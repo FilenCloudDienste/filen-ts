@@ -35,11 +35,11 @@ import {
 	rawRemoteTreePath,
 	normalizeCameraUploadHashEntry,
 	isDirUsable,
+	withReleasedSharedObjectRetry,
 	CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY
 } from "@/features/cameraUpload/cameraUploadHelpers"
 
 export type LocalFile = {
-	asset: MediaLibrary.Asset
 	info: {
 		mediaType: MediaLibrary.MediaType
 		filename: string
@@ -126,12 +126,6 @@ export const VERSION = 1
 // Auto triggers that arrive within this window of a completed FOREGROUND pass no-op; explicit
 // (manual) syncs always bypass. Mirrors offlineSync's AUTO_SYNC_MIN_INTERVAL_MS.
 export const AUTO_SYNC_MIN_INTERVAL_MS = 60_000
-
-// Width of the per-album asset-info worker pool in listLocal. Bounds concurrent
-// native getInfo round trips without a Semaphore: a shared semaphore queued ONE
-// pending acquire per asset beyond the width, and its FIFO waiter array shift()s
-// per release — O(n²) churn at camera-roll scale.
-const LOCAL_ASSET_INFO_CONCURRENCY = 32
 
 // Width of the per-delta upload worker pool in sync(). Bounds the pre-staging
 // probes (getUri/md5) and keeps the stagingMutex(4) waiter queue at O(width)
@@ -391,159 +385,98 @@ class CameraUpload {
 			folderTitleByAlbumId.set(id, folderTitle)
 		}
 
-		// Enumeration failures must not vanish silently: an asset (or whole album) whose
-		// info fetch persistently fails would otherwise be permanently excluded from backup
-		// with zero signal. Each rejection below is surfaced once per sync pass into the
-		// same error store the cameraUploadErrors screen reads, while the failing entry is
-		// still (correctly) excluded from the tree. The set dedupes assets that belong to
-		// several selected albums.
+		// Enumeration failures must not vanish silently: an asset with unusable metadata (or
+		// a whole album whose query fails) would otherwise be permanently excluded from backup
+		// with zero signal. Each failure below is surfaced once per sync pass into the same
+		// error store the cameraUploadErrors screen reads, while the failing entry is still
+		// (correctly) excluded from the tree. The set dedupes assets that belong to several
+		// selected albums.
 		const reportedFailedAssetIds = new Set<string>()
 
 		const albumEntries = Array.from(folderTitleByAlbumId.entries())
 		const albumResults = await Promise.allSettled(
 			albumEntries.map(async ([id, folderTitle]) => {
-				const album = new MediaLibrary.Album(id)
+				// Phase 1: one bulk metadata query per album, filtered at the MediaStore level
+				// (includeVideos/afterActivation discard rows natively). exeForMetadata maps
+				// cursor rows straight to plain records — no per-asset native round trips and
+				// no Asset shared objects created or held across the sync. The previous
+				// per-asset getter pipeline called into thousands of Asset shared objects
+				// while other albums' results were still being registered, racing expo's
+				// shared-object registry (unsynchronized lookups on the modules thread vs
+				// synchronized add/GC-delete on the JS thread) and spuriously failing with
+				// "Cannot use shared object that was already released" (issue #40). The
+				// plain-record path removes both sides of that race.
+				const buildQuery = () => {
+					let query = new MediaLibrary.Query().album(new MediaLibrary.Album(id))
 
-				// Phase 1: query assets with native-level filters to avoid fetching
-				// info for assets that would be discarded by includeVideos/afterActivation.
-				let query = new MediaLibrary.Query().album(album)
-
-				if (!config.includeVideos) {
-					query = query.within(MediaLibrary.AssetField.MEDIA_TYPE, [MediaLibrary.MediaType.IMAGE])
-				} else {
-					query = query.within(MediaLibrary.AssetField.MEDIA_TYPE, [MediaLibrary.MediaType.IMAGE, MediaLibrary.MediaType.VIDEO])
-				}
-
-				if (config.afterActivation) {
-					query = query.gte(MediaLibrary.AssetField.CREATION_TIME, config.activationTimestamp)
-				}
-
-				const assets = await query.exe()
-
-				// Phase 1.5: fetch asset infos concurrently, bounded by an index-cursor
-				// worker pool (LOCAL_ASSET_INFO_CONCURRENCY workers pulling the next
-				// index). Results land in a slot per asset, so the array stays aligned
-				// with `assets` exactly like the previous Promise.allSettled shape —
-				// the failure-surfacing loop below depends on that alignment. Aborts
-				// reject with the same Error("Aborted") the old path threw.
-				const infoResults: PromiseSettledResult<{
-					asset: MediaLibrary.Asset
-					info: LocalFile["info"]
-				}>[] = new Array(assets.length)
-				let nextAssetIndex = 0
-
-				const infoWorker = async (): Promise<void> => {
-					while (true) {
-						const index = nextAssetIndex++
-
-						if (index >= assets.length) {
-							return
-						}
-
-						const asset = assets[index] as MediaLibrary.Asset
-
-						if (signal.aborted) {
-							infoResults[index] = {
-								status: "rejected",
-								reason: new Error("Aborted")
-							}
-
-							continue
-						}
-
-						try {
-							const [filename, creationTime, modificationTime, mediaType] = await Promise.all([
-								asset.getFilename(),
-								asset.getCreationTime(),
-								asset.getModificationTime(),
-								asset.getMediaType()
-							])
-
-							infoResults[index] = {
-								status: "fulfilled",
-								value: {
-									asset,
-									info: {
-										id: asset.id,
-										filename,
-										creationTime,
-										modificationTime,
-										mediaType
-									}
-								}
-							}
-						} catch (error) {
-							infoResults[index] = {
-								status: "rejected",
-								reason: error
-							}
-						}
+					if (!config.includeVideos) {
+						query = query.within(MediaLibrary.AssetField.MEDIA_TYPE, [MediaLibrary.MediaType.IMAGE])
+					} else {
+						query = query.within(MediaLibrary.AssetField.MEDIA_TYPE, [MediaLibrary.MediaType.IMAGE, MediaLibrary.MediaType.VIDEO])
 					}
+
+					if (config.afterActivation) {
+						query = query.gte(MediaLibrary.AssetField.CREATION_TIME, config.activationTimestamp)
+					}
+
+					return query
 				}
 
-				const infoWorkers: Promise<void>[] = []
-				const infoWorkerCount = Math.min(LOCAL_ASSET_INFO_CONCURRENCY, assets.length)
+				// The chain is rebuilt inside the retry so a retried attempt starts from fresh
+				// shared objects (constructors and builder calls are synchronous — race-free).
+				const metadata = await withReleasedSharedObjectRetry(() => buildQuery().exeForMetadata())
 
-				for (let workerIndex = 0; workerIndex < infoWorkerCount; workerIndex++) {
-					infoWorkers.push(infoWorker())
+				if (signal.aborted) {
+					return
 				}
 
-				await Promise.all(infoWorkers)
-
-				// Single pass over the settled results, precomputing each entry's
-				// floored-seconds sort key once — the comparator below otherwise
-				// recomputes it O(n log n) times.
+				// Single pass over the records, precomputing each entry's floored-seconds
+				// sort key once — the comparator below otherwise recomputes it O(n log n)
+				// times. A record without a usable filename cannot form a tree path:
+				// surface it once per pass into the error store (enumeration exclusions
+				// must never be silent), then keep it out of the tree below.
 				const infos: {
-					asset: MediaLibrary.Asset
 					info: LocalFile["info"]
 					sortSec: number
 				}[] = []
 
-				for (const result of infoResults) {
-					if (result.status === "fulfilled") {
-						infos.push({
-							asset: result.value.asset,
-							info: result.value.info,
-							sortSec: Math.floor(effectiveCreationTimestamp(result.value.info) / 1000)
-						})
-					}
-				}
+				for (const entry of metadata) {
+					if (entry.filename === null || entry.filename.length === 0) {
+						degraded = true
 
-				// Surface per-asset enumeration failures (once per asset per pass) into the
-				// error store, then keep them out of the tree below. Abort-driven rejections
-				// are teardown, not failures, and are skipped.
-				for (let index = 0; index < infoResults.length; index++) {
-					const result = infoResults[index]
-
-					if (!result || result.status !== "rejected") {
-						continue
-					}
-
-					if (signal.aborted) {
-						continue
-					}
-
-					degraded = true
-
-					const failedAsset = assets[index]
-
-					if (!failedAsset || reportedFailedAssetIds.has(failedAsset.id)) {
-						continue
-					}
-
-					reportedFailedAssetIds.add(failedAsset.id)
-
-					logger.error("cameraUpload", "Asset info fetch failed", { assetId: failedAsset.id, albumId: id, error: result.reason })
-
-					useCameraUploadStore.getState().setErrors(errors => [
-						...errors,
-						{
-							id: randomUUID(),
-							timestamp: Date.now(),
-							error: result.reason,
-							asset: failedAsset
+						if (reportedFailedAssetIds.has(entry.id)) {
+							continue
 						}
-					])
+
+						reportedFailedAssetIds.add(entry.id)
+
+						logger.error("cameraUpload", "Asset filename missing in media store", { assetId: entry.id, albumId: id })
+
+						useCameraUploadStore.getState().setErrors(errors => [
+							...errors,
+							{
+								id: randomUUID(),
+								timestamp: Date.now(),
+								error: new Error(i18n.t("camera_upload_asset_filename_missing")),
+								assetId: entry.id
+							}
+						])
+
+						continue
+					}
+
+					const info: LocalFile["info"] = {
+						id: entry.id,
+						filename: entry.filename,
+						creationTime: entry.creationTime,
+						modificationTime: entry.modificationTime,
+						mediaType: entry.mediaType
+					}
+
+					infos.push({
+						info,
+						sortSec: Math.floor(effectiveCreationTimestamp(info) / 1000)
+					})
 				}
 
 				// Phase 2: sort by effective creation timestamp ascending before building the
@@ -583,7 +516,7 @@ class CameraUpload {
 				})
 
 				// Phase 3: build tree sequentially so collision resolution is deterministic.
-				for (const { asset, info, sortSec } of infos) {
+				for (const { info, sortSec } of infos) {
 					// #E2: keys are composed from RAW segments (plain "/" joins) — Paths.join
 					// percent-ENCODES segments and normalizeFilePathForSdk percent-DECODES
 					// them, corrupting literal %XX sequences in real filenames (the eternal
@@ -646,7 +579,6 @@ class CameraUpload {
 					}
 
 					tree[path] = {
-						asset,
 						info,
 						path,
 						originalPath,
@@ -1267,7 +1199,10 @@ class CameraUpload {
 					const result = await run(async defer => {
 						switch (delta.type) {
 							case "upload": {
-								const uri = await delta.file.asset.getUri()
+								// Reconstruct the Asset on demand (synchronous constructor — race-free)
+								// instead of holding a shared object per pending delta across the whole
+								// sync; the retry shields the one remaining async shared-object call (#40).
+								const uri = await withReleasedSharedObjectRetry(() => new MediaLibrary.Asset(delta.file.info.id).getUri())
 
 								if (!uri) {
 									throw new Error(i18n.t("camera_upload_file_missing"))
@@ -1451,7 +1386,7 @@ class CameraUpload {
 								id: randomUUID(),
 								timestamp: Date.now(),
 								error: result.error,
-								asset: delta.file.asset
+								assetId: delta.file.info.id
 							}
 						])
 					}

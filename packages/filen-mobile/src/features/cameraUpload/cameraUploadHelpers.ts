@@ -284,3 +284,26 @@ export function applyAfterActivationToggle<T extends { afterActivation: boolean;
 export function isDirUsable(dir: Dir | undefined): boolean {
 	return dir !== undefined && !isTrashParent(dir.parent)
 }
+
+// expo-modules-core's SharedObjectRegistry reads its pairs map WITHOUT synchronization when
+// converting a shared-object argument on the modules thread, while registrations and GC-driven
+// deletions mutate the same map under a lock on the JS thread. A lookup racing a structural
+// modification can spuriously miss a LIVE entry and reject the call with "Cannot use shared
+// object that was already released" (issue #40). The object is provably alive in that case, so
+// one immediate retry re-reads the registry and succeeds; a genuinely released object fails the
+// retry too and the error propagates unchanged.
+export function isReleasedSharedObjectError(error: unknown): boolean {
+	return error instanceof Error && error.message.includes("shared object that was already released")
+}
+
+export async function withReleasedSharedObjectRetry<T>(fn: () => Promise<T>): Promise<T> {
+	try {
+		return await fn()
+	} catch (error) {
+		if (!isReleasedSharedObjectError(error)) {
+			throw error
+		}
+
+		return await fn()
+	}
+}

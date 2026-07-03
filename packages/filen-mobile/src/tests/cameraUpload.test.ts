@@ -3931,13 +3931,13 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 			verifiedModificationTime: 2000
 		})
 
-		const originalExe = Query.prototype.exe
-		const spy = vi.spyOn(Query.prototype, "exe").mockImplementation(async function (this: any) {
+		const originalExeForMetadata = Query.prototype.exeForMetadata
+		const spy = vi.spyOn(Query.prototype, "exeForMetadata").mockImplementation(async function (this: any) {
 			if (this.albumFilter?.id === "album-bad") {
 				throw new Error("album query failed")
 			}
 
-			return await originalExe.call(this)
+			return await originalExeForMetadata.call(this)
 		})
 
 		try {
@@ -4297,9 +4297,7 @@ describe("B5 — ensureParentDirectoryExists in-flight dedupe", () => {
 // from the tree, which is correct).
 
 describe("B10 — enumeration failures are surfaced", () => {
-	it("a rejecting asset-info fetch records an error entry with the asset and the others still sync", async () => {
-		const { Asset } = await import("@/tests/mocks/expoMediaLibrary")
-
+	it("an asset without a usable filename records an error entry with the asset id and the others still sync", async () => {
 		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["good", "bad"] })
 		ml.addAsset({
 			id: "good",
@@ -4311,7 +4309,7 @@ describe("B10 — enumeration failures are surfaced", () => {
 		})
 		ml.addAsset({
 			id: "bad",
-			filename: "bad.jpg",
+			filename: null,
 			uri: "file:///media/bad",
 			mediaType: MediaType.IMAGE,
 			creationTime: 2000,
@@ -4320,42 +4318,27 @@ describe("B10 — enumeration failures are surfaced", () => {
 		fs.set("file:///media/good", new Uint8Array([1, 2, 3]))
 		fs.set("file:///media/bad", new Uint8Array([4, 5, 6]))
 
-		const originalGetFilename = Asset.prototype.getFilename
-		const spy = vi.spyOn(Asset.prototype, "getFilename").mockImplementation(async function (this: { id: string }) {
-			if (this.id === "bad") {
-				throw new Error("info fetch failed")
-			}
-
-			return await originalGetFilename.call(this)
-		})
-
-		try {
-			await cameraUpload.sync()
-		} finally {
-			spy.mockRestore()
-		}
+		await cameraUpload.sync()
 
 		// The good asset still uploaded.
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
 
 		// One error entry for the bad asset, carrying the asset identifier.
 		const entries = mockSetErrors.mock.calls.map(call => (call[0] as (prev: unknown[]) => any[])([])).flat()
-		const badEntries = entries.filter(entry => entry.asset?.id === "bad")
+		const badEntries = entries.filter(entry => entry.assetId === "bad")
 
 		expect(badEntries).toHaveLength(1)
-		expect((badEntries[0].error as Error).message).toBe("info fetch failed")
+		expect((badEntries[0].error as Error).message).toBe("camera_upload_asset_filename_missing")
 	})
 
-	it("an asset that fails in two selected albums is recorded once per pass (dedupe)", async () => {
-		const { Asset } = await import("@/tests/mocks/expoMediaLibrary")
-
+	it("an asset that is unusable in two selected albums is recorded once per pass (dedupe)", async () => {
 		vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, albumIds: ["album-1", "album-2"] })
 
 		ml.addAlbum({ id: "album-1", title: "Album One", assetIds: ["bad"] })
 		ml.addAlbum({ id: "album-2", title: "Album Two", assetIds: ["bad"] })
 		ml.addAsset({
 			id: "bad",
-			filename: "bad.jpg",
+			filename: null,
 			uri: "file:///media/bad",
 			mediaType: MediaType.IMAGE,
 			creationTime: 1000,
@@ -4363,20 +4346,12 @@ describe("B10 — enumeration failures are surfaced", () => {
 		})
 		fs.set("file:///media/bad", new Uint8Array([1, 2, 3]))
 
-		const spy = vi.spyOn(Asset.prototype, "getFilename").mockImplementation(async function (this: { id: string }) {
-			throw new Error(`info fetch failed for ${this.id}`)
-		})
-
-		try {
-			await cameraUpload.sync()
-		} finally {
-			spy.mockRestore()
-		}
+		await cameraUpload.sync()
 
 		expect(transfers.upload).not.toHaveBeenCalled()
 
 		const entries = mockSetErrors.mock.calls.map(call => (call[0] as (prev: unknown[]) => any[])([])).flat()
-		const badEntries = entries.filter(entry => entry.asset?.id === "bad")
+		const badEntries = entries.filter(entry => entry.assetId === "bad")
 
 		expect(badEntries).toHaveLength(1)
 	})
@@ -4407,13 +4382,13 @@ describe("B10 — enumeration failures are surfaced", () => {
 		fs.set("file:///media/g1", new Uint8Array([1, 2, 3]))
 		fs.set("file:///media/b1", new Uint8Array([4, 5, 6]))
 
-		const originalExe = Query.prototype.exe
-		const spy = vi.spyOn(Query.prototype, "exe").mockImplementation(async function (this: any) {
+		const originalExeForMetadata = Query.prototype.exeForMetadata
+		const spy = vi.spyOn(Query.prototype, "exeForMetadata").mockImplementation(async function (this: any) {
 			if (this.albumFilter?.id === "album-bad") {
 				throw new Error("album query failed")
 			}
 
-			return await originalExe.call(this)
+			return await originalExeForMetadata.call(this)
 		})
 
 		try {

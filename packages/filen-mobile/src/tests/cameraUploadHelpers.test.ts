@@ -49,6 +49,8 @@ import {
 	rawRemoteTreePath,
 	normalizeCameraUploadHashEntry,
 	isDirUsable,
+	isReleasedSharedObjectError,
+	withReleasedSharedObjectRetry,
 	CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY,
 	type CollisionParams
 } from "@/features/cameraUpload/cameraUploadHelpers"
@@ -1025,5 +1027,68 @@ describe("isDirUsable", () => {
 		const dir = { uuid: "dir-uuid", parent: { tag: "Trash" } } as any
 
 		expect(isDirUsable(dir)).toBe(false)
+	})
+})
+
+// ─── withReleasedSharedObjectRetry ───────────────────────────────────────────
+//
+// Shields the remaining expo shared-object calls against the registry read/write
+// race (#40): a spurious "already released" rejection on a live object succeeds
+// on an immediate retry; every other failure propagates unchanged.
+
+describe("withReleasedSharedObjectRetry", () => {
+	const releasedError = new Error(
+		"Call to function 'Asset.getUri' has been rejected.\n→ Caused by: The 1st argument cannot be cast to type class expo.modules.medialibrary.next.objects.asset.Asset (received class java.lang.Integer)\n→ Caused by: Cannot use shared object that was already released"
+	)
+
+	it("recognises the released-shared-object error chain", () => {
+		expect(isReleasedSharedObjectError(releasedError)).toBe(true)
+		expect(isReleasedSharedObjectError(new Error("some other failure"))).toBe(false)
+		expect(isReleasedSharedObjectError("Cannot use shared object that was already released")).toBe(false)
+	})
+
+	it("retries once after a spurious released-object rejection and returns the retry's result", async () => {
+		let calls = 0
+
+		const result = await withReleasedSharedObjectRetry(async () => {
+			calls++
+
+			if (calls === 1) {
+				throw releasedError
+			}
+
+			return "file:///media/photo.jpg"
+		})
+
+		expect(result).toBe("file:///media/photo.jpg")
+		expect(calls).toBe(2)
+	})
+
+	it("does not retry other errors", async () => {
+		let calls = 0
+
+		await expect(
+			withReleasedSharedObjectRetry(async () => {
+				calls++
+
+				throw new Error("album query failed")
+			})
+		).rejects.toThrow("album query failed")
+
+		expect(calls).toBe(1)
+	})
+
+	it("rethrows when the retry fails again (genuinely released object)", async () => {
+		let calls = 0
+
+		await expect(
+			withReleasedSharedObjectRetry(async () => {
+				calls++
+
+				throw releasedError
+			})
+		).rejects.toThrow("already released")
+
+		expect(calls).toBe(2)
 	})
 })

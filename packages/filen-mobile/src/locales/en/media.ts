@@ -111,6 +111,8 @@ export const media = {
 		"Some remote directories could not be listed. Backup continued, but items may be uploaded again.",
 	/** Camera upload error: a device album could not be read during sync. {{album}} is the album title. */
 	camera_upload_album_listing_failed: "Could not read the album {{album}}. Its items were skipped during this sync.",
+	/** Camera upload error: the device media store has no file name recorded for this item */
+	camera_upload_asset_filename_missing: "This item has no file name in the device media store and was skipped.",
 
 	// ── Playlists list ────────────────────────────────────────────────────────
 	/** Playlists screen — header title */

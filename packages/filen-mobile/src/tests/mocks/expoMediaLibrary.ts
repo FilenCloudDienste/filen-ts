@@ -47,6 +47,18 @@ export type AssetInfo = {
 	modificationTime: number | null
 }
 
+export type AssetMetadata = {
+	id: string
+	filename: string | null
+	mediaType: MediaType
+	width: number | null
+	height: number | null
+	duration: number | null
+	creationTime: number | null
+	modificationTime: number | null
+	isFavorite: boolean
+}
+
 // ─── Enums ──────────────────────────────────────────────────────────────────
 
 export enum MediaType {
@@ -78,7 +90,9 @@ export type AssetFieldValueMap = {
 
 type StoredAsset = {
 	id: string
-	filename: string
+	// null mirrors a MediaStore row without a DISPLAY_NAME: exeForMetadata surfaces it as
+	// `filename: null`, getFilename throws (like the real AssetPropertyNotFoundException).
+	filename: string | null
 	uri: string
 	mediaType: MediaType
 	width: number
@@ -169,7 +183,13 @@ export class Asset {
 	}
 
 	async getFilename(): Promise<string> {
-		return this.stored.filename
+		const filename = this.stored.filename
+
+		if (filename === null) {
+			throw new Error("Asset property not found: Filename")
+		}
+
+		return filename
 	}
 
 	async getHeight(): Promise<number> {
@@ -204,7 +224,7 @@ export class Asset {
 
 		return {
 			id: s.id,
-			filename: s.filename,
+			filename: s.filename ?? "",
 			uri: s.uri,
 			mediaType: s.mediaType,
 			width: s.width,
@@ -414,7 +434,7 @@ export class Query {
 		return this
 	}
 
-	async exe(): Promise<Asset[]> {
+	private resolveCandidates(): StoredAsset[] {
 		let candidates: StoredAsset[]
 
 		if (this.albumFilter) {
@@ -462,7 +482,25 @@ export class Query {
 			candidates = candidates.slice(0, this.limitValue)
 		}
 
-		return candidates.map(a => new Asset(a.id))
+		return candidates
+	}
+
+	async exe(): Promise<Asset[]> {
+		return this.resolveCandidates().map(a => new Asset(a.id))
+	}
+
+	async exeForMetadata(): Promise<AssetMetadata[]> {
+		return this.resolveCandidates().map(a => ({
+			id: a.id,
+			filename: a.filename,
+			mediaType: a.mediaType,
+			width: a.width,
+			height: a.height,
+			duration: a.duration,
+			creationTime: a.creationTime,
+			modificationTime: a.modificationTime,
+			isFavorite: false
+		}))
 	}
 }
 

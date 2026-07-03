@@ -1,10 +1,11 @@
 import { create } from "zustand"
-import type { Asset } from "expo-media-library/next"
 
 export type CameraUploadError = {
 	id: string
 	timestamp: number
-	asset?: Asset
+	// Media-library asset id (a contentUri on Android) — plain data on purpose: holding the
+	// live Asset shared object here retained its native peer for the store's lifetime.
+	assetId?: string
 	error?: unknown
 }
 
