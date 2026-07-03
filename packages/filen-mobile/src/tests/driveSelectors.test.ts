@@ -23,7 +23,8 @@ import {
 	isDirectoryItem,
 	isDriveItemDisabled,
 	isDriveItemNavigateOnly,
-	resolveDriveNavigationTarget
+	resolveDriveNavigationTarget,
+	keepAgainstIncomingDriveItem
 } from "@/features/drive/driveSelectors"
 import type { DriveItem } from "@/types"
 import type { DrivePath, SelectOptions } from "@/hooks/useDrivePath"
@@ -318,6 +319,33 @@ describe("isFileItem", () => {
 
 	it("returns false for type='sharedRootDirectory'", () => {
 		expect(isFileItem(sharedRootDir("a"))).toBe(false)
+	})
+})
+
+describe("keepAgainstIncomingDriveItem", () => {
+	it("drops the existing row when its uuid matches the incoming item", () => {
+		expect(keepAgainstIncomingDriveItem(file("same", false, "a.txt"), "same", "b.txt")).toBe(false)
+	})
+
+	it("drops an existing same-name (case/space-insensitive) duplicate with a different uuid", () => {
+		expect(keepAgainstIncomingDriveItem(file("old", false, "  Notes.TXT "), "new", "notes.txt")).toBe(false)
+	})
+
+	it("keeps an unrelated decryptable row (different uuid AND different name)", () => {
+		expect(keepAgainstIncomingDriveItem(file("old", false, "other.txt"), "new", "notes.txt")).toBe(true)
+	})
+
+	it("keeps an existing undecryptable sibling when the incoming item is also undecryptable", () => {
+		// Both names undefined — must NOT be treated as a same-name collision.
+		expect(keepAgainstIncomingDriveItem(file("undec-a"), "incoming", undefined)).toBe(true)
+	})
+
+	it("keeps an existing undecryptable sibling when the incoming item is decryptable", () => {
+		expect(keepAgainstIncomingDriveItem(file("undec-a"), "incoming", "notes.txt")).toBe(true)
+	})
+
+	it("keeps a decryptable row when the incoming item is undecryptable (name undefined)", () => {
+		expect(keepAgainstIncomingDriveItem(file("old", false, "notes.txt"), "incoming", undefined)).toBe(true)
 	})
 })
 

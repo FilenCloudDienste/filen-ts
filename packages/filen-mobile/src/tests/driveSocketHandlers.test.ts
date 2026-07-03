@@ -449,6 +449,35 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(mockDriveItemsQueryUpdateForNormalParent).not.toHaveBeenCalled()
 		})
 
+		it("FileNew: an incoming UNDECRYPTABLE file does not evict existing undecryptable siblings", async () => {
+			// Undecryptable items carry meta:null / decryptedMeta:null, so their name is undefined.
+			// The old dedup predicate compared `undefined !== undefined` (false) and wrongly treated
+			// every existing undecryptable sibling as a same-name duplicate, dropping them all.
+			const incomingUndecryptable = { type: "file", data: { uuid: "file-new", decryptedMeta: null } }
+			mockUnwrapFileMeta.mockReturnValue({ file: { uuid: "file-new", meta: null }, meta: null })
+			mockUnwrappedFileIntoDriveItem.mockReturnValue(incomingUndecryptable)
+
+			await handleDriveEvent({ event: makeFileWithParentEvent(DriveEvent_Tags.FileNew, rawFile) })
+
+			const { updater } = mockDriveItemsQueryUpdateForNormalParent.mock.calls[0]?.[0] as {
+				updater: (prev: Array<{ data: { uuid: string; decryptedMeta: { name: string } | null } }>) => Array<{ data: { uuid: string } }>
+			}
+
+			const prev = [
+				{ data: { uuid: "undec-a", decryptedMeta: null } },
+				{ data: { uuid: "undec-b", decryptedMeta: null } },
+				{ data: { uuid: "decryptable", decryptedMeta: { name: "notes.txt" } } }
+			]
+			const result = updater(prev)
+
+			// Both existing undecryptable siblings survive, the decryptable item survives, and the
+			// incoming item is appended — nothing is wrongly evicted.
+			expect(result.find(i => i.data.uuid === "undec-a")).toBeDefined()
+			expect(result.find(i => i.data.uuid === "undec-b")).toBeDefined()
+			expect(result.find(i => i.data.uuid === "decryptable")).toBeDefined()
+			expect(result.find(i => i.data.uuid === "file-new")).toBe(incomingUndecryptable)
+		})
+
 		it("FileRestore: adds item to parent listing AND removes from trash query", async () => {
 			mockUnwrapFileMeta.mockReturnValue({
 				file: { uuid: "file-restore", meta: { name: "file.txt" } },

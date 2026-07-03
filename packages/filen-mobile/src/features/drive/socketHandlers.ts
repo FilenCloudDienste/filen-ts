@@ -5,6 +5,7 @@ import {
 	driveItemsQueryUpdateForNormalParent
 } from "@/features/drive/queries/useDriveItems.query"
 import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
+import { keepAgainstIncomingDriveItem } from "@/features/drive/driveSelectors"
 import cache from "@/lib/cache"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import logger from "@/lib/logger"
@@ -34,11 +35,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				driveItemsQueryUpdateForNormalParent({
 					parentUuid: unwrappedParentUuid,
 					updater: prev => [
-						...prev.filter(
-							i =>
-								i.data.uuid !== unwrappedFileMeta.file.uuid &&
-								i.data.decryptedMeta?.name.toLowerCase().trim() !== unwrappedFileMeta.meta?.name.toLowerCase().trim()
-						),
+						...prev.filter(i => keepAgainstIncomingDriveItem(i, unwrappedFileMeta.file.uuid, unwrappedFileMeta.meta?.name)),
 						driveItem
 					]
 				})
@@ -180,11 +177,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					driveItemsQueryUpdateForNormalParent({
 						parentUuid: unwrappedParentUuidNew,
 						updater: prev => [
-							...prev.filter(
-								i =>
-									i.data.uuid !== unwrappedFileMeta.file.uuid &&
-									i.data.decryptedMeta?.name.toLowerCase().trim() !== unwrappedFileMeta.meta?.name.toLowerCase().trim()
-							),
+							...prev.filter(i => keepAgainstIncomingDriveItem(i, unwrappedFileMeta.file.uuid, unwrappedFileMeta.meta?.name)),
 							driveItem
 						]
 					})
@@ -223,11 +216,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					driveItemsQueryUpdateForNormalParent({
 						parentUuid: unwrappedParentUuidNew,
 						updater: prev => [
-							...prev.filter(
-								i =>
-									i.data.uuid !== unwrappedDirMeta.uuid &&
-									i.data.decryptedMeta?.name.toLowerCase().trim() !== unwrappedDirMeta.meta?.name.toLowerCase().trim()
-							),
+							...prev.filter(i => keepAgainstIncomingDriveItem(i, unwrappedDirMeta.uuid, unwrappedDirMeta.meta?.name)),
 							driveItem
 						]
 					})
@@ -392,11 +381,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				driveItemsQueryUpdateForNormalParent({
 					parentUuid: unwrappedParentUuid,
 					updater: prev => [
-						...prev.filter(
-							i =>
-								i.data.uuid !== unwrappedDirMeta.uuid &&
-								i.data.decryptedMeta?.name.toLowerCase().trim() !== unwrappedDirMeta.meta?.name.toLowerCase().trim()
-						),
+						...prev.filter(i => keepAgainstIncomingDriveItem(i, unwrappedDirMeta.uuid, unwrappedDirMeta.meta?.name)),
 						driveItem
 					]
 				})
