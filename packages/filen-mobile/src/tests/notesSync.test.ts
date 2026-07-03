@@ -878,6 +878,51 @@ describe("Sync (Notes)", () => {
 			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
 		})
 
+		it("VC3: clearRejections resets the strike count when inflight is cleared OUTSIDE a sync pass (remote-edit reload / restoreFromHistory)", async () => {
+			// Regression: the rejection counter is keyed by the stable note uuid and only reset
+			// by the start-of-pass cleanup loop when inflight is empty AT sync entry. The remote-edit
+			// reload and restoreFromHistory clear a note's inflight WITHOUT kicking a sync, so without
+			// an explicit clearRejections the stale count leaks into the next editing session and drops
+			// a fresh edit after a single failure instead of MAX_NON_RETRYABLE_REJECTIONS.
+			const sync = await createSync()
+
+			mockCreateExecutableTimeout.mockImplementation(timeoutImpl)
+
+			// Accumulate MAX - 1 strikes on note-1 (kept for retry each time).
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "v1", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("server"), ErrorKindMock.Server))
+
+			for (let attempt = 1; attempt < MAX_NON_RETRYABLE_REJECTIONS; attempt++) {
+				sync.executeNow()
+
+				await new Promise(resolve => setTimeout(resolve, 0))
+
+				expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+			}
+
+			// The reload / restore path clears this note's inflight out-of-band AND resets its strikes.
+			notesState.inflightContent = {}
+			sync.clearRejections("note-1")
+
+			// A fresh editing session for the SAME note fails once — it must be KEPT (fresh count
+			// 1/MAX), never inherit the pre-clear strikes.
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 3000, content: "v2", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockRejectedValueOnce(asSdkError(new Error("server again"), ErrorKindMock.Server))
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+			expect(notesState.inflightContent["note-1"]![0]!.content).toBe("v2")
+		})
+
 		it("skips when store is empty", async () => {
 			const sync = await createSync()
 
