@@ -9,9 +9,9 @@ export const DIRECTORY_PUBLIC_LINK_URL_PREFIX: string = "https://app.filen.io/#/
 export const NETINFO_CONFIG: NetInfoConfiguration = {
 	reachabilityUrl: "https://gateway.filen.io",
 	reachabilityTest: async response => response.status === 200,
-	reachabilityLongTimeout: 30 * 1000,
-	reachabilityShortTimeout: 15 * 1000,
-	reachabilityRequestTimeout: 20 * 1000,
+	reachabilityLongTimeout: 60 * 1000,
+	reachabilityShortTimeout: 30 * 1000,
+	reachabilityRequestTimeout: 45 * 1000,
 	reachabilityShouldRun: () => true,
 	shouldFetchWiFiSSID: false,
 	useNativeReachability: false
