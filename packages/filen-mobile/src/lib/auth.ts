@@ -247,11 +247,23 @@ class Auth {
 	}
 
 	public async saveStringifiedClientToSecureStorage(stringifiedClient: StringifiedClient): Promise<void> {
-		await secureStore.set(this.stringifiedClientStorageKey, {
+		const payload = {
 			...stringifiedClient,
 			maxIoMemoryUsage: this.maxIoMemoryUsage,
 			maxParallelRequests: this.maxParallelRequests
-		})
+		}
+
+		await secureStore.set(this.stringifiedClientStorageKey, payload)
+
+		// Keep the setSdkClients fast-path fingerprint in sync with what we just persisted. Otherwise
+		// an in-place credential change (changePassword persists a fresh blob HERE without going
+		// through setSdkClients) leaves lastStringifiedClient holding the boot-time blob — so the next
+		// warm background setup() re-run reads the new blob, sees isEqual=false, and REBUILDS the
+		// client, destroying the live handle that socket.tsx / http.tsx still hold via useSdkClients
+		// (which does not react to swaps) → "Raw pointer value was null" on the next foreground. The
+		// live client was already mutated in place by changePassword, so no rebuild is warranted.
+		// Set after the write so a failed persist doesn't desync the fingerprint from disk.
+		this.lastStringifiedClient = payload
 	}
 
 	public async login(...params: Parameters<UnauthJsClientInterface["login"]>): Promise<JsClientInterface> {

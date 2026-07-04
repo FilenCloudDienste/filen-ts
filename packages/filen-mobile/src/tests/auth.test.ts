@@ -588,6 +588,39 @@ describe("auth.saveStringifiedClientToSecureStorage", () => {
 		expect((saved as any).maxIoMemoryUsage).toBe(auth.maxIoMemoryUsage)
 		expect((saved as any).maxParallelRequests).toBe(auth.maxParallelRequests)
 	})
+
+	// Regression: an in-place credential change (changePassword) persists a fresh blob HERE without
+	// going through setSdkClients. If lastStringifiedClient isn't synced to the persisted payload, a
+	// later warm background setup() re-run sees isEqual=false and REBUILDS the client — destroying
+	// the live handle that socket.tsx / http.tsx still hold → "Raw pointer value was null".
+	it("syncs lastStringifiedClient to the persisted payload so the setSdkClients fast path recognises it", async () => {
+		const secureStore = await import("@/lib/secureStore")
+
+		vi.mocked(secureStore.default.set).mockResolvedValueOnce(undefined)
+
+		const base = { apiKey: "rotated-key", email: "user@example.com", masterKeys: ["mk-new"] } as any
+
+		await auth.saveStringifiedClientToSecureStorage(base)
+
+		expect(authInternals().lastStringifiedClient).toEqual({
+			...base,
+			maxIoMemoryUsage: auth.maxIoMemoryUsage,
+			maxParallelRequests: auth.maxParallelRequests
+		})
+	})
+
+	it("does not desync the fingerprint when the persist fails (stays whatever it was)", async () => {
+		const secureStore = await import("@/lib/secureStore")
+
+		authInternals().lastStringifiedClient = null
+		vi.mocked(secureStore.default.set).mockRejectedValueOnce(new Error("disk full"))
+
+		await expect(auth.saveStringifiedClientToSecureStorage({ apiKey: "k" } as any)).rejects.toThrow("disk full")
+
+		// The write threw before the fingerprint assignment, so disk and fingerprint stay consistent
+		// (both un-updated) rather than the fingerprint advancing past what's on disk.
+		expect(authInternals().lastStringifiedClient).toBeNull()
+	})
 })
 
 describe("auth.setSdkClients", () => {
@@ -648,13 +681,23 @@ describe("auth.setSdkClients", () => {
 
 		mockFromStringified.mockReturnValue({ toStringified: vi.fn(), uniffiDestroy: authedDestroy })
 
-		const first = await auth.setSdkClients({ apiKey: "ak-same", email: "x@y.z" } as any)
+		// The blob a real setup() re-reads from secureStore carries the persisted maxIo/maxParallel
+		// overrides (saveStringifiedClientToSecureStorage decorates them), so the fast-path fingerprint
+		// keys on that decorated shape. Passing the bare shape would trip the override-migration branch.
+		const stored = {
+			apiKey: "ak-same",
+			email: "x@y.z",
+			maxIoMemoryUsage: auth.maxIoMemoryUsage,
+			maxParallelRequests: auth.maxParallelRequests
+		} as any
+
+		const first = await auth.setSdkClients(stored)
 
 		const fromConfigCallsAfterFirst = mockFromConfig.mock.calls.length
 
 		// Structurally-equal clone — exactly what a second setup() passes after re-reading
 		// the stored client from secureStore.
-		const second = await auth.setSdkClients({ apiKey: "ak-same", email: "x@y.z" } as any)
+		const second = await auth.setSdkClients({ ...stored } as any)
 
 		expect(second.authedClient).toBe(first.authedClient)
 		expect(second.unauthedClient).toBe(first.unauthedClient)
