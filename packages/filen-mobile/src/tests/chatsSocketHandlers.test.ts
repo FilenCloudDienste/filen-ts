@@ -231,8 +231,8 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		mockPurgeChatInflightState.mockClear()
 		// Clear any pending timeouts
 		for (const key of Object.keys(chatTypingTimeoutsRef)) {
-			clearTimeout(chatTypingTimeoutsRef[Number(key)])
-			delete chatTypingTimeoutsRef[Number(key)]
+			clearTimeout(chatTypingTimeoutsRef[key])
+			delete chatTypingTimeoutsRef[key]
 		}
 		vi.useFakeTimers()
 	})
@@ -296,6 +296,33 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			// The timeout callback fires, calling setTyping a second time to clear the indicator
 			expect(mockSetTyping.mock.calls.length).toBeGreaterThanOrEqual(2)
+		})
+
+		it("does NOT clobber another chat's typing watchdog for the same sender (per-chat timer key)", async () => {
+			// Real in-memory typing store so each watchdog's per-chat auto-clear is observable.
+			let typingState: Record<string, Array<{ senderId: bigint; chat: string }>> = {}
+
+			mockSetTyping.mockImplementation(
+				(fn: Record<string, unknown[]> | ((prev: typeof typingState) => typeof typingState)) => {
+					typingState = typeof fn === "function" ? fn(typingState) : (fn as typeof typingState)
+				}
+			)
+
+			// The SAME sender starts typing in chat-A, then in chat-B before A's 10s watchdog elapses.
+			// A group-chat member can legitimately be typing in two chats at once.
+			await handleChatEvent({ event: makeTypingEvent(ChatTypingType.Down, "chat-A", OTHER_USER_ID), userId: USER_ID })
+			await handleChatEvent({ event: makeTypingEvent(ChatTypingType.Down, "chat-B", OTHER_USER_ID), userId: USER_ID })
+
+			expect((typingState["chat-A"] ?? []).map(t => t.senderId)).toEqual([OTHER_USER_ID])
+			expect((typingState["chat-B"] ?? []).map(t => t.senderId)).toEqual([OTHER_USER_ID])
+
+			// chat-A's Typing.Up is dropped — the exact case the watchdog exists to cover. Fire both.
+			vi.advanceTimersByTime(10000)
+
+			// With a per-(chat, sender) timer key both indicators auto-clear. With the old senderId-only
+			// key, chat-B's Down cancelled chat-A's watchdog, stranding chat-A on "typing…" forever.
+			expect(typingState["chat-A"] ?? []).toEqual([])
+			expect(typingState["chat-B"] ?? []).toEqual([])
 		})
 	})
 
