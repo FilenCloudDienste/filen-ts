@@ -10,7 +10,15 @@ import logger from "@/lib/logger"
 
 export type ChatSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Chat }>
 
-export const chatTypingTimeoutsRef: Record<number, NodeJS.Timeout> = {}
+// Keyed by `${chatUuid}:${senderId}` — NOT by senderId alone. The same sender can be typing in
+// multiple chats at once (group chats), so a global-per-sender key would let a Typing/MessageNew
+// event in one chat cancel/overwrite the auto-clear watchdog armed for that sender in another chat,
+// stranding a "typing…" indicator forever when the first chat's Typing.Up is dropped.
+export const chatTypingTimeoutsRef: Record<string, NodeJS.Timeout> = {}
+
+function typingTimeoutKey(chatUuid: string, senderId: bigint): string {
+	return `${chatUuid}:${senderId}`
+}
 
 export async function handleChatEvent({ event, userId }: { event: ChatSocketEvent; userId: bigint }): Promise<void> {
 	const [eventInner] = event.inner
@@ -18,13 +26,17 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 	switch (eventInner.inner.tag) {
 		case ChatEvent_Tags.Typing: {
 			const [inner] = eventInner.inner.inner
+			const timeoutKey = typingTimeoutKey(inner.chat, inner.senderId)
 
-			clearTimeout(chatTypingTimeoutsRef[Number(inner.senderId)])
+			clearTimeout(chatTypingTimeoutsRef[timeoutKey])
+			delete chatTypingTimeoutsRef[timeoutKey]
 
 			useChatsStore.getState().setTyping(prev => {
 				switch (inner.typingType) {
 					case ChatTypingType.Down: {
-						chatTypingTimeoutsRef[Number(inner.senderId)] = setTimeout(() => {
+						chatTypingTimeoutsRef[timeoutKey] = setTimeout(() => {
+							delete chatTypingTimeoutsRef[timeoutKey]
+
 							useChatsStore.getState().setTyping(prev => ({
 								...prev,
 								[inner.chat]: (prev[inner.chat] ?? []).filter(t => t.senderId !== inner.senderId)
@@ -51,8 +63,10 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 
 		case ChatEvent_Tags.MessageNew: {
 			const [inner] = eventInner.inner.inner
+			const messageTimeoutKey = typingTimeoutKey(inner.msg.chat, inner.msg.inner.senderId)
 
-			clearTimeout(chatTypingTimeoutsRef[Number(inner.msg.inner.senderId)])
+			clearTimeout(chatTypingTimeoutsRef[messageTimeoutKey])
+			delete chatTypingTimeoutsRef[messageTimeoutKey]
 
 			useChatsStore.getState().setTyping(prev => ({
 				...prev,
