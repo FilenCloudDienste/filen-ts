@@ -81,6 +81,7 @@
 	"cache_size_description": "Maximální místo na disku použité pro mezipaměť stažených souborů",
 	"camera_upload": "Nahrávání z fotoaparátu",
 	"camera_upload_album_listing_failed": "Nepodařilo se přečíst album {{album}}. Jeho položky byly při této synchronizaci přeskočeny.",
+	"camera_upload_asset_filename_missing": "Tato položka nemá v úložišti médií zařízení žádný název souboru a byla přeskočena.",
 	"camera_upload_destination_unavailable": "Cloudový adresář není k dispozici",
 	"camera_upload_destination_unavailable_description": "Cloudový adresář pro nahrávání z fotoaparátu byl smazán nebo přesunut do koše. Vyberte nový adresář, abyste mohli pokračovat v synchronizaci.",
 	"camera_upload_disabled": "Nahrávání z fotoaparátu je vypnuto",

@@ -81,6 +81,7 @@
 	"cache_size_description": "ダウンロードしたファイルのキャッシュに使用する最大ディスク容量",
 	"camera_upload": "カメラアップロード",
 	"camera_upload_album_listing_failed": "アルバム「{{album}}」を読み込めませんでした。今回の同期ではその項目はスキップされました。",
+	"camera_upload_asset_filename_missing": "この項目はデバイスのメディアストアにファイル名が登録されていないため、スキップされました。",
 	"camera_upload_destination_unavailable": "クラウドディレクトリが利用できません",
 	"camera_upload_destination_unavailable_description": "カメラアップロード用のクラウドディレクトリが削除されたか、ゴミ箱に移動されました。同期を続けるには新しいディレクトリを選択してください。",
 	"camera_upload_disabled": "カメラアップロードは無効です",

@@ -81,6 +81,7 @@
 	"cache_size_description": "Espacio de disco máximo usado para almacenar en caché los archivos descargados",
 	"camera_upload": "Subida desde la cámara",
 	"camera_upload_album_listing_failed": "No se pudo leer el álbum {{album}}. Sus elementos se omitieron durante esta sincronización.",
+	"camera_upload_asset_filename_missing": "Este elemento no tiene nombre de archivo en el almacén multimedia del dispositivo y se omitió.",
 	"camera_upload_destination_unavailable": "Directorio en la nube no disponible",
 	"camera_upload_destination_unavailable_description": "El directorio en la nube para la subida desde la cámara se eliminó o se movió a la papelera. Elige un nuevo directorio para seguir sincronizando.",
 	"camera_upload_disabled": "La subida desde la cámara está desactivada",

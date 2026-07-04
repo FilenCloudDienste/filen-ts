@@ -81,6 +81,7 @@
 	"cache_size_description": "Maximaler Speicherplatz zum Zwischenspeichern heruntergeladener Dateien",
 	"camera_upload": "Kamera-Upload",
 	"camera_upload_album_listing_failed": "Das Album {{album}} konnte nicht gelesen werden. Seine Elemente wurden bei dieser Synchronisierung übersprungen.",
+	"camera_upload_asset_filename_missing": "Dieses Element hat keinen Dateinamen im Medienspeicher des Geräts und wurde übersprungen.",
 	"camera_upload_destination_unavailable": "Cloud-Verzeichnis nicht verfügbar",
 	"camera_upload_destination_unavailable_description": "Das Cloud-Verzeichnis für den Kamera-Upload wurde gelöscht oder in den Papierkorb verschoben. Wähle ein neues Verzeichnis, um die Synchronisierung fortzusetzen.",
 	"camera_upload_disabled": "Kamera-Upload ist deaktiviert",

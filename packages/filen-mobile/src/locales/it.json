@@ -81,6 +81,7 @@
 	"cache_size_description": "Spazio su disco massimo usato per memorizzare nella cache i file scaricati",
 	"camera_upload": "Caricamento dalla fotocamera",
 	"camera_upload_album_listing_failed": "Impossibile leggere l'album {{album}}. I suoi elementi sono stati saltati durante questa sincronizzazione.",
+	"camera_upload_asset_filename_missing": "Questo elemento non ha un nome file nell'archivio multimediale del dispositivo ed è stato saltato.",
 	"camera_upload_destination_unavailable": "Directory cloud non disponibile",
 	"camera_upload_destination_unavailable_description": "La directory cloud per il caricamento dalla fotocamera è stata eliminata o spostata nel cestino. Scegli una nuova directory per continuare la sincronizzazione.",
 	"camera_upload_disabled": "Il caricamento dalla fotocamera è disabilitato",

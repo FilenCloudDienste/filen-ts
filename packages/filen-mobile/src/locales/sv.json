@@ -81,6 +81,7 @@
 	"cache_size_description": "Maximalt diskutrymme som används för att cacha nedladdade filer",
 	"camera_upload": "Kamerauppladdning",
 	"camera_upload_album_listing_failed": "Kunde inte läsa albumet {{album}}. Dess objekt hoppades över under den här synkroniseringen.",
+	"camera_upload_asset_filename_missing": "Det här objektet har inget filnamn i enhetens mediabibliotek och hoppades över.",
 	"camera_upload_destination_unavailable": "Molnkatalog otillgänglig",
 	"camera_upload_destination_unavailable_description": "Molnkatalogen för kamerauppladdning raderades eller flyttades till papperskorgen. Välj en ny katalog för att fortsätta synkronisera.",
 	"camera_upload_disabled": "Kamerauppladdning är inaktiverad",

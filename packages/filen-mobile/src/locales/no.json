@@ -81,6 +81,7 @@
 	"cache_size_description": "Maksimal diskplass som brukes til å bufre nedlastede filer",
 	"camera_upload": "Kameraopplasting",
 	"camera_upload_album_listing_failed": "Kunne ikke lese albumet {{album}}. Elementene ble hoppet over under denne synkroniseringen.",
+	"camera_upload_asset_filename_missing": "Dette elementet har ikke noe filnavn i enhetens mediebibliotek og ble hoppet over.",
 	"camera_upload_destination_unavailable": "Skykatalog utilgjengelig",
 	"camera_upload_destination_unavailable_description": "Skykatalogen for kameraopplasting ble slettet eller flyttet til papirkurven. Velg en ny katalog for å fortsette synkroniseringen.",
 	"camera_upload_disabled": "Kameraopplasting er deaktivert",

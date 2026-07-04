@@ -81,6 +81,7 @@
 	"cache_size_description": "Maksimal diskplads, der bruges til at cache downloadede filer",
 	"camera_upload": "Kameraupload",
 	"camera_upload_album_listing_failed": "Kunne ikke læse albummet {{album}}. Dets emner blev sprunget over under denne synkronisering.",
+	"camera_upload_asset_filename_missing": "Dette element har intet filnavn i enhedens mediearkiv og blev sprunget over.",
 	"camera_upload_destination_unavailable": "Skymappe utilgængelig",
 	"camera_upload_destination_unavailable_description": "Skymappen til kameraupload blev slettet eller flyttet til papirkurven. Vælg en ny mappe for at fortsætte synkroniseringen.",
 	"camera_upload_disabled": "Kameraupload er deaktiveret",

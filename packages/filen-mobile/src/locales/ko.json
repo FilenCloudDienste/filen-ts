@@ -81,6 +81,7 @@
 	"cache_size_description": "다운로드한 파일을 캐시하는 데 사용하는 최대 디스크 공간",
 	"camera_upload": "카메라 업로드",
 	"camera_upload_album_listing_failed": "앨범 {{album}}을(를) 읽을 수 없습니다. 이번 동기화에서 해당 항목은 건너뛰었습니다.",
+	"camera_upload_asset_filename_missing": "이 항목은 기기 미디어 저장소에 파일 이름이 없어 건너뛰었습니다.",
 	"camera_upload_destination_unavailable": "클라우드 디렉터리를 사용할 수 없음",
 	"camera_upload_destination_unavailable_description": "카메라 업로드용 클라우드 디렉터리가 삭제되었거나 휴지통으로 이동되었습니다. 동기화를 계속하려면 새 디렉터리를 선택하세요.",
 	"camera_upload_disabled": "카메라 업로드가 비활성화됨",
