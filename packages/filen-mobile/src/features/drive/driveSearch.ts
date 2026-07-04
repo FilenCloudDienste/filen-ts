@@ -266,8 +266,22 @@ export class DriveSearch {
 			return
 		}
 
-		// Install (the check above and this assignment are synchronous — atomic in JS).
+		// Install (the check above and this assignment are synchronous — atomic in JS). Release any
+		// session this open is REPLACING first: a transient iOS "inactive" (control center, a banner,
+		// the app switcher) never reaches "background", so the hook's cleanup skips its close (only
+		// closes when currentState === "active") and the singleton's background handler never fires —
+		// leaving `this.active` installed. On return to "active" the hook re-opens, reaching here; the
+		// old CacheSearch + window handle would otherwise leak (uniffi Arcs, no GC, listener still
+		// streaming across FFI and holding the worker socket-listener refcount) for the process
+		// lifetime. safeClose fire-and-forget: the old window's snapshots are already dropped by the
+		// generation guard, so we don't block the reopen on its teardown.
+		const previous = this.active
+
 		this.active = { search, windowHandle }
+
+		if (previous) {
+			void this.safeClose(previous.search, previous.windowHandle)
+		}
 
 		if (this.currentOpenToken === token) {
 			this.currentOpenToken = null
