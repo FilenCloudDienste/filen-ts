@@ -1,0 +1,19 @@
+diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt b/node_modules/expo-video/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt
+index 8b8eba9..934d502 100644
+--- a/node_modules/expo-video/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt
++++ b/node_modules/expo-video/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt
+@@ -285,7 +285,13 @@ class PictureInPictureManager(appContext: AppContext) : PictureInPictureFragment
+     val decorView = mainActivity.window.decorView
+     val rootView = decorView.findViewById<ViewGroup>(android.R.id.content)
+ 
+-    rootView.removeView(playerView)
++    // rootView.removeView(playerView) is a silent no-op when the playerView is not (or no longer)
++    // a child of THIS activity's content view — e.g. the PiP enter/exit transition raced a slow
++    // surface re-init (large/high-res videos) or an activity recreation, leaving the playerView
++    // parented elsewhere. The unconditional addView below then throws
++    // "The specified child already has a parent" and crashes the app. Detach from the ACTUAL
++    // parent instead — the exact defensive pattern layoutForPiPEnter already uses.
++    (playerView?.parent as? ViewGroup)?.removeView(playerView)
+     videoView?.addView(playerView)
+ 
+     for (i in 0 until rootView.childCount) {

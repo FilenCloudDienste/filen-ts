@@ -33,6 +33,11 @@
       "exclude": [
         "@shopify/flash-list"
       ]
+    },
+    "autolinking": {
+      "buildFromSource": [
+        ".*"
+      ]
     }
   },
   "op-sqlite": {
