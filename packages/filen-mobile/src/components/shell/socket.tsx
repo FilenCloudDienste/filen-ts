@@ -203,11 +203,29 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 			})
 
 			defer(() => {
-				if (socketListenerHandleRef.current) {
-					socketListenerHandleRef.current.uniffiDestroy()
-					socketListenerHandleRef.current = null
-					useSocketStore.getState().setState("disconnected")
-				}
+				// Take the mutex like every other transition (mirrors http.tsx's unmount teardown): if
+				// unmount (logout flips isAuthed) lands while an "active" transition is mid-flight —
+				// holding the mutex, awaiting sdkClient.addEventListener — a synchronous check here would
+				// see a null ref, skip, and then the resumed handler would assign the ref and leave that
+				// ListenerHandle undestroyed with onEvent live during the logout wipe. Serializing makes
+				// the in-flight registration complete first, so this reliably destroys it.
+				run(async innerDefer => {
+					await mutex.acquire()
+
+					innerDefer(() => {
+						mutex.release()
+					})
+
+					if (socketListenerHandleRef.current) {
+						socketListenerHandleRef.current.uniffiDestroy()
+						socketListenerHandleRef.current = null
+						useSocketStore.getState().setState("disconnected")
+					}
+				}).then(result => {
+					if (!result.success) {
+						logger.error("socket", "socket unmount teardown failed", { error: result.error })
+					}
+				})
 			})
 		})
 
