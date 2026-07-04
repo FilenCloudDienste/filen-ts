@@ -22,6 +22,9 @@ const PreviewVideo = ({ cacheKey, fileUrl }: { cacheKey: string; fileUrl: string
 	// Set when the Android PiP-permission-denied guard paused the player, so a late PiP-start can
 	// undo exactly that pause (and only that pause — never a user-initiated one).
 	const guardPausedRef = useRef<boolean>(false)
+	// iOS: handle for the native stopPictureInPicture() call — the only way to CLOSE a floating PiP
+	// window (it lives on this view's playerViewController).
+	const videoViewRef = useRef<VideoView>(null)
 
 	// Session-owned player (get-or-create, render-idempotent): survives the
 	// rotation remount of the carousel so playback continues uninterrupted.
@@ -38,21 +41,31 @@ const PreviewVideo = ({ cacheKey, fileUrl }: { cacheKey: string; fileUrl: string
 		isPlaying: player.playing
 	})
 
-	// iOS: the PiP session is OWNED by this view's native playerViewController — unmounting the
-	// presenting view (paging past it, or the gallery's rotation remount) deallocates it, killing
-	// the PiP window, and the stop delegate dies with the view, so the JS stop event may never be
-	// delivered. Clear the session signal ourselves or the lock/provider/cover suppressions stay
-	// armed indefinitely (fail-open; post-implementation review finding 2). Nothing legitimate
-	// unmounts the presenting view while a backgrounded session should survive (isActive and
-	// dimensions are frozen in background), so this is fail-closed. Android is deliberately NOT
-	// cleared here: its PiP session survives view remounts (the native stop broadcast reaches the
-	// re-registered views), so an unmount-time clear would end a legitimately live session.
+	// iOS "dismiss ends PiP": the PiP window is OWNED by this view's native playerViewController, and
+	// once the view unmounts iOS keeps the window floating with NO controllable handle — reopening a
+	// video then plays a second instance over it (the double-play bug). So on unmount, if this video
+	// owns the active PiP session, CLOSE the window via stopPictureInPicture() before it tears down,
+	// then clear the session signal (or the lock/provider/cover suppressions stay armed forever —
+	// review finding 2). The gallery's width-key freeze prevents a rotation remount from reaching
+	// here mid-session; the remaining unmount triggers (dismiss, paging past the item) should both
+	// end PiP under this model. Android is exempt: stopPictureInPicture throws there, and releasing
+	// the ExoPlayer already tears the window down synchronously.
 	useEffect(() => {
 		if (Platform.OS !== "ios") {
 			return
 		}
 
+		// Capture the view instance now (refs commit before effects run and stay stable for this
+		// cacheKey) so cleanup still has it after React detaches the ref during unmount.
+		const view = videoViewRef.current
+
 		return () => {
+			if (usePipStore.getState().activeKey === cacheKey) {
+				view?.stopPictureInPicture().catch(() => {
+					// View already detaching — nothing to stop.
+				})
+			}
+
 			usePipStore.getState().setActiveKey(prev => (prev === cacheKey ? null : prev))
 		}
 	}, [cacheKey])
@@ -151,6 +164,7 @@ const PreviewVideo = ({ cacheKey, fileUrl }: { cacheKey: string; fileUrl: string
 			style={videoViewStyle}
 		>
 			<VideoView
+				ref={videoViewRef}
 				style={{
 					width: "100%",
 					height: "100%"
