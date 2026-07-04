@@ -81,6 +81,7 @@
 	"cache_size_description": "İndirilen dosyaları önbelleğe almak için kullanılan en fazla disk alanı",
 	"camera_upload": "Kamera yüklemesi",
 	"camera_upload_album_listing_failed": "{{album}} albümü okunamadı. Öğeleri bu eşitleme sırasında atlandı.",
+	"camera_upload_asset_filename_missing": "Bu öğenin cihaz medya deposunda bir dosya adı yok ve atlandı.",
 	"camera_upload_destination_unavailable": "Bulut dizini kullanılamıyor",
 	"camera_upload_destination_unavailable_description": "Kamera yüklemesi için kullanılan bulut dizini silindi veya çöp kutusuna taşındı. Eşitlemeye devam etmek için yeni bir dizin seçin.",
 	"camera_upload_disabled": "Kamera yüklemesi devre dışı",

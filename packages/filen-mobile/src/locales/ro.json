@@ -81,6 +81,7 @@
 	"cache_size_description": "Spațiul maxim pe disc folosit pentru a stoca în cache fișierele descărcate",
 	"camera_upload": "Încărcare din cameră",
 	"camera_upload_album_listing_failed": "Nu s-a putut citi albumul {{album}}. Elementele sale au fost omise în timpul acestei sincronizări.",
+	"camera_upload_asset_filename_missing": "Acest element nu are un nume de fișier în stocarea media a dispozitivului și a fost omis.",
 	"camera_upload_destination_unavailable": "Director cloud indisponibil",
 	"camera_upload_destination_unavailable_description": "Directorul cloud pentru încărcarea de pe cameră a fost șters sau mutat la coșul de gunoi. Alege un director nou pentru a continua sincronizarea.",
 	"camera_upload_disabled": "Încărcarea din cameră este dezactivată",

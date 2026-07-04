@@ -81,6 +81,7 @@
 	"cache_size_description": "Espaço máximo em disco usado para armazenar em cache os ficheiros transferidos",
 	"camera_upload": "Carregamento da câmara",
 	"camera_upload_album_listing_failed": "Não foi possível ler o álbum {{album}}. Os seus itens foram ignorados durante esta sincronização.",
+	"camera_upload_asset_filename_missing": "Este item não tem nome de arquivo no armazenamento de mídia do dispositivo e foi ignorado.",
 	"camera_upload_destination_unavailable": "Diretório na nuvem indisponível",
 	"camera_upload_destination_unavailable_description": "O diretório na nuvem para o envio da câmara foi eliminado ou movido para o lixo. Escolha um novo diretório para continuar a sincronizar.",
 	"camera_upload_disabled": "Carregamento da câmara desativado",

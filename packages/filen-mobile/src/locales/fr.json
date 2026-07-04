@@ -81,6 +81,7 @@
 	"cache_size_description": "Espace disque maximal utilisé pour mettre en cache les fichiers téléchargés",
 	"camera_upload": "Téléversement depuis l'appareil photo",
 	"camera_upload_album_listing_failed": "Impossible de lire l'album {{album}}. Ses éléments ont été ignorés lors de cette synchronisation.",
+	"camera_upload_asset_filename_missing": "Cet élément n'a aucun nom de fichier dans la bibliothèque multimédia de l'appareil et a été ignoré.",
 	"camera_upload_destination_unavailable": "Répertoire cloud indisponible",
 	"camera_upload_destination_unavailable_description": "Le répertoire cloud pour l'envoi depuis l'appareil photo a été supprimé ou déplacé vers la corbeille. Choisissez un nouveau répertoire pour continuer la synchronisation.",
 	"camera_upload_disabled": "Le téléversement depuis l'appareil photo est désactivé",

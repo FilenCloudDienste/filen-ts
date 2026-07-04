@@ -81,6 +81,7 @@
 	"cache_size_description": "用于缓存已下载文件的最大磁盘空间",
 	"camera_upload": "相机上传",
 	"camera_upload_album_listing_failed": "无法读取相册 {{album}}。本次同步已跳过其中的项目。",
+	"camera_upload_asset_filename_missing": "此项目在设备媒体库中没有文件名，已被跳过。",
 	"camera_upload_destination_unavailable": "云目录不可用",
 	"camera_upload_destination_unavailable_description": "用于相机上传的云目录已被删除或移至回收站。请选择新的目录以继续同步。",
 	"camera_upload_disabled": "相机上传已停用",

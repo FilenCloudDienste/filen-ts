@@ -81,6 +81,7 @@
 	"cache_size_description": "A letöltött fájlok gyorsítótárazásához használt maximális lemezterület",
 	"camera_upload": "Kamerafeltöltés",
 	"camera_upload_album_listing_failed": "A(z) {{album}} album nem volt olvasható. Az elemeit kihagytuk ennél a szinkronizálásnál.",
+	"camera_upload_asset_filename_missing": "Ennek az elemnek nincs fájlneve az eszköz médiatárában, ezért kihagytuk.",
 	"camera_upload_destination_unavailable": "A felhőbeli könyvtár nem elérhető",
 	"camera_upload_destination_unavailable_description": "A kamerafeltöltéshez használt felhőbeli könyvtárat törölték vagy a kukába helyezték. Válassz egy új könyvtárat a szinkronizálás folytatásához.",
 	"camera_upload_disabled": "A kamerafeltöltés ki van kapcsolva",

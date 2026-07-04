@@ -81,6 +81,7 @@
 	"cache_size_description": "Ladattujen tiedostojen välimuistiin käytettävä enimmäislevytila",
 	"camera_upload": "Kameran lataus",
 	"camera_upload_album_listing_failed": "Albumia {{album}} ei voitu lukea. Sen kohteet ohitettiin tämän synkronoinnin aikana.",
+	"camera_upload_asset_filename_missing": "Tällä kohteella ei ole tiedostonimeä laitteen mediavarastossa, ja se ohitettiin.",
 	"camera_upload_destination_unavailable": "Pilvihakemisto ei ole käytettävissä",
 	"camera_upload_destination_unavailable_description": "Kameran latauksen pilvihakemisto poistettiin tai siirrettiin roskakoriin. Valitse uusi hakemisto jatkaaksesi synkronointia.",
 	"camera_upload_disabled": "Kameran lataus on poistettu käytöstä",

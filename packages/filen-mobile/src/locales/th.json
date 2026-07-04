@@ -81,6 +81,7 @@
 	"cache_size_description": "พื้นที่ดิสก์สูงสุดที่ใช้แคชไฟล์ที่ดาวน์โหลด",
 	"camera_upload": "การอัปโหลดจากกล้อง",
 	"camera_upload_album_listing_failed": "ไม่สามารถอ่านอัลบั้ม {{album}} ได้ รายการในอัลบั้มถูกข้ามไปในการซิงค์ครั้งนี้",
+	"camera_upload_asset_filename_missing": "รายการนี้ไม่มีชื่อไฟล์ในที่จัดเก็บสื่อของอุปกรณ์ จึงถูกข้ามไป",
 	"camera_upload_destination_unavailable": "ไม่มีไดเรกทอรีบนคลาวด์",
 	"camera_upload_destination_unavailable_description": "ไดเรกทอรีบนคลาวด์สำหรับการอัปโหลดจากกล้องถูกลบหรือย้ายไปยังถังขยะ เลือกไดเรกทอรีใหม่เพื่อซิงค์ต่อ",
 	"camera_upload_disabled": "ปิดการอัปโหลดจากกล้องอยู่",

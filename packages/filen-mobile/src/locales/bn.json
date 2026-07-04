@@ -81,6 +81,7 @@
 	"cache_size_description": "ডাউনলোড করা ফাইল ক্যাশ করতে ব্যবহৃত সর্বোচ্চ ডিস্ক স্পেস",
 	"camera_upload": "ক্যামেরা আপলোড",
 	"camera_upload_album_listing_failed": "{{album}} অ্যালবামটি পড়া যায়নি। এই সিঙ্কের সময় এর আইটেমগুলো এড়িয়ে যাওয়া হয়েছে।",
+	"camera_upload_asset_filename_missing": "ডিভাইসের মিডিয়া স্টোরে এই আইটেমের কোনো ফাইলের নাম নেই এবং এটি বাদ দেওয়া হয়েছে।",
 	"camera_upload_destination_unavailable": "ক্লাউড ডিরেক্টরি উপলব্ধ নেই",
 	"camera_upload_destination_unavailable_description": "ক্যামেরা আপলোডের জন্য ক্লাউড ডিরেক্টরিটি মুছে ফেলা হয়েছে বা ট্র্যাশে সরানো হয়েছে। সিঙ্ক চালিয়ে যেতে একটি নতুন ডিরেক্টরি বেছে নিন।",
 	"camera_upload_disabled": "ক্যামেরা আপলোড নিষ্ক্রিয়",

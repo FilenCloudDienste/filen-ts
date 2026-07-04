@@ -81,6 +81,7 @@
 	"cache_size_description": "Maksymalna ilość miejsca na dysku używana do buforowania pobranych plików",
 	"camera_upload": "Przesyłanie z aparatu",
 	"camera_upload_album_listing_failed": "Nie udało się odczytać albumu {{album}}. Jego elementy zostały pominięte podczas tej synchronizacji.",
+	"camera_upload_asset_filename_missing": "Ten element nie ma nazwy pliku w magazynie multimediów urządzenia i został pominięty.",
 	"camera_upload_destination_unavailable": "Katalog w chmurze niedostępny",
 	"camera_upload_destination_unavailable_description": "Katalog w chmurze dla przesyłania z aparatu został usunięty lub przeniesiony do kosza. Wybierz nowy katalog, aby kontynuować synchronizację.",
 	"camera_upload_disabled": "Przesyłanie z aparatu jest wyłączone",

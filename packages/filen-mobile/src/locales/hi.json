@@ -81,6 +81,7 @@
 	"cache_size_description": "डाउनलोड की गई फ़ाइलों को कैश करने के लिए उपयोग की जाने वाली अधिकतम डिस्क स्थान",
 	"camera_upload": "कैमरा अपलोड",
 	"camera_upload_album_listing_failed": "एल्बम {{album}} को पढ़ा नहीं जा सका। इस सिंक के दौरान इसके आइटम छोड़ दिए गए।",
+	"camera_upload_asset_filename_missing": "इस आइटम का डिवाइस मीडिया स्टोर में कोई फ़ाइल नाम नहीं है और इसे छोड़ दिया गया।",
 	"camera_upload_destination_unavailable": "क्लाउड डायरेक्टरी अनुपलब्ध",
 	"camera_upload_destination_unavailable_description": "कैमरा अपलोड की क्लाउड डायरेक्टरी हटा दी गई या ट्रैश में ले जाई गई। सिंक जारी रखने के लिए एक नई डायरेक्टरी चुनें।",
 	"camera_upload_disabled": "कैमरा अपलोड अक्षम है",

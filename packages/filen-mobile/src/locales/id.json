@@ -81,6 +81,7 @@
 	"cache_size_description": "Ruang disk maksimum yang digunakan untuk menyimpan berkas yang diunduh",
 	"camera_upload": "Unggah kamera",
 	"camera_upload_album_listing_failed": "Tidak dapat membaca album {{album}}. Item-itemnya dilewati selama sinkronisasi ini.",
+	"camera_upload_asset_filename_missing": "Item ini tidak memiliki nama file di penyimpanan media perangkat dan dilewati.",
 	"camera_upload_destination_unavailable": "Direktori cloud tidak tersedia",
 	"camera_upload_destination_unavailable_description": "Direktori cloud untuk unggah kamera telah dihapus atau dipindahkan ke tempat sampah. Pilih direktori baru untuk melanjutkan sinkronisasi.",
 	"camera_upload_disabled": "Unggah kamera dinonaktifkan",

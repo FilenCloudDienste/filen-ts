@@ -81,6 +81,7 @@
 	"cache_size_description": "Maximum disk space used to cache downloaded files",
 	"camera_upload": "Camera upload",
 	"camera_upload_album_listing_failed": "Could not read the album {{album}}. Its items were skipped during this sync.",
+	"camera_upload_asset_filename_missing": "This item has no file name in the device media store and was skipped.",
 	"camera_upload_destination_unavailable": "Cloud directory unavailable",
 	"camera_upload_destination_unavailable_description": "The cloud directory for camera upload was deleted or moved to the trash. Choose a new directory to continue syncing.",
 	"camera_upload_disabled": "Camera upload is disabled",

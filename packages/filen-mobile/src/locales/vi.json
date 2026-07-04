@@ -81,6 +81,7 @@
 	"cache_size_description": "Dung lượng đĩa tối đa dùng để lưu đệm các tệp đã tải về",
 	"camera_upload": "Tải lên từ camera",
 	"camera_upload_album_listing_failed": "Không thể đọc album {{album}}. Các mục trong đó đã bị bỏ qua trong lần đồng bộ này.",
+	"camera_upload_asset_filename_missing": "Mục này không có tên tệp trong kho lưu trữ phương tiện của thiết bị và đã bị bỏ qua.",
 	"camera_upload_destination_unavailable": "Thư mục đám mây không khả dụng",
 	"camera_upload_destination_unavailable_description": "Thư mục đám mây dùng cho tải ảnh từ máy ảnh đã bị xóa hoặc chuyển vào thùng rác. Hãy chọn một thư mục mới để tiếp tục đồng bộ.",
 	"camera_upload_disabled": "Tải lên từ camera đã tắt",

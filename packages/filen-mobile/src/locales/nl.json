@@ -81,6 +81,7 @@
 	"cache_size_description": "Maximale schijfruimte voor het cachen van gedownloade bestanden",
 	"camera_upload": "Camera-upload",
 	"camera_upload_album_listing_failed": "Kon het album {{album}} niet lezen. De items zijn tijdens deze synchronisatie overgeslagen.",
+	"camera_upload_asset_filename_missing": "Dit item heeft geen bestandsnaam in de media-opslag van het apparaat en is overgeslagen.",
 	"camera_upload_destination_unavailable": "Cloudmap niet beschikbaar",
 	"camera_upload_destination_unavailable_description": "De cloudmap voor camera-upload is verwijderd of naar de prullenbak verplaatst. Kies een nieuwe map om te blijven synchroniseren.",
 	"camera_upload_disabled": "Camera-upload is uitgeschakeld",
