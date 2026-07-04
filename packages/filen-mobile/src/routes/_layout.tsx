@@ -18,7 +18,7 @@ import { NotifierWrapper } from "react-native-notifier"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
 import { KeyboardProvider } from "react-native-keyboard-controller"
 import { PressablesConfig } from "pressto"
-import * as Haptics from "expo-haptics"
+import haptics from "@/lib/haptics"
 import FullScreenLoadingModal from "@/components/ui/fullScreenLoadingModal"
 import NotesSync from "@/features/notes/components/sync"
 import ChatsSync from "@/features/chats/components/sync"
@@ -126,8 +126,10 @@ const RootLayout = () => {
 				>
 					<PressablesConfig
 						globalHandlers={{
+							// Synchronous read of the cached preference (lib/haptics) — deliberately NOT
+							// useSecureStore here, which would re-render the whole app tree on every toggle.
 							onPress: () => {
-								Haptics.selectionAsync().catch(e => logger.warn("layout", "Haptics.selectionAsync failed", { error: e }))
+								haptics.selection()
 							}
 						}}
 					>

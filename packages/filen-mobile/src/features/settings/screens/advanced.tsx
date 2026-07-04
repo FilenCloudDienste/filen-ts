@@ -46,7 +46,7 @@ import {
 	useUploadLimitKbps,
 	useDownloadLimitKbps
 } from "@/features/settings/transferConfig"
-import { PIP_ENABLED_SECURE_STORE_KEY, DEFAULT_PIP_ENABLED } from "@/constants"
+import { PIP_ENABLED_SECURE_STORE_KEY, DEFAULT_PIP_ENABLED, HAPTICS_ENABLED_SECURE_STORE_KEY, DEFAULT_HAPTICS_ENABLED } from "@/constants"
 
 const SIZE_LOADING_PLACEHOLDER = "…"
 
@@ -179,6 +179,8 @@ function Advanced() {
 	)
 
 	const [pipEnabled, setPipEnabled] = useSecureStore<boolean>(PIP_ENABLED_SECURE_STORE_KEY, DEFAULT_PIP_ENABLED)
+
+	const [hapticsEnabled, setHapticsEnabled] = useSecureStore<boolean>(HAPTICS_ENABLED_SECURE_STORE_KEY, DEFAULT_HAPTICS_ENABLED)
 
 	const [transferPreset, setTransferPreset] = useTransferPerformancePreset()
 	const [uploadLimitKbps, setUploadLimitKbps] = useUploadLimitKbps()
@@ -321,6 +323,18 @@ function Advanced() {
 									value: pipEnabled,
 									onValueChange: () => {
 										setPipEnabled(prev => !prev)
+									}
+								}
+							},
+							{
+								icon: "pulse-outline",
+								title: t("haptic_feedback"),
+								subTitle: t("haptic_feedback_description"),
+								rightItem: {
+									type: "switch",
+									value: hapticsEnabled,
+									onValueChange: () => {
+										setHapticsEnabled(prev => !prev)
 									}
 								}
 							}

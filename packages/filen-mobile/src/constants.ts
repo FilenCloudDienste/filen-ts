@@ -17,6 +17,12 @@ export const HTTP_PROVIDER_PRIMARY_PORT = 49736
 export const PIP_ENABLED_SECURE_STORE_KEY = "pipEnabled"
 export const DEFAULT_PIP_ENABLED = true
 
+// Tap haptic feedback (the global PressablesConfig selection haptic). Default ON; toggle lives in
+// Advanced settings. Read non-reactively via lib/haptics (see there) so the root layout never
+// re-renders on change.
+export const HAPTICS_ENABLED_SECURE_STORE_KEY = "hapticsEnabled"
+export const DEFAULT_HAPTICS_ENABLED = true
+
 export const NETINFO_CONFIG: NetInfoConfiguration = {
 	reachabilityUrl: "https://gateway.filen.io",
 	reachabilityTest: async response => response.status === 200,

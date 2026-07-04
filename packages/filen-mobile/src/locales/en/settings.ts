@@ -218,6 +218,10 @@ export const settings = {
 	/** Advanced — description for the Picture-in-Picture toggle; states the deliberate no-relock behavior */
 	picture_in_picture_description:
 		"Keep videos playing in a floating window when you leave the app. While a video is floating, returning to the app will not ask you to unlock again.",
+	/** Advanced — row title: haptic (vibration) feedback on tap toggle */
+	haptic_feedback: "Haptic feedback",
+	/** Advanced — description for the haptic feedback toggle */
+	haptic_feedback_description: "Play a subtle vibration when you tap buttons and controls.",
 	/** Advanced — row title: clear generated image thumbnails */
 	clear_image_thumbnails: "Clear image thumbnails",
 	/** Advanced — confirm message before clearing image thumbnails */
