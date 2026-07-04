@@ -13,7 +13,7 @@ vi.mock("@/lib/time", () => ({
 	intlLanguage: "en-US"
 }))
 
-import { itemSorter, notesSorter, type SortByType } from "@/lib/sort"
+import { itemSorter, notesSorter, captureTimestamp, type SortByType } from "@/lib/sort"
 import { type DriveItem, type Note, type NoteTag } from "@/types"
 
 function makeItem(
@@ -414,6 +414,35 @@ describe("itemSorter", () => {
 			const result = itemSorter.sortItems([newer, older], "creationDesc")
 
 			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["new.txt", "old.txt"])
+		})
+
+		// captureTimestamp is exported as the photos grid's DISPLAY date too (#43): the
+		// floating date chip must label rows with the same value the timeline sorts by,
+		// or clamped-away garbage dates (epoch-zero created) resurface in the UI.
+		describe("captureTimestamp (photos date chip)", () => {
+			const T_2021 = Date.UTC(2021, 5, 30)
+			const T_2024 = Date.UTC(2024, 1, 13)
+
+			it("labels a legacy upload-stamped photo with its modified date, not the upload date", () => {
+				const legacy = makeItem("file", "legacy.jpg", { created: T_2024, modified: T_2021, timestamp: T_2024 })
+
+				expect(captureTimestamp(legacy)).toBe(T_2021)
+			})
+
+			it("labels an epoch-zero created with the upload date instead of 1970", () => {
+				const garbage = makeItem("file", "garbage.jpg", { created: 0, modified: 0, timestamp: T_2024 })
+
+				expect(captureTimestamp(garbage)).toBe(T_2024)
+			})
+
+			it("matches the captureDesc sort key exactly (chip and ordering share one source)", () => {
+				const item = makeItem("file", "photo.jpg", { created: T_2021, modified: T_2024, timestamp: T_2024 })
+
+				const sorted = itemSorter.sortItems([item], "captureDesc")
+
+				expect(sorted[0]).toBe(item)
+				expect(captureTimestamp(item)).toBe(T_2021)
+			})
 		})
 
 		// capture sorting: best-effort capture time for the photos timeline. Realistic ms

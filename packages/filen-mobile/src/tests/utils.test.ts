@@ -174,7 +174,7 @@ import {
 	resolveMimeType,
 	convertBigInts
 } from "@/lib/utils"
-import { makeDriveItemPublicLink, unwrapParentUuid, resolveCreatedOrTimestamp } from "@/lib/sdkUnwrap"
+import { makeDriveItemPublicLink, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
 import { getPreviewType } from "@/lib/previewType"
 import { extractLinks, trimUnbalanced, safeParseUrl } from "@/lib/linkParser"
@@ -1181,20 +1181,6 @@ describe("resolveMimeType", () => {
 
 	it("returns application/octet-stream for a name with no extension and no mime", () => {
 		expect(resolveMimeType({ mime: null, name: "Makefile" })).toBe("application/octet-stream")
-	})
-})
-
-describe("resolveCreatedOrTimestamp", () => {
-	it("uses created when it is defined", () => {
-		expect(resolveCreatedOrTimestamp({ created: 1700000000000n, timestamp: 999n })).toBe(1700000000000)
-	})
-
-	it("treats epoch-0 created as a real value, not as absent (falsy-bigint guard)", () => {
-		expect(resolveCreatedOrTimestamp({ created: 0n, timestamp: 1700000000000n })).toBe(0)
-	})
-
-	it("falls back to timestamp only when created is undefined", () => {
-		expect(resolveCreatedOrTimestamp({ created: undefined, timestamp: 1700000000000n })).toBe(1700000000000)
 	})
 })
 

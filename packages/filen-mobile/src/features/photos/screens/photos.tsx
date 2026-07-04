@@ -3,14 +3,13 @@ import { onlineManager } from "@tanstack/react-query"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import View from "@/components/ui/view"
 import useDriveItemsQuery from "@/features/drive/queries/useDriveItems.query"
-import { itemSorter } from "@/lib/sort"
+import { itemSorter, captureTimestamp } from "@/lib/sort"
 import VirtualList from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
 import { type View as RNView } from "react-native"
 import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import useViewLayout from "@/hooks/useViewLayout"
-import { resolveCreatedOrTimestamp } from "@/lib/sdkUnwrap"
 import { getPreviewType } from "@/lib/previewType"
 import useDrivePath from "@/hooks/useDrivePath"
 import { useFocusEffect } from "expo-router"
@@ -126,15 +125,12 @@ const Photos = () => {
 										return
 									}
 
+									// Same best-effort capture timestamp the grid is SORTED by (#43) —
+									// labeling rows with the raw `created` resurfaced the exact garbage
+									// dates (upload-stamped, epoch-zero) the capture key clamps away.
 									usePhotosStore.getState().setVisibleDateRange({
-										start: resolveCreatedOrTimestamp({
-											created: firstItem.item.data.decryptedMeta?.created,
-											timestamp: firstItem.item.data.timestamp
-										}),
-										end: resolveCreatedOrTimestamp({
-											created: lastItem.item.data.decryptedMeta?.created,
-											timestamp: lastItem.item.data.timestamp
-										})
+										start: captureTimestamp(firstItem.item),
+										end: captureTimestamp(lastItem.item)
 									})
 								}}
 								data={items}

@@ -691,10 +691,6 @@ export function makeDriveItemPublicLink({
 	}
 }
 
-export function resolveCreatedOrTimestamp({ created, timestamp }: { created: bigint | undefined; timestamp: bigint }): number {
-	return created !== undefined ? Number(created) : Number(timestamp)
-}
-
 export function linkedFileIntoDriveItem(file: LinkedFile): DriveItem {
 	return unwrappedFileIntoDriveItem(
 		unwrapFileMeta({

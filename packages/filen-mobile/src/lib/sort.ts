@@ -186,15 +186,19 @@ function creationSortKey(item: DriveItem): number {
 // mtimes and similar artifacts of legacy uploaders — rather than as very old capture dates.
 const CAPTURE_TIMESTAMP_FLOOR = Date.UTC(1980, 0, 1)
 
-// Best-effort capture time for the photos timeline. Legacy clients stamped `created` with
-// the upload time instead of the file's real creation date, stranding old photos at their
-// upload position while the real date survived in `modified`. A photo cannot be modified
-// before it was captured, so the earliest plausible client timestamp — above the garbage
-// floor and no later than the server-assigned upload time (the only fully trusted stamp) —
-// is the closest available estimate. Falls back to the upload time when neither client
-// timestamp is usable. Shared items carry no server timestamp: only the floor applies, and
-// they fall back to the plain creation key.
-function captureSortKey(item: DriveItem): number {
+// Best-effort capture time (ms) for the photos timeline. Legacy clients stamped `created`
+// with the upload time instead of the file's real creation date, stranding old photos at
+// their upload position while the real date survived in `modified`. A photo cannot be
+// modified before it was captured, so the earliest plausible client timestamp — above the
+// garbage floor and no later than the server-assigned upload time (the only fully trusted
+// stamp) — is the closest available estimate. Falls back to the upload time when neither
+// client timestamp is usable. Shared items carry no server timestamp: only the floor
+// applies, and they fall back to the plain creation key.
+//
+// Exported because it is ALSO the display date for the photos grid — the floating date
+// chip must label rows with the same timestamp the timeline is ordered by (#43), or
+// clamped-away garbage dates (epoch-zero `created`) resurface in the UI.
+export function captureTimestamp(item: DriveItem): number {
 	const isFile = item.type === "file"
 
 	if (!isFile && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
@@ -243,8 +247,8 @@ const sortModes: Record<string, SortMode> = {
 	uploadDateDesc: { kind: "timestamp", isAsc: false, timestampKey: uploadDateSortKey },
 	creationAsc: { kind: "timestamp", isAsc: true, timestampKey: creationSortKey },
 	creationDesc: { kind: "timestamp", isAsc: false, timestampKey: creationSortKey },
-	captureAsc: { kind: "timestamp", isAsc: true, timestampKey: captureSortKey },
-	captureDesc: { kind: "timestamp", isAsc: false, timestampKey: captureSortKey }
+	captureAsc: { kind: "timestamp", isAsc: true, timestampKey: captureTimestamp },
+	captureDesc: { kind: "timestamp", isAsc: false, timestampKey: captureTimestamp }
 }
 
 const FALLBACK_SORT_MODE = sortModes["nameAsc"] as SortMode
