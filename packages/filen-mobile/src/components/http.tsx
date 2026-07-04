@@ -70,6 +70,8 @@ async function startProviderLocked(sdkClient: JsClientInterface): Promise<void> 
 			try {
 				handle = (await sdkClient.startHttpProvider(sessionPort)) as HttpProviderHandle
 
+				console.log("http", "HTTP provider started", { port: handle.port() })
+
 				break
 			} catch (e) {
 				lastError = e
@@ -88,6 +90,8 @@ async function startProviderLocked(sdkClient: JsClientInterface): Promise<void> 
 			for (let attempt = 0; attempt < FIRST_BIND_ATTEMPTS_PER_CANDIDATE && !handle; attempt++) {
 				try {
 					handle = (await sdkClient.startHttpProvider(candidate)) as HttpProviderHandle
+
+					console.log("http", "HTTP provider started", { port: handle.port() })
 				} catch (e) {
 					lastError = e
 
@@ -137,6 +141,8 @@ function destroyProviderLocked(): void {
 
 	useHttpStore.getState().setPort(null)
 	useHttpStore.getState().setGetFileUrl(null)
+
+	console.log("http", "HTTP provider destroyed")
 }
 
 function cancelGraceDestroy(): void {
@@ -175,31 +181,52 @@ function scheduleGraceDestroy(): void {
 	}, PROVIDER_GRACE_DESTROY_MS)
 }
 
+const PROBE_TIMEOUT_MS = 2000
+
+// Coalesces overlapping health checks: two concurrent callers must not both observe "dead" and
+// serially destroy+restart (the second would kill a freshly-healthy provider).
+let healthCheckInFlight: Promise<void> | null = null
+
 // Probe + recover the provider during a backgrounded PiP session (spec §5.5). iOS may suspend the
 // process while the video is PAUSED in PiP, killing the listening socket; when the user resumes,
 // the player's range requests would fail against a dead port. Any HTTP response (even the 400 the
 // Rust handler returns for a bogus descriptor) proves liveness; connection refusal means dead —
-// restart on the SAME session port so previously-issued player URLs keep working.
+// restart on the SAME session port so previously-issued player URLs keep working. The probe is
+// timeout-bounded: a half-open socket right after an iOS resume could otherwise hang the fetch
+// forever and silently kill the heal chain for the session.
 export async function ensureHttpProviderHealthy(): Promise<void> {
-	const port = useHttpStore.getState().port
+	if (healthCheckInFlight) {
+		return healthCheckInFlight
+	}
 
-	if (port !== null) {
-		try {
-			await fetch(`http://127.0.0.1:${port}/file?file=x`)
+	healthCheckInFlight = run(async defer => {
+		defer(() => {
+			healthCheckInFlight = null
+		})
 
-			return
-		} catch {
-			// Connection refused/reset — the provider is gone; fall through to restart.
+		const port = useHttpStore.getState().port
+
+		if (port !== null) {
+			const abortController = new AbortController()
+			const probeTimeout = setTimeout(() => abortController.abort(), PROBE_TIMEOUT_MS)
+
+			try {
+				await fetch(`http://127.0.0.1:${port}/file?file=x`, { signal: abortController.signal })
+
+				return
+			} catch {
+				// Connection refused/reset/timed out — the provider is gone; fall through to restart.
+			} finally {
+				clearTimeout(probeTimeout)
+			}
 		}
-	}
 
-	const sdkClient = currentSdkClient
+		const sdkClient = currentSdkClient
 
-	if (!sdkClient) {
-		return
-	}
+		if (!sdkClient) {
+			return
+		}
 
-	const result = await run(async defer => {
 		await mutex.acquire()
 
 		defer(() => {
@@ -207,12 +234,15 @@ export async function ensureHttpProviderHealthy(): Promise<void> {
 		})
 
 		destroyProviderLocked()
+
 		await startProviderLocked(sdkClient)
+	}).then(result => {
+		if (!result.success) {
+			logger.error("http", "HTTP provider health recovery failed", { error: result.error })
+		}
 	})
 
-	if (!result.success) {
-		logger.error("http", "HTTP provider health recovery failed", { error: result.error })
-	}
+	return healthCheckInFlight
 }
 
 const InnerHttp = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
@@ -234,6 +264,17 @@ const InnerHttp = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 			}
 
 			cancelGraceDestroy()
+
+			// A handle can predate a background stay whose grace-destroy never fired (iOS suspended
+			// the process first, killing the socket under a live handle; the thaw-fired timer then
+			// no-ops on the "active" re-check). startProviderLocked early-returns on a live handle,
+			// so route through the health probe instead: it no-ops when alive and restarts on the
+			// same session port when dead (post-implementation review finding 6).
+			if (httpHandle) {
+				await ensureHttpProviderHealthy()
+
+				return
+			}
 
 			const result = await run(async defer => {
 				await mutex.acquire()
@@ -291,12 +332,25 @@ const InnerHttp = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 			defer(() => {
 				cancelGraceDestroy()
 
-				if (httpHandle) {
-					httpHandle.uniffiDestroy()
-					httpHandle = null
-					useHttpStore.getState().setPort(null)
-					useHttpStore.getState().setGetFileUrl(null)
-				}
+				// Unmount teardown (logout) takes the mutex like every other transition: an
+				// in-flight start (the same-port retry loop can run for seconds) completes and
+				// publishes first, then this destroys it and nulls the store — instead of racing
+				// it and leaving a zombie provider re-published against a destroyed SDK client
+				// (post-implementation review finding 9). doLogout's reloadAsync rebuilds the JS
+				// realm shortly after, which bounds anything that slips through.
+				run(async innerDefer => {
+					await mutex.acquire()
+
+					innerDefer(() => {
+						mutex.release()
+					})
+
+					destroyProviderLocked()
+				}).then(result => {
+					if (!result.success) {
+						logger.error("http", "HTTP provider unmount teardown failed", { error: result.error })
+					}
+				})
 			})
 		})
 

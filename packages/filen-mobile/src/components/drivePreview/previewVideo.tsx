@@ -38,6 +38,25 @@ const PreviewVideo = ({ cacheKey, fileUrl }: { cacheKey: string; fileUrl: string
 		isPlaying: player.playing
 	})
 
+	// iOS: the PiP session is OWNED by this view's native playerViewController — unmounting the
+	// presenting view (paging past it, or the gallery's rotation remount) deallocates it, killing
+	// the PiP window, and the stop delegate dies with the view, so the JS stop event may never be
+	// delivered. Clear the session signal ourselves or the lock/provider/cover suppressions stay
+	// armed indefinitely (fail-open; post-implementation review finding 2). Nothing legitimate
+	// unmounts the presenting view while a backgrounded session should survive (isActive and
+	// dimensions are frozen in background), so this is fail-closed. Android is deliberately NOT
+	// cleared here: its PiP session survives view remounts (the native stop broadcast reaches the
+	// re-registered views), so an unmount-time clear would end a legitimately live session.
+	useEffect(() => {
+		if (Platform.OS !== "ios") {
+			return
+		}
+
+		return () => {
+			usePipStore.getState().setActiveKey(prev => (prev === cacheKey ? null : prev))
+		}
+	}, [cacheKey])
+
 	// Backgrounded-PiP resume recovery (spec: docs/pip-video-player.md §5.5): iOS can suspend the
 	// process while the video is PAUSED in PiP, killing the localhost provider's socket. When the
 	// user taps play in the PiP window, probe the provider and restart it on the same port if dead;
@@ -73,6 +92,15 @@ const PreviewVideo = ({ cacheKey, fileUrl }: { cacheKey: string; fileUrl: string
 		}
 
 		const subscription = AppState.addEventListener("change", nextAppState => {
+			if (nextAppState === "active") {
+				// A guard pause is only undone by the PiP-start that explains it — anything else
+				// (user returned to the app) makes the flag stale: a much later PiP start must not
+				// force-play a video whose paused state the user now owns.
+				guardPausedRef.current = false
+
+				return
+			}
+
 			if (nextAppState !== "background" || !player.playing || usePipStore.getState().activeKey === cacheKey) {
 				return
 			}
@@ -131,7 +159,12 @@ const PreviewVideo = ({ cacheKey, fileUrl }: { cacheKey: string; fileUrl: string
 				contentFit="contain"
 				nativeControls={true}
 				allowsPictureInPicture={pipEnabled}
-				startsPictureInPictureAutomatically={pipEnabled}
+				// Android's native auto-enter only requires the view to be attached, NOT playing —
+				// backgrounding over a PAUSED preview would pop a PiP window (and legitimately
+				// suppress the biometric lock). iOS requires active playback natively. Gate Android
+				// on isPlaying so both platforms mean "keep the video PLAYING in a window", matching
+				// the settings copy (post-implementation review finding 4).
+				startsPictureInPictureAutomatically={pipEnabled && (Platform.OS === "ios" || isPlaying)}
 				// The Android fullscreen button launches a SEPARATE activity, which pauses
 				// MainActivity → AppState "background" while the user is still watching — tearing
 				// down the HTTP provider mid-playback and arming the biometric lock (spec §3a).

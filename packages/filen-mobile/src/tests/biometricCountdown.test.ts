@@ -541,6 +541,14 @@ describe("reduceBiometricAppState — PiP session suppression", () => {
 		expect(result.backgroundedDuringPipSession).toBe(false)
 	})
 
+	it("does not arm the pip flag when biometric is disabled (nothing to suppress)", () => {
+		const result = reduceBiometricAppState("background", ctx({ pipSessionActive: true, enabled: false }))
+
+		expect(result.setAuthenticated).toBe(null)
+		expect(result.lockedByBackground).toBe(false)
+		expect(result.backgroundedDuringPipSession).toBe(false)
+	})
+
 	it("presentation suppression takes precedence over the pip flag when both are on screen", () => {
 		const result = reduceBiometricAppState("background", ctx({ presentationActive: true, pipSessionActive: true }))
 

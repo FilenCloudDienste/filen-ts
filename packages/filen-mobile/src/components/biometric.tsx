@@ -202,6 +202,11 @@ export function reduceBiometricAppState(
 			// (the user deliberately kept playback on screen; the app is logically open). The sticky flag
 			// lets the "active" branch recognize an expand-back, and the PiP-stop subscription fails CLOSED
 			// (locks) the moment the session ends while still backgrounded.
+			//
+			// DELIBERATE precedence: when a presentation AND a PiP session are both live at background, the
+			// presentation branch above wins and this flag stays un-armed — a long absence then re-locks on
+			// return despite the PiP session. That fails CLOSED (a prompt, never an unlocked app), and the
+			// double-surface case is exotic; revisit only if it surfaces in practice.
 			backgroundedDuringPipSession = true
 		}
 	}
@@ -783,6 +788,14 @@ function Biometric() {
 
 				if (result.rekeyPrompt) {
 					setLastAppOpenTimestamp(now)
+				}
+
+				// The stop-side grace is one-shot: it exists to absorb the stop-before-active order
+				// of a single expand-back. Once an "active" transition has consumed it, a LATER
+				// ordinary background within the same 1.5s must not inherit the widened promptless
+				// window (post-implementation review finding 5).
+				if (nextAppState === "active") {
+					lastPipStopTimestampRef.current = 0
 				}
 			})
 

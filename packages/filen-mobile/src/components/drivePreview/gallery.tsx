@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
+import usePipStore from "@/stores/usePip.store"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import { useNavigation } from "expo-router"
 import { router } from "@/lib/router"
 import { type DriveItemFileExtracted } from "@/types"
 import { getPreviewType } from "@/lib/previewType"
-import { useWindowDimensions, type NativeSyntheticEvent, type NativeScrollEvent, type LayoutChangeEvent } from "react-native"
+import { useWindowDimensions, Platform, type NativeSyntheticEvent, type NativeScrollEvent, type LayoutChangeEvent } from "react-native"
 import { GestureDetector, Gesture } from "react-native-gesture-handler"
 import { useSharedValue, useAnimatedStyle, type SharedValue, withSpring, interpolate, Extrapolation } from "react-native-reanimated"
 import { type DrivePath } from "@/hooks/useDrivePath"
@@ -273,6 +274,20 @@ const Gallery = () => {
 	const fadeRange = dimensions.height * 0.5
 	const width = dimensions.width
 
+	// PiP freezes the remount key (spec: docs/pip-video-player.md §5.7, post-implementation review):
+	// entering/exiting PiP RESIZES the window, so the dimension flip would remount the width-keyed
+	// list mid-transition — tearing the presenting view out while expo-video's native code is
+	// re-parenting its playerView (the "child already has a parent" crash class) and killing the
+	// session. The remount exists for user-facing rotation; a PiP window flip must not trigger it.
+	// During-render adjustment (the codebase's prev-state pattern) so the frozen value commits in
+	// the same pass; it catches up to the live width on the first render after the session ends.
+	const pipSessionActive = usePipStore(state => state.activeKey !== null)
+	const [pipFrozenWidth, setPipFrozenWidth] = useState<number>(width)
+
+	if (!pipSessionActive && pipFrozenWidth !== width) {
+		setPipFrozenWidth(width)
+	}
+
 	// The page the carousel last SETTLED on. Updated only from momentum-end
 	// offsets, so mid-rotation viewability misfires (FlashList recomputes
 	// viewability with stale item layouts against the new viewport) can never
@@ -283,6 +298,16 @@ const Gallery = () => {
 	const anchorIndexRef = useRef<number>(initialScrollIndex)
 
 	const onMomentumScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+		// Android PiP resizes the ACTIVITY window while the list stays mounted (the remount key is
+		// deliberately frozen during a session): clamp/settle scrolls against the tiny viewport
+		// fire momentum-end with garbage geometry and would poison the anchor — the expand-back
+		// re-anchor (onListContainerLayout, geometry-proof by design) then faithfully restores the
+		// WRONG page. A PiP session pins the pager on Android. iOS in-app PiP keeps the pager
+		// interactive by design (its window never resizes), so its settles stay legitimate.
+		if (Platform.OS === "android" && usePipStore.getState().activeKey !== null) {
+			return
+		}
+
 		const pageWidth = e.nativeEvent.layoutMeasurement.width
 
 		if (pageWidth <= 0) {
@@ -636,7 +661,7 @@ const Gallery = () => {
 						re-aligns programmatic offsets.
 					*/}
 					<FlashList<GalleryItemTagged>
-						key={items.length > 1 ? `gallery-${width}` : "gallery"}
+						key={items.length > 1 ? `gallery-${pipFrozenWidth}` : "gallery"}
 						ref={listRef}
 						data={items}
 						keyExtractor={item => galleryItemKey(item)}
@@ -662,6 +687,14 @@ const Gallery = () => {
 						initialScrollIndex={anchorIndex >= 0 && anchorIndex < items.length ? anchorIndex : 0}
 						onMomentumScrollEnd={onMomentumScrollEnd}
 						onViewableItemsChanged={info => {
+							// Same Android-PiP guard as onMomentumScrollEnd: viewability recomputed
+							// against the tiny PiP-resized viewport must not churn currentItem /
+							// currentIndex (wrong header + active-cell flips) while the session pins
+							// the pager.
+							if (Platform.OS === "android" && usePipStore.getState().activeKey !== null) {
+								return
+							}
+
 							const first = info.viewableItems[0]
 
 							if (first && first.item) {
