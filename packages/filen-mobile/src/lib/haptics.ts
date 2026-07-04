@@ -55,14 +55,16 @@ class HapticsManager {
 	}
 
 	/**
-	 * Fire the tap-selection haptic when enabled. Synchronous + never throws (failures are logged).
+	 * Fire the tap haptic when enabled. Uses the Light impact (a short, crisp tap) rather than the
+	 * selection haptic, which users reported as feeling delayed and lingering past the tap.
+	 * Synchronous + never throws (failures are logged).
 	 */
 	public selection(): void {
 		if (!this.enabled) {
 			return
 		}
 
-		Haptics.selectionAsync().catch(e => logger.warn("haptics", "selectionAsync failed", { error: e }))
+		Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(e => logger.warn("haptics", "impactAsync failed", { error: e }))
 	}
 }
 
