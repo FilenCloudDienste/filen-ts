@@ -16,14 +16,25 @@ export const SDK_RATE_LIMIT_PER_SEC = 128
 
 const MIB = 1024 * 1024
 
-// concurrency = global in-flight HTTP request cap; memoryMib = in-flight chunk-buffer budget
-// (≈ max parallel 1-MiB chunk transfers). maxParallelRequests / maxIoMemoryUsage are mirrored to
-// match (no consumer found in SDK 0.4.27, but set to avoid any regression — see the design doc).
+// concurrency = the SDK's GLOBAL in-flight HTTP request cap (GlobalConcurrencyLimitLayer). Under
+// HTTP/1.1 each in-flight request tends to hold its own socket = one file descriptor, and the SAME
+// client backs the localhost video HTTP provider — so this cap is shared between bulk transfers and
+// video streaming. iOS's default file-descriptor soft limit is low (historically 256), and the
+// provider + SQLite + the expo-image disk cache all draw from the same table; the previous top
+// presets (224/256) could exhaust it → EMFILE surfacing as "could not load this file" + choppy /
+// slow video. Deliberately conservative ladder (4/8/16/32) — even "maximum" (32) sits at 2× the
+// SDK's own default (16) and leaves a huge FD margin on iOS, prioritising reliable video streaming
+// over peak bulk-transfer parallelism.
+//
+// memoryMib = the SDK's fileIoMemoryBudget (in-flight chunk-buffer budget; the streaming read-ahead
+// window is capped at budget/2, floored at one encrypted chunk ≈ 1 MiB, so the 4 MiB minimum keeps a
+// ≥ 2 MiB window). maxParallelRequests / maxIoMemoryUsage are mirrored (no consumer found in the
+// pinned SDK, but set to avoid any regression — see the design doc).
 export const TRANSFER_PRESET_VALUES: Record<TransferPerformancePreset, { concurrency: number; memoryMib: number }> = {
-	batterySaver: { concurrency: 64, memoryMib: 32 },
-	balanced: { concurrency: 160, memoryMib: 96 },
-	performance: { concurrency: 224, memoryMib: 160 },
-	maximum: { concurrency: 256, memoryMib: 256 }
+	batterySaver: { concurrency: 4, memoryMib: 4 },
+	balanced: { concurrency: 8, memoryMib: 8 },
+	performance: { concurrency: 16, memoryMib: 16 },
+	maximum: { concurrency: 32, memoryMib: 32 }
 }
 
 // 1 / 2 / 5 / 10 / 25 / 50 MB/s in KB/s (1024-based). null = unlimited. All ≥ the SDK's 16 KB/s upload floor.

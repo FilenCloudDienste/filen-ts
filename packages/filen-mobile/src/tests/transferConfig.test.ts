@@ -32,26 +32,34 @@ import {
 const MIB = 1024 * 1024
 
 describe("transferConfig — resolvePreset", () => {
-	it("maps balanced to 160 conc / 96 MiB with mirrored fields", () => {
+	// Conservative 4/8/16/32 ladder — the previous 160/224/256 tiers exhausted iOS's low FD limit
+	// through the shared client that also backs the video HTTP provider ("could not load this file").
+	it("maps the default (balanced) preset to 8 conc / 8 MiB", () => {
 		expect(resolvePreset("balanced")).toEqual({
-			concurrency: 160,
-			fileIoMemoryBudget: BigInt(96 * MIB),
-			maxParallelRequests: 160,
-			maxIoMemoryUsage: 96 * MIB
+			concurrency: 8,
+			fileIoMemoryBudget: BigInt(8 * MIB),
+			maxParallelRequests: 8,
+			maxIoMemoryUsage: 8 * MIB
 		})
 	})
 
-	it("maps maximum to 256 conc / 256 MiB", () => {
+	it("maps maximum to 32 conc / 32 MiB (2× the SDK default, deep FD headroom on iOS)", () => {
 		expect(resolvePreset("maximum")).toEqual({
-			concurrency: 256,
-			fileIoMemoryBudget: BigInt(256 * MIB),
-			maxParallelRequests: 256,
-			maxIoMemoryUsage: 256 * MIB
+			concurrency: 32,
+			fileIoMemoryBudget: BigInt(32 * MIB),
+			maxParallelRequests: 32,
+			maxIoMemoryUsage: 32 * MIB
 		})
 	})
 
-	it("maps batterySaver to 64 / 32 MiB", () => {
-		expect(resolvePreset("batterySaver")).toMatchObject({ concurrency: 64, maxIoMemoryUsage: 32 * MIB })
+	it("maps batterySaver to 4 / 4 MiB (memory floor: budget/2 stays above one chunk)", () => {
+		expect(resolvePreset("batterySaver")).toMatchObject({ concurrency: 4, maxIoMemoryUsage: 4 * MIB })
+	})
+
+	it("keeps every preset's concurrency well under iOS's ~256 FD soft limit (regression guard)", () => {
+		for (const preset of ["batterySaver", "balanced", "performance", "maximum"] as const) {
+			expect(resolvePreset(preset).concurrency).toBeLessThanOrEqual(32)
+		}
 	})
 })
 
@@ -66,7 +74,7 @@ describe("transferConfig — getResolvedTransferConfig", () => {
 		const resolved = await getResolvedTransferConfig()
 
 		expect(resolved).toEqual(DEFAULT_RESOLVED_TRANSFER_CONFIG)
-		expect(resolved.concurrency).toBe(160)
+		expect(resolved.concurrency).toBe(8)
 		expect(resolved.uploadKbps).toBeUndefined()
 		expect(resolved.downloadKbps).toBeUndefined()
 	})
@@ -78,7 +86,7 @@ describe("transferConfig — getResolvedTransferConfig", () => {
 
 		const resolved = await getResolvedTransferConfig()
 
-		expect(resolved.concurrency).toBe(256)
+		expect(resolved.concurrency).toBe(32)
 		expect(resolved.uploadKbps).toBe(5120)
 		expect(resolved.downloadKbps).toBeUndefined()
 	})
@@ -86,7 +94,7 @@ describe("transferConfig — getResolvedTransferConfig", () => {
 	it("falls back to balanced for an unknown stored preset string", async () => {
 		storeValues[TRANSFER_PERFORMANCE_PRESET_SECURE_STORE_KEY] = "turbo"
 
-		expect((await getResolvedTransferConfig()).concurrency).toBe(160)
+		expect((await getResolvedTransferConfig()).concurrency).toBe(8)
 	})
 })
 
