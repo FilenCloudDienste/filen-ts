@@ -28,7 +28,7 @@ function stopAndRelease(player: VideoPlayer): void {
 // alive. The cap preserves resume-position for the realistic back-and-forth
 // pattern while bounding memory in video-heavy directories; only videos this
 // many pages back lose their position and start over.
-export const MAX_GALLERY_VIDEO_PLAYERS = 4
+export const MAX_GALLERY_VIDEO_PLAYERS = 3
 
 /**
  * Video players owned by the gallery SESSION instead of the video cells.
