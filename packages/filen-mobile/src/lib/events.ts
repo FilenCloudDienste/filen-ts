@@ -15,6 +15,10 @@ export type Events = {
 	}
 	secureStoreClear: void
 	biometricEnabledInSession: void
+	// Fired at the start of doLogout() teardown, before the SDK clients are destroyed — lets
+	// component-land singletons (e.g. the gallery video players / a live PiP window) tear down
+	// without lib/auth importing native-backed component modules.
+	logout: void
 	showFullScreenLoadingModal: void
 	hideFullScreenLoadingModal: void
 	forceHideFullScreenLoadingModal: void

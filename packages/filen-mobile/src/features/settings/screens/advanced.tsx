@@ -46,6 +46,7 @@ import {
 	useUploadLimitKbps,
 	useDownloadLimitKbps
 } from "@/features/settings/transferConfig"
+import { PIP_ENABLED_SECURE_STORE_KEY, DEFAULT_PIP_ENABLED } from "@/constants"
 
 const SIZE_LOADING_PLACEHOLDER = "…"
 
@@ -177,6 +178,8 @@ function Advanced() {
 		DEFAULT_CONVERT_HEIC_TO_JPG_ENABLED
 	)
 
+	const [pipEnabled, setPipEnabled] = useSecureStore<boolean>(PIP_ENABLED_SECURE_STORE_KEY, DEFAULT_PIP_ENABLED)
+
 	const [transferPreset, setTransferPreset] = useTransferPerformancePreset()
 	const [uploadLimitKbps, setUploadLimitKbps] = useUploadLimitKbps()
 	const [downloadLimitKbps, setDownloadLimitKbps] = useDownloadLimitKbps()
@@ -306,6 +309,18 @@ function Advanced() {
 									value: convertHeic,
 									onValueChange: () => {
 										setConvertHeic(prev => !prev)
+									}
+								}
+							},
+							{
+								icon: "browsers-outline",
+								title: t("picture_in_picture"),
+								subTitle: t("picture_in_picture_description"),
+								rightItem: {
+									type: "switch",
+									value: pipEnabled,
+									onValueChange: () => {
+										setPipEnabled(prev => !prev)
 									}
 								}
 							}

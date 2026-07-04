@@ -79,6 +79,9 @@ function ctx(overrides: Partial<BiometricAppStateContext> = {}): BiometricAppSta
 		wasBackground: false,
 		lockedByBackground: false,
 		backgroundedBehindPresentation: false,
+		pipSessionActive: false,
+		backgroundedDuringPipSession: false,
+		pipStopGraceApplies: false,
 		lastAppCloseTimestamp: 0,
 		now: 1_000_000,
 		...overrides
@@ -126,19 +129,23 @@ describe("remainingMs", () => {
 
 describe("shouldLockOnBackground", () => {
 	it("locks when enabled, authenticated, and no presentation literally on screen", () => {
-		expect(shouldLockOnBackground(true, true, false)).toBe(true)
+		expect(shouldLockOnBackground(true, true, false, false)).toBe(true)
 	})
 
 	it("does not lock when biometric is disabled", () => {
-		expect(shouldLockOnBackground(false, true, false)).toBe(false)
+		expect(shouldLockOnBackground(false, true, false, false)).toBe(false)
 	})
 
 	it("does not lock when not currently authenticated (preserves an active lockout / prompt)", () => {
-		expect(shouldLockOnBackground(true, false, false)).toBe(false)
+		expect(shouldLockOnBackground(true, false, false, false)).toBe(false)
 	})
 
 	it("does not lock while a presentation is literally on screen (raw activeCount)", () => {
-		expect(shouldLockOnBackground(true, true, true)).toBe(false)
+		expect(shouldLockOnBackground(true, true, true, false)).toBe(false)
+	})
+
+	it("does not lock while a PiP session is active (user-initiated surface keeps the app open)", () => {
+		expect(shouldLockOnBackground(true, true, false, true)).toBe(false)
 	})
 })
 
@@ -504,5 +511,129 @@ describe("reduceBiometricAppState", () => {
 		expect(result.setAuthenticated).toBe(null)
 		expect(result.wasBackground).toBe(false)
 		expect(result.rekeyPrompt).toBe(false)
+	})
+})
+
+// ─── PiP session suppression (spec: docs/pip-video-player.md §5.6.1) ───────────
+//
+// An active Picture-in-Picture session extends the foreground session. The reducer suppresses the
+// lock-on-background and the foreground re-lock while the session lives; the PiP-stop store
+// subscription (component-level) fails closed the moment the session ends while backgrounded, with
+// PIP_STOP_GRACE_MS absorbing the stop-before-active event order on expand-back. Every case runs at
+// lockAfter 0 where relevant — the enable-time DEFAULT — because that configuration has zero
+// accidental slack for ordering races.
+
+describe("reduceBiometricAppState — PiP session suppression", () => {
+	it("does not lock on background while a PiP session is active, arms the sticky flag, stamps the close time", () => {
+		const result = reduceBiometricAppState("background", ctx({ pipSessionActive: true, now: 5000 }))
+
+		expect(result.setAuthenticated).toBe(null)
+		expect(result.lockedByBackground).toBe(false)
+		expect(result.backgroundedDuringPipSession).toBe(true)
+		expect(result.wasBackground).toBe(true)
+		expect(result.lastAppCloseTimestamp).toBe(5000)
+	})
+
+	it("does not arm the pip flag when not authenticated (an existing lock/prompt is preserved)", () => {
+		const result = reduceBiometricAppState("background", ctx({ pipSessionActive: true, authenticated: false }))
+
+		expect(result.setAuthenticated).toBe(null)
+		expect(result.backgroundedDuringPipSession).toBe(false)
+	})
+
+	it("presentation suppression takes precedence over the pip flag when both are on screen", () => {
+		const result = reduceBiometricAppState("background", ctx({ presentationActive: true, pipSessionActive: true }))
+
+		expect(result.setAuthenticated).toBe(null)
+		expect(result.backgroundedBehindPresentation).toBe(true)
+		expect(result.backgroundedDuringPipSession).toBe(false)
+	})
+
+	it("expand-back with the session still alive (active-before-stop order) never re-locks — even at lockAfter 0 after a long session", () => {
+		const bg = reduceBiometricAppState("background", ctx({ pipSessionActive: true, now: 1000, lockAfterMs: 0 }))
+
+		expect(bg.backgroundedDuringPipSession).toBe(true)
+
+		const active = reduceBiometricAppState(
+			"active",
+			ctx({
+				pipSessionActive: true,
+				wasBackground: bg.wasBackground,
+				lockedByBackground: bg.lockedByBackground,
+				backgroundedDuringPipSession: bg.backgroundedDuringPipSession,
+				lastAppCloseTimestamp: bg.lastAppCloseTimestamp,
+				lockAfterMs: 0,
+				now: 3_601_000 // an hour in PiP — elapsed vastly exceeds lockAfter
+			})
+		)
+
+		expect(active.setAuthenticated).toBe(null)
+		expect(active.backgroundedDuringPipSession).toBe(false)
+		expect(active.rekeyPrompt).toBe(true)
+	})
+
+	it("expand-back in the stop-before-active order auto-unlocks within PIP_STOP_GRACE_MS at lockAfter 0", () => {
+		// The PiP-stop subscription already ran: locked (fail closed), lockedByBackground true,
+		// lastAppCloseTimestamp re-stamped to the stop time, sticky flag cleared. "active" arrives
+		// moments later with the stop-grace applying.
+		const result = reduceBiometricAppState(
+			"active",
+			ctx({
+				authenticated: false,
+				wasBackground: true,
+				lockedByBackground: true,
+				backgroundedDuringPipSession: false,
+				pipStopGraceApplies: true,
+				lastAppCloseTimestamp: 10_000,
+				lockAfterMs: 0,
+				now: 10_100 // elapsed 100ms — within the widened window
+			})
+		)
+
+		expect(result.setAuthenticated).toBe(true)
+		expect(result.lockedByBackground).toBe(false)
+	})
+
+	it("a PiP-stop long before the return stays locked and prompts (grace no longer applies)", () => {
+		const result = reduceBiometricAppState(
+			"active",
+			ctx({
+				authenticated: false,
+				wasBackground: true,
+				lockedByBackground: true,
+				pipStopGraceApplies: false, // stop was minutes ago
+				lastAppCloseTimestamp: 10_000,
+				lockAfterMs: 0,
+				now: 610_000 // 10 minutes after the session ended
+			})
+		)
+
+		expect(result.setAuthenticated).toBe(null)
+		expect(result.rekeyPrompt).toBe(true)
+	})
+
+	it("the stop-grace also carries a lockAfter > 0 config (uses the larger of the two windows)", () => {
+		const result = reduceBiometricAppState(
+			"active",
+			ctx({
+				authenticated: false,
+				wasBackground: true,
+				lockedByBackground: true,
+				pipStopGraceApplies: true,
+				lastAppCloseTimestamp: 10_000,
+				lockAfterMs: 10_000,
+				now: 15_000 // elapsed 5s — within lockAfter, grace irrelevant but harmless
+			})
+		)
+
+		expect(result.setAuthenticated).toBe(true)
+	})
+
+	it("an ordinary background with NO pip session locks exactly as before (regression parity)", () => {
+		const result = reduceBiometricAppState("background", ctx({ pipSessionActive: false, now: 5000 }))
+
+		expect(result.setAuthenticated).toBe(false)
+		expect(result.lockedByBackground).toBe(true)
+		expect(result.backgroundedDuringPipSession).toBe(false)
 	})
 })

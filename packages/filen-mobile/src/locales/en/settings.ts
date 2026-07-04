@@ -213,6 +213,11 @@ export const settings = {
 	/** Advanced & Camera Upload — description for the HEIC/HEIF → JPG conversion toggle */
 	convert_heic_to_jpg_description:
 		"Automatically convert HEIC/HEIF photos to JPG on upload for better compatibility across devices and apps.",
+	/** Advanced — row title: Picture-in-Picture toggle for video playback */
+	picture_in_picture: "Picture-in-Picture",
+	/** Advanced — description for the Picture-in-Picture toggle; states the deliberate no-relock behavior */
+	picture_in_picture_description:
+		"Keep videos playing in a floating window when you leave the app. While a video is floating, returning to the app will not ask you to unlock again.",
 	/** Advanced — row title: clear generated image thumbnails */
 	clear_image_thumbnails: "Clear image thumbnails",
 	/** Advanced — confirm message before clearing image thumbnails */

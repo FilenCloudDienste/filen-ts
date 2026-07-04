@@ -19,6 +19,7 @@ import thumbnails from "@/lib/thumbnails"
 import sandboxCache from "@/lib/sandboxCache"
 import logger from "@/lib/logger"
 import driveSearch from "@/features/drive/driveSearch"
+import events from "@/lib/events"
 import { reloadAppAsync } from "expo"
 import { isEqual } from "es-toolkit"
 
@@ -345,6 +346,11 @@ class Auth {
 				logger.warn("auth", "logout phase-1 teardown failed", { index: phase1.indexOf(result), err: String(result.reason) })
 			}
 		}
+
+		// Component-land teardown (gallery video players → closes any live PiP window) before the
+		// clients the players stream through are destroyed. Event-based so lib/auth never imports
+		// native-backed component modules.
+		events.emit("logout")
 
 		// Phase 2 — cancel in-flight work (synchronous aborts). These trip the abort signals the SDK
 		// calls below were issued with, so awaiting them next observes settled cancellations.

@@ -1,4 +1,6 @@
 import { createVideoPlayer, type VideoPlayer } from "expo-video"
+import usePipStore from "@/stores/usePip.store"
+import events from "@/lib/events"
 
 // Native players hold decode buffers (tens of MB each) — cap how many stay
 // alive. The cap preserves resume-position for the realistic back-and-forth
@@ -34,7 +36,18 @@ export class GalleryVideoPlayers {
 		}
 
 		if (this.players.size >= MAX_GALLERY_VIDEO_PLAYERS) {
-			const oldestKey = this.players.keys().next().value
+			// Never evict the player presented in the system PiP window — releasing it kills the
+			// floating window mid-playback (spec: docs/pip-video-player.md §5.7).
+			const pipActiveKey = usePipStore.getState().activeKey
+			let oldestKey: string | undefined = undefined
+
+			for (const candidateKey of this.players.keys()) {
+				if (candidateKey !== pipActiveKey) {
+					oldestKey = candidateKey
+
+					break
+				}
+			}
 
 			if (oldestKey !== undefined) {
 				const oldest = this.players.get(oldestKey)
@@ -63,10 +76,14 @@ export class GalleryVideoPlayers {
 
 	// The pager settled on a different item — stop everything that is no longer
 	// front and center. Players stay alive (and resume from their position if
-	// the user pages back); they are only destroyed in releaseAll().
+	// the user pages back); they are only destroyed in releaseAll(). The PiP
+	// player is exempt: during iOS in-app PiP the pager stays scrollable, and
+	// settling elsewhere must not pause the floating window (spec §5.7).
 	public pauseAllExcept(key: string | null): void {
+		const pipActiveKey = usePipStore.getState().activeKey
+
 		for (const [playerKey, player] of this.players) {
-			if (playerKey === key) {
+			if (playerKey === key || playerKey === pipActiveKey) {
 				continue
 			}
 
@@ -88,7 +105,21 @@ export class GalleryVideoPlayers {
 		}
 
 		this.players.clear()
+
+		// Releasing the players closes any system PiP window with them — end the session signal
+		// so the provider teardown and the biometric lock re-arm (spec §5.2 defensive clears).
+		usePipStore.getState().setActiveKey(null)
 	}
 }
 
-export default new GalleryVideoPlayers()
+const galleryVideoPlayers = new GalleryVideoPlayers()
+
+// Logout wipes decrypted state and destroys the SDK client mid-stream — release the players (which
+// also closes any PiP window on both platforms; Android has no stopPictureInPicture API) instead of
+// leaving the floating window over a dead stream. Subscribed here (not called from lib/auth) so the
+// auth module never has to import expo-video-backed component modules (spec §5.7).
+events.subscribe("logout", () => {
+	galleryVideoPlayers.releaseAll()
+})
+
+export default galleryVideoPlayers

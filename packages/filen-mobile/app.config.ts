@@ -174,7 +174,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 				}
 			}
 		],
-		"expo-video",
+		[
+			"expo-video",
+			{
+				// PiP for the video preview (spec: docs/pip-video-player.md). Sets
+				// android:supportsPictureInPicture on MainActivity (hard requirement) and manages
+				// the iOS `audio` UIBackgroundMode (already present via UIBackgroundModes above).
+				supportsPictureInPicture: true
+			}
+		],
 		[
 			"expo-audio",
 			{

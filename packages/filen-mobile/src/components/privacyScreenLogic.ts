@@ -13,8 +13,23 @@ import { type AppStateStatus } from "react-native"
 //     AND for the systemPresentation grace window after (presentationSuppressed) — otherwise the cover
 //     flickers around the prompt. A plain home-press also passes through "inactive", but with no
 //     presentation active (presentationSuppressed === false), so it redacts immediately.
-export function shouldRedact(appState: AppStateStatus, presentationSuppressed: boolean, biometricLocked: boolean): boolean {
+//   - pipPreviewVisible: an active Picture-in-Picture session with the drivePreview route as the app's
+//     last-visible screen (spec: docs/pip-video-player.md §5.6.2). The user deliberately floated this
+//     video on screen — the app-window snapshot can only show the preview scaffolding around it, so the
+//     cover is suppressed. The pathname condition is load-bearing: the preview header's menu can push
+//     full screens (Move → a drive browser) OVER the mounted preview while PiP is alive — those must
+//     redact, so the caller computes this as pipActive AND pathname === drivePreview.
+export function shouldRedact(
+	appState: AppStateStatus,
+	presentationSuppressed: boolean,
+	biometricLocked: boolean,
+	pipPreviewVisible: boolean
+): boolean {
 	if (biometricLocked) {
+		return false
+	}
+
+	if (pipPreviewVisible) {
 		return false
 	}
 

@@ -6,6 +6,17 @@ export const IOS_APP_GROUP_IDENTIFIER: string = "group.io.filen.app"
 export const FILE_PUBLIC_LINK_URL_PREFIX: string = "https://app.filen.io/#/d/"
 export const DIRECTORY_PUBLIC_LINK_URL_PREFIX: string = "https://app.filen.io/#/f/"
 
+// Pinned local HTTP-provider port (spec: docs/pip-video-player.md §5.4). Player sources are
+// initial-only and URLs embed the port, so provider restarts must land on the SAME port or every
+// live player breaks. Dynamic/private range (49152–65535); the start logic falls through a small
+// ladder only on the session's FIRST bind, never mid-session.
+export const HTTP_PROVIDER_PRIMARY_PORT = 49736
+
+// Picture-in-Picture for the video preview (spec: docs/pip-video-player.md). Default ON
+// (product call 2026-07-04); toggle lives in Advanced settings.
+export const PIP_ENABLED_SECURE_STORE_KEY = "pipEnabled"
+export const DEFAULT_PIP_ENABLED = true
+
 export const NETINFO_CONFIG: NetInfoConfiguration = {
 	reachabilityUrl: "https://gateway.filen.io",
 	reachabilityTest: async response => response.status === 200,

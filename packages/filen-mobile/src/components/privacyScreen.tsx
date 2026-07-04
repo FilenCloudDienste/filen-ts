@@ -7,6 +7,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { usePrivacyScreenEnabled } from "@/features/settings/privacyScreen"
 import { useSystemPresentationStore, systemPresentation } from "@/lib/systemPresentation"
 import useAppStore from "@/stores/useApp.store"
+import usePipStore from "@/stores/usePip.store"
 import { shouldRedact } from "@/components/privacyScreenLogic"
 
 const COVER_CLASSES = "absolute top-0 left-0 right-0 bottom-0 z-10000 w-full h-full bg-background"
@@ -23,8 +24,12 @@ function computeShouldRedact(): boolean {
 	const appState = AppState.currentState
 	const presentationSuppressed = systemPresentation.isReLockSuppressed()
 	const biometricLocked = useAppStore.getState().biometricUnlocked === false
+	// PiP suppression is pathname-gated (spec: docs/pip-video-player.md §5.6.2): the preview
+	// header's menu can push full screens over the mounted preview while a PiP session is alive —
+	// only the preview itself may go uncovered.
+	const pipPreviewVisible = usePipStore.getState().activeKey !== null && useAppStore.getState().pathname.startsWith("/drivePreview")
 
-	return shouldRedact(appState, presentationSuppressed, biometricLocked)
+	return shouldRedact(appState, presentationSuppressed, biometricLocked, pipPreviewVisible)
 }
 
 // iOS privacy cover. Redacts the app-switcher snapshot while the app is not active, defers to the biometric
@@ -47,11 +52,13 @@ function PrivacyCover() {
 		const appStateSub = AppState.addEventListener("change", apply)
 		const unsubPresentation = useSystemPresentationStore.subscribe(apply)
 		const unsubApp = useAppStore.subscribe(apply)
+		const unsubPip = usePipStore.subscribe(apply)
 
 		return () => {
 			appStateSub.remove()
 			unsubPresentation()
 			unsubApp()
+			unsubPip()
 		}
 	}, [])
 
