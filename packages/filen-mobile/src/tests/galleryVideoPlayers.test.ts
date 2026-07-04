@@ -125,6 +125,39 @@ describe("galleryVideoPlayers", () => {
 		expect(createVideoPlayer).toHaveBeenCalledTimes(2)
 	})
 
+	it("releaseAll PAUSES before releasing — release() alone leaves iOS AVPlayer audio playing", () => {
+		const player = manager.acquire({
+			key: "a",
+			fileUrl: "http://localhost/a.mp4"
+		}) as unknown as MockPlayer
+
+		manager.releaseAll()
+
+		expect(player.pause).toHaveBeenCalledTimes(1)
+		expect(player.release).toHaveBeenCalledTimes(1)
+		// The pause must land before the release: on iOS the AVPlayer keeps playing until the
+		// wrapper deallocs (deferred by lingering native holders), so pausing first is what
+		// actually silences it (regression guard for the dismiss-keeps-playing bug).
+		const pauseOrder = player.pause.mock.invocationCallOrder[0] ?? Infinity
+		const releaseOrder = player.release.mock.invocationCallOrder[0] ?? -Infinity
+
+		expect(pauseOrder).toBeLessThan(releaseOrder)
+	})
+
+	it("LRU eviction also pauses before releasing the evicted player", () => {
+		for (let i = 0; i < MAX_GALLERY_VIDEO_PLAYERS + 1; i++) {
+			manager.acquire({
+				key: `key-${i}`,
+				fileUrl: `http://localhost/${i}.mp4`
+			})
+		}
+
+		const evicted = createdPlayers()[0]
+
+		expect(evicted?.pause).toHaveBeenCalledTimes(1)
+		expect(evicted?.release).toHaveBeenCalledTimes(1)
+	})
+
 	it("evicts and releases the least-recently-used player beyond the cap", () => {
 		for (let i = 0; i < MAX_GALLERY_VIDEO_PLAYERS + 1; i++) {
 			manager.acquire({

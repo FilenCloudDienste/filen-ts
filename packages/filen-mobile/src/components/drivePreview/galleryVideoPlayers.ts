@@ -2,6 +2,28 @@ import { createVideoPlayer, type VideoPlayer } from "expo-video"
 import usePipStore from "@/stores/usePip.store"
 import events from "@/lib/events"
 
+// Silence + free a session player. `release()` alone is NOT enough on iOS: `VideoView.player` is a
+// WEAK ref, so the AVPlayer's audio only stops in the VideoPlayer's deinit (replaceCurrentItem nil).
+// release() merely drops the JS handle — if any native holder lingers (NowPlayingManager, or the
+// AVPictureInPictureController that allowsPictureInPicture=true now creates), dealloc is deferred and
+// the AVPlayer keeps playing (audible for minutes after the gallery is dismissed — reliably after a
+// swipe-away-and-back leaves an extra playerViewController retaining it). Pausing first stops the
+// audio immediately regardless of when the object finally deallocs. Android already tears the
+// ExoPlayer down synchronously in release(), so pause() there is a harmless no-op.
+function stopAndRelease(player: VideoPlayer): void {
+	try {
+		player.pause()
+	} catch {
+		// released natively already — nothing to pause
+	}
+
+	try {
+		player.release()
+	} catch {
+		// already released
+	}
+}
+
 // Native players hold decode buffers (tens of MB each) — cap how many stay
 // alive. The cap preserves resume-position for the realistic back-and-forth
 // pattern while bounding memory in video-heavy directories; only videos this
@@ -54,10 +76,8 @@ export class GalleryVideoPlayers {
 
 				this.players.delete(oldestKey)
 
-				try {
-					oldest?.release()
-				} catch {
-					// already released
+				if (oldest) {
+					stopAndRelease(oldest)
 				}
 			}
 		}
@@ -97,11 +117,7 @@ export class GalleryVideoPlayers {
 
 	public releaseAll(): void {
 		for (const player of this.players.values()) {
-			try {
-				player.release()
-			} catch {
-				// already released
-			}
+			stopAndRelease(player)
 		}
 
 		this.players.clear()
