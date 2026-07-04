@@ -636,7 +636,8 @@ describe("hardening — special-character filenames through the full upload pipe
 
 		expect(stagedBasename).toMatch(/^mock-uuid-\d+\.jpg$/)
 
-		// md5-cache key: the raw lowercased composed tree path.
-		expect(cache.cameraUploadHashes.has(`/camera roll/${RAW_NAME.toLowerCase()}`)).toBe(true)
+		// md5-cache key: the stable asset id — name-agnostic, so special characters
+		// (and the compress/convertHeic key rewrites) never touch it.
+		expect(cache.cameraUploadHashes.has("nasty")).toBe(true)
 	})
 })

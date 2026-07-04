@@ -1099,8 +1099,38 @@ class CameraUpload {
 			// would falsely look "gone") and a CLEAN local listing (a degraded
 			// listing's absences are not evidence the asset left the device).
 			if (!params?.background && !localListing.degraded) {
+				const localAssetIds = new Set<string>()
+
+				for (const path in localListing.tree) {
+					const file = localListing.tree[path]
+
+					if (file) {
+						localAssetIds.add(file.info.id)
+					}
+				}
+
 				for (const key of cache.cameraUploadHashes.keys()) {
-					if (!localListing.tree[key]) {
+					// Legacy path-keyed entry (tree paths always start with "/", asset ids never
+					// do): re-key it under the stable asset id while the path→asset mapping is
+					// still known, then drop the path key. A path entry whose file is absent from
+					// the tree is unmappable and deleted — the fate the old prune gave it anyway.
+					if (key.startsWith("/")) {
+						const file = localListing.tree[key]
+
+						if (file && !cache.cameraUploadHashes.has(file.info.id)) {
+							const entry = cache.cameraUploadHashes.get(key)
+
+							if (entry !== undefined) {
+								cache.cameraUploadHashes.set(file.info.id, entry)
+							}
+						}
+
+						cache.cameraUploadHashes.delete(key)
+
+						continue
+					}
+
+					if (!localAssetIds.has(key)) {
 						cache.cameraUploadHashes.delete(key)
 					}
 				}
@@ -1117,6 +1147,13 @@ class CameraUpload {
 			if (reuploadDeleted && !remoteListing.degraded) {
 				for (const key in localListing.tree) {
 					if (!remoteListing.tree[key]) {
+						const file = localListing.tree[key]
+
+						if (file) {
+							cache.cameraUploadHashes.delete(file.info.id)
+						}
+
+						// Legacy path-keyed entry from before the asset-id migration.
 						cache.cameraUploadHashes.delete(key)
 					}
 				}
@@ -1184,7 +1221,14 @@ class CameraUpload {
 					// (legacy string entries migrate through it) and never matches.
 					// Hoisted out of the run() wrapper: pure cache reads that cannot
 					// throw, so the steady-state skip pays no run/defer machinery.
-					const cachedEntry = normalizeCameraUploadHashEntry(cache.cameraUploadHashes.get(delta.file.path))
+					// Shield entries are keyed by the STABLE asset id: tree paths are rewritten by the
+					// compress/convertHeic toggles (dedupTreeKey), so path-keyed entries were orphaned
+					// (and then pruned) on every toggle — re-uploading already-backed-up content in both
+					// toggle directions. The path lookup is the LEGACY fallback until a clean foreground
+					// pass migrates old entries to id keys (see the hygiene prune in sync()).
+					const cachedEntry = normalizeCameraUploadHashEntry(
+						cache.cameraUploadHashes.get(delta.file.info.id) ?? cache.cameraUploadHashes.get(delta.file.path)
+					)
 					const modificationTime = delta.file.info.modificationTime
 
 					if (
@@ -1225,8 +1269,8 @@ class CameraUpload {
 									// deleted photo with mirror mode off). Record the mtime this
 									// md5 was just verified against so the next pass takes the
 									// fast path above — this also upgrades legacy string entries
-									// to the object shape.
-									cache.cameraUploadHashes.set(delta.file.path, {
+									// to the object shape (and re-keys legacy path entries by id).
+									cache.cameraUploadHashes.set(delta.file.info.id, {
 										md5,
 										verifiedModificationTime: modificationTime ?? -1
 									})
@@ -1347,7 +1391,7 @@ class CameraUpload {
 									break
 								}
 
-								cache.cameraUploadHashes.set(delta.file.path, {
+								cache.cameraUploadHashes.set(delta.file.info.id, {
 									md5,
 									verifiedModificationTime: modificationTime ?? -1
 								})

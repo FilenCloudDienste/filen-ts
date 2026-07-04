@@ -121,6 +121,13 @@ type DrainedDirty = {
  * Entries persisted before this shape existed are plain md5 strings — readers treat a
  * string value as `{ md5: <string>, verifiedModificationTime: -1 }` and upgrade it in
  * place on the next write (lazy migration; no version bump / cache wipe needed).
+ *
+ * Keys are the media-library ASSET ID (Android contentUri / iOS ph:// identifier) —
+ * stable across the compress/convertHeic toggles that rewrite tree paths. Entries
+ * persisted before this keying used the tree path (always "/"-prefixed, so the two key
+ * generations are distinguishable); camera upload's hygiene prune re-keys those to the
+ * asset id on the first clean foreground pass and falls back to the path key on reads
+ * until then.
  */
 export type CameraUploadHashEntry = {
 	md5: string
