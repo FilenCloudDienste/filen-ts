@@ -1,7 +1,14 @@
 import { QueryCache, QueryClient } from "@tanstack/react-query"
-import { persister, PERSIST_MAX_AGE } from "@/queries/persist"
+import { persister } from "@/queries/persist"
 import { toErrorDTO, labelFirst } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
+
+// TWO INDEPENDENT CLOCKS — deliberately decoupled (mobile parity, state-query-events.md §2.1):
+// gcTime is IN-MEMORY retention measured from the last observer unsubscribing; the persister's
+// `PERSIST_MAX_AGE` (persist.ts) is ON-DISK expiry measured from `dataUpdatedAt` and is the sole
+// disk-eviction authority. Mobile sets gcTime effectively-infinite because "the persister is the
+// real eviction mechanism" — mirrored here with mobile's own QUERY_CLIENT_CACHE_TIME value.
+const GC_TIME = 86400 * 365 * 1000 * 10 // ~10 years
 
 // ---------------------------------------------------------------------------------------------
 // Conventions (T6 Step 4)
@@ -24,7 +31,8 @@ import { log } from "@/lib/log"
 // below only when that query settles successfully; T9 calls `restorePersistedQueries(queryClient)`
 // once on boot. Mobile's O(1) `persistQueryByKey` narrowing facade (their query-perf-campaign
 // artifact, version-pinned to library internals) is deliberately NOT ported — parked until
-// profiling shows the need.
+// profiling shows the need. When the first query that must NOT persist appears, use the
+// persister's first-class `filters` option (persist.ts) — not mobile's serialize-undefined hack.
 //
 // Zero-`useMutation` convention (RATIFIED 2026-07-05, A8h — no veto point remains at CP-B): this
 // app never calls `useMutation`. Writes are plain typed async functions that call the SDK directly
@@ -44,8 +52,8 @@ export const queryClient = new QueryClient({
 			// Per-query kv persistence as a DEFAULT (mobile parity): every query automatically
 			// restores from / persists to its own sqlite row through the wrapped queryFn pipeline.
 			persister: persister.persisterFn,
-			staleTime: 30_000,
-			gcTime: PERSIST_MAX_AGE, // 24h — same constant as the persisted-row maxAge, can't drift
+			staleTime: 30_000, // diverges from mobile's staleTime: 0 — pending owner decision at CP-B
+			gcTime: GC_TIME,
 			// retry: false — the Rust SDK owns ALL retries internally (tower stack; CLAUDE.md rule:
 			// never add retry/rate-limit/concurrency logic in JS). An app-level retry here would just
 			// re-run an already-exhausted SDK retry cycle and delay surfacing the error to the UI.

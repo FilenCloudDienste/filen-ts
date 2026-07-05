@@ -86,6 +86,48 @@ describe("per-query persister (Map-backed fake kv)", () => {
 		expect(fakeStore.get(notesKey)).toBe(notesRowBefore)
 	})
 
+	it("skips persisting an unserializable update (warn, no write, previous row kept) without an unhandled rejection", async () => {
+		const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined)
+		const client = makeClient()
+
+		await client.fetchQuery({ queryKey: ["boot", "config"], queryFn: () => ({ ok: true }) })
+
+		await vi.waitFor(() => {
+			expect(fakeStore.size).toBe(1)
+		})
+
+		const key = [...fakeStore.keys()][0]
+
+		if (key === undefined) {
+			throw new Error("seed row missing")
+		}
+
+		const rowBefore = fakeStore.get(key)
+
+		writes.length = 0
+
+		// A circular ref is the reliable JSON.stringify throw (functions/symbols are silently
+		// DROPPED by JSON semantics, they don't throw). The refetch itself succeeds in memory —
+		// only the persistence write must degrade.
+		interface Circular {
+			self?: Circular
+		}
+		const circular: Circular = {}
+		circular.self = circular
+
+		await client.fetchQuery({ queryKey: ["boot", "config"], queryFn: () => circular })
+
+		// The wrapped serialize turns the throw into warn + skip. Without the wrap this waitFor
+		// times out (no warn ever fires) and the floating persistQuery rejection additionally
+		// fails the run as an unhandled error — either way, RED.
+		await vi.waitFor(() => {
+			expect(warnSpy).toHaveBeenCalledWith("query.persist", expect.stringContaining("unserializable"), expect.anything())
+		})
+
+		expect(writes).toEqual([])
+		expect(fakeStore.get(key)).toBe(rowBefore)
+	})
+
 	it("restore-all on boot restores multiple queries including bigint data", async () => {
 		await seedTwoQueries()
 
