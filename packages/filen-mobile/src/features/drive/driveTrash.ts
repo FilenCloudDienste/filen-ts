@@ -300,10 +300,16 @@ export async function restoreFileVersion({ item, version, signal }: { item: Driv
 	}
 
 	// Drop the now-promoted version from the versions list so the screen
-	// reflects the restore without a manual refetch (mirrors deleteVersion below).
+	// reflects the restore without a manual refetch. Keyed on `previousUuid`, NOT
+	// item.data.uuid: a version restore ROTATES the file's uuid (the SDK sets
+	// file.uuid = version.uuid), so item.data.uuid is now the NEW uuid, while the
+	// file-versions screen queries by the PRE-rotation uuid it was opened with (route
+	// param, never re-set). Writing to the new key would land on an unobserved cache
+	// entry, leaving the restored version on screen until a manual refetch.
+	// (deleteVersion below does NOT rotate the uuid, so its item.data.uuid key is correct.)
 	driveItemVersionsQueryUpdate({
 		params: {
-			uuid: item.data.uuid
+			uuid: previousUuid
 		},
 		updater: prev => prev.filter(v => v.uuid !== version.uuid)
 	})
