@@ -2,7 +2,7 @@ import * as Comlink from "comlink"
 import SdkWorker from "@/workers/sdk.worker.ts?worker"
 import type { SdkWorkerApi } from "@/workers/sdk.worker"
 
-// C1 (rayon pool sizing): leave one core for the main thread / UI, and cap at 16 — worker spawn
+// rayon pool sizing: leave one core for the main thread / UI, and cap at 16 — worker spawn
 // cost and per-worker memory keep growing on many-core machines while our upload/download/crypto
 // throughput plateaus well before that, so more workers would only cost RAM.
 export function threadCount(): number {

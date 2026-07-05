@@ -7,7 +7,7 @@ class FakeFilenSdkError extends Error {
 	constructor() {
 		super("outer")
 	}
-	// wasm accessors are METHODS (spike E4); message is BOTH inherited prop and method on the real class —
+	// wasm accessors are METHODS; message is BOTH inherited prop and method on the real class —
 	// the fake models the method form via a shadowing own function:
 	inner_message(): string {
 		return "inner detail"

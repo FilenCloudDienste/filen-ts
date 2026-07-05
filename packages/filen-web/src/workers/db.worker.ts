@@ -5,8 +5,8 @@ import { log } from "@/lib/log"
 
 type Mode = "persistent" | "ephemeral"
 
-// Narrow local interface (D14 storage core spike, sqlite-wasm typings quality flagged mixed —
-// see the SAH pool / oo1 overload set in the installed `.d.mts`): both `oo1.DB` instances and
+// Narrow local interface — sqlite-wasm's own typings are inconsistent here (see the SAH pool / oo1
+// overload set in the installed `.d.mts`): both `oo1.DB` instances and
 // `OpfsSAHPoolDb` instances (the latter extends the former's base `Database` class) structurally
 // satisfy this — the only member either branch of `open()` below actually calls.
 interface Db {
@@ -39,7 +39,7 @@ async function open(forceEphemeral: boolean): Promise<Mode> {
 	}
 
 	if (db === null) {
-		db = new sqlite3.oo1.DB() // default ':memory:' (spike E10)
+		db = new sqlite3.oo1.DB() // default ':memory:'
 		mode = "ephemeral"
 	}
 

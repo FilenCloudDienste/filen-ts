@@ -6,7 +6,7 @@ import { log } from "@/lib/log"
 // node vitest cannot provide navigator.locks/BroadcastChannel/real workers (leader.ts's actual
 // election machinery), so the whole leader module is replaced with a Map-backed fake StorageApi —
 // this tests the adapter facade only (envelope + arktype validation), never leader election itself
-// (that gets a manual two-tab dev smoke — brief Step 5 — and a scripted e2e spec later, T11).
+// (that needs a manual two-tab dev smoke test, plus a scripted e2e spec later).
 const { fakeStore } = vi.hoisted(() => ({ fakeStore: new Map<string, string>() }))
 
 vi.mock("@/lib/storage/leader", () => ({

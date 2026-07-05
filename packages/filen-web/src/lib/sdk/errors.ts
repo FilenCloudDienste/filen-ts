@@ -2,7 +2,7 @@
 // JS) and the SDK's `FilenSdkError` (string `kind` + accessor METHODS). `FilenSdkError` clones
 // HOLLOW across postMessage (its data lives behind a wasm pointer), so every error must be
 // extracted to this plain, structured-clone-safe DTO BEFORE it crosses Comlink. i18n mapping of
-// `kind` lives main-thread (T7); this module stays worker-safe (no DOM, no i18n).
+// `kind` lives main-thread; this module stays worker-safe (no DOM, no i18n).
 
 export interface ErrorDTO {
 	species: "sdk" | "plain"
@@ -14,7 +14,7 @@ export interface ErrorDTO {
 	serverCode?: string
 }
 
-// LABEL-FIRST (mobile parity): the most user-meaningful string wins — the server's own message,
+// LABEL-FIRST: the most user-meaningful string wins — the server's own message,
 // else the inner detail, else the outer message.
 export function labelFirst(dto: ErrorDTO): string {
 	return dto.serverMessage ?? dto.innerMessage ?? dto.message

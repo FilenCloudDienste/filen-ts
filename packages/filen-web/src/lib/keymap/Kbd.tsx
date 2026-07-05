@@ -10,12 +10,11 @@ function formatKey(key: string): string {
 	return first === undefined ? key : first.toUpperCase() + rest.join("")
 }
 
-// The visible half of D12's "shortcut indicators are a designed element, not an afterthought":
-// every place a shortcut is mentioned in the UI (menus, tooltips, empty states, …) renders the
+// Every place a shortcut is mentioned in the UI (menus, tooltips, empty states, …) renders the
 // combo actually in effect — default OR user override — via the same registry `useAction` reads
-// from, split into one shadcn `<Kbd>` badge per key (registry component, `npx shadcn@latest add
-// @shadcn/kbd` — D17 verified: it already exists, so nothing here was hand-rolled) inside a
-// `<KbdGroup>`, matching the component's own documented multi-key usage.
+// from, split into one shadcn `<Kbd>` badge per key (`npx shadcn@latest add @shadcn/kbd` — already
+// available as a registry component, so nothing here is hand-rolled) inside a `<KbdGroup>`,
+// matching the component's own documented multi-key usage.
 export function Kbd({ action }: KbdProps) {
 	const combo = useComboFor(action)
 	const keys = combo

@@ -4,7 +4,7 @@ import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { log } from "@/lib/log"
 import type { CommonKey } from "@/lib/i18n"
 
-// Keyboard-first from day one (D12) — every keyboard-controllable action in the app registers
+// Keyboard-first from day one — every keyboard-controllable action in the app registers
 // here instead of wiring its own `window.addEventListener("keydown", …)`. A Map-backed registry
 // of ActionDefs (defaults) plus a small persisted-override layer (kv key below) gives every
 // consumer three things for free: one source of truth for "what does this shortcut do" (a future

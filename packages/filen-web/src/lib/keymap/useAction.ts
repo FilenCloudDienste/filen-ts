@@ -13,18 +13,18 @@ const DEFAULT_OPTIONS: Options = {
 
 // Thin wrapper around react-hotkeys-hook's `useHotkeys` (v5.3.3 — verified against the installed
 // package's own compiled source and README) that resolves the combo through the registry instead
-// of a literal string, so every keyboard-controllable action goes through one path (D12) and
-// stays live-remappable without the calling component doing anything extra.
+// of a literal string, so every keyboard-controllable action goes through one path and stays
+// live-remappable without the calling component doing anything extra.
 //
 // `scopes` is deliberately never passed to `useHotkeys` here. Verified against the installed
 // package's compiled source (node_modules/react-hotkeys-hook — useHotkeys.ts's `D()` scope-match
 // helper): an *omitted* `scopes` option always matches, but a *present* one requires the combo's
 // scope to be in `activeScopes`, which comes from `<HotkeysProvider>` context and defaults to an
 // EMPTY array with no provider mounted — so a scoped hotkey would silently never fire today.
-// Slice-0 has no `<HotkeysProvider>` yet and uses exactly one implicit global scope; every action
+// There is no `<HotkeysProvider>` yet and only one implicit global scope is in use; every action
 // fires unconditionally regardless of `ActionDef.scope`, which is carried for later UI/filtering
-// only. T9 (root wiring) should mount `<HotkeysProvider>` before any action needs real scope
-// isolation, at which point this wrapper can start forwarding `scope` as `options.scopes`.
+// only. Root wiring should mount `<HotkeysProvider>` before any action needs real scope isolation,
+// at which point this wrapper can start forwarding `scope` as `options.scopes`.
 export function useAction(id: string, handler: HotkeyCallback, options?: Options, deps: DependencyList = []): void {
 	const combo = useComboFor(id)
 

@@ -9,7 +9,7 @@ function asErrorDTO(e: unknown): ErrorDTO {
 	return typeof e === "object" && e !== null && "species" in e && "label" in e ? (e as ErrorDTO) : toErrorDTO(e)
 }
 
-// Drives the worker boot + the B1 async-runtime smoke, reflecting each phase into the boot store.
+// Drives the worker boot + the async-runtime smoke test, reflecting each phase into the boot store.
 // Boot success is NOT health: probeAsync() (an unauth network op that must settle) gates "ready".
 export async function bootSdk(): Promise<void> {
 	const { setBooting, setReady, setError } = useBootStore.getState()

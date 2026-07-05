@@ -1,6 +1,6 @@
 import * as Comlink from "comlink"
-import { serializeError, deserializeError, type SerializedError } from "@filen/utils" // D21: stacks survive the channel
-import DbWorker from "@/workers/db.worker.ts?worker" // matches the sdk worker's own spawn convention (src/lib/sdk/client.ts) — verified working in dev + build (T3)
+import { serializeError, deserializeError, type SerializedError } from "@filen/utils" // preserves stack traces across the BroadcastChannel
+import DbWorker from "@/workers/db.worker.ts?worker" // matches the sdk worker's own spawn convention (src/lib/sdk/client.ts) — confirmed working in dev + build
 import type { StorageApi } from "@/workers/db.worker"
 import { log } from "@/lib/log"
 
@@ -79,7 +79,7 @@ export function acquireStorage(forceEphemeral: boolean): Promise<StorageHandle> 
 
 			resolve({ role: "leader", api: remote as unknown as StorageApi })
 
-			return new Promise<never>(() => undefined) // hold the lock for the tab's lifetime; re-election = C1, deferred
+			return new Promise<never>(() => undefined) // hold the lock for the tab's lifetime; re-election on leader loss is not implemented yet
 		})
 
 		void granted.catch(reject)

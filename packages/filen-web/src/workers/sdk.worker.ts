@@ -5,14 +5,13 @@ import { run, runEffect, runTimeout } from "@filen/utils"
 import { toErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 
-// Spawn-base verified 2026-07-05 (T3 S1, live dev + preview): NEITHER a fixed `/` nor `/assets/`.
-// The wasm holds a RELATIVE `./filen-sdk-worker-thread.js` (verified via `strings` over
-// sdk-rs_bg.wasm) which it passes to `new Worker(...)`, so the async-runtime thread worker resolves
-// against THIS worker's own `self.location` directory — observed `/src/workers/` in dev and
-// `/assets/` in the build (the latter aligns with the plan's Branch A). The artifact plugin serves
-// the SDK files at whatever directory the worker sits in (basename-match in dev; copy to the assets
-// dir in the build). Our own wasm `init` URL below is likewise resolved against `self.location`, so
-// it and the thread workers share one `sdk-rs_bg.wasm` fetch.
+// NEITHER a fixed `/` nor `/assets/`: the wasm holds a RELATIVE `./filen-sdk-worker-thread.js`
+// (verified via `strings` over sdk-rs_bg.wasm) which it passes to `new Worker(...)`, so the
+// async-runtime thread worker resolves against THIS worker's own `self.location` directory —
+// observed `/src/workers/` in dev and `/assets/` in the build. The artifact plugin serves the SDK
+// files at whatever directory the worker sits in (basename-match in dev; copy to the assets dir in
+// the build). Our own wasm `init` URL below is likewise resolved against `self.location`, so it and
+// the thread workers share one `sdk-rs_bg.wasm` fetch.
 export type BootResult =
 	{ ok: true; threads: number } | { ok: false; reason: "artifacts" | "coi" | "pool" | "async-runtime"; detail: string }
 
@@ -42,20 +41,20 @@ const api = {
 		if (!self.crossOriginIsolated) {
 			return { ok: false, reason: "coi", detail: "crossOriginIsolated=false" }
 		}
-		// initThreadPool HANGS (not rejects) on a snippets 404 (spike E2) — runTimeout surfaces it as a pool error.
+		// initThreadPool HANGS (not rejects) on a snippets 404 — runTimeout surfaces it as a pool error.
 		const pool = await runTimeout(() => initThreadPool(threads), 15_000)
 		if (!pool.success) {
 			return { ok: false, reason: "pool", detail: toErrorDTO(pool.error).label }
 		}
 		return { ok: true, threads }
 	},
-	// Async-runtime health check (B1): an unauth network op that MUST settle (either way).
+	// Async-runtime health check: an unauth network op that MUST settle (either way).
 	async probeAsync(): Promise<void> {
 		const r = await runTimeout(async defer => {
 			const unauth = UnauthClient.from_config({})
 			defer(() => {
 				unauth.free()
-			}) // D20 house RAII idiom — LIFO defer releases the wasm handle
+			}) // defer() releases the wasm handle (LIFO)
 			await unauth.startPasswordReset("filen-web-healthcheck-nonexistent@filen.io").catch(() => undefined)
 		}, 10_000)
 		if (!r.success) {
@@ -68,7 +67,7 @@ const api = {
 			defer(() => {
 				unauth.free()
 			})
-			client = await unauth.login(params) // LoginParams object (verified .d.ts); 2FA via exception-driven re-call (slice 1)
+			client = await unauth.login(params) // LoginParams object (verified .d.ts); 2FA via exception-driven re-call
 			return client.toStringified()
 		})
 		if (!r.success) {
