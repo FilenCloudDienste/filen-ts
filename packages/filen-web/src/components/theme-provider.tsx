@@ -1,5 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
+import { registerAction } from "@/lib/keymap/registry"
+import { useAction } from "@/lib/keymap/useAction"
 
 type Theme = "dark" | "light" | "system"
 type ResolvedTheme = "dark" | "light"
@@ -52,22 +54,18 @@ function disableTransitionsTemporarily() {
 	}
 }
 
-function isEditableTarget(target: EventTarget | null) {
-	if (!(target instanceof HTMLElement)) {
-		return false
-	}
-
-	if (target.isContentEditable) {
-		return true
-	}
-
-	const editableParent = target.closest("input, textarea, select, [contenteditable='true']")
-	if (editableParent) {
-		return true
-	}
-
-	return false
-}
+// Module scope, not inside the component: runs exactly once per module evaluation, which is what
+// `registerAction`'s duplicate-id guard assumes. React StrictMode's double-invocation only
+// affects render/effects, not top-level module code, so this is safe under StrictMode — the one
+// known edge is Vite/React-Fast-Refresh re-running this file's top level on an HMR edit to THIS
+// file specifically, which would throw on the second registration; accepted for slice-0 (a
+// manual browser refresh recovers), same trade-off i18n's module-scope `.init()` already makes.
+registerAction({
+	id: "app.toggleTheme",
+	defaultCombo: "d",
+	scope: "global",
+	descriptionKey: "toggleTheme"
+})
 
 export function ThemeProvider({
 	children,
@@ -128,24 +126,14 @@ export function ThemeProvider({
 		}
 	}, [theme, applyTheme])
 
-	React.useEffect(() => {
-		const handleKeyDown = (event: KeyboardEvent) => {
-			if (event.repeat) {
-				return
-			}
-
-			if (event.metaKey || event.ctrlKey || event.altKey) {
-				return
-			}
-
-			if (isEditableTarget(event.target)) {
-				return
-			}
-
-			if (event.key.toLowerCase() !== "d") {
-				return
-			}
-
+	// Registered above as "app.toggleTheme" (default combo "d") — modifier-held presses and
+	// editable-target focus (input/textarea/select/contenteditable/ARIA textbox roles) are already
+	// excluded by react-hotkeys-hook's own combo-matching and `enableOnFormTags`/
+	// `enableOnContentEditable` defaults (both false), and `useAction`'s default `ignoreEventWhen`
+	// drops key-repeat — together the same guards the old hand-rolled listener implemented itself.
+	useAction(
+		"app.toggleTheme",
+		() => {
 			setThemeState(currentTheme => {
 				const nextTheme =
 					currentTheme === "dark" ? "light" : currentTheme === "light" ? "dark" : getSystemTheme() === "dark" ? "light" : "dark"
@@ -153,14 +141,10 @@ export function ThemeProvider({
 				localStorage.setItem(storageKey, nextTheme)
 				return nextTheme
 			})
-		}
-
-		window.addEventListener("keydown", handleKeyDown)
-
-		return () => {
-			window.removeEventListener("keydown", handleKeyDown)
-		}
-	}, [storageKey])
+		},
+		undefined,
+		[storageKey]
+	)
 
 	React.useEffect(() => {
 		const handleStorageChange = (event: StorageEvent) => {
