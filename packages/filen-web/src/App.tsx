@@ -1,19 +1,35 @@
-import { Button } from "@/components/ui/button"
+import { useEffect } from "react"
+import { bootSdk } from "@/lib/sdk/boot"
+import { useBootStore } from "@/stores/boot"
+import { labelFirst } from "@/lib/sdk/errors"
+
+// TEMPORARY dev smoke (T9 replaces App.tsx): boots the SDK worker on mount and renders the boot
+// phase, so T3 Step 1 (spawn-base) and the COI gate can be observed live in a real browser.
+// Module-level guard survives StrictMode's effect double-invoke so we boot exactly once.
+let started = false
 
 export function App() {
+	const phase = useBootStore(s => s.phase)
+	const reason = useBootStore(s => s.reason)
+	const error = useBootStore(s => s.error)
+
+	useEffect(() => {
+		if (started) {
+			return
+		}
+		started = true
+		void bootSdk()
+	}, [])
+
 	return (
-		<div className="flex min-h-svh p-6">
-			<div className="flex max-w-md min-w-0 flex-col gap-4 text-sm leading-loose">
-				<div>
-					<h1 className="font-medium">Project ready!</h1>
-					<p>You may now add components and start building.</p>
-					<p>We&apos;ve already added the button component for you.</p>
-					<Button className="mt-2">Button</Button>
-				</div>
-				<div className="font-mono text-xs text-muted-foreground">
-					(Press <kbd>d</kbd> to toggle dark mode)
-				</div>
-			</div>
+		<div className="flex min-h-svh flex-col gap-2 p-6 font-mono text-sm">
+			<div data-testid="boot-phase">boot: {phase}</div>
+			{phase === "error" && (
+				<>
+					<div data-testid="boot-reason">reason: {reason}</div>
+					<div data-testid="boot-label">{error ? labelFirst(error) : ""}</div>
+				</>
+			)}
 		</div>
 	)
 }
