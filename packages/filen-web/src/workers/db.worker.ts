@@ -34,7 +34,7 @@ async function open(forceEphemeral: boolean): Promise<Mode> {
 			db = new pool.OpfsSAHPoolDb("/filen-web.sqlite3")
 			mode = "persistent"
 		} catch (e) {
-			log.warn("db.worker", "OPFS unavailable — ephemeral mode (D14)", e)
+			log.warn("db.worker", "OPFS unavailable — falling back to in-memory ephemeral storage", e)
 		}
 	}
 
