@@ -15,10 +15,22 @@ async function markEphemeralIndicator(): Promise<void> {
 
 export function storage(): Promise<StorageHandle> {
 	if (handle === null) {
-		handle = acquireStorage(new URLSearchParams(location.search).has("ephemeral"))
-		// Side-channel only — failures here must never surface anywhere but the `handle` promise
-		// itself (which every real caller awaits directly), so both branches are swallowed.
-		void handle.then(markEphemeralIndicator, () => undefined).catch(() => undefined)
+		const attempt = acquireStorage(new URLSearchParams(location.search).has("ephemeral"))
+
+		handle = attempt
+		// Side-channel only — indicator failures must never surface anywhere but the `handle`
+		// promise itself (which every real caller awaits directly), so they are swallowed. A
+		// REJECTED attempt is additionally un-memoized (guarded so a newer attempt is never
+		// clobbered): without the reset, the first rejection — e.g. "no db leader after 10s" —
+		// would be replayed to every storage() call for the rest of the tab's life. Callers of
+		// this attempt still see the rejection (they await `attempt` itself, not this side chain).
+		void attempt
+			.then(markEphemeralIndicator, () => {
+				if (handle === attempt) {
+					handle = null
+				}
+			})
+			.catch(() => undefined)
 	}
 
 	return handle

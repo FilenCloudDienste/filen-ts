@@ -125,9 +125,6 @@ async function followerHandle(): Promise<StorageHandle> {
 	const ping = setInterval(() => {
 		ch.postMessage({ kind: "leader?" } satisfies Hello)
 	}, 250)
-	void ready.promise.finally(() => {
-		clearInterval(ping)
-	})
 
 	ch.addEventListener("message", (ev: MessageEvent<Msg>) => {
 		if (ev.data.kind !== "res") {
@@ -149,14 +146,27 @@ async function followerHandle(): Promise<StorageHandle> {
 		}
 	})
 
-	await Promise.race([
-		ready.promise,
-		new Promise<never>((_, reject) => {
-			setTimeout(() => {
-				reject(new Error("no db leader after 10s"))
-			}, 10_000)
-		})
-	])
+	// Teardown must hang off THIS race, not off `ready` — on the 10s no-leader path the rejection
+	// comes from the race's own timer while `ready` (settled only by a leader-ready message) stays
+	// pending forever, so a `ready.promise.finally(...)` hook would never fire and the ping interval
+	// would keep posting `leader?` every 250ms for the rest of the tab's life. The ping stops on
+	// every exit; the channel closes ONLY on rejection (this handle is never returned then, so
+	// nothing downstream could tear it down) — on success it stays open: it IS the RPC transport.
+	try {
+		await Promise.race([
+			ready.promise,
+			new Promise<never>((_, reject) => {
+				setTimeout(() => {
+					reject(new Error("no db leader after 10s"))
+				}, 10_000)
+			})
+		])
+	} catch (e) {
+		ch.close()
+		throw e
+	} finally {
+		clearInterval(ping)
+	}
 
 	const call =
 		(method: keyof StorageApi) =>
