@@ -1,0 +1,57 @@
+import { QueryCache, QueryClient } from "@tanstack/react-query"
+import { toErrorDTO, labelFirst } from "@/lib/sdk/errors"
+import { log } from "@/lib/log"
+
+// ---------------------------------------------------------------------------------------------
+// Conventions (T6 Step 4)
+// ---------------------------------------------------------------------------------------------
+//
+// Query key taxonomy: every key is a tuple `[domain, entity, params?]` —
+//   ["drive", "listing", { parentUuid }]
+//   ["notes", "detail", { uuid }]
+//   ["chats", "messages", { chatUuid, cursor }]
+// `domain` mirrors the feature folder under `src/features/<domain>/`; `entity` names the resource
+// within it; `params` (when present) is a plain, structurally-hashable object — never a class
+// instance or SDK wasm handle (D20: handles are worker-scoped and must never leak across a query
+// key, let alone survive a hash/compare or a persist round trip through this client's persister).
+//
+// Zero-`useMutation` convention (RATIFIED 2026-07-05, A8h — no veto point remains at CP-B): this
+// app never calls `useMutation`. Writes are plain typed async functions that call the SDK directly
+// from the triggering event handler and, on success, explicitly patch the affected queries
+// (`queryClient.setQueryData` / `invalidateQueries`) — "confirm-then-patch", mirroring
+// filen-mobile's own convention. There is no `onMutate`/`onError`/`onSettled` lifecycle to reason
+// about; optimistic-update/rollback logic, where a screen needs it, stays inline at the call site.
+//
+// Socket-driven invalidation (slice 2, not yet wired): realtime socket events will invalidate or
+// patch queries by key from a single subscription mounted near the router root. This module only
+// owns the client instance and its error/persistence plumbing — never feature-specific query keys.
+// ---------------------------------------------------------------------------------------------
+
+export const queryClient = new QueryClient({
+	defaultOptions: {
+		queries: {
+			staleTime: 30_000,
+			gcTime: 24 * 60 * 60 * 1000,
+			// retry: false — the Rust SDK owns ALL retries internally (tower stack; CLAUDE.md rule:
+			// never add retry/rate-limit/concurrency logic in JS). An app-level retry here would just
+			// re-run an already-exhausted SDK retry cycle and delay surfacing the error to the UI.
+			// Transient recovery = SDK-internal retries + refetchOnWindowFocus/refetchOnReconnect
+			// below (+ socket-driven invalidation, slice 2). Decided by Jan 2026-07-05, supersedes
+			// the plan's original `retry: 1` (itself already a revision of mobile's `retry: 5`).
+			retry: false,
+			refetchOnWindowFocus: true,
+			refetchOnReconnect: true
+		}
+	},
+	// Global error logging (verified against the installed v5.101.2 source,
+	// @tanstack/query-core/src/query.ts): a failed fetch dispatches an `updated` cache event AND
+	// calls this `onError` config callback with the same `(error, query)` pair — `onError` is used
+	// here since it is the documented, single-purpose hook for this (no need to subscribe to every
+	// cache event and filter `event.type === "updated" && event.action.type === "error"` by hand).
+	queryCache: new QueryCache({
+		onError: (error, query) => {
+			const dto = toErrorDTO(error)
+			log.error("query", `[${query.queryHash}]`, labelFirst(dto))
+		}
+	})
+})
