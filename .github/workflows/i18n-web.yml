@@ -3,16 +3,15 @@ name: i18n translate (web)
 # Parametrized port of `i18n-translate.yml` (filen-mobile's auto-translate workflow) targeting
 # `packages/filen-web` — mechanism mirrored 1:1 (checkout -> install -> run the translation
 # pipeline -> open/update one rolling PR), only the working-directory / branch / concurrency-group
-# names are package-specific. See docs/research/mobile/i18n-theme.md §1.6 and
-# docs/research/infra/monorepo.md §4.2 for the source mechanism this was ported from.
+# names are package-specific.
 #
-# TRIGGER (RATIFIED 2026-07-05, Jan; A8j closed): workflow_dispatch ONLY for now. Mobile's push
+# TRIGGER: workflow_dispatch ONLY for now. Mobile's push
 # trigger — `paths: ['packages/filen-mobile/src/locales/en/**']` — deliberately watches only the
 # EN source (target-language JSON catalogs + the snapshot are workflow OUTPUTS, not triggers, or
 # every run would fire on its own commit). The filen-web equivalent
-# (`packages/filen-web/src/locales/en/**`) plus the full 27-language target set (mobile parity) go
-# live at CP-C, once shell/auth keys have stabilized — until then this is manual-dispatch-only
-# scaffolding.
+# (`packages/filen-web/src/locales/en/**`) plus the full 27-language target set (mobile parity)
+# stay disabled until the translation pipeline is fully wired and shell/auth keys have
+# stabilized — until then this is manual-dispatch-only scaffolding.
 on:
   workflow_dispatch:
     inputs:
@@ -41,7 +40,7 @@ jobs:
   translate:
     runs-on: ubuntu-latest
     # Always-true today (the only trigger is workflow_dispatch) — kept pre-staged so the fork
-    # guard is already in place the moment the push trigger returns at CP-C, mirroring
+    # guard is already in place once the push trigger is enabled, mirroring
     # i18n-translate.yml's own guard exactly.
     if: github.event_name == 'workflow_dispatch' || github.repository == github.event.repository.full_name
     steps:
@@ -64,7 +63,7 @@ jobs:
       # `translate-i18n` (packages/filen-web/scripts/translate-i18n.ts + a matching package.json
       # script, mirroring filen-mobile's own copy) does not exist in filen-web yet — it lands
       # alongside the multi-language catalog infra (SUPPORTED_LANGUAGES + per-language JSON
-      # stubs), which is out of scope for T7's EN-only typed catalog. This step mirrors
+      # stubs) and requires a translate-i18n script port before first dispatch. This step mirrors
       # i18n-translate.yml's invocation shape so wiring the real script later is a drop-in, not a
       # workflow rewrite — a dispatch run today would fail here until that script lands.
       - name: Run translation pipeline

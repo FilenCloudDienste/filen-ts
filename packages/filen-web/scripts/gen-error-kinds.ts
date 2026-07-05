@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 
 // Codegen the SDK's `ErrorKind` string union into a runtime-checkable array so app code can
 // map `FilenSdkError.kind` without a hand-maintained list (mobile's hand-map silently drifted).
-// CI re-runs this + `git diff --exit-code` (T11) so the generated file can never go stale.
+// CI re-runs this + `git diff --exit-code` so the generated file can never go stale.
 const dts = readFileSync("node_modules/@filen/sdk-rs/sdk-rs.d.ts", "utf8")
 const union = /type ErrorKind =([^;]+);/.exec(dts)?.[1]
 if (union === undefined || union === "") {

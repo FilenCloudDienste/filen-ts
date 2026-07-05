@@ -11,23 +11,22 @@ const COI_HEADERS = {
 	"Cross-Origin-Resource-Policy": "same-origin"
 } as const
 
-// Hardened CSP (Jan mandate: as strict as possible — XSS history in the old apps).
-// Preview/prod only (dev needs HMR inline/eval — ratified exemption).
+// Hardened CSP, preview/prod only (the dev server needs HMR inline/eval).
 // connect-src: the JS glue (sdk-rs.js) contains NO literal hosts, but the wasm BINARY does —
-// verified via strings over sdk-rs_bg.wasm (T2 review): egest/gateway/ingest across filen.net
-// and filen-1.net … filen-6.net FAILOVER domains, plus socket.filen.io (wss). The current
-// *.filen.io wildcard therefore BLOCKS SDK failover — connect-src must be EXPANDED (add the
-// .net host families), not tightened. T3 (SDK boot) observes real traffic and finalizes this.
-// style-src DOES need 'unsafe-inline' — verified empirically in Step 5 (built preview,
-// real Chrome, devtools console): ThemeProvider's disableTransitionsTemporarily()
+// confirmed by running `strings` over sdk-rs_bg.wasm: egest/gateway/ingest hosts across
+// filen.net and filen-1.net … filen-6.net FAILOVER domains, plus socket.filen.io (wss). The
+// current *.filen.io wildcard therefore BLOCKS SDK failover — connect-src must be EXPANDED
+// (add the .net host families), not tightened.
+// style-src DOES need 'unsafe-inline' — verified empirically (built preview, real Chrome,
+// devtools console): ThemeProvider's disableTransitionsTemporarily()
 // (src/components/theme-provider.tsx) injects a literal `document.createElement("style")`
 // with a fixed, non-user-controlled transition-suppression rule on every theme change —
 // this is app-authored content, not attacker-reachable, so 'unsafe-inline' here doesn't
 // open a script-executable hole (CSP still blocks script-src unsafe-inline unconditionally).
 // The browser's own violation report offered a sha256 hash of that exact rule as a stricter
 // alternative; not used here because it silently breaks the moment that literal string
-// changes (T9 owns theme-provider) — 'unsafe-inline' for styles only is the documented,
-// deliberate exception per the brief (the non-negotiable floor is scoped to script-src).
+// changes — 'unsafe-inline' for styles only is a deliberate, narrowly-scoped exception
+// (the non-negotiable floor stays on script-src).
 const CSP = [
 	"default-src 'none'",
 	"script-src 'self' 'wasm-unsafe-eval'",
@@ -35,8 +34,8 @@ const CSP = [
 	"style-src 'self' 'unsafe-inline'",
 	"font-src 'self'",
 	"img-src 'self' blob: data:",
-	// filen-controlled domains only — .net + .filen-N.net are the SDK's baked-in failover
-	// families (verified in the wasm binary, T2 review; expansion ratified at CP-A).
+	// filen-controlled domains only — the .net / .filen-N.net families are the SDK's baked-in
+	// failover hosts (present in the wasm binary); removing them silently breaks failover.
 	"connect-src 'self' https://*.filen.io wss://*.filen.io https://*.filen.net wss://*.filen.net https://*.filen-1.net https://*.filen-2.net https://*.filen-3.net https://*.filen-4.net https://*.filen-5.net https://*.filen-6.net",
 	"manifest-src 'none'",
 	"object-src 'none'",

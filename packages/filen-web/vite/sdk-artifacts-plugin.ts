@@ -10,11 +10,11 @@ const require = createRequire(import.meta.url)
 // entry, "./sdk-rs.js") instead — robust to node_modules layout, no import.meta.dirname
 // guessing, and doesn't depend on an unexported subpath.
 const PKG = join(require.resolve("@filen/sdk-rs"), "..")
-// B1 deployment contract: the SDK wasm holds a RELATIVE `./filen-sdk-worker-thread.js` (verified via
+// Deployment contract: the SDK wasm holds a RELATIVE `./filen-sdk-worker-thread.js` (verified via
 // `strings` over sdk-rs_bg.wasm) which it hands to `new Worker(...)`. So the async-runtime thread
 // worker — and its transitive `sdk-rs.js` / `snippets/**` / `sdk-rs_bg.wasm` loads — resolve against
 // the SPAWNING worker's own `self.location` directory, and so does this worker's own explicit wasm
-// `init` URL. That directory is env-specific (T3 S1, verified live in dev + preview): `/src/workers/`
+// `init` URL. That directory is env-specific (verified live in dev + preview): `/src/workers/`
 // in dev (Vite serves the worker from its source path), `/assets/` in the build (Vite emits the
 // worker chunk there). There is therefore NO single fixed base — dev must serve these files at
 // WHATEVER directory the request carries (match by basename / `/snippets/` suffix), and the build
@@ -55,7 +55,7 @@ export function sdkArtifacts(): Plugin {
 					return
 				}
 				// Containment: the `/snippets/…` branch carries a request-controlled path — never let it
-				// escape PKG via `..` (dev-only traversal hardening; the T2 review flagged the raw join).
+				// escape PKG via `..` (dev-only traversal hardening).
 				const file = resolve(PKG, rel)
 				if (file !== PKG && !file.startsWith(PKG + sep)) {
 					next()
@@ -78,7 +78,7 @@ export function sdkArtifacts(): Plugin {
 			})
 		},
 		closeBundle() {
-			// Prod worker resolves against `<assetsDir>` (T3 S1) — copy the artifacts + snippets there.
+			// Prod worker resolves against `<assetsDir>` — copy the artifacts + snippets there.
 			const out = join(config.root, config.build.outDir, config.build.assetsDir)
 			for (const a of ARTIFACTS) {
 				cpSync(join(PKG, a), join(out, a))
