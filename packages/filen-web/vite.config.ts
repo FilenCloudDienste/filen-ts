@@ -35,7 +35,9 @@ const CSP = [
 	"style-src 'self' 'unsafe-inline'",
 	"font-src 'self'",
 	"img-src 'self' blob: data:",
-	"connect-src 'self' https://*.filen.io wss://*.filen.io",
+	// filen-controlled domains only — .net + .filen-N.net are the SDK's baked-in failover
+	// families (verified in the wasm binary, T2 review; expansion ratified at CP-A).
+	"connect-src 'self' https://*.filen.io wss://*.filen.io https://*.filen.net wss://*.filen.net https://*.filen-1.net https://*.filen-2.net https://*.filen-3.net https://*.filen-4.net https://*.filen-5.net https://*.filen-6.net",
 	"manifest-src 'none'",
 	"object-src 'none'",
 	"base-uri 'self'",
