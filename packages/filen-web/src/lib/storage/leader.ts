@@ -54,9 +54,14 @@ function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => voi
 }
 
 export function acquireStorage(forceEphemeral: boolean): Promise<StorageHandle> {
-	return new Promise(resolve => {
+	return new Promise((resolve, reject) => {
 		// Role is decided by the LOCK GRANT (deterministic) — never by racing a timer against open().
-		void navigator.locks.request(LOCK, { ifAvailable: true }, async lock => {
+		// `.catch(reject)` matters: without it, a rejection from followerHandle() (e.g. the 10s
+		// no-leader timeout) would throw inside this callback with nothing left listening — the
+		// callback's rejection reaches navigator.locks.request()'s own returned promise, which was
+		// otherwise being discarded, and the outer Promise here would then hang forever instead of
+		// surfacing the error.
+		const granted = navigator.locks.request(LOCK, { ifAvailable: true }, async lock => {
 			if (lock === null) {
 				resolve(await followerHandle())
 				return
@@ -76,6 +81,8 @@ export function acquireStorage(forceEphemeral: boolean): Promise<StorageHandle> 
 
 			return new Promise<never>(() => undefined) // hold the lock for the tab's lifetime; re-election = C1, deferred
 		})
+
+		void granted.catch(reject)
 	})
 }
 
