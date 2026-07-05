@@ -13,10 +13,11 @@ const COI_HEADERS = {
 
 // Hardened CSP (Jan mandate: as strict as possible — XSS history in the old apps).
 // Preview/prod only (dev needs HMR inline/eval — ratified exemption).
-// connect-src: derived in Step 5 from a grep over the shipped sdk-rs.js for literal
-// host strings; none were found (endpoints are assembled at runtime, likely inside the
-// wasm binary itself, not the JS glue) so the *.filen.io wildcard fallback is kept —
-// narrow this the moment a task derives the exact host list some other way.
+// connect-src: the JS glue (sdk-rs.js) contains NO literal hosts, but the wasm BINARY does —
+// verified via strings over sdk-rs_bg.wasm (T2 review): egest/gateway/ingest across filen.net
+// and filen-1.net … filen-6.net FAILOVER domains, plus socket.filen.io (wss). The current
+// *.filen.io wildcard therefore BLOCKS SDK failover — connect-src must be EXPANDED (add the
+// .net host families), not tightened. T3 (SDK boot) observes real traffic and finalizes this.
 // style-src DOES need 'unsafe-inline' — verified empirically in Step 5 (built preview,
 // real Chrome, devtools console): ThemeProvider's disableTransitionsTemporarily()
 // (src/components/theme-provider.tsx) injects a literal `document.createElement("style")`
