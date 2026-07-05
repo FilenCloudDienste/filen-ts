@@ -64,6 +64,16 @@ export default defineConfig({
 		sdkArtifacts()
 	],
 	resolve: { alias: { "@": "/src" } },
+	// Vite 8 already defaults both of these on (verified against the installed package's
+	// own types: `minify` defaults to 'oxc', `cssMinify` to 'lightningcss') — pinned
+	// explicitly so a future Vite default change can't silently soften production output.
+	// No built-in HTML minifier exists in Vite 8 (checked); the ~0.5kB index.html shell
+	// isn't worth a new plugin dependency for it. 'terser' would trade build speed for a
+	// historically marginal size win over oxc — not worth it unless profiling says otherwise.
+	build: {
+		minify: "oxc",
+		cssMinify: "lightningcss"
+	},
 	server: { headers: COI_HEADERS },
 	preview: {
 		headers: {
