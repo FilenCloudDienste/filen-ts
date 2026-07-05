@@ -3,8 +3,9 @@ import { bootSdk } from "@/lib/sdk/boot"
 import { useBootStore } from "@/stores/boot"
 import { labelFirst } from "@/lib/sdk/errors"
 
-// TEMPORARY dev smoke (T9 replaces App.tsx): boots the SDK worker on mount and renders the boot
-// phase, so T3 Step 1 (spawn-base) and the COI gate can be observed live in a real browser.
+// TEMPORARY dev smoke: boots the SDK worker on mount and renders the boot phase, so the boot
+// sequence and the COI gate can be observed live in a real browser. This file will be replaced
+// once real routing/UI lands.
 // Module-level guard survives StrictMode's effect double-invoke so we boot exactly once.
 let started = false
 

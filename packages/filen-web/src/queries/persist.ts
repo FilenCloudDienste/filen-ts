@@ -5,14 +5,13 @@ import { storage } from "@/lib/storage/adapter"
 import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
 import { log } from "@/lib/log"
 
-// PER-QUERY persistence (architecture decision, Jan 2026-07-05, superseding this task's first
-// build): `persistQueryClient` re-serializes the ENTIRE dehydrated client on every cache change —
-// O(cache) write amplification through the envelope serializer into sqlite on every query settle.
-// Mobile hit exactly that wall and deliberately runs `experimental_createQueryPersister` (one kv
-// row per query, written only when THAT query updates) — see filen-mobile/src/queries/client.ts
-// and docs/research/mobile/state-query-events.md §2.2. Web mirrors that architecture on the OPFS
-// sqlite kv table. The "experimental_" label notwithstanding, this API is mobile-proven in
-// production; the stable whole-client API is the one with the disqualifying write profile.
+// PER-QUERY persistence: `persistQueryClient` re-serializes the ENTIRE dehydrated client on every
+// cache change — O(cache) write amplification through the envelope serializer into sqlite on
+// every query settle. Mobile hit exactly that wall and deliberately runs
+// `experimental_createQueryPersister` (one kv row per query, written only when THAT query updates)
+// — see filen-mobile/src/queries/client.ts. Web mirrors that architecture on the OPFS sqlite kv
+// table. The "experimental_" label notwithstanding, this API is mobile-proven in production; the
+// stable whole-client API is the one with the disqualifying write profile.
 //
 // Deliberate deltas vs mobile:
 // - Import location: mobile imports from `@tanstack/query-persist-client-core` (a direct dep
@@ -20,10 +19,9 @@ import { log } from "@/lib/log"
 //   re-exports core verbatim (verified against the installed package) — core itself is not a
 //   direct dependency of this app.
 // - Mobile's in-memory buffer + debounced write-behind (`QueryPersisterKv`) and its O(1)
-//   `persistQueryByKey` narrowing facade are NOT ported: both are measured-need perf artifacts of
-//   their query-perf campaign, and the facade is explicitly version-pinned to library internals.
-//   Our kv writes already leave the main thread (worker-owned sqlite); add batching only if
-//   profiling demands it.
+//   `persistQueryByKey` narrowing facade are NOT ported: both are measured-need perf optimizations,
+//   and the facade is explicitly version-pinned to library internals. Our kv writes already leave
+//   the main thread (worker-owned sqlite); add batching only if profiling demands it.
 // - Mobile uses its `serialize` option as a should-persist FILTER (returning `undefined` into an
 //   object-typed buffer). That policy filter is not ported: `persisterFn` persists only after a
 //   SUCCESSFUL queryFn run by construction, so nothing needs filtering yet — and when the first
@@ -40,23 +38,23 @@ export const PERSIST_PREFIX = "rq.v1"
 // ON-DISK expiry: a persisted row whose `state.dataUpdatedAt` is older than this is dropped (and
 // its kv row deleted) by the persister's own expired-or-busted check on read/restore. This is the
 // SOLE disk-expiry authority, and it is deliberately a DIFFERENT clock from the QueryClient's
-// `gcTime` (in-memory retention since the last observer unsubscribed — near-infinite, mobile
-// parity; see client.ts). Mobile decouples the two the same way: "the persister is the real
-// eviction mechanism" (state-query-events.md §2.1).
-// ~10 years, mobile parity (CP-B decision, 2026-07-05): the persisted cache IS the warm-boot
-// story (D15) — stale rows render instantly as placeholders and refetch-on-focus/mount keeps
-// them honest; versioned busters + the buster check handle format evolution, not wall-clock age.
+// `gcTime` (in-memory retention since the last observer unsubscribed — near-infinite; see
+// client.ts). Mobile decouples the two the same way: "the persister is the real eviction
+// mechanism".
+// ~10 years: the persisted cache IS the warm-boot story — stale rows render instantly as
+// placeholders and refetch-on-focus/mount keeps them honest; versioned busters + the buster check
+// handle format evolution, not wall-clock age.
 export const PERSIST_MAX_AGE = 86400 * 365 * 1000 * 10
 
 // Storage keys follow the persister's OWN scheme — `${prefix}-${queryHash}` (verified in the
 // installed createPersister.ts) — so rows live at `rq.v1-<queryHash>`.
 const KV_KEY_PREFIX = `${PERSIST_PREFIX}-`
 
-// D11: every kv read is arktype-validated. This checks the OUTER `PersistedQuery` wrapper only —
+// Every kv read is arktype-validated. This checks the OUTER `PersistedQuery` wrapper only —
 // `state`'s internals are TanStack-owned and the library already self-defends on them (a row whose
 // `state.dataUpdatedAt` is missing/falsy is treated as expired and removed; `setQueryData` bails
-// on `undefined` data) — deep-validating them would duplicate that for no safety gain, mirroring
-// D11's "SDK returns are NOT re-validated" precedent.
+// on `undefined` data) — deep-validating them would duplicate that for no safety gain, consistent
+// with this codebase's "SDK returns are NOT re-validated" policy elsewhere.
 const persistedQuerySchema = type({
 	buster: "string",
 	queryHash: "string",
@@ -190,7 +188,7 @@ export const persister = experimental_createQueryPersister({
 	deserialize
 })
 
-// Boot-time restore-all (T9 calls this once, after storage init): walks every `rq.v1-*` row via
+// Boot-time restore-all (called once, after storage init): walks every `rq.v1-*` row via
 // the bridge's `entries()` and `setQueryData`s each fresh, current-buster row back into `client`
 // (the library's documented restore mechanism for this API — mobile's hand-rolled equivalent walks
 // its buffer the same way). Expired/busted/corrupt rows are deleted as it walks, which is also why

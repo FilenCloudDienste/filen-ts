@@ -9,7 +9,7 @@ interface BootState {
 	phase: "idle" | "booting" | "ready" | "error"
 	reason?: BootReason
 	error?: ErrorDTO
-	// Storage fell back to the ephemeral in-memory backend (D14) — set by T5, surfaced as an indicator.
+	// Storage fell back to the ephemeral in-memory backend — surfaced as an indicator.
 	ephemeral: boolean
 	setBooting: () => void
 	setReady: () => void

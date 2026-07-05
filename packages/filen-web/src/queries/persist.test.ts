@@ -31,7 +31,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 		})
 }))
 
-// A client wired the way T9 will wire the real singleton: the per-query persister as a DEFAULT, so
+// A client wired the way the real singleton is wired: the per-query persister as a default, so
 // every fetch persists/restores its own row automatically through real TanStack machinery — no
 // hand-rolled stand-ins for library internals anywhere in this suite; only the kv layer is faked.
 function makeClient(): QueryClient {

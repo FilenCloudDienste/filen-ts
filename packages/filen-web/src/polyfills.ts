@@ -1,4 +1,4 @@
-// D8: targeted polyfills only — each line lists its consumer.
-// Buffer: @filen/utils parseFilenPublicLink (slice 3) + its serializer helpers (T4).
+// Targeted polyfills only — each line lists its consumer.
+// Buffer: @filen/utils parseFilenPublicLink + its serializer helpers.
 import { Buffer } from "buffer"
 ;(globalThis as { Buffer?: typeof Buffer }).Buffer ??= Buffer

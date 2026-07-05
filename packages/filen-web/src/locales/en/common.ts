@@ -1,9 +1,8 @@
-// English source catalog — "common" namespace (T7 rev 1: the minimal boot/theme vocabulary this
-// slice needs; feature catalogs land per-area as later slices ship, mirroring filen-mobile's
-// per-area-file convention — see docs/research/mobile/i18n-theme.md). Flat `as const` object:
-// i18next's default `keySeparator` ('.') and `nsSeparator` (':') stay ON here (unlike mobile,
-// which disables both to run one flat namespace) — this app declares TWO real namespaces
-// ("common", "errors"), so keys must avoid literal '.' or ':' characters.
+// English source catalog — "common" namespace: the minimal boot/theme vocabulary needed so far;
+// feature catalogs land per-area as they ship, mirroring filen-mobile's per-area-file convention.
+// Flat `as const` object: i18next's default `keySeparator` ('.') and `nsSeparator` (':') stay ON
+// here (unlike mobile, which disables both to run one flat namespace) — this app declares TWO real
+// namespaces ("common", "errors"), so keys must avoid literal '.' or ':' characters.
 export const common = {
 	appName: "Filen",
 	loading: "Loading…",

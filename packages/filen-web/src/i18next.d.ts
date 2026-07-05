@@ -2,9 +2,9 @@
 // present in the "common" (default) or "errors" namespace becomes a compile error.
 //
 // MUST live directly under `src/` so tsconfig's `include: ["src"]` (tsconfig.app.json) picks it
-// up — mirrors a documented gotcha from the filen-mobile port (a repo-root `i18next.d.ts` is
-// silently ignored there because its tsconfig only includes `src/**/*.d.ts`; ours is broader but
-// the same "must live under src/" rule applies) — see docs/research/mobile/i18n-theme.md §1.2.
+// up — mirrors a gotcha from the filen-mobile port (a repo-root `i18next.d.ts` is silently ignored
+// there because its tsconfig only includes `src/**/*.d.ts`; ours is broader but the same "must
+// live under src/" rule applies).
 //
 // `keySeparator`/`nsSeparator` are left at i18next's defaults ('.'/':') — unlike mobile, this app
 // runs two real namespaces addressed via the standard `ns:key` syntax (see errorLabel.ts), so
