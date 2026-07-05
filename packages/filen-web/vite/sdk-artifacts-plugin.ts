@@ -1,5 +1,5 @@
 import { cpSync, createReadStream, existsSync } from "node:fs"
-import { extname, join } from "node:path"
+import { extname, join, resolve, sep } from "node:path"
 import { createRequire } from "node:module"
 import type { Plugin, ResolvedConfig } from "vite"
 
@@ -10,14 +10,33 @@ const require = createRequire(import.meta.url)
 // entry, "./sdk-rs.js") instead — robust to node_modules layout, no import.meta.dirname
 // guessing, and doesn't depend on an unexported subpath.
 const PKG = join(require.resolve("@filen/sdk-rs"), "..")
-// B1 deployment contract: the wasm spawns new Worker("./filen-sdk-worker-thread.js") against
-// the spawn base; these files must be reachable there (spike root-cause section).
+// B1 deployment contract: the SDK wasm holds a RELATIVE `./filen-sdk-worker-thread.js` (verified via
+// `strings` over sdk-rs_bg.wasm) which it hands to `new Worker(...)`. So the async-runtime thread
+// worker — and its transitive `sdk-rs.js` / `snippets/**` / `sdk-rs_bg.wasm` loads — resolve against
+// the SPAWNING worker's own `self.location` directory, and so does this worker's own explicit wasm
+// `init` URL. That directory is env-specific (T3 S1, verified live in dev + preview): `/src/workers/`
+// in dev (Vite serves the worker from its source path), `/assets/` in the build (Vite emits the
+// worker chunk there). There is therefore NO single fixed base — dev must serve these files at
+// WHATEVER directory the request carries (match by basename / `/snippets/` suffix), and the build
+// copies them next to the emitted worker in `<assetsDir>`.
 const ARTIFACTS = ["filen-sdk-worker-thread.js", "sdk-rs.js", "sdk-rs_bg.wasm"]
 const MIME: Record<string, string> = { ".js": "text/javascript", ".wasm": "application/wasm" }
 const COI: Record<string, string> = {
 	"Cross-Origin-Opener-Policy": "same-origin",
 	"Cross-Origin-Embedder-Policy": "require-corp",
 	"Cross-Origin-Resource-Policy": "same-origin"
+}
+
+// Map a request path to the package-relative artifact it serves, or null — directory-agnostic so it
+// works both at the worker's dev source dir and at the built assets dir. `sdk.worker.ts` and Vite's
+// own hashed emits never collide (the names here are exact and unhashed).
+function artifactRel(urlPath: string): string | null {
+	const snippetIdx = urlPath.indexOf("/snippets/")
+	if (snippetIdx !== -1) {
+		return urlPath.slice(snippetIdx + 1) // "snippets/…" relative to PKG
+	}
+	const base = urlPath.slice(urlPath.lastIndexOf("/") + 1)
+	return ARTIFACTS.includes(base) ? base : null
 }
 
 export function sdkArtifacts(): Plugin {
@@ -30,16 +49,18 @@ export function sdkArtifacts(): Plugin {
 		configureServer(server) {
 			server.middlewares.use((req, res, next) => {
 				const url = (req.url ?? "").split("?")[0] ?? ""
-				// TODO(T3-S1): serving under both `/` and `/assets/` is a placement hedge until
-				// the real sdk-rs.js spawn base is confirmed — delete this rewrite (and the
-				// matching closeBundle copy-to-both-dirs loop below) once T3 S1 settles it.
-				const stripped = url.replace(/^\/assets\//, "/")
-				const rel = ARTIFACTS.find(a => stripped === `/${a}`) ?? (stripped.startsWith("/snippets/") ? stripped.slice(1) : undefined)
-				if (rel === undefined) {
+				const rel = artifactRel(url)
+				if (rel === null) {
 					next()
 					return
 				}
-				const file = join(PKG, rel)
+				// Containment: the `/snippets/…` branch carries a request-controlled path — never let it
+				// escape PKG via `..` (dev-only traversal hardening; the T2 review flagged the raw join).
+				const file = resolve(PKG, rel)
+				if (file !== PKG && !file.startsWith(PKG + sep)) {
+					next()
+					return
+				}
 				if (!existsSync(file)) {
 					next()
 					return
@@ -57,13 +78,12 @@ export function sdkArtifacts(): Plugin {
 			})
 		},
 		closeBundle() {
-			const out = join(config.root, config.build.outDir)
-			for (const dest of [out, join(out, "assets")]) {
-				for (const a of ARTIFACTS) {
-					cpSync(join(PKG, a), join(dest, a))
-				}
-				cpSync(join(PKG, "snippets"), join(dest, "snippets"), { recursive: true })
+			// Prod worker resolves against `<assetsDir>` (T3 S1) — copy the artifacts + snippets there.
+			const out = join(config.root, config.build.outDir, config.build.assetsDir)
+			for (const a of ARTIFACTS) {
+				cpSync(join(PKG, a), join(out, a))
 			}
+			cpSync(join(PKG, "snippets"), join(out, "snippets"), { recursive: true })
 		}
 	}
 }
