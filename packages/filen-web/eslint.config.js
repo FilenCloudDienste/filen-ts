@@ -4,6 +4,7 @@ import reactHooks from "eslint-plugin-react-hooks"
 import reactRefresh from "eslint-plugin-react-refresh"
 import globals from "globals"
 import { defineConfig, globalIgnores } from "eslint/config"
+import eslintConfigPrettier from "eslint-config-prettier/flat"
 
 export default defineConfig([
 	globalIgnores(["dist", "docs", "src/routeTree.gen.ts", "src/lib/sdk/error-kinds.gen.ts"]),
@@ -28,5 +29,27 @@ export default defineConfig([
 		// Keep these files registry-verbatim instead of splitting them.
 		files: ["src/components/ui/**/*.{ts,tsx}"],
 		rules: { "react-refresh/only-export-components": "off" }
-	}
+	},
+	{
+		// `@/*` maps to `./src/*` (tsconfig + vite alias + shadcn components.json all agree),
+		// so every file under src can reach every other file under src through it — no
+		// legitimate relative import can exist here. Scoped to src/ only: vite.config.ts,
+		// scripts/*, and vite/* live outside the alias's mapped root and need relative imports.
+		files: ["src/**/*.{ts,tsx}"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					patterns: [
+						{
+							group: ["./*", "../*"],
+							message: 'Use the "@/..." alias instead of a relative import.'
+						}
+					]
+				}
+			]
+		}
+	},
+	// Must stay last — turns off stylistic rules that would otherwise fight prettier's output.
+	eslintConfigPrettier
 ])
