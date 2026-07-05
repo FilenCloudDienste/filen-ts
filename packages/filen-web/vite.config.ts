@@ -67,6 +67,11 @@ export default defineConfig({
 		sdkArtifacts()
 	],
 	resolve: { alias: { "@": "/src" } },
+	// @sqlite.org/sqlite-wasm's own Vite guidance (README "Usage with vite"): it self-locates
+	// sqlite3.wasm and the OPFS async proxy via `new URL(..., import.meta.url)` (verified against
+	// the installed 3.53.0-build1 package) — esbuild's dev-time dep pre-bundling would rewrite/copy
+	// the module in a way that breaks that relative resolution, so it must bypass optimization.
+	optimizeDeps: { exclude: ["@sqlite.org/sqlite-wasm"] },
 	// Vite 8 already defaults both of these on (verified against the installed package's
 	// own types: `minify` defaults to 'oxc', `cssMinify` to 'lightningcss') — pinned
 	// explicitly so a future Vite default change can't silently soften production output.
