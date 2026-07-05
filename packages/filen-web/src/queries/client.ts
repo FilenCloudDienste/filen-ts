@@ -52,7 +52,7 @@ export const queryClient = new QueryClient({
 			// Per-query kv persistence as a DEFAULT (mobile parity): every query automatically
 			// restores from / persists to its own sqlite row through the wrapped queryFn pipeline.
 			persister: persister.persisterFn,
-			staleTime: 30_000, // diverges from mobile's staleTime: 0 — pending owner decision at CP-B
+			staleTime: 0, // mobile parity (CP-B decision, 2026-07-05): every mount/focus refetches; sockets (slice 2) + refetch-on-focus/reconnect own freshness
 			gcTime: GC_TIME,
 			// retry: false — the Rust SDK owns ALL retries internally (tower stack; CLAUDE.md rule:
 			// never add retry/rate-limit/concurrency logic in JS). An app-level retry here would just

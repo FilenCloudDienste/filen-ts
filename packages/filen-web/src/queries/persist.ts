@@ -43,7 +43,10 @@ export const PERSIST_PREFIX = "rq.v1"
 // `gcTime` (in-memory retention since the last observer unsubscribed — near-infinite, mobile
 // parity; see client.ts). Mobile decouples the two the same way: "the persister is the real
 // eviction mechanism" (state-query-events.md §2.1).
-export const PERSIST_MAX_AGE = 24 * 60 * 60 * 1000
+// ~10 years, mobile parity (CP-B decision, 2026-07-05): the persisted cache IS the warm-boot
+// story (D15) — stale rows render instantly as placeholders and refetch-on-focus/mount keeps
+// them honest; versioned busters + the buster check handle format evolution, not wall-clock age.
+export const PERSIST_MAX_AGE = 86400 * 365 * 1000 * 10
 
 // Storage keys follow the persister's OWN scheme — `${prefix}-${queryHash}` (verified in the
 // installed createPersister.ts) — so rows live at `rq.v1-<queryHash>`.
