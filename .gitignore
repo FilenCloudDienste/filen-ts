@@ -46,4 +46,5 @@ codedb.snapshot
 
 # Local-only working dirs (design specs, plans, notes, agent scratch) — never committed
 .superpowers/
+.playwright-mcp/
 docs/
