@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import { persistQueryClientRestore, persistQueryClientSave } from "@tanstack/react-query-persist-client"
 import { stringifyEnvelope } from "@/lib/serialize"
 import { log } from "@/lib/log"
-import { persister, PERSIST_KEY } from "@/queries/persist"
+import { persister, restorePersistedQueries, PERSIST_PREFIX } from "@/queries/persist"
 
-// Mirrors src/lib/storage/adapter.test.ts's Map-backed fake StorageApi, mocked one level up at
-// `@/lib/storage/adapter`'s `storage()` — persist.ts's kv bridge calls that directly (ambiguity
-// resolution #2: kvGet/kvSet/kvDelete, never kvGetJson/kvSetJson — the persister already owns
-// serialization, so going through the JSON-aware helpers would double-envelope every write).
-const { fakeStore } = vi.hoisted(() => ({ fakeStore: new Map<string, string>() }))
+// Map-backed fake of the kv worker api (mirrors src/lib/storage/adapter.test.ts), mocked at
+// `@/lib/storage/adapter`'s `storage()` — the persister's kv bridge calls that directly with RAW
+// strings (kvGet/kvSet/kvDelete/kvKeys, never kvGetJson/kvSetJson: the persister owns its own
+// envelope, so the JSON-aware helpers would double-envelope every row). `writes` records every
+// kvSet key so tests can assert per-query write isolation (the point of this architecture).
+const { fakeStore, writes } = vi.hoisted(() => ({ fakeStore: new Map<string, string>(), writes: [] as string[] }))
 
 vi.mock("@/lib/storage/adapter", () => ({
 	storage: () =>
@@ -19,57 +19,135 @@ vi.mock("@/lib/storage/adapter", () => ({
 				kvGet: (key: string) => Promise.resolve(fakeStore.get(key) ?? null),
 				kvSet: (key: string, value: string) => {
 					fakeStore.set(key, value)
+					writes.push(key)
 					return Promise.resolve()
 				},
 				kvDelete: (key: string) => {
 					fakeStore.delete(key)
 					return Promise.resolve()
-				}
+				},
+				kvKeys: (prefix: string) => Promise.resolve([...fakeStore.keys()].filter(k => k.startsWith(prefix)))
 			}
 		})
 }))
 
+// A client wired the way T9 will wire the real singleton: the per-query persister as a DEFAULT, so
+// every fetch persists/restores its own row automatically through real TanStack machinery — no
+// hand-rolled stand-ins for library internals anywhere in this suite; only the kv layer is faked.
+function makeClient(): QueryClient {
+	return new QueryClient({ defaultOptions: { queries: { retry: false, persister: persister.persisterFn } } })
+}
+
+async function seedTwoQueries(): Promise<{ quotaKey: string; notesKey: string; client: QueryClient }> {
+	const client = makeClient()
+
+	await client.fetchQuery({ queryKey: ["drive", "quota"], queryFn: () => ({ usedBytes: 123456789012345678n }) })
+	await client.fetchQuery({ queryKey: ["notes", "list"], queryFn: () => [{ uuid: "n1", size: 42n }] })
+
+	// persistQuery is scheduled via notifyManager (setTimeout 0) and the kv write is async — poll.
+	await vi.waitFor(() => {
+		expect(fakeStore.size).toBe(2)
+	})
+
+	const quotaKey = [...fakeStore.keys()].find(k => k.includes("quota"))
+	const notesKey = [...fakeStore.keys()].find(k => k.includes("notes"))
+
+	if (quotaKey === undefined || notesKey === undefined) {
+		throw new Error("seed rows missing")
+	}
+
+	return { quotaKey, notesKey, client }
+}
+
 beforeEach(() => {
 	fakeStore.clear()
+	writes.length = 0
 	vi.restoreAllMocks()
 })
 
-// Uses the real dehydrate/hydrate/persistQueryClient* functions throughout (never a hand-rolled
-// stand-in for TanStack internals) — only the kv transport underneath the persister is faked.
-describe("query persister (Map-backed fake kv)", () => {
-	it("round-trips a dehydrated bigint through persist -> restore", async () => {
-		const source = new QueryClient()
-		source.setQueryData(["drive", "quota"], { usedBytes: 123456789012345678n })
+describe("per-query persister (Map-backed fake kv)", () => {
+	it("writes only the changed query's row (no whole-cache write amplification)", async () => {
+		const { quotaKey, notesKey, client } = await seedTwoQueries()
 
-		await persistQueryClientSave({ queryClient: source, persister, buster: PERSIST_KEY })
+		expect(quotaKey.startsWith(`${PERSIST_PREFIX}-`)).toBe(true) // the persister's own `${prefix}-${queryHash}` key scheme
 
-		const target = new QueryClient()
-		await persistQueryClientRestore({ queryClient: target, persister, buster: PERSIST_KEY })
+		const notesRowBefore = fakeStore.get(notesKey)
 
-		expect(target.getQueryData(["drive", "quota"])).toEqual({ usedBytes: 123456789012345678n })
+		writes.length = 0
+
+		// Default staleTime 0 → this fetchQuery refetches the existing query with new data.
+		await client.fetchQuery({ queryKey: ["drive", "quota"], queryFn: () => ({ usedBytes: 2n }) })
+
+		await vi.waitFor(() => {
+			expect(writes).toContain(quotaKey)
+		})
+
+		expect(writes).not.toContain(notesKey)
+		expect(fakeStore.get(notesKey)).toBe(notesRowBefore)
 	})
 
-	it("restores a corrupted stored string as an empty cache, never throws", async () => {
-		const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined)
-		fakeStore.set(PERSIST_KEY, "{not valid json")
+	it("restore-all on boot restores multiple queries including bigint data", async () => {
+		await seedTwoQueries()
 
 		const target = new QueryClient()
 
-		await expect(persistQueryClientRestore({ queryClient: target, persister, buster: PERSIST_KEY })).resolves.toBeUndefined()
+		await restorePersistedQueries(target)
 
-		expect(target.getQueryCache().getAll()).toHaveLength(0)
+		expect(target.getQueryData(["drive", "quota"])).toEqual({ usedBytes: 123456789012345678n })
+		expect(target.getQueryData(["notes", "list"])).toEqual([{ uuid: "n1", size: 42n }])
+	})
+
+	it("drops ONE corrupted row (warn + self-heal) while the others restore fine", async () => {
+		const { notesKey } = await seedTwoQueries()
+		const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined)
+
+		fakeStore.set(notesKey, "{not valid json")
+
+		const target = new QueryClient()
+
+		await restorePersistedQueries(target)
+
+		expect(target.getQueryData(["drive", "quota"])).toEqual({ usedBytes: 123456789012345678n })
+		expect(target.getQueryData(["notes", "list"])).toBeUndefined()
+		expect(fakeStore.has(notesKey)).toBe(false) // the library removes the bad row (self-heal)
 		expect(warnSpy).toHaveBeenCalledWith("query.persist", expect.stringContaining("unparseable"), expect.anything())
 	})
 
-	it("rejects a wrong-shape envelope via the wrapper schema: warns, restores empty, never throws", async () => {
+	it("drops a wrong-shape envelope via the wrapper schema (warn + self-heal), other rows unaffected", async () => {
+		const { quotaKey } = await seedTwoQueries()
 		const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined)
-		fakeStore.set(PERSIST_KEY, stringifyEnvelope({ oops: true }))
+		const badKey = `${PERSIST_PREFIX}-["bad"]`
+
+		fakeStore.set(badKey, stringifyEnvelope({ oops: true }))
 
 		const target = new QueryClient()
 
-		await expect(persistQueryClientRestore({ queryClient: target, persister, buster: PERSIST_KEY })).resolves.toBeUndefined()
+		await restorePersistedQueries(target)
 
-		expect(target.getQueryCache().getAll()).toHaveLength(0)
+		expect(target.getQueryData(["drive", "quota"])).toEqual({ usedBytes: 123456789012345678n })
+		expect(fakeStore.has(badKey)).toBe(false)
+		expect(fakeStore.has(quotaKey)).toBe(true)
 		expect(warnSpy).toHaveBeenCalledWith("query.persist", expect.stringContaining("invalid"), expect.anything())
+	})
+
+	it("drops a buster-mismatched row (old cache version) on restore", async () => {
+		const legacyKey = `${PERSIST_PREFIX}-["legacy"]`
+
+		fakeStore.set(
+			legacyKey,
+			stringifyEnvelope({
+				buster: "rq.v0",
+				queryHash: '["legacy"]',
+				queryKey: ["legacy"],
+				state: { data: { n: 1 }, dataUpdatedAt: Date.now(), status: "success" }
+			})
+		)
+
+		const target = new QueryClient()
+
+		await restorePersistedQueries(target)
+
+		expect(target.getQueryData(["legacy"])).toBeUndefined()
+		expect(fakeStore.has(legacyKey)).toBe(false)
 	})
 })

@@ -1,102 +1,163 @@
 import { type } from "arktype"
-import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister"
-import { persistQueryClient, type AsyncStorage, type PersistedClient } from "@tanstack/react-query-persist-client"
+import { experimental_createQueryPersister, type AsyncStorage, type PersistedQuery } from "@tanstack/react-query-persist-client"
 import type { QueryClient } from "@tanstack/react-query"
 import { storage } from "@/lib/storage/adapter"
 import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
 import { log } from "@/lib/log"
 
-// Versioned kv key AND cache-buster in one (brief T6): bumping this both moves the persisted
-// cache to a fresh kv row and makes `persistQueryClientRestore` treat any older-versioned blob as
-// busted — the two concerns are deliberately the same constant, never two that could drift apart.
-export const PERSIST_KEY = "rq.v1.cache"
+// PER-QUERY persistence (architecture decision, Jan 2026-07-05, superseding this task's first
+// build): `persistQueryClient` re-serializes the ENTIRE dehydrated client on every cache change —
+// O(cache) write amplification through the envelope serializer into sqlite on every query settle.
+// Mobile hit exactly that wall and deliberately runs `experimental_createQueryPersister` (one kv
+// row per query, written only when THAT query updates) — see filen-mobile/src/queries/client.ts
+// and docs/research/mobile/state-query-events.md §2.2. Web mirrors that architecture on the OPFS
+// sqlite kv table. The "experimental_" label notwithstanding, this API is mobile-proven in
+// production; the stable whole-client API is the one with the disqualifying write profile.
+//
+// Deliberate deltas vs mobile:
+// - Import location: mobile imports from `@tanstack/query-persist-client-core` (a direct dep
+//   there); here the SAME symbols come via `@tanstack/react-query-persist-client`, which
+//   re-exports core verbatim (verified against the installed package) — core itself is not a
+//   direct dependency of this app.
+// - Mobile's in-memory buffer + debounced write-behind (`QueryPersisterKv`) and its O(1)
+//   `persistQueryByKey` narrowing facade are NOT ported: both are measured-need perf artifacts of
+//   their query-perf campaign, and the facade is explicitly version-pinned to library internals.
+//   Our kv writes already leave the main thread (worker-owned sqlite); add batching only if
+//   profiling demands it.
+// - Mobile uses its `serialize` option as a should-persist filter (returning `undefined` into an
+//   object-typed buffer). Unnecessary here: `persisterFn` persists only after a SUCCESSFUL
+//   queryFn run by construction, and our storage is honestly string-typed.
 
-// D11: every kv read is arktype-validated. This only checks the OUTER `PersistedClient` envelope —
-// `clientState`'s internals (`queries`/`mutations`) are TanStack-owned and already defended by
-// `hydrate()`'s own `dehydratedState.mutations || []` / `.queries || []` fallback (verified in the
-// installed @tanstack/query-core source, src/hydration.ts) — re-validating that nested shape here
-// would duplicate that guarantee for no safety gain, mirroring D11's "SDK returns are NOT
-// re-validated" precedent for TanStack's own internal query state.
-const persistedClientSchema = type({
+// Versioned kv-key prefix AND cache-buster in one: bumping this moves every persisted row to a
+// fresh key family and makes the persister's own expired-or-busted check drop any older-versioned
+// row on read — deliberately a single constant so the two can never drift apart. Bump on ANY
+// change to the persisted shape (mobile's client.ts:13 flags this as the easy-to-forget step).
+export const PERSIST_PREFIX = "rq.v1"
+
+// One 24h lifetime for both layers: client.ts imports this as the QueryClient's `gcTime` and the
+// persister below uses it as `maxAge`, so in-memory retention and persisted-row expiry can't drift.
+export const PERSIST_MAX_AGE = 24 * 60 * 60 * 1000
+
+// Storage keys follow the persister's OWN scheme — `${prefix}-${queryHash}` (verified in the
+// installed createPersister.ts) — so rows live at `rq.v1-<queryHash>`.
+const KV_KEY_PREFIX = `${PERSIST_PREFIX}-`
+
+// D11: every kv read is arktype-validated. This checks the OUTER `PersistedQuery` wrapper only —
+// `state`'s internals are TanStack-owned and the library already self-defends on them (a row whose
+// `state.dataUpdatedAt` is missing/falsy is treated as expired and removed; `setQueryData` bails
+// on `undefined` data) — deep-validating them would duplicate that for no safety gain, mirroring
+// D11's "SDK returns are NOT re-validated" precedent.
+const persistedQuerySchema = type({
 	buster: "string",
-	timestamp: "number",
-	clientState: "object"
+	queryHash: "string",
+	queryKey: "unknown[]",
+	state: "object"
 })
 
-// The sanctioned "restore to empty" shape (verified against the installed
-// query-persist-client-core/src/persist.ts): `persistQueryClientRestore` skips `hydrate()`
-// entirely whenever `persistedClient.timestamp` is falsy, going straight to `removeClient()` —
-// the branch it reserves for a malformed/legacy persisted client, distinct from the
-// expired-or-busted branch used for a well-formed-but-stale cache. Returning this from
-// `deserialize` below both self-heals the corrupted kv row and guarantees the cache restores
-// empty, without ever throwing. `buster: ""` is a second, independent guard: it can never equal
-// the real (non-empty) `PERSIST_KEY` buster, so even if the timestamp check ever changed
-// upstream, the buster mismatch alone would still force the same `removeClient()` path.
-// The alternative — letting `deserialize` throw — also reaches `removeClient()`, but
-// `persistQueryClientRestore` then RE-THROWS, rejecting `persistQueryClient`'s restore promise;
-// this shape avoids handing T9 (the `__root` wiring) an unhandled rejection to remember to catch.
-const EMPTY_CLIENT: PersistedClient = { buster: "", timestamp: 0, clientState: { queries: [], mutations: [] } }
-
-function deserialize(cached: string): PersistedClient {
+// THROWING is this API's sanctioned per-row cache-miss (verified in the installed source, unlike
+// the whole-client persister where a deserialize throw propagated out of restore): BOTH consumers
+// wrap `deserialize` per row — `retrieveQuery` catches → removes the row → returns a miss, and
+// `restoreQueries` catches → removes the row → `continue`s with the remaining rows. So a corrupt
+// or wrong-shape row self-heals (its kv row is deleted) and never affects any other query.
+function deserialize(cached: string): PersistedQuery {
 	let parsed: unknown
 
 	try {
 		parsed = parseEnvelope(cached)
 	} catch (e) {
-		log.warn("query.persist", "dropping unparseable persisted cache envelope", e)
-		return EMPTY_CLIENT
+		log.warn("query.persist", "dropping unparseable persisted query row", e)
+		throw new Error("unparseable persisted query row", { cause: e })
 	}
 
-	const out = persistedClientSchema(parsed)
+	const out = persistedQuerySchema(parsed)
 
 	if (out instanceof type.errors) {
-		log.warn("query.persist", "dropping invalid persisted cache envelope", out.summary)
-		return EMPTY_CLIENT
+		log.warn("query.persist", "dropping invalid persisted query row", out.summary)
+		throw new Error(`invalid persisted query row: ${out.summary}`)
 	}
 
-	// arktype's callable `Type` returns `distill.Out<t>`; this schema only asserts the outer shape
-	// (`clientState: "object"`, see the comment above), so its inferred output doesn't structurally
-	// satisfy `PersistedClient`'s `clientState: DehydratedState`. This narrow assertion bridges that
-	// gap — the same friction, resolved the same way, as `kvGetJson`'s in src/lib/storage/adapter.ts.
-	return out as PersistedClient
+	// arktype's callable `Type` returns `distill.Out<t>`; this schema asserts only the outer wrapper
+	// (`state: "object"`, see above), so its inferred output doesn't structurally satisfy
+	// `PersistedQuery`'s `state: QueryState`. Same generic-wrapper friction, same narrow bridge, as
+	// `kvGetJson` in src/lib/storage/adapter.ts.
+	return out as PersistedQuery
 }
 
-// The persister wants an AsyncStorage-shaped `{getItem,setItem,removeItem}` over STRINGS — bridge
-// straight to the kv worker's own string API. NOT `kvGetJson`/`kvSetJson`: those already run
-// values through the envelope serializer, and `serialize`/`deserialize` below do that exact job
-// for the persister's payload — going through both would double-envelope every write.
-const kvAsyncStorage: AsyncStorage = {
+// AsyncStorage-shaped bridge over RAW strings straight to the kv worker api — NOT
+// `kvGetJson`/`kvSetJson` (those run the envelope serializer themselves; `serialize`/`deserialize`
+// here already do that job for the persister's payload — both would double-envelope every row).
+// Error policy makes persistence strictly best-effort, per method:
+// - getItem: a kv READ failure (e.g. storage boot failure) logs + reads as a miss, so the query
+//   falls through to its real fetch instead of erroring — `persisterFn` awaits `retrieveQuery`
+//   inside the query pipeline, and a rejection there would otherwise fail the query itself.
+// - setItem: the library fire-and-forgets `persistQuery`'s write (verified: the `setItem` promise
+//   is floating in the installed source), so a rejection would surface as an unhandled rejection —
+//   log + swallow instead; the row simply stays stale until the next successful write.
+// - removeItem: self-heal deletions are also best-effort — log + swallow keeps one failed delete
+//   from aborting a whole `restoreQueries` walk.
+// - entries: propagates — its only callers run under `restorePersistedQueries`'s own catch below.
+const kvStorage: AsyncStorage = {
 	getItem: async key => {
-		const { api } = await storage()
-		return api.kvGet(key)
+		try {
+			const { api } = await storage()
+			return await api.kvGet(key)
+		} catch (e) {
+			log.warn("query.persist", "kv read failed — treating as cache miss", e)
+			return null
+		}
 	},
 	setItem: async (key, value) => {
-		const { api } = await storage()
-		await api.kvSet(key, value)
+		try {
+			const { api } = await storage()
+			await api.kvSet(key, value)
+		} catch (e) {
+			log.error("query.persist", "kv write failed — query row not persisted", e)
+		}
 	},
 	removeItem: async key => {
+		try {
+			const { api } = await storage()
+			await api.kvDelete(key)
+		} catch (e) {
+			log.warn("query.persist", "kv delete failed", e)
+		}
+	},
+	entries: async () => {
 		const { api } = await storage()
-		await api.kvDelete(key)
+		const keys = await api.kvKeys(KV_KEY_PREFIX)
+		const out: [string, string][] = []
+
+		for (const key of keys) {
+			const value = await api.kvGet(key)
+
+			if (value !== null) {
+				out.push([key, value])
+			}
+		}
+
+		return out
 	}
 }
 
-// libs.md's actual recommendation: whole-client persistence via `persistQueryClient` +
-// `createAsyncStoragePersister` — NOT `experimental_createQueryPersister` (rev 1's mistake; that
-// per-query API is explicitly flagged experimental in the installed source and solves a different
-// problem, fine-grained per-query persistence, not "restore the whole client on boot").
-export const persister = createAsyncStoragePersister({
-	storage: kvAsyncStorage,
-	key: PERSIST_KEY,
+export const persister = experimental_createQueryPersister({
+	storage: kvStorage,
+	prefix: PERSIST_PREFIX,
+	buster: PERSIST_PREFIX,
+	maxAge: PERSIST_MAX_AGE,
 	serialize: stringifyEnvelope,
 	deserialize
 })
 
-// Restores the persisted cache onto `client` and subscribes it to future cache changes; T9 calls
-// this once from `__root` with the app's `queryClient` singleton (taken as a parameter, rather
-// than importing the singleton directly, so this stays independently testable with a throwaway
-// QueryClient). Returns `persistQueryClient`'s own tuple verbatim — `unsubscribe` for teardown
-// (e.g. HMR) and `restored`, which settles once the restore attempt (success, empty, or dropped)
-// has finished; T9 may await it before first paint.
-export function setupQueryPersistence(client: QueryClient): [unsubscribe: () => void, restored: Promise<void>] {
-	return persistQueryClient({ queryClient: client, persister, buster: PERSIST_KEY })
+// Boot-time restore-all (T9 calls this once, after storage init): walks every `rq.v1-*` row via
+// the bridge's `entries()` and `setQueryData`s each fresh, current-buster row back into `client`
+// (the library's documented restore mechanism for this API — mobile's hand-rolled equivalent walks
+// its buffer the same way). Expired/busted/corrupt rows are deleted as it walks, which is also why
+// no separate `persisterGc` pass exists: every boot IS the gc pass. Never rejects — a failed
+// restore means an empty cache and real fetches, never a blocked boot.
+export async function restorePersistedQueries(client: QueryClient): Promise<void> {
+	try {
+		await persister.restoreQueries(client)
+	} catch (e) {
+		log.error("query.persist", "restoring persisted queries failed — continuing with an empty cache", e)
+	}
 }
