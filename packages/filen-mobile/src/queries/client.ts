@@ -470,8 +470,16 @@ export const DEFAULT_QUERY_OPTIONS: Omit<UseQueryOptions<any, any, any, any>, "q
 	refetchInterval: false,
 	experimental_prefetchInRender: true,
 	refetchIntervalInBackground: false,
-	retry: 5,
-	retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000),
+	// NO JS-level retries — the Rust SDK owns retrying (CLAUDE.md: "Never add retry logic in JS").
+	// Every SDK request already runs behind filen-rs' tower retry stack (auth/http/retry.rs): up to
+	// 10 retries per request, rate-limited by a shared TpsBudget, and CLASSIFIED — only transient
+	// failures (5xx/408/429/timeouts/safe transport errors) retry; permanent errors fail fast.
+	// The previous `retry: 5` + exponential backoff multiplied wire attempts (×6 on top of the
+	// SDK's own cycles, re-running EVERY SDK call in the queryFn) and delayed deterministic
+	// failures by ~31s of backoff before the error surfaced. Recovery is owned by
+	// refetchOnMount/Reconnect ("always" above), socket invalidations, and reconnect.ts — not by
+	// queryFn re-runs. Non-SDK queryFns (local FS, permissions) fail deterministically anyway.
+	retry: false,
 	retryOnMount: true,
 	networkMode: "offlineFirst",
 	// PURE render-phase predicate: only decides whether to throw to an error boundary.

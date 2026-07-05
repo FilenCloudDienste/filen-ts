@@ -245,37 +245,19 @@ describe("shouldPersistQuery", () => {
 	})
 })
 
-// ─── DEFAULT_QUERY_OPTIONS.retryDelay ─────────────────────────────────────────
+// ─── DEFAULT_QUERY_OPTIONS.retry (SDK owns retries — see client.ts) ─────────────
 
-describe("DEFAULT_QUERY_OPTIONS.retryDelay", () => {
-	const retryDelay = DEFAULT_QUERY_OPTIONS.retryDelay as (attemptIndex: number) => number
-
-	it("returns 1000ms for attemptIndex=0", () => {
-		expect(retryDelay(0)).toBe(1000)
+describe("DEFAULT_QUERY_OPTIONS.retry", () => {
+	it("disables JS-level retries — the Rust SDK retry stack (10/request, budget-limited, transient-only) owns retrying", () => {
+		expect(DEFAULT_QUERY_OPTIONS.retry).toBe(false)
 	})
 
-	it("returns 2000ms for attemptIndex=1", () => {
-		expect(retryDelay(1)).toBe(2000)
+	it("does not configure a retryDelay (nothing to delay with retries disabled)", () => {
+		expect(DEFAULT_QUERY_OPTIONS.retryDelay).toBeUndefined()
 	})
 
-	it("returns 16000ms for attemptIndex=4", () => {
-		expect(retryDelay(4)).toBe(16000)
-	})
-
-	it("caps at 30000ms for attemptIndex=5 (2^5 * 1000 = 32000 > 30000)", () => {
-		expect(retryDelay(5)).toBe(30000)
-	})
-
-	it("always returns 30000ms for very large attemptIndex", () => {
-		expect(retryDelay(100)).toBe(30000)
-	})
-
-	it("attemptIndex=0 returns the minimum value (no result below 1000)", () => {
-		expect(retryDelay(0)).toBeGreaterThanOrEqual(1000)
-	})
-
-	it("never returns a negative result", () => {
-		expect(retryDelay(0)).toBeGreaterThan(0)
+	it("keeps retryOnMount so errored queries still refetch when a new observer mounts", () => {
+		expect(DEFAULT_QUERY_OPTIONS.retryOnMount).toBe(true)
 	})
 })
 
