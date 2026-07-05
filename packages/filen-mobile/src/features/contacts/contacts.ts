@@ -27,9 +27,10 @@ const contacts = {
 			})
 		})
 
-		// Invalidate both queries so TanStack Query re-fetches with retry rather than
-		// doing an inline getContacts() that — if it fails — would leave the request
-		// removed but the new contact absent (inconsistent gap until next focus refetch).
+		// Invalidate both queries so TanStack Query owns the re-fetch (with its
+		// focus/reconnect recovery) rather than doing an inline getContacts() that —
+		// if it fails — would leave the request removed but the new contact absent
+		// (inconsistent gap until next focus refetch).
 		// Consistent with the bulk-accept path in contactsHeader.tsx.
 		queryClient.invalidateQueries({ queryKey: [CONTACTS_QUERY_KEY] }).catch(e => {
 			logger.warn("contacts", "Failed to invalidate contacts query after acceptRequest", { uuid, error: e })
