@@ -28,7 +28,23 @@ export default defineConfig([
 		// alongside the component, which react-refresh can't fast-refresh.
 		// Keep these files registry-verbatim instead of splitting them.
 		files: ["src/components/ui/**/*.{ts,tsx}"],
-		rules: { "react-refresh/only-export-components": "off" }
+		// Also relaxed: some registry files use `Array<T>` / defensive optional chains that our strict
+		// config would flag. Scoped to the vendored ui/ dir so app code stays fully strict.
+		rules: {
+			"react-refresh/only-export-components": "off",
+			"@typescript-eslint/array-type": "off",
+			"@typescript-eslint/no-unnecessary-condition": "off"
+		}
+	},
+	{
+		// TanStack Router file routes export a `Route` constant (not a component) by convention and use
+		// `throw redirect()` / `throw notFound()` as the framework's control-flow idiom — neither is a
+		// code smell here, so the two rules that would flag them are scoped off for route files.
+		files: ["src/routes/**/*.{ts,tsx}"],
+		rules: {
+			"react-refresh/only-export-components": "off",
+			"@typescript-eslint/only-throw-error": "off"
+		}
 	},
 	{
 		// `@/*` maps to `./src/*` (tsconfig + vite alias + shadcn components.json all agree),

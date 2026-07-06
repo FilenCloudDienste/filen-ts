@@ -1,6 +1,8 @@
 import { sdkApi, threadCount } from "@/lib/sdk/client"
 import { toErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { useBootStore } from "@/stores/boot"
+import { queryClient } from "@/queries/client"
+import { restorePersistedQueries } from "@/queries/persist"
 import { log } from "@/lib/log"
 
 // The worker's Comlink boundary always throws a plain ErrorDTO; Comlink transport failures (a worker
@@ -21,7 +23,14 @@ export async function bootSdk(): Promise<void> {
 			log.error("boot", `${result.reason}: ${result.detail}`)
 			return
 		}
-		await sdkApi.probeAsync()
+		// Warm the query cache from disk once per boot, before the first render that reads it
+		// (best-effort — never rejects; a failed restore just means an empty cache).
+		await restorePersistedQueries(queryClient)
+		// Async-runtime health check: boot success ≠ health. Gated to dev so a transient probe failure
+		// can't block first paint in production/preview, where real ops exercise the runtime anyway.
+		if (import.meta.env.DEV) {
+			await sdkApi.probeAsync()
+		}
 		setReady()
 		log.info("boot", `ready (${String(result.threads)} threads)`)
 	} catch (e) {

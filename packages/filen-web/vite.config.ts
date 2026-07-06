@@ -17,16 +17,16 @@ const COI_HEADERS = {
 // filen.net and filen-1.net … filen-6.net FAILOVER domains, plus socket.filen.io (wss). The
 // current *.filen.io wildcard therefore BLOCKS SDK failover — connect-src must be EXPANDED
 // (add the .net host families), not tightened.
-// style-src DOES need 'unsafe-inline' — verified empirically (built preview, real Chrome,
-// devtools console): ThemeProvider's disableTransitionsTemporarily()
-// (src/components/theme-provider.tsx) injects a literal `document.createElement("style")`
-// with a fixed, non-user-controlled transition-suppression rule on every theme change —
-// this is app-authored content, not attacker-reachable, so 'unsafe-inline' here doesn't
-// open a script-executable hole (CSP still blocks script-src unsafe-inline unconditionally).
-// The browser's own violation report offered a sha256 hash of that exact rule as a stricter
-// alternative; not used here because it silently breaks the moment that literal string
-// changes — 'unsafe-inline' for styles only is a deliberate, narrowly-scoped exception
-// (the non-negotiable floor stays on script-src).
+// style-src DOES need 'unsafe-inline' — verified empirically (built preview, real Chrome, devtools
+// console). Two independent sources inject parsed inline styles that CSP style-src-elem blocks
+// otherwise: (1) ThemeProvider's disableTransitionsTemporarily() appends a literal
+// `document.createElement("style")` transition-suppression rule on every theme change, and (2) Base
+// UI (@base-ui/react) injects its own runtime `<style>` elements on mount (an empty one plus a rule
+// set — observed as sha256-47DEQ… [empty] and sha256-CIxDM… violations). Both are app/library-authored,
+// not attacker-reachable, so 'unsafe-inline' for STYLES only does not open a script hole (script-src
+// keeps its unconditional no-unsafe-inline floor). A moving set of sha256 hashes was rejected as too
+// brittle (the hashes shift when either source's literal changes). Replacing (1) with a predefined
+// toggled class was tried and does NOT suffice on its own — (2) still requires 'unsafe-inline'.
 const CSP = [
 	"default-src 'none'",
 	"script-src 'self' 'wasm-unsafe-eval'",
