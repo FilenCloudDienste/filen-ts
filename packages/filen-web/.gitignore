@@ -24,3 +24,10 @@ dist-ssr
 *.sw?
 
 docs/
+
+# e2e: injected session blob (secret-equivalent) + Playwright outputs
+e2e/.auth/
+test-results
+playwright-report
+blob-report
+playwright/.cache

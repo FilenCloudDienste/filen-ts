@@ -1,7 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2024",
-    "lib": ["ES2024"],
+    // DOM libs are here for the e2e project only: Playwright page.evaluate / addInitScript callbacks
+    // are type-checked in this project but run in the browser, so they reference window/document/etc.
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "types": ["node"],

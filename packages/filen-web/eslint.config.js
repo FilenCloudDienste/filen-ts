@@ -66,6 +66,15 @@ export default defineConfig([
 			]
 		}
 	},
+	{
+		// e2e specs are Playwright/Node, not React — the react plugins don't apply, and Playwright's
+		// fixture `use` callback trips rules-of-hooks (it reads `use` as the React hook).
+		files: ["e2e/**/*.ts"],
+		rules: {
+			"react-hooks/rules-of-hooks": "off",
+			"react-refresh/only-export-components": "off"
+		}
+	},
 	// Must stay last — turns off stylistic rules that would otherwise fight prettier's output.
 	eslintConfigPrettier
 ])

@@ -18,6 +18,14 @@ declare module "@tanstack/react-router" {
 	}
 }
 
+// E2E-only test hooks. The dynamic import behind this env condition is dead-code-eliminated from a
+// normal build (asserted by the no-flag build grep), so nothing test-related ships to production.
+if (import.meta.env.VITE_E2E === "1") {
+	void import("@/e2e-hooks").then(m => {
+		m.installE2eHooks(router)
+	})
+}
+
 const rootElement = document.getElementById("root")
 
 if (!rootElement) {
