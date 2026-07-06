@@ -1536,7 +1536,8 @@ export class Audio {
 
 				return {
 					...current,
-					files: [...current.files, ...toAppend]
+					files: [...current.files, ...toAppend],
+					updated: Date.now()
 				}
 			},
 			signal
