@@ -1,3 +1,4 @@
+import { type AlertDialogRoot } from "@base-ui/react/alert-dialog"
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -9,6 +10,7 @@ import {
 	AlertDialogTitle
 } from "@/components/ui/alert-dialog"
 import { Spinner } from "@/components/ui/spinner"
+import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 
 interface ConfirmDialogProps {
 	open: boolean
@@ -28,10 +30,13 @@ interface ConfirmDialogProps {
 // `useTranslation`. `onConfirm` is fire-and-forget from this component's point of view — the same
 // contract as the existing two-factor dialog's `onSubmit` — the caller owns the async lifecycle (sets
 // `pending`, closes via `onOpenChange` on success, keeps the dialog open and surfaces an error on
-// failure) rather than this primitive awaiting or closing on its behalf. No text input here, so
-// (unlike its siblings) there is no `<form>`: the confirm button is a plain, auto-focused, native
-// button — Enter activates it, and `disabled` while pending blocks both the click and the Enter key
-// natively, no bespoke listener needed.
+// failure) rather than this primitive awaiting or closing on its behalf. Dismissal is BLOCKED while
+// `pending`: every dismissal route (Escape here — the alert-dialog primitive already disables
+// outside-press, and the cancel button is disabled) funnels through onOpenChange, and a `false`
+// while the operation runs is a no-op, so the dialog stays open until it settles — rationale in
+// dismissal.logic.ts. No text input here, so (unlike its siblings) there is no `<form>`: the
+// confirm button is a plain, auto-focused, native button — Enter activates it, and `disabled` while
+// pending blocks both the click and the Enter key natively, no bespoke listener needed.
 function ConfirmDialog({
 	open,
 	pending,
@@ -43,10 +48,20 @@ function ConfirmDialog({
 	onOpenChange,
 	onConfirm
 }: ConfirmDialogProps) {
+	function handleOpenChange(next: boolean, details: AlertDialogRoot.ChangeEventDetails): void {
+		if (!shouldForwardOpenChange(next, pending)) {
+			// Also stops Base UI's own store from flipping (it closes itself after this callback
+			// unless the event is canceled) — see dismissal.logic.ts.
+			details.cancel()
+			return
+		}
+		onOpenChange(next)
+	}
+
 	return (
 		<AlertDialog
 			open={open}
-			onOpenChange={onOpenChange}
+			onOpenChange={handleOpenChange}
 		>
 			<AlertDialogContent>
 				<AlertDialogHeader>

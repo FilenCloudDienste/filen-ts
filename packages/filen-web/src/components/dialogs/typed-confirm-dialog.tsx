@@ -1,4 +1,5 @@
 import { useState, type SubmitEvent } from "react"
+import { type AlertDialogRoot } from "@base-ui/react/alert-dialog"
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -13,6 +14,7 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { isArmed, shouldResetOnOpen } from "@/components/dialogs/typed-confirm-dialog.logic"
+import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 
 interface TypedConfirmDialogProps {
 	open: boolean
@@ -39,7 +41,8 @@ interface TypedConfirmDialogProps {
 // every label arrives pre-resolved from the caller. Built directly on ui/alert-dialog.tsx rather than
 // composing `ConfirmDialog` — mirrors how the two pre-existing dialog consumers (two-factor,
 // forgot-password) each own their full scaffold rather than sharing a base, since the disabled/armed
-// condition here differs from ConfirmDialog's plain `pending` gate.
+// condition here differs from ConfirmDialog's plain `pending` gate. Dismissal is BLOCKED while
+// `pending`, same gate and rationale as ConfirmDialog — see dismissal.logic.ts.
 function TypedConfirmDialog({
 	open,
 	pending,
@@ -66,6 +69,16 @@ function TypedConfirmDialog({
 	}
 	const armed = isArmed(typed, matchValue)
 
+	function handleOpenChange(next: boolean, details: AlertDialogRoot.ChangeEventDetails): void {
+		if (!shouldForwardOpenChange(next, pending)) {
+			// Also stops Base UI's own store from flipping (it closes itself after this callback
+			// unless the event is canceled) — see dismissal.logic.ts.
+			details.cancel()
+			return
+		}
+		onOpenChange(next)
+	}
+
 	function handleSubmit(e: SubmitEvent): void {
 		e.preventDefault()
 		// Guards a disabled-but-still-submittable form (Enter fires onSubmit regardless of the
@@ -80,7 +93,7 @@ function TypedConfirmDialog({
 	return (
 		<AlertDialog
 			open={open}
-			onOpenChange={onOpenChange}
+			onOpenChange={handleOpenChange}
 		>
 			<AlertDialogContent>
 				<form

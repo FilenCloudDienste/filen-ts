@@ -59,9 +59,13 @@ function DialogContent({
 	className,
 	children,
 	showCloseButton = true,
+	closeButtonDisabled = false,
 	...props
 }: DialogPrimitive.Popup.Props & {
 	showCloseButton?: boolean
+	// Local addition (not registry stock — keep across a shadcn regen): pending-gated dialogs
+	// disable the X while their operation runs.
+	closeButtonDisabled?: boolean
 }) {
 	// Localized: src/locales/en/common.ts `close` key — a shadcn regen of this registry file must
 	// keep this call, not revert it to the literal "Close" string.
@@ -81,6 +85,7 @@ function DialogContent({
 				{showCloseButton && (
 					<DialogPrimitive.Close
 						data-slot="dialog-close"
+						disabled={closeButtonDisabled}
 						render={
 							<Button
 								variant="ghost"
