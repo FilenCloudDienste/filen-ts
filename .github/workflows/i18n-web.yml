@@ -61,11 +61,11 @@ jobs:
         run: npm install --force --include=dev && npx -y patch-package  --patch-dir ./patches
 
       # `translate-i18n` (packages/filen-web/scripts/translate-i18n.ts + a matching package.json
-      # script, mirroring filen-mobile's own copy) does not exist in filen-web yet — it lands
-      # alongside the multi-language catalog infra (SUPPORTED_LANGUAGES + per-language JSON
-      # stubs) and requires a translate-i18n script port before first dispatch. This step mirrors
-      # i18n-translate.yml's invocation shape so wiring the real script later is a drop-in, not a
-      # workflow rewrite — a dispatch run today would fail here until that script lands.
+      # script) is a port of filen-mobile's own script, adapted for filen-web's two real i18next
+      # namespaces (src/locales/en/common.ts + errors.ts) — each target-language catalog nests
+      # translations under the same namespace keys. Its target-language list (TARGET_LANGUAGES in
+      # the script, currently just `de`) is independent of mobile's list. This step mirrors
+      # i18n-translate.yml's invocation shape, unchanged.
       - name: Run translation pipeline
         working-directory: packages/filen-web
         env:

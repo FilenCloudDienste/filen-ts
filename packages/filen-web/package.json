@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "gen:error-kinds": "node --experimental-strip-types scripts/gen-error-kinds.ts",
-    "check:compiler": "node --experimental-strip-types scripts/check-compiler.ts"
+    "check:compiler": "node --experimental-strip-types scripts/check-compiler.ts",
+    "translate-i18n": "tsx scripts/translate-i18n.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -44,6 +45,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "0.110.0",
     "@babel/core": "^8.0.1",
     "@babel/plugin-syntax-jsx": "^8.0.1",
     "@babel/preset-typescript": "^8.0.1",
@@ -64,9 +66,11 @@
     "playwright": "^1.61.1",
     "prettier": "^3.8.3",
     "prettier-plugin-tailwindcss": "^0.8.0",
+    "tsx": "4.23.0",
     "typescript": "6.0.3",
     "typescript-eslint": "^8",
     "vite": "^8",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "zod": "4.4.3"
   }
 }
