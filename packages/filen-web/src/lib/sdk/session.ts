@@ -16,7 +16,7 @@ const AUTH_CHANNEL = "filen.auth.v1"
 type AuthMessage = { kind: "login" } | { kind: "logout" }
 
 // Schema for the persisted blob — mirrors `@filen/sdk-rs`'s `StringifiedClient` so the restore path
-// satisfies the D11 "every kv read is arktype-validated" rule without re-deriving it.
+// validates on read like every other kv consumer, without re-deriving the shape.
 export const sessionSchema = type({
 	email: "string",
 	userId: "bigint",

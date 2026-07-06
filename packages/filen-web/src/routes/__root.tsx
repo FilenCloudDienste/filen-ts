@@ -38,11 +38,14 @@ function BootGate() {
 				location.reload()
 				return
 			}
-			void sdkApi.hasClient().then(authed => {
-				if (!authed) {
-					location.reload()
-				}
-			})
+			void sdkApi
+				.hasClient()
+				.catch(() => false)
+				.then(authed => {
+					if (!authed) {
+						location.reload()
+					}
+				})
 		})
 	}, [])
 
