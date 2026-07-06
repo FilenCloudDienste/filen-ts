@@ -111,7 +111,7 @@ jobs:
       - name: Assert e2e hooks are absent from a production build
         working-directory: packages/filen-web
         run: |
-          npm run build
+          rm -rf dist && npm run build
           if grep -rq 'filenE2E\|filen.e2e.session' dist; then
             echo 'E2E hooks leaked into the production build'
             exit 1
