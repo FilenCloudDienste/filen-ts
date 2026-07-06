@@ -171,29 +171,30 @@ describe("hardening — bigint field fidelity across all timestamp modes", () =>
 	})
 })
 
-describe("hardening — equal-key stability at scale", () => {
-	it("400 equal-name files keep exact input order under nameAsc AND nameDesc", () => {
+describe("hardening — equal-key determinism at scale (#49)", () => {
+	it("400 equal-name files order by the uuid chain — independent of input order — under nameAsc AND nameDesc", () => {
 		const items: DriveItem[] = []
 
 		for (let i = 0; i < 400; i++) {
 			items.push(
 				makeItemWith("file", "same-name.txt", {
-					// Identical numeric value from every uuid so no hidden tiebreak applies.
 					uuid: `uuid-${String(i).padStart(4, "0")}`,
 					timestamp: 1000
 				})
 			)
 		}
 
-		// All comparator keys equal → a stable sort must return the input order verbatim,
-		// for BOTH directions (negating a 0 comparison is still 0).
-		const asc = itemSorter.sortItems(items, "nameAsc")
-		const desc = itemSorter.sortItems(items, "nameDesc")
+		// Equal keys must NOT fall through to input order — the input is the raw query data,
+		// whose order shuffles across refetches (#49). The tiebreak chain ends at the uuid, so
+		// any input permutation produces the same output, and desc is the exact reverse of asc.
+		const asc = itemSorter.sortItems(items, "nameAsc").map(item => item.data.uuid)
+		const desc = itemSorter.sortItems(items, "nameDesc").map(item => item.data.uuid)
+		const ascFromReversedInput = itemSorter.sortItems(items.slice().reverse(), "nameAsc").map(item => item.data.uuid)
 
-		for (let i = 0; i < items.length; i++) {
-			expect(asc[i], `asc index ${i}`).toBe(items[i])
-			expect(desc[i], `desc index ${i}`).toBe(items[i])
-		}
+		// These uuids carry ascending digit runs, so the uuid-number chain yields construction order.
+		expect(asc).toEqual(items.map(item => item.data.uuid))
+		expect(desc).toEqual(asc.slice().reverse())
+		expect(ascFromReversedInput).toEqual(asc)
 	})
 
 	it("equal-timestamp equal-uuid-number files keep input order under uploadDateAsc/Desc", () => {

@@ -118,15 +118,16 @@ export async function fetchData(
 	}
 }
 
-export function useDirectorySizeQuery(
-	params: UseDirectorySizeQueryParams,
-	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
-): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
+// Key + fn + freshness in one place so useQuery (rows) and prefetchQuery (size sort) can never
+// drift apart — a prefetch with a mismatched key would fetch twice and read nothing back.
+export function directorySizeQueryOptions(params: UseDirectorySizeQueryParams): {
+	queryKey: [string, UseDirectorySizeQueryParams]
+	queryFn: (context: { signal?: AbortSignal }) => ReturnType<typeof fetchData>
+	staleTime: number
+} {
 	const sortedParams = sortParams(params)
 
-	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
-		...options,
+	return {
 		// TODO: Change with API v4
 		staleTime: 15 * 60 * 1000, // 15 minutes
 		queryKey: [BASE_QUERY_KEY, sortedParams],
@@ -135,6 +136,17 @@ export function useDirectorySizeQuery(
 				...sortedParams,
 				signal
 			})
+	}
+}
+
+export function useDirectorySizeQuery(
+	params: UseDirectorySizeQueryParams,
+	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
+): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
+	const query = useQuery({
+		...DEFAULT_QUERY_OPTIONS,
+		...options,
+		...directorySizeQueryOptions(params)
 	})
 
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>

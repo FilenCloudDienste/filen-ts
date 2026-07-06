@@ -1199,3 +1199,134 @@ describe("itemSorter — unknown SortByType fallback", () => {
 		)
 	})
 })
+
+describe("itemSorter — deterministic ties + directory sizes (#49)", () => {
+	it("equal-size files sort alphabetically under sizeAsc and fully reversed under sizeDesc", () => {
+		const items = [
+			makeItem("file", "cherry.txt", { size: 100n, uuid: "cccc-3" }),
+			makeItem("file", "apple.txt", { size: 100n, uuid: "aaaa-1" }),
+			makeItem("file", "banana.txt", { size: 100n, uuid: "bbbb-2" })
+		]
+
+		const asc = itemSorter.sortItems(items, "sizeAsc").map(i => i.data.decryptedMeta?.name)
+		const desc = itemSorter.sortItems(items, "sizeDesc").map(i => i.data.decryptedMeta?.name)
+
+		expect(asc).toEqual(["apple.txt", "banana.txt", "cherry.txt"])
+		expect(desc).toEqual(["cherry.txt", "banana.txt", "apple.txt"])
+	})
+
+	it("output is independent of input order for size and mime ties", () => {
+		const build = () => [
+			makeItem("directory", "delta", { uuid: "dddd-4" }),
+			makeItem("directory", "alpha", { uuid: "aaaa-1" }),
+			makeItem("file", "same-size-b.txt", { size: 50n, uuid: "bbbb-2" }),
+			makeItem("file", "same-size-a.txt", { size: 50n, uuid: "aaaa-9" }),
+			makeItem("file", "photo-b.jpg", { size: 1n, mime: "image/jpeg", uuid: "ffff-6" }),
+			makeItem("file", "photo-a.jpg", { size: 2n, mime: "image/jpeg", uuid: "eeee-5" })
+		]
+
+		for (const mode of ["sizeAsc", "sizeDesc", "mimeAsc", "mimeDesc"] as const) {
+			const forward = itemSorter.sortItems(build(), mode).map(i => i.data.uuid)
+			const reversed = itemSorter.sortItems(build().reverse(), mode).map(i => i.data.uuid)
+			const rotated = (() => {
+				const input = build()
+
+				input.push(input.shift() as (typeof input)[number])
+
+				return itemSorter.sortItems(input, mode).map(i => i.data.uuid)
+			})()
+
+			expect(reversed, `mode ${mode} (reversed input)`).toEqual(forward)
+			expect(rotated, `mode ${mode} (rotated input)`).toEqual(forward)
+		}
+	})
+
+	it("mime ties order by name within each mime group", () => {
+		const items = [
+			makeItem("file", "zeta.jpg", { mime: "image/jpeg", uuid: "zzzz-1" }),
+			makeItem("file", "beta.png", { mime: "image/png", uuid: "bbbb-2" }),
+			makeItem("file", "alpha.jpg", { mime: "image/jpeg", uuid: "aaaa-3" })
+		]
+
+		const asc = itemSorter.sortItems(items, "mimeAsc").map(i => i.data.decryptedMeta?.name)
+
+		expect(asc).toEqual(["alpha.jpg", "zeta.jpg", "beta.png"])
+	})
+
+	it("identical names resolve through the uuid chain deterministically", () => {
+		const a = makeItem("file", "same.txt", { uuid: "0001-aaaa" })
+		const b = makeItem("file", "same.txt", { uuid: "0002-bbbb" })
+
+		const forward = itemSorter.sortItems([b, a], "nameAsc")
+		const reversed = itemSorter.sortItems([a, b], "nameAsc")
+
+		expect(forward.map(i => i.data.uuid)).toEqual(["0001-aaaa", "0002-bbbb"])
+		expect(reversed.map(i => i.data.uuid)).toEqual(["0001-aaaa", "0002-bbbb"])
+	})
+
+	it("directorySizes orders directories by their real sizes under sizeDesc", () => {
+		const items = [
+			makeItem("directory", "small", { uuid: "dir-small" }),
+			makeItem("directory", "huge", { uuid: "dir-huge" }),
+			makeItem("directory", "medium", { uuid: "dir-medium" }),
+			makeItem("file", "tiny.txt", { size: 1n, uuid: "file-1" })
+		]
+
+		const directorySizes = new Map<string, number>([
+			["dir-small", 10],
+			["dir-huge", 1_000_000],
+			["dir-medium", 5_000]
+		])
+
+		const desc = itemSorter.sortItems(items, "sizeDesc", { directorySizes }).map(i => i.data.uuid)
+
+		// Dirs-first partition holds; within dirs the REAL sizes decide.
+		expect(desc).toEqual(["dir-huge", "dir-medium", "dir-small", "file-1"])
+	})
+
+	it("directories missing from the map sort as size 0 and fall back to name order", () => {
+		const items = [
+			makeItem("directory", "known-large", { uuid: "dir-known" }),
+			makeItem("directory", "unknown-b", { uuid: "dir-ub" }),
+			makeItem("directory", "unknown-a", { uuid: "dir-ua" })
+		]
+
+		const directorySizes = new Map<string, number>([["dir-known", 999]])
+
+		const asc = itemSorter.sortItems(items, "sizeAsc", { directorySizes }).map(i => i.data.decryptedMeta?.name)
+
+		// Unknown dirs (size 0) come first under asc, alphabetical among themselves.
+		expect(asc).toEqual(["unknown-a", "unknown-b", "known-large"])
+	})
+
+	it("files ignore the directorySizes map even on uuid collision", () => {
+		const items = [
+			makeItem("file", "big.bin", { size: 100n, uuid: "shared-uuid" }),
+			makeItem("file", "small.bin", { size: 1n, uuid: "other-uuid" })
+		]
+
+		// A (pathological) file uuid present in the map must not override data.size.
+		const directorySizes = new Map<string, number>([["shared-uuid", 0]])
+
+		const asc = itemSorter.sortItems(items, "sizeAsc", { directorySizes }).map(i => i.data.decryptedMeta?.name)
+
+		expect(asc).toEqual(["small.bin", "big.bin"])
+	})
+
+	it("non-integral or non-finite map values fall back to data.size instead of throwing", () => {
+		const items = [
+			makeItem("directory", "nan-dir", { uuid: "dir-nan" }),
+			makeItem("directory", "real-dir", { uuid: "dir-real" })
+		]
+
+		const directorySizes = new Map<string, number>([
+			["dir-nan", Number.NaN],
+			["dir-real", 123.75]
+		])
+
+		const asc = itemSorter.sortItems(items, "sizeAsc", { directorySizes })
+
+		// NaN → data.size (0n) sorts first; 123.75 truncates to 123n.
+		expect(asc.map(i => i.data.decryptedMeta?.name)).toEqual(["nan-dir", "real-dir"])
+	})
+})

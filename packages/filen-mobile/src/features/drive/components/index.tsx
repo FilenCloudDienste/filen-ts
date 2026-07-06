@@ -24,6 +24,7 @@ import { useFocusEffect } from "expo-router"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { onlineManager } from "@tanstack/react-query"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
+import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import { isBlocked } from "@/features/contacts/blockedSelectors"
 import { getSharerIdentity } from "@/features/drive/driveSharer"
@@ -91,6 +92,15 @@ const Drive = () => {
 	// query falls through here too (empty query → filter is a no-op).
 	const isCacheSearch = isPlainDrive && searchActive
 
+	// Size sort needs the REAL directory sizes (items carry size: 0n for dirs — #49); the hook
+	// prefetches + reads them from the same query cache the rows display from, and returns
+	// undefined for every other sort mode (zero cost there).
+	const directorySizes = useDriveDirectorySizes({
+		items: isCacheSearch ? searchResults : driveItemsQuery.data,
+		drivePathType: drivePath.type,
+		enabled: sort === "sizeAsc" || sort === "sizeDesc"
+	})
+
 	// #26 — use retained data unconditionally (stale-while-error); status "error"
 	// with prior data keeps the listing visible instead of flipping to "empty".
 	const sortedItems = isCacheSearch
@@ -101,8 +111,8 @@ const Drive = () => {
 			// whole match set is loaded, so the user's sort is honoured.
 			totalCount > searchResults.length
 			? searchResults
-			: itemSorter.sortItems(searchResults, sort)
-		: filterDriveItemsBySearchQuery(itemSorter.sortItems(driveItemsQuery.data ?? [], sort), searchQuery)
+			: itemSorter.sortItems(searchResults, sort, { directorySizes })
+		: filterDriveItemsBySearchQuery(itemSorter.sortItems(driveItemsQuery.data ?? [], sort, { directorySizes }), searchQuery)
 
 	// Hide shared-in items shared by a blocked user (virtual-root filter — the query stays
 	// unopinionated). Only the sharedIn context carries a sharer identity to check.
