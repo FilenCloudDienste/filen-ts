@@ -12,13 +12,14 @@ interface BootErrorScreenProps {
 	// exactOptionalPropertyTypes.
 	reason: string | undefined
 	error: ErrorDTO | undefined
-	onRetry: () => void
 }
 
-// Full-screen terminal boot failure with a retry. `errorLabel` resolves the localized, user-meaningful
-// message (server/inner/outer, LABEL-FIRST); the raw reason is kept as a small technical footnote for
-// support, not as the headline.
-export function BootErrorScreen({ reason, error, onRetry }: BootErrorScreenProps) {
+// Full-screen terminal boot failure whose only recovery is a full page reload (mirroring /no-coi):
+// re-running boot against the already-live worker cannot recover a failed thread pool / async runtime
+// (initThreadPool is not idempotent), so a fresh document is the sole reliable path back. `errorLabel`
+// resolves the localized, user-meaningful message (server/inner/outer, LABEL-FIRST); the raw reason is
+// kept as a small technical footnote for support, not as the headline.
+export function BootErrorScreen({ reason, error }: BootErrorScreenProps) {
 	const { t } = useTranslation()
 	const detail = error ? errorLabel(error) : undefined
 
@@ -36,7 +37,13 @@ export function BootErrorScreen({ reason, error, onRetry }: BootErrorScreenProps
 					{detail ? <EmptyDescription>{detail}</EmptyDescription> : null}
 				</EmptyHeader>
 				<EmptyContent>
-					<Button onClick={onRetry}>{t("retry")}</Button>
+					<Button
+						onClick={() => {
+							window.location.reload()
+						}}
+					>
+						{t("reload")}
+					</Button>
 					{reason ? <span className="font-mono text-xs text-muted-foreground">{reason}</span> : null}
 				</EmptyContent>
 			</Empty>

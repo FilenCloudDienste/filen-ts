@@ -102,6 +102,23 @@ describe("keymap registry", () => {
 		expect(kvStore.get(OVERRIDES_KEY)).toEqual({ "app.test": "shift+k" })
 	})
 
+	it("setUserCombo merges onto a persisted override even when called before the load is awaited", async () => {
+		// The race the load-first guard closes: a stored override plus a remap issued before anyone has
+		// awaited the load. setUserCombo must load-then-merge, so BOTH entries survive in the persisted
+		// record — not just the freshly-set one clobbering the stored one.
+		kvStore.set(OVERRIDES_KEY, { "app.existing": "ctrl+e" })
+
+		const { registerAction, setUserCombo } = await freshRegistry()
+
+		registerAction(actionDef("app.existing"))
+		registerAction(actionDef("app.other"))
+
+		// deliberately NOT awaiting keymapOverridesLoaded() first — setUserCombo owns that ordering now.
+		await setUserCombo("app.other", "shift+o")
+
+		expect(kvStore.get(OVERRIDES_KEY)).toEqual({ "app.existing": "ctrl+e", "app.other": "shift+o" })
+	})
+
 	it("applies a valid persisted override on load, ahead of the default combo", async () => {
 		kvStore.set(OVERRIDES_KEY, { "app.test": "ctrl+k" })
 

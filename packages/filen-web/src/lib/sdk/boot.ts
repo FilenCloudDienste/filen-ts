@@ -1,15 +1,9 @@
 import { sdkApi, threadCount } from "@/lib/sdk/client"
-import { toErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO } from "@/lib/sdk/errors"
 import { useBootStore } from "@/stores/boot"
 import { queryClient } from "@/queries/client"
 import { restorePersistedQueries } from "@/queries/persist"
 import { log } from "@/lib/log"
-
-// The worker's Comlink boundary always throws a plain ErrorDTO; Comlink transport failures (a worker
-// that never loaded) throw something else — normalize both to an ErrorDTO for the store.
-function asErrorDTO(e: unknown): ErrorDTO {
-	return typeof e === "object" && e !== null && "species" in e && "label" in e ? (e as ErrorDTO) : toErrorDTO(e)
-}
 
 // Drives the worker boot + the async-runtime smoke test, reflecting each phase into the boot store.
 // Boot success is NOT health: probeAsync() (an unauth network op that must settle) gates "ready".

@@ -73,9 +73,6 @@ function BootGate() {
 			<BootErrorScreen
 				reason={reason}
 				error={error}
-				onRetry={() => {
-					void bootSdk()
-				}}
 			/>
 		)
 	}

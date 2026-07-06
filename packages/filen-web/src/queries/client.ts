@@ -1,6 +1,6 @@
 import { QueryCache, QueryClient } from "@tanstack/react-query"
 import { persister } from "@/queries/persist"
-import { toErrorDTO, labelFirst } from "@/lib/sdk/errors"
+import { asErrorDTO, labelFirst } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 
 // TWO INDEPENDENT CLOCKS, deliberately decoupled: gcTime is IN-MEMORY retention measured from the
@@ -71,7 +71,9 @@ export const queryClient = new QueryClient({
 	// cache event and filter `event.type === "updated" && event.action.type === "error"` by hand).
 	queryCache: new QueryCache({
 		onError: (error, query) => {
-			const dto = toErrorDTO(error)
+			// The worker rejects with a plain ErrorDTO already; asErrorDTO passes those through instead
+			// of re-normalizing them to "[object Object]".
+			const dto = asErrorDTO(error)
 			log.error("query", `[${query.queryHash}]`, labelFirst(dto))
 		}
 	})

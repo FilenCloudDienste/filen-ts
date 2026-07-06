@@ -21,7 +21,9 @@ self.addEventListener("activate", event => {
 self.addEventListener("fetch", event => {
 	const url = new URL(event.request.url)
 
-	if (url.pathname === "/__sw/version") {
+	// Scope to a same-origin GET: a controlled client's cross-origin requests also route through this
+	// worker, and only our own origin's GET should ever receive the synthetic version response.
+	if (url.origin === self.location.origin && event.request.method === "GET" && url.pathname === "/__sw/version") {
 		event.respondWith(new Response(JSON.stringify({ v: SW_PROTOCOL_VERSION }), { headers: { "Content-Type": "application/json" } }))
 	}
 })

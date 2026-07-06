@@ -115,6 +115,10 @@ export function comboFor(id: string): string {
 }
 
 export async function setUserCombo(id: string, combo: string): Promise<void> {
+	// Await the persisted-overrides load FIRST: without it, an early remap merges onto an empty store
+	// and persists a one-entry record that clobbers any stored overrides — which the late load then
+	// reverts in the UI. Loading first means we merge onto (and re-persist) the full existing set.
+	await ensureOverridesLoaded()
 	useKeymapStore.getState().setOverride(id, combo)
 	await kvSetJson(OVERRIDES_KV_KEY, useKeymapStore.getState().overrides)
 }

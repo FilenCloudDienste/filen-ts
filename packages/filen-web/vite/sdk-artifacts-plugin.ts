@@ -1,4 +1,4 @@
-import { cpSync, createReadStream, existsSync } from "node:fs"
+import { cpSync, createReadStream, existsSync, readdirSync, rmSync } from "node:fs"
 import { extname, join, resolve, sep } from "node:path"
 import { createRequire } from "node:module"
 import type { Plugin, ResolvedConfig } from "vite"
@@ -84,6 +84,15 @@ export function sdkArtifacts(): Plugin {
 				cpSync(join(PKG, a), join(out, a))
 			}
 			cpSync(join(PKG, "snippets"), join(out, "snippets"), { recursive: true })
+			// Vite also emits a CONTENT-HASHED wasm copy from the glue's dead default-arg branch
+			// (`new URL("sdk-rs_bg.wasm", import.meta.url)`), which the worker's explicit `init({ module_or_path })`
+			// never takes — a byte-identical ~10 MB duplicate that is never fetched. Drop it so exactly one
+			// `sdk-rs_bg.wasm` (the unhashed contract copy above) ships.
+			for (const f of readdirSync(out)) {
+				if (f.startsWith("sdk-rs_bg-") && f.endsWith(".wasm")) {
+					rmSync(join(out, f))
+				}
+			}
 		}
 	}
 }
