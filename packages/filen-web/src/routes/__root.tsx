@@ -1,11 +1,14 @@
 import { useEffect } from "react"
 import { createRootRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
 import { QueryClientProvider } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { queryClient } from "@/queries/client"
 import { ThemeProvider } from "@/components/theme-provider"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 import { bootSdk } from "@/lib/sdk/boot"
+import { i18n } from "@/lib/i18n"
+import { registerSW, applyUpdate } from "@/lib/sw/register"
 import { useBootStore } from "@/stores/boot"
 import { BootScreen } from "@/components/shell/boot-screen"
 import { BootErrorScreen } from "@/components/shell/boot-error-screen"
@@ -42,6 +45,22 @@ function BootGate() {
 			void navigate({ to: "/no-coi", replace: true })
 		}
 	}, [reason, onNoCoi, navigate])
+
+	// Side effect off the boot state machine, not a phase of it: once the SDK is ready, register the
+	// service worker and surface any waiting update as a dismissible reload prompt.
+	useEffect(() => {
+		if (phase !== "ready") {
+			return
+		}
+
+		registerSW(() => {
+			toast(i18n.t("updateReadyTitle"), {
+				description: i18n.t("updateReadyBody"),
+				duration: Infinity,
+				action: { label: i18n.t("reload"), onClick: applyUpdate }
+			})
+		})
+	}, [phase])
 
 	if (onNoCoi) {
 		return <Outlet />

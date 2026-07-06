@@ -48,5 +48,8 @@ export const common = {
 	loginEmailPlaceholder: "you@example.com",
 	loginPassword: "Password",
 	loginContinue: "Continue",
-	loginPlaceholderNote: "Sign-in arrives in the next update."
+	loginPlaceholderNote: "Sign-in arrives in the next update.",
+	// Service worker update prompt
+	updateReadyTitle: "Update ready",
+	updateReadyBody: "A new version of Filen has been downloaded. Reload to use it."
 } as const
