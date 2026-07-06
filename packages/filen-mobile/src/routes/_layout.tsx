@@ -151,7 +151,7 @@ const RootLayout = () => {
 											</Fragment>
 										)}
 										<Stack
-											initialRouteName={isAuthed ? "tabs" : "auth"}
+											initialRouteName={isAuthed ? "index" : "auth"}
 											screenOptions={{
 												headerShown: false,
 												contentStyle: {
