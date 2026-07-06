@@ -9,12 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as RegisterRouteImport } from './routes/register'
 import { Route as NoCoiRouteImport } from './routes/no-coi'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteRouteImport } from './routes/_app/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppDriveRouteImport } from './routes/_app/drive'
 
+const RegisterRoute = RegisterRouteImport.update({
+  id: '/register',
+  path: '/register',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const NoCoiRoute = NoCoiRouteImport.update({
   id: '/no-coi',
   path: '/no-coi',
@@ -44,12 +50,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/no-coi': typeof NoCoiRoute
+  '/register': typeof RegisterRoute
   '/drive': typeof AppDriveRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/no-coi': typeof NoCoiRoute
+  '/register': typeof RegisterRoute
   '/drive': typeof AppDriveRoute
 }
 export interface FileRoutesById {
@@ -58,14 +66,22 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteRouteWithChildren
   '/login': typeof LoginRoute
   '/no-coi': typeof NoCoiRoute
+  '/register': typeof RegisterRoute
   '/_app/drive': typeof AppDriveRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/no-coi' | '/drive'
+  fullPaths: '/' | '/login' | '/no-coi' | '/register' | '/drive'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/no-coi' | '/drive'
-  id: '__root__' | '/' | '/_app' | '/login' | '/no-coi' | '/_app/drive'
+  to: '/' | '/login' | '/no-coi' | '/register' | '/drive'
+  id:
+    | '__root__'
+    | '/'
+    | '/_app'
+    | '/login'
+    | '/no-coi'
+    | '/register'
+    | '/_app/drive'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -73,10 +89,18 @@ export interface RootRouteChildren {
   AppRouteRoute: typeof AppRouteRouteWithChildren
   LoginRoute: typeof LoginRoute
   NoCoiRoute: typeof NoCoiRoute
+  RegisterRoute: typeof RegisterRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/register': {
+      id: '/register'
+      path: '/register'
+      fullPath: '/register'
+      preLoaderRoute: typeof RegisterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/no-coi': {
       id: '/no-coi'
       path: '/no-coi'
@@ -132,6 +156,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppRouteRoute: AppRouteRouteWithChildren,
   LoginRoute: LoginRoute,
   NoCoiRoute: NoCoiRoute,
+  RegisterRoute: RegisterRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

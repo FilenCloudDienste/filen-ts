@@ -4,12 +4,12 @@ import { sdkApi } from "@/lib/sdk/client"
 import { whenBootReady } from "@/lib/sdk/boot"
 import { Logo } from "@/components/shell/logo"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { LoginForm } from "@/components/auth/login-form"
 
-// Unauthed page: bounce straight to /drive if a session is already live. Boot has already resumed
-// the session (T1) before this runs, so the read is race-free — mirrors `_app/route.tsx`'s guard,
-// inverted (redirect on authed, not on unauthed).
-export const Route = createFileRoute("/login")({
+// Placeholder registration surface — the real form (strength meter, referral capture, eligibility
+// banner) is the next task. Exists now so /login's "Sign up" link has a real, typed route to reach,
+// staged the same way /login itself was staged ahead of its real form. Guard mirrors /login's,
+// inverted from `_app/route.tsx`.
+export const Route = createFileRoute("/register")({
 	beforeLoad: async () => {
 		await whenBootReady()
 		const authed = await sdkApi.hasClient().catch(() => false)
@@ -17,11 +17,12 @@ export const Route = createFileRoute("/login")({
 			throw redirect({ to: "/drive" })
 		}
 	},
-	component: LoginPage
+	component: RegisterPage
 })
 
-function LoginPage() {
+function RegisterPage() {
 	const { t } = useTranslation("auth")
+	const { t: tCommon } = useTranslation()
 
 	return (
 		<div className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
@@ -29,22 +30,22 @@ function LoginPage() {
 				<CardHeader className="justify-items-center gap-3 text-center">
 					<Logo className="size-10 text-primary" />
 					<div className="flex flex-col gap-1">
-						<CardTitle>{t("loginTitle")}</CardTitle>
-						<CardDescription>{t("loginSubtitle")}</CardDescription>
+						<CardTitle>{t("registerTitle")}</CardTitle>
+						<CardDescription>{t("registerSubtitle")}</CardDescription>
 					</div>
 				</CardHeader>
 				<CardContent>
-					<LoginForm />
+					<p className="text-center text-sm text-muted-foreground">{tCommon("comingSoon")}</p>
 				</CardContent>
 				<CardFooter className="justify-center">
 					<p className="text-sm text-muted-foreground">
 						<Trans
 							t={t}
-							i18nKey="dontHaveAccount"
+							i18nKey="alreadyHaveAccount"
 							components={{
 								a: (
 									<Link
-										to="/register"
+										to="/login"
 										className="text-foreground underline underline-offset-4"
 									/>
 								)

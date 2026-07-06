@@ -10,8 +10,13 @@
 // used to sign in if the authenticator app is lost. The exportMasterKeys() artifact is always
 // `masterKeys…` in identifiers and i18n keys. Never blur the two.
 //
-// Split-sentence links (`dontHaveAccount`, `alreadyHaveAccount`) embed the tappable segment as a
-// `<link>…</link>` placeholder for react-i18next's `<Trans>` component. Prefer the bound-`t` form
+// Split-sentence links (`dontHaveAccount`, `alreadyHaveAccount`) embed the tappable segment as an
+// `<a>…</a>` placeholder for react-i18next's `<Trans>` component (`components={{ a: <Link .../> }}`).
+// NOT `<link>` — react-i18next's HTML parser (html-parse-stringify, via the `void-elements` table)
+// treats `<link>` as a void element like `<br>`/`<img>`, so `<link>Sign up</link>` silently drops
+// its children: the anchor renders empty and "Sign up" lands as unlinked plain text after it
+// (verified against a live build). Never use a tag name from the HTML void-elements list here
+// (area/base/br/col/embed/hr/img/input/link/meta/param/source/track/wbr). Prefer the bound-`t` form
 // (`const { t } = useTranslation("auth")` then `<Trans t={t} i18nKey="dontHaveAccount">`) — a
 // cross-namespace `i18nKey="auth:key"` string does not infer cleanly under this app's typed
 // `CustomTypeOptions`.
@@ -32,8 +37,8 @@ export const auth = {
 	loginPassword: "Password",
 	/** Login screen — submit button; also submits the two-factor step's retry once a code is entered */
 	loginSubmit: "Sign in",
-	/** Login screen — split-sentence link to the register screen; <link> wraps "Sign up" */
-	dontHaveAccount: "Don't have an account? <link>Sign up</link>",
+	/** Login screen — split-sentence link to the register screen; <a> wraps "Sign up" */
+	dontHaveAccount: "Don't have an account? <a>Sign up</a>",
 
 	// ── Two-factor step (shown during login when the account requires it) ──────
 	/** Login two-factor step — title shown once the account requires a code */
@@ -78,8 +83,8 @@ export const auth = {
 	registerConfirmPassword: "Confirm password",
 	/** Register screen — submit button */
 	registerSubmit: "Create account",
-	/** Register screen — split-sentence link to the login screen; <link> wraps "Sign in" */
-	alreadyHaveAccount: "Already have an account? <link>Sign in</link>",
+	/** Register screen — split-sentence link to the login screen; <a> wraps "Sign in" */
+	alreadyHaveAccount: "Already have an account? <a>Sign in</a>",
 
 	// ── Password strength meter (register screen) ───────────────────────────────
 	/** Register screen — label for the live password-strength meter */

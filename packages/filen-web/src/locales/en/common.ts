@@ -70,21 +70,6 @@ export const common = {
 	driveEmptyTitle: "Nothing here yet",
 	/** Drive page — empty-state body under the title */
 	driveEmptyBody: "Files and directories you add will appear here.",
-	// Login (placeholder — the real sign-in flow lands next)
-	/** Placeholder login card — title (superseded by the "auth" namespace once the real sign-in flow lands) */
-	loginTitle: "Sign in to Filen",
-	/** Placeholder login card — subtitle under the title */
-	loginSubtitle: "Your end-to-end encrypted drive, notes and chats.",
-	/** Placeholder login card — email field label */
-	loginEmail: "Email",
-	/** Placeholder login card — email field placeholder */
-	loginEmailPlaceholder: "you@example.com",
-	/** Placeholder login card — password field label */
-	loginPassword: "Password",
-	/** Placeholder login card — submit button */
-	loginContinue: "Continue",
-	/** Placeholder login card — note explaining sign-in is not functional yet */
-	loginPlaceholderNote: "Sign-in arrives in the next update.",
 	// Service worker update prompt
 	/** Update toast — title raised when a new version has been installed and is waiting */
 	updateReadyTitle: "Update ready",
