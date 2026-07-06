@@ -16,9 +16,8 @@
 // cross-namespace `i18nKey="auth:key"` string does not infer cleanly under this app's typed
 // `CustomTypeOptions`.
 //
-// The typed-confirmation phrase (`skipMasterKeysWarningTypedConfirmPhrase`) must be compared
-// verbatim (trimmed) against user input by reading it back through `t()` — never hardcode the
-// English string in the comparison, or a translated catalog stops matching its own instructions.
+// The skip-keys stage-4 gate compares the typed value against the account email (interpolated
+// into the copy as {{email}}) — a live value, never a translated phrase.
 export const auth = {
 	// ── Login screen ────────────────────────────────────────────────────────────
 	/** Login screen — page title above the sign-in form */
@@ -102,18 +101,12 @@ export const auth = {
 	/** Register screen — link on the eligibility banner opening the explainer article */
 	registerCheckLearnMore: "Learn more",
 
-	// ── Post-register / resend confirmation ─────────────────────────────────────
-	/** Register screen — success message after registration succeeds; the confirmation link itself is homepage-owned, not a web-app route */
+	// ── Post-register success panel / resend confirmation ───────────────────────
+	/** Register success panel — message shown after registration succeeds; the confirmation link itself is homepage-owned, not a web-app route */
 	accountCreatedCheckEmail: "Account created. Please check your email to confirm your address.",
-	/** Login screen — link/dialog title to resend the registration-confirmation email */
+	/** Register success panel — button that resends the confirmation email; no prompt, reuses the email already typed on the form */
 	resendConfirmation: "Resend confirmation email",
-	/** Resend-confirmation dialog — body asking for the registered email */
-	resendConfirmationBody: "Enter the email address you registered with and we'll send a new confirmation link.",
-	/** Resend-confirmation dialog — email field label */
-	resendConfirmationEmail: "Email",
-	/** Resend-confirmation dialog — submit button */
-	resendConfirmationSubmit: "Resend",
-	/** Resend-confirmation dialog — non-revealing confirmation shown after submit; never confirms whether the account exists or is already confirmed */
+	/** Register success panel — non-revealing toast after pressing resend; never confirms whether the account exists or is already confirmed */
 	resendConfirmationSent: "If an account exists for that address, a confirmation email has been sent.",
 
 	// ── Reset page (token-only: the user retypes their email, no prefill) ──────
@@ -156,12 +149,11 @@ export const auth = {
 		"Filen cannot recover this data for you afterwards, through support or otherwise. Only continue if you accept losing it permanently.",
 	/** Skip-master-keys warning, stage 4 of 4 — title for the final typed-confirmation gate */
 	skipMasterKeysWarningStage4Title: "Type to confirm",
-	/** Skip-master-keys warning, stage 4 of 4 — body instructing the user to type the confirmation phrase; {{phrase}} interpolates skipMasterKeysWarningTypedConfirmPhrase */
-	skipMasterKeysWarningStage4Body: "Type {{phrase}} below exactly as shown. This is your last chance to cancel.",
-	/** Skip-master-keys warning, stage 4 of 4 — the exact phrase the user must type; compare verbatim (trimmed) against the live t() value, never a hardcoded literal */
-	skipMasterKeysWarningTypedConfirmPhrase: "DELETE MY DATA",
-	/** Skip-master-keys warning, stage 4 of 4 — label for the typed-confirmation input */
-	skipMasterKeysWarningTypedConfirmLabel: "Confirmation phrase",
+	/** Skip-master-keys warning, stage 4 of 4 — body instructing the user to type their account email to arm the confirm button; {{email}} interpolates the live account email */
+	skipMasterKeysWarningStage4Body:
+		"Type your email address ({{email}}) below to confirm you accept permanently losing your existing files, notes and chats. This is your last chance to cancel.",
+	/** Skip-master-keys warning, stage 4 of 4 — label for the typed-email confirmation input */
+	skipMasterKeysWarningTypedConfirmLabel: "Your email address",
 
 	// ── Logout confirm ───────────────────────────────────────────────────────────
 	/** Logout confirm dialog — title; the confirm button reuses common:signOut */
@@ -221,8 +213,8 @@ export const auth = {
 	/** Export-master-keys row, dialog title, and button label */
 	exportMasterKeysAction: "Export master keys",
 	/** Export-master-keys row — subtitle summarizing the purpose */
-	exportMasterKeysDescription: "Back up your master keys for account recovery",
-	/** Export-master-keys dialog — body explaining why master keys matter for password-reset recovery */
+	exportMasterKeysDescription: "Back up your master keys to restore access if you forget your password",
+	/** Export-master-keys dialog — body explaining why master keys matter for password reset */
 	exportMasterKeysBody:
 		"Your master keys are required to recover your account if you forget your password. Export and store them somewhere safe.",
 	/** Master-keys reminder banner — title shown when the user has never exported their master keys */
