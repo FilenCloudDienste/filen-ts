@@ -8,6 +8,7 @@ import { router } from "@/lib/router"
 import { type DriveItemFileExtracted } from "@/types"
 import { getPreviewType } from "@/lib/previewType"
 import { useWindowDimensions, Platform, type NativeSyntheticEvent, type NativeScrollEvent, type LayoutChangeEvent } from "react-native"
+import { SystemBars } from "react-native-edge-to-edge"
 import { GestureDetector, Gesture } from "react-native-gesture-handler"
 import { useSharedValue, useAnimatedStyle, type SharedValue, withSpring, interpolate, Extrapolation } from "react-native-reanimated"
 import { type DrivePath } from "@/hooks/useDrivePath"
@@ -478,6 +479,15 @@ const Gallery = () => {
 		setHeaderOpacityValue(headerOpacity, headerOpacity.value < 0.5)
 	}
 
+	// In-place immersive landscape for videos (#53): rotating to landscape hides the gallery
+	// header and the system bars and previewVideo drops its paddings, so the existing VideoView
+	// fills the physical screen where it stands. Deliberately NOT expo-video's native fullscreen:
+	// on Android that launches a separate activity, which backgrounds MainActivity (HTTP provider
+	// teardown mid-playback + biometric arming — spec §3a) and pauses the JS runtime entirely.
+	// Gated off during a PiP session — the Android PiP window's tiny landscape-ish dimensions
+	// must not flip the (frozen-width) gallery into immersive state underneath the session.
+	const immersive = dimensions.width > dimensions.height && isVideo && !pipSessionActive
+
 	const headerAnimatedStyle = useAnimatedStyle(() => {
 		"worklet"
 
@@ -485,7 +495,7 @@ const Gallery = () => {
 		const panProgress = Math.abs(dismissTranslateY.value) / fadeRange
 		const pinchProgress = zoomScale.value < 1 ? (1 - zoomScale.value) / (1 - PINCH_BG_FADE_END) : 0
 		const dismissFade = 1 - Math.min(1, Math.max(panProgress, pinchProgress) * 1.5)
-		const base = isImage ? headerOpacity.value : 1
+		const base = immersive ? 0 : isImage ? headerOpacity.value : 1
 
 		return {
 			opacity: Math.max(0, base * zoomFade * dismissFade)
@@ -636,6 +646,13 @@ const Gallery = () => {
 
 	return (
 		<View className="flex-1 bg-transparent">
+			{/* Always mounted with a DYNAMIC hidden value: SystemBars' entries-stack merge skips
+			  * undefined props, so popping a hidden:true entry would leave the bars hidden (the
+			  * native side is only touched by explicit values). Flipping the SAME entry to an
+			  * explicit false re-shows the bars; the unmount-while-immersive path (dismissing the
+			  * gallery in landscape) is covered by the StyleProvider's explicit hidden:false base
+			  * entry, which the pop re-applies. */}
+			<SystemBars hidden={{ statusBar: immersive, navigationBar: immersive }} />
 			<AnimatedView
 				className="absolute inset-0 bg-black"
 				style={backgroundAnimatedStyle}
@@ -643,6 +660,9 @@ const Gallery = () => {
 			<GalleryHeader
 				animatedStyle={headerAnimatedStyle}
 				goBack={goBack}
+				// Faded out by the immersive style above — without this the invisible close/menu
+				// buttons would still swallow taps at the top edge of the video.
+				pointerEvents={immersive ? "none" : "auto"}
 			/>
 			<GestureDetector gesture={dismissGesture}>
 				<AnimatedView

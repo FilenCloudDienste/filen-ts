@@ -15,6 +15,10 @@ vi.mock("expo-router", () => ({
 	router: { canGoBack: vi.fn(() => false), back: vi.fn() }
 }))
 
+vi.mock("react-native-edge-to-edge", () => ({
+	SystemBars: () => null
+}))
+
 vi.mock("expo-screen-orientation", () => ({
 	Orientation: {
 		PORTRAIT_UP: 1,

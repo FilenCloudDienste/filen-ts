@@ -149,13 +149,19 @@ const PreviewVideo = ({ cacheKey, fileUrl }: { cacheKey: string; fileUrl: string
 		setHasLoadedOnce(true)
 	}
 
+	// In-place immersive landscape (#53): the gallery hides its header + the system bars when a
+	// video is viewed in landscape, and this drops the header/safe-area paddings so the VideoView
+	// fills the physical screen (contentFit "contain" letterboxes past any cutout). Portrait keeps
+	// the paddings so the video clears the gallery header and the home indicator.
+	const isLandscape = dimensions.width > dimensions.height
+
 	const videoViewStyle: ViewStyle = {
 		width: dimensions.width,
 		height: dimensions.height,
-		paddingTop: headerHeight ? headerHeight + insets.top : 0,
-		paddingBottom: insets.bottom,
-		paddingLeft: insets.left,
-		paddingRight: insets.right
+		paddingTop: !isLandscape && headerHeight ? headerHeight + insets.top : 0,
+		paddingBottom: isLandscape ? 0 : insets.bottom,
+		paddingLeft: isLandscape ? 0 : insets.left,
+		paddingRight: isLandscape ? 0 : insets.right
 	}
 
 	return (

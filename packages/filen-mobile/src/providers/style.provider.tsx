@@ -18,7 +18,16 @@ const StyleProvider = ({ children }: { children: React.ReactNode }) => {
 				}
 			}}
 		>
-			<SystemBars style={theme === "dark" ? "light" : "dark"} />
+			{/* hidden must be EXPLICIT here: SystemBars' entries-stack merge skips undefined, so
+			  * without a false base entry, popping any transient hidden:true entry (the gallery's
+			  * immersive landscape video mode) would leave the bars hidden forever. */}
+			<SystemBars
+				style={theme === "dark" ? "light" : "dark"}
+				hidden={{
+					statusBar: false,
+					navigationBar: false
+				}}
+			/>
 			{children}
 		</ThemeProvider>
 	)

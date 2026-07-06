@@ -27,10 +27,15 @@ import logger from "@/lib/logger"
 
 const GalleryHeader = ({
 	animatedStyle,
-	goBack
+	goBack,
+	pointerEvents = "auto"
 }: {
 	animatedStyle: ReturnType<typeof useAnimatedStyle<{ opacity: number }>>
 	goBack: () => void
+	// "none" while the gallery hides the header for immersive landscape video (#53) — an
+	// opacity-0 overlay still hit-tests, so its close/menu buttons must be taken out of the
+	// touch tree explicitly.
+	pointerEvents?: "auto" | "none"
 }) => {
 	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
@@ -70,6 +75,7 @@ const GalleryHeader = ({
 		<AnimatedView
 			className={cn("absolute top-0 left-0 right-0 z-1000", solidHeader ? "bg-background" : "bg-transparent")}
 			style={animatedStyle}
+			pointerEvents={pointerEvents}
 		>
 			<SafeAreaView
 				edges={["top", "left", "right"]}
