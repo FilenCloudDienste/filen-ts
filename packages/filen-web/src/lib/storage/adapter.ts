@@ -76,3 +76,10 @@ export async function kvSetJson(key: string, value: unknown): Promise<void> {
 	const { api } = await storage()
 	await api.kvSet(key, stringifyEnvelope(value))
 }
+
+// No envelope on delete — the key is the only argument. The primitive already exists in the worker
+// layer; the adapter simply exposes it alongside get/set.
+export async function kvDelete(key: string): Promise<void> {
+	const { api } = await storage()
+	await api.kvDelete(key)
+}

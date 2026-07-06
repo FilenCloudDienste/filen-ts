@@ -4,8 +4,8 @@ import { sdkApi } from "@/lib/sdk/client"
 import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { comboFor, setUserCombo } from "@/lib/keymap/registry"
-import { SESSION_KV_KEY } from "@/lib/sdk/session"
-import { useBootStore } from "@/stores/boot"
+import { persistSession, resumeSession } from "@/lib/sdk/session"
+import { whenBootReady } from "@/lib/sdk/boot"
 import { log } from "@/lib/log"
 
 // Test-only hooks, loaded ONLY when the app is built with VITE_E2E=1 (a dynamic import behind that
@@ -47,36 +47,14 @@ declare global {
 	}
 }
 
-type BootSnapshot = ReturnType<typeof useBootStore.getState>
-
-// Resolves once the SDK worker boot reaches "ready" (wasm init + thread pool up, required before
-// injectClient/login run); rejects if boot fails, so callers surface the failure instead of hanging.
-function whenBootReady(): Promise<void> {
-	return new Promise((resolve, reject) => {
-		function settle(state: BootSnapshot): void {
-			if (state.phase === "ready") {
-				unsub()
-				resolve()
-			} else if (state.phase === "error") {
-				unsub()
-				reject(new Error(`boot failed before ready: ${state.reason ?? "unknown"}`))
-			}
-		}
-
-		// zustand's subscribe never invokes the listener synchronously, so `unsub` is always assigned
-		// before `settle` first runs (the manual call below, or any later store change).
-		const unsub = useBootStore.subscribe(settle)
-
-		settle(useBootStore.getState())
-	})
-}
-
-// If a session blob was seeded into sessionStorage (by the injection fixture), move it into the
-// worker (so `hasClient()` reports authed) and persist it through the normal kv session-save path,
-// then clear the one-shot slot and re-run the route guards. The guards resolve `hasClient()` long
-// before this async injection completes, so the app first lands unauthed; a client-side navigation
-// (never a reload — that would drop the just-injected worker state) mirrors the real post-login
-// transition and lets the authed shell render.
+// If a session blob was seeded into sessionStorage (by the injection fixture), drive it through the
+// PRODUCTION session path — persist to kv, then resume (validate → inject into the worker) — so the
+// harness exercises the real save/restore round-trip rather than a bespoke write. Then clear the
+// one-shot slot and re-run the route guards. On this first seeded load the guards ran during boot
+// (kv still empty) and landed unauthed; a client-side navigation (never a reload — that would drop
+// the just-injected worker state) mirrors the real post-login transition and lets the authed shell
+// render. On a later reload the blob is already in kv, so bootSdk's own resumeSession authenticates
+// before the guards read hasClient() — no navigation needed.
 async function seedFromSlot(router: RouterLike): Promise<void> {
 	const raw = sessionStorage.getItem(SESSION_SLOT)
 
@@ -90,8 +68,8 @@ async function seedFromSlot(router: RouterLike): Promise<void> {
 
 	const blob = parseEnvelope(raw) as StringifiedClient
 
-	await sdkApi.injectClient(blob)
-	await kvSetJson(SESSION_KV_KEY, blob)
+	await persistSession(blob)
+	await resumeSession()
 	await router.navigate({ to: "/" })
 }
 

@@ -6,7 +6,8 @@ import { queryClient } from "@/queries/client"
 import { ThemeProvider } from "@/components/theme-provider"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
-import { bootSdk } from "@/lib/sdk/boot"
+import { onAuthBroadcast } from "@/lib/sdk/session"
+import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { registerSW, applyUpdate } from "@/lib/sw/register"
 import { useBootStore } from "@/stores/boot"
@@ -14,11 +15,6 @@ import { BootScreen } from "@/components/shell/boot-screen"
 import { BootErrorScreen } from "@/components/shell/boot-error-screen"
 
 export const Route = createRootRoute({ component: RootLayout })
-
-// Boot runs exactly once per document load. A module-level guard (not component state) survives
-// StrictMode's effect double-invoke and any remount of the gate, so `initThreadPool` is never re-run
-// against the already-live worker.
-let bootStarted = false
 
 // Every route inherits this gate. It renders the boot/error screens in place of the route Outlet
 // until the SDK is ready — except /no-coi, which is intentionally SDK-free and always allowed through
@@ -31,12 +27,23 @@ function BootGate() {
 	const navigate = useNavigate()
 	const onNoCoi = pathname === "/no-coi"
 
+	// Cross-tab auth coordination. A BroadcastChannel never hears its own posts, so only OTHER tabs
+	// react: a logout elsewhere reloads this tab (boot then lands on /login now that the shared kv
+	// session is cleared); a login elsewhere reloads this tab only if it is still unauthed, so it
+	// adopts the newly-persisted session. Each tab runs its own SDK worker, so a reload is the only way
+	// to re-sync a tab's in-worker client with the shared session — no key material crosses the channel.
 	useEffect(() => {
-		if (bootStarted) {
-			return
-		}
-		bootStarted = true
-		void bootSdk()
+		return onAuthBroadcast(message => {
+			if (message.kind === "logout") {
+				location.reload()
+				return
+			}
+			void sdkApi.hasClient().then(authed => {
+				if (!authed) {
+					location.reload()
+				}
+			})
+		})
 	}, [])
 
 	// A missing cross-origin-isolation is a distinct, actionable failure with its own page.

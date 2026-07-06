@@ -1,6 +1,15 @@
 /// <reference lib="webworker" />
 import * as Comlink from "comlink"
-import init, { initThreadPool, UnauthClient, type Client, type StringifiedClient } from "@filen/sdk-rs"
+import init, {
+	initThreadPool,
+	UnauthClient,
+	type Client,
+	type StringifiedClient,
+	type UserInfo,
+	type RegisterParams,
+	type CompletePasswordResetParams,
+	type ChangePasswordParams
+} from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
 import { toErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
@@ -16,6 +25,40 @@ export type BootResult =
 	{ ok: true; threads: number } | { ok: false; reason: "artifacts" | "coi" | "pool" | "async-runtime"; detail: string }
 
 let client: Client | null = null
+
+// Every authed op reads the live Client through this guard. Post-logout `client` is null, so a
+// forwarded call would null-deref; failing fast here surfaces a clean DTO at the Comlink boundary
+// ("no authenticated client") instead of a raw TypeError.
+function requireClient(): Client {
+	if (client === null) {
+		throw new Error("no authenticated client")
+	}
+	return client
+}
+
+// Adopt a freshly-authenticated Client as the live session, freeing the prior handle first (the
+// handle law: any op that replaces `client` releases what it replaces). Called only after the new
+// handle is in hand, so a failed auth never destroys the existing session.
+function adoptClient(next: Client): void {
+	client?.free()
+	client = next
+}
+
+// Run an unauthenticated op against a throwaway UnauthClient, releasing it (LIFO defer) whichever way
+// the op settles; unwraps the Result so the Comlink boundary sees a thrown ErrorDTO, not a Result.
+async function withUnauth<T>(fn: (unauth: UnauthClient) => Promise<T>): Promise<T> {
+	const r = await run<T>(async defer => {
+		const unauth = UnauthClient.from_config({})
+		defer(() => {
+			unauth.free()
+		})
+		return fn(unauth)
+	})
+	if (!r.success) {
+		throw r.error
+	}
+	return r.data
+}
 
 async function preflightArtifacts(): Promise<string | null> {
 	for (const a of ["filen-sdk-worker-thread.js", "sdk-rs.js", "sdk-rs_bg.wasm"]) {
@@ -61,19 +104,30 @@ const api = {
 			throw r.error
 		}
 	},
-	async login(params: { email: string; password: string; twoFactorCode?: string }): Promise<StringifiedClient> {
-		const r = await run(async defer => {
-			const unauth = UnauthClient.from_config({})
-			defer(() => {
-				unauth.free()
-			})
-			client = await unauth.login(params) // LoginParams object (verified .d.ts); 2FA via exception-driven re-call
-			return client.toStringified()
+	login(params: { email: string; password: string; twoFactorCode?: string }): Promise<StringifiedClient> {
+		return withUnauth(async unauth => {
+			const next = await unauth.login(params) // LoginParams object (verified .d.ts); 2FA via exception-driven re-call
+			adoptClient(next)
+			return next.toStringified()
 		})
-		if (!r.success) {
-			throw r.error
-		}
-		return r.data
+	},
+	register(params: RegisterParams): Promise<void> {
+		return withUnauth(unauth => unauth.register(params))
+	},
+	startPasswordReset(email: string): Promise<void> {
+		return withUnauth(unauth => unauth.startPasswordReset(email))
+	},
+	completePasswordReset(params: CompletePasswordResetParams): Promise<StringifiedClient> {
+		// Post-reset auto-login: keep the returned Client live (mirrors login), so the caller lands
+		// authed and re-persists the fresh blob.
+		return withUnauth(async unauth => {
+			const next = await unauth.completePasswordReset(params)
+			adoptClient(next)
+			return next.toStringified()
+		})
+	},
+	resendRegistrationConfirmation(email: string): Promise<void> {
+		return withUnauth(unauth => unauth.resendRegistrationConfirmation(email))
 	},
 	injectClient(blob: StringifiedClient): void {
 		const r = runEffect(
@@ -89,7 +143,7 @@ const api = {
 		if (!r.success) {
 			throw r.error
 		}
-		client = r.data
+		adoptClient(r.data)
 	},
 	async probeAuthedRead(): Promise<boolean> {
 		if (client === null) {
@@ -104,6 +158,44 @@ const api = {
 			throw r.error
 		}
 		return true
+	},
+	getUserInfo(): Promise<UserInfo> {
+		// bigint fields (ids, storage/quota counters) cross Comlink via structured clone — no boundary
+		// serializer.
+		return requireClient().getUserInfo()
+	},
+	async changePassword(params: ChangePasswordParams): Promise<StringifiedClient> {
+		const c = requireClient()
+		await c.changePassword(params) // mutates the live client in place (re-derives keys)
+		// Re-stringify AFTER the mutation so the caller re-persists the new credential fingerprint; the
+		// pre-change blob would no longer authenticate.
+		return c.toStringified()
+	},
+	exportMasterKeys(): Promise<string> {
+		return requireClient().exportMasterKeys()
+	},
+	enable2FA(code: string): Promise<string> {
+		// Returns the 2FA backup code — the only artifact this app names a "recovery key".
+		return requireClient().enable2FAGetRecoveryKey(code)
+	},
+	async disable2FA(code: string): Promise<void> {
+		await requireClient().disable2FA(code)
+	},
+	async deleteAccount(code?: string): Promise<void> {
+		await requireClient().deleteAccount(code)
+	},
+	logout(): void {
+		// Null FIRST so any subsequent authed op fails fast via requireClient() instead of racing the
+		// teardown. Then defer the actual free(): an in-flight wasm call still holds this handle and
+		// freeing it mid-flight is not verified safe, so hand the free to a later task rather than
+		// tearing the handle down inside logout's own turn.
+		const prev = client
+		client = null
+		if (prev !== null) {
+			setTimeout(() => {
+				prev.free()
+			}, 0)
+		}
 	},
 	hasClient(): boolean {
 		return client !== null
