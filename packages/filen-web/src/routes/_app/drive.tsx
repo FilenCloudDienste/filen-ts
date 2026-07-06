@@ -34,6 +34,7 @@ function DrivePage() {
 							variant="secondary"
 							size="icon-sm"
 							aria-label={t("driveViewList")}
+							disabled
 						>
 							<ListIcon />
 						</Button>
@@ -42,6 +43,7 @@ function DrivePage() {
 							size="icon-sm"
 							className="text-muted-foreground"
 							aria-label={t("driveViewGrid")}
+							disabled
 						>
 							<LayoutGridIcon />
 						</Button>

@@ -8,7 +8,7 @@ let handle: Promise<StorageHandle> | null = null
 
 // Reflects the resolved backend into the boot store exactly once per tab — asks the
 // API for its mode rather than assuming, so a follower tab (whose own `open()` never ran) still
-// reports the leader's real mode. Badge UI consuming `useBootStore().ephemeral` is not wired up yet.
+// reports the leader's real mode. The icon rail consumes `useBootStore().ephemeral` for its badge.
 async function markEphemeralIndicator(): Promise<void> {
 	useBootStore.getState().setEphemeral((await storageMode()) === "ephemeral")
 }

@@ -5,11 +5,9 @@
 // namespaces ("common", "errors"), so keys must avoid literal '.' or ':' characters.
 export const common = {
 	appName: "Filen",
-	loading: "Loading…",
 	ephemeralSession: "Ephemeral session",
 	bootDownloading: "Downloading Filen…",
 	bootErrorTitle: "Filen could not start",
-	retry: "Try again",
 	reload: "Reload page",
 	noCoiTitle: "Unable to start Filen securely",
 	noCoiBody:

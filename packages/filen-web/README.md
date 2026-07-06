@@ -1,21 +1,23 @@
-# React + TypeScript + Vite + shadcn/ui
+# @filen/web
 
-This is a template for a new Vite project with React, TypeScript, and shadcn/ui.
+The Filen web app — a from-scratch rewrite of Filen's end-to-end encrypted Cloud Drive, Notes and Chats client for the browser. All cryptography, networking and transfers run through the Rust SDK (`@filen/sdk-rs`) inside a cross-origin-isolated worker; this package is the UI, routing and boot shell around it.
 
-## Adding components
+## Requirements
 
-To add components to your app, run the following command:
+| Tool | Version |
+| ---- | ------- |
+| Node | >= 24   |
+| npm  | >= 10   |
 
-```bash
-npx shadcn@latest add button
-```
+## Commands
 
-This will place the ui components in the `src/components` directory.
-
-## Using components
-
-To use the components in your app, import them as follows:
-
-```tsx
-import { Button } from "@/components/ui/button"
-```
+| Command             | Description                                            |
+| ------------------- | ------------------------------------------------------ |
+| `npm run dev`       | Start the Vite dev server                              |
+| `npm run build`     | Type-check, build the app, then build the service worker |
+| `npm run preview`   | Serve the production build locally                     |
+| `npm run test`      | Run the unit tests (Vitest)                            |
+| `npm run test:e2e`  | Run the end-to-end tests (Playwright)                  |
+| `npm run lint`      | ESLint plus a Prettier format check                    |
+| `npm run typecheck` | Type-check without emitting                            |
+| `npm run format`    | Format the source with Prettier                        |
