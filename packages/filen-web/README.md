@@ -7,7 +7,7 @@ The Filen web app — a from-scratch rewrite of Filen's end-to-end encrypted Clo
 | Tool | Version |
 | ---- | ------- |
 | Node | >= 24   |
-| npm  | >= 10   |
+| npm  | >= 11   |
 
 ## Commands
 
