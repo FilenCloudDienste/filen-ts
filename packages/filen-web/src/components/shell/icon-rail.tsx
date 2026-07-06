@@ -29,7 +29,6 @@ import {
 	DropdownMenuGroup,
 	DropdownMenuItem,
 	DropdownMenuLabel,
-	DropdownMenuSeparator,
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
 import { Kbd } from "@/lib/keymap/Kbd"
@@ -42,10 +41,10 @@ type IconType = ComponentType<{ className?: string }>
 // `disabled` is deliberately avoided (it suppresses pointer events, which would kill the tooltip);
 // `aria-disabled` + muted styling conveys the same state while keeping hover/focus explainers.
 const MODULES: { key: CommonKey; icon: IconType }[] = [
+	{ key: "moduleTransfers", icon: ArrowDownUpIcon },
 	{ key: "moduleNotes", icon: NotebookPenIcon },
 	{ key: "moduleChats", icon: MessagesSquareIcon },
-	{ key: "moduleContacts", icon: UsersIcon },
-	{ key: "moduleTransfers", icon: ArrowDownUpIcon }
+	{ key: "moduleContacts", icon: UsersIcon }
 ]
 
 function ThemeToggle() {
@@ -106,14 +105,6 @@ function AccountMenu() {
 			>
 				<DropdownMenuGroup>
 					<DropdownMenuLabel>{t("account")}</DropdownMenuLabel>
-					<DropdownMenuItem
-						disabled
-						aria-disabled="true"
-					>
-						<SettingsIcon />
-						{t("settings")}
-					</DropdownMenuItem>
-					<DropdownMenuSeparator />
 					<DropdownMenuItem
 						disabled
 						aria-disabled="true"
@@ -200,6 +191,8 @@ export function IconRail() {
 					</Tooltip>
 				) : null}
 
+				<AccountMenu />
+
 				<Tooltip>
 					<TooltipTrigger
 						render={
@@ -217,7 +210,26 @@ export function IconRail() {
 
 				<Separator className="w-8" />
 				<ThemeToggle />
-				<AccountMenu />
+
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="icon-lg"
+								aria-disabled="true"
+								aria-label={t("settings")}
+								className="text-muted-foreground/60 hover:bg-transparent hover:text-muted-foreground/60"
+							>
+								<SettingsIcon />
+							</Button>
+						}
+					/>
+					<TooltipContent side="right">
+						{t("settings")}
+						<span className="text-background/60">· {t("comingSoon")}</span>
+					</TooltipContent>
+				</Tooltip>
 			</div>
 		</nav>
 	)
