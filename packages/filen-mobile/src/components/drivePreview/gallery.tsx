@@ -479,14 +479,17 @@ const Gallery = () => {
 		setHeaderOpacityValue(headerOpacity, headerOpacity.value < 0.5)
 	}
 
-	// In-place immersive landscape for videos (#53): rotating to landscape hides the gallery
-	// header and the system bars and previewVideo drops its paddings, so the existing VideoView
-	// fills the physical screen where it stands. Deliberately NOT expo-video's native fullscreen:
-	// on Android that launches a separate activity, which backgrounds MainActivity (HTTP provider
-	// teardown mid-playback + biometric arming — spec §3a) and pauses the JS runtime entirely.
-	// Gated off during a PiP session — the Android PiP window's tiny landscape-ish dimensions
-	// must not flip the (frozen-width) gallery into immersive state underneath the session.
-	const immersive = dimensions.width > dimensions.height && isVideo && !pipSessionActive
+	// In-place immersive landscape (#53): rotating to landscape hides the gallery header and the
+	// system bars (and previewVideo drops its paddings), so the media fills the physical screen
+	// where it stands. Covers videos AND images — paging between the two must not flip the chrome
+	// in and out — while document types (pdf/docx/text) and audio keep the header: their header X
+	// is a primary exit (the swipe-down dismiss gesture is disabled for the document types).
+	// Deliberately NOT expo-video's native fullscreen: on Android that launches a separate
+	// activity, which backgrounds MainActivity (HTTP provider teardown mid-playback + biometric
+	// arming — spec §3a) and pauses the JS runtime entirely. Gated off during a PiP session — the
+	// Android PiP window's tiny landscape-ish dimensions must not flip the (frozen-width) gallery
+	// into immersive state underneath the session.
+	const immersive = dimensions.width > dimensions.height && (isVideo || isImage) && !pipSessionActive
 
 	const headerAnimatedStyle = useAnimatedStyle(() => {
 		"worklet"
