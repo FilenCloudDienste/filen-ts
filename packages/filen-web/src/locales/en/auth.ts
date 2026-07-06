@@ -37,6 +37,9 @@ export const auth = {
 	loginPassword: "Password",
 	/** Login screen — submit button; also submits the two-factor step's retry once a code is entered */
 	loginSubmit: "Sign in",
+	/** Login screen — warning toast when sign-in succeeded but the session could not be saved on this device; the tab stays signed in, only resume after closing it is lost */
+	sessionPersistFailed:
+		"Signed in, but your session could not be saved on this device. You may need to sign in again after closing the tab.",
 	/** Login screen — split-sentence link to the register screen; <a> wraps "Sign up" */
 	dontHaveAccount: "Don't have an account? <a>Sign up</a>",
 

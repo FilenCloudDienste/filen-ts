@@ -1,4 +1,4 @@
-import { useState, type SubmitEvent } from "react"
+import { useRef, useState, type SubmitEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
@@ -7,6 +7,7 @@ import { persistSession, broadcastAuth } from "@/lib/sdk/session"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isValidEmail } from "@/lib/auth/validate"
+import { runLoginAttempt } from "@/lib/auth/login-attempt"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -14,10 +15,9 @@ import { Spinner } from "@/components/ui/spinner"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { TwoFactorDialog } from "@/components/auth/two-factor-dialog"
 
-// Forgot-password dialog: not its own file (only login-form.tsx/two-factor-dialog.tsx are new
-// components per the task scope) — small enough to live as a private sibling here. Re-seeds its
-// email field from the login form's current value on every open (the dialog stays mounted across
-// open/close so a plain `useState` initializer would only ever run once).
+// Forgot-password dialog: small enough to live as a private sibling of the login form rather than
+// its own file. Re-seeds its email field from the login form's current value on every open (the
+// dialog stays mounted across open/close so a plain `useState` initializer would only ever run once).
 function ForgotPasswordDialog({
 	open,
 	initialEmail,
@@ -109,33 +109,67 @@ function LoginForm() {
 	const [twoFactorOpen, setTwoFactorOpen] = useState(false)
 	const [twoFactorError, setTwoFactorError] = useState<string>()
 	const [forgotOpen, setForgotOpen] = useState(false)
+	// Cancellation counter for in-flight attempts: bumped on every two-factor dialog dismissal, so an
+	// attempt that started under an older value is stale when it settles and its result is discarded
+	// (no dialog reopen, no toast, no navigation — a late success is logged out by the helper).
+	const attemptGeneration = useRef(0)
+
+	function handleTwoFactorOpenChange(open: boolean): void {
+		if (!open) {
+			// Dismissing cancels the in-flight retry, not just the dialog.
+			attemptGeneration.current += 1
+			setTwoFactorError(undefined)
+		}
+		setTwoFactorOpen(open)
+	}
 
 	// Shared by the first (code-less) attempt and every two-factor retry — the DTO's `kind` is the
-	// only thing that differs between them. A failed attempt never destroys an existing worker client
-	// (T1 guarantees this; nothing here compensates for it).
+	// only thing that differs between them. The worker keeps any existing client when a login attempt
+	// fails, so a failed attempt needs no compensation here.
 	async function attemptLogin(twoFactorCode?: string): Promise<void> {
 		setPending(true)
 		try {
 			const trimmedEmail = email.trim()
-			const blob = await sdkApi.login(
+			const outcome = await runLoginAttempt(
+				{
+					login: params => sdkApi.login(params),
+					logout: () => sdkApi.logout(),
+					persist: persistSession,
+					broadcast: () => {
+						broadcastAuth("login")
+					},
+					generation: () => attemptGeneration.current
+				},
 				twoFactorCode !== undefined ? { email: trimmedEmail, password, twoFactorCode } : { email: trimmedEmail, password }
 			)
-			setTwoFactorOpen(false)
-			await persistSession(blob)
-			broadcastAuth("login")
-			await navigate({ to: "/drive" })
-		} catch (e) {
-			const dto = asErrorDTO(e)
-			if (dto.kind === "Enter2fa" || dto.kind === "Wrong2fa") {
-				// Enter2fa = first, code-less attempt (nothing to blame yet); Wrong2fa only ever arrives
-				// on a retry that DID send a code, so it always gets the inline "wrong code" copy.
-				setTwoFactorError(dto.kind === "Wrong2fa" ? t("twoFactorWrongCode") : undefined)
-				setTwoFactorOpen(true)
-			} else {
-				setTwoFactorOpen(false)
-				toast.error(errorLabel(dto))
+			switch (outcome.status) {
+				case "stale":
+					// Dismissed while in flight — the helper already discarded the result.
+					break
+				case "success":
+					setTwoFactorOpen(false)
+					if (!outcome.persisted) {
+						// Signed in but not saved: the in-tab session is fully functional, only
+						// resume-after-close is lost — navigating beats failing a successful login.
+						toast.warning(t("sessionPersistFailed"))
+					}
+					await navigate({ to: "/drive" })
+					break
+				case "two-factor":
+					setTwoFactorError(outcome.wrongCode ? t("twoFactorWrongCode") : undefined)
+					setTwoFactorOpen(true)
+					break
+				case "error":
+					setTwoFactorOpen(false)
+					toast.error(errorLabel(outcome.dto))
+					break
 			}
+		} catch (e) {
+			// Only reachable from past the helper (it never throws) — e.g. a navigation failure.
+			toast.error(errorLabel(asErrorDTO(e)))
 		} finally {
+			// Unconditional reset is safe: every submit affordance is disabled while pending, so
+			// attempts can never overlap — this only ever clears THIS attempt's flag.
 			setPending(false)
 		}
 	}
@@ -201,7 +235,7 @@ function LoginForm() {
 				open={twoFactorOpen}
 				pending={pending}
 				error={twoFactorError}
-				onOpenChange={setTwoFactorOpen}
+				onOpenChange={handleTwoFactorOpenChange}
 				onSubmit={code => {
 					void attemptLogin(code)
 				}}

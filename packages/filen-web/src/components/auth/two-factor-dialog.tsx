@@ -20,10 +20,11 @@ interface TwoFactorDialogProps {
 // Login two-factor step: an authenticator-code input plus a one-way toggle to a plain recovery-key
 // input — the SDK accepts either value as `twoFactorCode` (same field, same retry call). shadcn's
 // `input-otp` add resolves to the `input-otp` npm package (not a `@base-ui/react` primitive — Base
-// UI's own `otp-field` isn't wired into the registry's base-rhea style yet), so per the documented
-// fallback this is a plain numeric `Input`, not a boxed OTP widget. Closing by any means (Cancel/
-// Escape/outside click) is silent — only a rejected retry surfaces an error, and only a non-2FA kind
-// from a retry closes the dialog (that path lives in the caller, which owns the login attempt).
+// UI's own `otp-field` isn't wired into the registry's base-rhea style yet), so a plain numeric
+// `Input` stands in for a boxed OTP widget. Closing by any means (Escape/outside click/close button)
+// is silent AND cancels an in-flight retry — the caller discards a late result; only a rejected
+// retry surfaces an error, and only a non-2FA kind from a retry closes the dialog (both live in the
+// caller, which owns the login attempt).
 function TwoFactorDialog({ open, pending, error, onOpenChange, onSubmit }: TwoFactorDialogProps) {
 	const { t } = useTranslation("auth")
 	const [code, setCode] = useState("")
@@ -42,6 +43,10 @@ function TwoFactorDialog({ open, pending, error, onOpenChange, onSubmit }: TwoFa
 
 	function handleSubmit(e: SubmitEvent): void {
 		e.preventDefault()
+		// A retry is already in flight — Enter would double-submit past the disabled button.
+		if (pending) {
+			return
+		}
 		onSubmit(value.trim())
 		// Cleared unconditionally: a right code closes the dialog anyway; a wrong one must present an
 		// empty field per the retry contract.
@@ -72,6 +77,7 @@ function TwoFactorDialog({ open, pending, error, onOpenChange, onSubmit }: TwoFa
 							value={value}
 							autoFocus
 							autoComplete="one-time-code"
+							disabled={pending}
 							aria-invalid={error !== undefined}
 							inputMode={useRecoveryKey ? undefined : "numeric"}
 							maxLength={useRecoveryKey ? undefined : 6}

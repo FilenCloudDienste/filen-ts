@@ -1,22 +1,14 @@
-import { createFileRoute, redirect, Link } from "@tanstack/react-router"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import { Trans, useTranslation } from "react-i18next"
-import { sdkApi } from "@/lib/sdk/client"
-import { whenBootReady } from "@/lib/sdk/boot"
+import { redirectIfAuthed } from "@/lib/auth/guard"
 import { Logo } from "@/components/shell/logo"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { LoginForm } from "@/components/auth/login-form"
 
-// Unauthed page: bounce straight to /drive if a session is already live. Boot has already resumed
-// the session (T1) before this runs, so the read is race-free — mirrors `_app/route.tsx`'s guard,
-// inverted (redirect on authed, not on unauthed).
+// Unauthed page: a live session bounces straight to /drive. The shared guard awaits boot — which
+// includes session resume — before reading auth state, so the check is race-free.
 export const Route = createFileRoute("/login")({
-	beforeLoad: async () => {
-		await whenBootReady()
-		const authed = await sdkApi.hasClient().catch(() => false)
-		if (authed) {
-			throw redirect({ to: "/drive" })
-		}
-	},
+	beforeLoad: redirectIfAuthed,
 	component: LoginPage
 })
 

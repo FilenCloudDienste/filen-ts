@@ -1,22 +1,15 @@
-import { createFileRoute, redirect, Link } from "@tanstack/react-router"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import { Trans, useTranslation } from "react-i18next"
-import { sdkApi } from "@/lib/sdk/client"
-import { whenBootReady } from "@/lib/sdk/boot"
+import { redirectIfAuthed } from "@/lib/auth/guard"
 import { Logo } from "@/components/shell/logo"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 
 // Placeholder registration surface — the real form (strength meter, referral capture, eligibility
-// banner) is the next task. Exists now so /login's "Sign up" link has a real, typed route to reach,
-// staged the same way /login itself was staged ahead of its real form. Guard mirrors /login's,
-// inverted from `_app/route.tsx`.
+// banner) is built separately. Exists now so /login's "Sign up" link has a real, typed route to
+// reach, staged the same way /login itself was before its real form landed. Same shared
+// unauthed-page guard as /login.
 export const Route = createFileRoute("/register")({
-	beforeLoad: async () => {
-		await whenBootReady()
-		const authed = await sdkApi.hasClient().catch(() => false)
-		if (authed) {
-			throw redirect({ to: "/drive" })
-		}
-	},
+	beforeLoad: redirectIfAuthed,
 	component: RegisterPage
 })
 
