@@ -14,6 +14,8 @@ export const common = {
 	bootErrorTitle: "Filen could not start",
 	/** Shared reload-page action label: boot failure screen button, /no-coi page button, and the update toast's action */
 	reload: "Reload page",
+	/** Dialog primitive (ui/dialog.tsx) — screen-reader label on the icon-only close button, and the text label on the optional footer close button */
+	close: "Close",
 	/** /no-coi error page — title shown when the page loaded without the required cross-origin isolation */
 	noCoiTitle: "Unable to start Filen securely",
 	/** /no-coi error page — body explaining the missing isolation and suggesting a reload */

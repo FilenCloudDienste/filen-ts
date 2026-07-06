@@ -1,5 +1,6 @@
 import * as React from "react"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
+import { useTranslation } from "react-i18next"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -62,6 +63,9 @@ function DialogContent({
 }: DialogPrimitive.Popup.Props & {
 	showCloseButton?: boolean
 }) {
+	// Localized: src/locales/en/common.ts `close` key — a shadcn regen of this registry file must
+	// keep this call, not revert it to the literal "Close" string.
+	const { t } = useTranslation("common")
 	return (
 		<DialogPortal>
 			<DialogOverlay />
@@ -86,7 +90,7 @@ function DialogContent({
 						}
 					>
 						<XIcon />
-						<span className="sr-only">Close</span>
+						<span className="sr-only">{t("close")}</span>
 					</DialogPrimitive.Close>
 				)}
 			</DialogPrimitive.Popup>
@@ -112,6 +116,9 @@ function DialogFooter({
 }: React.ComponentProps<"div"> & {
 	showCloseButton?: boolean
 }) {
+	// Localized: src/locales/en/common.ts `close` key — a shadcn regen of this registry file must
+	// keep this call, not revert it to the literal "Close" string.
+	const { t } = useTranslation("common")
 	return (
 		<div
 			data-slot="dialog-footer"
@@ -119,7 +126,7 @@ function DialogFooter({
 			{...props}
 		>
 			{children}
-			{showCloseButton && <DialogPrimitive.Close render={<Button variant="outline" />}>Close</DialogPrimitive.Close>}
+			{showCloseButton && <DialogPrimitive.Close render={<Button variant="outline" />}>{t("close")}</DialogPrimitive.Close>}
 		</div>
 	)
 }
