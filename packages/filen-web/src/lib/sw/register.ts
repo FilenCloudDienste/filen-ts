@@ -40,7 +40,7 @@ export function registerSW(onUpdateReady: () => void): void {
 	}
 
 	void navigator.serviceWorker
-		.register("/sw.js")
+		.register("/sw.js", { type: "module" })
 		.then(reg => {
 			registration = reg
 
