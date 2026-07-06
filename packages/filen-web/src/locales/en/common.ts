@@ -45,6 +45,7 @@ export const common = {
 	loginTitle: "Sign in to Filen",
 	loginSubtitle: "Your end-to-end encrypted drive, notes and chats.",
 	loginEmail: "Email",
+	loginEmailPlaceholder: "you@example.com",
 	loginPassword: "Password",
 	loginContinue: "Continue",
 	loginPlaceholderNote: "Sign-in arrives in the next update."

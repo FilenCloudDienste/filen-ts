@@ -32,7 +32,7 @@ function LoginPage() {
 								id="email"
 								type="email"
 								autoComplete="off"
-								placeholder="you@example.com"
+								placeholder={t("loginEmailPlaceholder")}
 								disabled
 							/>
 						</Field>
