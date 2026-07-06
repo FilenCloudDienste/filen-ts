@@ -1,29 +1,22 @@
-name: Deploy staging web environment
+# Dormant until the web app is finished; deploy wiring is manual (docs/infra/nginx.conf).
+# Builds the app and uploads dist/ as an artifact — no automatic deploy, dispatch-only.
+name: Build staging web artifact
 
 on:
   workflow_dispatch:
 
-  push:
-    paths:
-      - 'packages/filen-web/**'
-
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: 'staging-web'
   cancel-in-progress: true
 
 env:
-  NODE_OPTIONS: --max-old-space-size=6144
+  NODE_OPTIONS: --max-old-space-size=8192
 
 jobs:
   staging-web:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,20 +27,12 @@ jobs:
           node-version: 24
       - name: Install dependencies
         working-directory: packages/filen-web
-        run: npm install --force --include=dev && npx -y patch-package  --patch-dir ./patches
-        env:
-          NODE_OPTIONS: --max-old-space-size=6144
+        run: npm ci
       - name: Build
         working-directory: packages/filen-web
         run: npm run build
-        env:
-          NODE_OPTIONS: --max-old-space-size=6144
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          path: './packages/filen-web/dist'
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          name: filen-web-dist
+          path: packages/filen-web/dist
