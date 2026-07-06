@@ -2,6 +2,7 @@ import i18n from "i18next"
 import { initReactI18next } from "react-i18next"
 import { common } from "@/locales/en/common"
 import { errors } from "@/locales/en/errors"
+import { auth } from "@/locales/en/auth"
 
 // Consumed by `ActionDef.descriptionKey` (keymap registry) — a compile-time-checked subset
 // of the "common" namespace's own key set, derived straight from the catalog so it can never
@@ -18,7 +19,7 @@ export type CommonKey = Extract<keyof typeof common, string>
 // @/workers/sdk.worker's pre-flight) ships `Intl.PluralRules` natively. No polyfill import here,
 // by design.
 //
-// `resources`/`react.useSuspense`: resources are the two EN namespaces only
+// `resources`/`react.useSuspense`: resources are the three EN namespaces only
 // — no other language ships yet (multi-language catalogs + `SUPPORTED_LANGUAGES` land with the
 // auto-translate pipeline's real script, see .github/workflows/i18n-web.yml). Suspense-throw i18n
 // is OFF: it interacts poorly with the React Compiler and complicates the boot gate; revisit only
@@ -27,7 +28,8 @@ void i18n.use(initReactI18next).init({
 	resources: {
 		en: {
 			common,
-			errors
+			errors,
+			auth
 		}
 	},
 	lng: "en",

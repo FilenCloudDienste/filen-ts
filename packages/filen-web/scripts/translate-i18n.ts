@@ -1,8 +1,8 @@
 // i18n translation pipeline — fills the target-language catalogs (src/locales/<lang>.json)
 // from the English source catalogs (src/locales/en/*.ts) via the Anthropic Messages API.
 //
-// The English source is split across real i18next namespaces (currently `common`, `errors`) —
-// each namespace file exports its own `as const` object. Every target-language catalog nests
+// The English source is split across real i18next namespaces (currently `common`, `errors`, `auth`)
+// — each namespace file exports its own `as const` object. Every target-language catalog nests
 // translations under the same namespace keys, e.g. `{ "common": {...}, "errors": {...} }`.
 //
 // Run with: npm run translate-i18n            (DELTA mode — only changed English keys)
@@ -34,11 +34,13 @@ import { dirname, join } from "node:path"
 
 import { common } from "@/locales/en/common"
 import { errors } from "@/locales/en/errors"
+import { auth } from "@/locales/en/auth"
 
 // NOTE: do NOT import from `@/lib/i18n` here — its index module runs
 // `i18n.use(initReactI18next).init(...)` as an import-time side effect the moment it's loaded,
 // which this script has no reason to trigger. Import the namespace catalogs directly
-// (`@/locales/en/common`, `@/locales/en/errors`) instead — that's what EN_CATALOG below does.
+// (`@/locales/en/common`, `@/locales/en/errors`, `@/locales/en/auth`) instead — that's what
+// EN_CATALOG below does.
 //
 // TARGET_LANGUAGES/LANGUAGE_NAMES live in this script rather than a shared module (unlike
 // mobile's `@/locales/languages`): nothing else in the app consumes the target-language list yet.
@@ -76,20 +78,21 @@ const LANGUAGE_NAMES: Record<TargetLanguage, string> = {
 }
 
 // ---------------------------------------------------------------------------
-// English source catalog (two real i18next namespaces)
+// English source catalog (real i18next namespaces)
 // ---------------------------------------------------------------------------
 
-const NAMESPACES = ["common", "errors"] as const
+const NAMESPACES = ["common", "errors", "auth"] as const
 
 type Namespace = (typeof NAMESPACES)[number]
 
 // One flat key→value map per namespace; every value is a string (plural keys are separate
 // `_one`/`_other` entries). Unlike mobile's single merged `en` barrel, keys only need to be unique
 // WITHIN a namespace — this mirrors the app's real i18next config (keySeparator/nsSeparator ON,
-// two real namespaces), so the delta/plural/translation machinery below is scoped per namespace.
+// real namespaces), so the delta/plural/translation machinery below is scoped per namespace.
 const EN_CATALOG: Record<Namespace, Record<string, string>> = {
 	common,
-	errors
+	errors,
+	auth
 }
 
 const DRY_RUN = process.env["DRY_RUN"] === "1"
@@ -176,7 +179,8 @@ type Delta = Record<Namespace, NamespaceDelta>
 function emptyDelta(): Delta {
 	return {
 		common: { upsert: {}, removed: [] },
-		errors: { upsert: {}, removed: [] }
+		errors: { upsert: {}, removed: [] },
+		auth: { upsert: {}, removed: [] }
 	}
 }
 
@@ -222,7 +226,8 @@ function readSnapshot(): Record<Namespace, Record<string, string>> | null {
 
 	return {
 		common: readNamespaceRecord(record, "common", ".en-snapshot.json"),
-		errors: readNamespaceRecord(record, "errors", ".en-snapshot.json")
+		errors: readNamespaceRecord(record, "errors", ".en-snapshot.json"),
+		auth: readNamespaceRecord(record, "auth", ".en-snapshot.json")
 	}
 }
 
@@ -241,7 +246,8 @@ function computeDelta(): Delta {
 
 	return {
 		common: computeNamespaceDelta(snapshot.common, EN_CATALOG.common),
-		errors: computeNamespaceDelta(snapshot.errors, EN_CATALOG.errors)
+		errors: computeNamespaceDelta(snapshot.errors, EN_CATALOG.errors),
+		auth: computeNamespaceDelta(snapshot.auth, EN_CATALOG.auth)
 	}
 }
 
@@ -272,13 +278,13 @@ function readTargetCatalog(lang: TargetLanguage): Record<Namespace, Record<strin
 	const path = join(LOCALES_DIR, `${lang}.json`)
 
 	if (!existsSync(path)) {
-		return { common: {}, errors: {} }
+		return { common: {}, errors: {}, auth: {} }
 	}
 
 	const raw = readFileSync(path, "utf8").trim()
 
 	if (raw.length === 0) {
-		return { common: {}, errors: {} }
+		return { common: {}, errors: {}, auth: {} }
 	}
 
 	const parsed: unknown = JSON.parse(raw)
@@ -292,7 +298,8 @@ function readTargetCatalog(lang: TargetLanguage): Record<Namespace, Record<strin
 
 	return {
 		common: readNamespaceRecord(record, "common", fileLabel),
-		errors: readNamespaceRecord(record, "errors", fileLabel)
+		errors: readNamespaceRecord(record, "errors", fileLabel),
+		auth: readNamespaceRecord(record, "auth", fileLabel)
 	}
 }
 
@@ -379,7 +386,8 @@ function computePluralBases(catalog: Record<string, string>): ReadonlyMap<string
 
 const ENGLISH_PLURAL_BASES: Record<Namespace, ReadonlyMap<string, ReadonlySet<string>>> = {
 	common: computePluralBases(EN_CATALOG.common),
-	errors: computePluralBases(EN_CATALOG.errors)
+	errors: computePluralBases(EN_CATALOG.errors),
+	auth: computePluralBases(EN_CATALOG.auth)
 }
 
 function pluralBaseOf(ns: Namespace, key: string): string | null {
@@ -759,7 +767,8 @@ function sortRecord(record: Record<string, string>): Record<string, string> {
 function writeCatalog(lang: TargetLanguage, catalog: Record<Namespace, Record<string, string>>): void {
 	const sorted: Record<Namespace, Record<string, string>> = {
 		common: sortRecord(catalog.common),
-		errors: sortRecord(catalog.errors)
+		errors: sortRecord(catalog.errors),
+		auth: sortRecord(catalog.auth)
 	}
 
 	const json = `${JSON.stringify(sorted, null, "\t")}\n`
@@ -774,7 +783,8 @@ function writeCatalog(lang: TargetLanguage, catalog: Record<Namespace, Record<st
 function writeSnapshot(): void {
 	const sorted: Record<Namespace, Record<string, string>> = {
 		common: sortRecord(EN_CATALOG.common),
-		errors: sortRecord(EN_CATALOG.errors)
+		errors: sortRecord(EN_CATALOG.errors),
+		auth: sortRecord(EN_CATALOG.auth)
 	}
 
 	const json = `${JSON.stringify(sorted, null, "\t")}\n`
@@ -822,7 +832,8 @@ async function main(): Promise<void> {
 		const existing = readTargetCatalog(lang)
 		const merged: Record<Namespace, Record<string, string>> = {
 			common: { ...existing.common },
-			errors: { ...existing.errors }
+			errors: { ...existing.errors },
+			auth: { ...existing.auth }
 		}
 
 		for (const ns of NAMESPACES) {
