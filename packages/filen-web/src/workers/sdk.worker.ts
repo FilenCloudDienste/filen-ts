@@ -8,7 +8,10 @@ import init, {
 	type UserInfo,
 	type RegisterParams,
 	type CompletePasswordResetParams,
-	type ChangePasswordParams
+	type ChangePasswordParams,
+	type Dir,
+	type NormalDirsAndFiles,
+	type AnyNormalDir
 } from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
 import { toErrorDTO } from "@/lib/sdk/errors"
@@ -222,6 +225,56 @@ const api = {
 	},
 	async deleteAccount(code?: string): Promise<void> {
 		await requireClient().deleteAccount(code)
+	},
+	// `listDir`/`getDirOptional`/`createDir` take no cancellation param (unlike mobile's transfer
+	// facade) — a stale response from a fast navigation is simply discarded once the query key
+	// changes under it, so no AbortSignal plumbing is needed here. `Dir.timestamp`/meta bigints
+	// cross Comlink via structured clone, same as getUserInfo — no boundary serializer.
+	async listDirectory(
+		target: { kind: "root" } | { kind: "uuid"; uuid: string } | { kind: "recents" | "favorites" | "trash" }
+	): Promise<NormalDirsAndFiles> {
+		const c = requireClient()
+		switch (target.kind) {
+			case "root":
+				return c.listDir(c.root())
+			case "recents":
+				return c.listRecents()
+			case "favorites":
+				return c.listFavorites()
+			case "trash":
+				return c.listTrash()
+			case "uuid": {
+				// getDirOptional (not listDir({uuid})): a plain `{uuid}` object is structurally a
+				// Root, and a bare string isn't assignable to the branded UuidStr AnyNormalDir needs.
+				const dir = await c.getDirOptional(target.uuid)
+				if (dir === undefined) {
+					throw new Error(`directory not found: ${target.uuid}`)
+				}
+				return c.listDir(dir)
+			}
+		}
+	},
+	// dirExists rejects when `name` is already taken under `parent` — that thrown SDK error
+	// surfaces as the boundary's ErrorDTO unchanged, so a duplicate name reads as the SDK's own
+	// message rather than a bespoke one here.
+	async createDirectory(parentUuid: string | null, name: string): Promise<Dir> {
+		const c = requireClient()
+		let parent: AnyNormalDir
+		if (parentUuid === null) {
+			parent = c.root()
+		} else {
+			const found = await c.getDirOptional(parentUuid)
+			if (found === undefined) {
+				throw new Error(`parent directory not found: ${parentUuid}`)
+			}
+			parent = found
+		}
+		await c.dirExists(parent, name)
+		return c.createDir(parent, name)
+	},
+	// Thin getDirOptional pass-through — the breadcrumb's per-ancestor lookup.
+	getDirectory(uuid: string): Promise<Dir | undefined> {
+		return requireClient().getDirOptional(uuid)
 	},
 	logout(): void {
 		releaseClient()

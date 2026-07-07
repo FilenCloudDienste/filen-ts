@@ -11,14 +11,14 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 export const Route = createFileRoute("/_app/drive")({ component: DrivePage })
 
 function DrivePage() {
-	const { t } = useTranslation()
+	const { t } = useTranslation(["drive", "common"])
 
 	return (
 		<>
 			<header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
 				<div className="flex items-center gap-2">
 					<FolderClosedIcon className="size-4 text-muted-foreground" />
-					<h1 className="font-heading text-base font-medium tracking-tight">{t("moduleDrive")}</h1>
+					<h1 className="font-heading text-base font-medium tracking-tight">{t("common:moduleDrive")}</h1>
 				</div>
 				<div className="ml-auto flex items-center gap-2">
 					<div className="relative hidden sm:block">

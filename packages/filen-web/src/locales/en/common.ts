@@ -49,33 +49,14 @@ export const common = {
 	signOut: "Sign out",
 	/** Icon rail — tooltip + accessible label on the storage-usage meter */
 	storage: "Storage",
-	// Drive
-	/** Drive toolbar — button opening the new/upload menu */
-	driveNew: "New",
-	/** Drive toolbar — search input placeholder, scoped to the directory being viewed */
-	driveSearch: "Search this directory",
-	/** Drive toolbar — accessible label on the list-view toggle button */
-	driveViewList: "List view",
-	/** Drive toolbar — accessible label on the grid-view toggle button */
-	driveViewGrid: "Grid view",
-	/** Drive sidebar — root item for the user's own drive */
-	driveMyDrive: "My Drive",
-	/** Drive sidebar — item listing recent files */
-	driveRecents: "Recents",
-	/** Drive sidebar — item listing favorited files and directories */
-	driveFavorites: "Favorites",
-	/** Drive sidebar — item for trashed files and directories */
-	driveTrash: "Trash",
+	// Drive sidebar — sharing and public-link destinations; kept here (not in the "drive" namespace,
+	// which holds the rest of the listing surface) until their own listing surface ships.
 	/** Drive sidebar — item for content other users shared with the user */
 	driveSharedIn: "Shared with me",
 	/** Drive sidebar — item for content the user shared with others */
 	driveSharedOut: "Shared with others",
 	/** Drive sidebar — item for the user's public links */
 	driveLinks: "Links",
-	/** Drive page — empty-state title for a directory with no content */
-	driveEmptyTitle: "Nothing here yet",
-	/** Drive page — empty-state body under the title */
-	driveEmptyBody: "Files and directories you add will appear here.",
 	// Service worker update prompt
 	/** Update toast — title raised when a new version has been installed and is waiting */
 	updateReadyTitle: "Update ready",
