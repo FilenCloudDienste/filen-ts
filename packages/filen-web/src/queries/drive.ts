@@ -9,7 +9,14 @@ import { sdkApi } from "@/lib/sdk/client"
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget } from "@/workers/sdk.worker"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
-import { type DriveVariant } from "@/lib/drive/preferences"
+import {
+	getSortPreferences,
+	getViewModePreferences,
+	type DrivePreferences,
+	type DriveVariant,
+	type DriveViewMode
+} from "@/lib/drive/preferences"
+import { type DriveSortBy } from "@/lib/drive/sort"
 
 // Query key taxonomy per client.ts ([domain, entity, params?]): `uuid` is null for every flat
 // listing (recents/favorites/trash) and for My Drive's own root, so a fast nav between two
@@ -96,5 +103,24 @@ export function useDirectoryPathQuery(uuid: string | null): UseQueryResult<Direc
 			}
 			return fetchDirectoryPath(uuid)
 		}
+	})
+}
+
+// Sort/view-mode preferences live in kv storage (lib/drive/preferences.ts), not the SDK — reading
+// them as queries anyway keeps every async read in this app on the same primitive (caching,
+// persistence, refetch-on-focus) instead of a one-off useEffect. Writes stay plain-fn-then-refetch,
+// same convention as every other write in this app (see queries/client.ts's zero-useMutation note):
+// the caller awaits the kv setter, then calls this query's own `.refetch()`.
+export function useSortPreferencesQuery(): UseQueryResult<DrivePreferences<DriveSortBy>> {
+	return useQuery({
+		queryKey: ["drive", "sortPreferences"] as const,
+		queryFn: getSortPreferences
+	})
+}
+
+export function useViewModePreferencesQuery(): UseQueryResult<DrivePreferences<DriveViewMode>> {
+	return useQuery({
+		queryKey: ["drive", "viewModePreferences"] as const,
+		queryFn: getViewModePreferences
 	})
 }

@@ -83,11 +83,19 @@ export const drive = {
 	/** Drive breadcrumb — accessible label on the breadcrumb navigation landmark */
 	driveBreadcrumbLabel: "Breadcrumb",
 
-	// ── Listing placeholder (swapped for the real virtualized list) ───────────────
+	// ── Listing ──────────────────────────────────────────────────────────────
+	/** Drive listing — accessible name for the list/grid region (ARIA listbox) */
+	driveListLabel: "Directory contents",
 	/** Drive listing — title shown when a directory listing fails to load */
 	driveLoadError: "Couldn't load this directory",
-	/** Drive listing — item count summary below a loaded, non-empty listing; singular */
+	/** Drive listing — item count summary shown in the toolbar when nothing is selected; singular */
 	driveItemCount_one: "{{count}} item",
-	/** Drive listing — item count summary below a loaded, non-empty listing; plural */
-	driveItemCount_other: "{{count}} items"
+	/** Drive listing — item count summary shown in the toolbar when nothing is selected; plural */
+	driveItemCount_other: "{{count}} items",
+	/** Drive listing — selection count shown in the toolbar in place of the item count; singular */
+	driveSelectionCount_one: "{{count}} selected",
+	/** Drive listing — selection count shown in the toolbar in place of the item count; plural */
+	driveSelectionCount_other: "{{count}} selected",
+	/** Drive listing row — visually-hidden label announcing a favorited item's star indicator */
+	driveFavorited: "Favorited"
 } as const
