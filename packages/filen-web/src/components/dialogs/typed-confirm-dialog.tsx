@@ -112,6 +112,8 @@ function TypedConfirmDialog({
 							value={typed}
 							autoFocus
 							autoComplete="off"
+							autoCorrect="off"
+							spellCheck={false}
 							disabled={pending}
 							onChange={e => {
 								setTyped(e.target.value)

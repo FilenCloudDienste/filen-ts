@@ -176,12 +176,12 @@ export const auth = {
 	skipMasterKeysWarningStage4Title: "Type to confirm",
 	/** Skip-master-keys warning, stage 4 of 4 — body instructing the user to type the confirmation phrase to arm the confirm button; {{phrase}} interpolates skipMasterKeysWarningTypedConfirmPhrase */
 	skipMasterKeysWarningStage4Body:
-		"Type {{phrase}} below to confirm you accept permanently losing your existing files, notes and chats. This is your last chance to cancel.",
+		'Type "{{phrase}}" below to confirm you accept permanently losing your existing files, notes and chats. This is your last chance to cancel.',
 	/** Skip-master-keys warning, stage 4 of 4 — label for the confirmation-phrase input */
 	skipMasterKeysWarningTypedConfirmLabel: "Confirmation phrase",
 	/** Skip-master-keys warning, stage 4 of 4 — the phrase the user must type EXACTLY (character for character, including case) to confirm permanently losing their data; translate as a short, natural phrase a user can type in your language — it is compared verbatim against what they type */
 	skipMasterKeysWarningTypedConfirmPhrase: "DELETE ALL MY DATA",
-	/** Skip-master-keys warning, stage 4 of 4 — confirm button that runs the actual reset once the typed email arms it */
+	/** Skip-master-keys warning, stage 4 of 4 — confirm button that runs the actual reset once the typed phrase arms it */
 	skipMasterKeysWarningStage4Confirm: "Reset password and delete my data",
 
 	// ── Logout confirm ───────────────────────────────────────────────────────────
