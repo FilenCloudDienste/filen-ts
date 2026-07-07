@@ -162,6 +162,22 @@ export async function emptyTrash(): Promise<VoidActionOutcome> {
 
 // ── Favorite ─────────────────────────────────────────────────────────────
 
+// Shared cache-patch tail for both the single-item toggle and the bulk SET below — factored out so
+// the favorites-membership rule (favoriting ADDS a row that listing never had, unfavoriting REMOVES
+// it) has exactly one implementation. Takes `favorited` explicitly rather than reading `result.data
+// .favorited` so a caller applying the same target across a whole selection (setFavoritedItems)
+// never has to reconstruct it from the item.
+function applyFavoritePatch(favorited: boolean, result: DriveItem): void {
+	driveListingQueryUpdateGlobal(prev => replaceIfPresent(prev, result))
+
+	// Favorites is its own membership listing, not merely a flag on an existing row: favoriting must
+	// be able to ADD a row that listing never had, unfavoriting must REMOVE it — the global flag patch
+	// above only ever updates rows that already exist.
+	queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "favorites", uuid: null }), prev =>
+		prev === undefined ? prev : favorited ? upsertDriveItem(prev, result) : removeByUuid(prev, result.data.uuid)
+	)
+}
+
 export async function toggleFavorite(item: DriveItem): Promise<ActionOutcome> {
 	const nextFavorited = !item.data.favorited
 
@@ -172,16 +188,20 @@ export async function toggleFavorite(item: DriveItem): Promise<ActionOutcome> {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
 
-	driveListingQueryUpdateGlobal(prev => replaceIfPresent(prev, result))
-
-	// Favorites is its own membership listing, not merely a flag on an existing row: favoriting must
-	// be able to ADD a row that listing never had, unfavoriting must REMOVE it — the global flag patch
-	// above only ever updates rows that already exist.
-	queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "favorites", uuid: null }), prev =>
-		prev === undefined ? prev : nextFavorited ? upsertDriveItem(prev, result) : removeByUuid(prev, result.data.uuid)
-	)
+	applyFavoritePatch(nextFavorited, result)
 
 	return { status: "success", item: result }
+}
+
+// Bulk favorite is a SET, not a per-item toggle (mobile parity — see driveSelectors.ts/
+// headerMenuBuilders.ts's buildBulkActionMenu): the bulk-action bar computes one target
+// (`!flags.includesFavorited`) from the whole selection and applies it to every item, rather than
+// each item flipping its own current flag independently.
+export function setFavoritedItems(items: DriveItem[], favorited: boolean): Promise<BulkOutcome<DriveItem>> {
+	return runBulk(items, async item => {
+		const result = narrowItem(await runOp<Dir | File>(sdkApi.setFavorited(item.data, favorited)))
+		applyFavoritePatch(favorited, result)
+	})
 }
 
 // ── Color ────────────────────────────────────────────────────────────────

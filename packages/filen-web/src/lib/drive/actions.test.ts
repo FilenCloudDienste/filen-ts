@@ -97,6 +97,7 @@ import {
 	restoreItems,
 	restoreVersion,
 	setColor,
+	setFavoritedItems,
 	toggleFavorite,
 	trashItems,
 	updateLink,
@@ -622,6 +623,88 @@ describe("toggleFavorite", () => {
 
 		expect(outcome).toEqual({ status: "error", dto })
 		expect(testQueryClient.getQueryData(favoritesListing())).toEqual([])
+	})
+})
+
+describe("setFavoritedItems", () => {
+	it("sets favorited=true on every item — a SET, not a per-item toggle — and patches each into the favorites listing", async () => {
+		const a = dirItem({ uuid: testUuid("a"), favorited: false })
+		const b = fileItem({ uuid: testUuid("b"), favorited: false })
+		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [a, b])
+		testQueryClient.setQueryData(favoritesListing(), [])
+		setFavorited.mockResolvedValueOnce({ type: "dir", ...mockDir({ uuid: testUuid("a"), favorited: true }) })
+		setFavorited.mockResolvedValueOnce({ type: "file", ...mockFile({ uuid: testUuid("b"), favorited: true }) })
+
+		const result = await setFavoritedItems([a, b], true)
+
+		expect(result.succeeded).toHaveLength(2)
+		expect(result.failed).toEqual([])
+		expect(setFavorited).toHaveBeenCalledWith(a.data, true)
+		expect(setFavorited).toHaveBeenCalledWith(b.data, true)
+		expect(testQueryClient.getQueryData<DriveItem[]>(driveListing(OTHER_PARENT_UUID))?.map(i => i.data.favorited)).toEqual([true, true])
+		expect(
+			testQueryClient
+				.getQueryData<DriveItem[]>(favoritesListing())
+				?.map(i => i.data.uuid)
+				.sort()
+		).toEqual([testUuid("a"), testUuid("b")].sort())
+	})
+
+	it("sets favorited=false on every item regardless of each item's own current flag — the bar always passes an explicit target", async () => {
+		const a = dirItem({ uuid: testUuid("a"), favorited: true })
+		const b = fileItem({ uuid: testUuid("b"), favorited: true })
+		testQueryClient.setQueryData(favoritesListing(), [a, b])
+		setFavorited.mockResolvedValueOnce({ type: "dir", ...mockDir({ uuid: testUuid("a"), favorited: false }) })
+		setFavorited.mockResolvedValueOnce({ type: "file", ...mockFile({ uuid: testUuid("b"), favorited: false }) })
+
+		await setFavoritedItems([a, b], false)
+
+		expect(setFavorited).toHaveBeenCalledWith(a.data, false)
+		expect(setFavorited).toHaveBeenCalledWith(b.data, false)
+		expect(testQueryClient.getQueryData<DriveItem[]>(favoritesListing())).toEqual([])
+	})
+
+	it("partial success: one item's rejection lands in failed without aborting or undoing the other's patch", async () => {
+		const ok = dirItem({ uuid: testUuid("ok"), favorited: false })
+		const bad = dirItem({ uuid: testUuid("bad"), favorited: false })
+		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [ok, bad])
+		testQueryClient.setQueryData(favoritesListing(), [])
+		const dto = sdkDto("Forbidden")
+		// items.map dispatches synchronously in array order (each callback's first `await` is the
+		// setFavorited call itself), so [ok, bad] queues these two outcomes in the same order.
+		setFavorited
+			.mockResolvedValueOnce({ type: "dir", ...mockDir({ uuid: testUuid("ok"), favorited: true }) })
+			.mockRejectedValueOnce(dto)
+
+		const result = await setFavoritedItems([ok, bad], true)
+
+		expect(result.succeeded).toEqual([ok])
+		expect(result.failed).toEqual([{ item: bad, error: dto }])
+		expect(
+			testQueryClient.getQueryData<DriveItem[]>(driveListing(OTHER_PARENT_UUID))?.find(i => i.data.uuid === testUuid("ok"))?.data
+				.favorited
+		).toBe(true)
+		expect(
+			testQueryClient.getQueryData<DriveItem[]>(driveListing(OTHER_PARENT_UUID))?.find(i => i.data.uuid === testUuid("bad"))?.data
+				.favorited
+		).toBe(false)
+		expect(testQueryClient.getQueryData<DriveItem[]>(favoritesListing())?.map(i => i.data.uuid)).toEqual([testUuid("ok")])
+	})
+
+	it("resolves to an empty split on an empty selection without calling the worker", async () => {
+		const result = await setFavoritedItems([], true)
+
+		expect(result).toEqual({ succeeded: [], failed: [] })
+		expect(setFavorited).not.toHaveBeenCalled()
+	})
+
+	it("leaves toggleFavorite's own per-item behavior unaffected (still derives the target from the item's current flag)", async () => {
+		const item = dirItem({ uuid: testUuid("a"), favorited: false })
+		setFavorited.mockResolvedValueOnce({ type: "dir", ...mockDir({ uuid: testUuid("a"), favorited: true }) })
+
+		await toggleFavorite(item)
+
+		expect(setFavorited).toHaveBeenCalledExactlyOnceWith(item.data, true)
 	})
 })
 

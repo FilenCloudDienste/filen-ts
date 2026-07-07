@@ -22,7 +22,8 @@ import { sortDriveItems, type DriveSortBy } from "@/lib/drive/sort"
 import { resolveDriveNavigationTarget, splatToUuids } from "@/lib/drive/navigate"
 import { clampListboxIndex, listboxRange } from "@/lib/drive/listbox"
 import { type DriveItem } from "@/lib/drive/item"
-import { renameItem, trashItems, deleteItemsPermanently, emptyTrash } from "@/lib/drive/actions"
+import { renameItem, trashItems, restoreItems, deleteItemsPermanently, emptyTrash } from "@/lib/drive/actions"
+import { type BulkOutcome } from "@/lib/drive/bulk"
 import { toastBulkOutcome } from "@/lib/drive/bulk-toast"
 import { useDirectoryListingQuery, useSortPreferencesQuery, useViewModePreferencesQuery } from "@/queries/drive"
 import { useDriveStore } from "@/stores/drive"
@@ -35,6 +36,7 @@ import { Breadcrumb } from "@/components/drive/breadcrumb"
 import { SortMenu } from "@/components/drive/sort-menu"
 import { ViewModeToggle } from "@/components/drive/view-mode-toggle"
 import { NewDirectory } from "@/components/drive/new-directory"
+import { BulkActionBar, type BulkDialogActionKind } from "@/components/drive/bulk-action-bar"
 import { EmptyState } from "@/components/drive/empty-state"
 import { ListingSkeleton } from "@/components/drive/listing-skeleton"
 import { DriveRow } from "@/components/drive/drive-row"
@@ -56,9 +58,10 @@ export interface DirectoryListingProps {
 }
 
 // The listing-level dialog host's own state shape. Widens item-menu.logic.ts's ItemActionDialogKind
-// with "emptyTrash" — a listing-level action (the trash toolbar, not yet built), never dispatched by
-// a per-item menu, so it has no place in that narrower, per-item-scoped union.
-type ActiveDialogKind = ItemActionDialogKind | "emptyTrash"
+// with two listing-level kinds neither dispatched by a per-item menu, so neither has a place in that
+// narrower, per-item-scoped union: "emptyTrash" (the trash toolbar) and "restoreSelected" (the bulk
+// bar's confirm — a single-item restore stays direct/unconfirmed, see item-menu.logic.ts's RESTORE).
+type ActiveDialogKind = ItemActionDialogKind | "emptyTrash" | "restoreSelected"
 
 interface ActiveDialog {
 	kind: ActiveDialogKind
@@ -80,7 +83,8 @@ const WIRED_DIALOG_KINDS = new Set<ActiveDialogKind>([
 	"color",
 	"versions",
 	"info",
-	"link"
+	"link",
+	"restoreSelected"
 ])
 
 // Module scope, not inside the component: runs exactly once per module evaluation (see
@@ -95,7 +99,7 @@ const WIRED_DIALOG_KINDS = new Set<ActiveDialogKind>([
 // fire regardless of focus location on the page (not just while the listbox itself is focused) —
 // an accepted, documented widening: every registered action fires globally today (no
 // `<HotkeysProvider>` scope activation yet, see registry.ts's ActionScope comment), and drive is
-// the app's only real interactive surface this slice, so "global" and "listbox-focused" coincide
+// currently the app's only real interactive surface, so "global" and "listbox-focused" coincide
 // in practice. Arrow/Home/End/Space/Enter cursor movement stays listbox-local — those are
 // continuous, per-row navigation semantics, not discrete user-remappable commands.
 registerAction({
@@ -176,10 +180,10 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	// The dialog host's own state — one instance of whichever dialog activeDialog.kind names is
 	// rendered below (renderActiveDialog), never more than one at a time. `dialogPending` is shared
-	// across the kinds whose async call the HOST itself owns (rename/trash/delete/emptyTrash) — the
-	// move/color/versions/info dialogs run their own async calls internally and track their own
-	// pending state, since each needs more than one shared boolean can express (e.g. versions has an
-	// independent restore vs. delete-confirm flow).
+	// across the kinds whose async call the HOST itself owns (rename/trash/delete/emptyTrash/
+	// restoreSelected) — the move/color/versions/info dialogs run their own async calls internally and
+	// track their own pending state, since each needs more than one shared boolean can express (e.g.
+	// versions has an independent restore vs. delete-confirm flow).
 	const [activeDialog, setActiveDialog] = useState<ActiveDialog | null>(null)
 	const [dialogPending, setDialogPending] = useState(false)
 	// True only while a dialog that actually RENDERS something is open — every kind renders one today
@@ -456,25 +460,38 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		closeActiveDialog()
 	}
 
-	async function handleTrashConfirm(items: DriveItem[]): Promise<void> {
+	// Shared tail for every HOST-owned bulk-dialog confirm (trash/delete/restoreSelected): runs `op`
+	// against `items`, tracks the shared dialogPending flag, closes the dialog, toasts the outcome,
+	// and prunes succeeded items from the selection — a no-op for whichever failed (still visible,
+	// correctly still selected, so the user can retry without re-selecting).
+	async function runBulkDialogAction(items: DriveItem[], op: (items: DriveItem[]) => Promise<BulkOutcome<DriveItem>>): Promise<void> {
 		setDialogPending(true)
-		const outcome = await trashItems(items)
+		const outcome = await op(items)
 		setDialogPending(false)
 		closeActiveDialog()
 		toastBulkOutcome(outcome)
-		// A trashed item vanishes from every listing it could have been selected in (see actions.ts) —
-		// leaving it selected would strand a phantom entry in the "N selected" count. A no-op for
-		// whichever failed (still visible, correctly still selected).
 		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
 	}
 
+	async function handleTrashConfirm(items: DriveItem[]): Promise<void> {
+		await runBulkDialogAction(items, trashItems)
+	}
+
 	async function handleDeleteConfirm(items: DriveItem[]): Promise<void> {
-		setDialogPending(true)
-		const outcome = await deleteItemsPermanently(items)
-		setDialogPending(false)
-		closeActiveDialog()
-		toastBulkOutcome(outcome)
-		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
+		await runBulkDialogAction(items, deleteItemsPermanently)
+	}
+
+	// Bulk restore CONFIRMS (unlike a single item's direct, unconfirmed restore — see
+	// item-menu.logic.ts's RESTORE descriptor and driveRestoreSelectedConfirmTitle's own doc comment).
+	async function handleRestoreSelectedConfirm(items: DriveItem[]): Promise<void> {
+		await runBulkDialogAction(items, restoreItems)
+	}
+
+	// Routes a bulk-action-bar click to the dialog host, dispatching against the CURRENT selection —
+	// mirrors the drive.trash keymap command's identical setActiveDialog({kind:"trash", items:
+	// selectedItems}) below.
+	function handleBulkDialogAction(kind: BulkDialogActionKind): void {
+		setActiveDialog({ kind, items: selectedItems })
 	}
 
 	async function handleEmptyTrashConfirm(): Promise<void> {
@@ -562,6 +579,25 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						}}
 						onConfirm={() => {
 							void handleDeleteConfirm(activeDialog.items)
+						}}
+					/>
+				)
+			case "restoreSelected":
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("driveRestoreSelectedConfirmTitle")}
+						body={t("driveRestoreSelectedConfirmBody", { count: activeDialog.items.length })}
+						confirmLabel={t("driveActionRestore")}
+						cancelLabel={t("common:cancel")}
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleRestoreSelectedConfirm(activeDialog.items)
 						}}
 					/>
 				)
@@ -742,32 +778,38 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				/>
 			</header>
 			<div className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border px-4">
-				<p className="text-sm text-muted-foreground">
-					{listingQuery.status === "success"
-						? selectedItems.length > 0
-							? t("driveSelectionCount", { count: selectedItems.length })
-							: t("driveItemCount", { count: sortedItems.length })
-						: null}
-				</p>
-				<div className="flex items-center gap-2">
-					<NewDirectory
-						parentUuid={uuid}
-						disabled={variant !== "drive" || listingQuery.status !== "success"}
+				{listingQuery.status === "success" && selectedItems.length > 0 ? (
+					<BulkActionBar
+						variant={variant}
+						selectedItems={selectedItems}
+						onDialogAction={handleBulkDialogAction}
 					/>
-					<ViewModeToggle
-						value={effectiveViewMode}
-						onChange={next => {
-							void applyViewModeChange(next)
-						}}
-					/>
-					<SortMenu
-						value={effectiveSort}
-						onChange={next => {
-							void applySortChange(next)
-						}}
-						disabled={!isSortableVariant(variant) || listingQuery.status !== "success"}
-					/>
-				</div>
+				) : (
+					<>
+						<p className="text-sm text-muted-foreground">
+							{listingQuery.status === "success" ? t("driveItemCount", { count: sortedItems.length }) : null}
+						</p>
+						<div className="flex items-center gap-2">
+							<NewDirectory
+								parentUuid={uuid}
+								disabled={variant !== "drive" || listingQuery.status !== "success"}
+							/>
+							<ViewModeToggle
+								value={effectiveViewMode}
+								onChange={next => {
+									void applyViewModeChange(next)
+								}}
+							/>
+							<SortMenu
+								value={effectiveSort}
+								onChange={next => {
+									void applySortChange(next)
+								}}
+								disabled={!isSortableVariant(variant) || listingQuery.status !== "success"}
+							/>
+						</div>
+					</>
+				)}
 			</div>
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 				{listingQuery.status === "pending" ? (
