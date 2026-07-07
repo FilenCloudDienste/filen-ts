@@ -185,7 +185,7 @@ test.describe("drive", () => {
 		const modKey = process.platform === "darwin" ? "Meta" : "Control"
 
 		if (!hasItems) {
-			// Select-all/clear are registered globally (D12) and must be safe no-ops against an empty
+			// Select-all/clear are registered globally and must be safe no-ops against an empty
 			// listbox even with nothing to select.
 			await page.keyboard.press(`${modKey}+a`)
 			await page.keyboard.press("Escape")

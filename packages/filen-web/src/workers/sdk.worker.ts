@@ -67,6 +67,7 @@ function adoptClient(next: Client): void {
 function releaseClient(): void {
 	const prev = client
 	client = null
+	clearDirectoryCache() // wipe cached names/dirs so a signed-out worker never holds decrypted data
 	if (prev !== null) {
 		setTimeout(() => {
 			prev.free()

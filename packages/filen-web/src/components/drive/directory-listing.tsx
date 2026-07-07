@@ -108,6 +108,10 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const sortedItems = sortDriveItems(listingQuery.data ?? [], effectiveSort)
 
 	const selectedItems = useDriveStore(useShallow(state => state.selectedItems))
+	// Derived once per render so each row/tile's membership check is an O(1) `.has()` instead of an
+	// O(selected) `.some()` — select-all in a large directory would otherwise make every render
+	// O(visible * selected).
+	const selectedUuids = new Set(selectedItems.map(item => item.data.uuid))
 
 	const [activeIndex, setActiveIndex] = useState(0)
 	const [anchorIndex, setAnchorIndex] = useState(0)
@@ -124,16 +128,19 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		setAnchorIndex(0)
 	}, [variant, splat])
 
-	const scrollRef = useRef<HTMLDivElement>(null)
+	// State (not `useRef`) so it's settable from a callback ref below — the pending/error/empty
+	// branches render a ref-less div, so a cold mount whose first render is "pending" would, with a
+	// `useRef` + `[]`-dep effect, never attach an observer for the component's whole lifetime, and a
+	// later pending<->success swap would leave one observing a detached node. A callback ref instead
+	// fires on every mount/unmount of the actual DOM node regardless of which branch renders it first.
+	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const itemRefs = useRef(new Map<number, HTMLDivElement>())
 	const focusRequestRef = useRef(0)
 
 	const [containerWidth, setContainerWidth] = useState(0)
 
 	useEffect(() => {
-		const el = scrollRef.current
-
-		if (!el) {
+		if (!scrollElement) {
 			return
 		}
 
@@ -145,19 +152,19 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			}
 		})
 
-		observer.observe(el)
+		observer.observe(scrollElement)
 
 		return () => {
 			observer.disconnect()
 		}
-	}, [])
+	}, [scrollElement])
 
 	const columns = Math.max(1, Math.floor(containerWidth / TILE_WIDTH))
 	const rowCount = Math.ceil(sortedItems.length / columns)
 
 	const listVirtualizer = useVirtualizer({
 		count: sortedItems.length,
-		getScrollElement: () => scrollRef.current,
+		getScrollElement: () => scrollElement,
 		estimateSize: () => ROW_HEIGHT,
 		overscan: LIST_OVERSCAN,
 		getItemKey: index => sortedItems[index]?.data.uuid ?? index
@@ -165,7 +172,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	const gridVirtualizer = useVirtualizer({
 		count: rowCount,
-		getScrollElement: () => scrollRef.current,
+		getScrollElement: () => scrollElement,
 		estimateSize: () => TILE_ROW_HEIGHT,
 		overscan: GRID_OVERSCAN,
 		getItemKey: index => index
@@ -456,7 +463,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							</div>
 						) : null}
 						<div
-							ref={scrollRef}
+							ref={setScrollElement}
 							role="listbox"
 							aria-multiselectable="true"
 							aria-label={t("driveListLabel")}
@@ -478,7 +485,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 													key={virtualRow.key}
 													item={item}
 													index={virtualRow.index}
-													selected={selectedItems.some(selectedItem => selectedItem.data.uuid === item.data.uuid)}
+													selected={selectedUuids.has(item.data.uuid)}
 													active={virtualRow.index === safeActiveIndex}
 													style={{
 														position: "absolute",
@@ -519,9 +526,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 															key={item.data.uuid}
 															item={item}
 															index={itemIndex}
-															selected={selectedItems.some(
-																selectedItem => selectedItem.data.uuid === item.data.uuid
-															)}
+															selected={selectedUuids.has(item.data.uuid)}
 															active={itemIndex === safeActiveIndex}
 															onPointerSelect={handlePointerSelect}
 															onOpen={handleOpen}
