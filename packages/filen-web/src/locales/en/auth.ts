@@ -137,6 +137,10 @@ export const auth = {
 	/** Reset page — help text explaining what the master keys file is for and what skipping it costs */
 	masterKeysFileHelp:
 		"Upload the master keys file you exported from Security settings to keep access to your existing files, notes and chats. Skip this only if you no longer have it.",
+	/** Reset page — button opening the file picker for the master keys file upload */
+	masterKeysFileChoose: "Choose file",
+	/** Reset page — shown next to the chosen file name once a master keys file has been read; {{fileName}} interpolates the chosen file's name */
+	masterKeysFileImported: "Master keys imported ({{fileName}})",
 
 	// ── Skip-master-keys warning: escalating 4-stage confirmation shown when the
 	// user tries to reset without uploading a master keys file ─────────────────
@@ -145,16 +149,22 @@ export const auth = {
 	/** Skip-master-keys warning, stage 1 of 4 — body stating the immediate consequence */
 	skipMasterKeysWarningStage1Body:
 		"Without your master keys file, resetting your password permanently deletes access to all of your existing files, notes and chats. This cannot be undone.",
+	/** Skip-master-keys warning, stage 1 of 4 — confirm button continuing past the warning */
+	skipMasterKeysWarningStage1Continue: "Continue",
 	/** Skip-master-keys warning, stage 2 of 4 — title escalating the confirmation */
 	skipMasterKeysWarningStage2Title: "Are you sure?",
 	/** Skip-master-keys warning, stage 2 of 4 — body spelling out that EVERY existing file, note and chat is affected, not just some of them */
 	skipMasterKeysWarningStage2Body:
 		"Every file, note and chat currently in your account will become permanently unrecoverable — not just some of them. Data you add after the reset is unaffected.",
+	/** Skip-master-keys warning, stage 2 of 4 — confirm button continuing past the warning */
+	skipMasterKeysWarningStage2Continue: "Yes, I'm sure",
 	/** Skip-master-keys warning, stage 3 of 4 — title stressing the decision is final */
 	skipMasterKeysWarningStage3Title: "There is no way to undo this",
 	/** Skip-master-keys warning, stage 3 of 4 — body stating Filen cannot recover the data afterwards, through support or otherwise */
 	skipMasterKeysWarningStage3Body:
 		"Filen cannot recover this data for you afterwards, through support or otherwise. Only continue if you accept losing it permanently.",
+	/** Skip-master-keys warning, stage 3 of 4 — confirm button continuing past the warning */
+	skipMasterKeysWarningStage3Continue: "I understand",
 	/** Skip-master-keys warning, stage 4 of 4 — title for the final typed-confirmation gate */
 	skipMasterKeysWarningStage4Title: "Type to confirm",
 	/** Skip-master-keys warning, stage 4 of 4 — body instructing the user to type their account email to arm the confirm button; {{email}} interpolates the live account email */
@@ -162,6 +172,8 @@ export const auth = {
 		"Type your email address ({{email}}) below to confirm you accept permanently losing your existing files, notes and chats. This is your last chance to cancel.",
 	/** Skip-master-keys warning, stage 4 of 4 — label for the typed-email confirmation input */
 	skipMasterKeysWarningTypedConfirmLabel: "Your email address",
+	/** Skip-master-keys warning, stage 4 of 4 — confirm button that runs the actual reset once the typed email arms it */
+	skipMasterKeysWarningStage4Confirm: "Reset password and delete my data",
 
 	// ── Logout confirm ───────────────────────────────────────────────────────────
 	/** Logout confirm dialog — title; the confirm button reuses common:signOut */

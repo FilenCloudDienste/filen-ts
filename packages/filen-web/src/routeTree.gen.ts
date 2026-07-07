@@ -14,6 +14,7 @@ import { Route as NoCoiRouteImport } from './routes/no-coi'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteRouteImport } from './routes/_app/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ResetTokenRouteImport } from './routes/reset.$token'
 import { Route as AppDriveRouteImport } from './routes/_app/drive'
 
 const RegisterRoute = RegisterRouteImport.update({
@@ -40,6 +41,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ResetTokenRoute = ResetTokenRouteImport.update({
+  id: '/reset/$token',
+  path: '/reset/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppDriveRoute = AppDriveRouteImport.update({
   id: '/drive',
   path: '/drive',
@@ -52,6 +58,7 @@ export interface FileRoutesByFullPath {
   '/no-coi': typeof NoCoiRoute
   '/register': typeof RegisterRoute
   '/drive': typeof AppDriveRoute
+  '/reset/$token': typeof ResetTokenRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -59,6 +66,7 @@ export interface FileRoutesByTo {
   '/no-coi': typeof NoCoiRoute
   '/register': typeof RegisterRoute
   '/drive': typeof AppDriveRoute
+  '/reset/$token': typeof ResetTokenRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -68,12 +76,14 @@ export interface FileRoutesById {
   '/no-coi': typeof NoCoiRoute
   '/register': typeof RegisterRoute
   '/_app/drive': typeof AppDriveRoute
+  '/reset/$token': typeof ResetTokenRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/no-coi' | '/register' | '/drive'
+  fullPaths:
+    '/' | '/login' | '/no-coi' | '/register' | '/drive' | '/reset/$token'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/no-coi' | '/register' | '/drive'
+  to: '/' | '/login' | '/no-coi' | '/register' | '/drive' | '/reset/$token'
   id:
     | '__root__'
     | '/'
@@ -82,6 +92,7 @@ export interface FileRouteTypes {
     | '/no-coi'
     | '/register'
     | '/_app/drive'
+    | '/reset/$token'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -90,6 +101,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   NoCoiRoute: typeof NoCoiRoute
   RegisterRoute: typeof RegisterRoute
+  ResetTokenRoute: typeof ResetTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -129,6 +141,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/reset/$token': {
+      id: '/reset/$token'
+      path: '/reset/$token'
+      fullPath: '/reset/$token'
+      preLoaderRoute: typeof ResetTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_app/drive': {
       id: '/_app/drive'
       path: '/drive'
@@ -157,6 +176,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   NoCoiRoute: NoCoiRoute,
   RegisterRoute: RegisterRoute,
+  ResetTokenRoute: ResetTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

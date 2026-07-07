@@ -16,6 +16,8 @@ export const common = {
 	reload: "Reload page",
 	/** Dialog primitive (ui/dialog.tsx) — screen-reader label on the icon-only close button, and the text label on the optional footer close button */
 	close: "Close",
+	/** Generic dialog cancel button — shared by every ConfirmDialog/TypedConfirmDialog consumer (e.g. the reset page's skip-master-keys ceremony) */
+	cancel: "Cancel",
 	/** /no-coi error page — title shown when the page loaded without the required cross-origin isolation */
 	noCoiTitle: "Unable to start Filen securely",
 	/** /no-coi error page — body explaining the missing isolation and suggesting a reload */
