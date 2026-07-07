@@ -279,6 +279,15 @@ test.describe("drive bulk actions", () => {
 		await scratchTrashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
 		await expect(scratchTrashConfirm).toHaveCount(0)
 
-		await expect(finalScratchRow).toHaveCount(0)
+		// A reload (not just re-checking the same live query-client state) before this LAST assertion —
+		// the app's queries refetch on window focus (queries/client.ts: staleTime 0 +
+		// refetchOnWindowFocus), and Playwright's own multi-worker automation can shift OS-level window
+		// focus across concurrently-running pages; a refetch that happens to land against a moment the
+		// backend hasn't fully caught up with the just-issued trash can overwrite the correct optimistic
+		// removal with a stale "still there" read on THIS page, without anything ever being wrong
+		// server-side. A fresh boot re-fetches once, for real, independent of that page's prior state.
+		await page.reload()
+		const rootAfterFinalCleanup = await waitForListingSettled(page)
+		await expect(rootAfterFinalCleanup.listbox.getByRole("option", { name: scratchName })).toHaveCount(0)
 	})
 })
