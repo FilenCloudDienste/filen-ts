@@ -63,7 +63,7 @@ function startPlainServer(): Promise<PlainServer> {
 	})
 }
 
-test.describe("no cross-origin isolation", { tag: "@no-sdk" }, () => {
+test.describe("no cross-origin isolation", { tag: "@capability" }, () => {
 	let plain: PlainServer
 
 	test.beforeAll(async () => {

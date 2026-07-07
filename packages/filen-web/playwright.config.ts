@@ -42,16 +42,26 @@ export default defineConfig({
 			dependencies: ["auth-setup"]
 		},
 		{
+			// Verified empirically (login-free probe, real getDirectory()/SAH-pool open against this
+			// exact Playwright build): Playwright's bundled Firefox has working OPFS-SAH storage, so it
+			// boots the app like chromium and runs the full suite — unlike webkit below.
 			name: "firefox",
 			use: { ...devices["Desktop Firefox"] },
 			dependencies: ["auth-setup"]
 		},
 		{
-			// webkit runs only the SDK-free subset (no login / injected session), so it needs no
-			// auth-setup dependency and stays runnable without credentials.
+			// Playwright's bundled WebKit cannot open OPFS-SAH storage (verified empirically: it
+			// exposes navigator.storage.getDirectory, but calling it rejects with a generic
+			// UnknownError) — with OPFS now a hard boot requirement, EVERY route boots straight to
+			// /no-opfs, so webkit can never reach the `@no-sdk` app specs (shell/keymap/register/reset)
+			// that need a real boot-to-ready. Real Safari 16.4+ has OPFS and works fine; this is a
+			// Playwright-WebKit limitation only, the same story as its lack of SharedArrayBuffer —
+			// scoped down to the capability-gate pages themselves (no-coi + no-opfs), which render
+			// independently of whether the app can boot at all, so it still needs no auth-setup
+			// dependency and stays runnable without credentials.
 			name: "webkit",
 			use: { ...devices["Desktop Safari"] },
-			grep: /@no-sdk/
+			grep: /@capability/
 		}
 	],
 	webServer: {
