@@ -98,7 +98,7 @@ function DeleteAccountCard({ accountQuery }: DeleteAccountCardProps) {
 			/>
 			<ConfirmDialog
 				open={chainStage === "stage2"}
-				pending={false}
+				pending={pending}
 				title={t("deleteAccountConfirmTitle")}
 				body={t("deleteAccountConfirmBody")}
 				confirmLabel={t("deleteAccountSubmit")}

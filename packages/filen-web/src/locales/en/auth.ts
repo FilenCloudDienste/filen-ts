@@ -256,6 +256,8 @@ export const auth = {
 	/** Export-master-keys dialog — body explaining why master keys matter for password reset */
 	exportMasterKeysBody:
 		"Your master keys are required to recover your account if you forget your password. Export and store them somewhere safe.",
+	/** Export-master-keys card — accessible label for the destructive badge shown when master keys have never been exported */
+	exportMasterKeysNotBackedUp: "Not backed up",
 	/** Master-keys reminder banner — title shown when the user has never exported their master keys */
 	exportMasterKeysReminderTitle: "Back up your master keys",
 	/** Master-keys reminder banner — body explaining the risk of never exporting them */

@@ -58,7 +58,7 @@ function ExportMasterKeysCard({ accountQuery }: ExportMasterKeysCardProps) {
 					<CardAction>
 						<Badge
 							variant="destructive"
-							aria-label="!"
+							aria-label={t("exportMasterKeysNotBackedUp")}
 						>
 							!
 						</Badge>
