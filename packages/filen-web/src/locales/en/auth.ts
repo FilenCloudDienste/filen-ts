@@ -194,6 +194,8 @@ export const auth = {
 	// ── Security settings page ──────────────────────────────────────────────────
 	/** Security settings — page title */
 	securityTitle: "Security",
+	/** Security settings — error-state title shown when the account query (getUserInfo) fails to load; paired with common:tryAgain */
+	securityLoadError: "Couldn't load your account",
 
 	// ── Change password (security settings) ─────────────────────────────────────
 	/** Change-password section — heading and dialog title */
@@ -216,17 +218,19 @@ export const auth = {
 	twoFactorSectionTitle: "Two-factor authentication",
 	/** Two-factor authentication section — subtitle describing the feature */
 	twoFactorSectionDescription: "Require a code from your authenticator app when signing in",
-	/** Enable-two-factor flow — title for the code-entry step that confirms setup */
+	/** Two-factor code-entry step title, shared by the enable, disable, and delete-account confirmation flows — the instruction is identical regardless of which action the code confirms */
 	twoFactorEnterCodeTitle: "Enter two-factor code",
-	/** Enable-two-factor flow — body instructing the user to open their authenticator app */
+	/** Two-factor code-entry step body, shared by the enable, disable, and delete-account confirmation flows */
 	twoFactorEnterCodeBody: "Open your authenticator app and enter the six-digit code",
-	/** Enable-two-factor flow — submit button that confirms setup and enables two-factor authentication */
+	/** Enable-two-factor flow — button revealing the QR/secret step, and the code-entry dialog's submit button that confirms setup and enables two-factor authentication */
 	twoFactorEnableSubmit: "Enable",
+	/** Enable-two-factor flow — button that copies the raw secret (the QR's underlying value) to the clipboard, for authenticator apps that accept manual entry instead of scanning */
+	twoFactorCopySecret: "Copy secret",
 	/** Disable-two-factor dialog — title */
 	twoFactorDisableTitle: "Disable two-factor authentication",
 	/** Disable-two-factor dialog — body warning about the security trade-off */
 	twoFactorDisableBody: "Are you sure you want to disable two-factor authentication? Your account will be less secure.",
-	/** Disable-two-factor dialog — submit button */
+	/** Disable-two-factor dialog — submit button; also the disable flow's code-entry dialog submit button */
 	twoFactorDisableSubmit: "Disable",
 
 	// ── Recovery key (two-factor backup code), shown once right after enabling ─
@@ -237,6 +241,12 @@ export const auth = {
 		"This is the only time your recovery key will be shown. Copy it and store it somewhere safe — you'll need it if you ever lose access to your authenticator app, and it cannot be retrieved again.",
 	/** Recovery-key screen — confirm button the user must press to acknowledge they saved the key before it closes */
 	recoveryKeySavedConfirm: "I've saved my recovery key",
+	/** Recovery-key screen — button that copies the key to the clipboard */
+	recoveryKeyCopy: "Copy",
+	/** Recovery-key screen — button that downloads the key as a .txt file */
+	recoveryKeyDownload: "Download",
+	/** Shared confirmation toast after any copy-to-clipboard action in security settings (the 2FA secret, the recovery key) */
+	copiedToClipboard: "Copied to clipboard",
 
 	// ── Export master keys (security settings) + reminder nag ──────────────────
 	/** Export-master-keys row, dialog title, and button label */
@@ -259,6 +269,8 @@ export const auth = {
 	// ── Delete account: two-stage confirm, then "check your email" ─────────────
 	/** Delete-account section — heading and first confirmation dialog title */
 	deleteAccountTitle: "Delete account",
+	/** Delete-account card — short subtitle under the heading (the dialogs carry the full irreversibility warning) */
+	deleteAccountDescription: "Permanently delete your account and all of its data",
 	/** Delete-account dialog, stage 1 — body stating the action is irreversible and starts with a confirmation email */
 	deleteAccountBody:
 		"This will permanently delete your account and cannot be undone. We will first send a confirmation email before anything is deleted.",

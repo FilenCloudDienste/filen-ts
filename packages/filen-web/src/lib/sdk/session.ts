@@ -40,14 +40,6 @@ export async function clearSession(): Promise<void> {
 	await kvDelete(SESSION_KV_KEY)
 }
 
-// Cheap, local-only display email for UI surfaces that need one before the real account query
-// (getUserInfo) exists — a single kv read, no network. Returns null when there is no session, or an
-// unreadable/invalid one (kvGetJson already logged and dropped it in that case).
-export async function getSessionEmail(): Promise<string | null> {
-	const blob = await kvGetJson(SESSION_KV_KEY, sessionSchema)
-	return blob?.email ?? null
-}
-
 // Read the persisted blob, validate it, and inject it into the worker. Returns false when there is
 // no session, an unreadable one (kvGetJson already dropped it), or one the SDK rejects. An
 // ephemeral (`:memory:`) kv never has a prior-reload blob to read — resume is a no-op there, matching

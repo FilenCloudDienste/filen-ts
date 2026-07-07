@@ -1,6 +1,6 @@
-import { useEffect, useState, type ComponentType } from "react"
+import { useState, type ComponentType } from "react"
 import { useTranslation } from "react-i18next"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import {
 	FolderClosedIcon,
 	NotebookPenIcon,
@@ -17,12 +17,14 @@ import {
 import type { CommonKey } from "@/lib/i18n"
 import { runLogout } from "@/lib/auth/logout"
 import { sdkApi } from "@/lib/sdk/client"
-import { clearSession, broadcastAuth, getSessionEmail } from "@/lib/sdk/session"
+import { clearSession, broadcastAuth } from "@/lib/sdk/session"
 import { kvClear } from "@/lib/storage/adapter"
 import { queryClient } from "@/queries/client"
+import { useAccountQuery } from "@/queries/account"
+import { useExportKeysReminder } from "@/components/settings/security/export-master-keys"
 import { Logo } from "@/components/shell/logo"
 import { useTheme } from "@/components/theme-provider"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -37,8 +39,23 @@ import {
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
 import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
+import { registerAction } from "@/lib/keymap/registry"
+import { useAction } from "@/lib/keymap/useAction"
 import { Kbd } from "@/lib/keymap/Kbd"
 import { useBootStore } from "@/stores/boot"
+
+// Registered at module scope (runs once per module evaluation — mirrors theme-provider.tsx's own
+// "app.toggleTheme" registration right next to its useAction call below). Default UNASSIGNED
+// ("" — react-hotkeys-hook's own combo parser accepts an empty string as "matches no key", verified
+// against the installed package's parseHotkeys, so this never fires until a user rebinds it): the
+// keyboard-first contract only requires every action be user-mappable, not that every action ship
+// with a default combo.
+registerAction({
+	id: "app.openSettings",
+	defaultCombo: "",
+	scope: "global",
+	descriptionKey: "settings"
+})
 
 type IconType = ComponentType<{ className?: string }>
 
@@ -84,25 +101,9 @@ function ThemeToggle() {
 
 function AccountMenu() {
 	const { t } = useTranslation(["common", "auth"])
-	// Stopgap until the account query (getUserInfo) lands: a cheap local kv read, no network — falls
-	// back to the static "Account" label below on a missing/unreadable session.
-	const [email, setEmail] = useState<string | null>(null)
+	const accountQuery = useAccountQuery()
 	const [confirmOpen, setConfirmOpen] = useState(false)
 	const [pending, setPending] = useState(false)
-
-	useEffect(() => {
-		let cancelled = false
-		void getSessionEmail()
-			.then(value => {
-				if (!cancelled) {
-					setEmail(value)
-				}
-			})
-			.catch(() => undefined) // best-effort — the static label stands in on any read failure
-		return () => {
-			cancelled = true
-		}
-	}, [])
 
 	async function handleSignOut(): Promise<void> {
 		setPending(true)
@@ -156,7 +157,7 @@ function AccountMenu() {
 					className="min-w-44"
 				>
 					<DropdownMenuGroup>
-						<DropdownMenuLabel className="truncate">{email ?? t("account")}</DropdownMenuLabel>
+						<DropdownMenuLabel className="truncate">{accountQuery.data?.email ?? t("account")}</DropdownMenuLabel>
 						<DropdownMenuItem
 							onClick={() => {
 								setConfirmOpen(true)
@@ -188,6 +189,24 @@ function AccountMenu() {
 export function IconRail() {
 	const { t } = useTranslation()
 	const ephemeral = useBootStore(s => s.ephemeral)
+	const navigate = useNavigate()
+
+	// Mounted once here (the icon rail exists for the app's whole authed lifetime, independent of
+	// which route is active) rather than on the security route itself, so the nag can fire and route
+	// TO that page even when the user never opens it unprompted.
+	useExportKeysReminder()
+
+	// Registered above at module scope (default unassigned) — this only wires the LIVE combo, which
+	// starts as "" (react-hotkeys-hook's parser treats it as "never matches") and works the instant a
+	// user rebinds it via a future shortcuts UI, with no further code change.
+	useAction(
+		"app.openSettings",
+		() => {
+			void navigate({ to: "/settings/security" })
+		},
+		undefined,
+		[navigate]
+	)
 
 	return (
 		<nav
@@ -281,20 +300,18 @@ export function IconRail() {
 				<Tooltip>
 					<TooltipTrigger
 						render={
-							<Button
-								variant="ghost"
-								size="icon-lg"
-								aria-disabled="true"
+							<Link
+								to="/settings/security"
 								aria-label={t("settings")}
-								className="text-muted-foreground/60 hover:bg-transparent hover:text-muted-foreground/60"
+								className={buttonVariants({ variant: "ghost", size: "icon-lg" })}
 							>
 								<SettingsIcon />
-							</Button>
+							</Link>
 						}
 					/>
 					<TooltipContent side="right">
 						{t("settings")}
-						<span className="text-background/60">· {t("comingSoon")}</span>
+						<Kbd action="app.openSettings" />
 					</TooltipContent>
 				</Tooltip>
 			</div>
