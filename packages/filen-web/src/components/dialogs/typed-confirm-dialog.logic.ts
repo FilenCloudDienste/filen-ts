@@ -2,11 +2,11 @@
 // requires a component file to export components only, and these two are plain functions consumed
 // by both the component and its colocated test.
 
-// Exact-match only (no trim/case-fold): `matchValue` is a live value (an email, a directory name,
-// etc.) the caller already holds, never a translated string — i18n copy can reword at any time,
-// which would make the required input silently unreproducible (or trivially wrong) the moment a
-// translation changes, and reproducing exactly what the user already sees elsewhere is the whole
-// point of typed confirmation.
+// Exact-match only (no trim/case-fold): the caller guarantees the displayed instruction and
+// `matchValue` are the same string by construction — a live value (an email, a directory name)
+// interpolated into the copy, or a translated phrase resolved once and fed to both the copy and
+// the check (see the matchValue prop notes) — so normalization here could only loosen the
+// confirmation, never repair a drift.
 export function isArmed(typed: string, matchValue: string): boolean {
 	return typed === matchValue
 }

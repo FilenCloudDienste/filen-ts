@@ -22,11 +22,12 @@ interface TypedConfirmDialogProps {
 	title: string
 	body: string
 	matchLabel: string
-	// Live value the typed input must equal exactly — an email, a directory name, etc., that the
-	// caller already holds. Never a translated string: i18n copy can reword at any time, which would
-	// make the required input silently unreproducible (or trivially wrong) the moment a translation
-	// changes — the whole point of typed confirmation is reproducing a value the user already sees
-	// elsewhere verbatim.
+	// The exact string the typed input must equal. Contract: what the dialog's copy tells the user
+	// to type and this value must be the SAME string by construction, so they can never drift —
+	// either a live value the user already sees elsewhere (an email, a directory name) interpolated
+	// into the body, or a translated phrase resolved ONCE by the caller and fed to both the body
+	// interpolation and this prop. What it must never be: a phrase worded in the copy and re-worded
+	// here independently (two sources = silent drift the moment either rewords).
 	matchValue: string
 	confirmLabel: string
 	cancelLabel: string

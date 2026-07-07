@@ -15,8 +15,8 @@ export const errors = {
 	EmailOrPasswordWrong: "Wrong email or password. Please try again.",
 	/** Fires when a password-protected public link rejects the password entered; shown on the link's password prompt */
 	WrongPassword: "Wrong password. Please try again.",
-	/** Fires when an account-recovery operation rejects the recovery material it was given — reachable from the reset page's uploaded master keys file (the SDK's recoverKey parameter); shown on the reset form */
-	BadRecoveryKey: "The recovery key is invalid. Please double-check it and try again.",
+	/** Fires when an account-recovery operation rejects the recovery material it was given — reachable from the reset page's uploaded master keys file (the SDK's recoverKey parameter, hence the kind name); the label speaks master-keys language per the naming law */
+	BadRecoveryKey: "The master keys file is invalid. Please check the file and try again.",
 	/** Fires when sign-in requires a two-factor code and none was provided; the sign-in flow branches to its two-factor step on this kind */
 	Enter2fa: "Please enter your two-factor authentication code.",
 	/** Fires when an operation given an authenticator code rejects it (sign-in, enabling/disabling two-factor, account deletion); shown by the prompting form */

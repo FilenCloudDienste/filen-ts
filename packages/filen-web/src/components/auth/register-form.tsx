@@ -5,7 +5,7 @@ import { ratePasswordStrength } from "@filen/utils"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { isValidEmail } from "@/lib/auth/validate"
+import { isValidEmail, isPasswordStrongEnough } from "@/lib/auth/validate"
 import { getReferral } from "@/lib/auth/referral"
 import { useRegisterCheckQuery } from "@/queries/register-check"
 import { Button } from "@/components/ui/button"
@@ -55,12 +55,10 @@ function RegisterForm() {
 	const emailValid = isValidEmail(email)
 	const passwordStrength = password.length > 0 ? ratePasswordStrength(password) : null
 	const passwordsMatch = password.length > 0 && password === confirmPassword
-	// Mirrors filen-mobile's register gate exactly: the meter is informational only, no minimum tier
-	// is enforced. `passwordStrength !== null` is redundant given `passwordsMatch` already requires a
-	// non-empty password — kept for parity with mobile's written condition rather than collapsed
-	// away. No `isOnline` term: this slice ships no connectivity infra, a real network failure
-	// surfaces as the SDK's own error toast instead.
-	const canSubmit = emailValid && passwordsMatch && passwordStrength !== null
+	// Minimum-strength gate, shared with the reset form via isPasswordStrongEnough (weak is the only
+	// blocked tier — the meter's weak state explains why). No `isOnline` term: this slice ships no
+	// connectivity infra, a real network failure surfaces as the SDK's own error toast instead.
+	const canSubmit = emailValid && passwordsMatch && isPasswordStrongEnough(passwordStrength)
 
 	async function handleSubmit(e: SubmitEvent): Promise<void> {
 		e.preventDefault()

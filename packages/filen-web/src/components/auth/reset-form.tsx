@@ -7,8 +7,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { persistSession, broadcastAuth } from "@/lib/sdk/session"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { i18n } from "@/lib/i18n"
-import { isValidEmail } from "@/lib/auth/validate"
+import { isValidEmail, isPasswordStrongEnough } from "@/lib/auth/validate"
 import { runResetAttempt } from "@/lib/auth/reset-attempt"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -30,7 +29,9 @@ interface ResetFormProps {
 // the same attemptReset call, with masterKeysFileText simply omitted on the ceremony path — matching
 // completePasswordReset's own optional recoverKey param.
 function ResetForm({ token }: ResetFormProps) {
-	const { t } = useTranslation("auth")
+	// Both namespaces bound: the ceremony's cancel button reuses the generic common:cancel — a
+	// single-ns bound `t` rejects cross-namespace keys under the typed catalog.
+	const { t } = useTranslation(["auth", "common"])
 	const navigate = useNavigate()
 	const [email, setEmail] = useState("")
 	const [password, setPassword] = useState("")
@@ -42,10 +43,13 @@ function ResetForm({ token }: ResetFormProps) {
 	const trimmedEmail = email.trim()
 	const passwordStrength = password.length > 0 ? ratePasswordStrength(password) : null
 	const passwordsMatch = password.length > 0 && password === confirmPassword
-	// Display-only gate parity with the register form: the meter is informational only, no minimum
-	// tier is enforced.
-	const canSubmit = isValidEmail(email) && passwordsMatch && passwordStrength !== null
-	const cancelLabel = i18n.t("cancel")
+	// Minimum-strength gate, shared with the register form via isPasswordStrongEnough (weak is the
+	// only blocked tier — the meter's weak state explains why).
+	const canSubmit = isValidEmail(email) && passwordsMatch && isPasswordStrongEnough(passwordStrength)
+	const cancelLabel = t("common:cancel")
+	// Resolved ONCE: the stage-4 body copy ({{phrase}}) and its matchValue both read THIS string, so
+	// the phrase the user is told to type and the phrase the input is checked against cannot drift.
+	const typedConfirmPhrase = t("skipMasterKeysWarningTypedConfirmPhrase")
 
 	// The single call site for both the direct (with-file) and ceremony (without-file) submit paths.
 	async function attemptReset(masterKeys: string | undefined): Promise<void> {
@@ -240,9 +244,9 @@ function ResetForm({ token }: ResetFormProps) {
 				open={chainStage === "stage4"}
 				pending={pending}
 				title={t("skipMasterKeysWarningStage4Title")}
-				body={t("skipMasterKeysWarningStage4Body", { email: trimmedEmail })}
+				body={t("skipMasterKeysWarningStage4Body", { phrase: typedConfirmPhrase })}
 				matchLabel={t("skipMasterKeysWarningTypedConfirmLabel")}
-				matchValue={trimmedEmail}
+				matchValue={typedConfirmPhrase}
 				confirmLabel={t("skipMasterKeysWarningStage4Confirm")}
 				cancelLabel={cancelLabel}
 				destructive

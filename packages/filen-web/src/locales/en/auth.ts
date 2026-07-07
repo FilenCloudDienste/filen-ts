@@ -21,8 +21,11 @@
 // cross-namespace `i18nKey="auth:key"` string does not infer cleanly under this app's typed
 // `CustomTypeOptions`.
 //
-// The skip-keys stage-4 gate compares the typed value against the account email (interpolated
-// into the copy as {{email}}) — a live value, never a translated phrase.
+// The skip-keys stage-4 gate compares the typed value against the localized confirmation phrase
+// (skipMasterKeysWarningTypedConfirmPhrase). The consumer resolves that key ONCE and feeds the
+// same resolved string to both the visible copy ({{phrase}}) and the match check, so the displayed
+// phrase and the compared phrase cannot drift — that same-source rule is TypedConfirmDialog's
+// matchValue contract.
 export const auth = {
 	// ── Login screen ────────────────────────────────────────────────────────────
 	/** Login screen — page title above the sign-in form */
@@ -89,7 +92,7 @@ export const auth = {
 	/** Register screen — split-sentence link to the login screen; <a> wraps "Sign in" */
 	alreadyHaveAccount: "Already have an account? <a>Sign in</a>",
 
-	// ── Password strength meter (register screen) ───────────────────────────────
+	// ── Password strength meter (register + reset screens) ──────────────────────
 	/** Register screen — label for the live password-strength meter */
 	passwordStrengthLabel: "Password strength",
 	/** Password-strength rating: weakest tier */
@@ -100,6 +103,8 @@ export const auth = {
 	passwordStrengthStrong: "Strong",
 	/** Password-strength rating: strongest tier */
 	passwordStrengthBest: "Very strong",
+	/** Helper line under the strength meter (register and reset forms) when the entered password is below the minimum strength required to submit; never names a specific tier */
+	passwordStrengthTooWeak: "Choose a stronger password to continue",
 
 	// ── Free-storage eligibility banner (register screen) ───────────────────────
 	/** Register screen — eligibility banner shown when the region/IP IS eligible for the free-storage signup bonus */
@@ -141,6 +146,8 @@ export const auth = {
 	masterKeysFileChoose: "Choose file",
 	/** Reset page — shown next to the chosen file name once a master keys file has been read; {{fileName}} interpolates the chosen file's name */
 	masterKeysFileImported: "Master keys imported ({{fileName}})",
+	/** Reset page — accessible label on the button that removes the chosen master keys file, returning the reset to the no-file (skip-keys) path */
+	masterKeysFileRemove: "Remove master keys file",
 
 	// ── Skip-master-keys warning: escalating 4-stage confirmation shown when the
 	// user tries to reset without uploading a master keys file ─────────────────
@@ -167,11 +174,13 @@ export const auth = {
 	skipMasterKeysWarningStage3Continue: "I understand",
 	/** Skip-master-keys warning, stage 4 of 4 — title for the final typed-confirmation gate */
 	skipMasterKeysWarningStage4Title: "Type to confirm",
-	/** Skip-master-keys warning, stage 4 of 4 — body instructing the user to type their account email to arm the confirm button; {{email}} interpolates the live account email */
+	/** Skip-master-keys warning, stage 4 of 4 — body instructing the user to type the confirmation phrase to arm the confirm button; {{phrase}} interpolates skipMasterKeysWarningTypedConfirmPhrase */
 	skipMasterKeysWarningStage4Body:
-		"Type your email address ({{email}}) below to confirm you accept permanently losing your existing files, notes and chats. This is your last chance to cancel.",
-	/** Skip-master-keys warning, stage 4 of 4 — label for the typed-email confirmation input */
-	skipMasterKeysWarningTypedConfirmLabel: "Your email address",
+		"Type {{phrase}} below to confirm you accept permanently losing your existing files, notes and chats. This is your last chance to cancel.",
+	/** Skip-master-keys warning, stage 4 of 4 — label for the confirmation-phrase input */
+	skipMasterKeysWarningTypedConfirmLabel: "Confirmation phrase",
+	/** Skip-master-keys warning, stage 4 of 4 — the phrase the user must type EXACTLY (character for character, including case) to confirm permanently losing their data; translate as a short, natural phrase a user can type in your language — it is compared verbatim against what they type */
+	skipMasterKeysWarningTypedConfirmPhrase: "DELETE ALL MY DATA",
 	/** Skip-master-keys warning, stage 4 of 4 — confirm button that runs the actual reset once the typed email arms it */
 	skipMasterKeysWarningStage4Confirm: "Reset password and delete my data",
 

@@ -29,9 +29,11 @@ const STRENGTH_LABEL_KEY = {
 	best: "passwordStrengthBest"
 } as const satisfies Record<PasswordStrengthTier, string>
 
-// Live strength feedback only — purely informational, never gates submission (each consuming form's
-// own canSubmit stops at "rated at all", no minimum tier). Width steps in quarters rather than a
-// continuous scale, per a simple width-stepped bar. Shared by the register and reset forms.
+// Live strength feedback shared by the register and reset forms. Width steps in quarters rather
+// than a continuous scale, per a simple width-stepped bar. Both consuming forms gate their submit
+// on isPasswordStrongEnough (weak is the only blocked tier), so the weak tier also renders the
+// "choose a stronger password" helper here — the gate's explanation lives in one place and the
+// two forms cannot diverge.
 function StrengthMeter({ tier }: { tier: PasswordStrengthTier }) {
 	const { t } = useTranslation("auth")
 
@@ -44,6 +46,7 @@ function StrengthMeter({ tier }: { tier: PasswordStrengthTier }) {
 				/>
 			</div>
 			<p className={cn("text-xs", tier === "weak" ? "text-destructive" : "text-muted-foreground")}>{t(STRENGTH_LABEL_KEY[tier])}</p>
+			{tier === "weak" && <p className="text-xs text-destructive">{t("passwordStrengthTooWeak")}</p>}
 		</div>
 	)
 }
