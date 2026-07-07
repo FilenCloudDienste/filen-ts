@@ -31,12 +31,14 @@ test.describe("shell", { tag: "@no-sdk" }, () => {
 
 		await page.goto("/")
 
-		// Catalog strings resolve (no raw keys) across the sign-in card.
+		// Catalog strings resolve (no raw keys) across the sign-in card — the real login form (not the
+		// pre-auth placeholder this test originally shipped against).
 		await expect(page.getByText("Sign in to Filen")).toBeVisible()
 		await expect(page.getByText("Your end-to-end encrypted drive, notes and chats.")).toBeVisible()
-		await expect(page.getByText("Email")).toBeVisible()
-		await expect(page.getByText("Password")).toBeVisible()
-		await expect(page.getByText("Sign-in arrives in the next update.")).toBeVisible()
+		await expect(page.getByText("Email", { exact: true })).toBeVisible()
+		await expect(page.getByText("Password", { exact: true })).toBeVisible()
+		await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible()
+		await expect(page.getByRole("button", { name: "Forgot password?", exact: true })).toBeVisible()
 
 		expect(cspViolations, cspViolations.join("\n")).toEqual([])
 		expect(consoleErrors, consoleErrors.join("\n")).toEqual([])

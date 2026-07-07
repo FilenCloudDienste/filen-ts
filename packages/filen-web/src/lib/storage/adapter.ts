@@ -84,6 +84,15 @@ export async function kvDelete(key: string): Promise<void> {
 	await api.kvDelete(key)
 }
 
+// Raw existence check, independent of any schema: kvGetJson collapses "absent" and "present but
+// schema-mismatched" to the same `null`, which is the right call for a normal typed read but makes
+// it useless for proving a key is genuinely gone (e.g. after a wipe) when the caller does not also
+// happen to hold the exact schema that key was written with.
+export async function kvHas(key: string): Promise<boolean> {
+	const { api } = await storage()
+	return (await api.kvGet(key)) !== null
+}
+
 // Wipes every kv row — query-persist rows and keymap overrides included, the full local wipe
 // logout needs. Composed from the two primitives already leader-routed (kvKeys/kvDelete) rather
 // than adding a third worker op: an empty prefix matches every key (db.worker's `LIKE ? || '%'`),

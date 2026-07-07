@@ -24,10 +24,11 @@ export default defineConfig({
 	reporter: [["html", { open: "never" }], ["list"]],
 	timeout: 90_000,
 	expect: { timeout: 15_000 },
-	// The session blob and credentials are secret-equivalent; a trace would capture them as
-	// addInitScript / evaluate arguments, so tracing stays off. Failure screenshots are safe — no
-	// secret is ever rendered into the UI (the drive is an empty placeholder, the login email field
-	// shows only a placeholder string).
+	// The session blob is secret-equivalent; a trace would capture it as an addInitScript / evaluate
+	// argument, so tracing stays off. Failure screenshots are an acceptable residual: the password
+	// input always renders masked (screenshots capture pixels, not DOM values), and auth-setup /
+	// auth.spec type only the dedicated e2e test account's email — never a customer's, never the
+	// session blob.
 	use: {
 		baseURL: BASE_URL,
 		trace: "off",

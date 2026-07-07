@@ -4,9 +4,11 @@
 // resolve. Declared non-optional: every spec waits for the hooks before touching them.
 interface E2eHooks {
 	mint: (email: string, password: string) => Promise<string>
+	dumpSession: () => Promise<string>
 	probeAuthedRead: () => Promise<boolean>
 	kvSet: (key: string, value: string) => Promise<void>
 	kvGet: (key: string) => Promise<string | null>
+	kvHas: (key: string) => Promise<boolean>
 	setUserCombo: (actionId: string, combo: string) => Promise<void>
 	comboFor: (actionId: string) => string
 }

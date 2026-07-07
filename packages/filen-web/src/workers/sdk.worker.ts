@@ -164,6 +164,13 @@ const api = {
 		// serializer.
 		return requireClient().getUserInfo()
 	},
+	// Re-stringifies whatever client is CURRENTLY live, independent of any particular auth flow — same
+	// shape as getUserInfo: a plain authed read, no mutation. Today's only caller is the E2E harness's
+	// dumpSession hook, which needs the just-authenticated client regardless of whether persistSession's
+	// own kv write happened to succeed.
+	toStringified(): Promise<StringifiedClient> {
+		return requireClient().toStringified()
+	},
 	async changePassword(params: ChangePasswordParams): Promise<StringifiedClient> {
 		const c = requireClient()
 		await c.changePassword(params) // mutates the live client in place (re-derives keys)

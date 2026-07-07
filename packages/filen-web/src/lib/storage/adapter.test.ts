@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { type } from "arktype"
-import { kvClear, kvGetJson, kvSetJson } from "@/lib/storage/adapter"
+import { kvClear, kvGetJson, kvHas, kvSetJson } from "@/lib/storage/adapter"
 import { log } from "@/lib/log"
 
 // node vitest cannot provide navigator.locks/BroadcastChannel/real workers (leader.ts's actual
@@ -77,5 +77,17 @@ describe("storage adapter (Map-backed fake StorageApi)", () => {
 		await kvClear()
 
 		expect(fakeStore.size).toBe(0)
+	})
+
+	it("kvHas reports existence independent of schema — even a mismatched value counts as present", async () => {
+		await expect(kvHas("k4")).resolves.toBe(false)
+
+		await kvSetJson("k4", { n: "not-a-bigint" }) // kvGetJson would drop this as invalid for a bigint schema
+
+		await expect(kvHas("k4")).resolves.toBe(true)
+
+		await kvClear()
+
+		await expect(kvHas("k4")).resolves.toBe(false)
 	})
 })

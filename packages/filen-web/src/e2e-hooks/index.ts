@@ -2,7 +2,7 @@ import { type } from "arktype"
 import type { StringifiedClient } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
-import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
+import { kvGetJson, kvHas, kvSetJson } from "@/lib/storage/adapter"
 import { comboFor, setUserCombo } from "@/lib/keymap/registry"
 import { persistSession, resumeSession } from "@/lib/sdk/session"
 import { whenBootReady } from "@/lib/sdk/boot"
@@ -25,11 +25,23 @@ const stringSchema = type("string")
 
 interface E2eHooks {
 	// Logs in and returns the session blob as an envelope string (bigint-safe, ready to persist).
+	// Documented fallback for auth-setup's real-form login (see auth.setup.ts) — kept working in case
+	// the form path ever proves too flaky to drive from Playwright.
 	mint: (email: string, password: string) => Promise<string>
+	// Re-stringifies the WORKER'S currently-live client (not the kv copy — see dumpSession) into the
+	// same envelope-string shape mint returns. Used by auth-setup to harvest the session after driving
+	// the real login form, so the harness gets genuine UI coverage from the one login the budget allows.
+	dumpSession: () => Promise<string>
 	// A single authenticated read against the API — proves an injected session actually authenticates.
 	probeAuthedRead: () => Promise<boolean>
 	kvSet: (key: string, value: string) => Promise<void>
 	kvGet: (key: string) => Promise<string | null>
+	// Raw existence check, independent of schema — kvGet/kvGetJson return null for BOTH "absent" and
+	// "present but the wrong shape for the schema this hook happens to validate with", which makes
+	// kvGet useless for proving a key is genuinely gone (e.g. asserting a wipe) unless the caller also
+	// holds that exact schema. Used by auth.spec's logout test to check the session key without
+	// depending on sessionSchema.
+	kvHas: (key: string) => Promise<boolean>
 	setUserCombo: (actionId: string, combo: string) => Promise<void>
 	comboFor: (actionId: string) => string
 }
@@ -80,9 +92,15 @@ export function installE2eHooks(router: RouterLike): void {
 
 			return stringifyEnvelope(await sdkApi.login({ email, password }))
 		},
+		dumpSession: async () => {
+			await whenBootReady()
+
+			return stringifyEnvelope(await sdkApi.toStringified())
+		},
 		probeAuthedRead: () => sdkApi.probeAuthedRead(),
 		kvSet: (key, value) => kvSetJson(key, value),
 		kvGet: key => kvGetJson(key, stringSchema),
+		kvHas: key => kvHas(key),
 		setUserCombo: (actionId, combo) => setUserCombo(actionId, combo),
 		comboFor: actionId => comboFor(actionId)
 	}

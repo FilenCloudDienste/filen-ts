@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { StringifiedClient } from "@filen/sdk-rs"
 import { runLoginAttempt, type LoginAttemptDeps, type LoginParams } from "@/lib/auth/login-attempt"
-import type { ErrorDTO } from "@/lib/sdk/errors"
+import { toErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 
 function sampleBlob(): StringifiedClient {
@@ -110,6 +110,38 @@ describe("runLoginAttempt (injected deps, no worker)", () => {
 		await expect(runLoginAttempt(h.deps, PARAMS)).resolves.toEqual({ status: "two-factor", wrongCode: false })
 
 		h.login.mockRejectedValueOnce(sdkDto("Wrong2fa"))
+		await expect(runLoginAttempt(h.deps, PARAMS)).resolves.toEqual({ status: "two-factor", wrongCode: true })
+
+		expect(h.logout).not.toHaveBeenCalled()
+	})
+
+	// errors.test.ts proves toErrorDTO's shape detection in isolation; the test above proves the
+	// two-factor branch in isolation against a hand-built DTO literal. Neither closes the gap between
+	// them: a live FilenSdkError never survives Comlink intact (it clones hollow — see errors.ts's
+	// header), so the worker always runs it through toErrorDTO BEFORE the rejection crosses the
+	// boundary (sdk.worker.ts's Proxy wrapper). This runs a live-shaped 2FA throw through the REAL
+	// toErrorDTO and feeds its actual output into the branch, proving the two conversion layers agree
+	// on the kind a production worker throw would actually carry.
+	class LiveTwoFactorError {
+		kind: string
+		constructor(kind: string) {
+			this.kind = kind
+		}
+		message(): string {
+			return "outer"
+		}
+		server_message(): string {
+			return ""
+		}
+	}
+
+	it("branches correctly on a DTO produced by the real toErrorDTO from a live-shaped 2fa throw", async () => {
+		const h = makeHarness()
+
+		h.login.mockRejectedValueOnce(toErrorDTO(new LiveTwoFactorError("Enter2fa")))
+		await expect(runLoginAttempt(h.deps, PARAMS)).resolves.toEqual({ status: "two-factor", wrongCode: false })
+
+		h.login.mockRejectedValueOnce(toErrorDTO(new LiveTwoFactorError("Wrong2fa")))
 		await expect(runLoginAttempt(h.deps, PARAMS)).resolves.toEqual({ status: "two-factor", wrongCode: true })
 
 		expect(h.logout).not.toHaveBeenCalled()
