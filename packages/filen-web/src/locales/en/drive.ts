@@ -83,7 +83,7 @@ export const drive = {
 	/** Drive breadcrumb — accessible label on the breadcrumb navigation landmark */
 	driveBreadcrumbLabel: "Breadcrumb",
 
-	// ── Listing placeholder (T4 replaces the body with the real virtualized list) ───────────────
+	// ── Listing placeholder (swapped for the real virtualized list) ───────────────
 	/** Drive listing — title shown when a directory listing fails to load */
 	driveLoadError: "Couldn't load this directory",
 	/** Drive listing — item count summary below a loaded, non-empty listing; singular */

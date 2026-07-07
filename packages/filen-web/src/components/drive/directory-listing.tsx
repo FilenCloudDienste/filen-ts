@@ -15,7 +15,7 @@ export interface DirectoryListingProps {
 }
 
 // Every drive route (drive.tsx, drive_.$uuid.tsx, recents/favorites/trash.tsx) renders this one
-// container with its own {variant,uuid} — the single place T4 swaps this placeholder body for the
+// container with its own {variant,uuid} — the single place the placeholder body is swapped for the
 // real virtualized list, so no route needs to change again when it does.
 export function DirectoryListing({ variant, uuid }: DirectoryListingProps) {
 	const { t } = useTranslation(["drive", "common"])

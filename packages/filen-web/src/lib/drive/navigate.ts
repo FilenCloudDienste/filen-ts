@@ -6,7 +6,7 @@ export interface DriveNavigationTarget {
 	params: { uuid: string }
 }
 
-// Files never navigate in 2a — opening one is a preview, a later slice's concern (2e).
+// Files never navigate here — opening one is a preview, a later concern.
 //
 // Every variant funnels a directory open into the "drive" variant's own route: recents/favorites
 // are flat, single-level listings with no nested route of their own (see
