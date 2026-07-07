@@ -4,6 +4,7 @@ import type { QueryClient } from "@tanstack/react-query"
 import { storage } from "@/lib/storage/adapter"
 import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
 import { log } from "@/lib/log"
+import { REGISTER_CHECK_QUERY_KEY } from "@/queries/register-check"
 
 // PER-QUERY persistence: `persistQueryClient` re-serializes the ENTIRE dehydrated client on every
 // cache change — O(cache) write amplification through the envelope serializer into sqlite on
@@ -179,13 +180,30 @@ const kvStorage: AsyncStorage<string | undefined> = {
 	}
 }
 
+// Query keys excluded from disk persistence entirely, matched exactly (not just by domain prefix)
+// so future queries sharing a domain default back to normal persistence. First (and today, only)
+// entry: the register-eligibility check is IP/region + time sensitive and already refetches on
+// every mount (staleTime 0 + refetchOnMount "always"), so persisting it would only ever serve a
+// stale banner for an instant, at the cost of a needless disk row. Imported rather than
+// re-literaled so the two can never drift apart.
+const NEVER_PERSIST_QUERY_KEYS: readonly (readonly string[])[] = [REGISTER_CHECK_QUERY_KEY]
+
+function isNeverPersisted(queryKey: readonly unknown[]): boolean {
+	return NEVER_PERSIST_QUERY_KEYS.some(
+		excluded => excluded.length === queryKey.length && excluded.every((segment, i) => segment === queryKey[i])
+	)
+}
+
 export const persister = experimental_createQueryPersister({
 	storage: kvStorage,
 	prefix: PERSIST_PREFIX,
 	buster: PERSIST_PREFIX,
 	maxAge: PERSIST_MAX_AGE,
 	serialize,
-	deserialize
+	deserialize,
+	filters: {
+		predicate: query => !isNeverPersisted(query.queryKey)
+	}
 })
 
 // Boot-time restore-all (called once, after storage init): walks every `rq.v1-*` row via

@@ -3,11 +3,11 @@ import { Trans, useTranslation } from "react-i18next"
 import { redirectIfAuthed } from "@/lib/auth/guard"
 import { Logo } from "@/components/shell/logo"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { RegisterForm } from "@/components/auth/register-form"
 
-// Placeholder registration surface — the real form (strength meter, referral capture, eligibility
-// banner) is built separately. Exists now so /login's "Sign up" link has a real, typed route to
-// reach, staged the same way /login itself was before its real form landed. Same shared
-// unauthed-page guard as /login.
+// Unauthed page: a live session bounces straight to /drive. Same shared guard as /login — see
+// guard.ts. Mirrors login.tsx's Card shell; the real form (strength meter, referral capture,
+// eligibility banner, check-your-email success state) lives in RegisterForm.
 export const Route = createFileRoute("/register")({
 	beforeLoad: redirectIfAuthed,
 	component: RegisterPage
@@ -15,7 +15,6 @@ export const Route = createFileRoute("/register")({
 
 function RegisterPage() {
 	const { t } = useTranslation("auth")
-	const { t: tCommon } = useTranslation()
 
 	return (
 		<div className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
@@ -28,7 +27,7 @@ function RegisterPage() {
 					</div>
 				</CardHeader>
 				<CardContent>
-					<p className="text-center text-sm text-muted-foreground">{tCommon("comingSoon")}</p>
+					<RegisterForm />
 				</CardContent>
 				<CardFooter className="justify-center">
 					<p className="text-sm text-muted-foreground">
