@@ -156,6 +156,22 @@ describe("restoreFileVersion — versions list cache update (bug #11)", () => {
 
 		expect(next.map(v => v.uuid)).toEqual(["ver-keep"])
 	})
+
+	// A version restore ROTATES the file's uuid (the SDK sets file.uuid = version.uuid), so the
+	// modified file returned carries a DIFFERENT uuid than the input. The versions-list screen
+	// keeps querying by the PRE-rotation uuid it was opened with (route param, never re-set), so
+	// the optimistic cache patch MUST target that pre-rotation uuid — not the rotated one — or it
+	// lands on an unobserved key and the restored version stays on screen until a manual refetch.
+	it("keys the versions-cache update on the PRE-rotation uuid, not the rotated file uuid", async () => {
+		// SDK returns the file with a rotated uuid (equals the restored version's uuid).
+		mockRestoreFileVersion.mockResolvedValueOnce({ uuid: "ver-old" })
+
+		await restoreFileVersion({ item: fileItem, version: makeVersion("ver-old") })
+
+		expect(mockDriveItemVersionsQueryUpdate).toHaveBeenCalledTimes(1)
+		// Must be the screen's key ("file-1"), NOT the post-rotation uuid ("ver-old").
+		expect(mockDriveItemVersionsQueryUpdate.mock.calls[0]?.[0]?.params).toEqual({ uuid: "file-1" })
+	})
 })
 
 // ---------------------------------------------------------------------------
