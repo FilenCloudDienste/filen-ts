@@ -15,7 +15,7 @@ import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import useIsOnline from "@/hooks/useIsOnline"
-import { isValidEmail } from "@/features/auth/utils"
+import { isValidEmail, isPasswordStrongEnough } from "@/features/auth/utils"
 import useRegisterCheckQuery from "@/features/auth/queries/useRegisterCheck.query"
 import logger from "@/lib/logger"
 
@@ -63,7 +63,8 @@ const Register = () => {
 	const passwordStrength = password.length > 0 ? ratePasswordStrength(password) : null
 	const emailValid = isValidEmail(email)
 	const passwordsMatch = password.length > 0 && password === confirmPassword
-	const canSubmit = emailValid && passwordsMatch && passwordStrength !== null && isOnline
+	const passwordStrongEnough = isPasswordStrongEnough(passwordStrength)
+	const canSubmit = emailValid && passwordsMatch && passwordStrongEnough && isOnline
 
 	const dismiss = (): void => {
 		navigation.getParent()?.goBack()
@@ -288,6 +289,9 @@ const Register = () => {
 								{t(STRENGTH_LABEL_KEY[passwordStrength.strength])}
 							</Text>
 						</View>
+					)}
+					{passwordStrength !== null && !passwordStrongEnough && (
+						<Text className="text-red-500 text-xs px-1">{t("password_too_weak_to_register")}</Text>
 					)}
 					{password.length > 0 && confirmPassword.length > 0 && !passwordsMatch && (
 						<Text className="text-red-500 text-xs px-1">{t("passwords_do_not_match")}</Text>

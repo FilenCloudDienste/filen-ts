@@ -48,6 +48,8 @@ export const auth = {
 	password_strength_strong: "Strong",
 	/** Password-strength rating: strongest tier */
 	password_strength_best: "Very strong",
+	/** Registration form — helper line shown under the strength meter when the entered password is below the minimum required strength */
+	password_too_weak_to_register: "Choose a stronger password to continue",
 	// passwords_do_not_match lives in common.ts.
 	/** Registration screen — primary submit button that creates the account */
 	create_account: "Create account",

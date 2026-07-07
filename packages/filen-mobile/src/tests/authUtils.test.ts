@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
+import { ratePasswordStrength } from "@filen/utils"
 
-import { isValidEmail } from "@/features/auth/utils"
+import { isValidEmail, isPasswordStrongEnough } from "@/features/auth/utils"
 
 describe("isValidEmail", () => {
 	it("accepts a standard email address", () => {
@@ -33,5 +34,27 @@ describe("isValidEmail", () => {
 
 	it("rejects a missing local part", () => {
 		expect(isValidEmail("@example.com")).toBe(false)
+	})
+})
+
+describe("isPasswordStrongEnough", () => {
+	it("rejects a null strength (empty password)", () => {
+		expect(isPasswordStrongEnough(null)).toBe(false)
+	})
+
+	it("rejects a weak password", () => {
+		expect(isPasswordStrongEnough(ratePasswordStrength("abc"))).toBe(false)
+	})
+
+	it("accepts a normal-strength password", () => {
+		expect(isPasswordStrongEnough(ratePasswordStrength("AbcAbcAbcAbc"))).toBe(true)
+	})
+
+	it("accepts a strong password", () => {
+		expect(isPasswordStrongEnough(ratePasswordStrength("Abcdefg!@#"))).toBe(true)
+	})
+
+	it("accepts the best-tier password", () => {
+		expect(isPasswordStrongEnough(ratePasswordStrength("Abcdefghijk!@#$%"))).toBe(true)
 	})
 })
