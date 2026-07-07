@@ -6,10 +6,10 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
 interface BootErrorScreenProps {
-	// The machine-readable boot failure reason (artifacts | pool | async-runtime). `coi` is handled
-	// separately by routing to the dedicated /no-coi page, so it never reaches this screen. Both fields
-	// are required-but-undefinable so the store's `X | undefined` selectors pass cleanly under
-	// exactOptionalPropertyTypes.
+	// The machine-readable boot failure reason (artifacts | pool | async-runtime). `coi` and `opfs` are
+	// handled separately by routing to their own dedicated pages (/no-coi, /no-opfs), so neither ever
+	// reaches this screen. Both fields are required-but-undefinable so the store's `X | undefined`
+	// selectors pass cleanly under exactOptionalPropertyTypes.
 	reason: string | undefined
 	error: ErrorDTO | undefined
 }

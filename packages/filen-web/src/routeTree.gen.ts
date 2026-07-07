@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as RegisterRouteImport } from './routes/register'
+import { Route as NoOpfsRouteImport } from './routes/no-opfs'
 import { Route as NoCoiRouteImport } from './routes/no-coi'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteRouteImport } from './routes/_app/route'
@@ -24,6 +25,11 @@ import { Route as AppDriveSplatRouteImport } from './routes/_app/drive.$'
 const RegisterRoute = RegisterRouteImport.update({
   id: '/register',
   path: '/register',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NoOpfsRoute = NoOpfsRouteImport.update({
+  id: '/no-opfs',
+  path: '/no-opfs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NoCoiRoute = NoCoiRouteImport.update({
@@ -80,6 +86,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/no-coi': typeof NoCoiRoute
+  '/no-opfs': typeof NoOpfsRoute
   '/register': typeof RegisterRoute
   '/favorites': typeof AppFavoritesRoute
   '/recents': typeof AppRecentsRoute
@@ -92,6 +99,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/no-coi': typeof NoCoiRoute
+  '/no-opfs': typeof NoOpfsRoute
   '/register': typeof RegisterRoute
   '/favorites': typeof AppFavoritesRoute
   '/recents': typeof AppRecentsRoute
@@ -106,6 +114,7 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteRouteWithChildren
   '/login': typeof LoginRoute
   '/no-coi': typeof NoCoiRoute
+  '/no-opfs': typeof NoOpfsRoute
   '/register': typeof RegisterRoute
   '/_app/favorites': typeof AppFavoritesRoute
   '/_app/recents': typeof AppRecentsRoute
@@ -120,6 +129,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/no-coi'
+    | '/no-opfs'
     | '/register'
     | '/favorites'
     | '/recents'
@@ -132,6 +142,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/no-coi'
+    | '/no-opfs'
     | '/register'
     | '/favorites'
     | '/recents'
@@ -145,6 +156,7 @@ export interface FileRouteTypes {
     | '/_app'
     | '/login'
     | '/no-coi'
+    | '/no-opfs'
     | '/register'
     | '/_app/favorites'
     | '/_app/recents'
@@ -159,6 +171,7 @@ export interface RootRouteChildren {
   AppRouteRoute: typeof AppRouteRouteWithChildren
   LoginRoute: typeof LoginRoute
   NoCoiRoute: typeof NoCoiRoute
+  NoOpfsRoute: typeof NoOpfsRoute
   RegisterRoute: typeof RegisterRoute
   ResetTokenRoute: typeof ResetTokenRoute
 }
@@ -170,6 +183,13 @@ declare module '@tanstack/react-router' {
       path: '/register'
       fullPath: '/register'
       preLoaderRoute: typeof RegisterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/no-opfs': {
+      id: '/no-opfs'
+      path: '/no-opfs'
+      fullPath: '/no-opfs'
+      preLoaderRoute: typeof NoOpfsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/no-coi': {
@@ -270,6 +290,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppRouteRoute: AppRouteRouteWithChildren,
   LoginRoute: LoginRoute,
   NoCoiRoute: NoCoiRoute,
+  NoOpfsRoute: NoOpfsRoute,
   RegisterRoute: RegisterRoute,
   ResetTokenRoute: ResetTokenRoute,
 }

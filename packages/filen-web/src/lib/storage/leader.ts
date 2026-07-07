@@ -28,7 +28,7 @@ interface Res {
 type Hello = { kind: "leader-ready" } | { kind: "leader?" }
 type Msg = Req | Res | Hello
 
-const STORAGE_METHODS = ["open", "mode", "kvGet", "kvSet", "kvDelete", "kvKeys"] as const satisfies readonly (keyof StorageApi)[]
+const STORAGE_METHODS = ["open", "kvGet", "kvSet", "kvDelete", "kvKeys"] as const satisfies readonly (keyof StorageApi)[]
 
 // A promise plus its externally-exposed settle functions — lets a listener registered before the
 // promise exists (e.g. inside the promise's own executor) settle it later without a self-reference
@@ -53,7 +53,7 @@ function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => voi
 	}
 }
 
-export function acquireStorage(forceEphemeral: boolean): Promise<StorageHandle> {
+export function acquireStorage(): Promise<StorageHandle> {
 	return new Promise((resolve, reject) => {
 		// Role is decided by the LOCK GRANT (deterministic) — never by racing a timer against open().
 		// `.catch(reject)` matters: without it, a rejection from followerHandle() (e.g. the 10s
@@ -69,7 +69,11 @@ export function acquireStorage(forceEphemeral: boolean): Promise<StorageHandle> 
 
 			const worker = new DbWorker()
 			const remote = Comlink.wrap<StorageApi>(worker)
-			await remote.open(forceEphemeral)
+			// OPFS is a hard requirement — a thrown open() (see db.worker.ts) rejects this whole lock
+			// callback, which navigator.locks.request propagates to `granted` below and releases the
+			// lock without ever posting "leader-ready"; any waiting follower times out instead of
+			// hanging forever.
+			await remote.open()
 
 			const ch = new BroadcastChannel(CHANNEL)
 			ch.onmessage = (ev: MessageEvent<Msg>) => {

@@ -3,7 +3,7 @@ import { test, expect } from "./fixtures"
 const SESSION_SLOT = "filen.e2e.session"
 
 test.describe("storage", () => {
-	test("kv values persist across a reload on the persistent backend", async ({ page }) => {
+	test("kv values persist across a reload", async ({ page }) => {
 		await page.goto("/")
 		await page.waitForFunction(() => "__filenE2E" in window)
 
@@ -15,33 +15,7 @@ test.describe("storage", () => {
 		expect(value).toBe("persisted-value")
 	})
 
-	test("ephemeral mode shows the indicator and does not persist", async ({ page, injectedSession, browserName }) => {
-		// Reloading the authed shell under COI intermittently trips a Corrupted Content Error on
-		// Playwright-firefox; the ephemeral indicator + non-persistence are verified on chromium.
-		test.skip(browserName === "firefox", "reloading the authed shell is unstable on Playwright-firefox under COI")
-
-		expect(injectedSession.length).toBeGreaterThan(0)
-
-		await page.goto("/?ephemeral=1")
-
-		// Authed shell renders; the backend was chosen ephemeral from the initial URL, so the rail shows
-		// the ephemeral indicator (aria-label from the ephemeralSession catalog key).
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
-		await expect(page.getByLabel("Ephemeral session")).toBeVisible()
-
-		await page.evaluate(() => window.__filenE2E.kvSet("e2e.storage.ephemeral", "gone"))
-
-		// The in-memory backend does not survive a reload — the value is gone. (A reload, not a second
-		// goto: re-navigating to the same URL intermittently trips a Corrupted Content Error on
-		// Playwright-firefox under COI.)
-		await page.reload()
-		await page.waitForFunction(() => "__filenE2E" in window)
-
-		const value = await page.evaluate(() => window.__filenE2E.kvGet("e2e.storage.ephemeral"))
-		expect(value).toBeNull()
-	})
-
-	test("a follower tab reads through the leader and reflects its ephemeral mode", async ({
+	test("a follower tab reads a value written by the leader tab through the BroadcastChannel RPC", async ({
 		page,
 		injectedSession,
 		context,
@@ -53,14 +27,13 @@ test.describe("storage", () => {
 
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		// Leader tab: ephemeral, writes a value into the leader-owned sqlite.
-		await page.goto("/?ephemeral=1")
+		// Leader tab: wins the Web Lock, opens OPFS directly, and writes a value into its own sqlite.
+		await page.goto("/")
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
-		await expect(page.getByLabel("Ephemeral session")).toBeVisible()
 		await page.evaluate(() => window.__filenE2E.kvSet("e2e.storage.leader", "from-leader"))
 
-		// Follower tab: opened WITHOUT ?ephemeral — it must still report ephemeral (it asks the leader,
-		// never assumes) and read the leader's value through the BroadcastChannel RPC.
+		// Follower tab: the lock is already held, so it reads through the BroadcastChannel RPC instead
+		// of opening its own OPFS handle.
 		const follower = await context.newPage()
 
 		await follower.addInitScript(
@@ -72,7 +45,6 @@ test.describe("storage", () => {
 		await follower.goto("/")
 
 		await expect(follower.getByRole("navigation", { name: "Filen" })).toBeVisible()
-		await expect(follower.getByLabel("Ephemeral session")).toBeVisible()
 
 		const readThrough = await follower.evaluate(() => window.__filenE2E.kvGet("e2e.storage.leader"))
 		expect(readThrough).toBe("from-leader")

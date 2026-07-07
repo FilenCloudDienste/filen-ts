@@ -14,8 +14,7 @@ vi.mock("@/lib/storage/leader", () => ({
 		Promise.resolve({
 			role: "leader" as const,
 			api: {
-				open: () => Promise.resolve("persistent" as const),
-				mode: () => Promise.resolve("persistent" as const),
+				open: () => Promise.resolve(undefined),
 				kvGet: (key: string) => Promise.resolve(fakeStore.get(key) ?? null),
 				kvSet: (key: string, value: string) => {
 					fakeStore.set(key, value)
@@ -29,8 +28,6 @@ vi.mock("@/lib/storage/leader", () => ({
 			}
 		})
 }))
-
-vi.stubGlobal("location", { search: "" })
 
 beforeEach(() => {
 	fakeStore.clear()

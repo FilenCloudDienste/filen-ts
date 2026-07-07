@@ -2,43 +2,30 @@ import { type, type Type } from "arktype"
 import { acquireStorage, type StorageHandle } from "@/lib/storage/leader"
 import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
 import { log } from "@/lib/log"
-import { useBootStore } from "@/stores/boot"
 
 let handle: Promise<StorageHandle> | null = null
 
-// Reflects the resolved backend into the boot store exactly once per tab — asks the
-// API for its mode rather than assuming, so a follower tab (whose own `open()` never ran) still
-// reports the leader's real mode. The icon rail consumes `useBootStore().ephemeral` for its badge.
-async function markEphemeralIndicator(): Promise<void> {
-	useBootStore.getState().setEphemeral((await storageMode()) === "ephemeral")
-}
-
+// Storage has exactly one backend now (OPFS-persistent) — a failed acquisition is a hard boot
+// failure (see bootSdk's explicit storage probe), not a mode to report. Memoized per tab regardless
+// of role: a leader opens its own worker once; a follower reuses the same election result for every
+// kv call.
 export function storage(): Promise<StorageHandle> {
 	if (handle === null) {
-		const attempt = acquireStorage(new URLSearchParams(location.search).has("ephemeral"))
+		const attempt = acquireStorage()
 
 		handle = attempt
-		// Side-channel only — indicator failures must never surface anywhere but the `handle`
-		// promise itself (which every real caller awaits directly), so they are swallowed. A
-		// REJECTED attempt is additionally un-memoized (guarded so a newer attempt is never
-		// clobbered): without the reset, the first rejection — e.g. "no db leader after 10s" —
-		// would be replayed to every storage() call for the rest of the tab's life. Callers of
-		// this attempt still see the rejection (they await `attempt` itself, not this side chain).
-		void attempt
-			.then(markEphemeralIndicator, () => {
-				if (handle === attempt) {
-					handle = null
-				}
-			})
-			.catch(() => undefined)
+		// A REJECTED attempt is un-memoized (guarded so a newer attempt is never clobbered): without
+		// the reset, the first rejection — e.g. "no db leader after 10s" — would be replayed to every
+		// storage() call for the rest of the tab's life. Callers of THIS attempt still see the
+		// rejection (they await `attempt` itself, not this side chain).
+		void attempt.catch(() => {
+			if (handle === attempt) {
+				handle = null
+			}
+		})
 	}
 
 	return handle
-}
-
-export async function storageMode(): Promise<"persistent" | "ephemeral"> {
-	const { api } = await storage()
-	return api.mode() // followers ask the leader — never assume (rev-1 hardcoded this wrong)
 }
 
 export async function kvGetJson<T>(key: string, schema: Type<T>): Promise<T | null> {

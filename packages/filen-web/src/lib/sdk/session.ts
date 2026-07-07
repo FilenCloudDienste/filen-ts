@@ -41,9 +41,7 @@ export async function clearSession(): Promise<void> {
 }
 
 // Read the persisted blob, validate it, and inject it into the worker. Returns false when there is
-// no session, an unreadable one (kvGetJson already dropped it), or one the SDK rejects. An
-// ephemeral (`:memory:`) kv never has a prior-reload blob to read — resume is a no-op there, matching
-// the ephemeral indicator.
+// no session, an unreadable one (kvGetJson already dropped it), or one the SDK rejects.
 export async function resumeSession(): Promise<boolean> {
 	const blob = await kvGetJson(SESSION_KV_KEY, sessionSchema)
 	if (blob === null) {

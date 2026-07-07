@@ -17,8 +17,9 @@ import { BootErrorScreen } from "@/components/shell/boot-error-screen"
 export const Route = createRootRoute({ component: RootLayout })
 
 // Every route inherits this gate. It renders the boot/error screens in place of the route Outlet
-// until the SDK is ready — except /no-coi, which is intentionally SDK-free and always allowed through
-// so a COI failure can never loop back into a gate that will never reach "ready".
+// until the SDK is ready — except /no-coi and /no-opfs, which are intentionally boot-independent and
+// always allowed through so a capability-gate failure can never loop back into a gate that will never
+// reach "ready".
 function BootGate() {
 	const phase = useBootStore(s => s.phase)
 	const reason = useBootStore(s => s.reason)
@@ -26,6 +27,7 @@ function BootGate() {
 	const pathname = useRouterState({ select: s => s.location.pathname })
 	const navigate = useNavigate()
 	const onNoCoi = pathname === "/no-coi"
+	const onNoOpfs = pathname === "/no-opfs"
 
 	// Cross-tab auth coordination. A BroadcastChannel never hears its own posts, so only OTHER tabs
 	// react: a logout elsewhere reloads this tab (boot then lands on /login now that the shared kv
@@ -49,12 +51,17 @@ function BootGate() {
 		})
 	}, [])
 
-	// A missing cross-origin-isolation is a distinct, actionable failure with its own page.
+	// A missing cross-origin-isolation, or unavailable OPFS storage, is a distinct, actionable
+	// capability-gate failure with its own dedicated page (not the generic boot-error screen).
 	useEffect(() => {
 		if (reason === "coi" && !onNoCoi) {
 			void navigate({ to: "/no-coi", replace: true })
+			return
 		}
-	}, [reason, onNoCoi, navigate])
+		if (reason === "opfs" && !onNoOpfs) {
+			void navigate({ to: "/no-opfs", replace: true })
+		}
+	}, [reason, onNoCoi, onNoOpfs, navigate])
 
 	// Side effect off the boot state machine, not a phase of it: once the SDK is ready, register the
 	// service worker and surface any waiting update as a dismissible reload prompt.
@@ -72,13 +79,13 @@ function BootGate() {
 		})
 	}, [phase])
 
-	if (onNoCoi) {
+	if (onNoCoi || onNoOpfs) {
 		return <Outlet />
 	}
 	if (phase === "ready") {
 		return <Outlet />
 	}
-	if (phase === "error" && reason !== "coi") {
+	if (phase === "error" && reason !== "coi" && reason !== "opfs") {
 		return (
 			<BootErrorScreen
 				reason={reason}

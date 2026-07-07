@@ -1,6 +1,8 @@
 import { sdkApi, threadCount } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { resumeSession } from "@/lib/sdk/session"
+import { storage } from "@/lib/storage/adapter"
+import { isOpfsUnavailableError } from "@/lib/storage/errors"
 import { useBootStore } from "@/stores/boot"
 import { queryClient } from "@/queries/client"
 import { restorePersistedQueries, purgePersistedQueries } from "@/queries/persist"
@@ -33,9 +35,23 @@ export async function bootSdk(): Promise<void> {
 			log.error("boot", `${result.reason}: ${result.detail}`)
 			return
 		}
+		// OPFS is a hard boot requirement — probed here as its own explicit step so a failure maps to
+		// the dedicated `opfs` reason immediately, rather than surfacing later as a generic
+		// async-runtime failure the first time resumeSession/restorePersistedQueries below happens to
+		// touch storage lazily.
+		try {
+			await storage()
+		} catch (e) {
+			if (!isOpfsUnavailableError(e)) {
+				throw e
+			}
+			setError("opfs", asErrorDTO(e))
+			log.error("boot", "opfs unavailable", e)
+			return
+		}
 		// Resume a persisted session into the worker BEFORE the gate flips to ready: guards observe
 		// readiness via whenBootReady() and then read hasClient(), so the client must already be
-		// injected. Self-heals an invalid blob; a missing/ephemeral one just leaves the tab unauthed.
+		// injected. Self-heals an invalid blob; a missing one just leaves the tab unauthed.
 		// Runs BEFORE the query-cache restore below — resumeSession only touches kv + the already-
 		// booted worker, nothing about the query cache — so the restore can be gated on whether this
 		// boot is actually authed.

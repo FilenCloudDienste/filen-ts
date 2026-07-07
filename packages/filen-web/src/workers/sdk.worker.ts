@@ -25,8 +25,13 @@ import { cacheDirs, clearDirectoryCache, getCachedDir, getCachedName } from "@/l
 // files at whatever directory the worker sits in (basename-match in dev; copy to the assets dir in
 // the build). Our own wasm `init` URL below is likewise resolved against `self.location`, so it and
 // the thread workers share one `sdk-rs_bg.wasm` fetch.
+// `opfs` is never returned by this worker's own boot() below — the storage worker lives elsewhere
+// (db.worker.ts, orchestrated main-thread by @/lib/sdk/boot's explicit post-boot storage probe) — but
+// the reason lives in THIS union so the boot store's `BootReason` (derived from it, kept in lockstep)
+// stays the single source of truth for every boot-failure reason the app can hit, wherever it's
+// actually detected.
 export type BootResult =
-	{ ok: true; threads: number } | { ok: false; reason: "artifacts" | "coi" | "pool" | "async-runtime"; detail: string }
+	{ ok: true; threads: number } | { ok: false; reason: "artifacts" | "coi" | "pool" | "async-runtime" | "opfs"; detail: string }
 
 let client: Client | null = null
 

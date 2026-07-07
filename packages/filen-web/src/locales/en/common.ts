@@ -6,13 +6,11 @@
 export const common = {
 	/** Product name — rendered beside the logo on the boot screen and as the icon rail's accessible home label; brand, never translated */
 	appName: "Filen",
-	/** Icon rail — tooltip + accessible label on the warning badge shown when storage runs in-memory (nothing persists after reload) */
-	ephemeralSession: "Ephemeral session",
 	/** Boot screen — status line under the logo while the app downloads and starts the SDK */
 	bootDownloading: "Downloading Filen…",
 	/** Boot failure screen — title shown when the app could not start */
 	bootErrorTitle: "Filen could not start",
-	/** Shared reload-page action label: boot failure screen button, /no-coi page button, and the update toast's action */
+	/** Shared reload-page action label: boot failure screen button, /no-coi and /no-opfs page buttons, and the update toast's action */
 	reload: "Reload page",
 	/** Dialog primitive (ui/dialog.tsx) — screen-reader label on the icon-only close button, and the text label on the optional footer close button */
 	close: "Close",
@@ -25,6 +23,11 @@ export const common = {
 	/** /no-coi error page — body explaining the missing isolation and suggesting a reload */
 	noCoiBody:
 		"Your browser did not load this page with the isolation features Filen requires. Try reloading the page, or contact support if the problem continues.",
+	/** /no-opfs error page — title shown when the browser could not provide the persistent storage Filen requires */
+	noOpfsTitle: "Persistent storage is unavailable",
+	/** /no-opfs error page — body explaining OPFS is required and suggesting how to fix it (enable it, use a supported browser) */
+	noOpfsBody:
+		"Filen needs your browser's private, persistent file storage (OPFS) to keep your data on this device. It may be disabled or blocked in a private/incognito window. Enable it, or switch to a recent version of Chrome, Edge, or Safari, then reload the page.",
 	/** Theme toggle — icon rail button tooltip/accessible label and the keymap action description shown in shortcut UI */
 	toggleTheme: "Toggle theme",
 	/** Icon rail — tooltip suffix on modules and items that are not available yet */

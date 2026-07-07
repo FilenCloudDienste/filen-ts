@@ -1,20 +1,16 @@
 /// <reference lib="webworker" />
 import * as Comlink from "comlink"
 import sqlite3InitModule, { type SqlValue } from "@sqlite.org/sqlite-wasm"
-import { log } from "@/lib/log"
-
-type Mode = "persistent" | "ephemeral"
+import { opfsUnavailableError } from "@/lib/storage/errors"
 
 // Narrow local interface — sqlite-wasm's own typings are inconsistent here (see the SAH pool / oo1
-// overload set in the installed `.d.mts`): both `oo1.DB` instances and
-// `OpfsSAHPoolDb` instances (the latter extends the former's base `Database` class) structurally
-// satisfy this — the only member either branch of `open()` below actually calls.
+// overload set in the installed `.d.mts`): an `OpfsSAHPoolDb` instance (which extends the base
+// `Database` class) structurally satisfies this — the only member `open()` below actually calls.
 interface Db {
 	exec(opts: { sql: string; bind?: readonly SqlValue[]; callback?: (row: SqlValue[]) => void }): unknown
 }
 
 let db: Db | null = null
-let mode: Mode = "ephemeral"
 
 function requireDb(): Db {
 	if (db === null) {
@@ -24,35 +20,28 @@ function requireDb(): Db {
 	return db
 }
 
-async function open(forceEphemeral: boolean): Promise<Mode> {
+// OPFS is a hard requirement — there is no in-memory fallback. A failed SAH pool install / DB open
+// (OPFS disabled, private browsing, an unsupported browser) is fatal to boot: it throws a tagged
+// error (see @/lib/storage/errors) instead of silently swapping to a `:memory:` database, so the
+// caller can map it to the dedicated `opfs` boot-failure reason.
+async function open(): Promise<void> {
 	const sqlite3 = await sqlite3InitModule()
 
-	if (!forceEphemeral) {
-		try {
-			const pool = await sqlite3.installOpfsSAHPoolVfs({ name: "filen-web", initialCapacity: 4 })
+	try {
+		const pool = await sqlite3.installOpfsSAHPoolVfs({ name: "filen-web", initialCapacity: 4 })
 
-			db = new pool.OpfsSAHPoolDb("/filen-web.sqlite3")
-			mode = "persistent"
-		} catch (e) {
-			log.warn("db.worker", "OPFS unavailable — falling back to in-memory ephemeral storage", e)
-		}
-	}
-
-	if (db === null) {
-		db = new sqlite3.oo1.DB() // default ':memory:'
-		mode = "ephemeral"
+		db = new pool.OpfsSAHPoolDb("/filen-web.sqlite3")
+	} catch (e) {
+		throw opfsUnavailableError(e)
 	}
 
 	requireDb().exec({
 		sql: "CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL) WITHOUT ROWID"
 	})
-
-	return mode
 }
 
 const api = {
 	open,
-	mode: (): Mode => mode,
 	kvGet: (key: string): string | null => {
 		let out: string | null = null
 

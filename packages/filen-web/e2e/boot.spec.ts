@@ -21,9 +21,6 @@ test.describe("boot", () => {
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 		await expect(page.getByRole("heading", { name: "Cloud Drive" })).toBeVisible()
 
-		// A persistent boot is not ephemeral — the indicator is absent.
-		await expect(page.getByLabel("Ephemeral session")).toHaveCount(0)
-
 		// A rail tooltip renders on hover.
 		await page.getByRole("button", { name: "Notes" }).hover()
 		await expect(page.getByText("Coming soon")).toBeVisible()

@@ -95,8 +95,8 @@ test.describe("auth", () => {
 		injectedSession,
 		browserName
 	}) => {
-		// Playwright-firefox's documented authed-shell-reload instability (Corrupted Content Error) —
-		// same storage.spec gating precedent as its "ephemeral mode" reload test.
+		// Playwright-firefox's documented authed-shell-reload instability (Corrupted Content Error) when
+		// reloading an already-authed page.
 		test.skip(browserName !== "chromium", "reload-resume is chromium-gated: Playwright-firefox authed-shell-reload instability")
 		expect(injectedSession.length).toBeGreaterThan(0)
 
@@ -129,8 +129,8 @@ test.describe("auth", () => {
 	})
 
 	test("logout signs out, wipes the local session, and a second tab converges to sign-in", async ({ page, context, browserName }) => {
-		// Second-SDK-worker-tab crash + the same authed-shell-reload instability as above — storage.spec
-		// gates its own follower-tab test on the identical rationale.
+		// Second-SDK-worker-tab crash (storage.spec's follower-tab test hits the identical rationale) plus
+		// the same authed-shell-reload instability as the test above.
 		test.skip(browserName !== "chromium", "second-tab convergence is chromium-gated: Playwright-firefox second-SDK-worker-tab crash")
 
 		const session = readHarvestedSession()

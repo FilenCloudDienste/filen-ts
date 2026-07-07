@@ -11,7 +11,6 @@ import {
 	MoonIcon,
 	SettingsIcon,
 	LogOutIcon,
-	TriangleAlertIcon,
 	UserIcon
 } from "lucide-react"
 import type { CommonKey } from "@/lib/i18n"
@@ -29,7 +28,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -42,7 +40,6 @@ import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { Kbd } from "@/lib/keymap/Kbd"
-import { useBootStore } from "@/stores/boot"
 
 // Registered at module scope (runs once per module evaluation — mirrors theme-provider.tsx's own
 // "app.toggleTheme" registration right next to its useAction call below). Default UNASSIGNED
@@ -188,7 +185,6 @@ function AccountMenu() {
 
 export function IconRail() {
 	const { t } = useTranslation()
-	const ephemeral = useBootStore(s => s.ephemeral)
 	const navigate = useNavigate()
 
 	// Mounted once here (the icon rail exists for the app's whole authed lifetime, independent of
@@ -261,23 +257,6 @@ export function IconRail() {
 			))}
 
 			<div className="mt-auto flex w-full flex-col items-center gap-2">
-				{ephemeral ? (
-					<Tooltip>
-						<TooltipTrigger
-							render={
-								<Badge
-									variant="secondary"
-									className="size-7 rounded-full p-0"
-									aria-label={t("ephemeralSession")}
-								>
-									<TriangleAlertIcon />
-								</Badge>
-							}
-						/>
-						<TooltipContent side="right">{t("ephemeralSession")}</TooltipContent>
-					</Tooltip>
-				) : null}
-
 				<AccountMenu />
 
 				<Tooltip>
