@@ -53,34 +53,41 @@ const SDK_HOST_RE = /(^|\.)filen(-[1-6])?\.(io|net)$/
 const email = process.env["FILEN_WEB_E2E_TEST_EMAIL"] ?? ""
 
 test.describe("auth", () => {
-	test("a wrong password surfaces the label-first error through the minified worker", async ({ page, browserName }) => {
-		// Both browser projects run the full testDir (see playwright.config.ts) — an ungated attempt
-		// here would fire the one deliberate failed login TWICE, busting the login budget (auth-setup's
-		// one success + this one failure, exactly once each per full run).
-		test.skip(
-			browserName !== "chromium",
-			"chromium-only: firefox also runs this file; ungated, this would double the failed-login budget"
-		)
-		test.skip(email === "", "no e2e credentials configured")
+	// This block makes a real call to the rate-limited login endpoint, so it must never retry: under
+	// CI (retries: 1 in playwright.config) a flake would fire a SECOND real failed login in the same
+	// run and bust the budget. Same guard auth.setup.ts uses for its one real success.
+	test.describe("real login attempt", () => {
+		test.describe.configure({ retries: 0 })
 
-		await page.goto("/login")
-		await expect(page.getByText("Sign in to Filen")).toBeVisible()
+		test("a wrong password surfaces the label-first error through the minified worker", async ({ page, browserName }) => {
+			// Both browser projects run the full testDir (see playwright.config.ts) — an ungated attempt
+			// here would fire the one deliberate failed login TWICE, busting the login budget (auth-setup's
+			// one success + this one failure, exactly once each per full run).
+			test.skip(
+				browserName !== "chromium",
+				"chromium-only: firefox also runs this file; ungated, this would double the failed-login budget"
+			)
+			test.skip(email === "", "no e2e credentials configured")
 
-		await page.getByLabel("Email", { exact: true }).fill(email)
-		// Deliberately NOT the real password — this test never reads FILEN_WEB_E2E_TEST_PASSWORD, only
-		// the email (a dedicated e2e test account, not a customer's).
-		await page.getByLabel("Password", { exact: true }).fill("wrong-password-e2e-probe")
-		await page.getByRole("button", { name: "Sign in", exact: true }).click()
+			await page.goto("/login")
+			await expect(page.getByText("Sign in to Filen")).toBeVisible()
 
-		// errors.ts pre-seeds a catalog translation for EmailOrPasswordWrong, so errorLabel() renders
-		// this exact string regardless of the live server's own wording — the regression net this test
-		// exists for is that the MINIFIED production worker still duck-types the live FilenSdkError
-		// (toErrorDTO's isSdkError probe survives minification) and reports the right kind, not that the
-		// server's message happens to match.
-		await expect(page.getByText("Wrong email or password. Please try again.")).toBeVisible()
+			await page.getByLabel("Email", { exact: true }).fill(email)
+			// Deliberately NOT the real password — this test never reads FILEN_WEB_E2E_TEST_PASSWORD, only
+			// the email (a dedicated e2e test account, not a customer's).
+			await page.getByLabel("Password", { exact: true }).fill("wrong-password-e2e-probe")
+			await page.getByRole("button", { name: "Sign in", exact: true }).click()
 
-		// A rejected attempt never navigates — still on the sign-in form.
-		await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible()
+			// errors.ts pre-seeds a catalog translation for EmailOrPasswordWrong, so errorLabel() renders
+			// this exact string regardless of the live server's own wording — the regression net this test
+			// exists for is that the MINIFIED production worker still duck-types the live FilenSdkError
+			// (toErrorDTO's isSdkError probe survives minification) and reports the right kind, not that the
+			// server's message happens to match.
+			await expect(page.getByText("Wrong email or password. Please try again.")).toBeVisible()
+
+			// A rejected attempt never navigates — still on the sign-in form.
+			await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible()
+		})
 	})
 
 	test("an authed session survives a reload without re-authenticating against the SDK API", async ({
@@ -141,8 +148,10 @@ test.describe("auth", () => {
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
 		// A second, already-signed-in tab opened BEFORE logout — the realistic multi-tab scenario the
-		// auth broadcast channel exists to keep coherent. Seeded the same once-only way: its own reload
-		// later in this test must reflect the real (by-then wiped) kv state too.
+		// auth broadcast channel exists to keep coherent. The once-per-page marker lives in localStorage,
+		// which is shared across the context, so this second call is a no-op: `second` renders authed
+		// because the first seed already persisted the session into the shared kv. What matters is that
+		// neither page re-seeds on its post-logout reload, so both converge onto the wiped kv state.
 		const second = await context.newPage()
 
 		await seedOncePerPage(second, session)
