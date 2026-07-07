@@ -18,7 +18,7 @@ import {
 	type DriveViewMode
 } from "@/lib/drive/preferences"
 import { sortDriveItems, type DriveSortBy } from "@/lib/drive/sort"
-import { resolveDriveNavigationTarget } from "@/lib/drive/navigate"
+import { resolveDriveNavigationTarget, splatToUuids } from "@/lib/drive/navigate"
 import { clampListboxIndex, listboxRange } from "@/lib/drive/listbox"
 import { type DriveItem } from "@/lib/drive/item"
 import { useDirectoryListingQuery, useSortPreferencesQuery, useViewModePreferencesQuery } from "@/queries/drive"
@@ -34,7 +34,9 @@ import { DriveTile } from "@/components/drive/drive-tile"
 
 export interface DirectoryListingProps {
 	variant: DriveVariant
-	uuid: string | null
+	// The full "/drive/$" splat path ("" for root, else a "/"-joined ancestor-uuid chain) — recents/
+	// favorites/trash pass "" (they're flat, never nested). The current directory is the last segment.
+	splat: string
 }
 
 const ROW_HEIGHT = 40
@@ -46,12 +48,14 @@ const GRID_OVERSCAN = 3
 // into range but that hasn't mounted (and registered its ref) yet.
 const FOCUS_RETRY_FRAMES = 10
 
-// Every drive route (drive.tsx, drive_.$uuid.tsx, recents/favorites/trash.tsx) renders this one
-// container with its own {variant,uuid} — the single place the placeholder body is swapped for the
-// real virtualized list, so no route needs to change again when it does.
-export function DirectoryListing({ variant, uuid }: DirectoryListingProps) {
+// Every drive route (drive.$.tsx, recents/favorites/trash.tsx) renders this one container with its
+// own {variant,splat} — the single place the placeholder body is swapped for the real virtualized
+// list, so no route needs to change again when it does. The current directory's own uuid is always
+// the splat's last segment (null at the root, where the splat is empty).
+export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const navigate = useNavigate()
+	const uuid = splatToUuids(splat).at(-1) ?? null
 	const driveLocation: DriveLocation = { variant, uuid }
 
 	const listingQuery = useDirectoryListingQuery(variant, uuid)
@@ -73,14 +77,14 @@ export function DirectoryListing({ variant, uuid }: DirectoryListingProps) {
 	const safeAnchorIndex = clampListboxIndex(anchorIndex, sortedItems.length)
 
 	// A fresh directory/variant must never inherit the previous one's selection or cursor. Routes
-	// that only change `uuid` (deeper nav within the same route file, e.g. drive_.$uuid.tsx) re-render
-	// this component in place rather than remounting it, so a plain mount effect would miss that case
-	// — keying on [variant, uuid] instead covers both a remount and an in-place param change.
+	// that only change `splat` (deeper nav within the same drive.$.tsx route) re-render this
+	// component in place rather than remounting it, so a plain mount effect would miss that case —
+	// keying on [variant, splat] instead covers both a remount and an in-place param change.
 	useEffect(() => {
 		useDriveStore.getState().clearSelectedItems()
 		setActiveIndex(0)
 		setAnchorIndex(0)
-	}, [variant, uuid])
+	}, [variant, splat])
 
 	const scrollRef = useRef<HTMLDivElement>(null)
 	const itemRefs = useRef(new Map<number, HTMLDivElement>())
@@ -205,7 +209,7 @@ export function DirectoryListing({ variant, uuid }: DirectoryListingProps) {
 			return
 		}
 
-		const target = resolveDriveNavigationTarget(item, variant)
+		const target = resolveDriveNavigationTarget(item, variant, splat)
 
 		if (target) {
 			void navigate(target)
@@ -327,7 +331,7 @@ export function DirectoryListing({ variant, uuid }: DirectoryListingProps) {
 			<header className="flex h-14 shrink-0 items-center border-b border-border px-4">
 				<Breadcrumb
 					variant={variant}
-					uuid={uuid}
+					splat={splat}
 				/>
 			</header>
 			<div className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border px-4">

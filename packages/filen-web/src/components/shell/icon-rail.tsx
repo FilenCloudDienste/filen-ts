@@ -214,7 +214,8 @@ export function IconRail() {
 			className="flex h-svh w-16 shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar py-3"
 		>
 			<Link
-				to="/drive"
+				to="/drive/$"
+				params={{ _splat: "" }}
 				aria-label={t("moduleDrive")}
 				className="mb-1 flex size-9 items-center justify-center rounded-2xl text-primary outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
 			>

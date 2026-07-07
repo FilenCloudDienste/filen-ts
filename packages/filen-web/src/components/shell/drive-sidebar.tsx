@@ -7,27 +7,32 @@ import { Separator } from "@/components/ui/separator"
 
 type IconType = ComponentType<{ className?: string }>
 
-// The four listing surfaces wired to real routes in this slice; sharedIn/sharedOut/links have no
-// route yet (a later drive sub-slice — see preferences.ts's DriveVariant scope note) and stay
-// inert below.
-type DriveSidebarRoute = "/drive" | "/recents" | "/favorites" | "/trash"
+// The three flat listing surfaces wired to real routes in this slice; sharedIn/sharedOut/links have
+// no route yet (a later drive sub-slice — see preferences.ts's DriveVariant scope note) and stay
+// inert below. My Drive itself is NOT part of this union — its target is the "/drive/$" splat,
+// which (unlike these three) takes a required `params`, so it renders as its own literal <Link>
+// below rather than through this union-typed component.
+type DriveSidebarRoute = "/recents" | "/favorites" | "/trash"
+
+// Shared by NavItem and My Drive's own literal <Link> below, so both stay visually identical
+// without either recomputing the same static class string on every render.
+const NAV_ITEM_CLASS = cn(
+	"group flex h-8 w-full items-center gap-2.5 rounded-xl px-2.5 text-sm transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/30 [&_svg]:size-4 [&_svg]:shrink-0",
+	"text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+	"data-[status=active]:bg-sidebar-accent data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground"
+)
 
 // `to` present renders a real `<Link>` — TanStack Router stamps `data-status="active"` and
-// `aria-current="page"` on it automatically whenever the current location matches (prefix match by
-// default, so "/drive" stays active while browsing any /drive/$uuid subdirectory too). `to` absent
-// renders the original inert row — sharedIn/sharedOut/links have no destination yet.
+// `aria-current="page"` on it automatically whenever the current location matches (a plain
+// pathname-prefix comparison, independent of route id/params — so My Drive's own "/drive/$" link
+// below stays active for any nested /drive/... path the same way). `to` absent renders the
+// original inert row — sharedIn/sharedOut/links have no destination yet.
 function NavItem({ icon: Icon, label, to }: { icon: IconType; label: string; to?: DriveSidebarRoute | undefined }) {
-	const className = cn(
-		"group flex h-8 w-full items-center gap-2.5 rounded-xl px-2.5 text-sm transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/30 [&_svg]:size-4 [&_svg]:shrink-0",
-		"text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-		"data-[status=active]:bg-sidebar-accent data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground"
-	)
-
 	if (to === undefined) {
 		return (
 			<button
 				type="button"
-				className={className}
+				className={NAV_ITEM_CLASS}
 			>
 				<Icon className="text-muted-foreground" />
 				<span className="truncate">{label}</span>
@@ -38,7 +43,7 @@ function NavItem({ icon: Icon, label, to }: { icon: IconType; label: string; to?
 	return (
 		<Link
 			to={to}
-			className={className}
+			className={NAV_ITEM_CLASS}
 		>
 			<Icon className="text-muted-foreground group-data-[status=active]:text-primary" />
 			<span className="truncate">{label}</span>
@@ -68,11 +73,14 @@ export function DriveSidebar() {
 	return (
 		<aside className="hidden h-svh w-60 shrink-0 flex-col border-r border-border bg-sidebar md:flex">
 			<div className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
-				<NavItem
-					icon={FolderClosedIcon}
-					label={t("driveMyDrive")}
-					to="/drive"
-				/>
+				<Link
+					to="/drive/$"
+					params={{ _splat: "" }}
+					className={NAV_ITEM_CLASS}
+				>
+					<FolderClosedIcon className="text-muted-foreground group-data-[status=active]:text-primary" />
+					<span className="truncate">{t("driveMyDrive")}</span>
+				</Link>
 				<Separator className="my-2" />
 				<div className="flex flex-col gap-0.5">
 					{items.map(({ id, label, icon, to }) => (

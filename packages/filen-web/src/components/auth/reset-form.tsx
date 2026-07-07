@@ -84,7 +84,7 @@ function ResetForm({ token }: ResetFormProps) {
 					if (!outcome.persisted) {
 						toast.warning(t("sessionPersistFailed"))
 					}
-					await navigate({ to: "/drive" })
+					await navigate({ to: "/drive/$", params: { _splat: "" } })
 					break
 				case "error":
 					// Expired/invalid token arrives as a generic server error here — LABEL-FIRST surfaces its

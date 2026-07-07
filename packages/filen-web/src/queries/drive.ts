@@ -1,9 +1,4 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
-// Whole-statement `import type` (not the usual inline `type` keyword — see every other
-// @filen/sdk-rs type import in this codebase, e.g. lib/drive/item.ts): the inline form doesn't
-// reliably elide under vitest for this package, and a non-elided import drags in the wasm-bindgen
-// worker glue (references `self`, undefined under Node).
-import type { Dir } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 // Whole-statement `import type` here too — sdk.worker.ts's own top-level code pulls in
 // @filen/sdk-rs as a real value import, same elision hazard as above.
@@ -59,50 +54,28 @@ export function useDirectoryListingQuery(variant: DriveVariant, uuid: string | n
 	})
 }
 
-// Every ancestor (and the current directory) narrows to the "directory" arm by construction —
-// getItemPath only ever returns Dir values — but narrowItem's signature covers Dir | File, so this
-// throw-guards the arm instead of casting it away.
-type DriveDirectoryItem = Extract<DriveItem, { type: "directory" }>
+// Breadcrumb primitive: the "/drive/$" splat carries the full ancestor-uuid path in the URL itself
+// (see lib/drive/navigate.ts's splatToUuids) — this only resolves DISPLAY NAMES for that path's
+// uuids, cache-first, in one batched worker call. No getItemPath walk, no per-ancestor Dir/File
+// narrowing (a name lookup has no item-type union to narrow). A uuid this call can't resolve
+// (not-found, undecryptable meta) is simply absent from the returned record — never a query error —
+// so the breadcrumb degrades one segment at a time (uuid-fallback) instead of failing wholesale.
+export function driveNamesQueryKey(uuids: string[]) {
+	return ["drive", "names", uuids] as const
+}
 
-function narrowDirectory(dir: Dir): DriveDirectoryItem {
-	const item = narrowItem(dir)
-	if (item.type !== "directory") {
-		throw new Error("narrowItem(Dir) produced a non-directory arm")
+export async function fetchDirectoryNames(uuids: string[]): Promise<Record<string, string>> {
+	if (uuids.length === 0) {
+		return {}
 	}
-	return item
+	return sdkApi.resolveDirectoryNames(uuids)
 }
 
-export interface DirectoryPath {
-	path: string
-	ancestors: DriveDirectoryItem[]
-	current: DriveDirectoryItem
-}
-
-// Root has no ancestors and is never queried here (Root is not a valid getItemPath argument) — the
-// breadcrumb renders the variant's own root label directly and skips this call whenever uuid is
-// null (see components/drive/breadcrumb.tsx). A rejection here (not-found uuid, or the SDK's
-// undecryptable-ancestor case) surfaces as a normal query error; there is no partial/degraded path.
-export async function fetchDirectoryPath(uuid: string): Promise<DirectoryPath> {
-	const result = await sdkApi.getDirectoryPath(uuid)
-	return {
-		path: result.path,
-		ancestors: result.ancestors.map(narrowDirectory),
-		current: narrowDirectory(result.current)
-	}
-}
-
-export function useDirectoryPathQuery(uuid: string | null): UseQueryResult<DirectoryPath> {
+export function useDirectoryNamesQuery(uuids: string[]): UseQueryResult<Record<string, string>> {
 	return useQuery({
-		queryKey: ["drive", "path", { uuid }] as const,
-		enabled: uuid !== null,
-		queryFn: () => {
-			// Never reached while uuid is null (enabled:false above) — this is the guard/throw
-			// narrowing this codebase uses instead of a bare non-null assertion or `as string`.
-			if (uuid === null) {
-				throw new Error("useDirectoryPathQuery requires a non-null uuid")
-			}
-			return fetchDirectoryPath(uuid)
-		}
+		queryKey: driveNamesQueryKey(uuids),
+		enabled: uuids.length > 0,
+		queryFn: () => fetchDirectoryNames(uuids)
 	})
 }
 

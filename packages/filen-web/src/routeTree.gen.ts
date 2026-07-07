@@ -18,9 +18,8 @@ import { Route as ResetTokenRouteImport } from './routes/reset.$token'
 import { Route as AppTrashRouteImport } from './routes/_app/trash'
 import { Route as AppRecentsRouteImport } from './routes/_app/recents'
 import { Route as AppFavoritesRouteImport } from './routes/_app/favorites'
-import { Route as AppDriveRouteImport } from './routes/_app/drive'
 import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/security'
-import { Route as AppDriveUuidRouteImport } from './routes/_app/drive_.$uuid'
+import { Route as AppDriveSplatRouteImport } from './routes/_app/drive.$'
 
 const RegisterRoute = RegisterRouteImport.update({
   id: '/register',
@@ -66,19 +65,14 @@ const AppFavoritesRoute = AppFavoritesRouteImport.update({
   path: '/favorites',
   getParentRoute: () => AppRouteRoute,
 } as any)
-const AppDriveRoute = AppDriveRouteImport.update({
-  id: '/drive',
-  path: '/drive',
-  getParentRoute: () => AppRouteRoute,
-} as any)
 const AppSettingsSecurityRoute = AppSettingsSecurityRouteImport.update({
   id: '/settings/security',
   path: '/settings/security',
   getParentRoute: () => AppRouteRoute,
 } as any)
-const AppDriveUuidRoute = AppDriveUuidRouteImport.update({
-  id: '/drive_/$uuid',
-  path: '/drive/$uuid',
+const AppDriveSplatRoute = AppDriveSplatRouteImport.update({
+  id: '/drive/$',
+  path: '/drive/$',
   getParentRoute: () => AppRouteRoute,
 } as any)
 
@@ -87,12 +81,11 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/no-coi': typeof NoCoiRoute
   '/register': typeof RegisterRoute
-  '/drive': typeof AppDriveRoute
   '/favorites': typeof AppFavoritesRoute
   '/recents': typeof AppRecentsRoute
   '/trash': typeof AppTrashRoute
   '/reset/$token': typeof ResetTokenRoute
-  '/drive/$uuid': typeof AppDriveUuidRoute
+  '/drive/$': typeof AppDriveSplatRoute
   '/settings/security': typeof AppSettingsSecurityRoute
 }
 export interface FileRoutesByTo {
@@ -100,12 +93,11 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/no-coi': typeof NoCoiRoute
   '/register': typeof RegisterRoute
-  '/drive': typeof AppDriveRoute
   '/favorites': typeof AppFavoritesRoute
   '/recents': typeof AppRecentsRoute
   '/trash': typeof AppTrashRoute
   '/reset/$token': typeof ResetTokenRoute
-  '/drive/$uuid': typeof AppDriveUuidRoute
+  '/drive/$': typeof AppDriveSplatRoute
   '/settings/security': typeof AppSettingsSecurityRoute
 }
 export interface FileRoutesById {
@@ -115,12 +107,11 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/no-coi': typeof NoCoiRoute
   '/register': typeof RegisterRoute
-  '/_app/drive': typeof AppDriveRoute
   '/_app/favorites': typeof AppFavoritesRoute
   '/_app/recents': typeof AppRecentsRoute
   '/_app/trash': typeof AppTrashRoute
   '/reset/$token': typeof ResetTokenRoute
-  '/_app/drive_/$uuid': typeof AppDriveUuidRoute
+  '/_app/drive/$': typeof AppDriveSplatRoute
   '/_app/settings/security': typeof AppSettingsSecurityRoute
 }
 export interface FileRouteTypes {
@@ -130,12 +121,11 @@ export interface FileRouteTypes {
     | '/login'
     | '/no-coi'
     | '/register'
-    | '/drive'
     | '/favorites'
     | '/recents'
     | '/trash'
     | '/reset/$token'
-    | '/drive/$uuid'
+    | '/drive/$'
     | '/settings/security'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -143,12 +133,11 @@ export interface FileRouteTypes {
     | '/login'
     | '/no-coi'
     | '/register'
-    | '/drive'
     | '/favorites'
     | '/recents'
     | '/trash'
     | '/reset/$token'
-    | '/drive/$uuid'
+    | '/drive/$'
     | '/settings/security'
   id:
     | '__root__'
@@ -157,12 +146,11 @@ export interface FileRouteTypes {
     | '/login'
     | '/no-coi'
     | '/register'
-    | '/_app/drive'
     | '/_app/favorites'
     | '/_app/recents'
     | '/_app/trash'
     | '/reset/$token'
-    | '/_app/drive_/$uuid'
+    | '/_app/drive/$'
     | '/_app/settings/security'
   fileRoutesById: FileRoutesById
 }
@@ -240,13 +228,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppFavoritesRouteImport
       parentRoute: typeof AppRouteRoute
     }
-    '/_app/drive': {
-      id: '/_app/drive'
-      path: '/drive'
-      fullPath: '/drive'
-      preLoaderRoute: typeof AppDriveRouteImport
-      parentRoute: typeof AppRouteRoute
-    }
     '/_app/settings/security': {
       id: '/_app/settings/security'
       path: '/settings/security'
@@ -254,31 +235,29 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsSecurityRouteImport
       parentRoute: typeof AppRouteRoute
     }
-    '/_app/drive_/$uuid': {
-      id: '/_app/drive_/$uuid'
-      path: '/drive/$uuid'
-      fullPath: '/drive/$uuid'
-      preLoaderRoute: typeof AppDriveUuidRouteImport
+    '/_app/drive/$': {
+      id: '/_app/drive/$'
+      path: '/drive/$'
+      fullPath: '/drive/$'
+      preLoaderRoute: typeof AppDriveSplatRouteImport
       parentRoute: typeof AppRouteRoute
     }
   }
 }
 
 interface AppRouteRouteChildren {
-  AppDriveRoute: typeof AppDriveRoute
   AppFavoritesRoute: typeof AppFavoritesRoute
   AppRecentsRoute: typeof AppRecentsRoute
   AppTrashRoute: typeof AppTrashRoute
-  AppDriveUuidRoute: typeof AppDriveUuidRoute
+  AppDriveSplatRoute: typeof AppDriveSplatRoute
   AppSettingsSecurityRoute: typeof AppSettingsSecurityRoute
 }
 
 const AppRouteRouteChildren: AppRouteRouteChildren = {
-  AppDriveRoute: AppDriveRoute,
   AppFavoritesRoute: AppFavoritesRoute,
   AppRecentsRoute: AppRecentsRoute,
   AppTrashRoute: AppTrashRoute,
-  AppDriveUuidRoute: AppDriveUuidRoute,
+  AppDriveSplatRoute: AppDriveSplatRoute,
   AppSettingsSecurityRoute: AppSettingsSecurityRoute,
 }
 

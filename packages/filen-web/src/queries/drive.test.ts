@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { Dir, File, NormalDirsAndFiles, GetItemPathResult, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, NormalDirsAndFiles, UuidStr } from "@filen/sdk-rs"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it
 // down to the two methods this module calls, mirroring account.test.ts's mock boundary.
-const { listDirectory, getDirectoryPath } = vi.hoisted(() => ({
+const { listDirectory, resolveDirectoryNames } = vi.hoisted(() => ({
 	listDirectory: vi.fn<(target: unknown) => Promise<NormalDirsAndFiles>>(),
-	getDirectoryPath: vi.fn<(uuid: string) => Promise<GetItemPathResult & { current: Dir }>>()
+	resolveDirectoryNames: vi.fn<(uuids: string[]) => Promise<Record<string, string>>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, getDirectoryPath } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, resolveDirectoryNames } }))
 
-import { driveListingQueryKey, fetchDirectoryListing, fetchDirectoryPath } from "@/queries/drive"
+import { driveListingQueryKey, driveNamesQueryKey, fetchDirectoryListing, fetchDirectoryNames } from "@/queries/drive"
 
 // Unlike account.test.ts (one call-count assertion in the whole file), several tests here assert
 // exact call counts — clear history between tests so an earlier test's calls can't leak in.
@@ -112,36 +112,41 @@ describe("fetchDirectoryListing", () => {
 	})
 })
 
-describe("fetchDirectoryPath", () => {
-	it("narrows ancestors and the current directory, preserving path verbatim", async () => {
-		const ancestorUuid = testUuid("ancestor-1")
-		const currentUuid = testUuid("current-1")
-		const ancestor = mockDir({ uuid: ancestorUuid })
-		const current = mockDir({ uuid: currentUuid })
-		getDirectoryPath.mockResolvedValueOnce({ path: "/Documents/Reports", ancestors: [ancestor], current })
+describe("driveNamesQueryKey", () => {
+	it("builds the [domain, entity, uuids] tuple", () => {
+		expect(driveNamesQueryKey(["a", "b"])).toEqual(["drive", "names", ["a", "b"]])
+	})
+})
 
-		const result = await fetchDirectoryPath(currentUuid)
+describe("fetchDirectoryNames", () => {
+	it("returns an empty record without calling the worker for an empty uuid list", async () => {
+		const result = await fetchDirectoryNames([])
 
-		expect(result.path).toBe("/Documents/Reports")
-		expect(result.ancestors).toHaveLength(1)
-		expect(result.ancestors[0]?.data.uuid).toBe(ancestorUuid)
-		expect(result.current.data.uuid).toBe(currentUuid)
-		expect(result.current.type).toBe("directory")
+		expect(result).toEqual({})
+		expect(resolveDirectoryNames).not.toHaveBeenCalled()
 	})
 
-	it("passes the uuid through to sdkApi.getDirectoryPath unchanged", async () => {
-		getDirectoryPath.mockResolvedValueOnce({ path: "/Documents", ancestors: [], current: mockDir() })
+	it("passes the uuids through to sdkApi.resolveDirectoryNames unchanged", async () => {
+		resolveDirectoryNames.mockResolvedValueOnce({})
 
-		await fetchDirectoryPath("target-uuid")
+		await fetchDirectoryNames(["uuid-a", "uuid-b"])
 
-		expect(getDirectoryPath).toHaveBeenCalledTimes(1)
-		expect(getDirectoryPath).toHaveBeenCalledWith("target-uuid")
+		expect(resolveDirectoryNames).toHaveBeenCalledTimes(1)
+		expect(resolveDirectoryNames).toHaveBeenCalledWith(["uuid-a", "uuid-b"])
 	})
 
-	it("propagates a rejection from sdkApi.getDirectoryPath unchanged (e.g. not-found or undecryptable-ancestor DTOs)", async () => {
-		const error = new Error("directory not found: missing-uuid")
-		getDirectoryPath.mockRejectedValueOnce(error)
+	it("returns the worker's resolved record unchanged, including a partial result", async () => {
+		resolveDirectoryNames.mockResolvedValueOnce({ "uuid-a": "Documents" })
 
-		await expect(fetchDirectoryPath("missing-uuid")).rejects.toBe(error)
+		const result = await fetchDirectoryNames(["uuid-a", "uuid-b"])
+
+		expect(result).toEqual({ "uuid-a": "Documents" })
+	})
+
+	it("propagates a rejection from sdkApi.resolveDirectoryNames unchanged", async () => {
+		const error = new Error("no authenticated client")
+		resolveDirectoryNames.mockRejectedValueOnce(error)
+
+		await expect(fetchDirectoryNames(["uuid-a"])).rejects.toBe(error)
 	})
 })

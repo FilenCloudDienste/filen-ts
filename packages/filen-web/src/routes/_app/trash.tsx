@@ -8,7 +8,7 @@ function TrashPage() {
 	return (
 		<DirectoryListing
 			variant="trash"
-			uuid={null}
+			splat=""
 		/>
 	)
 }

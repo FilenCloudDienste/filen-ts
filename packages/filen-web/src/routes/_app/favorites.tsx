@@ -8,7 +8,7 @@ function FavoritesPage() {
 	return (
 		<DirectoryListing
 			variant="favorites"
-			uuid={null}
+			splat=""
 		/>
 	)
 }

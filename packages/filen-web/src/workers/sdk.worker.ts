@@ -11,12 +11,12 @@ import init, {
 	type ChangePasswordParams,
 	type Dir,
 	type NormalDirsAndFiles,
-	type AnyNormalDir,
-	type GetItemPathResult
+	type AnyNormalDir
 } from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
 import { toErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
+import { cacheDirs, clearDirectoryCache, getCachedDir, getCachedName } from "@/lib/drive/cache"
 
 // NEITHER a fixed `/` nor `/assets/`: the wasm holds a RELATIVE `./filen-sdk-worker-thread.js`
 // (verified via `strings` over sdk-rs_bg.wasm) which it passes to `new Worker(...)`, so the
@@ -42,10 +42,15 @@ function requireClient(): Client {
 
 // Adopt a freshly-authenticated Client as the live session, freeing the prior handle first (the
 // handle law: any op that replaces `client` releases what it replaces). Called only after the new
-// handle is in hand, so a failed auth never destroys the existing session.
+// handle is in hand, so a failed auth never destroys the existing session. Every path that makes a
+// new client live — login, completePasswordReset, injectClient (session resume, e2e re-seed) —
+// funnels through here, so clearing the directory cache in this one place, unconditionally,
+// guarantees a fresh session never reads a prior account's cached directories/names — including
+// the injectClient case, which can adopt a new client without an explicit logout ever running.
 function adoptClient(next: Client): void {
 	client?.free()
 	client = next
+	clearDirectoryCache()
 }
 
 // Null the live client FIRST so any subsequent authed op fails fast via requireClient() instead of
@@ -237,61 +242,95 @@ const api = {
 	// cross Comlink via structured clone, same as getUserInfo — no boundary serializer.
 	async listDirectory(target: ListDirectoryTarget): Promise<NormalDirsAndFiles> {
 		const c = requireClient()
-		switch (target.kind) {
-			case "root":
-				return c.listDir(c.root())
-			case "recents":
-				return c.listRecents()
-			case "favorites":
-				return c.listFavorites()
-			case "trash":
-				return c.listTrash()
-			case "uuid": {
-				// getDirOptional (not listDir({uuid})): a plain `{uuid}` object is structurally a
-				// Root, and a bare string isn't assignable to the branded UuidStr AnyNormalDir needs.
-				const dir = await c.getDirOptional(target.uuid)
-				if (dir === undefined) {
-					throw new Error(`directory not found: ${target.uuid}`)
+		const result = await (async (): Promise<NormalDirsAndFiles> => {
+			switch (target.kind) {
+				case "root":
+					return c.listDir(c.root())
+				case "recents":
+					return c.listRecents()
+				case "favorites":
+					return c.listFavorites()
+				case "trash":
+					return c.listTrash()
+				case "uuid": {
+					// Cache-first: a directory just listed as part of its own parent's listing is
+					// already held here, so browsing into it costs zero extra round trips.
+					// getDirOptional (not listDir({uuid})) is the cold-miss fallback — a plain
+					// `{uuid}` object is structurally a Root, and a bare string isn't assignable to
+					// the branded UuidStr AnyNormalDir needs.
+					const dir = getCachedDir(target.uuid) ?? (await c.getDirOptional(target.uuid))
+					if (dir === undefined) {
+						throw new Error(`directory not found: ${target.uuid}`)
+					}
+					return c.listDir(dir)
 				}
-				return c.listDir(dir)
 			}
-		}
+		})()
+		// Every returned dir becomes resolvable by uuid for the rest of this session — the next
+		// listing into one of them, or a breadcrumb resolving its name, never needs its own round
+		// trip. Populated uniformly across every branch (recents/favorites/trash can surface
+		// directories too — a favorited or trashed directory browsed into later hits this cache
+		// exactly like one reached from a normal listing).
+		cacheDirs(result.dirs)
+		return result
 	},
-	// dirExists rejects when `name` is already taken under `parent` — that thrown SDK error
-	// surfaces as the boundary's ErrorDTO unchanged, so a duplicate name reads as the SDK's own
-	// message rather than a bespoke one here.
+	// Backend directory create is idempotent and case-insensitive: an existing directory with this
+	// name under this parent returns ITS uuid rather than erroring (a name clash with a FILE still
+	// rejects) — so no pre-check call. `dirExists` always resolved void regardless of outcome and
+	// could never actually signal "already exists"; the pre-check bought nothing but a wasted round
+	// trip.
 	async createDirectory(parentUuid: string | null, name: string): Promise<Dir> {
 		const c = requireClient()
-		let parent: AnyNormalDir
-		if (parentUuid === null) {
-			parent = c.root()
-		} else {
-			const found = await c.getDirOptional(parentUuid)
+		const parent: AnyNormalDir = await (async (): Promise<AnyNormalDir> => {
+			if (parentUuid === null) {
+				return c.root()
+			}
+			// Cache-first parent resolve, same rule as listDirectory's uuid case.
+			const found = getCachedDir(parentUuid) ?? (await c.getDirOptional(parentUuid))
 			if (found === undefined) {
 				throw new Error(`parent directory not found: ${parentUuid}`)
 			}
-			parent = found
-		}
-		await c.dirExists(parent, name)
-		return c.createDir(parent, name)
+			return found
+		})()
+		const created = await c.createDir(parent, name)
+		cacheDirs([created])
+		return created
 	},
 	// Thin getDirOptional pass-through.
 	getDirectory(uuid: string): Promise<Dir | undefined> {
 		return requireClient().getDirOptional(uuid)
 	},
-	// Breadcrumb primitive: getItemPath takes a live Dir, not a bare uuid, so this composes the
-	// same getDirOptional-then-not-found-DTO shape as listDirectory's uuid case and
-	// createDirectory's parent lookup. `current` is returned alongside `path`/`ancestors` — the
-	// getDirOptional call above already resolved it, so surfacing it costs no extra SDK round trip,
-	// and the breadcrumb needs the current directory's own decrypted name (ancestors excludes it).
-	async getDirectoryPath(uuid: string): Promise<GetItemPathResult & { current: Dir }> {
+	// Breadcrumb primitive: the "/drive/$" splat carries the full ancestor-uuid path in the URL
+	// already (see lib/drive/navigate.ts), so this only resolves DISPLAY NAMES for a batch of
+	// uuids — no getItemPath walk. Cache-first per uuid; only a cold miss (e.g. a deep-linked path
+	// this tab has never listed before) calls getDirOptional, and every miss resolves IN PARALLEL —
+	// a cold multi-segment link costs one round trip per uncached segment, not one per depth level
+	// in series. A uuid that never resolves (not found, or a rejected lookup) is simply absent from
+	// the returned record; the caller falls back to displaying the raw uuid for that segment.
+	async resolveDirectoryNames(uuids: string[]): Promise<Record<string, string>> {
 		const c = requireClient()
-		const dir = await c.getDirOptional(uuid)
-		if (dir === undefined) {
-			throw new Error(`directory not found: ${uuid}`)
+		const misses = uuids.filter(uuid => getCachedName(uuid) === undefined)
+
+		await Promise.all(
+			misses.map(async uuid => {
+				const dir = await c.getDirOptional(uuid).catch((e: unknown) => {
+					log.warn("sdk.worker", "resolveDirectoryNames: unresolved uuid", uuid, e)
+					return undefined
+				})
+				if (dir !== undefined) {
+					cacheDirs([dir])
+				}
+			})
+		)
+
+		const names: Record<string, string> = {}
+		for (const uuid of uuids) {
+			const name = getCachedName(uuid)
+			if (name !== undefined) {
+				names[uuid] = name
+			}
 		}
-		const { path, ancestors } = await c.getItemPath(dir)
-		return { path, ancestors, current: dir }
+		return names
 	},
 	logout(): void {
 		releaseClient()

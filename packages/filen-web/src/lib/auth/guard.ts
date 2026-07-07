@@ -10,6 +10,6 @@ export async function redirectIfAuthed(): Promise<void> {
 	await whenBootReady()
 	const authed = await sdkApi.hasClient().catch(() => false)
 	if (authed) {
-		throw redirect({ to: "/drive" })
+		throw redirect({ to: "/drive/$", params: { _splat: "" } })
 	}
 }

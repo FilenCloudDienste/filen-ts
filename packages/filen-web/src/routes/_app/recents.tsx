@@ -8,7 +8,7 @@ function RecentsPage() {
 	return (
 		<DirectoryListing
 			variant="recents"
-			uuid={null}
+			splat=""
 		/>
 	)
 }

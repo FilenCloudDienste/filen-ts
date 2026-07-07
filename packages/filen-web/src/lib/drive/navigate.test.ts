@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
-import { resolveDriveNavigationTarget } from "@/lib/drive/navigate"
+import { resolveDriveNavigationTarget, splatToUuids } from "@/lib/drive/navigate"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
 // readable test label into a shape that satisfies it, mirroring sort.test.ts's own uuid fixtures.
@@ -47,28 +47,67 @@ function fileItem(uuid: UuidStr): DriveItem {
 const NAVIGABLE_VARIANTS: DriveVariant[] = ["drive", "recents", "favorites"]
 const ALL_VARIANTS: DriveVariant[] = ["drive", "recents", "favorites", "trash"]
 
-describe("resolveDriveNavigationTarget", () => {
-	it.each(ALL_VARIANTS)("returns null for a file in the %s variant — file-open is a later slice", variant => {
-		expect(resolveDriveNavigationTarget(fileItem(testUuid("file-1")), variant)).toBeNull()
+describe("splatToUuids", () => {
+	it("returns an empty array for the root splat", () => {
+		expect(splatToUuids("")).toEqual([])
 	})
 
-	it.each(NAVIGABLE_VARIANTS)("a directory in the %s variant navigates to /drive/$uuid", variant => {
+	it("returns a single-element array for a one-level splat", () => {
+		expect(splatToUuids("a")).toEqual(["a"])
+	})
+
+	it("splits a multi-level splat on '/', preserving order", () => {
+		expect(splatToUuids("a/b/c")).toEqual(["a", "b", "c"])
+	})
+})
+
+describe("resolveDriveNavigationTarget", () => {
+	it.each(ALL_VARIANTS)("returns null for a file in the %s variant — file-open is a later slice", variant => {
+		expect(resolveDriveNavigationTarget(fileItem(testUuid("file-1")), variant, "")).toBeNull()
+	})
+
+	it("a directory clicked at the drive root appends its own uuid to the empty splat", () => {
 		const uuid = testUuid("dir-1")
 
-		expect(resolveDriveNavigationTarget(directoryItem(uuid), variant)).toEqual({
-			to: "/drive/$uuid",
-			params: { uuid }
+		expect(resolveDriveNavigationTarget(directoryItem(uuid), "drive", "")).toEqual({
+			to: "/drive/$",
+			params: { _splat: uuid }
 		})
 	})
 
-	it("a directory in the trash variant returns null — mirrors mobile's rule (trashed directories are never browsable)", () => {
-		expect(resolveDriveNavigationTarget(directoryItem(testUuid("dir-1")), "trash")).toBeNull()
+	it("a directory clicked inside a nested path appends its uuid onto the current splat", () => {
+		const parentA = testUuid("parent-a")
+		const parentB = testUuid("parent-b")
+		const clicked = testUuid("dir-clicked")
+		const currentSplat = `${parentA}/${parentB}`
+
+		expect(resolveDriveNavigationTarget(directoryItem(clicked), "drive", currentSplat)).toEqual({
+			to: "/drive/$",
+			params: { _splat: `${parentA}/${parentB}/${clicked}` }
+		})
 	})
 
-	it("carries the clicked directory's own uuid through, not some other identifier", () => {
-		const uuid = testUuid("distinct-uuid")
-		const target = resolveDriveNavigationTarget(directoryItem(uuid), "drive")
+	it.each(["recents", "favorites"] as const)(
+		"a directory clicked from the flat %s root (no splat of its own) starts a fresh one-level path",
+		variant => {
+			const uuid = testUuid("dir-1")
 
-		expect(target?.params.uuid).toBe(uuid)
+			expect(resolveDriveNavigationTarget(directoryItem(uuid), variant, "")).toEqual({
+				to: "/drive/$",
+				params: { _splat: uuid }
+			})
+		}
+	)
+
+	it("a directory in the trash variant returns null regardless of the current splat — mirrors mobile's rule (trashed directories are never browsable)", () => {
+		expect(resolveDriveNavigationTarget(directoryItem(testUuid("dir-1")), "trash", "")).toBeNull()
+		expect(resolveDriveNavigationTarget(directoryItem(testUuid("dir-1")), "trash", testUuid("some-parent"))).toBeNull()
+	})
+
+	it.each(NAVIGABLE_VARIANTS)("carries the clicked directory's own uuid through as the new splat's final segment (%s)", variant => {
+		const uuid = testUuid("distinct-uuid")
+		const target = resolveDriveNavigationTarget(directoryItem(uuid), variant, "")
+
+		expect(target?.params._splat).toBe(uuid)
 	})
 })

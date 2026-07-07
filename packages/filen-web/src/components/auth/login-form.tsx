@@ -153,7 +153,7 @@ function LoginForm() {
 						// resume-after-close is lost — navigating beats failing a successful login.
 						toast.warning(t("sessionPersistFailed"))
 					}
-					await navigate({ to: "/drive" })
+					await navigate({ to: "/drive/$", params: { _splat: "" } })
 					break
 				case "two-factor":
 					setTwoFactorError(outcome.wrongCode ? t("twoFactorWrongCode") : undefined)
