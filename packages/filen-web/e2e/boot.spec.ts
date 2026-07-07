@@ -19,7 +19,9 @@ test.describe("boot", () => {
 		// The hook injects the session then re-runs the guards, so the authed shell renders — which is
 		// itself proof the session authenticated the router (`hasClient()` gated the redirect).
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
-		await expect(page.getByRole("heading", { name: "Cloud Drive" })).toBeVisible()
+		// The drive listing itself (not the old placeholder shell) is now the authed landing surface —
+		// its toolbar is a stable, always-rendered proof the route mounted past the shell chrome.
+		await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeVisible()
 
 		// A rail tooltip renders on hover.
 		await page.getByRole("button", { name: "Notes" }).hover()
