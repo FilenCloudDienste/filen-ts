@@ -14,12 +14,14 @@ export interface ChangePasswordParams {
 export interface ChangePasswordAttemptDeps {
 	changePassword: (params: ChangePasswordParams) => Promise<StringifiedClient>
 	persist: (blob: StringifiedClient) => Promise<void>
+	clearSession: () => Promise<void>
 }
 
 export type ChangePasswordAttemptOutcome =
 	// `persisted: false` = the password WAS changed (the worker's live client already re-derived its
-	// keys) but the new session could not be saved on this device — resume-after-close would land on
-	// dead, pre-change credentials; the in-tab session is still fully functional.
+	// keys) but the new session could not be saved on this device; the stale pre-change blob is
+	// cleared too, so resume-after-close lands unauthed (a fresh sign-in with the new password) rather
+	// than reviving dead credentials. The in-tab session is still fully functional.
 	| { status: "success"; persisted: boolean }
 	// Any failure from the SDK call itself (wrong current password, network, …). `persist` is never
 	// reached in this branch — there is nothing new to persist.
@@ -55,6 +57,15 @@ export async function runChangePasswordAttempt(
 	} catch (e) {
 		persisted = false
 		log.warn("security", "change-password session persist failed", asErrorDTO(e))
+		// The pre-change blob is still on disk and now authenticates with the dead old password — drop
+		// it so the next resume starts clean instead of reviving credentials that no longer work.
+		// Best-effort in its own right: a stale blob is the worst case either way, so a clear failure is
+		// logged and swallowed, never thrown.
+		try {
+			await deps.clearSession()
+		} catch (clearError) {
+			log.warn("security", "clearing stale session after change-password persist failure failed", asErrorDTO(clearError))
+		}
 	}
 	return { status: "success", persisted }
 }

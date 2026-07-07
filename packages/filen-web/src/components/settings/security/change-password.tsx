@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { ratePasswordStrength } from "@filen/utils"
 import { sdkApi } from "@/lib/sdk/client"
-import { persistSession } from "@/lib/sdk/session"
+import { persistSession, clearSession } from "@/lib/sdk/session"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isPasswordStrongEnough } from "@/lib/auth/validate"
@@ -48,7 +48,8 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 			const outcome = await runChangePasswordAttempt(
 				{
 					changePassword: params => sdkApi.changePassword(params),
-					persist: persistSession
+					persist: persistSession,
+					clearSession
 				},
 				{ currentPassword, newPassword }
 			)
@@ -56,7 +57,7 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 			switch (outcome.status) {
 				case "success":
 					if (!outcome.persisted) {
-						toast.warning(t("sessionPersistFailed"))
+						toast.warning(t("changePasswordPersistFailed"))
 					}
 					toast.success(t("changePasswordSuccess"))
 					setCurrentPassword("")

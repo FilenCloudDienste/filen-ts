@@ -3,7 +3,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { resumeSession } from "@/lib/sdk/session"
 import { useBootStore } from "@/stores/boot"
 import { queryClient } from "@/queries/client"
-import { restorePersistedQueries } from "@/queries/persist"
+import { restorePersistedQueries, purgePersistedQueries } from "@/queries/persist"
 import { log } from "@/lib/log"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
@@ -33,13 +33,23 @@ export async function bootSdk(): Promise<void> {
 			log.error("boot", `${result.reason}: ${result.detail}`)
 			return
 		}
-		// Warm the query cache from disk once per boot, before the first render that reads it
-		// (best-effort — never rejects; a failed restore just means an empty cache).
-		await restorePersistedQueries(queryClient)
-		// Restore a persisted session into the worker BEFORE the gate flips to ready: guards observe
+		// Resume a persisted session into the worker BEFORE the gate flips to ready: guards observe
 		// readiness via whenBootReady() and then read hasClient(), so the client must already be
 		// injected. Self-heals an invalid blob; a missing/ephemeral one just leaves the tab unauthed.
-		await resumeSession()
+		// Runs BEFORE the query-cache restore below — resumeSession only touches kv + the already-
+		// booted worker, nothing about the query cache — so the restore can be gated on whether this
+		// boot is actually authed.
+		const resumed = await resumeSession()
+		if (resumed) {
+			// Warm the query cache from disk once per boot, before the first render that reads it
+			// (best-effort — never rejects; a failed restore just means an empty cache).
+			await restorePersistedQueries(queryClient)
+		} else {
+			// An unauthed boot must not resurrect a leftover rq.v1-* row (e.g. a cross-tab
+			// logout/persister-write race) into the cache, where it would flash under whatever
+			// account signs in next — wipe instead of restoring.
+			await purgePersistedQueries()
+		}
 		// Async-runtime health check: boot success ≠ health. Gated to dev so a transient probe failure
 		// can't block first paint in production/preview, where real ops exercise the runtime anyway.
 		if (import.meta.env.DEV) {

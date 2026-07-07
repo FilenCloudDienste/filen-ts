@@ -44,6 +44,22 @@ function adoptClient(next: Client): void {
 	client = next
 }
 
+// Null the live client FIRST so any subsequent authed op fails fast via requireClient() instead of
+// racing the teardown, then defer the actual free(): an in-flight wasm call still holds this handle
+// and freeing it mid-flight is not verified safe, so hand the free to a later task rather than
+// tearing the handle down inside this turn. Shared by logout() and by any op whose adoptClient()
+// already succeeded but a later step then failed — a caller-visible failure must never leave the
+// worker holding a client the caller believes is dead.
+function releaseClient(): void {
+	const prev = client
+	client = null
+	if (prev !== null) {
+		setTimeout(() => {
+			prev.free()
+		}, 0)
+	}
+}
+
 // Run an unauthenticated op against a throwaway UnauthClient, releasing it (LIFO defer) whichever way
 // the op settles; unwraps the Result so the Comlink boundary sees a thrown ErrorDTO, not a Result.
 async function withUnauth<T>(fn: (unauth: UnauthClient) => Promise<T>): Promise<T> {
@@ -108,7 +124,16 @@ const api = {
 		return withUnauth(async unauth => {
 			const next = await unauth.login(params) // LoginParams object (verified .d.ts); 2FA via exception-driven re-call
 			adoptClient(next)
-			return next.toStringified()
+			// adoptClient already made `next` the live client; if stringify throws, the caller sees a
+			// throw and treats login as failed, so release the client it believes is dead. `await` is
+			// load-bearing: a bare `return next.toStringified()` would settle outside this try and escape
+			// the catch.
+			try {
+				return await next.toStringified()
+			} catch (e) {
+				releaseClient()
+				throw e
+			}
 		})
 	},
 	register(params: RegisterParams): Promise<void> {
@@ -123,7 +148,14 @@ const api = {
 		return withUnauth(async unauth => {
 			const next = await unauth.completePasswordReset(params)
 			adoptClient(next)
-			return next.toStringified()
+			// See login: release the just-adopted client if the post-adopt stringify throws, and `await`
+			// so the rejection is caught here rather than escaping the try.
+			try {
+				return await next.toStringified()
+			} catch (e) {
+				releaseClient()
+				throw e
+			}
 		})
 	},
 	resendRegistrationConfirmation(email: string): Promise<void> {
@@ -192,17 +224,7 @@ const api = {
 		await requireClient().deleteAccount(code)
 	},
 	logout(): void {
-		// Null FIRST so any subsequent authed op fails fast via requireClient() instead of racing the
-		// teardown. Then defer the actual free(): an in-flight wasm call still holds this handle and
-		// freeing it mid-flight is not verified safe, so hand the free to a later task rather than
-		// tearing the handle down inside logout's own turn.
-		const prev = client
-		client = null
-		if (prev !== null) {
-			setTimeout(() => {
-				prev.free()
-			}, 0)
-		}
+		releaseClient()
 	},
 	hasClient(): boolean {
 		return client !== null

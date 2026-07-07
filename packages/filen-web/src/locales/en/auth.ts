@@ -93,8 +93,6 @@ export const auth = {
 	alreadyHaveAccount: "Already have an account? <a>Sign in</a>",
 
 	// ── Password strength meter (register + reset screens) ──────────────────────
-	/** Register screen — label for the live password-strength meter */
-	passwordStrengthLabel: "Password strength",
 	/** Password-strength rating: weakest tier */
 	passwordStrengthWeak: "Weak",
 	/** Password-strength rating: medium tier */
@@ -109,8 +107,6 @@ export const auth = {
 	// ── Free-storage eligibility banner (register screen) ───────────────────────
 	/** Register screen — eligibility banner shown when the region/IP IS eligible for the free-storage signup bonus */
 	registerCheckEligible: "You are eligible for 10 GiB of free storage!",
-	/** Register screen — eligibility banner shown when NOT eligible (or the check could not complete) */
-	registerCheckNotEligible: "You are not eligible for 10 GiB of free storage.",
 	/** Register screen — link on the eligibility banner opening the explainer article */
 	registerCheckLearnMore: "Learn more",
 
@@ -212,6 +208,8 @@ export const auth = {
 	changePasswordSubmit: "Update password",
 	/** Change-password form — success message after the password is changed */
 	changePasswordSuccess: "Your password has been updated.",
+	/** Change-password form — warning toast when the password was changed but the new session could not be saved on this device; the previously-saved session is cleared, so the next sign-in on this device needs the new password */
+	changePasswordPersistFailed: "Your password was changed, but the new session could not be saved on this device. Please sign in again.",
 
 	// ── Two-factor authentication (security settings) ───────────────────────────
 	/** Two-factor authentication section — heading */

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import { stringifyEnvelope } from "@/lib/serialize"
 import { log } from "@/lib/log"
-import { persister, restorePersistedQueries, PERSIST_PREFIX } from "@/queries/persist"
+import { persister, restorePersistedQueries, purgePersistedQueries, PERSIST_PREFIX } from "@/queries/persist"
 
 // Map-backed fake of the kv worker api (mirrors src/lib/storage/adapter.test.ts), mocked at
 // `@/lib/storage/adapter`'s `storage()` — the persister's kv bridge calls that directly with RAW
@@ -137,6 +137,15 @@ describe("per-query persister (Map-backed fake kv)", () => {
 
 		expect(target.getQueryData(["drive", "quota"])).toEqual({ usedBytes: 123456789012345678n })
 		expect(target.getQueryData(["notes", "list"])).toEqual([{ uuid: "n1", size: 42n }])
+	})
+
+	it("purgePersistedQueries wipes every rq.v1-* row without restoring any of them", async () => {
+		const { quotaKey, notesKey } = await seedTwoQueries()
+
+		await purgePersistedQueries()
+
+		expect(fakeStore.has(quotaKey)).toBe(false)
+		expect(fakeStore.has(notesKey)).toBe(false)
 	})
 
 	it("drops ONE corrupted row (warn + self-heal) while the others restore fine", async () => {

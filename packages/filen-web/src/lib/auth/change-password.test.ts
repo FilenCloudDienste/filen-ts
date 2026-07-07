@@ -20,8 +20,9 @@ const PARAMS: ChangePasswordParams = { currentPassword: "old-pw", newPassword: "
 function makeHarness() {
 	const changePassword = vi.fn<(params: ChangePasswordParams) => Promise<StringifiedClient>>()
 	const persist = vi.fn<(blob: StringifiedClient) => Promise<void>>().mockResolvedValue(undefined)
-	const deps: ChangePasswordAttemptDeps = { changePassword, persist }
-	return { deps, changePassword, persist }
+	const clearSession = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
+	const deps: ChangePasswordAttemptDeps = { changePassword, persist, clearSession }
+	return { deps, changePassword, persist, clearSession }
 }
 
 beforeEach(() => {
@@ -40,6 +41,7 @@ describe("runChangePasswordAttempt (injected deps, no worker)", () => {
 		expect(h.changePassword).toHaveBeenCalledWith(PARAMS)
 		expect(h.persist).toHaveBeenCalledTimes(1)
 		expect(h.persist).toHaveBeenCalledWith(blob)
+		expect(h.clearSession).not.toHaveBeenCalled()
 	})
 
 	it("a changePassword failure never reaches persist", async () => {
@@ -62,5 +64,18 @@ describe("runChangePasswordAttempt (injected deps, no worker)", () => {
 		await expect(runChangePasswordAttempt(h.deps, PARAMS)).resolves.toEqual({ status: "success", persisted: false })
 
 		expect(warnSpy).toHaveBeenCalledWith("security", expect.stringContaining("persist failed"), expect.anything())
+		expect(h.clearSession).toHaveBeenCalledTimes(1)
+	})
+
+	it("a clearSession failure after a persist failure is swallowed: still success with persisted:false, no throw", async () => {
+		vi.spyOn(log, "warn").mockImplementation(() => undefined)
+		const h = makeHarness()
+		h.changePassword.mockResolvedValue(sampleBlob())
+		h.persist.mockRejectedValue(new Error("kv write failed"))
+		h.clearSession.mockRejectedValue(new Error("kv delete failed"))
+
+		await expect(runChangePasswordAttempt(h.deps, PARAMS)).resolves.toEqual({ status: "success", persisted: false })
+
+		expect(h.clearSession).toHaveBeenCalledTimes(1)
 	})
 })

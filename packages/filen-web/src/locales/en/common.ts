@@ -43,7 +43,7 @@ export const common = {
 	// Account menu
 	/** Account menu — trigger's accessible label and the dropdown's heading */
 	account: "Account",
-	/** Icon rail — settings item tooltip/accessible label (not available yet) */
+	/** Icon rail — settings item tooltip/accessible label; opens the settings page (security: change password, two-factor authentication, master-keys export, delete account) */
 	settings: "Settings",
 	/** Account menu — item that signs the user out; the sign-out confirm dialog reuses it as its confirm button */
 	signOut: "Sign out",

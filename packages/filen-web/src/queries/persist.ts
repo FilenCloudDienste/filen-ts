@@ -219,3 +219,19 @@ export async function restorePersistedQueries(client: QueryClient): Promise<void
 		log.error("query.persist", "restoring persisted queries failed — continuing with an empty cache", e)
 	}
 }
+
+// Wipes every rq.v1-* row without restoring any of them — the not-authed counterpart to
+// restorePersistedQueries, called instead of it whenever a boot's resumeSession() comes back false.
+// Closes a cross-tab race: a floating persister write (fire-and-forget, see kvStorage.setItem above)
+// can land after another tab's logout wipe, leaving an orphan row this tab must not adopt. Same
+// allSettled-over-independent-RPCs shape as kvClear (adapter.ts) — one slow/failed delete must not
+// abort the rest.
+export async function purgePersistedQueries(): Promise<void> {
+	try {
+		const { api } = await storage()
+		const keys = await api.kvKeys(KV_KEY_PREFIX)
+		await Promise.allSettled(keys.map(key => api.kvDelete(key)))
+	} catch (e) {
+		log.error("query.persist", "purging persisted queries failed", e)
+	}
+}
