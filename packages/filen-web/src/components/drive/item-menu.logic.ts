@@ -51,8 +51,9 @@ const VERSIONS: ItemActionDescriptor = {
 }
 const INFO: ItemActionDescriptor = { id: "info", labelKey: "driveActionInfo", icon: InfoIcon, run: "dialog", dialogKind: "info" }
 // Copy-link's real behavior (read existing link status, write the URL to the clipboard) needs
-// link-status data a later step provides — until then it dispatches the same seam as Public link
-// rather than acting on data this menu doesn't have.
+// link-status data this menu doesn't have — it deliberately dispatches the same dialog kind as
+// Public link rather than duplicating that fetch here; the dialog's own Copy button IS copy-link's
+// implementation.
 const PUBLIC_LINK: ItemActionDescriptor = {
 	id: "publicLink",
 	labelKey: "driveActionPublicLink",

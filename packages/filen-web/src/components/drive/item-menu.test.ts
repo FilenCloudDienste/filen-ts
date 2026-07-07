@@ -108,7 +108,7 @@ describe("driveItemActions (item menu gating)", () => {
 		expect(dirDescriptors.find(d => d.id === "info")).toMatchObject({ run: "dialog", dialogKind: "info" })
 	})
 
-	it("public link and copy link both dispatch the link dialog kind (no clipboard logic yet)", () => {
+	it("public link and copy link both dispatch the link dialog kind (the dialog itself owns the clipboard write)", () => {
 		const descriptors = driveItemActions(dirItem(), "drive")
 		expect(descriptors.find(d => d.id === "publicLink")).toMatchObject({ run: "dialog", dialogKind: "link" })
 		expect(descriptors.find(d => d.id === "copyLink")).toMatchObject({ run: "dialog", dialogKind: "link" })

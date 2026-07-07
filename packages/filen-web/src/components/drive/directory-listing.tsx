@@ -43,6 +43,7 @@ import { MoveTargetDialog } from "@/components/drive/move-target-dialog"
 import { ColorDialog } from "@/components/drive/color-dialog"
 import { VersionsDialog } from "@/components/drive/versions-dialog"
 import { InfoDialog } from "@/components/drive/info-dialog"
+import { LinkDialog } from "@/components/drive/link-dialog"
 import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
 import { TypedConfirmDialog } from "@/components/dialogs/typed-confirm-dialog"
 import { InputDialog } from "@/components/dialogs/input-dialog"
@@ -64,12 +65,23 @@ interface ActiveDialog {
 	items: DriveItem[]
 }
 
-// Kinds the dialog host below actually renders. `link` remains a typed seam (its arm is still a bare
-// `null` — later work renders the public-link dialog there) — activeDialog still tracks it like any
-// other kind, so without this a seam kind would look identical to a real wired one to the F2/Delete
-// guards, permanently wedging activeDialog !== null (and so those shortcuts) the moment a menu
-// dispatched one, since nothing ever renders to close it again.
-const WIRED_DIALOG_KINDS = new Set<ActiveDialogKind>(["rename", "trash", "delete", "emptyTrash", "move", "color", "versions", "info"])
+// Kinds the dialog host below actually renders — every ActiveDialogKind is wired today, but the set
+// stays explicit (rather than collapsing to a bare `activeDialog !== null` check) so a future kind
+// added to the union without an immediate dialog implementation degrades safely: an unwired seam kind
+// would otherwise look identical to a real one to the F2/Delete guards below, permanently wedging
+// activeDialog !== null (and so those shortcuts) the moment a menu dispatched one, since nothing
+// would ever render to close it again.
+const WIRED_DIALOG_KINDS = new Set<ActiveDialogKind>([
+	"rename",
+	"trash",
+	"delete",
+	"emptyTrash",
+	"move",
+	"color",
+	"versions",
+	"info",
+	"link"
+])
 
 // Module scope, not inside the component: runs exactly once per module evaluation (see
 // theme-provider.tsx's own "app.toggleTheme" registration for the full StrictMode/HMR rationale).
@@ -170,9 +182,9 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// independent restore vs. delete-confirm flow).
 	const [activeDialog, setActiveDialog] = useState<ActiveDialog | null>(null)
 	const [dialogPending, setDialogPending] = useState(false)
-	// True only while a dialog that actually RENDERS something is open — a seam kind (`link`) never
-	// shows anything, so it must not count as "open" for the F2/Delete guards below (see
-	// WIRED_DIALOG_KINDS).
+	// True only while a dialog that actually RENDERS something is open — every kind renders one today
+	// (see WIRED_DIALOG_KINDS), but the check stays explicit so a future seam kind can't silently wedge
+	// the F2/Delete guards below open forever.
 	const isDialogOpen = activeDialog !== null && WIRED_DIALOG_KINDS.has(activeDialog.kind)
 
 	// A fresh directory/variant must never inherit the previous one's selection or cursor. Routes
@@ -479,8 +491,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	}
 
 	// One instance of whichever dialog is active, switching on activeDialog.kind — never more than one
-	// mounted at a time. `link` is the one remaining clean typed seam (later work fills that arm in;
-	// dispatching the intent here already works end to end).
+	// mounted at a time.
 	function renderActiveDialog(): ReactNode {
 		if (!activeDialog) {
 			return null
@@ -631,9 +642,20 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					/>
 				)
 			}
-			// Placeholder — the public-link dialog renders here.
-			case "link":
-				return null
+			case "link": {
+				const item = activeDialog.items[0]
+
+				if (!item) {
+					return null
+				}
+
+				return (
+					<LinkDialog
+						item={item}
+						onClose={closeActiveDialog}
+					/>
+				)
+			}
 		}
 	}
 

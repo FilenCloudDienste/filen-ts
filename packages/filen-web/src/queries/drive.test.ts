@@ -1,18 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, File, NormalDirsAndFiles, UuidStr } from "@filen/sdk-rs"
+import type { Dir, DirPublicLinkRW, File, FilePublicLink, NormalDirsAndFiles, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it
 // down to the methods this module calls, mirroring account.test.ts's mock boundary.
-const { listDirectory, resolveDirectoryNames, getItemInfo, listFileVersionsOp } = vi.hoisted(() => ({
-	listDirectory: vi.fn<(target: unknown) => Promise<NormalDirsAndFiles>>(),
-	resolveDirectoryNames: vi.fn<(uuids: string[]) => Promise<Record<string, string>>>(),
-	getItemInfo: vi.fn(),
-	listFileVersionsOp: vi.fn()
-}))
+const { listDirectory, resolveDirectoryNames, getItemInfo, listFileVersionsOp, getDirectoryLinkStatus, getFileLinkStatus } = vi.hoisted(
+	() => ({
+		listDirectory: vi.fn<(target: unknown) => Promise<NormalDirsAndFiles>>(),
+		resolveDirectoryNames: vi.fn<(uuids: string[]) => Promise<Record<string, string>>>(),
+		getItemInfo: vi.fn(),
+		listFileVersionsOp: vi.fn(),
+		getDirectoryLinkStatus: vi.fn(),
+		getFileLinkStatus: vi.fn()
+	})
+)
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, resolveDirectoryNames, getItemInfo, listFileVersionsOp } }))
+vi.mock("@/lib/sdk/client", () => ({
+	sdkApi: { listDirectory, resolveDirectoryNames, getItemInfo, listFileVersionsOp, getDirectoryLinkStatus, getFileLinkStatus }
+}))
 
 // Every other hook wrapper below is a one-line pass-through no node-environment test can render (no
 // DOM — see vitest.config.ts). useItemInfoQuery's `enabled` default is worth covering directly
@@ -38,12 +44,15 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import {
+	driveItemLinkStatusQueryKey,
+	driveItemLinkStatusQueryUpdate,
 	driveListingQueryKey,
 	driveListingQueryUpdate,
 	driveListingQueryUpdateGlobal,
 	driveNamesQueryKey,
 	fetchDirectoryListing,
 	fetchDirectoryNames,
+	fetchDriveItemLinkStatus,
 	fetchFileVersions,
 	fetchItemInfo,
 	fileVersionsQueryKey,
@@ -92,6 +101,30 @@ function mockFile(overrides: Partial<File> = {}): File {
 			type: "decoded",
 			data: { name: "report.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
 		},
+		...overrides
+	}
+}
+
+function mockDirLink(overrides: Partial<DirPublicLinkRW> = {}): DirPublicLinkRW {
+	return {
+		linkUuid: testUuid("dir-link"),
+		linkKey: "dir-link-key",
+		linkKeyVersion: 1,
+		password: { type: "none" },
+		expiration: "never",
+		enableDownload: true,
+		salt: "dir-salt",
+		...overrides
+	}
+}
+
+function mockFileLink(overrides: Partial<FilePublicLink> = {}): FilePublicLink {
+	return {
+		linkUuid: testUuid("file-link"),
+		password: { type: "none" },
+		expiration: "never",
+		downloadable: true,
+		salt: "file-salt",
 		...overrides
 	}
 }
@@ -273,6 +306,75 @@ describe("fetchFileVersions", () => {
 		listFileVersionsOp.mockRejectedValueOnce(error)
 
 		await expect(fetchFileVersions(mockFile())).rejects.toBe(error)
+	})
+})
+
+describe("driveItemLinkStatusQueryKey", () => {
+	it("builds the [domain, entity, uuid] tuple", () => {
+		expect(driveItemLinkStatusQueryKey("abc")).toEqual(["drive", "linkStatus", "abc"])
+	})
+})
+
+describe("fetchDriveItemLinkStatus", () => {
+	it("calls getDirectoryLinkStatus and tags the result 'directory' for a directory item", async () => {
+		const dir = narrowItem(mockDir())
+		const status = mockDirLink()
+		getDirectoryLinkStatus.mockResolvedValueOnce(status)
+
+		await expect(fetchDriveItemLinkStatus(dir)).resolves.toEqual({ type: "directory", status })
+		expect(getDirectoryLinkStatus).toHaveBeenCalledExactlyOnceWith(dir.data)
+		expect(getFileLinkStatus).not.toHaveBeenCalled()
+	})
+
+	it("calls getFileLinkStatus and tags the result 'file' for a file item", async () => {
+		const file = narrowItem(mockFile())
+		const status = mockFileLink()
+		getFileLinkStatus.mockResolvedValueOnce(status)
+
+		await expect(fetchDriveItemLinkStatus(file)).resolves.toEqual({ type: "file", status })
+		expect(getFileLinkStatus).toHaveBeenCalledExactlyOnceWith(file.data)
+		expect(getDirectoryLinkStatus).not.toHaveBeenCalled()
+	})
+
+	it("returns null (no link) when the worker resolves undefined, for either item type", async () => {
+		getDirectoryLinkStatus.mockResolvedValueOnce(undefined)
+		getFileLinkStatus.mockResolvedValueOnce(undefined)
+
+		await expect(fetchDriveItemLinkStatus(narrowItem(mockDir()))).resolves.toBeNull()
+		await expect(fetchDriveItemLinkStatus(narrowItem(mockFile()))).resolves.toBeNull()
+	})
+
+	it("propagates a rejection from the worker unchanged", async () => {
+		const error = new Error("no authenticated client")
+		getDirectoryLinkStatus.mockRejectedValueOnce(error)
+
+		await expect(fetchDriveItemLinkStatus(narrowItem(mockDir()))).rejects.toBe(error)
+	})
+})
+
+describe("driveItemLinkStatusQueryUpdate", () => {
+	it("sets the link status at the item's own uuid key", () => {
+		const status = mockFileLink()
+
+		driveItemLinkStatusQueryUpdate("some-uuid", { type: "file", status })
+
+		expect(testQueryClient.getQueryData(driveItemLinkStatusQueryKey("some-uuid"))).toEqual({ type: "file", status })
+	})
+
+	it("can patch back to null (disable)", () => {
+		testQueryClient.setQueryData(driveItemLinkStatusQueryKey("some-uuid"), { type: "file", status: mockFileLink() })
+
+		driveItemLinkStatusQueryUpdate("some-uuid", null)
+
+		expect(testQueryClient.getQueryData(driveItemLinkStatusQueryKey("some-uuid"))).toBeNull()
+	})
+
+	it("never touches a differently-scoped uuid's key", () => {
+		testQueryClient.setQueryData(driveItemLinkStatusQueryKey("other-uuid"), null)
+
+		driveItemLinkStatusQueryUpdate("some-uuid", { type: "directory", status: mockDirLink() })
+
+		expect(testQueryClient.getQueryData(driveItemLinkStatusQueryKey("other-uuid"))).toBeNull()
 	})
 })
 

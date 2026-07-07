@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, File, FileVersion, UserInfo, UuidStr } from "@filen/sdk-rs"
+import type { Dir, DirPublicLinkRW, File, FilePublicLink, FileVersion, UserInfo, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
@@ -21,7 +21,13 @@ const {
 	setFavorited,
 	setDirectoryColor,
 	restoreFileVersionOp,
-	deleteFileVersionOp
+	deleteFileVersionOp,
+	createDirectoryLink,
+	createFileLink,
+	updateDirectoryLink,
+	updateFileLink,
+	removeDirectoryLink,
+	removeFileLink
 } = vi.hoisted(() => ({
 	renameDirectory: vi.fn(),
 	renameFile: vi.fn(),
@@ -37,7 +43,13 @@ const {
 	setFavorited: vi.fn(),
 	setDirectoryColor: vi.fn(),
 	restoreFileVersionOp: vi.fn(),
-	deleteFileVersionOp: vi.fn()
+	deleteFileVersionOp: vi.fn(),
+	createDirectoryLink: vi.fn(),
+	createFileLink: vi.fn(),
+	updateDirectoryLink: vi.fn(),
+	updateFileLink: vi.fn(),
+	removeDirectoryLink: vi.fn(),
+	removeFileLink: vi.fn()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({
@@ -56,7 +68,13 @@ vi.mock("@/lib/sdk/client", () => ({
 		setFavorited,
 		setDirectoryColor,
 		restoreFileVersionOp,
-		deleteFileVersionOp
+		deleteFileVersionOp,
+		createDirectoryLink,
+		createFileLink,
+		updateDirectoryLink,
+		updateFileLink,
+		removeDirectoryLink,
+		removeFileLink
 	}
 }))
 
@@ -67,10 +85,12 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import { driveListingQueryKey, driveNamesQueryKey } from "@/queries/drive"
+import { driveItemLinkStatusQueryKey, driveListingQueryKey, driveNamesQueryKey } from "@/queries/drive"
 import {
+	createLink,
 	deleteItemsPermanently,
 	deleteVersion,
+	disableLink,
 	emptyTrash,
 	moveItems,
 	renameItem,
@@ -79,6 +99,7 @@ import {
 	setColor,
 	toggleFavorite,
 	trashItems,
+	updateLink,
 	type DirectoryItem,
 	type FileItem
 } from "@/lib/drive/actions"
@@ -160,6 +181,30 @@ function mockVersion(overrides: Partial<FileVersion> = {}): FileVersion {
 		},
 		timestamp: 1_600_000_000_000n,
 		uuid: testUuid("version"),
+		...overrides
+	}
+}
+
+function mockDirLink(overrides: Partial<DirPublicLinkRW> = {}): DirPublicLinkRW {
+	return {
+		linkUuid: testUuid("dir-link"),
+		linkKey: "dir-link-key",
+		linkKeyVersion: 1,
+		password: { type: "none" },
+		expiration: "never",
+		enableDownload: true,
+		salt: "dir-salt",
+		...overrides
+	}
+}
+
+function mockFileLink(overrides: Partial<FilePublicLink> = {}): FilePublicLink {
+	return {
+		linkUuid: testUuid("file-link"),
+		password: { type: "none" },
+		expiration: "never",
+		downloadable: true,
+		salt: "file-salt",
 		...overrides
 	}
 }
@@ -721,6 +766,156 @@ describe("deleteVersion", () => {
 			}
 		})
 		expect(deleteFileVersionOp).not.toHaveBeenCalled()
+	})
+})
+
+describe("createLink", () => {
+	it("directory: calls createDirectoryLink with a Comlink-proxied callback and patches the link-status cache", async () => {
+		const dir = dirItem({ uuid: testUuid("a") })
+		const status = mockDirLink()
+		createDirectoryLink.mockResolvedValueOnce(status)
+
+		const outcome = await createLink(dir, vi.fn())
+
+		expect(outcome).toEqual({ status: "success", link: { type: "directory", status } })
+		expect(createDirectoryLink).toHaveBeenCalledTimes(1)
+		expect(createDirectoryLink.mock.calls[0]?.[0]).toBe(dir.data)
+		expect(testQueryClient.getQueryData(driveItemLinkStatusQueryKey(testUuid("a")))).toEqual({ type: "directory", status })
+		expect(createFileLink).not.toHaveBeenCalled()
+	})
+
+	it("directory: the progress callback passed to createDirectoryLink still calls through to the caller's onProgress", async () => {
+		const dir = dirItem({ uuid: testUuid("a") })
+		createDirectoryLink.mockImplementationOnce((_dir: Dir, onProgress: (a: number, b: number | undefined) => void) => {
+			onProgress(50, 100)
+			return mockDirLink()
+		})
+		const seen: [number, number | undefined][] = []
+
+		await createLink(dir, (downloaded, total) => {
+			seen.push([downloaded, total])
+		})
+
+		expect(seen).toEqual([[50, 100]])
+	})
+
+	it("file: calls createFileLink (no progress callback), not createDirectoryLink", async () => {
+		const file = fileItem({ uuid: testUuid("f") })
+		const status = mockFileLink()
+		createFileLink.mockResolvedValueOnce(status)
+
+		const outcome = await createLink(file, vi.fn())
+
+		expect(outcome).toEqual({ status: "success", link: { type: "file", status } })
+		expect(createFileLink).toHaveBeenCalledExactlyOnceWith(file.data)
+		expect(createDirectoryLink).not.toHaveBeenCalled()
+		expect(testQueryClient.getQueryData(driveItemLinkStatusQueryKey(testUuid("f")))).toEqual({ type: "file", status })
+	})
+
+	it("returns an error outcome without patching the cache on rejection", async () => {
+		const dir = dirItem({ uuid: testUuid("a") })
+		const dto = sdkDto("Forbidden")
+		createDirectoryLink.mockRejectedValueOnce(dto)
+
+		const outcome = await createLink(dir, vi.fn())
+
+		expect(outcome).toEqual({ status: "error", dto })
+		expect(testQueryClient.getQueryData(driveItemLinkStatusQueryKey(testUuid("a")))).toBeUndefined()
+	})
+})
+
+describe("updateLink", () => {
+	it("directory: calls updateDirectoryLink with the merged status and patches the cache", async () => {
+		const dir = dirItem({ uuid: testUuid("a") })
+		const merged = mockDirLink({ expiration: "7d" })
+		updateDirectoryLink.mockResolvedValueOnce(merged)
+
+		const outcome = await updateLink(dir, { type: "directory", status: merged })
+
+		expect(outcome).toEqual({ status: "success", link: { type: "directory", status: merged } })
+		expect(updateDirectoryLink).toHaveBeenCalledExactlyOnceWith(dir.data, merged)
+		expect(testQueryClient.getQueryData(driveItemLinkStatusQueryKey(testUuid("a")))).toEqual({ type: "directory", status: merged })
+	})
+
+	it("file: calls updateFileLink, not updateDirectoryLink", async () => {
+		const file = fileItem({ uuid: testUuid("f") })
+		const merged = mockFileLink({ downloadable: false })
+		updateFileLink.mockResolvedValueOnce(merged)
+
+		const outcome = await updateLink(file, { type: "file", status: merged })
+
+		expect(outcome).toEqual({ status: "success", link: { type: "file", status: merged } })
+		expect(updateFileLink).toHaveBeenCalledExactlyOnceWith(file.data, merged)
+		expect(updateDirectoryLink).not.toHaveBeenCalled()
+	})
+
+	it("an item/link type mismatch is refused as an error without calling either worker op", async () => {
+		const dir = dirItem({ uuid: testUuid("a") })
+
+		const outcome = await updateLink(dir, { type: "file", status: mockFileLink() })
+
+		expect(outcome.status).toBe("error")
+		expect(updateDirectoryLink).not.toHaveBeenCalled()
+		expect(updateFileLink).not.toHaveBeenCalled()
+	})
+
+	it("returns an error outcome without patching the cache on rejection", async () => {
+		const dir = dirItem({ uuid: testUuid("a") })
+		const dto = sdkDto("NotFound")
+		updateDirectoryLink.mockRejectedValueOnce(dto)
+
+		const outcome = await updateLink(dir, { type: "directory", status: mockDirLink() })
+
+		expect(outcome).toEqual({ status: "error", dto })
+		expect(testQueryClient.getQueryData(driveItemLinkStatusQueryKey(testUuid("a")))).toBeUndefined()
+	})
+})
+
+describe("disableLink", () => {
+	it("directory: calls removeDirectoryLink with only the directory (asymmetric — no link arg)", async () => {
+		const dir = dirItem({ uuid: testUuid("a") })
+		removeDirectoryLink.mockResolvedValueOnce(undefined)
+
+		const outcome = await disableLink(dir, { type: "directory", status: mockDirLink() })
+
+		expect(outcome).toEqual({ status: "success" })
+		expect(removeDirectoryLink).toHaveBeenCalledExactlyOnceWith(dir.data)
+		expect(removeFileLink).not.toHaveBeenCalled()
+		expect(testQueryClient.getQueryData(driveItemLinkStatusQueryKey(testUuid("a")))).toBeNull()
+	})
+
+	it("file: calls removeFileLink with the file AND the live link object (asymmetric)", async () => {
+		const file = fileItem({ uuid: testUuid("f") })
+		const link = mockFileLink()
+		removeFileLink.mockResolvedValueOnce(undefined)
+
+		const outcome = await disableLink(file, { type: "file", status: link })
+
+		expect(outcome).toEqual({ status: "success" })
+		expect(removeFileLink).toHaveBeenCalledExactlyOnceWith(file.data, link)
+		expect(removeDirectoryLink).not.toHaveBeenCalled()
+		expect(testQueryClient.getQueryData(driveItemLinkStatusQueryKey(testUuid("f")))).toBeNull()
+	})
+
+	it("an item/link type mismatch is refused as an error without calling either worker op", async () => {
+		const file = fileItem({ uuid: testUuid("f") })
+
+		const outcome = await disableLink(file, { type: "directory", status: mockDirLink() })
+
+		expect(outcome.status).toBe("error")
+		expect(removeDirectoryLink).not.toHaveBeenCalled()
+		expect(removeFileLink).not.toHaveBeenCalled()
+	})
+
+	it("returns an error outcome without patching the cache on rejection", async () => {
+		const dir = dirItem({ uuid: testUuid("a") })
+		const dto = sdkDto("Forbidden")
+		removeDirectoryLink.mockRejectedValueOnce(dto)
+
+		const outcome = await disableLink(dir, { type: "directory", status: mockDirLink() })
+
+		expect(outcome).toEqual({ status: "error", dto })
+		expect(testQueryClient.getQueryData(driveItemLinkStatusQueryKey(testUuid("a")))).toBeUndefined()
 	})
 })
 

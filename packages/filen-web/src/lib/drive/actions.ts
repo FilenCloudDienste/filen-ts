@@ -1,9 +1,17 @@
+import * as Comlink from "comlink"
 import type { Dir, DirColor, File, FileVersion, UserInfo } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import { driveListingQueryKey, driveListingQueryUpdate, driveListingQueryUpdateGlobal, normalizeParentUuid } from "@/queries/drive"
+import {
+	driveListingQueryKey,
+	driveListingQueryUpdate,
+	driveListingQueryUpdateGlobal,
+	driveItemLinkStatusQueryUpdate,
+	normalizeParentUuid,
+	type DriveItemLinkStatus
+} from "@/queries/drive"
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/lib/drive/item"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { runBulk, type BulkOutcome } from "@/lib/drive/bulk"
@@ -231,6 +239,80 @@ export async function deleteVersion(file: FileItem, version: FileVersion): Promi
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
+
+	return { status: "success" }
+}
+
+// ── Public link ──────────────────────────────────────────────────────────
+// A link never changes the item's listing presence (no listing-cache patch below, unlike every write
+// above) — only the link-status query itself needs patching, so a reopened panel reflects the change
+// without a redundant re-fetch.
+
+export type LinkActionOutcome = { status: "success"; link: DriveItemLinkStatus } | { status: "error"; dto: ErrorDTO }
+
+// The dir tree re-encrypt crosses Comlink with a progress callback — Comlink.proxy marks it so the
+// worker can invoke it directly instead of the call attempting (and failing) to structured-clone a
+// function.
+export async function createLink(
+	item: DriveItem,
+	onProgress: (downloadedBytes: number, totalBytes: number | undefined) => void
+): Promise<LinkActionOutcome> {
+	let link: DriveItemLinkStatus
+
+	try {
+		link =
+			item.type === "directory"
+				? { type: "directory", status: await runOp(sdkApi.createDirectoryLink(item.data, Comlink.proxy(onProgress))) }
+				: { type: "file", status: await runOp(sdkApi.createFileLink(item.data)) }
+	} catch (e) {
+		return { status: "error", dto: asErrorDTO(e) }
+	}
+
+	driveItemLinkStatusQueryUpdate(item.data.uuid, link)
+
+	return { status: "success", link }
+}
+
+// `next` carries the merged object (see link-dialog.logic.ts's buildLinkUpdate) — the item/link type
+// pairing is re-verified here rather than trusted blindly, since the two are independently-typed
+// parameters the type system can't itself correlate.
+export async function updateLink(item: DriveItem, next: DriveItemLinkStatus): Promise<LinkActionOutcome> {
+	let link: DriveItemLinkStatus
+
+	try {
+		if (item.type === "directory" && next.type === "directory") {
+			link = { type: "directory", status: await runOp(sdkApi.updateDirectoryLink(item.data, next.status)) }
+		} else if (item.type === "file" && next.type === "file") {
+			link = { type: "file", status: await runOp(sdkApi.updateFileLink(item.data, next.status)) }
+		} else {
+			throw new Error("Item/link type mismatch")
+		}
+	} catch (e) {
+		return { status: "error", dto: asErrorDTO(e) }
+	}
+
+	driveItemLinkStatusQueryUpdate(item.data.uuid, link)
+
+	return { status: "success", link }
+}
+
+// Asymmetric args (verified against the installed .d.ts, see sdk.worker.ts's own comment on this):
+// removing a directory's link only needs the directory; removing a file's link also needs the live
+// link object, so the caller's already-fetched status is threaded through as `current`.
+export async function disableLink(item: DriveItem, current: DriveItemLinkStatus): Promise<VoidActionOutcome> {
+	try {
+		if (item.type === "directory" && current.type === "directory") {
+			await runOp(sdkApi.removeDirectoryLink(item.data))
+		} else if (item.type === "file" && current.type === "file") {
+			await runOp(sdkApi.removeFileLink(item.data, current.status))
+		} else {
+			throw new Error("Item/link type mismatch")
+		}
+	} catch (e) {
+		return { status: "error", dto: asErrorDTO(e) }
+	}
+
+	driveItemLinkStatusQueryUpdate(item.data.uuid, null)
 
 	return { status: "success" }
 }

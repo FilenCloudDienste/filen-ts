@@ -272,6 +272,40 @@ export const drive = {
 	driveLinkDownloadableLabel: "Allow downloads",
 	/** Public-link dialog — label for the link-URL field shown next to the copy button */
 	driveLinkUrlLabel: "Link",
+	/** Public-link dialog — empty-state title shown before a link has been created for this item */
+	driveLinkNoLinkTitle: "No public link",
+	/** Public-link dialog — empty-state description under driveLinkNoLinkTitle */
+	driveLinkNoLinkDescription: "Anyone with the link can access this item.",
+	/** Public-link dialog — toast shown after the link URL is copied to the clipboard */
+	driveLinkUrlCopiedToast: "Link copied to clipboard",
+	/** Public-link dialog — status text shown next to the password field when a password is already set (the field itself never shows the plaintext) */
+	driveLinkPasswordSetStatus: "Password set",
+	/** Public-link dialog — button revealing the password field to set the link's first password */
+	driveLinkPasswordSetAction: "Set password",
+	/** Public-link dialog — button revealing the password field to replace an already-set password */
+	driveLinkPasswordChangeAction: "Change password",
+	/** Public-link dialog — button removing the link's password entirely */
+	driveLinkPasswordRemoveAction: "Remove password",
+	/** Public-link dialog — button confirming a typed password while the password field is open */
+	driveLinkPasswordSaveAction: "Save",
+	/** Public-link dialog — progress text shown while a directory link is being created; {{percent}} = 0-100 */
+	driveLinkCreatingProgress: "Encrypting… {{percent}}%",
+	/** Public-link dialog — expiration option: the link never expires */
+	driveLinkExpirationNever: "Never",
+	/** Public-link dialog — expiration option: 1 hour */
+	driveLinkExpirationOneHour: "1 hour",
+	/** Public-link dialog — expiration option: 6 hours */
+	driveLinkExpirationSixHours: "6 hours",
+	/** Public-link dialog — expiration option: 1 day */
+	driveLinkExpirationOneDay: "1 day",
+	/** Public-link dialog — expiration option: 3 days */
+	driveLinkExpirationThreeDays: "3 days",
+	/** Public-link dialog — expiration option: 1 week */
+	driveLinkExpirationOneWeek: "1 week",
+	/** Public-link dialog — expiration option: 2 weeks */
+	driveLinkExpirationTwoWeeks: "2 weeks",
+	/** Public-link dialog — expiration option: 30 days */
+	driveLinkExpirationThirtyDays: "30 days",
 
 	// ── Bulk action result toast ─────────────────────────────────────────────
 	// Partial-success summary (web departs from mobile's fail-fast bulk ops here): every selected item

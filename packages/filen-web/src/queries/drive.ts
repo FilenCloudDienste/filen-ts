@@ -4,7 +4,7 @@ import { queryClient } from "@/queries/client"
 // Whole-statement `import type` here too — sdk.worker.ts's own top-level code pulls in
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
-import type { Dir, File, FileVersion } from "@filen/sdk-rs"
+import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
 import {
 	getSortPreferences,
@@ -174,4 +174,40 @@ export function useViewModePreferencesQuery(): UseQueryResult<DrivePreferences<D
 		queryKey: ["drive", "viewModePreferences"] as const,
 		queryFn: getViewModePreferences
 	})
+}
+
+// Public-link panel primitive: tags the worker's per-type status read with which type it is —
+// DirPublicLinkRW and FilePublicLink share no discriminant field of their own (their download flag
+// is even named differently, see link-dialog.logic.ts), so callers that need to know which shape
+// they're holding (building an update, constructing the link URL) would otherwise have to re-derive
+// it structurally. `null` means no link exists yet (the SDK's own idempotent-check-first shape);
+// there is no separate "not fetched" state here — that's the query's own pending/error status.
+export type DriveItemLinkStatus = { type: "directory"; status: DirPublicLinkRW } | { type: "file"; status: FilePublicLink }
+
+export function driveItemLinkStatusQueryKey(uuid: string) {
+	return ["drive", "linkStatus", uuid] as const
+}
+
+export async function fetchDriveItemLinkStatus(item: DriveItem): Promise<DriveItemLinkStatus | null> {
+	if (item.type === "directory") {
+		const status = await sdkApi.getDirectoryLinkStatus(item.data)
+		return status ? { type: "directory", status } : null
+	}
+
+	const status = await sdkApi.getFileLinkStatus(item.data)
+	return status ? { type: "file", status } : null
+}
+
+export function useDriveItemLinkStatusQuery(item: DriveItem): UseQueryResult<DriveItemLinkStatus | null> {
+	return useQuery({
+		queryKey: driveItemLinkStatusQueryKey(item.data.uuid),
+		queryFn: () => fetchDriveItemLinkStatus(item)
+	})
+}
+
+// Confirm-then-patch after create/update/disable (queries/client.ts's zero-useMutation convention) —
+// a link never changes the item's listing presence, so this is the only cache this feature ever
+// patches (contrast actions.ts's other writes, which also touch one or more listing keys).
+export function driveItemLinkStatusQueryUpdate(uuid: string, next: DriveItemLinkStatus | null): void {
+	queryClient.setQueryData<DriveItemLinkStatus | null>(driveItemLinkStatusQueryKey(uuid), next)
 }
