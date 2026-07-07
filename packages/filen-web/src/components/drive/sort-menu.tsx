@@ -75,13 +75,17 @@ export function SortMenu({ value, onChange, disabled = false }: SortMenuProps) {
 				}
 			/>
 			<DropdownMenuContent align="end">
-				<DropdownMenuLabel>{t("driveSortBy")}</DropdownMenuLabel>
 				<DropdownMenuRadioGroup
 					value={field}
 					onValueChange={(next: SortField) => {
 						onChange(SORT_BY_FROM_PARTS[next][direction])
 					}}
 				>
+					{/* Base UI's Menu.GroupLabel reads its group context from the nearest Menu.Group/
+					Menu.RadioGroup ancestor (mui/base-ui#4826) — it must nest inside the radio group it
+					labels, not sit as a sibling before it (the Radix-shadcn convention this was ported
+					from), or mounting throws "MenuGroupContext is missing". */}
+					<DropdownMenuLabel>{t("driveSortBy")}</DropdownMenuLabel>
 					{fields.map(row => (
 						<DropdownMenuRadioItem
 							key={row.field}
