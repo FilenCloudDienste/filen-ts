@@ -84,7 +84,7 @@ function ThemeToggle() {
 
 function AccountMenu() {
 	const { t } = useTranslation(["common", "auth"])
-	// Stopgap until T7's account query (getUserInfo) lands: a cheap local kv read, no network — falls
+	// Stopgap until the account query (getUserInfo) lands: a cheap local kv read, no network — falls
 	// back to the static "Account" label below on a missing/unreadable session.
 	const [email, setEmail] = useState<string | null>(null)
 	const [confirmOpen, setConfirmOpen] = useState(false)

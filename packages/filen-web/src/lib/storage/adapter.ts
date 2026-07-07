@@ -91,5 +91,7 @@ export async function kvDelete(key: string): Promise<void> {
 export async function kvClear(): Promise<void> {
 	const { api } = await storage()
 	const keys = await api.kvKeys("")
-	await Promise.all(keys.map(key => api.kvDelete(key)))
+	// allSettled, not all: on a follower each delete is an independent RPC with its own timeout;
+	// one slow delete must not abort the rest of the wipe.
+	await Promise.allSettled(keys.map(key => api.kvDelete(key)))
 }

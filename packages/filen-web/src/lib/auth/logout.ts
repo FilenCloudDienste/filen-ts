@@ -42,7 +42,7 @@ export async function runLogout(deps: LogoutDeps): Promise<void> {
 	// having succeeded, so a cancelQueries failure must not skip it.
 	await phase("cancel-queries", deps.cancelQueries)
 	await phase("clear-query-cache", deps.clearQueryCache)
-	// Worker nulls the client immediately (new ops fail fast); the handle free is deferred (T1).
+	// Worker nulls the client immediately (new ops fail fast); the handle free is deferred.
 	await phase("sdk-logout", deps.sdkLogout)
 	// Session row first, then every remaining kv row — query-persist rows and keymap overrides
 	// included: logout is a full local wipe by design, matching the confirm dialog's copy.

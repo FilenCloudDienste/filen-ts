@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { type } from "arktype"
-import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
+import { kvClear, kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { log } from "@/lib/log"
 
 // node vitest cannot provide navigator.locks/BroadcastChannel/real workers (leader.ts's actual
@@ -67,5 +67,15 @@ describe("storage adapter (Map-backed fake StorageApi)", () => {
 
 	it("returns null for a missing key without touching the schema", async () => {
 		await expect(kvGetJson("missing", type({ n: "bigint" }))).resolves.toBeNull()
+	})
+
+	it("kvClear wipes every row regardless of prefix", async () => {
+		await kvSetJson("rq.v1.a", { n: 1n })
+		await kvSetJson("keymap.v1.overrides", { n: 2n })
+		await kvSetJson("session", { n: 3n })
+
+		await kvClear()
+
+		expect(fakeStore.size).toBe(0)
 	})
 })
