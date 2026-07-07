@@ -133,7 +133,7 @@ export const drive = {
 	driveActionFavorite: "Favorite",
 	/** Item menu — remove the selected item(s) from favorites */
 	driveActionUnfavorite: "Unfavorite",
-	/** Item menu — open the directory-color swatch popover (directories only) */
+	/** Item menu — open the directory-color swatch dialog (directories only) */
 	driveActionColor: "Color",
 	/** Item menu — open the file-version history panel (files only) */
 	driveActionVersions: "Versions",
@@ -187,9 +187,15 @@ export const drive = {
 	// ── Move dialog ──────────────────────────────────────────────────────────
 	/** Move dialog — title of the destination-directory picker */
 	driveMoveDialogTitle: "Select destination",
+	/** Move dialog — confirm button moving the selection into the currently open directory */
+	driveMoveHereAction: "Move here",
+
+	// ── Color dialog ─────────────────────────────────────────────────────────
+	/** Color dialog — title (opened via driveActionColor) */
+	driveColorDialogTitle: "Directory color",
 
 	// ── Directory colors ─────────────────────────────────────────────────────
-	// Swatch names shown in the color popover (driveActionColor) and as each swatch's accessible label.
+	// Swatch names shown in the color dialog (driveColorDialogTitle) and as each swatch's accessible label.
 	/** Directory color swatch — the default (uncolored) state */
 	driveColorDefault: "Default",
 	/** Directory color swatch */
@@ -214,6 +220,22 @@ export const drive = {
 	driveVersionsRestoreAction: "Restore this version",
 	/** Versions panel — per-row action permanently deleting that specific version */
 	driveVersionsDeleteAction: "Delete this version",
+
+	// ── Version restore confirm ──────────────────────────────────────────────
+	/** Version restore confirm dialog — title; restoring rotates the file onto this version's uuid, replacing its current live content (mobile parity: restore confirms too, not just delete) */
+	driveVersionsRestoreConfirmTitle: "Restore this version?",
+	/** Version restore confirm dialog — body; the confirm button reuses driveVersionsRestoreAction */
+	driveVersionsRestoreConfirmBody: "Are you sure you want to restore this version? It will replace the file's current content.",
+
+	// ── Version delete confirm ───────────────────────────────────────────────
+	/** Version delete confirm dialog — title; deleting a single version is permanent, unlike trashing an item */
+	driveVersionsDeleteConfirmTitle: "Delete this version?",
+	/** Version delete confirm dialog — body; the confirm button reuses driveVersionsDeleteAction */
+	driveVersionsDeleteConfirmBody: "Are you sure you want to permanently delete this version? This cannot be undone.",
+
+	// ── Version delete guard ─────────────────────────────────────────────────
+	/** File-versions defense-in-depth guard — surfaced only if a caller reaches the delete-version action helper directly on the file's own live version (its uuid IS the file's current content, so deleting it would destroy the file, not just history); the panel's own per-row disabled state already keeps the UI from reaching this, so this message is a last-resort backstop */
+	driveVersionsDeleteLiveBlocked: "This is the current version and can't be deleted.",
 
 	// ── Info panel ───────────────────────────────────────────────────────────
 	/** Info panel — heading (opened via driveActionInfo) */

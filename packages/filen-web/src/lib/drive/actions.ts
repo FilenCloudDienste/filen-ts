@@ -1,5 +1,6 @@
 import type { Dir, DirColor, File, FileVersion, UserInfo } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
+import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { driveListingQueryKey, driveListingQueryUpdate, driveListingQueryUpdateGlobal, normalizeParentUuid } from "@/queries/drive"
@@ -213,9 +214,18 @@ export async function restoreVersion(file: FileItem, version: FileVersion): Prom
 	return { status: "success", item: updated }
 }
 
-// `file` is unused: deleteFileVersionOp takes only the version (the file has no listing-cache effect
-// to patch here) — kept as a parameter for call-site symmetry with restoreVersion.
-export async function deleteVersion(_file: FileItem, version: FileVersion): Promise<VoidActionOutcome> {
+// deleteFileVersionOp takes only the version and deletes by ITS uuid alone — for every version
+// except the live one that's just history, but the live version's uuid IS the file's own current
+// storage blob (see restoreVersion/isCurrentVersion), so deleting it would destroy the file's
+// current content, not just a historical entry. The versions panel already disables this per row;
+// this guard is the same rule enforced again at the library boundary so no future caller can reach
+// the live-blob delete by skipping the UI (defense-in-depth).
+export async function deleteVersion(file: FileItem, version: FileVersion): Promise<VoidActionOutcome> {
+	if (version.uuid === file.data.uuid) {
+		const message = i18n.t("drive:driveVersionsDeleteLiveBlocked")
+		return { status: "error", dto: { species: "plain", message, label: message } }
+	}
+
 	try {
 		await runOp(sdkApi.deleteFileVersionOp(version))
 	} catch (e) {

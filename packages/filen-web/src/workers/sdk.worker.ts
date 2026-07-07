@@ -116,10 +116,16 @@ async function preflightArtifacts(): Promise<string | null> {
 // instead of duplicating it.
 export type ListDirectoryTarget = { kind: "root" } | { kind: "uuid"; uuid: string } | { kind: "recents" | "favorites" | "trash" }
 
+// The non-uuid arms of ParentUuid: pseudo-parent sentinels with no navigable ancestry, so
+// getItemPath has nothing to walk and would only fail (or stall) resolving them.
+const PSEUDO_PARENTS: ReadonlySet<string> = new Set(["trash", "recents", "favorites", "links"])
+
 // getItemInfo's return shape: getItemPath's path/ancestors flattened up one level, plus a directory-
 // only size aggregate (null for a file — a file already carries its own size on the held item).
+// `path` is nullable: see getItemInfo's own comment on why the getItemPath call underneath it can
+// fail independently of everything else this op reads.
 export interface ItemInfoResult {
-	path: string
+	path: string | null
 	ancestors: Dir[]
 	size: DirSizeResponse | null
 }
@@ -431,14 +437,24 @@ const api = {
 	// check below narrows Dir vs File exhaustively. getDirSize only applies to directories; a file
 	// already carries its own size on the held item, so the two calls only ever run together, in
 	// parallel, when both are actually needed.
+	// getItemPath walks the item's ancestor chain by uuid and can reject independently of every
+	// other row this op returns — a trashed item's original parent directory (its own uuid is still
+	// carried by the trashed item's meta) may since have been permanently deleted, so that call is
+	// wrapped in its own catch. A pseudo-parent sentinel (trash/recents/favorites/links) has no chain
+	// to walk at all, and getItemPath doesn't reject cleanly on one — it stalls — so PSEUDO_PARENTS
+	// short-circuits the path to a resolved null before getItemPath is ever called. getDirSize gets
+	// the same catch treatment: a size failure shouldn't fail the whole read either. Every field this
+	// op resolves degrades independently — the caller (info-dialog) omits a row when its value is
+	// null, same as it already omits every other absent-data row.
 	async getItemInfo(item: Dir | File): Promise<ItemInfoResult> {
 		const c = requireClient()
+		const pathPromise = PSEUDO_PARENTS.has(item.parent) ? Promise.resolve(null) : c.getItemPath(item).catch(() => null)
 		if ("chunks" in item) {
-			const { path, ancestors } = await c.getItemPath(item)
-			return { path, ancestors, size: null }
+			const pathResult = await pathPromise
+			return { path: pathResult?.path ?? null, ancestors: pathResult?.ancestors ?? [], size: null }
 		}
-		const [{ path, ancestors }, size] = await Promise.all([c.getItemPath(item), c.getDirSize(item)])
-		return { path, ancestors, size }
+		const [pathResult, size] = await Promise.all([pathPromise, c.getDirSize(item).catch(() => null)])
+		return { path: pathResult?.path ?? null, ancestors: pathResult?.ancestors ?? [], size }
 	},
 	// ── Public links ─────────────────────────────────────────────────────────
 	getDirectoryLinkStatus(dir: Dir): Promise<DirPublicLinkRW | undefined> {

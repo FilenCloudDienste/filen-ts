@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, File } from "@filen/sdk-rs"
 import { narrowItem } from "@/lib/drive/item"
-import { formatItemSize, formatModifiedDate } from "@/lib/drive/format"
+import { formatCreatedDate, formatItemSize, formatModifiedDate, formatVersionTimestamp } from "@/lib/drive/format"
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {
@@ -81,5 +81,62 @@ describe("formatModifiedDate", () => {
 		const item = narrowItem(mockDir({ timestamp: 1_700_000_000_000n, meta: { type: "decoded", data: { name: "Documents" } } }))
 
 		expect(formatModifiedDate(item)).toBe(expectedDate(1_700_000_000_000))
+	})
+})
+
+describe("formatCreatedDate", () => {
+	it("uses decryptedMeta.created for a file when present", () => {
+		const item = narrowItem(
+			mockFile({
+				timestamp: 1n,
+				meta: {
+					type: "decoded",
+					data: { name: "x", mime: "text/plain", created: 1_700_000_000_000n, modified: 2n, size: 1n, key: "k", version: 2 }
+				}
+			})
+		)
+
+		expect(formatCreatedDate(item)).toBe(expectedDate(1_700_000_000_000))
+	})
+
+	it("falls back to the item's own timestamp for a file with no created field", () => {
+		const item = narrowItem(
+			mockFile({
+				timestamp: 1_700_000_000_000n,
+				meta: { type: "decoded", data: { name: "x", mime: "text/plain", modified: 2n, size: 1n, key: "k", version: 2 } }
+			})
+		)
+
+		expect(formatCreatedDate(item)).toBe(expectedDate(1_700_000_000_000))
+	})
+
+	it("uses decryptedMeta.created for a directory when present", () => {
+		const item = narrowItem(
+			mockDir({ timestamp: 1n, meta: { type: "decoded", data: { name: "Documents", created: 1_700_000_000_000n } } })
+		)
+
+		expect(formatCreatedDate(item)).toBe(expectedDate(1_700_000_000_000))
+	})
+
+	it("falls back to the item's own timestamp for an undecryptable item", () => {
+		const item = narrowItem(mockDir({ timestamp: 1_700_000_000_000n, meta: { type: "encrypted", data: "ciphertext" } }))
+
+		expect(formatCreatedDate(item)).toBe(expectedDate(1_700_000_000_000))
+	})
+})
+
+describe("formatVersionTimestamp", () => {
+	it("includes both date and time, matching Intl's medium-date/short-time output for the same instant", () => {
+		const ms = 1_700_000_000_000
+		const expected = new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+
+		expect(formatVersionTimestamp(BigInt(ms))).toBe(expected)
+	})
+
+	it("distinguishes two timestamps that land on the same calendar day but a different time", () => {
+		const morning = formatVersionTimestamp(1_700_000_000_000n)
+		const laterSameDay = formatVersionTimestamp(1_700_000_000_000n + 60n * 60n * 1000n)
+
+		expect(morning).not.toBe(laterSameDay)
 	})
 })

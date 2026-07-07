@@ -4,13 +4,28 @@ import type { Dir, File, NormalDirsAndFiles, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it
-// down to the two methods this module calls, mirroring account.test.ts's mock boundary.
-const { listDirectory, resolveDirectoryNames } = vi.hoisted(() => ({
+// down to the methods this module calls, mirroring account.test.ts's mock boundary.
+const { listDirectory, resolveDirectoryNames, getItemInfo, listFileVersionsOp } = vi.hoisted(() => ({
 	listDirectory: vi.fn<(target: unknown) => Promise<NormalDirsAndFiles>>(),
-	resolveDirectoryNames: vi.fn<(uuids: string[]) => Promise<Record<string, string>>>()
+	resolveDirectoryNames: vi.fn<(uuids: string[]) => Promise<Record<string, string>>>(),
+	getItemInfo: vi.fn(),
+	listFileVersionsOp: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, resolveDirectoryNames } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, resolveDirectoryNames, getItemInfo, listFileVersionsOp } }))
+
+// Every other hook wrapper below is a one-line pass-through no node-environment test can render (no
+// DOM — see vitest.config.ts). useItemInfoQuery's `enabled` default is worth covering directly
+// anyway: get the fallback wrong (e.g. defaulting to false) and every existing caller silently stops
+// fetching. This only intercepts useQuery itself — real `useQuery` internals are never exercised,
+// just whether our wrapper forwards `enabled` into its options — so QueryClient (used below to build
+// testQueryClient) and the rest of the module stay real.
+const { useQuery } = vi.hoisted(() => ({ useQuery: vi.fn() }))
+
+vi.mock("@tanstack/react-query", async importOriginal => {
+	const actual = await importOriginal<typeof import("@tanstack/react-query")>()
+	return { ...actual, useQuery }
+})
 
 // A bare, unconfigured QueryClient (no persister, no retry/logging wiring) stands in for the real
 // singleton — driveListingQueryUpdate only needs genuine setQueryData/getQueryData cache mechanics,
@@ -29,7 +44,12 @@ import {
 	driveNamesQueryKey,
 	fetchDirectoryListing,
 	fetchDirectoryNames,
-	normalizeParentUuid
+	fetchFileVersions,
+	fetchItemInfo,
+	fileVersionsQueryKey,
+	itemInfoQueryKey,
+	normalizeParentUuid,
+	useItemInfoQuery
 } from "@/queries/drive"
 
 // Unlike account.test.ts (one call-count assertion in the whole file), several tests here assert
@@ -169,6 +189,90 @@ describe("fetchDirectoryNames", () => {
 		resolveDirectoryNames.mockRejectedValueOnce(error)
 
 		await expect(fetchDirectoryNames(["uuid-a"])).rejects.toBe(error)
+	})
+})
+
+describe("itemInfoQueryKey", () => {
+	it("builds the [domain, entity, uuid] tuple", () => {
+		expect(itemInfoQueryKey("abc")).toEqual(["drive", "itemInfo", "abc"])
+	})
+})
+
+describe("fetchItemInfo", () => {
+	it("passes the item through to sdkApi.getItemInfo unchanged", async () => {
+		const dir = mockDir()
+		const result = { path: "Documents/", ancestors: [], size: { size: 0n, files: 0n, dirs: 0n } }
+		getItemInfo.mockResolvedValueOnce(result)
+
+		await expect(fetchItemInfo(dir)).resolves.toEqual(result)
+		expect(getItemInfo).toHaveBeenCalledExactlyOnceWith(dir)
+	})
+
+	it("propagates a rejection from sdkApi.getItemInfo unchanged", async () => {
+		const error = new Error("no authenticated client")
+		getItemInfo.mockRejectedValueOnce(error)
+
+		await expect(fetchItemInfo(mockFile())).rejects.toBe(error)
+	})
+
+	// A null path is a resolved value, not a rejection (see sdk.worker.ts's getItemInfo: it absorbs a
+	// trashed item's unresolvable getItemPath itself rather than failing the whole read) — this layer
+	// is a plain pass-through either way, so a null path needs no special handling here either.
+	it("passes a null path through unchanged (a trashed item's path can be individually unresolvable)", async () => {
+		const file = mockFile()
+		const result = { path: null, ancestors: [], size: null }
+		getItemInfo.mockResolvedValueOnce(result)
+
+		await expect(fetchItemInfo(file)).resolves.toEqual(result)
+	})
+})
+
+describe("useItemInfoQuery", () => {
+	// The info dialog disables this query for a trashed item (getItemPath/getDirSize stall on a
+	// trashed item's unresolvable ancestry rather than reject — see fetchItemInfo's own tests above
+	// and sdk.worker.ts's getItemInfo), so `enabled` reaching useQuery unchanged is the one thing
+	// this thin wrapper must get right.
+	it("forwards enabled: false through to useQuery, unmodified", () => {
+		useQuery.mockReturnValue({ status: "pending" })
+		const dir = mockDir()
+
+		useItemInfoQuery(dir, { enabled: false })
+
+		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ enabled: false }))
+	})
+
+	// Every caller besides the info dialog's trash case omits `options` entirely — a wrong default
+	// here would silently stop every one of them from ever fetching.
+	it("defaults enabled to true when no options are given", () => {
+		useQuery.mockReturnValue({ status: "pending" })
+		const dir = mockDir()
+
+		useItemInfoQuery(dir)
+
+		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ enabled: true }))
+	})
+})
+
+describe("fileVersionsQueryKey", () => {
+	it("builds the [domain, entity, uuid] tuple", () => {
+		expect(fileVersionsQueryKey("abc")).toEqual(["drive", "fileVersions", "abc"])
+	})
+})
+
+describe("fetchFileVersions", () => {
+	it("passes the file through to sdkApi.listFileVersionsOp unchanged", async () => {
+		const file = mockFile()
+		listFileVersionsOp.mockResolvedValueOnce([])
+
+		await expect(fetchFileVersions(file)).resolves.toEqual([])
+		expect(listFileVersionsOp).toHaveBeenCalledExactlyOnceWith(file)
+	})
+
+	it("propagates a rejection from sdkApi.listFileVersionsOp unchanged", async () => {
+		const error = new Error("no authenticated client")
+		listFileVersionsOp.mockRejectedValueOnce(error)
+
+		await expect(fetchFileVersions(mockFile())).rejects.toBe(error)
 	})
 })
 

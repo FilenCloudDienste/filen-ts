@@ -701,6 +701,27 @@ describe("deleteVersion", () => {
 
 		expect(outcome).toEqual({ status: "error", dto })
 	})
+
+	// Defense-in-depth: deleteFileVersionOp deletes by the version's uuid alone, and the live
+	// version's uuid IS the file's own current storage blob — the versions panel already disables
+	// this per row, but a caller reaching this helper directly (bypassing that UI guard) must still
+	// be refused before the worker is ever called.
+	it("refuses to delete the file's own live version without calling the worker", async () => {
+		const file = fileItem({ uuid: testUuid("live") })
+		const liveVersion = mockVersion({ uuid: testUuid("live") })
+
+		const outcome = await deleteVersion(file, liveVersion)
+
+		expect(outcome).toEqual({
+			status: "error",
+			dto: {
+				species: "plain",
+				message: "This is the current version and can't be deleted.",
+				label: "This is the current version and can't be deleted."
+			}
+		})
+		expect(deleteFileVersionOp).not.toHaveBeenCalled()
+	})
 })
 
 // Sanity: driveNamesQueryKey stays importable/used the same way renameItem's own invalidation targets

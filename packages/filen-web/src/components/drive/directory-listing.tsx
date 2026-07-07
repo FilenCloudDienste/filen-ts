@@ -39,6 +39,10 @@ import { EmptyState } from "@/components/drive/empty-state"
 import { ListingSkeleton } from "@/components/drive/listing-skeleton"
 import { DriveRow } from "@/components/drive/drive-row"
 import { DriveTile } from "@/components/drive/drive-tile"
+import { MoveTargetDialog } from "@/components/drive/move-target-dialog"
+import { ColorDialog } from "@/components/drive/color-dialog"
+import { VersionsDialog } from "@/components/drive/versions-dialog"
+import { InfoDialog } from "@/components/drive/info-dialog"
 import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
 import { TypedConfirmDialog } from "@/components/dialogs/typed-confirm-dialog"
 import { InputDialog } from "@/components/dialogs/input-dialog"
@@ -60,12 +64,12 @@ interface ActiveDialog {
 	items: DriveItem[]
 }
 
-// Kinds the dialog host below actually renders. move/color/versions/info/link are a typed seam (the
-// switch's arm for each is a bare `null` — later work renders the real dialog there) — activeDialog
-// still tracks them like any other kind, so without this a seam kind would look identical to a real
-// wired one to the F2/Delete guards, permanently wedging activeDialog !== null (and so those
-// shortcuts) the moment a menu dispatched one, since nothing ever renders to close it again.
-const WIRED_DIALOG_KINDS = new Set<ActiveDialogKind>(["rename", "trash", "delete", "emptyTrash"])
+// Kinds the dialog host below actually renders. `link` remains a typed seam (its arm is still a bare
+// `null` — later work renders the public-link dialog there) — activeDialog still tracks it like any
+// other kind, so without this a seam kind would look identical to a real wired one to the F2/Delete
+// guards, permanently wedging activeDialog !== null (and so those shortcuts) the moment a menu
+// dispatched one, since nothing ever renders to close it again.
+const WIRED_DIALOG_KINDS = new Set<ActiveDialogKind>(["rename", "trash", "delete", "emptyTrash", "move", "color", "versions", "info"])
 
 // Module scope, not inside the component: runs exactly once per module evaluation (see
 // theme-provider.tsx's own "app.toggleTheme" registration for the full StrictMode/HMR rationale).
@@ -160,12 +164,15 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	// The dialog host's own state — one instance of whichever dialog activeDialog.kind names is
 	// rendered below (renderActiveDialog), never more than one at a time. `dialogPending` is shared
-	// across all of them since only one is ever mounted.
+	// across the kinds whose async call the HOST itself owns (rename/trash/delete/emptyTrash) — the
+	// move/color/versions/info dialogs run their own async calls internally and track their own
+	// pending state, since each needs more than one shared boolean can express (e.g. versions has an
+	// independent restore vs. delete-confirm flow).
 	const [activeDialog, setActiveDialog] = useState<ActiveDialog | null>(null)
 	const [dialogPending, setDialogPending] = useState(false)
-	// True only while a dialog that actually RENDERS something is open — a seam kind (move/color/
-	// versions/info/link) never shows anything, so it must not count as "open" for the F2/Delete
-	// guards below (see WIRED_DIALOG_KINDS).
+	// True only while a dialog that actually RENDERS something is open — a seam kind (`link`) never
+	// shows anything, so it must not count as "open" for the F2/Delete guards below (see
+	// WIRED_DIALOG_KINDS).
 	const isDialogOpen = activeDialog !== null && WIRED_DIALOG_KINDS.has(activeDialog.kind)
 
 	// A fresh directory/variant must never inherit the previous one's selection or cursor. Routes
@@ -472,8 +479,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	}
 
 	// One instance of whichever dialog is active, switching on activeDialog.kind — never more than one
-	// mounted at a time. move/color/versions/info/link are a clean typed seam (later work fills these
-	// arms in; dispatching the intent here already works end to end).
+	// mounted at a time. `link` is the one remaining clean typed seam (later work fills that arm in;
+	// dispatching the intent here already works end to end).
 	function renderActiveDialog(): ReactNode {
 		if (!activeDialog) {
 			return null
@@ -572,12 +579,58 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					/>
 				)
 			}
-			// Placeholder — MoveTargetDialog/ColorPicker/VersionsPanel/InfoPanel render here.
 			case "move":
-			case "color":
-			case "versions":
-			case "info":
-				return null
+				return activeDialog.items.length > 0 ? (
+					<MoveTargetDialog
+						items={activeDialog.items}
+						onClose={closeActiveDialog}
+					/>
+				) : null
+			case "color": {
+				const item = activeDialog.items[0]
+
+				// The menu only ever offers Color for a directory (see item-menu.logic.ts) — this narrows
+				// that guarantee into a type, it doesn't impose a new one.
+				if (item?.type !== "directory") {
+					return null
+				}
+
+				return (
+					<ColorDialog
+						directory={item}
+						onClose={closeActiveDialog}
+					/>
+				)
+			}
+			case "versions": {
+				const item = activeDialog.items[0]
+
+				if (item?.type !== "file") {
+					return null
+				}
+
+				return (
+					<VersionsDialog
+						file={item}
+						onClose={closeActiveDialog}
+					/>
+				)
+			}
+			case "info": {
+				const item = activeDialog.items[0]
+
+				if (!item) {
+					return null
+				}
+
+				return (
+					<InfoDialog
+						item={item}
+						remoteInfoEnabled={variant !== "trash"}
+						onClose={closeActiveDialog}
+					/>
+				)
+			}
 			// Placeholder — the public-link dialog renders here.
 			case "link":
 				return null

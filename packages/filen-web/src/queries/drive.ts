@@ -3,7 +3,8 @@ import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 // Whole-statement `import type` here too — sdk.worker.ts's own top-level code pulls in
 // @filen/sdk-rs as a real value import, same elision hazard as above.
-import type { ListDirectoryTarget } from "@/workers/sdk.worker"
+import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
+import type { Dir, File, FileVersion } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
 import {
 	getSortPreferences,
@@ -112,6 +113,47 @@ export function useDirectoryNamesQuery(uuids: string[]): UseQueryResult<Record<s
 		queryKey: driveNamesQueryKey(uuids),
 		enabled: uuids.length > 0,
 		queryFn: () => fetchDirectoryNames(uuids)
+	})
+}
+
+// Info panel primitive: an on-demand, single-item read (path + ancestors + a directory-only size
+// aggregate — see sdk.worker.ts's ItemInfoResult) — keyed on the item's own uuid so switching between
+// two items' info panels never shows a stale read while the new one is still in flight.
+export function itemInfoQueryKey(uuid: string) {
+	return ["drive", "itemInfo", uuid] as const
+}
+
+export async function fetchItemInfo(item: Dir | File): Promise<ItemInfoResult> {
+	return sdkApi.getItemInfo(item)
+}
+
+// `enabled` lets a caller skip the fetch entirely rather than rely on a `.catch` to rescue it — the
+// info dialog does this for a trashed item, since getItemPath/getDirSize stall rather than reject on
+// a trashed item's unresolvable ancestry (see sdk.worker.ts's getItemInfo), and a stalled promise
+// can't be caught. Defaults to true so every other caller is unaffected.
+export function useItemInfoQuery(item: Dir | File, options?: { enabled?: boolean }): UseQueryResult<ItemInfoResult> {
+	return useQuery({
+		queryKey: itemInfoQueryKey(item.uuid),
+		queryFn: () => fetchItemInfo(item),
+		enabled: options?.enabled ?? true
+	})
+}
+
+// Versions panel primitive: an on-demand read of a single file's version history, newest first (the
+// SDK sorts server-side — see filen-sdk-rs's list_file_versions). Keyed on the file's own (current)
+// uuid, same rationale as itemInfoQueryKey.
+export function fileVersionsQueryKey(uuid: string) {
+	return ["drive", "fileVersions", uuid] as const
+}
+
+export async function fetchFileVersions(file: File): Promise<FileVersion[]> {
+	return sdkApi.listFileVersionsOp(file)
+}
+
+export function useFileVersionsQuery(file: File): UseQueryResult<FileVersion[]> {
+	return useQuery({
+		queryKey: fileVersionsQueryKey(file.uuid),
+		queryFn: () => fetchFileVersions(file)
 	})
 }
 
