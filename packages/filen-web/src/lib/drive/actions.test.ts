@@ -311,6 +311,44 @@ describe("renameItem", () => {
 
 		expect(outcome).toEqual({ status: "error", dto: { species: "plain", message: "network lost", label: "network lost" } })
 	})
+
+	// A rename never changes listing membership (same uuid, same parent) — unlike the narrow
+	// per-parent patch this replaces, a global replace-in-place also reaches a favorited/recent copy
+	// of the same item cached under a different listing key.
+	it("fans a rename out to every cached listing the item appears in, including favorites", async () => {
+		seedRootUuid()
+		const original = dirItem({ uuid: testUuid("a"), parent: OTHER_PARENT_UUID, meta: { type: "decoded", data: { name: "Old" } } })
+		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [original])
+		testQueryClient.setQueryData(favoritesListing(), [original])
+		renameDirectory.mockResolvedValueOnce(
+			mockDir({ uuid: testUuid("a"), parent: OTHER_PARENT_UUID, meta: { type: "decoded", data: { name: "New" } } })
+		)
+
+		await renameItem(original, "New")
+
+		const parentListing = testQueryClient.getQueryData<DriveItem[]>(driveListing(OTHER_PARENT_UUID))
+		const favorites = testQueryClient.getQueryData<DriveItem[]>(favoritesListing())
+		expect(parentListing?.[0]?.data.decryptedMeta?.name).toBe("New")
+		expect(favorites?.[0]?.data.decryptedMeta?.name).toBe("New")
+	})
+
+	it("still resolves a success outcome even when the background names-cache invalidation rejects", async () => {
+		seedRootUuid()
+		const original = dirItem({ uuid: testUuid("a"), parent: OTHER_PARENT_UUID })
+		renameDirectory.mockResolvedValueOnce(mockDir({ uuid: testUuid("a"), parent: OTHER_PARENT_UUID }))
+		// renameItem deliberately doesn't await this (fire-and-forget) — the inline catch below only
+		// defuses the test process's own unhandledRejection reporting for this discarded promise, it
+		// does not give renameItem itself a handler.
+		vi.spyOn(testQueryClient, "invalidateQueries").mockImplementationOnce(() => {
+			const rejected = Promise.reject(new Error("names invalidation failed"))
+			rejected.catch(() => undefined)
+			return rejected
+		})
+
+		const outcome = await renameItem(original, "New")
+
+		expect(outcome.status).toBe("success")
+	})
 })
 
 describe("moveItems", () => {
@@ -623,6 +661,29 @@ describe("toggleFavorite", () => {
 
 		expect(outcome).toEqual({ status: "error", dto })
 		expect(testQueryClient.getQueryData(favoritesListing())).toEqual([])
+	})
+
+	// Favorites aggregates across every directory (unlike every other upsert call site, which targets
+	// a single drive-parent where the backend already enforces name-uniqueness) — two distinct items
+	// from different parents legitimately share a name, so the add path must dedup on uuid alone.
+	it("favoriting a same-named item does not evict other distinct-uuid favorites sharing that name from a different directory", async () => {
+		const sharedMeta = {
+			type: "decoded" as const,
+			data: { name: "budget.xlsx", mime: "application/pdf", modified: 1n, size: 1n, key: "k", version: 2 as const }
+		}
+		const favoriteFromDirA = fileItem({ uuid: testUuid("fav-a"), parent: testUuid("dir-a"), favorited: true, meta: sharedMeta })
+		const favoriteFromDirB = fileItem({ uuid: testUuid("fav-b"), parent: testUuid("dir-b"), favorited: true, meta: sharedMeta })
+		testQueryClient.setQueryData(favoritesListing(), [favoriteFromDirA, favoriteFromDirB])
+		const incoming = fileItem({ uuid: testUuid("fav-c"), parent: testUuid("dir-c"), favorited: false, meta: sharedMeta })
+		setFavorited.mockResolvedValueOnce({
+			type: "file",
+			...mockFile({ uuid: testUuid("fav-c"), parent: testUuid("dir-c"), favorited: true, meta: sharedMeta })
+		})
+
+		await toggleFavorite(incoming)
+
+		const favorites = testQueryClient.getQueryData<DriveItem[]>(favoritesListing())
+		expect(favorites?.map(i => i.data.uuid).sort()).toEqual([testUuid("fav-a"), testUuid("fav-b"), testUuid("fav-c")].sort())
 	})
 })
 

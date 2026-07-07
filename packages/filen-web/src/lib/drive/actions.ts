@@ -76,9 +76,14 @@ export async function renameItem(item: DriveItem, newName: string): Promise<Acti
 	}
 
 	const updated = narrowItem(renamed)
-	driveListingQueryUpdate(normalizeParentUuid(item.data.parent, currentRootUuid()), prev => upsertDriveItem(prev, updated))
+	// A rename never changes listing membership (same uuid, same parent) — a global replace-in-place
+	// covers the drive-parent listing too, and also fans the new name out to a favorited/recent copy
+	// of the same row, which a narrow per-parent patch never reached.
+	driveListingQueryUpdateGlobal(prev => replaceIfPresent(prev, updated))
 	// Breadcrumb name cache — this item's uuid may appear as an ancestor segment on some open path.
-	await queryClient.invalidateQueries({ queryKey: ["drive", "names"] })
+	// Fire-and-forget: the optimistic patch above already covers the success outcome, so a rejection
+	// here must not delay it or escape renameItem uncaught.
+	void queryClient.invalidateQueries({ queryKey: ["drive", "names"] })
 
 	return { status: "success", item: updated }
 }
@@ -172,9 +177,12 @@ function applyFavoritePatch(favorited: boolean, result: DriveItem): void {
 
 	// Favorites is its own membership listing, not merely a flag on an existing row: favoriting must
 	// be able to ADD a row that listing never had, unfavoriting must REMOVE it — the global flag patch
-	// above only ever updates rows that already exist.
+	// above only ever updates rows that already exist. The add path dedups on uuid alone rather than
+	// upsertDriveItem's name-collision rule: favorites aggregates across every directory, so two
+	// distinct items from different parents can legitimately share a name, and every other upsert call
+	// site targets a single drive-parent where the backend already enforces name-uniqueness.
 	queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "favorites", uuid: null }), prev =>
-		prev === undefined ? prev : favorited ? upsertDriveItem(prev, result) : removeByUuid(prev, result.data.uuid)
+		prev === undefined ? prev : favorited ? [...removeByUuid(prev, result.data.uuid), result] : removeByUuid(prev, result.data.uuid)
 	)
 }
 

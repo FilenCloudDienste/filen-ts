@@ -53,6 +53,15 @@ function ItemMenuEntries({ item, variant, onItemAction, family }: ItemMenuConten
 
 			if (outcome.status === "error") {
 				toast.error(errorLabel(outcome.dto))
+				return
+			}
+
+			// Unfavoriting while the favorites listing is open drops the row from that listing (cache
+			// patch in actions.ts) — mirrors the restore/trash cleanup below so its uuid doesn't linger
+			// in the selection store as a ghost "N selected" count. Favoriting-ON and any non-favorites
+			// variant leave the item visible, so selection is left untouched in both of those cases.
+			if (variant === "favorites" && !outcome.item.data.favorited) {
+				useDriveStore.getState().removeFromSelection([outcome.item.data.uuid])
 			}
 
 			return

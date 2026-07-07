@@ -697,35 +697,51 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	// Registered above at module scope. Browser default for mod+a is "select all page text" — must
 	// preventDefault or the native selection would visibly compete with the drive-item selection.
+	// Guarded on isDialogOpen (see its own comment) so a background Cmd+A can't select items behind
+	// an open dialog — returns before preventDefault, so the browser default runs instead in that case.
 	useAction(
 		"drive.selectAll",
 		keyboardEvent => {
+			if (isDialogOpen) {
+				return
+			}
+
 			keyboardEvent.preventDefault()
 			useDriveStore.getState().selectAllItems(sortedItems)
 		},
 		undefined,
-		[sortedItems]
+		[isDialogOpen, sortedItems]
 	)
 
 	// Registered above at module scope. No preventDefault — bare Escape has no disruptive browser
-	// default, matching the hand-rolled handler this replaced.
+	// default, matching the hand-rolled handler this replaced. Guarded on isDialogOpen so Escape closes
+	// the dialog (its own onOpenChange handling) without also clearing the background selection.
 	useAction(
 		"drive.clearSelection",
 		() => {
+			if (isDialogOpen) {
+				return
+			}
+
 			useDriveStore.getState().clearSelectedItems()
 		},
 		undefined,
-		[]
+		[isDialogOpen]
 	)
 
-	// Registered above at module scope. Net-new shortcut — no listbox handling to reconcile.
+	// Registered above at module scope. Net-new shortcut — no listbox handling to reconcile. Guarded
+	// on isDialogOpen so it can't flip the background view mode while a dialog is open.
 	useAction(
 		"drive.toggleView",
 		() => {
+			if (isDialogOpen) {
+				return
+			}
+
 			void applyViewModeChange(effectiveViewMode === "list" ? "grid" : "list")
 		},
 		undefined,
-		[effectiveViewMode, applyViewModeChange]
+		[isDialogOpen, effectiveViewMode, applyViewModeChange]
 	)
 
 	// Registered above at module scope. No preventDefault — F2 has no disruptive browser default.
