@@ -10,13 +10,20 @@ import init, {
 	type CompletePasswordResetParams,
 	type ChangePasswordParams,
 	type Dir,
+	type File,
 	type NormalDirsAndFiles,
-	type AnyNormalDir
+	type AnyNormalDir,
+	type FileVersion,
+	type DirColor,
+	type NonRootNormalItemTagged,
+	type DirPublicLinkRW,
+	type FilePublicLink,
+	type DirSizeResponse
 } from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
 import { toErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
-import { cacheDirs, clearDirectoryCache, getCachedDir, getCachedName } from "@/lib/drive/cache"
+import { cacheDirs, clearDirectoryCache, evictDirs, getCachedDir, getCachedName } from "@/lib/drive/cache"
 
 // NEITHER a fixed `/` nor `/assets/`: the wasm holds a RELATIVE `./filen-sdk-worker-thread.js`
 // (verified via `strings` over sdk-rs_bg.wasm) which it passes to `new Worker(...)`, so the
@@ -108,6 +115,31 @@ async function preflightArtifacts(): Promise<string | null> {
 // Named (not inlined) so queries/drive.ts's target-mapping helper can import the exact union
 // instead of duplicating it.
 export type ListDirectoryTarget = { kind: "root" } | { kind: "uuid"; uuid: string } | { kind: "recents" | "favorites" | "trash" }
+
+// getItemInfo's return shape: getItemPath's path/ancestors flattened up one level, plus a directory-
+// only size aggregate (null for a file — a file already carries its own size on the held item).
+export interface ItemInfoResult {
+	path: string
+	ancestors: Dir[]
+	size: DirSizeResponse | null
+}
+
+// Cache-first parent resolve shared by createDirectory/moveDirectory/moveFile: `null` maps to
+// client.root() (the only "parent" a create/move can target that isn't itself a real Dir); any other
+// uuid checks the in-memory dir cache before a getDirOptional round trip, same cache-first rule as
+// listDirectory's uuid case. Throws when the uuid can't be resolved at all — every caller treats a
+// missing parent as a hard failure; there is no sensible partial result for "create/move into a
+// directory that doesn't exist".
+async function resolveNormalDirParent(c: Client, parentUuid: string | null): Promise<AnyNormalDir> {
+	if (parentUuid === null) {
+		return c.root()
+	}
+	const found = getCachedDir(parentUuid) ?? (await c.getDirOptional(parentUuid))
+	if (found === undefined) {
+		throw new Error(`parent directory not found: ${parentUuid}`)
+	}
+	return found
+}
 
 const api = {
 	async boot({ threads }: { threads: number }): Promise<BootResult> {
@@ -287,17 +319,7 @@ const api = {
 	// trip.
 	async createDirectory(parentUuid: string | null, name: string): Promise<Dir> {
 		const c = requireClient()
-		const parent: AnyNormalDir = await (async (): Promise<AnyNormalDir> => {
-			if (parentUuid === null) {
-				return c.root()
-			}
-			// Cache-first parent resolve, same rule as listDirectory's uuid case.
-			const found = getCachedDir(parentUuid) ?? (await c.getDirOptional(parentUuid))
-			if (found === undefined) {
-				throw new Error(`parent directory not found: ${parentUuid}`)
-			}
-			return found
-		})()
+		const parent = await resolveNormalDirParent(c, parentUuid)
 		const created = await c.createDir(parent, name)
 		cacheDirs([created])
 		return created
@@ -305,6 +327,145 @@ const api = {
 	// Thin getDirOptional pass-through.
 	getDirectory(uuid: string): Promise<Dir | undefined> {
 		return requireClient().getDirOptional(uuid)
+	},
+	// ── Rename ───────────────────────────────────────────────────────────────
+	// Held-item ops throughout this section take the caller's already-fetched DriveItem.data
+	// directly (Dir & ExtraData & {decryptedMeta} / File & ExtraData & {decryptedMeta}) — no uuid
+	// re-resolve. That shape is a structural superset of the plain Dir/File these ops declare, so it
+	// passes through with no adapter (see lib/drive/item.test.ts's assignability check); the wasm
+	// serde layer has no deny_unknown_fields, so the extra own fields cross the boundary as harmless
+	// JSON. A live authed call confirming this at runtime has not been run in this environment (no
+	// login available) — flagged for QA.
+	async renameDirectory(dir: Dir, name: string): Promise<Dir> {
+		const c = requireClient()
+		const renamed = await c.updateDirMetadata(dir, { name })
+		cacheDirs([renamed])
+		return renamed
+	},
+	renameFile(file: File, name: string): Promise<File> {
+		return requireClient().updateFileMetadata(file, { name })
+	},
+	// ── Move ─────────────────────────────────────────────────────────────────
+	async moveDirectory(dir: Dir, newParentUuid: string | null): Promise<Dir> {
+		const c = requireClient()
+		const parent = await resolveNormalDirParent(c, newParentUuid)
+		const moved = await c.moveDir(dir, parent)
+		cacheDirs([moved])
+		return moved
+	},
+	async moveFile(file: File, newParentUuid: string | null): Promise<File> {
+		const c = requireClient()
+		const parent = await resolveNormalDirParent(c, newParentUuid)
+		return c.moveFile(file, parent)
+	},
+	// ── Trash / restore (uuid preserved both ways) ──────────────────────────────
+	async trashDirectory(dir: Dir): Promise<Dir> {
+		const c = requireClient()
+		const trashed = await c.trashDir(dir)
+		cacheDirs([trashed])
+		return trashed
+	},
+	trashFile(file: File): Promise<File> {
+		return requireClient().trashFile(file)
+	},
+	async restoreDirectory(dir: Dir): Promise<Dir> {
+		const c = requireClient()
+		const restored = await c.restoreDir(dir)
+		cacheDirs([restored])
+		return restored
+	},
+	restoreFile(file: File): Promise<File> {
+		return requireClient().restoreFile(file)
+	},
+	// ── Permanent delete ─────────────────────────────────────────────────────
+	async deleteDirectoryPermanently(dir: Dir): Promise<void> {
+		const c = requireClient()
+		await c.deleteDirPermanently(dir)
+		// The only worker-side cache upkeep a void-returning delete can do: nothing comes back to feed
+		// cacheDirs, but the uuid itself is still right here, so drop it — otherwise a later cache-first
+		// read (createDirectory/moveDirectory's parent resolve, a breadcrumb name lookup) could keep
+		// resolving a directory the backend has already destroyed.
+		evictDirs([dir.uuid])
+	},
+	deleteFilePermanently(file: File): Promise<void> {
+		// Files are never cached (lib/drive/cache.ts only tracks directories), so there is nothing to
+		// evict here.
+		return requireClient().deleteFilePermanently(file)
+	},
+	// No uuid list comes back from the backend, so — unlike deleteDirectoryPermanently — there is
+	// nothing specific this could evict; a blanket clearDirectoryCache() would also drop every
+	// still-valid directory's cache entry, a worse trade than leaving them be.
+	emptyTrash(): Promise<void> {
+		return requireClient().emptyTrash()
+	},
+	// ── Favorite / color ─────────────────────────────────────────────────────
+	async setFavorited(item: Dir | File, favorited: boolean): Promise<NonRootNormalItemTagged> {
+		const c = requireClient()
+		const result = await c.setFavorite(item, favorited)
+		if (result.type === "dir") {
+			cacheDirs([result])
+		}
+		return result
+	},
+	async setDirectoryColor(dir: Dir, color: DirColor): Promise<Dir> {
+		const c = requireClient()
+		const colored = await c.setDirColor(dir, color)
+		cacheDirs([colored])
+		return colored
+	},
+	// ── File versions ────────────────────────────────────────────────────────
+	listFileVersionsOp(file: File): Promise<FileVersion[]> {
+		return requireClient().listFileVersions(file)
+	},
+	// Rotates the file's uuid (a content change, like an upload) — the caller patches its cached
+	// listing like a move (drop the old uuid, insert this result), not a plain in-place update.
+	restoreFileVersionOp(file: File, version: FileVersion): Promise<File> {
+		return requireClient().restoreFileVersion(file, version)
+	},
+	deleteFileVersionOp(version: FileVersion): Promise<void> {
+		return requireClient().deleteFileVersion(version)
+	},
+	// ── Item info (info panel) ───────────────────────────────────────────────
+	// Single op over the NonRootNormalItem union, mirroring getItemPath's own signature — a file is
+	// the only arm with a `chunks` field (see lib/drive/item.ts's identical isFile probe), so the `in`
+	// check below narrows Dir vs File exhaustively. getDirSize only applies to directories; a file
+	// already carries its own size on the held item, so the two calls only ever run together, in
+	// parallel, when both are actually needed.
+	async getItemInfo(item: Dir | File): Promise<ItemInfoResult> {
+		const c = requireClient()
+		if ("chunks" in item) {
+			const { path, ancestors } = await c.getItemPath(item)
+			return { path, ancestors, size: null }
+		}
+		const [{ path, ancestors }, size] = await Promise.all([c.getItemPath(item), c.getDirSize(item)])
+		return { path, ancestors, size }
+	},
+	// ── Public links ─────────────────────────────────────────────────────────
+	getDirectoryLinkStatus(dir: Dir): Promise<DirPublicLinkRW | undefined> {
+		return requireClient().getDirLinkStatus(dir)
+	},
+	getFileLinkStatus(file: File): Promise<FilePublicLink | undefined> {
+		return requireClient().getFileLinkStatus(file)
+	},
+	createDirectoryLink(dir: Dir, onProgress: (downloadedBytes: number, totalBytes: number | undefined) => void): Promise<DirPublicLinkRW> {
+		return requireClient().publicLinkDir(dir, onProgress)
+	},
+	createFileLink(file: File): Promise<FilePublicLink> {
+		return requireClient().publicLinkFile(file)
+	},
+	updateDirectoryLink(dir: Dir, link: DirPublicLinkRW): Promise<DirPublicLinkRW> {
+		return requireClient().updateDirLink(dir, link)
+	},
+	updateFileLink(file: File, link: FilePublicLink): Promise<FilePublicLink> {
+		return requireClient().updateFileLink(file, link)
+	},
+	// Asymmetric args (verified against the installed .d.ts): removing a Dir link only needs the dir
+	// itself, but removing a File link also needs the live link object.
+	removeDirectoryLink(dir: Dir): Promise<void> {
+		return requireClient().removeDirLink(dir)
+	},
+	removeFileLink(file: File, link: FilePublicLink): Promise<void> {
+		return requireClient().removeFileLink(file, link)
 	},
 	// Breadcrumb primitive: the "/drive/$" splat carries the full ancestor-uuid path in the URL
 	// already (see lib/drive/navigate.ts), so this only resolves DISPLAY NAMES for a batch of

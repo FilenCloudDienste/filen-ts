@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File, NormalDirsAndFiles, UuidStr } from "@filen/sdk-rs"
-import { narrowItem } from "@/lib/drive/item"
+import { narrowItem, type DriveItem } from "@/lib/drive/item"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it
 // down to the two methods this module calls, mirroring account.test.ts's mock boundary.
@@ -25,9 +25,11 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import {
 	driveListingQueryKey,
 	driveListingQueryUpdate,
+	driveListingQueryUpdateGlobal,
 	driveNamesQueryKey,
 	fetchDirectoryListing,
-	fetchDirectoryNames
+	fetchDirectoryNames,
+	normalizeParentUuid
 } from "@/queries/drive"
 
 // Unlike account.test.ts (one call-count assertion in the whole file), several tests here assert
@@ -212,5 +214,91 @@ describe("driveListingQueryUpdate", () => {
 		driveListingQueryUpdate(null, prev => [...prev, narrowItem(mockDir({ uuid: testUuid("new") }))])
 
 		expect(testQueryClient.getQueryData(recentsKey)).toEqual([])
+	})
+})
+
+describe("driveListingQueryUpdateGlobal", () => {
+	it("patches every instantiated listing key regardless of variant or uuid, including the null-root", () => {
+		const target = narrowItem(mockDir({ uuid: testUuid("target"), favorited: false }))
+		const other = narrowItem(mockDir({ uuid: testUuid("other"), favorited: false }))
+		const driveRootKey = driveListingQueryKey({ variant: "drive", uuid: null })
+		const driveSubKey = driveListingQueryKey({ variant: "drive", uuid: "some-parent" })
+		const favoritesKey = driveListingQueryKey({ variant: "favorites", uuid: null })
+		const trashKey = driveListingQueryKey({ variant: "trash", uuid: null })
+		testQueryClient.setQueryData(driveRootKey, [target, other])
+		testQueryClient.setQueryData(driveSubKey, [target])
+		testQueryClient.setQueryData(favoritesKey, [target])
+		testQueryClient.setQueryData(trashKey, [other])
+
+		driveListingQueryUpdateGlobal(items =>
+			items.map(item => {
+				if (item.type !== "directory" || item.data.uuid !== target.data.uuid) {
+					return item
+				}
+				return { ...item, data: { ...item.data, favorited: true } }
+			})
+		)
+
+		expect(testQueryClient.getQueryData<DriveItem[]>(driveRootKey)?.find(i => i.data.uuid === target.data.uuid)?.data.favorited).toBe(
+			true
+		)
+		expect(testQueryClient.getQueryData<DriveItem[]>(driveSubKey)?.[0]?.data.favorited).toBe(true)
+		expect(testQueryClient.getQueryData<DriveItem[]>(favoritesKey)?.[0]?.data.favorited).toBe(true)
+		// `other` is untouched by the updater everywhere it appears, including the trash listing.
+		expect(testQueryClient.getQueryData<DriveItem[]>(trashKey)?.[0]?.data.favorited).toBe(false)
+		expect(testQueryClient.getQueryData<DriveItem[]>(driveRootKey)?.find(i => i.data.uuid === other.data.uuid)?.data.favorited).toBe(
+			false
+		)
+	})
+
+	it("leaves a non-listing key (e.g. drive names or sort preferences) completely untouched", () => {
+		const namesKey = driveNamesQueryKey(["a", "b"])
+		const sortKey = ["drive", "sortPreferences"] as const
+		testQueryClient.setQueryData(namesKey, { a: "Documents" })
+		testQueryClient.setQueryData(sortKey, { mode: "global", global: "nameAsc", perDirectory: {} })
+
+		driveListingQueryUpdateGlobal(items => items)
+
+		expect(testQueryClient.getQueryData(namesKey)).toEqual({ a: "Documents" })
+		expect(testQueryClient.getQueryData(sortKey)).toEqual({ mode: "global", global: "nameAsc", perDirectory: {} })
+	})
+
+	it("never conjures data into a listing key that was never fetched (no cached data yet)", () => {
+		const unfetchedKey = driveListingQueryKey({ variant: "drive", uuid: "never-fetched" })
+		// Registers the query in the cache (so findAll sees it) without ever giving it data — mirrors a
+		// component that mounted a query that hasn't resolved yet.
+		void testQueryClient.getQueryCache().build(testQueryClient, { queryKey: unfetchedKey })
+
+		driveListingQueryUpdateGlobal(items => [...items, narrowItem(mockDir({ uuid: testUuid("new") }))])
+
+		expect(testQueryClient.getQueryData(unfetchedKey)).toBeUndefined()
+	})
+
+	it("applies the same updater independently per key (a filter can remove from one listing and keep another)", () => {
+		const keep = narrowItem(mockDir({ uuid: testUuid("keep") }))
+		const drop = narrowItem(mockDir({ uuid: testUuid("drop") }))
+		const keyA = driveListingQueryKey({ variant: "drive", uuid: null })
+		const keyB = driveListingQueryKey({ variant: "trash", uuid: null })
+		testQueryClient.setQueryData(keyA, [keep, drop])
+		testQueryClient.setQueryData(keyB, [drop])
+
+		driveListingQueryUpdateGlobal(items => items.filter(item => item.data.uuid !== drop.data.uuid))
+
+		expect(testQueryClient.getQueryData(keyA)).toEqual([keep])
+		expect(testQueryClient.getQueryData(keyB)).toEqual([])
+	})
+})
+
+describe("normalizeParentUuid", () => {
+	it("maps the account's root uuid to null", () => {
+		expect(normalizeParentUuid("root-uuid", "root-uuid")).toBeNull()
+	})
+
+	it("leaves a non-root uuid unchanged", () => {
+		expect(normalizeParentUuid("some-directory-uuid", "root-uuid")).toBe("some-directory-uuid")
+	})
+
+	it("leaves null unchanged (already the root sentinel)", () => {
+		expect(normalizeParentUuid(null, "root-uuid")).toBeNull()
 	})
 })

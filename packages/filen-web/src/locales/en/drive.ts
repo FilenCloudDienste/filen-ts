@@ -107,5 +107,149 @@ export const drive = {
 	/** Keymap registry — description for the drive.clearSelection command */
 	driveCommandClearSelection: "Clear selection",
 	/** Keymap registry — description for the drive.toggleView command */
-	driveCommandToggleView: "Toggle view"
+	driveCommandToggleView: "Toggle view",
+
+	// ── Item action menu ─────────────────────────────────────────────────────
+	// Per-item and bulk-selection context-menu entries. Imperative verbs (menu actions), not
+	// descriptions of state — see driveActionFavorite/driveActionUnfavorite in particular.
+	/** Item menu — rename the selected item; opens the rename dialog */
+	driveActionRename: "Rename",
+	/** Item menu — move the selected item(s); opens the destination picker (driveMoveDialogTitle) */
+	driveActionMove: "Move",
+	/** Item menu — move the selected item(s) to the trash; also the trash-confirm dialog's confirm button */
+	driveActionTrash: "Trash",
+	/** Item menu — restore the selected item(s) out of the trash; also the bulk-restore confirm dialog's confirm button */
+	driveActionRestore: "Restore",
+	/** Item menu (trash view) — permanently delete the selected item(s); also the delete-confirm dialog's confirm button */
+	driveActionDeletePermanently: "Delete permanently",
+	/** Item menu — add the selected item(s) to favorites */
+	driveActionFavorite: "Favorite",
+	/** Item menu — remove the selected item(s) from favorites */
+	driveActionUnfavorite: "Unfavorite",
+	/** Item menu — open the directory-color swatch popover (directories only) */
+	driveActionColor: "Color",
+	/** Item menu — open the file-version history panel (files only) */
+	driveActionVersions: "Versions",
+	/** Item menu — open the info panel for the selected item */
+	driveActionInfo: "Info",
+	/** Item menu — open the public-link dialog for the selected item */
+	driveActionPublicLink: "Public link",
+	/** Item menu — copy the selected item's existing public-link URL to the clipboard */
+	driveActionCopyLink: "Copy link",
+	/** Trash toolbar — permanently delete every item currently in the trash; also the empty-trash confirm dialog's confirm button */
+	driveActionEmptyTrash: "Empty trash",
+
+	// ── Trash confirm ────────────────────────────────────────────────────────
+	/** Trash confirm dialog — title; the confirm button reuses driveActionTrash */
+	driveTrashConfirmTitle: "Move to trash?",
+	/** Trash confirm dialog — body for a single item */
+	driveTrashConfirmBody_one: "Are you sure you want to move this item to the trash? You can restore it later.",
+	/** Trash confirm dialog — body for multiple items; {{count}} = items being trashed */
+	driveTrashConfirmBody_other: "Are you sure you want to move these {{count}} items to the trash? You can restore them later.",
+
+	// ── Permanent-delete confirm ─────────────────────────────────────────────
+	/** Delete-permanently confirm dialog — title; the confirm button reuses driveActionDeletePermanently */
+	driveDeletePermanentlyConfirmTitle: "Delete permanently?",
+	/** Delete-permanently confirm dialog — body for a single item */
+	driveDeletePermanentlyConfirmBody_one: "Are you sure you want to permanently delete this item? This cannot be undone.",
+	/** Delete-permanently confirm dialog — body for multiple items; {{count}} = items being deleted */
+	driveDeletePermanentlyConfirmBody_other: "Are you sure you want to permanently delete these {{count}} items? This cannot be undone.",
+
+	// ── Empty-trash confirm (typed) ──────────────────────────────────────────
+	/** Empty-trash confirm dialog — title; the confirm button reuses driveActionEmptyTrash */
+	driveEmptyTrashConfirmTitle: "Empty trash?",
+	/** Empty-trash confirm dialog — body instructing the user to type the confirmation phrase; {{phrase}} interpolates driveEmptyTrashTypedConfirmPhrase */
+	driveEmptyTrashConfirmBody: 'Type "{{phrase}}" below to permanently delete everything in the trash. This cannot be undone.',
+	/** Empty-trash confirm dialog — label for the confirmation-phrase input */
+	driveEmptyTrashTypedConfirmLabel: "Confirmation phrase",
+	/** Empty-trash confirm dialog — the phrase the user must type EXACTLY (character for character, including case) to confirm; translate as a short, natural phrase a user can type in your language — it is compared verbatim against what they type */
+	driveEmptyTrashTypedConfirmPhrase: "EMPTY TRASH",
+
+	// ── Bulk-restore confirm ─────────────────────────────────────────────────
+	/** Bulk-restore confirm dialog — title; the confirm button reuses driveActionRestore. A single restored item needs no confirm (mobile parity) — this dialog is bulk-selection only */
+	driveRestoreSelectedConfirmTitle: "Restore items?",
+	/** Bulk-restore confirm dialog — body for a single selected item */
+	driveRestoreSelectedConfirmBody_one: "Are you sure you want to restore this item?",
+	/** Bulk-restore confirm dialog — body for multiple selected items; {{count}} = items being restored */
+	driveRestoreSelectedConfirmBody_other: "Are you sure you want to restore these {{count}} items?",
+
+	// ── Move dialog ──────────────────────────────────────────────────────────
+	/** Move dialog — title of the destination-directory picker */
+	driveMoveDialogTitle: "Select destination",
+
+	// ── Directory colors ─────────────────────────────────────────────────────
+	// Swatch names shown in the color popover (driveActionColor) and as each swatch's accessible label.
+	/** Directory color swatch — the default (uncolored) state */
+	driveColorDefault: "Default",
+	/** Directory color swatch */
+	driveColorBlue: "Blue",
+	/** Directory color swatch */
+	driveColorGreen: "Green",
+	/** Directory color swatch */
+	driveColorPurple: "Purple",
+	/** Directory color swatch */
+	driveColorRed: "Red",
+	/** Directory color swatch */
+	driveColorGray: "Gray",
+
+	// ── Versions panel ───────────────────────────────────────────────────────
+	/** Versions panel — heading (opened via driveActionVersions) */
+	driveVersionsPanelTitle: "Versions",
+	/** Versions panel — empty state when a file has no earlier versions */
+	driveVersionsEmpty: "No previous versions",
+	/** Versions panel — badge marking the file's current (live) version among its history */
+	driveVersionsCurrentBadge: "Current",
+	/** Versions panel — per-row action restoring that specific version's content (rotates the file's uuid) */
+	driveVersionsRestoreAction: "Restore this version",
+	/** Versions panel — per-row action permanently deleting that specific version */
+	driveVersionsDeleteAction: "Delete this version",
+
+	// ── Info panel ───────────────────────────────────────────────────────────
+	/** Info panel — heading (opened via driveActionInfo) */
+	driveInfoPanelTitle: "Info",
+	/** Info panel — row label: the item's directory path (breadcrumb ancestors) */
+	driveInfoPath: "Location",
+	/** Info panel — row label: size on disk (a directory's is the recursive aggregate) */
+	driveInfoSize: "Size",
+	/** Info panel — row label: number of files inside a directory */
+	driveInfoFileCount: "Files",
+	/** Info panel — row label: number of sub-directories inside a directory */
+	driveInfoDirectoryCount: "Directories",
+	/** Info panel — row label: creation date */
+	driveInfoCreated: "Created",
+	/** Info panel — row label: last-modified date */
+	driveInfoModified: "Modified",
+	/** Info panel — row label: MIME type of a file */
+	driveInfoMimeType: "MIME type",
+
+	// ── Public link dialog ───────────────────────────────────────────────────
+	/** Public-link dialog — title (opened via driveActionPublicLink) */
+	driveLinkDialogTitle: "Public link",
+	/** Public-link dialog — button creating a new public link for an item that doesn't have one yet */
+	driveLinkEnableAction: "Create public link",
+	/** Public-link dialog — button disabling and removing the item's existing public link */
+	driveLinkDisableAction: "Disable public link",
+	/** Public-link dialog — label for the optional password field protecting the link */
+	driveLinkPasswordLabel: "Password",
+	/** Public-link dialog — placeholder for the password field when the link has no password set */
+	driveLinkPasswordPlaceholder: "No password",
+	/** Public-link dialog — label for the link-expiration field */
+	driveLinkExpirationLabel: "Expires",
+	/** Public-link dialog — label for the toggle allowing downloads through the link */
+	driveLinkDownloadableLabel: "Allow downloads",
+	/** Public-link dialog — label for the link-URL field shown next to the copy button */
+	driveLinkUrlLabel: "Link",
+
+	// ── Bulk action result toast ─────────────────────────────────────────────
+	// Partial-success summary (web departs from mobile's fail-fast bulk ops here): every selected item
+	// runs independently, so a bulk trash/restore/favorite/color/delete can partially fail without
+	// aborting the rest. Generic across every bulk action rather than one pair per action.
+	/** Bulk action result toast — every selected item succeeded; {{count}} = items affected */
+	driveBulkActionComplete_one: "{{count}} item updated",
+	/** Bulk action result toast — every selected item succeeded (plural); {{count}} = items affected */
+	driveBulkActionComplete_other: "{{count}} items updated",
+	/** Bulk action result toast — at least one selected item failed; {{count}} = items that succeeded, {{failed}} = items that failed */
+	driveBulkActionCompleteWithFailures_one: "{{count}} item updated, {{failed}} failed",
+	/** Bulk action result toast — at least one selected item failed (plural); {{count}} = items that succeeded, {{failed}} = items that failed */
+	driveBulkActionCompleteWithFailures_other: "{{count}} items updated, {{failed}} failed"
 } as const

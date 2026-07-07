@@ -63,6 +63,33 @@ export function driveListingQueryUpdate(parentUuid: string | null, updater: (pre
 	queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: parentUuid }), prev => updater(prev ?? []))
 }
 
+// Fan-out patch across EVERY currently-instantiated listing, any variant, any uuid — a
+// `["drive","listing"]` queryKey filter only compares the indices IT specifies (verified against
+// the installed @tanstack/query-core's partialMatchKey: it walks Object.keys of the FILTER key, so
+// index 2's params object is never inspected), so this matches every "drive"/"recents"/"favorites"/
+// "trash" listing at once, the null-root included. For an action whose effect isn't confined to one
+// parent — an item can be favorited/colored in place, or trashed out of a normal listing while
+// simultaneously belonging to the trash's own flat listing — a single narrow driveListingQueryUpdate
+// call can't reach every affected key, but this can. A listing nobody has fetched yet has no cached
+// data; the updater never runs for it (returning `undefined` from the per-query updater is
+// setQueryData's own documented no-op), so this can never conjure a `[]` into an unfetched query.
+export function driveListingQueryUpdateGlobal(updater: (items: DriveItem[]) => DriveItem[]): void {
+	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
+		queryClient.setQueryData<DriveItem[]>(query.queryKey, prev => (prev === undefined ? undefined : updater(prev)))
+	}
+}
+
+// Dir/File.parent is NEVER null on the wasm side (ParentUuid = a real uuid or one of
+// "trash"/"recents"/"favorites"/"links"), but a listing keys the drive ROOT as `uuid: null` (see
+// driveListingQueryKey/toListingTarget) — there is no navigable "root uuid" segment in a query key,
+// only the sentinel. A narrow patch keyed off a raw parent uuid (rename's breadcrumb aside, every
+// other per-parent patch) must collapse the root's real uuid back to the sentinel before it can hit
+// the right key; every other uuid — a real subdirectory, or a flat-listing marker no "drive"-variant
+// patch ever receives — passes through unchanged.
+export function normalizeParentUuid(parentUuid: string | null, rootUuid: string): string | null {
+	return parentUuid === rootUuid ? null : parentUuid
+}
+
 // Breadcrumb primitive: the "/drive/$" splat carries the full ancestor-uuid path in the URL itself
 // (see lib/drive/navigate.ts's splatToUuids) — this only resolves DISPLAY NAMES for that path's
 // uuids, cache-first, in one batched worker call. No getItemPath walk, no per-ancestor Dir/File

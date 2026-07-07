@@ -210,3 +210,35 @@ describe("upsertDriveItem", () => {
 		expect(items).toEqual([a])
 	})
 })
+
+// Drive action worker ops (sdk.worker.ts: renameDirectory, moveDirectory, trashFile, …) declare
+// their held-item parameter as the plain wasm Dir/File shape, but every real caller only ever holds
+// a DriveItem — Dir/File plus ExtraData plus decryptedMeta. These two assignments only need to
+// TYPECHECK: if DriveItem's arms ever stopped being a structural superset of Dir/File, this file
+// would fail `npm run typecheck` (no adapter/stripper exists anywhere, by design — see the worker's
+// own comment on this). Runtime toleration of the extra own fields crossing the wasm boundary is a
+// separate, already-verified concern (no serde deny_unknown_fields); confirming it against a live
+// authed call is deferred to QA, since this environment has no session to log in with.
+describe("DriveItem.data assignability to the plain SDK shapes the worker's action ops declare", () => {
+	it("a narrowed directory's data satisfies Dir with no adapter", () => {
+		const item = narrowItem(mockDir())
+		if (item.type !== "directory") {
+			throw new Error("expected a directory arm")
+		}
+
+		const asWorkerParam: Dir = item.data
+
+		expect(asWorkerParam.uuid).toBe(item.data.uuid)
+	})
+
+	it("a narrowed file's data satisfies File with no adapter", () => {
+		const item = narrowItem(mockFile())
+		if (item.type !== "file") {
+			throw new Error("expected a file arm")
+		}
+
+		const asWorkerParam: File = item.data
+
+		expect(asWorkerParam.uuid).toBe(item.data.uuid)
+	})
+})

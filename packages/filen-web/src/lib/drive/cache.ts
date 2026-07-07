@@ -46,3 +46,14 @@ export function clearDirectoryCache(): void {
 	dirsByUuid.clear()
 	namesByUuid.clear()
 }
+
+// Removes a batch of uuids from both maps — the delete-side counterpart to cacheDirs. Exported for
+// whichever action call site needs to invalidate a directory this session already cached (e.g. a
+// permanent delete), so a later cache-first read (createDirectory's parent resolve, a breadcrumb
+// name lookup) can't return a directory the backend no longer has.
+export function evictDirs(uuids: readonly string[]): void {
+	for (const uuid of uuids) {
+		dirsByUuid.delete(uuid)
+		namesByUuid.delete(uuid)
+	}
+}

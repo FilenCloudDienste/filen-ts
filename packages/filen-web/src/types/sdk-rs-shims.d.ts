@@ -14,4 +14,11 @@ import "@filen/sdk-rs"
 declare module "@filen/sdk-rs" {
 	// JsClient exists at runtime but is absent from the shipped types.
 	export const JsClient: unknown
+
+	// PasswordState (and, through it, FilePublicLink/DirPublicLinkRW) references these two branded
+	// string aliases, but neither is declared or exported anywhere in the shipped .d.ts — the link
+	// action surface (get*LinkStatus, *Link{Dir,File}, update*Link) is the first use site to touch
+	// them, so backfill the plain string shape here.
+	export type LinkHashedPasswordStatic = string
+	export type LinkPasswordSalt = string
 }

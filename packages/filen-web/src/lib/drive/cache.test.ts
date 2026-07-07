@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 // inline form doesn't reliably elide under vitest for this package, and a non-elided import drags
 // in the wasm-bindgen worker glue (references `self`, undefined under Node).
 import type { Dir, UuidStr } from "@filen/sdk-rs"
-import { cacheDirs, clearDirectoryCache, getCachedDir, getCachedName } from "@/lib/drive/cache"
+import { cacheDirs, clearDirectoryCache, evictDirs, getCachedDir, getCachedName } from "@/lib/drive/cache"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
 // readable test label into a shape that satisfies it, mirroring drive.test.ts's own uuid fixtures.
@@ -95,5 +95,57 @@ describe("directory cache", () => {
 
 		expect(getCachedDir(uuid)).toBeUndefined()
 		expect(getCachedName(uuid)).toBeUndefined()
+	})
+})
+
+describe("evictDirs", () => {
+	it("removes a single uuid from both the dir and name maps", () => {
+		const uuid = testUuid("a")
+		cacheDirs([mockDir({ uuid })])
+
+		evictDirs([uuid])
+
+		expect(getCachedDir(uuid)).toBeUndefined()
+		expect(getCachedName(uuid)).toBeUndefined()
+	})
+
+	it("evicts a whole batch in one call", () => {
+		const uuidA = testUuid("a")
+		const uuidB = testUuid("b")
+		cacheDirs([mockDir({ uuid: uuidA }), mockDir({ uuid: uuidB, meta: { type: "decoded", data: { name: "Videos" } } })])
+
+		evictDirs([uuidA, uuidB])
+
+		expect(getCachedDir(uuidA)).toBeUndefined()
+		expect(getCachedDir(uuidB)).toBeUndefined()
+		expect(getCachedName(uuidA)).toBeUndefined()
+		expect(getCachedName(uuidB)).toBeUndefined()
+	})
+
+	it("leaves every other cached uuid untouched", () => {
+		const evicted = testUuid("evicted")
+		const kept = testUuid("kept")
+		cacheDirs([mockDir({ uuid: evicted }), mockDir({ uuid: kept, meta: { type: "decoded", data: { name: "Kept" } } })])
+
+		evictDirs([evicted])
+
+		expect(getCachedDir(kept)).toBeDefined()
+		expect(getCachedName(kept)).toBe("Kept")
+	})
+
+	it("evictDirs([]) is a safe no-op", () => {
+		const uuid = testUuid("a")
+		cacheDirs([mockDir({ uuid })])
+
+		expect(() => {
+			evictDirs([])
+		}).not.toThrow()
+		expect(getCachedDir(uuid)).toBeDefined()
+	})
+
+	it("evicting a uuid that was never cached is a safe no-op", () => {
+		expect(() => {
+			evictDirs([testUuid("never-cached")])
+		}).not.toThrow()
 	})
 })
