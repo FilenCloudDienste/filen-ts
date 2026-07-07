@@ -83,3 +83,13 @@ export async function kvDelete(key: string): Promise<void> {
 	const { api } = await storage()
 	await api.kvDelete(key)
 }
+
+// Wipes every kv row — query-persist rows and keymap overrides included, the full local wipe
+// logout needs. Composed from the two primitives already leader-routed (kvKeys/kvDelete) rather
+// than adding a third worker op: an empty prefix matches every key (db.worker's `LIKE ? || '%'`),
+// so nothing new needs registering in STORAGE_METHODS.
+export async function kvClear(): Promise<void> {
+	const { api } = await storage()
+	const keys = await api.kvKeys("")
+	await Promise.all(keys.map(key => api.kvDelete(key)))
+}

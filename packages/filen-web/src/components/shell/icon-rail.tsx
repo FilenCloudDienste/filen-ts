@@ -1,4 +1,4 @@
-import type { ComponentType } from "react"
+import { useEffect, useState, type ComponentType } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import {
@@ -15,6 +15,11 @@ import {
 	UserIcon
 } from "lucide-react"
 import type { CommonKey } from "@/lib/i18n"
+import { runLogout } from "@/lib/auth/logout"
+import { sdkApi } from "@/lib/sdk/client"
+import { clearSession, broadcastAuth, getSessionEmail } from "@/lib/sdk/session"
+import { kvClear } from "@/lib/storage/adapter"
+import { queryClient } from "@/queries/client"
 import { Logo } from "@/components/shell/logo"
 import { useTheme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
@@ -31,6 +36,7 @@ import {
 	DropdownMenuLabel,
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
+import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
 import { Kbd } from "@/lib/keymap/Kbd"
 import { useBootStore } from "@/stores/boot"
 
@@ -77,44 +83,105 @@ function ThemeToggle() {
 }
 
 function AccountMenu() {
-	const { t } = useTranslation()
+	const { t } = useTranslation(["common", "auth"])
+	// Stopgap until T7's account query (getUserInfo) lands: a cheap local kv read, no network — falls
+	// back to the static "Account" label below on a missing/unreadable session.
+	const [email, setEmail] = useState<string | null>(null)
+	const [confirmOpen, setConfirmOpen] = useState(false)
+	const [pending, setPending] = useState(false)
+
+	useEffect(() => {
+		let cancelled = false
+		void getSessionEmail()
+			.then(value => {
+				if (!cancelled) {
+					setEmail(value)
+				}
+			})
+			.catch(() => undefined) // best-effort — the static label stands in on any read failure
+		return () => {
+			cancelled = true
+		}
+	}, [])
+
+	async function handleSignOut(): Promise<void> {
+		setPending(true)
+		try {
+			await runLogout({
+				cancelQueries: () => queryClient.cancelQueries(),
+				clearQueryCache: () => {
+					queryClient.clear()
+				},
+				sdkLogout: () => sdkApi.logout(),
+				clearSession,
+				kvClear,
+				broadcast: () => {
+					broadcastAuth("logout")
+				},
+				reload: () => {
+					location.reload()
+				}
+			})
+		} finally {
+			// runLogout isolates every phase internally (log-and-continue) and never rejects; this
+			// mirrors login-form's unconditional reset — harmless even though a successful sign-out
+			// reloads the page shortly after.
+			setPending(false)
+		}
+	}
 
 	return (
-		<DropdownMenu>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-lg"
-						aria-label={t("account")}
-						className="rounded-full"
-					>
-						<Avatar size="sm">
-							<AvatarFallback>
-								<UserIcon className="size-4" />
-							</AvatarFallback>
-						</Avatar>
-					</Button>
-				}
+		<>
+			<DropdownMenu>
+				<DropdownMenuTrigger
+					render={
+						<Button
+							variant="ghost"
+							size="icon-lg"
+							aria-label={t("account")}
+							className="rounded-full"
+						>
+							<Avatar size="sm">
+								<AvatarFallback>
+									<UserIcon className="size-4" />
+								</AvatarFallback>
+							</Avatar>
+						</Button>
+					}
+				/>
+				<DropdownMenuContent
+					side="right"
+					align="end"
+					sideOffset={8}
+					className="min-w-44"
+				>
+					<DropdownMenuGroup>
+						<DropdownMenuLabel className="truncate">{email ?? t("account")}</DropdownMenuLabel>
+						<DropdownMenuItem
+							onClick={() => {
+								setConfirmOpen(true)
+							}}
+						>
+							<LogOutIcon />
+							{t("signOut")}
+						</DropdownMenuItem>
+					</DropdownMenuGroup>
+				</DropdownMenuContent>
+			</DropdownMenu>
+			<ConfirmDialog
+				open={confirmOpen}
+				pending={pending}
+				title={t("auth:logoutConfirmTitle")}
+				body={t("auth:logoutConfirmBody")}
+				confirmLabel={t("signOut")}
+				cancelLabel={t("cancel")}
+				destructive
+				onOpenChange={setConfirmOpen}
+				onConfirm={() => {
+					void handleSignOut()
+				}}
 			/>
-			<DropdownMenuContent
-				side="right"
-				align="end"
-				sideOffset={8}
-				className="min-w-44"
-			>
-				<DropdownMenuGroup>
-					<DropdownMenuLabel>{t("account")}</DropdownMenuLabel>
-					<DropdownMenuItem
-						disabled
-						aria-disabled="true"
-					>
-						<LogOutIcon />
-						{t("signOut")}
-					</DropdownMenuItem>
-				</DropdownMenuGroup>
-			</DropdownMenuContent>
-		</DropdownMenu>
+		</>
 	)
 }
 
