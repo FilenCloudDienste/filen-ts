@@ -3381,6 +3381,32 @@ describe("Audio", () => {
 			expect(savedPlaylist!.files.some(f => f.uuid === "save-me")).toBe(true)
 		})
 
+		it("bumps the playlist's `updated` timestamp on the saved payload (parity with the other mutators)", async () => {
+			const { audio } = await createAudio()
+			setupPlaylistsDirForSave()
+
+			vi.mocked(playlistsQueryUpdate).mockClear()
+
+			// An OLD `updated` so a fresh bump is unambiguously greater. Without the bump the
+			// mutate return spreads `...current` and the stale value survives verbatim.
+			const staleUpdated = 1000
+			const playlist = { ...makePlaylist(), updated: staleUpdated }
+
+			await audio.addFilesToPlaylist({
+				playlist,
+				items: [makeDriveItem("bump-me")]
+			})
+
+			const updaterArg = vi.mocked(playlistsQueryUpdate).mock.calls[0]?.[0] as unknown as {
+				updater: (prev: { uuid: string; updated: number }[]) => { uuid: string; updated: number }[]
+			}
+
+			const savedPlaylist = updaterArg.updater([])[0]
+
+			expect(savedPlaylist).toBeDefined()
+			expect(savedPlaylist!.updated).toBeGreaterThan(staleUpdated)
+		})
+
 		it("sharedFile type passes the filter and is added", async () => {
 			const { audio } = await createAudio()
 			setupPlaylistsDirForSave()
