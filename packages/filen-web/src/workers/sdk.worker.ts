@@ -11,7 +11,8 @@ import init, {
 	type ChangePasswordParams,
 	type Dir,
 	type NormalDirsAndFiles,
-	type AnyNormalDir
+	type AnyNormalDir,
+	type GetItemPathResult
 } from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
 import { toErrorDTO } from "@/lib/sdk/errors"
@@ -92,6 +93,10 @@ async function preflightArtifacts(): Promise<string | null> {
 	}
 	return null // snippets/** has hashed dirs — covered by the pool timeout below
 }
+
+// Named (not inlined) so queries/drive.ts's target-mapping helper can import the exact union
+// instead of duplicating it.
+export type ListDirectoryTarget = { kind: "root" } | { kind: "uuid"; uuid: string } | { kind: "recents" | "favorites" | "trash" }
 
 const api = {
 	async boot({ threads }: { threads: number }): Promise<BootResult> {
@@ -230,9 +235,7 @@ const api = {
 	// facade) — a stale response from a fast navigation is simply discarded once the query key
 	// changes under it, so no AbortSignal plumbing is needed here. `Dir.timestamp`/meta bigints
 	// cross Comlink via structured clone, same as getUserInfo — no boundary serializer.
-	async listDirectory(
-		target: { kind: "root" } | { kind: "uuid"; uuid: string } | { kind: "recents" | "favorites" | "trash" }
-	): Promise<NormalDirsAndFiles> {
+	async listDirectory(target: ListDirectoryTarget): Promise<NormalDirsAndFiles> {
 		const c = requireClient()
 		switch (target.kind) {
 			case "root":
@@ -272,9 +275,23 @@ const api = {
 		await c.dirExists(parent, name)
 		return c.createDir(parent, name)
 	},
-	// Thin getDirOptional pass-through — the breadcrumb's per-ancestor lookup.
+	// Thin getDirOptional pass-through.
 	getDirectory(uuid: string): Promise<Dir | undefined> {
 		return requireClient().getDirOptional(uuid)
+	},
+	// Breadcrumb primitive: getItemPath takes a live Dir, not a bare uuid, so this composes the
+	// same getDirOptional-then-not-found-DTO shape as listDirectory's uuid case and
+	// createDirectory's parent lookup. `current` is returned alongside `path`/`ancestors` — the
+	// getDirOptional call above already resolved it, so surfacing it costs no extra SDK round trip,
+	// and the breadcrumb needs the current directory's own decrypted name (ancestors excludes it).
+	async getDirectoryPath(uuid: string): Promise<GetItemPathResult & { current: Dir }> {
+		const c = requireClient()
+		const dir = await c.getDirOptional(uuid)
+		if (dir === undefined) {
+			throw new Error(`directory not found: ${uuid}`)
+		}
+		const { path, ancestors } = await c.getItemPath(dir)
+		return { path, ancestors, current: dir }
 	},
 	logout(): void {
 		releaseClient()
