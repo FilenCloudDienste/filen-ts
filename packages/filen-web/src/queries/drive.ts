@@ -1,5 +1,6 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
+import { queryClient } from "@/queries/client"
 // Whole-statement `import type` here too — sdk.worker.ts's own top-level code pulls in
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget } from "@/workers/sdk.worker"
@@ -52,6 +53,14 @@ export function useDirectoryListingQuery(variant: DriveVariant, uuid: string | n
 		queryKey: driveListingQueryKey({ variant, uuid }),
 		queryFn: () => fetchDirectoryListing(variant, uuid)
 	})
+}
+
+// Confirm-then-patch for a write landing in My Drive (queries/client.ts's zero-useMutation
+// convention) — always the "drive" variant: the three flat listings (recents/favorites/trash) have
+// no navigable parent to create/move into. A cache miss (nobody has viewed this directory yet)
+// defaults to [] so the patch still lands for whenever it first mounts.
+export function driveListingQueryUpdate(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]): void {
+	queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: parentUuid }), prev => updater(prev ?? []))
 }
 
 // Breadcrumb primitive: the "/drive/$" splat carries the full ancestor-uuid path in the URL itself

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File, NormalDirsAndFiles, UuidStr } from "@filen/sdk-rs"
+import { narrowItem } from "@/lib/drive/item"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it
 // down to the two methods this module calls, mirroring account.test.ts's mock boundary.
@@ -10,12 +12,29 @@ const { listDirectory, resolveDirectoryNames } = vi.hoisted(() => ({
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, resolveDirectoryNames } }))
 
-import { driveListingQueryKey, driveNamesQueryKey, fetchDirectoryListing, fetchDirectoryNames } from "@/queries/drive"
+// A bare, unconfigured QueryClient (no persister, no retry/logging wiring) stands in for the real
+// singleton — driveListingQueryUpdate only needs genuine setQueryData/getQueryData cache mechanics,
+// never the production client's OPFS-backed persistence pipeline (out of scope for a unit test, and
+// unavailable under node vitest anyway). `QueryClient` is a plain top-level import (not a locally
+// declared variable), so referencing it directly inside the factory is fine — vi.hoisted is only
+// needed to share a locally-declared value with a factory, which is why the instance is re-imported
+// by its mocked name below instead.
+vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
+
+import { queryClient as testQueryClient } from "@/queries/client"
+import {
+	driveListingQueryKey,
+	driveListingQueryUpdate,
+	driveNamesQueryKey,
+	fetchDirectoryListing,
+	fetchDirectoryNames
+} from "@/queries/drive"
 
 // Unlike account.test.ts (one call-count assertion in the whole file), several tests here assert
 // exact call counts — clear history between tests so an earlier test's calls can't leak in.
 beforeEach(() => {
 	vi.clearAllMocks()
+	testQueryClient.clear()
 })
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
@@ -148,5 +167,50 @@ describe("fetchDirectoryNames", () => {
 		resolveDirectoryNames.mockRejectedValueOnce(error)
 
 		await expect(fetchDirectoryNames(["uuid-a"])).rejects.toBe(error)
+	})
+})
+
+describe("driveListingQueryUpdate", () => {
+	it("defaults an uncached listing to [] before applying the updater", () => {
+		const created = narrowItem(mockDir({ uuid: testUuid("new") }))
+
+		driveListingQueryUpdate(null, prev => [...prev, created])
+
+		expect(testQueryClient.getQueryData(driveListingQueryKey({ variant: "drive", uuid: null }))).toEqual([created])
+	})
+
+	it("targets the drive variant's key for the given parent uuid, leaving other parents untouched", () => {
+		const otherParentKey = driveListingQueryKey({ variant: "drive", uuid: "other-parent" })
+		testQueryClient.setQueryData(otherParentKey, [])
+		const created = narrowItem(mockDir({ uuid: testUuid("new") }))
+
+		driveListingQueryUpdate("this-parent", prev => [...prev, created])
+
+		expect(testQueryClient.getQueryData(driveListingQueryKey({ variant: "drive", uuid: "this-parent" }))).toEqual([created])
+		expect(testQueryClient.getQueryData(otherParentKey)).toEqual([])
+	})
+
+	it("passes the previously cached array through to the updater unchanged", () => {
+		const key = driveListingQueryKey({ variant: "drive", uuid: null })
+		const existingA = narrowItem(mockDir({ uuid: testUuid("a") }))
+		const existingB = narrowItem(mockDir({ uuid: testUuid("b") }))
+		testQueryClient.setQueryData(key, [existingA, existingB])
+
+		let seenPrev: unknown
+		driveListingQueryUpdate(null, prev => {
+			seenPrev = prev
+			return prev
+		})
+
+		expect(seenPrev).toEqual([existingA, existingB])
+	})
+
+	it("never touches a differently-scoped variant's key (e.g. recents) for the same uuid", () => {
+		const recentsKey = driveListingQueryKey({ variant: "recents", uuid: null })
+		testQueryClient.setQueryData(recentsKey, [])
+
+		driveListingQueryUpdate(null, prev => [...prev, narrowItem(mockDir({ uuid: testUuid("new") }))])
+
+		expect(testQueryClient.getQueryData(recentsKey)).toEqual([])
 	})
 })

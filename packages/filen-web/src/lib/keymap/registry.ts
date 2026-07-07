@@ -2,7 +2,7 @@ import { type } from "arktype"
 import { create } from "zustand"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { log } from "@/lib/log"
-import type { CommonKey } from "@/lib/i18n"
+import type { CommonKey, DriveKey } from "@/lib/i18n"
 
 // Keyboard-first from day one — every keyboard-controllable action in the app registers
 // here instead of wiring its own `window.addEventListener("keydown", …)`. A Map-backed registry
@@ -16,7 +16,7 @@ export interface ActionDef {
 	id: string
 	defaultCombo: string
 	scope: ActionScope
-	descriptionKey: CommonKey
+	descriptionKey: CommonKey | DriveKey
 }
 
 const OVERRIDES_KV_KEY = "keymap.v1.overrides"

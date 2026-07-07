@@ -24,9 +24,12 @@ import { type DriveItem } from "@/lib/drive/item"
 import { useDirectoryListingQuery, useSortPreferencesQuery, useViewModePreferencesQuery } from "@/queries/drive"
 import { useDriveStore } from "@/stores/drive"
 import { asErrorDTO } from "@/lib/sdk/errors"
+import { registerAction } from "@/lib/keymap/registry"
+import { useAction } from "@/lib/keymap/useAction"
 import { Breadcrumb } from "@/components/drive/breadcrumb"
 import { SortMenu } from "@/components/drive/sort-menu"
 import { ViewModeToggle } from "@/components/drive/view-mode-toggle"
+import { NewDirectory } from "@/components/drive/new-directory"
 import { EmptyState } from "@/components/drive/empty-state"
 import { ListingSkeleton } from "@/components/drive/listing-skeleton"
 import { DriveRow } from "@/components/drive/drive-row"
@@ -38,6 +41,41 @@ export interface DirectoryListingProps {
 	// favorites/trash pass "" (they're flat, never nested). The current directory is the last segment.
 	splat: string
 }
+
+// Module scope, not inside the component: runs exactly once per module evaluation (see
+// theme-provider.tsx's own "app.toggleTheme" registration for the full StrictMode/HMR rationale).
+//
+// Reconciling these with the listbox's own roving-tabindex `onKeyDown` (below): select-all and
+// clear-selection used to be hand-rolled checks inside that handler, matching Cmd/Ctrl+A and
+// Escape unconditionally whenever the listbox had focus. They are registered as commands here
+// INSTEAD of that (not in addition to it — a stray double-registration would double-fire, since
+// useAction's useHotkeys binds document-wide, not scoped to the listbox element) so a user remap
+// actually changes what fires, and so `<Kbd action>` reflects the real live combo. This makes them
+// fire regardless of focus location on the page (not just while the listbox itself is focused) —
+// an accepted, documented widening: every registered action fires globally today (no
+// `<HotkeysProvider>` scope activation yet, see registry.ts's ActionScope comment), and drive is
+// the app's only real interactive surface this slice, so "global" and "listbox-focused" coincide
+// in practice. Arrow/Home/End/Space/Enter cursor movement stays listbox-local — those are
+// continuous, per-row navigation semantics, not discrete user-remappable commands.
+registerAction({
+	id: "drive.selectAll",
+	defaultCombo: "mod+a",
+	scope: "drive",
+	descriptionKey: "driveCommandSelectAll"
+})
+registerAction({
+	id: "drive.clearSelection",
+	defaultCombo: "escape",
+	scope: "drive",
+	descriptionKey: "driveCommandClearSelection"
+})
+// No prior intrinsic handling to reconcile — view mode had no keyboard toggle before this.
+registerAction({
+	id: "drive.toggleView",
+	defaultCombo: "v",
+	scope: "drive",
+	descriptionKey: "driveCommandToggleView"
+})
 
 const ROW_HEIGHT = 40
 const TILE_WIDTH = 140
@@ -245,22 +283,12 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	// ARIA listbox cursor semantics (roving tabindex): plain Arrow/Home/End move the cursor only —
 	// they never change the selection — Space toggles the active item, Shift+Arrow extends a range
-	// from the last non-shift cursor position, Cmd/Ctrl+A selects everything, Escape clears.
+	// from the last non-shift cursor position. Select-all (Cmd/Ctrl+A) and clear-selection (Escape)
+	// are NOT handled here — they're registered drive.selectAll/drive.clearSelection commands (see
+	// the module-scope registerAction calls above) so they stay user-remappable with one firing
+	// owner; keeping a second hand-rolled check here would double-fire on every keypress.
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
 		if (sortedItems.length === 0) {
-			return
-		}
-
-		if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a") {
-			event.preventDefault()
-			useDriveStore.getState().selectAllItems(sortedItems)
-
-			return
-		}
-
-		if (event.key === "Escape") {
-			useDriveStore.getState().clearSelectedItems()
-
 			return
 		}
 
@@ -326,6 +354,39 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		await viewModePrefsQuery.refetch()
 	}
 
+	// Registered above at module scope. Browser default for mod+a is "select all page text" — must
+	// preventDefault or the native selection would visibly compete with the drive-item selection.
+	useAction(
+		"drive.selectAll",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+			useDriveStore.getState().selectAllItems(sortedItems)
+		},
+		undefined,
+		[sortedItems]
+	)
+
+	// Registered above at module scope. No preventDefault — bare Escape has no disruptive browser
+	// default, matching the hand-rolled handler this replaced.
+	useAction(
+		"drive.clearSelection",
+		() => {
+			useDriveStore.getState().clearSelectedItems()
+		},
+		undefined,
+		[]
+	)
+
+	// Registered above at module scope. Net-new shortcut — no listbox handling to reconcile.
+	useAction(
+		"drive.toggleView",
+		() => {
+			void applyViewModeChange(effectiveViewMode === "list" ? "grid" : "list")
+		},
+		undefined,
+		[effectiveViewMode, applyViewModeChange]
+	)
+
 	return (
 		<>
 			<header className="flex h-14 shrink-0 items-center border-b border-border px-4">
@@ -343,6 +404,10 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						: null}
 				</p>
 				<div className="flex items-center gap-2">
+					<NewDirectory
+						parentUuid={uuid}
+						disabled={variant !== "drive" || listingQuery.status !== "success"}
+					/>
 					<ViewModeToggle
 						value={effectiveViewMode}
 						onChange={next => {

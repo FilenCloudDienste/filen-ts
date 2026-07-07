@@ -13,6 +13,12 @@ import { drive } from "@/locales/en/drive"
 // used in @/stores/boot.ts) guards the same way against a future non-string key.
 export type CommonKey = Extract<keyof typeof common, string>
 
+// Same derivation for the "drive" namespace — the keymap registry's first feature-scoped actions
+// (drive.*) describe themselves with drive-namespace copy rather than borrowing/duplicating a
+// "common" key. Widens `ActionDef.descriptionKey` to `CommonKey | DriveKey`; a future namespace's
+// own actions extend the union the same way instead of forcing every description into "common".
+export type DriveKey = Extract<keyof typeof drive, string>
+
 // `Intl.PluralRules` gate: i18next's plural-key resolution (`_one`/
 // `_other` suffixes, unused by rev 1's catalogs but load-bearing the moment a count-based key
 // lands) needs it. Unlike React Native/Hermes — which mobile polyfills via `intl-pluralrules` —

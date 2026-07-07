@@ -97,5 +97,15 @@ export const drive = {
 	/** Drive listing — selection count shown in the toolbar in place of the item count; plural */
 	driveSelectionCount_other: "{{count}} selected",
 	/** Drive listing row — visually-hidden label announcing a favorited item's star indicator */
-	driveFavorited: "Favorited"
+	driveFavorited: "Favorited",
+
+	// ── Keymap commands ──────────────────────────────────────────────────────
+	/** Keymap registry — description for the drive.newDirectory command */
+	driveCommandNewDirectory: "New directory",
+	/** Keymap registry — description for the drive.selectAll command */
+	driveCommandSelectAll: "Select all",
+	/** Keymap registry — description for the drive.clearSelection command */
+	driveCommandClearSelection: "Clear selection",
+	/** Keymap registry — description for the drive.toggleView command */
+	driveCommandToggleView: "Toggle view"
 } as const

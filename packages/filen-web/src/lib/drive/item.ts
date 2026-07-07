@@ -42,3 +42,32 @@ export function narrowItem(raw: Dir | File): DriveItem {
 	const decryptedMeta = meta.type === "decoded" ? meta.data : null
 	return { type: "directory", data: { ...raw, size: 0n, undecryptable: decryptedMeta === null, decryptedMeta } }
 }
+
+// Identity/name-collision filter for splicing an incoming item into a cached listing: an existing
+// row survives unless it IS the incoming item (uuid match) or a same-name duplicate the incoming
+// item supersedes (case-insensitive, trimmed) — mirrors filen-mobile's driveSelectors
+// keepAgainstIncomingDriveItem. The name arm only fires when BOTH names are present: an
+// undecryptable item's decryptedMeta is null (name undefined), and undefined === undefined would
+// wrongly treat every undecryptable row as colliding with every other one.
+export function keepAgainstIncomingDriveItem(existing: DriveItem, incoming: DriveItem): boolean {
+	if (existing.data.uuid === incoming.data.uuid) {
+		return false
+	}
+
+	const existingName = existing.data.decryptedMeta?.name.toLowerCase().trim()
+	const incomingName = incoming.data.decryptedMeta?.name.toLowerCase().trim()
+
+	if (existingName !== undefined && incomingName !== undefined && existingName === incomingName) {
+		return false
+	}
+
+	return true
+}
+
+// Insert an incoming item into a cached listing, replacing (never duplicating) whatever row it
+// collides with — see keepAgainstIncomingDriveItem. Covers createDirectory's idempotent-existing-
+// directory return: the backend hands back the SAME uuid it already returned last time, so the
+// stale cached row is dropped and the fresh one appended, net item count unchanged.
+export function upsertDriveItem(items: DriveItem[], incoming: DriveItem): DriveItem[] {
+	return [...items.filter(existing => keepAgainstIncomingDriveItem(existing, incoming)), incoming]
+}

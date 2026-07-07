@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File } from "@filen/sdk-rs"
-import { narrowItem } from "@/lib/drive/item"
+import type { Dir, File, UuidStr } from "@filen/sdk-rs"
+import { keepAgainstIncomingDriveItem, narrowItem, upsertDriveItem, type DriveItem } from "@/lib/drive/item"
+
+// UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
+// readable test label into a shape that satisfies it, mirroring queries/drive.test.ts's own fixture.
+function testUuid(label: string): UuidStr {
+	return `${label}-0000-0000-0000-000000000000` as UuidStr
+}
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {
@@ -107,5 +113,100 @@ describe("narrowItem", () => {
 			// line must stay a type error, or the union has stopped narrowing `data` by `type`.
 			void dirItem.data.decryptedMeta?.mime
 		}
+	})
+})
+
+// Named after a short label (padded to a valid UuidStr) so failures read as "which fixture" rather
+// than "some directory".
+function namedDir(uuidLabel: string, name: string, overrides: Partial<Dir> = {}): DriveItem {
+	return narrowItem(mockDir({ uuid: testUuid(uuidLabel), meta: { type: "decoded", data: { name } }, ...overrides }))
+}
+
+function undecryptableDir(uuidLabel: string): DriveItem {
+	return narrowItem(mockDir({ uuid: testUuid(uuidLabel), meta: { type: "encrypted", data: "ciphertext" } }))
+}
+
+describe("keepAgainstIncomingDriveItem", () => {
+	it("drops the existing row when its uuid matches the incoming item", () => {
+		const existing = namedDir("same-uuid", "a.txt")
+		const incoming = namedDir("same-uuid", "b.txt")
+
+		expect(keepAgainstIncomingDriveItem(existing, incoming)).toBe(false)
+	})
+
+	it("drops an existing same-name (case/space-insensitive) duplicate with a different uuid", () => {
+		const existing = namedDir("old-uuid", "  Notes ")
+		const incoming = namedDir("new-uuid", "notes")
+
+		expect(keepAgainstIncomingDriveItem(existing, incoming)).toBe(false)
+	})
+
+	it("keeps an unrelated decryptable row (different uuid AND different name)", () => {
+		const existing = namedDir("old-uuid", "other")
+		const incoming = namedDir("new-uuid", "notes")
+
+		expect(keepAgainstIncomingDriveItem(existing, incoming)).toBe(true)
+	})
+
+	it("keeps an existing undecryptable sibling when the incoming item is also undecryptable", () => {
+		// Both names undefined — must NOT be treated as a same-name collision.
+		const existing = undecryptableDir("existing-uuid")
+		const incoming = undecryptableDir("incoming-uuid")
+
+		expect(keepAgainstIncomingDriveItem(existing, incoming)).toBe(true)
+	})
+
+	it("keeps an existing undecryptable sibling when the incoming item is decryptable", () => {
+		const existing = undecryptableDir("existing-uuid")
+		const incoming = namedDir("incoming-uuid", "notes")
+
+		expect(keepAgainstIncomingDriveItem(existing, incoming)).toBe(true)
+	})
+
+	it("keeps a decryptable row when the incoming item is undecryptable (name undefined)", () => {
+		const existing = namedDir("existing-uuid", "notes")
+		const incoming = undecryptableDir("incoming-uuid")
+
+		expect(keepAgainstIncomingDriveItem(existing, incoming)).toBe(true)
+	})
+})
+
+describe("upsertDriveItem", () => {
+	it("appends the incoming item when nothing collides", () => {
+		const a = namedDir("uuid-a", "a")
+		const b = namedDir("uuid-b", "b")
+
+		expect(upsertDriveItem([a], b)).toEqual([a, b])
+	})
+
+	it("replaces (not duplicates) an existing row on a uuid match — the idempotent-create case", () => {
+		// createDirectory's backend is idempotent: creating an already-existing name returns THAT
+		// directory's own uuid. The returned item must replace its stale cached copy, never duplicate.
+		const stale = namedDir("same-uuid", "Docs", { favorited: false })
+		const other = namedDir("uuid-b", "b")
+		const fresh = namedDir("same-uuid", "Docs", { favorited: true })
+
+		const result = upsertDriveItem([stale, other], fresh)
+
+		expect(result).toHaveLength(2)
+		expect(result).toEqual([other, fresh])
+	})
+
+	it("replaces (not duplicates) an existing row on a case/space-insensitive name match, different uuid", () => {
+		const stale = namedDir("old-uuid", " Docs ")
+		const fresh = namedDir("new-uuid", "docs")
+
+		const result = upsertDriveItem([stale], fresh)
+
+		expect(result).toEqual([fresh])
+	})
+
+	it("never mutates the input array", () => {
+		const a = namedDir("uuid-a", "a")
+		const items = [a]
+
+		upsertDriveItem(items, namedDir("uuid-b", "b"))
+
+		expect(items).toEqual([a])
 	})
 })
