@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useShallow } from "zustand/shallow"
+import { toast } from "sonner"
 import {
 	resolveEffectiveSort,
 	resolveEffectiveViewMode,
@@ -21,11 +22,15 @@ import { sortDriveItems, type DriveSortBy } from "@/lib/drive/sort"
 import { resolveDriveNavigationTarget, splatToUuids } from "@/lib/drive/navigate"
 import { clampListboxIndex, listboxRange } from "@/lib/drive/listbox"
 import { type DriveItem } from "@/lib/drive/item"
+import { renameItem, trashItems, deleteItemsPermanently, emptyTrash } from "@/lib/drive/actions"
+import { toastBulkOutcome } from "@/lib/drive/bulk-toast"
 import { useDirectoryListingQuery, useSortPreferencesQuery, useViewModePreferencesQuery } from "@/queries/drive"
 import { useDriveStore } from "@/stores/drive"
 import { asErrorDTO } from "@/lib/sdk/errors"
+import { errorLabel } from "@/lib/i18n/errorLabel"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
+import { driveItemActions, type ItemActionDialogKind } from "@/components/drive/item-menu.logic"
 import { Breadcrumb } from "@/components/drive/breadcrumb"
 import { SortMenu } from "@/components/drive/sort-menu"
 import { ViewModeToggle } from "@/components/drive/view-mode-toggle"
@@ -34,6 +39,9 @@ import { EmptyState } from "@/components/drive/empty-state"
 import { ListingSkeleton } from "@/components/drive/listing-skeleton"
 import { DriveRow } from "@/components/drive/drive-row"
 import { DriveTile } from "@/components/drive/drive-tile"
+import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
+import { TypedConfirmDialog } from "@/components/dialogs/typed-confirm-dialog"
+import { InputDialog } from "@/components/dialogs/input-dialog"
 
 export interface DirectoryListingProps {
 	variant: DriveVariant
@@ -41,6 +49,23 @@ export interface DirectoryListingProps {
 	// favorites/trash pass "" (they're flat, never nested). The current directory is the last segment.
 	splat: string
 }
+
+// The listing-level dialog host's own state shape. Widens item-menu.logic.ts's ItemActionDialogKind
+// with "emptyTrash" — a listing-level action (the trash toolbar, not yet built), never dispatched by
+// a per-item menu, so it has no place in that narrower, per-item-scoped union.
+type ActiveDialogKind = ItemActionDialogKind | "emptyTrash"
+
+interface ActiveDialog {
+	kind: ActiveDialogKind
+	items: DriveItem[]
+}
+
+// Kinds the dialog host below actually renders. move/color/versions/info/link are a typed seam (the
+// switch's arm for each is a bare `null` — later work renders the real dialog there) — activeDialog
+// still tracks them like any other kind, so without this a seam kind would look identical to a real
+// wired one to the F2/Delete guards, permanently wedging activeDialog !== null (and so those
+// shortcuts) the moment a menu dispatched one, since nothing ever renders to close it again.
+const WIRED_DIALOG_KINDS = new Set<ActiveDialogKind>(["rename", "trash", "delete", "emptyTrash"])
 
 // Module scope, not inside the component: runs exactly once per module evaluation (see
 // theme-provider.tsx's own "app.toggleTheme" registration for the full StrictMode/HMR rationale).
@@ -75,6 +100,21 @@ registerAction({
 	defaultCombo: "v",
 	scope: "drive",
 	descriptionKey: "driveCommandToggleView"
+})
+// Opens the rename dialog for the roving-cursor item — see the useAction call below for the guard
+// (only a real, wired dialog blocks it; only an item driveItemActions itself would offer Rename for).
+registerAction({
+	id: "drive.rename",
+	defaultCombo: "f2",
+	scope: "drive",
+	descriptionKey: "driveCommandRename"
+})
+// Opens the trash confirm for the current selection — see the useAction call below for its guards.
+registerAction({
+	id: "drive.trash",
+	defaultCombo: "delete,backspace",
+	scope: "drive",
+	descriptionKey: "driveCommandTrash"
 })
 
 const ROW_HEIGHT = 40
@@ -117,6 +157,16 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const [anchorIndex, setAnchorIndex] = useState(0)
 	const safeActiveIndex = clampListboxIndex(activeIndex, sortedItems.length)
 	const safeAnchorIndex = clampListboxIndex(anchorIndex, sortedItems.length)
+
+	// The dialog host's own state — one instance of whichever dialog activeDialog.kind names is
+	// rendered below (renderActiveDialog), never more than one at a time. `dialogPending` is shared
+	// across all of them since only one is ever mounted.
+	const [activeDialog, setActiveDialog] = useState<ActiveDialog | null>(null)
+	const [dialogPending, setDialogPending] = useState(false)
+	// True only while a dialog that actually RENDERS something is open — a seam kind (move/color/
+	// versions/info/link) never shows anything, so it must not count as "open" for the F2/Delete
+	// guards below (see WIRED_DIALOG_KINDS).
+	const isDialogOpen = activeDialog !== null && WIRED_DIALOG_KINDS.has(activeDialog.kind)
 
 	// A fresh directory/variant must never inherit the previous one's selection or cursor. Routes
 	// that only change `splat` (deeper nav within the same drive.$.tsx route) re-render this
@@ -361,6 +411,179 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		await viewModePrefsQuery.refetch()
 	}
 
+	function closeActiveDialog(): void {
+		setActiveDialog(null)
+	}
+
+	// Threaded into DriveRow/DriveTile as onItemAction (consistent with onPointerSelect/onOpen) — every
+	// "dialog"-run item-menu descriptor calls this with its own kind; "direct"-run ones (favorite/
+	// restore) resolve fully inside item-menu.tsx and never reach here.
+	function handleItemAction(kind: ItemActionDialogKind, item: DriveItem): void {
+		setActiveDialog({ kind, items: [item] })
+	}
+
+	async function handleRenameSubmit(item: DriveItem, value: string): Promise<void> {
+		setDialogPending(true)
+		const outcome = await renameItem(item, value.trim())
+		setDialogPending(false)
+
+		if (outcome.status === "error") {
+			// Dialog stays open on error (e.g. a name clash) so the user can fix the name and retry —
+			// mirrors new-directory.tsx's identical convention.
+			toast.error(errorLabel(outcome.dto))
+			return
+		}
+
+		closeActiveDialog()
+	}
+
+	async function handleTrashConfirm(items: DriveItem[]): Promise<void> {
+		setDialogPending(true)
+		const outcome = await trashItems(items)
+		setDialogPending(false)
+		closeActiveDialog()
+		toastBulkOutcome(outcome)
+		// A trashed item vanishes from every listing it could have been selected in (see actions.ts) —
+		// leaving it selected would strand a phantom entry in the "N selected" count. A no-op for
+		// whichever failed (still visible, correctly still selected).
+		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
+	}
+
+	async function handleDeleteConfirm(items: DriveItem[]): Promise<void> {
+		setDialogPending(true)
+		const outcome = await deleteItemsPermanently(items)
+		setDialogPending(false)
+		closeActiveDialog()
+		toastBulkOutcome(outcome)
+		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
+	}
+
+	async function handleEmptyTrashConfirm(): Promise<void> {
+		setDialogPending(true)
+		const outcome = await emptyTrash()
+		setDialogPending(false)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+			return
+		}
+
+		closeActiveDialog()
+	}
+
+	// One instance of whichever dialog is active, switching on activeDialog.kind — never more than one
+	// mounted at a time. move/color/versions/info/link are a clean typed seam (later work fills these
+	// arms in; dispatching the intent here already works end to end).
+	function renderActiveDialog(): ReactNode {
+		if (!activeDialog) {
+			return null
+		}
+
+		switch (activeDialog.kind) {
+			case "rename": {
+				const item = activeDialog.items[0]
+
+				if (!item) {
+					return null
+				}
+
+				return (
+					<InputDialog
+						open
+						pending={dialogPending}
+						title={t("driveActionRename")}
+						body={t("driveRenameDialogBody")}
+						label={t("driveNewDirectoryLabel")}
+						initialValue={item.data.decryptedMeta?.name ?? ""}
+						submitLabel={t("driveActionRename")}
+						validate={value => value.trim().length > 0}
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onSubmit={value => {
+							void handleRenameSubmit(item, value)
+						}}
+					/>
+				)
+			}
+			case "trash":
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("driveTrashConfirmTitle")}
+						body={t("driveTrashConfirmBody", { count: activeDialog.items.length })}
+						confirmLabel={t("driveActionTrash")}
+						cancelLabel={t("common:cancel")}
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleTrashConfirm(activeDialog.items)
+						}}
+					/>
+				)
+			case "delete":
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("driveDeletePermanentlyConfirmTitle")}
+						body={t("driveDeletePermanentlyConfirmBody", { count: activeDialog.items.length })}
+						confirmLabel={t("driveActionDeletePermanently")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleDeleteConfirm(activeDialog.items)
+						}}
+					/>
+				)
+			case "emptyTrash": {
+				const phrase = t("driveEmptyTrashTypedConfirmPhrase")
+
+				return (
+					<TypedConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("driveEmptyTrashConfirmTitle")}
+						body={t("driveEmptyTrashConfirmBody", { phrase })}
+						matchLabel={t("driveEmptyTrashTypedConfirmLabel")}
+						matchValue={phrase}
+						confirmLabel={t("driveActionEmptyTrash")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleEmptyTrashConfirm()
+						}}
+					/>
+				)
+			}
+			// Placeholder — MoveTargetDialog/ColorPicker/VersionsPanel/InfoPanel render here.
+			case "move":
+			case "color":
+			case "versions":
+			case "info":
+				return null
+			// Placeholder — the public-link dialog renders here.
+			case "link":
+				return null
+		}
+	}
+
 	// Registered above at module scope. Browser default for mod+a is "select all page text" — must
 	// preventDefault or the native selection would visibly compete with the drive-item selection.
 	useAction(
@@ -392,6 +615,47 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		},
 		undefined,
 		[effectiveViewMode, applyViewModeChange]
+	)
+
+	// Registered above at module scope. No preventDefault — F2 has no disruptive browser default.
+	// Reuses driveItemActions' own gating (rather than re-deriving "not in trash, not undecryptable"
+	// here) so this can never open a rename the item menu itself wouldn't offer for the same item.
+	useAction(
+		"drive.rename",
+		() => {
+			if (isDialogOpen) {
+				return
+			}
+
+			const item = sortedItems[safeActiveIndex]
+
+			if (!item || !driveItemActions(item, variant).some(descriptor => descriptor.id === "rename")) {
+				return
+			}
+
+			setActiveDialog({ kind: "rename", items: [item] })
+		},
+		undefined,
+		[isDialogOpen, sortedItems, safeActiveIndex, variant]
+	)
+
+	// Registered above at module scope. preventDefault unconditionally — Backspace's browser default
+	// (navigate back) must never fire while this listing has focus, guarded case or not. Guards: empty
+	// selection, a wired dialog already open (isDialogOpen — see its own comment), and trash itself
+	// (permanent delete stays menu-only + explicitly confirmed, never a bare keypress).
+	useAction(
+		"drive.trash",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+
+			if (selectedItems.length === 0 || isDialogOpen || variant === "trash") {
+				return
+			}
+
+			setActiveDialog({ kind: "trash", items: selectedItems })
+		},
+		undefined,
+		[selectedItems, isDialogOpen, variant]
 	)
 
 	return (
@@ -487,6 +751,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 													index={virtualRow.index}
 													selected={selectedUuids.has(item.data.uuid)}
 													active={virtualRow.index === safeActiveIndex}
+													variant={variant}
 													style={{
 														position: "absolute",
 														top: 0,
@@ -496,6 +761,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 													}}
 													onPointerSelect={handlePointerSelect}
 													onOpen={handleOpen}
+													onItemAction={handleItemAction}
 													registerRef={registerRef}
 												/>
 											)
@@ -528,8 +794,10 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 															index={itemIndex}
 															selected={selectedUuids.has(item.data.uuid)}
 															active={itemIndex === safeActiveIndex}
+															variant={variant}
 															onPointerSelect={handlePointerSelect}
 															onOpen={handleOpen}
+															onItemAction={handleItemAction}
 															registerRef={registerRef}
 														/>
 													)
@@ -541,6 +809,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					</>
 				)}
 			</div>
+			{renderActiveDialog()}
 		</>
 	)
 }

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { seededValueOnOpen } from "@/components/dialogs/input-dialog.logic"
 
 interface InputDialogProps {
 	open: boolean
@@ -14,6 +15,10 @@ interface InputDialogProps {
 	body: string
 	label: string
 	placeholder?: string | undefined
+	// Pre-fills the field on every closed-to-open transition (rename's existing item name) instead of
+	// the always-blank default; the field is also re-selected on open (see the Input's onFocus below)
+	// so typing immediately overwrites it. Omitted keeps the original always-blank behavior.
+	initialValue?: string | undefined
 	// Optional input-attribute passthroughs (e.g. type="password" + autoComplete="current-password",
 	// or inputMode="numeric" + maxLength for a one-time code). The DOM attribute types already carry
 	// `| undefined`, so possibly-undefined caller state passes through directly under
@@ -31,12 +36,13 @@ interface InputDialogProps {
 // Generic single-field prompt built on the dialog primitive — the shared base for "type a value and
 // submit" flows (the pre-primitive forgot-password dialog's shape, generalized). Namespace-agnostic
 // like every dialog primitive in this directory: every label is caller-resolved. The typed value
-// always starts blank and resets on every open transition (adjusting state during render, same
-// "reset state when a prop changes" pattern the forgot-password dialog and TypedConfirmDialog use)
-// so a dismissed prompt never resurfaces a stale value the next time it opens. Dismissal is BLOCKED
-// while `pending` — Escape, outside-press and the X close button (also visually disabled) all
-// funnel through onOpenChange, and a `false` while the operation runs is a no-op, so the dialog
-// stays open until it settles — rationale in dismissal.logic.ts.
+// starts at initialValue (blank when omitted) and resets on every open transition (adjusting state
+// during render, same "reset state when a prop changes" pattern the forgot-password dialog and
+// TypedConfirmDialog use — see input-dialog.logic.ts) so a dismissed prompt never resurfaces a stale
+// value the next time it opens. Dismissal is BLOCKED while `pending` — Escape, outside-press and the
+// X close button (also visually disabled) all funnel through onOpenChange, and a `false` while the
+// operation runs is a no-op, so the dialog stays open until it settles — rationale in
+// dismissal.logic.ts.
 function InputDialog({
 	open,
 	pending,
@@ -44,6 +50,7 @@ function InputDialog({
 	body,
 	label,
 	placeholder,
+	initialValue,
 	type,
 	inputMode,
 	autoComplete,
@@ -54,11 +61,12 @@ function InputDialog({
 	onSubmit
 }: InputDialogProps) {
 	const [wasOpen, setWasOpen] = useState(open)
-	const [value, setValue] = useState("")
+	const [value, setValue] = useState(initialValue ?? "")
 	if (open !== wasOpen) {
 		setWasOpen(open)
-		if (open) {
-			setValue("")
+		const seeded = seededValueOnOpen(open, wasOpen, initialValue ?? "")
+		if (seeded !== null) {
+			setValue(seeded)
 		}
 	}
 	const valid = validate(value)
@@ -109,6 +117,12 @@ function InputDialog({
 							disabled={pending}
 							onChange={e => {
 								setValue(e.target.value)
+							}}
+							onFocus={e => {
+								// Base UI's Dialog re-focuses the popup's initial-focus target (this input, via
+								// FloatingFocusManager) on every open, not just first mount — so this reliably
+								// selects the pre-filled value each time, not only once.
+								e.target.select()
 							}}
 						/>
 					</Field>

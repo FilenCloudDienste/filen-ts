@@ -108,8 +108,15 @@ export const drive = {
 	driveCommandClearSelection: "Clear selection",
 	/** Keymap registry — description for the drive.toggleView command */
 	driveCommandToggleView: "Toggle view",
+	/** Keymap registry — description for the drive.rename command */
+	driveCommandRename: "Rename",
+	/** Keymap registry — description for the drive.trash command */
+	driveCommandTrash: "Trash",
 
 	// ── Item action menu ─────────────────────────────────────────────────────
+	/** Item menu — accessible label for the ⋯ button opening the per-item action menu */
+	driveItemMenuTrigger: "More actions",
+	//
 	// Per-item and bulk-selection context-menu entries. Imperative verbs (menu actions), not
 	// descriptions of state — see driveActionFavorite/driveActionUnfavorite in particular.
 	/** Item menu — rename the selected item; opens the rename dialog */
@@ -138,6 +145,10 @@ export const drive = {
 	driveActionCopyLink: "Copy link",
 	/** Trash toolbar — permanently delete every item currently in the trash; also the empty-trash confirm dialog's confirm button */
 	driveActionEmptyTrash: "Empty trash",
+
+	// ── Rename dialog ────────────────────────────────────────────────────────
+	/** Rename dialog — body under the title (driveActionRename doubles as both the dialog title and its submit button, matching the new-directory dialog's own title/submit pairing) */
+	driveRenameDialogBody: "Enter a new name.",
 
 	// ── Trash confirm ────────────────────────────────────────────────────────
 	/** Trash confirm dialog — title; the confirm button reuses driveActionTrash */
