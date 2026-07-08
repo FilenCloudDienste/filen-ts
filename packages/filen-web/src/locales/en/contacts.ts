@@ -25,10 +25,6 @@ export const contacts = {
 	contactsEmptyTitle: "No contacts",
 	/** Contacts page — empty-state body under contactsEmptyTitle */
 	contactsEmptyBody: "Add a contact to start sharing and chatting.",
-	/** Contacts page — empty-state title when there are no incoming or outgoing requests */
-	contactsRequestsEmptyTitle: "No requests",
-	/** Contacts page — empty-state body under contactsRequestsEmptyTitle */
-	contactsRequestsEmptyBody: "Contact requests you send or receive will appear here.",
 	/** Contacts page — title shown when the contacts/requests queries fail to load; the body is the failing query's own errorLabel */
 	contactsLoadError: "Couldn't load contacts",
 
@@ -65,8 +61,6 @@ export const contacts = {
 	contactsAddEmailLabel: "Email",
 	/** Add-contact dialog — email field placeholder */
 	contactsAddEmailPlaceholder: "you@example.com",
-	/** Add-contact dialog — validation message shown when the typed address is not a valid email */
-	contactsAddInvalidEmail: "Enter a valid email address",
 
 	// ── Row menu ─────────────────────────────────────────────────────────────
 	/** Contact row — accessible label on the trailing "More actions" (⋯) menu trigger (Remove/Block) */
