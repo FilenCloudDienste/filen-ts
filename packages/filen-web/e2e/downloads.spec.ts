@@ -1,0 +1,365 @@
+import { statSync } from "node:fs"
+import type { Page } from "@playwright/test"
+import { test, expect } from "./fixtures"
+
+// Neither native picker is drivable by Playwright, so every FSA-path test below stubs
+// window.showSaveFilePicker (installed via addInitScript, before the app's own first script runs, so
+// isFsaAvailable() -- save-download.ts -- sees it from first paint) with a function that returns a fake
+// FileSystemFileHandle-alike whose createWritable() resolves to a REAL WritableStream (required:
+// ReadableStream.pipeTo's own brand check rejects a duck-typed non-WritableStream object) backed by a
+// custom sink. The app still runs its real FSA code path end to end (capability check -> picker ->
+// TransformStream bridge -> coordinated teardown -- save-download.ts/download.ts) against that
+// controllable sink, which accumulates into window.__smokeSink for the test to read back. The SW-path
+// test instead DELETES the picker so isFsaAvailable() is false and the app takes the service-worker
+// route, whose plain navigation becomes a real browser download caught via page.waitForEvent("download").
+//
+// Every test drives the SAME UI trigger: select the row(s), then the bulk-action bar's "Download"
+// button (bulk-action-bar.tsx) -- chosen over the per-item ⋯ menu (its trigger is opacity-0 until
+// row-hover, an extra, unnecessary step to drive from Playwright) and over the mod+s keymap (an
+// invisible interaction with no visible affordance to assert against first). Selecting a row always
+// swaps the toolbar for the bulk bar, even for a single-item selection (directory-listing.tsx), so one
+// trigger covers both the single-file and the zip path below.
+const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
+
+// Meta on macOS (where this suite runs today), Control elsewhere -- mirrors drive-actions.spec.ts's own
+// multi-select modifier.
+const MOD_KEY = process.platform === "darwin" ? "Meta" : "Control"
+
+// Ambient shims for globals this spec installs on the page, merged with e2e/global.d.ts's own Window
+// augmentation (same program, same declaration-merging rules) rather than touching that file -- none of
+// these are real e2e hooks the app ships, just this spec's own test doubles/scratch state.
+declare global {
+	interface Window {
+		// File System Access API -- absent from this project's e2e tsconfig program (src/types/file-system-access.d.ts
+		// isn't part of it; see tsconfig.node.json's own "include" list), so it needs its own minimal
+		// ambient shim here, mirroring that file's rationale. Optional so stubFsaPicker/deleteFsaPicker
+		// below can assign/delete it.
+		showSaveFilePicker?: (options?: { suggestedName?: string }) => Promise<{
+			createWritable: () => Promise<WritableStream<Uint8Array>>
+		}>
+		// Set by stubFsaPicker's addInitScript before the app's own first script runs -- accumulates every
+		// byte the app's real FSA code path (save-download.ts/download.ts) writes into the fake sink below,
+		// plus the first 4 bytes written (the zip test's magic-number check). Declared non-optional: every
+		// test that reads it called stubFsaPicker first (mirrors e2e/global.d.ts's own __filenE2E rationale).
+		__smokeSink: { bytes: number; first4: number[] }
+		// Test-local stash for whatever createTestFiles/createLargeTestFile actually created, read back by
+		// trashCreatedTestFiles in each test's own finally. Kept off the Playwright<->page bridge (JSON-only,
+		// bigint-unsafe) the same way e2e/global.d.ts's own hook return values are, hence `unknown[]` rather
+		// than importing the SDK's File type. Optional: trashCreatedTestFiles runs even if creation itself
+		// never got far enough to assign it.
+		__e2eDownloadFiles?: unknown[]
+	}
+}
+
+// Duplicated from drive.spec.ts/uploads.spec.ts rather than shared -- this package has no cross-spec e2e
+// helpers module yet, and every other spec file here owns its helpers locally too.
+async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
+	const listbox = page.getByRole("listbox", { name: "Directory contents" })
+	const empty = page.getByText("Nothing here yet")
+
+	await expect(listbox.or(empty)).toBeVisible()
+
+	return { listbox, hasItems: await listbox.isVisible() }
+}
+
+// A file created through createTestFiles/createLargeTestFile below bypasses the UI upload path's own
+// optimistic cache patch (lib/drive/upload.ts) -- it lands on the account for real, but an
+// already-mounted listing has no live invalidation to pick it up (queries/client.ts: "Socket-driven
+// invalidation (not yet wired)"), and live-verified: without this, a hook-created file never appears in
+// an already-open listing on its own. Every drive query defaults to staleTime 0 + refetchOnWindowFocus
+// (queries/client.ts) -- the same mechanism drive-actions.spec.ts's own final-cleanup comment documents
+// this suite already relying on -- so dispatching the exact event TanStack Query's FocusManager listens
+// for (verified against the installed @tanstack/query-core: window.addEventListener("visibilitychange", ...))
+// forces the still-mounted listing query to refetch deterministically, without a reload (forbidden
+// mid-flow) or a second page.goto.
+async function forceListingRefetch(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		window.dispatchEvent(new Event("visibilitychange"))
+	})
+}
+
+// Trick 1 (FSA path, Chromium's default) -- see the file-level comment above for the full rationale.
+// `throttleMs`, when positive, awaits inside write() so a caller (the cancel test) can keep a transfer
+// reliably in-flight long enough for a real Cancel click to land.
+async function stubFsaPicker(page: Page, throttleMs = 0): Promise<void> {
+	await page.addInitScript(delayMs => {
+		window.__smokeSink = { bytes: 0, first4: [] }
+
+		window.showSaveFilePicker = () =>
+			Promise.resolve({
+				createWritable: () =>
+					Promise.resolve(
+						new WritableStream<Uint8Array>({
+							async write(chunk) {
+								if (delayMs > 0) {
+									await new Promise<void>(resolve => {
+										setTimeout(resolve, delayMs)
+									})
+								}
+
+								if (window.__smokeSink.first4.length === 0 && chunk.byteLength > 0) {
+									window.__smokeSink.first4 = Array.from(chunk.subarray(0, 4))
+								}
+
+								window.__smokeSink.bytes += chunk.byteLength
+							}
+						})
+					)
+			})
+	}, throttleMs)
+}
+
+// Trick 2 (SW path, Firefox/Safari's default -- forced here on Chromium) -- see the file-level comment
+// above for the full rationale.
+async function deleteFsaPicker(page: Page): Promise<void> {
+	await page.addInitScript(() => {
+		delete window.showSaveFilePicker
+	})
+}
+
+function readSmokeSink(page: Page): Promise<{ bytes: number; first4: number[] }> {
+	return page.evaluate(() => window.__smokeSink)
+}
+
+// Small, real files created directly through the worker (no UI) via the app's e2e hooks, mirroring
+// sw.spec.ts's own zip test: Promise.allSettled so one failed create doesn't strand the others, net-zero
+// via trashCreatedTestFiles below. Every call here is paired with forceListingRefetch so the still-open
+// listing actually shows the new row (see that helper's own comment).
+async function createTestFiles(page: Page, files: { name: string; content: string }[]): Promise<void> {
+	await page.evaluate(async entries => {
+		const hooks = window.__filenE2E
+		const created = await Promise.allSettled(entries.map(entry => hooks.createTestFile(entry.name, entry.content)))
+		window.__e2eDownloadFiles = created.flatMap(result => (result.status === "fulfilled" ? [result.value] : []))
+	}, files)
+
+	await forceListingRefetch(page)
+}
+
+// Same shape as createTestFiles above, but for the cancel test's larger file: the content is generated
+// INSIDE the page rather than passed as an argument, so a several-MiB string never has to cross the
+// Playwright<->page bridge as a serialized call argument.
+async function createLargeTestFile(page: Page, name: string, sizeBytes: number): Promise<void> {
+	await page.evaluate(
+		async ({ name, sizeBytes }) => {
+			const hooks = window.__filenE2E
+			const file = await hooks.createTestFile(name, "x".repeat(sizeBytes))
+			window.__e2eDownloadFiles = [file]
+		},
+		{ name, sizeBytes }
+	)
+
+	await forceListingRefetch(page)
+}
+
+// Net-zero companion to createTestFiles/createLargeTestFile -- trashes whatever actually landed on the
+// page-global stash, allSettled so one failure doesn't strand the rest (mirrors sw.spec.ts's own finally).
+async function trashCreatedTestFiles(page: Page): Promise<void> {
+	await page.evaluate(async () => {
+		const hooks = window.__filenE2E
+		const files = window.__e2eDownloadFiles ?? []
+		await Promise.allSettled(files.map(file => hooks.trashTestFile(file)))
+	})
+}
+
+test.describe("downloads", () => {
+	test("a single file downloads through the File System Access path and the transfer reaches Done", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await stubFsaPicker(page)
+
+		await page.goto("/drive")
+		const { listbox } = await waitForListingSettled(page)
+
+		const fileName = `e2e-download-fsa-${crypto.randomUUID()}.txt`
+		const content = "filen web e2e download probe"
+
+		try {
+			await createTestFiles(page, [{ name: fileName, content }])
+
+			const row = listbox.getByRole("option", { name: fileName })
+			await expect(row).toBeVisible({ timeout: 20_000 })
+
+			await row.click()
+			await page.getByRole("button", { name: "Download", exact: true }).click()
+
+			await page
+				.getByRole("button", { name: /Transfers/i })
+				.first()
+				.click()
+
+			// The transfer row's accessible name lives on its progressbar, not the row's outer container --
+			// the Pause/Cancel buttons are exact-named siblings (vs. the separate /transfers screen's own
+			// "Pause all"/"Cancel all"), located independently below since only one row is ever active here.
+			await expect(page.getByRole("progressbar", { name: fileName })).toBeVisible()
+			await expect(page.getByText("Done")).toBeVisible({ timeout: 20_000 })
+
+			const sink = await readSmokeSink(page)
+			expect(sink.bytes).toBe(Buffer.byteLength(content, "utf8"))
+		} finally {
+			await trashCreatedTestFiles(page)
+		}
+	})
+
+	test("a multi-select download zips into ONE archive over the File System Access path", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await stubFsaPicker(page)
+
+		await page.goto("/drive")
+		const { listbox } = await waitForListingSettled(page)
+
+		const nameA = `e2e-download-zip-a-${crypto.randomUUID()}.txt`
+		const nameB = `e2e-download-zip-b-${crypto.randomUUID()}.txt`
+
+		try {
+			await createTestFiles(page, [
+				{ name: nameA, content: "filen web e2e zip download file a" },
+				{ name: nameB, content: "filen web e2e zip download file b" }
+			])
+
+			const rowA = listbox.getByRole("option", { name: nameA })
+			const rowB = listbox.getByRole("option", { name: nameB })
+			await expect(rowA).toBeVisible({ timeout: 20_000 })
+			await expect(rowB).toBeVisible({ timeout: 20_000 })
+
+			// Click, then modifier-click to add to the selection -- the same mechanism drive-actions.spec.ts's
+			// own bulk tests use.
+			await rowA.click()
+			await rowB.click({ modifiers: [MOD_KEY] })
+			await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
+
+			await page.getByRole("button", { name: "Download", exact: true }).click()
+
+			await page
+				.getByRole("button", { name: /Transfers/i })
+				.first()
+				.click()
+
+			// A mixed multi-item selection has no single source name to derive from, so the zip falls back to
+			// the shared generic archive name (download-zip.ts's resolveSuggestedZipName).
+			await expect(page.getByRole("progressbar", { name: "Filen.zip" })).toBeVisible({ timeout: 10_000 })
+			await expect(page.getByRole("progressbar", { name: "Filen.zip" })).toHaveCount(1)
+
+			await expect(page.getByText("Done")).toBeVisible({ timeout: 20_000 })
+
+			const sink = await readSmokeSink(page)
+			// ZIP local-file-header magic (PK\x03\x04) -- proves a real, complete archive streamed through,
+			// not just a registration ack.
+			expect(sink.first4).toEqual([0x50, 0x4b, 0x03, 0x04])
+			expect(sink.bytes).toBeGreaterThan(100)
+		} finally {
+			await trashCreatedTestFiles(page)
+		}
+	})
+
+	test("a single file downloads through the service-worker path as a real browser download", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await deleteFsaPicker(page)
+
+		await page.goto("/drive")
+		const { listbox } = await waitForListingSettled(page)
+
+		const fileName = `e2e-download-sw-${crypto.randomUUID()}.txt`
+		const content = "filen web e2e sw download probe"
+
+		try {
+			await createTestFiles(page, [{ name: fileName, content }])
+
+			const row = listbox.getByRole("option", { name: fileName })
+			await expect(row).toBeVisible({ timeout: 20_000 })
+
+			await row.click()
+
+			const [download] = await Promise.all([
+				page.waitForEvent("download", { timeout: 15_000 }),
+				page.getByRole("button", { name: "Download", exact: true }).click()
+			])
+
+			expect(download.suggestedFilename()).toBe(fileName)
+			expect(statSync(await download.path()).size).toBe(Buffer.byteLength(content, "utf8"))
+
+			// The sw path is fire-and-forget once the navigation triggers (save-download.ts's
+			// triggerSwDownload; download.ts's runDownload sw branch has no per-byte progress to report,
+			// unlike the fsa branch) -- live-verified against runDownload's own settle call that the row
+			// still reaches Done for a file this size, so that is what this asserts, not an invented
+			// intermediate state.
+			await page
+				.getByRole("button", { name: /Transfers/i })
+				.first()
+				.click()
+			await expect(page.getByRole("progressbar", { name: fileName })).toBeVisible()
+			await expect(page.getByText("Done")).toBeVisible({ timeout: 20_000 })
+		} finally {
+			await trashCreatedTestFiles(page)
+		}
+	})
+
+	test("cancelling a File System Access download mid-flight removes the row and leaves the source untouched", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		// A throttled sink (~75ms per chunk) keeps a large-enough download reliably in-flight long enough
+		// for a real Cancel click to land deterministically, rather than racing a real transfer's own,
+		// unpredictable network speed. Live-verified against this exact SDK/account: a 24 MiB file streams
+		// in ~1 MiB chunks, so the throttle alone buys several seconds of in-flight window -- comfortably
+		// under the "few MiB, well under 50MB" ceiling a real UI upload input would otherwise need.
+		await stubFsaPicker(page, 75)
+
+		await page.goto("/drive")
+		const { listbox } = await waitForListingSettled(page)
+
+		const fileName = `e2e-download-cancel-${crypto.randomUUID()}.bin`
+		const sizeBytes = 24 * 1024 * 1024
+
+		try {
+			await createLargeTestFile(page, fileName, sizeBytes)
+
+			const row = listbox.getByRole("option", { name: fileName })
+			await expect(row).toBeVisible({ timeout: 20_000 })
+
+			await row.click()
+			await page.getByRole("button", { name: "Download", exact: true }).click()
+
+			await page
+				.getByRole("button", { name: /Transfers/i })
+				.first()
+				.click()
+
+			const progressbar = page.getByRole("progressbar", { name: fileName })
+			await expect(progressbar).toBeVisible()
+
+			await page.getByRole("button", { name: "Cancel", exact: true }).click()
+
+			// Cancelled transfers keep no history (download.ts's runDownload Cancelled branch settles then
+			// immediately removes the row) -- unlike a finished row, there is no separate Dismiss step.
+			await expect(progressbar).toHaveCount(0)
+			await expect(page.getByText(/failed/i)).toHaveCount(0)
+
+			// The source item itself is untouched -- cancelling aborts the in-flight transfer, never the
+			// underlying file, and the listing was never patched by a download in the first place.
+			await expect(row).toBeVisible()
+		} finally {
+			await trashCreatedTestFiles(page)
+		}
+	})
+})
