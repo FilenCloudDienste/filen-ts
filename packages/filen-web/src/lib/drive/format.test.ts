@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File } from "@filen/sdk-rs"
+import type { Dir, File, SharedDir, SharedFile, SharingRole } from "@filen/sdk-rs"
 import { narrowItem } from "@/lib/drive/item"
-import { formatCreatedDate, formatItemSize, formatModifiedDate, formatVersionTimestamp } from "@/lib/drive/format"
+import { formatCreatedDate, formatItemSize, formatModifiedDate, formatVersionTimestamp, sharedIdentityLabel } from "@/lib/drive/format"
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {
@@ -36,6 +36,40 @@ function mockFile(overrides: Partial<File> = {}): File {
 
 function expectedDate(ms: number): string {
 	return new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+}
+
+function sharerRole(id: number, email: string): SharingRole {
+	return { Sharer: { email, id } }
+}
+
+// A SharedFile has no `favorited` field, so narrowItem resolves it to a sharedRootFile — one of the
+// three arms getSharerIdentity reads its sharingRole directly off of (see item.ts).
+function mockSharedFile(overrides: Partial<SharedFile> = {}): SharedFile {
+	return {
+		uuid: "44444444-4444-4444-4444-444444444444",
+		size: 2_048n,
+		region: "de-1",
+		bucket: "filen-1",
+		chunks: 2n,
+		timestamp: 1_700_000_000_000n,
+		meta: {
+			type: "decoded",
+			data: { name: "shared.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
+		},
+		sharingRole: sharerRole(42, "sharer@filen.io"),
+		sharedTag: true,
+		...overrides
+	}
+}
+
+// A bare SharedDir (no fetcher-spread sharingRole) narrows to a sharedDirectory whose data.sharingRole
+// is undefined — getSharerIdentity has nothing to read and no resolver is passed in these tests.
+function mockSharedDir(overrides: Partial<SharedDir> = {}): SharedDir {
+	return {
+		inner: mockDir({ uuid: "55555555-5555-5555-5555-555555555555", meta: { type: "decoded", data: { name: "SharedChild" } } }),
+		sharedTag: true,
+		...overrides
+	}
 }
 
 describe("formatItemSize", () => {
@@ -138,5 +172,29 @@ describe("formatVersionTimestamp", () => {
 		const laterSameDay = formatVersionTimestamp(1_700_000_000_000n + 60n * 60n * 1000n)
 
 		expect(morning).not.toBe(laterSameDay)
+	})
+})
+
+describe("sharedIdentityLabel", () => {
+	it("returns null for a non-shared variant regardless of the item", () => {
+		expect(sharedIdentityLabel(narrowItem(mockDir()), "drive")).toBeNull()
+	})
+
+	it("returns null on a shared variant when the item's role can't be read", () => {
+		const item = narrowItem(mockSharedDir())
+
+		expect(sharedIdentityLabel(item, "sharedIn")).toBeNull()
+	})
+
+	it("labels a resolvable identity on sharedIn with driveSharedByLabel — who shared it with me", () => {
+		const item = narrowItem(mockSharedFile())
+
+		expect(sharedIdentityLabel(item, "sharedIn")).toEqual({ labelKey: "driveSharedByLabel", name: "sharer@filen.io" })
+	})
+
+	it("labels a resolvable identity on sharedOut with driveSharedWithLabel — who I shared it with", () => {
+		const item = narrowItem(mockSharedFile())
+
+		expect(sharedIdentityLabel(item, "sharedOut")).toEqual({ labelKey: "driveSharedWithLabel", name: "sharer@filen.io" })
 	})
 })
