@@ -1,7 +1,7 @@
-// English source catalog — "transfers" namespace: the icon-rail Transfers trigger and its panel
-// (components/transfers/*) tracking in-flight and finished uploads AND downloads, plus the
-// upload/download-summary toasts startUploads (lib/drive/upload.ts) / startDownloads
-// (lib/drive/download.ts) fire once a batch finishes. Same typed-catalog rules as
+// English source catalog — "transfers" namespace: the icon-rail Transfers trigger, its popover panel,
+// and the full /transfers screen (components/transfers/*) tracking in-flight and finished uploads AND
+// downloads, plus the upload/download-summary toasts startUploads (lib/drive/upload.ts) /
+// startDownloads (lib/drive/download.ts) fire once a batch finishes. Same typed-catalog rules as
 // common/errors/auth/drive/contacts: flat `as const` object, camelCase keys, no literal '.' or ':'
 // (real i18next namespaces, keySeparator/nsSeparator both ON).
 //
@@ -26,10 +26,28 @@ export const transfers = {
 	transfersEmptyBody: "Files you upload will appear here.",
 	/** Transfers panel — button clearing every finished (done/error) transfer from the list; active uploads are unaffected */
 	transfersClearFinished: "Clear finished",
+	/** Transfers panel — footer link navigating to the full /transfers screen; closes the popover */
+	transfersPanelSeeAll: "See all",
+
+	// ── Screen ───────────────────────────────────────────────────────────────
+	/** Transfers screen — empty-state body under transfersEmptyTitle (the screen reuses the panel's title; this body mentions both directions since the full page has room to) */
+	transfersScreenEmptyBody: "Uploads and downloads will appear here.",
+	/** Transfers screen — heading above the section listing in-flight (uploading/downloading) transfers */
+	transfersScreenSectionActive: "Active",
+	/** Transfers screen — heading above the section listing finished (done/error) transfers */
+	transfersScreenSectionFinished: "Finished",
+	/** Transfers screen — header button pausing every active, not-yet-paused transfer; disabled when none qualify */
+	transfersScreenPauseAll: "Pause all",
+	/** Transfers screen — header button resuming every active, paused transfer; disabled when none qualify */
+	transfersScreenResumeAll: "Resume all",
+	/** Transfers screen — header button cancelling every active transfer, paused or not; disabled when none qualify */
+	transfersScreenCancelAll: "Cancel all",
 
 	// ── Row ──────────────────────────────────────────────────────────────────
 	/** Transfer row — status label while a file is uploading */
 	transfersStatusUploading: "Uploading",
+	/** Transfer row — status label while a file is downloading */
+	transfersStatusDownloading: "Downloading",
 	/** Transfer row — status label once a file finished uploading */
 	transfersStatusDone: "Done",
 	/** Transfer row — status label when a file failed to upload; the row also surfaces the failing outcome's own error label */

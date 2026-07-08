@@ -17,6 +17,7 @@ import { Route as AppRouteRouteImport } from './routes/_app/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ResetTokenRouteImport } from './routes/reset.$token'
 import { Route as AppTrashRouteImport } from './routes/_app/trash'
+import { Route as AppTransfersRouteImport } from './routes/_app/transfers'
 import { Route as AppRecentsRouteImport } from './routes/_app/recents'
 import { Route as AppFavoritesRouteImport } from './routes/_app/favorites'
 import { Route as AppContactsRouteImport } from './routes/_app/contacts'
@@ -64,6 +65,11 @@ const AppTrashRoute = AppTrashRouteImport.update({
   path: '/trash',
   getParentRoute: () => AppRouteRoute,
 } as any)
+const AppTransfersRoute = AppTransfersRouteImport.update({
+  id: '/transfers',
+  path: '/transfers',
+  getParentRoute: () => AppRouteRoute,
+} as any)
 const AppRecentsRoute = AppRecentsRouteImport.update({
   id: '/recents',
   path: '/recents',
@@ -109,6 +115,7 @@ export interface FileRoutesByFullPath {
   '/contacts': typeof AppContactsRoute
   '/favorites': typeof AppFavoritesRoute
   '/recents': typeof AppRecentsRoute
+  '/transfers': typeof AppTransfersRoute
   '/trash': typeof AppTrashRoute
   '/reset/$token': typeof ResetTokenRoute
   '/drive/$': typeof AppDriveSplatRoute
@@ -125,6 +132,7 @@ export interface FileRoutesByTo {
   '/contacts': typeof AppContactsRoute
   '/favorites': typeof AppFavoritesRoute
   '/recents': typeof AppRecentsRoute
+  '/transfers': typeof AppTransfersRoute
   '/trash': typeof AppTrashRoute
   '/reset/$token': typeof ResetTokenRoute
   '/drive/$': typeof AppDriveSplatRoute
@@ -143,6 +151,7 @@ export interface FileRoutesById {
   '/_app/contacts': typeof AppContactsRoute
   '/_app/favorites': typeof AppFavoritesRoute
   '/_app/recents': typeof AppRecentsRoute
+  '/_app/transfers': typeof AppTransfersRoute
   '/_app/trash': typeof AppTrashRoute
   '/reset/$token': typeof ResetTokenRoute
   '/_app/drive/$': typeof AppDriveSplatRoute
@@ -161,6 +170,7 @@ export interface FileRouteTypes {
     | '/contacts'
     | '/favorites'
     | '/recents'
+    | '/transfers'
     | '/trash'
     | '/reset/$token'
     | '/drive/$'
@@ -177,6 +187,7 @@ export interface FileRouteTypes {
     | '/contacts'
     | '/favorites'
     | '/recents'
+    | '/transfers'
     | '/trash'
     | '/reset/$token'
     | '/drive/$'
@@ -194,6 +205,7 @@ export interface FileRouteTypes {
     | '/_app/contacts'
     | '/_app/favorites'
     | '/_app/recents'
+    | '/_app/transfers'
     | '/_app/trash'
     | '/reset/$token'
     | '/_app/drive/$'
@@ -270,6 +282,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTrashRouteImport
       parentRoute: typeof AppRouteRoute
     }
+    '/_app/transfers': {
+      id: '/_app/transfers'
+      path: '/transfers'
+      fullPath: '/transfers'
+      preLoaderRoute: typeof AppTransfersRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
     '/_app/recents': {
       id: '/_app/recents'
       path: '/recents'
@@ -326,6 +345,7 @@ interface AppRouteRouteChildren {
   AppContactsRoute: typeof AppContactsRoute
   AppFavoritesRoute: typeof AppFavoritesRoute
   AppRecentsRoute: typeof AppRecentsRoute
+  AppTransfersRoute: typeof AppTransfersRoute
   AppTrashRoute: typeof AppTrashRoute
   AppDriveSplatRoute: typeof AppDriveSplatRoute
   AppSettingsSecurityRoute: typeof AppSettingsSecurityRoute
@@ -337,6 +357,7 @@ const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppContactsRoute: AppContactsRoute,
   AppFavoritesRoute: AppFavoritesRoute,
   AppRecentsRoute: AppRecentsRoute,
+  AppTransfersRoute: AppTransfersRoute,
   AppTrashRoute: AppTrashRoute,
   AppDriveSplatRoute: AppDriveSplatRoute,
   AppSettingsSecurityRoute: AppSettingsSecurityRoute,

@@ -21,3 +21,10 @@ export function transferProgress(transfer: Transfer): number {
 
 	return Math.min(100, Math.max(0, (transfer.bytesTransferred / transfer.size) * 100))
 }
+
+// The active-row status icon's sr-only label key, direction-aware — isActiveTransfer's two members
+// ("uploading"/"downloading") each get their own announcement instead of the row hard-coding the
+// upload one for both directions.
+export function activeStatusLabelKey(direction: Transfer["direction"]): "transfersStatusUploading" | "transfersStatusDownloading" {
+	return direction === "upload" ? "transfersStatusUploading" : "transfersStatusDownloading"
+}

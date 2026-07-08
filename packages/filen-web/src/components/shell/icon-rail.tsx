@@ -58,6 +58,15 @@ registerAction({
 	descriptionKey: "settings"
 })
 
+// Mirrors app.openSettings directly above — same unassigned-by-default route-nav shape, wired the
+// same way in IconRail below.
+registerAction({
+	id: "app.openTransfers",
+	defaultCombo: "",
+	scope: "global",
+	descriptionKey: "moduleTransfers"
+})
+
 type IconType = ComponentType<{ className?: string }>
 
 // The remaining module surfaces land later — rendered as inert, muted rail entries so the
@@ -187,18 +196,24 @@ function AccountMenu() {
 	)
 }
 
-// The one MODULES entry promoted out of the inert loop above: a real Popover trigger (not a Link —
-// there is no /transfers route yet, see stores/transfers.ts's own header comment) showing the rail's
-// live active-upload count. No Tooltip wrapper, unlike every Link-driven entry above — mirrors
-// AccountMenu just above (the rail's other overlay-opening trigger), which also skips one; nesting a
-// hover Tooltip and a click Popover on the same trigger is an untested composition in this codebase,
-// not worth risking here.
+// The one MODULES entry promoted out of the inert loop above: a real Popover trigger (still a
+// Popover, not a Link — it stays the quick glance; the panel's own "See all" footer is the Link to
+// the full /transfers screen) showing the rail's live active-upload count. No Tooltip wrapper, unlike
+// every Link-driven entry above — mirrors AccountMenu just above (the rail's other overlay-opening
+// trigger), which also skips one; nesting a hover Tooltip and a click Popover on the same trigger is
+// an untested composition in this codebase, not worth risking here. Open state is lifted and
+// controlled (rather than the uncontrolled default every other Popover.Root usage would default to)
+// solely so the panel's "See all" link can close it on navigate — see TransfersPanelProps.onClose.
 function TransfersEntry() {
 	const { t } = useTranslation(["common", "transfers"])
 	const { activeCount } = useTransfersAggregate()
+	const [open, setOpen] = useState(false)
 
 	return (
-		<Popover>
+		<Popover
+			open={open}
+			onOpenChange={setOpen}
+		>
 			<PopoverTrigger
 				render={
 					<Button
@@ -230,7 +245,11 @@ function TransfersEntry() {
 				align="end"
 				className="w-80"
 			>
-				<TransfersPanel />
+				<TransfersPanel
+					onClose={() => {
+						setOpen(false)
+					}}
+				/>
 			</PopoverContent>
 		</Popover>
 	)
@@ -258,6 +277,16 @@ export function IconRail() {
 		"app.openSettings",
 		() => {
 			void navigate({ to: "/settings/security" })
+		},
+		undefined,
+		[navigate]
+	)
+
+	// Mirrors the app.openSettings wiring directly above.
+	useAction(
+		"app.openTransfers",
+		() => {
+			void navigate({ to: "/transfers" })
 		},
 		undefined,
 		[navigate]

@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next"
-import { CircleAlertIcon, CircleCheckIcon, PauseIcon, PlayIcon, XIcon } from "lucide-react"
+import { CircleAlertIcon, CircleCheckIcon, DownloadIcon, PauseIcon, PlayIcon, UploadIcon, XIcon } from "lucide-react"
 import { formatBytes } from "@filen/utils"
 import { isActiveTransfer, useTransfersStore, type Transfer } from "@/stores/transfers"
-import { transferProgress } from "@/components/transfers/transfer-row.logic"
+import { transferProgress, activeStatusLabelKey } from "@/components/transfers/transfer-row.logic"
 import { cancelTransfer, pauseTransfer, resumeTransfer } from "@/lib/transfers/control"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { cn } from "@/lib/utils"
@@ -15,11 +15,12 @@ export interface TransferRowProps {
 }
 
 // Leading status icon — aria-hidden in the "done"/"error" branches since the row's own trailing text
-// (TransferRow below) already spells out "Done"/"Failed" as real accessible text; only "uploading"
-// gets a companion sr-only label, because its trailing text is a bare percentage with no other
-// accessible mention of "uploading" anywhere in the row. Mirrors DriveRow's StarIcon (aria-hidden +
+// (TransferRow below) already spells out "Done"/"Failed" as real accessible text; only the active
+// (uploading/downloading) branch gets a companion sr-only label, resolved direction-aware via
+// activeStatusLabelKey, because its trailing text is a bare percentage with no other accessible
+// mention of the transfer's direction anywhere in the row. Mirrors DriveRow's StarIcon (aria-hidden +
 // a separate sr-only announcement) rather than relying on an aria-label on the icon itself.
-function TransferStatusIcon({ status }: { status: Transfer["status"] }) {
+function TransferStatusIcon({ status, direction }: { status: Transfer["status"]; direction: Transfer["direction"] }) {
 	const { t } = useTranslation("transfers")
 
 	if (status === "done") {
@@ -46,8 +47,24 @@ function TransferStatusIcon({ status }: { status: Transfer["status"] }) {
 				aria-hidden="true"
 				className="size-4 text-muted-foreground"
 			/>
-			<span className="sr-only">{t("transfersStatusUploading")}</span>
+			<span className="sr-only">{t(activeStatusLabelKey(direction))}</span>
 		</>
+	)
+}
+
+// Small decorative direction glyph (upload vs download), aria-hidden — purely an at-a-glance visual
+// cue; the accessible direction distinction lives in TransferStatusIcon's own sr-only label above.
+// Reuses the same icons the rest of the app already associates with each direction (upload-menu.tsx/
+// upload-dropzone.tsx's UploadIcon, bulk-action-bar.logic.ts's DownloadIcon) rather than a generic
+// arrow pair.
+function TransferDirectionIcon({ direction }: { direction: Transfer["direction"] }) {
+	const Icon = direction === "upload" ? UploadIcon : DownloadIcon
+
+	return (
+		<Icon
+			aria-hidden="true"
+			className="size-3.5 shrink-0 text-muted-foreground"
+		/>
 	)
 }
 
@@ -91,7 +108,11 @@ export function TransferRow({ transfer }: TransferRowProps) {
 	return (
 		<div className="flex flex-col gap-1.5 rounded-xl px-1 py-1.5">
 			<div className="flex items-center gap-2">
-				<TransferStatusIcon status={transfer.status} />
+				<TransferStatusIcon
+					status={transfer.status}
+					direction={transfer.direction}
+				/>
+				<TransferDirectionIcon direction={transfer.direction} />
 				<span className="min-w-0 flex-1 truncate text-sm">{transfer.name}</span>
 				<span className="shrink-0 text-xs text-muted-foreground tabular-nums">{trailingLabel}</span>
 				{finished ? (

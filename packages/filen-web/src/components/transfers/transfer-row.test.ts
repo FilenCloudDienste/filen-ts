@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { type Transfer } from "@/stores/transfers"
-import { transferProgress } from "@/components/transfers/transfer-row.logic"
+import { transferProgress, activeStatusLabelKey } from "@/components/transfers/transfer-row.logic"
 
 function transfer(overrides: Partial<Transfer> = {}): Transfer {
 	return {
@@ -44,5 +44,15 @@ describe("transferProgress", () => {
 
 	it("error: zero size never divides by zero — reads 0", () => {
 		expect(transferProgress(transfer({ status: "error", bytesTransferred: 0, size: 0 }))).toBe(0)
+	})
+})
+
+describe("activeStatusLabelKey", () => {
+	it("upload direction reads the uploading key", () => {
+		expect(activeStatusLabelKey("upload")).toBe("transfersStatusUploading")
+	})
+
+	it("download direction reads the downloading key", () => {
+		expect(activeStatusLabelKey("download")).toBe("transfersStatusDownloading")
 	})
 })
