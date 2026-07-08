@@ -26,14 +26,31 @@ describe("driveBulkActions", () => {
 		expect(deletePermanently).toMatchObject({ run: "dialog", dialogKind: "delete", destructive: true, icon: Trash2Icon })
 	})
 
-	it.each(["drive", "recents", "favorites"] as const)(
-		"%s variant, decryptable selection, none favorited: favorite, move, trash in that order",
+	it.each(["drive", "recents", "favorites", "sharedOut"] as const)(
+		"%s variant, decryptable selection, none favorited: favorite, move, share, trash in that order",
 		variant => {
 			const descriptors = driveBulkActions(variant, flags({ includesFavorited: false, includesUndecryptable: false }))
 
-			expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "trash"])
+			expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "share", "trash"])
 		}
 	)
+
+	// Bulk share gates like single-item share: the owned surfaces only (drive/recents/favorites/
+	// sharedOut), never shared-with-me, and never when the selection includes an undecryptable item.
+	it("share is present on sharedOut bulk but absent on sharedIn bulk (owned surfaces only)", () => {
+		expect(driveBulkActions("sharedOut", flags({ includesUndecryptable: false })).map(d => d.id)).toContain("share")
+		expect(driveBulkActions("sharedIn", flags({ includesUndecryptable: false })).map(d => d.id)).not.toContain("share")
+	})
+
+	it("bulk share is suppressed when the selection includes an undecryptable item", () => {
+		expect(driveBulkActions("drive", flags({ includesUndecryptable: true })).map(d => d.id)).not.toContain("share")
+	})
+
+	it("bulk share opens the contact-picker dialog kind", () => {
+		const share = driveBulkActions("drive", flags({ includesUndecryptable: false })).find(d => d.id === "share")
+
+		expect(share).toMatchObject({ run: "dialog", dialogKind: "share" })
+	})
 
 	it("favorite descriptor labels/icons Favorite when nothing in the selection is favorited", () => {
 		const [favorite] = driveBulkActions("drive", flags({ includesFavorited: false, includesUndecryptable: false }))

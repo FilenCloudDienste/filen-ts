@@ -49,12 +49,22 @@ function ids(item: DriveItem, variant: Parameters<typeof driveItemActions>[1]): 
 }
 
 describe("driveItemActions (item menu gating)", () => {
-	it("drive variant, directory: rename/move/favorite/color/info/publicLink/copyLink/trash, in that order (no versions)", () => {
-		expect(ids(dirItem(), "drive")).toEqual(["rename", "move", "favorite", "color", "info", "publicLink", "copyLink", "trash"])
+	it("drive variant, directory: rename/move/favorite/color/info/share/publicLink/copyLink/trash, in that order (no versions)", () => {
+		expect(ids(dirItem(), "drive")).toEqual(["rename", "move", "favorite", "color", "info", "share", "publicLink", "copyLink", "trash"])
 	})
 
-	it("drive variant, file: rename/move/favorite/versions/info/publicLink/copyLink/trash, in that order (no color)", () => {
-		expect(ids(fileItem(), "drive")).toEqual(["rename", "move", "favorite", "versions", "info", "publicLink", "copyLink", "trash"])
+	it("drive variant, file: rename/move/favorite/versions/info/share/publicLink/copyLink/trash, in that order (no color)", () => {
+		expect(ids(fileItem(), "drive")).toEqual([
+			"rename",
+			"move",
+			"favorite",
+			"versions",
+			"info",
+			"share",
+			"publicLink",
+			"copyLink",
+			"trash"
+		])
 	})
 
 	it("recents variant mirrors drive's gating", () => {
@@ -63,6 +73,20 @@ describe("driveItemActions (item menu gating)", () => {
 
 	it("favorites variant mirrors drive's gating", () => {
 		expect(ids(dirItem(), "favorites")).toEqual(ids(dirItem(), "drive"))
+	})
+
+	// Share is offered on the owned surfaces (drive/recents/favorites/sharedOut) but never on
+	// shared-with-me (you can't grant access to an item you don't own) — mirrors mobile's gating.
+	it("share is present on every owned variant and absent on sharedIn", () => {
+		expect(ids(fileItem(), "drive")).toContain("share")
+		expect(ids(fileItem(), "recents")).toContain("share")
+		expect(ids(fileItem(), "favorites")).toContain("share")
+		expect(ids(fileItem(), "sharedOut")).toContain("share")
+		expect(ids(fileItem(), "sharedIn")).not.toContain("share")
+	})
+
+	it("share dispatches its own contact-picker dialog kind", () => {
+		expect(driveItemActions(dirItem(), "drive").find(d => d.id === "share")).toMatchObject({ run: "dialog", dialogKind: "share" })
 	})
 
 	it("trash variant: only restore/deletePermanently/info, regardless of type", () => {

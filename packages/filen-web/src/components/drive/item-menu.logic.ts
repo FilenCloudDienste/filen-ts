@@ -8,22 +8,35 @@ import {
 	InfoIcon,
 	LinkIcon,
 	CopyIcon,
+	UsersIcon,
 	Trash2Icon,
 	RotateCcwIcon,
 	type LucideIcon
 } from "lucide-react"
 import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
+import { canShareVariant } from "@/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
 
 // Dialog kinds a per-item action can open in the listing-level dialog host (directory-listing.tsx's
 // own activeDialog state). "emptyTrash" is a listing-level action (the trash toolbar, no per-item
 // trigger), so it deliberately isn't part of this union — directory-listing.tsx's own ActiveDialog
 // kind widens this with that one extra literal.
-export type ItemActionDialogKind = "rename" | "move" | "color" | "versions" | "info" | "link" | "trash" | "delete"
+export type ItemActionDialogKind = "rename" | "move" | "color" | "versions" | "info" | "link" | "share" | "trash" | "delete"
 
 export type ItemActionId =
-	"rename" | "move" | "favorite" | "color" | "versions" | "info" | "publicLink" | "copyLink" | "trash" | "restore" | "deletePermanently"
+	| "rename"
+	| "move"
+	| "favorite"
+	| "color"
+	| "versions"
+	| "info"
+	| "publicLink"
+	| "copyLink"
+	| "share"
+	| "trash"
+	| "restore"
+	| "deletePermanently"
 
 interface ItemActionDescriptorShared {
 	id: ItemActionId
@@ -68,6 +81,10 @@ const COPY_LINK: ItemActionDescriptor = {
 	run: "dialog",
 	dialogKind: "link"
 }
+// Share the item with a Filen contact (opens the contact picker) — distinct from a public link (a
+// URL anyone can open): this grants a specific existing contact access. Variant-gated (see
+// canShareVariant / driveItemActions).
+const SHARE: ItemActionDescriptor = { id: "share", labelKey: "driveActionShare", icon: UsersIcon, run: "dialog", dialogKind: "share" }
 // Recoverable — not destructive-styled, matching the trash-confirm dialog it opens.
 const TRASH: ItemActionDescriptor = { id: "trash", labelKey: "driveActionTrash", icon: Trash2Icon, run: "dialog", dialogKind: "trash" }
 // A single item restores directly, no confirm (mobile parity — see driveRestoreSelectedConfirmTitle's
@@ -106,5 +123,16 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 
 	const typeSpecific = asDirectoryOrFile(item).type === "directory" ? COLOR : VERSIONS
 
-	return [RENAME, MOVE, favoriteDescriptor(item), typeSpecific, INFO, PUBLIC_LINK, COPY_LINK, TRASH]
+	// Share sits with the other access-granting actions (info/link) after the type-specific group; it
+	// only appears on the owned surfaces (canShareVariant excludes sharedIn — you can't grant access to
+	// an item you don't own — and, via the early returns above, trash and undecryptable items).
+	const actions: ItemActionDescriptor[] = [RENAME, MOVE, favoriteDescriptor(item), typeSpecific, INFO]
+
+	if (canShareVariant(variant)) {
+		actions.push(SHARE)
+	}
+
+	actions.push(PUBLIC_LINK, COPY_LINK, TRASH)
+
+	return actions
 }

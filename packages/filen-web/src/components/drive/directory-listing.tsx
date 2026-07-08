@@ -44,6 +44,7 @@ import { ListingSkeleton } from "@/components/drive/listing-skeleton"
 import { DriveRow } from "@/components/drive/drive-row"
 import { DriveTile } from "@/components/drive/drive-tile"
 import { MoveTargetDialog } from "@/components/drive/move-target-dialog"
+import { ContactPickerDialog } from "@/components/drive/contact-picker-dialog"
 import { ColorDialog } from "@/components/drive/color-dialog"
 import { VersionsDialog } from "@/components/drive/versions-dialog"
 import { InfoDialog } from "@/components/drive/info-dialog"
@@ -86,6 +87,7 @@ const WIRED_DIALOG_KINDS = new Set<ActiveDialogKind>([
 	"versions",
 	"info",
 	"link",
+	"share",
 	"restoreSelected"
 ])
 
@@ -717,6 +719,15 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					/>
 				)
 			}
+			case "share":
+				// Reached from a per-item menu (items: [item]) or the bulk bar (items: selectedItems) — the
+				// picker itself shares each item with every chosen contact.
+				return activeDialog.items.length > 0 ? (
+					<ContactPickerDialog
+						items={activeDialog.items}
+						onClose={closeActiveDialog}
+					/>
+				) : null
 		}
 	}
 

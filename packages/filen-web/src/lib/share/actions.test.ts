@@ -1,0 +1,215 @@
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { QueryClient } from "@tanstack/react-query"
+import type { Contact, Dir, File, UuidStr } from "@filen/sdk-rs"
+import { narrowItem, type DriveItem } from "@/lib/drive/item"
+import type { ErrorDTO } from "@/lib/sdk/errors"
+
+// The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it down
+// to the two share ops, mirroring lib/drive/actions.test.ts's mock boundary.
+const { shareDirectory, shareFile } = vi.hoisted(() => ({
+	shareDirectory: vi.fn(),
+	shareFile: vi.fn()
+}))
+
+vi.mock("@/lib/sdk/client", () => ({
+	sdkApi: {
+		shareDirectory,
+		shareFile
+	}
+}))
+
+// A bare, unconfigured QueryClient stands in for the real singleton — same rationale as
+// lib/drive/actions.test.ts: this helper only needs genuine invalidateQueries mechanics, never the
+// production client's OPFS-backed persistence pipeline.
+vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
+
+import { queryClient as testQueryClient } from "@/queries/client"
+import { driveListingQueryKey } from "@/queries/drive"
+import { shareItems } from "@/lib/share/actions"
+
+beforeEach(() => {
+	vi.clearAllMocks()
+	testQueryClient.clear()
+})
+
+// UuidStr is a template-literal brand requiring at least 3 dashes — pad a short readable label into a
+// shape that satisfies it, mirroring lib/drive/actions.test.ts's own fixture.
+function testUuid(label: string): UuidStr {
+	return `${label}-0000-0000-0000-000000000000` as UuidStr
+}
+
+function mockDir(overrides: Partial<Dir> = {}): Dir {
+	return {
+		uuid: testUuid("dir"),
+		parent: testUuid("parent"),
+		color: "default",
+		timestamp: 1_700_000_000_000n,
+		favorited: false,
+		meta: { type: "decoded", data: { name: "Documents" } },
+		...overrides
+	}
+}
+
+function mockFile(overrides: Partial<File> = {}): File {
+	return {
+		uuid: testUuid("file"),
+		parent: testUuid("parent"),
+		size: 1_024n,
+		favorited: false,
+		region: "de-1",
+		bucket: "filen-1",
+		timestamp: 1_700_000_000_000n,
+		chunks: 1n,
+		canMakeThumbnail: true,
+		meta: {
+			type: "decoded",
+			data: { name: "report.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
+		},
+		...overrides
+	}
+}
+
+function dirItem(overrides: Partial<Dir> = {}): Extract<DriveItem, { type: "directory" }> {
+	const item = narrowItem(mockDir(overrides))
+	if (item.type !== "directory") {
+		throw new Error("expected a directory arm")
+	}
+	return item
+}
+
+function fileItem(overrides: Partial<File> = {}): Extract<DriveItem, { type: "file" }> {
+	const item = narrowItem(mockFile(overrides))
+	if (item.type !== "file") {
+		throw new Error("expected a file arm")
+	}
+	return item
+}
+
+function mockContact(label: string): Contact {
+	return {
+		uuid: testUuid(label),
+		userId: 1n,
+		email: `${label}@example.com`,
+		nickName: undefined,
+		lastActive: 0n,
+		timestamp: 0n,
+		publicKey: "pk"
+	}
+}
+
+// Worker-boundary errors arrive as plain DTOs (the Comlink proxy throws toErrorDTO output) — mirrors
+// lib/drive/actions.test.ts's sdkDto fixture.
+function sdkDto(kind: string): ErrorDTO {
+	return { species: "sdk", kind, message: `${kind} message`, label: `${kind} label` }
+}
+
+function sharedOutRoot() {
+	return driveListingQueryKey({ variant: "sharedOut", uuid: null })
+}
+
+describe("shareItems", () => {
+	it("shares N items × M contacts = N×M calls, routing directories to shareDirectory and files to shareFile", async () => {
+		const dir = dirItem({ uuid: testUuid("d") })
+		const file = fileItem({ uuid: testUuid("f") })
+		const alice = mockContact("alice")
+		const bob = mockContact("bob")
+		const carol = mockContact("carol")
+		shareDirectory.mockResolvedValue(undefined)
+		shareFile.mockResolvedValue(undefined)
+
+		const outcome = await shareItems([dir, file], [alice, bob, carol])
+
+		expect(outcome.succeeded).toEqual([dir, file])
+		expect(outcome.failed).toEqual([])
+		// 2 items × 3 contacts: the directory took all three via shareDirectory, the file all three via
+		// shareFile.
+		expect(shareDirectory).toHaveBeenCalledTimes(3)
+		expect(shareFile).toHaveBeenCalledTimes(3)
+		for (const contact of [alice, bob, carol]) {
+			expect(shareDirectory).toHaveBeenCalledWith(dir.data, contact)
+			expect(shareFile).toHaveBeenCalledWith(file.data, contact)
+		}
+	})
+
+	it("shares each contact for one item in sequence (no concurrency machinery)", async () => {
+		const dir = dirItem({ uuid: testUuid("d") })
+		const contacts = [mockContact("a"), mockContact("b"), mockContact("c")]
+		const seen: string[] = []
+		shareDirectory.mockImplementation((_dir: Dir, contact: Contact) => {
+			seen.push(contact.email)
+			return Promise.resolve()
+		})
+
+		await shareItems([dir], contacts)
+
+		expect(seen).toEqual(["a@example.com", "b@example.com", "c@example.com"])
+	})
+
+	it("partial failure: an item whose sibling fails still reports the succeeded one, both correctly split", async () => {
+		const ok = dirItem({ uuid: testUuid("ok") })
+		const bad = dirItem({ uuid: testUuid("bad") })
+		const contact = mockContact("alice")
+		const dto = sdkDto("Forbidden")
+		// items.map dispatches synchronously in array order (each callback's first await is its
+		// shareDirectory call), so [ok, bad] queues these two outcomes in order — same call-order
+		// technique as lib/drive/actions.test.ts's moveItems partial-failure test.
+		shareDirectory.mockResolvedValueOnce(undefined).mockRejectedValueOnce(dto)
+
+		const outcome = await shareItems([ok, bad], [contact])
+
+		expect(outcome.succeeded).toEqual([ok])
+		expect(outcome.failed).toEqual([{ item: bad, error: dto }])
+	})
+
+	it("an item fails if ANY of its contacts fails, and its remaining contacts are skipped", async () => {
+		const dir = dirItem({ uuid: testUuid("d") })
+		const good = mockContact("good")
+		const bad = mockContact("bad")
+		const skipped = mockContact("skipped")
+		const dto = sdkDto("Forbidden")
+		// One item, contacts share sequentially (good, then bad) — bad's rejection throws out of the
+		// per-item loop before skipped is ever reached.
+		shareDirectory.mockResolvedValueOnce(undefined).mockRejectedValueOnce(dto)
+
+		const outcome = await shareItems([dir], [good, bad, skipped])
+
+		expect(outcome.succeeded).toEqual([])
+		expect(outcome.failed).toEqual([{ item: dir, error: dto }])
+		// good was attempted, bad threw, skipped never ran (the per-item loop stopped on bad's throw).
+		expect(shareDirectory).toHaveBeenCalledWith(dir.data, good)
+		expect(shareDirectory).toHaveBeenCalledWith(dir.data, bad)
+		expect(shareDirectory).not.toHaveBeenCalledWith(dir.data, skipped)
+	})
+
+	it("invalidates the shared-with-others root listing after at least one item succeeds", async () => {
+		const dir = dirItem({ uuid: testUuid("d") })
+		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
+		shareDirectory.mockResolvedValue(undefined)
+
+		await shareItems([dir], [mockContact("alice")])
+
+		expect(invalidateSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: sharedOutRoot() })
+	})
+
+	it("does NOT invalidate when every item failed (nothing changed server-side)", async () => {
+		const dir = dirItem({ uuid: testUuid("d") })
+		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
+		shareDirectory.mockRejectedValue(sdkDto("Forbidden"))
+
+		const outcome = await shareItems([dir], [mockContact("alice")])
+
+		expect(outcome.succeeded).toEqual([])
+		expect(invalidateSpy).not.toHaveBeenCalled()
+	})
+
+	it("resolves to an empty split on an empty selection without calling the worker or invalidating", async () => {
+		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
+
+		const outcome = await shareItems([], [mockContact("alice")])
+
+		expect(outcome).toEqual({ succeeded: [], failed: [] })
+		expect(shareDirectory).not.toHaveBeenCalled()
+		expect(shareFile).not.toHaveBeenCalled()
+		expect(invalidateSpy).not.toHaveBeenCalled()
+	})
+})

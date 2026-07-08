@@ -1,15 +1,17 @@
-import { StarIcon, StarOffIcon, FolderInputIcon, Trash2Icon, RotateCcwIcon, type LucideIcon } from "lucide-react"
+import { StarIcon, StarOffIcon, FolderInputIcon, UsersIcon, Trash2Icon, RotateCcwIcon, type LucideIcon } from "lucide-react"
 import { type DriveVariant } from "@/lib/drive/preferences"
 import { type DriveSelectionFlags } from "@/lib/drive/selection-flags"
+import { canShareVariant } from "@/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
 
 // Dialog kinds the bulk-action bar can ask the listing's dialog host to open — a narrow subset of
 // directory-listing.tsx's own ActiveDialogKind (the per-item-only kinds — rename/color/versions/info/
-// link — can never be bulk-dispatched, so they have no place here).
-export type BulkDialogActionKind = "move" | "trash" | "delete" | "restoreSelected"
+// link — can never be bulk-dispatched, so they have no place here). "share" is bulk-dispatchable (the
+// contact picker takes the whole selection), unlike the other link/access kinds.
+export type BulkDialogActionKind = "move" | "share" | "trash" | "delete" | "restoreSelected"
 
 interface BulkActionDescriptorShared {
-	id: "favorite" | "move" | "trash" | "restoreSelected" | "delete"
+	id: "favorite" | "move" | "share" | "trash" | "restoreSelected" | "delete"
 	labelKey: DriveKey
 	icon: LucideIcon
 	destructive?: boolean
@@ -57,6 +59,14 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 			run: "direct"
 		})
 		descriptors.push({ id: "move", labelKey: "driveActionMove", icon: FolderInputIcon, run: "dialog", dialogKind: "move" })
+
+		// Share the whole selection with contacts — same undecryptable gate as favorite/move above (an
+		// undecryptable item can't be shared), plus the owned-surface variant gate (canShareVariant
+		// excludes sharedIn; trash already returned above). Mirrors mobile's bulkShareFilenUser gating
+		// (drive/recents/favorites/sharedOut, no undecryptable items).
+		if (canShareVariant(variant)) {
+			descriptors.push({ id: "share", labelKey: "driveActionShare", icon: UsersIcon, run: "dialog", dialogKind: "share" })
+		}
 	}
 
 	// Trash is NOT gated by undecryptable (pure uuid, same as restore/delete above) and is never

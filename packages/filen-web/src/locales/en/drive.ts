@@ -153,6 +153,8 @@ export const drive = {
 	driveActionPublicLink: "Public link",
 	/** Item menu — copy the selected item's existing public-link URL to the clipboard */
 	driveActionCopyLink: "Copy link",
+	/** Item menu — share the selected item(s) with a Filen contact; opens the contact picker. Also the picker's own submit button */
+	driveActionShare: "Share",
 	/** Trash toolbar — permanently delete every item currently in the trash; also the empty-trash confirm dialog's confirm button */
 	driveActionEmptyTrash: "Empty trash",
 
@@ -199,6 +201,14 @@ export const drive = {
 	driveMoveDialogTitle: "Select destination",
 	/** Move dialog — confirm button moving the selection into the currently open directory */
 	driveMoveHereAction: "Move here",
+
+	// ── Share dialog (contact picker) ────────────────────────────────────────
+	/** Share dialog — title of the contact picker (opened via driveActionShare); the submit button reuses driveActionShare */
+	driveShareDialogTitle: "Share with contacts",
+	/** Share dialog — body under the title for a single item */
+	driveShareDialogBody_one: "Select the contacts to share this item with.",
+	/** Share dialog — body under the title for multiple items; {{count}} = items being shared */
+	driveShareDialogBody_other: "Select the contacts to share these {{count}} items with.",
 
 	// ── Color dialog ─────────────────────────────────────────────────────────
 	/** Color dialog — title (opened via driveActionColor) */
