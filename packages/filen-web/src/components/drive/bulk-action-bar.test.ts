@@ -152,7 +152,7 @@ describe("driveBulkActions — unshare gating (everySharedRoot)", () => {
 	})
 })
 
-// F1 fix: sharedIn/sharedOut bulk mirrors the per-item menu's safe subset (item-menu.logic.ts) — no
+// sharedIn/sharedOut bulk mirrors the per-item menu's safe subset (item-menu.logic.ts) — no
 // bulk favorite/move/trash on either shared surface, regardless of undecryptable/everySharedRoot.
 // sharedOut keeps bulk share (canShareVariant); either surface keeps bulk unshare (everySharedRoot).
 describe("driveBulkActions — shared-surface safe subset (sharedIn/sharedOut)", () => {

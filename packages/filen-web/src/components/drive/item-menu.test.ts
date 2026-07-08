@@ -269,7 +269,7 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 	})
 })
 
-// F1 fix: sharedIn/sharedOut expose only sharing-scoped + read-only actions — every owner-mutating
+// sharedIn/sharedOut expose only sharing-scoped + read-only actions — every owner-mutating
 // action (rename/move/favorite/color/versions/publicLink/copyLink/trash) is gated off both surfaces
 // regardless of root/nested item type. sharedIn because the caller doesn't own the item (the SDK would
 // reject the mutation); sharedOut as a deliberate safe-subset even though the caller DOES own those
