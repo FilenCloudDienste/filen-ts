@@ -39,6 +39,8 @@ import { Breadcrumb } from "@/components/drive/breadcrumb"
 import { SortMenu } from "@/components/drive/sort-menu"
 import { ViewModeToggle } from "@/components/drive/view-mode-toggle"
 import { NewDirectory } from "@/components/drive/new-directory"
+import { UploadMenu } from "@/components/drive/upload-menu"
+import { UploadDropzone } from "@/components/drive/upload-dropzone"
 import { BulkActionBar, type BulkDialogActionKind } from "@/components/drive/bulk-action-bar"
 import { EmptyState } from "@/components/drive/empty-state"
 import { ListingSkeleton } from "@/components/drive/listing-skeleton"
@@ -165,6 +167,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const listingQuery = useDirectoryListingQuery(variant, uuid)
 	const sortPrefsQuery = useSortPreferencesQuery()
 	const viewModePrefsQuery = useViewModePreferencesQuery()
+	// New directory / upload only make sense in the navigable "drive" variant, once the listing has
+	// loaded — recents/favorites/trash/shared have no directory to write into, and a still-loading
+	// listing has no confirmed uuid to target yet. Shared by NewDirectory, UploadMenu and
+	// UploadDropzone below (all three write into the same `uuid`).
+	const writeDisabled = variant !== "drive" || listingQuery.status !== "success"
 	// Gates the underlying contacts/blocked fetch itself (see use-blocked-users.ts) — only sharedIn
 	// filters by it, so the other 5 variants skip the getContacts/getBlockedContacts worker round trip
 	// on every mount and window refocus.
@@ -875,7 +882,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						<div className="flex items-center gap-2">
 							<NewDirectory
 								parentUuid={uuid}
-								disabled={variant !== "drive" || listingQuery.status !== "success"}
+								disabled={writeDisabled}
+							/>
+							<UploadMenu
+								parentUuid={uuid}
+								disabled={writeDisabled}
 							/>
 							<ViewModeToggle
 								value={effectiveViewMode}
@@ -894,7 +905,10 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					</>
 				)}
 			</div>
-			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+			<UploadDropzone
+				parentUuid={uuid}
+				disabled={writeDisabled}
+			>
 				{listingQuery.status === "pending" ? (
 					<div className="flex-1 overflow-y-auto">
 						<ListingSkeleton viewMode={effectiveViewMode} />
@@ -1008,7 +1022,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						</div>
 					</>
 				)}
-			</div>
+			</UploadDropzone>
 			{renderActiveDialog()}
 		</>
 	)

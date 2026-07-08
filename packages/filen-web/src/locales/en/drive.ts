@@ -29,6 +29,12 @@ export const drive = {
 	/** New menu — entry opening the browser directory picker to upload an entire directory tree into the current directory */
 	driveUploadDirectory: "Upload directory",
 
+	// ── Upload ───────────────────────────────────────────────────────────────
+	/** Drive toolbar — trigger button opening the standalone upload menu (Upload files, later Upload directory) */
+	driveUploadMenuTrigger: "Upload",
+	/** Drive listing — overlay hint shown over the listing area while dragging files over it */
+	driveUploadDropHint: "Drop files to upload",
+
 	// ── Sidebar ──────────────────────────────────────────────────────────────
 	/** Drive sidebar — root item for the user's own drive */
 	driveMyDrive: "My Drive",
