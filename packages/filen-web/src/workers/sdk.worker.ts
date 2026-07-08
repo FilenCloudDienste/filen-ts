@@ -4,6 +4,7 @@ import init, {
 	initThreadPool,
 	UnauthClient,
 	type Client,
+	type AnyFile,
 	type StringifiedClient,
 	type UserInfo,
 	type RegisterParams,
@@ -58,6 +59,11 @@ export type BootResult =
 	{ ok: true; threads: number } | { ok: false; reason: "artifacts" | "coi" | "pool" | "async-runtime" | "opfs"; detail: string }
 
 let client: Client | null = null
+
+// Per-transfer AbortControllers so cancelDownload(transferId) can abort an in-flight download. Unlike
+// the streaming UPLOAD (whose managedFuture is wasm-serde-rejected), the streaming download ACCEPTS
+// managedFuture.abortSignal at runtime — verified — so a download carries a real, honored cancel.
+const downloadAborts = new Map<string, AbortController>()
 
 // Every authed op reads the live Client through this guard. Post-logout `client` is null, so a
 // forwarded call would null-deref; failing fast here surfaces a clean DTO at the Comlink boundary
@@ -399,6 +405,41 @@ const api = {
 				onProgress(bytes)
 			}
 		})
+	},
+	// ── Download ───────────────────────────────────────────────────────────────
+	// The reverse of uploadFile: the WritableStream SINK arrives via Comlink.transfer (a transferable
+	// stream, moved once — the decrypted bytes stream through it and are pulled on the main side, never
+	// crossing Comlink as a buffer), and progress is a plain-fn-wrapped Comlink proxy (same as upload —
+	// wasm needs a plain preserved callable, not a proxy object). progress is passed unconditionally: the
+	// wasm layer requires it despite `progress?:` in the .d.ts. managedFuture.abortSignal IS accepted at
+	// runtime (unlike the streaming upload), so a per-transfer AbortController gives cancelDownload a real
+	// cancel; aborting rejects the SDK call with kind "Cancelled", which the caller maps to a drop.
+	async downloadFileToWriter(
+		file: AnyFile,
+		transferId: string,
+		writer: WritableStream<Uint8Array>,
+		onProgress: (bytes: bigint) => void
+	): Promise<void> {
+		const c = requireClient()
+		const controller = new AbortController()
+		downloadAborts.set(transferId, controller)
+		try {
+			await c.downloadFileToWriter({
+				file,
+				writer,
+				progress: bytes => {
+					onProgress(bytes)
+				},
+				managedFuture: { abortSignal: controller.signal }
+			})
+		} finally {
+			downloadAborts.delete(transferId)
+		}
+	},
+	// Aborts an in-flight download by transferId; a no-op once the download has settled (the controller
+	// is already evicted). The abort surfaces as a "Cancelled" rejection at downloadFileToWriter's caller.
+	cancelDownload(transferId: string): void {
+		downloadAborts.get(transferId)?.abort()
 	},
 	// ── Rename ───────────────────────────────────────────────────────────────
 	// Held-item ops throughout this section take the caller's already-fetched DriveItem.data
