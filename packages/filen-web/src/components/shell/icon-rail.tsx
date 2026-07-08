@@ -1,6 +1,6 @@
 import { useState, type ComponentType } from "react"
 import { useTranslation } from "react-i18next"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import {
 	FolderClosedIcon,
 	NotebookPenIcon,
@@ -56,15 +56,15 @@ registerAction({
 
 type IconType = ComponentType<{ className?: string }>
 
-// The module surfaces beyond Drive land later — rendered as inert, muted rail entries so
-// the information architecture reads intact without pretending the destinations exist yet. Native
-// `disabled` is deliberately avoided (it suppresses pointer events, which would kill the tooltip);
-// `aria-disabled` + muted styling conveys the same state while keeping hover/focus explainers.
+// The remaining module surfaces land later — rendered as inert, muted rail entries so the
+// information architecture reads intact without pretending the destinations exist yet (Contacts has
+// since landed as a real link below, mirroring Drive). Native `disabled` is deliberately avoided (it
+// suppresses pointer events, which would kill the tooltip); `aria-disabled` + muted styling conveys
+// the same state while keeping hover/focus explainers.
 const MODULES: { key: CommonKey; icon: IconType }[] = [
 	{ key: "moduleTransfers", icon: ArrowDownUpIcon },
 	{ key: "moduleNotes", icon: NotebookPenIcon },
-	{ key: "moduleChats", icon: MessagesSquareIcon },
-	{ key: "moduleContacts", icon: UsersIcon }
+	{ key: "moduleChats", icon: MessagesSquareIcon }
 ]
 
 function ThemeToggle() {
@@ -186,6 +186,12 @@ function AccountMenu() {
 export function IconRail() {
 	const { t } = useTranslation()
 	const navigate = useNavigate()
+	// Same read as __root.tsx's BootGate (the app's other consumer of the current path). Drive's own
+	// route is a "/drive/$" splat, so its match also covers every nested directory, not just the bare
+	// "/drive" root — Contacts has no nested path, so an exact match is enough for it.
+	const pathname = useRouterState({ select: state => state.location.pathname })
+	const driveActive = pathname === "/drive" || pathname.startsWith("/drive/")
+	const contactsActive = pathname === "/contacts"
 
 	// Mounted once here (the icon rail exists for the app's whole authed lifetime, independent of
 	// which route is active) rather than on the security route itself, so the nag can fire and route
@@ -221,17 +227,34 @@ export function IconRail() {
 			<Tooltip>
 				<TooltipTrigger
 					render={
-						<Button
-							variant="secondary"
-							size="icon-lg"
-							aria-current="page"
+						<Link
+							to="/drive/$"
+							params={{ _splat: "" }}
+							aria-current={driveActive ? "page" : undefined}
 							aria-label={t("moduleDrive")}
+							className={buttonVariants({ variant: driveActive ? "secondary" : "ghost", size: "icon-lg" })}
 						>
 							<FolderClosedIcon />
-						</Button>
+						</Link>
 					}
 				/>
 				<TooltipContent side="right">{t("moduleDrive")}</TooltipContent>
+			</Tooltip>
+
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<Link
+							to="/contacts"
+							aria-current={contactsActive ? "page" : undefined}
+							aria-label={t("moduleContacts")}
+							className={buttonVariants({ variant: contactsActive ? "secondary" : "ghost", size: "icon-lg" })}
+						>
+							<UsersIcon />
+						</Link>
+					}
+				/>
+				<TooltipContent side="right">{t("moduleContacts")}</TooltipContent>
 			</Tooltip>
 
 			{MODULES.map(({ key, icon: Icon }) => (

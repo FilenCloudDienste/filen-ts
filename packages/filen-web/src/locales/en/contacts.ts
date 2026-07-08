@@ -29,6 +29,8 @@ export const contacts = {
 	contactsRequestsEmptyTitle: "No requests",
 	/** Contacts page — empty-state body under contactsRequestsEmptyTitle */
 	contactsRequestsEmptyBody: "Contact requests you send or receive will appear here.",
+	/** Contacts page — title shown when the contacts/requests queries fail to load; the body is the failing query's own errorLabel */
+	contactsLoadError: "Couldn't load contacts",
 
 	// ── Search ───────────────────────────────────────────────────────────────
 	/** Contacts page — search input placeholder */

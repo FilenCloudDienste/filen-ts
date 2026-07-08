@@ -19,6 +19,7 @@ import { Route as ResetTokenRouteImport } from './routes/reset.$token'
 import { Route as AppTrashRouteImport } from './routes/_app/trash'
 import { Route as AppRecentsRouteImport } from './routes/_app/recents'
 import { Route as AppFavoritesRouteImport } from './routes/_app/favorites'
+import { Route as AppContactsRouteImport } from './routes/_app/contacts'
 import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/security'
 import { Route as AppDriveSplatRouteImport } from './routes/_app/drive.$'
 
@@ -71,6 +72,11 @@ const AppFavoritesRoute = AppFavoritesRouteImport.update({
   path: '/favorites',
   getParentRoute: () => AppRouteRoute,
 } as any)
+const AppContactsRoute = AppContactsRouteImport.update({
+  id: '/contacts',
+  path: '/contacts',
+  getParentRoute: () => AppRouteRoute,
+} as any)
 const AppSettingsSecurityRoute = AppSettingsSecurityRouteImport.update({
   id: '/settings/security',
   path: '/settings/security',
@@ -88,6 +94,7 @@ export interface FileRoutesByFullPath {
   '/no-coi': typeof NoCoiRoute
   '/no-opfs': typeof NoOpfsRoute
   '/register': typeof RegisterRoute
+  '/contacts': typeof AppContactsRoute
   '/favorites': typeof AppFavoritesRoute
   '/recents': typeof AppRecentsRoute
   '/trash': typeof AppTrashRoute
@@ -101,6 +108,7 @@ export interface FileRoutesByTo {
   '/no-coi': typeof NoCoiRoute
   '/no-opfs': typeof NoOpfsRoute
   '/register': typeof RegisterRoute
+  '/contacts': typeof AppContactsRoute
   '/favorites': typeof AppFavoritesRoute
   '/recents': typeof AppRecentsRoute
   '/trash': typeof AppTrashRoute
@@ -116,6 +124,7 @@ export interface FileRoutesById {
   '/no-coi': typeof NoCoiRoute
   '/no-opfs': typeof NoOpfsRoute
   '/register': typeof RegisterRoute
+  '/_app/contacts': typeof AppContactsRoute
   '/_app/favorites': typeof AppFavoritesRoute
   '/_app/recents': typeof AppRecentsRoute
   '/_app/trash': typeof AppTrashRoute
@@ -131,6 +140,7 @@ export interface FileRouteTypes {
     | '/no-coi'
     | '/no-opfs'
     | '/register'
+    | '/contacts'
     | '/favorites'
     | '/recents'
     | '/trash'
@@ -144,6 +154,7 @@ export interface FileRouteTypes {
     | '/no-coi'
     | '/no-opfs'
     | '/register'
+    | '/contacts'
     | '/favorites'
     | '/recents'
     | '/trash'
@@ -158,6 +169,7 @@ export interface FileRouteTypes {
     | '/no-coi'
     | '/no-opfs'
     | '/register'
+    | '/_app/contacts'
     | '/_app/favorites'
     | '/_app/recents'
     | '/_app/trash'
@@ -248,6 +260,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppFavoritesRouteImport
       parentRoute: typeof AppRouteRoute
     }
+    '/_app/contacts': {
+      id: '/_app/contacts'
+      path: '/contacts'
+      fullPath: '/contacts'
+      preLoaderRoute: typeof AppContactsRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
     '/_app/settings/security': {
       id: '/_app/settings/security'
       path: '/settings/security'
@@ -266,6 +285,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppRouteRouteChildren {
+  AppContactsRoute: typeof AppContactsRoute
   AppFavoritesRoute: typeof AppFavoritesRoute
   AppRecentsRoute: typeof AppRecentsRoute
   AppTrashRoute: typeof AppTrashRoute
@@ -274,6 +294,7 @@ interface AppRouteRouteChildren {
 }
 
 const AppRouteRouteChildren: AppRouteRouteChildren = {
+  AppContactsRoute: AppContactsRoute,
   AppFavoritesRoute: AppFavoritesRoute,
   AppRecentsRoute: AppRecentsRoute,
   AppTrashRoute: AppTrashRoute,
