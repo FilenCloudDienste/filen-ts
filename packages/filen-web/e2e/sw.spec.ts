@@ -63,12 +63,23 @@ test.describe("service worker", () => {
 		const result = await page.evaluate(
 			async ({ initType, registerType, prefix }) => {
 				const hooks = window.__filenE2E
-				const [fileA, fileB] = await Promise.all([
+				// allSettled, not all: if one upload succeeds and the other rejects, the finally below must
+				// still see (and trash) the one that landed — Promise.all would reject past it.
+				const created = await Promise.allSettled([
 					hooks.createTestFile(`e2e-sw-zip-a-${crypto.randomUUID()}.txt`, "filen sw zip e2e file a"),
 					hooks.createTestFile(`e2e-sw-zip-b-${crypto.randomUUID()}.txt`, "filen sw zip e2e file b")
 				])
 
 				try {
+					const [a, b] = created
+
+					if (a.status !== "fulfilled" || b.status !== "fulfilled") {
+						throw new Error("test file creation failed")
+					}
+
+					const fileA = a.value
+					const fileB = b.value
+
 					const registration = await navigator.serviceWorker.ready
 
 					if (registration.active === null) {
@@ -121,8 +132,8 @@ test.describe("service worker", () => {
 					}
 				} finally {
 					// Net-zero on the shared e2e account, mirroring uploads.spec.ts's own create -> act ->
-					// trash convention.
-					await Promise.all([hooks.trashTestFile(fileA), hooks.trashTestFile(fileB)])
+					// trash convention — trashing exactly the files that were actually created.
+					await Promise.all(created.flatMap(r => (r.status === "fulfilled" ? [hooks.trashTestFile(r.value)] : [])))
 				}
 			},
 			{ initType: SW_MSG_INIT_CLIENT, registerType: SW_MSG_REGISTER_ZIP_DOWNLOAD, prefix: SW_DOWNLOAD_PREFIX }
