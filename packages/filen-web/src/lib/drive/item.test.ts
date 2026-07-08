@@ -305,9 +305,10 @@ function mockSharedFile(overrides: Partial<SharedFile> = {}): SharedFile {
 }
 
 describe("narrowItem — shared arms", () => {
-	it("narrows a SharedRootDir into a sharedRootDirectory with a Dir-shaped, role-carrying data", () => {
+	it("narrows a SharedRootDir into a sharedRootDirectory with a Dir-shaped, role-carrying data, retaining the raw as shareSource", () => {
 		const role = sharerRole(42, "sharer@filen.io")
-		const item = narrowItem(mockSharedRootDir({ sharingRole: role }))
+		const raw = mockSharedRootDir({ sharingRole: role })
+		const item = narrowItem(raw)
 
 		if (item.type !== "sharedRootDirectory") {
 			throw new Error("expected a sharedRootDirectory arm")
@@ -320,10 +321,15 @@ describe("narrowItem — shared arms", () => {
 		expect(item.data.writeAccess).toBe(true)
 		expect(item.data.favorited).toBe(false) // synthesized inert
 		expect(item.data.parent).toBe(testUuid("sroot")) // synthesized inert (self-uuid)
+		// shareSource is the UNTOUCHED raw SharedRootDir (same reference, `inner` intact) — the exact
+		// shape removeSharedItem needs; `data` itself lost `inner` when it was flattened above.
+		expect(item.data.shareSource).toBe(raw)
+		expect(item.data.shareSource.inner).toBe(raw.inner)
 	})
 
-	it("narrows a SharedFile into a sharedRootFile, preserving its native size and role", () => {
-		const item = narrowItem(mockSharedFile())
+	it("narrows a SharedFile into a sharedRootFile, preserving its native size and role, retaining the raw as shareSource", () => {
+		const raw = mockSharedFile()
+		const item = narrowItem(raw)
 
 		if (item.type !== "sharedRootFile") {
 			throw new Error("expected a sharedRootFile arm")
@@ -335,6 +341,8 @@ describe("narrowItem — shared arms", () => {
 		expect(item.data.sharingRole).toEqual(receiverRole(7, "receiver@filen.io"))
 		expect(item.data.favorited).toBe(false)
 		expect(item.data.canMakeThumbnail).toBe(false)
+		// shareSource is the untouched raw SharedFile (same reference) — what removeSharedItem needs.
+		expect(item.data.shareSource).toBe(raw)
 	})
 
 	it("context-tags a nested SharedDir (parent role spread on) into a sharedDirectory", () => {
@@ -349,6 +357,9 @@ describe("narrowItem — shared arms", () => {
 		expect(item.data.decryptedMeta).toEqual({ name: "SharedChild" })
 		expect(item.data.sharedTag).toBe(true)
 		expect(item.data.sharingRole).toEqual(role) // spread from the parent
+		// Nested arms are never root shares — no shareSource (see item.ts's union doc comment);
+		// removeSharedItem is root-only.
+		expect("shareSource" in item.data).toBe(false)
 	})
 
 	it("narrows a bare SharedDir (no spread role) into a sharedDirectory with an undefined role", () => {
@@ -373,6 +384,9 @@ describe("narrowItem — shared arms", () => {
 		expect(item.data.sharingRole).toEqual(role)
 		expect(item.data.sharedTag).toBe(true)
 		expect(item.data.decryptedMeta?.mime).toBe("application/pdf")
+		// Nested arms are never root shares — no shareSource (see item.ts's union doc comment);
+		// removeSharedItem is root-only.
+		expect("shareSource" in item.data).toBe(false)
 	})
 })
 

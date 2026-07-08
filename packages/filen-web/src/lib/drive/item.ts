@@ -28,9 +28,23 @@ export interface ExtraData {
 // (see getSharerIdentity): required on every arm that natively carries one, optional on the nested
 // sharedDirectory (a SharedDir has no own role — the fetcher spreads the parent's onto it, and a
 // path that rebuilds one without the spread relies on the resolver fallback instead).
+//
+// The two ROOT arms (sharedRootDirectory/sharedRootFile) additionally retain the untouched wasm value
+// they were flattened from, as `shareSource` — the worker's removeSharedItem(item: SharedRootItem)
+// forwards it straight to the SDK, which deserializes SharedRootItem as an UNTAGGED union
+// (SharedRootDir | SharedFile). A flattened directory's `data` has no `inner` wrapper, so it matches
+// NEITHER variant (SharedRootDir needs `inner`, SharedFile needs `chunks`) — passing `data` itself
+// would fail to deserialize for a directory. Only the two root arms get one: a nested sharedDirectory/
+// sharedFile is narrowed from a SharedDir/File the fetcher already spread a role onto, never a real
+// SharedRootItem, and removeSharedItem is root-only regardless (see share/actions.ts's unshareItems).
 type SharedDirectoryData = Dir & ExtraData & { decryptedMeta: DecryptedDirMeta | null; sharedTag: boolean; sharingRole?: SharingRole }
-type SharedRootDirectoryData = Dir & ExtraData & { decryptedMeta: DecryptedDirMeta | null; sharingRole: SharingRole; writeAccess: boolean }
+type SharedRootDirectoryData = Dir &
+	ExtraData & { decryptedMeta: DecryptedDirMeta | null; sharingRole: SharingRole; writeAccess: boolean; shareSource: SharedRootDir }
 type SharedFileData = File & ExtraData & { decryptedMeta: DecryptedFileMeta | null; sharedTag: boolean; sharingRole: SharingRole }
+// sharedRootFile-only split: the nested sharedFile arm below is narrowed from a plain File the fetcher
+// spread a role onto — no real wasm SharedFile ever backed it — so it stays on SharedFileData with no
+// shareSource. Only a ROOT file's data was ever constructed from a genuine SharedFile.
+type SharedRootFileData = SharedFileData & { shareSource: SharedFile }
 
 // Six-arm discriminated union: narrowing on `type` narrows `data` under max-strict (a file arm's
 // `decryptedMeta` is `DecryptedFileMeta | null` — exposes `.mime` — a directory arm's is
@@ -44,7 +58,7 @@ export type DriveItem =
 	| { type: "sharedDirectory"; data: SharedDirectoryData }
 	| { type: "sharedRootDirectory"; data: SharedRootDirectoryData }
 	| { type: "sharedFile"; data: SharedFileData }
-	| { type: "sharedRootFile"; data: SharedFileData }
+	| { type: "sharedRootFile"; data: SharedRootFileData }
 
 // The base directory|file projection asDirectoryOrFile maps every arm onto — its `data` is a
 // structural superset of Dir/File, so it is assignable to the plain wasm shapes the worker's
@@ -90,6 +104,8 @@ function narrowFile(raw: NarrowableFileInput): DriveItem {
 		// SharedFile lacks a normal item's `parent`/`favorited`/`canMakeThumbnail`; a shared-root file
 		// has no navigable normal parent and is never favorited/thumbnailed through this arm, so those
 		// are synthesized inert (self-uuid parent, false flags) purely to keep the base File shape whole.
+		// `shareSource` retains the untouched raw SharedFile (see the union's own doc comment above) —
+		// removeSharedItem needs the genuine wasm value, never this synthesized shape.
 		return {
 			type: "sharedRootFile",
 			data: {
@@ -106,7 +122,8 @@ function narrowFile(raw: NarrowableFileInput): DriveItem {
 				undecryptable: decryptedMeta === null,
 				decryptedMeta,
 				sharedTag: raw.sharedTag,
-				sharingRole: raw.sharingRole
+				sharingRole: raw.sharingRole,
+				shareSource: raw
 			}
 		}
 	}
@@ -156,7 +173,9 @@ function narrowDir(raw: NarrowableDirInput): DriveItem {
 	const decryptedMeta = inner.meta.type === "decoded" ? inner.meta.data : null
 	// RootDirWithMeta lacks a Dir's `parent`/`favorited`; a shared-root directory has no navigable
 	// normal parent and is never favorited through this arm, so those are synthesized inert (self-uuid
-	// parent, false) purely to keep the base Dir shape whole.
+	// parent, false) purely to keep the base Dir shape whole. `shareSource` retains the untouched raw
+	// SharedRootDir (see the union's own doc comment above), `inner` wrapper and all — `data` itself
+	// lost `inner` in the flattening above, so it alone can't round-trip through removeSharedItem.
 	return {
 		type: "sharedRootDirectory",
 		data: {
@@ -170,7 +189,8 @@ function narrowDir(raw: NarrowableDirInput): DriveItem {
 			undecryptable: decryptedMeta === null,
 			decryptedMeta,
 			sharingRole: raw.sharingRole,
-			writeAccess: raw.writeAccess
+			writeAccess: raw.writeAccess,
+			shareSource: raw
 		}
 	}
 }
