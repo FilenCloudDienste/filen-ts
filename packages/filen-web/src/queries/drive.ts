@@ -56,10 +56,17 @@ export async function fetchDirectoryListing(variant: DriveVariant, uuid: string 
 // dirs/files bigints (timestamp, size, chunks, meta created/modified/size) cross Comlink via
 // structured clone already (see sdk.worker.ts); this module never JSON.stringifies them, and the
 // result rides the persister's own envelope serializer at rest — zero customization needed here.
+//
+// One hook serves every variant — DirectoryListing is variant-generic, so rules-of-hooks forbid
+// picking between two listing hooks per render. The queryFn dispatches instead: the two shared
+// variants fetch through fetchSharedListing (whose worker ops return a different result shape than
+// listDirectory — see fetchSharedListing / toListingTarget's throw), everything else through
+// fetchDirectoryListing. The guard narrows `variant` to the shared union, matching its param.
 export function useDirectoryListingQuery(variant: DriveVariant, uuid: string | null): UseQueryResult<DriveItem[]> {
 	return useQuery({
 		queryKey: driveListingQueryKey({ variant, uuid }),
-		queryFn: () => fetchDirectoryListing(variant, uuid)
+		queryFn: () =>
+			variant === "sharedIn" || variant === "sharedOut" ? fetchSharedListing(variant, uuid) : fetchDirectoryListing(variant, uuid)
 	})
 }
 
@@ -68,8 +75,9 @@ export function useDirectoryListingQuery(variant: DriveVariant, uuid: string | n
 // already carries its own share role, so narrowItem classifies it structurally); a non-null uuid
 // browses into a nested shared directory, where the worker returns the parent role and this CONTEXT-
 // TAGS every nested dir/file with it BEFORE narrowing — a nested SharedDir/File is otherwise
-// structurally a plain dir/file and can't be classified as shared. Exported (not just the hook) so
-// this project's node-environment unit tests can exercise it against a mocked sdkApi.
+// structurally a plain dir/file and can't be classified as shared. Exported (no hook wrapper of its
+// own — useDirectoryListingQuery's variant dispatch calls it directly) so this project's
+// node-environment unit tests can exercise it against a mocked sdkApi.
 export async function fetchSharedListing(variant: "sharedIn" | "sharedOut", uuid: string | null): Promise<DriveItem[]> {
 	if (uuid === null) {
 		const { dirs, files } = variant === "sharedIn" ? await sdkApi.listSharedInRoot() : await sdkApi.listSharedOutRoot()
@@ -78,13 +86,6 @@ export async function fetchSharedListing(variant: "sharedIn" | "sharedOut", uuid
 
 	const { dirs, files, role } = await sdkApi.listSharedDirectory(uuid)
 	return [...dirs.map(dir => narrowItem({ ...dir, sharingRole: role })), ...files.map(file => narrowItem({ ...file, sharingRole: role }))]
-}
-
-export function useSharedListingQuery(variant: "sharedIn" | "sharedOut", uuid: string | null): UseQueryResult<DriveItem[]> {
-	return useQuery({
-		queryKey: driveListingQueryKey({ variant, uuid }),
-		queryFn: () => fetchSharedListing(variant, uuid)
-	})
 }
 
 // Confirm-then-patch for a write landing in My Drive (queries/client.ts's zero-useMutation
