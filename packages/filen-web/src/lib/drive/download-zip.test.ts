@@ -11,12 +11,17 @@ const { downloadItemsToZip } = vi.hoisted(() => ({ downloadItemsToZip: vi.fn() }
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { downloadItemsToZip } }))
 
-const { saveDownloadMock, isPickerCancelledMock } = vi.hoisted(() => ({
+const { saveDownloadMock, isPickerCancelledMock, triggerSwZipDownloadMock } = vi.hoisted(() => ({
 	saveDownloadMock: vi.fn(),
-	isPickerCancelledMock: vi.fn()
+	isPickerCancelledMock: vi.fn(),
+	triggerSwZipDownloadMock: vi.fn()
 }))
 
-vi.mock("@/lib/drive/save-download", () => ({ saveDownload: saveDownloadMock, isPickerCancelled: isPickerCancelledMock }))
+vi.mock("@/lib/drive/save-download", () => ({
+	saveDownload: saveDownloadMock,
+	isPickerCancelled: isPickerCancelledMock,
+	triggerSwZipDownload: triggerSwZipDownloadMock
+}))
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
@@ -490,14 +495,25 @@ describe("defaultZipDownloadDeps.downloadZip — fsa branch", () => {
 	})
 })
 
-describe("defaultZipDownloadDeps.downloadZip — sw branch (guarded, unreachable via the FSA entry-point gates)", () => {
-	it("rejects with a clear error instead of silently misdownloading", async () => {
+describe("defaultZipDownloadDeps.downloadZip — sw branch", () => {
+	it("delegates to triggerSwZipDownload with the narrowed items and the sw save target, never touching the worker", async () => {
 		const save: SwSaveTarget = { kind: "sw", id: "id-1", url: "/sw/download/id-1", name: "Filen.zip" }
+		const items = [testFile(), testFile()]
+		triggerSwZipDownloadMock.mockResolvedValue(undefined)
+
+		await defaultZipDownloadDeps.downloadZip(items, "transfer-id", save, vi.fn())
+
+		expect(triggerSwZipDownloadMock).toHaveBeenCalledWith(items, save)
+		expect(downloadItemsToZip).not.toHaveBeenCalled()
+	})
+
+	it("propagates a triggerSwZipDownload rejection", async () => {
+		const save: SwSaveTarget = { kind: "sw", id: "id-1", url: "/sw/download/id-1", name: "Filen.zip" }
+		triggerSwZipDownloadMock.mockRejectedValue(new Error("no active service worker"))
 
 		await expect(defaultZipDownloadDeps.downloadZip([testFile()], "transfer-id", save, vi.fn())).rejects.toThrow(
-			"zip over service worker not supported yet"
+			"no active service worker"
 		)
-		expect(downloadItemsToZip).not.toHaveBeenCalled()
 	})
 })
 

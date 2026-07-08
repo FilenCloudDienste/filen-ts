@@ -52,7 +52,8 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 	// download is checked FIRST, before dialog/favorite — startBulkDownload's FSA save picker needs
 	// this click's own live user gesture (see lib/drive/download.ts), so nothing here may yield to the
 	// event loop ahead of it. A disabled Button's onClick never fires at all (see the disabled prop
-	// below), so this never runs for a multi/directory selection.
+	// below), which today only guards the empty-selection edge case — every dir/multi selection is
+	// downloadable too now (the sw zip route).
 	function runDescriptor(descriptor: BulkActionDescriptor): void {
 		if (descriptor.id === "download") {
 			startBulkDownload(selectedItems)
@@ -94,9 +95,10 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 			</div>
 			<div className="flex items-center gap-2">
 				{descriptors.map(descriptor => {
-					// Present-but-disabled (never absent) for a multi/directory selection until the zip
-					// path lands — a dead click is worse than a disabled control (mirrors
-					// item-menu.logic.ts's downloadDescriptor). Every other descriptor stays always-enabled.
+					// isBulkDownloadEnabled is effectively always true here (the bar only mounts once a
+					// selection exists) — kept as a defensive check mirroring item-menu.logic.ts's own
+					// downloadDescriptor rather than assuming the caller never renders an empty selection.
+					// Every other descriptor stays always-enabled.
 					const disabled = descriptor.id === "download" && !isBulkDownloadEnabled(selectedItems)
 					const buttonProps = {
 						variant: descriptor.destructive ? ("destructive" as const) : ("outline" as const),

@@ -1,5 +1,6 @@
 import { type } from "arktype"
-import type { StringifiedClient } from "@filen/sdk-rs"
+import * as Comlink from "comlink"
+import type { StringifiedClient, File } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
 import { kvGetJson, kvHas, kvSetJson } from "@/lib/storage/adapter"
@@ -44,6 +45,19 @@ interface E2eHooks {
 	kvHas: (key: string) => Promise<boolean>
 	setUserCombo: (actionId: string, combo: string) => Promise<void>
 	comboFor: (actionId: string) => string
+	// Raw (non-enveloped) client blob for handing straight to the service worker's own
+	// SW_MSG_INIT_CLIENT handshake from inside a page.evaluate callback — bigint fields survive the
+	// postMessage structured clone there, unlike the JSON-only Playwright<->page bridge dumpSession is
+	// stringified for. Used by the sw zip e2e case, which drives the SW protocol directly rather than
+	// through a real Download click (Chromium's File System Access API would otherwise take the fsa
+	// branch, the one path that can never reach the sw route under test).
+	rawStringifiedClient: () => Promise<StringifiedClient>
+	// Uploads one small real file at the drive root through the real worker path (no UI) and returns
+	// the resulting File record — gives the sw zip e2e case real, live-downloadable ZipItems without
+	// depending on whatever the shared e2e account happens to already hold.
+	createTestFile: (name: string, content: string) => Promise<File>
+	// Trashes a File this hook created — keeps the shared e2e account net-zero after a test run.
+	trashTestFile: (file: File) => Promise<void>
 }
 
 // Minimal shape of the TanStack router main.tsx hands in — enough to re-run route guards after the
@@ -102,7 +116,25 @@ export function installE2eHooks(router: RouterLike): void {
 		kvGet: key => kvGetJson(key, stringSchema),
 		kvHas: key => kvHas(key),
 		setUserCombo: (actionId, combo) => setUserCombo(actionId, combo),
-		comboFor: actionId => comboFor(actionId)
+		comboFor: actionId => comboFor(actionId),
+		rawStringifiedClient: async () => {
+			await whenBootReady()
+
+			return sdkApi.toStringified()
+		},
+		createTestFile: async (name, content) => {
+			await whenBootReady()
+
+			return sdkApi.uploadFile(
+				null,
+				crypto.randomUUID(),
+				new File([content], name, { type: "text/plain" }),
+				Comlink.proxy(() => undefined)
+			)
+		},
+		trashTestFile: async file => {
+			await sdkApi.trashFile(file)
+		}
 	}
 
 	void seedFromSlot(router).catch((e: unknown) => {

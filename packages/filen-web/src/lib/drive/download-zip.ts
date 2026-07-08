@@ -7,7 +7,7 @@ import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/lib/drive/item"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/drive/upload"
-import { saveDownload, isPickerCancelled, type SaveTarget, type FsaSaveTarget } from "@/lib/drive/save-download"
+import { saveDownload, triggerSwZipDownload, isPickerCancelled, type SaveTarget, type FsaSaveTarget } from "@/lib/drive/save-download"
 import { useTransfersStore, type TransfersStore } from "@/stores/transfers"
 
 // Maps a selection to what downloadItemsToZip wants. A file narrows the same way narrowToAnyFile does
@@ -148,21 +148,12 @@ async function downloadZipViaFsa(
 	await sinkDone
 }
 
-// The real wiring behind RunZipDownloadDeps.downloadZip. The sw branch is unreachable through any
-// shipped entry point today — every dir/multi Download gate stays off unless isFsaAvailable() (see
-// item-menu.logic.ts / bulk-action-bar.logic.ts / directory-listing.tsx) — but rejects with a clear
-// error rather than silently misdownloading if it's ever reached before the service-worker zip path
-// lands. Promise.reject, not a bare throw: this is typed as returning Promise<void>, so every caller
-// (runZipDownload's try/catch, but also a bare `deps.downloadZip(...).catch(...)`) expects a rejection
-// to arrive THROUGH the promise, never as a synchronous exception out of the call itself.
+// The real wiring behind RunZipDownloadDeps.downloadZip: fsa streams through the worker directly, sw
+// registers the ZipItem[] with the service worker and lets a plain navigation trigger the browser's
+// own download manager — mirrors download.ts's defaultDownloadDeps.download split exactly.
 export const defaultZipDownloadDeps: RunZipDownloadDeps = {
-	downloadZip: (items, transferId, save, onProgress) => {
-		if (save.kind === "sw") {
-			return Promise.reject(new Error("zip over service worker not supported yet"))
-		}
-
-		return downloadZipViaFsa(items, transferId, save, onProgress)
-	},
+	downloadZip: (items, transferId, save, onProgress) =>
+		save.kind === "sw" ? triggerSwZipDownload(items, save) : downloadZipViaFsa(items, transferId, save, onProgress),
 	store: useTransfersStore.getState()
 }
 

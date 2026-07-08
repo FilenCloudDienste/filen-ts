@@ -153,9 +153,8 @@ export const defaultDownloadDeps: RunDownloadDeps = {
 // dialogs — the SDK does the recursion + zip in one native call, the exact inverse of upload's own
 // JS-orchestrated multi-file fan-out. Only a lone file downloads directly. Exported as the single
 // routing predicate startDownloads below branches on, and the single unifying PRESENCE/shape gate
-// every download entry point (item-menu/bulk-bar/keymap) reads — their own ENABLED gate additionally
-// requires isFsaAvailable() when this is true (see lib/drive/save-download.ts, download-zip.ts: the
-// service-worker zip path is a later task).
+// every download entry point (item-menu/bulk-bar/keymap) reads — their own ENABLED gate is now
+// unconditional (the service-worker zip path covers every dir/multi selection, not just FSA browsers).
 export function needsZip(items: DriveItem[]): boolean {
 	return items.length > 1 || items.some(item => asDirectoryOrFile(item).type === "directory")
 }

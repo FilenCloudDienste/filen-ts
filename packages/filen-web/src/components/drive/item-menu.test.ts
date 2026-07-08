@@ -4,11 +4,10 @@ import { UserMinusIcon, DownloadIcon } from "lucide-react"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
 
-// item-menu.logic.ts imports lib/drive/download.ts (for needsZip/startDownloads) which in turn
-// touches the worker client and query client — unresolvable/unwanted under node vitest, mirrors
-// lib/drive/download.test.ts's own mock boundary. needsZip is kept REAL (via importOriginal) so the
-// gating tests below exercise the genuine single-unifying-gate predicate, not a re-derived stand-in;
-// only startDownloads is replaced, since actually running it would reach the (also mocked) worker.
+// item-menu.logic.ts imports lib/drive/download.ts (for startDownloads) which in turn touches the
+// worker client and query client — unresolvable/unwanted under node vitest, mirrors
+// lib/drive/download.test.ts's own mock boundary. startDownloads is replaced, since actually running
+// it would reach the (also mocked) worker.
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -21,9 +20,10 @@ vi.mock("@/lib/drive/download", async importOriginal => {
 })
 
 // isFsaAvailable reads `window`, absent entirely under node vitest (a real call would throw) — kept
-// REAL otherwise (via importOriginal) so save-download's own saveDownload/isPickerCancelled stay
-// genuine; only isFsaAvailable is replaced. Defaults to false (non-FSA browser) below so every
-// existing gating assertion keeps its pre-zip meaning unless a test opts into the FSA-available case.
+// REAL otherwise (via importOriginal) so save-download's own other exports stay genuine.
+// downloadDescriptor no longer calls it at all (the service-worker zip path made download's enabled
+// gate unconditional) — stubbed to both true and false below purely to prove that value no longer
+// changes the outcome.
 const { isFsaAvailableMock } = vi.hoisted(() => ({ isFsaAvailableMock: vi.fn() }))
 
 vi.mock("@/lib/drive/save-download", async importOriginal => {
@@ -356,21 +356,22 @@ describe("driveItemActions — shared-surface safe subset (sharedIn/sharedOut)",
 })
 
 // Download's single unifying ENABLED gate (mirrored in bulk-action-bar.logic.ts and the drive
-// keymap): present on every decryptable, non-trash item, enabled iff the item is a file OR the browser
-// can zip a directory via the File System Access API. PRESENCE has its own separate exclusions —
-// trash (see the trash-variant test above) and undecryptable (below).
-describe("driveItemActions — download gating (single unifying gate: !needsZip || isFsaAvailable())", () => {
+// keymap): present on every decryptable, non-trash item, enabled unconditionally now that the
+// service-worker zip path covers every dir/multi selection too. PRESENCE has its own separate
+// exclusions — trash (see the trash-variant test above) and undecryptable (below). Both FSA states
+// are still exercised here as documentation that isFsaAvailable's value no longer matters.
+describe("driveItemActions — download gating (enabled unconditionally, transport-agnostic since the sw zip path)", () => {
 	it("is present and enabled for a file, regardless of FSA availability", () => {
 		const descriptor = driveItemActions(fileItem(), "drive").find(d => d.id === "download")
 
 		expect(descriptor).toMatchObject({ run: "direct", enabled: true, icon: DownloadIcon })
 	})
 
-	it("is present but disabled for a directory on a non-FSA browser (isFsaAvailable false) — the service-worker zip path is a later task", () => {
+	it("is present and enabled for a directory on a non-FSA browser (isFsaAvailable false) — the sw zip route covers it", () => {
 		isFsaAvailableMock.mockReturnValue(false)
 		const descriptor = driveItemActions(dirItem(), "drive").find(d => d.id === "download")
 
-		expect(descriptor).toMatchObject({ run: "direct", enabled: false })
+		expect(descriptor).toMatchObject({ run: "direct", enabled: true })
 	})
 
 	it("is present and enabled for a directory when isFsaAvailable() is true", () => {
@@ -385,7 +386,7 @@ describe("driveItemActions — download gating (single unifying gate: !needsZip 
 		expect(ids(dirItem(), "trash")).not.toContain("download")
 	})
 
-	it("is absent for an undecryptable item regardless of file/directory type — undecryptable gate takes precedence over needsZip", () => {
+	it("is absent for an undecryptable item regardless of file/directory type", () => {
 		const undecryptableFile = narrowItem(mockFile({ meta: { type: "encrypted", data: "ciphertext" } }))
 		const undecryptableDir = narrowItem(mockDir({ meta: { type: "encrypted", data: "ciphertext" } }))
 

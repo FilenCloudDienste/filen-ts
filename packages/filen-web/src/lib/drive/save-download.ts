@@ -1,6 +1,6 @@
-import type { AnyFile } from "@filen/sdk-rs"
+import type { AnyFile, ZipItem } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
-import { SW_DOWNLOAD_PREFIX, SW_MSG_INIT_CLIENT, SW_MSG_REGISTER_DOWNLOAD } from "@/lib/sw/protocol"
+import { SW_DOWNLOAD_PREFIX, SW_MSG_INIT_CLIENT, SW_MSG_REGISTER_DOWNLOAD, SW_MSG_REGISTER_ZIP_DOWNLOAD } from "@/lib/sw/protocol"
 
 // The disk mechanism a download writes to, picked once per saveDownload() call by capability —
 // callers (lib/drive/download.ts) branch on `kind`, never on the browser directly. FSA carries a
@@ -129,6 +129,16 @@ export async function triggerSwDownload(file: AnyFile, save: SwSaveTarget): Prom
 	const target = await activeServiceWorker()
 
 	await sendToSw(target, SW_MSG_REGISTER_DOWNLOAD, { id: save.id, file, name: save.name, size: Number(file.size) })
+
+	window.location.href = save.url
+}
+
+// Zip flavor of triggerSwDownload above — same registration-then-plain-navigation shape, just a
+// different message type and no `size` (a zip's total isn't known until the SW streams it).
+export async function triggerSwZipDownload(items: ZipItem[], save: SwSaveTarget): Promise<void> {
+	const target = await activeServiceWorker()
+
+	await sendToSw(target, SW_MSG_REGISTER_ZIP_DOWNLOAD, { id: save.id, items, name: save.name })
 
 	window.location.href = save.url
 }

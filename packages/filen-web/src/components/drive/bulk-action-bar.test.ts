@@ -5,12 +5,10 @@ import type { Dir, File } from "@filen/sdk-rs"
 import { type DriveSelectionFlags } from "@/lib/drive/selection-flags"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
 
-// bulk-action-bar.logic.ts imports lib/drive/download.ts (for needsZip/startDownloads), which in turn
-// touches the worker client and query client — unresolvable/unwanted under node vitest, mirrors
-// lib/drive/download.test.ts's own mock boundary. needsZip is kept REAL (via importOriginal) so
-// isBulkDownloadEnabled below exercises the genuine single-unifying-gate predicate, not a re-derived
-// stand-in; only startDownloads is replaced, since actually running it would reach the (also mocked)
-// worker.
+// bulk-action-bar.logic.ts imports lib/drive/download.ts (for startDownloads), which in turn touches
+// the worker client and query client — unresolvable/unwanted under node vitest, mirrors
+// lib/drive/download.test.ts's own mock boundary. startDownloads is replaced, since actually running
+// it would reach the (also mocked) worker.
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -23,8 +21,9 @@ vi.mock("@/lib/drive/download", async importOriginal => {
 })
 
 // isFsaAvailable reads `window`, absent entirely under node vitest (a real call would throw) — kept
-// REAL otherwise (via importOriginal). Defaults to false (non-FSA browser) below so every existing
-// gating assertion keeps its pre-zip meaning unless a test opts into the FSA-available case.
+// REAL otherwise (via importOriginal). isBulkDownloadEnabled no longer calls it at all (the
+// service-worker zip path made download's enabled gate unconditional) — stubbed to both true and
+// false below purely to prove that value no longer changes the outcome.
 const { isFsaAvailableMock } = vi.hoisted(() => ({ isFsaAvailableMock: vi.fn() }))
 
 vi.mock("@/lib/drive/save-download", async importOriginal => {
@@ -277,24 +276,25 @@ describe("driveBulkActions — download descriptor shape", () => {
 	})
 })
 
-// Download's ENABLED state (distinct from its presence in driveBulkActions) — the single unifying
-// gate mirrored in item-menu.logic.ts and the drive keymap: enabled iff the selection is a lone file,
-// or it needs zipping and the browser can (isFsaAvailable).
+// Download's ENABLED state (distinct from its presence in driveBulkActions) — mirrored in
+// item-menu.logic.ts and the drive keymap: enabled iff the selection is non-empty. The service-worker
+// zip path removed the isFsaAvailable() requirement a dir/multi selection used to need — both FSA
+// states are still exercised below as documentation that its value no longer changes the outcome.
 describe("isBulkDownloadEnabled", () => {
 	it("is enabled for a single-file selection, regardless of FSA availability", () => {
 		expect(isBulkDownloadEnabled([fileItem()])).toBe(true)
 	})
 
-	it("is disabled for a multi-file selection on a non-FSA browser", () => {
+	it("is enabled for a multi-file selection on a non-FSA browser — the sw zip route covers it", () => {
 		isFsaAvailableMock.mockReturnValue(false)
 
-		expect(isBulkDownloadEnabled([fileItem(), fileItem()])).toBe(false)
+		expect(isBulkDownloadEnabled([fileItem(), fileItem()])).toBe(true)
 	})
 
-	it("is disabled for a single-directory selection on a non-FSA browser", () => {
+	it("is enabled for a single-directory selection on a non-FSA browser — the sw zip route covers it", () => {
 		isFsaAvailableMock.mockReturnValue(false)
 
-		expect(isBulkDownloadEnabled([dirItem()])).toBe(false)
+		expect(isBulkDownloadEnabled([dirItem()])).toBe(true)
 	})
 
 	it("is enabled for a multi-file selection when isFsaAvailable() is true", () => {

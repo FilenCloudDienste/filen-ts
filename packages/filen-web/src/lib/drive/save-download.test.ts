@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { AnyFile } from "@filen/sdk-rs"
+import type { AnyFile, ZipItem } from "@filen/sdk-rs"
 import { type SwSaveTarget } from "@/lib/drive/save-download"
-import { SW_DOWNLOAD_PREFIX, SW_MSG_INIT_CLIENT, SW_MSG_REGISTER_DOWNLOAD } from "@/lib/sw/protocol"
+import { SW_DOWNLOAD_PREFIX, SW_MSG_INIT_CLIENT, SW_MSG_REGISTER_DOWNLOAD, SW_MSG_REGISTER_ZIP_DOWNLOAD } from "@/lib/sw/protocol"
 
 // save-download.ts keeps its SW-client-ready state in a module-level `let` (mirrors
 // lib/sw/register.ts) — every test that touches the sw path needs its own module instance, so
@@ -259,6 +259,35 @@ describe("triggerSwDownload", () => {
 		const save: SwSaveTarget = { kind: "sw", id: "abc-123", url: `${SW_DOWNLOAD_PREFIX}abc-123`, name: "report.pdf" }
 
 		await expect(triggerSwDownload(testFile(), save)).rejects.toThrow("no room")
+		expect(location.href).toBe("")
+	})
+})
+
+describe("triggerSwZipDownload", () => {
+	it("registers the items against the token (no size), then navigates via a plain location assignment", async () => {
+		const sw = fakeServiceWorker(() => ({ ok: true }))
+		const location = stubWindow()
+		stubServiceWorkerReady(sw)
+
+		const { triggerSwZipDownload } = await freshModule()
+		const items: ZipItem[] = [testFile({ size: 2_048n }), testFile({ size: 512n })]
+		const save: SwSaveTarget = { kind: "sw", id: "abc-123", url: `${SW_DOWNLOAD_PREFIX}abc-123`, name: "Filen.zip" }
+
+		await triggerSwZipDownload(items, save)
+
+		expect(sw.calls).toEqual([{ type: SW_MSG_REGISTER_ZIP_DOWNLOAD, payload: { id: "abc-123", items, name: "Filen.zip" } }])
+		expect(location.href).toBe(`${SW_DOWNLOAD_PREFIX}abc-123`)
+	})
+
+	it("does not navigate when registration fails", async () => {
+		const sw = fakeServiceWorker(() => ({ ok: false, error: "no room" }))
+		const location = stubWindow()
+		stubServiceWorkerReady(sw)
+
+		const { triggerSwZipDownload } = await freshModule()
+		const save: SwSaveTarget = { kind: "sw", id: "abc-123", url: `${SW_DOWNLOAD_PREFIX}abc-123`, name: "Filen.zip" }
+
+		await expect(triggerSwZipDownload([testFile()], save)).rejects.toThrow("no room")
 		expect(location.href).toBe("")
 	})
 })

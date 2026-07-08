@@ -14,8 +14,7 @@ import { type DriveSelectionFlags } from "@/lib/drive/selection-flags"
 import { canShareVariant, isSharedVariant } from "@/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
 import { type DriveItem } from "@/lib/drive/item"
-import { needsZip, startDownloads } from "@/lib/drive/download"
-import { isFsaAvailable } from "@/lib/drive/save-download"
+import { startDownloads } from "@/lib/drive/download"
 
 // Dialog kinds the bulk-action bar can ask the listing's dialog host to open — a narrow subset of
 // directory-listing.tsx's own ActiveDialogKind (the per-item-only kinds — rename/color/versions/info/
@@ -124,15 +123,12 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 	return descriptors
 }
 
-// Download's ENABLED state (distinct from its PRESENCE in driveBulkActions above) needs the real
-// selection, not DriveSelectionFlags — a shared file/directory collapses to neither everyFile nor
-// everyDirectory there (selection-flags.ts's own aggregation), so reconstructing needsZip's
-// file-vs-directory check from flags alone would wrongly gate a shared single-file selection. This
-// is the single unifying gate (mirrored in item-menu.logic.ts and the drive keymap): enabled iff the
-// selection is a lone file, or it needs zipping and the browser can (isFsaAvailable) — the
-// service-worker zip path is a later task, so a dir/multi selection still disables on Firefox/Safari.
+// Download's ENABLED state (distinct from its PRESENCE in driveBulkActions above) — mirrored in
+// item-menu.logic.ts and the drive keymap: enabled iff the selection is non-empty. The service-worker
+// zip path removed the isFsaAvailable() requirement a dir/multi selection used to need — every
+// selection downloads on every browser now, empty selections excepted.
 export function isBulkDownloadEnabled(items: DriveItem[]): boolean {
-	return items.length > 0 && (!needsZip(items) || isFsaAvailable())
+	return items.length > 0
 }
 
 // Download's "direct" action needs no await before it — startDownloads' FSA save picker requires the

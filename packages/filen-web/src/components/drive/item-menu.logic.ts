@@ -19,8 +19,7 @@ import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
 import { canShareVariant, isSharedVariant } from "@/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
-import { needsZip, startDownloads } from "@/lib/drive/download"
-import { isFsaAvailable } from "@/lib/drive/save-download"
+import { startDownloads } from "@/lib/drive/download"
 
 // Dialog kinds a per-item action can open in the listing-level dialog host (directory-listing.tsx's
 // own activeDialog state). "emptyTrash" is a listing-level action (the trash toolbar, no per-item
@@ -128,19 +127,12 @@ function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
 		: { id: "favorite", labelKey: "driveActionFavorite", icon: StarIcon, run: "direct" }
 }
 
-// The single unifying download gate (mirrored in bulk-action-bar.logic.ts and the drive keymap):
-// enabled iff the item is a file, or it's a directory and the browser can zip one via the File System
-// Access API (isFsaAvailable) — the service-worker zip path is a later task, so a directory still
-// disables on Firefox/Safari. Present-but-disabled rather than absent either way: a dead click is
-// worse than a disabled control.
-function downloadDescriptor(item: DriveItem): ItemActionDescriptor {
-	return {
-		id: "download",
-		labelKey: "driveActionDownload",
-		icon: DownloadIcon,
-		run: "direct",
-		enabled: !needsZip([item]) || isFsaAvailable()
-	}
+// Download is unconditionally enabled for any item that reaches this descriptor — the service-worker
+// zip path means a dir/multi selection downloads on every browser now, not just Chromium's File System
+// Access API. PRESENCE is still gated elsewhere (trash/undecryptable never reach this call site at
+// all) — kept as an explicit field rather than omitted, mirroring the shared field's own doc comment.
+function downloadDescriptor(): ItemActionDescriptor {
+	return { id: "download", labelKey: "driveActionDownload", icon: DownloadIcon, run: "direct", enabled: true }
 }
 
 // Download's "direct" action needs no await before it — startDownloads' FSA save picker requires the
@@ -200,9 +192,9 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 		: [INFO]
 
 	// Download sits right after Info (the other read/reference action) — offered on every surface this
-	// point is reachable from, owned or shared alike, gated only by downloadDescriptor's own file/
-	// directory check, never by ownerMutable/canShareVariant (download mutates nothing).
-	actions.push(downloadDescriptor(item))
+	// point is reachable from, owned or shared alike, never gated by ownerMutable/canShareVariant
+	// (download mutates nothing).
+	actions.push(downloadDescriptor())
 
 	// Share sits with the other access-granting actions (info/link) after the type-specific group; it
 	// only appears on the owned surfaces (canShareVariant excludes sharedIn — you can't grant access to
