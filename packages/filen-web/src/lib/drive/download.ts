@@ -9,7 +9,7 @@ import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/drive/upload"
 import { saveDownload, triggerSwDownload, isPickerCancelled, type SaveTarget, type FsaSaveTarget } from "@/lib/drive/save-download"
 import { useTransfersStore, type TransfersStore } from "@/stores/transfers"
-import { log } from "@/lib/log"
+import { startZipDownload } from "@/lib/drive/download-zip"
 
 // Extracts the SDK AnyFile a download op wants from a DriveItem's file arm. A directory item is a
 // contract violation here — startDownloads below routes any directory to the zip path instead — so
@@ -149,21 +149,13 @@ export const defaultDownloadDeps: RunDownloadDeps = {
 	store: useTransfersStore.getState()
 }
 
-// Directory + multi-select zip download (the SDK's downloadItemsToZip) lands in a later task. This
-// placeholder keeps startDownloads' single-vs-zip routing decision compilable and testable ahead of
-// that work landing — it is not reachable from any shipped UI yet (no entry point calls
-// startDownloads with more than one item, or a directory, today).
-export function startZipDownload(items: DriveItem[]): Promise<void> {
-	log.warn("download", "startZipDownload: not implemented yet", { count: items.length })
-
-	return Promise.resolve()
-}
-
 // A directory, or more than one item at all, zips into one archive rather than N separate save
 // dialogs — the SDK does the recursion + zip in one native call, the exact inverse of upload's own
 // JS-orchestrated multi-file fan-out. Only a lone file downloads directly. Exported as the single
-// gate every download entry point (item-menu/bulk-bar/keymap) enables on: a lone file is
-// enabled, anything else is disabled until the zip path lands.
+// routing predicate startDownloads below branches on, and the single unifying PRESENCE/shape gate
+// every download entry point (item-menu/bulk-bar/keymap) reads — their own ENABLED gate additionally
+// requires isFsaAvailable() when this is true (see lib/drive/save-download.ts, download-zip.ts: the
+// service-worker zip path is a later task).
 export function needsZip(items: DriveItem[]): boolean {
 	return items.length > 1 || items.some(item => asDirectoryOrFile(item).type === "directory")
 }

@@ -146,6 +146,42 @@ describe("setProgress", () => {
 	})
 })
 
+describe("setSize", () => {
+	it("updates size for the matching id", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "a", size: 0 }))
+
+		useTransfersStore.getState().setSize("a", 5_000)
+
+		expect(useTransfersStore.getState().transfers[0]?.size).toBe(5_000)
+	})
+
+	it("leaves other transfers untouched", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "a", size: 0 }))
+		useTransfersStore.getState().add(makeTransfer({ id: "b", size: 10 }))
+
+		useTransfersStore.getState().setSize("a", 5_000)
+
+		expect(useTransfersStore.getState().transfers.find(transfer => transfer.id === "b")?.size).toBe(10)
+	})
+
+	it("is a no-op for an unknown id", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "a", size: 0 }))
+
+		useTransfersStore.getState().setSize("missing", 999)
+
+		expect(useTransfersStore.getState().transfers[0]?.size).toBe(0)
+	})
+
+	it("can grow across repeated calls, mirroring a zip transfer's totalBytes discovered mid-walk", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "a", size: 0 }))
+
+		useTransfersStore.getState().setSize("a", 1_000)
+		useTransfersStore.getState().setSize("a", 4_000)
+
+		expect(useTransfersStore.getState().transfers[0]?.size).toBe(4_000)
+	})
+})
+
 describe("settle", () => {
 	it("marks a transfer done, with no error field set", () => {
 		useTransfersStore.getState().add(makeTransfer({ id: "a" }))

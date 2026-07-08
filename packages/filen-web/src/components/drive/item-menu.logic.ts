@@ -20,6 +20,7 @@ import { type DriveVariant } from "@/lib/drive/preferences"
 import { canShareVariant, isSharedVariant } from "@/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
 import { needsZip, startDownloads } from "@/lib/drive/download"
+import { isFsaAvailable } from "@/lib/drive/save-download"
 
 // Dialog kinds a per-item action can open in the listing-level dialog host (directory-listing.tsx's
 // own activeDialog state). "emptyTrash" is a listing-level action (the trash toolbar, no per-item
@@ -127,11 +128,18 @@ function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
 }
 
 // The single unifying download gate (mirrored in bulk-action-bar.logic.ts and the drive keymap):
-// enabled iff `!needsZip([item])`, i.e. a file. A directory routes to the zip stub (not functional
-// until a later task), so it stays present-but-disabled rather than vanishing from the menu — a dead
-// click is worse than a disabled control.
+// enabled iff the item is a file, or it's a directory and the browser can zip one via the File System
+// Access API (isFsaAvailable) — the service-worker zip path is a later task, so a directory still
+// disables on Firefox/Safari. Present-but-disabled rather than absent either way: a dead click is
+// worse than a disabled control.
 function downloadDescriptor(item: DriveItem): ItemActionDescriptor {
-	return { id: "download", labelKey: "driveActionDownload", icon: DownloadIcon, run: "direct", enabled: !needsZip([item]) }
+	return {
+		id: "download",
+		labelKey: "driveActionDownload",
+		icon: DownloadIcon,
+		run: "direct",
+		enabled: !needsZip([item]) || isFsaAvailable()
+	}
 }
 
 // Download's "direct" action needs no await before it — startDownloads' FSA save picker requires the

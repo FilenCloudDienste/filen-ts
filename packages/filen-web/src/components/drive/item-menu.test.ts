@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import { UserMinusIcon, DownloadIcon } from "lucide-react"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
@@ -20,7 +20,22 @@ vi.mock("@/lib/drive/download", async importOriginal => {
 	return { ...actual, startDownloads: startDownloadsMock }
 })
 
+// isFsaAvailable reads `window`, absent entirely under node vitest (a real call would throw) — kept
+// REAL otherwise (via importOriginal) so save-download's own saveDownload/isPickerCancelled stay
+// genuine; only isFsaAvailable is replaced. Defaults to false (non-FSA browser) below so every
+// existing gating assertion keeps its pre-zip meaning unless a test opts into the FSA-available case.
+const { isFsaAvailableMock } = vi.hoisted(() => ({ isFsaAvailableMock: vi.fn() }))
+
+vi.mock("@/lib/drive/save-download", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/lib/drive/save-download")>()
+	return { ...actual, isFsaAvailable: isFsaAvailableMock }
+})
+
 import { driveItemActions, startItemDownload } from "@/components/drive/item-menu.logic"
+
+beforeEach(() => {
+	isFsaAvailableMock.mockReturnValue(false)
+})
 
 // Local fixtures mirror item.test.ts / actions.test.ts's own per-file convention (each test file owns
 // its minimal Dir/File shape rather than sharing one across files).
@@ -341,19 +356,28 @@ describe("driveItemActions — shared-surface safe subset (sharedIn/sharedOut)",
 })
 
 // Download's single unifying ENABLED gate (mirrored in bulk-action-bar.logic.ts and the drive
-// keymap): present on every decryptable, non-trash item, enabled iff the item is a file. PRESENCE has
-// its own separate exclusions — trash (see the trash-variant test above) and undecryptable (below).
-describe("driveItemActions — download gating (single unifying gate: !needsZip)", () => {
-	it("is present and enabled for a file", () => {
+// keymap): present on every decryptable, non-trash item, enabled iff the item is a file OR the browser
+// can zip a directory via the File System Access API. PRESENCE has its own separate exclusions —
+// trash (see the trash-variant test above) and undecryptable (below).
+describe("driveItemActions — download gating (single unifying gate: !needsZip || isFsaAvailable())", () => {
+	it("is present and enabled for a file, regardless of FSA availability", () => {
 		const descriptor = driveItemActions(fileItem(), "drive").find(d => d.id === "download")
 
 		expect(descriptor).toMatchObject({ run: "direct", enabled: true, icon: DownloadIcon })
 	})
 
-	it("is present but disabled for a directory — routes to the zip stub until a later task", () => {
+	it("is present but disabled for a directory on a non-FSA browser (isFsaAvailable false) — the service-worker zip path is a later task", () => {
+		isFsaAvailableMock.mockReturnValue(false)
 		const descriptor = driveItemActions(dirItem(), "drive").find(d => d.id === "download")
 
 		expect(descriptor).toMatchObject({ run: "direct", enabled: false })
+	})
+
+	it("is present and enabled for a directory when isFsaAvailable() is true", () => {
+		isFsaAvailableMock.mockReturnValue(true)
+		const descriptor = driveItemActions(dirItem(), "drive").find(d => d.id === "download")
+
+		expect(descriptor).toMatchObject({ run: "direct", enabled: true })
 	})
 
 	it("is absent from the trash-reduced menu (mirrors bulk-bar/keymap's own trash exclusion)", () => {

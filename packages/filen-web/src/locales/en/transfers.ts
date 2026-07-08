@@ -75,5 +75,9 @@ export const transfers = {
 	/** Download summary toast — the download failed; {{count}} = files that succeeded, {{failed}} = files that failed; singular */
 	transfersDownloadSummaryCompleteWithFailures_one: "{{count}} file downloaded, {{failed}} failed",
 	/** Download summary toast — at least one file in the batch failed; {{count}} = files that succeeded, {{failed}} = files that failed; plural */
-	transfersDownloadSummaryCompleteWithFailures_other: "{{count}} files downloaded, {{failed}} failed"
+	transfersDownloadSummaryCompleteWithFailures_other: "{{count}} files downloaded, {{failed}} failed",
+
+	// ── Zip download (startZipDownload) ───────────────────────────────────────
+	/** Suggested filename for a zip download of a multi-item selection (no single item to name it after) — a save-dialog/transfer-row filename, not a sentence; keep the .zip extension */
+	transfersZipDownloadDefaultName: "Filen.zip"
 } as const

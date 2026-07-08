@@ -37,15 +37,14 @@ const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), 
 
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
-import {
-	runDownload,
-	narrowToAnyFile,
-	defaultDownloadDeps,
-	startDownloads,
-	startZipDownload,
-	needsZip,
-	type RunDownloadDeps
-} from "@/lib/drive/download"
+// The real zip orchestration (runZipDownload/narrowToZipItems/etc.) lives in, and is unit-tested by,
+// download-zip.test.ts — this file only needs to prove startDownloads ROUTES to it, so the whole
+// module is replaced with a spy rather than exercising the real zip path here too.
+const { startZipDownloadMock } = vi.hoisted(() => ({ startZipDownloadMock: vi.fn() }))
+
+vi.mock("@/lib/drive/download-zip", () => ({ startZipDownload: startZipDownloadMock }))
+
+import { runDownload, narrowToAnyFile, defaultDownloadDeps, startDownloads, needsZip, type RunDownloadDeps } from "@/lib/drive/download"
 import { useTransfersStore, type Transfer, type TerminalStatus } from "@/stores/transfers"
 
 const PARENT_UUID = "22222222-2222-2222-2222-222222222222" as UuidStr
@@ -140,6 +139,7 @@ beforeEach(() => {
 	useTransfersStore.setState({ transfers: [], speedSamples: [] })
 	saveDownloadMock.mockResolvedValue(fsaTarget)
 	isPickerCancelledMock.mockReturnValue(false)
+	startZipDownloadMock.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -420,14 +420,18 @@ describe("startDownloads (real runDownload + defaultDownloadDeps)", () => {
 		await startDownloads([dirItem()])
 
 		expect(saveDownloadMock).not.toHaveBeenCalled()
+		expect(startZipDownloadMock).toHaveBeenCalledTimes(1)
 		expect(toastSuccess).not.toHaveBeenCalled()
 		expect(toastError).not.toHaveBeenCalled()
 	})
 
 	it("routes a multi-file selection (no directory) to the zip seam, never N single downloads", async () => {
-		await startDownloads([fileItem({ name: "a.txt" }), fileItem({ name: "b.txt" })])
+		const items = [fileItem({ name: "a.txt" }), fileItem({ name: "b.txt" })]
+
+		await startDownloads(items)
 
 		expect(saveDownloadMock).not.toHaveBeenCalled()
+		expect(startZipDownloadMock).toHaveBeenCalledWith(items)
 	})
 
 	it("registers one done transfer in the real transfers store for a single successful download", async () => {
@@ -440,12 +444,6 @@ describe("startDownloads (real runDownload + defaultDownloadDeps)", () => {
 		const transfers = useTransfersStore.getState().transfers
 		expect(transfers).toHaveLength(1)
 		expect(transfers[0]).toMatchObject({ direction: "download", status: "done" })
-	})
-})
-
-describe("startZipDownload (the zip-download seam)", () => {
-	it("resolves without throwing (placeholder — the real zip orchestration lands in a later task)", async () => {
-		await expect(startZipDownload([fileItem(), dirItem()])).resolves.toBeUndefined()
 	})
 })
 

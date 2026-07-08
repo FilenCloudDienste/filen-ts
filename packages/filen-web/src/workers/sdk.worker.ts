@@ -6,6 +6,7 @@ import init, {
 	PauseSignal,
 	type Client,
 	type AnyFile,
+	type ZipItem,
 	type StringifiedClient,
 	type UserInfo,
 	type RegisterParams,
@@ -472,6 +473,40 @@ const api = {
 				},
 				managedFuture: { abortSignal: controller.signal, pauseSignal: pause }
 			})
+		} finally {
+			downloadAborts.delete(transferId)
+			downloadPauses.delete(transferId)
+			pause.free()
+		}
+	},
+	// A directory/multi-select zip: the SDK does its own recursion + zip framing in this ONE call, so
+	// there is still exactly one worker op for the whole batch. Everything else mirrors
+	// downloadFileToWriter exactly — same downloadAborts/downloadPauses maps keyed by the same
+	// transferId convention, so cancelDownload/pauseDownload/resumeDownload below reach a zip transfer
+	// with no changes of their own. Positional args, not an options object (downloadItemsToZip's own
+	// wasm signature, unlike downloadFileToWriter's single-object DownloadFileStreamParams); progress
+	// is still a plain-fn-wrapped proxy (a raw proxy object is serde-rejected) and still required
+	// despite the `| undefined` in the .d.ts.
+	async downloadItemsToZip(
+		items: ZipItem[],
+		transferId: string,
+		writer: WritableStream<Uint8Array>,
+		onProgress: (bytesWritten: bigint, totalBytes: bigint, itemsProcessed: bigint, totalItems: bigint) => void
+	): Promise<void> {
+		const c = requireClient()
+		const controller = new AbortController()
+		downloadAborts.set(transferId, controller)
+		const pause = new PauseSignal()
+		downloadPauses.set(transferId, pause)
+		try {
+			await c.downloadItemsToZip(
+				items,
+				writer,
+				(bytesWritten, totalBytes, itemsProcessed, totalItems) => {
+					onProgress(bytesWritten, totalBytes, itemsProcessed, totalItems)
+				},
+				{ abortSignal: controller.signal, pauseSignal: pause }
+			)
 		} finally {
 			downloadAborts.delete(transferId)
 			downloadPauses.delete(transferId)

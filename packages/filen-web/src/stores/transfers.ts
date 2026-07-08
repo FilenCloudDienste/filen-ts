@@ -4,11 +4,13 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 
 // One row per in-flight or finished transfer, in-memory only (no persistence — mirrors
 // useDriveStore's selection state, not a query). `direction` now carries real "download" rows
-// alongside "upload" (lib/drive/upload.ts's runUpload, lib/drive/download.ts's runDownload).
-// "cancelled" is a real, if short-lived, status: a download's cancel path settles to it then
-// immediately removes the row (mobile parity — no history entry for an aborted transfer), so it is
-// never expected to render. "completedWithErrors" backs a future zip transfer (directory/multi-select
-// download) that resolves with per-entry failures — not settled by anything yet.
+// alongside "upload" (lib/drive/upload.ts's runUpload, lib/drive/download.ts's runDownload, including
+// a zip transfer's own single row — lib/drive/download-zip.ts's runZipDownload). "cancelled" is a
+// real, if short-lived, status: a download's cancel path settles to it then immediately removes the
+// row (mobile parity — no history entry for an aborted transfer), so it is never expected to render.
+// "completedWithErrors" stays unused: it models a resolve-with-per-entry-failures outcome, but the
+// SDK's zip op rejects the WHOLE call on any real failure rather than signalling a partial one (see
+// runZipDownload's own comment) — nothing settles to this status today.
 export interface Transfer {
 	id: string
 	direction: "upload" | "download"
@@ -117,6 +119,12 @@ export interface TransfersStore {
 	// to each call site (lib/drive/upload.ts's runUpload, lib/drive/download.ts's runDownload).
 	add: (transfer: Omit<Transfer, "paused">) => void
 	setProgress: (id: string, bytesTransferred: number) => void
+	// Updates a transfer's total size after add() — every upload and single-file download already
+	// knows its size upfront (the source File/DriveItem carries it), but a zip transfer's total isn't
+	// known until the SDK's own progress callback reports it, and can keep growing as the recursive
+	// walk discovers more files (lib/drive/download-zip.ts's runZipDownload adds the row at size 0 and
+	// calls this on every throttled tick).
+	setSize: (id: string, size: number) => void
 	// Flips ONLY the paused flag — never touches status (paused is not a terminal state; see
 	// Transfer["paused"]'s own comment). Backs the active-row pause/resume toggle
 	// (lib/transfers/control.ts's pauseTransfer/resumeTransfer).
@@ -157,6 +165,11 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 
 			return { transfers, speedSamples }
 		})
+	},
+	setSize: (id, size) => {
+		set(state => ({
+			transfers: state.transfers.map(transfer => (transfer.id === id ? { ...transfer, size } : transfer))
+		}))
 	},
 	settle: (id, status, error) => {
 		set(state => {

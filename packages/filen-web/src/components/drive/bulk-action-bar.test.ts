@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import { StarIcon, StarOffIcon, FolderInputIcon, UserMinusIcon, Trash2Icon, RotateCcwIcon, DownloadIcon } from "lucide-react"
 import type { Dir, File } from "@filen/sdk-rs"
@@ -22,7 +22,21 @@ vi.mock("@/lib/drive/download", async importOriginal => {
 	return { ...actual, startDownloads: startDownloadsMock }
 })
 
+// isFsaAvailable reads `window`, absent entirely under node vitest (a real call would throw) — kept
+// REAL otherwise (via importOriginal). Defaults to false (non-FSA browser) below so every existing
+// gating assertion keeps its pre-zip meaning unless a test opts into the FSA-available case.
+const { isFsaAvailableMock } = vi.hoisted(() => ({ isFsaAvailableMock: vi.fn() }))
+
+vi.mock("@/lib/drive/save-download", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/lib/drive/save-download")>()
+	return { ...actual, isFsaAvailable: isFsaAvailableMock }
+})
+
 import { driveBulkActions, isBulkDownloadEnabled, startBulkDownload } from "@/components/drive/bulk-action-bar.logic"
+
+beforeEach(() => {
+	isFsaAvailableMock.mockReturnValue(false)
+})
 
 // Local fixtures mirror item-menu.test.ts's own per-file convention.
 function mockFile(overrides: Partial<File> = {}): File {
@@ -264,21 +278,40 @@ describe("driveBulkActions — download descriptor shape", () => {
 })
 
 // Download's ENABLED state (distinct from its presence in driveBulkActions) — the single unifying
-// gate mirrored in item-menu.logic.ts and the drive keymap: enabled iff the selection is a lone file.
+// gate mirrored in item-menu.logic.ts and the drive keymap: enabled iff the selection is a lone file,
+// or it needs zipping and the browser can (isFsaAvailable).
 describe("isBulkDownloadEnabled", () => {
-	it("is enabled for a single-file selection", () => {
+	it("is enabled for a single-file selection, regardless of FSA availability", () => {
 		expect(isBulkDownloadEnabled([fileItem()])).toBe(true)
 	})
 
-	it("is disabled for a multi-file selection", () => {
+	it("is disabled for a multi-file selection on a non-FSA browser", () => {
+		isFsaAvailableMock.mockReturnValue(false)
+
 		expect(isBulkDownloadEnabled([fileItem(), fileItem()])).toBe(false)
 	})
 
-	it("is disabled for a single-directory selection", () => {
+	it("is disabled for a single-directory selection on a non-FSA browser", () => {
+		isFsaAvailableMock.mockReturnValue(false)
+
 		expect(isBulkDownloadEnabled([dirItem()])).toBe(false)
 	})
 
-	it("is disabled for an empty selection", () => {
+	it("is enabled for a multi-file selection when isFsaAvailable() is true", () => {
+		isFsaAvailableMock.mockReturnValue(true)
+
+		expect(isBulkDownloadEnabled([fileItem(), fileItem()])).toBe(true)
+	})
+
+	it("is enabled for a single-directory selection when isFsaAvailable() is true", () => {
+		isFsaAvailableMock.mockReturnValue(true)
+
+		expect(isBulkDownloadEnabled([dirItem()])).toBe(true)
+	})
+
+	it("is disabled for an empty selection even when isFsaAvailable() is true", () => {
+		isFsaAvailableMock.mockReturnValue(true)
+
 		expect(isBulkDownloadEnabled([])).toBe(false)
 	})
 })
