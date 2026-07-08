@@ -23,6 +23,12 @@ export const drive = {
 	/** Drive toolbar — accessible label on the grid-view toggle button */
 	driveViewGrid: "Grid view",
 
+	// ── New menu (opened via driveNew) ──────────────────────────────────────
+	/** New menu — entry opening the browser file picker to upload one or more files into the current directory */
+	driveUploadFiles: "Upload files",
+	/** New menu — entry opening the browser directory picker to upload an entire directory tree into the current directory */
+	driveUploadDirectory: "Upload directory",
+
 	// ── Sidebar ──────────────────────────────────────────────────────────────
 	/** Drive sidebar — root item for the user's own drive */
 	driveMyDrive: "My Drive",

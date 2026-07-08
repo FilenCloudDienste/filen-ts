@@ -2,7 +2,7 @@
 // from the English source catalogs (src/locales/en/*.ts) via the Anthropic Messages API.
 //
 // The English source is split across real i18next namespaces (currently `common`, `errors`, `auth`,
-// `drive`, `contacts`) — each namespace file exports its own `as const` object. Every target-language
+// `drive`, `contacts`, `transfers`) — each namespace file exports its own `as const` object. Every target-language
 // catalog nests translations under the same namespace keys, e.g. `{ "common": {...}, "errors": {...} }`.
 //
 // Run with: npm run translate-i18n            (DELTA mode — only changed English keys)
@@ -37,12 +37,13 @@ import { errors } from "@/locales/en/errors"
 import { auth } from "@/locales/en/auth"
 import { drive } from "@/locales/en/drive"
 import { contacts } from "@/locales/en/contacts"
+import { transfers } from "@/locales/en/transfers"
 
 // NOTE: do NOT import from `@/lib/i18n` here — its index module runs
 // `i18n.use(initReactI18next).init(...)` as an import-time side effect the moment it's loaded,
 // which this script has no reason to trigger. Import the namespace catalogs directly
 // (`@/locales/en/common`, `@/locales/en/errors`, `@/locales/en/auth`, `@/locales/en/drive`,
-// `@/locales/en/contacts`) instead — that's what EN_CATALOG below does.
+// `@/locales/en/contacts`, `@/locales/en/transfers`) instead — that's what EN_CATALOG below does.
 //
 // TARGET_LANGUAGES/LANGUAGE_NAMES live in this script rather than a shared module (unlike
 // mobile's `@/locales/languages`): nothing else in the app consumes the target-language list yet.
@@ -83,7 +84,7 @@ const LANGUAGE_NAMES: Record<TargetLanguage, string> = {
 // English source catalog (real i18next namespaces)
 // ---------------------------------------------------------------------------
 
-const NAMESPACES = ["common", "errors", "auth", "drive", "contacts"] as const
+const NAMESPACES = ["common", "errors", "auth", "drive", "contacts", "transfers"] as const
 
 type Namespace = (typeof NAMESPACES)[number]
 
@@ -96,7 +97,8 @@ const EN_CATALOG: Record<Namespace, Record<string, string>> = {
 	errors,
 	auth,
 	drive,
-	contacts
+	contacts,
+	transfers
 }
 
 const DRY_RUN = process.env["DRY_RUN"] === "1"
@@ -186,7 +188,8 @@ function emptyDelta(): Delta {
 		errors: { upsert: {}, removed: [] },
 		auth: { upsert: {}, removed: [] },
 		drive: { upsert: {}, removed: [] },
-		contacts: { upsert: {}, removed: [] }
+		contacts: { upsert: {}, removed: [] },
+		transfers: { upsert: {}, removed: [] }
 	}
 }
 
@@ -235,7 +238,8 @@ function readSnapshot(): Record<Namespace, Record<string, string>> | null {
 		errors: readNamespaceRecord(record, "errors", ".en-snapshot.json"),
 		auth: readNamespaceRecord(record, "auth", ".en-snapshot.json"),
 		drive: readNamespaceRecord(record, "drive", ".en-snapshot.json"),
-		contacts: readNamespaceRecord(record, "contacts", ".en-snapshot.json")
+		contacts: readNamespaceRecord(record, "contacts", ".en-snapshot.json"),
+		transfers: readNamespaceRecord(record, "transfers", ".en-snapshot.json")
 	}
 }
 
@@ -257,7 +261,8 @@ function computeDelta(): Delta {
 		errors: computeNamespaceDelta(snapshot.errors, EN_CATALOG.errors),
 		auth: computeNamespaceDelta(snapshot.auth, EN_CATALOG.auth),
 		drive: computeNamespaceDelta(snapshot.drive, EN_CATALOG.drive),
-		contacts: computeNamespaceDelta(snapshot.contacts, EN_CATALOG.contacts)
+		contacts: computeNamespaceDelta(snapshot.contacts, EN_CATALOG.contacts),
+		transfers: computeNamespaceDelta(snapshot.transfers, EN_CATALOG.transfers)
 	}
 }
 
@@ -288,13 +293,13 @@ function readTargetCatalog(lang: TargetLanguage): Record<Namespace, Record<strin
 	const path = join(LOCALES_DIR, `${lang}.json`)
 
 	if (!existsSync(path)) {
-		return { common: {}, errors: {}, auth: {}, drive: {}, contacts: {} }
+		return { common: {}, errors: {}, auth: {}, drive: {}, contacts: {}, transfers: {} }
 	}
 
 	const raw = readFileSync(path, "utf8").trim()
 
 	if (raw.length === 0) {
-		return { common: {}, errors: {}, auth: {}, drive: {}, contacts: {} }
+		return { common: {}, errors: {}, auth: {}, drive: {}, contacts: {}, transfers: {} }
 	}
 
 	const parsed: unknown = JSON.parse(raw)
@@ -311,7 +316,8 @@ function readTargetCatalog(lang: TargetLanguage): Record<Namespace, Record<strin
 		errors: readNamespaceRecord(record, "errors", fileLabel),
 		auth: readNamespaceRecord(record, "auth", fileLabel),
 		drive: readNamespaceRecord(record, "drive", fileLabel),
-		contacts: readNamespaceRecord(record, "contacts", fileLabel)
+		contacts: readNamespaceRecord(record, "contacts", fileLabel),
+		transfers: readNamespaceRecord(record, "transfers", fileLabel)
 	}
 }
 
@@ -401,7 +407,8 @@ const ENGLISH_PLURAL_BASES: Record<Namespace, ReadonlyMap<string, ReadonlySet<st
 	errors: computePluralBases(EN_CATALOG.errors),
 	auth: computePluralBases(EN_CATALOG.auth),
 	drive: computePluralBases(EN_CATALOG.drive),
-	contacts: computePluralBases(EN_CATALOG.contacts)
+	contacts: computePluralBases(EN_CATALOG.contacts),
+	transfers: computePluralBases(EN_CATALOG.transfers)
 }
 
 function pluralBaseOf(ns: Namespace, key: string): string | null {
@@ -784,7 +791,8 @@ function writeCatalog(lang: TargetLanguage, catalog: Record<Namespace, Record<st
 		errors: sortRecord(catalog.errors),
 		auth: sortRecord(catalog.auth),
 		drive: sortRecord(catalog.drive),
-		contacts: sortRecord(catalog.contacts)
+		contacts: sortRecord(catalog.contacts),
+		transfers: sortRecord(catalog.transfers)
 	}
 
 	const json = `${JSON.stringify(sorted, null, "\t")}\n`
@@ -802,7 +810,8 @@ function writeSnapshot(): void {
 		errors: sortRecord(EN_CATALOG.errors),
 		auth: sortRecord(EN_CATALOG.auth),
 		drive: sortRecord(EN_CATALOG.drive),
-		contacts: sortRecord(EN_CATALOG.contacts)
+		contacts: sortRecord(EN_CATALOG.contacts),
+		transfers: sortRecord(EN_CATALOG.transfers)
 	}
 
 	const json = `${JSON.stringify(sorted, null, "\t")}\n`
@@ -853,7 +862,8 @@ async function main(): Promise<void> {
 			errors: { ...existing.errors },
 			auth: { ...existing.auth },
 			drive: { ...existing.drive },
-			contacts: { ...existing.contacts }
+			contacts: { ...existing.contacts },
+			transfers: { ...existing.transfers }
 		}
 
 		for (const ns of NAMESPACES) {

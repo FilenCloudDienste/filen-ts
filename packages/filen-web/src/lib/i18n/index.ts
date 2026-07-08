@@ -5,6 +5,7 @@ import { errors } from "@/locales/en/errors"
 import { auth } from "@/locales/en/auth"
 import { drive } from "@/locales/en/drive"
 import { contacts } from "@/locales/en/contacts"
+import { transfers } from "@/locales/en/transfers"
 
 // Consumed by `ActionDef.descriptionKey` (keymap registry) — a compile-time-checked subset
 // of the "common" namespace's own key set, derived straight from the catalog so it can never
@@ -26,6 +27,12 @@ export type DriveKey = Extract<keyof typeof drive, string>
 // without this file needing a matching edit at that time.
 export type ContactsKey = Extract<keyof typeof contacts, string>
 
+// Same derivation for the "transfers" namespace, exported ahead of need: only its own two
+// summary-toast keys (lib/drive/upload.ts's startUploads) are consumed today, no panel component
+// ships yet, but a later transfers-panel keymap command can extend the descriptionKey union with
+// this type without this file needing a matching edit at that time.
+export type TransfersKey = Extract<keyof typeof transfers, string>
+
 // `Intl.PluralRules` gate: i18next's plural-key resolution (`_one`/
 // `_other` suffixes, unused by rev 1's catalogs but load-bearing the moment a count-based key
 // lands) needs it. Unlike React Native/Hermes — which mobile polyfills via `intl-pluralrules` —
@@ -33,7 +40,7 @@ export type ContactsKey = Extract<keyof typeof contacts, string>
 // @/workers/sdk.worker's pre-flight) ships `Intl.PluralRules` natively. No polyfill import here,
 // by design.
 //
-// `resources`/`react.useSuspense`: resources are the five EN namespaces only
+// `resources`/`react.useSuspense`: resources are the six EN namespaces only
 // — no other language ships yet (multi-language catalogs + `SUPPORTED_LANGUAGES` land with the
 // auto-translate pipeline's real script, see .github/workflows/i18n-web.yml). Suspense-throw i18n
 // is OFF: it interacts poorly with the React Compiler and complicates the boot gate; revisit only
@@ -45,7 +52,8 @@ void i18n.use(initReactI18next).init({
 			errors,
 			auth,
 			drive,
-			contacts
+			contacts,
+			transfers
 		}
 	},
 	lng: "en",
