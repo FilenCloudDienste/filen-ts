@@ -37,6 +37,7 @@ export function UploadMenu({ parentUuid, disabled = false }: UploadMenuProps) {
 				ref={inputRef}
 				type="file"
 				multiple
+				disabled={disabled}
 				className="hidden"
 				onChange={handleFilesChosen}
 			/>
