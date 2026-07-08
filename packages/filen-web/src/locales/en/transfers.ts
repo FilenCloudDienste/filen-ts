@@ -1,14 +1,19 @@
-// English source catalog — "transfers" namespace: a future transfers panel tracking in-flight and
-// finished uploads, plus the upload-summary toast startUploads (lib/drive/upload.ts) fires once a
-// batch of files finishes. Same typed-catalog rules as common/errors/auth/drive/contacts: flat
-// `as const` object, camelCase keys, no literal '.' or ':' (real i18next namespaces,
-// keySeparator/nsSeparator both ON).
+// English source catalog — "transfers" namespace: the icon-rail Transfers trigger and its panel
+// (components/transfers/*) tracking in-flight and finished uploads, plus the upload-summary toast
+// startUploads (lib/drive/upload.ts) fires once a batch of files finishes. Same typed-catalog rules
+// as common/errors/auth/drive/contacts: flat `as const` object, camelCase keys, no literal '.' or
+// ':' (real i18next namespaces, keySeparator/nsSeparator both ON).
 //
-// Several keys below are declared ahead of the panel that will render them (no panel component
-// ships yet — see lib/drive/upload.ts/stores/transfers.ts), so no literal string has to land in
-// those components later, mirroring drive.ts's own new-directory-dialog precedent. No "cancelled"
-// status/copy — cancel/abort isn't wired up yet.
+// No "cancelled" status/copy — cancel/abort isn't wired up yet (stores/transfers.ts), so uploading
+// rows in the panel have no cancel/remove control, only finished (done/error) rows do
+// (transfersRowRemove).
 export const transfers = {
+	// ── Icon rail ───────────────────────────────────────────────────────────
+	/** Icon-rail Transfers trigger — accessible label while at least one upload is active; replaces the plain moduleTransfers label so the count is announced, not just shown in the visual badge; singular */
+	transfersActiveBadge_one: "Transfers, {{count}} active",
+	/** Icon-rail Transfers trigger — accessible label while at least one upload is active; replaces the plain moduleTransfers label so the count is announced, not just shown in the visual badge; plural */
+	transfersActiveBadge_other: "Transfers, {{count}} active",
+
 	// ── Panel ────────────────────────────────────────────────────────────────
 	/** Transfers panel — heading */
 	transfersPanelTitle: "Transfers",

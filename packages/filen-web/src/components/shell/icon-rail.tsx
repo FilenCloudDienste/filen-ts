@@ -20,14 +20,18 @@ import { clearSession, broadcastAuth } from "@/lib/sdk/session"
 import { kvClear } from "@/lib/storage/adapter"
 import { queryClient } from "@/queries/client"
 import { useAccountQuery } from "@/queries/account"
+import { useTransfersAggregate } from "@/stores/transfers"
 import { useExportKeysReminder } from "@/components/settings/security/export-master-keys"
+import { TransfersPanel } from "@/components/transfers/transfers-panel"
 import { Logo } from "@/components/shell/logo"
 import { useTheme } from "@/components/theme-provider"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -57,12 +61,12 @@ registerAction({
 type IconType = ComponentType<{ className?: string }>
 
 // The remaining module surfaces land later — rendered as inert, muted rail entries so the
-// information architecture reads intact without pretending the destinations exist yet (Contacts has
-// since landed as a real link below, mirroring Drive). Native `disabled` is deliberately avoided (it
-// suppresses pointer events, which would kill the tooltip); `aria-disabled` + muted styling conveys
-// the same state while keeping hover/focus explainers.
+// information architecture reads intact without pretending the destinations exist yet (Contacts and
+// Transfers have since landed as real entries: Contacts a Link mirroring Drive above, Transfers the
+// TransfersEntry popover below). Native `disabled` is deliberately avoided (it suppresses pointer
+// events, which would kill the tooltip); `aria-disabled` + muted styling conveys the same state while
+// keeping hover/focus explainers.
 const MODULES: { key: CommonKey; icon: IconType }[] = [
-	{ key: "moduleTransfers", icon: ArrowDownUpIcon },
 	{ key: "moduleNotes", icon: NotebookPenIcon },
 	{ key: "moduleChats", icon: MessagesSquareIcon }
 ]
@@ -183,6 +187,55 @@ function AccountMenu() {
 	)
 }
 
+// The one MODULES entry promoted out of the inert loop above: a real Popover trigger (not a Link —
+// there is no /transfers route yet, see stores/transfers.ts's own header comment) showing the rail's
+// live active-upload count. No Tooltip wrapper, unlike every Link-driven entry above — mirrors
+// AccountMenu just above (the rail's other overlay-opening trigger), which also skips one; nesting a
+// hover Tooltip and a click Popover on the same trigger is an untested composition in this codebase,
+// not worth risking here.
+function TransfersEntry() {
+	const { t } = useTranslation(["common", "transfers"])
+	const { activeCount } = useTransfersAggregate()
+
+	return (
+		<Popover>
+			<PopoverTrigger
+				render={
+					<Button
+						variant="ghost"
+						size="icon-lg"
+						aria-label={
+							activeCount > 0 ? t("transfers:transfersActiveBadge", { count: activeCount }) : t("common:moduleTransfers")
+						}
+						className="relative"
+					>
+						<ArrowDownUpIcon />
+						{activeCount > 0 ? (
+							// aria-hidden: the count is already folded into the Button's own aria-label above —
+							// a button with an explicit aria-label ignores descendant content (including any
+							// aria-label on this badge) when computing its accessible name, so a label here would
+							// be dead weight, not a second announcement.
+							<Badge
+								aria-hidden="true"
+								className="absolute -top-1 -right-1 h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
+							>
+								{activeCount}
+							</Badge>
+						) : null}
+					</Button>
+				}
+			/>
+			<PopoverContent
+				side="right"
+				align="end"
+				className="w-80"
+			>
+				<TransfersPanel />
+			</PopoverContent>
+		</Popover>
+	)
+}
+
 export function IconRail() {
 	const { t } = useTranslation()
 	const navigate = useNavigate()
@@ -256,6 +309,8 @@ export function IconRail() {
 				/>
 				<TooltipContent side="right">{t("moduleContacts")}</TooltipContent>
 			</Tooltip>
+
+			<TransfersEntry />
 
 			{MODULES.map(({ key, icon: Icon }) => (
 				<Tooltip key={key}>
