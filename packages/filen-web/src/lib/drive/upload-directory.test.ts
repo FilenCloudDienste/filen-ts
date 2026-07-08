@@ -14,7 +14,8 @@ import type { Transfer, TerminalStatus } from "@/stores/transfers"
 // startUploads block.
 const { createDirectory, uploadFile } = vi.hoisted(() => ({
 	createDirectory: vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>(),
-	uploadFile: vi.fn<(parentUuid: string | null, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
+	uploadFile:
+		vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { createDirectory, uploadFile } }))
@@ -275,7 +276,8 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 	function makeHarness() {
 		const create = vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>()
 		const patchDirListing = vi.fn<(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void>()
-		const upload = vi.fn<(parentUuid: string | null, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
+		const upload =
+			vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
 		const add = vi.fn<(t: Transfer) => void>()
 		const setProgress = vi.fn<(id: string, bytesTransferred: number) => void>()
 		const settle = vi.fn<(id: string, status: TerminalStatus, error?: ErrorDTO) => void>()
@@ -328,8 +330,18 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 		// "a/x.txt"'s parent is "a" (created with basename "a", uuid testUuid("a")); "a/b/y.txt"'s
 		// parent is "a/b" (created with basename "b", uuid testUuid("b")) — each file must land under
 		// its OWN recreated parent, not just any created dir.
-		expect(h.upload).toHaveBeenCalledWith(testUuid("a"), expect.objectContaining({ name: "x.txt" }), expect.any(Function))
-		expect(h.upload).toHaveBeenCalledWith(testUuid("b"), expect.objectContaining({ name: "y.txt" }), expect.any(Function))
+		expect(h.upload).toHaveBeenCalledWith(
+			testUuid("a"),
+			expect.any(String),
+			expect.objectContaining({ name: "x.txt" }),
+			expect.any(Function)
+		)
+		expect(h.upload).toHaveBeenCalledWith(
+			testUuid("b"),
+			expect.any(String),
+			expect.objectContaining({ name: "y.txt" }),
+			expect.any(Function)
+		)
 	})
 
 	it("creates dirs in depth order even when the input array lists deeper paths first", async () => {
@@ -367,7 +379,12 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 		// Only the file directly under the successfully-created "a" uploads; both files nested under
 		// the failed "b" are skipped without ever calling upload.
 		expect(h.upload).toHaveBeenCalledTimes(1)
-		expect(h.upload).toHaveBeenCalledWith(testUuid("a"), expect.objectContaining({ name: "under-a.txt" }), expect.any(Function))
+		expect(h.upload).toHaveBeenCalledWith(
+			testUuid("a"),
+			expect.any(String),
+			expect.objectContaining({ name: "under-a.txt" }),
+			expect.any(Function)
+		)
 
 		expect(toastError).toHaveBeenCalledTimes(1)
 		expect(toastSuccess).not.toHaveBeenCalled()
@@ -416,7 +433,7 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 		const callOrder: string[] = []
 		const resolvers: (() => void)[] = []
 
-		h.upload.mockImplementation(async (_parentUuid, file) => {
+		h.upload.mockImplementation(async (_parentUuid, _transferId, file) => {
 			callOrder.push(`called:${file.name}`)
 			await new Promise<void>(resolve => {
 				resolvers.push(resolve)
@@ -456,7 +473,7 @@ describe("startDirectoryUpload (real wiring)", () => {
 		createDirectory.mockImplementation((_parentUuid, name) =>
 			Promise.resolve(mockDir({ uuid: testUuid(name), meta: { type: "decoded", data: { name } } }))
 		)
-		uploadFile.mockImplementation((_parentUuid, file) =>
+		uploadFile.mockImplementation((_parentUuid, _transferId, file) =>
 			Promise.resolve(
 				mockSdkFile({
 					uuid: testUuid(file.name),

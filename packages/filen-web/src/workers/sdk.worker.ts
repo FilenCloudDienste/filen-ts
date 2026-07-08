@@ -60,10 +60,14 @@ export type BootResult =
 
 let client: Client | null = null
 
-// Per-transfer AbortControllers so cancelDownload(transferId) can abort an in-flight download. Unlike
-// the streaming UPLOAD (whose managedFuture is wasm-serde-rejected), the streaming download ACCEPTS
-// managedFuture.abortSignal at runtime — verified — so a download carries a real, honored cancel.
+// Per-transfer AbortControllers so cancelDownload(transferId) can abort an in-flight download.
+// managedFuture.abortSignal is accepted at runtime — verified — so a download carries a real, honored
+// cancel; aborting rejects the SDK call with kind "Cancelled", which the caller maps to a drop.
 const downloadAborts = new Map<string, AbortController>()
+
+// Mirrors downloadAborts for the streaming UPLOAD — see uploadFile's own comment for why this is now
+// safe (0.4.33 stopped burying managedFuture under serde(flatten)).
+const uploadAborts = new Map<string, AbortController>()
 
 // Every authed op reads the live Client through this guard. Post-logout `client` is null, so a
 // forwarded call would null-deref; failing fast here surfaces a clean DTO at the Comlink boundary
@@ -385,26 +389,38 @@ const api = {
 	// (mirror createDirectory); file.stream() is called HERE, not on the main thread — a real Blob
 	// stream (Blob.prototype.stream() is available in worker scope), never a hand-rolled one. progress
 	// is passed unconditionally: the wasm layer rejects with "missing field 'progress'" if it's
-	// omitted, despite `progress?:` in the .d.ts. No `managedFuture`: passing an abortSignal to the
-	// streaming upload is serde-rejected by wasm (and the SDK's own streaming test omits it), so
-	// cancelling an in-flight upload is out of scope here.
-	async uploadFile(parentUuid: string | null, file: BrowserFile, onProgress: (bytes: bigint) => void): Promise<File> {
+	// omitted, despite `progress?:` in the .d.ts, and — same as downloadFileToWriter — must stay a
+	// plain worker-side fn wrapping the caller's Comlink proxy, never the proxy object itself (still
+	// serde-rejected). managedFuture.abortSignal now deserializes here too: 0.4.33 stopped burying
+	// managed_future under serde(flatten), so a per-transfer AbortController gives cancelUpload a real
+	// cancel, same as downloadFileToWriter's own.
+	async uploadFile(parentUuid: string | null, transferId: string, file: BrowserFile, onProgress: (bytes: bigint) => void): Promise<File> {
 		const c = requireClient()
-		const parent = await resolveNormalDirParent(c, parentUuid)
+		const controller = new AbortController()
+		uploadAborts.set(transferId, controller)
 
-		return await c.uploadFileFromReader({
-			parent,
-			name: file.name,
-			reader: file.stream(),
-			knownSize: file.size,
-			...(file.type ? { mime: file.type } : {}),
-			// The caller passes onProgress as a Comlink proxy (an object) — wasm needs a plain preserved
-			// callable here, not a proxy object. Forward through a plain worker-side fn; the proxy call
-			// is async, fire-and-forget (progress is a notification, ordering-tolerant).
-			progress: bytes => {
-				onProgress(bytes)
-			}
-		})
+		try {
+			const parent = await resolveNormalDirParent(c, parentUuid)
+
+			return await c.uploadFileFromReader({
+				parent,
+				name: file.name,
+				reader: file.stream(),
+				knownSize: file.size,
+				...(file.type ? { mime: file.type } : {}),
+				progress: bytes => {
+					onProgress(bytes)
+				},
+				managedFuture: { abortSignal: controller.signal }
+			})
+		} finally {
+			uploadAborts.delete(transferId)
+		}
+	},
+	// Aborts an in-flight upload by transferId; a no-op once the upload has settled (the controller is
+	// already evicted). Mirrors cancelDownload.
+	cancelUpload(transferId: string): void {
+		uploadAborts.get(transferId)?.abort()
 	},
 	// ── Download ───────────────────────────────────────────────────────────────
 	// The reverse of uploadFile: the WritableStream SINK arrives via Comlink.transfer (a transferable
@@ -412,7 +428,7 @@ const api = {
 	// crossing Comlink as a buffer), and progress is a plain-fn-wrapped Comlink proxy (same as upload —
 	// wasm needs a plain preserved callable, not a proxy object). progress is passed unconditionally: the
 	// wasm layer requires it despite `progress?:` in the .d.ts. managedFuture.abortSignal IS accepted at
-	// runtime (unlike the streaming upload), so a per-transfer AbortController gives cancelDownload a real
+	// runtime — same as uploadFile now — so a per-transfer AbortController gives cancelDownload a real
 	// cancel; aborting rejects the SDK call with kind "Cancelled", which the caller maps to a drop.
 	async downloadFileToWriter(
 		file: AnyFile,

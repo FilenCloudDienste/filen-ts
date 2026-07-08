@@ -9,11 +9,13 @@ import type { Transfer, TerminalStatus } from "@/stores/transfers"
 // persister, unresolvable/unwanted under node vitest — mock both down to what this module actually
 // calls, mirroring drive/actions.test.ts's mock boundary. `sonner` is mocked to assert the summary
 // toast's call args without a mounted <Toaster/>.
-const { uploadFile } = vi.hoisted(() => ({
-	uploadFile: vi.fn<(parentUuid: string | null, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
+const { uploadFile, cancelUpload } = vi.hoisted(() => ({
+	uploadFile:
+		vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>(),
+	cancelUpload: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { uploadFile } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { uploadFile, cancelUpload } }))
 
 // A bare, unconfigured QueryClient stands in for the real singleton — driveListingQueryUpdate only
 // needs genuine setQueryData/getQueryData cache mechanics, never the production client's OPFS-backed
@@ -24,7 +26,7 @@ const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), 
 
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
-import { runUpload, startUploads, throttle, type RunUploadDeps } from "@/lib/drive/upload"
+import { runUpload, startUploads, throttle, defaultUploadDeps, type RunUploadDeps } from "@/lib/drive/upload"
 import { useTransfersStore } from "@/stores/transfers"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
@@ -76,7 +78,8 @@ afterEach(() => {
 
 describe("runUpload (injected deps, no worker or query client)", () => {
 	function makeHarness() {
-		const upload = vi.fn<(parentUuid: string | null, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
+		const upload =
+			vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
 		const add = vi.fn<(t: Transfer) => void>()
 		const setProgress = vi.fn<(id: string, bytesTransferred: number) => void>()
 		const settle = vi.fn<(id: string, status: TerminalStatus, error?: ErrorDTO) => void>()
@@ -133,13 +136,13 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 
 		await runUpload(h.deps, { parentUuid: null, file: mockBrowserFile() })
 
-		expect(h.upload).toHaveBeenCalledWith(null, expect.any(File), expect.any(Function))
+		expect(h.upload).toHaveBeenCalledWith(null, expect.any(String), expect.any(File), expect.any(Function))
 		expect(h.patchListing).toHaveBeenCalledWith(null, expect.any(Function))
 	})
 
 	it("reports the first progress notification through to store.setProgress, narrowed to a number", async () => {
 		const h = makeHarness()
-		h.upload.mockImplementation((_parentUuid, _file, onProgress) => {
+		h.upload.mockImplementation((_parentUuid, _transferId, _file, onProgress) => {
 			onProgress(512n)
 			return Promise.resolve(mockSdkFile())
 		})
@@ -152,7 +155,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 	it("throttles rapid progress callbacks, always delivering the final cumulative value", async () => {
 		vi.useFakeTimers()
 		const h = makeHarness()
-		h.upload.mockImplementation((_parentUuid, _file, onProgress) => {
+		h.upload.mockImplementation((_parentUuid, _transferId, _file, onProgress) => {
 			onProgress(100n) // leading edge -> fires immediately
 			onProgress(200n) // buffered
 			onProgress(300n) // buffered (overwrites 200n)
@@ -189,6 +192,18 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 			status: "error",
 			dto: { species: "plain", message: "network dropped", label: "network dropped" }
 		})
+	})
+
+	it("settles cancelled then removes the row on a Cancelled rejection, returning a clean success", async () => {
+		const h = makeHarness()
+		h.upload.mockRejectedValue(sdkDto("Cancelled"))
+
+		const outcome = await runUpload(h.deps, { parentUuid: "parent-uuid", file: mockBrowserFile() })
+
+		expect(outcome).toEqual({ status: "success" })
+		const id = h.settle.mock.calls[0]?.[0]
+		expect(h.settle).toHaveBeenCalledWith(id, "cancelled")
+		expect(h.remove).toHaveBeenCalledWith(id)
 	})
 })
 
@@ -314,7 +329,7 @@ describe("startUploads (real runUpload + defaultUploadDeps, mocked sdk client/qu
 		const callOrder: string[] = []
 		const resolvers: (() => void)[] = []
 
-		uploadFile.mockImplementation(async (_parentUuid: string | null, file: File) => {
+		uploadFile.mockImplementation(async (_parentUuid: string | null, _transferId: string, file: File) => {
 			callOrder.push(`called:${file.name}`)
 			await new Promise<void>(resolve => {
 				resolvers.push(resolve)
@@ -361,13 +376,27 @@ describe("startUploads (real runUpload + defaultUploadDeps, mocked sdk client/qu
 	// callback here and observing the REAL store exercises that wrap, not just the injected-deps harness
 	// runUpload's own describe block already covers above.
 	it("delivers progress through the Comlink.proxy wrap into the real transfers store", async () => {
-		uploadFile.mockImplementation((_parentUuid: string | null, _file: File, onProgress: (bytes: bigint) => void) => {
-			onProgress(512n) // leading edge -> throttle forwards it synchronously
-			return Promise.resolve(mockSdkFile())
-		})
+		uploadFile.mockImplementation(
+			(_parentUuid: string | null, _transferId: string, _file: File, onProgress: (bytes: bigint) => void) => {
+				onProgress(512n) // leading edge -> throttle forwards it synchronously
+				return Promise.resolve(mockSdkFile())
+			}
+		)
 
 		await startUploads([mockBrowserFile("a.txt", 1_024)], null)
 
 		expect(useTransfersStore.getState().transfers[0]?.bytesTransferred).toBe(512)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// defaultUploadDeps.cancel — mirrors download.test.ts's own defaultDownloadDeps.cancel block.
+// ---------------------------------------------------------------------------
+
+describe("defaultUploadDeps.cancel", () => {
+	it("fires sdkApi.cancelUpload for the given transferId", () => {
+		defaultUploadDeps.cancel?.("transfer-id")
+
+		expect(cancelUpload).toHaveBeenCalledWith("transfer-id")
 	})
 })

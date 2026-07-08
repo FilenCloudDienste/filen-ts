@@ -29,8 +29,9 @@ export function narrowToAnyFile(item: DriveItem): AnyFile {
 
 // DI mirror of RunUploadDeps (lib/drive/upload.ts), minus patchListing — a download is read-only
 // w.r.t. the drive, so there is no cache to patch on success. `cancel` is unused by runDownload
-// itself (there is no cancel UI yet); it exists so a later cancel control can call
-// defaultDownloadDeps.cancel(transferId) without another store/deps shape change.
+// itself — the cancel button (transfer-row.tsx) calls lib/transfers/control.ts's cancelTransfer,
+// which dispatches straight to sdkApi.cancelDownload/cancelUpload rather than through either deps
+// object; this field stays for DI/testability parity with RunUploadDeps.
 export interface RunDownloadDeps {
 	download: (file: AnyFile, transferId: string, save: SaveTarget, onProgress: (bytes: bigint) => void) => Promise<void>
 	cancel?: (transferId: string) => void

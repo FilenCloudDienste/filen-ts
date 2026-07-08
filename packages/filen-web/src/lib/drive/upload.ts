@@ -60,11 +60,12 @@ export function throttle<Args extends unknown[]>(fn: (...args: Args) => void, ms
 export const PROGRESS_THROTTLE_MS = 100
 
 // Injected collaborators so a single upload attempt is unit-testable without a worker or a query
-// client — mirrors runCreateDirectory's shape (lib/drive/create-directory.ts). `store` only needs the
-// four actions an attempt itself drives; defaultUploadDeps below hands in the full store (its actions
-// never change identity — see stores/transfers.ts), so `remove` rides along for shape parity.
+// client — mirrors runCreateDirectory's shape (lib/drive/create-directory.ts). `store` needs `remove`
+// too now: a Cancelled rejection drops the row entirely (mirrors runDownload). `cancel` is unused by
+// runUpload itself, same as RunDownloadDeps' own (download.ts) — kept for DI/testability parity.
 export interface RunUploadDeps {
-	upload: (parentUuid: string | null, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>
+	upload: (parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>
+	cancel?: (transferId: string) => void
 	store: Pick<TransfersStore, "add" | "setProgress" | "settle" | "remove">
 	patchListing: typeof driveListingQueryUpdate
 }
@@ -72,10 +73,11 @@ export interface RunUploadDeps {
 // One upload attempt: register it in the transfers store, stream it through the injected `upload` op
 // with THROTTLED progress (the raw callback fires per chunk — see sdk.worker.ts's own uploadFile op —
 // far more often than any UI needs to re-render), then settle the store and — only on success — patch
-// the destination listing so the new file appears without a refetch. Never throws; LABEL-FIRST via
-// runOp/asErrorDTO, mirroring every VoidActionOutcome helper in lib/drive/actions.ts and
-// lib/contacts/actions.ts. No cancel/abort path here — sdk.worker.ts's uploadFile doc comment: a
-// streaming abort is wasm-serde-incompatible, so cancellation isn't wired up yet.
+// the destination listing so the new file appears without a refetch. `Cancelled` (the SDK's abort
+// rejection kind — see sdk.worker.ts's uploadFile) removes the row entirely rather than leaving a
+// finished entry behind (mobile parity: an aborted transfer has no history). Never throws; LABEL-FIRST
+// via runOp/asErrorDTO, mirroring every VoidActionOutcome helper in lib/drive/actions.ts and
+// lib/contacts/actions.ts.
 export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string | null; file: File }): Promise<VoidActionOutcome> {
 	const { parentUuid, file } = args
 	const id = crypto.randomUUID()
@@ -99,10 +101,19 @@ export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string 
 
 	let uploaded: SdkFile
 	try {
-		uploaded = await runOp(deps.upload(parentUuid, file, reportProgress))
+		uploaded = await runOp(deps.upload(parentUuid, id, file, reportProgress))
 	} catch (e) {
 		const dto = asErrorDTO(e)
+
+		if (dto.kind === "Cancelled") {
+			deps.store.settle(id, "cancelled")
+			deps.store.remove(id)
+
+			return { status: "success" }
+		}
+
 		deps.store.settle(id, "error", dto)
+
 		return { status: "error", dto }
 	}
 
@@ -116,13 +127,17 @@ export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string 
 // in Comlink.proxy — a plain function can't structured-clone across the worker boundary, so it must
 // be marked for Comlink to re-wrap it worker-side into a callable (mirrors lib/drive/actions.ts's
 // createLink, which proxies createDirectoryLink's own re-encrypt progress callback the same way).
-// `useTransfersStore.getState()` grabs the store's ACTIONS once — they're stable references for the
-// store's entire lifetime (zustand never reassigns them), so reading them here at module scope is
-// safe as non-render orchestration code, unlike reading state itself outside a selector hook.
-// Exported so upload-directory.ts's own defaultDirectoryUploadDeps can reuse this exact wiring
-// (including the Comlink.proxy wrap) for its per-file uploads instead of re-declaring it.
+// `cancel` mirrors defaultDownloadDeps.cancel (download.ts): fire-and-forget straight to the worker,
+// unused by runUpload itself. `useTransfersStore.getState()` grabs the store's ACTIONS once — they're
+// stable references for the store's entire lifetime (zustand never reassigns them), so reading them
+// here at module scope is safe as non-render orchestration code, unlike reading state itself outside
+// a selector hook. Exported so upload-directory.ts's own defaultDirectoryUploadDeps can reuse this
+// exact wiring (including the Comlink.proxy wrap) for its per-file uploads instead of re-declaring it.
 export const defaultUploadDeps: RunUploadDeps = {
-	upload: (parentUuid, file, onProgress) => sdkApi.uploadFile(parentUuid, file, Comlink.proxy(onProgress)),
+	upload: (parentUuid, id, file, onProgress) => sdkApi.uploadFile(parentUuid, id, file, Comlink.proxy(onProgress)),
+	cancel: id => {
+		void sdkApi.cancelUpload(id)
+	},
 	store: useTransfersStore.getState(),
 	patchListing: driveListingQueryUpdate
 }

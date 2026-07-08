@@ -6,10 +6,10 @@
 // (real i18next namespaces, keySeparator/nsSeparator both ON).
 //
 // No "cancelled"/"completedWithErrors" copy yet — those statuses exist at the store level
-// (stores/transfers.ts) but no row in this panel renders them today: a cancelled download is
-// removed right after settling (never displayed), and completedWithErrors backs a zip transfer no
-// code produces yet. Active (uploading/downloading) rows have no cancel/remove control in this panel
-// yet either; only finished rows do (transfersRowRemove).
+// (stores/transfers.ts) but no row in this panel renders them today: a cancelled transfer is removed
+// right after settling (never displayed), and completedWithErrors backs a zip transfer no code
+// produces yet. Active (uploading/downloading) rows get transfersRowCancel; finished rows get
+// transfersRowRemove.
 export const transfers = {
 	// ── Icon rail ───────────────────────────────────────────────────────────
 	/** Icon-rail Transfers trigger — accessible label while at least one upload is active; replaces the plain moduleTransfers label so the count is announced, not just shown in the visual badge; singular */
@@ -36,6 +36,8 @@ export const transfers = {
 	transfersStatusError: "Failed",
 	/** Transfer row — accessible label on the button removing a single finished (done/error) transfer from the list */
 	transfersRowRemove: "Remove",
+	/** Transfer row — accessible label on the button cancelling a single active (uploading/downloading) transfer */
+	transfersRowCancel: "Cancel",
 
 	// ── Upload summary toast (startUploads) ──────────────────────────────────
 	/** Upload summary toast — every uploaded file in the batch succeeded; singular */
