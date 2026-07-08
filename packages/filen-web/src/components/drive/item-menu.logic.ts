@@ -12,12 +12,14 @@ import {
 	UserMinusIcon,
 	Trash2Icon,
 	RotateCcwIcon,
+	DownloadIcon,
 	type LucideIcon
 } from "lucide-react"
 import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
 import { canShareVariant, isSharedVariant } from "@/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
+import { needsZip, startDownloads } from "@/lib/drive/download"
 
 // Dialog kinds a per-item action can open in the listing-level dialog host (directory-listing.tsx's
 // own activeDialog state). "emptyTrash" is a listing-level action (the trash toolbar, no per-item
@@ -32,6 +34,7 @@ export type ItemActionId =
 	| "color"
 	| "versions"
 	| "info"
+	| "download"
 	| "publicLink"
 	| "copyLink"
 	| "share"
@@ -45,6 +48,10 @@ interface ItemActionDescriptorShared {
 	labelKey: DriveKey
 	icon: LucideIcon
 	destructive?: boolean
+	// Present-but-disabled (never absent) once set to false — omitted (default enabled) for every
+	// descriptor that has no reason to ever disable itself. Today only "download" uses it: a dead
+	// click is worse than a disabled control (see downloadDescriptor below).
+	enabled?: boolean
 }
 
 // "direct" calls an action helper immediately (favorite/restore); "dialog" opens the listing's dialog host
@@ -119,14 +126,31 @@ function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
 		: { id: "favorite", labelKey: "driveActionFavorite", icon: StarIcon, run: "direct" }
 }
 
+// The single unifying download gate (mirrored in bulk-action-bar.logic.ts and the drive keymap):
+// enabled iff `!needsZip([item])`, i.e. a file. A directory routes to the zip stub (not functional
+// until a later task), so it stays present-but-disabled rather than vanishing from the menu — a dead
+// click is worse than a disabled control.
+function downloadDescriptor(item: DriveItem): ItemActionDescriptor {
+	return { id: "download", labelKey: "driveActionDownload", icon: DownloadIcon, run: "direct", enabled: !needsZip([item]) }
+}
+
+// Download's "direct" action needs no await before it — startDownloads' FSA save picker requires the
+// click's own live user gesture (see download.ts), and item-menu.tsx's onClick can't be exercised
+// under this project's DOM-less vitest setup (vitest.config.ts's node environment), so this is the
+// unit-testable seam proving the wiring: item-menu.tsx calls this synchronously off the click, never
+// `await`ed.
+export function startItemDownload(item: DriveItem): void {
+	void startDownloads([item])
+}
+
 // Pure per-item menu builder shared by both the right-click context menu and the ⋯ dropdown (see
 // item-menu.tsx) — same descriptor list either way, gated purely by variant/type/undecryptable so it
 // stays trivially testable without rendering anything. Operates on a SINGLE item; bulk multi-select
 // actions are the selection bar's own concern, not this menu's.
 export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemActionDescriptor[] {
-	// Trash's own menu is already the maximally-reduced set (no rename/move/color/versions/link
-	// regardless), so an undecryptable item here needs no further reduction — checked first so that
-	// case never has to be special-cased below.
+	// Trash's own menu is already the maximally-reduced set (no rename/move/color/versions/link/
+	// download regardless), so an undecryptable item here needs no further reduction — checked first
+	// so that case never has to be special-cased below.
 	if (variant === "trash") {
 		return [RESTORE, DELETE_PERMANENTLY, INFO]
 	}
@@ -145,7 +169,7 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 	const ownerMutable = !isSharedVariant(variant)
 
 	if (item.data.undecryptable) {
-		const actions: ItemActionDescriptor[] = [INFO]
+		const actions: ItemActionDescriptor[] = [INFO, downloadDescriptor(item)]
 
 		if (ownerMutable) {
 			actions.push(TRASH)
@@ -161,6 +185,11 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 	const actions: ItemActionDescriptor[] = ownerMutable
 		? [RENAME, MOVE, favoriteDescriptor(item), asDirectoryOrFile(item).type === "directory" ? COLOR : VERSIONS, INFO]
 		: [INFO]
+
+	// Download sits right after Info (the other read/reference action) — offered on every surface this
+	// point is reachable from, owned or shared alike, gated only by downloadDescriptor's own file/
+	// directory check, never by ownerMutable/canShareVariant (download mutates nothing).
+	actions.push(downloadDescriptor(item))
 
 	// Share sits with the other access-granting actions (info/link) after the type-specific group; it
 	// only appears on the owned surfaces (canShareVariant excludes sharedIn — you can't grant access to

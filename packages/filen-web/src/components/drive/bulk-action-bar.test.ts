@@ -1,7 +1,68 @@
-import { describe, expect, it } from "vitest"
-import { StarIcon, StarOffIcon, FolderInputIcon, UserMinusIcon, Trash2Icon, RotateCcwIcon } from "lucide-react"
+import { describe, expect, it, vi } from "vitest"
+import { QueryClient } from "@tanstack/react-query"
+import { StarIcon, StarOffIcon, FolderInputIcon, UserMinusIcon, Trash2Icon, RotateCcwIcon, DownloadIcon } from "lucide-react"
+import type { Dir, File } from "@filen/sdk-rs"
 import { type DriveSelectionFlags } from "@/lib/drive/selection-flags"
-import { driveBulkActions } from "@/components/drive/bulk-action-bar.logic"
+import { narrowItem, type DriveItem } from "@/lib/drive/item"
+
+// bulk-action-bar.logic.ts imports lib/drive/download.ts (for needsZip/startDownloads), which in turn
+// touches the worker client and query client — unresolvable/unwanted under node vitest, mirrors
+// lib/drive/download.test.ts's own mock boundary. needsZip is kept REAL (via importOriginal) so
+// isBulkDownloadEnabled below exercises the genuine single-unifying-gate predicate, not a re-derived
+// stand-in; only startDownloads is replaced, since actually running it would reach the (also mocked)
+// worker.
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+
+const { startDownloadsMock } = vi.hoisted(() => ({ startDownloadsMock: vi.fn() }))
+
+vi.mock("@/lib/drive/download", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/lib/drive/download")>()
+	return { ...actual, startDownloads: startDownloadsMock }
+})
+
+import { driveBulkActions, isBulkDownloadEnabled, startBulkDownload } from "@/components/drive/bulk-action-bar.logic"
+
+// Local fixtures mirror item-menu.test.ts's own per-file convention.
+function mockFile(overrides: Partial<File> = {}): File {
+	return {
+		uuid: "33333333-3333-3333-3333-333333333333",
+		parent: "22222222-2222-2222-2222-222222222222",
+		size: 1_024n,
+		favorited: false,
+		region: "de-1",
+		bucket: "filen-1",
+		timestamp: 1_700_000_000_000n,
+		chunks: 1n,
+		canMakeThumbnail: true,
+		meta: {
+			type: "decoded",
+			data: { name: "report.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
+		},
+		...overrides
+	}
+}
+
+function mockDir(overrides: Partial<Dir> = {}): Dir {
+	return {
+		uuid: "11111111-1111-1111-1111-111111111111",
+		parent: "22222222-2222-2222-2222-222222222222",
+		color: "default",
+		timestamp: 1_700_000_000_000n,
+		favorited: false,
+		meta: { type: "decoded", data: { name: "Documents" } },
+		...overrides
+	}
+}
+
+function fileItem(overrides: Partial<File> = {}): DriveItem {
+	return narrowItem(mockFile(overrides))
+}
+
+function dirItem(overrides: Partial<Dir> = {}): DriveItem {
+	return narrowItem(mockDir(overrides))
+}
 
 function flags(overrides: Partial<DriveSelectionFlags> = {}): DriveSelectionFlags {
 	return {
@@ -35,11 +96,11 @@ describe("driveBulkActions", () => {
 	})
 
 	it.each(["drive", "recents", "favorites"] as const)(
-		"%s variant, decryptable selection, none favorited: favorite, move, share, trash in that order",
+		"%s variant, decryptable selection, none favorited: favorite, move, share, download, trash in that order",
 		variant => {
 			const descriptors = driveBulkActions(variant, flags({ includesFavorited: false, includesUndecryptable: false }))
 
-			expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "share", "trash"])
+			expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "share", "download", "trash"])
 		}
 	)
 
@@ -80,11 +141,11 @@ describe("driveBulkActions", () => {
 	})
 
 	it.each(["drive", "recents", "favorites"] as const)(
-		"%s variant, any undecryptable item: favorite and move are suppressed, trash alone remains",
+		"%s variant, any undecryptable item: favorite/move/share are suppressed, download and trash remain",
 		variant => {
 			const descriptors = driveBulkActions(variant, flags({ includesUndecryptable: true }))
 
-			expect(descriptors.map(d => d.id)).toEqual(["trash"])
+			expect(descriptors.map(d => d.id)).toEqual(["download", "trash"])
 		}
 	)
 
@@ -144,11 +205,10 @@ describe("driveBulkActions — unshare gating (everySharedRoot)", () => {
 		expect(unshare).toMatchObject({ run: "dialog", dialogKind: "unshare", destructive: true, icon: UserMinusIcon })
 	})
 
-	it("is the last descriptor when present, after share (no bulk trash on sharedOut)", () => {
+	it("is the last descriptor when present, after share and download (no bulk trash on sharedOut)", () => {
 		const descriptors = driveBulkActions("sharedOut", flags({ everySharedRoot: true, includesUndecryptable: false }))
 
-		expect(descriptors.at(-1)?.id).toBe("unshare")
-		expect(descriptors.at(-2)?.id).toBe("share")
+		expect(descriptors.map(d => d.id)).toEqual(["share", "download", "unshare"])
 	})
 })
 
@@ -156,28 +216,28 @@ describe("driveBulkActions — unshare gating (everySharedRoot)", () => {
 // bulk favorite/move/trash on either shared surface, regardless of undecryptable/everySharedRoot.
 // sharedOut keeps bulk share (canShareVariant); either surface keeps bulk unshare (everySharedRoot).
 describe("driveBulkActions — shared-surface safe subset (sharedIn/sharedOut)", () => {
-	it("sharedOut, not everySharedRoot: share only", () => {
+	it("sharedOut, not everySharedRoot: share + download", () => {
 		const descriptors = driveBulkActions("sharedOut", flags({ includesUndecryptable: false, everySharedRoot: false }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["share"])
+		expect(descriptors.map(d => d.id)).toEqual(["share", "download"])
 	})
 
-	it("sharedOut, everySharedRoot: share then unshare", () => {
+	it("sharedOut, everySharedRoot: share, download, then unshare", () => {
 		const descriptors = driveBulkActions("sharedOut", flags({ includesUndecryptable: false, everySharedRoot: true }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["share", "unshare"])
+		expect(descriptors.map(d => d.id)).toEqual(["share", "download", "unshare"])
 	})
 
-	it("sharedIn, not everySharedRoot: no bulk actions at all (no bulk info)", () => {
+	it("sharedIn, not everySharedRoot: download only (download mutates nothing, so it survives sharedIn's owner-mutating gate)", () => {
 		const descriptors = driveBulkActions("sharedIn", flags({ includesUndecryptable: false, everySharedRoot: false }))
 
-		expect(descriptors).toEqual([])
+		expect(descriptors.map(d => d.id)).toEqual(["download"])
 	})
 
-	it("sharedIn, everySharedRoot: unshare only", () => {
+	it("sharedIn, everySharedRoot: download then unshare", () => {
 		const descriptors = driveBulkActions("sharedIn", flags({ includesUndecryptable: false, everySharedRoot: true }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["unshare"])
+		expect(descriptors.map(d => d.id)).toEqual(["download", "unshare"])
 	})
 
 	it("neither shared surface ever offers favorite/move/trash, undecryptable or everySharedRoot combined any way", () => {
@@ -190,5 +250,45 @@ describe("driveBulkActions — shared-surface safe subset (sharedIn/sharedOut)",
 				}
 			}
 		}
+	})
+})
+
+// The download descriptor itself (icon/label/run) — driveBulkActions' own presence/ordering is
+// already covered by the describe blocks above; this isolates its shape.
+describe("driveBulkActions — download descriptor shape", () => {
+	it("is a direct action with the download icon and label", () => {
+		const download = driveBulkActions("drive", flags({ includesUndecryptable: false })).find(d => d.id === "download")
+
+		expect(download).toMatchObject({ run: "direct", labelKey: "driveActionDownload", icon: DownloadIcon })
+	})
+})
+
+// Download's ENABLED state (distinct from its presence in driveBulkActions) — the single unifying
+// gate mirrored in item-menu.logic.ts and the drive keymap: enabled iff the selection is a lone file.
+describe("isBulkDownloadEnabled", () => {
+	it("is enabled for a single-file selection", () => {
+		expect(isBulkDownloadEnabled([fileItem()])).toBe(true)
+	})
+
+	it("is disabled for a multi-file selection", () => {
+		expect(isBulkDownloadEnabled([fileItem(), fileItem()])).toBe(false)
+	})
+
+	it("is disabled for a single-directory selection", () => {
+		expect(isBulkDownloadEnabled([dirItem()])).toBe(false)
+	})
+
+	it("is disabled for an empty selection", () => {
+		expect(isBulkDownloadEnabled([])).toBe(false)
+	})
+})
+
+describe("startBulkDownload", () => {
+	it("calls startDownloads with the selection, synchronously (gesture-preserving)", () => {
+		const items = [fileItem()]
+
+		startBulkDownload(items)
+
+		expect(startDownloadsMock).toHaveBeenCalledWith(items)
 	})
 })

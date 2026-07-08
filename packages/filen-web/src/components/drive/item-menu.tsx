@@ -9,6 +9,7 @@ import { toastBulkOutcome } from "@/lib/drive/bulk-toast"
 import { useDriveStore } from "@/stores/drive"
 import {
 	driveItemActions,
+	startItemDownload,
 	type ItemActionDescriptor,
 	type ItemActionDialogKind,
 	type ItemActionId
@@ -48,6 +49,15 @@ function ItemMenuEntries({ item, variant, onItemAction, family }: ItemMenuConten
 	const { Item, Separator } = family
 
 	async function runDirect(descriptor: Extract<ItemActionDescriptor, { run: "direct" }>): Promise<void> {
+		// Checked FIRST, before any `await` below — startItemDownload's FSA save picker needs this
+		// click's own live user gesture (see download.ts), so nothing here may yield to the event loop
+		// ahead of it. disabled=false is already guaranteed by the Item's own `disabled` prop below (a
+		// disabled MenuItem never fires onClick at all), so this never runs for a directory.
+		if (descriptor.id === "download") {
+			startItemDownload(item)
+			return
+		}
+
 		if (descriptor.id === "favorite") {
 			const outcome = await toggleFavorite(item)
 
@@ -83,6 +93,7 @@ function ItemMenuEntries({ item, variant, onItemAction, family }: ItemMenuConten
 					{index > 0 && SEPARATOR_BEFORE.has(descriptor.id) ? <Separator /> : null}
 					<Item
 						variant={descriptor.destructive ? "destructive" : "default"}
+						disabled={descriptor.enabled === false}
 						onClick={event => {
 							// The ⋯ dropdown is mounted as a React descendant of the row's own clickable div
 							// (needed so the trigger button sits visually inside the row) — Base UI's MenuItem

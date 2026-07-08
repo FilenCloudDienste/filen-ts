@@ -24,6 +24,7 @@ import { clampListboxIndex, listboxRange } from "@/lib/drive/listbox"
 import { type DriveItem } from "@/lib/drive/item"
 import { renameItem, trashItems, restoreItems, deleteItemsPermanently, emptyTrash } from "@/lib/drive/actions"
 import { unshareItems } from "@/lib/share/actions"
+import { needsZip, startDownloads } from "@/lib/drive/download"
 import { type BulkOutcome } from "@/lib/drive/bulk"
 import { toastBulkOutcome } from "@/lib/drive/bulk-toast"
 import { useDirectoryListingQuery, useSortPreferencesQuery, useViewModePreferencesQuery } from "@/queries/drive"
@@ -143,6 +144,15 @@ registerAction({
 	defaultCombo: "delete,backspace",
 	scope: "drive",
 	descriptionKey: "driveCommandTrash"
+})
+// Downloads the current selection — see the useAction call below for its guards (single unifying
+// gate, mirroring item-menu/bulk-bar: mod+s reads as "save to disk", the FSA picker's own verb, and
+// is free of every other registered combo (mod+a/escape/v/f2/delete/backspace/n, global "d"/"").
+registerAction({
+	id: "drive.download",
+	defaultCombo: "mod+s",
+	scope: "drive",
+	descriptionKey: "driveCommandDownload"
 })
 
 const ROW_HEIGHT = 40
@@ -854,6 +864,28 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			}
 
 			setActiveDialog({ kind: "trash", items: selectedItems })
+		},
+		undefined,
+		[selectedItems, isDialogOpen, variant]
+	)
+
+	// Registered above at module scope. preventDefault unconditionally — mod+s's browser default
+	// (Save Page As) must never fire while this listing has focus. Guards mirror drive.trash's own
+	// (empty selection, an open dialog, the trash variant — download isn't offered there, matching
+	// item-menu/bulk-bar's own trash exclusion) plus the single unifying gate every download entry
+	// point shares: needsZip (a directory or multi-selection routes to the zip stub, not ready until a
+	// later task) — void, not awaited, so the FSA save picker inside startDownloads keeps this
+	// keydown's own live user gesture.
+	useAction(
+		"drive.download",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+
+			if (selectedItems.length === 0 || isDialogOpen || variant === "trash" || needsZip(selectedItems)) {
+				return
+			}
+
+			void startDownloads(selectedItems)
 		},
 		undefined,
 		[selectedItems, isDialogOpen, variant]

@@ -43,6 +43,7 @@ import {
 	defaultDownloadDeps,
 	startDownloads,
 	startZipDownload,
+	needsZip,
 	type RunDownloadDeps
 } from "@/lib/drive/download"
 import { useTransfersStore, type Transfer, type TerminalStatus } from "@/stores/transfers"
@@ -382,7 +383,7 @@ describe("startDownloads (real runDownload + defaultDownloadDeps)", () => {
 		expect(toastError).not.toHaveBeenCalled()
 	})
 
-	it("downloads a single file directly and toasts a success summary", async () => {
+	it("downloads a single file directly without a misleading success toast (the transfers row is the signal)", async () => {
 		downloadFileToWriter.mockImplementation(async (_file: AnyFile, _id: string, writer: WritableStream<Uint8Array>) => {
 			await writer.getWriter().close()
 		})
@@ -390,7 +391,19 @@ describe("startDownloads (real runDownload + defaultDownloadDeps)", () => {
 		await startDownloads([fileItem({ name: "a.txt" })])
 
 		expect(saveDownloadMock).toHaveBeenCalledTimes(1)
-		expect(toastSuccess).toHaveBeenCalledTimes(1)
+		expect(toastSuccess).not.toHaveBeenCalled()
+		expect(toastError).not.toHaveBeenCalled()
+	})
+
+	// runDownload can't distinguish a picker-cancel from a real download (both resolve
+	// {status:"success"}) — proves the fix never fires the misleading toast either way.
+	it("produces no success toast when the user cancels the save picker (a clean no-op, not a download)", async () => {
+		saveDownloadMock.mockRejectedValue(new Error("aborted"))
+		isPickerCancelledMock.mockReturnValue(true)
+
+		await startDownloads([fileItem()])
+
+		expect(toastSuccess).not.toHaveBeenCalled()
 		expect(toastError).not.toHaveBeenCalled()
 	})
 
@@ -433,5 +446,25 @@ describe("startDownloads (real runDownload + defaultDownloadDeps)", () => {
 describe("startZipDownload (the zip-download seam)", () => {
 	it("resolves without throwing (placeholder — the real zip orchestration lands in a later task)", async () => {
 		await expect(startZipDownload([fileItem(), dirItem()])).resolves.toBeUndefined()
+	})
+})
+
+// The exported single-unifying-gate predicate every download entry point (item-menu/bulk-bar/keymap)
+// enables on — proven directly here so those call sites can trust it without re-deriving the rule.
+describe("needsZip (the zip-gate predicate)", () => {
+	it("is false for a single file", () => {
+		expect(needsZip([fileItem()])).toBe(false)
+	})
+
+	it("is true for a single directory", () => {
+		expect(needsZip([dirItem()])).toBe(true)
+	})
+
+	it("is true for more than one item, even all files", () => {
+		expect(needsZip([fileItem(), fileItem()])).toBe(true)
+	})
+
+	it("is false for an empty selection", () => {
+		expect(needsZip([])).toBe(false)
 	})
 })

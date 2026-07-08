@@ -134,6 +134,8 @@ export const drive = {
 	driveCommandRename: "Rename",
 	/** Keymap registry — description for the drive.trash command */
 	driveCommandTrash: "Trash",
+	/** Keymap registry — description for the drive.download command */
+	driveCommandDownload: "Download",
 
 	// ── Item action menu ─────────────────────────────────────────────────────
 	/** Item menu — accessible label for the ⋯ button opening the per-item action menu */
@@ -161,6 +163,8 @@ export const drive = {
 	driveActionVersions: "Versions",
 	/** Item menu — open the info panel for the selected item */
 	driveActionInfo: "Info",
+	/** Item menu — download the selected item to disk; disabled for a directory or a multi-selection until zip download ships */
+	driveActionDownload: "Download",
 	/** Item menu — open the public-link dialog for the selected item */
 	driveActionPublicLink: "Public link",
 	/** Item menu — copy the selected item's existing public-link URL to the clipboard */

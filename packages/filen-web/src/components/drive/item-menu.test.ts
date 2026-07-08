@@ -1,8 +1,26 @@
-import { describe, expect, it } from "vitest"
-import { UserMinusIcon } from "lucide-react"
+import { describe, expect, it, vi } from "vitest"
+import { QueryClient } from "@tanstack/react-query"
+import { UserMinusIcon, DownloadIcon } from "lucide-react"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
-import { driveItemActions } from "@/components/drive/item-menu.logic"
+
+// item-menu.logic.ts imports lib/drive/download.ts (for needsZip/startDownloads) which in turn
+// touches the worker client and query client — unresolvable/unwanted under node vitest, mirrors
+// lib/drive/download.test.ts's own mock boundary. needsZip is kept REAL (via importOriginal) so the
+// gating tests below exercise the genuine single-unifying-gate predicate, not a re-derived stand-in;
+// only startDownloads is replaced, since actually running it would reach the (also mocked) worker.
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+
+const { startDownloadsMock } = vi.hoisted(() => ({ startDownloadsMock: vi.fn() }))
+
+vi.mock("@/lib/drive/download", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/lib/drive/download")>()
+	return { ...actual, startDownloads: startDownloadsMock }
+})
+
+import { driveItemActions, startItemDownload } from "@/components/drive/item-menu.logic"
 
 // Local fixtures mirror item.test.ts / actions.test.ts's own per-file convention (each test file owns
 // its minimal Dir/File shape rather than sharing one across files).
@@ -107,17 +125,29 @@ function ids(item: DriveItem, variant: Parameters<typeof driveItemActions>[1]): 
 }
 
 describe("driveItemActions (item menu gating)", () => {
-	it("drive variant, directory: rename/move/favorite/color/info/share/publicLink/copyLink/trash, in that order (no versions)", () => {
-		expect(ids(dirItem(), "drive")).toEqual(["rename", "move", "favorite", "color", "info", "share", "publicLink", "copyLink", "trash"])
+	it("drive variant, directory: rename/move/favorite/color/info/download/share/publicLink/copyLink/trash, in that order (no versions)", () => {
+		expect(ids(dirItem(), "drive")).toEqual([
+			"rename",
+			"move",
+			"favorite",
+			"color",
+			"info",
+			"download",
+			"share",
+			"publicLink",
+			"copyLink",
+			"trash"
+		])
 	})
 
-	it("drive variant, file: rename/move/favorite/versions/info/share/publicLink/copyLink/trash, in that order (no color)", () => {
+	it("drive variant, file: rename/move/favorite/versions/info/download/share/publicLink/copyLink/trash, in that order (no color)", () => {
 		expect(ids(fileItem(), "drive")).toEqual([
 			"rename",
 			"move",
 			"favorite",
 			"versions",
 			"info",
+			"download",
 			"share",
 			"publicLink",
 			"copyLink",
@@ -152,10 +182,10 @@ describe("driveItemActions (item menu gating)", () => {
 		expect(ids(fileItem(), "trash")).toEqual(["restore", "deletePermanently", "info"])
 	})
 
-	it("undecryptable item outside trash: reduced to info/trash only", () => {
+	it("undecryptable item outside trash: reduced to info/download/trash only", () => {
 		const undecryptable = narrowItem(mockFile({ meta: { type: "encrypted", data: "ciphertext" } }))
-		expect(ids(undecryptable, "drive")).toEqual(["info", "trash"])
-		expect(ids(undecryptable, "favorites")).toEqual(["info", "trash"])
+		expect(ids(undecryptable, "drive")).toEqual(["info", "download", "trash"])
+		expect(ids(undecryptable, "favorites")).toEqual(["info", "download", "trash"])
 	})
 
 	it("undecryptable item in trash: identical to a normal trash-variant item (no further reduction)", () => {
@@ -252,8 +282,9 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 		)
 
 		// No trash: sharedOut is a shared surface (isSharedVariant), so the owner-mutating trash push
-		// never runs — see the "shared-surface safe subset" describe block below.
-		expect(ids(undecryptableRootDir, "sharedOut")).toEqual(["info", "unshare"])
+		// never runs — see the "shared-surface safe subset" describe block below. Download is present
+		// (undecryptable no longer excludes it) but would render disabled — this fixture is a directory.
+		expect(ids(undecryptableRootDir, "sharedOut")).toEqual(["info", "download", "unshare"])
 	})
 
 	it("unshare dispatches its own confirm dialog kind and is destructive-styled", () => {
@@ -265,7 +296,7 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 	it("unshare is the last action offered on a decryptable shared-root item, after info (sharedIn has no owner actions)", () => {
 		const descriptors = ids(sharedRootFileItem(), "sharedIn")
 
-		expect(descriptors).toEqual(["info", "unshare"])
+		expect(descriptors).toEqual(["info", "download", "unshare"])
 	})
 })
 
@@ -278,24 +309,24 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 describe("driveItemActions — shared-surface safe subset (sharedIn/sharedOut)", () => {
 	const OWNER_ONLY_IDS = ["rename", "move", "favorite", "color", "versions", "publicLink", "copyLink", "trash"]
 
-	it("sharedIn root: exactly info + unshare", () => {
-		expect(ids(sharedRootDirItem(), "sharedIn")).toEqual(["info", "unshare"])
-		expect(ids(sharedRootFileItem(), "sharedIn")).toEqual(["info", "unshare"])
+	it("sharedIn root: exactly info + download + unshare", () => {
+		expect(ids(sharedRootDirItem(), "sharedIn")).toEqual(["info", "download", "unshare"])
+		expect(ids(sharedRootFileItem(), "sharedIn")).toEqual(["info", "download", "unshare"])
 	})
 
-	it("sharedIn nested: exactly info (unshare stays root-only)", () => {
-		expect(ids(sharedDirItem(), "sharedIn")).toEqual(["info"])
-		expect(ids(sharedFileItem(), "sharedIn")).toEqual(["info"])
+	it("sharedIn nested: exactly info + download (unshare stays root-only)", () => {
+		expect(ids(sharedDirItem(), "sharedIn")).toEqual(["info", "download"])
+		expect(ids(sharedFileItem(), "sharedIn")).toEqual(["info", "download"])
 	})
 
-	it("sharedOut root: exactly info + share + unshare", () => {
-		expect(ids(sharedRootDirItem(), "sharedOut")).toEqual(["info", "share", "unshare"])
-		expect(ids(sharedRootFileItem(), "sharedOut")).toEqual(["info", "share", "unshare"])
+	it("sharedOut root: exactly info + download + share + unshare", () => {
+		expect(ids(sharedRootDirItem(), "sharedOut")).toEqual(["info", "download", "share", "unshare"])
+		expect(ids(sharedRootFileItem(), "sharedOut")).toEqual(["info", "download", "share", "unshare"])
 	})
 
-	it("sharedOut nested: exactly info + share (unshare stays root-only)", () => {
-		expect(ids(sharedDirItem(), "sharedOut")).toEqual(["info", "share"])
-		expect(ids(sharedFileItem(), "sharedOut")).toEqual(["info", "share"])
+	it("sharedOut nested: exactly info + download + share (unshare stays root-only)", () => {
+		expect(ids(sharedDirItem(), "sharedOut")).toEqual(["info", "download", "share"])
+		expect(ids(sharedFileItem(), "sharedOut")).toEqual(["info", "download", "share"])
 	})
 
 	it("neither shared surface ever offers an owner-mutating action, root or nested", () => {
@@ -306,5 +337,45 @@ describe("driveItemActions — shared-surface safe subset (sharedIn/sharedOut)",
 				expect(ids(item, variant).filter(id => OWNER_ONLY_IDS.includes(id))).toEqual([])
 			}
 		}
+	})
+})
+
+// Download's single unifying gate (mirrored in bulk-action-bar.logic.ts and the drive keymap):
+// present everywhere the general/undecryptable branches reach (never trash — see the trash-variant
+// test above), enabled iff the item is a file.
+describe("driveItemActions — download gating (single unifying gate: !needsZip)", () => {
+	it("is present and enabled for a file", () => {
+		const descriptor = driveItemActions(fileItem(), "drive").find(d => d.id === "download")
+
+		expect(descriptor).toMatchObject({ run: "direct", enabled: true, icon: DownloadIcon })
+	})
+
+	it("is present but disabled for a directory — routes to the zip stub until a later task", () => {
+		const descriptor = driveItemActions(dirItem(), "drive").find(d => d.id === "download")
+
+		expect(descriptor).toMatchObject({ run: "direct", enabled: false })
+	})
+
+	it("is absent from the trash-reduced menu (mirrors bulk-bar/keymap's own trash exclusion)", () => {
+		expect(ids(fileItem(), "trash")).not.toContain("download")
+		expect(ids(dirItem(), "trash")).not.toContain("download")
+	})
+
+	it("is present (though disabled/enabled per file-vs-directory) even for an undecryptable item", () => {
+		const undecryptableFile = narrowItem(mockFile({ meta: { type: "encrypted", data: "ciphertext" } }))
+		const undecryptableDir = narrowItem(mockDir({ meta: { type: "encrypted", data: "ciphertext" } }))
+
+		expect(driveItemActions(undecryptableFile, "drive").find(d => d.id === "download")).toMatchObject({ enabled: true })
+		expect(driveItemActions(undecryptableDir, "drive").find(d => d.id === "download")).toMatchObject({ enabled: false })
+	})
+})
+
+describe("startItemDownload", () => {
+	it("calls startDownloads with the item wrapped in a single-element array, synchronously (gesture-preserving)", () => {
+		const item = fileItem()
+
+		startItemDownload(item)
+
+		expect(startDownloadsMock).toHaveBeenCalledWith([item])
 	})
 })

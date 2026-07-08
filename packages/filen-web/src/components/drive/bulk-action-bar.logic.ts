@@ -1,8 +1,20 @@
-import { StarIcon, StarOffIcon, FolderInputIcon, UsersIcon, UserMinusIcon, Trash2Icon, RotateCcwIcon, type LucideIcon } from "lucide-react"
+import {
+	StarIcon,
+	StarOffIcon,
+	FolderInputIcon,
+	UsersIcon,
+	UserMinusIcon,
+	Trash2Icon,
+	RotateCcwIcon,
+	DownloadIcon,
+	type LucideIcon
+} from "lucide-react"
 import { type DriveVariant } from "@/lib/drive/preferences"
 import { type DriveSelectionFlags } from "@/lib/drive/selection-flags"
 import { canShareVariant, isSharedVariant } from "@/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
+import { type DriveItem } from "@/lib/drive/item"
+import { needsZip, startDownloads } from "@/lib/drive/download"
 
 // Dialog kinds the bulk-action bar can ask the listing's dialog host to open — a narrow subset of
 // directory-listing.tsx's own ActiveDialogKind (the per-item-only kinds — rename/color/versions/info/
@@ -12,7 +24,7 @@ import { type DriveKey } from "@/lib/i18n"
 export type BulkDialogActionKind = "move" | "share" | "unshare" | "trash" | "delete" | "restoreSelected"
 
 interface BulkActionDescriptorShared {
-	id: "favorite" | "move" | "share" | "unshare" | "trash" | "restoreSelected" | "delete"
+	id: "favorite" | "move" | "share" | "unshare" | "trash" | "restoreSelected" | "delete" | "download"
 	labelKey: DriveKey
 	icon: LucideIcon
 	destructive?: boolean
@@ -78,6 +90,12 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 		}
 	}
 
+	// Download mutates nothing, so — unlike favorite/move/share above — it is never gated on
+	// ownerMutable/includesUndecryptable; it is offered on every non-trash surface this point is
+	// reachable from (owned or shared). Its own ENABLED state is a separate concern (isBulkDownloadEnabled
+	// below) — this only controls presence, mirroring item-menu.logic.ts's downloadDescriptor.
+	descriptors.push({ id: "download", labelKey: "driveActionDownload", icon: DownloadIcon, run: "direct" })
+
 	// Trash is NOT gated by undecryptable (pure uuid, same as restore/delete above) and is never
 	// destructive-styled — recoverable, matching the per-item TRASH descriptor's own rationale.
 	if (ownerMutable) {
@@ -100,4 +118,22 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 	}
 
 	return descriptors
+}
+
+// Download's ENABLED state (distinct from its PRESENCE in driveBulkActions above) needs the real
+// selection, not DriveSelectionFlags — a shared file/directory collapses to neither everyFile nor
+// everyDirectory there (selection-flags.ts's own aggregation), so reconstructing needsZip's
+// file-vs-directory check from flags alone would wrongly gate a shared single-file selection. This
+// is the single unifying gate (mirrored in item-menu.logic.ts and the drive keymap): enabled iff the
+// selection is a lone file.
+export function isBulkDownloadEnabled(items: DriveItem[]): boolean {
+	return items.length > 0 && !needsZip(items)
+}
+
+// Download's "direct" action needs no await before it — startDownloads' FSA save picker requires the
+// click's own live user gesture (see lib/drive/download.ts), and bulk-action-bar.tsx's onClick can't
+// be exercised under this project's DOM-less vitest setup, so this is the unit-testable seam proving
+// the wiring: bulk-action-bar.tsx calls this synchronously off the click, never `await`ed.
+export function startBulkDownload(items: DriveItem[]): void {
+	void startDownloads(items)
 }

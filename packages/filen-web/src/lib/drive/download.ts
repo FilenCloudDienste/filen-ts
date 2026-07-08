@@ -160,14 +160,19 @@ export function startZipDownload(items: DriveItem[]): Promise<void> {
 
 // A directory, or more than one item at all, zips into one archive rather than N separate save
 // dialogs — the SDK does the recursion + zip in one native call, the exact inverse of upload's own
-// JS-orchestrated multi-file fan-out. Only a lone file downloads directly.
-function needsZip(items: DriveItem[]): boolean {
+// JS-orchestrated multi-file fan-out. Only a lone file downloads directly. Exported as the single
+// gate every download entry point (item-menu/bulk-bar/keymap) enables on: a lone file is
+// enabled, anything else is disabled until the zip path lands.
+export function needsZip(items: DriveItem[]): boolean {
 	return items.length > 1 || items.some(item => asDirectoryOrFile(item).type === "directory")
 }
 
-// The one call a download entry point makes. Ends in a summary toast mirroring startUploads'
-// success/partial-failure shape (lib/drive/upload.ts) — reusing the same "transfers" namespace
-// pattern rather than the drive-bulk one, since a download fan-out never produces a BulkOutcome<DriveItem>.
+// The one call a download entry point makes. Mirrors startUploads' partial-failure toast
+// (lib/drive/upload.ts) on error, but deliberately drops the success toast: runDownload's return is
+// the shared 2-state VoidActionOutcome, so a user cancelling the save picker (a clean no-op) is
+// INDISTINGUISHABLE here from a real completed download — both resolve {status:"success"}. Rather
+// than widen that cross-cutting type, this just never claims "downloaded" on success; the transfers
+// row it creates is already the signal that a download started and finished.
 export async function startDownloads(items: DriveItem[]): Promise<void> {
 	if (items.length === 0) {
 		return
@@ -189,9 +194,5 @@ export async function startDownloads(items: DriveItem[]): Promise<void> {
 
 	if (outcome.status === "error") {
 		toast.error(i18n.t("transfers:transfersDownloadSummaryCompleteWithFailures", { count: 0, failed: 1 }))
-
-		return
 	}
-
-	toast.success(i18n.t("transfers:transfersDownloadSummaryComplete", { count: 1 }))
 }

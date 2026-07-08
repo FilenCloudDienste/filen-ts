@@ -171,3 +171,54 @@ describe("keymap registry", () => {
 		expect(keymapOverridesSchema({ "app.test": 123 })).toBeInstanceOf(type.errors)
 	})
 })
+
+// drive.download (directory-listing.tsx's module-scope registration, mirrored here since registry.ts
+// itself holds no concrete actions — every feature registers its own). Combos below mirror the app's
+// REAL default registrations as of this task (directory-listing.tsx/new-directory.tsx/
+// theme-provider.tsx/icon-rail.tsx) so a genuine collision would fail this test, not just a synthetic
+// one.
+describe("keymap registry — drive.download registration", () => {
+	it("registers with its chosen default combo (mod+s)", async () => {
+		const { registerAction, comboFor } = await freshRegistry()
+
+		registerAction({ id: "drive.download", defaultCombo: "mod+s", scope: "drive", descriptionKey: "driveCommandDownload" })
+
+		expect(comboFor("drive.download")).toBe("mod+s")
+	})
+
+	it("does not collide with any other registered default combo in the app", async () => {
+		const { registerAction, comboFor } = await freshRegistry()
+
+		// drive scope (directory-listing.tsx + new-directory.tsx)
+		registerAction({ id: "drive.selectAll", defaultCombo: "mod+a", scope: "drive", descriptionKey: "driveCommandSelectAll" })
+		registerAction({ id: "drive.clearSelection", defaultCombo: "escape", scope: "drive", descriptionKey: "driveCommandClearSelection" })
+		registerAction({ id: "drive.toggleView", defaultCombo: "v", scope: "drive", descriptionKey: "driveCommandToggleView" })
+		registerAction({ id: "drive.rename", defaultCombo: "f2", scope: "drive", descriptionKey: "driveCommandRename" })
+		registerAction({ id: "drive.trash", defaultCombo: "delete,backspace", scope: "drive", descriptionKey: "driveCommandTrash" })
+		registerAction({ id: "drive.newDirectory", defaultCombo: "n", scope: "drive", descriptionKey: "driveCommandNewDirectory" })
+		registerAction({ id: "drive.download", defaultCombo: "mod+s", scope: "drive", descriptionKey: "driveCommandDownload" })
+		// global scope (theme-provider.tsx + icon-rail.tsx) — scope isn't enforced yet (every action
+		// fires unconditionally, see registry.ts's ActionScope comment), so these are live collision
+		// candidates too, not just drive-scope ones.
+		registerAction({ id: "app.toggleTheme", defaultCombo: "d", scope: "global", descriptionKey: "toggleTheme" })
+		registerAction({ id: "app.openSettings", defaultCombo: "", scope: "global", descriptionKey: "settings" })
+
+		const ids = [
+			"drive.selectAll",
+			"drive.clearSelection",
+			"drive.toggleView",
+			"drive.rename",
+			"drive.trash",
+			"drive.newDirectory",
+			"drive.download",
+			"app.toggleTheme",
+			"app.openSettings"
+		]
+		// "" (openSettings' unbound default) is excluded from the collision check — an empty combo
+		// isn't a real binding (keymapOverridesSchema itself rejects "" as a value), it just means
+		// unbound-by-default.
+		const combos = ids.map(comboFor).filter(combo => combo.length > 0)
+
+		expect(new Set(combos).size).toBe(combos.length)
+	})
+})
