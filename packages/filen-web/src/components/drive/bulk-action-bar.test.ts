@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest"
-import { StarIcon, StarOffIcon, FolderInputIcon, Trash2Icon, RotateCcwIcon } from "lucide-react"
+import { StarIcon, StarOffIcon, FolderInputIcon, UserMinusIcon, Trash2Icon, RotateCcwIcon } from "lucide-react"
 import { type DriveSelectionFlags } from "@/lib/drive/selection-flags"
 import { driveBulkActions } from "@/components/drive/bulk-action-bar.logic"
 
 function flags(overrides: Partial<DriveSelectionFlags> = {}): DriveSelectionFlags {
-	return { count: 2, includesFavorited: false, everyFile: false, everyDirectory: false, includesUndecryptable: false, ...overrides }
+	return {
+		count: 2,
+		includesFavorited: false,
+		everyFile: false,
+		everyDirectory: false,
+		includesUndecryptable: false,
+		everySharedRoot: false,
+		...overrides
+	}
 }
 
 describe("driveBulkActions", () => {
@@ -104,5 +112,42 @@ describe("driveBulkActions", () => {
 		const withoutDirs = driveBulkActions("drive", flags({ includesUndecryptable: false, everyDirectory: false }))
 
 		expect(withDirs.map(d => d.id)).toEqual(withoutDirs.map(d => d.id))
+	})
+})
+
+// Unshare (removeSharedItem) is root-only — gated purely on everySharedRoot (the WHOLE selection is
+// sharedRootDirectory/sharedRootFile arms), mirroring item-menu.logic.ts's own per-item type gate.
+describe("driveBulkActions — unshare gating (everySharedRoot)", () => {
+	it("appears when the whole selection is shared-root arms, on both sharedOut and sharedIn", () => {
+		expect(driveBulkActions("sharedOut", flags({ everySharedRoot: true })).map(d => d.id)).toContain("unshare")
+		expect(driveBulkActions("sharedIn", flags({ everySharedRoot: true })).map(d => d.id)).toContain("unshare")
+	})
+
+	it("is absent when the selection is not entirely shared-root arms", () => {
+		expect(driveBulkActions("drive", flags({ everySharedRoot: false })).map(d => d.id)).not.toContain("unshare")
+		expect(driveBulkActions("sharedOut", flags({ everySharedRoot: false })).map(d => d.id)).not.toContain("unshare")
+	})
+
+	it("survives includesUndecryptable — pure-uuid disposition, same as trash", () => {
+		const descriptors = driveBulkActions("sharedOut", flags({ everySharedRoot: true, includesUndecryptable: true }))
+
+		expect(descriptors.map(d => d.id)).toContain("unshare")
+	})
+
+	it("is absent from the trash variant's maximally-reduced menu, even nominally flagged", () => {
+		expect(driveBulkActions("trash", flags({ everySharedRoot: true })).map(d => d.id)).not.toContain("unshare")
+	})
+
+	it("dispatches the unshare confirm dialog kind and is destructive-styled", () => {
+		const unshare = driveBulkActions("sharedOut", flags({ everySharedRoot: true })).find(d => d.id === "unshare")
+
+		expect(unshare).toMatchObject({ run: "dialog", dialogKind: "unshare", destructive: true, icon: UserMinusIcon })
+	})
+
+	it("is the last descriptor when present, after trash", () => {
+		const descriptors = driveBulkActions("sharedOut", flags({ everySharedRoot: true, includesUndecryptable: false }))
+
+		expect(descriptors.at(-1)?.id).toBe("unshare")
+		expect(descriptors.at(-2)?.id).toBe("trash")
 	})
 })

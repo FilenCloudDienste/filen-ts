@@ -3,10 +3,9 @@ import { type DriveItem } from "@/lib/drive/item"
 // Aggregated flags for a Drive multi-selection, computed in a single pass — the bulk-action bar's
 // only source of gating truth (directory-listing.tsx computes this once per render from
 // `selectedItems`, React Compiler memoizes). Mirrors filen-mobile's driveSelectors.ts
-// DriveSelectionFlags/aggregateDriveSelectionFlags, simplified for web's narrower item shape: a web
-// DriveItem is only ever "directory" | "file" (no shared*/offline variants), so `everyFile`/
-// `everyDirectory` need no discriminant-set lookup, and there is no save-to-photos surface here, so
-// mobile's `everyImageOrVideoFile` has no web counterpart.
+// DriveSelectionFlags/aggregateDriveSelectionFlags; `everyFile`/`everyDirectory` match only the two
+// BASE arms (a shared item's own type, e.g. sharedRootFile, counts as neither) — there is no
+// save-to-photos surface here, so mobile's `everyImageOrVideoFile` has no web counterpart.
 export interface DriveSelectionFlags {
 	count: number
 	// True iff any selected item is favorited. Drives the bulk Favorite/Unfavorite button's label and
@@ -17,6 +16,10 @@ export interface DriveSelectionFlags {
 	// True iff any selected item is undecryptable. Gates bulk actions that need decrypted metadata
 	// (favorite, move) — trash/restore/delete stay available, since those only need each item's uuid.
 	includesUndecryptable: boolean
+	// True iff every selected item is a shared-root arm (sharedRootDirectory/sharedRootFile) — the
+	// only two arms removeSharedItem accepts (see item.ts's shareSource retention). Drives the bulk
+	// Unshare button's gate, mirroring the per-item menu's own item.type check (item-menu.logic.ts).
+	everySharedRoot: boolean
 }
 
 // Returned by reference (not rebuilt) for an empty selection, mirroring mobile's EMPTY_DRIVE_FLAGS —
@@ -26,7 +29,8 @@ const EMPTY_DRIVE_SELECTION_FLAGS: DriveSelectionFlags = Object.freeze({
 	includesFavorited: false,
 	everyFile: false,
 	everyDirectory: false,
-	includesUndecryptable: false
+	includesUndecryptable: false,
+	everySharedRoot: false
 })
 
 export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): DriveSelectionFlags {
@@ -38,6 +42,7 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 	let everyFile = true
 	let everyDirectory = true
 	let includesUndecryptable = false
+	let everySharedRoot = true
 
 	for (const item of items) {
 		if (item.data.favorited) {
@@ -55,7 +60,11 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 		if (item.type !== "directory") {
 			everyDirectory = false
 		}
+
+		if (item.type !== "sharedRootDirectory" && item.type !== "sharedRootFile") {
+			everySharedRoot = false
+		}
 	}
 
-	return { count: items.length, includesFavorited, everyFile, everyDirectory, includesUndecryptable }
+	return { count: items.length, includesFavorited, everyFile, everyDirectory, includesUndecryptable, everySharedRoot }
 }

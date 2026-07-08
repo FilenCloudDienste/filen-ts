@@ -1,20 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Contact, Dir, File, UuidStr } from "@filen/sdk-rs"
+import type { Contact, Dir, File, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it down
-// to the two share ops, mirroring lib/drive/actions.test.ts's mock boundary.
-const { shareDirectory, shareFile } = vi.hoisted(() => ({
+// to the ops this file exercises, mirroring lib/drive/actions.test.ts's mock boundary.
+const { shareDirectory, shareFile, removeSharedItem } = vi.hoisted(() => ({
 	shareDirectory: vi.fn(),
-	shareFile: vi.fn()
+	shareFile: vi.fn(),
+	removeSharedItem: vi.fn()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: {
 		shareDirectory,
-		shareFile
+		shareFile,
+		removeSharedItem
 	}
 }))
 
@@ -25,7 +27,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { driveListingQueryKey } from "@/queries/drive"
-import { shareItems } from "@/lib/share/actions"
+import { shareItems, unshareItems } from "@/lib/share/actions"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -85,6 +87,73 @@ function fileItem(overrides: Partial<File> = {}): Extract<DriveItem, { type: "fi
 	return item
 }
 
+function sharerRole(id: number, email: string): SharingRole {
+	return { Sharer: { email, id } }
+}
+
+function mockSharedRootDir(overrides: Partial<SharedRootDir> = {}): SharedRootDir {
+	return {
+		inner: {
+			uuid: testUuid("sroot"),
+			color: "default",
+			timestamp: 1_700_000_000_000n,
+			meta: { type: "decoded", data: { name: "SharedRoot" } }
+		},
+		sharingRole: sharerRole(42, "sharer@filen.io"),
+		writeAccess: true,
+		...overrides
+	}
+}
+
+function mockSharedFile(overrides: Partial<SharedFile> = {}): SharedFile {
+	return {
+		uuid: testUuid("sfile"),
+		size: 2_048n,
+		region: "de-1",
+		bucket: "filen-1",
+		chunks: 2n,
+		timestamp: 1_700_000_000_000n,
+		meta: {
+			type: "decoded",
+			data: { name: "shared.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
+		},
+		sharingRole: sharerRole(7, "receiver@filen.io"),
+		sharedTag: true,
+		...overrides
+	}
+}
+
+// Returns the raw wasm fixture ALONGSIDE the narrowed item — unshareItems' whole point is that it
+// forwards the untouched raw (`shareSource`), never the flattened `data`, so tests need the raw's own
+// reference to assert against, not just what narrowItem derived from it.
+function sharedRootDirFixture(overrides: Partial<SharedRootDir> = {}): {
+	raw: SharedRootDir
+	item: Extract<DriveItem, { type: "sharedRootDirectory" }>
+} {
+	const raw = mockSharedRootDir(overrides)
+	const item = narrowItem(raw)
+
+	if (item.type !== "sharedRootDirectory") {
+		throw new Error("expected a sharedRootDirectory arm")
+	}
+
+	return { raw, item }
+}
+
+function sharedRootFileFixture(overrides: Partial<SharedFile> = {}): {
+	raw: SharedFile
+	item: Extract<DriveItem, { type: "sharedRootFile" }>
+} {
+	const raw = mockSharedFile(overrides)
+	const item = narrowItem(raw)
+
+	if (item.type !== "sharedRootFile") {
+		throw new Error("expected a sharedRootFile arm")
+	}
+
+	return { raw, item }
+}
+
 function mockContact(label: string): Contact {
 	return {
 		uuid: testUuid(label),
@@ -105,6 +174,10 @@ function sdkDto(kind: string): ErrorDTO {
 
 function sharedOutRoot() {
 	return driveListingQueryKey({ variant: "sharedOut", uuid: null })
+}
+
+function sharedInRoot() {
+	return driveListingQueryKey({ variant: "sharedIn", uuid: null })
 }
 
 describe("shareItems", () => {
@@ -230,5 +303,104 @@ describe("shareItems", () => {
 		expect(shareDirectory).not.toHaveBeenCalled()
 		expect(shareFile).not.toHaveBeenCalled()
 		expect(invalidateSpy).not.toHaveBeenCalled()
+	})
+})
+
+describe("unshareItems", () => {
+	it("calls removeSharedItem with EXACTLY the retained shareSource raw (same reference) — directory arm", async () => {
+		const { raw, item } = sharedRootDirFixture()
+		removeSharedItem.mockResolvedValue(undefined)
+
+		await unshareItems([item], "sharedOut")
+
+		expect(removeSharedItem).toHaveBeenCalledExactlyOnceWith(raw)
+		expect(removeSharedItem.mock.calls[0]?.[0]).toBe(raw) // same reference, not a reconstruction
+		// The flattened `data` is a DIFFERENT shape (no `inner`) — never what crosses to the worker.
+		expect(removeSharedItem).not.toHaveBeenCalledWith(item.data)
+	})
+
+	it("calls removeSharedItem with EXACTLY the retained shareSource raw (same reference) — file arm", async () => {
+		const { raw, item } = sharedRootFileFixture()
+		removeSharedItem.mockResolvedValue(undefined)
+
+		await unshareItems([item], "sharedIn")
+
+		expect(removeSharedItem).toHaveBeenCalledExactlyOnceWith(raw)
+		expect(removeSharedItem.mock.calls[0]?.[0]).toBe(raw)
+		expect(removeSharedItem).not.toHaveBeenCalledWith(item.data)
+	})
+
+	it("reports a per-item BulkOutcome across a mixed directory+file selection", async () => {
+		// sharedRootDirFixture/sharedRootFileFixture default to distinct uuids (sroot/sfile) — no
+		// override needed for these two to coexist.
+		const { item: dir } = sharedRootDirFixture()
+		const { item: file } = sharedRootFileFixture()
+		removeSharedItem.mockResolvedValue(undefined)
+
+		const outcome = await unshareItems([dir, file], "sharedOut")
+
+		expect(outcome.succeeded).toEqual([dir, file])
+		expect(outcome.failed).toEqual([])
+		expect(removeSharedItem).toHaveBeenCalledTimes(2)
+	})
+
+	it("patches the sharedOut ROOT listing (removeByUuid) on success, leaving a sibling row intact", async () => {
+		const { item: target } = sharedRootDirFixture()
+		const { item: sibling } = sharedRootFileFixture()
+		testQueryClient.setQueryData(sharedOutRoot(), [target, sibling])
+		removeSharedItem.mockResolvedValue(undefined)
+
+		await unshareItems([target], "sharedOut")
+
+		expect(testQueryClient.getQueryData(sharedOutRoot())).toEqual([sibling])
+	})
+
+	it("patches the sharedIn ROOT listing (not sharedOut) when variant is sharedIn", async () => {
+		const { item: target } = sharedRootFileFixture({ uuid: testUuid("in-target") })
+		testQueryClient.setQueryData(sharedInRoot(), [target])
+		removeSharedItem.mockResolvedValue(undefined)
+
+		await unshareItems([target], "sharedIn")
+
+		expect(testQueryClient.getQueryData(sharedInRoot())).toEqual([])
+	})
+
+	it("does NOT patch the listing when removeSharedItem rejects", async () => {
+		const { item: target } = sharedRootDirFixture()
+		testQueryClient.setQueryData(sharedOutRoot(), [target])
+		const dto = sdkDto("Forbidden")
+		removeSharedItem.mockRejectedValue(dto)
+
+		const outcome = await unshareItems([target], "sharedOut")
+
+		expect(outcome.failed).toEqual([{ item: target, error: dto }])
+		expect(testQueryClient.getQueryData(sharedOutRoot())).toEqual([target])
+	})
+
+	it("a cache miss (nobody has viewed the listing yet) is a no-op patch, not a conjured empty array", async () => {
+		const { item: target } = sharedRootFileFixture({ uuid: testUuid("nocache") })
+		removeSharedItem.mockResolvedValue(undefined)
+
+		await unshareItems([target], "sharedOut")
+
+		expect(testQueryClient.getQueryData(sharedOutRoot())).toBeUndefined()
+	})
+
+	it("guards against a non-root item (defense-in-depth — the UI never gates one through): the item fails, removeSharedItem is never called", async () => {
+		const plainDir = dirItem({ uuid: testUuid("plain") })
+
+		const outcome = await unshareItems([plainDir], "sharedOut")
+
+		expect(outcome.succeeded).toEqual([])
+		expect(outcome.failed).toHaveLength(1)
+		expect(outcome.failed[0]?.item).toBe(plainDir)
+		expect(removeSharedItem).not.toHaveBeenCalled()
+	})
+
+	it("resolves to an empty split on an empty selection without calling the worker", async () => {
+		const outcome = await unshareItems([], "sharedOut")
+
+		expect(outcome).toEqual({ succeeded: [], failed: [] })
+		expect(removeSharedItem).not.toHaveBeenCalled()
 	})
 })

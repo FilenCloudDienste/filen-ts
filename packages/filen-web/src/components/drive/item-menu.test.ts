@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File } from "@filen/sdk-rs"
+import { UserMinusIcon } from "lucide-react"
+import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
 import { driveItemActions } from "@/components/drive/item-menu.logic"
 
@@ -42,6 +43,63 @@ function dirItem(overrides: Partial<Dir> = {}): DriveItem {
 
 function fileItem(overrides: Partial<File> = {}): DriveItem {
 	return narrowItem(mockFile(overrides))
+}
+
+function sharerRole(id: number, email: string): SharingRole {
+	return { Sharer: { email, id } }
+}
+
+function mockSharedRootDir(overrides: Partial<SharedRootDir> = {}): SharedRootDir {
+	return {
+		inner: {
+			uuid: "44444444-4444-4444-4444-444444444444",
+			color: "default",
+			timestamp: 1_700_000_000_000n,
+			meta: { type: "decoded", data: { name: "SharedRoot" } }
+		},
+		sharingRole: sharerRole(42, "sharer@filen.io"),
+		writeAccess: true,
+		...overrides
+	}
+}
+
+function mockSharedFile(overrides: Partial<SharedFile> = {}): SharedFile {
+	return {
+		uuid: "55555555-5555-5555-5555-555555555555",
+		size: 2_048n,
+		region: "de-1",
+		bucket: "filen-1",
+		chunks: 2n,
+		timestamp: 1_700_000_000_000n,
+		meta: {
+			type: "decoded",
+			data: { name: "shared.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
+		},
+		sharingRole: sharerRole(7, "receiver@filen.io"),
+		sharedTag: true,
+		...overrides
+	}
+}
+
+function mockSharedDir(overrides: Partial<SharedDir> = {}): SharedDir {
+	return { inner: mockDir({ uuid: "66666666-6666-6666-6666-666666666666" }), sharedTag: true, ...overrides }
+}
+
+function sharedRootDirItem(): DriveItem {
+	return narrowItem(mockSharedRootDir())
+}
+
+function sharedRootFileItem(): DriveItem {
+	return narrowItem(mockSharedFile())
+}
+
+// Nested shared arms need a spread role to classify (see item.ts) — mirrors item.test.ts's own fixture.
+function sharedDirItem(): DriveItem {
+	return narrowItem({ ...mockSharedDir(), sharingRole: sharerRole(1, "a@filen.io") })
+}
+
+function sharedFileItem(): DriveItem {
+	return narrowItem({ ...mockFile({ uuid: "77777777-7777-7777-7777-777777777777" }), sharingRole: sharerRole(1, "a@filen.io") })
 }
 
 function ids(item: DriveItem, variant: Parameters<typeof driveItemActions>[1]): string[] {
@@ -151,5 +209,61 @@ describe("driveItemActions (item menu gating)", () => {
 		const second = driveItemActions(dirItem(), "drive")
 		expect(first).not.toBe(second)
 		expect(first).toEqual(second)
+	})
+})
+
+// Unshare (removeSharedItem) is root-only — gated purely on item.type, never variant alone: only a
+// sharedRootDirectory/sharedRootFile arm carries the raw shareSource removeSharedItem needs (item.ts).
+describe("driveItemActions — unshare gating (shared-root arms only)", () => {
+	it("offers unshare on a sharedRootDirectory (shared-with-others root)", () => {
+		expect(ids(sharedRootDirItem(), "sharedOut")).toContain("unshare")
+	})
+
+	it("offers unshare on a sharedRootFile (shared-with-me root)", () => {
+		expect(ids(sharedRootFileItem(), "sharedIn")).toContain("unshare")
+	})
+
+	it("never offers unshare on a nested sharedDirectory or sharedFile", () => {
+		expect(ids(sharedDirItem(), "sharedIn")).not.toContain("unshare")
+		expect(ids(sharedFileItem(), "sharedIn")).not.toContain("unshare")
+	})
+
+	it("never offers unshare on an owned item (drive/recents/favorites)", () => {
+		expect(ids(dirItem(), "drive")).not.toContain("unshare")
+		expect(ids(fileItem(), "recents")).not.toContain("unshare")
+		expect(ids(dirItem(), "favorites")).not.toContain("unshare")
+	})
+
+	it("never offers unshare in the trash-reduced menu", () => {
+		expect(ids(dirItem(), "trash")).not.toContain("unshare")
+		expect(ids(fileItem(), "trash")).not.toContain("unshare")
+	})
+
+	it("keeps unshare for an undecryptable shared-root item — pure-uuid disposition, same as trash", () => {
+		const undecryptableRootDir = narrowItem(
+			mockSharedRootDir({
+				inner: {
+					uuid: "88888888-8888-8888-8888-888888888888",
+					color: "default",
+					timestamp: 1_700_000_000_000n,
+					meta: { type: "encrypted", data: "ciphertext" }
+				}
+			})
+		)
+
+		expect(ids(undecryptableRootDir, "sharedOut")).toEqual(["info", "trash", "unshare"])
+	})
+
+	it("unshare dispatches its own confirm dialog kind and is destructive-styled", () => {
+		const descriptor = driveItemActions(sharedRootDirItem(), "sharedOut").find(d => d.id === "unshare")
+
+		expect(descriptor).toMatchObject({ run: "dialog", dialogKind: "unshare", destructive: true, icon: UserMinusIcon })
+	})
+
+	it("unshare is the last action offered on a decryptable shared-root item, after trash", () => {
+		const descriptors = ids(sharedRootFileItem(), "sharedIn")
+
+		expect(descriptors.at(-1)).toBe("unshare")
+		expect(descriptors.at(-2)).toBe("trash")
 	})
 })

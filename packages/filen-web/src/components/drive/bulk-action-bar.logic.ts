@@ -1,4 +1,4 @@
-import { StarIcon, StarOffIcon, FolderInputIcon, UsersIcon, Trash2Icon, RotateCcwIcon, type LucideIcon } from "lucide-react"
+import { StarIcon, StarOffIcon, FolderInputIcon, UsersIcon, UserMinusIcon, Trash2Icon, RotateCcwIcon, type LucideIcon } from "lucide-react"
 import { type DriveVariant } from "@/lib/drive/preferences"
 import { type DriveSelectionFlags } from "@/lib/drive/selection-flags"
 import { canShareVariant } from "@/lib/share/gating"
@@ -6,12 +6,13 @@ import { type DriveKey } from "@/lib/i18n"
 
 // Dialog kinds the bulk-action bar can ask the listing's dialog host to open — a narrow subset of
 // directory-listing.tsx's own ActiveDialogKind (the per-item-only kinds — rename/color/versions/info/
-// link — can never be bulk-dispatched, so they have no place here). "share" is bulk-dispatchable (the
-// contact picker takes the whole selection), unlike the other link/access kinds.
-export type BulkDialogActionKind = "move" | "share" | "trash" | "delete" | "restoreSelected"
+// link — can never be bulk-dispatched, so they have no place here). "share"/"unshare" are both
+// bulk-dispatchable (the contact picker / unshare confirm each take the whole selection), unlike the
+// other link/access kinds.
+export type BulkDialogActionKind = "move" | "share" | "unshare" | "trash" | "delete" | "restoreSelected"
 
 interface BulkActionDescriptorShared {
-	id: "favorite" | "move" | "share" | "trash" | "restoreSelected" | "delete"
+	id: "favorite" | "move" | "share" | "unshare" | "trash" | "restoreSelected" | "delete"
 	labelKey: DriveKey
 	icon: LucideIcon
 	destructive?: boolean
@@ -72,6 +73,21 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 	// Trash is NOT gated by undecryptable (pure uuid, same as restore/delete above) and is never
 	// destructive-styled — recoverable, matching the per-item TRASH descriptor's own rationale.
 	descriptors.push({ id: "trash", labelKey: "driveActionTrash", icon: Trash2Icon, run: "dialog", dialogKind: "trash" })
+
+	// Root-only, same gate as the per-item menu's own UNSHARE (item-menu.logic.ts): only fires when
+	// EVERY selected item is a sharedRootDirectory/sharedRootFile arm. Independent of includesUndecryptable
+	// above — same pure-uuid-disposition rationale as trash — and destructive-styled, mirroring mobile's
+	// removeShare/stopSharing menu entries.
+	if (flags.everySharedRoot) {
+		descriptors.push({
+			id: "unshare",
+			labelKey: "driveActionUnshare",
+			icon: UserMinusIcon,
+			destructive: true,
+			run: "dialog",
+			dialogKind: "unshare"
+		})
+	}
 
 	return descriptors
 }

@@ -155,6 +155,8 @@ export const drive = {
 	driveActionCopyLink: "Copy link",
 	/** Item menu — share the selected item(s) with a Filen contact; opens the contact picker. Also the picker's own submit button */
 	driveActionShare: "Share",
+	/** Item menu (shared-with-me/shared-with-others root only) — stop sharing the selected shared-root item(s); opens the unshare-confirm dialog */
+	driveActionUnshare: "Unshare",
 	/** Trash toolbar — permanently delete every item currently in the trash; also the empty-trash confirm dialog's confirm button */
 	driveActionEmptyTrash: "Empty trash",
 
@@ -195,6 +197,14 @@ export const drive = {
 	driveRestoreSelectedConfirmBody_one: "Are you sure you want to restore this item?",
 	/** Bulk-restore confirm dialog — body for multiple selected items; {{count}} = items being restored */
 	driveRestoreSelectedConfirmBody_other: "Are you sure you want to restore these {{count}} items?",
+
+	// ── Unshare confirm ──────────────────────────────────────────────────────
+	/** Unshare confirm dialog — title (shared-with-me/shared-with-others root only); the confirm button reuses driveActionUnshare */
+	driveUnshareConfirmTitle: "Stop sharing?",
+	/** Unshare confirm dialog — body for a single item */
+	driveUnshareConfirmBody_one: "Are you sure you want to stop sharing this item?",
+	/** Unshare confirm dialog — body for multiple items; {{count}} = items being unshared */
+	driveUnshareConfirmBody_other: "Are you sure you want to stop sharing these {{count}} items?",
 
 	// ── Move dialog ──────────────────────────────────────────────────────────
 	/** Move dialog — title of the destination-directory picker */

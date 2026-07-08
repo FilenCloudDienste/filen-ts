@@ -9,6 +9,7 @@ import {
 	LinkIcon,
 	CopyIcon,
 	UsersIcon,
+	UserMinusIcon,
 	Trash2Icon,
 	RotateCcwIcon,
 	type LucideIcon
@@ -22,7 +23,7 @@ import { type DriveKey } from "@/lib/i18n"
 // own activeDialog state). "emptyTrash" is a listing-level action (the trash toolbar, no per-item
 // trigger), so it deliberately isn't part of this union — directory-listing.tsx's own ActiveDialog
 // kind widens this with that one extra literal.
-export type ItemActionDialogKind = "rename" | "move" | "color" | "versions" | "info" | "link" | "share" | "trash" | "delete"
+export type ItemActionDialogKind = "rename" | "move" | "color" | "versions" | "info" | "link" | "share" | "unshare" | "trash" | "delete"
 
 export type ItemActionId =
 	| "rename"
@@ -34,6 +35,7 @@ export type ItemActionId =
 	| "publicLink"
 	| "copyLink"
 	| "share"
+	| "unshare"
 	| "trash"
 	| "restore"
 	| "deletePermanently"
@@ -85,6 +87,18 @@ const COPY_LINK: ItemActionDescriptor = {
 // URL anyone can open): this grants a specific existing contact access. Variant-gated (see
 // canShareVariant / driveItemActions).
 const SHARE: ItemActionDescriptor = { id: "share", labelKey: "driveActionShare", icon: UsersIcon, run: "dialog", dialogKind: "share" }
+// Stop sharing a shared-root item (removeSharedItem) — root-only: gated below to the
+// sharedRootDirectory/sharedRootFile arms alone, the only two arms that carry a `shareSource` (see
+// item.ts's shareSource retention). Destructive-styled, mirroring mobile's own removeShare/
+// stopSharing menu entries (both destructive there too) — the other party loses access immediately.
+const UNSHARE: ItemActionDescriptor = {
+	id: "unshare",
+	labelKey: "driveActionUnshare",
+	icon: UserMinusIcon,
+	run: "dialog",
+	dialogKind: "unshare",
+	destructive: true
+}
 // Recoverable — not destructive-styled, matching the trash-confirm dialog it opens.
 const TRASH: ItemActionDescriptor = { id: "trash", labelKey: "driveActionTrash", icon: Trash2Icon, run: "dialog", dialogKind: "trash" }
 // A single item restores directly, no confirm (mobile parity — see driveRestoreSelectedConfirmTitle's
@@ -117,8 +131,15 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 		return [RESTORE, DELETE_PERMANENTLY, INFO]
 	}
 
+	// Root-only — removeSharedItem has no nested-item shape (see item.ts's shareSource retention), so
+	// a nested sharedDirectory/sharedFile never qualifies. This naturally confines Unshare to the
+	// sharedIn/sharedOut ROOT listings, the only place a sharedRoot* arm ever appears. Independent of
+	// the undecryptable reduction below — unshare needs no decrypted metadata (it acts on
+	// shareSource's own identity), the same pure-uuid-disposition rationale as TRASH.
+	const isSharedRoot = item.type === "sharedRootDirectory" || item.type === "sharedRootFile"
+
 	if (item.data.undecryptable) {
-		return [INFO, TRASH]
+		return isSharedRoot ? [INFO, TRASH, UNSHARE] : [INFO, TRASH]
 	}
 
 	const typeSpecific = asDirectoryOrFile(item).type === "directory" ? COLOR : VERSIONS
@@ -133,6 +154,10 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 	}
 
 	actions.push(PUBLIC_LINK, COPY_LINK, TRASH)
+
+	if (isSharedRoot) {
+		actions.push(UNSHARE)
+	}
 
 	return actions
 }

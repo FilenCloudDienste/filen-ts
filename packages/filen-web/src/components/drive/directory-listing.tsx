@@ -23,6 +23,7 @@ import { resolveDriveNavigationTarget, splatToUuids } from "@/lib/drive/navigate
 import { clampListboxIndex, listboxRange } from "@/lib/drive/listbox"
 import { type DriveItem } from "@/lib/drive/item"
 import { renameItem, trashItems, restoreItems, deleteItemsPermanently, emptyTrash } from "@/lib/drive/actions"
+import { unshareItems } from "@/lib/share/actions"
 import { type BulkOutcome } from "@/lib/drive/bulk"
 import { toastBulkOutcome } from "@/lib/drive/bulk-toast"
 import { useDirectoryListingQuery, useSortPreferencesQuery, useViewModePreferencesQuery } from "@/queries/drive"
@@ -88,6 +89,7 @@ const WIRED_DIALOG_KINDS = new Set<ActiveDialogKind>([
 	"info",
 	"link",
 	"share",
+	"unshare",
 	"restoreSelected"
 ])
 
@@ -514,6 +516,12 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		await runBulkDialogAction(items, restoreItems)
 	}
 
+	// Root-only (see item-menu.logic.ts's UNSHARE gate) — the sharedIn/sharedOut root-listing patch
+	// lives inside unshareItems itself, keyed off the CURRENT variant (this listing's own).
+	async function handleUnshareConfirm(items: DriveItem[]): Promise<void> {
+		await runBulkDialogAction(items, targetItems => unshareItems(targetItems, variant))
+	}
+
 	// Routes a bulk-action-bar click to the dialog host, dispatching against the CURRENT selection —
 	// mirrors the drive.trash keymap command's identical setActiveDialog({kind:"trash", items:
 	// selectedItems}) below.
@@ -728,6 +736,29 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						onClose={closeActiveDialog}
 					/>
 				) : null
+			case "unshare":
+				// Reached from a per-item menu (items: [item]) or the bulk bar (items: selectedItems) — both
+				// only ever dispatch this for sharedRootDirectory/sharedRootFile arms (item-menu.logic.ts /
+				// bulk-action-bar.logic.ts's own root-only gate).
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("driveUnshareConfirmTitle")}
+						body={t("driveUnshareConfirmBody", { count: activeDialog.items.length })}
+						confirmLabel={t("driveActionUnshare")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleUnshareConfirm(activeDialog.items)
+						}}
+					/>
+				)
 		}
 	}
 

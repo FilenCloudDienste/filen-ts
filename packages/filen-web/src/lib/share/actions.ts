@@ -3,6 +3,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 import { driveListingQueryKey } from "@/queries/drive"
 import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
+import { type DriveVariant } from "@/lib/drive/preferences"
 import { runOp } from "@/lib/actions/outcome"
 import { runBulk, type BulkOutcome } from "@/lib/drive/bulk"
 
@@ -57,4 +58,39 @@ export async function shareItems(items: DriveItem[], contacts: Contact[]): Promi
 	}
 
 	return outcome
+}
+
+// Filters a cached shared-root listing down to every row except the given uuid — a local, standalone
+// copy of drive/actions.ts's own private removeByUuid (unexported there, and this file already stands
+// alone from drive/actions.ts's write helpers, same as shareItems above).
+function removeByUuid(items: DriveItem[], uuid: string): DriveItem[] {
+	return items.filter(item => item.data.uuid !== uuid)
+}
+
+// Stops sharing a shared-root item — a directory shared out, or an item shared in the caller wants
+// gone. Root-only: item-menu.logic.ts/bulk-action-bar.logic.ts gate this action to the
+// sharedRootDirectory/sharedRootFile arms alone, the only two that carry a `shareSource` (see item.ts's
+// union doc comment) — the type guard below is a defense-in-depth backstop for a caller bug, never a
+// state the real gated callers can reach.
+//
+// `item.data.shareSource`, never `item.data` itself, is what crosses to the worker: removeSharedItem
+// forwards its argument straight to the SDK, which deserializes SharedRootItem as an UNTAGGED union —
+// the flattened `data` a directory arm carries has no `inner`, matching neither SharedRootDir nor
+// SharedFile (see item.ts).
+export function unshareItems(items: DriveItem[], variant: DriveVariant): Promise<BulkOutcome<DriveItem>> {
+	return runBulk(items, async item => {
+		if (item.type !== "sharedRootDirectory" && item.type !== "sharedRootFile") {
+			throw new Error(`unshareItems: item type "${item.type}" has no share source`)
+		}
+
+		await runOp(sdkApi.removeSharedItem(item.data.shareSource))
+
+		// The item vanishes from the shared ROOT listing it lives in (sharedIn or sharedOut, whichever
+		// `variant` names) — no cross-surface patch needed, unlike a normal drive write: removing a
+		// share never touches an owned listing. `prev === undefined` (nobody has viewed this listing
+		// yet) is left alone rather than conjuring a `[]`, same rationale as driveListingQueryUpdate.
+		queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant, uuid: null }), prev =>
+			prev === undefined ? prev : removeByUuid(prev, item.data.uuid)
+		)
+	})
 }

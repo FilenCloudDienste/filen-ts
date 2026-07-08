@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
 import { aggregateDriveSelectionFlags } from "@/lib/drive/selection-flags"
 
@@ -51,12 +51,76 @@ function undecryptableFile(overrides: Partial<File> = {}): DriveItem {
 	return narrowItem({ ...mockFile(overrides), meta: { type: "encrypted", data: "ciphertext" } })
 }
 
+function sharerRole(id: number, email: string): SharingRole {
+	return { Sharer: { email, id } }
+}
+
+function mockSharedRootDir(overrides: Partial<SharedRootDir> = {}): SharedRootDir {
+	return {
+		inner: {
+			uuid: testUuid("sroot"),
+			color: "default",
+			timestamp: 1_700_000_000_000n,
+			meta: { type: "decoded", data: { name: "SharedRoot" } }
+		},
+		sharingRole: sharerRole(42, "sharer@filen.io"),
+		writeAccess: true,
+		...overrides
+	}
+}
+
+function mockSharedFile(overrides: Partial<SharedFile> = {}): SharedFile {
+	return {
+		uuid: testUuid("sfile"),
+		size: 2_048n,
+		region: "de-1",
+		bucket: "filen-1",
+		chunks: 2n,
+		timestamp: 1_700_000_000_000n,
+		meta: {
+			type: "decoded",
+			data: { name: "shared.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
+		},
+		sharingRole: sharerRole(7, "receiver@filen.io"),
+		sharedTag: true,
+		...overrides
+	}
+}
+
+function mockSharedDir(overrides: Partial<SharedDir> = {}): SharedDir {
+	return { inner: mockDir({ uuid: testUuid("sdir") }), sharedTag: true, ...overrides }
+}
+
+function sharedRootDirItem(): DriveItem {
+	return narrowItem(mockSharedRootDir())
+}
+
+function sharedRootFileItem(): DriveItem {
+	return narrowItem(mockSharedFile())
+}
+
+// Nested shared arms need a spread role to classify (see item.ts) — mirrors item.test.ts's own fixture.
+function sharedDirItem(): DriveItem {
+	return narrowItem({ ...mockSharedDir(), sharingRole: sharerRole(1, "a@filen.io") })
+}
+
+function sharedFileItem(): DriveItem {
+	return narrowItem({ ...mockFile({ uuid: testUuid("nested-file") }), sharingRole: sharerRole(1, "a@filen.io") })
+}
+
 describe("aggregateDriveSelectionFlags", () => {
 	it("returns the frozen all-false, count:0 sentinel for an empty selection, by reference", () => {
 		const first = aggregateDriveSelectionFlags([])
 		const second = aggregateDriveSelectionFlags([])
 
-		expect(first).toEqual({ count: 0, includesFavorited: false, everyFile: false, everyDirectory: false, includesUndecryptable: false })
+		expect(first).toEqual({
+			count: 0,
+			includesFavorited: false,
+			everyFile: false,
+			everyDirectory: false,
+			includesUndecryptable: false,
+			everySharedRoot: false
+		})
 		expect(first).toBe(second) // same frozen constant, not a freshly-built object each call
 		expect(Object.isFrozen(first)).toBe(true)
 	})
@@ -126,7 +190,8 @@ describe("aggregateDriveSelectionFlags", () => {
 			includesFavorited: false,
 			everyFile: false,
 			everyDirectory: true,
-			includesUndecryptable: false
+			includesUndecryptable: false,
+			everySharedRoot: false
 		})
 	})
 
@@ -141,7 +206,40 @@ describe("aggregateDriveSelectionFlags", () => {
 			includesFavorited: true,
 			everyFile: false,
 			everyDirectory: false,
-			includesUndecryptable: true
+			includesUndecryptable: true,
+			everySharedRoot: false
 		})
+	})
+})
+
+describe("aggregateDriveSelectionFlags — everySharedRoot", () => {
+	it("is true when the whole selection is shared-root arms (sharedRootDirectory/sharedRootFile)", () => {
+		const flags = aggregateDriveSelectionFlags([sharedRootDirItem(), sharedRootFileItem()])
+
+		expect(flags.everySharedRoot).toBe(true)
+	})
+
+	it("is true for a single-item shared-root selection (true/false, not vacuously true)", () => {
+		const flags = aggregateDriveSelectionFlags([sharedRootDirItem()])
+
+		expect(flags.everySharedRoot).toBe(true)
+	})
+
+	it("is false when a shared-root item is mixed with an owned item", () => {
+		const flags = aggregateDriveSelectionFlags([sharedRootDirItem(), dirItem({ uuid: testUuid("owned") })])
+
+		expect(flags.everySharedRoot).toBe(false)
+	})
+
+	it("is false for nested shared arms (sharedDirectory/sharedFile) — they carry no shareSource", () => {
+		const flags = aggregateDriveSelectionFlags([sharedDirItem(), sharedFileItem()])
+
+		expect(flags.everySharedRoot).toBe(false)
+	})
+
+	it("is false for a plain owned selection", () => {
+		const flags = aggregateDriveSelectionFlags([dirItem({ uuid: testUuid("a") }), fileItem({ uuid: testUuid("b") })])
+
+		expect(flags.everySharedRoot).toBe(false)
 	})
 })
