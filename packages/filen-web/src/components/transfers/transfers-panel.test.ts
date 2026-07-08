@@ -55,4 +55,12 @@ describe("hasFinishedTransfers", () => {
 	it("true when at least one row is error", () => {
 		expect(hasFinishedTransfers([transfer({ status: "error" })])).toBe(true)
 	})
+
+	it("false when a row is downloading (active, not finished)", () => {
+		expect(hasFinishedTransfers([transfer({ direction: "download", status: "downloading" })])).toBe(false)
+	})
+
+	it("true when a download row is done", () => {
+		expect(hasFinishedTransfers([transfer({ direction: "download", status: "done" })])).toBe(true)
+	})
 })

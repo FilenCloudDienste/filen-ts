@@ -3,7 +3,7 @@ import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import type { DriveItem } from "@/lib/drive/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
-import type { Transfer } from "@/stores/transfers"
+import type { Transfer, TerminalStatus } from "@/stores/transfers"
 
 // Same mock boundary as upload.test.ts/create-directory.test.ts/queries/drive.test.ts: the real sdk
 // client/query client modules touch a Vite `?worker` / an OPFS-backed persister, unresolvable/unwanted
@@ -278,7 +278,7 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 		const upload = vi.fn<(parentUuid: string | null, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
 		const add = vi.fn<(t: Transfer) => void>()
 		const setProgress = vi.fn<(id: string, bytesTransferred: number) => void>()
-		const settle = vi.fn<(id: string, status: "done" | "error", error?: ErrorDTO) => void>()
+		const settle = vi.fn<(id: string, status: TerminalStatus, error?: ErrorDTO) => void>()
 		const remove = vi.fn<(id: string) => void>()
 		const patchFileListing = vi.fn<(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void>()
 

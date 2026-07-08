@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next"
 import { CircleAlertIcon, CircleCheckIcon, XIcon } from "lucide-react"
 import { formatBytes } from "@filen/utils"
-import { useTransfersStore, type Transfer } from "@/stores/transfers"
+import { isActiveTransfer, useTransfersStore, type Transfer } from "@/stores/transfers"
 import { transferProgress } from "@/components/transfers/transfer-row.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { cn } from "@/lib/utils"
@@ -51,15 +51,16 @@ function TransferStatusIcon({ status }: { status: Transfer["status"] }) {
 }
 
 // One row: name + live progress bar, mirroring DriveRow's icon+truncate+trailing idiom (drive/
-// drive-row.tsx) scaled down for the panel's narrower surface. Uploading rows carry NO cancel/remove
-// control — streaming-upload abort isn't wired up yet (see stores/transfers.ts's header comment), and
-// a "Cancel" that silently kept uploading in the background would mislead the user more than having
-// no control at all. Only a finished (done/error) row gets the dismiss button, wired straight to the
-// store — a finished transfer is already done, so dismissing just clears its row, no confirm needed.
+// drive-row.tsx) scaled down for the panel's narrower surface. Active (uploading/downloading) rows
+// carry NO cancel/remove control here yet — a real cancel channel exists for downloads
+// (lib/drive/download.ts's defaultDownloadDeps.cancel), but no button wires it up in this panel yet.
+// Only a finished row (isActiveTransfer false — done/error/completedWithErrors) gets the dismiss
+// button, wired straight to the store — a finished transfer is already done, so dismissing just
+// clears its row, no confirm needed.
 export function TransferRow({ transfer }: TransferRowProps) {
 	const { t, i18n } = useTranslation("transfers")
 	const progress = transferProgress(transfer)
-	const finished = transfer.status !== "uploading"
+	const finished = !isActiveTransfer(transfer.status)
 
 	// Never renders bytesTransferred for a "done" row (only its final size) — settle()/setProgress()
 	// are separate store writes, so a just-finished row's bytesTransferred can still briefly trail
@@ -75,15 +76,14 @@ export function TransferRow({ transfer }: TransferRowProps) {
 		secondary = `${formatBytes(transfer.bytesTransferred)} / ${formatBytes(transfer.size)}`
 	}
 
-	// Uploading shows a live percentage (the one number that actually changes tick to tick); once
-	// finished, the word carries more information than a stale/redundant "100%" would. Intl.NumberFormat
-	// (not a hand-rolled `${n}%` template) so the symbol/rounding follow the active locale — some
-	// locales space or place "%" differently, and percent's default maximumFractionDigits is 0, which
-	// is also what rounds the value for display.
-	const trailingLabel =
-		transfer.status === "uploading"
-			? new Intl.NumberFormat(i18n.language, { style: "percent" }).format(progress / 100)
-			: t(transfer.status === "done" ? "transfersStatusDone" : "transfersStatusError")
+	// Active (uploading OR downloading) shows a live percentage (the one number that actually changes
+	// tick to tick); once finished, the word carries more information than a stale/redundant "100%"
+	// would. Intl.NumberFormat (not a hand-rolled `${n}%` template) so the symbol/rounding follow the
+	// active locale — some locales space or place "%" differently, and percent's default
+	// maximumFractionDigits is 0, which is also what rounds the value for display.
+	const trailingLabel = isActiveTransfer(transfer.status)
+		? new Intl.NumberFormat(i18n.language, { style: "percent" }).format(progress / 100)
+		: t(transfer.status === "done" ? "transfersStatusDone" : "transfersStatusError")
 
 	return (
 		<div className="flex flex-col gap-1.5 rounded-xl px-1 py-1.5">

@@ -1,6 +1,14 @@
-import { beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ErrorDTO } from "@/lib/sdk/errors"
-import { computeTransfersAggregate, useTransfersStore, type Transfer } from "@/stores/transfers"
+import {
+	capFinishedTransfers,
+	computeTransfersAggregate,
+	computeTransfersSpeed,
+	isActiveTransfer,
+	useTransfersStore,
+	type SpeedSample,
+	type Transfer
+} from "@/stores/transfers"
 
 function makeTransfer(overrides: Partial<Transfer> = {}): Transfer {
 	return {
@@ -21,7 +29,11 @@ function sdkDto(kind: string): ErrorDTO {
 }
 
 beforeEach(() => {
-	useTransfersStore.setState({ transfers: [] })
+	useTransfersStore.setState({ transfers: [], speedSamples: [] })
+})
+
+afterEach(() => {
+	vi.useRealTimers()
 })
 
 describe("add", () => {
@@ -109,6 +121,46 @@ describe("settle", () => {
 
 		expect(useTransfersStore.getState().transfers.find(transfer => transfer.id === "b")?.status).toBe("uploading")
 	})
+
+	it("marks a download cancelled (a transient state — the caller removes it right after)", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "a", direction: "download", status: "downloading" }))
+
+		useTransfersStore.getState().settle("a", "cancelled")
+
+		expect(useTransfersStore.getState().transfers[0]?.status).toBe("cancelled")
+	})
+
+	it("marks a zip transfer completedWithErrors, carrying the dto", () => {
+		const dto = sdkDto("PartialFailure")
+		useTransfersStore.getState().add(makeTransfer({ id: "a", direction: "download", status: "downloading" }))
+
+		useTransfersStore.getState().settle("a", "completedWithErrors", dto)
+
+		const transfer = useTransfersStore.getState().transfers[0]
+		expect(transfer?.status).toBe("completedWithErrors")
+		expect(transfer?.error).toEqual(dto)
+	})
+
+	it("drops the oldest finished rows once the finished count exceeds the 200 cap, leaving active rows untouched", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "active", status: "uploading" }))
+
+		for (let i = 0; i < 201; i++) {
+			useTransfersStore.getState().add(makeTransfer({ id: `finished-${String(i)}`, status: "uploading" }))
+		}
+
+		for (let i = 0; i < 201; i++) {
+			useTransfersStore.getState().settle(`finished-${String(i)}`, "done")
+		}
+
+		// The 201st settle() pushes the finished count to 201 -> drops exactly the oldest one, leaving
+		// 200 finished + the 1 always-active row untouched (201 total).
+		const ids = useTransfersStore.getState().transfers.map(transfer => transfer.id)
+		expect(ids).toHaveLength(201)
+		expect(ids).toContain("active")
+		expect(ids).not.toContain("finished-0")
+		expect(ids).toContain("finished-1")
+		expect(ids).toContain("finished-200")
+	})
 })
 
 describe("remove", () => {
@@ -141,21 +193,149 @@ describe("clearFinished", () => {
 
 		expect(useTransfersStore.getState().transfers.map(transfer => transfer.id)).toEqual(["a", "b"])
 	})
+
+	it("keeps a downloading row (active, not finished)", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "a", direction: "download", status: "downloading" }))
+		useTransfersStore.getState().add(makeTransfer({ id: "b", direction: "download", status: "done" }))
+
+		useTransfersStore.getState().clearFinished()
+
+		expect(useTransfersStore.getState().transfers.map(transfer => transfer.id)).toEqual(["a"])
+	})
+})
+
+describe("isActiveTransfer", () => {
+	it("is true for uploading and downloading", () => {
+		expect(isActiveTransfer("uploading")).toBe(true)
+		expect(isActiveTransfer("downloading")).toBe(true)
+	})
+
+	it("is false for every terminal status", () => {
+		expect(isActiveTransfer("done")).toBe(false)
+		expect(isActiveTransfer("error")).toBe(false)
+		expect(isActiveTransfer("cancelled")).toBe(false)
+		expect(isActiveTransfer("completedWithErrors")).toBe(false)
+	})
+})
+
+describe("capFinishedTransfers", () => {
+	it("is a no-op under the cap", () => {
+		const transfers = [makeTransfer({ id: "a", status: "uploading" }), makeTransfer({ id: "b", status: "done" })]
+
+		expect(capFinishedTransfers(transfers)).toEqual(transfers)
+	})
+
+	it("drops only the oldest finished rows past the cap, never an active row", () => {
+		const transfers = [
+			makeTransfer({ id: "active", status: "uploading" }),
+			...Array.from({ length: 201 }, (_, i) => makeTransfer({ id: `f${String(i)}`, status: "done" }))
+		]
+
+		const kept = capFinishedTransfers(transfers).map(transfer => transfer.id)
+
+		expect(kept).toHaveLength(201) // 1 active + 200 finished
+		expect(kept).toContain("active")
+		expect(kept).not.toContain("f0")
+		expect(kept).toContain("f1")
+		expect(kept).toContain("f200")
+	})
+})
+
+describe("computeTransfersSpeed", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+		vi.setSystemTime(1_700_000_010_000)
+	})
+
+	function sample(overrides: Partial<SpeedSample> = {}): SpeedSample {
+		return { timestamp: Date.now(), totalBytes: 0, ...overrides }
+	}
+
+	it("is 0 with no samples", () => {
+		expect(computeTransfersSpeed([])).toBe(0)
+	})
+
+	it("is 0 with a single sample (no elapsed interval to divide by)", () => {
+		expect(computeTransfersSpeed([sample({ timestamp: Date.now(), totalBytes: 1_000 })])).toBe(0)
+	})
+
+	it("computes bytes/sec between the earliest and latest in-window samples", () => {
+		const now = Date.now()
+		const samples = [sample({ timestamp: now - 2_000, totalBytes: 1_000 }), sample({ timestamp: now, totalBytes: 3_000 })]
+
+		// 2000 bytes over 2s -> 1000 bytes/sec
+		expect(computeTransfersSpeed(samples)).toBe(1_000)
+	})
+
+	it("ignores samples older than the 5s window", () => {
+		const now = Date.now()
+		const samples = [
+			sample({ timestamp: now - 10_000, totalBytes: 0 }), // outside the window entirely
+			sample({ timestamp: now - 1_000, totalBytes: 500 }),
+			sample({ timestamp: now, totalBytes: 1_500 })
+		]
+
+		// only the last two count: 1000 bytes over 1s -> 1000 bytes/sec
+		expect(computeTransfersSpeed(samples)).toBe(1_000)
+	})
+
+	it("never goes negative (e.g. totalBytes dropped because a transfer settled between samples)", () => {
+		const now = Date.now()
+		const samples = [sample({ timestamp: now - 1_000, totalBytes: 5_000 }), sample({ timestamp: now, totalBytes: 1_000 })]
+
+		expect(computeTransfersSpeed(samples)).toBe(0)
+	})
+})
+
+describe("setProgress (speed sample recording)", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+		vi.setSystemTime(1_700_000_010_000)
+	})
+
+	it("appends a sample summing bytesTransferred across active transfers only", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "a", status: "uploading" }))
+		useTransfersStore.getState().add(makeTransfer({ id: "b", status: "done" }))
+
+		useTransfersStore.getState().setProgress("a", 500)
+
+		expect(useTransfersStore.getState().speedSamples).toEqual([{ timestamp: Date.now(), totalBytes: 500 }])
+	})
+
+	it("trims samples older than the 5s window on every call", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "a", status: "uploading" }))
+
+		useTransfersStore.getState().setProgress("a", 100)
+		vi.advanceTimersByTime(6_000)
+		useTransfersStore.getState().setProgress("a", 200)
+
+		expect(useTransfersStore.getState().speedSamples).toHaveLength(1)
+		expect(useTransfersStore.getState().speedSamples[0]?.totalBytes).toBe(200)
+	})
 })
 
 describe("computeTransfersAggregate", () => {
 	it("returns zero when there are no transfers", () => {
-		expect(computeTransfersAggregate([])).toEqual({ activeCount: 0, percent: 0 })
+		expect(computeTransfersAggregate([])).toEqual({ activeCount: 0, percent: 0, speed: 0 })
 	})
 
-	it("counts only uploading transfers, ignoring done/error", () => {
+	it("counts only active (uploading/downloading) transfers, ignoring done/error", () => {
 		const transfers = [
 			makeTransfer({ id: "a", status: "uploading", size: 100, bytesTransferred: 50 }),
 			makeTransfer({ id: "b", status: "done", size: 100, bytesTransferred: 100 }),
 			makeTransfer({ id: "c", status: "error", size: 100, bytesTransferred: 20 })
 		]
 
-		expect(computeTransfersAggregate(transfers)).toEqual({ activeCount: 1, percent: 50 })
+		expect(computeTransfersAggregate(transfers)).toEqual({ activeCount: 1, percent: 50, speed: 0 })
+	})
+
+	it("counts a downloading transfer as active, same as uploading", () => {
+		const transfers = [
+			makeTransfer({ id: "a", direction: "download", status: "downloading", size: 100, bytesTransferred: 25 }),
+			makeTransfer({ id: "b", direction: "upload", status: "uploading", size: 100, bytesTransferred: 25 })
+		]
+
+		expect(computeTransfersAggregate(transfers)).toEqual({ activeCount: 2, percent: 25, speed: 0 })
 	})
 
 	it("sums bytesTransferred/size across every active transfer", () => {
@@ -165,12 +345,24 @@ describe("computeTransfersAggregate", () => {
 		]
 
 		// 100 transferred / 400 total -> 25%
-		expect(computeTransfersAggregate(transfers)).toEqual({ activeCount: 2, percent: 25 })
+		expect(computeTransfersAggregate(transfers)).toEqual({ activeCount: 2, percent: 25, speed: 0 })
 	})
 
 	it("is 0 percent (not NaN) when every active transfer has zero size", () => {
 		const transfers = [makeTransfer({ id: "a", status: "uploading", size: 0, bytesTransferred: 0 })]
 
-		expect(computeTransfersAggregate(transfers)).toEqual({ activeCount: 1, percent: 0 })
+		expect(computeTransfersAggregate(transfers)).toEqual({ activeCount: 1, percent: 0, speed: 0 })
+	})
+
+	it("folds in computeTransfersSpeed's result when samples are given", () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(1_700_000_010_000)
+		const now = Date.now()
+		const samples: SpeedSample[] = [
+			{ timestamp: now - 1_000, totalBytes: 0 },
+			{ timestamp: now, totalBytes: 2_000 }
+		]
+
+		expect(computeTransfersAggregate([], samples).speed).toBe(2_000)
 	})
 })

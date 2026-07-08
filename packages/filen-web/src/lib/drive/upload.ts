@@ -55,8 +55,9 @@ export function throttle<Args extends unknown[]>(fn: (...args: Args) => void, ms
 }
 
 // ~10 store updates/sec per transfer is plenty for a progress bar and keeps a many-file batch from
-// re-rendering the transfers panel on every chunk (mobile parity).
-const PROGRESS_THROTTLE_MS = 100
+// re-rendering the transfers panel on every chunk (mobile parity). Exported so lib/drive/download.ts
+// reuses the exact same cadence instead of redeclaring the constant.
+export const PROGRESS_THROTTLE_MS = 100
 
 // Injected collaborators so a single upload attempt is unit-testable without a worker or a query
 // client — mirrors runCreateDirectory's shape (lib/drive/create-directory.ts). `store` only needs the

@@ -3,7 +3,7 @@ import { QueryClient } from "@tanstack/react-query"
 import type { File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import type { DriveItem } from "@/lib/drive/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
-import type { Transfer } from "@/stores/transfers"
+import type { Transfer, TerminalStatus } from "@/stores/transfers"
 
 // The real sdk client/query client modules import a Vite `?worker` / touch an OPFS-backed
 // persister, unresolvable/unwanted under node vitest — mock both down to what this module actually
@@ -79,7 +79,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		const upload = vi.fn<(parentUuid: string | null, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
 		const add = vi.fn<(t: Transfer) => void>()
 		const setProgress = vi.fn<(id: string, bytesTransferred: number) => void>()
-		const settle = vi.fn<(id: string, status: "done" | "error", error?: ErrorDTO) => void>()
+		const settle = vi.fn<(id: string, status: TerminalStatus, error?: ErrorDTO) => void>()
 		const remove = vi.fn<(id: string) => void>()
 		const patchListing = vi.fn<(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void>()
 		const deps: RunUploadDeps = { upload, store: { add, setProgress, settle, remove }, patchListing }

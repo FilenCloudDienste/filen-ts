@@ -1,12 +1,15 @@
 // English source catalog — "transfers" namespace: the icon-rail Transfers trigger and its panel
-// (components/transfers/*) tracking in-flight and finished uploads, plus the upload-summary toast
-// startUploads (lib/drive/upload.ts) fires once a batch of files finishes. Same typed-catalog rules
-// as common/errors/auth/drive/contacts: flat `as const` object, camelCase keys, no literal '.' or
-// ':' (real i18next namespaces, keySeparator/nsSeparator both ON).
+// (components/transfers/*) tracking in-flight and finished uploads AND downloads, plus the
+// upload/download-summary toasts startUploads (lib/drive/upload.ts) / startDownloads
+// (lib/drive/download.ts) fire once a batch finishes. Same typed-catalog rules as
+// common/errors/auth/drive/contacts: flat `as const` object, camelCase keys, no literal '.' or ':'
+// (real i18next namespaces, keySeparator/nsSeparator both ON).
 //
-// No "cancelled" status/copy — cancel/abort isn't wired up yet (stores/transfers.ts), so uploading
-// rows in the panel have no cancel/remove control, only finished (done/error) rows do
-// (transfersRowRemove).
+// No "cancelled"/"completedWithErrors" copy yet — those statuses exist at the store level
+// (stores/transfers.ts) but no row in this panel renders them today: a cancelled download is
+// removed right after settling (never displayed), and completedWithErrors backs a zip transfer no
+// code produces yet. Active (uploading/downloading) rows have no cancel/remove control in this panel
+// yet either; only finished rows do (transfersRowRemove).
 export const transfers = {
 	// ── Icon rail ───────────────────────────────────────────────────────────
 	/** Icon-rail Transfers trigger — accessible label while at least one upload is active; replaces the plain moduleTransfers label so the count is announced, not just shown in the visual badge; singular */
@@ -56,5 +59,15 @@ export const transfers = {
 	/** Directory-upload summary toast — at least one directory or file in the batch failed; {{count}} = items that succeeded, {{failed}} = items that failed; singular */
 	transfersDirectoryUploadSummaryCompleteWithFailures_one: "{{count}} item uploaded, {{failed}} failed",
 	/** Directory-upload summary toast — at least one directory or file in the batch failed; {{count}} = items that succeeded, {{failed}} = items that failed; plural */
-	transfersDirectoryUploadSummaryCompleteWithFailures_other: "{{count}} items uploaded, {{failed}} failed"
+	transfersDirectoryUploadSummaryCompleteWithFailures_other: "{{count}} items uploaded, {{failed}} failed",
+
+	// ── Download summary toast (startDownloads) ───────────────────────────────
+	/** Download summary toast — the downloaded file succeeded; singular */
+	transfersDownloadSummaryComplete_one: "{{count}} file downloaded",
+	/** Download summary toast — every downloaded file in the batch succeeded; plural */
+	transfersDownloadSummaryComplete_other: "{{count}} files downloaded",
+	/** Download summary toast — the download failed; {{count}} = files that succeeded, {{failed}} = files that failed; singular */
+	transfersDownloadSummaryCompleteWithFailures_one: "{{count}} file downloaded, {{failed}} failed",
+	/** Download summary toast — at least one file in the batch failed; {{count}} = files that succeeded, {{failed}} = files that failed; plural */
+	transfersDownloadSummaryCompleteWithFailures_other: "{{count}} files downloaded, {{failed}} failed"
 } as const
