@@ -31,7 +31,9 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
+import { useBlockedUsers } from "@/lib/contacts/use-blocked-users"
 import { driveItemActions, type ItemActionDialogKind } from "@/components/drive/item-menu.logic"
+import { filterSharedInByBlocked, staleBlockedSelectionUuids } from "@/components/drive/directory-listing.logic"
 import { Breadcrumb } from "@/components/drive/breadcrumb"
 import { SortMenu } from "@/components/drive/sort-menu"
 import { ViewModeToggle } from "@/components/drive/view-mode-toggle"
@@ -159,13 +161,17 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const listingQuery = useDirectoryListingQuery(variant, uuid)
 	const sortPrefsQuery = useSortPreferencesQuery()
 	const viewModePrefsQuery = useViewModePreferencesQuery()
+	const blocked = useBlockedUsers()
 
 	const sortPrefs = sortPrefsQuery.data ?? DEFAULT_SORT_PREFERENCES
 	const viewModePrefs = viewModePrefsQuery.data ?? DEFAULT_VIEW_MODE_PREFERENCES
 	const effectiveSort = resolveEffectiveSort(sortPrefs, driveLocation)
 	const effectiveViewMode = resolveEffectiveViewMode(viewModePrefs, driveLocation)
 
-	const sortedItems = sortDriveItems(listingQuery.data ?? [], effectiveSort)
+	// sharedIn ONLY: hide items shared by a blocked user (fail-open — see directory-listing.logic.ts).
+	// Every other variant's listing data passes straight through, untouched.
+	const visibleItems = variant === "sharedIn" ? filterSharedInByBlocked(listingQuery.data ?? [], blocked) : (listingQuery.data ?? [])
+	const sortedItems = sortDriveItems(visibleItems, effectiveSort)
 
 	const selectedItems = useDriveStore(useShallow(state => state.selectedItems))
 	// Derived once per render so each row/tile's membership check is an O(1) `.has()` instead of an
@@ -200,6 +206,22 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		setActiveIndex(0)
 		setAnchorIndex(0)
 	}, [variant, splat])
+
+	// Stale-selection purge (sharedIn only): drops any selected item that just became blocked (the
+	// user blocked its sharer while viewing this listing) so the bulk bar can never target a
+	// now-hidden item. Fail-open, same predicate as the display filter above — an item whose sharer
+	// identity doesn't resolve is never purged.
+	useEffect(() => {
+		if (variant !== "sharedIn") {
+			return
+		}
+
+		const toRemove = staleBlockedSelectionUuids(useDriveStore.getState().selectedItems, blocked)
+
+		if (toRemove.length > 0) {
+			useDriveStore.getState().removeFromSelection(toRemove)
+		}
+	}, [variant, blocked])
 
 	// State (not `useRef`) so it's settable from a callback ref below — the pending/error/empty
 	// branches render a ref-less div, so a cold mount whose first render is "pending" would, with a
