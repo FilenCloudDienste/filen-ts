@@ -34,7 +34,7 @@ describe("driveBulkActions", () => {
 		expect(deletePermanently).toMatchObject({ run: "dialog", dialogKind: "delete", destructive: true, icon: Trash2Icon })
 	})
 
-	it.each(["drive", "recents", "favorites", "sharedOut"] as const)(
+	it.each(["drive", "recents", "favorites"] as const)(
 		"%s variant, decryptable selection, none favorited: favorite, move, share, trash in that order",
 		variant => {
 			const descriptors = driveBulkActions(variant, flags({ includesFavorited: false, includesUndecryptable: false }))
@@ -144,10 +144,51 @@ describe("driveBulkActions — unshare gating (everySharedRoot)", () => {
 		expect(unshare).toMatchObject({ run: "dialog", dialogKind: "unshare", destructive: true, icon: UserMinusIcon })
 	})
 
-	it("is the last descriptor when present, after trash", () => {
+	it("is the last descriptor when present, after share (no bulk trash on sharedOut)", () => {
 		const descriptors = driveBulkActions("sharedOut", flags({ everySharedRoot: true, includesUndecryptable: false }))
 
 		expect(descriptors.at(-1)?.id).toBe("unshare")
-		expect(descriptors.at(-2)?.id).toBe("trash")
+		expect(descriptors.at(-2)?.id).toBe("share")
+	})
+})
+
+// F1 fix: sharedIn/sharedOut bulk mirrors the per-item menu's safe subset (item-menu.logic.ts) — no
+// bulk favorite/move/trash on either shared surface, regardless of undecryptable/everySharedRoot.
+// sharedOut keeps bulk share (canShareVariant); either surface keeps bulk unshare (everySharedRoot).
+describe("driveBulkActions — shared-surface safe subset (sharedIn/sharedOut)", () => {
+	it("sharedOut, not everySharedRoot: share only", () => {
+		const descriptors = driveBulkActions("sharedOut", flags({ includesUndecryptable: false, everySharedRoot: false }))
+
+		expect(descriptors.map(d => d.id)).toEqual(["share"])
+	})
+
+	it("sharedOut, everySharedRoot: share then unshare", () => {
+		const descriptors = driveBulkActions("sharedOut", flags({ includesUndecryptable: false, everySharedRoot: true }))
+
+		expect(descriptors.map(d => d.id)).toEqual(["share", "unshare"])
+	})
+
+	it("sharedIn, not everySharedRoot: no bulk actions at all (no bulk info)", () => {
+		const descriptors = driveBulkActions("sharedIn", flags({ includesUndecryptable: false, everySharedRoot: false }))
+
+		expect(descriptors).toEqual([])
+	})
+
+	it("sharedIn, everySharedRoot: unshare only", () => {
+		const descriptors = driveBulkActions("sharedIn", flags({ includesUndecryptable: false, everySharedRoot: true }))
+
+		expect(descriptors.map(d => d.id)).toEqual(["unshare"])
+	})
+
+	it("neither shared surface ever offers favorite/move/trash, undecryptable or everySharedRoot combined any way", () => {
+		for (const variant of ["sharedIn", "sharedOut"] as const) {
+			for (const includesUndecryptable of [false, true]) {
+				for (const everySharedRoot of [false, true]) {
+					const ids = driveBulkActions(variant, flags({ includesUndecryptable, everySharedRoot })).map(d => d.id)
+
+					expect(ids.filter(id => id === "favorite" || id === "move" || id === "trash")).toEqual([])
+				}
+			}
+		}
 	})
 })

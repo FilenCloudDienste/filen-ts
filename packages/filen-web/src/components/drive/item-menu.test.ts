@@ -239,7 +239,7 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 		expect(ids(fileItem(), "trash")).not.toContain("unshare")
 	})
 
-	it("keeps unshare for an undecryptable shared-root item — pure-uuid disposition, same as trash", () => {
+	it("keeps unshare (and info) for an undecryptable shared-root item — pure-uuid disposition, no decrypted metadata needed", () => {
 		const undecryptableRootDir = narrowItem(
 			mockSharedRootDir({
 				inner: {
@@ -251,7 +251,9 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 			})
 		)
 
-		expect(ids(undecryptableRootDir, "sharedOut")).toEqual(["info", "trash", "unshare"])
+		// No trash: sharedOut is a shared surface (isSharedVariant), so the owner-mutating trash push
+		// never runs — see the "shared-surface safe subset" describe block below.
+		expect(ids(undecryptableRootDir, "sharedOut")).toEqual(["info", "unshare"])
 	})
 
 	it("unshare dispatches its own confirm dialog kind and is destructive-styled", () => {
@@ -260,10 +262,49 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 		expect(descriptor).toMatchObject({ run: "dialog", dialogKind: "unshare", destructive: true, icon: UserMinusIcon })
 	})
 
-	it("unshare is the last action offered on a decryptable shared-root item, after trash", () => {
+	it("unshare is the last action offered on a decryptable shared-root item, after info (sharedIn has no owner actions)", () => {
 		const descriptors = ids(sharedRootFileItem(), "sharedIn")
 
-		expect(descriptors.at(-1)).toBe("unshare")
-		expect(descriptors.at(-2)).toBe("trash")
+		expect(descriptors).toEqual(["info", "unshare"])
+	})
+})
+
+// F1 fix: sharedIn/sharedOut expose only sharing-scoped + read-only actions — every owner-mutating
+// action (rename/move/favorite/color/versions/publicLink/copyLink/trash) is gated off both surfaces
+// regardless of root/nested item type. sharedIn because the caller doesn't own the item (the SDK would
+// reject the mutation); sharedOut as a deliberate safe-subset even though the caller DOES own those
+// items — the mutation would succeed but its cache patch downgrades the shared row (losing the
+// "Shared with…" badge/Unshare until refetch) and move/link assume base arms. See isSharedVariant.
+describe("driveItemActions — shared-surface safe subset (sharedIn/sharedOut)", () => {
+	const OWNER_ONLY_IDS = ["rename", "move", "favorite", "color", "versions", "publicLink", "copyLink", "trash"]
+
+	it("sharedIn root: exactly info + unshare", () => {
+		expect(ids(sharedRootDirItem(), "sharedIn")).toEqual(["info", "unshare"])
+		expect(ids(sharedRootFileItem(), "sharedIn")).toEqual(["info", "unshare"])
+	})
+
+	it("sharedIn nested: exactly info (unshare stays root-only)", () => {
+		expect(ids(sharedDirItem(), "sharedIn")).toEqual(["info"])
+		expect(ids(sharedFileItem(), "sharedIn")).toEqual(["info"])
+	})
+
+	it("sharedOut root: exactly info + share + unshare", () => {
+		expect(ids(sharedRootDirItem(), "sharedOut")).toEqual(["info", "share", "unshare"])
+		expect(ids(sharedRootFileItem(), "sharedOut")).toEqual(["info", "share", "unshare"])
+	})
+
+	it("sharedOut nested: exactly info + share (unshare stays root-only)", () => {
+		expect(ids(sharedDirItem(), "sharedOut")).toEqual(["info", "share"])
+		expect(ids(sharedFileItem(), "sharedOut")).toEqual(["info", "share"])
+	})
+
+	it("neither shared surface ever offers an owner-mutating action, root or nested", () => {
+		const sharedItems = [sharedRootDirItem(), sharedRootFileItem(), sharedDirItem(), sharedFileItem()]
+
+		for (const variant of ["sharedIn", "sharedOut"] as const) {
+			for (const item of sharedItems) {
+				expect(ids(item, variant).filter(id => OWNER_ONLY_IDS.includes(id))).toEqual([])
+			}
+		}
 	})
 })

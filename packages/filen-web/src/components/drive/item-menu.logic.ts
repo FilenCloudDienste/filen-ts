@@ -16,7 +16,7 @@ import {
 } from "lucide-react"
 import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
-import { canShareVariant } from "@/lib/share/gating"
+import { canShareVariant, isSharedVariant } from "@/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
 
 // Dialog kinds a per-item action can open in the listing-level dialog host (directory-listing.tsx's
@@ -138,22 +138,40 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 	// shareSource's own identity), the same pure-uuid-disposition rationale as TRASH.
 	const isSharedRoot = item.type === "sharedRootDirectory" || item.type === "sharedRootFile"
 
+	// Every owner-mutating push below (rename/move/favorite/color/versions/publicLink/copyLink/trash)
+	// is gated on ownerMutable, false for sharedIn/sharedOut — see isSharedVariant's own doc comment
+	// for why both surfaces are excluded. What's left for those two: INFO always, SHARE when
+	// canShareVariant allows it (sharedOut only), UNSHARE when isSharedRoot allows it (either surface).
+	const ownerMutable = !isSharedVariant(variant)
+
 	if (item.data.undecryptable) {
-		return isSharedRoot ? [INFO, TRASH, UNSHARE] : [INFO, TRASH]
+		const actions: ItemActionDescriptor[] = [INFO]
+
+		if (ownerMutable) {
+			actions.push(TRASH)
+		}
+
+		if (isSharedRoot) {
+			actions.push(UNSHARE)
+		}
+
+		return actions
 	}
 
-	const typeSpecific = asDirectoryOrFile(item).type === "directory" ? COLOR : VERSIONS
+	const actions: ItemActionDescriptor[] = ownerMutable
+		? [RENAME, MOVE, favoriteDescriptor(item), asDirectoryOrFile(item).type === "directory" ? COLOR : VERSIONS, INFO]
+		: [INFO]
 
 	// Share sits with the other access-granting actions (info/link) after the type-specific group; it
 	// only appears on the owned surfaces (canShareVariant excludes sharedIn — you can't grant access to
 	// an item you don't own — and, via the early returns above, trash and undecryptable items).
-	const actions: ItemActionDescriptor[] = [RENAME, MOVE, favoriteDescriptor(item), typeSpecific, INFO]
-
 	if (canShareVariant(variant)) {
 		actions.push(SHARE)
 	}
 
-	actions.push(PUBLIC_LINK, COPY_LINK, TRASH)
+	if (ownerMutable) {
+		actions.push(PUBLIC_LINK, COPY_LINK, TRASH)
+	}
 
 	if (isSharedRoot) {
 		actions.push(UNSHARE)
