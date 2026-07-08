@@ -96,9 +96,10 @@ const COPY_LINK: ItemActionDescriptor = {
 // canShareVariant / driveItemActions).
 const SHARE: ItemActionDescriptor = { id: "share", labelKey: "driveActionShare", icon: UsersIcon, run: "dialog", dialogKind: "share" }
 // Stop sharing a shared-root item (removeSharedItem) — root-only: gated below to the
-// sharedRootDirectory/sharedRootFile arms alone, the only two arms that carry a `shareSource` (see
-// item.ts's shareSource retention). Destructive-styled, mirroring mobile's own removeShare/
-// stopSharing menu entries (both destructive there too) — the other party loses access immediately.
+// sharedRootDirectory/sharedRootFile arms alone, the only two whose shareSource is a SharedRootItem
+// (see item.ts's shareSource retention) — removeSharedItem's own wasm signature. Destructive-styled,
+// mirroring mobile's own removeShare/stopSharing menu entries (both destructive there too) — the
+// other party loses access immediately.
 const UNSHARE: ItemActionDescriptor = {
 	id: "unshare",
 	labelKey: "driveActionUnshare",

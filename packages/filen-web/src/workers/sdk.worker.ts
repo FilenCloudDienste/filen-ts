@@ -16,6 +16,7 @@ import init, {
 	type File,
 	type NormalDirsAndFiles,
 	type AnyNormalDir,
+	type AnyDirWithContext,
 	type FileVersion,
 	type DirColor,
 	type NonRootNormalItemTagged,
@@ -485,8 +486,7 @@ const api = {
 	// transferId convention, so cancelDownload/pauseDownload/resumeDownload below reach a zip transfer
 	// with no changes of their own. Positional args, not an options object (downloadItemsToZip's own
 	// wasm signature, unlike downloadFileToWriter's single-object DownloadFileStreamParams); progress
-	// is still a plain-fn-wrapped proxy (a raw proxy object is serde-rejected) and still required
-	// despite the `| undefined` in the .d.ts.
+	// is still a plain-fn-wrapped proxy — a raw proxy object is serde-rejected.
 	async downloadItemsToZip(
 		items: ZipItem[],
 		transferId: string,
@@ -629,7 +629,11 @@ const api = {
 	// the only arm with a `chunks` field (see lib/drive/item.ts's identical isFile probe), so the `in`
 	// check below narrows Dir vs File exhaustively. getDirSize only applies to directories; a file
 	// already carries its own size on the held item, so the two calls only ever run together, in
-	// parallel, when both are actually needed.
+	// parallel, when both are actually needed. `dirContext` is the AnyDirWithContext the caller builds
+	// via item.ts's toAnyDirWithContext for a shared directory (info-dialog.tsx) — getDirSize is a
+	// category-dispatched op, so a bare owned Dir only dispatches correctly for an OWNED directory;
+	// omitted, `item` itself is passed, which is exactly right for that owned case (already an
+	// AnyNormalDir).
 	// getItemPath walks the item's ancestor chain by uuid and can reject independently of every
 	// other row this op returns — a trashed item's original parent directory (its own uuid is still
 	// carried by the trashed item's meta) may since have been permanently deleted, so that call is
@@ -639,14 +643,14 @@ const api = {
 	// the same catch treatment: a size failure shouldn't fail the whole read either. Every field this
 	// op resolves degrades independently — the caller (info-dialog) omits a row when its value is
 	// null, same as it already omits every other absent-data row.
-	async getItemInfo(item: Dir | File): Promise<ItemInfoResult> {
+	async getItemInfo(item: Dir | File, dirContext?: AnyDirWithContext): Promise<ItemInfoResult> {
 		const c = requireClient()
 		const pathPromise = PSEUDO_PARENTS.has(item.parent) ? Promise.resolve(null) : c.getItemPath(item).catch(() => null)
 		if ("chunks" in item) {
 			const pathResult = await pathPromise
 			return { path: pathResult?.path ?? null, ancestors: pathResult?.ancestors ?? [], size: null }
 		}
-		const [pathResult, size] = await Promise.all([pathPromise, c.getDirSize(item).catch(() => null)])
+		const [pathResult, size] = await Promise.all([pathPromise, c.getDirSize(dirContext ?? item).catch(() => null)])
 		return { path: pathResult?.path ?? null, ancestors: pathResult?.ancestors ?? [], size }
 	},
 	// ── Public links ─────────────────────────────────────────────────────────

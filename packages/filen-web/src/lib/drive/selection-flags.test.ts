@@ -231,7 +231,7 @@ describe("aggregateDriveSelectionFlags — everySharedRoot", () => {
 		expect(flags.everySharedRoot).toBe(false)
 	})
 
-	it("is false for nested shared arms (sharedDirectory/sharedFile) — they carry no shareSource", () => {
+	it("is false for nested shared arms (sharedDirectory/sharedFile) — everySharedRoot keys on item.type, not on shareSource", () => {
 		const flags = aggregateDriveSelectionFlags([sharedDirItem(), sharedFileItem()])
 
 		expect(flags.everySharedRoot).toBe(false)

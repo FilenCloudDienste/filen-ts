@@ -345,9 +345,10 @@ describe("narrowItem — shared arms", () => {
 		expect(item.data.shareSource).toBe(raw)
 	})
 
-	it("context-tags a nested SharedDir (parent role spread on) into a sharedDirectory", () => {
+	it("context-tags a nested SharedDir (parent role spread on) into a sharedDirectory, retaining the raw as shareSource", () => {
 		const role = sharerRole(99, "owner@filen.io")
-		const item = narrowItem({ ...mockSharedDir(), sharingRole: role })
+		const raw = { ...mockSharedDir(), sharingRole: role }
+		const item = narrowItem(raw)
 
 		if (item.type !== "sharedDirectory") {
 			throw new Error("expected a sharedDirectory arm")
@@ -357,19 +358,23 @@ describe("narrowItem — shared arms", () => {
 		expect(item.data.decryptedMeta).toEqual({ name: "SharedChild" })
 		expect(item.data.sharedTag).toBe(true)
 		expect(item.data.sharingRole).toEqual(role) // spread from the parent
-		// Nested arms are never root shares — no shareSource (see item.ts's union doc comment);
-		// removeSharedItem is root-only.
-		expect("shareSource" in item.data).toBe(false)
+		// Nested shares now retain their raw SharedDir too (mirrors the root arm) — toAnyDirWithContext
+		// needs the genuine wasm value to dispatch a category-aware dir op correctly; `data` itself lost
+		// `inner` in the flattening above.
+		expect(item.data.shareSource).toBe(raw)
+		expect(item.data.shareSource.inner).toBe(raw.inner)
 	})
 
-	it("narrows a bare SharedDir (no spread role) into a sharedDirectory with an undefined role", () => {
-		const item = narrowItem(mockSharedDir())
+	it("narrows a bare SharedDir (no spread role) into a sharedDirectory with an undefined role but a retained shareSource", () => {
+		const raw = mockSharedDir()
+		const item = narrowItem(raw)
 
 		if (item.type !== "sharedDirectory") {
 			throw new Error("expected a sharedDirectory arm")
 		}
 
 		expect(item.data.sharingRole).toBeUndefined()
+		expect(item.data.shareSource).toBe(raw)
 	})
 
 	it("context-tags a nested File (parent role spread on) into a sharedFile", () => {
@@ -384,8 +389,8 @@ describe("narrowItem — shared arms", () => {
 		expect(item.data.sharingRole).toEqual(role)
 		expect(item.data.sharedTag).toBe(true)
 		expect(item.data.decryptedMeta?.mime).toBe("application/pdf")
-		// Nested arms are never root shares — no shareSource (see item.ts's union doc comment);
-		// removeSharedItem is root-only.
+		// Unlike the nested sharedDirectory arm, no real wasm SharedFile ever backs a nested file (see
+		// item.ts's union doc comment) — there is nothing to retain as a shareSource here.
 		expect("shareSource" in item.data).toBe(false)
 	})
 })

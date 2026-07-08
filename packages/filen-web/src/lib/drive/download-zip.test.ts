@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { AnyFile, UuidStr, ZipItem } from "@filen/sdk-rs"
+import type { AnyFile, SharedDir, SharedRootDir, SharingRole, UuidStr, ZipItem } from "@filen/sdk-rs"
 import type { DriveItem } from "@/lib/drive/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { FsaSaveTarget, SaveTarget, SwSaveTarget } from "@/lib/drive/save-download"
@@ -86,6 +86,76 @@ function dirItem(params: { uuid?: UuidStr; name?: string } = {}): DriveItem {
 	}
 }
 
+function sharerRole(id: number, email: string): SharingRole {
+	return { Sharer: { id, email } }
+}
+
+// A shared-with-others/shared-with-me ROOT directory — role is required on this arm (see item.ts).
+function sharedRootDirItem(params: { uuid?: UuidStr; name?: string; role?: SharingRole } = {}): DriveItem {
+	const uuid = params.uuid ?? nextUuid()
+	const name = params.name ?? `shared-root-dir-${uuid}`
+	const role = params.role ?? sharerRole(42, "sharer@filen.io")
+	const shareSource: SharedRootDir = {
+		inner: { uuid, color: "default", timestamp: 1_700_000_000_000n, meta: { type: "decoded", data: { name } } },
+		sharingRole: role,
+		writeAccess: true
+	}
+
+	return {
+		type: "sharedRootDirectory",
+		data: {
+			uuid,
+			parent: uuid,
+			color: "default",
+			timestamp: 1_700_000_000_000n,
+			favorited: false,
+			meta: { type: "decoded", data: { name } },
+			size: 0n,
+			undecryptable: false,
+			decryptedMeta: { name },
+			sharingRole: role,
+			writeAccess: true,
+			shareSource
+		}
+	}
+}
+
+// A nested shared directory (browsed into from a shared root) — `role` mirrors the fetcher's spread
+// (queries/drive.ts); omitted reproduces a directory the spread never reached.
+function sharedDirItem(params: { uuid?: UuidStr; name?: string; role?: SharingRole } = {}): DriveItem {
+	const uuid = params.uuid ?? nextUuid()
+	const name = params.name ?? `shared-dir-${uuid}`
+	const shareSource: SharedDir = {
+		inner: {
+			uuid,
+			parent: PARENT_UUID,
+			color: "default",
+			timestamp: 1_700_000_000_000n,
+			favorited: false,
+			meta: { type: "decoded", data: { name } }
+		},
+		sharedTag: true
+	}
+
+	return {
+		type: "sharedDirectory",
+		data: {
+			uuid,
+			parent: PARENT_UUID,
+			color: "default",
+			timestamp: 1_700_000_000_000n,
+			favorited: false,
+			meta: { type: "decoded", data: { name } },
+			size: 0n,
+			undecryptable: false,
+			decryptedMeta: { name },
+			sharedTag: true,
+			...(params.role !== undefined ? { sharingRole: params.role } : {}),
+			shareSource
+		}
+	}
+}
+
 function testFile(overrides: Partial<AnyFile> = {}): AnyFile {
 	return {
 		uuid: nextUuid(),
@@ -154,6 +224,61 @@ describe("narrowToZipItems", () => {
 
 	it("returns an empty array for an empty selection", () => {
 		expect(narrowToZipItems([])).toEqual([])
+	})
+
+	// A flattened shared directory would match the SDK's untagged AnyDirWithContext on its owned
+	// (AnyNormalDir) arm instead of the dedicated Shared arm — the {dir, shareInfo} wrapper below is
+	// what actually routes it through the share endpoint/crypter. See item.ts's toAnyDirWithContext.
+	it("maps a sharedRootDirectory to the {dir, shareInfo} wrapper over its retained shareSource", () => {
+		const item = sharedRootDirItem({ name: "SharedRoot" })
+
+		if (item.type !== "sharedRootDirectory") {
+			throw new Error("expected a sharedRootDirectory arm")
+		}
+
+		const [zipItem] = narrowToZipItems([item])
+
+		expect(zipItem).toEqual({ dir: item.data.shareSource, shareInfo: item.data.sharingRole })
+	})
+
+	it("maps a nested sharedDirectory WITH a role to the {dir, shareInfo} wrapper over its retained shareSource", () => {
+		const role = sharerRole(7, "owner@filen.io")
+		const item = sharedDirItem({ name: "SharedChild", role })
+
+		if (item.type !== "sharedDirectory") {
+			throw new Error("expected a sharedDirectory arm")
+		}
+
+		const [zipItem] = narrowToZipItems([item])
+
+		expect(zipItem).toEqual({ dir: item.data.shareSource, shareInfo: role })
+	})
+
+	// No role anywhere (never spread, no resolver) leaves no correct arm to dispatch to — throwing
+	// here is what stops this from silently falling through to the owned arm (the Critical bug this
+	// fix closes), never a state the real gated callers (FSA-gated Download entries) can reach.
+	it("throws for a nested sharedDirectory with no sharingRole, rather than mis-dispatching to the owned arm", () => {
+		const item = sharedDirItem({ name: "SharedChild" })
+
+		expect(() => narrowToZipItems([item])).toThrow(/sharingRole/)
+	})
+
+	it("preserves selection order across a mix of owned and shared arms", () => {
+		const file = fileItem({ name: "a.txt" })
+		const dir = dirItem({ name: "Documents" })
+		const sharedDir = sharedDirItem({ name: "SharedChild", role: sharerRole(1, "a@filen.io") })
+		const sharedRootDir = sharedRootDirItem({ name: "SharedRoot" })
+
+		if (sharedDir.type !== "sharedDirectory" || sharedRootDir.type !== "sharedRootDirectory") {
+			throw new Error("expected shared arms")
+		}
+
+		expect(narrowToZipItems([file, sharedDir, dir, sharedRootDir])).toEqual([
+			file.data,
+			{ dir: sharedDir.data.shareSource, shareInfo: sharedDir.data.sharingRole },
+			dir.data,
+			{ dir: sharedRootDir.data.shareSource, shareInfo: sharedRootDir.data.sharingRole }
+		])
 	})
 })
 
@@ -262,6 +387,19 @@ describe("runZipDownload (injected deps, save-download mocked)", () => {
 
 		expect(outcome).toEqual({ status: "error", dto })
 		expect(h.settle).toHaveBeenCalledWith(expect.any(String), "error", dto)
+	})
+
+	// narrowToZipItems' throw (a nested sharedDirectory with no sharingRole) happens synchronously
+	// inside the same try this catches every other downloadZip failure with — settling a clean error
+	// outcome, never calling downloadZip with a bare, wrongly-dispatched Dir.
+	it("settles a clean error outcome and never calls downloadZip when a nested sharedDirectory has no sharingRole", async () => {
+		const h = makeHarness()
+
+		const outcome = await runZipDownload(h.deps, { items: [sharedDirItem({ name: "SharedChild" })], suggestedName: "Filen.zip" })
+
+		expect(outcome.status).toBe("error")
+		expect(h.downloadZip).not.toHaveBeenCalled()
+		expect(h.settle).toHaveBeenCalledWith(expect.any(String), "error", expect.anything())
 	})
 
 	it("settles cancelled then removes the row on a Cancelled rejection, returning a clean success", async () => {

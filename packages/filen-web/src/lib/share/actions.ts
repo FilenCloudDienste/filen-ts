@@ -69,9 +69,9 @@ function removeByUuid(items: DriveItem[], uuid: string): DriveItem[] {
 
 // Stops sharing a shared-root item — a directory shared out, or an item shared in the caller wants
 // gone. Root-only: item-menu.logic.ts/bulk-action-bar.logic.ts gate this action to the
-// sharedRootDirectory/sharedRootFile arms alone, the only two that carry a `shareSource` (see item.ts's
-// union doc comment) — the type guard below is a defense-in-depth backstop for a caller bug, never a
-// state the real gated callers can reach.
+// sharedRootDirectory/sharedRootFile arms alone, the only two whose shareSource is a SharedRootItem
+// (see item.ts's union doc comment) — the type guard below is a defense-in-depth backstop for a caller
+// bug, never a state the real gated callers can reach.
 //
 // `item.data.shareSource`, never `item.data` itself, is what crosses to the worker: removeSharedItem
 // forwards its argument straight to the SDK, which deserializes SharedRootItem as an UNTAGGED union —

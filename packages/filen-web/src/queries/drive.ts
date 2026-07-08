@@ -4,7 +4,7 @@ import { queryClient } from "@/queries/client"
 // Whole-statement `import type` here too — sdk.worker.ts's own top-level code pulls in
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
-import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink } from "@filen/sdk-rs"
+import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink, AnyDirWithContext } from "@filen/sdk-rs"
 import { narrowItem, asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import {
 	getSortPreferences,
@@ -155,18 +155,24 @@ export function itemInfoQueryKey(uuid: string) {
 	return ["drive", "itemInfo", uuid] as const
 }
 
-export async function fetchItemInfo(item: Dir | File): Promise<ItemInfoResult> {
-	return sdkApi.getItemInfo(item)
+// `dirContext` forwards the AnyDirWithContext a caller built for a shared directory (item.ts's
+// toAnyDirWithContext) straight through to getDirSize — omitted, sdkApi.getItemInfo dispatches
+// getDirSize off the bare item instead, correct for an owned directory but not a shared one.
+export async function fetchItemInfo(item: Dir | File, dirContext?: AnyDirWithContext): Promise<ItemInfoResult> {
+	return dirContext === undefined ? sdkApi.getItemInfo(item) : sdkApi.getItemInfo(item, dirContext)
 }
 
 // `enabled` lets a caller skip the fetch entirely rather than rely on a `.catch` to rescue it — the
 // info dialog does this for a trashed item, since getItemPath/getDirSize stall rather than reject on
 // a trashed item's unresolvable ancestry (see sdk.worker.ts's getItemInfo), and a stalled promise
 // can't be caught. Defaults to true so every other caller is unaffected.
-export function useItemInfoQuery(item: Dir | File, options?: { enabled?: boolean }): UseQueryResult<ItemInfoResult> {
+export function useItemInfoQuery(
+	item: Dir | File,
+	options?: { enabled?: boolean; dirContext?: AnyDirWithContext }
+): UseQueryResult<ItemInfoResult> {
 	return useQuery({
 		queryKey: itemInfoQueryKey(item.uuid),
-		queryFn: () => fetchItemInfo(item),
+		queryFn: () => fetchItemInfo(item, options?.dirContext),
 		enabled: options?.enabled ?? true
 	})
 }

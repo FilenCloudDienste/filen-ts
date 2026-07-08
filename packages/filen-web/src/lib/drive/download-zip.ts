@@ -5,25 +5,33 @@ import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
+import { asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/lib/drive/item"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/drive/upload"
 import { saveDownload, isPickerCancelled, type SaveTarget, type FsaSaveTarget } from "@/lib/drive/save-download"
 import { useTransfersStore, type TransfersStore } from "@/stores/transfers"
 
 // Maps a selection to what downloadItemsToZip wants. A file narrows the same way narrowToAnyFile does
-// (download.ts): asDirectoryOrFile(item).data is a structural superset, assignable with no adapter. A
-// directory turns out to need no adapter either — @filen/sdk-rs's AnyDirWithContext =
-// AnySharedDirWithContext | AnyLinkedDirWithContext | AnyNormalDir, and AnyNormalDir = Dir | Root, so a
-// plain owned directory's flattened data (already a structural Dir superset) lands on the AnyNormalDir
-// arm directly (confirmed against the Rust source: AnyDirWithContext is an untagged enum, and a bare
-// Dir-shaped object fails the {dir,shareInfo}/{dir,link} wrapper shapes first, falling through to
-// Normal). A shared directory flattens the exact same uniform way — asDirectoryOrFile normalizes every
-// arm to the same Dir-shaped data — rather than reconstructing AnySharedDirWithContext's wrapper; this
-// mirrors how a shared FILE already narrows through the single-file download path today, not a new gap
-// this introduces, but it is unverified at runtime against an actually-shared directory (no login
-// available in this environment — flagged for QA, same caliber as sdk.worker.ts's own held-item ops).
+// (download.ts): item.data is a structural superset of AnyFile, assignable with no adapter — a shared
+// file carries its own key material, so content download needs no category dispatch either way. A
+// directory is different: @filen/sdk-rs's AnyDirWithContext is an UNTAGGED union
+// (AnySharedDirWithContext | AnyLinkedDirWithContext | AnyNormalDir), so a flattened shared directory's
+// bare Dir-shaped data would match AnyNormalDir instead of the dedicated Shared arm — silently listing
+// and decrypting through the OWNED code path instead of the share endpoint/crypter a shared directory
+// actually needs. toAnyDirWithContext (item.ts) rebuilds the real wrapper from each directory arm's
+// own retained share context instead.
 export function narrowToZipItems(items: DriveItem[]): ZipItem[] {
-	return items.map(item => asDirectoryOrFile(item).data)
+	return items.map(item => {
+		switch (item.type) {
+			case "file":
+			case "sharedFile":
+			case "sharedRootFile":
+				return item.data
+			case "directory":
+			case "sharedDirectory":
+			case "sharedRootDirectory":
+				return toAnyDirWithContext(item)
+		}
+	})
 }
 
 // DI mirror of RunDownloadDeps (download.ts) for the zip path — one archive, one transfer row, one

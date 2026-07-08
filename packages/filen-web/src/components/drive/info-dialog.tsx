@@ -2,7 +2,8 @@ import { createElement, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { formatBytes } from "@filen/utils"
 import { StarIcon } from "lucide-react"
-import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
+import type { AnyDirWithContext } from "@filen/sdk-rs"
+import { asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/lib/drive/item"
 import { fileIconFor } from "@/lib/drive/icon"
 import { formatCreatedDate, formatItemSize, formatModifiedDate } from "@/lib/drive/format"
 import { useItemInfoQuery } from "@/queries/drive"
@@ -15,6 +16,22 @@ export interface InfoDialogProps {
 	item: DriveItem
 	remoteInfoEnabled: boolean
 	onClose: () => void
+}
+
+// A nested sharedDirectory's role is normally spread on by its fetcher (queries/drive.ts) — the catch
+// here is a last-resort backstop for the one contract violation toAnyDirWithContext refuses to guess
+// through (no role to dispatch with), so a stale/unspread row degrades to no size shown, same as any
+// other getDirSize failure, instead of crashing the panel.
+function safeDirContext(item: DriveItem): AnyDirWithContext | undefined {
+	if (item.type !== "sharedDirectory" && item.type !== "sharedRootDirectory") {
+		return undefined
+	}
+
+	try {
+		return toAnyDirWithContext(item)
+	} catch {
+		return undefined
+	}
 }
 
 function InfoRow({ label, value }: { label: string; value: ReactNode }) {
@@ -43,9 +60,11 @@ function InfoRow({ label, value }: { label: string; value: ReactNode }) {
 // already uses, so this panel needs no dedicated "Type"/"Favorited" copy of its own.
 export function InfoDialog({ item, remoteInfoEnabled, onClose }: InfoDialogProps) {
 	const { t } = useTranslation("drive")
+	const dirContext = safeDirContext(item)
 	// Rules-of-hooks: called unconditionally regardless of variant — remoteInfoEnabled controls
-	// fetching through `enabled`, never whether the hook itself runs.
-	const infoQuery = useItemInfoQuery(item.data, { enabled: remoteInfoEnabled })
+	// fetching through `enabled`, never whether the hook itself runs. dirContext is spread in only
+	// when built (exactOptionalPropertyTypes rejects an explicit `dirContext: undefined`).
+	const infoQuery = useItemInfoQuery(item.data, { enabled: remoteInfoEnabled, ...(dirContext !== undefined ? { dirContext } : {}) })
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
 	// A shared file reads as a file, a shared directory as a directory (asDirectoryOrFile) — the raw
 	// six-arm `item.type` would miss every shared arm in the branches below (see item.ts).

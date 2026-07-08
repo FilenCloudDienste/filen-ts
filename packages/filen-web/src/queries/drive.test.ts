@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type {
+	AnyDirWithContext,
 	Dir,
 	DirPublicLinkRW,
 	File,
@@ -292,6 +293,20 @@ describe("fetchItemInfo", () => {
 		getItemInfo.mockResolvedValueOnce(result)
 
 		await expect(fetchItemInfo(file)).resolves.toEqual(result)
+	})
+
+	// dirContext is what a shared directory's caller (info-dialog.tsx, via item.ts's
+	// toAnyDirWithContext) passes so getDirSize dispatches through the SDK's Shared arm instead of the
+	// owned one a bare Dir would land on — forwarded as a second argument only when given, so the
+	// "unchanged" pass-through above still exercises the plain owned-directory call shape.
+	it("forwards dirContext to sdkApi.getItemInfo as a second argument when given", async () => {
+		const dir = mockDir()
+		const dirContext: AnyDirWithContext = mockDir({ uuid: testUuid("shared-ctx") })
+		const result = { path: "Documents/", ancestors: [], size: { size: 0n, files: 0n, dirs: 0n } }
+		getItemInfo.mockResolvedValueOnce(result)
+
+		await expect(fetchItemInfo(dir, dirContext)).resolves.toEqual(result)
+		expect(getItemInfo).toHaveBeenCalledExactlyOnceWith(dir, dirContext)
 	})
 })
 

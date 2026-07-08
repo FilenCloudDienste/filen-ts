@@ -24,8 +24,7 @@ import { clampListboxIndex, listboxRange } from "@/lib/drive/listbox"
 import { type DriveItem } from "@/lib/drive/item"
 import { renameItem, trashItems, restoreItems, deleteItemsPermanently, emptyTrash } from "@/lib/drive/actions"
 import { unshareItems } from "@/lib/share/actions"
-import { needsZip, startDownloads } from "@/lib/drive/download"
-import { isFsaAvailable } from "@/lib/drive/save-download"
+import { startDownloads } from "@/lib/drive/download"
 import { type BulkOutcome } from "@/lib/drive/bulk"
 import { toastBulkOutcome } from "@/lib/drive/bulk-toast"
 import { useDirectoryListingQuery, useSortPreferencesQuery, useViewModePreferencesQuery } from "@/queries/drive"
@@ -36,6 +35,7 @@ import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { useBlockedUsers } from "@/lib/contacts/use-blocked-users"
 import { driveItemActions, type ItemActionDialogKind } from "@/components/drive/item-menu.logic"
+import { isBulkDownloadEnabled } from "@/components/drive/bulk-action-bar.logic"
 import { filterSharedInByBlocked, staleBlockedSelectionUuids } from "@/components/drive/directory-listing.logic"
 import { Breadcrumb } from "@/components/drive/breadcrumb"
 import { SortMenu } from "@/components/drive/sort-menu"
@@ -872,24 +872,22 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	// Registered above at module scope. preventDefault unconditionally — mod+s's browser default
 	// (Save Page As) must never fire while this listing has focus. Guards mirror drive.trash's own
-	// (empty selection, an open dialog, the trash variant — download isn't offered there, matching
-	// item-menu/bulk-bar's own trash exclusion) plus the single unifying gate every download entry
-	// point shares: `!needsZip || isFsaAvailable()` — a directory/multi-selection needs the zip path
-	// (download-zip.ts), gated to browsers with the File System Access API until the service-worker
-	// zip path lands. Also inert when the selection includes an undecryptable item — its meta is
-	// ciphertext with no content key, so it can never decrypt (mirrors item-menu/bulk-bar's own
-	// undecryptable exclusion) — void, not awaited, so the FSA save picker inside startDownloads keeps
-	// this keydown's own live user gesture.
+	// (an open dialog, the trash variant — download isn't offered there, matching item-menu/bulk-bar's
+	// own trash exclusion) plus isBulkDownloadEnabled (bulk-action-bar.logic.ts) — the single unifying
+	// ENABLED gate every download entry point shares, empty selection included (false for []). Also
+	// inert when the selection includes an undecryptable item — its meta is ciphertext with no content
+	// key, so it can never decrypt (mirrors item-menu/bulk-bar's own undecryptable exclusion) — void,
+	// not awaited, so the FSA save picker inside startDownloads keeps this keydown's own live user
+	// gesture.
 	useAction(
 		"drive.download",
 		keyboardEvent => {
 			keyboardEvent.preventDefault()
 
 			if (
-				selectedItems.length === 0 ||
 				isDialogOpen ||
 				variant === "trash" ||
-				(needsZip(selectedItems) && !isFsaAvailable()) ||
+				!isBulkDownloadEnabled(selectedItems) ||
 				selectedItems.some(item => item.data.undecryptable)
 			) {
 				return

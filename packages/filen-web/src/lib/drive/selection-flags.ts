@@ -17,8 +17,9 @@ export interface DriveSelectionFlags {
 	// (favorite, move) — trash/restore/delete stay available, since those only need each item's uuid.
 	includesUndecryptable: boolean
 	// True iff every selected item is a shared-root arm (sharedRootDirectory/sharedRootFile) — the
-	// only two arms removeSharedItem accepts (see item.ts's shareSource retention). Drives the bulk
-	// Unshare button's gate, mirroring the per-item menu's own item.type check (item-menu.logic.ts).
+	// only two arms removeSharedItem accepts, since only their shareSource is a SharedRootItem (see
+	// item.ts's shareSource retention). Drives the bulk Unshare button's gate, mirroring the per-item
+	// menu's own item.type check (item-menu.logic.ts).
 	everySharedRoot: boolean
 }
 

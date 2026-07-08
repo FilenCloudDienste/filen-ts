@@ -7,7 +7,8 @@ import type {
 	SharedRootDir,
 	SharedFile,
 	SharingRole,
-	ShareInfo
+	ShareInfo,
+	AnyDirWithContext
 } from "@filen/sdk-rs"
 
 // Extra fields every DriveItem carries beyond its raw wasm shape (mirrors filen-mobile's
@@ -29,15 +30,21 @@ export interface ExtraData {
 // sharedDirectory (a SharedDir has no own role — the fetcher spreads the parent's onto it, and a
 // path that rebuilds one without the spread relies on the resolver fallback instead).
 //
-// The two ROOT arms (sharedRootDirectory/sharedRootFile) additionally retain the untouched wasm value
-// they were flattened from, as `shareSource` — the worker's removeSharedItem(item: SharedRootItem)
-// forwards it straight to the SDK, which deserializes SharedRootItem as an UNTAGGED union
-// (SharedRootDir | SharedFile). A flattened directory's `data` has no `inner` wrapper, so it matches
-// NEITHER variant (SharedRootDir needs `inner`, SharedFile needs `chunks`) — passing `data` itself
-// would fail to deserialize for a directory. Only the two root arms get one: a nested sharedDirectory/
-// sharedFile is narrowed from a SharedDir/File the fetcher already spread a role onto, never a real
-// SharedRootItem, and removeSharedItem is root-only regardless (see share/actions.ts's unshareItems).
-type SharedDirectoryData = Dir & ExtraData & { decryptedMeta: DecryptedDirMeta | null; sharedTag: boolean; sharingRole?: SharingRole }
+// Three of the four shared arms additionally retain the untouched wasm value they were flattened
+// from, as `shareSource` — each for its own consumer. The two ROOT arms (sharedRootDirectory/
+// sharedRootFile) retain theirs for the worker's removeSharedItem(item: SharedRootItem), which
+// forwards it straight to the SDK — SharedRootItem deserializes as an UNTAGGED union (SharedRootDir |
+// SharedFile), and a flattened directory's `data` has no `inner` wrapper, matching NEITHER variant.
+// The nested sharedDirectory arm retains its own for a different consumer: @filen/sdk-rs's
+// AnyDirWithContext is ALSO an untagged union (AnySharedDirWithContext | AnyLinkedDirWithContext |
+// AnyNormalDir) — a flattened shared directory's bare Dir-shaped data matches AnyNormalDir instead of
+// the dedicated Shared arm, silently routing a category-dispatched op (zip download, getDirSize) down
+// the OWNED code path. toAnyDirWithContext below rebuilds the real wrapper from this retained value.
+// The nested sharedFile arm alone gets none: it's narrowed from a plain File the fetcher spread a role
+// onto — no real wasm SharedFile ever backed it (only a ROOT file's data was ever a genuine SharedFile)
+// — there is nothing to retain, and file content downloads need no category dispatch to begin with.
+type SharedDirectoryData = Dir &
+	ExtraData & { decryptedMeta: DecryptedDirMeta | null; sharedTag: boolean; sharingRole?: SharingRole; shareSource: SharedDir }
 type SharedRootDirectoryData = Dir &
 	ExtraData & { decryptedMeta: DecryptedDirMeta | null; sharingRole: SharingRole; writeAccess: boolean; shareSource: SharedRootDir }
 type SharedFileData = File & ExtraData & { decryptedMeta: DecryptedFileMeta | null; sharedTag: boolean; sharingRole: SharingRole }
@@ -156,6 +163,9 @@ function narrowDir(raw: NarrowableDirInput): DriveItem {
 		const inner = raw.inner
 		const decryptedMeta = inner.meta.type === "decoded" ? inner.meta.data : null
 		const role = raw.sharingRole
+		// `shareSource` retains the untouched raw SharedDir (see the union's own doc comment above) —
+		// toAnyDirWithContext needs the genuine wasm value to rebuild AnyDirWithContext; `data` itself
+		// lost `inner` in the flattening above.
 		return {
 			type: "sharedDirectory",
 			data: {
@@ -164,7 +174,8 @@ function narrowDir(raw: NarrowableDirInput): DriveItem {
 				undecryptable: decryptedMeta === null,
 				decryptedMeta,
 				sharedTag: raw.sharedTag,
-				...(role !== undefined ? { sharingRole: role } : {})
+				...(role !== undefined ? { sharingRole: role } : {}),
+				shareSource: raw
 			}
 		}
 	}
@@ -211,6 +222,33 @@ export function asDirectoryOrFile(item: DriveItem): BaseDirectoryItem | BaseFile
 		case "sharedFile":
 		case "sharedRootFile":
 			return { type: "file", data: item.data }
+	}
+}
+
+// Rebuilds the SDK's AnyDirWithContext from a directory-arm DriveItem — the shape every
+// category-dispatched dir op (zip download, getDirSize, …) needs so an UNTAGGED union match lands on
+// the right arm. A plain owned directory needs no wrapper (data is already an AnyNormalDir). A
+// sharedRootDirectory's role is required at the type level, so its wrapper always builds. A nested
+// sharedDirectory's role is only ever present via the fetcher's spread (queries/drive.ts) — if it's
+// missing there is no correct arm to dispatch to, so this throws rather than let the caller fall
+// through to the owned arm and mis-list/mis-decrypt a share silently.
+export function toAnyDirWithContext(
+	item: Extract<DriveItem, { type: "directory" | "sharedDirectory" | "sharedRootDirectory" }>
+): AnyDirWithContext {
+	switch (item.type) {
+		case "directory":
+			return item.data
+		case "sharedRootDirectory":
+			return { dir: item.data.shareSource, shareInfo: item.data.sharingRole }
+		case "sharedDirectory": {
+			const { sharingRole } = item.data
+
+			if (sharingRole === undefined) {
+				throw new Error("toAnyDirWithContext: nested sharedDirectory has no sharingRole to dispatch with")
+			}
+
+			return { dir: item.data.shareSource, shareInfo: sharingRole }
+		}
 	}
 }
 
