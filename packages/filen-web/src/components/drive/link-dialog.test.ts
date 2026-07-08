@@ -104,13 +104,11 @@ describe("readLinkForm", () => {
 	})
 
 	it("passwordSet is true for a 'known' password", () => {
-		const known = Object.assign("plaintext", { type: "known" as const })
-		expect(readLinkForm(mockFileLink({ password: known })).passwordSet).toBe(true)
+		expect(readLinkForm(mockFileLink({ password: { type: "known", data: "plaintext" } })).passwordSet).toBe(true)
 	})
 
 	it("passwordSet is true for a 'hashed' password (no plaintext available, still counts as set)", () => {
-		const hashed = Object.assign("hashed-value", { type: "hashed" as const })
-		expect(readLinkForm(mockDirLink({ password: hashed })).passwordSet).toBe(true)
+		expect(readLinkForm(mockDirLink({ password: { type: "hashed", data: "hashed-value" } })).passwordSet).toBe(true)
 	})
 })
 
@@ -150,7 +148,7 @@ describe("buildLinkUpdate — field-name asymmetry", () => {
 
 describe("buildLinkUpdate — password resolution", () => {
 	it("untouched (edits.password omitted) resends the existing PasswordState verbatim, including 'hashed'", () => {
-		const hashed = Object.assign("existing-hash", { type: "hashed" as const })
+		const hashed = { type: "hashed", data: "existing-hash" } as const
 		const current = dirStatus({ password: hashed })
 
 		const next = buildLinkUpdate(current, { expiration: "1d" })
@@ -169,13 +167,11 @@ describe("buildLinkUpdate — password resolution", () => {
 		if (next.status.password.type !== "known") {
 			throw new Error("expected a known password")
 		}
-		// Narrowed to {type:"known"} & string above, so this is a real string coercion, not
-		// Object's default toString.
-		expect(String(next.status.password)).toBe("hunter2")
+		expect(next.status.password.data).toBe("hunter2")
 	})
 
 	it("clearing resolves to {type:'none'}, discarding whatever password existed before", () => {
-		const hashed = Object.assign("existing-hash", { type: "hashed" as const })
+		const hashed = { type: "hashed", data: "existing-hash" } as const
 		const current = fileStatus({ password: hashed })
 
 		const next = buildLinkUpdate(current, { password: { kind: "cleared" } })

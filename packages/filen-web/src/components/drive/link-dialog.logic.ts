@@ -55,11 +55,9 @@ function resolvePassword(current: PasswordState, edit: PasswordEdit | undefined)
 		return { type: "none" }
 	}
 
-	// PasswordState's "known" arm is a tagged newtype string (`{type:"known"} & string`) — an object
-	// literal can't satisfy that intersection (spreading a primitive string is a compile error under
-	// this project's strict settings), so the plaintext is stapled on via Object.assign instead,
-	// which types as `string & {type:"known"}` (the same intersection, order doesn't matter).
-	return Object.assign(edit.plaintext, { type: "known" as const })
+	// PasswordState's "known" arm is adjacently tagged (`{ type: "known"; data: string }`) — the
+	// plaintext the user typed goes in `data`; the SDK hashes+salts it server-side.
+	return { type: "known", data: edit.plaintext }
 }
 
 // Maps the normalized form edits back onto the right field name per item type and resolves the
