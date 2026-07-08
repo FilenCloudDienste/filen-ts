@@ -10,6 +10,7 @@ function transfer(overrides: Partial<Transfer> = {}): Transfer {
 		size: 100,
 		bytesTransferred: 0,
 		status: "uploading",
+		paused: false,
 		parentUuid: null,
 		startedAt: 0,
 		...overrides

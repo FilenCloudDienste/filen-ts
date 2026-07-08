@@ -8,8 +8,8 @@
 // No "cancelled"/"completedWithErrors" copy yet — those statuses exist at the store level
 // (stores/transfers.ts) but no row in this panel renders them today: a cancelled transfer is removed
 // right after settling (never displayed), and completedWithErrors backs a zip transfer no code
-// produces yet. Active (uploading/downloading) rows get transfersRowCancel; finished rows get
-// transfersRowRemove.
+// produces yet. Active (uploading/downloading) rows get transfersRowCancel plus a pause/resume
+// toggle (transfersRowPause/transfersRowResume); finished rows get transfersRowRemove.
 export const transfers = {
 	// ── Icon rail ───────────────────────────────────────────────────────────
 	/** Icon-rail Transfers trigger — accessible label while at least one upload is active; replaces the plain moduleTransfers label so the count is announced, not just shown in the visual badge; singular */
@@ -38,6 +38,10 @@ export const transfers = {
 	transfersRowRemove: "Remove",
 	/** Transfer row — accessible label on the button cancelling a single active (uploading/downloading) transfer */
 	transfersRowCancel: "Cancel",
+	/** Transfer row — accessible label on the toggle button pausing a single active, not-yet-paused transfer */
+	transfersRowPause: "Pause",
+	/** Transfer row — accessible label on the toggle button resuming a single active, paused transfer */
+	transfersRowResume: "Resume",
 
 	// ── Upload summary toast (startUploads) ──────────────────────────────────
 	/** Upload summary toast — every uploaded file in the batch succeeded; singular */

@@ -278,7 +278,7 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 		const patchDirListing = vi.fn<(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void>()
 		const upload =
 			vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
-		const add = vi.fn<(t: Transfer) => void>()
+		const add = vi.fn<(t: Omit<Transfer, "paused">) => void>()
 		const setProgress = vi.fn<(id: string, bytesTransferred: number) => void>()
 		const settle = vi.fn<(id: string, status: TerminalStatus, error?: ErrorDTO) => void>()
 		const remove = vi.fn<(id: string) => void>()

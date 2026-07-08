@@ -170,7 +170,7 @@ describe("runDownload (injected deps, save-download mocked)", () => {
 	function makeHarness() {
 		const download =
 			vi.fn<(file: AnyFile, transferId: string, save: SaveTarget, onProgress: (bytes: bigint) => void) => Promise<void>>()
-		const add = vi.fn<(t: Transfer) => void>()
+		const add = vi.fn<(t: Omit<Transfer, "paused">) => void>()
 		const setProgress = vi.fn<(id: string, bytesTransferred: number) => void>()
 		const settle = vi.fn<(id: string, status: TerminalStatus, error?: ErrorDTO) => void>()
 		const remove = vi.fn<(id: string) => void>()

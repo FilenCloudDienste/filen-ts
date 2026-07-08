@@ -18,6 +18,7 @@ function makeTransfer(overrides: Partial<Transfer> = {}): Transfer {
 		size: 1_000,
 		bytesTransferred: 0,
 		status: "uploading",
+		paused: false,
 		parentUuid: null,
 		startedAt: 1_700_000_000_000,
 		...overrides
@@ -61,6 +62,60 @@ describe("add", () => {
 		useTransfersStore.getState().add(makeTransfer())
 
 		expect(useTransfersStore.getState().transfers).not.toBe(prev)
+	})
+
+	it("defaults paused to false on a newly added transfer", () => {
+		useTransfersStore.getState().add({
+			id: "a",
+			direction: "upload",
+			name: "report.pdf",
+			size: 1_000,
+			bytesTransferred: 0,
+			status: "uploading",
+			parentUuid: null,
+			startedAt: 0
+		})
+
+		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(false)
+	})
+})
+
+describe("setPaused", () => {
+	it("flips paused to true for the matching id, leaving status untouched", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "a", status: "downloading" }))
+
+		useTransfersStore.getState().setPaused("a", true)
+
+		const transfer = useTransfersStore.getState().transfers[0]
+		expect(transfer?.paused).toBe(true)
+		expect(transfer?.status).toBe("downloading")
+		expect(isActiveTransfer("downloading")).toBe(true) // paused never becomes part of the active predicate
+	})
+
+	it("flips paused back to false", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "a" }))
+		useTransfersStore.getState().setPaused("a", true)
+
+		useTransfersStore.getState().setPaused("a", false)
+
+		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(false)
+	})
+
+	it("leaves other transfers untouched", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "a" }))
+		useTransfersStore.getState().add(makeTransfer({ id: "b" }))
+
+		useTransfersStore.getState().setPaused("a", true)
+
+		expect(useTransfersStore.getState().transfers.find(transfer => transfer.id === "b")?.paused).toBe(false)
+	})
+
+	it("is a no-op for an unknown id", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "a" }))
+
+		useTransfersStore.getState().setPaused("missing", true)
+
+		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(false)
 	})
 })
 

@@ -16,6 +16,10 @@ export interface Transfer {
 	size: number
 	bytesTransferred: number
 	status: "uploading" | "downloading" | "done" | "error" | "cancelled" | "completedWithErrors"
+	// Suspended-in-place flag for an ACTIVE transfer — set via setPaused, never via settle. Never
+	// implies a status change: a paused transfer is still "uploading"/"downloading" (isActiveTransfer
+	// stays true), just not currently receiving bytes/progress until resumed.
+	paused: boolean
 	// Present only once status is "error" — exactOptionalPropertyTypes forbids assigning `undefined`
 	// to this key explicitly, so settle() below only ever spreads it in when actually provided.
 	error?: ErrorDTO
@@ -109,8 +113,14 @@ export interface TransfersStore {
 	// Rolling-window input for computeTransfersSpeed — store-owned since setProgress is the only
 	// place bytesTransferred actually changes over time; never written to directly by a consumer.
 	speedSamples: SpeedSample[]
-	add: (transfer: Transfer) => void
+	// Omits `paused` — every newly added transfer starts unpaused, enforced here rather than trusted
+	// to each call site (lib/drive/upload.ts's runUpload, lib/drive/download.ts's runDownload).
+	add: (transfer: Omit<Transfer, "paused">) => void
 	setProgress: (id: string, bytesTransferred: number) => void
+	// Flips ONLY the paused flag — never touches status (paused is not a terminal state; see
+	// Transfer["paused"]'s own comment). Backs the active-row pause/resume toggle
+	// (lib/transfers/control.ts's pauseTransfer/resumeTransfer).
+	setPaused: (id: string, paused: boolean) => void
 	settle: (id: string, status: TerminalStatus, error?: ErrorDTO) => void
 	remove: (id: string) => void
 	// Drops every finished (non-active) row; active transfers are left untouched. Backs the
@@ -122,7 +132,12 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 	transfers: [],
 	speedSamples: [],
 	add: transfer => {
-		set(state => ({ transfers: [...state.transfers, transfer] }))
+		set(state => ({ transfers: [...state.transfers, { ...transfer, paused: false }] }))
+	},
+	setPaused: (id, paused) => {
+		set(state => ({
+			transfers: state.transfers.map(transfer => (transfer.id === id ? { ...transfer, paused } : transfer))
+		}))
 	},
 	setProgress: (id, bytesTransferred) => {
 		set(state => {

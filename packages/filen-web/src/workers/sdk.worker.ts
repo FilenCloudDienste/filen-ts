@@ -3,6 +3,7 @@ import * as Comlink from "comlink"
 import init, {
 	initThreadPool,
 	UnauthClient,
+	PauseSignal,
 	type Client,
 	type AnyFile,
 	type StringifiedClient,
@@ -68,6 +69,13 @@ const downloadAborts = new Map<string, AbortController>()
 // Mirrors downloadAborts for the streaming UPLOAD — see uploadFile's own comment for why this is now
 // safe (0.4.33 stopped burying managedFuture under serde(flatten)).
 const uploadAborts = new Map<string, AbortController>()
+
+// Per-transfer PauseSignal so pauseUpload/pauseDownload can suspend an in-flight transfer's future
+// without erroring it — unlike abort, pause never rejects; resume just continues the same future.
+// Mirrors downloadAborts/uploadAborts, one map per direction. Each entry is a wasm-heap object: it
+// MUST be freed (see uploadFile/downloadFileToWriter's own finally) or it leaks wasm memory.
+const uploadPauses = new Map<string, PauseSignal>()
+const downloadPauses = new Map<string, PauseSignal>()
 
 // Every authed op reads the live Client through this guard. Post-logout `client` is null, so a
 // forwarded call would null-deref; failing fast here surfaces a clean DTO at the Comlink boundary
@@ -398,6 +406,8 @@ const api = {
 		const c = requireClient()
 		const controller = new AbortController()
 		uploadAborts.set(transferId, controller)
+		const pause = new PauseSignal()
+		uploadPauses.set(transferId, pause)
 
 		try {
 			const parent = await resolveNormalDirParent(c, parentUuid)
@@ -411,16 +421,28 @@ const api = {
 				progress: bytes => {
 					onProgress(bytes)
 				},
-				managedFuture: { abortSignal: controller.signal }
+				managedFuture: { abortSignal: controller.signal, pauseSignal: pause }
 			})
 		} finally {
 			uploadAborts.delete(transferId)
+			uploadPauses.delete(transferId)
+			pause.free()
 		}
 	},
 	// Aborts an in-flight upload by transferId; a no-op once the upload has settled (the controller is
 	// already evicted). Mirrors cancelDownload.
 	cancelUpload(transferId: string): void {
 		uploadAborts.get(transferId)?.abort()
+	},
+	// Suspends an in-flight upload's future by transferId — no error, no drop, just no more
+	// bytes/progress until resumeUpload. A no-op once the upload has settled (the signal is already
+	// evicted+freed). Mirrors pauseDownload.
+	pauseUpload(transferId: string): void {
+		uploadPauses.get(transferId)?.pause()
+	},
+	// Continues a paused upload; a no-op once the upload has settled. Mirrors resumeDownload.
+	resumeUpload(transferId: string): void {
+		uploadPauses.get(transferId)?.resume()
 	},
 	// ── Download ───────────────────────────────────────────────────────────────
 	// The reverse of uploadFile: the WritableStream SINK arrives via Comlink.transfer (a transferable
@@ -439,6 +461,8 @@ const api = {
 		const c = requireClient()
 		const controller = new AbortController()
 		downloadAborts.set(transferId, controller)
+		const pause = new PauseSignal()
+		downloadPauses.set(transferId, pause)
 		try {
 			await c.downloadFileToWriter({
 				file,
@@ -446,16 +470,27 @@ const api = {
 				progress: bytes => {
 					onProgress(bytes)
 				},
-				managedFuture: { abortSignal: controller.signal }
+				managedFuture: { abortSignal: controller.signal, pauseSignal: pause }
 			})
 		} finally {
 			downloadAborts.delete(transferId)
+			downloadPauses.delete(transferId)
+			pause.free()
 		}
 	},
 	// Aborts an in-flight download by transferId; a no-op once the download has settled (the controller
 	// is already evicted). The abort surfaces as a "Cancelled" rejection at downloadFileToWriter's caller.
 	cancelDownload(transferId: string): void {
 		downloadAborts.get(transferId)?.abort()
+	},
+	// Suspends an in-flight download's future by transferId — no error, no drop, just no more
+	// bytes/progress until resumeDownload. A no-op once the download has settled. Mirrors pauseUpload.
+	pauseDownload(transferId: string): void {
+		downloadPauses.get(transferId)?.pause()
+	},
+	// Continues a paused download; a no-op once the download has settled. Mirrors resumeUpload.
+	resumeDownload(transferId: string): void {
+		downloadPauses.get(transferId)?.resume()
 	},
 	// ── Rename ───────────────────────────────────────────────────────────────
 	// Held-item ops throughout this section take the caller's already-fetched DriveItem.data

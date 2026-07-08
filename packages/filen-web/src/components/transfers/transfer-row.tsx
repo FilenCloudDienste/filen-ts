@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next"
-import { CircleAlertIcon, CircleCheckIcon, XIcon } from "lucide-react"
+import { CircleAlertIcon, CircleCheckIcon, PauseIcon, PlayIcon, XIcon } from "lucide-react"
 import { formatBytes } from "@filen/utils"
 import { isActiveTransfer, useTransfersStore, type Transfer } from "@/stores/transfers"
 import { transferProgress } from "@/components/transfers/transfer-row.logic"
-import { cancelTransfer } from "@/lib/transfers/control"
+import { cancelTransfer, pauseTransfer, resumeTransfer } from "@/lib/transfers/control"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -53,11 +53,13 @@ function TransferStatusIcon({ status }: { status: Transfer["status"] }) {
 
 // One row: name + live progress bar, mirroring DriveRow's icon+truncate+trailing idiom (drive/
 // drive-row.tsx) scaled down for the panel's narrower surface. Active (uploading/downloading) rows get
-// a Cancel button wired to lib/transfers/control.ts's cancelTransfer — the in-flight
-// runUpload/runDownload catch does the actual store settle+remove once the worker call rejects with
-// "Cancelled". A finished row (isActiveTransfer false — done/error/completedWithErrors) gets a dismiss
-// button instead, wired straight to the store — a finished transfer is already done, so dismissing
-// just clears its row, no confirm needed.
+// a pause/resume toggle plus a Cancel button, wired to lib/transfers/control.ts's
+// pauseTransfer/resumeTransfer/cancelTransfer — the in-flight runUpload/runDownload catch does the
+// actual store settle+remove once a cancelled worker call rejects with "Cancelled"; pause/resume never
+// reject, so the toggle flips the store's `paused` flag itself (see pauseTransfer/resumeTransfer). A
+// finished row (isActiveTransfer false — done/error/completedWithErrors) gets a dismiss button instead,
+// wired straight to the store — a finished transfer is already done, so dismissing just clears its row,
+// no confirm needed.
 export function TransferRow({ transfer }: TransferRowProps) {
 	const { t, i18n } = useTranslation("transfers")
 	const progress = transferProgress(transfer)
@@ -104,16 +106,32 @@ export function TransferRow({ transfer }: TransferRowProps) {
 						<XIcon />
 					</Button>
 				) : (
-					<Button
-						variant="ghost"
-						size="icon-xs"
-						aria-label={t("transfersRowCancel")}
-						onClick={() => {
-							cancelTransfer(transfer.id)
-						}}
-					>
-						<XIcon />
-					</Button>
+					<>
+						<Button
+							variant="ghost"
+							size="icon-xs"
+							aria-label={t(transfer.paused ? "transfersRowResume" : "transfersRowPause")}
+							onClick={() => {
+								if (transfer.paused) {
+									resumeTransfer(transfer.id)
+								} else {
+									pauseTransfer(transfer.id)
+								}
+							}}
+						>
+							{transfer.paused ? <PlayIcon /> : <PauseIcon />}
+						</Button>
+						<Button
+							variant="ghost"
+							size="icon-xs"
+							aria-label={t("transfersRowCancel")}
+							onClick={() => {
+								cancelTransfer(transfer.id)
+							}}
+						>
+							<XIcon />
+						</Button>
+					</>
 				)}
 			</div>
 			<Progress
