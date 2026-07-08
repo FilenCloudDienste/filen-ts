@@ -2,6 +2,7 @@ import { useEffect, useState, type DragEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { UploadIcon } from "lucide-react"
 import { startUploads } from "@/lib/drive/upload"
+import { startDirectoryUpload } from "@/lib/drive/upload-directory"
 import { enterDragDepth, leaveDragDepth } from "@/components/drive/upload-dropzone.logic"
 
 export interface UploadDropzoneProps {
@@ -15,10 +16,10 @@ export interface UploadDropzoneProps {
 	children: ReactNode
 }
 
-// Drop target wrapping the listing's list/scroll area (mounted in directory-listing.tsx). FILES
-// ONLY — directory entries (DataTransferItem.webkitGetAsEntry) are a later addition; dropping a
-// directory today just uploads whatever plain Files the browser exposes for it (typically none),
-// an acceptable gap until that lands.
+// Drop target wrapping the listing's list/scroll area (mounted in directory-listing.tsx). A drop
+// carrying at least one directory (DataTransferItem.webkitGetAsEntry returning a
+// FileSystemDirectoryEntry) goes through the tree-walking directory-upload path; a plain files-only
+// drop keeps using the flat startUploads path unchanged.
 //
 // The highlight uses a depth counter (upload-dropzone.logic.ts) rather than a plain dragover/
 // dragleave boolean: dragenter/dragleave bubble up from every descendant the cursor crosses, and a
@@ -78,6 +79,21 @@ export function UploadDropzone({ parentUuid, disabled = false, children }: Uploa
 		setDragDepth(0)
 
 		if (disabled) {
+			return
+		}
+
+		const entries: FileSystemEntry[] = []
+
+		for (const item of Array.from(event.dataTransfer.items)) {
+			const entry = item.webkitGetAsEntry()
+
+			if (entry !== null) {
+				entries.push(entry)
+			}
+		}
+
+		if (entries.some(entry => entry.isDirectory)) {
+			void startDirectoryUpload({ kind: "entries", entries }, parentUuid)
 			return
 		}
 

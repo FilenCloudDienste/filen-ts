@@ -118,7 +118,9 @@ export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string 
 // `useTransfersStore.getState()` grabs the store's ACTIONS once — they're stable references for the
 // store's entire lifetime (zustand never reassigns them), so reading them here at module scope is
 // safe as non-render orchestration code, unlike reading state itself outside a selector hook.
-const defaultUploadDeps: RunUploadDeps = {
+// Exported so upload-directory.ts's own defaultDirectoryUploadDeps can reuse this exact wiring
+// (including the Comlink.proxy wrap) for its per-file uploads instead of re-declaring it.
+export const defaultUploadDeps: RunUploadDeps = {
 	upload: (parentUuid, file, onProgress) => sdkApi.uploadFile(parentUuid, file, Comlink.proxy(onProgress)),
 	store: useTransfersStore.getState(),
 	patchListing: driveListingQueryUpdate

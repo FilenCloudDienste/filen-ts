@@ -42,5 +42,19 @@ export const transfers = {
 	/** Upload summary toast — at least one file in the batch failed; {{count}} = files that succeeded, {{failed}} = files that failed; singular */
 	transfersUploadSummaryCompleteWithFailures_one: "{{count}} file uploaded, {{failed}} failed",
 	/** Upload summary toast — at least one file in the batch failed; {{count}} = files that succeeded, {{failed}} = files that failed; plural */
-	transfersUploadSummaryCompleteWithFailures_other: "{{count}} files uploaded, {{failed}} failed"
+	transfersUploadSummaryCompleteWithFailures_other: "{{count}} files uploaded, {{failed}} failed",
+
+	// ── Upload summary toast (runDirectoryUpload) ─────────────────────────────
+	// Counts BOTH created sub-directories and uploaded files as one "item" (unlike the plain
+	// transfersUploadSummary* keys above, which only ever count files) — a directory upload recreates
+	// a tree of both, and a directory-only failure (an empty sub-directory that couldn't be created)
+	// would otherwise vanish from a files-only count.
+	/** Directory-upload summary toast — every created directory and uploaded file in the batch succeeded; singular */
+	transfersDirectoryUploadSummaryComplete_one: "{{count}} item uploaded",
+	/** Directory-upload summary toast — every created directory and uploaded file in the batch succeeded; plural */
+	transfersDirectoryUploadSummaryComplete_other: "{{count}} items uploaded",
+	/** Directory-upload summary toast — at least one directory or file in the batch failed; {{count}} = items that succeeded, {{failed}} = items that failed; singular */
+	transfersDirectoryUploadSummaryCompleteWithFailures_one: "{{count}} item uploaded, {{failed}} failed",
+	/** Directory-upload summary toast — at least one directory or file in the batch failed; {{count}} = items that succeeded, {{failed}} = items that failed; plural */
+	transfersDirectoryUploadSummaryCompleteWithFailures_other: "{{count}} items uploaded, {{failed}} failed"
 } as const
