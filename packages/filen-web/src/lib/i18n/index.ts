@@ -4,6 +4,7 @@ import { common } from "@/locales/en/common"
 import { errors } from "@/locales/en/errors"
 import { auth } from "@/locales/en/auth"
 import { drive } from "@/locales/en/drive"
+import { contacts } from "@/locales/en/contacts"
 
 // Consumed by `ActionDef.descriptionKey` (keymap registry) — a compile-time-checked subset
 // of the "common" namespace's own key set, derived straight from the catalog so it can never
@@ -19,6 +20,12 @@ export type CommonKey = Extract<keyof typeof common, string>
 // own actions extend the union the same way instead of forcing every description into "common".
 export type DriveKey = Extract<keyof typeof drive, string>
 
+// Same derivation for the "contacts" namespace, exported ahead of need: no contacts action
+// registers a keymap command yet (lib/keymap/registry.ts's ActionDef.descriptionKey is still
+// `CommonKey | DriveKey`), but a later add-contact command can extend that union with this type
+// without this file needing a matching edit at that time.
+export type ContactsKey = Extract<keyof typeof contacts, string>
+
 // `Intl.PluralRules` gate: i18next's plural-key resolution (`_one`/
 // `_other` suffixes, unused by rev 1's catalogs but load-bearing the moment a count-based key
 // lands) needs it. Unlike React Native/Hermes — which mobile polyfills via `intl-pluralrules` —
@@ -26,7 +33,7 @@ export type DriveKey = Extract<keyof typeof drive, string>
 // @/workers/sdk.worker's pre-flight) ships `Intl.PluralRules` natively. No polyfill import here,
 // by design.
 //
-// `resources`/`react.useSuspense`: resources are the four EN namespaces only
+// `resources`/`react.useSuspense`: resources are the five EN namespaces only
 // — no other language ships yet (multi-language catalogs + `SUPPORTED_LANGUAGES` land with the
 // auto-translate pipeline's real script, see .github/workflows/i18n-web.yml). Suspense-throw i18n
 // is OFF: it interacts poorly with the React Compiler and complicates the boot gate; revisit only
@@ -37,7 +44,8 @@ void i18n.use(initReactI18next).init({
 			common,
 			errors,
 			auth,
-			drive
+			drive,
+			contacts
 		}
 	},
 	lng: "en",

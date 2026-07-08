@@ -18,7 +18,11 @@ import init, {
 	type NonRootNormalItemTagged,
 	type DirPublicLinkRW,
 	type FilePublicLink,
-	type DirSizeResponse
+	type DirSizeResponse,
+	type Contact,
+	type BlockedContact,
+	type ContactRequestIn,
+	type ContactRequestOut
 } from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
 import { toErrorDTO } from "@/lib/sdk/errors"
@@ -514,6 +518,49 @@ const api = {
 			}
 		}
 		return names
+	},
+	// ── Contacts ─────────────────────────────────────────────────────────────
+	// Plain pass-throughs, same shape as getDirectory/getUserInfo above — every returned record is
+	// flat scalars (no enum-typed field, unlike e.g. DirPublicLinkRW's password union, so no shim
+	// needed), and every bigint field (userId/lastActive/timestamp) crosses Comlink via structured
+	// clone already. No worker-side cache: unlike a directory, a contact is never re-resolved by
+	// uuid from an unrelated op, so there is nothing here for a cache to save a round trip on.
+	getContacts(): Promise<Contact[]> {
+		return requireClient().getContacts()
+	},
+	getBlockedContacts(): Promise<BlockedContact[]> {
+		return requireClient().getBlockedContacts()
+	},
+	listIncomingContactRequests(): Promise<ContactRequestIn[]> {
+		return requireClient().listIncomingContactRequests()
+	},
+	listOutgoingContactRequests(): Promise<ContactRequestOut[]> {
+		return requireClient().listOutgoingContactRequests()
+	},
+	// Returns the new outgoing request's uuid.
+	sendContactRequest(email: string): Promise<string> {
+		return requireClient().sendContactRequest(email)
+	},
+	// Returns the newly created contact's uuid.
+	acceptContactRequest(uuid: string): Promise<string> {
+		return requireClient().acceptContactRequest(uuid)
+	},
+	denyContactRequest(uuid: string): Promise<void> {
+		return requireClient().denyContactRequest(uuid)
+	},
+	cancelContactRequest(uuid: string): Promise<void> {
+		return requireClient().cancelContactRequest(uuid)
+	},
+	// Email-keyed — every other op in this section takes a uuid — returns the new BlockedContact's
+	// uuid.
+	blockContact(email: string): Promise<string> {
+		return requireClient().blockContact(email)
+	},
+	unblockContact(uuid: string): Promise<void> {
+		return requireClient().unblockContact(uuid)
+	},
+	deleteContact(uuid: string): Promise<void> {
+		return requireClient().deleteContact(uuid)
 	},
 	logout(): void {
 		releaseClient()
