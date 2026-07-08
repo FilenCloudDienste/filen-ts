@@ -15,33 +15,14 @@ import {
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/lib/drive/item"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { runBulk, type BulkOutcome } from "@/lib/drive/bulk"
+import { runOp, type ActionOutcome as GenericActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
+
+export type { VoidActionOutcome }
 
 export type DirectoryItem = Extract<DriveItem, { type: "directory" }>
 export type FileItem = Extract<DriveItem, { type: "file" }>
 
-export type ActionOutcome = { status: "success"; item: DriveItem } | { status: "error"; dto: ErrorDTO }
-
-export type VoidActionOutcome = { status: "success" } | { status: "error"; dto: ErrorDTO }
-
-// Every worker call funnels through here so a rejection — whichever side ends up catching it, a
-// singular action's own try/catch or runBulk's per-item catch — is already LABEL-FIRST-shaped.
-// asErrorDTO is idempotent on a DTO the worker's Comlink boundary already threw and normalizes
-// anything else (e.g. a plain Error from a mocked op in tests), so this is safe to apply uniformly.
-// A directory-vs-file ternary (two differently-typed remote calls) or a remote method whose own
-// resolved type is itself a union both need an explicit `runOp<Dir | File>(...)` at the call site —
-// Comlink's Remote<T> wraps a return type through two DISTRIBUTIVE conditional types, which turns a
-// union return into a union of Promises rather than a Promise of a union, defeating T's inference.
-async function runOp<T>(op: Promise<T>): Promise<T> {
-	try {
-		return await op
-	} catch (e) {
-		// A plain ErrorDTO thrown intact is what the singular actions' own try/catch and runBulk's
-		// per-item catch both expect to receive; an Error subclass would just need unwrapping right
-		// back out again.
-		// eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberate, see above
-		throw asErrorDTO(e)
-	}
-}
+export type ActionOutcome = GenericActionOutcome<DriveItem>
 
 // The account query is warm by the time any drive listing can render (the rail/account menu fetch
 // it eagerly) — a cache miss degrades to "", a value no real directory uuid or the null root
