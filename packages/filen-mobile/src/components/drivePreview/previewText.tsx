@@ -280,6 +280,7 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 				readOnly={readOnly}
 				placeholder={t("placeholder")}
 				type={previewType === "code" ? "code" : "text"}
+				fileName={item.type === "drive" ? item.data.data.decryptedMeta?.name : item.data.name}
 				paddingTop={headerHeight ? headerHeight + 8 : undefined}
 				paddingBottom={insets.bottom}
 			/>

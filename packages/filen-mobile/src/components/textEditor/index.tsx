@@ -118,6 +118,7 @@ export const TextEditor = ({
 	onReady,
 	disableMarkdownPreview,
 	id,
+	fileName,
 	autoFocus,
 	paddingTop,
 	paddingBottom
@@ -130,6 +131,9 @@ export const TextEditor = ({
 	onReady?: () => void
 	disableMarkdownPreview?: boolean
 	id?: string
+	// Real filename of the previewed file, threaded to TextEditorDOM so it can pick the CodeMirror
+	// language by extension (loadLanguage). Without it every code file defaults to "file.tsx" (TSX).
+	fileName?: string
 	autoFocus?: boolean
 	paddingTop?: number
 	paddingBottom?: number
@@ -289,6 +293,7 @@ export const TextEditor = ({
 							initialValue={encodedInitialValue}
 							placeholder={placeholder}
 							readOnly={readOnly}
+							fileName={fileName}
 							markdownPreviewActive={markdownPreviewActive}
 							autoFocus={autoFocus}
 							dom={{
