@@ -155,7 +155,7 @@ describe("computeTransfersAggregate", () => {
 			makeTransfer({ id: "c", status: "error", size: 100, bytesTransferred: 20 })
 		]
 
-		expect(computeTransfersAggregate(transfers)).toEqual({ activeCount: 1, percent: 0.5 })
+		expect(computeTransfersAggregate(transfers)).toEqual({ activeCount: 1, percent: 50 })
 	})
 
 	it("sums bytesTransferred/size across every active transfer", () => {
@@ -164,8 +164,8 @@ describe("computeTransfersAggregate", () => {
 			makeTransfer({ id: "b", status: "uploading", size: 300, bytesTransferred: 50 })
 		]
 
-		// 100 transferred / 400 total
-		expect(computeTransfersAggregate(transfers)).toEqual({ activeCount: 2, percent: 0.25 })
+		// 100 transferred / 400 total -> 25%
+		expect(computeTransfersAggregate(transfers)).toEqual({ activeCount: 2, percent: 25 })
 	})
 
 	it("is 0 percent (not NaN) when every active transfer has zero size", () => {

@@ -355,4 +355,19 @@ describe("startUploads (real runUpload + defaultUploadDeps, mocked sdk client/qu
 		expect(transfers).toHaveLength(2)
 		expect(transfers.every(transfer => transfer.status === "done")).toBe(true)
 	})
+
+	// Proves progress survives the real defaultUploadDeps wiring — sdk/client.ts's onProgress crosses
+	// through Comlink.proxy (upload.ts) before reaching this mocked uploadFile, so invoking the proxied
+	// callback here and observing the REAL store exercises that wrap, not just the injected-deps harness
+	// runUpload's own describe block already covers above.
+	it("delivers progress through the Comlink.proxy wrap into the real transfers store", async () => {
+		uploadFile.mockImplementation((_parentUuid: string | null, _file: File, onProgress: (bytes: bigint) => void) => {
+			onProgress(512n) // leading edge -> throttle forwards it synchronously
+			return Promise.resolve(mockSdkFile())
+		})
+
+		await startUploads([mockBrowserFile("a.txt", 1_024)], null)
+
+		expect(useTransfersStore.getState().transfers[0]?.bytesTransferred).toBe(512)
+	})
 })

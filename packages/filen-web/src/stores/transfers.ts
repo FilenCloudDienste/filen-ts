@@ -60,8 +60,9 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 // Plain, testable aggregate math — mirrors fetchDirectoryListing/useDirectoryListingQuery's split
 // (queries/drive.ts): the hook below is a one-line wrapper this project's node-environment unit
 // tests can't render (no DOM — see vitest.config.ts), so the math itself is exported and unit-tested
-// directly against plain Transfer arrays. `percent` is the raw 0..1 ratio (summed transferred /
-// summed size across active rows), not a 0-100 scale — a consumer multiplies by 100 for display.
+// directly against plain Transfer arrays. `percent` is already scaled 0-100 (summed transferred /
+// summed size across active rows, times 100) — a consumer feeds it straight into a progress bar,
+// never multiplies again.
 export function computeTransfersAggregate(transfers: Transfer[]): { activeCount: number; percent: number } {
 	let activeCount = 0
 	let transferred = 0
@@ -77,14 +78,15 @@ export function computeTransfersAggregate(transfers: Transfer[]): { activeCount:
 		total += transfer.size
 	}
 
-	return { activeCount, percent: activeCount === 0 || total === 0 ? 0 : transferred / total }
+	return { activeCount, percent: activeCount === 0 || total === 0 ? 0 : (transferred / total) * 100 }
 }
 
 // Selector hook, not a plain accessor — React-Compiler standing constraint: a component reads this
 // store through a selector hook returning primitives/stable refs, never `.getState()` in render.
 // useShallow keeps the returned object's IDENTITY stable across renders where neither field actually
 // changed (mirrors directory-listing.tsx's own useShallow(state => state.selectedItems)), since
-// computeTransfersAggregate otherwise returns a brand-new object on every store update.
+// computeTransfersAggregate otherwise returns a brand-new object on every store update. `percent` is
+// 0-100, ready to feed straight into a progress bar — not a 0..1 ratio.
 export function useTransfersAggregate(): { activeCount: number; percent: number } {
 	return useTransfersStore(useShallow(state => computeTransfersAggregate(state.transfers)))
 }
