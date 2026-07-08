@@ -36,6 +36,19 @@ export const contacts = {
 	/** Contacts page — search input placeholder */
 	contactsSearchPlaceholder: "Search contacts",
 
+	// ── Bulk selection ───────────────────────────────────────────────────────
+	// List toolbar — mirrors filen-mobile's contactsHeader.tsx bulk mode: a selection toggle replaces
+	// the search box with a "N selected" bar and per-section bulk actions (see the Row / bulk action
+	// labels below, reused verbatim as the bulk buttons' own labels).
+	/** List toolbar — button that turns on bulk-selection mode (rows become selectable; replaces search while active) */
+	contactsActionSelect: "Select",
+	/** Bulk-selection toolbar — accessible label on the button that clears the selection and exits selection mode */
+	contactsCommandClearSelection: "Clear selection",
+	/** Bulk-selection toolbar — total selected row count across every section, singular */
+	contactsSelectionCount_one: "{{count}} selected",
+	/** Bulk-selection toolbar — total selected row count across every section, plural */
+	contactsSelectionCount_other: "{{count}} selected",
+
 	// ── Presence ─────────────────────────────────────────────────────────────
 	/** Contact row — visually-hidden label announcing a contact's online-presence indicator */
 	contactsPresenceOnline: "Online",
@@ -54,6 +67,10 @@ export const contacts = {
 	contactsAddEmailPlaceholder: "you@example.com",
 	/** Add-contact dialog — validation message shown when the typed address is not a valid email */
 	contactsAddInvalidEmail: "Enter a valid email address",
+
+	// ── Row menu ─────────────────────────────────────────────────────────────
+	/** Contact row — accessible label on the trailing "More actions" (⋯) menu trigger (Remove/Block) */
+	contactsRowMenuTrigger: "More actions",
 
 	// ── Row / bulk action labels ─────────────────────────────────────────────
 	// Imperative verbs, not state descriptions — same rule as drive.ts's item-menu entries. Each

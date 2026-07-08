@@ -1,12 +1,43 @@
 import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { SearchIcon, UsersIcon } from "lucide-react"
+import { SearchIcon, UsersIcon, ListChecksIcon } from "lucide-react"
+import { toast } from "sonner"
+import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import { useContactsQuery, useContactRequestsQuery } from "@/queries/contacts"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { type ContactsKey } from "@/lib/i18n"
 import { buildContactSections, type ContactSection } from "@/components/contacts/contacts-list.logic"
-import { ContactRow, ContactRequestRow, BlockedContactRow } from "@/components/contacts/contact-row"
+import {
+	acceptRequest,
+	denyRequest,
+	cancelRequest,
+	removeContact,
+	blockContact,
+	unblockContact,
+	runContactsBulk,
+	type VoidActionOutcome
+} from "@/lib/contacts/actions"
+import { toastContactsBulkOutcome } from "@/lib/contacts/bulk-toast"
+import {
+	EMPTY_CONTACT_SELECTION,
+	toggleContactSelection,
+	removeFromContactSelection,
+	type ContactSelection,
+	type ContactSectionKey
+} from "@/lib/contacts/selection"
+import {
+	ContactRow,
+	ContactRequestRow,
+	BlockedContactRow,
+	IncomingRequestActions,
+	OutgoingRequestActions,
+	ContactActions,
+	BlockedActions
+} from "@/components/contacts/contact-row"
+import { AddContactDialog } from "@/components/contacts/add-contact-dialog"
+import { ContactsBulkBar } from "@/components/contacts/contacts-bulk-bar"
+import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -21,50 +52,31 @@ const SECTION_HEADER_KEY: Record<ContactSection["key"], ContactsKey> = {
 
 const SKELETON_ROW_COUNT = 6
 
-// One row per section item, dispatched on the section's own key — the key already discriminates
-// `items`' concrete type (see contacts-list.logic.ts's ContactSection), so no per-item type tag is
-// needed the way mobile's flat single-list rendering requires one. The trailing action slot on every
-// row renders nothing yet.
-function renderSectionItems(section: ContactSection): ReactNode {
-	switch (section.key) {
-		case "requests":
-			return section.items.map(request => (
-				<ContactRequestRow
-					key={request.uuid}
-					request={request}
-				/>
-			))
-		case "pending":
-			return section.items.map(request => (
-				<ContactRequestRow
-					key={request.uuid}
-					request={request}
-				/>
-			))
-		case "contacts":
-			return section.items.map(contact => (
-				<ContactRow
-					key={contact.uuid}
-					contact={contact}
-				/>
-			))
-		case "blocked":
-			return section.items.map(blocked => (
-				<BlockedContactRow
-					key={blocked.uuid}
-					contact={blocked}
-				/>
-			))
-	}
-}
+// The listing-level confirm-dialog host's own state shape — mirrors directory-listing.tsx's
+// ActiveDialog{kind,items}, widened with a `bulk` flag: every kind here can be reached either from a
+// single row's own action (bulk: false, a 1-length items array) or from the bulk bar (bulk: true,
+// the whole gated section selection) — same dialog, same title/body (the count just interpolates),
+// only the confirm handler's run-single-vs-run-bulk branch differs. Accept has no dialog kind: it
+// never confirms (mirrors mobile), so it never reaches this host.
+type ActiveContactDialog =
+	| { kind: "deny"; bulk: boolean; items: ContactRequestIn[] }
+	| { kind: "cancel"; bulk: boolean; items: ContactRequestOut[] }
+	| { kind: "remove"; bulk: boolean; items: Contact[] }
+	| { kind: "block"; bulk: boolean; items: Contact[] }
+	| { kind: "unblock"; bulk: boolean; items: BlockedContact[] }
 
-// Owns both contacts queries, the search box's local state, and the whole status-branch (loading
-// skeleton / load-error / empty / sectioned list) — mirrors DirectoryListing's own self-contained
-// shape (route files stay thin; the content component owns its data). The add-contact trigger and
-// every per-row action are a later task's concern — this renders the list, the rows, and search only.
+// Owns both contacts queries, the search box's local state, bulk-selection mode, and the whole
+// status-branch (loading skeleton / load-error / empty / sectioned list) — mirrors DirectoryListing's
+// own self-contained shape (route files stay thin; the content component owns its data + its dialog
+// host).
 export function ContactsList() {
 	const { t } = useTranslation(["contacts", "common"])
 	const [search, setSearch] = useState("")
+	const [selectMode, setSelectMode] = useState(false)
+	const [selection, setSelection] = useState<ContactSelection>(EMPTY_CONTACT_SELECTION)
+	const [activeDialog, setActiveDialog] = useState<ActiveContactDialog | null>(null)
+	const [dialogPending, setDialogPending] = useState(false)
+
 	const contactsQuery = useContactsQuery()
 	const requestsQuery = useContactRequestsQuery()
 
@@ -75,11 +87,16 @@ export function ContactsList() {
 	const queryError =
 		contactsQuery.status === "error" ? contactsQuery.error : requestsQuery.status === "error" ? requestsQuery.error : null
 
+	const contactsData = contactsQuery.data?.contacts ?? []
+	const blockedData = contactsQuery.data?.blocked ?? []
+	const incomingData = requestsQuery.data?.incoming ?? []
+	const outgoingData = requestsQuery.data?.outgoing ?? []
+
 	const sections = buildContactSections({
-		contacts: contactsQuery.data?.contacts ?? [],
-		blocked: contactsQuery.data?.blocked ?? [],
-		incoming: requestsQuery.data?.incoming ?? [],
-		outgoing: requestsQuery.data?.outgoing ?? [],
+		contacts: contactsData,
+		blocked: blockedData,
+		incoming: incomingData,
+		outgoing: outgoingData,
 		search
 	})
 
@@ -88,28 +105,462 @@ export function ContactsList() {
 		void requestsQuery.refetch()
 	}
 
+	function closeActiveDialog(): void {
+		setActiveDialog(null)
+	}
+
+	function toggleSelect(section: ContactSectionKey, uuid: string): void {
+		setSelection(prev => toggleContactSelection(prev, section, uuid))
+	}
+
+	function pruneSelection(section: ContactSectionKey, uuids: string[]): void {
+		if (uuids.length === 0) {
+			return
+		}
+
+		setSelection(prev => removeFromContactSelection(prev, section, uuids))
+	}
+
+	function exitSelectMode(): void {
+		setSelectMode(false)
+		setSelection(EMPTY_CONTACT_SELECTION)
+	}
+
+	// No confirm (mirrors mobile) — silent success, LABEL-FIRST toast on failure, matching every
+	// other singular contact action's convention (see runSingleDialogAction below).
+	async function handleAccept(request: ContactRequestIn): Promise<void> {
+		const outcome = await acceptRequest(request.uuid)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+		}
+	}
+
+	async function handleBulkAccept(items: ContactRequestIn[]): Promise<void> {
+		const outcome = await runContactsBulk(items, request => acceptRequest(request.uuid))
+		toastContactsBulkOutcome(outcome)
+		pruneSelection(
+			"requests",
+			outcome.succeeded.map(request => request.uuid)
+		)
+	}
+
+	// Shared tail for a per-row single confirm: run the singular action helper, close silently on
+	// success, toast + stay open (so the user can retry) on failure — mirrors directory-listing.tsx's
+	// rename handler, the closest single-item (non-bulk-shaped) precedent there.
+	async function runSingleDialogAction<T>(item: T, op: (item: T) => Promise<VoidActionOutcome>): Promise<void> {
+		setDialogPending(true)
+		const outcome = await op(item)
+		setDialogPending(false)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+			return
+		}
+
+		closeActiveDialog()
+	}
+
+	// Shared tail for a bulk confirm: run every item independently via runContactsBulk, always close
+	// (the toast conveys any partial failure), and prune succeeded uuids from the selection — mirrors
+	// directory-listing.tsx's runBulkDialogAction.
+	async function runBulkDialogAction<T>(
+		section: ContactSectionKey,
+		items: T[],
+		op: (item: T) => Promise<VoidActionOutcome>,
+		uuidOf: (item: T) => string
+	): Promise<void> {
+		setDialogPending(true)
+		const outcome = await runContactsBulk(items, op)
+		setDialogPending(false)
+		closeActiveDialog()
+		toastContactsBulkOutcome(outcome)
+		pruneSelection(section, outcome.succeeded.map(uuidOf))
+	}
+
+	// One instance of whichever dialog is active, switching on activeDialog.kind — never more than one
+	// mounted at a time. Only remove/block render `destructive` (the locale catalog's own doc
+	// comments: deny/cancel/unblock never are, despite mobile flagging deny/cancel that way).
+	function renderActiveDialog(): ReactNode {
+		if (!activeDialog) {
+			return null
+		}
+
+		switch (activeDialog.kind) {
+			case "deny": {
+				const { items, bulk } = activeDialog
+
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("contactsDenyConfirmTitle")}
+						body={t("contactsDenyConfirmBody", { count: items.length })}
+						confirmLabel={t("contactsActionDeny")}
+						cancelLabel={t("common:cancel")}
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							if (bulk) {
+								void runBulkDialogAction(
+									"requests",
+									items,
+									request => denyRequest(request.uuid),
+									request => request.uuid
+								)
+								return
+							}
+
+							const item = items[0]
+
+							if (!item) {
+								return
+							}
+
+							void runSingleDialogAction(item, request => denyRequest(request.uuid))
+						}}
+					/>
+				)
+			}
+			case "cancel": {
+				const { items, bulk } = activeDialog
+
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("contactsCancelConfirmTitle")}
+						body={t("contactsCancelConfirmBody", { count: items.length })}
+						confirmLabel={t("contactsActionCancelRequest")}
+						cancelLabel={t("common:cancel")}
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							if (bulk) {
+								void runBulkDialogAction(
+									"pending",
+									items,
+									request => cancelRequest(request.uuid),
+									request => request.uuid
+								)
+								return
+							}
+
+							const item = items[0]
+
+							if (!item) {
+								return
+							}
+
+							void runSingleDialogAction(item, request => cancelRequest(request.uuid))
+						}}
+					/>
+				)
+			}
+			case "remove": {
+				const { items, bulk } = activeDialog
+
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("contactsRemoveConfirmTitle")}
+						body={t("contactsRemoveConfirmBody", { count: items.length })}
+						confirmLabel={t("contactsActionRemove")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							if (bulk) {
+								void runBulkDialogAction(
+									"contacts",
+									items,
+									contact => removeContact(contact.uuid),
+									contact => contact.uuid
+								)
+								return
+							}
+
+							const item = items[0]
+
+							if (!item) {
+								return
+							}
+
+							void runSingleDialogAction(item, contact => removeContact(contact.uuid))
+						}}
+					/>
+				)
+			}
+			case "block": {
+				const { items, bulk } = activeDialog
+
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("contactsBlockConfirmTitle")}
+						body={t("contactsBlockConfirmBody", { count: items.length })}
+						confirmLabel={t("contactsActionBlock")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							if (bulk) {
+								void runBulkDialogAction(
+									"contacts",
+									items,
+									contact => blockContact(contact),
+									contact => contact.uuid
+								)
+								return
+							}
+
+							const item = items[0]
+
+							if (!item) {
+								return
+							}
+
+							void runSingleDialogAction(item, contact => blockContact(contact))
+						}}
+					/>
+				)
+			}
+			case "unblock": {
+				const { items, bulk } = activeDialog
+
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("contactsUnblockConfirmTitle")}
+						body={t("contactsUnblockConfirmBody", { count: items.length })}
+						confirmLabel={t("contactsActionUnblock")}
+						cancelLabel={t("common:cancel")}
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							if (bulk) {
+								void runBulkDialogAction(
+									"blocked",
+									items,
+									contact => unblockContact(contact.uuid),
+									contact => contact.uuid
+								)
+								return
+							}
+
+							const item = items[0]
+
+							if (!item) {
+								return
+							}
+
+							void runSingleDialogAction(item, contact => unblockContact(contact.uuid))
+						}}
+					/>
+				)
+			}
+		}
+	}
+
+	// One row per section item, dispatched on the section's own key — the key already discriminates
+	// `items`' concrete type (see contacts-list.logic.ts's ContactSection), so no per-item type tag is
+	// needed the way mobile's flat single-list rendering requires one. In bulk-selection mode every row
+	// becomes a selectable option instead (see contact-row.tsx's ContactRowShell) and the trailing
+	// action slot is left empty — the bulk bar replaces the per-row actions entirely.
+	function renderSectionItems(section: ContactSection): ReactNode {
+		switch (section.key) {
+			case "requests":
+				return section.items.map(request => (
+					<ContactRequestRow
+						key={request.uuid}
+						request={request}
+						selected={selectMode ? selection.requests.has(request.uuid) : undefined}
+						onToggleSelect={
+							selectMode
+								? () => {
+										toggleSelect("requests", request.uuid)
+									}
+								: undefined
+						}
+					>
+						{!selectMode ? (
+							<IncomingRequestActions
+								request={request}
+								onAccept={item => {
+									void handleAccept(item)
+								}}
+								onDeny={item => {
+									setActiveDialog({ kind: "deny", bulk: false, items: [item] })
+								}}
+							/>
+						) : null}
+					</ContactRequestRow>
+				))
+			case "pending":
+				return section.items.map(request => (
+					<ContactRequestRow
+						key={request.uuid}
+						request={request}
+						selected={selectMode ? selection.pending.has(request.uuid) : undefined}
+						onToggleSelect={
+							selectMode
+								? () => {
+										toggleSelect("pending", request.uuid)
+									}
+								: undefined
+						}
+					>
+						{!selectMode ? (
+							<OutgoingRequestActions
+								request={request}
+								onCancel={item => {
+									setActiveDialog({ kind: "cancel", bulk: false, items: [item] })
+								}}
+							/>
+						) : null}
+					</ContactRequestRow>
+				))
+			case "contacts":
+				return section.items.map(contact => (
+					<ContactRow
+						key={contact.uuid}
+						contact={contact}
+						selected={selectMode ? selection.contacts.has(contact.uuid) : undefined}
+						onToggleSelect={
+							selectMode
+								? () => {
+										toggleSelect("contacts", contact.uuid)
+									}
+								: undefined
+						}
+					>
+						{!selectMode ? (
+							<ContactActions
+								contact={contact}
+								onRemove={item => {
+									setActiveDialog({ kind: "remove", bulk: false, items: [item] })
+								}}
+								onBlock={item => {
+									setActiveDialog({ kind: "block", bulk: false, items: [item] })
+								}}
+							/>
+						) : null}
+					</ContactRow>
+				))
+			case "blocked":
+				return section.items.map(blocked => (
+					<BlockedContactRow
+						key={blocked.uuid}
+						contact={blocked}
+						selected={selectMode ? selection.blocked.has(blocked.uuid) : undefined}
+						onToggleSelect={
+							selectMode
+								? () => {
+										toggleSelect("blocked", blocked.uuid)
+									}
+								: undefined
+						}
+					>
+						{!selectMode ? (
+							<BlockedActions
+								contact={blocked}
+								onUnblock={item => {
+									setActiveDialog({ kind: "unblock", bulk: false, items: [item] })
+								}}
+							/>
+						) : null}
+					</BlockedContactRow>
+				))
+		}
+	}
+
 	return (
 		<>
 			<header className="flex h-14 shrink-0 items-center border-b border-border px-4">
 				<h1 className="text-sm font-medium">{t("common:moduleContacts")}</h1>
 			</header>
-			<div className="flex h-12 shrink-0 items-center border-b border-border px-4">
-				<div className="relative w-full max-w-xs">
-					<SearchIcon
-						aria-hidden="true"
-						className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-					/>
-					<Input
-						type="search"
-						aria-label={t("contactsSearchPlaceholder")}
-						placeholder={t("contactsSearchPlaceholder")}
-						value={search}
-						onChange={event => {
-							setSearch(event.target.value)
+			<div className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border px-4">
+				{selectMode ? (
+					<ContactsBulkBar
+						requests={incomingData}
+						pending={outgoingData}
+						contacts={contactsData}
+						blocked={blockedData}
+						selection={selection}
+						onClear={exitSelectMode}
+						onAccept={items => {
+							void handleBulkAccept(items)
 						}}
-						className="pl-8"
+						onDeny={items => {
+							setActiveDialog({ kind: "deny", bulk: true, items })
+						}}
+						onCancel={items => {
+							setActiveDialog({ kind: "cancel", bulk: true, items })
+						}}
+						onRemove={items => {
+							setActiveDialog({ kind: "remove", bulk: true, items })
+						}}
+						onBlock={items => {
+							setActiveDialog({ kind: "block", bulk: true, items })
+						}}
+						onUnblock={items => {
+							setActiveDialog({ kind: "unblock", bulk: true, items })
+						}}
 					/>
-				</div>
+				) : (
+					<>
+						<div className="relative max-w-xs flex-1">
+							<SearchIcon
+								aria-hidden="true"
+								className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+							/>
+							<Input
+								type="search"
+								aria-label={t("contactsSearchPlaceholder")}
+								placeholder={t("contactsSearchPlaceholder")}
+								value={search}
+								onChange={event => {
+									setSearch(event.target.value)
+								}}
+								className="pl-8"
+							/>
+						</div>
+						<div className="flex shrink-0 items-center gap-2">
+							<AddContactDialog />
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={isPending || queryError !== null || sections.length === 0}
+								onClick={() => {
+									setSelectMode(true)
+								}}
+							>
+								<ListChecksIcon aria-hidden="true" />
+								{t("contactsActionSelect")}
+							</Button>
+						</div>
+					</>
+				)}
 			</div>
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 				{isPending ? (
@@ -166,6 +617,7 @@ export function ContactsList() {
 					</div>
 				)}
 			</div>
+			{renderActiveDialog()}
 		</>
 	)
 }
