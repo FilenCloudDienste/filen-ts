@@ -1,8 +1,9 @@
 import { FileIcon, FolderIcon, type LucideIcon } from "lucide-react"
-import { type DriveItem } from "@/lib/drive/item"
+import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 
 // Placeholder seam: every item resolves to one of two generic icons today. A later preview slice
-// wires per-extension icons from src/assets/file-icons/ behind this same signature.
+// wires per-extension icons from src/assets/file-icons/ behind this same signature. A shared
+// directory reads as a directory, a shared file as a file (asDirectoryOrFile).
 export function fileIconFor(item: DriveItem): LucideIcon {
-	return item.type === "directory" ? FolderIcon : FileIcon
+	return asDirectoryOrFile(item).type === "directory" ? FolderIcon : FileIcon
 }

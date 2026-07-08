@@ -2,10 +2,11 @@ import { type, type Type } from "arktype"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { type DriveSortBy } from "@/lib/drive/sort"
 
-// The four listing surfaces sort/view-mode preferences apply to — the NormalDirsAndFiles roots
-// (My Drive, recents, favorites, trash). sharedIn/sharedOut/links carry a different item shape
-// entirely and are not part of this surface yet.
-export type DriveVariant = "drive" | "recents" | "favorites" | "trash"
+// The listing surfaces sort/view-mode preferences apply to — the NormalDirsAndFiles roots (My
+// Drive, recents, favorites, trash) plus the two shared roots (sharedIn/sharedOut), which carry the
+// widened DriveItem shape (see lib/drive/item.ts). links carry a different item shape entirely and
+// are not part of this surface yet.
+export type DriveVariant = "drive" | "recents" | "favorites" | "trash" | "sharedIn" | "sharedOut"
 
 // Minimal location a preference is scoped to: which listing surface, and (for "drive") which
 // directory within it. `uuid` is null for the three flat listings and for My Drive's own root.

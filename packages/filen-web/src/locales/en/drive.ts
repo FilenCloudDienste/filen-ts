@@ -32,6 +32,10 @@ export const drive = {
 	driveFavorites: "Favorites",
 	/** Drive sidebar — item for trashed files and directories */
 	driveTrash: "Trash",
+	/** Drive breadcrumb — root label for the items other users share with you */
+	driveSharedIn: "Shared with me",
+	/** Drive breadcrumb — root label for the items you share with other users */
+	driveSharedOut: "Shared with others",
 
 	// ── Empty state ──────────────────────────────────────────────────────────
 	/** Drive page — empty-state title for a directory with no content */

@@ -2,8 +2,16 @@ import { beforeEach, describe, expect, it } from "vitest"
 // Whole-statement `import type` (not the usual inline `type` keyword — see queries/drive.ts): the
 // inline form doesn't reliably elide under vitest for this package, and a non-elided import drags
 // in the wasm-bindgen worker glue (references `self`, undefined under Node).
-import type { Dir, UuidStr } from "@filen/sdk-rs"
-import { cacheDirs, clearDirectoryCache, evictDirs, getCachedDir, getCachedName } from "@/lib/drive/cache"
+import type { Dir, UuidStr, SharedRootDir, SharingRole } from "@filen/sdk-rs"
+import {
+	cacheDirs,
+	cacheSharedDirContext,
+	clearDirectoryCache,
+	evictDirs,
+	getCachedDir,
+	getCachedName,
+	getSharedDirContext
+} from "@/lib/drive/cache"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
 // readable test label into a shape that satisfies it, mirroring drive.test.ts's own uuid fixtures.
@@ -147,5 +155,54 @@ describe("evictDirs", () => {
 		expect(() => {
 			evictDirs([testUuid("never-cached")])
 		}).not.toThrow()
+	})
+})
+
+function sharerRole(id: number, email: string): SharingRole {
+	return { Sharer: { email, id } }
+}
+
+function mockSharedRootDir(uuid: UuidStr, role: SharingRole): SharedRootDir {
+	return {
+		inner: { uuid, color: "default", timestamp: 1_700_000_000_000n, meta: { type: "decoded", data: { name: "SharedRoot" } } },
+		sharingRole: role,
+		writeAccess: true
+	}
+}
+
+describe("shared-dir context cache", () => {
+	it("returns undefined for a uuid that was never cached", () => {
+		expect(getSharedDirContext(testUuid("missing"))).toBeUndefined()
+	})
+
+	it("stores the dir handle and role, retrievable by uuid", () => {
+		const uuid = testUuid("shared")
+		const role = sharerRole(42, "sharer@filen.io")
+		const dir = mockSharedRootDir(uuid, role)
+
+		cacheSharedDirContext(uuid, { dir, role })
+
+		expect(getSharedDirContext(uuid)).toEqual({ dir, role })
+	})
+
+	it("re-caching the same uuid overwrites the stale context", () => {
+		const uuid = testUuid("shared")
+		const roleA = sharerRole(1, "a@filen.io")
+		const roleB = sharerRole(2, "b@filen.io")
+
+		cacheSharedDirContext(uuid, { dir: mockSharedRootDir(uuid, roleA), role: roleA })
+		cacheSharedDirContext(uuid, { dir: mockSharedRootDir(uuid, roleB), role: roleB })
+
+		expect(getSharedDirContext(uuid)?.role).toEqual(roleB)
+	})
+
+	it("clearDirectoryCache empties the shared-dir context map too (session isolation)", () => {
+		const uuid = testUuid("shared")
+		const role = sharerRole(42, "sharer@filen.io")
+		cacheSharedDirContext(uuid, { dir: mockSharedRootDir(uuid, role), role })
+
+		clearDirectoryCache()
+
+		expect(getSharedDirContext(uuid)).toBeUndefined()
 	})
 })

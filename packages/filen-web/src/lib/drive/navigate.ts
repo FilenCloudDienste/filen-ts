@@ -1,4 +1,4 @@
-import { type DriveItem } from "@/lib/drive/item"
+import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
 
 export interface DriveNavigationTarget {
@@ -26,7 +26,9 @@ export function splatToUuids(splat: string): string[] {
 // once drivePath.type === "trash") — a trashed directory's contents are never browsable, so this
 // returns null rather than a splat target the other variants get.
 export function resolveDriveNavigationTarget(item: DriveItem, variant: DriveVariant, currentSplat: string): DriveNavigationTarget | null {
-	if (item.type !== "directory") {
+	// A shared directory is navigable too (browsing into a nested share), so directory-vs-file routes
+	// through asDirectoryOrFile — else descending into a shared-dir would be rejected as a non-directory.
+	if (asDirectoryOrFile(item).type !== "directory") {
 		return null
 	}
 

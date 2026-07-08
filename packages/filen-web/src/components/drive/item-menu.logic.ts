@@ -12,7 +12,7 @@ import {
 	RotateCcwIcon,
 	type LucideIcon
 } from "lucide-react"
-import { type DriveItem } from "@/lib/drive/item"
+import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
 import { type DriveKey } from "@/lib/i18n"
 
@@ -104,7 +104,7 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 		return [INFO, TRASH]
 	}
 
-	const typeSpecific = item.type === "directory" ? COLOR : VERSIONS
+	const typeSpecific = asDirectoryOrFile(item).type === "directory" ? COLOR : VERSIONS
 
 	return [RENAME, MOVE, favoriteDescriptor(item), typeSpecific, INFO, PUBLIC_LINK, COPY_LINK, TRASH]
 }

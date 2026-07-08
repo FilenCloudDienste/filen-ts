@@ -1,7 +1,7 @@
 // Whole-statement `import type` (not the usual inline `type` keyword — see queries/drive.ts): the
 // inline form doesn't reliably elide under vitest for this package, and a non-elided import drags
 // in the wasm-bindgen worker glue (references `self`, undefined under Node).
-import type { Dir } from "@filen/sdk-rs"
+import type { Dir, AnySharedDir, SharingRole } from "@filen/sdk-rs"
 
 // In-memory only — persistence is deferred. Imported into sdk.worker.ts (the only place that calls
 // listDir/createDir/getDirOptional), so population and cache-first reads live right next to the SDK
@@ -12,6 +12,17 @@ import type { Dir } from "@filen/sdk-rs"
 // never sees a prior account's directories.
 const dirsByUuid = new Map<string, Dir>()
 const namesByUuid = new Map<string, string>()
+
+// The raw shared-dir handle plus the role under which it was reached — the two arguments
+// listSharedDir needs. A nested shared listing (browsing into a shared directory by uuid) resolves
+// its target through this, the same cache-first way listDirectory's uuid case resolves a normal dir:
+// every shared listing populates it with the dirs it returned, so descending into one costs no extra
+// round trip. A SharedDir carries no own role, so the parent's role is stored alongside it.
+interface SharedDirContext {
+	dir: AnySharedDir
+	role: SharingRole
+}
+const sharedDirContextByUuid = new Map<string, SharedDirContext>()
 
 function extractName(dir: Dir): string | undefined {
 	return dir.meta.type === "decoded" ? dir.meta.data.name : undefined
@@ -42,9 +53,21 @@ export function cacheDirs(dirs: readonly Dir[]): void {
 	}
 }
 
+// Records the handle+role a shared dir was reached under so a later listing keyed by its uuid can
+// resolve it. `uuid` is the underlying dir's own uuid (SharedRootDir.inner.uuid / SharedDir.inner.uuid),
+// the same value a nested-listing target carries.
+export function cacheSharedDirContext(uuid: string, context: SharedDirContext): void {
+	sharedDirContextByUuid.set(uuid, context)
+}
+
+export function getSharedDirContext(uuid: string): SharedDirContext | undefined {
+	return sharedDirContextByUuid.get(uuid)
+}
+
 export function clearDirectoryCache(): void {
 	dirsByUuid.clear()
 	namesByUuid.clear()
+	sharedDirContextByUuid.clear()
 }
 
 // Removes a batch of uuids from both maps — the delete-side counterpart to cacheDirs. Exported for

@@ -13,7 +13,9 @@ const VARIANT_ROOT_LABEL_KEY = {
 	drive: "driveMyDrive",
 	recents: "driveRecents",
 	favorites: "driveFavorites",
-	trash: "driveTrash"
+	trash: "driveTrash",
+	sharedIn: "driveSharedIn",
+	sharedOut: "driveSharedOut"
 } as const satisfies Record<DriveVariant, string>
 
 const CRUMB_LINK_CLASS = "text-muted-foreground hover:text-foreground hover:underline"

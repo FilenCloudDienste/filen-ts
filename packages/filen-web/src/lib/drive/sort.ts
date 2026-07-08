@@ -1,5 +1,5 @@
 import { parseNumbersFromString } from "@filen/utils"
-import { type DriveItem } from "@/lib/drive/item"
+import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 
 // Field x direction. "type" groups files by MIME (directories have none, so they fall back to
 // name — see typeSortKey); the other fields are self-explanatory. Recents forces uploadDateDesc
@@ -144,7 +144,8 @@ function nameSortKey(item: DriveItem): string {
 // — so ties (many files sharing a MIME) are broken by name before the uuid chain (tiebreakByName
 // on the sort mode below).
 function typeSortKey(item: DriveItem): string {
-	return item.type === "file" ? (item.data.decryptedMeta?.mime ?? item.data.decryptedMeta?.name ?? item.data.uuid) : nameSortKey(item)
+	const base = asDirectoryOrFile(item)
+	return base.type === "file" ? (base.data.decryptedMeta?.mime ?? base.data.decryptedMeta?.name ?? base.data.uuid) : nameSortKey(item)
 }
 
 // Both Dir and File carry a native, server-assigned `timestamp` — the upload time — directly, so
@@ -155,10 +156,11 @@ function uploadDateSortKey(item: DriveItem): number {
 }
 
 function lastModifiedSortKey(item: DriveItem): number {
+	const base = asDirectoryOrFile(item)
 	return Number(
-		item.type === "file"
-			? (item.data.decryptedMeta?.modified ?? item.data.timestamp)
-			: (item.data.decryptedMeta?.created ?? item.data.timestamp)
+		base.type === "file"
+			? (base.data.decryptedMeta?.modified ?? base.data.timestamp)
+			: (base.data.decryptedMeta?.created ?? base.data.timestamp)
 	)
 }
 
@@ -246,7 +248,7 @@ function sortPartition(partition: DriveItem[], mode: SortMode, directorySizes?: 
 			// @/lib/drive/item) — substitute the caller's display-cache value when provided. Values
 			// arrive as integral byte counts; guard the BigInt conversion anyway (BigInt(NaN/fraction)
 			// throws).
-			const known = directorySizes && item.type === "directory" ? directorySizes.get(item.data.uuid) : undefined
+			const known = directorySizes && asDirectoryOrFile(item).type === "directory" ? directorySizes.get(item.data.uuid) : undefined
 
 			// Sizes stay bigint end-to-end: Number() conversion would collapse values that differ
 			// beyond 2^53.
@@ -374,7 +376,7 @@ export function sortDriveItems(items: DriveItem[], sortBy: DriveSortBy, director
 	const files: DriveItem[] = []
 
 	for (const item of items) {
-		if (item.type === "directory") {
+		if (asDirectoryOrFile(item).type === "directory") {
 			dirs.push(item)
 		} else {
 			files.push(item)

@@ -1,10 +1,12 @@
 import { formatBytes } from "@filen/utils"
-import type { DriveItem } from "@/lib/drive/item"
+import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 
 // Directories carry no real size on the item itself (synthetic 0n — see narrowItem in
-// @/lib/drive/item), so the size column is blank for them rather than showing "0 B".
+// @/lib/drive/item), so the size column is blank for them rather than showing "0 B". A shared file
+// reads as a file, a shared directory as a directory (asDirectoryOrFile).
 export function formatItemSize(item: DriveItem): string {
-	return item.type === "file" ? formatBytes(Number(item.data.size)) : ""
+	const base = asDirectoryOrFile(item)
+	return base.type === "file" ? formatBytes(Number(base.data.size)) : ""
 }
 
 function formatTimestamp(timestamp: bigint): string {
@@ -12,12 +14,15 @@ function formatTimestamp(timestamp: bigint): string {
 }
 
 // Mirrors sort.ts's lastModifiedSortKey field resolution exactly, so the displayed date always
-// matches what sorting by "last modified" actually orders by.
+// matches what sorting by "last modified" actually orders by. Routed through asDirectoryOrFile so a
+// file arm's decryptedMeta (with `modified`) and a directory arm's (with `created`) each resolve
+// against the correctly-typed meta, shared arms included.
 export function formatModifiedDate(item: DriveItem): string {
+	const base = asDirectoryOrFile(item)
 	const timestamp =
-		item.type === "file"
-			? (item.data.decryptedMeta?.modified ?? item.data.timestamp)
-			: (item.data.decryptedMeta?.created ?? item.data.timestamp)
+		base.type === "file"
+			? (base.data.decryptedMeta?.modified ?? base.data.timestamp)
+			: (base.data.decryptedMeta?.created ?? base.data.timestamp)
 
 	return formatTimestamp(timestamp)
 }

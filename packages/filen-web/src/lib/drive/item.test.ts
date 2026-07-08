@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, UuidStr } from "@filen/sdk-rs"
-import { keepAgainstIncomingDriveItem, narrowItem, upsertDriveItem, type DriveItem } from "@/lib/drive/item"
+import type { Dir, File, UuidStr, SharedDir, SharedRootDir, SharedFile, SharingRole } from "@filen/sdk-rs"
+import {
+	asDirectoryOrFile,
+	getSharerIdentity,
+	keepAgainstIncomingDriveItem,
+	narrowItem,
+	upsertDriveItem,
+	type DriveItem
+} from "@/lib/drive/item"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
 // readable test label into a shape that satisfies it, mirroring queries/drive.test.ts's own fixture.
@@ -240,5 +247,234 @@ describe("DriveItem.data assignability to the plain SDK shapes the worker's acti
 		const asWorkerParam: File = item.data
 
 		expect(asWorkerParam.uuid).toBe(item.data.uuid)
+	})
+})
+
+function sharerRole(id: number, email: string): SharingRole {
+	return { Sharer: { email, id } }
+}
+
+function receiverRole(id: number, email: string): SharingRole {
+	return { Receiver: { email, id } }
+}
+
+// The uniffi-style runtime shape the .d.ts doesn't model ({ tag, inner: [ShareInfo] }) — cast in so
+// shareInfoFromRole's dual-surface read can be exercised against a SharingRole-typed value.
+function runtimeRole(id: number, email: string): SharingRole {
+	return { tag: "Sharer", inner: [{ email, id }] } as unknown as SharingRole
+}
+
+function mockSharedRootDir(overrides: Partial<SharedRootDir> = {}): SharedRootDir {
+	return {
+		inner: {
+			uuid: testUuid("sroot"),
+			color: "default",
+			timestamp: 1_700_000_000_000n,
+			meta: { type: "decoded", data: { name: "SharedRoot" } }
+		},
+		sharingRole: sharerRole(42, "sharer@filen.io"),
+		writeAccess: true,
+		...overrides
+	}
+}
+
+function mockSharedDir(overrides: Partial<SharedDir> = {}): SharedDir {
+	return {
+		inner: mockDir({ uuid: testUuid("sdir"), meta: { type: "decoded", data: { name: "SharedChild" } } }),
+		sharedTag: true,
+		...overrides
+	}
+}
+
+function mockSharedFile(overrides: Partial<SharedFile> = {}): SharedFile {
+	return {
+		uuid: testUuid("sfile"),
+		size: 2_048n,
+		region: "de-1",
+		bucket: "filen-1",
+		chunks: 2n,
+		timestamp: 1_700_000_000_000n,
+		meta: {
+			type: "decoded",
+			data: { name: "shared.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
+		},
+		sharingRole: receiverRole(7, "receiver@filen.io"),
+		sharedTag: true,
+		...overrides
+	}
+}
+
+describe("narrowItem — shared arms", () => {
+	it("narrows a SharedRootDir into a sharedRootDirectory with a Dir-shaped, role-carrying data", () => {
+		const role = sharerRole(42, "sharer@filen.io")
+		const item = narrowItem(mockSharedRootDir({ sharingRole: role }))
+
+		if (item.type !== "sharedRootDirectory") {
+			throw new Error("expected a sharedRootDirectory arm")
+		}
+
+		expect(item.data.uuid).toBe(testUuid("sroot")) // extracted from inner
+		expect(item.data.decryptedMeta).toEqual({ name: "SharedRoot" })
+		expect(item.data.size).toBe(0n)
+		expect(item.data.sharingRole).toEqual(role)
+		expect(item.data.writeAccess).toBe(true)
+		expect(item.data.favorited).toBe(false) // synthesized inert
+		expect(item.data.parent).toBe(testUuid("sroot")) // synthesized inert (self-uuid)
+	})
+
+	it("narrows a SharedFile into a sharedRootFile, preserving its native size and role", () => {
+		const item = narrowItem(mockSharedFile())
+
+		if (item.type !== "sharedRootFile") {
+			throw new Error("expected a sharedRootFile arm")
+		}
+
+		expect(item.data.uuid).toBe(testUuid("sfile"))
+		expect(item.data.size).toBe(2_048n) // native SharedFile.size, not synthesized
+		expect(item.data.decryptedMeta?.mime).toBe("application/pdf")
+		expect(item.data.sharingRole).toEqual(receiverRole(7, "receiver@filen.io"))
+		expect(item.data.favorited).toBe(false)
+		expect(item.data.canMakeThumbnail).toBe(false)
+	})
+
+	it("context-tags a nested SharedDir (parent role spread on) into a sharedDirectory", () => {
+		const role = sharerRole(99, "owner@filen.io")
+		const item = narrowItem({ ...mockSharedDir(), sharingRole: role })
+
+		if (item.type !== "sharedDirectory") {
+			throw new Error("expected a sharedDirectory arm")
+		}
+
+		expect(item.data.uuid).toBe(testUuid("sdir")) // extracted from inner Dir
+		expect(item.data.decryptedMeta).toEqual({ name: "SharedChild" })
+		expect(item.data.sharedTag).toBe(true)
+		expect(item.data.sharingRole).toEqual(role) // spread from the parent
+	})
+
+	it("narrows a bare SharedDir (no spread role) into a sharedDirectory with an undefined role", () => {
+		const item = narrowItem(mockSharedDir())
+
+		if (item.type !== "sharedDirectory") {
+			throw new Error("expected a sharedDirectory arm")
+		}
+
+		expect(item.data.sharingRole).toBeUndefined()
+	})
+
+	it("context-tags a nested File (parent role spread on) into a sharedFile", () => {
+		const role = receiverRole(5, "peer@filen.io")
+		const item = narrowItem({ ...mockFile({ uuid: testUuid("nested") }), sharingRole: role })
+
+		if (item.type !== "sharedFile") {
+			throw new Error("expected a sharedFile arm")
+		}
+
+		expect(item.data.uuid).toBe(testUuid("nested"))
+		expect(item.data.sharingRole).toEqual(role)
+		expect(item.data.sharedTag).toBe(true)
+		expect(item.data.decryptedMeta?.mime).toBe("application/pdf")
+	})
+})
+
+describe("asDirectoryOrFile", () => {
+	it("passes a base directory/file arm through by reference", () => {
+		const dir = narrowItem(mockDir())
+		const file = narrowItem(mockFile())
+
+		expect(asDirectoryOrFile(dir)).toBe(dir)
+		expect(asDirectoryOrFile(file)).toBe(file)
+	})
+
+	it("maps both shared-directory arms to a directory view whose data satisfies Dir", () => {
+		const nested = narrowItem({ ...mockSharedDir(), sharingRole: sharerRole(1, "a@filen.io") })
+		const root = narrowItem(mockSharedRootDir())
+
+		for (const item of [nested, root]) {
+			const base = asDirectoryOrFile(item)
+
+			if (base.type !== "directory") {
+				throw new Error("expected a directory view")
+			}
+
+			const asDir: Dir = base.data // must satisfy the plain wasm Dir the worker's dir ops declare
+
+			expect(asDir.uuid).toBe(item.data.uuid)
+		}
+	})
+
+	it("maps both shared-file arms to a file view whose data satisfies File", () => {
+		const nested = narrowItem({ ...mockFile({ uuid: testUuid("nf") }), sharingRole: receiverRole(2, "b@filen.io") })
+		const root = narrowItem(mockSharedFile())
+
+		for (const item of [nested, root]) {
+			const base = asDirectoryOrFile(item)
+
+			if (base.type !== "file") {
+				throw new Error("expected a file view")
+			}
+
+			const asFile: File = base.data
+
+			expect(asFile.uuid).toBe(item.data.uuid)
+		}
+	})
+})
+
+describe("getSharerIdentity", () => {
+	it("returns null for the non-shared base arms", () => {
+		expect(getSharerIdentity(narrowItem(mockDir()))).toBeNull()
+		expect(getSharerIdentity(narrowItem(mockFile()))).toBeNull()
+	})
+
+	it("reads the role directly off a sharedRootFile", () => {
+		expect(getSharerIdentity(narrowItem(mockSharedFile()))).toEqual({ userId: 7n, email: "receiver@filen.io" })
+	})
+
+	it("reads the role directly off a sharedRootDirectory", () => {
+		const item = narrowItem(mockSharedRootDir({ sharingRole: sharerRole(42, "sharer@filen.io") }))
+		expect(getSharerIdentity(item)).toEqual({ userId: 42n, email: "sharer@filen.io" })
+	})
+
+	it("reads the spread role off a nested sharedFile", () => {
+		const item = narrowItem({ ...mockFile(), sharingRole: sharerRole(11, "owner@filen.io") })
+		expect(getSharerIdentity(item)).toEqual({ userId: 11n, email: "owner@filen.io" })
+	})
+
+	it("reads the spread role off a nested sharedDirectory", () => {
+		const item = narrowItem({ ...mockSharedDir(), sharingRole: receiverRole(13, "peer@filen.io") })
+		expect(getSharerIdentity(item)).toEqual({ userId: 13n, email: "peer@filen.io" })
+	})
+
+	it("falls back to the injected resolver for a sharedDirectory with no spread role", () => {
+		const item = narrowItem(mockSharedDir()) // no role spread → data.sharingRole undefined
+		if (item.type !== "sharedDirectory") {
+			throw new Error("expected a sharedDirectory arm")
+		}
+
+		const resolve = (uuid: string): SharingRole | undefined => (uuid === item.data.uuid ? sharerRole(21, "cached@filen.io") : undefined)
+
+		expect(getSharerIdentity(item, resolve)).toEqual({ userId: 21n, email: "cached@filen.io" })
+	})
+
+	it("returns null for a roleless sharedDirectory when no resolver is given", () => {
+		expect(getSharerIdentity(narrowItem(mockSharedDir()))).toBeNull()
+	})
+
+	it("normalizes ShareInfo.id (a number) to a bigint userId — never a raw number", () => {
+		const identity = getSharerIdentity(narrowItem(mockSharedFile({ sharingRole: sharerRole(123456, "x@filen.io") })))
+
+		expect(identity).not.toBeNull()
+		expect(typeof identity?.userId).toBe("bigint")
+		expect(identity?.userId).toBe(123456n)
+	})
+
+	it("reads the Sharer, the Receiver, and the uniffi-runtime {inner:[…]} SharingRole shapes alike", () => {
+		const sharer = narrowItem(mockSharedFile({ sharingRole: sharerRole(1, "s@filen.io") }))
+		const receiver = narrowItem(mockSharedFile({ sharingRole: receiverRole(2, "r@filen.io") }))
+		const runtime = narrowItem(mockSharedFile({ sharingRole: runtimeRole(3, "u@filen.io") }))
+
+		expect(getSharerIdentity(sharer)).toEqual({ userId: 1n, email: "s@filen.io" })
+		expect(getSharerIdentity(receiver)).toEqual({ userId: 2n, email: "r@filen.io" })
+		expect(getSharerIdentity(runtime)).toEqual({ userId: 3n, email: "u@filen.io" })
 	})
 })

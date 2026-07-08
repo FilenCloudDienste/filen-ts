@@ -22,12 +22,25 @@ import init, {
 	type Contact,
 	type BlockedContact,
 	type ContactRequestIn,
-	type ContactRequestOut
+	type ContactRequestOut,
+	type SharedRootDirsAndFiles,
+	type SharedRootDir,
+	type SharedDir,
+	type SharedRootItem,
+	type SharingRole
 } from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
 import { toErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
-import { cacheDirs, clearDirectoryCache, evictDirs, getCachedDir, getCachedName } from "@/lib/drive/cache"
+import {
+	cacheDirs,
+	cacheSharedDirContext,
+	clearDirectoryCache,
+	evictDirs,
+	getCachedDir,
+	getCachedName,
+	getSharedDirContext
+} from "@/lib/drive/cache"
 
 // NEITHER a fixed `/` nor `/assets/`: the wasm holds a RELATIVE `./filen-sdk-worker-thread.js`
 // (verified via `strings` over sdk-rs_bg.wasm) which it passes to `new Worker(...)`, so the
@@ -149,6 +162,24 @@ async function resolveNormalDirParent(c: Client, parentUuid: string | null): Pro
 		throw new Error(`parent directory not found: ${parentUuid}`)
 	}
 	return found
+}
+
+// A nested shared listing (listSharedDirectory) returns the parent's role too, so the query can
+// spread it onto each nested SharedDir/File before narrowing — a nested item is otherwise
+// structurally a plain dir/file and can't be classified as shared.
+export interface SharedNestedListing {
+	dirs: SharedDir[]
+	files: File[]
+	role: SharingRole
+}
+
+// Makes every shared-root dir resolvable by its own uuid for the rest of the session, so browsing
+// into one (listSharedDirectory) needs no re-fetch — the shared-listing counterpart of cacheDirs.
+// A SharedRootDir carries its own role; a nested SharedDir does not, so its parent's role is stored.
+function cacheSharedRootContexts(dirs: readonly SharedRootDir[]): void {
+	for (const dir of dirs) {
+		cacheSharedDirContext(dir.inner.uuid, { dir, role: dir.sharingRole })
+	}
 }
 
 const api = {
@@ -561,6 +592,49 @@ const api = {
 	},
 	deleteContact(uuid: string): Promise<void> {
 		return requireClient().deleteContact(uuid)
+	},
+	// ── Sharing ──────────────────────────────────────────────────────────────
+	// shareDir's progress callback is a REQUIRED param on the wasm surface, but this app shows no
+	// dir-share progress (mobile parity) — a worker-local no-op stands in. It never crosses the
+	// Comlink boundary (it's created and invoked entirely inside this worker), so no Comlink.proxy.
+	async shareDirectory(dir: Dir, contact: Contact): Promise<void> {
+		await requireClient().shareDir(dir, contact, () => undefined)
+	},
+	async shareFile(file: File, contact: Contact): Promise<void> {
+		await requireClient().shareFile(file, contact)
+	},
+	// Shared-root listings return the raw SDK result (the query narrows + context-tags, mirroring
+	// listDirectory) and cache each returned dir's share context so a nested listing by uuid resolves.
+	async listSharedInRoot(): Promise<SharedRootDirsAndFiles> {
+		const result = await requireClient().listInShared()
+		cacheSharedRootContexts(result.dirs)
+		return result
+	},
+	async listSharedOutRoot(contact?: Contact | null): Promise<SharedRootDirsAndFiles> {
+		const result = await requireClient().listOutShared(contact ?? undefined)
+		cacheSharedRootContexts(result.dirs)
+		return result
+	},
+	// Browsing into a shared directory: resolve the dir+role cached from a prior shared listing (a
+	// cache miss is a hard not-found, same as listDirectory's uuid case — no silent fallback to a
+	// different listing), list it, cache the children for further descent, and return the role so the
+	// query can context-tag the nested items before narrowing.
+	async listSharedDirectory(uuid: string): Promise<SharedNestedListing> {
+		const c = requireClient()
+		const context = getSharedDirContext(uuid)
+		if (context === undefined) {
+			throw new Error(`shared directory not found: ${uuid}`)
+		}
+		const result = await c.listSharedDir(context.dir, context.role)
+		for (const dir of result.dirs) {
+			cacheSharedDirContext(dir.inner.uuid, { dir, role: context.role })
+		}
+		return { dirs: result.dirs, files: result.files, role: context.role }
+	},
+	// Stops sharing a shared-root item (a directory shared out, or an item shared in the caller wants
+	// gone). The caller-side arg shape is a later concern; this only exposes the op.
+	removeSharedItem(item: SharedRootItem): Promise<void> {
+		return requireClient().removeSharedItem(item)
 	},
 	logout(): void {
 		releaseClient()

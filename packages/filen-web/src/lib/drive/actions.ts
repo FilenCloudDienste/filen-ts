@@ -12,7 +12,7 @@ import {
 	normalizeParentUuid,
 	type DriveItemLinkStatus
 } from "@/queries/drive"
-import { narrowItem, upsertDriveItem, type DriveItem } from "@/lib/drive/item"
+import { narrowItem, upsertDriveItem, asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { runBulk, type BulkOutcome } from "@/lib/drive/bulk"
 import { runOp, type ActionOutcome as GenericActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
@@ -47,10 +47,11 @@ function replaceIfPresent(items: DriveItem[], updated: DriveItem): DriveItem[] {
 // ── Rename ───────────────────────────────────────────────────────────────
 
 export async function renameItem(item: DriveItem, newName: string): Promise<ActionOutcome> {
+	const base = asDirectoryOrFile(item)
 	let renamed: Dir | File
 	try {
 		renamed = await runOp<Dir | File>(
-			item.type === "directory" ? sdkApi.renameDirectory(item.data, newName) : sdkApi.renameFile(item.data, newName)
+			base.type === "directory" ? sdkApi.renameDirectory(base.data, newName) : sdkApi.renameFile(base.data, newName)
 		)
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
@@ -76,8 +77,9 @@ export function moveItems(items: DriveItem[], targetParentUuid: string | null): 
 	const normalizedTarget = normalizeParentUuid(targetParentUuid, rootUuid)
 
 	return runBulk(items, async item => {
+		const base = asDirectoryOrFile(item)
 		const moved = await runOp<Dir | File>(
-			item.type === "directory" ? sdkApi.moveDirectory(item.data, targetParentUuid) : sdkApi.moveFile(item.data, targetParentUuid)
+			base.type === "directory" ? sdkApi.moveDirectory(base.data, targetParentUuid) : sdkApi.moveFile(base.data, targetParentUuid)
 		)
 		const updated = narrowItem(moved)
 
@@ -90,7 +92,8 @@ export function moveItems(items: DriveItem[], targetParentUuid: string | null): 
 
 export function trashItems(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> {
 	return runBulk(items, async item => {
-		await runOp<Dir | File>(item.type === "directory" ? sdkApi.trashDirectory(item.data) : sdkApi.trashFile(item.data))
+		const base = asDirectoryOrFile(item)
+		await runOp<Dir | File>(base.type === "directory" ? sdkApi.trashDirectory(base.data) : sdkApi.trashFile(base.data))
 
 		// Vanishes from wherever it was visible (drive/favorites/recents) — never optimistically added
 		// to the trash listing itself, which refetches on open (accepted staleness).
@@ -104,8 +107,9 @@ export function restoreItems(items: DriveItem[]): Promise<BulkOutcome<DriveItem>
 	const rootUuid = currentRootUuid()
 
 	return runBulk(items, async item => {
+		const base = asDirectoryOrFile(item)
 		const restored = await runOp<Dir | File>(
-			item.type === "directory" ? sdkApi.restoreDirectory(item.data) : sdkApi.restoreFile(item.data)
+			base.type === "directory" ? sdkApi.restoreDirectory(base.data) : sdkApi.restoreFile(base.data)
 		)
 		const updated = narrowItem(restored)
 
@@ -121,7 +125,8 @@ export function restoreItems(items: DriveItem[]): Promise<BulkOutcome<DriveItem>
 
 export function deleteItemsPermanently(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> {
 	return runBulk(items, async item => {
-		await runOp(item.type === "directory" ? sdkApi.deleteDirectoryPermanently(item.data) : sdkApi.deleteFilePermanently(item.data))
+		const base = asDirectoryOrFile(item)
+		await runOp(base.type === "directory" ? sdkApi.deleteDirectoryPermanently(base.data) : sdkApi.deleteFilePermanently(base.data))
 
 		// The worker's own deleteDirectoryPermanently already evicts the directory cache worker-side
 		// (that cache is worker-realm private, unreachable from here) — this is only the listing side.
@@ -266,13 +271,14 @@ export async function createLink(
 	item: DriveItem,
 	onProgress: (downloadedBytes: number, totalBytes: number | undefined) => void
 ): Promise<LinkActionOutcome> {
+	const base = asDirectoryOrFile(item)
 	let link: DriveItemLinkStatus
 
 	try {
 		link =
-			item.type === "directory"
-				? { type: "directory", status: await runOp(sdkApi.createDirectoryLink(item.data, Comlink.proxy(onProgress))) }
-				: { type: "file", status: await runOp(sdkApi.createFileLink(item.data)) }
+			base.type === "directory"
+				? { type: "directory", status: await runOp(sdkApi.createDirectoryLink(base.data, Comlink.proxy(onProgress))) }
+				: { type: "file", status: await runOp(sdkApi.createFileLink(base.data)) }
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
@@ -286,13 +292,14 @@ export async function createLink(
 // pairing is re-verified here rather than trusted blindly, since the two are independently-typed
 // parameters the type system can't itself correlate.
 export async function updateLink(item: DriveItem, next: DriveItemLinkStatus): Promise<LinkActionOutcome> {
+	const base = asDirectoryOrFile(item)
 	let link: DriveItemLinkStatus
 
 	try {
-		if (item.type === "directory" && next.type === "directory") {
-			link = { type: "directory", status: await runOp(sdkApi.updateDirectoryLink(item.data, next.status)) }
-		} else if (item.type === "file" && next.type === "file") {
-			link = { type: "file", status: await runOp(sdkApi.updateFileLink(item.data, next.status)) }
+		if (base.type === "directory" && next.type === "directory") {
+			link = { type: "directory", status: await runOp(sdkApi.updateDirectoryLink(base.data, next.status)) }
+		} else if (base.type === "file" && next.type === "file") {
+			link = { type: "file", status: await runOp(sdkApi.updateFileLink(base.data, next.status)) }
 		} else {
 			throw new Error("Item/link type mismatch")
 		}
@@ -309,11 +316,13 @@ export async function updateLink(item: DriveItem, next: DriveItemLinkStatus): Pr
 // removing a directory's link only needs the directory; removing a file's link also needs the live
 // link object, so the caller's already-fetched status is threaded through as `current`.
 export async function disableLink(item: DriveItem, current: DriveItemLinkStatus): Promise<VoidActionOutcome> {
+	const base = asDirectoryOrFile(item)
+
 	try {
-		if (item.type === "directory" && current.type === "directory") {
-			await runOp(sdkApi.removeDirectoryLink(item.data))
-		} else if (item.type === "file" && current.type === "file") {
-			await runOp(sdkApi.removeFileLink(item.data, current.status))
+		if (base.type === "directory" && current.type === "directory") {
+			await runOp(sdkApi.removeDirectoryLink(base.data))
+		} else if (base.type === "file" && current.type === "file") {
+			await runOp(sdkApi.removeFileLink(base.data, current.status))
 		} else {
 			throw new Error("Item/link type mismatch")
 		}

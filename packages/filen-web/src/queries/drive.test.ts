@@ -1,23 +1,56 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, DirPublicLinkRW, File, FilePublicLink, NormalDirsAndFiles, UuidStr } from "@filen/sdk-rs"
+import type {
+	Dir,
+	DirPublicLinkRW,
+	File,
+	FilePublicLink,
+	NormalDirsAndFiles,
+	SharedRootDirsAndFiles,
+	SharedDir,
+	SharedFile,
+	SharedRootDir,
+	SharingRole,
+	UuidStr
+} from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it
 // down to the methods this module calls, mirroring account.test.ts's mock boundary.
-const { listDirectory, resolveDirectoryNames, getItemInfo, listFileVersionsOp, getDirectoryLinkStatus, getFileLinkStatus } = vi.hoisted(
-	() => ({
-		listDirectory: vi.fn<(target: unknown) => Promise<NormalDirsAndFiles>>(),
-		resolveDirectoryNames: vi.fn<(uuids: string[]) => Promise<Record<string, string>>>(),
-		getItemInfo: vi.fn(),
-		listFileVersionsOp: vi.fn(),
-		getDirectoryLinkStatus: vi.fn(),
-		getFileLinkStatus: vi.fn()
-	})
-)
+const {
+	listDirectory,
+	resolveDirectoryNames,
+	getItemInfo,
+	listFileVersionsOp,
+	getDirectoryLinkStatus,
+	getFileLinkStatus,
+	listSharedInRoot,
+	listSharedOutRoot,
+	listSharedDirectory
+} = vi.hoisted(() => ({
+	listDirectory: vi.fn<(target: unknown) => Promise<NormalDirsAndFiles>>(),
+	resolveDirectoryNames: vi.fn<(uuids: string[]) => Promise<Record<string, string>>>(),
+	getItemInfo: vi.fn(),
+	listFileVersionsOp: vi.fn(),
+	getDirectoryLinkStatus: vi.fn(),
+	getFileLinkStatus: vi.fn(),
+	listSharedInRoot: vi.fn<() => Promise<SharedRootDirsAndFiles>>(),
+	listSharedOutRoot: vi.fn<() => Promise<SharedRootDirsAndFiles>>(),
+	listSharedDirectory: vi.fn<(uuid: string) => Promise<{ dirs: SharedDir[]; files: File[]; role: SharingRole }>>()
+}))
 
 vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { listDirectory, resolveDirectoryNames, getItemInfo, listFileVersionsOp, getDirectoryLinkStatus, getFileLinkStatus }
+	sdkApi: {
+		listDirectory,
+		resolveDirectoryNames,
+		getItemInfo,
+		listFileVersionsOp,
+		getDirectoryLinkStatus,
+		getFileLinkStatus,
+		listSharedInRoot,
+		listSharedOutRoot,
+		listSharedDirectory
+	}
 }))
 
 // Every other hook wrapper below is a one-line pass-through no node-environment test can render (no
@@ -55,9 +88,11 @@ import {
 	fetchDriveItemLinkStatus,
 	fetchFileVersions,
 	fetchItemInfo,
+	fetchSharedListing,
 	fileVersionsQueryKey,
 	itemInfoQueryKey,
 	normalizeParentUuid,
+	toListingTarget,
 	useItemInfoQuery
 } from "@/queries/drive"
 
@@ -506,5 +541,100 @@ describe("normalizeParentUuid", () => {
 
 	it("leaves null unchanged (already the root sentinel)", () => {
 		expect(normalizeParentUuid(null, "root-uuid")).toBeNull()
+	})
+})
+
+describe("toListingTarget", () => {
+	it("maps the drive variant to root for a null uuid and to a uuid target otherwise", () => {
+		expect(toListingTarget("drive", null)).toEqual({ kind: "root" })
+		expect(toListingTarget("drive", "abc")).toEqual({ kind: "uuid", uuid: "abc" })
+	})
+
+	it.each(["recents", "favorites", "trash"] as const)("maps the flat %s variant to its own kind, ignoring uuid", variant => {
+		expect(toListingTarget(variant, "ignored")).toEqual({ kind: variant })
+	})
+
+	it.each(["sharedIn", "sharedOut"] as const)("throws for the %s variant (it lists via its own ops)", variant => {
+		expect(() => toListingTarget(variant, null)).toThrow()
+	})
+})
+
+function sharerRole(id: number, email: string): SharingRole {
+	return { Sharer: { email, id } }
+}
+
+function mockSharedRootDir(uuid: UuidStr): SharedRootDir {
+	return {
+		inner: { uuid, color: "default", timestamp: 1_700_000_000_000n, meta: { type: "decoded", data: { name: "SharedRoot" } } },
+		sharingRole: sharerRole(42, "sharer@filen.io"),
+		writeAccess: true
+	}
+}
+
+function mockSharedFile(uuid: UuidStr): SharedFile {
+	return {
+		uuid,
+		size: 2_048n,
+		region: "de-1",
+		bucket: "filen-1",
+		chunks: 2n,
+		timestamp: 1_700_000_000_000n,
+		meta: {
+			type: "decoded",
+			data: { name: "shared.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
+		},
+		sharingRole: sharerRole(42, "sharer@filen.io"),
+		sharedTag: true
+	}
+}
+
+function mockSharedDir(uuid: UuidStr): SharedDir {
+	return { inner: mockDir({ uuid }), sharedTag: true }
+}
+
+describe("fetchSharedListing", () => {
+	it("lists the sharedIn root and narrows into the shared-root arms", async () => {
+		const dirUuid = testUuid("sroot-dir")
+		const fileUuid = testUuid("sroot-file")
+		listSharedInRoot.mockResolvedValueOnce({ dirs: [mockSharedRootDir(dirUuid)], files: [mockSharedFile(fileUuid)] })
+
+		const items = await fetchSharedListing("sharedIn", null)
+
+		expect(listSharedInRoot).toHaveBeenCalledTimes(1)
+		expect(listSharedOutRoot).not.toHaveBeenCalled()
+		expect(items.map(item => item.type)).toEqual(["sharedRootDirectory", "sharedRootFile"])
+		expect(items.map(item => item.data.uuid)).toEqual([dirUuid, fileUuid])
+	})
+
+	it("routes the sharedOut root through listSharedOutRoot", async () => {
+		listSharedOutRoot.mockResolvedValueOnce({ dirs: [], files: [] })
+
+		await fetchSharedListing("sharedOut", null)
+
+		expect(listSharedOutRoot).toHaveBeenCalledTimes(1)
+		expect(listSharedInRoot).not.toHaveBeenCalled()
+	})
+
+	it("context-tags every nested item with the parent role before narrowing", async () => {
+		const role = sharerRole(99, "owner@filen.io")
+		const dirUuid = testUuid("nested-dir")
+		const fileUuid = testUuid("nested-file")
+		listSharedDirectory.mockResolvedValueOnce({ dirs: [mockSharedDir(dirUuid)], files: [mockFile({ uuid: fileUuid })], role })
+
+		const items = await fetchSharedListing("sharedIn", "parent-uuid")
+
+		expect(listSharedDirectory).toHaveBeenCalledExactlyOnceWith("parent-uuid")
+		expect(items.map(item => item.type)).toEqual(["sharedDirectory", "sharedFile"])
+		// The parent role is spread onto each nested item — this is the whole point of the context-tag.
+		const [dir, file] = items
+		expect(dir?.type === "sharedDirectory" && dir.data.sharingRole).toEqual(role)
+		expect(file?.type === "sharedFile" && file.data.sharingRole).toEqual(role)
+	})
+
+	it("propagates a rejection from the worker unchanged", async () => {
+		const error = new Error("shared directory not found: parent-uuid")
+		listSharedDirectory.mockRejectedValueOnce(error)
+
+		await expect(fetchSharedListing("sharedIn", "parent-uuid")).rejects.toBe(error)
 	})
 })

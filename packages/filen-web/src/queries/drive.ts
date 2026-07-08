@@ -5,7 +5,7 @@ import { queryClient } from "@/queries/client"
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
 import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink } from "@filen/sdk-rs"
-import { narrowItem, type DriveItem } from "@/lib/drive/item"
+import { narrowItem, asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import {
 	getSortPreferences,
 	getViewModePreferences,
@@ -28,14 +28,21 @@ export function driveListingQueryKey(params: DriveListingParams) {
 }
 
 // Root only applies to the "drive" variant (client.root() has no equivalent for the three flat
-// listings); every other variant ignores `uuid` entirely — recents/favorites/trash are always
-// their own flat listing regardless of how the caller got there.
-function toListingTarget(variant: DriveVariant, uuid: string | null): ListDirectoryTarget {
-	if (variant !== "drive") {
-		return { kind: variant }
+// listings); recents/favorites/trash are always their own flat listing regardless of how the caller
+// got there. The two shared variants list through their own worker ops (different result shapes — see
+// fetchSharedListing), never listDirectory, so they have no target here.
+export function toListingTarget(variant: DriveVariant, uuid: string | null): ListDirectoryTarget {
+	switch (variant) {
+		case "drive":
+			return uuid === null ? { kind: "root" } : { kind: "uuid", uuid }
+		case "recents":
+		case "favorites":
+		case "trash":
+			return { kind: variant }
+		case "sharedIn":
+		case "sharedOut":
+			throw new Error(`toListingTarget: shared variant "${variant}" lists via its own ops, not listDirectory`)
 	}
-
-	return uuid === null ? { kind: "root" } : { kind: "uuid", uuid }
 }
 
 // Plain, testable query function — mirrors fetchAccount (queries/account.ts): the hook itself is a
@@ -53,6 +60,30 @@ export function useDirectoryListingQuery(variant: DriveVariant, uuid: string | n
 	return useQuery({
 		queryKey: driveListingQueryKey({ variant, uuid }),
 		queryFn: () => fetchDirectoryListing(variant, uuid)
+	})
+}
+
+// Shared listings, keyed in the same taxonomy as normal listings (variant carries sharedIn/sharedOut)
+// but fetched through their own worker ops. A null uuid lists the shared root (each returned item
+// already carries its own share role, so narrowItem classifies it structurally); a non-null uuid
+// browses into a nested shared directory, where the worker returns the parent role and this CONTEXT-
+// TAGS every nested dir/file with it BEFORE narrowing — a nested SharedDir/File is otherwise
+// structurally a plain dir/file and can't be classified as shared. Exported (not just the hook) so
+// this project's node-environment unit tests can exercise it against a mocked sdkApi.
+export async function fetchSharedListing(variant: "sharedIn" | "sharedOut", uuid: string | null): Promise<DriveItem[]> {
+	if (uuid === null) {
+		const { dirs, files } = variant === "sharedIn" ? await sdkApi.listSharedInRoot() : await sdkApi.listSharedOutRoot()
+		return [...dirs.map(narrowItem), ...files.map(narrowItem)]
+	}
+
+	const { dirs, files, role } = await sdkApi.listSharedDirectory(uuid)
+	return [...dirs.map(dir => narrowItem({ ...dir, sharingRole: role })), ...files.map(file => narrowItem({ ...file, sharingRole: role }))]
+}
+
+export function useSharedListingQuery(variant: "sharedIn" | "sharedOut", uuid: string | null): UseQueryResult<DriveItem[]> {
+	return useQuery({
+		queryKey: driveListingQueryKey({ variant, uuid }),
+		queryFn: () => fetchSharedListing(variant, uuid)
 	})
 }
 
@@ -189,12 +220,14 @@ export function driveItemLinkStatusQueryKey(uuid: string) {
 }
 
 export async function fetchDriveItemLinkStatus(item: DriveItem): Promise<DriveItemLinkStatus | null> {
-	if (item.type === "directory") {
-		const status = await sdkApi.getDirectoryLinkStatus(item.data)
+	const base = asDirectoryOrFile(item)
+
+	if (base.type === "directory") {
+		const status = await sdkApi.getDirectoryLinkStatus(base.data)
 		return status ? { type: "directory", status } : null
 	}
 
-	const status = await sdkApi.getFileLinkStatus(item.data)
+	const status = await sdkApi.getFileLinkStatus(base.data)
 	return status ? { type: "file", status } : null
 }
 
