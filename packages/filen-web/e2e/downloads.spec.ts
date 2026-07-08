@@ -1,4 +1,6 @@
-import { statSync } from "node:fs"
+import { statSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 
@@ -25,9 +27,9 @@ const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, 
 // multi-select modifier.
 const MOD_KEY = process.platform === "darwin" ? "Meta" : "Control"
 
-// Ambient shims for globals this spec installs on the page, merged with e2e/global.d.ts's own Window
-// augmentation (same program, same declaration-merging rules) rather than touching that file -- none of
-// these are real e2e hooks the app ships, just this spec's own test doubles/scratch state.
+// Ambient shim for window.showSaveFilePicker, merged with e2e/global.d.ts's own Window augmentation
+// (same program, same declaration-merging rules) rather than touching that file -- this isn't a real
+// e2e hook the app ships, just this spec's own test double.
 declare global {
 	interface Window {
 		// File System Access API -- absent from this project's e2e tsconfig program (src/types/file-system-access.d.ts
@@ -42,12 +44,6 @@ declare global {
 		// plus the first 4 bytes written (the zip test's magic-number check). Declared non-optional: every
 		// test that reads it called stubFsaPicker first (mirrors e2e/global.d.ts's own __filenE2E rationale).
 		__smokeSink: { bytes: number; first4: number[] }
-		// Test-local stash for whatever createTestFiles/createLargeTestFile actually created, read back by
-		// trashCreatedTestFiles in each test's own finally. Kept off the Playwright<->page bridge (JSON-only,
-		// bigint-unsafe) the same way e2e/global.d.ts's own hook return values are, hence `unknown[]` rather
-		// than importing the SDK's File type. Optional: trashCreatedTestFiles runs even if creation itself
-		// never got far enough to assign it.
-		__e2eDownloadFiles?: unknown[]
 	}
 }
 
@@ -62,20 +58,78 @@ async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<
 	return { listbox, hasItems: await listbox.isVisible() }
 }
 
-// A file created through createTestFiles/createLargeTestFile below bypasses the UI upload path's own
-// optimistic cache patch (lib/drive/upload.ts) -- it lands on the account for real, but an
-// already-mounted listing has no live invalidation to pick it up (queries/client.ts: "Socket-driven
-// invalidation (not yet wired)"), and live-verified: without this, a hook-created file never appears in
-// an already-open listing on its own. Every drive query defaults to staleTime 0 + refetchOnWindowFocus
-// (queries/client.ts) -- the same mechanism drive-actions.spec.ts's own final-cleanup comment documents
-// this suite already relying on -- so dispatching the exact event TanStack Query's FocusManager listens
-// for (verified against the installed @tanstack/query-core: window.addEventListener("visibilitychange", ...))
-// forces the still-mounted listing query to refetch deterministically, without a reload (forbidden
-// mid-flow) or a second page.goto.
-async function forceListingRefetch(page: Page): Promise<void> {
-	await page.evaluate(() => {
-		window.dispatchEvent(new Event("visibilitychange"))
-	})
+// Every test below nests its fixture file(s) inside a per-test scratch directory rather than creating
+// them at /drive's root -- mirrors drive-actions.spec.ts's own hardened convention (see the comment on
+// that file's one mutating test). Under this suite's fullyParallel config (playwright.config.ts),
+// root-level create/trash from one spec races root-level reads from another: drive.spec.ts's own
+// "selection" test snapshots the root listbox's option COUNT, then asserts a select-all against it --
+// a TOCTOU a concurrent create/trash at root can break, and this exact interference already reproduced
+// live once as a flaky drive.spec.ts failure (drive-actions.spec.ts's own comment documents it).
+// Nesting confines every count-shifting moment to the two around the scratch directory itself (create,
+// final trash) instead of one pair per fixture file.
+async function enterScratchDirectory(page: Page, name: string): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
+	// The listing virtualizes its rows (directory-listing.tsx's useVirtualizer, keyed by item uuid) --
+	// on a long/shared listing a row sorted well below the fold may not be mounted in the DOM at all, so
+	// a locator that depends on finding a SPECIFIC named row (this function's own scratchRow below,
+	// trashScratchDirectory's row) can silently miss it. A generously tall viewport makes the scroll
+	// container's height exceed any realistic item count's total row height, so the virtualizer renders
+	// every row in one pass for the rest of this test -- simpler and more robust here than driving
+	// synthetic scroll/wheel events against an unknown scroll container to hunt for one row.
+	await page.setViewportSize({ width: 1280, height: 8000 })
+
+	const { listbox } = await waitForListingSettled(page)
+
+	await page.getByRole("button", { name: "New directory", exact: true }).click()
+	const dialog = page.getByRole("dialog")
+	await expect(dialog).toBeVisible()
+	await page.getByLabel("Name", { exact: true }).fill(name)
+	await page.getByRole("button", { name: "Create", exact: true }).click()
+	await expect(dialog).toHaveCount(0)
+
+	const scratchRow = listbox.getByRole("option", { name })
+	await expect(scratchRow).toBeVisible()
+
+	// A real double-click (an in-app client-side route change, same as drive-actions.spec.ts's own
+	// descent) -- everything the calling test does until trashScratchDirectory below stays inside this
+	// directory and never touches the root listing again.
+	await scratchRow.dblclick()
+
+	return waitForListingSettled(page)
+}
+
+// Failure-proof companion to enterScratchDirectory above -- called from every test's own finally, so the
+// scratch directory (and everything uploaded into it) is trashed even when an assertion above throws.
+// Escape first: every test below opens the rail's Transfers popover, which renders close enough to the
+// sidebar to risk covering its own "My Drive" link, and dismissing an already-closed popover is a
+// harmless no-op.
+async function trashScratchDirectory(page: Page, name: string): Promise<void> {
+	await page.keyboard.press("Escape")
+	await page.getByRole("complementary").getByRole("link", { name: "My Drive", exact: true }).click()
+
+	const { listbox } = await waitForListingSettled(page)
+	const row = listbox.getByRole("option", { name })
+
+	// waitForListingSettled only proves SOME listbox is showing, not that it reflects the scratch
+	// directory just created: React Query serves this root query key's LAST-cached result instantly
+	// (queries/client.ts's staleTime 0 still triggers a background refetch, but never blocks the
+	// already-cached render) -- root was cached once already, at this test's own initial goto, before
+	// the scratch directory existed. A one-shot visibility check races that background refetch and
+	// reliably loses under load; polling rides it out. A genuine timeout (the scratch directory never
+	// made it into the listing at all, e.g. enterScratchDirectory itself failed before creating it) is
+	// the one case there is nothing to trash.
+	try {
+		await expect(row).toBeVisible({ timeout: 15_000 })
+	} catch {
+		return
+	}
+
+	await row.click()
+	await page.getByRole("button", { name: "Trash", exact: true }).click()
+
+	const confirm = page.getByRole("alertdialog")
+	await expect(confirm).toBeVisible()
+	await confirm.getByRole("button", { name: "Trash", exact: true }).click()
+	await expect(confirm).toHaveCount(0)
 }
 
 // Trick 1 (FSA path, Chromium's default) -- see the file-level comment above for the full rationale.
@@ -121,44 +175,49 @@ function readSmokeSink(page: Page): Promise<{ bytes: number; first4: number[] }>
 	return page.evaluate(() => window.__smokeSink)
 }
 
-// Small, real files created directly through the worker (no UI) via the app's e2e hooks, mirroring
-// sw.spec.ts's own zip test: Promise.allSettled so one failed create doesn't strand the others, net-zero
-// via trashCreatedTestFiles below. Every call here is paired with forceListingRefetch so the still-open
-// listing actually shows the new row (see that helper's own comment).
-async function createTestFiles(page: Page, files: { name: string; content: string }[]): Promise<void> {
-	await page.evaluate(async entries => {
-		const hooks = window.__filenE2E
-		const created = await Promise.allSettled(entries.map(entry => hooks.createTestFile(entry.name, entry.content)))
-		window.__e2eDownloadFiles = created.flatMap(result => (result.status === "fulfilled" ? [result.value] : []))
-	}, files)
-
-	await forceListingRefetch(page)
+// Fixture files are uploaded through the SAME real UI path a user would use -- the hidden file input
+// upload-menu.tsx wires up, targeting whatever directory the app is currently navigated into
+// (directory-listing.tsx passes it the current listing's own uuid) -- rather than through the
+// createTestFile e2e hook: that hook's own doc comment says it uploads at the account ROOT with no
+// parentUuid option, which would defeat the whole point of nesting above. Driving the UI instead also
+// means the upload lands through runUpload's own optimistic cache patch (lib/drive/upload.ts), so the
+// new row appears in the already-open scratch listing on its own -- no forced refetch needed. Mirrors
+// uploads.spec.ts's own picker-driven test.
+async function uploadTestFiles(page: Page, files: { name: string; content: string }[]): Promise<void> {
+	await page
+		.locator('input[type="file"]')
+		.first()
+		.setInputFiles(files.map(({ name, content }) => ({ name, mimeType: "text/plain", buffer: Buffer.from(content, "utf8") })))
 }
 
-// Same shape as createTestFiles above, but for the cancel test's larger file: the content is generated
-// INSIDE the page rather than passed as an argument, so a several-MiB string never has to cross the
-// Playwright<->page bridge as a serialized call argument.
-async function createLargeTestFile(page: Page, name: string, sizeBytes: number): Promise<void> {
-	await page.evaluate(
-		async ({ name, sizeBytes }) => {
-			const hooks = window.__filenE2E
-			const file = await hooks.createTestFile(name, "x".repeat(sizeBytes))
-			window.__e2eDownloadFiles = [file]
-		},
-		{ name, sizeBytes }
-	)
+// Same UI path as uploadTestFiles above, but for the cancel test's larger file: the content is written
+// to a REAL temp file on disk first (mirrors uploads.spec.ts's own directory-upload test), then handed
+// to setInputFiles as a path rather than a buffer -- Playwright/CDP reads a path-based file input
+// straight off local disk into the browser, so a several-MiB payload never has to serialize through the
+// Playwright<->driver bridge as a call argument.
+async function uploadLargeTestFile(page: Page, name: string, sizeBytes: number): Promise<void> {
+	const path = join(tmpdir(), name)
+	writeFileSync(path, "x".repeat(sizeBytes))
 
-	await forceListingRefetch(page)
+	await page.locator('input[type="file"]').first().setInputFiles(path)
 }
 
-// Net-zero companion to createTestFiles/createLargeTestFile -- trashes whatever actually landed on the
-// page-global stash, allSettled so one failure doesn't strand the rest (mirrors sw.spec.ts's own finally).
-async function trashCreatedTestFiles(page: Page): Promise<void> {
-	await page.evaluate(async () => {
-		const hooks = window.__filenE2E
-		const files = window.__e2eDownloadFiles ?? []
-		await Promise.allSettled(files.map(file => hooks.trashTestFile(file)))
-	})
+// A real, UI-driven fixture upload (uploadTestFiles/uploadLargeTestFile above) leaves a FINISHED
+// "upload" transfer row behind in the same store the download flow below reads -- and a transfer row's
+// accessible name is just its bare file name regardless of direction (transfer-row.tsx's own
+// `<Progress aria-label={transfer.name} />`), so an upload and a later download of the SAME file
+// collide on every getByRole("progressbar", { name: fileName })/getByText("Done") locator below unless
+// the upload's own row is cleared first. The panel's "Clear finished" button (transfers-panel.tsx)
+// clears every finished row in one click, so this works the same whether one file or several were just
+// uploaded.
+async function clearFinishedTransfers(page: Page): Promise<void> {
+	await page
+		.getByRole("button", { name: /Transfers/i })
+		.first()
+		.click()
+
+	await page.getByRole("button", { name: "Clear finished", exact: true }).click()
+	await page.keyboard.press("Escape")
 }
 
 test.describe("downloads", () => {
@@ -173,16 +232,20 @@ test.describe("downloads", () => {
 		await stubFsaPicker(page)
 
 		await page.goto("/drive")
-		const { listbox } = await waitForListingSettled(page)
 
+		const scratchName = `e2e-download-fsa-${crypto.randomUUID()}`
 		const fileName = `e2e-download-fsa-${crypto.randomUUID()}.txt`
 		const content = "filen web e2e download probe"
 
 		try {
-			await createTestFiles(page, [{ name: fileName, content }])
+			const { listbox } = await enterScratchDirectory(page, scratchName)
+
+			await uploadTestFiles(page, [{ name: fileName, content }])
 
 			const row = listbox.getByRole("option", { name: fileName })
 			await expect(row).toBeVisible({ timeout: 20_000 })
+
+			await clearFinishedTransfers(page)
 
 			await row.click()
 			await page.getByRole("button", { name: "Download", exact: true }).click()
@@ -201,7 +264,7 @@ test.describe("downloads", () => {
 			const sink = await readSmokeSink(page)
 			expect(sink.bytes).toBe(Buffer.byteLength(content, "utf8"))
 		} finally {
-			await trashCreatedTestFiles(page)
+			await trashScratchDirectory(page, scratchName)
 		}
 	})
 
@@ -216,13 +279,15 @@ test.describe("downloads", () => {
 		await stubFsaPicker(page)
 
 		await page.goto("/drive")
-		const { listbox } = await waitForListingSettled(page)
 
+		const scratchName = `e2e-download-zip-${crypto.randomUUID()}`
 		const nameA = `e2e-download-zip-a-${crypto.randomUUID()}.txt`
 		const nameB = `e2e-download-zip-b-${crypto.randomUUID()}.txt`
 
 		try {
-			await createTestFiles(page, [
+			const { listbox } = await enterScratchDirectory(page, scratchName)
+
+			await uploadTestFiles(page, [
 				{ name: nameA, content: "filen web e2e zip download file a" },
 				{ name: nameB, content: "filen web e2e zip download file b" }
 			])
@@ -231,6 +296,8 @@ test.describe("downloads", () => {
 			const rowB = listbox.getByRole("option", { name: nameB })
 			await expect(rowA).toBeVisible({ timeout: 20_000 })
 			await expect(rowB).toBeVisible({ timeout: 20_000 })
+
+			await clearFinishedTransfers(page)
 
 			// Click, then modifier-click to add to the selection -- the same mechanism drive-actions.spec.ts's
 			// own bulk tests use.
@@ -246,9 +313,11 @@ test.describe("downloads", () => {
 				.click()
 
 			// A mixed multi-item selection has no single source name to derive from, so the zip falls back to
-			// the shared generic archive name (download-zip.ts's resolveSuggestedZipName).
-			await expect(page.getByRole("progressbar", { name: "Filen.zip" })).toBeVisible({ timeout: 10_000 })
-			await expect(page.getByRole("progressbar", { name: "Filen.zip" })).toHaveCount(1)
+			// the shared generic archive name (download-zip.ts's resolveSuggestedZipName). exact: true guards
+			// against Playwright's default substring/case-insensitive accessible-name matching picking up an
+			// unrelated row that merely CONTAINS this literal name.
+			await expect(page.getByRole("progressbar", { name: "Filen.zip", exact: true })).toBeVisible({ timeout: 10_000 })
+			await expect(page.getByRole("progressbar", { name: "Filen.zip", exact: true })).toHaveCount(1)
 
 			await expect(page.getByText("Done")).toBeVisible({ timeout: 20_000 })
 
@@ -258,7 +327,7 @@ test.describe("downloads", () => {
 			expect(sink.first4).toEqual([0x50, 0x4b, 0x03, 0x04])
 			expect(sink.bytes).toBeGreaterThan(100)
 		} finally {
-			await trashCreatedTestFiles(page)
+			await trashScratchDirectory(page, scratchName)
 		}
 	})
 
@@ -273,16 +342,20 @@ test.describe("downloads", () => {
 		await deleteFsaPicker(page)
 
 		await page.goto("/drive")
-		const { listbox } = await waitForListingSettled(page)
 
+		const scratchName = `e2e-download-sw-${crypto.randomUUID()}`
 		const fileName = `e2e-download-sw-${crypto.randomUUID()}.txt`
 		const content = "filen web e2e sw download probe"
 
 		try {
-			await createTestFiles(page, [{ name: fileName, content }])
+			const { listbox } = await enterScratchDirectory(page, scratchName)
+
+			await uploadTestFiles(page, [{ name: fileName, content }])
 
 			const row = listbox.getByRole("option", { name: fileName })
 			await expect(row).toBeVisible({ timeout: 20_000 })
+
+			await clearFinishedTransfers(page)
 
 			await row.click()
 
@@ -306,7 +379,7 @@ test.describe("downloads", () => {
 			await expect(page.getByRole("progressbar", { name: fileName })).toBeVisible()
 			await expect(page.getByText("Done")).toBeVisible({ timeout: 20_000 })
 		} finally {
-			await trashCreatedTestFiles(page)
+			await trashScratchDirectory(page, scratchName)
 		}
 	})
 
@@ -326,16 +399,20 @@ test.describe("downloads", () => {
 		await stubFsaPicker(page, 75)
 
 		await page.goto("/drive")
-		const { listbox } = await waitForListingSettled(page)
 
+		const scratchName = `e2e-download-cancel-${crypto.randomUUID()}`
 		const fileName = `e2e-download-cancel-${crypto.randomUUID()}.bin`
 		const sizeBytes = 24 * 1024 * 1024
 
 		try {
-			await createLargeTestFile(page, fileName, sizeBytes)
+			const { listbox } = await enterScratchDirectory(page, scratchName)
+
+			await uploadLargeTestFile(page, fileName, sizeBytes)
 
 			const row = listbox.getByRole("option", { name: fileName })
 			await expect(row).toBeVisible({ timeout: 20_000 })
+
+			await clearFinishedTransfers(page)
 
 			await row.click()
 			await page.getByRole("button", { name: "Download", exact: true }).click()
@@ -348,6 +425,12 @@ test.describe("downloads", () => {
 			const progressbar = page.getByRole("progressbar", { name: fileName })
 			await expect(progressbar).toBeVisible()
 
+			// Snapshot the scratch directory's own option count just before cancelling -- race-free here,
+			// unlike the identical snapshot-then-assert shape in drive.spec.ts's own "selection" test: the
+			// scratch directory is this test's private space, so nothing else ever concurrently
+			// creates/trashes inside it the way concurrent specs do at /drive's shared root.
+			const optionCountBeforeCancel = await listbox.getByRole("option").count()
+
 			await page.getByRole("button", { name: "Cancel", exact: true }).click()
 
 			// Cancelled transfers keep no history (download.ts's runDownload Cancelled branch settles then
@@ -356,10 +439,13 @@ test.describe("downloads", () => {
 			await expect(page.getByText(/failed/i)).toHaveCount(0)
 
 			// The source item itself is untouched -- cancelling aborts the in-flight transfer, never the
-			// underlying file, and the listing was never patched by a download in the first place.
+			// underlying file, and the listing was never patched by a download in the first place. The
+			// unchanged option count alongside it proves nothing else in the scratch listing shifted either,
+			// not just that this one specific row happens to still be there.
 			await expect(row).toBeVisible()
+			await expect(listbox.getByRole("option")).toHaveCount(optionCountBeforeCancel)
 		} finally {
-			await trashCreatedTestFiles(page)
+			await trashScratchDirectory(page, scratchName)
 		}
 	})
 })
