@@ -28,6 +28,6 @@ test.describe("service worker", () => {
 					}),
 				{ timeout: 30_000 }
 			)
-			.toEqual({ v: 1 })
+			.toEqual({ v: 2 })
 	})
 })
