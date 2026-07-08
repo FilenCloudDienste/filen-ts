@@ -1,8 +1,20 @@
 import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
 
+// The three splat routes a directory open can land on — one per browsable surface with a path of its
+// own (My Drive plus the two shared roots). recents/favorites/trash have no splat route; a directory
+// opened from one of them starts a fresh "/drive/$" path (see resolveDriveNavigationTarget).
+export type DriveRouteId = "/drive/$" | "/shared-in/$" | "/shared-out/$"
+
+// Which splat route a given variant's directories browse within: the shared variants descend into
+// their own "/shared-in/$" / "/shared-out/$" routes so a nested share never lands on the owned
+// "/drive/$" route; every other variant funnels into "/drive/$".
+export function driveRouteIdFor(variant: DriveVariant): DriveRouteId {
+	return variant === "sharedIn" ? "/shared-in/$" : variant === "sharedOut" ? "/shared-out/$" : "/drive/$"
+}
+
 export interface DriveNavigationTarget {
-	to: "/drive/$"
+	to: DriveRouteId
 	params: { _splat: string }
 }
 
@@ -17,8 +29,9 @@ export function splatToUuids(splat: string): string[] {
 
 // Files never navigate here — opening one is a preview, a later concern.
 //
-// Every variant funnels a directory open into the "drive" variant's own splat route:
-// recents/favorites are flat, single-level listings with no path of their own (see
+// The target route is driveRouteIdFor(variant): the two shared variants descend into their own
+// splat routes (a nested share stays under "/shared-in/$" / "/shared-out/$"), everything else funnels
+// into "/drive/$". recents/favorites are flat, single-level listings with no path of their own (see
 // routes/_app/{recents,favorites}.tsx), so entering one of their directories starts a fresh
 // one-level path — same as opening a directory at the drive root (both pass an empty
 // `currentSplat`). Trash mirrors mobile's rule instead (filen-mobile's
@@ -38,5 +51,5 @@ export function resolveDriveNavigationTarget(item: DriveItem, variant: DriveVari
 
 	const nextSplat = currentSplat === "" ? item.data.uuid : `${currentSplat}/${item.data.uuid}`
 
-	return { to: "/drive/$", params: { _splat: nextSplat } }
+	return { to: driveRouteIdFor(variant), params: { _splat: nextSplat } }
 }

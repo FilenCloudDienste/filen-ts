@@ -103,6 +103,12 @@ export const drive = {
 	/** Drive listing row — visually-hidden label announcing a favorited item's star indicator */
 	driveFavorited: "Favorited",
 
+	// ── Shared identity ──────────────────────────────────────────────────────
+	/** Drive listing row/tile (shared-with-me surface) — muted secondary label naming who shared an item with the user; {{name}} = the sharer's email */
+	driveSharedByLabel: "Shared by {{name}}",
+	/** Drive listing row/tile (shared-with-others surface) — muted secondary label naming who the user shared an item with; {{name}} = the recipient's email */
+	driveSharedWithLabel: "Shared with {{name}}",
+
 	// ── Keymap commands ──────────────────────────────────────────────────────
 	/** Keymap registry — description for the drive.newDirectory command */
 	driveCommandNewDirectory: "New directory",

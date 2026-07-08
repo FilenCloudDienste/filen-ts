@@ -4,6 +4,7 @@ import { MoreHorizontalIcon } from "lucide-react"
 import { type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
 import { fileIconFor } from "@/lib/drive/icon"
+import { sharedIdentityLabel } from "@/lib/drive/format"
 import { type ItemActionDialogKind } from "@/components/drive/item-menu.logic"
 import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/components/drive/item-menu"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
@@ -27,6 +28,8 @@ export interface DriveTileProps {
 export function DriveTile({ item, index, selected, active, variant, onPointerSelect, onOpen, onItemAction, registerRef }: DriveTileProps) {
 	const { t } = useTranslation("drive")
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
+	// Only the two shared variants resolve a counterparty; every other variant gets null (no badge).
+	const shared = sharedIdentityLabel(item, variant)
 
 	return (
 		<ContextMenu>
@@ -51,6 +54,11 @@ export function DriveTile({ item, index, selected, active, variant, onPointerSel
 					>
 						{createElement(fileIconFor(item), { "aria-hidden": true, className: "size-10 shrink-0 text-muted-foreground" })}
 						<span className="line-clamp-2 w-full text-xs break-words">{name}</span>
+						{shared ? (
+							<span className="w-full truncate text-[0.7rem] text-muted-foreground">
+								{t(shared.labelKey, { name: shared.name })}
+							</span>
+						) : null}
 						<DropdownMenu>
 							<DropdownMenuTrigger
 								render={

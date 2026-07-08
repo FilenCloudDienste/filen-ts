@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { ChevronRightIcon } from "lucide-react"
 import { type DriveVariant } from "@/lib/drive/preferences"
-import { splatToUuids } from "@/lib/drive/navigate"
+import { driveRouteIdFor, splatToUuids } from "@/lib/drive/navigate"
 import { useDirectoryNamesQuery } from "@/queries/drive"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -34,6 +34,11 @@ export function Breadcrumb({ variant, splat }: BreadcrumbProps) {
 	const { t } = useTranslation("drive")
 	const rootLabel = t(VARIANT_ROOT_LABEL_KEY[variant])
 	const uuids = splatToUuids(splat)
+	// One route id for every crumb link — the shared variants link within their own splat routes, so
+	// a breadcrumb ancestor click stays on "/shared-in/$" / "/shared-out/$" instead of jumping to the
+	// owned "/drive/$" (see lib/drive/navigate.ts's driveRouteIdFor). All three routes take the same
+	// splat param, so only the `to` differs.
+	const routeId = driveRouteIdFor(variant)
 	const namesQuery = useDirectoryNamesQuery(uuids)
 
 	return (
@@ -49,7 +54,7 @@ export function Breadcrumb({ variant, splat }: BreadcrumbProps) {
 						</span>
 					) : (
 						<Link
-							to="/drive/$"
+							to={routeId}
 							params={{ _splat: "" }}
 							className={CRUMB_LINK_CLASS}
 						>
@@ -103,7 +108,7 @@ export function Breadcrumb({ variant, splat }: BreadcrumbProps) {
 											</span>
 										) : (
 											<Link
-												to="/drive/$"
+												to={routeId}
 												params={{ _splat: uuids.slice(0, index + 1).join("/") }}
 												className={CRUMB_LINK_CLASS}
 											>

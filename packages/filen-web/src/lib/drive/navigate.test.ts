@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, UuidStr, SharedDir, SharedFile, SharingRole } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
-import { resolveDriveNavigationTarget, splatToUuids } from "@/lib/drive/navigate"
+import { driveRouteIdFor, resolveDriveNavigationTarget, splatToUuids } from "@/lib/drive/navigate"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
 // readable test label into a shape that satisfies it, mirroring sort.test.ts's own uuid fixtures.
@@ -44,6 +44,46 @@ function fileItem(uuid: UuidStr): DriveItem {
 	return narrowItem(file)
 }
 
+// A nested shared directory (SharedDir + a spread parent role), narrowed exactly as the shared
+// listing fetcher builds it — narrows to a "sharedDirectory" arm that asDirectoryOrFile maps to a
+// directory, so it navigates like one. Role identity is irrelevant to navigation; a plausible one is
+// supplied so the fixture matches the real narrowed shape.
+function sharedDirectoryItem(uuid: UuidStr): DriveItem {
+	const sharedDir: SharedDir & { sharingRole: SharingRole } = {
+		inner: {
+			uuid,
+			parent: testUuid("parent"),
+			color: "default",
+			timestamp: 1_700_000_000_000n,
+			favorited: false,
+			meta: { type: "decoded", data: { name: "Shared" } }
+		},
+		sharedTag: true,
+		sharingRole: { Sharer: { email: "sharer@filen.io", id: 42 } }
+	}
+	return narrowItem(sharedDir)
+}
+
+// A shared file (narrows to a "sharedRootFile" arm) — asDirectoryOrFile maps it to a file, so it
+// never navigates, mirroring the base-file rule.
+function sharedFileItem(uuid: UuidStr): DriveItem {
+	const sharedFile: SharedFile = {
+		uuid,
+		size: 2_048n,
+		region: "de-1",
+		bucket: "filen-1",
+		chunks: 2n,
+		timestamp: 1_700_000_000_000n,
+		meta: {
+			type: "decoded",
+			data: { name: "shared.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "key", version: 2 }
+		},
+		sharingRole: { Receiver: { email: "receiver@filen.io", id: 7 } },
+		sharedTag: true
+	}
+	return narrowItem(sharedFile)
+}
+
 const NAVIGABLE_VARIANTS: DriveVariant[] = ["drive", "recents", "favorites"]
 const ALL_VARIANTS: DriveVariant[] = ["drive", "recents", "favorites", "trash"]
 
@@ -61,9 +101,52 @@ describe("splatToUuids", () => {
 	})
 })
 
+describe("driveRouteIdFor", () => {
+	it("routes the shared variants to their own splat routes and every other variant to /drive/$", () => {
+		expect(driveRouteIdFor("drive")).toBe("/drive/$")
+		expect(driveRouteIdFor("recents")).toBe("/drive/$")
+		expect(driveRouteIdFor("favorites")).toBe("/drive/$")
+		expect(driveRouteIdFor("trash")).toBe("/drive/$")
+		expect(driveRouteIdFor("sharedIn")).toBe("/shared-in/$")
+		expect(driveRouteIdFor("sharedOut")).toBe("/shared-out/$")
+	})
+})
+
 describe("resolveDriveNavigationTarget", () => {
 	it.each(ALL_VARIANTS)("returns null for a file in the %s variant — file-open is a later slice", variant => {
 		expect(resolveDriveNavigationTarget(fileItem(testUuid("file-1")), variant, "")).toBeNull()
+	})
+
+	it.each(["sharedIn", "sharedOut"] as const)("returns null for a shared file in the %s variant (asDirectoryOrFile → file)", variant => {
+		expect(resolveDriveNavigationTarget(sharedFileItem(testUuid("shared-file")), variant, "")).toBeNull()
+	})
+
+	it("descends a shared directory under sharedIn into the shared-in splat route", () => {
+		const uuid = testUuid("shared-dir")
+
+		expect(resolveDriveNavigationTarget(sharedDirectoryItem(uuid), "sharedIn", "")).toEqual({
+			to: "/shared-in/$",
+			params: { _splat: uuid }
+		})
+	})
+
+	it("descends a shared directory under sharedOut into the shared-out splat route", () => {
+		const uuid = testUuid("shared-dir")
+
+		expect(resolveDriveNavigationTarget(sharedDirectoryItem(uuid), "sharedOut", "")).toEqual({
+			to: "/shared-out/$",
+			params: { _splat: uuid }
+		})
+	})
+
+	it("appends onto the current splat when descending into a nested share (stays on the shared route)", () => {
+		const parent = testUuid("shared-parent")
+		const clicked = testUuid("shared-child")
+
+		expect(resolveDriveNavigationTarget(sharedDirectoryItem(clicked), "sharedIn", parent)).toEqual({
+			to: "/shared-in/$",
+			params: { _splat: `${parent}/${clicked}` }
+		})
 	})
 
 	it("a directory clicked at the drive root appends its own uuid to the empty splat", () => {

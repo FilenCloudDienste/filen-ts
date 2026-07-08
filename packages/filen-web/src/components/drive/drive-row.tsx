@@ -4,7 +4,7 @@ import { StarIcon, MoreHorizontalIcon } from "lucide-react"
 import { type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
 import { fileIconFor } from "@/lib/drive/icon"
-import { formatItemSize, formatModifiedDate } from "@/lib/drive/format"
+import { formatItemSize, formatModifiedDate, sharedIdentityLabel } from "@/lib/drive/format"
 import { type ItemActionDialogKind } from "@/components/drive/item-menu.logic"
 import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/components/drive/item-menu"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
@@ -40,6 +40,8 @@ export function DriveRow({
 }: DriveRowProps) {
 	const { t } = useTranslation("drive")
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
+	// Only the two shared variants resolve a counterparty; every other variant gets null (no badge).
+	const shared = sharedIdentityLabel(item, variant)
 
 	return (
 		<ContextMenu>
@@ -68,6 +70,11 @@ export function DriveRow({
 					>
 						{createElement(fileIconFor(item), { "aria-hidden": true, className: "size-4 shrink-0 text-muted-foreground" })}
 						<span className="min-w-0 flex-1 truncate">{name}</span>
+						{shared ? (
+							<span className="max-w-48 min-w-0 shrink truncate text-xs text-muted-foreground">
+								{t(shared.labelKey, { name: shared.name })}
+							</span>
+						) : null}
 						{item.data.favorited ? (
 							<>
 								<StarIcon

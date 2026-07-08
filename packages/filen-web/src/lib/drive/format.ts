@@ -1,5 +1,6 @@
 import { formatBytes } from "@filen/utils"
-import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
+import { asDirectoryOrFile, getSharerIdentity, type DriveItem } from "@/lib/drive/item"
+import { type DriveVariant } from "@/lib/drive/preferences"
 
 // Directories carry no real size on the item itself (synthetic 0n — see narrowItem in
 // @/lib/drive/item), so the size column is blank for them rather than showing "0 B". A shared file
@@ -40,4 +41,27 @@ export function formatCreatedDate(item: DriveItem): string {
 // (autosave, rapid re-uploads), where a date-only label would leave them indistinguishable.
 export function formatVersionTimestamp(timestamp: bigint): string {
 	return new Date(Number(timestamp)).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+}
+
+// The shared counterparty a listing row/tile shows as a muted secondary segment on the two shared
+// surfaces: on "shared with me" it's who shared the item (driveSharedByLabel), on "shared with others"
+// who it's shared with (driveSharedWithLabel). Returns the i18n key to interpolate plus the
+// counterparty email; null for a non-shared variant, or a shared item whose role couldn't be read
+// (an undecryptable/unknown role) — the caller renders nothing then, never the badge for the four
+// non-shared variants.
+export function sharedIdentityLabel(
+	item: DriveItem,
+	variant: DriveVariant
+): { labelKey: "driveSharedByLabel" | "driveSharedWithLabel"; name: string } | null {
+	if (variant !== "sharedIn" && variant !== "sharedOut") {
+		return null
+	}
+
+	const identity = getSharerIdentity(item)
+
+	if (identity === null) {
+		return null
+	}
+
+	return { labelKey: variant === "sharedIn" ? "driveSharedByLabel" : "driveSharedWithLabel", name: identity.email }
 }

@@ -20,6 +20,8 @@ import { Route as AppTrashRouteImport } from './routes/_app/trash'
 import { Route as AppRecentsRouteImport } from './routes/_app/recents'
 import { Route as AppFavoritesRouteImport } from './routes/_app/favorites'
 import { Route as AppContactsRouteImport } from './routes/_app/contacts'
+import { Route as AppSharedOutSplatRouteImport } from './routes/_app/shared-out.$'
+import { Route as AppSharedInSplatRouteImport } from './routes/_app/shared-in.$'
 import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/security'
 import { Route as AppDriveSplatRouteImport } from './routes/_app/drive.$'
 
@@ -77,6 +79,16 @@ const AppContactsRoute = AppContactsRouteImport.update({
   path: '/contacts',
   getParentRoute: () => AppRouteRoute,
 } as any)
+const AppSharedOutSplatRoute = AppSharedOutSplatRouteImport.update({
+  id: '/shared-out/$',
+  path: '/shared-out/$',
+  getParentRoute: () => AppRouteRoute,
+} as any)
+const AppSharedInSplatRoute = AppSharedInSplatRouteImport.update({
+  id: '/shared-in/$',
+  path: '/shared-in/$',
+  getParentRoute: () => AppRouteRoute,
+} as any)
 const AppSettingsSecurityRoute = AppSettingsSecurityRouteImport.update({
   id: '/settings/security',
   path: '/settings/security',
@@ -101,6 +113,8 @@ export interface FileRoutesByFullPath {
   '/reset/$token': typeof ResetTokenRoute
   '/drive/$': typeof AppDriveSplatRoute
   '/settings/security': typeof AppSettingsSecurityRoute
+  '/shared-in/$': typeof AppSharedInSplatRoute
+  '/shared-out/$': typeof AppSharedOutSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -115,6 +129,8 @@ export interface FileRoutesByTo {
   '/reset/$token': typeof ResetTokenRoute
   '/drive/$': typeof AppDriveSplatRoute
   '/settings/security': typeof AppSettingsSecurityRoute
+  '/shared-in/$': typeof AppSharedInSplatRoute
+  '/shared-out/$': typeof AppSharedOutSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -131,6 +147,8 @@ export interface FileRoutesById {
   '/reset/$token': typeof ResetTokenRoute
   '/_app/drive/$': typeof AppDriveSplatRoute
   '/_app/settings/security': typeof AppSettingsSecurityRoute
+  '/_app/shared-in/$': typeof AppSharedInSplatRoute
+  '/_app/shared-out/$': typeof AppSharedOutSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -147,6 +165,8 @@ export interface FileRouteTypes {
     | '/reset/$token'
     | '/drive/$'
     | '/settings/security'
+    | '/shared-in/$'
+    | '/shared-out/$'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -161,6 +181,8 @@ export interface FileRouteTypes {
     | '/reset/$token'
     | '/drive/$'
     | '/settings/security'
+    | '/shared-in/$'
+    | '/shared-out/$'
   id:
     | '__root__'
     | '/'
@@ -176,6 +198,8 @@ export interface FileRouteTypes {
     | '/reset/$token'
     | '/_app/drive/$'
     | '/_app/settings/security'
+    | '/_app/shared-in/$'
+    | '/_app/shared-out/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -267,6 +291,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppContactsRouteImport
       parentRoute: typeof AppRouteRoute
     }
+    '/_app/shared-out/$': {
+      id: '/_app/shared-out/$'
+      path: '/shared-out/$'
+      fullPath: '/shared-out/$'
+      preLoaderRoute: typeof AppSharedOutSplatRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
+    '/_app/shared-in/$': {
+      id: '/_app/shared-in/$'
+      path: '/shared-in/$'
+      fullPath: '/shared-in/$'
+      preLoaderRoute: typeof AppSharedInSplatRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
     '/_app/settings/security': {
       id: '/_app/settings/security'
       path: '/settings/security'
@@ -291,6 +329,8 @@ interface AppRouteRouteChildren {
   AppTrashRoute: typeof AppTrashRoute
   AppDriveSplatRoute: typeof AppDriveSplatRoute
   AppSettingsSecurityRoute: typeof AppSettingsSecurityRoute
+  AppSharedInSplatRoute: typeof AppSharedInSplatRoute
+  AppSharedOutSplatRoute: typeof AppSharedOutSplatRoute
 }
 
 const AppRouteRouteChildren: AppRouteRouteChildren = {
@@ -300,6 +340,8 @@ const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppTrashRoute: AppTrashRoute,
   AppDriveSplatRoute: AppDriveSplatRoute,
   AppSettingsSecurityRoute: AppSettingsSecurityRoute,
+  AppSharedInSplatRoute: AppSharedInSplatRoute,
+  AppSharedOutSplatRoute: AppSharedOutSplatRoute,
 }
 
 const AppRouteRouteWithChildren = AppRouteRoute._addFileChildren(
