@@ -2,7 +2,7 @@ import { createElement, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { formatBytes } from "@filen/utils"
 import { StarIcon } from "lucide-react"
-import type { DriveItem } from "@/lib/drive/item"
+import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { fileIconFor } from "@/lib/drive/icon"
 import { formatCreatedDate, formatItemSize, formatModifiedDate } from "@/lib/drive/format"
 import { useItemInfoQuery } from "@/queries/drive"
@@ -27,8 +27,10 @@ function InfoRow({ label, value }: { label: string; value: ReactNode }) {
 }
 
 // Read-only item-info panel — mounted-when-active by the listing's dialog host. Works for a directory
-// or a file, and for an item in any variant including trash (info is offered there too — see
-// item-menu.logic.ts). Two tiers of data: item.data-derived rows (name, created, modified, and a
+// or a file — including any of the four shared arms, routed through asDirectoryOrFile same as
+// formatItemSize (lib/drive/format.ts) so a shared item's Size/MIME or size/file/dir-count rows render
+// same as an owned one — and for an item in any variant including trash (info is offered there too —
+// see item-menu.logic.ts). Two tiers of data: item.data-derived rows (name, created, modified, and a
 // file's size/mime) are synchronous and need no network, so they always render regardless of variant
 // or query state. Path and a directory's size/file/dir counts come from the remote getItemInfo call
 // instead, gated by remoteInfoEnabled (passed down by the host, false for trash) — a trashed item's
@@ -45,6 +47,9 @@ export function InfoDialog({ item, remoteInfoEnabled, onClose }: InfoDialogProps
 	// fetching through `enabled`, never whether the hook itself runs.
 	const infoQuery = useItemInfoQuery(item.data, { enabled: remoteInfoEnabled })
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
+	// A shared file reads as a file, a shared directory as a directory (asDirectoryOrFile) — the raw
+	// six-arm `item.type` would miss every shared arm in the branches below (see item.ts).
+	const base = asDirectoryOrFile(item)
 
 	return (
 		<Dialog
@@ -91,7 +96,7 @@ export function InfoDialog({ item, remoteInfoEnabled, onClose }: InfoDialogProps
 										value={infoQuery.data.path}
 									/>
 								) : null}
-								{item.type === "directory" && infoQuery.data.size ? (
+								{base.type === "directory" && infoQuery.data.size ? (
 									<>
 										<InfoRow
 											label={t("driveInfoSize")}
@@ -110,16 +115,16 @@ export function InfoDialog({ item, remoteInfoEnabled, onClose }: InfoDialogProps
 							</>
 						) : null
 					) : null}
-					{item.type === "file" ? (
+					{base.type === "file" ? (
 						<>
 							<InfoRow
 								label={t("driveInfoSize")}
 								value={formatItemSize(item)}
 							/>
-							{item.data.decryptedMeta ? (
+							{base.data.decryptedMeta ? (
 								<InfoRow
 									label={t("driveInfoMimeType")}
-									value={item.data.decryptedMeta.mime}
+									value={base.data.decryptedMeta.mime}
 								/>
 							) : null}
 						</>
