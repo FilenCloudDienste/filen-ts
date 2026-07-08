@@ -86,10 +86,6 @@ export const transfers = {
 	transfersDirectoryUploadSummaryCompleteWithFailures_other: "{{count}} items uploaded, {{failed}} failed",
 
 	// ── Download summary toast (startDownloads) ───────────────────────────────
-	/** Download summary toast — the downloaded file succeeded; singular */
-	transfersDownloadSummaryComplete_one: "{{count}} file downloaded",
-	/** Download summary toast — every downloaded file in the batch succeeded; plural */
-	transfersDownloadSummaryComplete_other: "{{count}} files downloaded",
 	/** Download summary toast — the download failed; {{count}} = files that succeeded, {{failed}} = files that failed; singular */
 	transfersDownloadSummaryCompleteWithFailures_one: "{{count}} file downloaded, {{failed}} failed",
 	/** Download summary toast — at least one file in the batch failed; {{count}} = files that succeeded, {{failed}} = files that failed; plural */

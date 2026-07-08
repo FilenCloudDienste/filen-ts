@@ -190,12 +190,18 @@ function fsaWritable(sink: UnderlyingSink<Uint8Array> = {}): FileSystemWritableF
 	})
 }
 
-const fsaTarget: SaveTarget = { kind: "fsa", writable: {} as FileSystemWritableFileStream }
+// A genuine per-call fsa SaveTarget rather than a shared module-level one — mirrors download.test.ts's
+// own fix: downloadZipViaFsa's real pipe now runs to actual completion against this default, and a
+// WritableStream is single-use, so a shared instance would already be closed/aborted by whichever
+// test in this file ran first.
+function fsaTarget(): SaveTarget {
+	return { kind: "fsa", writable: fsaWritable() }
+}
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	useTransfersStore.setState({ transfers: [], speedSamples: [] })
-	saveDownloadMock.mockResolvedValue(fsaTarget)
+	saveDownloadMock.mockResolvedValue(fsaTarget())
 	isPickerCancelledMock.mockReturnValue(false)
 })
 
@@ -492,6 +498,25 @@ describe("defaultZipDownloadDeps.downloadZip — fsa branch", () => {
 		await expect(defaultZipDownloadDeps.downloadZip([testFile()], "transfer-id", save, vi.fn())).rejects.toEqual(dto)
 
 		expect(sinkAbort).toHaveBeenCalledTimes(1)
+	})
+})
+
+// Mirrors download.test.ts's own fsa sink close-failure case: a genuine close/flush failure must not
+// be mistaken for a finished zip download, exercised through the real runZipDownload +
+// defaultZipDownloadDeps + store.
+describe("runZipDownload (real defaultZipDownloadDeps) — fsa sink close failure", () => {
+	it("settles error (not done) and returns an error outcome when the sink's close() rejects after a successful worker resolve", async () => {
+		const closeError = new Error("disk full")
+		const save: FsaSaveTarget = { kind: "fsa", writable: fsaWritable({ close: () => Promise.reject(closeError) }) }
+		saveDownloadMock.mockResolvedValue(save)
+		downloadItemsToZip.mockImplementation(async (_items: ZipItem[], _id: string, writer: WritableStream<Uint8Array>) => {
+			await writer.getWriter().close()
+		})
+
+		const outcome = await runZipDownload(defaultZipDownloadDeps, { items: [dirItem()], suggestedName: "Documents.zip" })
+
+		expect(outcome.status).toBe("error")
+		expect(useTransfersStore.getState().transfers[0]?.status).toBe("error")
 	})
 })
 

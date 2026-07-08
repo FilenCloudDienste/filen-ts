@@ -252,6 +252,23 @@ describe("settle", () => {
 		expect(ids).toContain("finished-1")
 		expect(ids).toContain("finished-200")
 	})
+
+	it("does not count a cancelled settle toward the finished cap (a cancel at the boundary never evicts a finished row)", () => {
+		for (let i = 0; i < 200; i++) {
+			useTransfersStore.getState().add(makeTransfer({ id: `finished-${String(i)}`, status: "uploading" }))
+		}
+
+		for (let i = 0; i < 200; i++) {
+			useTransfersStore.getState().settle(`finished-${String(i)}`, "done")
+		}
+
+		useTransfersStore.getState().add(makeTransfer({ id: "cancelled-row", direction: "download", status: "downloading" }))
+		useTransfersStore.getState().settle("cancelled-row", "cancelled")
+
+		const ids = useTransfersStore.getState().transfers.map(transfer => transfer.id)
+		expect(ids).toContain("finished-0")
+		expect(ids).toContain("cancelled-row")
+	})
 })
 
 describe("remove", () => {

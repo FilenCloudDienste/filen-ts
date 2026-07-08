@@ -42,6 +42,25 @@ interface PendingZipDownload {
 type PendingDownload = PendingFileDownload | PendingZipDownload
 const downloads = new Map<string, PendingDownload>()
 
+// No page-side signal ever tells the SW a download finished (by design — see the registration
+// handlers below): the id must also survive every GET (Safari probes a Range, then re-fetches), so
+// eviction can't key off a GET either. Bounded retention is the only guard against unbounded growth of
+// decrypted key material across the SW's lifetime — a generous concurrent-download ceiling, evicting
+// the OLDEST entry (Map preserves insertion order) once a new registration pushes past it.
+const MAX_PENDING_DOWNLOADS = 32
+
+function registerPendingDownload(id: string, entry: PendingDownload): void {
+	downloads.set(id, entry)
+
+	if (downloads.size > MAX_PENDING_DOWNLOADS) {
+		const oldest = downloads.keys().next().value
+
+		if (oldest !== undefined) {
+			downloads.delete(oldest)
+		}
+	}
+}
+
 // In-flight stream count — the SW must not skipWaiting() an update through a running save (it would
 // truncate the download). Guards SKIP_WAITING.
 let activeStreams = 0
@@ -155,7 +174,9 @@ function handleDownload(request: Request, url: URL): Response {
 	// the SDK's `{start,end}` (Rust range convention) — an HTTP inclusive `bytes=0-99` maps to
 	// `{start:0,end:100}`. On failure, abort the writable so the Response readable ERRORS (never hangs).
 	// The id is NOT evicted on GET — Safari probes a range then re-fetches, so a download must survive
-	// repeated GETs; the page evicts it explicitly once the save settles.
+	// repeated GETs. There is no page-side completion signal either, so nothing ever evicts it on
+	// finish — retention is bounded instead (registerPendingDownload), which still respects Safari's
+	// repeated-GET need for any recent entry.
 	void (async () => {
 		try {
 			await client.downloadFileToWriter({
@@ -216,14 +237,14 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 
 	if (type === SW_MSG_REGISTER_DOWNLOAD) {
 		const msg = event.data as { id: string; file: SwAnyFile; name: string; size: number }
-		downloads.set(msg.id, { kind: "file", file: msg.file, name: msg.name, size: msg.size })
+		registerPendingDownload(msg.id, { kind: "file", file: msg.file, name: msg.name, size: msg.size })
 		port?.postMessage({ ok: true })
 		return
 	}
 
 	if (type === SW_MSG_REGISTER_ZIP_DOWNLOAD) {
 		const msg = event.data as { id: string; items: SwZipItem[]; name: string }
-		downloads.set(msg.id, { kind: "zip", items: msg.items, name: msg.name })
+		registerPendingDownload(msg.id, { kind: "zip", items: msg.items, name: msg.name })
 		port?.postMessage({ ok: true })
 		return
 	}

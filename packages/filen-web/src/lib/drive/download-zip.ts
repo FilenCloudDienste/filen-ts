@@ -118,9 +118,12 @@ export async function runZipDownload(
 	return { status: "success" }
 }
 
-// The FSA sink wiring — identical shape to download.ts's downloadViaFsa, same coordinated teardown: the
-// worker call rejecting can leave the transferred writable open, so the pipe is aborted on the same
-// shared signal rather than hanging forever on an abandoned stream.
+// The FSA sink wiring — identical shape to download.ts's downloadViaFsa, same coordinated teardown and
+// same asymmetric swallow: the worker call rejecting can leave the transferred writable open, so the
+// pipe is aborted on the same shared signal and `sinkDone` is swallowed there ONLY (an abort-induced
+// rejection is expected). The success path awaits the RAW `sinkDone`, so a genuine close/flush failure
+// (disk full at close, a revoked handle) rejects this function too, rather than reporting a finished
+// zip that never actually finished writing.
 async function downloadZipViaFsa(
 	items: ZipItem[],
 	transferId: string,
@@ -129,7 +132,7 @@ async function downloadZipViaFsa(
 ): Promise<void> {
 	const transform = new TransformStream<Uint8Array, Uint8Array>()
 	const teardown = new AbortController()
-	const sinkDone = transform.readable.pipeTo(save.writable, { signal: teardown.signal }).catch(() => undefined)
+	const sinkDone = transform.readable.pipeTo(save.writable, { signal: teardown.signal })
 
 	try {
 		await sdkApi.downloadItemsToZip(
@@ -140,7 +143,7 @@ async function downloadZipViaFsa(
 		)
 	} catch (e) {
 		teardown.abort()
-		await sinkDone
+		await sinkDone.catch(() => undefined)
 
 		throw e
 	}

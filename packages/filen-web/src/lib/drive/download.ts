@@ -109,14 +109,16 @@ export async function runDownload(deps: RunDownloadDeps, args: { item: DriveItem
 // The FSA sink wiring: a main-thread TransformStream bridges the worker call (its `writable` end,
 // Comlink.transfer'd in — the worker pulls decrypted bytes into it) and the real on-disk sink (its
 // `readable` end piped to the FSA writable). COORDINATED TEARDOWN: if the worker call rejects (e.g.
-// cancelDownload aborted it), the SDK may leave the transferred writable OPEN, so the pipe is
-// aborted here too via the shared AbortSignal — otherwise a naive `readable` consumer hangs forever
-// on an open-but-abandoned stream. On success, `sinkDone` is awaited too so this only resolves once
-// the FSA file is actually finished writing, not merely once the worker call returns.
+// cancelDownload aborted it), the SDK may leave the transferred writable OPEN, so the pipe is aborted
+// here too via the shared AbortSignal — otherwise a naive `readable` consumer hangs forever on an
+// open-but-abandoned stream; `sinkDone` is swallowed on THIS branch only because an abort-induced
+// rejection is expected, not a real failure. The success path awaits the RAW `sinkDone` instead: a
+// genuine close/flush failure (disk full at close, a revoked handle) must reject this function too,
+// not be silently treated as a finished download.
 async function downloadViaFsa(file: AnyFile, transferId: string, save: FsaSaveTarget, onProgress: (bytes: bigint) => void): Promise<void> {
 	const transform = new TransformStream<Uint8Array, Uint8Array>()
 	const teardown = new AbortController()
-	const sinkDone = transform.readable.pipeTo(save.writable, { signal: teardown.signal }).catch(() => undefined)
+	const sinkDone = transform.readable.pipeTo(save.writable, { signal: teardown.signal })
 
 	try {
 		await sdkApi.downloadFileToWriter(
@@ -127,7 +129,7 @@ async function downloadViaFsa(file: AnyFile, transferId: string, save: FsaSaveTa
 		)
 	} catch (e) {
 		teardown.abort()
-		await sinkDone
+		await sinkDone.catch(() => undefined)
 
 		throw e
 	}

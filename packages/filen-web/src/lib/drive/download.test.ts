@@ -132,12 +132,18 @@ function fsaWritable(sink: UnderlyingSink<Uint8Array> = {}): FileSystemWritableF
 	})
 }
 
-const fsaTarget: SaveTarget = { kind: "fsa", writable: {} as FileSystemWritableFileStream }
+// A genuine per-call fsa SaveTarget (mirrors what handle.createWritable() returns) rather than a
+// shared module-level one — downloadViaFsa's real pipe now runs to actual completion against this
+// default (see the fsa sink close-failure describe block below), and a WritableStream is single-use:
+// a shared instance would already be closed/aborted by whichever test in this file ran first.
+function fsaTarget(): SaveTarget {
+	return { kind: "fsa", writable: fsaWritable() }
+}
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	useTransfersStore.setState({ transfers: [], speedSamples: [] })
-	saveDownloadMock.mockResolvedValue(fsaTarget)
+	saveDownloadMock.mockResolvedValue(fsaTarget())
 	isPickerCancelledMock.mockReturnValue(false)
 	startZipDownloadMock.mockResolvedValue(undefined)
 })
@@ -346,6 +352,25 @@ describe("defaultDownloadDeps.download — fsa branch", () => {
 		await expect(defaultDownloadDeps.download(testFile(), "transfer-id", save, vi.fn())).rejects.toEqual(dto)
 
 		expect(sinkAbort).toHaveBeenCalledTimes(1)
+	})
+})
+
+// A genuine close/flush failure (disk full at close, a revoked handle) must not be mistaken for a
+// finished download — exercised through the real runDownload + defaultDownloadDeps + store, since the
+// injected-deps harness above fakes `download` entirely and can't reach this sink-level failure mode.
+describe("runDownload (real defaultDownloadDeps) — fsa sink close failure", () => {
+	it("settles error (not done) and returns an error outcome when the sink's close() rejects after a successful worker resolve", async () => {
+		const closeError = new Error("disk full")
+		const save: FsaSaveTarget = { kind: "fsa", writable: fsaWritable({ close: () => Promise.reject(closeError) }) }
+		saveDownloadMock.mockResolvedValue(save)
+		downloadFileToWriter.mockImplementation(async (_file: AnyFile, _id: string, writer: WritableStream<Uint8Array>) => {
+			await writer.getWriter().close()
+		})
+
+		const outcome = await runDownload(defaultDownloadDeps, { item: fileItem() })
+
+		expect(outcome.status).toBe("error")
+		expect(useTransfersStore.getState().transfers[0]?.status).toBe("error")
 	})
 })
 

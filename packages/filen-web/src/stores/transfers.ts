@@ -177,7 +177,11 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 				transfer.id === id ? (error === undefined ? { ...transfer, status } : { ...transfer, status, error }) : transfer
 			)
 
-			return { transfers: capFinishedTransfers(transfers) }
+			// "cancelled" never joins history — every caller removes the row immediately after settling it
+			// (runDownload/runZipDownload/runUpload's own Cancelled branch) — so it must never count toward
+			// the finished cap either, or that transient row can evict an OLDER, still-legitimate finished
+			// row an instant before it is itself removed.
+			return { transfers: status === "cancelled" ? transfers : capFinishedTransfers(transfers) }
 		})
 	},
 	remove: id => {
