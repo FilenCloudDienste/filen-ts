@@ -182,6 +182,16 @@ function cacheSharedRootContexts(dirs: readonly SharedRootDir[]): void {
 	}
 }
 
+// The SDK's `File` type import above shadows the ambient DOM `File` by name — a type-only import
+// only occupies the type namespace, so the VALUE binding `File` (never imported) still resolves to
+// the global constructor, and this alias recovers its instance type for the one op that needs it.
+type BrowserFile = InstanceType<typeof File>
+
+// transferId → the AbortController driving that upload's `managedFuture.abortSignal`. Module-scoped
+// like `client` so a separate cancelUpload call can reach an in-flight uploadFile's controller;
+// uploadFile deletes its own entry on settle, so an unknown/already-settled id is a no-op abort.
+const uploadRegistry = new Map<string, AbortController>()
+
 const api = {
 	async boot({ threads }: { threads: number }): Promise<BootResult> {
 		const missing = await preflightArtifacts()
@@ -368,6 +378,34 @@ const api = {
 	// Thin getDirOptional pass-through.
 	getDirectory(uuid: string): Promise<Dir | undefined> {
 		return requireClient().getDirOptional(uuid)
+	},
+	// ── Upload ───────────────────────────────────────────────────────────────
+	// The one seam a browser File and its stream cross into this worker. Parent resolves worker-side
+	// (mirror createDirectory); file.stream() is called HERE, not on the main thread — a real Blob
+	// stream (Blob.prototype.stream() is available in worker scope), never a hand-rolled one. progress
+	// is passed unconditionally: the wasm layer rejects with "missing field 'progress'" if it's
+	// omitted, despite `progress?:` in the .d.ts.
+	async uploadFile(parentUuid: string | null, transferId: string, file: BrowserFile, onProgress: (bytes: bigint) => void): Promise<File> {
+		const c = requireClient()
+		const parent = await resolveNormalDirParent(c, parentUuid)
+		const controller = new AbortController()
+		uploadRegistry.set(transferId, controller)
+		try {
+			return await c.uploadFileFromReader({
+				parent,
+				name: file.name,
+				reader: file.stream(),
+				knownSize: file.size,
+				...(file.type ? { mime: file.type } : {}),
+				progress: onProgress,
+				managedFuture: { abortSignal: controller.signal }
+			})
+		} finally {
+			uploadRegistry.delete(transferId)
+		}
+	},
+	cancelUpload(transferId: string): void {
+		uploadRegistry.get(transferId)?.abort()
 	},
 	// ── Rename ───────────────────────────────────────────────────────────────
 	// Held-item ops throughout this section take the caller's already-fetched DriveItem.data
