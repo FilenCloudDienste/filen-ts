@@ -15,6 +15,20 @@ vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: { getContacts, getBlockedContacts, listIncomingContactRequests, listOutgoingContactRequests }
 }))
 
+// Every other hook wrapper below is a one-line pass-through no node-environment test can render (no
+// DOM — see vitest.config.ts). useContactsQuery's `enabled` default is worth covering directly
+// anyway, same rationale as drive.test.ts's useItemInfoQuery coverage: get the fallback wrong (e.g.
+// defaulting to false) and contacts-list.tsx's own bare call silently stops fetching. This only
+// intercepts useQuery itself — real `useQuery` internals are never exercised, just whether our
+// wrapper forwards `enabled` into its options — so QueryClient (used below to build testQueryClient)
+// and the rest of the module stay real.
+const { useQuery } = vi.hoisted(() => ({ useQuery: vi.fn() }))
+
+vi.mock("@tanstack/react-query", async importOriginal => {
+	const actual = await importOriginal<typeof import("@tanstack/react-query")>()
+	return { ...actual, useQuery }
+})
+
 // A bare, unconfigured QueryClient stands in for the real singleton — same rationale as
 // drive.test.ts: the patchers only need genuine setQueryData/getQueryData cache mechanics, never
 // the production client's OPFS-backed persistence pipeline.
@@ -28,7 +42,8 @@ import {
 	contactsQueryGet,
 	contactsQueryUpdate,
 	fetchContactRequests,
-	fetchContacts
+	fetchContacts,
+	useContactsQuery
 } from "@/queries/contacts"
 
 beforeEach(() => {
@@ -117,6 +132,29 @@ describe("fetchContacts", () => {
 		getBlockedContacts.mockRejectedValueOnce(error)
 
 		await expect(fetchContacts()).rejects.toBe(error)
+	})
+})
+
+describe("useContactsQuery", () => {
+	// contacts-list.tsx's own call passes no options at all — a wrong default here would silently
+	// stop it from ever fetching.
+	it("defaults enabled to true when no options are given", () => {
+		useQuery.mockReturnValue({ status: "pending" })
+
+		useContactsQuery()
+
+		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ enabled: true }))
+	})
+
+	// use-blocked-users.ts disables this query on every drive variant except sharedIn (the only one
+	// that filters by the blocked set) — `enabled` reaching useQuery unchanged is the one thing this
+	// thin wrapper must get right, same rationale as drive.test.ts's useItemInfoQuery coverage.
+	it("forwards enabled: false through to useQuery, unmodified", () => {
+		useQuery.mockReturnValue({ status: "pending" })
+
+		useContactsQuery({ enabled: false })
+
+		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ enabled: false }))
 	})
 })
 

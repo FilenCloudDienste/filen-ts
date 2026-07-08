@@ -161,7 +161,10 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const listingQuery = useDirectoryListingQuery(variant, uuid)
 	const sortPrefsQuery = useSortPreferencesQuery()
 	const viewModePrefsQuery = useViewModePreferencesQuery()
-	const blocked = useBlockedUsers()
+	// Gates the underlying contacts/blocked fetch itself (see use-blocked-users.ts) — only sharedIn
+	// filters by it, so the other 5 variants skip the getContacts/getBlockedContacts worker round trip
+	// on every mount and window refocus.
+	const blocked = useBlockedUsers(variant === "sharedIn")
 
 	const sortPrefs = sortPrefsQuery.data ?? DEFAULT_SORT_PREFERENCES
 	const viewModePrefs = viewModePrefsQuery.data ?? DEFAULT_VIEW_MODE_PREFERENCES
