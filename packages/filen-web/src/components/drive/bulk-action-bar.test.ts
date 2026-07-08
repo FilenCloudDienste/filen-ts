@@ -141,11 +141,11 @@ describe("driveBulkActions", () => {
 	})
 
 	it.each(["drive", "recents", "favorites"] as const)(
-		"%s variant, any undecryptable item: favorite/move/share are suppressed, download and trash remain",
+		"%s variant, any undecryptable item: favorite/move/share/download are suppressed, trash remains",
 		variant => {
 			const descriptors = driveBulkActions(variant, flags({ includesUndecryptable: true }))
 
-			expect(descriptors.map(d => d.id)).toEqual(["download", "trash"])
+			expect(descriptors.map(d => d.id)).toEqual(["trash"])
 		}
 	)
 

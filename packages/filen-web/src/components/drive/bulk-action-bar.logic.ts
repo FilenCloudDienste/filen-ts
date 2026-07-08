@@ -88,13 +88,16 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 		if (canShareVariant(variant)) {
 			descriptors.push({ id: "share", labelKey: "driveActionShare", icon: UsersIcon, run: "dialog", dialogKind: "share" })
 		}
-	}
 
-	// Download mutates nothing, so — unlike favorite/move/share above — it is never gated on
-	// ownerMutable/includesUndecryptable; it is offered on every non-trash surface this point is
-	// reachable from (owned or shared). Its own ENABLED state is a separate concern (isBulkDownloadEnabled
-	// below) — this only controls presence, mirroring item-menu.logic.ts's downloadDescriptor.
-	descriptors.push({ id: "download", labelKey: "driveActionDownload", icon: DownloadIcon, run: "direct" })
+		// Download shares the includesUndecryptable gate above (unlike favorite/move/share, it is never
+		// gated on ownerMutable/canShareVariant — download mutates nothing): an undecryptable item's meta
+		// is ciphertext with no content key, so it can never decrypt — a guaranteed-failing click, worse
+		// than a disabled control. Offered on every non-trash, decryptable surface this point is
+		// reachable from (owned or shared). Its own ENABLED state is a separate concern
+		// (isBulkDownloadEnabled below) — this only controls presence, mirroring item-menu.logic.ts's
+		// downloadDescriptor.
+		descriptors.push({ id: "download", labelKey: "driveActionDownload", icon: DownloadIcon, run: "direct" })
+	}
 
 	// Trash is NOT gated by undecryptable (pure uuid, same as restore/delete above) and is never
 	// destructive-styled — recoverable, matching the per-item TRASH descriptor's own rationale.

@@ -874,14 +874,22 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// (empty selection, an open dialog, the trash variant — download isn't offered there, matching
 	// item-menu/bulk-bar's own trash exclusion) plus the single unifying gate every download entry
 	// point shares: needsZip (a directory or multi-selection routes to the zip stub, not ready until a
-	// later task) — void, not awaited, so the FSA save picker inside startDownloads keeps this
-	// keydown's own live user gesture.
+	// later task). Also inert when the selection includes an undecryptable item — its meta is
+	// ciphertext with no content key, so it can never decrypt (mirrors item-menu/bulk-bar's own
+	// undecryptable exclusion) — void, not awaited, so the FSA save picker inside startDownloads keeps
+	// this keydown's own live user gesture.
 	useAction(
 		"drive.download",
 		keyboardEvent => {
 			keyboardEvent.preventDefault()
 
-			if (selectedItems.length === 0 || isDialogOpen || variant === "trash" || needsZip(selectedItems)) {
+			if (
+				selectedItems.length === 0 ||
+				isDialogOpen ||
+				variant === "trash" ||
+				needsZip(selectedItems) ||
+				selectedItems.some(item => item.data.undecryptable)
+			) {
 				return
 			}
 

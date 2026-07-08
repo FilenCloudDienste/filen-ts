@@ -168,8 +168,12 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 	// canShareVariant allows it (sharedOut only), UNSHARE when isSharedRoot allows it (either surface).
 	const ownerMutable = !isSharedVariant(variant)
 
+	// Download is excluded here (unlike the general branch below): an undecryptable item's meta is the
+	// ciphertext arm with no content key, so downloadFileToWriter can never decrypt it — a guaranteed
+	// failure, worse than a disabled control. Same rationale as rename/move/favorite/etc. below, just
+	// enforced by omission since download has no other reason to disable itself (see enabled? above).
 	if (item.data.undecryptable) {
-		const actions: ItemActionDescriptor[] = [INFO, downloadDescriptor(item)]
+		const actions: ItemActionDescriptor[] = [INFO]
 
 		if (ownerMutable) {
 			actions.push(TRASH)

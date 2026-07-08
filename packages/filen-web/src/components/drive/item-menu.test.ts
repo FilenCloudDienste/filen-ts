@@ -182,10 +182,10 @@ describe("driveItemActions (item menu gating)", () => {
 		expect(ids(fileItem(), "trash")).toEqual(["restore", "deletePermanently", "info"])
 	})
 
-	it("undecryptable item outside trash: reduced to info/download/trash only", () => {
+	it("undecryptable item outside trash: reduced to info/trash only (download excluded — can never decrypt)", () => {
 		const undecryptable = narrowItem(mockFile({ meta: { type: "encrypted", data: "ciphertext" } }))
-		expect(ids(undecryptable, "drive")).toEqual(["info", "download", "trash"])
-		expect(ids(undecryptable, "favorites")).toEqual(["info", "download", "trash"])
+		expect(ids(undecryptable, "drive")).toEqual(["info", "trash"])
+		expect(ids(undecryptable, "favorites")).toEqual(["info", "trash"])
 	})
 
 	it("undecryptable item in trash: identical to a normal trash-variant item (no further reduction)", () => {
@@ -282,9 +282,9 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 		)
 
 		// No trash: sharedOut is a shared surface (isSharedVariant), so the owner-mutating trash push
-		// never runs — see the "shared-surface safe subset" describe block below. Download is present
-		// (undecryptable no longer excludes it) but would render disabled — this fixture is a directory.
-		expect(ids(undecryptableRootDir, "sharedOut")).toEqual(["info", "download", "unshare"])
+		// never runs — see the "shared-surface safe subset" describe block below. Download is absent too:
+		// an undecryptable item's meta carries no content key, so it can never decrypt.
+		expect(ids(undecryptableRootDir, "sharedOut")).toEqual(["info", "unshare"])
 	})
 
 	it("unshare dispatches its own confirm dialog kind and is destructive-styled", () => {
@@ -340,9 +340,9 @@ describe("driveItemActions — shared-surface safe subset (sharedIn/sharedOut)",
 	})
 })
 
-// Download's single unifying gate (mirrored in bulk-action-bar.logic.ts and the drive keymap):
-// present everywhere the general/undecryptable branches reach (never trash — see the trash-variant
-// test above), enabled iff the item is a file.
+// Download's single unifying ENABLED gate (mirrored in bulk-action-bar.logic.ts and the drive
+// keymap): present on every decryptable, non-trash item, enabled iff the item is a file. PRESENCE has
+// its own separate exclusions — trash (see the trash-variant test above) and undecryptable (below).
 describe("driveItemActions — download gating (single unifying gate: !needsZip)", () => {
 	it("is present and enabled for a file", () => {
 		const descriptor = driveItemActions(fileItem(), "drive").find(d => d.id === "download")
@@ -361,12 +361,12 @@ describe("driveItemActions — download gating (single unifying gate: !needsZip)
 		expect(ids(dirItem(), "trash")).not.toContain("download")
 	})
 
-	it("is present (though disabled/enabled per file-vs-directory) even for an undecryptable item", () => {
+	it("is absent for an undecryptable item regardless of file/directory type — undecryptable gate takes precedence over needsZip", () => {
 		const undecryptableFile = narrowItem(mockFile({ meta: { type: "encrypted", data: "ciphertext" } }))
 		const undecryptableDir = narrowItem(mockDir({ meta: { type: "encrypted", data: "ciphertext" } }))
 
-		expect(driveItemActions(undecryptableFile, "drive").find(d => d.id === "download")).toMatchObject({ enabled: true })
-		expect(driveItemActions(undecryptableDir, "drive").find(d => d.id === "download")).toMatchObject({ enabled: false })
+		expect(driveItemActions(undecryptableFile, "drive").find(d => d.id === "download")).toBeUndefined()
+		expect(driveItemActions(undecryptableDir, "drive").find(d => d.id === "download")).toBeUndefined()
 	})
 })
 
