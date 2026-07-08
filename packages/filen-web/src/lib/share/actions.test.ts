@@ -161,24 +161,43 @@ describe("shareItems", () => {
 		expect(outcome.failed).toEqual([{ item: bad, error: dto }])
 	})
 
-	it("an item fails if ANY of its contacts fails, and its remaining contacts are skipped", async () => {
+	it("an item fails if ANY of its contacts fails, but every contact is still attempted", async () => {
 		const dir = dirItem({ uuid: testUuid("d") })
 		const good = mockContact("good")
 		const bad = mockContact("bad")
-		const skipped = mockContact("skipped")
+		const alsoGood = mockContact("also-good")
 		const dto = sdkDto("Forbidden")
-		// One item, contacts share sequentially (good, then bad) — bad's rejection throws out of the
-		// per-item loop before skipped is ever reached.
-		shareDirectory.mockResolvedValueOnce(undefined).mockRejectedValueOnce(dto)
+		// One item, contacts share sequentially (good, then bad, then alsoGood) — bad's rejection is
+		// caught per-contact instead of throwing out of the loop, so alsoGood still gets its turn.
+		shareDirectory.mockResolvedValueOnce(undefined).mockRejectedValueOnce(dto).mockResolvedValueOnce(undefined)
 
-		const outcome = await shareItems([dir], [good, bad, skipped])
+		const outcome = await shareItems([dir], [good, bad, alsoGood])
 
 		expect(outcome.succeeded).toEqual([])
 		expect(outcome.failed).toEqual([{ item: dir, error: dto }])
-		// good was attempted, bad threw, skipped never ran (the per-item loop stopped on bad's throw).
-		expect(shareDirectory).toHaveBeenCalledWith(dir.data, good)
-		expect(shareDirectory).toHaveBeenCalledWith(dir.data, bad)
-		expect(shareDirectory).not.toHaveBeenCalledWith(dir.data, skipped)
+		// all three contacts were attempted despite bad's mid-list rejection — the item still fails
+		// overall, but alsoGood is never stranded behind bad the way it used to be.
+		expect(shareDirectory).toHaveBeenCalledTimes(3)
+		expect(shareDirectory).toHaveBeenNthCalledWith(1, dir.data, good)
+		expect(shareDirectory).toHaveBeenNthCalledWith(2, dir.data, bad)
+		expect(shareDirectory).toHaveBeenNthCalledWith(3, dir.data, alsoGood)
+	})
+
+	it("keeps the FIRST failing contact's error when multiple contacts fail (LABEL-FIRST)", async () => {
+		const dir = dirItem({ uuid: testUuid("d") })
+		const firstBad = mockContact("first-bad")
+		const secondBad = mockContact("second-bad")
+		const firstDto = sdkDto("Forbidden")
+		const secondDto = sdkDto("RateLimited")
+		shareDirectory.mockRejectedValueOnce(firstDto).mockRejectedValueOnce(secondDto)
+
+		const outcome = await shareItems([dir], [firstBad, secondBad])
+
+		expect(outcome.succeeded).toEqual([])
+		// secondBad is still attempted (both calls fire), but the item's reported error stays pinned to
+		// the first rejection rather than being overwritten by the second.
+		expect(shareDirectory).toHaveBeenCalledTimes(2)
+		expect(outcome.failed).toEqual([{ item: dir, error: firstDto }])
 	})
 
 	it("invalidates the shared-with-others root listing after at least one item succeeds", async () => {
