@@ -85,8 +85,9 @@ const CODE_EXTENSIONS = new Set([
 ])
 
 // Lowercased extension with no leading dot; "" when the name has none (including a dotfile like
-// ".gitignore", where the only "." is the leading one — not a real extension).
-function extensionOf(name: string): string {
+// ".gitignore", where the only "." is the leading one — not a real extension). Exported for
+// text-viewer.tsx (resolves a CodeMirror language the same way previewType resolves a category).
+export function extensionOf(name: string): string {
 	const dot = name.lastIndexOf(".")
 
 	return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toLowerCase() : ""
@@ -265,4 +266,80 @@ export function stepPreviewIndex(currentUuid: string, siblings: DriveItem[], del
 	const currentIndex = siblings.findIndex(sibling => sibling.data.uuid === currentUuid)
 
 	return clampListboxIndex((currentIndex === -1 ? 0 : currentIndex) + delta, siblings.length)
+}
+
+// Non-fatal UTF-8 decode — an invalid byte sequence becomes the U+FFFD replacement character rather
+// than throwing (TextDecoder's default `fatal: false`). A whole-buffer text/code/markdown preview
+// always renders SOMETHING: a labeled "can't display" would be wrong for a file that decodes almost
+// entirely cleanly, and a hard failure on the rare genuinely-binary-misnamed file just shows as a
+// handful of replacement glyphs instead of blocking the preview outright.
+export function decodeUtf8(bytes: Uint8Array): string {
+	return new TextDecoder("utf-8").decode(bytes)
+}
+
+// ext -> the language tag text-viewer.tsx's own loader switches on to pick a CodeMirror language
+// package (lazily imported there — this file stays framework-free, so the map value is a plain string,
+// never a CodeMirror Extension). "" means no grammar is wired for that extension; the file still
+// renders as a fully usable read-only, unhighlighted CodeMirror view, never a blocked preview. Every
+// CODE_EXTENSIONS entry above is covered (some intentionally unmapped — no maintained CodeMirror 6
+// grammar exists for a bare Makefile/DOS-batch, and "vue"/"svelte" SFC parsing is out of scope), plus
+// the two markdown extensions for the view-source fallback (markdown-viewer.tsx delegating to
+// TextViewer). Several tags share one CodeMirror package family (js/cjs/mjs/jsx/tsx/ts all resolve via
+// @codemirror/lang-javascript with different jsx/typescript flags; c/cpp/h/hpp share
+// @codemirror/lang-cpp's C-family grammar; cs/kt/dart/gradle route through the legacy clike/groovy
+// stream parsers, the closest available grammars for those).
+const CODE_LANGUAGE_MAP: Readonly<Record<string, string>> = {
+	js: "javascript",
+	cjs: "javascript",
+	mjs: "javascript",
+	jsx: "jsx",
+	tsx: "tsx",
+	ts: "typescript",
+	json: "json",
+	htm: "html",
+	html: "html",
+	html5: "html",
+	css: "css",
+	css3: "css",
+	coffee: "coffeescript",
+	litcoffee: "coffeescript",
+	sass: "sass",
+	xml: "xml",
+	sql: "sql",
+	java: "java",
+	kt: "kotlin",
+	swift: "swift",
+	py: "python",
+	py3: "python",
+	cmake: "cmake",
+	cs: "csharp",
+	dart: "dart",
+	dockerfile: "dockerfile",
+	go: "go",
+	less: "less",
+	yaml: "yaml",
+	vbs: "vbscript",
+	cobol: "cobol",
+	toml: "toml",
+	conf: "ini",
+	ini: "ini",
+	gradle: "groovy",
+	lua: "lua",
+	cpp: "cpp",
+	c: "cpp",
+	h: "cpp",
+	hpp: "cpp",
+	rs: "rust",
+	sh: "shell",
+	rb: "ruby",
+	ps1: "powershell",
+	protobuf: "protobuf",
+	proto: "protobuf",
+	php: "php",
+	md: "markdown",
+	markdown: "markdown"
+}
+
+export function codeMirrorLanguageFor(ext: string): string {
+	return CODE_LANGUAGE_MAP[ext] ?? ""
 }

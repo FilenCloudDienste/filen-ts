@@ -56,6 +56,20 @@ const DOCX_BYTES = Buffer.from(
 	"base64"
 )
 
+// A tiny plain-text fixture — proves the whole-buffer -> decodeUtf8 -> read-only CodeMirror path with
+// no language grammar involved.
+const TEXT_BYTES = Buffer.from("Hello from a tiny text fixture.\nSecond line here.\n", "utf8")
+
+// A tiny TypeScript fixture — same path as TEXT_BYTES, but resolves a language (codeMirrorLanguageFor)
+// and lazy-loads @codemirror/lang-javascript, proving the per-extension highlighting actually engages.
+const CODE_BYTES = Buffer.from("export function add(a: number, b: number): number {\n\treturn a + b\n}\n", "utf8")
+
+// A tiny GFM markdown fixture — a heading (real <h1> once rendered), bold text, and one safe external
+// link (proves the target="_blank"/rel="noreferrer" + urlTransform link-hygiene path renders correctly
+// for a SAFE link; the reject case is covered at the unit level, markdown-viewer.logic.test.ts, mirroring
+// docx-viewer.logic.test.ts's own precedent).
+const MARKDOWN_BYTES = Buffer.from("# Hello Markdown\n\nThis is **bold** text and a [safe link](https://example.com/safe).\n", "utf8")
+
 // Duplicated from downloads.spec.ts rather than shared — this package has no cross-spec e2e helpers
 // module yet, and every other spec file here owns its helpers locally too.
 async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
@@ -403,6 +417,156 @@ test("docx preview renders document content and closes, no CSP console errors", 
 
 		await page.keyboard.press("Escape")
 		await expect(text).toHaveCount(0)
+
+		expect(cspViolations).toEqual([])
+	} finally {
+		await trashScratchDirectory(page, scratchName)
+	}
+})
+
+// The one live proof the text path actually works: a real lazy CodeMirror chunk, real UTF-8 decode, in
+// a real browser — unlike preview.logic.test.ts's pure decodeUtf8/codeMirrorLanguageFor unit coverage,
+// none of that is provable without one.
+test("text preview decodes and renders read-only content, no CSP console errors", async ({ page, injectedSession, browserName }) => {
+	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test.setTimeout(120_000)
+	expect(injectedSession.length).toBeGreaterThan(0)
+
+	const runId = crypto.randomUUID()
+	const scratchName = `e2e-preview-text-${runId}`
+	const nameTxt = `e2e-preview-text-${runId}.txt`
+
+	const cspViolations: string[] = []
+	page.on("console", msg => {
+		if (msg.type() === "error" && /content security policy|refused to/i.test(msg.text())) {
+			cspViolations.push(msg.text())
+		}
+	})
+
+	await page.goto("/drive")
+
+	try {
+		const { listbox } = await enterScratchDirectory(page, scratchName)
+
+		const input = page.locator('input[type="file"]').first()
+		await input.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }])
+
+		const row = listbox.getByRole("option", { name: nameTxt })
+		await expect(row).toBeVisible({ timeout: 45_000 })
+
+		// Opens the CodeMirror lazy chunk for the first time this run.
+		await row.dblclick()
+		const line = page.getByText("Hello from a tiny text fixture.")
+		await expect(line).toBeVisible({ timeout: 30_000 })
+		await expect(page.getByText("Second line here.")).toBeVisible()
+
+		await page.keyboard.press("Escape")
+		await expect(line).toHaveCount(0)
+
+		expect(cspViolations).toEqual([])
+	} finally {
+		await trashScratchDirectory(page, scratchName)
+	}
+})
+
+// Proves language routing actually engages a real @codemirror/lang-javascript chunk (not just plain
+// text): a highlighted line wraps its tokens in <span>s, a plain one (the text leg above) doesn't.
+test("code preview renders with syntax highlighting, no CSP console errors", async ({ page, injectedSession, browserName }) => {
+	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test.setTimeout(120_000)
+	expect(injectedSession.length).toBeGreaterThan(0)
+
+	const runId = crypto.randomUUID()
+	const scratchName = `e2e-preview-code-${runId}`
+	const nameCode = `e2e-preview-code-${runId}.ts`
+
+	const cspViolations: string[] = []
+	page.on("console", msg => {
+		if (msg.type() === "error" && /content security policy|refused to/i.test(msg.text())) {
+			cspViolations.push(msg.text())
+		}
+	})
+
+	await page.goto("/drive")
+
+	try {
+		const { listbox } = await enterScratchDirectory(page, scratchName)
+
+		const input = page.locator('input[type="file"]').first()
+		await input.setInputFiles([{ name: nameCode, mimeType: "video/mp2t", buffer: CODE_BYTES }])
+
+		const row = listbox.getByRole("option", { name: nameCode })
+		await expect(row).toBeVisible({ timeout: 45_000 })
+
+		// Opens the CodeMirror + @codemirror/lang-javascript lazy chunks for the first time this run.
+		await row.dblclick()
+		await expect(page.getByText("export function add")).toBeVisible({ timeout: 30_000 })
+		await expect(page.locator(".cm-line span").first()).toBeVisible({ timeout: 15_000 })
+
+		await page.keyboard.press("Escape")
+		await expect(page.getByText("export function add")).toHaveCount(0)
+
+		expect(cspViolations).toEqual([])
+	} finally {
+		await trashScratchDirectory(page, scratchName)
+	}
+})
+
+// Proves the react-markdown + remark-gfm rendered view (a real <h1>, a safe external link with
+// target="_blank"/rel="noreferrer"), the view-source toggle (falls back to the same CodeMirror surface
+// the text/code legs above prove), and toggling back — the whole read-only markdown surface end to end.
+test("markdown preview renders GFM content and its view-source toggle round-trips, no CSP console errors", async ({
+	page,
+	injectedSession,
+	browserName
+}) => {
+	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test.setTimeout(120_000)
+	expect(injectedSession.length).toBeGreaterThan(0)
+
+	const runId = crypto.randomUUID()
+	const scratchName = `e2e-preview-md-${runId}`
+	const nameMd = `e2e-preview-md-${runId}.md`
+
+	const cspViolations: string[] = []
+	page.on("console", msg => {
+		if (msg.type() === "error" && /content security policy|refused to/i.test(msg.text())) {
+			cspViolations.push(msg.text())
+		}
+	})
+
+	await page.goto("/drive")
+
+	try {
+		const { listbox } = await enterScratchDirectory(page, scratchName)
+
+		const input = page.locator('input[type="file"]').first()
+		await input.setInputFiles([{ name: nameMd, mimeType: "text/markdown", buffer: MARKDOWN_BYTES }])
+
+		const row = listbox.getByRole("option", { name: nameMd })
+		await expect(row).toBeVisible({ timeout: 45_000 })
+
+		// Opens the react-markdown + remark-gfm lazy chunk for the first time this run.
+		await row.dblclick()
+		const heading = page.getByRole("heading", { name: "Hello Markdown", level: 1 })
+		await expect(heading).toBeVisible({ timeout: 30_000 })
+
+		const link = page.getByRole("link", { name: "safe link" })
+		await expect(link).toHaveAttribute("target", "_blank")
+		await expect(link).toHaveAttribute("rel", "noreferrer")
+
+		// View source — mounts the same CodeMirror surface the text/code legs use, this run's first use
+		// of it since this file never opened via the text/code path.
+		await page.getByRole("button", { name: "View source" }).click()
+		await expect(page.getByText("# Hello Markdown")).toBeVisible({ timeout: 30_000 })
+		await expect(heading).toHaveCount(0)
+
+		// Back to rendered.
+		await page.getByRole("button", { name: "View rendered" }).click()
+		await expect(heading).toBeVisible({ timeout: 15_000 })
+
+		await page.keyboard.press("Escape")
+		await expect(heading).toHaveCount(0)
 
 		expect(cspViolations).toEqual([])
 	} finally {

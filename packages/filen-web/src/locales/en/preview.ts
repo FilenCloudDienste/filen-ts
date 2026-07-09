@@ -44,5 +44,11 @@ export const preview = {
 
 	// ── Docx ─────────────────────────────────────────────────────────────────
 	/** Docx viewer — shown in place of the document when it fails to load or render */
-	previewDocxLoadFailed: "This document couldn't be rendered."
+	previewDocxLoadFailed: "This document couldn't be rendered.",
+
+	// ── Markdown ─────────────────────────────────────────────────────────────
+	/** Markdown viewer — toolbar button shown while viewing the rendered output; switches to the raw-text source view */
+	previewMarkdownViewSourceAction: "View source",
+	/** Markdown viewer — toolbar button shown while viewing the raw-text source; switches back to the rendered output */
+	previewMarkdownViewRenderedAction: "View rendered"
 } as const

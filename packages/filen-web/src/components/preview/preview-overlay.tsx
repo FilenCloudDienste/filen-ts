@@ -11,11 +11,15 @@ import { MediaViewer } from "@/components/preview/media-viewer"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 
-// Lazy chunks: pdf.js (~1MB+) and docx-preview only ever download once a pdf/docx is actually
-// opened, never on the app's own initial bundle — the first two categories to use React.lazy in
-// this app (image/video/audio all stream or buffer directly, no heavy renderer library involved).
+// Lazy chunks: pdf.js (~1MB+), docx-preview, CodeMirror (+ its per-language grammar chunks) and
+// react-markdown only ever download once a file needing them is actually opened, never on the app's
+// own initial bundle (image/video/audio all stream or buffer directly, no heavy renderer library
+// involved). markdown-viewer.tsx's own "view source" toggle lazy-imports TextViewer a second time —
+// the same underlying chunk as this one, deduped by the bundler.
 const PdfViewer = lazy(() => import("@/components/preview/pdf-viewer"))
 const DocxViewer = lazy(() => import("@/components/preview/docx-viewer"))
+const TextViewer = lazy(() => import("@/components/preview/text-viewer"))
+const MarkdownViewer = lazy(() => import("@/components/preview/markdown-viewer"))
 
 export interface PreviewOverlayProps {
 	variant: DriveVariant
@@ -263,11 +267,39 @@ function PreviewBody({ item }: { item: DriveItem }) {
 					/>
 				</Suspense>
 			)
-		// Every other previewable category has no viewer yet — later tasks replace this branch with a
-		// real one per category as they land, shrinking this fallback over time.
 		case "text":
 		case "code":
+			return (
+				<Suspense
+					fallback={
+						<div className="flex size-full items-center justify-center">
+							<Spinner className="size-6" />
+						</div>
+					}
+				>
+					<TextViewer
+						item={item}
+						alt={alt}
+					/>
+				</Suspense>
+			)
 		case "markdown":
+			return (
+				<Suspense
+					fallback={
+						<div className="flex size-full items-center justify-center">
+							<Spinner className="size-6" />
+						</div>
+					}
+				>
+					<MarkdownViewer
+						item={item}
+						alt={alt}
+					/>
+				</Suspense>
+			)
+		// No viewer exists for "other" — canPreview already excludes it from ever reaching the overlay
+		// at all (it's unreachable here in practice), kept as the exhaustive switch's required fallback.
 		case "other":
 			return (
 				<div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">

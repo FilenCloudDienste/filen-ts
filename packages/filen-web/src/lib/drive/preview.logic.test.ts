@@ -8,6 +8,9 @@ import {
 	previewableSiblings,
 	stepPreviewIndex,
 	streamFailureAction,
+	extensionOf,
+	codeMirrorLanguageFor,
+	decodeUtf8,
 	PREVIEW_MAX_BYTES
 } from "@/lib/drive/preview.logic"
 
@@ -258,6 +261,25 @@ describe("canPreview", () => {
 		expect(canPreview(fileNamed("doc.pdf", { size: PREVIEW_MAX_BYTES }), "drive")).toBe(true)
 	})
 
+	// text/code/markdown are whole-buffer categories too (never in STREAMED_CATEGORIES) — same cap
+	// applies, no category-specific override. A 256 MiB+1 log file must refuse preview rather than ever
+	// reaching CodeMirror.
+	it.each([
+		["notes.txt", "text"],
+		["script.ts", "code"],
+		["readme.md", "markdown"]
+	])("is false for a %s (%s) over the size cap", name => {
+		expect(canPreview(fileNamed(name, { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(false)
+	})
+
+	it.each([
+		["notes.txt", "text"],
+		["script.ts", "code"],
+		["readme.md", "markdown"]
+	])("is true for a %s (%s) exactly at the size cap", name => {
+		expect(canPreview(fileNamed(name, { size: PREVIEW_MAX_BYTES }), "drive")).toBe(true)
+	})
+
 	it("is true for a streamed category (video/audio/image) even past the whole-buffer size cap — uncapped", () => {
 		expect(canPreview(fileNamed("movie.mp4", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(true)
 		expect(canPreview(fileNamed("song.mp3", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(true)
@@ -356,5 +378,135 @@ describe("stepPreviewIndex", () => {
 	it("is a no-op index (0) on a single-item list either direction", () => {
 		expect(stepPreviewIndex(a.data.uuid, [a], 1)).toBe(0)
 		expect(stepPreviewIndex(a.data.uuid, [a], -1)).toBe(0)
+	})
+})
+
+describe("extensionOf", () => {
+	it("returns the lowercased extension with no leading dot", () => {
+		expect(extensionOf("report.PDF")).toBe("pdf")
+	})
+
+	it("returns the empty string for a dotfile (leading dot only)", () => {
+		expect(extensionOf(".gitignore")).toBe("")
+	})
+
+	it("returns the empty string for a name with no extension", () => {
+		expect(extensionOf("README")).toBe("")
+	})
+
+	it("uses the LAST dot for a multi-dot name", () => {
+		expect(extensionOf("archive.tar.gz")).toBe("gz")
+	})
+})
+
+describe("decodeUtf8", () => {
+	it("decodes plain ASCII", () => {
+		expect(decodeUtf8(new TextEncoder().encode("hello world"))).toBe("hello world")
+	})
+
+	it("decodes multi-byte UTF-8 (accents, CJK, emoji) round-trip", () => {
+		const text = "café — 日本語 — 🎉"
+
+		expect(decodeUtf8(new TextEncoder().encode(text))).toBe(text)
+	})
+
+	it("returns an empty string for an empty buffer", () => {
+		expect(decodeUtf8(new Uint8Array(0))).toBe("")
+	})
+
+	// Non-fatal: an invalid byte sequence becomes the U+FFFD replacement character rather than
+	// throwing — a preview always shows SOMETHING for a whole-buffer text/code/markdown file (mirrors
+	// the app's mobile counterpart's own plain `new TextDecoder().decode(bytes)`, no `fatal: true`); a
+	// labeled "can't display" would be wrong for a file that's mostly valid UTF-8 with a few bad bytes.
+	it("never throws on an invalid byte sequence — decodes to the replacement character", () => {
+		const invalid = new Uint8Array([0xff, 0xfe, 0x00, 0x41])
+
+		expect(() => decodeUtf8(invalid)).not.toThrow()
+		expect(decodeUtf8(invalid)).toContain("�")
+	})
+})
+
+describe("codeMirrorLanguageFor — extension to CodeMirror language tag", () => {
+	// The full code-extension set (previewType's own CODE_EXTENSIONS) mapped to the tag
+	// text-viewer.tsx's own loader switches on, or "" when no CodeMirror grammar is wired for it (still
+	// a fully usable read-only plain-text view, just unhighlighted).
+	const EXPECTED: Record<string, string> = {
+		js: "javascript",
+		cjs: "javascript",
+		mjs: "javascript",
+		jsx: "jsx",
+		tsx: "tsx",
+		ts: "typescript",
+		cpp: "cpp",
+		c: "cpp",
+		php: "php",
+		htm: "html",
+		html5: "html",
+		html: "html",
+		css: "css",
+		css3: "css",
+		coffee: "coffeescript",
+		litcoffee: "coffeescript",
+		sass: "sass",
+		xml: "xml",
+		json: "json",
+		sql: "sql",
+		java: "java",
+		kt: "kotlin",
+		swift: "swift",
+		py3: "python",
+		py: "python",
+		cmake: "cmake",
+		cs: "csharp",
+		dart: "dart",
+		dockerfile: "dockerfile",
+		go: "go",
+		less: "less",
+		yaml: "yaml",
+		vue: "",
+		svelte: "",
+		vbs: "vbscript",
+		cobol: "cobol",
+		toml: "toml",
+		conf: "ini",
+		ini: "ini",
+		makefile: "",
+		mk: "",
+		gradle: "groovy",
+		lua: "lua",
+		h: "cpp",
+		hpp: "cpp",
+		rs: "rust",
+		sh: "shell",
+		rb: "ruby",
+		ps1: "powershell",
+		bat: "",
+		ps: "",
+		protobuf: "protobuf",
+		proto: "protobuf"
+	}
+
+	it.each(Object.entries(EXPECTED))("%s -> %s", (ext, expected) => {
+		expect(codeMirrorLanguageFor(ext)).toBe(expected)
+	})
+
+	// Markdown's own "view source" fallback (markdown-viewer.tsx delegating to TextViewer) resolves a
+	// language too, even though md/markdown never reach here via the "code" category.
+	it.each(["md", "markdown"])("%s -> markdown (view-source fallback)", ext => {
+		expect(codeMirrorLanguageFor(ext)).toBe("markdown")
+	})
+
+	it('returns "" for an unrecognized extension', () => {
+		expect(codeMirrorLanguageFor("xyz123")).toBe("")
+	})
+
+	it('returns "" for the empty extension (no-extension / dotfile names)', () => {
+		expect(codeMirrorLanguageFor("")).toBe("")
+	})
+
+	// The real call path (text-viewer.tsx) always feeds it extensionOf(name)'s already-lowercased
+	// output — proven end to end here, mirroring previewType's own case-insensitivity proof.
+	it("is case-insensitive end to end through extensionOf", () => {
+		expect(codeMirrorLanguageFor(extensionOf("SCRIPT.TS"))).toBe("typescript")
 	})
 })
