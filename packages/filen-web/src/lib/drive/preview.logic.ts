@@ -6,10 +6,13 @@ import { clampListboxIndex } from "@/lib/drive/listbox"
 // ever — canPreview excludes it unconditionally).
 export type PreviewCategory = "image" | "video" | "audio" | "pdf" | "docx" | "text" | "code" | "markdown" | "other"
 
-// Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): image/pdf/docx/text/
-// code/markdown download fully into RAM before rendering, so an oversize file is excluded from
-// canPreview rather than risking a tab-crashing allocation. Media (video/audio) streams via the service
-// worker's Range route instead and is never bounded by this.
+// Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): pdf/docx/text/code/
+// markdown download fully into RAM before rendering, so an oversize file is excluded from canPreview
+// rather than risking a tab-crashing allocation. video/audio/image stream via the service worker's
+// inline Range route instead and are never bounded by this — image ALSO keeps a whole-buffer fallback
+// (dev / SW absent / stream registration failure) that this cap does not gate either, since the SW's
+// own availability isn't known at gating time; an oversize image on that fallback path is an accepted,
+// deliberate tradeoff of joining the streamed set, not a regression this cap is meant to catch.
 export const PREVIEW_MAX_BYTES = 268_435_456n // 256 MiB
 
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico", "apng", "avif"])
@@ -182,12 +185,15 @@ export function previewType(item: DriveItem): PreviewCategory {
 	return byMime ?? "other"
 }
 
-const STREAMED_CATEGORIES = new Set<PreviewCategory>(["video", "audio"])
+// image joins video/audio here: all three prefer the SW's inline Range route (lib/preview/preview-
+// stream.ts) and fall whole-buffer only as a capability fallback (dev / SW absent / registration
+// failure) — see PREVIEW_MAX_BYTES's own comment on the tradeoff that fallback accepts.
+const STREAMED_CATEGORIES = new Set<PreviewCategory>(["video", "audio", "image"])
 
 // Gate for opening a preview: a file, decryptable, resolves to a real category, and — for a
-// whole-buffer category only — under the memory cap (streamed media is never capped). Trash is NOT
-// excluded — a trashed file still previews, read-only, mirroring mobile — `variant` is threaded for a
-// later trash-exclusion/editability override, not consulted by this base gate.
+// whole-buffer-only category — under the memory cap (a streamed category is never capped here). Trash
+// is NOT excluded — a trashed file still previews, read-only, mirroring mobile — `variant` is threaded
+// for a later trash-exclusion/editability override, not consulted by this base gate.
 export function canPreview(item: DriveItem, variant: DriveVariant): boolean {
 	void variant
 

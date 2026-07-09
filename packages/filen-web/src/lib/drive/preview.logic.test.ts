@@ -189,7 +189,7 @@ describe("previewType — extension category map", () => {
 })
 
 describe("canPreview", () => {
-	it("is true for a decryptable, in-range whole-buffer file", () => {
+	it("is true for a decryptable, in-range file", () => {
 		expect(canPreview(fileNamed("photo.jpg"), "drive")).toBe(true)
 	})
 
@@ -205,17 +205,18 @@ describe("canPreview", () => {
 		expect(canPreview(fileNamed("archive.zip"), "drive")).toBe(false)
 	})
 
-	it("is false for a whole-buffer category over the size cap", () => {
-		expect(canPreview(fileNamed("photo.jpg", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(false)
+	it("is false for a whole-buffer-only category over the size cap", () => {
+		expect(canPreview(fileNamed("doc.pdf", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(false)
 	})
 
-	it("is true for a whole-buffer category exactly at the size cap", () => {
-		expect(canPreview(fileNamed("photo.jpg", { size: PREVIEW_MAX_BYTES }), "drive")).toBe(true)
+	it("is true for a whole-buffer-only category exactly at the size cap", () => {
+		expect(canPreview(fileNamed("doc.pdf", { size: PREVIEW_MAX_BYTES }), "drive")).toBe(true)
 	})
 
-	it("is true for a media category (video/audio) even past the whole-buffer size cap — streamed, uncapped", () => {
+	it("is true for a streamed category (video/audio/image) even past the whole-buffer size cap — uncapped", () => {
 		expect(canPreview(fileNamed("movie.mp4", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(true)
 		expect(canPreview(fileNamed("song.mp3", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(true)
+		expect(canPreview(fileNamed("photo.jpg", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(true)
 	})
 
 	it("does NOT exclude trash — a trashed file still previews, read-only, mirroring mobile", () => {

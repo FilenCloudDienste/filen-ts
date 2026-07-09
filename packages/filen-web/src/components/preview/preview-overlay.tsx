@@ -6,11 +6,9 @@ import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
 import { previewType } from "@/lib/drive/preview.logic"
 import { startDownloads } from "@/lib/drive/download"
-import { errorLabel } from "@/lib/i18n/errorLabel"
-import { usePreviewBytes } from "@/components/preview/use-preview-bytes"
 import { ImageViewer } from "@/components/preview/image-viewer"
+import { MediaViewer } from "@/components/preview/media-viewer"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
 
 export interface PreviewOverlayProps {
 	variant: DriveVariant
@@ -25,8 +23,9 @@ export interface PreviewOverlayProps {
 // Full-bleed preview surface, mounted by the drive dialog host (directory-listing.tsx) exactly like its
 // sibling dialog kinds — composed directly from Base UI's dialog primitives (not the shared centered
 // ui/dialog.tsx) since no full-screen surface exists yet to reuse. Unlike every other dialog in this
-// app, closing here is NEVER blocked on a pending state: a preview download is a read-only, ephemeral
-// fetch that usePreviewBytes already cancels on unmount, not a write worth protecting against an
+// app, closing here is NEVER blocked on a pending state: every viewer's own data load is a read-only,
+// ephemeral fetch (a buffered whole-file download cancels on unmount, a streamed SW registration has
+// nothing server-side to cancel in the first place), never a write worth protecting against an
 // interrupted close.
 export function PreviewOverlay({ variant, items, index, onStep, onClose }: PreviewOverlayProps) {
 	const { t } = useTranslation(["preview", "common"])
@@ -170,51 +169,49 @@ function PreviewName({ name }: { name: string }) {
 	)
 }
 
-// Loads the open item's bytes and dispatches to the right viewer — remounted (keyed by uuid) on every
-// item change so its pending/success/error state never flashes the previous item's content.
+// Dispatches to the right viewer by category — remounted (keyed by uuid) on every item change so a
+// viewer's own pending/success/error state never flashes the previous item's content. Bytes are no
+// longer loaded centrally here: image/video/audio each own their own data source (a streamed SW URL or
+// a buffered blob, see image-viewer.tsx/media-viewer.tsx), since only some categories stream — a
+// category still rendered by the fallback below (pdf/docx/text/code/markdown) has nothing to load yet.
 function PreviewBody({ item }: { item: DriveItem }) {
 	const { t } = useTranslation("preview")
-	const result = usePreviewBytes(item)
-
-	if (result.status === "pending") {
-		return (
-			<div className="flex size-full items-center justify-center">
-				<Spinner className="size-6" />
-			</div>
-		)
-	}
-
-	if (result.status === "error") {
-		return (
-			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-				{errorLabel(result.dto)}
-			</div>
-		)
-	}
 
 	// Narrows `data.decryptedMeta` to the file-arm's DecryptedFileMeta (which alone carries `.mime`) —
 	// previewType/canPreview already guarantee a file arm for every item that ever reaches this
 	// component, but that guarantee lives in a plain function's return value, not a type predicate, so
-	// TS needs this explicit narrow before a `.mime` access type-checks.
+	// TS needs this explicit narrow before a `.mime`/`.name` access type-checks.
 	const base = asDirectoryOrFile(item)
 
 	if (base.type !== "file") {
 		return null
 	}
 
-	switch (previewType(item)) {
+	const alt = base.data.decryptedMeta?.name ?? base.data.uuid
+	// Stored once (rather than switching on the previewType(item) call directly) so the "video"/"audio"
+	// case below can pass it straight through as MediaViewer's own narrower category prop without a
+	// second, redundant resolution — a raw switch on the call expression doesn't narrow across cases.
+	const category = previewType(item)
+
+	switch (category) {
 		case "image":
 			return (
 				<ImageViewer
-					bytes={result.bytes}
-					mime={base.data.decryptedMeta?.mime}
-					alt={base.data.decryptedMeta?.name ?? base.data.uuid}
+					item={item}
+					alt={alt}
+				/>
+			)
+		case "video":
+		case "audio":
+			return (
+				<MediaViewer
+					item={item}
+					category={category}
+					alt={alt}
 				/>
 			)
 		// Every other previewable category has no viewer yet — later tasks replace this branch with a
 		// real one per category as they land, shrinking this fallback over time.
-		case "video":
-		case "audio":
 		case "pdf":
 		case "docx":
 		case "text":

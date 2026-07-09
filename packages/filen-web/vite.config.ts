@@ -34,6 +34,12 @@ const CSP = [
 	"style-src 'self' 'unsafe-inline'",
 	"font-src 'self'",
 	"img-src 'self' blob: data:",
+	// <video>/<audio> element sources — 'self' for the SW's inline-preview route (same-origin, never a
+	// cross-origin media host), blob: for the buffered-fallback object URL (dev / SW absent / a failed
+	// stream registration). Was absent from the CSP entirely until the preview feature needed it —
+	// default-src 'none' blocks every <video>/<audio> src fetch outright without this directive; a plain
+	// <img> also joins the SW's inline route now but is governed by img-src above, not this one.
+	"media-src 'self' blob:",
 	// filen-controlled domains only — the .net / .filen-N.net families are the SDK's baked-in
 	// failover hosts (present in the wasm binary); removing them silently breaks failover.
 	"connect-src 'self' https://*.filen.io wss://*.filen.io https://*.filen.net wss://*.filen.net https://*.filen-1.net https://*.filen-2.net https://*.filen-3.net https://*.filen-4.net https://*.filen-5.net https://*.filen-6.net",

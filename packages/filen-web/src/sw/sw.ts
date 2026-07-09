@@ -15,7 +15,9 @@ import {
 	SW_MSG_INIT_CLIENT,
 	SW_MSG_REGISTER_DOWNLOAD,
 	SW_MSG_REGISTER_ZIP_DOWNLOAD,
-	SW_MSG_PING
+	SW_MSG_REGISTER_PREVIEW,
+	SW_MSG_PING,
+	isAllowedInlineContentType
 } from "@/lib/sw/protocol"
 
 // ── SW-hosted trimmed SDK (single-threaded — no COI, no rayon pool) ─────────────────────────────
@@ -27,7 +29,9 @@ let swClient: SwClient | null = null
 
 // Resolved downloads keyed by opaque token — the `/sw/download/<id>` route reads them. A discriminated
 // union: a single file streams with Range/206 support, a zip is one non-seekable archive stream (no
-// known size upfront, so no `size` field on that arm).
+// known size upfront, so no `size` field on that arm), and a preview is the same Range/206-capable
+// single-file stream as "file" but served INLINE (no Content-Disposition) under an allowlisted
+// Content-Type instead of a forced attachment/octet-stream.
 interface PendingFileDownload {
 	kind: "file"
 	file: SwAnyFile
@@ -39,7 +43,14 @@ interface PendingZipDownload {
 	items: SwZipItem[]
 	name: string
 }
-type PendingDownload = PendingFileDownload | PendingZipDownload
+interface PendingPreviewDownload {
+	kind: "preview"
+	file: SwAnyFile
+	name: string
+	size: number
+	contentType: string
+}
+type PendingDownload = PendingFileDownload | PendingZipDownload | PendingPreviewDownload
 const downloads = new Map<string, PendingDownload>()
 
 // No page-side signal ever tells the SW a download finished (by design — see the registration
@@ -145,18 +156,23 @@ function handleZipDownload(pending: PendingZipDownload, client: SwClient): Respo
 	})
 }
 
-function handleDownload(request: Request, url: URL): Response {
-	const id = decodeURIComponent(url.pathname.slice(SW_DOWNLOAD_PREFIX.length))
-	const pending = downloads.get(id)
-	const client = swClient
-	if (pending === undefined || client === null) {
-		return new Response("download not found", { status: 404 })
-	}
-
-	if (pending.kind === "zip") {
-		return handleZipDownload(pending, client)
-	}
-
+// Shared by the "file" (forced attachment) and "preview" (inline) kinds below — both are single-file,
+// Range/206-capable streams that only ever differ in which headers they answer with. `disposition:
+// null` omits Content-Disposition entirely (the preview route's inline contract); a non-null string
+// is used verbatim (the file route's attachment, or a preview that failed its own Content-Type
+// re-validation and fell back to one). `sandbox: true` adds a maximally-restrictive
+// Content-Security-Policy: sandbox response header (scripts/forms/popups/same-origin all disabled) —
+// inert for the intended <video>/<audio>/<img> SUBRESOURCE use (a CSP header only ever governs a
+// response loaded as its own browsing context/document, never a media/image fetch), but it closes off
+// a direct-navigation edge case: an allowlisted image/svg+xml response, if a URL is copied out of the
+// app and navigated to directly rather than embedded, could otherwise execute an embedded <script> as
+// a full document with no CSP of its own to stop it.
+function streamFileRange(
+	pending: { file: SwAnyFile; size: number },
+	client: SwClient,
+	request: Request,
+	headers: { contentType: string; disposition: string | null; sandbox?: boolean }
+): Response {
 	const total = pending.size
 	const rangeHeader = request.headers.get("Range")
 	const range = rangeHeader !== null ? parseRange(rangeHeader, total) : null
@@ -194,19 +210,56 @@ function handleDownload(request: Request, url: URL): Response {
 		}
 	})()
 
-	const headers: Record<string, string> = {
-		"Content-Type": "application/octet-stream",
-		"Content-Disposition": `attachment; filename="${sanitizeFilename(pending.name)}"`,
+	const responseHeaders: Record<string, string> = {
+		"Content-Type": headers.contentType,
 		"X-Content-Type-Options": "nosniff"
 	}
-	if (range !== null) {
-		headers["Content-Range"] = `bytes ${String(start)}-${String(end)}/${String(total)}`
-		headers["Content-Length"] = String(length)
-		return new Response(readable, { status: 206, headers })
+	if (headers.disposition !== null) {
+		responseHeaders["Content-Disposition"] = headers.disposition
 	}
-	headers["Content-Length"] = String(total)
-	headers["Accept-Ranges"] = "bytes"
-	return new Response(readable, { status: 200, headers })
+	if (headers.sandbox === true) {
+		responseHeaders["Content-Security-Policy"] = "sandbox"
+	}
+	if (range !== null) {
+		responseHeaders["Content-Range"] = `bytes ${String(start)}-${String(end)}/${String(total)}`
+		responseHeaders["Content-Length"] = String(length)
+		return new Response(readable, { status: 206, headers: responseHeaders })
+	}
+	responseHeaders["Content-Length"] = String(total)
+	responseHeaders["Accept-Ranges"] = "bytes"
+	return new Response(readable, { status: 200, headers: responseHeaders })
+}
+
+// A forced-attachment octet-stream response — the "file" kind's own contract, and the fallback a
+// "preview" kind takes when its contentType fails the SW's own re-validation.
+function attachmentHeaders(name: string): { contentType: string; disposition: string } {
+	return { contentType: "application/octet-stream", disposition: `attachment; filename="${sanitizeFilename(name)}"` }
+}
+
+function handleDownload(request: Request, url: URL): Response {
+	const id = decodeURIComponent(url.pathname.slice(SW_DOWNLOAD_PREFIX.length))
+	const pending = downloads.get(id)
+	const client = swClient
+	if (pending === undefined || client === null) {
+		return new Response("download not found", { status: 404 })
+	}
+
+	if (pending.kind === "zip") {
+		return handleZipDownload(pending, client)
+	}
+
+	if (pending.kind === "file") {
+		return streamFileRange(pending, client, request, attachmentHeaders(pending.name))
+	}
+
+	// "preview": defense-in-depth re-validation — never trust the page's own registration call alone.
+	// An unrecognized contentType degrades to the same forced-attachment response as a plain file
+	// download rather than ever serving an unvalidated Content-Type inline.
+	if (!isAllowedInlineContentType(pending.contentType)) {
+		return streamFileRange(pending, client, request, attachmentHeaders(pending.name))
+	}
+
+	return streamFileRange(pending, client, request, { contentType: pending.contentType, disposition: null, sandbox: true })
 }
 
 // Update policy: no skipWaiting at install — a new worker stays in "waiting" until the page confirms
@@ -249,6 +302,19 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 		return
 	}
 
+	if (type === SW_MSG_REGISTER_PREVIEW) {
+		const msg = event.data as { id: string; file: SwAnyFile; name: string; size: number; contentType: string }
+		registerPendingDownload(msg.id, {
+			kind: "preview",
+			file: msg.file,
+			name: msg.name,
+			size: msg.size,
+			contentType: msg.contentType
+		})
+		port?.postMessage({ ok: true })
+		return
+	}
+
 	if (type === SW_MSG_PING) {
 		port?.postMessage({ pong: true })
 	}
@@ -274,7 +340,9 @@ self.addEventListener("fetch", event => {
 
 	// A plain navigation to this route (NOT an `<a download>` — the download attribute makes the browser
 	// fetch via its download manager, bypassing the SW) is intercepted here; the attachment response
-	// turns it into the file save. Page-`fetch()` (e.g. a Range probe) hits the same handler.
+	// turns it into the file save. A `<video>`/`<audio>`/`<img src>` subresource fetch (never a
+	// navigation) and its own Range probes/seeks hit the same handler and the same route prefix — only
+	// the registered PendingDownload's own `kind` decides attachment vs. inline.
 	if (url.pathname.startsWith(SW_DOWNLOAD_PREFIX)) {
 		event.respondWith(handleDownload(event.request, url))
 	}

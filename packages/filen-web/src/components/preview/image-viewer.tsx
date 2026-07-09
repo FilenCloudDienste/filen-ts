@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react"
+import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
+import { allowedMediaContentType } from "@/lib/preview/media-type"
+import { isMediaStreamAvailable } from "@/lib/preview/preview-stream"
+import { usePreviewBytes } from "@/components/preview/use-preview-bytes"
+import { usePreviewStreamUrl } from "@/components/preview/use-preview-stream-url"
+import { errorLabel } from "@/lib/i18n/errorLabel"
+import { Spinner } from "@/components/ui/spinner"
 
 export interface ImageViewerProps {
-	bytes: Uint8Array
-	// Possibly-undefined VALUE, not an absent key (exactOptionalPropertyTypes) — the caller always
-	// passes decryptedMeta?.mime through as-is, undefined included.
-	mime: string | undefined
+	item: DriveItem
 	alt: string
 }
 
@@ -13,32 +17,12 @@ const MAX_SCALE = 8
 // Wheel delta -> scale factor; a typical mouse-wheel notch (~100 deltaY) nudges zoom by ~15%.
 const ZOOM_SENSITIVITY = 0.0015
 
-// <img> from a blob URL, minted/revoked entirely in this component's own effect so the blob never
-// outlives it. Fit-to-screen via object-contain, plus a basic uniform wheel-zoom (no pan, no lib).
-export function ImageViewer({ bytes, mime, alt }: ImageViewerProps) {
-	const [url, setUrl] = useState<string | null>(null)
+// <img> from an already-resolved URL (either mode below). Fit-to-screen via object-contain, plus a
+// basic uniform wheel-zoom (no pan, no lib) — identical rendering regardless of whether `url` is a
+// blob: URL or the SW's inline-preview route.
+function ZoomableImage({ url, alt }: { url: string; alt: string }) {
 	const [scale, setScale] = useState(1)
 	const containerRef = useRef<HTMLDivElement | null>(null)
-
-	useEffect(() => {
-		// The generic ArrayBufferLike-vs-ArrayBuffer parameter on Uint8Array (TS lib.es2024.arraybuffer)
-		// makes an unparameterized Uint8Array reject BlobPart's stricter ArrayBufferView<ArrayBuffer> —
-		// bytes here is always backed by a real ArrayBuffer (Comlink.transfer of a worker download, never
-		// a SharedArrayBuffer), so this narrows the generic parameter only, not the value.
-		const objectUrl = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime ?? "application/octet-stream" }))
-
-		// Minting the blob URL IS the side effect (a fresh external-system resource requiring a paired
-		// revoke) — there is no value to render until this runs, so it cannot be computed during render. A
-		// useMemo/lazy-useState alternative would recompute under StrictMode's double-invoke with no
-		// cleanup hook to revoke the discarded first URL, leaking it; this effect's own cleanup below is
-		// exactly what makes the double-invoke safe (create/revoke/create, no leak).
-		// eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate, see above
-		setUrl(objectUrl)
-
-		return () => {
-			URL.revokeObjectURL(objectUrl)
-		}
-	}, [bytes, mime])
 
 	// A React onWheel prop can never preventDefault a page scroll here: react-dom registers the wheel
 	// listener PASSIVE at its root for scroll performance (verified against the installed react-dom
@@ -63,10 +47,6 @@ export function ImageViewer({ bytes, mime, alt }: ImageViewerProps) {
 		}
 	}, [])
 
-	if (!url) {
-		return null
-	}
-
 	return (
 		<div
 			ref={containerRef}
@@ -80,5 +60,143 @@ export function ImageViewer({ bytes, mime, alt }: ImageViewerProps) {
 				style={{ transform: `scale(${String(scale)})` }}
 			/>
 		</div>
+	)
+}
+
+// Streamed mode: registers against the SW's inline route and renders once a URL resolves. A
+// registration failure hands control back to the parent (onFallback) rather than showing an error —
+// the buffered path below is the recovery, not a dead end.
+function StreamedImage({
+	item,
+	alt,
+	contentType,
+	onFallback
+}: {
+	item: DriveItem
+	alt: string
+	contentType: string
+	onFallback: () => void
+}) {
+	const name = item.data.decryptedMeta?.name ?? item.data.uuid
+	const result = usePreviewStreamUrl(item, name, contentType)
+
+	useEffect(() => {
+		if (result.status === "error") {
+			onFallback()
+		}
+	}, [result.status, onFallback])
+
+	if (result.status !== "success") {
+		return (
+			<div className="flex size-full items-center justify-center">
+				<Spinner className="size-6" />
+			</div>
+		)
+	}
+
+	return (
+		<ZoomableImage
+			url={result.url}
+			alt={alt}
+		/>
+	)
+}
+
+function BufferedImageBytes({ bytes, mime, alt }: { bytes: Uint8Array; mime: string | undefined; alt: string }) {
+	const [url, setUrl] = useState<string | null>(null)
+
+	useEffect(() => {
+		// The generic ArrayBufferLike-vs-ArrayBuffer parameter on Uint8Array (TS lib.es2024.arraybuffer)
+		// makes an unparameterized Uint8Array reject BlobPart's stricter ArrayBufferView<ArrayBuffer> —
+		// bytes here is always backed by a real ArrayBuffer (Comlink.transfer of a worker download, never
+		// a SharedArrayBuffer), so this narrows the generic parameter only, not the value.
+		const objectUrl = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime ?? "application/octet-stream" }))
+
+		// Minting the blob URL IS the side effect (a fresh external-system resource requiring a paired
+		// revoke) — there is no value to render until this runs, so it cannot be computed during render. A
+		// useMemo/lazy-useState alternative would recompute under StrictMode's double-invoke with no
+		// cleanup hook to revoke the discarded first URL, leaking it; this effect's own cleanup below is
+		// exactly what makes the double-invoke safe (create/revoke/create, no leak).
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate, see above
+		setUrl(objectUrl)
+
+		return () => {
+			URL.revokeObjectURL(objectUrl)
+		}
+	}, [bytes, mime])
+
+	if (!url) {
+		return null
+	}
+
+	return (
+		<ZoomableImage
+			url={url}
+			alt={alt}
+		/>
+	)
+}
+
+// Buffered mode (the original whole-buffer behavior, now the fallback): a full-file download,
+// minted/revoked as a blob URL entirely in BufferedImageBytes's own effect so the blob never outlives it.
+function BufferedImage({ item, alt }: { item: DriveItem; alt: string }) {
+	const result = usePreviewBytes(item)
+
+	if (result.status === "pending") {
+		return (
+			<div className="flex size-full items-center justify-center">
+				<Spinner className="size-6" />
+			</div>
+		)
+	}
+
+	if (result.status === "error") {
+		return (
+			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
+				{errorLabel(result.dto)}
+			</div>
+		)
+	}
+
+	const base = asDirectoryOrFile(item)
+	const mime = base.type === "file" ? base.data.decryptedMeta?.mime : undefined
+
+	return (
+		<BufferedImageBytes
+			bytes={result.bytes}
+			mime={mime}
+			alt={alt}
+		/>
+	)
+}
+
+// Picks the SW's inline-preview route (streamed, no whole-buffer download) when a service worker is
+// controlling the tab AND this item's mime passes the inline allowlist, else falls back to the
+// buffered whole-file blob path (dev / SW absent / a failed stream registration) — see
+// preview-stream.ts's isMediaStreamAvailable for the single capability flip point. The buffered path
+// is also where an item the allowlist rejects outright (e.g. an unrecognized mime) always lands.
+export function ImageViewer({ item, alt }: ImageViewerProps) {
+	const contentType = allowedMediaContentType(item)
+	const streamable = contentType !== null && isMediaStreamAvailable()
+	const [useBuffered, setUseBuffered] = useState(!streamable)
+
+	if (!useBuffered && contentType !== null) {
+		return (
+			<StreamedImage
+				item={item}
+				alt={alt}
+				contentType={contentType}
+				onFallback={() => {
+					setUseBuffered(true)
+				}}
+			/>
+		)
+	}
+
+	return (
+		<BufferedImage
+			item={item}
+			alt={alt}
+		/>
 	)
 }

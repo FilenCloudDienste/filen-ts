@@ -49,8 +49,10 @@ async function pickFsaTarget(suggestedName: string): Promise<FsaSaveTarget> {
 // One MessageChannel round trip to the active service worker: post `{type, ...payload}` with the
 // channel's port2 transferred, resolve/reject on its single ack (`{ok: true}` / `{ok: false, error}`)
 // — the exact reply shape sw.ts's own message listener posts back for SW_MSG_INIT_CLIENT and
-// SW_MSG_REGISTER_DOWNLOAD.
-function sendToSw(target: ServiceWorker, type: string, payload: Record<string, unknown>): Promise<void> {
+// SW_MSG_REGISTER_DOWNLOAD. Exported alongside activeServiceWorker/ensureSwClientReady below: the
+// preview-streaming module (lib/preview/preview-stream.ts) reuses this exact round trip for its own
+// registration message rather than duplicating it.
+export function sendToSw(target: ServiceWorker, type: string, payload: Record<string, unknown>): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const channel = new MessageChannel()
 
@@ -66,7 +68,7 @@ function sendToSw(target: ServiceWorker, type: string, payload: Record<string, u
 	})
 }
 
-async function activeServiceWorker(): Promise<ServiceWorker> {
+export async function activeServiceWorker(): Promise<ServiceWorker> {
 	const registration = await navigator.serviceWorker.ready
 	const target = registration.active
 
@@ -90,7 +92,7 @@ async function initSwClient(): Promise<void> {
 	await sendToSw(target, SW_MSG_INIT_CLIENT, { blob })
 }
 
-function ensureSwClientReady(): Promise<void> {
+export function ensureSwClientReady(): Promise<void> {
 	swClientReady ??= initSwClient().catch((e: unknown) => {
 		swClientReady = null
 
