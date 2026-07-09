@@ -38,7 +38,12 @@ import { useAction } from "@/lib/keymap/useAction"
 import { useBlockedUsers } from "@/lib/contacts/use-blocked-users"
 import { driveItemActions, type ItemActionDialogKind } from "@/components/drive/item-menu.logic"
 import { isBulkDownloadEnabled } from "@/components/drive/bulk-action-bar.logic"
-import { filterSharedInByBlocked, resolveSearchDisplayItems, staleBlockedSelectionUuids } from "@/components/drive/directory-listing.logic"
+import {
+	filterSharedInByBlocked,
+	resolveSearchDisplayItems,
+	staleBlockedSelectionUuids,
+	staleSelectionUuids
+} from "@/components/drive/directory-listing.logic"
 import { Breadcrumb } from "@/components/drive/breadcrumb"
 import { SortMenu } from "@/components/drive/sort-menu"
 import { ViewModeToggle } from "@/components/drive/view-mode-toggle"
@@ -266,6 +271,39 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			useDriveStore.getState().removeFromSelection(toRemove)
 		}
 	}, [variant, blocked])
+
+	// Ghost-selection purge (search only): search results are PUSH-FED — a live resync can drop a
+	// selected hit with no navigation involved — so nothing else intersects `selectedItems` with the
+	// live result set ([variant, splat] above only resets on navigation; SearchInput's own onKeyDown
+	// consumes Escape locally to clear the query, so drive.clearSelection never reaches the store
+	// either). Mirrors the sharedIn purge above.
+	//
+	// Keyed on a uuid-content signature, not `sortedItems` itself: resolveSearchDisplayItems/
+	// buildSearchResults rebuild a brand-new array of brand-new items every render regardless of
+	// whether a push changed anything, so a reference-keyed effect would re-fire on every unrelated
+	// re-render — this string stays `===`-stable across those, so an unchanged heartbeat can't fight
+	// an in-progress in-search selection, and only changes when a push actually adds or drops a hit.
+	// The normal listing's own rarer refetch-drop case stays out of scope — its items aren't
+	// reference-stable either, so covering it here isn't free.
+	const searchResultUuids = search.active
+		? sortedItems
+				.map(item => item.data.uuid)
+				.sort()
+				.join(",")
+		: ""
+
+	useEffect(() => {
+		if (!search.active) {
+			return
+		}
+
+		const toRemove = staleSelectionUuids(useDriveStore.getState().selectedItems, sortedItems)
+
+		if (toRemove.length > 0) {
+			useDriveStore.getState().removeFromSelection(toRemove)
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the signature above, not sortedItems — see comment above
+	}, [search.active, searchResultUuids])
 
 	// State (not `useRef`) so it's settable from a callback ref below — the pending/error/empty
 	// branches render a ref-less div, so a cold mount whose first render is "pending" would, with a

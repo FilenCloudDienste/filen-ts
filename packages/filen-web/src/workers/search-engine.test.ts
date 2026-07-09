@@ -388,6 +388,13 @@ describe("createSearchEngine — open", () => {
 		listener([{ type: "resyncProgress", progress: { type: "started", roots: [deadRoot] } }])
 
 		expect(pushes).toEqual([])
+
+		// "finished" carries no roots and isn't gated on activeRootUuid at all (see statusListener's own
+		// branch) — activePush being cleared is the ONLY thing that stops it reaching this dead open's
+		// push, so this is the branch that actually pins the activePush half of the clear.
+		listener([{ type: "resyncProgress", progress: { type: "finished", converged: true } }])
+
+		expect(pushes).toEqual([])
 	})
 
 	// Companion coverage for the EXISTING createSearch catch (unchanged by this task) — pins that it

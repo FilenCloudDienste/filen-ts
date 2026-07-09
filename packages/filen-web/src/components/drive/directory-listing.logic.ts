@@ -30,6 +30,16 @@ export function staleBlockedSelectionUuids(selectedItems: readonly DriveItem[], 
 	return selectedItems.filter(item => !isVisibleSharedInItem(item, blocked)).map(item => item.data.uuid)
 }
 
+// Uuids of currently-selected items no longer present in a live item set — directory-listing.tsx's
+// search-result purge uses this to drop a selection ghost the instant a push drops a hit the user
+// had selected. Generic over its second argument (not search-specific) so a future caller could
+// reuse it for the normal listing's own, rarer refetch-drop case.
+export function staleSelectionUuids(selectedItems: readonly DriveItem[], liveItems: readonly DriveItem[]): string[] {
+	const liveUuids = new Set(liveItems.map(item => item.data.uuid))
+
+	return selectedItems.filter(item => !liveUuids.has(item.data.uuid)).map(item => item.data.uuid)
+}
+
 // Search results only get re-sorted once the whole match set is actually in hand (total <=
 // results.length) — the search engine's own window is a fixed 1,000-item ceiling (mirrors mobile), so
 // while more matches exist than currently landed, re-sorting the PARTIAL set every time a new one

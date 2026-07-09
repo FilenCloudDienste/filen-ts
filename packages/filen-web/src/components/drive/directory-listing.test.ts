@@ -6,7 +6,8 @@ import {
 	filterSharedInByBlocked,
 	isVisibleSharedInItem,
 	resolveSearchDisplayItems,
-	staleBlockedSelectionUuids
+	staleBlockedSelectionUuids,
+	staleSelectionUuids
 } from "@/components/drive/directory-listing.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — mirrors
@@ -202,6 +203,40 @@ describe("staleBlockedSelectionUuids", () => {
 
 	it("returns an empty array for an empty selection", () => {
 		expect(staleBlockedSelectionUuids([], blockedUsersFixture())).toEqual([])
+	})
+})
+
+describe("staleSelectionUuids", () => {
+	it("returns the uuids of selected items no longer present in the live set", () => {
+		const a = narrowItem(mockDir({ uuid: testUuid("live-a") }))
+		const b = narrowItem(mockDir({ uuid: testUuid("live-b") }))
+		const dropped = narrowItem(mockFile({ uuid: testUuid("dropped") }))
+
+		const result = staleSelectionUuids([a, dropped, b], [a, b])
+
+		expect(result).toEqual([dropped.data.uuid])
+	})
+
+	// Pins the case a push-fed effect must get right: an unchanged live set (e.g. a heartbeat) never
+	// drops a still-present selection.
+	it("returns an empty array when every selected item is still live", () => {
+		const a = narrowItem(mockDir({ uuid: testUuid("still-a") }))
+		const b = narrowItem(mockFile({ uuid: testUuid("still-b") }))
+
+		expect(staleSelectionUuids([a, b], [a, b])).toEqual([])
+	})
+
+	it("returns an empty array for an empty selection", () => {
+		const a = narrowItem(mockDir({ uuid: testUuid("live-only") }))
+
+		expect(staleSelectionUuids([], [a])).toEqual([])
+	})
+
+	it("drops every selected uuid when the live set is empty", () => {
+		const a = narrowItem(mockDir({ uuid: testUuid("now-gone-a") }))
+		const b = narrowItem(mockFile({ uuid: testUuid("now-gone-b") }))
+
+		expect(staleSelectionUuids([a, b], [])).toEqual([a.data.uuid, b.data.uuid])
 	})
 })
 

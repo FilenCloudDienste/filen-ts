@@ -223,8 +223,15 @@ export function createSearchEngine() {
 				// redundant-call optimization, not a correctness requirement.
 				await client.configureCache(CACHE_PATH, statusListener)
 			} catch (e) {
+				// Rolls back both fields THIS open() call set before this await (activePush at the top,
+				// activeRootUuid just above) — not `active`, which still belongs to whatever open last
+				// succeeded. activeRootUuid alone left resyncProgress:finished (unconditional on it,
+				// unlike the other statusListener branches) still able to reach this dead open's push;
+				// activePush must be cleared too. Guarded on currentToken: a newer open that already
+				// superseded this one owns its own routing state, untouched here.
 				if (currentToken === token) {
 					activeRootUuid = null
+					activePush = null
 				}
 
 				throw e
