@@ -421,6 +421,31 @@ describe("createSearchEngine — open", () => {
 		expect(pushes).toEqual([])
 	})
 
+	it("a failed reopen also sweeps the previously-installed search so setName reports nothing to retune", async () => {
+		// The wedge this pins: open A succeeds (a live search installs), a reopen genuinely fails —
+		// without the rollback closing A, a later setName would succeed against the STALE search, whose
+		// listener routes to a push the caller has already abandoned: live refiltering nobody sees.
+		const fakeWindow = makeFakeWindow(snapshot())
+		const searchA = fakeSearchResolving(fakeWindow)
+		const boom = new Error("reopen boom")
+		const createSearch = vi
+			.fn()
+			.mockImplementationOnce(() => Promise.resolve(searchA))
+			.mockImplementationOnce(() => Promise.reject(boom))
+		const { client } = makeFakeClient(createSearch)
+		const engine = createSearchEngine()
+		const { push } = collectPushes()
+
+		await engine.open(client, { rootUuid: null, name: "" }, push)
+		await expect(engine.open(client, { rootUuid: null, name: "x" }, push)).rejects.toBe(boom)
+
+		expect(fakeWindow.free).toHaveBeenCalledTimes(1)
+		expect(searchA.close).toHaveBeenCalledTimes(1)
+		expect(searchA.free).toHaveBeenCalledTimes(1)
+		await expect(engine.setName("y")).resolves.toBe(false)
+		expect(searchA.setConfig).not.toHaveBeenCalled()
+	})
+
 	it("pushes every snapshot delivered after the first, tagged as type snapshot", async () => {
 		const fakeWindow = makeFakeWindow(snapshot({ total: 1n }))
 		let capturedListener: SnapshotListener | undefined

@@ -196,6 +196,29 @@ export function createSearchEngine() {
 		}
 	}
 
+	// Rolls back a genuinely-failed open(): the routing fields that call set, PLUS whatever search was
+	// still installed from the last successful open. A failed reopen otherwise leaves that stale handle
+	// live — a later setName would succeed against it and refilter into a push nobody routes (the
+	// caller's generation has moved on), wedging search on a terminal state until a manual clear+retype.
+	// Closing it instead makes the next setName return false, which the caller already answers with a
+	// clean reopen. Token-guarded: a newer open that superseded this one owns the routing state and its
+	// own active handle, untouched here.
+	async function rollBackFailedOpen(token: OpenToken): Promise<void> {
+		if (currentToken !== token) {
+			return
+		}
+
+		activeRootUuid = null
+		activePush = null
+
+		const stale = active
+		active = null
+
+		if (stale !== null) {
+			await safeClose(stale.search, stale.searchWindow)
+		}
+	}
+
 	async function open(
 		client: Client,
 		{ rootUuid, name }: { rootUuid: string | null; name: string },
@@ -223,16 +246,11 @@ export function createSearchEngine() {
 				// redundant-call optimization, not a correctness requirement.
 				await client.configureCache(CACHE_PATH, statusListener)
 			} catch (e) {
-				// Rolls back both fields THIS open() call set before this await (activePush at the top,
-				// activeRootUuid just above) — not `active`, which still belongs to whatever open last
-				// succeeded. activeRootUuid alone left resyncProgress:finished (unconditional on it,
-				// unlike the other statusListener branches) still able to reach this dead open's push;
-				// activePush must be cleared too. Guarded on currentToken: a newer open that already
-				// superseded this one owns its own routing state, untouched here.
-				if (currentToken === token) {
-					activeRootUuid = null
-					activePush = null
-				}
+				// resyncProgress:finished is unconditional on activeRootUuid (unlike the other
+				// statusListener branches), so BOTH routing fields must clear — and the shared rollback's
+				// stale-handle close is a no-op here (configureCache only ever fails before any open has
+				// succeeded in this worker, so nothing is installed).
+				await rollBackFailedOpen(token)
 
 				throw e
 			}
@@ -249,9 +267,7 @@ export function createSearchEngine() {
 		try {
 			search = await client.createSearch(resolvedRoot, buildConfig(name))
 		} catch (e) {
-			if (currentToken === token) {
-				activeRootUuid = null
-			}
+			await rollBackFailedOpen(token)
 
 			throw e
 		}
@@ -293,6 +309,7 @@ export function createSearchEngine() {
 
 		if (!rangeResult.success) {
 			await safeClose(search, null)
+			await rollBackFailedOpen(token)
 
 			throw rangeResult.error
 		}
