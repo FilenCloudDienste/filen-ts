@@ -73,7 +73,11 @@ function fakeLib(decodeThrows?: unknown): HeicDecoderModule {
 }
 
 function depsFor(lib: HeicDecoderModule): HeicTransformDeps {
-	return { getDecoder: () => Promise.resolve(lib), encodeJpeg: () => Promise.resolve(new Blob(["jpeg"], { type: "image/jpeg" })) }
+	return {
+		getDecoder: () => Promise.resolve(lib),
+		encodeJpeg: () => Promise.resolve(new Blob(["jpeg"], { type: "image/jpeg" })),
+		encodeThumb: () => Promise.resolve(new Blob(["thumb"], { type: "image/webp" }))
+	}
 }
 
 describe("heic worker boundary — a real Comlink round trip over MessageChannel", () => {

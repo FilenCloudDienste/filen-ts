@@ -87,10 +87,27 @@ const downloadPauses = new Map<string, PauseSignal>()
 // rather than borrowing that one.
 const previewAborts = new Map<string, AbortController>()
 
-// Fires sweepThumbs at most once per worker lifetime (this worker's own first makeThumbnail call),
-// never re-armed — a long-lived tab's OPFS thumbnail cache still gets cap-enforced without every
-// generation paying for a listing pass.
+// Fires sweepThumbs at most once per worker lifetime (this worker's own first makeThumbnail OR
+// storeThumbnail call, see armThumbSweep below), never re-armed — a long-lived tab's OPFS thumbnail
+// cache still gets cap-enforced without every generation paying for a listing pass.
 let thumbsSweptThisSession = false
+
+// Arms the once-per-session eviction sweep — called from both makeThumbnail (the SDK-decoded route)
+// and storeThumbnail (every client-side heic/video/pdf generator's persist call), since a session
+// that only ever produces client-generated thumbnails (a directory with no plain raster images in it)
+// would otherwise never sweep at all. Fire-and-forget: eviction is a cap-enforcement housekeeping
+// pass, never something a thumbnail request should wait on.
+function armThumbSweep(): void {
+	if (thumbsSweptThisSession) {
+		return
+	}
+
+	thumbsSweptThisSession = true
+
+	void sweepThumbs(THUMB_CACHE_CAP).catch((e: unknown) => {
+		log.warn("sdk.worker", "sweepThumbs failed", e)
+	})
+}
 
 // Every authed op reads the live Client through this guard. Post-logout `client` is null, so a
 // forwarded call would null-deref; failing fast here surfaces a clean DTO at the Comlink boundary
@@ -856,12 +873,7 @@ const api = {
 	// non-fatal, the caller's own bytes still render either way — then transfer the buffer out
 	// (never cloned).
 	async makeThumbnail(file: File, maxDim: number): Promise<Uint8Array | undefined> {
-		if (!thumbsSweptThisSession) {
-			thumbsSweptThisSession = true
-			void sweepThumbs(THUMB_CACHE_CAP).catch((e: unknown) => {
-				log.warn("sdk.worker", "sweepThumbs failed", e)
-			})
-		}
+		armThumbSweep()
 
 		const c = requireClient()
 		const result = await c.makeThumbnailInMemory({ file, maxWidth: maxDim, maxHeight: maxDim })
@@ -883,8 +895,11 @@ const api = {
 	// Persists thumbnail bytes a CLIENT-side generator produced outside this worker (its own decode
 	// runs elsewhere — HEIC/video/pdf never route through makeThumbnailInMemory). Callers
 	// Comlink.transfer the buffer in, never clone; rejection is the caller's own to handle (mirrors
-	// writeThumb's own propagation past the second-open collision it already swallows).
+	// writeThumb's own propagation past the second-open collision it already swallows). Also arms the
+	// sweep (see armThumbSweep) — a session that only ever produces client-generated thumbnails would
+	// otherwise never sweep, since makeThumbnail (the only other arming call site) is never reached.
 	async storeThumbnail(uuid: string, bytes: Uint8Array): Promise<void> {
+		armThumbSweep()
 		await writeThumb(uuid, bytes)
 	},
 	logout(): void {

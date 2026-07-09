@@ -116,9 +116,12 @@ async function generate(
 		}
 
 		let bytes: Uint8Array | undefined
+		let needsPersist = false
 
 		try {
 			if (category === "sdk-image") {
+				// The worker's own makeThumbnail op already persisted this (writeThumb, before it ever
+				// transfers the buffer back out) — nothing left for this thread to store.
 				bytes = await runOp(deps.makeThumbnail(item.data, THUMB_MAX_DIM))
 			} else {
 				const generator = deps.getGenerator(category)
@@ -126,9 +129,7 @@ async function generate(
 
 				if (generated !== null) {
 					bytes = generated
-					await deps.storeThumbnail(uuid, generated).catch((e: unknown) => {
-						log.warn("thumbnails", "generate: persist failed", uuid, e)
-					})
+					needsPersist = true
 				}
 			}
 		} catch (e) {
@@ -144,8 +145,21 @@ async function generate(
 		// makes an unparameterized Uint8Array reject BlobPart's stricter ArrayBufferView<ArrayBuffer> —
 		// bytes here is always backed by a real ArrayBuffer (a Comlink.transfer out of the sdk worker, or
 		// a generator's own freshly-allocated buffer, never a SharedArrayBuffer), so this narrows the
-		// generic parameter only, mirroring image-viewer.tsx's identical cast.
-		return finalize(deps, uuid, new Blob([bytes as Uint8Array<ArrayBuffer>], { type: THUMB_MIME }))
+		// generic parameter only, mirroring image-viewer.tsx's identical cast. Built BEFORE the persist
+		// call below: the Blob constructor copies bytes into its own storage immediately, whereas
+		// storeThumbnail's Comlink.transfer detaches this SAME buffer synchronously, at the call itself
+		// (postMessage's transfer-list handoff, not once the call resolves) — persisting first would
+		// leave `bytes` a zero-length view by the time this line ran, silently producing an empty Blob.
+		const attachedBytes = bytes as Uint8Array<ArrayBuffer>
+		const blob = new Blob([attachedBytes], { type: THUMB_MIME })
+
+		if (needsPersist) {
+			await deps.storeThumbnail(uuid, attachedBytes).catch((e: unknown) => {
+				log.warn("thumbnails", "generate: persist failed", uuid, e)
+			})
+		}
+
+		return finalize(deps, uuid, blob)
 	} finally {
 		semaphore.release()
 	}

@@ -86,11 +86,12 @@ function fakeLib(options: { width?: number; height?: number; displayResult?: unk
 	return { lib, freeCalls, contextFreeCalls }
 }
 
-function depsFor(lib: HeicDecoderModule, encodeJpeg?: HeicTransformDeps["encodeJpeg"]) {
+function depsFor(lib: HeicDecoderModule, encodeJpeg?: HeicTransformDeps["encodeJpeg"], encodeThumb?: HeicTransformDeps["encodeThumb"]) {
 	const getDecoderSpy = vi.fn(() => Promise.resolve(lib))
 	const deps: HeicTransformDeps = {
 		getDecoder: getDecoderSpy,
-		encodeJpeg: encodeJpeg ?? (() => Promise.resolve(new Blob(["jpeg"], { type: "image/jpeg" })))
+		encodeJpeg: encodeJpeg ?? (() => Promise.resolve(new Blob(["jpeg"], { type: "image/jpeg" }))),
+		encodeThumb: encodeThumb ?? (() => Promise.resolve(new Blob(["thumb"], { type: "image/webp" })))
 	}
 
 	return { deps, getDecoderSpy }
@@ -129,6 +130,43 @@ describe("runHeicTransform — happy path", () => {
 	})
 })
 
+describe("runHeicTransform — thumbnail opts", () => {
+	it("with no opts, calls encodeJpeg and never encodeThumb (the frozen default path)", async () => {
+		const { runHeicTransform } = await freshModule()
+		const { lib } = fakeLib()
+		const encodeJpeg = vi.fn((): Promise<Blob> => Promise.resolve(new Blob(["jpeg"])))
+		const encodeThumb = vi.fn((): Promise<Blob> => Promise.resolve(new Blob(["thumb"])))
+		const { deps } = depsFor(lib, encodeJpeg, encodeThumb)
+
+		await runHeicTransform(BYTES, deps)
+
+		expect(encodeJpeg).toHaveBeenCalledTimes(1)
+		expect(encodeThumb).not.toHaveBeenCalled()
+	})
+
+	it("with opts.maxDimension set, calls encodeThumb with the decoded pixels and that maxDimension, never encodeJpeg", async () => {
+		const { runHeicTransform } = await freshModule()
+		const { lib } = fakeLib({ width: 4, height: 3 })
+		const encodeJpeg = vi.fn((): Promise<Blob> => Promise.resolve(new Blob(["jpeg"])))
+		const encodeThumb = vi.fn((): Promise<Blob> => Promise.resolve(new Blob(["thumb"])))
+		const { deps } = depsFor(lib, encodeJpeg, encodeThumb)
+
+		await runHeicTransform(BYTES, deps, { maxDimension: 512 })
+
+		expect(encodeThumb).toHaveBeenCalledWith(expect.objectContaining({ width: 4, height: 3 }), 512)
+		expect(encodeJpeg).not.toHaveBeenCalled()
+	})
+
+	it("resolves with the exact Blob encodeThumb produced", async () => {
+		const { runHeicTransform } = await freshModule()
+		const { lib } = fakeLib()
+		const producedBlob = new Blob(["thumb-bytes"], { type: "image/webp" })
+		const { deps } = depsFor(lib, undefined, () => Promise.resolve(producedBlob))
+
+		await expect(runHeicTransform(BYTES, deps, { maxDimension: 512 })).resolves.toBe(producedBlob)
+	})
+})
+
 describe("runHeicTransform — decoder memoization", () => {
 	it("loads the decoder once across sequential calls", async () => {
 		const { runHeicTransform } = await freshModule()
@@ -160,7 +198,11 @@ describe("runHeicTransform — decoder memoization", () => {
 
 			return attempt === 1 ? Promise.reject(new Error("wasm init failed")) : Promise.resolve(lib)
 		})
-		const deps: HeicTransformDeps = { getDecoder: getDecoderSpy, encodeJpeg: () => Promise.resolve(new Blob(["jpeg"])) }
+		const deps: HeicTransformDeps = {
+			getDecoder: getDecoderSpy,
+			encodeJpeg: () => Promise.resolve(new Blob(["jpeg"])),
+			encodeThumb: () => Promise.resolve(new Blob(["thumb"]))
+		}
 
 		await expect(runHeicTransform(BYTES, deps)).rejects.toThrow()
 		await expect(runHeicTransform(BYTES, deps)).resolves.toBeInstanceOf(Blob)

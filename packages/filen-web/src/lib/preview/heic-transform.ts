@@ -1,6 +1,7 @@
 import * as Comlink from "comlink"
 import HeicWorker from "@/workers/heic.worker.ts?worker"
 import type { HeicWorkerApi } from "@/workers/heic.worker"
+import type { HeicTransformOpts } from "@/lib/preview/heic-codec"
 
 // Spun up on the first HEIC/HEIF preview, not at module load — most sessions never open one. Wrapped
 // with Comlink exactly like sdk.worker.ts/db.worker.ts's own workers (client.ts, storage/leader.ts);
@@ -28,8 +29,9 @@ async function getSharedWorker(): Promise<Comlink.Remote<HeicWorkerApi>> {
 // off the main thread in the worker above, so a multi-megapixel photo (iPhone default) never blocks the
 // tab. Signature and error behavior are unchanged from before this moved worker-side: any failure still
 // surfaces as a plain rejected Error, which the caller maps to one labeled error state regardless of
-// content.
-export async function transformHeicBytes(bytes: Uint8Array): Promise<Blob> {
+// content. `opts` is omitted by image-viewer.tsx (every preview call) — only the thumbnail generator
+// (thumb-generators.ts) passes `{maxDimension}` to request the downscaled, webp-first encode instead.
+export async function transformHeicBytes(bytes: Uint8Array, opts?: HeicTransformOpts): Promise<Blob> {
 	const worker = await getSharedWorker()
 	// Narrowed the same way image-viewer.tsx's BufferedImageBytes narrows a worker-sourced Uint8Array:
 	// this buffer is always a fresh ArrayBuffer allocation (usePreviewBytes's buffered download), never a
@@ -38,5 +40,5 @@ export async function transformHeicBytes(bytes: Uint8Array): Promise<Blob> {
 	// multi-megabyte, and nothing on the main thread reads these bytes again after this call.
 	const transferable = bytes as Uint8Array<ArrayBuffer>
 
-	return await worker.transform(Comlink.transfer(transferable, [transferable.buffer]))
+	return await worker.transform(Comlink.transfer(transferable, [transferable.buffer]), opts)
 }
