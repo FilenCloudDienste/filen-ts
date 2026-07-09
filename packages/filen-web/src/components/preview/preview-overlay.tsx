@@ -214,7 +214,14 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 	// editable buffer; runs it immediately otherwise. Every dismissal route (Escape, backdrop, the X
 	// button — all three fold into Base UI's own onOpenChange(false)), both pager buttons, and the
 	// in-dialog arrow keys funnel through this, so none of them can silently drop an in-progress edit.
+	// An in-flight save blocks the intent outright (mirrors the pager buttons' own disabled state):
+	// prompting "discard?" mid-save would let the user discard while the un-cancellable upload still
+	// lands and patches the listing — a silent contradiction of the choice they just made.
 	function requestOrRun(intent: PendingIntent, run: () => void): void {
+		if (saving) {
+			return
+		}
+
 		if (editable && dirty) {
 			setPendingIntent(intent)
 			return
