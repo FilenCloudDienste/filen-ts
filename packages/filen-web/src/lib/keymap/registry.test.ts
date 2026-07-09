@@ -197,6 +197,10 @@ describe("keymap registry — drive.download registration", () => {
 		registerAction({ id: "drive.trash", defaultCombo: "delete,backspace", scope: "drive", descriptionKey: "driveCommandTrash" })
 		registerAction({ id: "drive.newDirectory", defaultCombo: "n", scope: "drive", descriptionKey: "driveCommandNewDirectory" })
 		registerAction({ id: "drive.download", defaultCombo: "mod+s", scope: "drive", descriptionKey: "driveCommandDownload" })
+		// preview pager (directory-listing.tsx) — only fires while the preview overlay is open, but the
+		// default combo itself must still be globally unique like every other registered action.
+		registerAction({ id: "drive.previewPrev", defaultCombo: "arrowleft", scope: "drive", descriptionKey: "previewCommandPrevious" })
+		registerAction({ id: "drive.previewNext", defaultCombo: "arrowright", scope: "drive", descriptionKey: "previewCommandNext" })
 		// global scope (theme-provider.tsx + icon-rail.tsx) — scope isn't enforced yet (every action
 		// fires unconditionally, see registry.ts's ActionScope comment), so these are live collision
 		// candidates too, not just drive-scope ones.
@@ -211,6 +215,8 @@ describe("keymap registry — drive.download registration", () => {
 			"drive.trash",
 			"drive.newDirectory",
 			"drive.download",
+			"drive.previewPrev",
+			"drive.previewNext",
 			"app.toggleTheme",
 			"app.openSettings"
 		]

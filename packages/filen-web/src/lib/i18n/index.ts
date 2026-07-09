@@ -6,6 +6,7 @@ import { auth } from "@/locales/en/auth"
 import { drive } from "@/locales/en/drive"
 import { contacts } from "@/locales/en/contacts"
 import { transfers } from "@/locales/en/transfers"
+import { preview } from "@/locales/en/preview"
 
 // Consumed by `ActionDef.descriptionKey` (keymap registry) — a compile-time-checked subset
 // of the "common" namespace's own key set, derived straight from the catalog so it can never
@@ -33,6 +34,11 @@ export type ContactsKey = Extract<keyof typeof contacts, string>
 // this type without this file needing a matching edit at that time.
 export type TransfersKey = Extract<keyof typeof transfers, string>
 
+// Same derivation for the "preview" namespace — the drive.previewPrev/drive.previewNext keymap
+// commands (directory-listing.tsx) describe themselves with preview-namespace copy. Widens
+// ActionDef.descriptionKey to CommonKey | DriveKey | PreviewKey.
+export type PreviewKey = Extract<keyof typeof preview, string>
+
 // `Intl.PluralRules` gate: i18next's plural-key resolution (`_one`/
 // `_other` suffixes, unused by rev 1's catalogs but load-bearing the moment a count-based key
 // lands) needs it. Unlike React Native/Hermes — which mobile polyfills via `intl-pluralrules` —
@@ -40,7 +46,7 @@ export type TransfersKey = Extract<keyof typeof transfers, string>
 // @/workers/sdk.worker's pre-flight) ships `Intl.PluralRules` natively. No polyfill import here,
 // by design.
 //
-// `resources`/`react.useSuspense`: resources are the six EN namespaces only
+// `resources`/`react.useSuspense`: resources are the seven EN namespaces only
 // — no other language ships yet (multi-language catalogs + `SUPPORTED_LANGUAGES` land with the
 // auto-translate pipeline's real script, see .github/workflows/i18n-web.yml). Suspense-throw i18n
 // is OFF: it interacts poorly with the React Compiler and complicates the boot gate; revisit only
@@ -53,7 +59,8 @@ void i18n.use(initReactI18next).init({
 			auth,
 			drive,
 			contacts,
-			transfers
+			transfers,
+			preview
 		}
 	},
 	lng: "en",

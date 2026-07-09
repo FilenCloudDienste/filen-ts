@@ -79,6 +79,12 @@ const uploadAborts = new Map<string, AbortController>()
 const uploadPauses = new Map<string, PauseSignal>()
 const downloadPauses = new Map<string, PauseSignal>()
 
+// Per-preview-token AbortController so cancelPreviewDownload(token) can abort an in-flight whole-buffer
+// preview fetch. Mirrors downloadAborts but keyed by the caller-minted preview token, not a transfer id
+// — previews are never registered as transfers (no row, no progress), so they get their own registry
+// rather than borrowing that one.
+const previewAborts = new Map<string, AbortController>()
+
 // Every authed op reads the live Client through this guard. Post-logout `client` is null, so a
 // forwarded call would null-deref; failing fast here surfaces a clean DTO at the Comlink boundary
 // ("no authenticated client") instead of a raw TypeError.
@@ -526,6 +532,29 @@ const api = {
 	// Continues a paused download; a no-op once the download has settled. Mirrors resumeUpload.
 	resumeDownload(transferId: string): void {
 		downloadPauses.get(transferId)?.resume()
+	},
+	// ── Preview ──────────────────────────────────────────────────────────────
+	// Whole-buffer fetch for the preview overlay (image/pdf/docx/text/code/markdown — never the
+	// streamed media path). No writer/progress plumbing, unlike downloadFileToWriter: downloadFile
+	// hands back the full decrypted Uint8Array in one shot, which crosses back to the caller via
+	// Comlink.transfer (never structured-cloned). Previews are ephemeral reads, not transfers — no
+	// transfers-store row — so this gets its own previewAborts registry rather than reusing
+	// downloadAborts/downloadPauses (no pause concept for a one-shot buffered fetch either).
+	async downloadFileBytes(file: AnyFile, previewToken: string): Promise<Uint8Array> {
+		const c = requireClient()
+		const controller = new AbortController()
+		previewAborts.set(previewToken, controller)
+		try {
+			const bytes = await c.downloadFile(file, { abortSignal: controller.signal })
+			return Comlink.transfer(bytes, [bytes.buffer])
+		} finally {
+			previewAborts.delete(previewToken)
+		}
+	},
+	// Aborts an in-flight preview download by its token; a no-op once the download has settled (the
+	// controller is already evicted). Mirrors cancelDownload.
+	cancelPreviewDownload(previewToken: string): void {
+		previewAborts.get(previewToken)?.abort()
 	},
 	// ── Rename ───────────────────────────────────────────────────────────────
 	// Held-item ops throughout this section take the caller's already-fetched DriveItem.data

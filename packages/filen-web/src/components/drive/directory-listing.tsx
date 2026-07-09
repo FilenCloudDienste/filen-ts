@@ -21,7 +21,8 @@ import {
 import { sortDriveItems, type DriveSortBy } from "@/lib/drive/sort"
 import { resolveDriveNavigationTarget, splatToUuids } from "@/lib/drive/navigate"
 import { clampListboxIndex, listboxRange } from "@/lib/drive/listbox"
-import { type DriveItem } from "@/lib/drive/item"
+import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
+import { canPreview, previewableSiblings, stepPreviewIndex } from "@/lib/drive/preview.logic"
 import { renameItem, trashItems, restoreItems, deleteItemsPermanently, emptyTrash } from "@/lib/drive/actions"
 import { unshareItems } from "@/lib/share/actions"
 import { startDownloads } from "@/lib/drive/download"
@@ -54,6 +55,7 @@ import { ColorDialog } from "@/components/drive/color-dialog"
 import { VersionsDialog } from "@/components/drive/versions-dialog"
 import { InfoDialog } from "@/components/drive/info-dialog"
 import { LinkDialog } from "@/components/drive/link-dialog"
+import { PreviewOverlay } from "@/components/preview/preview-overlay"
 import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
 import { TypedConfirmDialog } from "@/components/dialogs/typed-confirm-dialog"
 import { InputDialog } from "@/components/dialogs/input-dialog"
@@ -69,11 +71,14 @@ export interface DirectoryListingProps {
 // with two listing-level kinds neither dispatched by a per-item menu, so neither has a place in that
 // narrower, per-item-scoped union: "emptyTrash" (the trash toolbar) and "restoreSelected" (the bulk
 // bar's confirm — a single-item restore stays direct/unconfirmed, see item-menu.logic.ts's RESTORE).
-type ActiveDialogKind = ItemActionDialogKind | "emptyTrash" | "restoreSelected"
+type ActiveDialogKind = ItemActionDialogKind | "emptyTrash" | "restoreSelected" | "preview"
 
 interface ActiveDialog {
 	kind: ActiveDialogKind
 	items: DriveItem[]
+	// Only meaningful for kind:"preview" — the opened item's position within `items` (the frozen
+	// previewable-sibling snapshot taken at open time). Every other kind leaves this unset.
+	index?: number
 }
 
 // Kinds the dialog host below actually renders — every ActiveDialogKind is wired today, but the set
@@ -94,7 +99,8 @@ const WIRED_DIALOG_KINDS = new Set<ActiveDialogKind>([
 	"link",
 	"share",
 	"unshare",
-	"restoreSelected"
+	"restoreSelected",
+	"preview"
 ])
 
 // Module scope, not inside the component: runs exactly once per module evaluation (see
@@ -154,6 +160,21 @@ registerAction({
 	defaultCombo: "mod+s",
 	scope: "drive",
 	descriptionKey: "driveCommandDownload"
+})
+// Preview pager — fires only while the preview overlay is open (see the useAction guards below);
+// arrow keys otherwise have no listbox meaning of their own in this app (unlike Up/Down/Home/End,
+// which stay hand-rolled cursor movement in handleKeyDown — see its own comment).
+registerAction({
+	id: "drive.previewPrev",
+	defaultCombo: "arrowleft",
+	scope: "drive",
+	descriptionKey: "previewCommandPrevious"
+})
+registerAction({
+	id: "drive.previewNext",
+	defaultCombo: "arrowright",
+	scope: "drive",
+	descriptionKey: "previewCommandNext"
 })
 
 const ROW_HEIGHT = 40
@@ -374,6 +395,22 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			return
 		}
 
+		// A file opens the preview overlay when previewable, else no-ops (mirrors the prior behavior:
+		// resolveDriveNavigationTarget already returns null for every file arm — see its own comment).
+		// A directory falls through to the unchanged navigation path below.
+		if (asDirectoryOrFile(item).type === "file") {
+			if (!canPreview(item, variant)) {
+				return
+			}
+
+			const siblings = previewableSiblings(sortedItems, variant)
+			const siblingIndex = siblings.findIndex(sibling => sibling.data.uuid === item.data.uuid)
+
+			setActiveDialog({ kind: "preview", items: siblings, index: siblingIndex === -1 ? 0 : siblingIndex })
+
+			return
+		}
+
 		const target = resolveDriveNavigationTarget(item, variant, splat)
 
 		if (target) {
@@ -483,6 +520,25 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	function closeActiveDialog(): void {
 		setActiveDialog(null)
+	}
+
+	// Steps the open preview by one sibling (no wrap) — shared by the header's prev/next buttons
+	// (PreviewOverlay's onStep) and the drive.previewPrev/drive.previewNext keymap actions below, so
+	// both routes compute the same clamped index the same way. A no-op outside kind:"preview".
+	function stepPreview(delta: 1 | -1): void {
+		setActiveDialog(prev => {
+			if (prev?.kind !== "preview" || prev.index === undefined) {
+				return prev
+			}
+
+			const current = prev.items[prev.index]
+
+			if (!current) {
+				return prev
+			}
+
+			return { ...prev, index: stepPreviewIndex(current.data.uuid, prev.items, delta) }
+		})
 	}
 
 	// Threaded into DriveRow/DriveTile as onItemAction (consistent with onPointerSelect/onOpen) — every
@@ -777,6 +833,23 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						}}
 					/>
 				)
+			case "preview": {
+				const previewIndex = activeDialog.index
+
+				if (previewIndex === undefined) {
+					return null
+				}
+
+				return (
+					<PreviewOverlay
+						variant={variant}
+						items={activeDialog.items}
+						index={previewIndex}
+						onStep={stepPreview}
+						onClose={closeActiveDialog}
+					/>
+				)
+			}
 		}
 	}
 
@@ -897,6 +970,37 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		},
 		undefined,
 		[selectedItems, isDialogOpen, variant]
+	)
+
+	// Registered above at module scope. Guarded on the preview overlay actually being open — arrow keys
+	// are otherwise unclaimed here, so nothing to preventDefault while it's closed (native scroll/text-
+	// cursor behavior passes through untouched).
+	useAction(
+		"drive.previewPrev",
+		keyboardEvent => {
+			if (activeDialog?.kind !== "preview") {
+				return
+			}
+
+			keyboardEvent.preventDefault()
+			stepPreview(-1)
+		},
+		undefined,
+		[activeDialog]
+	)
+
+	useAction(
+		"drive.previewNext",
+		keyboardEvent => {
+			if (activeDialog?.kind !== "preview") {
+				return
+			}
+
+			keyboardEvent.preventDefault()
+			stepPreview(1)
+		},
+		undefined,
+		[activeDialog]
 	)
 
 	return (
