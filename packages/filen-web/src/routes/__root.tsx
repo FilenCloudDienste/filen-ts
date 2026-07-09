@@ -3,7 +3,7 @@ import { createRootRoute, Outlet, useNavigate, useRouterState } from "@tanstack/
 import { QueryClientProvider } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { queryClient } from "@/queries/client"
-import { ThemeProvider } from "@/components/theme-provider"
+import { ThemeProvider } from "@/providers/themeProvider"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 import { onAuthBroadcast } from "@/lib/sdk/session"
@@ -11,8 +11,8 @@ import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { registerSW, applyUpdate } from "@/lib/sw/register"
 import { useBootStore } from "@/stores/boot"
-import { BootScreen } from "@/components/shell/boot-screen"
-import { BootErrorScreen } from "@/components/shell/boot-error-screen"
+import { BootScreen } from "@/features/shell/components/bootScreen"
+import { BootErrorScreen } from "@/features/shell/components/bootErrorScreen"
 
 export const Route = createRootRoute({ component: RootLayout })
 

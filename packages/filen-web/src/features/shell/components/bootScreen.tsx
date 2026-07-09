@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { Logo } from "@/components/shell/logo"
+import { Logo } from "@/features/shell/components/logo"
 import { Spinner } from "@/components/ui/spinner"
 
 // Full-screen indeterminate boot state shown while the SDK worker downloads + initializes. No

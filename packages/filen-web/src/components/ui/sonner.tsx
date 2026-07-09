@@ -1,6 +1,6 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
-import { useTheme } from "@/components/theme-provider"
+import { useTheme } from "@/providers/themeProvider"
 
 // Registry default reads the theme from `next-themes`; this app owns its theme provider, so the
 // import is repointed and `next-themes` is not a dependency. `theme` is "dark" | "light" | "system",

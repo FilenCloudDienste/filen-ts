@@ -1,6 +1,6 @@
 import { Outlet } from "@tanstack/react-router"
-import { IconRail } from "@/components/shell/icon-rail"
-import { DriveSidebar } from "@/components/shell/drive-sidebar"
+import { IconRail } from "@/features/shell/components/iconRail"
+import { DriveSidebar } from "@/features/shell/components/driveSidebar"
 
 // Desktop-first three-column shell: fixed icon rail, contextual module sidebar, and the content
 // pane (route Outlet). The sidebar is Drive-specific for now — only one module exists yet; it

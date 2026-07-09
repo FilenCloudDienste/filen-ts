@@ -7,7 +7,7 @@ import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { extensionOf, codeMirrorLanguageFor, decodeUtf8 } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { useTheme } from "@/components/theme-provider"
+import { useTheme } from "@/providers/themeProvider"
 import { Spinner } from "@/components/ui/spinner"
 
 export interface TextViewerProps {

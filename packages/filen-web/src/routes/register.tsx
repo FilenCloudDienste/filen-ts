@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { Trans, useTranslation } from "react-i18next"
 import { redirectIfAuthed } from "@/features/auth/lib/guard"
-import { Logo } from "@/components/shell/logo"
+import { Logo } from "@/features/shell/components/logo"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { RegisterForm } from "@/features/auth/components/registerForm"
 
