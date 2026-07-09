@@ -47,6 +47,7 @@ import {
 } from "@/lib/drive/cache"
 import { THUMB_CACHE_CAP } from "@/lib/drive/thumbnails.logic"
 import { sweepThumbs, writeThumb } from "@/workers/thumb-store"
+import { createSearchEngine, type SearchPush, type SearchSnapshotDTO } from "@/workers/search-engine"
 
 // NEITHER a fixed `/` nor `/assets/`: the wasm holds a RELATIVE `./filen-sdk-worker-thread.js`
 // (verified via `strings` over sdk-rs_bg.wasm) which it passes to `new Worker(...)`, so the
@@ -64,6 +65,10 @@ export type BootResult =
 	{ ok: true; threads: number } | { ok: false; reason: "artifacts" | "coi" | "pool" | "async-runtime" | "opfs"; detail: string }
 
 let client: Client | null = null
+
+// Single instance for this worker's lifetime — the cache-backed search's own handle registry, token
+// supersession, and configure-once guard (search-engine.ts).
+const searchEngine = createSearchEngine()
 
 // Per-transfer AbortControllers so cancelDownload(transferId) can abort an in-flight download.
 // managedFuture.abortSignal is accepted at runtime — verified — so a download carries a real, honored
@@ -902,7 +907,25 @@ const api = {
 		armThumbSweep()
 		await writeThumb(uuid, bytes)
 	},
-	logout(): void {
+	// ── Search ───────────────────────────────────────────────────────────────
+	// Thin pass-throughs onto the single searchEngine instance (search-engine.ts owns the actual
+	// wasm handle lifecycle — it can't cross Comlink). `onPush` arrives as the caller's
+	// Comlink.proxy, same shape as uploadFile/downloadFileToWriter's onProgress above; the engine
+	// stores and calls it directly and never hands it to a wasm call itself, so no extra wrap
+	// belongs at this boundary (see search-engine.ts's own statusListener/listener comments).
+	searchOpen(params: { rootUuid: string | null; name: string }, onPush: (p: SearchPush) => void): Promise<SearchSnapshotDTO> {
+		return searchEngine.open(requireClient(), params, onPush)
+	},
+	searchSetName(name: string): Promise<boolean> {
+		return searchEngine.setName(name)
+	},
+	searchClose(): Promise<void> {
+		return searchEngine.close()
+	},
+	// Closes the live search BEFORE releasing the client — search-engine.ts's teardown calls
+	// close()/free() on handles that belong to THIS client; releasing it first would race that.
+	async logout(): Promise<void> {
+		await searchEngine.close()
 		releaseClient()
 	},
 	hasClient(): boolean {
