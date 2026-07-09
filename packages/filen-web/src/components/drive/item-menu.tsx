@@ -1,11 +1,11 @@
 import { createElement, Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { type DriveItem } from "@/lib/drive/item"
-import { type DriveVariant } from "@/lib/drive/preferences"
-import { toggleFavorite, restoreItems } from "@/lib/drive/actions"
+import { type DriveItem } from "@/features/drive/lib/item"
+import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { toggleFavorite, restoreItems } from "@/features/drive/lib/actions"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { toastBulkOutcome } from "@/lib/drive/bulk-toast"
+import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { useDriveStore } from "@/stores/drive"
 import {
 	driveItemActions,

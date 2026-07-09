@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react"
-import { type DriveItem } from "@/lib/drive/item"
-import { getThumbnailUrl } from "@/lib/drive/thumbnails"
-import { thumbnailCategory } from "@/lib/drive/thumbnails.logic"
+import { type DriveItem } from "@/features/drive/lib/item"
+import { getThumbnailUrl } from "@/features/drive/lib/thumbnails"
+import { thumbnailCategory } from "@/features/drive/lib/thumbnails.logic"
 
 // side-effect: registers the heic/video/pdf client generators against the thumbnail service —
 // nothing else in production imports thumb-generators.ts, and an unregistered category would
 // otherwise silently resolve no thumbnail forever (getThumbnailUrl's own unregistered-generator path
 // is a clean null, never a throw).
-import "@/lib/drive/thumb-generators"
+import "@/features/drive/lib/thumbGenerators"
 
 // Bridges the thumbnail service's async getThumbnailUrl into render state for one drive item. Keyed
 // on item.data.uuid rather than `item` itself: both the list and grid virtualizers key their virtual

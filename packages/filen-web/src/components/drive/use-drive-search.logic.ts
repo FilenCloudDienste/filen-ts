@@ -1,6 +1,6 @@
-import { narrowItem, type DriveItem } from "@/lib/drive/item"
-import { type DriveVariant } from "@/lib/drive/preferences"
-import { resolveDriveNavigationTarget, type DriveNavigationTarget } from "@/lib/drive/navigate"
+import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { resolveDriveNavigationTarget, type DriveNavigationTarget } from "@/features/drive/lib/navigate"
 import { type SearchHitDTO } from "@/workers/search-engine"
 
 // Pure bits pulled out of use-drive-search.ts's async/timer-driven wiring so they're table-testable

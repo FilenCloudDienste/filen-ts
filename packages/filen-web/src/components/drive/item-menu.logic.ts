@@ -15,11 +15,11 @@ import {
 	DownloadIcon,
 	type LucideIcon
 } from "lucide-react"
-import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
-import { type DriveVariant } from "@/lib/drive/preferences"
-import { canShareVariant, isSharedVariant } from "@/lib/share/gating"
+import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { canShareVariant, isSharedVariant } from "@/features/drive/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
-import { startDownloads } from "@/lib/drive/download"
+import { startDownloads } from "@/features/drive/lib/download"
 
 // Dialog kinds a per-item action can open in the listing-level dialog host (directory-listing.tsx's
 // own activeDialog state). "emptyTrash" is a listing-level action (the trash toolbar, no per-item

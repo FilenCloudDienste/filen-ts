@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import type { Dir, UuidStr } from "@filen/sdk-rs"
-import { narrowItem, type DriveItem } from "@/lib/drive/item"
+import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/stores/drive"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — mirrors

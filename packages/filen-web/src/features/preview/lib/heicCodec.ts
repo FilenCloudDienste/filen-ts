@@ -1,5 +1,5 @@
 import { log } from "@/lib/log"
-import { fitWithin, encodeCanvasThumb } from "@/lib/drive/thumb-generators.logic"
+import { fitWithin, encodeCanvasThumb } from "@/features/drive/lib/thumbGenerators.logic"
 
 // Pure decode (HEIC/HEIF bytes -> RGBA) + encode (RGBA -> JPEG Blob) logic, dependency-injected so
 // runHeicTransform below runs in node against a fake decoder (see heic-codec.test.ts) with no WASM and

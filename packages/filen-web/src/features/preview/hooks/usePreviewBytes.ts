@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
-import { type DriveItem } from "@/lib/drive/item"
-import { narrowToAnyFile } from "@/lib/drive/download"
+import { type DriveItem } from "@/features/drive/lib/item"
+import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"

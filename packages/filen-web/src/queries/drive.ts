@@ -5,15 +5,15 @@ import { queryClient } from "@/queries/client"
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
 import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink, AnyDirWithContext } from "@filen/sdk-rs"
-import { narrowItem, asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
+import { narrowItem, asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import {
 	getSortPreferences,
 	getViewModePreferences,
 	type DrivePreferences,
 	type DriveVariant,
 	type DriveViewMode
-} from "@/lib/drive/preferences"
-import { type DriveSortBy } from "@/lib/drive/sort"
+} from "@/features/drive/lib/preferences"
+import { type DriveSortBy } from "@/features/drive/lib/sort"
 
 // Query key taxonomy per client.ts ([domain, entity, params?]): `uuid` is null for every flat
 // listing (recents/favorites/trash) and for My Drive's own root, so a fast nav between two

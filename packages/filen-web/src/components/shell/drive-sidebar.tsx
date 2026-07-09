@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { FolderClosedIcon, ClockIcon, StarIcon, Trash2Icon, UsersIcon, Share2Icon, Link2Icon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { type DriveRouteId } from "@/lib/drive/navigate"
+import { type DriveRouteId } from "@/features/drive/lib/navigate"
 import { Separator } from "@/components/ui/separator"
 
 type IconType = ComponentType<{ className?: string }>

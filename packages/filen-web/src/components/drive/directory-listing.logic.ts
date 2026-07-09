@@ -1,6 +1,6 @@
-import { getSharerIdentity, type DriveItem } from "@/lib/drive/item"
+import { getSharerIdentity, type DriveItem } from "@/features/drive/lib/item"
 import { isBlocked, type BlockedUsers } from "@/features/contacts/lib/blocking"
-import { sortDriveItems, type DriveSortBy } from "@/lib/drive/sort"
+import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
 
 // Fail-open visibility check for a sharedIn item: an unresolved sharer identity (getSharerIdentity
 // returns null — the item isn't shared, or its role couldn't be read) always KEEPS the item; only a

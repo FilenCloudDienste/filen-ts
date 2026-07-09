@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { File, FileVersion, UuidStr } from "@filen/sdk-rs"
-import { narrowItem } from "@/lib/drive/item"
-import type { FileItem } from "@/lib/drive/actions"
+import { narrowItem } from "@/features/drive/lib/item"
+import type { FileItem } from "@/features/drive/lib/actions"
 import { hasNoPreviousVersions, isCurrentVersion } from "@/components/drive/versions-dialog.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short

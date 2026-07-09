@@ -9,12 +9,12 @@ import {
 	DownloadIcon,
 	type LucideIcon
 } from "lucide-react"
-import { type DriveVariant } from "@/lib/drive/preferences"
-import { type DriveSelectionFlags } from "@/lib/drive/selection-flags"
-import { canShareVariant, isSharedVariant } from "@/lib/share/gating"
+import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
+import { canShareVariant, isSharedVariant } from "@/features/drive/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
-import { type DriveItem } from "@/lib/drive/item"
-import { startDownloads } from "@/lib/drive/download"
+import { type DriveItem } from "@/features/drive/lib/item"
+import { startDownloads } from "@/features/drive/lib/download"
 
 // Dialog kinds the bulk-action bar can ask the listing's dialog host to open — a narrow subset of
 // directory-listing.tsx's own ActiveDialogKind (the per-item-only kinds — rename/color/versions/info/

@@ -1,8 +1,8 @@
 import { useEffect, useRef, type ChangeEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { UploadIcon } from "lucide-react"
-import { startUploads } from "@/lib/drive/upload"
-import { startDirectoryUpload } from "@/lib/drive/upload-directory"
+import { startUploads } from "@/features/drive/lib/upload"
+import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import * as Comlink from "comlink"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
-import { type DriveItem } from "@/lib/drive/item"
+import { type DriveItem } from "@/features/drive/lib/item"
 import {
 	deriveSearchStatus,
 	GRACE_MS,
@@ -10,7 +10,7 @@ import {
 	STALL_CEILING_MS,
 	SETCONFIG_DEBOUNCE_MS,
 	type SearchStatus
-} from "@/lib/drive/search-status.logic"
+} from "@/features/drive/lib/searchStatus.logic"
 import { type SearchPush, type SearchHitDTO } from "@/workers/search-engine"
 import { buildSearchResults, resolveSearchTransition } from "@/components/drive/use-drive-search.logic"
 

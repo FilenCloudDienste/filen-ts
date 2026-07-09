@@ -9,7 +9,7 @@ import {
 } from "@/features/contacts/queries/contacts"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
-import { runBulk, type BulkOutcome } from "@/lib/drive/bulk"
+import { runBulk, type BulkOutcome } from "@/features/drive/lib/bulk"
 
 export type { VoidActionOutcome }
 

@@ -1,5 +1,5 @@
-import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
-import { previewType, needsImageTransform } from "@/lib/drive/preview.logic"
+import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { previewType, needsImageTransform } from "@/features/drive/lib/preview.logic"
 import { isAllowedInlineContentType } from "@/lib/sw/protocol"
 
 // The page-side half of the inline-preview allowlist gate (the SW's own independent re-check lives in

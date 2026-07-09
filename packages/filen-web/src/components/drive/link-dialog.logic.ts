@@ -1,6 +1,6 @@
 import { Buffer } from "buffer"
 import type { DirPublicLinkRW, FilePublicLink, PasswordState, PublicLinkExpiration } from "@filen/sdk-rs"
-import type { DriveItem } from "@/lib/drive/item"
+import type { DriveItem } from "@/features/drive/lib/item"
 import type { DriveItemLinkStatus } from "@/queries/drive"
 
 // Mirrors filen-mobile's FILE_PUBLIC_LINK_URL_PREFIX/DIRECTORY_PUBLIC_LINK_URL_PREFIX (src/constants.ts)

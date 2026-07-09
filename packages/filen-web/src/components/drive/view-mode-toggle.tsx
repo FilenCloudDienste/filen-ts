@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { LayoutGridIcon, ListIcon } from "lucide-react"
-import { type DriveViewMode } from "@/lib/drive/preferences"
+import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 

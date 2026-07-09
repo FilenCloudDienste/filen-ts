@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, DirPublicLinkRW, File, FilePublicLink, UuidStr } from "@filen/sdk-rs"
-import { narrowItem, type DriveItem } from "@/lib/drive/item"
+import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { DriveItemLinkStatus } from "@/queries/drive"
 import { buildLinkUpdate, buildPublicLinkUrl, readLinkForm } from "@/components/drive/link-dialog.logic"
 

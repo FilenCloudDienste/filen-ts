@@ -1,5 +1,5 @@
 import type { FileVersion } from "@filen/sdk-rs"
-import type { FileItem } from "@/lib/drive/actions"
+import type { FileItem } from "@/features/drive/lib/actions"
 
 // A version's OWN uuid becomes the file's live uuid the moment it's the active content — restoring
 // an older version rotates the file onto THAT version's uuid (see actions.ts's restoreVersion) — so

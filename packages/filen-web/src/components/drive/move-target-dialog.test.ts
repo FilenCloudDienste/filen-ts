@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, File, UuidStr } from "@filen/sdk-rs"
-import { narrowItem, type DriveItem } from "@/lib/drive/item"
+import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import {
 	isMoveConfirmDisabled,
 	isMoveDestinationForbidden,

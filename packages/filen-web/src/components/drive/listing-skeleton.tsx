@@ -1,4 +1,4 @@
-import { type DriveViewMode } from "@/lib/drive/preferences"
+import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { Skeleton } from "@/components/ui/skeleton"
 
 export interface ListingSkeletonProps {

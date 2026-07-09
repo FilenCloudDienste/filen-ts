@@ -7,7 +7,7 @@ import { kvGetJson, kvHas, kvSetJson } from "@/lib/storage/adapter"
 import { comboFor, setUserCombo } from "@/lib/keymap/registry"
 import { persistSession, resumeSession } from "@/lib/sdk/session"
 import { whenBootReady } from "@/lib/sdk/boot"
-import { readThumbnailBlob } from "@/lib/drive/thumb-cache"
+import { readThumbnailBlob } from "@/features/drive/lib/thumbCache"
 import { log } from "@/lib/log"
 
 // Test-only hooks, loaded ONLY when the app is built with VITE_E2E=1 (a dynamic import behind that

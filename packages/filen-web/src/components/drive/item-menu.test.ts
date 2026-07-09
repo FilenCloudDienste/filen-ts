@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import { UserMinusIcon, DownloadIcon } from "lucide-react"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
-import { narrowItem, type DriveItem } from "@/lib/drive/item"
+import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
 // item-menu.logic.ts imports lib/drive/download.ts (for startDownloads) which in turn touches the
 // worker client and query client — unresolvable/unwanted under node vitest, mirrors
@@ -14,8 +14,8 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const { startDownloadsMock } = vi.hoisted(() => ({ startDownloadsMock: vi.fn() }))
 
-vi.mock("@/lib/drive/download", async importOriginal => {
-	const actual = await importOriginal<typeof import("@/lib/drive/download")>()
+vi.mock("@/features/drive/lib/download", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/features/drive/lib/download")>()
 	return { ...actual, startDownloads: startDownloadsMock }
 })
 
@@ -26,8 +26,8 @@ vi.mock("@/lib/drive/download", async importOriginal => {
 // changes the outcome.
 const { isFsaAvailableMock } = vi.hoisted(() => ({ isFsaAvailableMock: vi.fn() }))
 
-vi.mock("@/lib/drive/save-download", async importOriginal => {
-	const actual = await importOriginal<typeof import("@/lib/drive/save-download")>()
+vi.mock("@/features/drive/lib/saveDownload", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/features/drive/lib/saveDownload")>()
 	return { ...actual, isFsaAvailable: isFsaAvailableMock }
 })
 

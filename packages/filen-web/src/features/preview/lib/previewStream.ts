@@ -1,5 +1,5 @@
 import type { AnyFile } from "@filen/sdk-rs"
-import { activeServiceWorker, ensureSwClientReady, sendToSw } from "@/lib/drive/save-download"
+import { activeServiceWorker, ensureSwClientReady, sendToSw } from "@/features/drive/lib/saveDownload"
 import { SW_DOWNLOAD_PREFIX, SW_MSG_REGISTER_PREVIEW } from "@/lib/sw/protocol"
 
 // Registers `file` against the SW's inline-preview route (no attachment disposition, an allowlisted

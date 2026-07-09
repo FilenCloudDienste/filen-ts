@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import { type DriveItem } from "@/lib/drive/item"
+import { type DriveItem } from "@/features/drive/lib/item"
 
 // Add if absent (by uuid), remove if present — the toggle boilerplate every selection action here
 // builds on. Returns a new array; the input is never mutated.

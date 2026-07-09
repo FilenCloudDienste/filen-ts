@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { getDocument, GlobalWorkerOptions, PasswordResponses, type PDFDocumentProxy, type PDFPageProxy, type RenderTask } from "pdfjs-dist"
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
-import { type DriveItem } from "@/lib/drive/item"
-import { clampListboxIndex } from "@/lib/drive/listbox"
+import { type DriveItem } from "@/features/drive/lib/item"
+import { clampListboxIndex } from "@/features/drive/lib/listbox"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import {
 	mostVisiblePage,

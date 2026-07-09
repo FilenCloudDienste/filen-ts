@@ -1,11 +1,11 @@
 import { createElement } from "react"
 import { useTranslation } from "react-i18next"
 import { XIcon } from "lucide-react"
-import { type DriveItem } from "@/lib/drive/item"
-import { type DriveVariant } from "@/lib/drive/preferences"
-import { aggregateDriveSelectionFlags } from "@/lib/drive/selection-flags"
-import { setFavoritedItems } from "@/lib/drive/actions"
-import { toastBulkOutcome } from "@/lib/drive/bulk-toast"
+import { type DriveItem } from "@/features/drive/lib/item"
+import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
+import { setFavoritedItems } from "@/features/drive/lib/actions"
+import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { useDriveStore } from "@/stores/drive"
 import {
 	driveBulkActions,

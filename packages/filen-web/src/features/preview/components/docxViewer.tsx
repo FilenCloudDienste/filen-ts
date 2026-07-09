@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { renderAsync } from "docx-preview"
-import { type DriveItem } from "@/lib/drive/item"
+import { type DriveItem } from "@/features/drive/lib/item"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { isSafeLinkHref } from "@/features/preview/components/docxViewer.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"

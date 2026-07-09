@@ -1,6 +1,6 @@
 import { toast } from "sonner"
 import { i18n } from "@/lib/i18n"
-import { type BulkOutcome } from "@/lib/drive/bulk"
+import { type BulkOutcome } from "@/features/drive/lib/bulk"
 
 // Presentation layer for runContactsBulk's outcome (bulk-accept/deny/cancel/remove/block/unblock) —
 // mirrors lib/drive/bulk-toast.ts's toastBulkOutcome, kept as its own small module rather than

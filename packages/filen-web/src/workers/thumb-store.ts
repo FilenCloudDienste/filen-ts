@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { log } from "@/lib/log"
-import { THUMB_DIR, THUMB_EXT, pickEvictions, type ThumbCacheEntry } from "@/lib/drive/thumbnails.logic"
+import { THUMB_DIR, THUMB_EXT, pickEvictions, type ThumbCacheEntry } from "@/features/drive/lib/thumbnails.logic"
 
 // Worker-only OPFS blob store for cached thumbnails — no wasm import anywhere in this module, so it
 // stays trivially importable from sdk.worker.ts without dragging the SDK's own init/thread-pool

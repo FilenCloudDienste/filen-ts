@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { ArrowDownNarrowWideIcon } from "lucide-react"
-import { type DriveSortBy } from "@/lib/drive/sort"
+import { type DriveSortBy } from "@/features/drive/lib/sort"
 import { Button } from "@/components/ui/button"
 import {
 	DropdownMenu,

@@ -14,7 +14,7 @@ import type {
 	SharingRole,
 	UuidStr
 } from "@filen/sdk-rs"
-import { narrowItem, type DriveItem } from "@/lib/drive/item"
+import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it
 // down to the methods this module calls, mirroring account.test.ts's mock boundary.

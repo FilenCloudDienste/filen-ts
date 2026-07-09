@@ -44,8 +44,8 @@ import {
 	getCachedDir,
 	getCachedName,
 	getSharedDirContext
-} from "@/lib/drive/cache"
-import { THUMB_CACHE_CAP } from "@/lib/drive/thumbnails.logic"
+} from "@/features/drive/lib/cache"
+import { THUMB_CACHE_CAP } from "@/features/drive/lib/thumbnails.logic"
 import { sweepThumbs, writeThumb } from "@/workers/thumb-store"
 import { createSearchEngine, type SearchPush, type SearchSnapshotDTO } from "@/workers/search-engine"
 

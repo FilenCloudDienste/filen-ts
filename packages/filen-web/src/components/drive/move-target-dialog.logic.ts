@@ -1,4 +1,4 @@
-import type { DriveItem } from "@/lib/drive/item"
+import type { DriveItem } from "@/features/drive/lib/item"
 
 // A move destination is illegal for two independent reasons, checked separately so the picker can
 // apply them at different points: entering a row (browsing) only ever needs the first, "Move here"
