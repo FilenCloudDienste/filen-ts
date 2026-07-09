@@ -1,6 +1,31 @@
 // Pure page-visibility/canvas-sizing math for pdf-viewer.tsx — framework-free so it is testable in
 // node (pdf-viewer.logic.test.ts) with no pdf.js, canvas, or DOM involved.
 
+// Two IntersectionObserver rootMargin values per page: RENDER (tight) triggers the first render as a
+// page approaches the viewport; EVICT (generous) releases that page's canvas only once it has
+// scrolled much further away. The gap between them is deliberate hysteresis — a single shared
+// threshold would render and evict the same page repeatedly while it sits near the boundary.
+export const PDF_PAGE_RENDER_MARGIN_PX = 400
+export const PDF_PAGE_EVICT_MARGIN_PX = 1200
+
+export type PdfPageAction = "render" | "evict" | "idle"
+
+// What a page's canvas should do given its current extended-viewport membership and render state.
+// pdf-viewer.tsx's render effect only acts on "render" (start a page.render() task); "evict" is
+// unconditional on !withinExtendedView rather than gated on `rendered` because the actual release
+// (canvas resize + un-rendering) runs eagerly from the eviction observer's own callback the instant
+// visibility flips, not from this decision — a page whose render task got cancelled mid-flight had
+// already sized its canvas to a full bitmap by then, so it needs releasing too, not just a page that
+// finished. Kept as one three-way decision (not two separate booleans) because it's the single place
+// documenting the hysteresis: render and evict never both read true for the same input.
+export function pdfPageAction(withinExtendedView: boolean, rendered: boolean): PdfPageAction {
+	if (!withinExtendedView) {
+		return "evict"
+	}
+
+	return rendered ? "idle" : "render"
+}
+
 // One page's current IntersectionObserver ratio, as reported by pdf-viewer.tsx's per-page observer.
 export interface PageVisibility {
 	page: number

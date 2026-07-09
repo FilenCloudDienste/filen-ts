@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { mostVisiblePage, canvasDimsForViewport, canvasRenderTransform, type PageVisibility } from "@/components/preview/pdf-viewer.logic"
+import {
+	mostVisiblePage,
+	canvasDimsForViewport,
+	canvasRenderTransform,
+	pdfPageAction,
+	PDF_PAGE_RENDER_MARGIN_PX,
+	PDF_PAGE_EVICT_MARGIN_PX,
+	type PageVisibility
+} from "@/components/preview/pdf-viewer.logic"
 
 describe("mostVisiblePage", () => {
 	it("picks the entry with the highest ratio", () => {
@@ -79,5 +87,29 @@ describe("canvasRenderTransform", () => {
 
 	it("treats a non-positive ratio as 1", () => {
 		expect(canvasRenderTransform(0)).toEqual([1, 0, 0, 1, 0, 0])
+	})
+})
+
+describe("PDF_PAGE_EVICT_MARGIN_PX", () => {
+	it("stays wider than the render margin, or eviction would thrash at the boundary", () => {
+		expect(PDF_PAGE_EVICT_MARGIN_PX).toBeGreaterThan(PDF_PAGE_RENDER_MARGIN_PX)
+	})
+})
+
+describe("pdfPageAction", () => {
+	it("renders once within the extended viewport and not yet rendered", () => {
+		expect(pdfPageAction(true, false)).toBe("render")
+	})
+
+	it("goes idle once rendered and still within the extended viewport", () => {
+		expect(pdfPageAction(true, true)).toBe("idle")
+	})
+
+	it("evicts a rendered page once it leaves the extended viewport", () => {
+		expect(pdfPageAction(false, true)).toBe("evict")
+	})
+
+	it("also evicts an unrendered page outside the extended viewport (a cancelled mid-render still sized its canvas)", () => {
+		expect(pdfPageAction(false, false)).toBe("evict")
 	})
 })

@@ -5,7 +5,15 @@ import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
 import { type DriveItem } from "@/lib/drive/item"
 import { clampListboxIndex } from "@/lib/drive/listbox"
 import { usePreviewBytes } from "@/components/preview/use-preview-bytes"
-import { mostVisiblePage, canvasDimsForViewport, canvasRenderTransform, type PageVisibility } from "@/components/preview/pdf-viewer.logic"
+import {
+	mostVisiblePage,
+	canvasDimsForViewport,
+	canvasRenderTransform,
+	pdfPageAction,
+	PDF_PAGE_RENDER_MARGIN_PX,
+	PDF_PAGE_EVICT_MARGIN_PX,
+	type PageVisibility
+} from "@/components/preview/pdf-viewer.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -54,7 +62,12 @@ function usePdfDocument(bytes: Uint8Array): { state: DocumentState; submitPasswo
 
 	useEffect(() => {
 		let live = true
-		const task = getDocument({ data: bytes })
+		// bytes.slice(): getDocument transfers `data`'s backing ArrayBuffer to the worker (postMessage
+		// with a transfer list — verified against the installed 6.1.200 source), detaching it. StrictMode
+		// double-invokes this effect in dev with the SAME `bytes` reference, so the first call would
+		// detach the SDK-owned buffer out from under the second, racing loser. A copy gives every call —
+		// StrictMode's extra one included — its own buffer to transfer; `bytes` itself is never touched.
+		const task = getDocument({ data: bytes.slice() })
 
 		task.onPassword = (updatePassword: (password: string) => void, reason: number) => {
 			updatePasswordRef.current = updatePassword
@@ -138,12 +151,15 @@ function PdfPasswordPrompt({ attempt, onSubmit }: { attempt: PasswordAttempt; on
 }
 
 // One page's canvas — resolves its own PDFPageProxy on mount (cheap: already-parsed doc structure,
-// not rasterization), then renders exactly once metadata is ready AND the parent's lazy gate opens.
-// The gate keeps a many-page document from rasterizing every page up front (each canvas allocates
+// not rasterization), then renders once metadata is ready AND the parent's lazy gate opens. The gate
+// keeps a many-page document from rasterizing every page up front (each canvas allocates
 // width*height*4 bytes — the same tab-crashing-allocation concern PREVIEW_MAX_BYTES already guards at
-// the whole-file level, just at per-page granularity here); once rendered, a page stays rendered for
-// the rest of this mount rather than unrendering on scroll-away, trading some peak memory for zero
-// re-render-on-scroll-back complexity.
+// the whole-file level, just at per-page granularity here). A page's canvas is also released once it
+// scrolls past the wider PDF_PAGE_EVICT_MARGIN_PX zone (pdfPageAction below) — without that, a long,
+// low-byte-size document could still accumulate hundreds of full-res canvases over one scroll-through
+// and exhaust the tab despite never approaching the whole-file byte cap. Re-entering the render
+// margin re-renders from scratch; the wrapper div's own size (from the already-resolved `page`, never
+// reset by eviction) keeps scroll position stable across an evict/re-render cycle.
 function PdfPage({
 	doc,
 	pageNumber,
@@ -165,6 +181,9 @@ function PdfPage({
 	const canvasRef = useRef<HTMLCanvasElement | null>(null)
 	const [page, setPage] = useState<PDFPageProxy | null>(null)
 	const [rendered, setRendered] = useState(false)
+	// Live (non-monotonic, unlike the parent's renderSet) membership in the wider eviction margin —
+	// gates the render effect below (see pdfPageAction) and is itself set from the eviction observer.
+	const [withinExtendedView, setWithinExtendedView] = useState(false)
 
 	// Latest onIntersect, read (never as a dependency) from the observer callback below — keeps that
 	// effect from tearing down and recreating its IntersectionObserver on every ancestor re-render
@@ -206,7 +225,7 @@ function PdfPage({
 					onIntersectRef.current(pageNumber, entry.intersectionRatio, entry.isIntersecting)
 				}
 			},
-			{ root: container, rootMargin: "400px 0px", threshold: [0, 0.25, 0.5, 0.75, 1] }
+			{ root: container, rootMargin: `${String(PDF_PAGE_RENDER_MARGIN_PX)}px 0px`, threshold: [0, 0.25, 0.5, 0.75, 1] }
 		)
 
 		observer.observe(el)
@@ -216,14 +235,68 @@ function PdfPage({
 		}
 	}, [root, pageNumber])
 
+	// A second, wider-margin observer purely for eviction — deliberately separate from the one above
+	// (which needs fine-grained ratios for the current-page indicator, not a 1200px-wide root). Boolean
+	// isIntersecting only, so threshold stays at the default single crossing. Eviction itself (canvas
+	// release + un-rendering) runs right here in the callback rather than in a state-driven effect body
+	// below — a subscription callback is where React wants an external-system reaction to live
+	// (react-hooks/set-state-in-effect), and it also sidesteps ever reading a stale `rendered`: the
+	// action is the same (release, unconditionally) whether or not this page had finished rendering.
 	useEffect(() => {
-		if (!page || !shouldRender || rendered) {
+		const container = root.current
+		const el = divRef.current
+
+		if (!container || !el) {
+			return
+		}
+
+		const observer = new IntersectionObserver(
+			entries => {
+				const entry = entries[0]
+
+				if (!entry) {
+					return
+				}
+
+				setWithinExtendedView(entry.isIntersecting)
+
+				if (!entry.isIntersecting) {
+					// Releases a fully-rendered canvas, or one an in-flight render had already sized before
+					// the render effect's own cleanup (triggered by the withinExtendedView update above)
+					// cancels that task — safe either way; a resized canvas just stops accepting meaningful
+					// draws. setRendered(false) when already false is a no-op React bails out on.
+					const canvas = canvasRef.current
+
+					if (canvas) {
+						canvas.width = 0
+						canvas.height = 0
+					}
+
+					setRendered(false)
+				}
+			},
+			{ root: container, rootMargin: `${String(PDF_PAGE_EVICT_MARGIN_PX)}px 0px` }
+		)
+
+		observer.observe(el)
+
+		return () => {
+			observer.disconnect()
+		}
+	}, [root])
+
+	useEffect(() => {
+		if (!page || !shouldRender) {
 			return
 		}
 
 		const canvas = canvasRef.current
 
 		if (!canvas) {
+			return
+		}
+
+		if (pdfPageAction(withinExtendedView, rendered) !== "render") {
 			return
 		}
 
@@ -246,18 +319,19 @@ function PdfPage({
 				}
 			})
 			.catch(() => {
-				// A cancelled task rejects too (RenderTask.cancel's own documented contract) — the
-				// `cancelled` guard above already keeps that path from reaching here. Nothing else
-				// surfaces a page-level render error; the document-level error branch already covers a
-				// genuinely broken PDF, and a single bad page is rare enough not to warrant its own
-				// labeled state yet.
+				// A cancelled task rejects too, with a RenderingCancelledException (RenderTask.cancel's own
+				// documented contract, confirmed against the installed d.ts) — the `cancelled` guard above
+				// already keeps that path from reaching here, and eviction (same cancel path) hits it just
+				// as harmlessly. Nothing else surfaces a page-level render error; the document-level error
+				// branch already covers a genuinely broken PDF, and a single bad page is rare enough not to
+				// warrant its own labeled state yet.
 			})
 
 		return () => {
 			cancelled = true
 			task.cancel()
 		}
-	}, [page, shouldRender, rendered])
+	}, [page, shouldRender, withinExtendedView, rendered])
 
 	const viewport = page?.getViewport({ scale: BASE_SCALE })
 
