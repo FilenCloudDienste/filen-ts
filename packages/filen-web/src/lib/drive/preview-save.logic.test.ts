@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { File as SdkFile, UuidStr } from "@filen/sdk-rs"
-import { isEditable, runPreviewSave, type PreviewSaveDeps } from "@/lib/drive/preview-save.logic"
+import { isEditable, isUnresolvableParentError, runPreviewSave, type PreviewSaveDeps } from "@/lib/drive/preview-save.logic"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
@@ -92,6 +92,28 @@ describe("isEditable", () => {
 
 	it("is false for a directory", () => {
 		expect(isEditable(dirItem(), "drive")).toBe(false)
+	})
+})
+
+describe("isUnresolvableParentError", () => {
+	it("is true for the exact shape resolveNormalDirParent's worker throw normalizes to", () => {
+		expect(
+			isUnresolvableParentError({
+				species: "plain",
+				message: "parent directory not found: missing-uuid",
+				label: "parent directory not found: missing-uuid"
+			})
+		).toBe(true)
+	})
+
+	it("is false for a plain error with an unrelated message — a genuinely retryable failure", () => {
+		expect(isUnresolvableParentError({ species: "plain", message: "network request failed", label: "network request failed" })).toBe(
+			false
+		)
+	})
+
+	it("is false for an sdk-species error, even one carrying a lookalike message", () => {
+		expect(isUnresolvableParentError(sdkDto("parent directory not found: x"))).toBe(false)
 	})
 })
 

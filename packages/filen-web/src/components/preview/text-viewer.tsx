@@ -140,8 +140,12 @@ function TextSource({ text, tag, alt, editable, onDirtyChange, contentRef }: Tex
 	const [content, setContent] = useState(text)
 	// `text` itself never changes across this component's own lifetime (a genuinely different item
 	// forces a remount, not a prop update — see the invariant above), so comparing against it directly
-	// doubles as "compare against the frozen original" with no extra ref of its own.
-	const dirty = editable && content !== text
+	// doubles as "compare against the frozen original" with no extra ref of its own. Unconditional — no
+	// `editable &&` guard: `content` can only ever diverge from `text` through `onChange` below, which
+	// itself requires `editable`, so this is a no-op for an always-read-only mount, and, unlike a guarded
+	// version, SURVIVES a later editable->false flip (a failed save's read-only lock, preview-overlay.tsx)
+	// instead of masking genuinely unsaved edits as clean.
+	const dirty = content !== text
 
 	useEffect(() => {
 		onDirtyChange(dirty)
@@ -158,7 +162,12 @@ function TextSource({ text, tag, alt, editable, onDirtyChange, contentRef }: Tex
 	return (
 		<div className="size-full">
 			<CodeMirror
-				value={editable ? content : text}
+				// Always the live buffer, never `text` directly — `content` only diverges from it through
+				// `onChange` below (itself editable-gated), so this is a no-op for an always-read-only
+				// mount, and, for one whose `editable` flips false mid-session (a failed save's read-only
+				// lock, preview-overlay.tsx), keeps the user's typed edits ON SCREEN instead of visibly
+				// reverting them to the pre-edit original.
+				value={content}
 				extensions={extensions}
 				editable={editable}
 				readOnly={!editable}

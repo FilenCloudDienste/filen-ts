@@ -556,6 +556,14 @@ test("editable text preview saves via its Save button, persists across reopen, a
 		await page.keyboard.type("edited content two")
 		await expect(page.getByRole("button", { name: "Save" })).toBeVisible()
 
+		// Arrow keys move the CodeMirror caret while focus is inside the editor — they must never bubble
+		// to the overlay's own pager key handler, which used to page (or, dirty as here, pop this very
+		// unsaved-changes prompt) on every single press instead of leaving cursor movement to CodeMirror.
+		await page.keyboard.press("ArrowLeft")
+		await page.keyboard.press("ArrowRight")
+		await expect(page.getByRole("alertdialog")).toHaveCount(0)
+		await expect(page.getByText("edited content two")).toBeVisible()
+
 		await page.keyboard.press("Escape")
 		const confirmDialog = page.getByRole("alertdialog")
 		await expect(confirmDialog).toBeVisible()
@@ -563,6 +571,82 @@ test("editable text preview saves via its Save button, persists across reopen, a
 
 		await confirmDialog.getByRole("button", { name: "Discard" }).click()
 		await expect(confirmDialog).toHaveCount(0)
+		await expect(page.locator(".cm-content")).toHaveCount(0)
+	} finally {
+		await trashScratchDirectory(page, scratchName)
+	}
+})
+
+// The exact multi-sibling regression a single accumulated-per-slot override (not a single shared slot)
+// exists to fix: saving file A, paging to sibling B, then paging BACK to A must still resolve A's OWN
+// just-saved content — a single-slot override would instead resolve the FROZEN pre-save uuid the
+// pager's snapshot still carries for A's slot once a save on a DIFFERENT slot overwrote it, and the
+// worker's own download op 404s on a uuid the earlier save already rotated away from. A is also saved
+// TWICE in a row before ever paging away, proving a same-slot re-save chains onto the SAME accumulated
+// entry (keyed by A's frozen uuid, not its already-rotated one) rather than orphaning the first save.
+test("editable preview: saving a file, paging to a sibling and back still resolves its own saved content", async ({
+	page,
+	injectedSession,
+	browserName
+}) => {
+	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test.setTimeout(120_000)
+	expect(injectedSession.length).toBeGreaterThan(0)
+
+	const runId = crypto.randomUUID()
+	const scratchName = `e2e-preview-edit-pager-${runId}`
+	const nameA = `e2e-preview-edit-pager-a-${runId}.txt`
+	const nameB = `e2e-preview-edit-pager-b-${runId}.txt`
+	const modKey = process.platform === "darwin" ? "Meta" : "Control"
+
+	await page.goto("/drive")
+
+	try {
+		const { listbox } = await enterScratchDirectory(page, scratchName)
+
+		const input = page.locator('input[type="file"]').first()
+		await input.setInputFiles([
+			{ name: nameA, mimeType: "text/plain", buffer: TEXT_BYTES },
+			{ name: nameB, mimeType: "text/plain", buffer: TEXT_BYTES }
+		])
+
+		const rowA = listbox.getByRole("option", { name: nameA })
+		const rowB = listbox.getByRole("option", { name: nameB })
+		await expect(rowA).toBeVisible({ timeout: 45_000 })
+		await expect(rowB).toBeVisible({ timeout: 45_000 })
+
+		// "a" sorts before "b" — Next from A lands on B, mirroring the image leg's own nameA/nameB proof.
+		await rowA.dblclick()
+		await expect(page.getByText("Hello from a tiny text fixture.")).toBeVisible({ timeout: 30_000 })
+
+		const editor = page.locator(".cm-content")
+		let saveButton = page.getByRole("button", { name: "Save" })
+
+		// First save: rotates A's uuid once.
+		await editor.click()
+		await page.keyboard.press(`${modKey}+a`)
+		await page.keyboard.type("A first save")
+		await saveButton.click()
+		await expect(saveButton).toHaveCount(0, { timeout: 15_000 })
+
+		// Second save, same slot, no navigation in between: rotates A's uuid again.
+		await editor.click()
+		await page.keyboard.press(`${modKey}+a`)
+		await page.keyboard.type("A second save")
+		saveButton = page.getByRole("button", { name: "Save" })
+		await expect(saveButton).toBeVisible()
+		await saveButton.click()
+		await expect(saveButton).toHaveCount(0, { timeout: 15_000 })
+
+		// Page to sibling B (still its original, unedited content)...
+		await page.getByRole("button", { name: "Next file" }).click()
+		await expect(page.getByText("Hello from a tiny text fixture.")).toBeVisible({ timeout: 30_000 })
+
+		// ...then back to A: must render A's OWN latest saved content, never a download error.
+		await page.getByRole("button", { name: "Previous file" }).click()
+		await expect(page.getByText("A second save")).toBeVisible({ timeout: 30_000 })
+
+		await page.keyboard.press("Escape")
 		await expect(page.locator(".cm-content")).toHaveCount(0)
 	} finally {
 		await trashScratchDirectory(page, scratchName)

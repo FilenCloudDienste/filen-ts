@@ -7,7 +7,7 @@ import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
 import { previewType } from "@/lib/drive/preview.logic"
 import { startDownloads } from "@/lib/drive/download"
-import { isEditable, runPreviewSave } from "@/lib/drive/preview-save.logic"
+import { isEditable, isUnresolvableParentError, runPreviewSave } from "@/lib/drive/preview-save.logic"
 import { currentRootUuid } from "@/lib/drive/actions"
 import { driveListingQueryUpdate } from "@/queries/drive"
 import { sdkApi } from "@/lib/sdk/client"
@@ -17,6 +17,7 @@ import { useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
 import { ImageViewer } from "@/components/preview/image-viewer"
 import { MediaViewer } from "@/components/preview/media-viewer"
+import { isTextEditingTarget } from "@/components/preview/preview-overlay.logic"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
@@ -124,20 +125,29 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 	// re-rendering on every keystroke — see TextViewer's own contentRef prop doc.
 	const contentRef = useRef<string | null>(null)
 
-	// Local override for the currently-displayed item: `items` is a FROZEN pager snapshot (see the
-	// props' own comment) a save's uuid rotation can never update in place. Keyed to the RAW (pre-save)
-	// uuid so it stops applying — PreviewBody naturally re-keys back onto `rawItem` — the moment the
-	// user steps to a different sibling (a genuinely different `rawItem`).
-	const [saved, setSaved] = useState<{ forUuid: string; item: DriveItem } | null>(null)
-	// Same keying trick for the mobile-parity "a failed save locks the file read-only" rule (see
-	// runPreviewSave's own comment) — a fresh item (navigation) or a fresh overlay mount (close+reopen)
-	// both clear it for free, derived rather than reset by an effect.
+	// Local override for the currently-displayed item, ACCUMULATED per pager slot across the whole
+	// overlay session: `items` is a FROZEN pager snapshot (see the props' own comment) a save's uuid
+	// rotation can never update in place, and a single `{forUuid, item}` slot (this state's prior shape)
+	// loses every OTHER already-saved sibling's override the moment a save happens on a DIFFERENT slot —
+	// paging back to it then resolves the stale pre-save uuid, which the worker's own download op 404s
+	// on (it was already rotated away by that earlier save). Keyed to each slot's own FROZEN (pre-save)
+	// `rawItem.data.uuid` — never the possibly-already-overridden `item.data.uuid` — so a REPEAT save of
+	// the same still-open slot (re-editing an already-saved item, no navigation in between) naturally
+	// overwrites the SAME map entry instead of chaining a second key; the lookup below needs no
+	// chain-walk. Never reset except by a fresh mount (a close+reopen), same as `lockedReadOnly` below.
+	const [saved, setSaved] = useState<ReadonlyMap<string, DriveItem>>(() => new Map<string, DriveItem>())
+	// Single-slot (unlike `saved` above) — the read-only lock is keyed to the CURRENT pager slot only,
+	// so navigating to a different sibling and back can, in principle, forget an earlier slot's lock;
+	// accepted for now (a lost SAFETY lock, not a 404 — the failure class this guards against re-asserts
+	// itself on the very next failed save). Mirrors mobile parity's own "a failed save locks the file
+	// read-only" rule (see runPreviewSave's own comment) — a fresh item (navigation) or a fresh overlay
+	// mount (close+reopen) both clear it for free, derived rather than reset by an effect.
 	const [lockedReadOnly, setLockedReadOnly] = useState<{ forUuid: string } | null>(null)
 	const [dirty, setDirty] = useState(false)
 	const [saving, setSaving] = useState(false)
 	const [pendingIntent, setPendingIntent] = useState<PendingIntent | null>(null)
 
-	const item = rawItem !== undefined && saved?.forUuid === rawItem.data.uuid ? saved.item : rawItem
+	const item = rawItem !== undefined ? (saved.get(rawItem.data.uuid) ?? rawItem) : undefined
 	const editable = item !== undefined && isEditable(item, variant) && lockedReadOnly?.forUuid !== rawItem?.data.uuid
 
 	// A step can disable the very pager button that triggered it (index lands on the first/last item,
@@ -154,11 +164,14 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 		}
 	}, [index])
 
-	// The one write path: encode -> upload -> patch listing -> re-key onto the rotated uuid (success),
-	// or lock the buffer read-only with a LABEL-FIRST toast (failure) — see preview-save.logic.ts's own
-	// comment for why a retry against the same broken parent is never offered. `dirty` resets for free:
-	// success re-keys PreviewBody (a new `item.data.uuid`), which remounts TextViewer fresh and reports
-	// its own clean `dirty=false` right back up (see text-viewer.tsx's own mount-time effect).
+	// The one write path: encode -> upload -> patch listing -> re-key onto the rotated uuid (success), or
+	// a LABEL-FIRST toast (failure) — read-only lockdown is reserved for the ONE failure class retrying
+	// can never fix (isUnresolvableParentError, see preview-save.logic.ts's own comment on why); every
+	// other failure leaves the buffer editable+dirty for a retry. `dirty` resets for free on SUCCESS
+	// only: a new `item.data.uuid` re-keys PreviewBody, remounting TextViewer fresh with its own clean
+	// `dirty=false` (see text-viewer.tsx's own mount-time effect) — a FAILURE never remounts anything, so
+	// the buffer (and its dirty bit) simply survives untouched, which is exactly what keeps the typed
+	// content visible and the close/nav prompt still armed either way.
 	async function performSave(): Promise<void> {
 		// Locals, not the outer `item`/`rawItem` directly — this closure runs asynchronously, well after
 		// this render's narrowing; re-binding here gives the guard below its own, freshly-narrowable copy.
@@ -190,12 +203,18 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
-			setLockedReadOnly({ forUuid: targetRawItem.data.uuid })
-			toast.warning(t("previewReadOnlyAfterSaveFailure"))
+
+			if (isUnresolvableParentError(outcome.dto)) {
+				setLockedReadOnly({ forUuid: targetRawItem.data.uuid })
+				toast.warning(t("previewReadOnlyAfterSaveFailure"))
+			}
+
 			return
 		}
 
-		setSaved({ forUuid: targetRawItem.data.uuid, item: outcome.item })
+		// Keyed by the FROZEN slot uuid (targetRawItem), never targetItem's own uuid — see `saved`'s own
+		// comment on why that's what makes a chained re-save of the same slot collapse onto one entry.
+		setSaved(prev => new Map(prev).set(targetRawItem.data.uuid, outcome.item))
 	}
 
 	useAction(
@@ -210,11 +229,14 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 		[editable, dirty, saving, item, rawItem]
 	)
 
-	// Routes a close/prev/next intent through the unsaved-changes prompt when the open item is a dirty
-	// editable buffer; runs it immediately otherwise. Every dismissal route (Escape, backdrop, the X
-	// button — all three fold into Base UI's own onOpenChange(false)), both pager buttons, and the
-	// in-dialog arrow keys funnel through this, so none of them can silently drop an in-progress edit.
-	// An in-flight save blocks the intent outright (mirrors the pager buttons' own disabled state):
+	// Routes a close/prev/next intent through the unsaved-changes prompt whenever the buffer is dirty;
+	// runs it immediately otherwise. Every dismissal route (Escape, backdrop, the X button — all three
+	// fold into Base UI's own onOpenChange(false)), both pager buttons, and the in-dialog arrow keys
+	// funnel through this, so none of them can silently drop an in-progress edit. Gated on `dirty` ALONE,
+	// not `editable && dirty`: a failed save can lock the buffer read-only (setLockedReadOnly above)
+	// without ever clearing `dirty` — the user's unsaved edits are still sitting there, about to be lost,
+	// so the prompt must still fire even though no further edit (or save) is possible anymore. An
+	// in-flight save blocks the intent outright (mirrors the pager buttons' own disabled state):
 	// prompting "discard?" mid-save would let the user discard while the un-cancellable upload still
 	// lands and patches the listing — a silent contradiction of the choice they just made.
 	function requestOrRun(intent: PendingIntent, run: () => void): void {
@@ -222,7 +244,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 			return
 		}
 
-		if (editable && dirty) {
+		if (dirty) {
 			setPendingIntent(intent)
 			return
 		}
@@ -245,8 +267,13 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 	// BEFORE that internal stopPropagation — this is that handler, mirroring move-target-dialog.tsx's own
 	// local onKeyDown for the identical in-dialog-focus-trap reason.
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
-		// A focused media scrubber wins over the pager — native seek expectation (see isMediaTarget above).
-		if (isMediaTarget(event.target)) {
+		// A focused media scrubber wins over the pager — native seek expectation (see isMediaTarget
+		// above). A focused CodeMirror surface wins too — its own arrow bindings move the cursor/
+		// selection and never stopPropagation, so without this a Left/Right meant for the caret would
+		// also page the overlay (or pop the unsaved-changes prompt on every press) — see
+		// preview-overlay.logic.ts's own isTextEditingTarget for why this checks read-only CodeMirror
+		// too, not just the editable case.
+		if (isMediaTarget(event.target) || isTextEditingTarget(event.target)) {
 			return
 		}
 

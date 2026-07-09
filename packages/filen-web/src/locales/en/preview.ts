@@ -31,7 +31,7 @@ export const preview = {
 	previewUnsavedChangesBody: "You have unsaved changes to this file. Discard them?",
 	/** Unsaved-changes confirm dialog — the destructive confirm button, discards the buffer and proceeds */
 	previewDiscardAction: "Discard",
-	/** Toast shown after a save fails — the editor is locked read-only for the rest of this session (mobile parity: retrying against the same broken parent would only fail again) */
+	/** Toast shown after a save fails because the file's own parent directory no longer exists — the editor locks read-only for the rest of this session (mobile parity: retrying against the same broken parent would only fail again); every other save failure keeps the editor open for a retry instead */
 	previewReadOnlyAfterSaveFailure: "This file is now read-only — saving failed and can't be retried until you reopen it.",
 
 	// ── PDF ──────────────────────────────────────────────────────────────────

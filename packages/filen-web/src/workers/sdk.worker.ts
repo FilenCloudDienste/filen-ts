@@ -34,7 +34,7 @@ import init, {
 	type SharingRole
 } from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
-import { toErrorDTO } from "@/lib/sdk/errors"
+import { toErrorDTO, PARENT_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 import {
 	cacheDirs,
@@ -185,7 +185,7 @@ async function resolveNormalDirParent(c: Client, parentUuid: string | null): Pro
 	}
 	const found = getCachedDir(parentUuid) ?? (await c.getDirOptional(parentUuid))
 	if (found === undefined) {
-		throw new Error(`parent directory not found: ${parentUuid}`)
+		throw new Error(`${PARENT_NOT_FOUND_PREFIX}${parentUuid}`)
 	}
 	return found
 }

@@ -4,7 +4,7 @@ import { asDirectoryOrFile, narrowItem, upsertDriveItem, type DriveItem } from "
 import { previewType } from "@/lib/drive/preview.logic"
 import { type DriveVariant } from "@/lib/drive/preferences"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
-import { asErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
 
 // Editable-preview eligibility gate (mobile parity): only a decryptable text/code file inside the
 // navigable "drive" variant — never trash/recents/favorites/sharedIn/sharedOut (no writable parent
@@ -51,10 +51,11 @@ function dropUuid(items: DriveItem[], uuid: string): DriveItem[] {
 // produces — mirrors restoreVersion's identical uuid-rotation reconcile (lib/drive/actions.ts):
 // upsertDriveItem's name-collision dedup already drops the stale row (same parent, same name), and the
 // explicit dropUuid below is the same defense-in-depth restoreVersion applies for a row whose meta
-// isn't decodable enough to match on name alone. Never throws — a worker rejection (including an
-// unresolvable parent, e.g. the containing directory was deleted from another session mid-edit) comes
-// back as an error outcome; the caller degrades the editor to read-only rather than retrying against a
-// parent that will only ever fail again (mobile parity).
+// isn't decodable enough to match on name alone. Never throws — a worker rejection comes back as an
+// error outcome; the caller (preview-overlay.tsx) degrades the editor to read-only ONLY for the one
+// class isUnresolvableParentError below identifies (e.g. the containing directory was deleted from
+// another session mid-edit) — retrying against a parent that will only ever fail again is pointless
+// (mobile parity). Every other rejection leaves the buffer editable for a retry.
 export async function runPreviewSave(deps: PreviewSaveDeps, args: { item: DriveItem; content: string }): Promise<ActionOutcome<DriveItem>> {
 	const { item, content } = args
 	const base = asDirectoryOrFile(item)
@@ -87,4 +88,13 @@ export async function runPreviewSave(deps: PreviewSaveDeps, args: { item: DriveI
 	deps.patchListing(targetParent, prev => dropUuid(upsertDriveItem(prev, newItem), oldUuid))
 
 	return { status: "success", item: newItem }
+}
+
+// True for the one save-failure class where retrying is pointless — resolveNormalDirParent's own
+// thrown message (sdk.worker.ts, PARENT_NOT_FOUND_PREFIX) when the file's own parent directory no
+// longer exists (deleted from another session mid-edit, etc.). Every other failure (network blip,
+// quota, a transient SDK error) is worth letting the user retry — preview-overlay.tsx's performSave
+// reserves its read-only lockdown for this class alone.
+export function isUnresolvableParentError(dto: ErrorDTO): boolean {
+	return dto.species === "plain" && dto.message.startsWith(PARENT_NOT_FOUND_PREFIX)
 }

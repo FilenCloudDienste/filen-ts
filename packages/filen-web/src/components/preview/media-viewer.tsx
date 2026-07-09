@@ -63,8 +63,12 @@ function MediaElement({
 }
 
 // Streamed mode: registers against the SW's inline route and renders once a URL resolves. A
-// registration failure hands control back to the parent (onFallback) rather than showing an error —
-// the buffered path below is the recovery, not a dead end.
+// registration failure hands control back to the parent (onFallback) for the buffered fallback ONLY
+// when the file is under the whole-buffer cap (streamFailureAction, the SAME decision the mid-
+// consumption onError handler below applies) — an oversize file gets the labeled error state instead,
+// never an unbounded buffered retry (a multi-GB video on a prod SW hiccup would otherwise whole-buffer
+// straight into a tab-crashing allocation, since a streamed category is never capped at the open gate,
+// preview.logic.ts).
 function StreamedMedia({
 	item,
 	category,
@@ -81,29 +85,39 @@ function StreamedMedia({
 	const { t } = useTranslation("preview")
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
 	const result = usePreviewStreamUrl(item, name, contentType)
-	// One-way, mirrors MediaViewer's own useBuffered below: once set, this branch renders the labeled
-	// error state for the rest of this mount — there is no path back to the <video>/<audio> element, so
-	// a repeat native error event (unmounted subtree) can never re-fire this.
+	// Mid-consumption-only (set from the onError DOM event below, a genuine event handler — never an
+	// effect). The registration-failure case is deliberately NOT routed through this: see
+	// registrationOverCap just below for why.
 	const [capExceeded, setCapExceeded] = useState(false)
+	// A pure derivation, not a second setCapExceeded(true) from the effect below: `result.status`/`item`
+	// are already reactive inputs, so an over-cap REGISTRATION failure needs no stored state or effect-
+	// time setState to recompute this fresh each render (react-hooks/set-state-in-effect flags exactly
+	// that — a direct setState call synchronously inside an effect body — which the onError handler below
+	// is exempt from only because it's a genuine DOM event callback, not an effect).
+	const registrationOverCap = result.status === "error" && streamFailureAction(item) === "error"
 
 	useEffect(() => {
-		if (result.status === "error") {
+		if (result.status === "error" && streamFailureAction(item) === "buffer") {
 			onFallback()
 		}
-	}, [result.status, onFallback])
+	}, [result.status, onFallback, item])
+
+	// Checked BEFORE the pending/error spinner below: an over-cap REGISTRATION failure leaves
+	// `result.status` permanently "error" (never "success"), so this must win regardless of that status,
+	// not just after it — unlike the mid-consumption path, where `result.status` is already "success" by
+	// the time onError can ever set `capExceeded`, so the ordering is a no-op there.
+	if (capExceeded || registrationOverCap) {
+		return (
+			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
+				{t("previewStreamFailed")}
+			</div>
+		)
+	}
 
 	if (result.status !== "success") {
 		return (
 			<div className="flex size-full items-center justify-center">
 				<Spinner className="size-6" />
-			</div>
-		)
-	}
-
-	if (capExceeded) {
-		return (
-			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-				{t("previewStreamFailed")}
 			</div>
 		)
 	}
