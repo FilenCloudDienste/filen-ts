@@ -58,7 +58,7 @@
     "@expo/react-native-action-sheet": "^4.1.1",
     "@expo/ui": "~57.0.3",
     "@expo/vector-icons": "^15.1.1",
-    "@filen/sdk-rs": "0.4.31",
+    "@filen/sdk-rs": "0.4.34",
     "@filen/utils": "^0.0.12",
     "@kishannareshpal/expo-pdf": "^0.3.2",
     "@op-engineering/op-sqlite": "^17.1.2",
