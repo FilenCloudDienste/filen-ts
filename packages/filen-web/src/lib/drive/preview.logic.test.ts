@@ -4,6 +4,7 @@ import { narrowItem, type DriveItem } from "@/lib/drive/item"
 import {
 	previewType,
 	canPreview,
+	needsImageTransform,
 	previewableSiblings,
 	stepPreviewIndex,
 	streamFailureAction,
@@ -72,6 +73,12 @@ function dirItem(overrides: Partial<Dir> = {}): DriveItem {
 
 describe("previewType — extension category map", () => {
 	it.each(["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico", "apng", "avif"])("%s -> image", ext => {
+		expect(previewType(fileNamed(`photo.${ext}`))).toBe("image")
+	})
+
+	// HEIC/HEIF join "image" too (they're previewable), but can't stream — needsImageTransform below
+	// is the seam a viewer branches on to route them through the buffered + transform path instead.
+	it.each(["heic", "heif"])("%s -> image", ext => {
 		expect(previewType(fileNamed(`photo.${ext}`))).toBe("image")
 	})
 
@@ -159,9 +166,8 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed(`source.${ext}`))).toBe("code")
 	})
 
-	// HEIC/HEIF deliberately excluded from "image" (no native browser decode); an unknown extension
-	// with no mime hint also lands here.
-	it.each(["heic", "heif", "exe", "psd", "zip"])("%s -> other", ext => {
+	// An unknown extension with no mime hint lands here.
+	it.each(["exe", "psd", "zip"])("%s -> other", ext => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("other")
 	})
 
@@ -195,6 +201,38 @@ describe("previewType — extension category map", () => {
 	})
 })
 
+describe("needsImageTransform", () => {
+	it.each(["heic", "heif"])("is true for a %s file", ext => {
+		expect(needsImageTransform(fileNamed(`photo.${ext}`))).toBe(true)
+	})
+
+	it("is case-insensitive on the extension", () => {
+		expect(needsImageTransform(fileNamed("PHOTO.HEIC"))).toBe(true)
+	})
+
+	it.each(["jpg", "png", "webp", "avif"])("is false for a streamable image extension (%s)", ext => {
+		expect(needsImageTransform(fileNamed(`photo.${ext}`))).toBe(false)
+	})
+
+	it("is false for a non-image category", () => {
+		expect(needsImageTransform(fileNamed("clip.mp4"))).toBe(false)
+	})
+
+	it("is false for a directory", () => {
+		expect(needsImageTransform(dirItem())).toBe(false)
+	})
+
+	it("is false for an undecryptable file (no name to resolve an extension from)", () => {
+		expect(needsImageTransform(fileNamed("photo.heic", { undecryptable: true }))).toBe(false)
+	})
+
+	// Extension-only, never the item's own mime — a spoofed streamable mime on a HEIC-named file must
+	// still resolve true (media-type.ts's own test file separately proves this keeps it off the SW route).
+	it("ignores a spoofed streamable mime on a HEIC-named file", () => {
+		expect(needsImageTransform(fileNamed("photo.heic", { mime: "image/jpeg" }))).toBe(true)
+	})
+})
+
 describe("canPreview", () => {
 	it("is true for a decryptable, in-range file", () => {
 		expect(canPreview(fileNamed("photo.jpg"), "drive")).toBe(true)
@@ -224,6 +262,17 @@ describe("canPreview", () => {
 		expect(canPreview(fileNamed("movie.mp4", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(true)
 		expect(canPreview(fileNamed("song.mp3", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(true)
 		expect(canPreview(fileNamed("photo.jpg", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(true)
+	})
+
+	// HEIC/HEIF are category "image" (a STREAMED_CATEGORIES member) but never actually stream
+	// (needsImageTransform) — canPreview must apply the whole-buffer cap to them like pdf/docx, not the
+	// uncapped rule above.
+	it("is false for a HEIC file over the size cap — buffered, not streamed, despite being 'image'", () => {
+		expect(canPreview(fileNamed("photo.heic", { size: PREVIEW_MAX_BYTES + 1n }), "drive")).toBe(false)
+	})
+
+	it("is true for a HEIC file at or under the size cap", () => {
+		expect(canPreview(fileNamed("photo.heic", { size: PREVIEW_MAX_BYTES }), "drive")).toBe(true)
 	})
 
 	it("does NOT exclude trash — a trashed file still previews, read-only, mirroring mobile", () => {

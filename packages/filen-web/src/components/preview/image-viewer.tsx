@@ -3,10 +3,12 @@ import { useTranslation } from "react-i18next"
 import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { allowedMediaContentType } from "@/lib/preview/media-type"
 import { isMediaStreamAvailable } from "@/lib/preview/preview-stream"
-import { streamFailureAction } from "@/lib/drive/preview.logic"
+import { streamFailureAction, needsImageTransform } from "@/lib/drive/preview.logic"
+import { transformHeicBytes } from "@/lib/preview/heic-transform"
 import { usePreviewBytes } from "@/components/preview/use-preview-bytes"
 import { usePreviewStreamUrl } from "@/components/preview/use-preview-stream-url"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { type ErrorDTO } from "@/lib/sdk/errors"
 import { Spinner } from "@/components/ui/spinner"
 
 export interface ImageViewerProps {
@@ -206,12 +208,109 @@ function BufferedImage({ item, alt }: { item: DriveItem; alt: string }) {
 	)
 }
 
+// HEIC/HEIF byte stage: pipes the already-downloaded buffer through the lazy-loaded transform and
+// mints/revokes a blob URL from the resulting JPEG, mirroring BufferedImageBytes's own lifecycle
+// (minting the URL IS the effect; the cleanup revokes it on unmount/bytes-change).
+function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
+	const { t } = useTranslation("preview")
+	const [state, setState] = useState<{ status: "pending" } | { status: "success"; url: string } | { status: "error"; dto: ErrorDTO }>({
+		status: "pending"
+	})
+
+	useEffect(() => {
+		let live = true
+		let objectUrl: string | null = null
+
+		async function run(): Promise<void> {
+			try {
+				const blob = await transformHeicBytes(bytes)
+
+				if (!live) {
+					return
+				}
+
+				objectUrl = URL.createObjectURL(blob)
+				setState({ status: "success", url: objectUrl })
+			} catch {
+				if (live) {
+					const message = t("previewTransformFailed")
+
+					setState({ status: "error", dto: { species: "plain", message, label: message } })
+				}
+			}
+		}
+
+		void run()
+
+		return () => {
+			live = false
+
+			if (objectUrl) {
+				URL.revokeObjectURL(objectUrl)
+			}
+		}
+	}, [bytes, t])
+
+	if (state.status === "pending") {
+		return (
+			<div className="flex size-full items-center justify-center">
+				<Spinner className="size-6" />
+			</div>
+		)
+	}
+
+	if (state.status === "error") {
+		return (
+			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
+				{errorLabel(state.dto)}
+			</div>
+		)
+	}
+
+	return (
+		<ZoomableImage
+			url={state.url}
+			alt={alt}
+		/>
+	)
+}
+
+// HEIC/HEIF: never streamable (needsImageTransform), always buffered — downloads the whole file like
+// BufferedImage, then hands the bytes to TransformedImageBytes for the decode+re-encode step before
+// anything renders.
+function TransformedImage({ item, alt }: { item: DriveItem; alt: string }) {
+	const result = usePreviewBytes(item)
+
+	if (result.status === "pending") {
+		return (
+			<div className="flex size-full items-center justify-center">
+				<Spinner className="size-6" />
+			</div>
+		)
+	}
+
+	if (result.status === "error") {
+		return (
+			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
+				{errorLabel(result.dto)}
+			</div>
+		)
+	}
+
+	return (
+		<TransformedImageBytes
+			bytes={result.bytes}
+			alt={alt}
+		/>
+	)
+}
+
 // Picks the SW's inline-preview route (streamed, no whole-buffer download) when a service worker is
 // controlling the tab AND this item's mime passes the inline allowlist, else falls back to the
 // buffered whole-file blob path (dev / SW absent / a failed stream registration) — see
 // preview-stream.ts's isMediaStreamAvailable for the single capability flip point. The buffered path
 // is also where an item the allowlist rejects outright (e.g. an unrecognized mime) always lands.
-export function ImageViewer({ item, alt }: ImageViewerProps) {
+function StreamableImage({ item, alt }: { item: DriveItem; alt: string }) {
 	const contentType = allowedMediaContentType(item)
 	const streamable = contentType !== null && isMediaStreamAvailable()
 	const [useBuffered, setUseBuffered] = useState(!streamable)
@@ -231,6 +330,27 @@ export function ImageViewer({ item, alt }: ImageViewerProps) {
 
 	return (
 		<BufferedImage
+			item={item}
+			alt={alt}
+		/>
+	)
+}
+
+// Top-level dispatch, hook-free so needsImageTransform can short-circuit before StreamableImage's own
+// useState runs — HEIC/HEIF never reach the streamed branch at all (media-type.ts independently
+// excludes them too, defense-in-depth), every other image extension is unaffected.
+export function ImageViewer({ item, alt }: ImageViewerProps) {
+	if (needsImageTransform(item)) {
+		return (
+			<TransformedImage
+				item={item}
+				alt={alt}
+			/>
+		)
+	}
+
+	return (
+		<StreamableImage
 			item={item}
 			alt={alt}
 		/>

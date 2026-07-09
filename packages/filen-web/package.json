@@ -33,6 +33,7 @@
     "clsx": "^2.1.1",
     "comlink": "^4.4.2",
     "i18next": "^26.3.4",
+    "libheif-js": "1.19.8",
     "lucide-react": "^1.23.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",

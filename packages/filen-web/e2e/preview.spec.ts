@@ -14,6 +14,14 @@ const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, 
 // A real 1x1 transparent PNG.
 const PNG_BYTES = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64")
 
+// A real, tiny (505-byte) HEIC image — an 8x8 solid-red still picture, HEVC-encoded. Small enough to
+// embed as base64 like the PNG fixture above, and genuinely decodable (verified against the exact
+// libheif-js build this app lazy-loads before committing this fixture).
+const HEIC_BYTES = Buffer.from(
+	"AAAAJGZ0eXBoZWljAAAAAG1pZjFNaVBybWlhZk1pSEJoZWljAAABhm1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAHBpY3QAAAAAAAAAAAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAAADnBpdG0AAAAAAAEAAAAjaWluZgAAAAAAAQAAABVpbmZlAgAAAAABAABodmMxAAAAAOZpcHJwAAAAxWlwY28AAAATY29scm5jbHgAAgACAAaAAAAADGNsbGkAywBAAAAAFGlzcGUAAAAAAAAACAAAAAgAAAAJaXJvdAAAAAAQcGl4aQAAAAADCAgIAAAAcWh2Y0MBA3AAAACwAAAAAAAe8AD8/fj4AAALA6AAAQAXQAEMAf//A3AAAAMAsAAAAwAAAwAecCShAAEAI0IBAQNwAAADALAAAAMAAAMAHqAUIEHAmw7iHuRZVNwICBgCogABAAlEAcBhcshEU2QAAAAZaXBtYQAAAAAAAAABAAEGgQIDBYaEAAAAHmlsb2MAAAAARAAAAQABAAAAAQAAAboAAAA/AAAAAW1kYXQAAAAAAAAATwAAADsoAa+i+kaBfP/92s//9uX7L9AKPVf/tCfI+buy/6ZQ90yyZ/og+cI53hzw5nPv9uVCL2FfgrcISbIrgA==",
+	"base64"
+)
+
 // Duplicated from downloads.spec.ts rather than shared — this package has no cross-spec e2e helpers
 // module yet, and every other spec file here owns its helpers locally too.
 async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
@@ -121,6 +129,63 @@ test("image preview opens, pages with the button and the arrow key, and closes w
 		await page.keyboard.press("Escape")
 		await expect(imgA).toHaveCount(0)
 		await expect(page.getByRole("img", { name: nameB })).toHaveCount(0)
+	} finally {
+		await trashScratchDirectory(page, scratchName)
+	}
+})
+
+// The one live proof the HEIC path actually decodes: a real WASM library, lazy-loaded on first HEIC
+// preview, running in a real browser — unlike the pure logic seams (preview.logic.test.ts,
+// media-type.test.ts, heic-transform.test.ts), an injected/mocked decoder can't prove this. Also
+// proves the buffered-not-streamed guarantee end to end (the img's own src) and zero CSP violations
+// during the WASM load + decode (the CSP concession this feature could have needed, but didn't).
+test("HEIC preview transforms client-side and renders via the buffered path, never the SW route", async ({
+	page,
+	injectedSession,
+	browserName
+}) => {
+	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test.setTimeout(120_000)
+	expect(injectedSession.length).toBeGreaterThan(0)
+
+	const runId = crypto.randomUUID()
+	const scratchName = `e2e-preview-heic-${runId}`
+	const nameHeic = `e2e-preview-heic-${runId}.heic`
+
+	const cspViolations: string[] = []
+	page.on("console", msg => {
+		if (msg.type() === "error" && /content security policy|refused to/i.test(msg.text())) {
+			cspViolations.push(msg.text())
+		}
+	})
+
+	await page.goto("/drive")
+
+	try {
+		const { listbox } = await enterScratchDirectory(page, scratchName)
+
+		const input = page.locator('input[type="file"]').first()
+		await input.setInputFiles([{ name: nameHeic, mimeType: "image/heic", buffer: HEIC_BYTES }])
+
+		const row = listbox.getByRole("option", { name: nameHeic })
+		await expect(row).toBeVisible({ timeout: 45_000 })
+
+		// The WASM decoder is lazy-loaded here for the first time (fetch + compile + decode + a JPEG
+		// re-encode), on top of the worker round trip every buffered preview already pays — a generous
+		// timeout accounts for that, not just the download.
+		await row.dblclick()
+		const img = page.getByRole("img", { name: nameHeic })
+		await expect(img).toBeVisible({ timeout: 60_000 })
+
+		// Buffered path only, never the SW's inline route (needsImageTransform's own unit test proves
+		// the logic-layer guarantee; this is the same guarantee observed live).
+		const src = await img.getAttribute("src")
+		expect(src).toMatch(/^blob:/)
+
+		await page.keyboard.press("Escape")
+		await expect(img).toHaveCount(0)
+
+		expect(cspViolations).toEqual([])
 	} finally {
 		await trashScratchDirectory(page, scratchName)
 	}

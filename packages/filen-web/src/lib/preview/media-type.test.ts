@@ -101,6 +101,17 @@ describe("allowedMediaContentType", () => {
 		expect(allowedMediaContentType(fileNamed("clip.mp4", "video/mp4", { undecryptable: true }))).toBeNull()
 	})
 
+	// HEIC/HEIF resolve category "image" but must never stream — the one place this module's own
+	// exclusion (not just an absent-from-allowlist mime) is load-bearing is a spoofed streamable mime.
+	it("rejects a HEIC/HEIF file's own real mime", () => {
+		expect(allowedMediaContentType(fileNamed("photo.heic", "image/heic"))).toBeNull()
+		expect(allowedMediaContentType(fileNamed("photo.heif", "image/heif"))).toBeNull()
+	})
+
+	it("rejects a HEIC file even with a spoofed, otherwise-allowlisted mime", () => {
+		expect(allowedMediaContentType(fileNamed("photo.heic", "image/jpeg"))).toBeNull()
+	})
+
 	it("rejects a directory", () => {
 		expect(allowedMediaContentType(dirItem())).toBeNull()
 	})

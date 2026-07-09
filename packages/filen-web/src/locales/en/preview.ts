@@ -16,5 +16,7 @@ export const preview = {
 	/** Preview overlay body — shown in place of a viewer for a previewable category with no renderer built yet */
 	previewUnsupportedType: "Preview isn't available for this file type yet.",
 	/** Preview overlay body — a streamed image/video/audio failed mid-playback and the file is too large to safely retry buffered */
-	previewStreamFailed: "This preview failed and the file is too large to retry."
+	previewStreamFailed: "This preview failed and the file is too large to retry.",
+	/** Preview overlay body — a HEIC/HEIF image could not be converted for preview (corrupt or unsupported file) */
+	previewTransformFailed: "This image couldn't be converted for preview."
 } as const

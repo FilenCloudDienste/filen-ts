@@ -1,5 +1,5 @@
 import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
-import { previewType } from "@/lib/drive/preview.logic"
+import { previewType, needsImageTransform } from "@/lib/drive/preview.logic"
 import { isAllowedInlineContentType } from "@/lib/sw/protocol"
 
 // The page-side half of the inline-preview allowlist gate (the SW's own independent re-check lives in
@@ -16,6 +16,13 @@ export function allowedMediaContentType(item: DriveItem): string | null {
 	const category = previewType(item)
 
 	if (category !== "video" && category !== "audio" && category !== "image") {
+		return null
+	}
+
+	// HEIC/HEIF resolve to "image" but can never stream (no browser decodes them inline) — excluded
+	// independently of the mime check below, so a spoofed streamable mime on a HEIC-named file can't
+	// slip through (defense-in-depth: image-viewer.tsx's own dispatch checks this first too).
+	if (needsImageTransform(item)) {
 		return null
 	}
 
