@@ -29,6 +29,23 @@ async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<
 	return { listbox, hasItems: await listbox.isVisible() }
 }
 
+// react-hotkeys-hook resolves the "mod" pseudo-modifier from the PAGE's own navigator.userAgent
+// (its internal isMac() check: /mac/i against the UA, iOS excluded), never from the real host OS.
+// process.platform (the Node/Playwright-runner's host) is not a reliable proxy for that: Playwright's
+// chromium "Desktop Chrome" device profile ships a fixed userAgent that reports Windows regardless of
+// the machine it actually runs on (verified against playwright-core's own device descriptor source).
+// On a macOS runner this desyncs the two Mac checks — the test would send Meta, the in-page library
+// would still expect Ctrl for "mod" — so a keymap.v1-registered "mod+…" combo never matches and the
+// keydown falls through to the browser's own default action instead. Asking the page the same
+// question the library asks itself is the only way to pick a key that will actually match.
+async function resolveModKey(page: Page): Promise<"Meta" | "Control"> {
+	const looksLikeMacToBrowser = await page.evaluate(
+		() => /mac/i.test(navigator.userAgent) && !/iphone|ipad|ipod/i.test(navigator.userAgent)
+	)
+
+	return looksLikeMacToBrowser ? "Meta" : "Control"
+}
+
 test.describe("drive", () => {
 	test("the My Drive listing renders the shell, breadcrumb, and directory contents region", async ({
 		page,
@@ -178,11 +195,7 @@ test.describe("drive", () => {
 
 		await page.goto("/drive")
 		const { listbox, hasItems } = await waitForListingSettled(page)
-
-		// Playwright and the app's own worker run on this same host, so process.platform correctly
-		// proxies the browser's platform for react-hotkeys-hook's "mod" resolution (Meta on macOS, else
-		// Control).
-		const modKey = process.platform === "darwin" ? "Meta" : "Control"
+		const modKey = await resolveModKey(page)
 
 		if (!hasItems) {
 			// Select-all/clear are registered globally and must be safe no-ops against an empty
