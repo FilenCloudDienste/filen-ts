@@ -14,11 +14,5 @@ export const preview = {
 
 	// ── Body ─────────────────────────────────────────────────────────────────
 	/** Preview overlay body — shown in place of a viewer for a previewable category with no renderer built yet */
-	previewUnsupportedType: "Preview isn't available for this file type yet.",
-
-	// ── Keymap commands ──────────────────────────────────────────────────────
-	/** Keymap registry — description for the drive.previewPrev command (ArrowLeft; fires only while the preview overlay is open) */
-	previewCommandPrevious: "Previous file",
-	/** Keymap registry — description for the drive.previewNext command (ArrowRight; fires only while the preview overlay is open) */
-	previewCommandNext: "Next file"
+	previewUnsupportedType: "Preview isn't available for this file type yet."
 } as const

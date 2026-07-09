@@ -161,22 +161,6 @@ registerAction({
 	scope: "drive",
 	descriptionKey: "driveCommandDownload"
 })
-// Preview pager — fires only while the preview overlay is open (see the useAction guards below);
-// arrow keys otherwise have no listbox meaning of their own in this app (unlike Up/Down/Home/End,
-// which stay hand-rolled cursor movement in handleKeyDown — see its own comment).
-registerAction({
-	id: "drive.previewPrev",
-	defaultCombo: "arrowleft",
-	scope: "drive",
-	descriptionKey: "previewCommandPrevious"
-})
-registerAction({
-	id: "drive.previewNext",
-	defaultCombo: "arrowright",
-	scope: "drive",
-	descriptionKey: "previewCommandNext"
-})
-
 const ROW_HEIGHT = 40
 const TILE_WIDTH = 140
 const TILE_ROW_HEIGHT = 124
@@ -522,9 +506,10 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		setActiveDialog(null)
 	}
 
-	// Steps the open preview by one sibling (no wrap) — shared by the header's prev/next buttons
-	// (PreviewOverlay's onStep) and the drive.previewPrev/drive.previewNext keymap actions below, so
-	// both routes compute the same clamped index the same way. A no-op outside kind:"preview".
+	// Steps the open preview by one sibling (no wrap) — the single implementation behind PreviewOverlay's
+	// onStep prop, which both the header's prev/next buttons AND its own local in-dialog arrow-key
+	// handler call (preview-overlay.tsx — arrow keys can't reach a document-level keymap action while
+	// the dialog traps focus, see that handler's own comment). A no-op outside kind:"preview".
 	function stepPreview(delta: 1 | -1): void {
 		setActiveDialog(prev => {
 			if (prev?.kind !== "preview" || prev.index === undefined) {
@@ -970,37 +955,6 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		},
 		undefined,
 		[selectedItems, isDialogOpen, variant]
-	)
-
-	// Registered above at module scope. Guarded on the preview overlay actually being open — arrow keys
-	// are otherwise unclaimed here, so nothing to preventDefault while it's closed (native scroll/text-
-	// cursor behavior passes through untouched).
-	useAction(
-		"drive.previewPrev",
-		keyboardEvent => {
-			if (activeDialog?.kind !== "preview") {
-				return
-			}
-
-			keyboardEvent.preventDefault()
-			stepPreview(-1)
-		},
-		undefined,
-		[activeDialog]
-	)
-
-	useAction(
-		"drive.previewNext",
-		keyboardEvent => {
-			if (activeDialog?.kind !== "preview") {
-				return
-			}
-
-			keyboardEvent.preventDefault()
-			stepPreview(1)
-		},
-		undefined,
-		[activeDialog]
 	)
 
 	return (

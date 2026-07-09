@@ -5,11 +5,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 
-export interface UsePreviewBytesResult {
-	status: "pending" | "success" | "error"
-	bytes?: Uint8Array
-	dto?: ErrorDTO
-}
+export type UsePreviewBytesResult = { status: "pending" } | { status: "success"; bytes: Uint8Array } | { status: "error"; dto: ErrorDTO }
 
 // Loads one file's whole decrypted buffer for the preview overlay. Mints a fresh token per load and
 // cancels the in-flight worker download (previewAborts registry, sdk.worker.ts) on unmount AND on

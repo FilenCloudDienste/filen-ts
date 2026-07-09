@@ -1,3 +1,4 @@
+import { useEffect, useRef, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { XIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon } from "lucide-react"
@@ -30,10 +31,43 @@ export interface PreviewOverlayProps {
 export function PreviewOverlay({ variant, items, index, onStep, onClose }: PreviewOverlayProps) {
 	const { t } = useTranslation(["preview", "common"])
 	const item = items[index]
+	const popupRef = useRef<HTMLDivElement>(null)
+
+	// A step can disable the very pager button that triggered it (index lands on the first/last item,
+	// see the Prev/Next Buttons' own `disabled` below) — the browser blurs a disabled focused control
+	// straight to `<body>` with no app-level recovery, which strands keyboard/AT focus OUTSIDE the
+	// dialog's own DOM subtree (body is an ancestor of the portaled popup, not a descendant, so no
+	// handler scoped to the popup — including handleKeyDown below — ever sees another keypress there).
+	// Live-verified (page.evaluate(() => document.activeElement) read "BODY" right after such a step).
+	// Pulls focus back onto the popup container itself whenever that's happened; a no-op otherwise
+	// (focus already on something valid inside the dialog, e.g. the other, still-enabled pager button).
+	useEffect(() => {
+		if (popupRef.current && !popupRef.current.contains(document.activeElement)) {
+			popupRef.current.focus()
+		}
+	}, [index])
 
 	function handleOpenChange(next: boolean): void {
 		if (!next) {
 			onClose()
+		}
+	}
+
+	// Base UI's DialogPopup calls event.stopPropagation() for every composite key (Arrow*/Home/End) in
+	// its own onKeyDown (dialog/popup/DialogPopup.js + internals/composite/composite.js's
+	// COMPOSITE_KEYS, verified against the installed package) before it can bubble to the document-level
+	// keymap listener useAction/react-hotkeys-hook registers — so ArrowLeft/ArrowRight can never reach a
+	// global drive.previewPrev/drive.previewNext action while the dialog holds focus. Merged onKeyDown
+	// props run right-to-left (merge-props.js), so a handler passed directly on Popup (below) still runs
+	// BEFORE that internal stopPropagation — this is that handler, mirroring move-target-dialog.tsx's own
+	// local onKeyDown for the identical in-dialog-focus-trap reason.
+	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
+		if (event.key === "ArrowLeft") {
+			event.preventDefault()
+			onStep(-1)
+		} else if (event.key === "ArrowRight") {
+			event.preventDefault()
+			onStep(1)
 		}
 	}
 
@@ -50,7 +84,11 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 		>
 			<DialogPrimitive.Portal>
 				<DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-background duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
-				<DialogPrimitive.Popup className="fixed inset-0 z-50 flex flex-col bg-background duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0">
+				<DialogPrimitive.Popup
+					ref={popupRef}
+					onKeyDown={handleKeyDown}
+					className="fixed inset-0 z-50 flex flex-col bg-background duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
+				>
 					<header className="flex h-14 shrink-0 items-center gap-1 border-b border-border px-4">
 						<PreviewName name={name} />
 						<Button
@@ -136,9 +174,9 @@ function PreviewName({ name }: { name: string }) {
 // item change so its pending/success/error state never flashes the previous item's content.
 function PreviewBody({ item }: { item: DriveItem }) {
 	const { t } = useTranslation("preview")
-	const { status, bytes, dto } = usePreviewBytes(item)
+	const result = usePreviewBytes(item)
 
-	if (status === "pending") {
+	if (result.status === "pending") {
 		return (
 			<div className="flex size-full items-center justify-center">
 				<Spinner className="size-6" />
@@ -146,16 +184,12 @@ function PreviewBody({ item }: { item: DriveItem }) {
 		)
 	}
 
-	if (status === "error") {
+	if (result.status === "error") {
 		return (
 			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-				{dto ? errorLabel(dto) : null}
+				{errorLabel(result.dto)}
 			</div>
 		)
-	}
-
-	if (!bytes) {
-		return null
 	}
 
 	// Narrows `data.decryptedMeta` to the file-arm's DecryptedFileMeta (which alone carries `.mime`) —
@@ -172,7 +206,7 @@ function PreviewBody({ item }: { item: DriveItem }) {
 		case "image":
 			return (
 				<ImageViewer
-					bytes={bytes}
+					bytes={result.bytes}
 					mime={base.data.decryptedMeta?.mime}
 					alt={base.data.decryptedMeta?.name ?? base.data.uuid}
 				/>
