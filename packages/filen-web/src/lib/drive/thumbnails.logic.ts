@@ -1,0 +1,99 @@
+import { type DriveItem } from "@/lib/drive/item"
+import { extensionOf } from "@/lib/drive/preview.logic"
+
+// Every category this app can produce a cached thumbnail for; "none" covers every non-"file" arm
+// (directory, every shared arm — out of scope here), an undecryptable file, an unrecognized
+// extension, and a whole-buffer category over the size gate.
+export type ThumbnailCategory = "sdk-image" | "heic" | "video" | "pdf" | "none"
+
+// Square thumbnail bound (both dimensions) fed to makeThumbnailInMemory and, later, every
+// client-side generator — one shared target keeps every cached .thumb file roughly the same size.
+export const THUMB_MAX_DIM = 512
+
+// Whole-buffer decode/generate ceiling (64 MiB) for the categories that pull the ENTIRE file into
+// memory to produce a thumbnail (sdk-image, heic, pdf) — an oversize file skips thumbnailing
+// entirely rather than risking a tab-crashing allocation for a preview-sized image. video is exempt:
+// its generator only ever reads a single frame off a stream, never the whole file.
+export const THUMB_SIZE_GATE = 67_108_864n
+
+// On-disk cache ceiling (256 MiB) — sweepThumbs evicts the oldest entries once the store exceeds
+// this, so a long-lived session's thumbnail cache never grows unbounded.
+export const THUMB_CACHE_CAP = 268_435_456
+
+// OPFS path segments under the origin's private root. "v1" lets a future format change (a different
+// encode, a different max dimension) start from an empty store instead of migrating old bytes.
+export const THUMB_DIR = ["thumbnails", "v1"]
+
+export const THUMB_EXT = ".thumb"
+
+// SDK-decodable raster extensions — verified against the installed wasm build's own
+// canMakeThumbnail flag survey: bmp and avif both report false, so neither routes here (no
+// client-side generator exists or is planned for either, matching old-web parity).
+const SDK_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp"])
+const HEIC_EXTENSIONS = new Set(["heic", "heif"])
+const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "webm", "m4v", "mkv"])
+
+// Extension-first category routing, "file" arm only — a directory or any shared arm (shared items
+// are out of scope here) always resolves "none", same as an undecryptable file (no name to route
+// on). sdk-image additionally requires the item's own canMakeThumbnail flag; every whole-buffer
+// category (sdk-image, heic, pdf) additionally requires the file to be at or under
+// THUMB_SIZE_GATE — video is exempt, its generator never buffers the whole file.
+export function thumbnailCategory(item: DriveItem): ThumbnailCategory {
+	if (item.type !== "file" || item.data.undecryptable) {
+		return "none"
+	}
+
+	const name = item.data.decryptedMeta?.name
+	const ext = name !== undefined ? extensionOf(name) : ""
+
+	if (SDK_IMAGE_EXTENSIONS.has(ext)) {
+		return item.data.canMakeThumbnail && item.data.size <= THUMB_SIZE_GATE ? "sdk-image" : "none"
+	}
+
+	if (HEIC_EXTENSIONS.has(ext)) {
+		return item.data.size <= THUMB_SIZE_GATE ? "heic" : "none"
+	}
+
+	if (VIDEO_EXTENSIONS.has(ext)) {
+		return "video"
+	}
+
+	if (ext === "pdf") {
+		return item.data.size <= THUMB_SIZE_GATE ? "pdf" : "none"
+	}
+
+	return "none"
+}
+
+// name/size/lastModified projection of one cached .thumb file — thumb-store.ts's listThumbs() own
+// return shape, and pickEvictions' own input below.
+export interface ThumbCacheEntry {
+	name: string
+	size: number
+	lastModified: number
+}
+
+// Oldest-first eviction until the running total is back at or under capBytes — pure so the boundary
+// cases (already under cap, landing exactly on cap) are cheap to exhaust without touching OPFS.
+export function pickEvictions(entries: ThumbCacheEntry[], capBytes: number): string[] {
+	const total = entries.reduce((sum, entry) => sum + entry.size, 0)
+
+	if (total <= capBytes) {
+		return []
+	}
+
+	const oldestFirst = [...entries].sort((a, b) => a.lastModified - b.lastModified)
+	const evict: string[] = []
+	let remaining = total
+
+	for (const entry of oldestFirst) {
+		if (remaining <= capBytes) {
+			break
+		}
+
+		evict.push(entry.name)
+		remaining -= entry.size
+	}
+
+	return evict
+}

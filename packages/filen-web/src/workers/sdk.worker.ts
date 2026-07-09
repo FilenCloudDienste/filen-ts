@@ -45,6 +45,8 @@ import {
 	getCachedName,
 	getSharedDirContext
 } from "@/lib/drive/cache"
+import { THUMB_CACHE_CAP } from "@/lib/drive/thumbnails.logic"
+import { sweepThumbs, writeThumb } from "@/workers/thumb-store"
 
 // NEITHER a fixed `/` nor `/assets/`: the wasm holds a RELATIVE `./filen-sdk-worker-thread.js`
 // (verified via `strings` over sdk-rs_bg.wasm) which it passes to `new Worker(...)`, so the
@@ -84,6 +86,11 @@ const downloadPauses = new Map<string, PauseSignal>()
 // — previews are never registered as transfers (no row, no progress), so they get their own registry
 // rather than borrowing that one.
 const previewAborts = new Map<string, AbortController>()
+
+// Fires sweepThumbs at most once per worker lifetime (this worker's own first makeThumbnail call),
+// never re-armed — a long-lived tab's OPFS thumbnail cache still gets cap-enforced without every
+// generation paying for a listing pass.
+let thumbsSweptThisSession = false
 
 // Every authed op reads the live Client through this guard. Post-logout `client` is null, so a
 // forwarded call would null-deref; failing fast here surfaces a clean DTO at the Comlink boundary
@@ -840,6 +847,45 @@ const api = {
 	// gone). The caller-side arg shape is a later concern; this only exposes the op.
 	removeSharedItem(item: SharedRootItem): Promise<void> {
 		return requireClient().removeSharedItem(item)
+	},
+	// ── Thumbnails ───────────────────────────────────────────────────────────
+	// SDK-decoded thumbnail for one already-fetched file (the caller's own DriveItem file-arm data —
+	// structurally a File, same held-item convention as renameFile/trashFile above). `undefined`
+	// means the SDK itself produced no thumbnail (still a clean outcome, not an error) and passes
+	// straight through. On bytes: persist to the OPFS store first — a persist failure is logged and
+	// non-fatal, the caller's own bytes still render either way — then transfer the buffer out
+	// (never cloned).
+	async makeThumbnail(file: File, maxDim: number): Promise<Uint8Array | undefined> {
+		if (!thumbsSweptThisSession) {
+			thumbsSweptThisSession = true
+			void sweepThumbs(THUMB_CACHE_CAP).catch((e: unknown) => {
+				log.warn("sdk.worker", "sweepThumbs failed", e)
+			})
+		}
+
+		const c = requireClient()
+		const result = await c.makeThumbnailInMemory({ file, maxWidth: maxDim, maxHeight: maxDim })
+
+		if (result === undefined) {
+			return undefined
+		}
+
+		const bytes = result.webpData
+
+		try {
+			await writeThumb(file.uuid, bytes)
+		} catch (e) {
+			log.warn("sdk.worker", "makeThumbnail: persist failed", file.uuid, e)
+		}
+
+		return Comlink.transfer(bytes, [bytes.buffer])
+	},
+	// Persists thumbnail bytes a CLIENT-side generator produced outside this worker (its own decode
+	// runs elsewhere — HEIC/video/pdf never route through makeThumbnailInMemory). Callers
+	// Comlink.transfer the buffer in, never clone; rejection is the caller's own to handle (mirrors
+	// writeThumb's own propagation past the second-open collision it already swallows).
+	async storeThumbnail(uuid: string, bytes: Uint8Array): Promise<void> {
+		await writeThumb(uuid, bytes)
 	},
 	logout(): void {
 		releaseClient()
