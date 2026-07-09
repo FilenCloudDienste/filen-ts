@@ -455,6 +455,7 @@ const PreviewAudioInner = ({ item, metadata, fileUrl }: { item: GalleryItemTagge
 }
 
 const PreviewAudio = ({ item, fileUrl }: { item: GalleryItemTagged; fileUrl: string }) => {
+	const { t } = useTranslation()
 	const audioMetadataQuery = useAudioMetadataQuery(
 		item.type === "drive"
 			? {
@@ -473,6 +474,26 @@ const PreviewAudio = ({ item, fileUrl }: { item: GalleryItemTagged; fileUrl: str
 					}
 				}
 	)
+
+	if (audioMetadataQuery.status === "error") {
+		return (
+			<View className="bg-transparent flex-1 items-center justify-center px-8">
+				<Ionicons
+					name="warning-outline"
+					size={48}
+					color="#9ca3af"
+				/>
+				<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">{t("preview_load_failed")}</Text>
+				<PressableScale
+					className="mt-4"
+					onPress={() => audioMetadataQuery.refetch()}
+					hitSlop={10}
+				>
+					<Text className="text-sm leading-5 text-primary">{t("retry")}</Text>
+				</PressableScale>
+			</View>
+		)
+	}
 
 	if (audioMetadataQuery.status !== "success") {
 		return (
