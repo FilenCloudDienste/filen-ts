@@ -1,6 +1,6 @@
 import type { StringifiedClient } from "@filen/sdk-rs"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
-import type { SdkErrorKind } from "@/lib/sdk/error-kinds.gen"
+import type { SdkErrorKind } from "@/lib/sdk/errorKinds.gen"
 import { log } from "@/lib/log"
 
 export interface LoginParams {

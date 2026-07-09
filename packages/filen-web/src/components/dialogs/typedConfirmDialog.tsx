@@ -13,7 +13,7 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
-import { isArmed, shouldResetOnOpen } from "@/components/dialogs/typed-confirm-dialog.logic"
+import { isArmed, shouldResetOnOpen } from "@/components/dialogs/typedConfirmDialog.logic"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 
 interface TypedConfirmDialogProps {

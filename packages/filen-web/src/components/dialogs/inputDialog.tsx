@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
-import { seededValueOnOpen } from "@/components/dialogs/input-dialog.logic"
+import { seededValueOnOpen } from "@/components/dialogs/inputDialog.logic"
 
 interface InputDialogProps {
 	open: boolean

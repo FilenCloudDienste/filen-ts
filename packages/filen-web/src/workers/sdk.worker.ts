@@ -46,8 +46,8 @@ import {
 	getSharedDirContext
 } from "@/features/drive/lib/cache"
 import { THUMB_CACHE_CAP } from "@/features/drive/lib/thumbnails.logic"
-import { sweepThumbs, writeThumb } from "@/workers/thumb-store"
-import { createSearchEngine, type SearchPush, type SearchSnapshotDTO } from "@/workers/search-engine"
+import { sweepThumbs, writeThumb } from "@/workers/thumbStore"
+import { createSearchEngine, type SearchPush, type SearchSnapshotDTO } from "@/workers/searchEngine"
 
 // NEITHER a fixed `/` nor `/assets/`: the wasm holds a RELATIVE `./filen-sdk-worker-thread.js`
 // (verified via `strings` over sdk-rs_bg.wasm) which it passes to `new Worker(...)`, so the

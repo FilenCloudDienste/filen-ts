@@ -67,9 +67,9 @@ import { VersionsDialog } from "@/features/drive/components/versionsDialog"
 import { InfoDialog } from "@/features/drive/components/infoDialog"
 import { LinkDialog } from "@/features/drive/components/linkDialog"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
-import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
-import { TypedConfirmDialog } from "@/components/dialogs/typed-confirm-dialog"
-import { InputDialog } from "@/components/dialogs/input-dialog"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
+import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
+import { InputDialog } from "@/components/dialogs/inputDialog"
 
 export interface DirectoryListingProps {
 	variant: DriveVariant

@@ -19,7 +19,7 @@ import {
 import { Card, CardAction, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 
 interface ExportMasterKeysCardProps {
 	accountQuery: AccountQuerySuccess

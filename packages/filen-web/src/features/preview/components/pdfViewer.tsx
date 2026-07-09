@@ -17,7 +17,7 @@ import {
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
-import { InputDialog } from "@/components/dialogs/input-dialog"
+import { InputDialog } from "@/components/dialogs/inputDialog"
 
 export interface PdfViewerProps {
 	item: DriveItem

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { Client, CacheSearchSnapshot, CacheStatusMessage, Dir, File, UuidStr } from "@filen/sdk-rs"
-import { createSearchEngine, SearchSupersededError, CEILING, type SearchPush } from "@/workers/search-engine"
+import { createSearchEngine, SearchSupersededError, CEILING, type SearchPush } from "@/workers/searchEngine"
 
 // UuidStr is a branded template literal requiring at least 3 dashes (see @filen/sdk-rs) — mirrors
 // queries/drive.test.ts's own testUuid() so a readable label still satisfies the brand.

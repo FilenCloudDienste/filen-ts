@@ -40,10 +40,10 @@ import {
 	DropdownMenuLabel,
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
-import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
-import { Kbd } from "@/lib/keymap/Kbd"
+import { Kbd } from "@/lib/keymap/kbd"
 
 // Registered at module scope (runs once per module evaluation — mirrors theme-provider.tsx's own
 // "app.toggleTheme" registration right next to its useAction call below). Default UNASSIGNED

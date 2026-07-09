@@ -37,7 +37,7 @@ import {
 } from "@/features/contacts/components/contactRow"
 import { AddContactDialog } from "@/features/contacts/components/addContactDialog"
 import { ContactsBulkBar } from "@/features/contacts/components/contactsBulkBar"
-import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"

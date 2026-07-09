@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { seededValueOnOpen } from "@/components/dialogs/input-dialog.logic"
+import { seededValueOnOpen } from "@/components/dialogs/inputDialog.logic"
 
 describe("seededValueOnOpen (InputDialog initialValue seeding)", () => {
 	it("seeds the initialValue on the closed-to-open transition", () => {

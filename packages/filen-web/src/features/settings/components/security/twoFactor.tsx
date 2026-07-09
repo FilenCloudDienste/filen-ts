@@ -12,8 +12,8 @@ import { buildOtpauthUri, canDismissRecoveryKeyPanel } from "@/features/settings
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
-import { InputDialog } from "@/components/dialogs/input-dialog"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
+import { InputDialog } from "@/components/dialogs/inputDialog"
 
 interface TwoFactorCardProps {
 	accountQuery: AccountQuerySuccess

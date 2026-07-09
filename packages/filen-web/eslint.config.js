@@ -7,7 +7,7 @@ import { defineConfig, globalIgnores } from "eslint/config"
 import eslintConfigPrettier from "eslint-config-prettier/flat"
 
 export default defineConfig([
-	globalIgnores(["dist", "docs", "src/routeTree.gen.ts", "src/lib/sdk/error-kinds.gen.ts"]),
+	globalIgnores(["dist", "docs", "src/routeTree.gen.ts", "src/lib/sdk/errorKinds.gen.ts"]),
 	{
 		files: ["**/*.{ts,tsx}"],
 		extends: [

@@ -1,4 +1,4 @@
-import { shouldResetOnOpen } from "@/components/dialogs/typed-confirm-dialog.logic"
+import { shouldResetOnOpen } from "@/components/dialogs/typedConfirmDialog.logic"
 
 // Pure value-on-open resolver, split out of the component file for the same react-refresh reason as
 // typed-confirm-dialog.logic.ts. Mirrors TypedConfirmDialog's own reset-during-render pattern (a

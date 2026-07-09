@@ -20,7 +20,7 @@ import { MediaViewer } from "@/features/preview/components/mediaViewer"
 import { isTextEditingTarget } from "@/features/preview/components/previewOverlay.logic"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 
 // Lazy chunks: pdf.js (~1MB+), docx-preview, CodeMirror (+ its per-language grammar chunks) and
 // react-markdown only ever download once a file needing them is actually opened, never on the app's

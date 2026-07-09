@@ -11,7 +11,7 @@ import {
 	SETCONFIG_DEBOUNCE_MS,
 	type SearchStatus
 } from "@/features/drive/lib/searchStatus.logic"
-import { type SearchPush, type SearchHitDTO } from "@/workers/search-engine"
+import { type SearchPush, type SearchHitDTO } from "@/workers/searchEngine"
 import { buildSearchResults, resolveSearchTransition } from "@/features/drive/hooks/useDriveSearch.logic"
 
 export interface UseDriveSearchResult {

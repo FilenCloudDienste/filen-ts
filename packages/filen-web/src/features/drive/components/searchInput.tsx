@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { SearchIcon, XIcon } from "lucide-react"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
-import { Kbd } from "@/lib/keymap/Kbd"
+import { Kbd } from "@/lib/keymap/kbd"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 

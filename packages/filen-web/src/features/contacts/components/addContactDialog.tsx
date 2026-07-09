@@ -6,7 +6,7 @@ import { isValidEmail } from "@/lib/validate"
 import { sendContactRequest } from "@/features/contacts/lib/actions"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Button } from "@/components/ui/button"
-import { InputDialog } from "@/components/dialogs/input-dialog"
+import { InputDialog } from "@/components/dialogs/inputDialog"
 
 // Self-contained trigger + dialog, mirroring drive/new-directory.tsx's shape exactly (a toolbar-level
 // action with no per-item target, so it owns its own open/pending state rather than routing through

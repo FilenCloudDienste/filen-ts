@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isArmed, shouldResetOnOpen } from "@/components/dialogs/typed-confirm-dialog.logic"
+import { isArmed, shouldResetOnOpen } from "@/components/dialogs/typedConfirmDialog.logic"
 
 describe("isArmed (typed-confirm-dialog match logic)", () => {
 	it("arms on an exact match", () => {

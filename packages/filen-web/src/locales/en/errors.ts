@@ -1,4 +1,4 @@
-import { type SdkErrorKind } from "@/lib/sdk/error-kinds.gen"
+import { type SdkErrorKind } from "@/lib/sdk/errorKinds.gen"
 
 // English source catalog — "errors" namespace, keyed by the SDK's finite `SdkErrorKind` taxonomy
 // (@/lib/sdk/error-kinds.gen, generated from @filen/sdk-rs@0.4.29's ErrorKind enum) so a lookup is
