@@ -85,7 +85,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import { driveItemLinkStatusQueryKey, driveListingQueryKey, driveNamesQueryKey } from "@/queries/drive"
+import { driveItemLinkStatusQueryKey, driveListingQueryKey, driveNamesQueryKey } from "@/features/drive/queries/drive"
 import {
 	createLink,
 	deleteItemsPermanently,

@@ -11,7 +11,7 @@ import {
 	driveItemLinkStatusQueryUpdate,
 	normalizeParentUuid,
 	type DriveItemLinkStatus
-} from "@/queries/drive"
+} from "@/features/drive/queries/drive"
 import { narrowItem, upsertDriveItem, asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { runBulk, type BulkOutcome } from "@/features/drive/lib/bulk"

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import type { Dir, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { useDriveStore } from "@/stores/drive"
+import { useDriveStore } from "@/features/drive/store/useDriveStore"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — mirrors
 // navigate.test.ts / queries/drive.test.ts's own uuid fixtures.

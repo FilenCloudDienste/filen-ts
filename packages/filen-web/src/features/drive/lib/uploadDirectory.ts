@@ -5,7 +5,7 @@ import { i18n } from "@/lib/i18n"
 import { sdkApi } from "@/lib/sdk/client"
 import { runCreateDirectory, type CreateDirectoryDeps } from "@/features/drive/lib/createDirectory"
 import { runUpload, defaultUploadDeps, type RunUploadDeps } from "@/features/drive/lib/upload"
-import { driveListingQueryUpdate } from "@/queries/drive"
+import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 
 // Directory upload: pick/drop a whole directory and recreate its sub-directory tree in the current
 // listing, uploading every file into its recreated parent. The wasm SDK has no recursive-upload

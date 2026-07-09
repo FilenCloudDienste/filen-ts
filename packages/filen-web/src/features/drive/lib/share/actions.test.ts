@@ -26,7 +26,7 @@ vi.mock("@/lib/sdk/client", () => ({
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
-import { driveListingQueryKey } from "@/queries/drive"
+import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import { shareItems, unshareItems } from "@/features/drive/lib/share/actions"
 
 beforeEach(() => {

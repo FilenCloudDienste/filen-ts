@@ -26,7 +26,7 @@ const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), 
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
-import { driveListingQueryKey } from "@/queries/drive"
+import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import {
 	collectDirectoryUploads,
 	runDirectoryUpload,

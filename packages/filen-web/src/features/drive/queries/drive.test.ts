@@ -95,7 +95,7 @@ import {
 	normalizeParentUuid,
 	toListingTarget,
 	useItemInfoQuery
-} from "@/queries/drive"
+} from "@/features/drive/queries/drive"
 
 // Unlike account.test.ts (one call-count assertion in the whole file), several tests here assert
 // exact call counts — clear history between tests so an earlier test's calls can't leak in.

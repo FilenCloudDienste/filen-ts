@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, DirPublicLinkRW, File, FilePublicLink, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import type { DriveItemLinkStatus } from "@/queries/drive"
+import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import { buildLinkUpdate, buildPublicLinkUrl, readLinkForm } from "@/features/drive/components/linkDialog.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short

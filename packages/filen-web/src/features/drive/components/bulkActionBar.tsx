@@ -6,7 +6,7 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { setFavoritedItems } from "@/features/drive/lib/actions"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
-import { useDriveStore } from "@/stores/drive"
+import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	driveBulkActions,
 	isBulkDownloadEnabled,

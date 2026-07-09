@@ -1,7 +1,7 @@
 import type { Contact } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
-import { driveListingQueryKey } from "@/queries/drive"
+import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { runOp } from "@/lib/actions/outcome"

@@ -6,7 +6,7 @@ import { i18n } from "@/lib/i18n"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { narrowItem, upsertDriveItem } from "@/features/drive/lib/item"
-import { driveListingQueryUpdate } from "@/queries/drive"
+import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 
 // Leading+trailing throttle, written locally rather than pulling a dependency — no throttle/debounce

@@ -6,7 +6,7 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { toggleFavorite, restoreItems } from "@/features/drive/lib/actions"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
-import { useDriveStore } from "@/stores/drive"
+import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	driveItemActions,
 	startItemDownload,
