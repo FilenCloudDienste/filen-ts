@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from "react"
+import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
+import { useDialogHost } from "@/lib/useDialogHost"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { stepPreviewIndex } from "@/features/drive/lib/preview.logic"
@@ -37,32 +38,7 @@ interface ActiveDialog {
 	index?: number
 }
 
-// Kinds the dialog host below actually renders — every ActiveDialogKind is wired today, but the set
-// stays explicit (rather than collapsing to a bare `activeDialog !== null` check) so a future kind
-// added to the union without an immediate dialog implementation degrades safely: an unwired seam kind
-// would otherwise look identical to a real one to the F2/Delete guards below, permanently wedging
-// activeDialog !== null (and so those shortcuts) the moment a menu dispatched one, since nothing
-// would ever render to close it again.
-const WIRED_DIALOG_KINDS = new Set<ActiveDialogKind>([
-	"rename",
-	"trash",
-	"delete",
-	"emptyTrash",
-	"move",
-	"color",
-	"versions",
-	"info",
-	"link",
-	"share",
-	"unshare",
-	"restoreSelected",
-	"preview"
-])
-
 export interface DriveDialogHost {
-	// True only while a dialog that actually RENDERS something is open — every kind renders one today
-	// (see WIRED_DIALOG_KINDS), but the check stays explicit so a future seam kind can't silently wedge
-	// the F2/Delete guards open forever.
 	isDialogOpen: boolean
 	handleItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
 	handleBulkDialogAction: (kind: BulkDialogActionKind) => void
@@ -82,13 +58,8 @@ interface UseDriveDialogHostParams {
 // boolean can express (e.g. versions has an independent restore vs. delete-confirm flow).
 export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHostParams): DriveDialogHost {
 	const { t } = useTranslation(["drive", "common"])
-	const [activeDialog, setActiveDialog] = useState<ActiveDialog | null>(null)
-	const [dialogPending, setDialogPending] = useState(false)
-	const isDialogOpen = activeDialog !== null && WIRED_DIALOG_KINDS.has(activeDialog.kind)
-
-	function closeActiveDialog(): void {
-		setActiveDialog(null)
-	}
+	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, isDialogOpen, closeActiveDialog } =
+		useDialogHost<ActiveDialog>()
 
 	// Steps the open preview by one sibling (no wrap) — the single implementation behind PreviewOverlay's
 	// onStep prop, which both the header's prev/next buttons AND its own local in-dialog arrow-key

@@ -6,6 +6,7 @@ import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } fro
 import { useContactsQuery, useContactRequestsQuery } from "@/features/contacts/queries/contacts"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { useDialogHost } from "@/lib/useDialogHost"
 import { type ContactsKey } from "@/lib/i18n"
 import { buildContactSections, type ContactSection } from "@/features/contacts/components/contactsList.logic"
 import {
@@ -52,12 +53,11 @@ const SECTION_HEADER_KEY: Record<ContactSection["key"], ContactsKey> = {
 
 const SKELETON_ROW_COUNT = 6
 
-// The listing-level confirm-dialog host's own state shape — mirrors directory-listing.tsx's
-// ActiveDialog{kind,items}, widened with a `bulk` flag: every kind here can be reached either from a
-// single row's own action (bulk: false, a 1-length items array) or from the bulk bar (bulk: true,
-// the whole gated section selection) — same dialog, same title/body (the count just interpolates),
-// only the confirm handler's run-single-vs-run-bulk branch differs. Accept has no dialog kind: it
-// never confirms (mirrors mobile), so it never reaches this host.
+// The per-kind dialog payload threaded through useDialogHost, widened with a `bulk` flag: every kind
+// here can be reached either from a single row's own action (bulk: false, a 1-length items array) or
+// from the bulk bar (bulk: true, the whole gated section selection) — same dialog, same title/body
+// (the count just interpolates), only the confirm handler's run-single-vs-run-bulk branch differs.
+// Accept has no dialog kind: it never confirms (mirrors mobile), so it never reaches this host.
 type ActiveContactDialog =
 	| { kind: "deny"; bulk: boolean; items: ContactRequestIn[] }
 	| { kind: "cancel"; bulk: boolean; items: ContactRequestOut[] }
@@ -74,8 +74,7 @@ export function ContactsList() {
 	const [search, setSearch] = useState("")
 	const [selectMode, setSelectMode] = useState(false)
 	const [selection, setSelection] = useState<ContactSelection>(EMPTY_CONTACT_SELECTION)
-	const [activeDialog, setActiveDialog] = useState<ActiveContactDialog | null>(null)
-	const [dialogPending, setDialogPending] = useState(false)
+	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, closeActiveDialog } = useDialogHost<ActiveContactDialog>()
 
 	const contactsQuery = useContactsQuery()
 	const requestsQuery = useContactRequestsQuery()
@@ -103,10 +102,6 @@ export function ContactsList() {
 	function handleRetry(): void {
 		void contactsQuery.refetch()
 		void requestsQuery.refetch()
-	}
-
-	function closeActiveDialog(): void {
-		setActiveDialog(null)
 	}
 
 	function toggleSelect(section: ContactSectionKey, uuid: string): void {
