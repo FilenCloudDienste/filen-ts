@@ -11,16 +11,26 @@ import { test, expect } from "./fixtures"
 // failure this once produced live).
 const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
 
-// The "mod" pseudo-modifier must be resolved from the PAGE's own userAgent, never process.platform —
-// Playwright's chromium device profile reports Windows regardless of the host, desyncing the two Mac
-// checks so a Meta-keyed press never matches the in-page keymap (see drive.spec.ts's resolveModKey
-// comment for the full mechanism). Duplicated per this suite's local-helpers convention.
-async function resolveModKey(page: Page): Promise<"Meta" | "Control"> {
-	const looksLikeMacToBrowser = await page.evaluate(
-		() => /mac/i.test(navigator.userAgent) && !/iphone|ipad|ipod/i.test(navigator.userAgent)
-	)
+// Deliberately NOT drive.spec.ts's own resolveModKey pattern (userAgent-based) — this file's two
+// editable-preview tests use the resolved key exclusively to drive CodeMirror's OWN built-in select-all
+// binding (`Mod-a` inside `.cm-content`), never a react-hotkeys-hook-registered app action, and the two
+// libraries resolve "mac" from different navigator properties that disagree under Playwright's chromium
+// device emulation. react-hotkeys-hook (the app's keymap registry — mod+f/mod+s/etc., what drive.spec.ts's
+// own resolveModKey correctly targets) checks navigator.userAgent, which Playwright's "Desktop Chrome"
+// profile fakes as Windows regardless of host. CodeMirror's keymap (@codemirror/view, `mac: ios ||
+// /Mac/.test(nav.platform)` — verified in the installed package source) checks navigator.platform
+// instead, which that same profile leaves truthful. On a macOS host the two disagree: userAgent says
+// "not mac" (Control), platform says "mac" (Meta) — reusing the userAgent-based helper here sends
+// Control-a into the editor, which CodeMirror doesn't bind to select-all, so nothing gets selected and
+// the following keyboard.type() INSERTS at the click-positioned caret instead of replacing the buffer —
+// silently corrupting the saved content into a mix of old and new text (reproduced live: a "select all
+// then replace" step that leaves the original first/last line intact around the inserted new text,
+// which the reopen assertions below alone would have surfaced as a confusing stale-content flake rather
+// than the actual wrong-modifier-key cause).
+async function resolveEditorModKey(page: Page): Promise<"Meta" | "Control"> {
+	const looksLikeMacToCodeMirror = await page.evaluate(() => navigator.platform.includes("Mac"))
 
-	return looksLikeMacToBrowser ? "Meta" : "Control"
+	return looksLikeMacToCodeMirror ? "Meta" : "Control"
 }
 
 // Sequential within this file (one worker), overriding the config's fullyParallel — the same
@@ -513,7 +523,7 @@ test("editable text preview saves via its Save button, persists across reopen, a
 	const runId = crypto.randomUUID()
 	const scratchName = `e2e-preview-edit-${runId}`
 	const nameTxt = `e2e-preview-edit-${runId}.txt`
-	const modKey = await resolveModKey(page)
+	const modKey = await resolveEditorModKey(page)
 
 	await page.goto("/drive")
 
@@ -607,7 +617,7 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 	const scratchName = `e2e-preview-edit-pager-${runId}`
 	const nameA = `e2e-preview-edit-pager-a-${runId}.txt`
 	const nameB = `e2e-preview-edit-pager-b-${runId}.txt`
-	const modKey = await resolveModKey(page)
+	const modKey = await resolveEditorModKey(page)
 
 	await page.goto("/drive")
 
