@@ -1,6 +1,6 @@
 import * as Comlink from "comlink"
-import HeicWorker from "@/workers/heic.worker.ts?worker"
-import type { HeicWorkerApi } from "@/workers/heic.worker"
+import HeicWorker from "@/features/preview/workers/heic.worker.ts?worker"
+import type { HeicWorkerApi } from "@/features/preview/workers/heic.worker"
 import type { HeicTransformOpts } from "@/lib/preview/heic-codec"
 
 // Spun up on the first HEIC/HEIF preview, not at module load — most sessions never open one. Wrapped

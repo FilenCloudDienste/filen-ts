@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import * as Comlink from "comlink"
 import type { DecodedHeicImage, HeicDecoderModule, HeicTransformDeps } from "@/lib/preview/heic-codec"
-import type { HeicWorkerApi } from "@/workers/heic.worker"
+import type { HeicWorkerApi } from "@/features/preview/workers/heic.worker"
 
 // heic.worker.ts can't be imported directly here: Comlink.expose(api) runs at module load against
 // `self`, which only exists in a real worker (verified: Node has no global `self`). This rebuilds the
