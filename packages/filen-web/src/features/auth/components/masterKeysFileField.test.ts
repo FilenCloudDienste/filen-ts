@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { readMasterKeysFile, type MasterKeysFileLike } from "@/components/auth/master-keys-file-field.logic"
+import { readMasterKeysFile, type MasterKeysFileLike } from "@/features/auth/components/masterKeysFileField.logic"
 
 function fakeFile(name: string, text: () => Promise<string>): MasterKeysFileLike {
 	return { name, text }

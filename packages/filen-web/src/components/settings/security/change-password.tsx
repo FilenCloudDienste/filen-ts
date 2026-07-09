@@ -6,15 +6,15 @@ import { sdkApi } from "@/lib/sdk/client"
 import { persistSession, clearSession } from "@/lib/sdk/session"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { isPasswordStrongEnough } from "@/lib/auth/validate"
-import { runChangePasswordAttempt } from "@/lib/auth/change-password"
+import { isPasswordStrongEnough } from "@/lib/validate"
+import { runChangePasswordAttempt } from "@/features/settings/components/security/changePassword.logic"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { StrengthMeter } from "@/components/auth/strength-meter"
+import { StrengthMeter } from "@/features/auth/components/strengthMeter"
 
 interface ChangePasswordCardProps {
 	accountQuery: AccountQuerySuccess

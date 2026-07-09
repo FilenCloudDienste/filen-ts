@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { runLogout, type LogoutDeps } from "@/lib/auth/logout"
+import { runLogout, type LogoutDeps } from "@/lib/logout"
 import { log } from "@/lib/log"
 
 // Every mock records its own label into a shared array by default — the single source of truth the

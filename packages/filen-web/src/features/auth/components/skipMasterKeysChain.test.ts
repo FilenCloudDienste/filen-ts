@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { advanceSkipMasterKeysChain, type SkipMasterKeysStage } from "@/components/auth/skip-master-keys-chain.logic"
+import { advanceSkipMasterKeysChain, type SkipMasterKeysStage } from "@/features/auth/components/skipMasterKeysChain.logic"
 
 const STAGES: readonly SkipMasterKeysStage[] = ["stage1", "stage2", "stage3", "stage4"]
 

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { StringifiedClient } from "@filen/sdk-rs"
-import { runLoginAttempt, type LoginAttemptDeps, type LoginParams } from "@/lib/auth/login-attempt"
+import { runLoginAttempt, type LoginAttemptDeps, type LoginParams } from "@/features/auth/lib/loginAttempt"
 import { toErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 

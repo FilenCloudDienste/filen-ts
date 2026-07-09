@@ -4,7 +4,7 @@ import { toast } from "sonner"
 import { CircleCheckIcon, XIcon } from "lucide-react"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { readMasterKeysFile } from "@/components/auth/master-keys-file-field.logic"
+import { readMasterKeysFile } from "@/features/auth/components/masterKeysFileField.logic"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Button } from "@/components/ui/button"
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { ratePasswordStrength } from "@filen/utils"
-import { isPasswordStrongEnough } from "@/lib/auth/validate"
+import { isPasswordStrongEnough } from "@/lib/validate"
 
 // Fixtures run through the REAL @filen/utils rater (not hand-built rating objects) so the gate is
 // tested against the same tier boundaries the forms see: length >= 10 plus 2 of 3 character classes

@@ -4,7 +4,7 @@ import type { QueryClient } from "@tanstack/react-query"
 import { storage } from "@/lib/storage/adapter"
 import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
 import { log } from "@/lib/log"
-import { REGISTER_CHECK_QUERY_KEY } from "@/queries/register-check"
+import { REGISTER_CHECK_QUERY_KEY } from "@/features/auth/queries/registerCheck"
 
 // PER-QUERY persistence: `persistQueryClient` re-serializes the ENTIRE dehydrated client on every
 // cache change — O(cache) write amplification through the envelope serializer into sqlite on

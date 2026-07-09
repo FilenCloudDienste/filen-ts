@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { StringifiedClient } from "@filen/sdk-rs"
-import { runChangePasswordAttempt, type ChangePasswordAttemptDeps, type ChangePasswordParams } from "@/lib/auth/change-password"
+import {
+	runChangePasswordAttempt,
+	type ChangePasswordAttemptDeps,
+	type ChangePasswordParams
+} from "@/features/settings/components/security/changePassword.logic"
 import { log } from "@/lib/log"
 
 function sampleBlob(): StringifiedClient {

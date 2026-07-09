@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { fetchRegisterCheck } from "@/queries/register-check"
+import { fetchRegisterCheck } from "@/features/auth/queries/registerCheck"
 
 // global.fetch is the only ambient surface this module touches — replaced wholesale per test,
 // mirroring src/lib/sw/register.test.ts's vi.stubGlobal idiom (no DOM lib in this project).

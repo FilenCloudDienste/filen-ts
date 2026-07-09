@@ -6,14 +6,14 @@ import { sdkApi } from "@/lib/sdk/client"
 import { persistSession, broadcastAuth } from "@/lib/sdk/session"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { isValidEmail } from "@/lib/auth/validate"
-import { runLoginAttempt } from "@/lib/auth/login-attempt"
+import { isValidEmail } from "@/lib/validate"
+import { runLoginAttempt } from "@/features/auth/lib/loginAttempt"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { TwoFactorDialog } from "@/components/auth/two-factor-dialog"
+import { TwoFactorDialog } from "@/features/auth/components/twoFactorDialog"
 
 // Forgot-password dialog: small enough to live as a private sibling of the login form rather than
 // its own file. Re-seeds its email field from the login form's current value on every open (the

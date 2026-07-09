@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { StringifiedClient } from "@filen/sdk-rs"
-import { runResetAttempt, type ResetAttemptDeps, type ResetParams } from "@/lib/auth/reset-attempt"
+import { runResetAttempt, type ResetAttemptDeps, type ResetParams } from "@/features/auth/lib/resetAttempt"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 

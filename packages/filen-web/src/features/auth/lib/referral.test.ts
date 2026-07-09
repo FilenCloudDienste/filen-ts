@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { getReferral } from "@/lib/auth/referral"
+import { getReferral } from "@/features/auth/lib/referral"
 
 // document.cookie is the only ambient global this module touches — replaced wholesale per test,
 // mirroring src/lib/sw/register.test.ts's vi.stubGlobal idiom (no DOM lib in this project).

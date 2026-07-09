@@ -49,7 +49,7 @@ export default defineConfig([
 	{
 		// The shared unauthed-page guard throws the router's `redirect()` — the same framework
 		// control-flow idiom the route files use, extracted so /login and /register share one guard.
-		files: ["src/lib/auth/guard.ts"],
+		files: ["src/features/auth/lib/guard.ts"],
 		rules: {
 			"@typescript-eslint/only-throw-error": "off"
 		}

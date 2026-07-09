@@ -14,7 +14,7 @@ import {
 	UserIcon
 } from "lucide-react"
 import type { CommonKey } from "@/lib/i18n"
-import { runLogout } from "@/lib/auth/logout"
+import { runLogout } from "@/lib/logout"
 import { sdkApi } from "@/lib/sdk/client"
 import { clearSession, broadcastAuth } from "@/lib/sdk/session"
 import { kvClear } from "@/lib/storage/adapter"
