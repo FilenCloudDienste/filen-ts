@@ -18,8 +18,9 @@ interface E2eHooks {
 	setUserCombo: (actionId: string, combo: string) => Promise<void>
 	comboFor: (actionId: string) => string
 	rawStringifiedClient: () => Promise<unknown>
-	createTestFile: (name: string, content: string) => Promise<unknown>
+	createTestFile: (name: string, content: string, parentUuid?: string | null) => Promise<unknown>
 	trashTestFile: (file: unknown) => Promise<void>
+	thumbnailFileStat: (parentUuid: string, name: string) => Promise<{ size: number; lastModified: number } | null>
 }
 
 declare global {

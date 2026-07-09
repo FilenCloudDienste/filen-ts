@@ -7,6 +7,7 @@ import { kvGetJson, kvHas, kvSetJson } from "@/lib/storage/adapter"
 import { comboFor, setUserCombo } from "@/lib/keymap/registry"
 import { persistSession, resumeSession } from "@/lib/sdk/session"
 import { whenBootReady } from "@/lib/sdk/boot"
+import { readThumbnailBlob } from "@/lib/drive/thumb-cache"
 import { log } from "@/lib/log"
 
 // Test-only hooks, loaded ONLY when the app is built with VITE_E2E=1 (a dynamic import behind that
@@ -52,12 +53,19 @@ interface E2eHooks {
 	// through a real Download click (Chromium's File System Access API would otherwise take the fsa
 	// branch, the one path that can never reach the sw route under test).
 	rawStringifiedClient: () => Promise<StringifiedClient>
-	// Uploads one small real file at the drive root through the real worker path (no UI) and returns
-	// the resulting File record — gives the sw zip e2e case real, live-downloadable ZipItems without
-	// depending on whatever the shared e2e account happens to already hold.
-	createTestFile: (name: string, content: string) => Promise<File>
+	// Uploads one small real file through the real worker path (no UI) and returns the resulting File
+	// record — gives the sw zip e2e case real, live-downloadable ZipItems without depending on whatever
+	// the shared e2e account happens to already hold. `parentUuid` defaults to the drive root; callers
+	// nesting inside a scratch directory (net-zero on the shared account) pass its uuid explicitly.
+	createTestFile: (name: string, content: string, parentUuid?: string | null) => Promise<File>
 	// Trashes a File this hook created — keeps the shared e2e account net-zero after a test run.
 	trashTestFile: (file: File) => Promise<void>
+	// Reads one cached thumbnail's on-disk size + write time, found by file name inside a parent
+	// directory. The only way to prove a repaint after a real page reload came from the existing OPFS
+	// cache entry rather than a fresh generation: a regenerate rewrites the file (a new
+	// lastModified), a cache hit never touches the write path. Null when the file or its cache entry
+	// doesn't exist.
+	thumbnailFileStat: (parentUuid: string, name: string) => Promise<{ size: number; lastModified: number } | null>
 }
 
 // Minimal shape of the TanStack router main.tsx hands in — enough to re-run route guards after the
@@ -122,11 +130,11 @@ export function installE2eHooks(router: RouterLike): void {
 
 			return sdkApi.toStringified()
 		},
-		createTestFile: async (name, content) => {
+		createTestFile: async (name, content, parentUuid = null) => {
 			await whenBootReady()
 
 			return sdkApi.uploadFile(
-				null,
+				parentUuid,
 				crypto.randomUUID(),
 				new File([content], name, { type: "text/plain" }),
 				Comlink.proxy(() => undefined)
@@ -134,6 +142,32 @@ export function installE2eHooks(router: RouterLike): void {
 		},
 		trashTestFile: async file => {
 			await sdkApi.trashFile(file)
+		},
+		thumbnailFileStat: async (parentUuid, name) => {
+			await whenBootReady()
+
+			// listDirectory returns raw SDK File records, not app-level DriveItems — meta arrives as the
+			// tagged union (mirrors lib/drive/item.ts's own narrowItem extraction) rather than the
+			// pre-narrowed decryptedMeta field the drive UI reads.
+			const { files } = await sdkApi.listDirectory({ kind: "uuid", uuid: parentUuid })
+			const file = files.find(f => f.meta.type === "decoded" && f.meta.data.name === name)
+
+			if (file === undefined) {
+				return null
+			}
+
+			const blob = await readThumbnailBlob(file.uuid)
+
+			if (blob === null) {
+				return null
+			}
+
+			// size/lastModified live on the runtime File the store's own getFile() returns; the read
+			// side's own return type widens it to Blob, so the extra field is asserted here rather than
+			// imported (avoids shadowing this file's own SDK File type import above).
+			const stat = blob as Blob & { lastModified: number }
+
+			return { size: stat.size, lastModified: stat.lastModified }
 		}
 	}
 
