@@ -301,7 +301,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			}
 
 			keyboardEvent.preventDefault()
-			useDriveStore.getState().selectAllItems(sortedItems)
+			useDriveStore.getState().setSelectedItems(sortedItems)
 		},
 		undefined,
 		[isDialogOpen, sortedItems]

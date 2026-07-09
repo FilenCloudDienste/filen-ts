@@ -22,7 +22,6 @@ interface DriveState {
 	toggleSelectedItem: (item: DriveItem) => void
 	removeFromSelection: (uuids: string[]) => void
 	clearSelectedItems: () => void
-	selectAllItems: (items: DriveItem[]) => void
 }
 
 export const useDriveStore = create<DriveState>(set => ({
@@ -52,8 +51,5 @@ export const useDriveStore = create<DriveState>(set => ({
 	},
 	clearSelectedItems: () => {
 		set({ selectedItems: [] })
-	},
-	selectAllItems: items => {
-		set({ selectedItems: items })
 	}
 }))

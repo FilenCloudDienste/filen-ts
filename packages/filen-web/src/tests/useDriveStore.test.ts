@@ -126,15 +126,3 @@ describe("clearSelectedItems", () => {
 		expect(useDriveStore.getState().selectedItems).toEqual([])
 	})
 })
-
-describe("selectAllItems", () => {
-	it("replaces the current selection with the given items", () => {
-		const itemA = directoryItem(testUuid("a"))
-		const itemB = directoryItem(testUuid("b"))
-
-		useDriveStore.setState({ selectedItems: [directoryItem(testUuid("z"))] })
-		useDriveStore.getState().selectAllItems([itemA, itemB])
-
-		expect(useDriveStore.getState().selectedItems).toEqual([itemA, itemB])
-	})
-})

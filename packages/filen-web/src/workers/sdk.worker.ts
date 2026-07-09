@@ -86,6 +86,27 @@ const uploadAborts = new Map<string, AbortController>()
 const uploadPauses = new Map<string, PauseSignal>()
 const downloadPauses = new Map<string, PauseSignal>()
 
+// Shared shape behind uploadFile/downloadFileToWriter/downloadItemsToZip's per-transfer pause
+// lifecycle: register a fresh PauseSignal, run fn with it, then evict from both maps and free the
+// wasm-heap object on any exit — same delete-then-free order every one of those call sites needs.
+async function withPauseSignal<T>(
+	pauses: Map<string, PauseSignal>,
+	aborts: Map<string, AbortController>,
+	transferId: string,
+	fn: (pause: PauseSignal) => Promise<T>
+): Promise<T> {
+	const pause = new PauseSignal()
+	pauses.set(transferId, pause)
+
+	try {
+		return await fn(pause)
+	} finally {
+		aborts.delete(transferId)
+		pauses.delete(transferId)
+		pause.free()
+	}
+}
+
 // Per-preview-token AbortController so cancelPreviewDownload(token) can abort an in-flight whole-buffer
 // preview fetch. Mirrors downloadAborts but keyed by the caller-minted preview token, not a transfer id
 // — previews are never registered as transfers (no row, no progress), so they get their own registry
@@ -443,10 +464,8 @@ const api = {
 		const c = requireClient()
 		const controller = new AbortController()
 		uploadAborts.set(transferId, controller)
-		const pause = new PauseSignal()
-		uploadPauses.set(transferId, pause)
 
-		try {
+		return withPauseSignal(uploadPauses, uploadAborts, transferId, async pause => {
 			const parent = await resolveNormalDirParent(c, parentUuid)
 
 			return await c.uploadFileFromReader({
@@ -460,11 +479,7 @@ const api = {
 				},
 				managedFuture: { abortSignal: controller.signal, pauseSignal: pause }
 			})
-		} finally {
-			uploadAborts.delete(transferId)
-			uploadPauses.delete(transferId)
-			pause.free()
-		}
+		})
 	},
 	// Aborts an in-flight upload by transferId; a no-op once the upload has settled (the controller is
 	// already evicted). Mirrors cancelDownload.
@@ -512,9 +527,8 @@ const api = {
 		const c = requireClient()
 		const controller = new AbortController()
 		downloadAborts.set(transferId, controller)
-		const pause = new PauseSignal()
-		downloadPauses.set(transferId, pause)
-		try {
+
+		await withPauseSignal(downloadPauses, downloadAborts, transferId, async pause => {
 			await c.downloadFileToWriter({
 				file,
 				writer,
@@ -523,11 +537,7 @@ const api = {
 				},
 				managedFuture: { abortSignal: controller.signal, pauseSignal: pause }
 			})
-		} finally {
-			downloadAborts.delete(transferId)
-			downloadPauses.delete(transferId)
-			pause.free()
-		}
+		})
 	},
 	// A directory/multi-select zip: the SDK does its own recursion + zip framing in this ONE call, so
 	// there is still exactly one worker op for the whole batch. Everything else mirrors
@@ -545,9 +555,8 @@ const api = {
 		const c = requireClient()
 		const controller = new AbortController()
 		downloadAborts.set(transferId, controller)
-		const pause = new PauseSignal()
-		downloadPauses.set(transferId, pause)
-		try {
+
+		await withPauseSignal(downloadPauses, downloadAborts, transferId, async pause => {
 			await c.downloadItemsToZip(
 				items,
 				writer,
@@ -556,11 +565,7 @@ const api = {
 				},
 				{ abortSignal: controller.signal, pauseSignal: pause }
 			)
-		} finally {
-			downloadAborts.delete(transferId)
-			downloadPauses.delete(transferId)
-			pause.free()
-		}
+		})
 	},
 	// Aborts an in-flight download by transferId; a no-op once the download has settled (the controller
 	// is already evicted). The abort surfaces as a "Cancelled" rejection at downloadFileToWriter's caller.

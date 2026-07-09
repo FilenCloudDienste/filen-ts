@@ -53,22 +53,6 @@ export async function writeThumb(uuid: string, bytes: Uint8Array): Promise<void>
 	}
 }
 
-// A missing entry is a clean no-op, not a failure — invalidateThumbnail/sweepThumbs both call this
-// against a uuid that may already be gone (a re-invalidate, a file evicted by a concurrent sweep).
-export async function deleteThumb(uuid: string): Promise<void> {
-	const dir = await thumbDirHandle()
-
-	try {
-		await dir.removeEntry(`${uuid}${THUMB_EXT}`)
-	} catch (e) {
-		if (e instanceof DOMException && e.name === "NotFoundError") {
-			return
-		}
-
-		throw e
-	}
-}
-
 // Enumerates every cached thumbnail with its on-disk size and last-write time — sweepThumbs' own
 // input. getFile() per entry (not getSize() via a sync access handle) so this stays a plain async
 // read, safely callable even while another entry in the same directory is mid-write elsewhere.

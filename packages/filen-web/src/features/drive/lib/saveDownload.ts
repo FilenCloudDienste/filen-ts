@@ -1,4 +1,5 @@
 import type { AnyFile, ZipItem } from "@filen/sdk-rs"
+import { isAbortError } from "@filen/utils"
 import { sdkApi } from "@/lib/sdk/client"
 import { SW_DOWNLOAD_PREFIX, SW_MSG_INIT_CLIENT, SW_MSG_REGISTER_DOWNLOAD, SW_MSG_REGISTER_ZIP_DOWNLOAD } from "@/lib/sw/protocol"
 
@@ -26,11 +27,10 @@ export function isFsaAvailable(): boolean {
 }
 
 // showSaveFilePicker() rejects with a DOMException named "AbortError" when the user dismisses the
-// save dialog without choosing a location — that is a deliberate no-op, never an error toast. Duck-
-// typed (not `instanceof DOMException`) so it recognizes both a real browser rejection and a plain
-// `{name: "AbortError"}` test double, mirroring lib/sdk/errors.ts's own isSdkError shape probe.
+// save dialog without choosing a location — that is a deliberate no-op, never an error toast.
+// isAbortError's duck-typed name check also recognizes a plain `{name: "AbortError"}` test double.
 export function isPickerCancelled(e: unknown): boolean {
-	return typeof e === "object" && e !== null && (e as { name?: unknown }).name === "AbortError"
+	return isAbortError(e)
 }
 
 async function pickFsaTarget(suggestedName: string): Promise<FsaSaveTarget> {
