@@ -60,7 +60,6 @@ export function useDriveListboxNav({
 		useDriveStore.getState().clearSelectedItems()
 		// eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate navigation reset, see above
 		setActiveIndex(0)
-		// eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate navigation reset, see above
 		setAnchorIndex(0)
 	}, [variant, splat])
 
