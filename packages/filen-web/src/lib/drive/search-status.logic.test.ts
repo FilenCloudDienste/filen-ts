@@ -7,6 +7,7 @@ import { deriveSearchStatus } from "@/lib/drive/search-status.logic"
 function base(over?: Partial<Parameters<typeof deriveSearchStatus>[0]>): Parameters<typeof deriveSearchStatus>[0] {
 	return {
 		query: "doc",
+		hasSnapshot: true,
 		resultCount: 0,
 		resyncing: false,
 		live: true,
@@ -32,6 +33,18 @@ describe("deriveSearchStatus", () => {
 
 	it("is warming with zero results before grace elapses", () => {
 		expect(deriveSearchStatus(base({ resultCount: 0, graceElapsed: false }))).toBe("warming")
+	})
+
+	it("is warming with no snapshot yet, even once grace has already elapsed (the false-negative this guards against)", () => {
+		expect(deriveSearchStatus(base({ hasSnapshot: false, graceElapsed: true }))).toBe("warming")
+	})
+
+	it("is warming with no snapshot yet, even while a resync is actively converging", () => {
+		expect(deriveSearchStatus(base({ hasSnapshot: false, graceElapsed: true, resyncing: true }))).toBe("warming")
+	})
+
+	it("stops being forced into warming the instant a snapshot lands, even with zero results, once grace has elapsed", () => {
+		expect(deriveSearchStatus(base({ hasSnapshot: true, resultCount: 0, graceElapsed: true, resyncing: false }))).toBe("settled")
 	})
 
 	it("stays warming with zero results while resyncing, still inside grace", () => {
@@ -76,6 +89,10 @@ describe("deriveSearchStatus", () => {
 
 	it("is terminal on a watchdog trip with no data and no resync in flight (a genuine wedge)", () => {
 		expect(deriveSearchStatus(base({ watchdogTripped: true, resultCount: 0, resyncing: false }))).toBe("terminal")
+	})
+
+	it("is terminal on a watchdog trip even if no snapshot ever arrived — the fatal wedge still wins over the warming guard", () => {
+		expect(deriveSearchStatus(base({ hasSnapshot: false, watchdogTripped: true, resultCount: 0, resyncing: false }))).toBe("terminal")
 	})
 
 	it("is NOT terminal on a watchdog trip while a resync is still actively converging", () => {

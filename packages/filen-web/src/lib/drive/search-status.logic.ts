@@ -11,8 +11,9 @@ export const SETCONFIG_DEBOUNCE_MS = 350
 // an empty snapshot this fresh may just not have converged yet.
 export const GRACE_MS = 400
 
-// No snapshot at all within this window of opening collapses to terminal — a wedged worker can't
-// spin a bare "Searching…" forever.
+// Past this much time with nothing back at all, give up and collapse to terminal — an open that
+// never produces so much as an empty snapshot is a dead end, and staying on an unresolved loading
+// state forever is a worse outcome than telling the user it failed.
 export const WATCHDOG_MS = 15_000
 
 // Backstop for a dropped resync-finished push: stop waiting on a stalled convergence after this long
@@ -26,6 +27,12 @@ export const RESULT_CEILING = 1_000
 
 export interface SearchStatusInput {
 	query: string
+	// True once the CURRENT open has produced at least one snapshot (even an empty one). The caller
+	// must default this to false the instant an open is issued and flip it true only once a real
+	// snapshot lands — never infer it from resultCount/graceElapsed alone (see the warming branch
+	// below): a slow first round trip that outlasts the grace window must still read as warming, not
+	// as a converged zero-result search.
+	hasSnapshot: boolean
 	resultCount: number
 	resyncing: boolean
 	live: boolean
@@ -50,9 +57,13 @@ export function deriveSearchStatus(input: SearchStatusInput): SearchStatus {
 		return "terminal"
 	}
 
-	// Zero results is warming until grace clears it — mirrors mobile's rule that a non-empty result
-	// always displays immediately, grace only ever gates the empty case.
-	if (input.resultCount === 0 && !input.graceElapsed) {
+	// No snapshot at all yet for the current open ALWAYS reads as warming, independent of the grace
+	// timer — a caller that only relied on resultCount===0/graceElapsed defaults here would misread a
+	// slow (but eventually successful) first round trip as a converged, empty search the instant grace
+	// elapsed before the open even resolved. Once a snapshot has landed, zero results is warming only
+	// until grace clears it — mirrors mobile's rule that a non-empty result always displays
+	// immediately, grace only ever gates the empty case.
+	if (!input.hasSnapshot || (input.resultCount === 0 && !input.graceElapsed)) {
 		return "warming"
 	}
 

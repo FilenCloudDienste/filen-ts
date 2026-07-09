@@ -71,7 +71,16 @@ export function toErrorDTO(e: unknown): ErrorDTO {
 		return dto
 	}
 	const message = e instanceof Error ? e.message : String(e)
-	return { species: "plain", message, label: message }
+	// A custom Error subclass's own `.name` is the only identity that can survive this boundary — its
+	// class/prototype never does (sdk.worker.ts's Comlink.expose proxy structured-clones every thrown
+	// value into a plain object before it ever reaches Comlink's own — separately lossy — Error
+	// handling, so `instanceof`/constructor checks are unavailable to any main-thread catch regardless
+	// of which layer is asked). Carrying a meaningful `.name` through as `kind` lets a caller
+	// discriminate a specific plain-Error case the same way it already would an SDK error's own `kind`,
+	// without matching on message text. The default, unset `.name` ("Error") carries no information and
+	// is excluded so it doesn't masquerade as a real kind.
+	const kind = e instanceof Error && e.name !== "" && e.name !== "Error" ? e.name : undefined
+	return { species: "plain", message, label: message, ...(kind !== undefined ? { kind } : {}) }
 }
 
 // Canonical entry point for an UNKNOWN rejection. The SDK worker's Comlink boundary already throws a

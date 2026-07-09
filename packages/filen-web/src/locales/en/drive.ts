@@ -115,6 +115,18 @@ export const drive = {
 	/** Drive listing row — visually-hidden label announcing a favorited item's star indicator */
 	driveFavorited: "Favorited",
 
+	// ── Search ───────────────────────────────────────────────────────────────
+	/** Drive search input — accessible label on the button clearing the current search text */
+	driveSearchClear: "Clear search",
+	/** Drive search — empty-state title once the search has settled with zero matches */
+	driveSearchNoResults: "No matches",
+	/** Drive search — status text shown next to a spinner while zero matches have converged yet but the search is still actively running */
+	driveSearchStillSearching: "Still searching…",
+	/** Drive search — error empty-state title once the search has given up (the underlying session died or timed out with nothing back) */
+	driveSearchUnavailable: "Search is unavailable right now",
+	/** Drive search — footer note shown when more matches exist than are currently displayed; {{shown}} = matches loaded so far, {{total}} = total matches found */
+	driveSearchShowingOf: "Showing {{shown}} of {{total}}",
+
 	// ── Shared identity ──────────────────────────────────────────────────────
 	/** Drive listing row/tile (shared-with-me surface) — muted secondary label naming who shared an item with the user; {{name}} = the sharer's email */
 	driveSharedByLabel: "Shared by {{name}}",
@@ -136,6 +148,8 @@ export const drive = {
 	driveCommandTrash: "Trash",
 	/** Keymap registry — description for the drive.download command */
 	driveCommandDownload: "Download",
+	/** Keymap registry — description for the drive.search command */
+	driveCommandSearch: "Search",
 
 	// ── Item action menu ─────────────────────────────────────────────────────
 	/** Item menu — accessible label for the ⋯ button opening the per-item action menu */

@@ -4,6 +4,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useShallow } from "zustand/shallow"
 import { toast } from "sonner"
+import { SearchXIcon, CircleAlertIcon } from "lucide-react"
 import {
 	resolveEffectiveSort,
 	resolveEffectiveViewMode,
@@ -37,7 +38,7 @@ import { useAction } from "@/lib/keymap/useAction"
 import { useBlockedUsers } from "@/lib/contacts/use-blocked-users"
 import { driveItemActions, type ItemActionDialogKind } from "@/components/drive/item-menu.logic"
 import { isBulkDownloadEnabled } from "@/components/drive/bulk-action-bar.logic"
-import { filterSharedInByBlocked, staleBlockedSelectionUuids } from "@/components/drive/directory-listing.logic"
+import { filterSharedInByBlocked, resolveSearchDisplayItems, staleBlockedSelectionUuids } from "@/components/drive/directory-listing.logic"
 import { Breadcrumb } from "@/components/drive/breadcrumb"
 import { SortMenu } from "@/components/drive/sort-menu"
 import { ViewModeToggle } from "@/components/drive/view-mode-toggle"
@@ -49,6 +50,11 @@ import { EmptyState } from "@/components/drive/empty-state"
 import { ListingSkeleton } from "@/components/drive/listing-skeleton"
 import { DriveRow } from "@/components/drive/drive-row"
 import { DriveTile } from "@/components/drive/drive-tile"
+import { SearchInput } from "@/components/drive/search-input"
+import { useDriveSearch } from "@/components/drive/use-drive-search"
+import { searchHitNavigationTarget } from "@/components/drive/use-drive-search.logic"
+import { Spinner } from "@/components/ui/spinner"
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { MoveTargetDialog } from "@/components/drive/move-target-dialog"
 import { ContactPickerDialog } from "@/components/drive/contact-picker-dialog"
 import { ColorDialog } from "@/components/drive/color-dialog"
@@ -201,7 +207,15 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// sharedIn ONLY: hide items shared by a blocked user (fail-open — see directory-listing.logic.ts).
 	// Every other variant's listing data passes straight through, untouched.
 	const visibleItems = variant === "sharedIn" ? filterSharedInByBlocked(listingQuery.data ?? [], blocked) : (listingQuery.data ?? [])
-	const sortedItems = sortDriveItems(visibleItems, effectiveSort)
+	// Subtree search rooted at the CURRENT directory (uuid), gated to the "drive" variant — recents/
+	// favorites/trash/shared have no navigable subtree of their own for it to search. While active,
+	// search results stand in for the normal listing query everywhere below: selection, the listbox's
+	// keyboard nav, context menus, the bulk bar, and preview siblings all read `sortedItems` alone, so
+	// swapping its one source here is what makes every one of them inherited for free.
+	const search = useDriveSearch(uuid, variant === "drive")
+	const sortedItems = search.active
+		? resolveSearchDisplayItems(search.results, search.total, effectiveSort)
+		: sortDriveItems(visibleItems, effectiveSort)
 
 	const selectedItems = useDriveStore(useShallow(state => state.selectedItems))
 	// Derived once per render so each row/tile's membership check is an O(1) `.has()` instead of an
@@ -395,10 +409,20 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			return
 		}
 
-		const target = resolveDriveNavigationTarget(item, variant, splat)
+		// A search hit is found via a subtree search rooted at the CURRENT directory, but the hit itself
+		// can be anywhere under it — searchHitNavigationTarget rebuilds a fresh, root-relative target
+		// from the hit's own uuid (never appended to `splat`); the in-place open below stays unchanged
+		// for the normal (non-search) listing.
+		const target = search.active ? searchHitNavigationTarget(item, variant) : resolveDriveNavigationTarget(item, variant, splat)
 
 		if (target) {
 			void navigate(target)
+
+			// Old-web parity: opening a directory hit always leaves search (the destination is a normal
+			// listing, not another search).
+			if (search.active) {
+				search.clear()
+			}
 		}
 	}
 
@@ -957,6 +981,131 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		[selectedItems, isDialogOpen, variant]
 	)
 
+	// The column header + virtualized listbox — identical shape whether sortedItems is the normal
+	// listing or (search.active) the search results; only the per-row/tile searchParentPath and the
+	// trailing footer differ. Kept as one render function rather than duplicated JSX in both branches
+	// below.
+	function renderListboxContent(): ReactNode {
+		return (
+			<>
+				{effectiveViewMode === "list" ? (
+					<div
+						aria-hidden="true"
+						className="flex h-8 shrink-0 items-center gap-3 border-b border-border px-3 text-xs font-medium text-muted-foreground"
+					>
+						<span className="size-4 shrink-0" />
+						<span className="min-w-0 flex-1">{t("driveColumnName")}</span>
+						<span className="w-20 shrink-0 text-right">{t("driveColumnSize")}</span>
+						<span className="w-28 shrink-0 text-right">{t("driveColumnModified")}</span>
+					</div>
+				) : null}
+				<div
+					ref={setScrollElement}
+					role="listbox"
+					aria-multiselectable="true"
+					aria-label={t("driveListLabel")}
+					tabIndex={-1}
+					onKeyDown={handleKeyDown}
+					className="min-h-0 flex-1 overflow-y-auto"
+				>
+					<div style={{ position: "relative", width: "100%", height: activeVirtualizer.getTotalSize() }}>
+						{effectiveViewMode === "list"
+							? listVirtualizer.getVirtualItems().map(virtualRow => {
+									const item = sortedItems[virtualRow.index]
+
+									if (!item) {
+										return null
+									}
+
+									// exactOptionalPropertyTypes forbids passing searchParentPath={undefined} outright (a distinct
+									// state from "omitted") — spread it in only when there's a real string to show.
+									const parentPath = search.active ? search.parentPaths.get(item.data.uuid) : undefined
+
+									return (
+										<DriveRow
+											key={virtualRow.key}
+											item={item}
+											index={virtualRow.index}
+											selected={selectedUuids.has(item.data.uuid)}
+											active={virtualRow.index === safeActiveIndex}
+											variant={variant}
+											style={{
+												position: "absolute",
+												top: 0,
+												left: 0,
+												width: "100%",
+												transform: `translateY(${String(virtualRow.start)}px)`
+											}}
+											{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
+											onPointerSelect={handlePointerSelect}
+											onOpen={handleOpen}
+											onItemAction={handleItemAction}
+											registerRef={registerRef}
+										/>
+									)
+								})
+							: gridVirtualizer.getVirtualItems().map(virtualRow => (
+									<div
+										key={virtualRow.key}
+										style={{
+											position: "absolute",
+											top: 0,
+											left: 0,
+											width: "100%",
+											transform: `translateY(${String(virtualRow.start)}px)`,
+											display: "grid",
+											gridTemplateColumns: `repeat(${String(columns)}, minmax(0, 1fr))`
+										}}
+									>
+										{Array.from({ length: columns }, (_, column) => {
+											const itemIndex = virtualRow.index * columns + column
+											const item = sortedItems[itemIndex]
+
+											if (!item) {
+												return null
+											}
+
+											// exactOptionalPropertyTypes forbids passing searchParentPath={undefined} outright (a distinct
+											// state from "omitted") — spread it in only when there's a real string to show.
+											const parentPath = search.active ? search.parentPaths.get(item.data.uuid) : undefined
+
+											return (
+												<DriveTile
+													key={item.data.uuid}
+													item={item}
+													index={itemIndex}
+													selected={selectedUuids.has(item.data.uuid)}
+													active={itemIndex === safeActiveIndex}
+													variant={variant}
+													{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
+													onPointerSelect={handlePointerSelect}
+													onOpen={handleOpen}
+													onItemAction={handleItemAction}
+													registerRef={registerRef}
+												/>
+											)
+										})}
+									</div>
+								))}
+					</div>
+				</div>
+				{search.active && (search.status === "background" || search.total > BigInt(sortedItems.length)) ? (
+					<div className="flex h-8 shrink-0 items-center justify-center gap-2 border-t border-border px-3 text-xs text-muted-foreground">
+						{search.status === "background" ? (
+							<Spinner
+								aria-hidden="true"
+								className="size-3"
+							/>
+						) : null}
+						{search.total > BigInt(sortedItems.length) ? (
+							<span>{t("driveSearchShowingOf", { shown: sortedItems.length, total: search.total.toString() })}</span>
+						) : null}
+					</div>
+				) : null}
+			</>
+		)
+	}
+
 	return (
 		<>
 			<header className="flex h-14 shrink-0 items-center border-b border-border px-4">
@@ -978,6 +1127,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							{listingQuery.status === "success" ? t("driveItemCount", { count: sortedItems.length }) : null}
 						</p>
 						<div className="flex items-center gap-2">
+							{variant === "drive" ? (
+								<SearchInput
+									value={search.input}
+									onChange={search.setInput}
+									onClear={search.clear}
+								/>
+							) : null}
 							<NewDirectory
 								parentUuid={uuid}
 								disabled={writeDisabled}
@@ -1007,7 +1163,42 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				parentUuid={uuid}
 				disabled={writeDisabled}
 			>
-				{listingQuery.status === "pending" ? (
+				{search.active ? (
+					search.status === "warming" ? (
+						<div className="flex-1 overflow-y-auto">
+							<ListingSkeleton viewMode={effectiveViewMode} />
+						</div>
+					) : search.status === "searching-empty" ? (
+						<div className="flex flex-1 flex-col items-center justify-center gap-2 overflow-y-auto">
+							<Spinner className="size-5 text-muted-foreground" />
+							<p className="text-sm text-muted-foreground">{t("driveSearchStillSearching")}</p>
+						</div>
+					) : search.status === "terminal" ? (
+						<div className="flex flex-1 overflow-y-auto">
+							<Empty>
+								<EmptyHeader>
+									<EmptyMedia variant="icon">
+										<CircleAlertIcon />
+									</EmptyMedia>
+									<EmptyTitle>{t("driveSearchUnavailable")}</EmptyTitle>
+								</EmptyHeader>
+							</Empty>
+						</div>
+					) : sortedItems.length === 0 ? (
+						<div className="flex flex-1 overflow-y-auto">
+							<Empty>
+								<EmptyHeader>
+									<EmptyMedia variant="icon">
+										<SearchXIcon />
+									</EmptyMedia>
+									<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>
+								</EmptyHeader>
+							</Empty>
+						</div>
+					) : (
+						renderListboxContent()
+					)
+				) : listingQuery.status === "pending" ? (
 					<div className="flex-1 overflow-y-auto">
 						<ListingSkeleton viewMode={effectiveViewMode} />
 					</div>
@@ -1026,99 +1217,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						<EmptyState variant="empty" />
 					</div>
 				) : (
-					<>
-						{effectiveViewMode === "list" ? (
-							<div
-								aria-hidden="true"
-								className="flex h-8 shrink-0 items-center gap-3 border-b border-border px-3 text-xs font-medium text-muted-foreground"
-							>
-								<span className="size-4 shrink-0" />
-								<span className="min-w-0 flex-1">{t("driveColumnName")}</span>
-								<span className="w-20 shrink-0 text-right">{t("driveColumnSize")}</span>
-								<span className="w-28 shrink-0 text-right">{t("driveColumnModified")}</span>
-							</div>
-						) : null}
-						<div
-							ref={setScrollElement}
-							role="listbox"
-							aria-multiselectable="true"
-							aria-label={t("driveListLabel")}
-							tabIndex={-1}
-							onKeyDown={handleKeyDown}
-							className="min-h-0 flex-1 overflow-y-auto"
-						>
-							<div style={{ position: "relative", width: "100%", height: activeVirtualizer.getTotalSize() }}>
-								{effectiveViewMode === "list"
-									? listVirtualizer.getVirtualItems().map(virtualRow => {
-											const item = sortedItems[virtualRow.index]
-
-											if (!item) {
-												return null
-											}
-
-											return (
-												<DriveRow
-													key={virtualRow.key}
-													item={item}
-													index={virtualRow.index}
-													selected={selectedUuids.has(item.data.uuid)}
-													active={virtualRow.index === safeActiveIndex}
-													variant={variant}
-													style={{
-														position: "absolute",
-														top: 0,
-														left: 0,
-														width: "100%",
-														transform: `translateY(${String(virtualRow.start)}px)`
-													}}
-													onPointerSelect={handlePointerSelect}
-													onOpen={handleOpen}
-													onItemAction={handleItemAction}
-													registerRef={registerRef}
-												/>
-											)
-										})
-									: gridVirtualizer.getVirtualItems().map(virtualRow => (
-											<div
-												key={virtualRow.key}
-												style={{
-													position: "absolute",
-													top: 0,
-													left: 0,
-													width: "100%",
-													transform: `translateY(${String(virtualRow.start)}px)`,
-													display: "grid",
-													gridTemplateColumns: `repeat(${String(columns)}, minmax(0, 1fr))`
-												}}
-											>
-												{Array.from({ length: columns }, (_, column) => {
-													const itemIndex = virtualRow.index * columns + column
-													const item = sortedItems[itemIndex]
-
-													if (!item) {
-														return null
-													}
-
-													return (
-														<DriveTile
-															key={item.data.uuid}
-															item={item}
-															index={itemIndex}
-															selected={selectedUuids.has(item.data.uuid)}
-															active={itemIndex === safeActiveIndex}
-															variant={variant}
-															onPointerSelect={handlePointerSelect}
-															onOpen={handleOpen}
-															onItemAction={handleItemAction}
-															registerRef={registerRef}
-														/>
-													)
-												})}
-											</div>
-										))}
-							</div>
-						</div>
-					</>
+					renderListboxContent()
 				)}
 			</UploadDropzone>
 			{renderActiveDialog()}

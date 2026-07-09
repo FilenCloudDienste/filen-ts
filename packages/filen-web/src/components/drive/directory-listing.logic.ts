@@ -1,5 +1,6 @@
 import { getSharerIdentity, type DriveItem } from "@/lib/drive/item"
 import { isBlocked, type BlockedUsers } from "@/lib/contacts/blocking"
+import { sortDriveItems, type DriveSortBy } from "@/lib/drive/sort"
 
 // Fail-open visibility check for a sharedIn item: an unresolved sharer identity (getSharerIdentity
 // returns null — the item isn't shared, or its role couldn't be read) always KEEPS the item; only a
@@ -27,4 +28,13 @@ export function filterSharedInByBlocked(items: readonly DriveItem[], blocked: Bl
 // identity is unresolved is never included here (fail-open — mirrors isVisibleSharedInItem).
 export function staleBlockedSelectionUuids(selectedItems: readonly DriveItem[], blocked: BlockedUsers): string[] {
 	return selectedItems.filter(item => !isVisibleSharedInItem(item, blocked)).map(item => item.data.uuid)
+}
+
+// Search results only get re-sorted once the whole match set is actually in hand (total <=
+// results.length) — the search engine's own window is a fixed 1,000-item ceiling (mirrors mobile), so
+// while more matches exist than currently landed, re-sorting the PARTIAL set every time a new one
+// streams in would visibly reshuffle rows the user is looking at. Truncated results instead keep the
+// SDK's own delivered (name) order, which is stable across a growing result set.
+export function resolveSearchDisplayItems(results: DriveItem[], total: bigint, sortBy: DriveSortBy): DriveItem[] {
+	return total <= BigInt(results.length) ? sortDriveItems(results, sortBy) : results
 }

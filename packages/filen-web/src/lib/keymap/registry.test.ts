@@ -197,6 +197,7 @@ describe("keymap registry — drive.download registration", () => {
 		registerAction({ id: "drive.trash", defaultCombo: "delete,backspace", scope: "drive", descriptionKey: "driveCommandTrash" })
 		registerAction({ id: "drive.newDirectory", defaultCombo: "n", scope: "drive", descriptionKey: "driveCommandNewDirectory" })
 		registerAction({ id: "drive.download", defaultCombo: "mod+s", scope: "drive", descriptionKey: "driveCommandDownload" })
+		registerAction({ id: "drive.search", defaultCombo: "mod+f", scope: "drive", descriptionKey: "driveCommandSearch" })
 		// global scope (theme-provider.tsx + icon-rail.tsx) — scope isn't enforced yet (every action
 		// fires unconditionally, see registry.ts's ActionScope comment), so these are live collision
 		// candidates too, not just drive-scope ones.
@@ -211,6 +212,7 @@ describe("keymap registry — drive.download registration", () => {
 			"drive.trash",
 			"drive.newDirectory",
 			"drive.download",
+			"drive.search",
 			"app.toggleTheme",
 			"app.openSettings"
 		]

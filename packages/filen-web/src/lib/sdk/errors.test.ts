@@ -48,6 +48,29 @@ describe("toErrorDTO", () => {
 		expect(labelFirst(dto)).toBe("invalid type: string")
 	})
 
+	// A named custom Error subclass (e.g. workers/search-engine.ts's SearchSupersededError) is the
+	// real-world case this exists for: the class/prototype itself never survives the worker boundary
+	// (sdk.worker.ts's Comlink.expose proxy converts every throw to a plain DTO before Comlink even
+	// sees it), so `.name` carried through as `kind` is the only identity a main-thread catch can key
+	// discrimination on.
+	it("carries a named custom Error subclass's own .name through as kind", () => {
+		class Superseded extends Error {
+			constructor() {
+				super("superseded")
+				this.name = "Superseded"
+			}
+		}
+
+		const dto = toErrorDTO(new Superseded())
+		expect(dto.species).toBe("plain")
+		expect(dto.kind).toBe("Superseded")
+		expect(dto.message).toBe("superseded")
+	})
+
+	it("does not carry the default, unset Error name through as kind", () => {
+		expect(toErrorDTO(new Error("plain boom")).kind).toBeUndefined()
+	})
+
 	it("never throws on garbage", () => {
 		expect(toErrorDTO(undefined).label).toBeTypeOf("string")
 	})

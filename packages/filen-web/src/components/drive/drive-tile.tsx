@@ -19,6 +19,10 @@ export interface DriveTileProps {
 	selected: boolean
 	active: boolean
 	variant: DriveVariant
+	// Search results only: the item's ancestor-name chain from the search root — undefined outside an
+	// active search. Shown as a native hover tooltip (title attr), not inline text — a tile has far
+	// less room than a row for a second line.
+	searchParentPath?: string
 	onPointerSelect: (index: number, event: MouseEvent<HTMLDivElement>) => void
 	onOpen: (index: number) => void
 	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
@@ -27,7 +31,18 @@ export interface DriveTileProps {
 
 // Grid tiles are plain CSS-grid children of an already-positioned virtual row (see
 // directory-listing.tsx) — unlike DriveRow, no per-tile absolute-positioning style is needed.
-export function DriveTile({ item, index, selected, active, variant, onPointerSelect, onOpen, onItemAction, registerRef }: DriveTileProps) {
+export function DriveTile({
+	item,
+	index,
+	selected,
+	active,
+	variant,
+	searchParentPath,
+	onPointerSelect,
+	onOpen,
+	onItemAction,
+	registerRef
+}: DriveTileProps) {
 	const { t } = useTranslation("drive")
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
 	// Only the two shared variants resolve a counterparty; every other variant gets null (no badge).
@@ -50,6 +65,7 @@ export function DriveTile({ item, index, selected, active, variant, onPointerSel
 						role="option"
 						aria-selected={selected}
 						tabIndex={active ? 0 : -1}
+						title={searchParentPath !== undefined && searchParentPath.length > 0 ? searchParentPath : undefined}
 						className="group/tile relative flex flex-col items-center gap-2 rounded-2xl p-3 text-center text-sm outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
 						onClick={event => {
 							onPointerSelect(index, event)

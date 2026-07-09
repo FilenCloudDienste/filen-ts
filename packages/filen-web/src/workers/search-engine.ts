@@ -42,6 +42,15 @@ export type SearchPush =
 export class SearchSupersededError extends Error {
 	constructor() {
 		super("search superseded")
+
+		// sdk.worker.ts's Comlink.expose proxy converts every thrown value on this worker to a plain
+		// ErrorDTO (lib/sdk/errors.ts's toErrorDTO) before Comlink's own transport ever sees it — no
+		// class/prototype survives that conversion, so `instanceof SearchSupersededError` always fails
+		// once this crosses to the main thread (verified live). toErrorDTO carries a named Error
+		// subclass's own `.name` through as `dto.kind`, which is the one identity that DOES survive —
+		// setting it explicitly here (it otherwise inherits the unhelpful "Error") is what lets a
+		// main-thread catch block discriminate a supersede from a genuine rejection by `dto.kind`.
+		this.name = "SearchSupersededError"
 	}
 }
 
@@ -125,6 +134,10 @@ async function safeClose(search: CacheSearch, searchWindow: CacheSearchWindow | 
 }
 
 export function createSearchEngine() {
+	// Never reset once flipped true: logout always location.reload()s the whole worker away, so
+	// nothing in this worker's lifetime currently needs to clear it. A future in-SPA account switch
+	// (no full reload) would have to reset this explicitly, or the new session silently inherits the
+	// previous account's cache configuration.
 	let configured = false
 	let active: { search: CacheSearch; searchWindow: CacheSearchWindow } | null = null
 	let currentToken: OpenToken | null = null
@@ -204,10 +217,18 @@ export function createSearchEngine() {
 		activeRootUuid = resolvedRoot
 
 		if (!configured) {
-			// A second configureCache call (a re-open after this worker already configured one)
-			// verifiably succeeds silently — no error, no behavior change — so this guard is a
-			// redundant-call optimization, not a correctness requirement.
-			await client.configureCache(CACHE_PATH, statusListener)
+			try {
+				// A second configureCache call (a re-open after this worker already configured one)
+				// verifiably succeeds silently — no error, no behavior change — so this guard is a
+				// redundant-call optimization, not a correctness requirement.
+				await client.configureCache(CACHE_PATH, statusListener)
+			} catch (e) {
+				if (currentToken === token) {
+					activeRootUuid = null
+				}
+
+				throw e
+			}
 
 			configured = true
 		}

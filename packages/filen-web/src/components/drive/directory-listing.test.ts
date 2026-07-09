@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { narrowItem } from "@/lib/drive/item"
 import { deriveBlockedUsers, type BlockedUsers } from "@/lib/contacts/blocking"
-import { filterSharedInByBlocked, isVisibleSharedInItem, staleBlockedSelectionUuids } from "@/components/drive/directory-listing.logic"
+import {
+	filterSharedInByBlocked,
+	isVisibleSharedInItem,
+	resolveSearchDisplayItems,
+	staleBlockedSelectionUuids
+} from "@/components/drive/directory-listing.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — mirrors
 // queries/drive.test.ts's own testUuid helper.
@@ -197,5 +202,38 @@ describe("staleBlockedSelectionUuids", () => {
 
 	it("returns an empty array for an empty selection", () => {
 		expect(staleBlockedSelectionUuids([], blockedUsersFixture())).toEqual([])
+	})
+})
+
+describe("resolveSearchDisplayItems", () => {
+	it("re-sorts once the whole match set is in hand (total equals what's already landed)", () => {
+		const b = narrowItem(mockDir({ uuid: testUuid("b"), meta: { type: "decoded", data: { name: "b" } } }))
+		const a = narrowItem(mockDir({ uuid: testUuid("a"), meta: { type: "decoded", data: { name: "a" } } }))
+
+		const result = resolveSearchDisplayItems([b, a], 2n, "nameAsc")
+
+		expect(result.map(item => item.data.uuid)).toEqual([a.data.uuid, b.data.uuid])
+	})
+
+	it("re-sorts when total is below what's landed too (a stale/overcounted total is never worse than sorting)", () => {
+		const b = narrowItem(mockDir({ uuid: testUuid("b2"), meta: { type: "decoded", data: { name: "b" } } }))
+		const a = narrowItem(mockDir({ uuid: testUuid("a2"), meta: { type: "decoded", data: { name: "a" } } }))
+
+		const result = resolveSearchDisplayItems([b, a], 1n, "nameAsc")
+
+		expect(result.map(item => item.data.uuid)).toEqual([a.data.uuid, b.data.uuid])
+	})
+
+	it("keeps the SDK-delivered order while truncated (more matches exist than currently landed)", () => {
+		const b = narrowItem(mockDir({ uuid: testUuid("b3"), meta: { type: "decoded", data: { name: "b" } } }))
+		const a = narrowItem(mockDir({ uuid: testUuid("a3"), meta: { type: "decoded", data: { name: "a" } } }))
+
+		const result = resolveSearchDisplayItems([b, a], 5n, "nameAsc")
+
+		expect(result.map(item => item.data.uuid)).toEqual([b.data.uuid, a.data.uuid])
+	})
+
+	it("returns an empty array unchanged regardless of total", () => {
+		expect(resolveSearchDisplayItems([], 0n, "nameAsc")).toEqual([])
 	})
 })

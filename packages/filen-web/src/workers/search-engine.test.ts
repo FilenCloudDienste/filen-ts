@@ -78,13 +78,17 @@ function fakeSearchResolving(fakeWindow: ReturnType<typeof makeFakeWindow>, onLi
 	})
 }
 
-function makeFakeClient(createSearch: ReturnType<typeof vi.fn>, rootUuid = "root-uuid") {
+function makeFakeClient(
+	createSearch: ReturnType<typeof vi.fn>,
+	rootUuid = "root-uuid",
+	configureCacheResult: () => Promise<undefined> = () => Promise.resolve(undefined)
+) {
 	let capturedStatusListener: ((messages: CacheStatusMessage[]) => void) | undefined
 
 	const configureCache = vi.fn((_path: string, listener: (messages: CacheStatusMessage[]) => void) => {
 		capturedStatusListener = listener
 
-		return Promise.resolve(undefined)
+		return configureCacheResult()
 	})
 
 	const fakeClient = {
@@ -356,6 +360,58 @@ describe("createSearchEngine — open", () => {
 		await expect(engine.open(client, { rootUuid: null, name: "" }, push)).rejects.toBe(boom)
 		expect(search.close).toHaveBeenCalledTimes(1)
 		expect(search.free).toHaveBeenCalledTimes(1)
+	})
+
+	// Regression coverage for a real bug: a genuine configureCache rejection used to leave
+	// activeRootUuid/activePush/currentToken all set (no catch existed around that await at all), so
+	// the module-level statusListener kept routing later, unrelated status events to this dead open's
+	// push. Reusing the SAME root for both the failed open and the injected status event is the
+	// strongest version of this test — even a same-root event must not reach the dead push once the
+	// routing state is properly cleared.
+	it("clears routing state on a genuine configureCache rejection so a later status event never reaches the dead push", async () => {
+		const boom = new Error("configureCache boom")
+		const deadRoot = testUuid("dead-root-configure")
+		const createSearch = vi.fn()
+		const { client, statusListener } = makeFakeClient(createSearch, deadRoot, () => Promise.reject(boom))
+		const engine = createSearchEngine()
+		const { push, pushes } = collectPushes()
+
+		await expect(engine.open(client, { rootUuid: deadRoot, name: "" }, push)).rejects.toBe(boom)
+		expect(createSearch).not.toHaveBeenCalled()
+
+		const listener = statusListener()
+
+		if (listener === undefined) {
+			throw new Error("test setup: configureCache never captured a status listener")
+		}
+
+		listener([{ type: "resyncProgress", progress: { type: "started", roots: [deadRoot] } }])
+
+		expect(pushes).toEqual([])
+	})
+
+	// Companion coverage for the EXISTING createSearch catch (unchanged by this task) — pins that it
+	// already clears activeRootUuid on a genuine rejection, so a same-root status event correctly never
+	// reaches the dead open's push either.
+	it("clears routing state on a genuine createSearch rejection so a later status event never reaches the dead push", async () => {
+		const boom = new Error("createSearch boom")
+		const deadRoot = testUuid("dead-root-create")
+		const createSearch = vi.fn(() => Promise.reject(boom))
+		const { client, statusListener } = makeFakeClient(createSearch, deadRoot)
+		const engine = createSearchEngine()
+		const { push, pushes } = collectPushes()
+
+		await expect(engine.open(client, { rootUuid: deadRoot, name: "" }, push)).rejects.toBe(boom)
+
+		const listener = statusListener()
+
+		if (listener === undefined) {
+			throw new Error("test setup: configureCache never captured a status listener")
+		}
+
+		listener([{ type: "resyncProgress", progress: { type: "started", roots: [deadRoot] } }])
+
+		expect(pushes).toEqual([])
 	})
 
 	it("pushes every snapshot delivered after the first, tagged as type snapshot", async () => {

@@ -22,6 +22,9 @@ export interface DriveRowProps {
 	// Absolute-positioning style computed by the virtualizer (position/top/left/width/transform) —
 	// the row owns none of that itself, only its own visual/layout concerns.
 	style: CSSProperties
+	// Search results only: the item's ancestor-name chain from the search root (empty for a direct
+	// child of it) — undefined outside an active search, where a row has nothing to show here.
+	searchParentPath?: string
 	onPointerSelect: (index: number, event: MouseEvent<HTMLDivElement>) => void
 	onOpen: (index: number) => void
 	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
@@ -35,6 +38,7 @@ export function DriveRow({
 	active,
 	variant,
 	style,
+	searchParentPath,
 	onPointerSelect,
 	onOpen,
 	onItemAction,
@@ -90,6 +94,9 @@ export function DriveRow({
 							createElement(fileIconFor(item), { "aria-hidden": true, className: "size-4 shrink-0 text-muted-foreground" })
 						)}
 						<span className="min-w-0 flex-1 truncate">{name}</span>
+						{searchParentPath !== undefined && searchParentPath.length > 0 ? (
+							<span className="max-w-48 min-w-0 shrink truncate text-xs text-muted-foreground">{searchParentPath}</span>
+						) : null}
 						{shared ? (
 							<span className="max-w-48 min-w-0 shrink truncate text-xs text-muted-foreground">
 								{t(shared.labelKey, { name: shared.name })}
