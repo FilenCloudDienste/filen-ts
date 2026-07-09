@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { narrowItem } from "@/lib/drive/item"
-import { deriveBlockedUsers, type BlockedUsers } from "@/lib/contacts/blocking"
+import { deriveBlockedUsers, type BlockedUsers } from "@/features/contacts/lib/blocking"
 import {
 	filterSharedInByBlocked,
 	isVisibleSharedInItem,

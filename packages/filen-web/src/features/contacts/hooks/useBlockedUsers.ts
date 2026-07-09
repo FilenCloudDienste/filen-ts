@@ -1,5 +1,5 @@
-import { useContactsQuery } from "@/queries/contacts"
-import { deriveBlockedUsers, type BlockedUsers } from "@/lib/contacts/blocking"
+import { useContactsQuery } from "@/features/contacts/queries/contacts"
+import { deriveBlockedUsers, type BlockedUsers } from "@/features/contacts/lib/blocking"
 
 // Reactive blocked-user lookup for the sharedIn block filter (see
 // components/drive/directory-listing.logic.ts) — mirrors filen-mobile's useBlockedUsers. React

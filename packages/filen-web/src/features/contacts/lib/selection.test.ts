@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { EMPTY_CONTACT_SELECTION, removeFromContactSelection, toggleContactSelection } from "@/lib/contacts/selection"
+import { EMPTY_CONTACT_SELECTION, removeFromContactSelection, toggleContactSelection } from "@/features/contacts/lib/selection"
 
 describe("toggleContactSelection", () => {
 	it("adds a uuid that is not yet selected in the given section", () => {

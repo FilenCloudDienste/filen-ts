@@ -35,7 +35,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
-import { useBlockedUsers } from "@/lib/contacts/use-blocked-users"
+import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { driveItemActions, type ItemActionDialogKind } from "@/components/drive/item-menu.logic"
 import { isBulkDownloadEnabled } from "@/components/drive/bulk-action-bar.logic"
 import {

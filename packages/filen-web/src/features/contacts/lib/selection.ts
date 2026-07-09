@@ -1,4 +1,4 @@
-import { type ContactSection } from "@/components/contacts/contacts-list.logic"
+import { type ContactSection } from "@/features/contacts/components/contactsList.logic"
 
 // Per-section selected-uuid buckets for the contacts bulk-selection mode. Unlike drive's single
 // DriveItem union (stores/drive.ts), contacts has four structurally distinct row kinds (requests/

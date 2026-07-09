@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
-import { buildContactSections, contactDisplayName, contactInitials, isContactOnline } from "@/components/contacts/contacts-list.logic"
+import {
+	buildContactSections,
+	contactDisplayName,
+	contactInitials,
+	isContactOnline
+} from "@/features/contacts/components/contactsList.logic"
 
 function mockContact(overrides: Partial<Contact> = {}): Contact {
 	return {

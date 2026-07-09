@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { BlockedContact } from "@filen/sdk-rs"
-import { deriveBlockedUsers, EMPTY_BLOCKED_USERS, isBlocked } from "@/lib/contacts/blocking"
+import { deriveBlockedUsers, EMPTY_BLOCKED_USERS, isBlocked } from "@/features/contacts/lib/blocking"
 
 function mockBlockedContact(overrides: Partial<BlockedContact> = {}): BlockedContact {
 	return {

@@ -1,5 +1,5 @@
 import { getSharerIdentity, type DriveItem } from "@/lib/drive/item"
-import { isBlocked, type BlockedUsers } from "@/lib/contacts/blocking"
+import { isBlocked, type BlockedUsers } from "@/features/contacts/lib/blocking"
 import { sortDriveItems, type DriveSortBy } from "@/lib/drive/sort"
 
 // Fail-open visibility check for a sharedIn item: an unresolved sharer identity (getSharerIdentity

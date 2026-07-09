@@ -3,11 +3,11 @@ import { useTranslation } from "react-i18next"
 import { SearchIcon, UsersIcon, ListChecksIcon } from "lucide-react"
 import { toast } from "sonner"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
-import { useContactsQuery, useContactRequestsQuery } from "@/queries/contacts"
+import { useContactsQuery, useContactRequestsQuery } from "@/features/contacts/queries/contacts"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { type ContactsKey } from "@/lib/i18n"
-import { buildContactSections, type ContactSection } from "@/components/contacts/contacts-list.logic"
+import { buildContactSections, type ContactSection } from "@/features/contacts/components/contactsList.logic"
 import {
 	acceptRequest,
 	denyRequest,
@@ -17,15 +17,15 @@ import {
 	unblockContact,
 	runContactsBulk,
 	type VoidActionOutcome
-} from "@/lib/contacts/actions"
-import { toastContactsBulkOutcome } from "@/lib/contacts/bulk-toast"
+} from "@/features/contacts/lib/actions"
+import { toastContactsBulkOutcome } from "@/features/contacts/lib/bulkToast"
 import {
 	EMPTY_CONTACT_SELECTION,
 	toggleContactSelection,
 	removeFromContactSelection,
 	type ContactSelection,
 	type ContactSectionKey
-} from "@/lib/contacts/selection"
+} from "@/features/contacts/lib/selection"
 import {
 	ContactRow,
 	ContactRequestRow,
@@ -34,9 +34,9 @@ import {
 	OutgoingRequestActions,
 	ContactActions,
 	BlockedActions
-} from "@/components/contacts/contact-row"
-import { AddContactDialog } from "@/components/contacts/add-contact-dialog"
-import { ContactsBulkBar } from "@/components/contacts/contacts-bulk-bar"
+} from "@/features/contacts/components/contactRow"
+import { AddContactDialog } from "@/features/contacts/components/addContactDialog"
+import { ContactsBulkBar } from "@/features/contacts/components/contactsBulkBar"
 import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"

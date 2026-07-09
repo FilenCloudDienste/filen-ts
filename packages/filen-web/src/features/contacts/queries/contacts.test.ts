@@ -44,7 +44,7 @@ import {
 	fetchContactRequests,
 	fetchContacts,
 	useContactsQuery
-} from "@/queries/contacts"
+} from "@/features/contacts/queries/contacts"
 
 beforeEach(() => {
 	vi.clearAllMocks()

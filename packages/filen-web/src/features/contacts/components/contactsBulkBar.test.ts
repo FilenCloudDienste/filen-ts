@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { CheckIcon, XIcon, Trash2Icon, BanIcon, RotateCcwIcon } from "lucide-react"
-import { buildContactBulkActions, type ContactBulkCounts } from "@/components/contacts/contacts-bulk-bar.logic"
+import { buildContactBulkActions, type ContactBulkCounts } from "@/features/contacts/components/contactsBulkBar.logic"
 
 function counts(overrides: Partial<ContactBulkCounts> = {}): ContactBulkCounts {
 	return { requests: 0, pending: 0, contacts: 0, blocked: 0, ...overrides }

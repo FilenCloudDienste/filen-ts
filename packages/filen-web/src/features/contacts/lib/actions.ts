@@ -1,7 +1,12 @@
 import type { BlockedContact, Contact, ContactRequestOut, UuidStr } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
-import { CONTACTS_QUERY_KEY, CONTACT_REQUESTS_QUERY_KEY, contactRequestsQueryUpdate, contactsQueryUpdate } from "@/queries/contacts"
+import {
+	CONTACTS_QUERY_KEY,
+	CONTACT_REQUESTS_QUERY_KEY,
+	contactRequestsQueryUpdate,
+	contactsQueryUpdate
+} from "@/features/contacts/queries/contacts"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { runBulk, type BulkOutcome } from "@/lib/drive/bulk"

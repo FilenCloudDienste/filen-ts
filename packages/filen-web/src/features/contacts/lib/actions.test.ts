@@ -48,7 +48,7 @@ vi.mock("@/lib/sdk/client", () => ({
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
-import { CONTACTS_QUERY_KEY, CONTACT_REQUESTS_QUERY_KEY } from "@/queries/contacts"
+import { CONTACTS_QUERY_KEY, CONTACT_REQUESTS_QUERY_KEY } from "@/features/contacts/queries/contacts"
 import {
 	acceptRequest,
 	blockContact as blockContactAction,
@@ -58,7 +58,7 @@ import {
 	runContactsBulk,
 	sendContactRequest as sendContactRequestAction,
 	unblockContact as unblockContactAction
-} from "@/lib/contacts/actions"
+} from "@/features/contacts/lib/actions"
 
 beforeEach(() => {
 	vi.clearAllMocks()

@@ -2,8 +2,8 @@ import { createElement } from "react"
 import { useTranslation } from "react-i18next"
 import { XIcon } from "lucide-react"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
-import { type ContactSelection } from "@/lib/contacts/selection"
-import { buildContactBulkActions, type ContactBulkActionKind } from "@/components/contacts/contacts-bulk-bar.logic"
+import { type ContactSelection } from "@/features/contacts/lib/selection"
+import { buildContactBulkActions, type ContactBulkActionKind } from "@/features/contacts/components/contactsBulkBar.logic"
 import { Button } from "@/components/ui/button"
 
 export interface ContactsBulkBarProps {
