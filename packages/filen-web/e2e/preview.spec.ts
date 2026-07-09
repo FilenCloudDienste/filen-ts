@@ -478,7 +478,7 @@ test("text preview decodes and renders read-only content, no CSP console errors"
 
 		// Opens the CodeMirror lazy chunk for the first time this run.
 		await row.dblclick()
-		const line = page.getByText("Hello from a tiny text fixture.")
+		const line = page.getByRole("dialog").getByText("Hello from a tiny text fixture.")
 		await expect(line).toBeVisible({ timeout: 30_000 })
 		await expect(page.getByText("Second line here.")).toBeVisible()
 
@@ -527,7 +527,7 @@ test("editable text preview saves via its Save button, persists across reopen, a
 		await expect(row).toBeVisible({ timeout: 45_000 })
 
 		await row.dblclick()
-		const original = page.getByText("Hello from a tiny text fixture.")
+		const original = page.getByRole("dialog").getByText("Hello from a tiny text fixture.")
 		await expect(original).toBeVisible({ timeout: 30_000 })
 
 		// Select-all + type replaces the whole buffer with a deterministic string (basicSetup's
@@ -627,7 +627,7 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 
 		// "a" sorts before "b" — Next from A lands on B, mirroring the image leg's own nameA/nameB proof.
 		await rowA.dblclick()
-		await expect(page.getByText("Hello from a tiny text fixture.")).toBeVisible({ timeout: 30_000 })
+		await expect(page.getByRole("dialog").getByText("Hello from a tiny text fixture.")).toBeVisible({ timeout: 30_000 })
 
 		const editor = page.locator(".cm-content")
 		let saveButton = page.getByRole("button", { name: "Save" })
@@ -650,7 +650,7 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 
 		// Page to sibling B (still its original, unedited content)...
 		await page.getByRole("button", { name: "Next file" }).click()
-		await expect(page.getByText("Hello from a tiny text fixture.")).toBeVisible({ timeout: 30_000 })
+		await expect(page.getByRole("dialog").getByText("Hello from a tiny text fixture.")).toBeVisible({ timeout: 30_000 })
 
 		// ...then back to A: must render A's OWN latest saved content, never a download error.
 		await page.getByRole("button", { name: "Previous file" }).click()
@@ -831,7 +831,7 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 		await expect(trashRow).toBeVisible({ timeout: 15_000 })
 
 		await trashRow.dblclick()
-		const line = page.getByText("Hello from a tiny text fixture.")
+		const line = page.getByRole("dialog").getByText("Hello from a tiny text fixture.")
 		await expect(line).toBeVisible({ timeout: 30_000 })
 
 		// Read-only: isEditable gates off outside the drive variant, so the Save button (rendered only
