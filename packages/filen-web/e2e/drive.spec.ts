@@ -1,5 +1,6 @@
-import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
+import { waitForListingSettled } from "./helpers/listing"
+import { resolveModKey } from "./helpers/modkey"
 
 // The injected session's own account content (My Drive's root) is real, live, and unknown ahead of
 // time — every test below holds regardless of whether it is empty or populated (see the per-test
@@ -15,36 +16,6 @@ import { test, expect } from "./fixtures"
 // verified: on firefox the listing sits on its loading skeleton forever and the toolbar stays
 // permanently disabled, never reaching either terminal render state.
 const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
-
-// Resolves once the listing has settled to one of its two terminal render states for the CURRENT
-// directory — there is no third: a query error would leave neither locator visible, which is a real,
-// actionable failure like any other timeout here. Returns the listbox locator and whether it actually
-// has content, so callers can gate content-dependent assertions on real, live account state.
-async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	const listbox = page.getByRole("listbox", { name: "Directory contents" })
-	const empty = page.getByText("Nothing here yet")
-
-	await expect(listbox.or(empty)).toBeVisible()
-
-	return { listbox, hasItems: await listbox.isVisible() }
-}
-
-// react-hotkeys-hook resolves the "mod" pseudo-modifier from the PAGE's own navigator.userAgent
-// (its internal isMac() check: /mac/i against the UA, iOS excluded), never from the real host OS.
-// process.platform (the Node/Playwright-runner's host) is not a reliable proxy for that: Playwright's
-// chromium "Desktop Chrome" device profile ships a fixed userAgent that reports Windows regardless of
-// the machine it actually runs on (verified against playwright-core's own device descriptor source).
-// On a macOS runner this desyncs the two Mac checks — the test would send Meta, the in-page library
-// would still expect Ctrl for "mod" — so a keymap.v1-registered "mod+…" combo never matches and the
-// keydown falls through to the browser's own default action instead. Asking the page the same
-// question the library asks itself is the only way to pick a key that will actually match.
-async function resolveModKey(page: Page): Promise<"Meta" | "Control"> {
-	const looksLikeMacToBrowser = await page.evaluate(
-		() => /mac/i.test(navigator.userAgent) && !/iphone|ipad|ipod/i.test(navigator.userAgent)
-	)
-
-	return looksLikeMacToBrowser ? "Meta" : "Control"
-}
 
 test.describe("drive", () => {
 	test("the My Drive listing renders the shell, breadcrumb, and directory contents region", async ({

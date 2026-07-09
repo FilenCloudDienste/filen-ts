@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
+import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
 
 // Mirrors drive.spec.ts's own FIREFOX_HANG_REASON — every test below needs the listing's own
 // authenticated listDir call to settle before the picker inputs are even enabled (directory-listing.tsx's
@@ -16,69 +16,6 @@ const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, 
 // OS-level drag does), so upload-dropzone.tsx's own drop handler never fires from automation. It's
 // manual-QA-only. Both tests below drive the picker inputs instead (setInputFiles), a real,
 // automatable path through the exact same upload orchestration.
-//
-// Duplicated from drive.spec.ts/drive-actions.spec.ts/share.spec.ts rather than shared — this package
-// has no cross-spec e2e helpers module yet, and every other spec file here owns its helpers locally too.
-async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	const listbox = page.getByRole("listbox", { name: "Directory contents" })
-	const empty = page.getByText("Nothing here yet")
-
-	await expect(listbox.or(empty)).toBeVisible()
-
-	return { listbox, hasItems: await listbox.isVisible() }
-}
-
-// Duplicated from downloads.spec.ts/drive-actions.spec.ts's own enterScratchDirectory — both uploads
-// below land inside a scratch directory rather than at /drive's root: this suite runs fullyParallel
-// (playwright.config.ts), and a root-level create/trash races other specs' own root-listing
-// assertions (drive-actions.spec.ts's own comment documents the exact interference this once produced
-// live). A generous viewport defeats virtualization so a later named-row locator can't miss a
-// mounted-but-scrolled row; dblclick descends via a real client-side route change.
-async function enterScratchDirectory(page: Page, name: string): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	await page.setViewportSize({ width: 1280, height: 8000 })
-
-	const { listbox } = await waitForListingSettled(page)
-
-	await page.getByRole("button", { name: "New directory", exact: true }).click()
-	const dialog = page.getByRole("dialog")
-	await expect(dialog).toBeVisible()
-	await page.getByLabel("Name", { exact: true }).fill(name)
-	await page.getByRole("button", { name: "Create", exact: true }).click()
-	await expect(dialog).toHaveCount(0)
-
-	const scratchRow = listbox.getByRole("option", { name })
-	await expect(scratchRow).toBeVisible()
-
-	await scratchRow.dblclick()
-
-	return waitForListingSettled(page)
-}
-
-// Duplicated from downloads.spec.ts's own trashScratchDirectory — failure-proof companion to
-// enterScratchDirectory above, called from every test's own finally so the scratch directory (and
-// everything uploaded into it) is trashed even when an assertion above throws. Trashing the whole
-// directory covers both tests below in one step — no separate per-file trash is needed.
-async function trashScratchDirectory(page: Page, name: string): Promise<void> {
-	await page.keyboard.press("Escape")
-	await page.getByRole("complementary").getByRole("link", { name: "My Drive", exact: true }).click()
-
-	const { listbox } = await waitForListingSettled(page)
-	const row = listbox.getByRole("option", { name })
-
-	try {
-		await expect(row).toBeVisible({ timeout: 15_000 })
-	} catch {
-		return
-	}
-
-	await row.click()
-	await page.getByRole("button", { name: "Trash", exact: true }).click()
-
-	const confirm = page.getByRole("alertdialog")
-	await expect(confirm).toBeVisible()
-	await confirm.getByRole("button", { name: "Trash", exact: true }).click()
-	await expect(confirm).toHaveCount(0)
-}
 
 test.describe("uploads", () => {
 	test("picking a file uploads it through the worker and lands a row in the listing", async ({ page, injectedSession, browserName }) => {

@@ -1,30 +1,12 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
+import { waitForListingSettled, trashScratchDirectory } from "./helpers/listing"
+import { resolveModKey } from "./helpers/modkey"
+import { trackCspViolations } from "./helpers/csp"
 
 // Duplicated from drive.spec.ts/preview.spec.ts rather than shared — this package has no cross-spec
 // e2e helpers module yet, and every other spec file here owns its helpers locally too.
 const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
-
-// react-hotkeys-hook resolves the "mod" pseudo-modifier from the PAGE's own navigator.userAgent,
-// never process.platform — Playwright's chromium device profile reports Windows regardless of host
-// (see drive.spec.ts's own resolveModKey comment for the full mechanism). Duplicated per this
-// suite's local-helpers convention.
-async function resolveModKey(page: Page): Promise<"Meta" | "Control"> {
-	const looksLikeMacToBrowser = await page.evaluate(
-		() => /mac/i.test(navigator.userAgent) && !/iphone|ipad|ipod/i.test(navigator.userAgent)
-	)
-
-	return looksLikeMacToBrowser ? "Meta" : "Control"
-}
-
-async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	const listbox = page.getByRole("listbox", { name: "Directory contents" })
-	const empty = page.getByText("Nothing here yet")
-
-	await expect(listbox.or(empty)).toBeVisible()
-
-	return { listbox, hasItems: await listbox.isVisible() }
-}
 
 async function createDirectory(page: Page, listbox: ReturnType<Page["getByRole"]>, name: string): Promise<void> {
 	await page.getByRole("button", { name: "New directory", exact: true }).click()
@@ -35,33 +17,6 @@ async function createDirectory(page: Page, listbox: ReturnType<Page["getByRole"]
 	await expect(dialog).toHaveCount(0)
 
 	await expect(listbox.getByRole("option", { name })).toBeVisible()
-}
-
-// Duplicated from downloads.spec.ts's own trashScratchDirectory — Escape first defensively closes
-// any popover/overlay a failed assertion above left open.
-async function trashScratchDirectory(page: Page, name: string): Promise<void> {
-	await page.keyboard.press("Escape")
-	await page.getByRole("complementary").getByRole("link", { name: "My Drive", exact: true }).click()
-
-	const { listbox } = await waitForListingSettled(page)
-	const row = listbox.getByRole("option", { name })
-
-	try {
-		await expect(row).toBeVisible({ timeout: 15_000 })
-	} catch {
-		return
-	}
-
-	await row.click()
-	await page.getByRole("button", { name: "Trash", exact: true }).click()
-
-	const confirm = page.getByRole("alertdialog")
-	await expect(confirm).toBeVisible()
-	await confirm.getByRole("button", { name: "Trash", exact: true }).click()
-	// This scratch directory still holds its own nested subtree (nested/target-*.txt) at cleanup time,
-	// unlike every other spec's flat/already-emptied scratch directory — a generous timeout covers the
-	// larger trash operation rather than the default 15s.
-	await expect(confirm).toHaveCount(0, { timeout: 30_000 })
 }
 
 // The one live proof the whole subtree search feature works end to end: a real
@@ -89,12 +44,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 	const targetContent = "filen web e2e search target"
 	const modKey = await resolveModKey(page)
 
-	const cspViolations: string[] = []
-	page.on("console", msg => {
-		if (msg.type() === "error" && /content security policy|refused to/i.test(msg.text())) {
-			cspViolations.push(msg.text())
-		}
-	})
+	const cspViolations = trackCspViolations(page)
 
 	await page.goto("/drive")
 
@@ -202,6 +152,9 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 
 		expect(cspViolations).toEqual([])
 	} finally {
-		await trashScratchDirectory(page, scratchName)
+		// This scratch directory still holds its own nested subtree (nested/target-*.txt) at cleanup
+		// time, unlike every other spec's flat/already-emptied scratch directory — a generous timeout
+		// covers the larger trash operation rather than the default 15s.
+		await trashScratchDirectory(page, scratchName, 30_000)
 	}
 })

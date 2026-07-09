@@ -1,5 +1,5 @@
-import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
+import { waitForListingSettled } from "./helpers/listing"
 
 // Sharing/unsharing are OUTWARD-FACING mutations (a share reaches ANOTHER account; unshare revokes
 // real access) and premium-gated, so every test below is render/gate-only — the contact picker is
@@ -14,17 +14,6 @@ import { test, expect } from "./fixtures"
 // call to settle (the shared listings, or /drive itself for the picker test), and that hangs
 // indefinitely on Playwright-firefox under COI.
 const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
-
-// Duplicated from drive.spec.ts/drive-actions.spec.ts rather than shared — this package has no
-// cross-spec e2e helpers module yet, and every other spec file here owns its helpers locally too.
-async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	const listbox = page.getByRole("listbox", { name: "Directory contents" })
-	const empty = page.getByText("Nothing here yet")
-
-	await expect(listbox.or(empty)).toBeVisible()
-
-	return { listbox, hasItems: await listbox.isVisible() }
-}
 
 test.describe("sharing", () => {
 	test("shared surfaces render and activate from the sidebar", async ({ page, injectedSession, browserName }) => {

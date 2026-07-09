@@ -1,5 +1,7 @@
-import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
+import { waitForListingSettled, enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { resolveEditorModKey } from "./helpers/modkey"
+import { trackCspViolations } from "./helpers/csp"
 
 // Proves the preview overlay's whole pager loop live: open via double-click, page forward with the
 // on-screen button, page back with the ArrowLeft key (the in-dialog local handler — see
@@ -10,28 +12,6 @@ import { test, expect } from "./fixtures"
 // races drive.spec.ts's own root-listing assertions (see drive-actions.spec.ts's comment for the exact
 // failure this once produced live).
 const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
-
-// Deliberately NOT drive.spec.ts's own resolveModKey pattern (userAgent-based) — this file's two
-// editable-preview tests use the resolved key exclusively to drive CodeMirror's OWN built-in select-all
-// binding (`Mod-a` inside `.cm-content`), never a react-hotkeys-hook-registered app action, and the two
-// libraries resolve "mac" from different navigator properties that disagree under Playwright's chromium
-// device emulation. react-hotkeys-hook (the app's keymap registry — mod+f/mod+s/etc., what drive.spec.ts's
-// own resolveModKey correctly targets) checks navigator.userAgent, which Playwright's "Desktop Chrome"
-// profile fakes as Windows regardless of host. CodeMirror's keymap (@codemirror/view, `mac: ios ||
-// /Mac/.test(nav.platform)` — verified in the installed package source) checks navigator.platform
-// instead, which that same profile leaves truthful. On a macOS host the two disagree: userAgent says
-// "not mac" (Control), platform says "mac" (Meta) — reusing the userAgent-based helper here sends
-// Control-a into the editor, which CodeMirror doesn't bind to select-all, so nothing gets selected and
-// the following keyboard.type() INSERTS at the click-positioned caret instead of replacing the buffer —
-// silently corrupting the saved content into a mix of old and new text (reproduced live: a "select all
-// then replace" step that leaves the original first/last line intact around the inserted new text,
-// which the reopen assertions below alone would have surfaced as a confusing stale-content flake rather
-// than the actual wrong-modifier-key cause).
-async function resolveEditorModKey(page: Page): Promise<"Meta" | "Control"> {
-	const looksLikeMacToCodeMirror = await page.evaluate(() => navigator.platform.includes("Mac"))
-
-	return looksLikeMacToCodeMirror ? "Meta" : "Control"
-}
 
 // Sequential within this file (one worker), overriding the config's fullyParallel — the same
 // live-account rationale as drive-actions.spec.ts's own serial mode, but "default" so one test's
@@ -101,65 +81,6 @@ const CODE_BYTES = Buffer.from("export function add(a: number, b: number): numbe
 // for a SAFE link; the reject case is covered at the unit level, markdown-viewer.logic.test.ts, mirroring
 // docx-viewer.logic.test.ts's own precedent).
 const MARKDOWN_BYTES = Buffer.from("# Hello Markdown\n\nThis is **bold** text and a [safe link](https://example.com/safe).\n", "utf8")
-
-// Duplicated from downloads.spec.ts rather than shared — this package has no cross-spec e2e helpers
-// module yet, and every other spec file here owns its helpers locally too.
-async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	const listbox = page.getByRole("listbox", { name: "Directory contents" })
-	const empty = page.getByText("Nothing here yet")
-
-	await expect(listbox.or(empty)).toBeVisible()
-
-	return { listbox, hasItems: await listbox.isVisible() }
-}
-
-// Duplicated from downloads.spec.ts's own enterScratchDirectory — same rationale (a generous viewport
-// defeats virtualization so a later named-row locator can't miss a mounted-but-scrolled row; dblclick
-// descends via a real client-side route change).
-async function enterScratchDirectory(page: Page, name: string): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	await page.setViewportSize({ width: 1280, height: 8000 })
-
-	const { listbox } = await waitForListingSettled(page)
-
-	await page.getByRole("button", { name: "New directory", exact: true }).click()
-	const dialog = page.getByRole("dialog")
-	await expect(dialog).toBeVisible()
-	await page.getByLabel("Name", { exact: true }).fill(name)
-	await page.getByRole("button", { name: "Create", exact: true }).click()
-	await expect(dialog).toHaveCount(0)
-
-	const scratchRow = listbox.getByRole("option", { name })
-	await expect(scratchRow).toBeVisible()
-
-	await scratchRow.dblclick()
-
-	return waitForListingSettled(page)
-}
-
-// Duplicated from downloads.spec.ts's own trashScratchDirectory — Escape first defensively closes the
-// preview overlay if a failed assertion above left it open (its own onOpenChange never otherwise runs),
-// same rationale as that file's popover-dismiss comment.
-async function trashScratchDirectory(page: Page, name: string): Promise<void> {
-	await page.keyboard.press("Escape")
-	await page.getByRole("complementary").getByRole("link", { name: "My Drive", exact: true }).click()
-
-	const { listbox } = await waitForListingSettled(page)
-	const row = listbox.getByRole("option", { name })
-
-	try {
-		await expect(row).toBeVisible({ timeout: 15_000 })
-	} catch {
-		return
-	}
-
-	await row.click()
-	await page.getByRole("button", { name: "Trash", exact: true }).click()
-
-	const confirm = page.getByRole("alertdialog")
-	await expect(confirm).toBeVisible()
-	await confirm.getByRole("button", { name: "Trash", exact: true }).click()
-	await expect(confirm).toHaveCount(0)
-}
 
 test("image preview opens, pages with the button and the arrow key, and closes with escape", async ({
 	page,
@@ -232,12 +153,7 @@ test("HEIC preview transforms client-side and renders via the buffered path, nev
 	const scratchName = `e2e-preview-heic-${runId}`
 	const nameHeic = `e2e-preview-heic-${runId}.heic`
 
-	const cspViolations: string[] = []
-	page.on("console", msg => {
-		if (msg.type() === "error" && /content security policy|refused to/i.test(msg.text())) {
-			cspViolations.push(msg.text())
-		}
-	})
+	const cspViolations = trackCspViolations(page)
 
 	await page.goto("/drive")
 
@@ -290,12 +206,7 @@ test("PDF preview renders multi-page content, pages via its own toolbar with a r
 	const scratchName = `e2e-preview-pdf-${runId}`
 	const namePdf = `e2e-preview-pdf-${runId}.pdf`
 
-	const cspViolations: string[] = []
-	page.on("console", msg => {
-		if (msg.type() === "error" && /content security policy|refused to/i.test(msg.text())) {
-			cspViolations.push(msg.text())
-		}
-	})
+	const cspViolations = trackCspViolations(page)
 
 	await page.goto("/drive")
 
@@ -355,12 +266,7 @@ test("PDF preview prompts for a password, retries after a wrong one, and renders
 	const scratchName = `e2e-preview-pdf-pw-${runId}`
 	const namePdf = `e2e-preview-pdf-pw-${runId}.pdf`
 
-	const cspViolations: string[] = []
-	page.on("console", msg => {
-		if (msg.type() === "error" && /content security policy|refused to/i.test(msg.text())) {
-			cspViolations.push(msg.text())
-		}
-	})
+	const cspViolations = trackCspViolations(page)
 
 	await page.goto("/drive")
 
@@ -418,12 +324,7 @@ test("docx preview renders document content and closes, no CSP console errors", 
 	const scratchName = `e2e-preview-docx-${runId}`
 	const nameDocx = `e2e-preview-docx-${runId}.docx`
 
-	const cspViolations: string[] = []
-	page.on("console", msg => {
-		if (msg.type() === "error" && /content security policy|refused to/i.test(msg.text())) {
-			cspViolations.push(msg.text())
-		}
-	})
+	const cspViolations = trackCspViolations(page)
 
 	await page.goto("/drive")
 
@@ -468,12 +369,7 @@ test("text preview decodes and renders read-only content, no CSP console errors"
 	const scratchName = `e2e-preview-text-${runId}`
 	const nameTxt = `e2e-preview-text-${runId}.txt`
 
-	const cspViolations: string[] = []
-	page.on("console", msg => {
-		if (msg.type() === "error" && /content security policy|refused to/i.test(msg.text())) {
-			cspViolations.push(msg.text())
-		}
-	})
+	const cspViolations = trackCspViolations(page)
 
 	await page.goto("/drive")
 
@@ -684,12 +580,7 @@ test("code preview renders with syntax highlighting, no CSP console errors", asy
 	const scratchName = `e2e-preview-code-${runId}`
 	const nameCode = `e2e-preview-code-${runId}.ts`
 
-	const cspViolations: string[] = []
-	page.on("console", msg => {
-		if (msg.type() === "error" && /content security policy|refused to/i.test(msg.text())) {
-			cspViolations.push(msg.text())
-		}
-	})
+	const cspViolations = trackCspViolations(page)
 
 	await page.goto("/drive")
 
@@ -732,12 +623,7 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 	const scratchName = `e2e-preview-md-${runId}`
 	const nameMd = `e2e-preview-md-${runId}.md`
 
-	const cspViolations: string[] = []
-	page.on("console", msg => {
-		if (msg.type() === "error" && /content security policy|refused to/i.test(msg.text())) {
-			cspViolations.push(msg.text())
-		}
-	})
+	const cspViolations = trackCspViolations(page)
 
 	await page.goto("/drive")
 

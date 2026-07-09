@@ -1,5 +1,6 @@
-import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
+import { waitForListingSettled, enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { trackCspViolations } from "./helpers/csp"
 
 // Duplicated from preview.spec.ts/downloads.spec.ts rather than shared — this package has no
 // cross-spec e2e helpers module yet, and every other spec file here owns its helpers locally too.
@@ -9,62 +10,6 @@ const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, 
 // canMakeThumbnail is metadata-only (extension-derived), but makeThumbnailInMemory itself decodes
 // real bytes, so this has to be a genuinely valid image, not just a correctly-named one.
 const PNG_BYTES = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64")
-
-async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	const listbox = page.getByRole("listbox", { name: "Directory contents" })
-	const empty = page.getByText("Nothing here yet")
-
-	await expect(listbox.or(empty)).toBeVisible()
-
-	return { listbox, hasItems: await listbox.isVisible() }
-}
-
-// Duplicated from downloads.spec.ts's own enterScratchDirectory — same rationale (a generous
-// viewport defeats virtualization so a later named-row locator can't miss a mounted-but-scrolled
-// row; dblclick descends via a real client-side route change).
-async function enterScratchDirectory(page: Page, name: string): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	await page.setViewportSize({ width: 1280, height: 8000 })
-
-	const { listbox } = await waitForListingSettled(page)
-
-	await page.getByRole("button", { name: "New directory", exact: true }).click()
-	const dialog = page.getByRole("dialog")
-	await expect(dialog).toBeVisible()
-	await page.getByLabel("Name", { exact: true }).fill(name)
-	await page.getByRole("button", { name: "Create", exact: true }).click()
-	await expect(dialog).toHaveCount(0)
-
-	const scratchRow = listbox.getByRole("option", { name })
-	await expect(scratchRow).toBeVisible()
-
-	await scratchRow.dblclick()
-
-	return waitForListingSettled(page)
-}
-
-// Duplicated from downloads.spec.ts's own trashScratchDirectory — Escape first defensively closes
-// any popover/overlay a failed assertion above left open.
-async function trashScratchDirectory(page: Page, name: string): Promise<void> {
-	await page.keyboard.press("Escape")
-	await page.getByRole("complementary").getByRole("link", { name: "My Drive", exact: true }).click()
-
-	const { listbox } = await waitForListingSettled(page)
-	const row = listbox.getByRole("option", { name })
-
-	try {
-		await expect(row).toBeVisible({ timeout: 15_000 })
-	} catch {
-		return
-	}
-
-	await row.click()
-	await page.getByRole("button", { name: "Trash", exact: true }).click()
-
-	const confirm = page.getByRole("alertdialog")
-	await expect(confirm).toBeVisible()
-	await confirm.getByRole("button", { name: "Trash", exact: true }).click()
-	await expect(confirm).toHaveCount(0)
-}
 
 // The one live proof the whole thumbnail pipeline works end to end: a real makeThumbnailInMemory
 // worker round trip, a real OPFS write/read, and the icon-slot swap in both listing views — none of
@@ -86,12 +31,7 @@ test("an image renders a real thumbnail in both listing views, text/svg siblings
 	const nameTxt = `e2e-thumb-${runId}.txt`
 	const nameSvg = `e2e-thumb-${runId}.svg`
 
-	const cspViolations: string[] = []
-	page.on("console", msg => {
-		if (msg.type() === "error" && /content security policy|refused to/i.test(msg.text())) {
-			cspViolations.push(msg.text())
-		}
-	})
+	const cspViolations = trackCspViolations(page)
 
 	await page.goto("/drive")
 

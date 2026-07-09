@@ -1,26 +1,11 @@
-import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
+import { waitForListingSettled } from "./helpers/listing"
+import { MOD_KEY } from "./helpers/modkey"
 
 // Mirrors drive.spec.ts's own FIREFOX_HANG_REASON — every test below needs the SAME authenticated
 // listDir call to settle before it can do anything, and that hangs indefinitely on Playwright-firefox
 // under COI (see drive.spec.ts's own comment for the live-verified root cause).
 const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
-
-// Duplicated from drive.spec.ts rather than shared — this package has no cross-spec e2e helpers
-// module yet, and every other spec file here owns its helpers locally too.
-async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	const listbox = page.getByRole("listbox", { name: "Directory contents" })
-	const empty = page.getByText("Nothing here yet")
-
-	await expect(listbox.or(empty)).toBeVisible()
-
-	return { listbox, hasItems: await listbox.isVisible() }
-}
-
-// Meta on macOS (where this suite actually runs today), Control everywhere else — mirrors
-// drive.spec.ts's own selection test; Playwright/the app's worker share this host, so
-// process.platform correctly proxies the browser's own platform for the add-to-selection modifier.
-const MOD_KEY = process.platform === "darwin" ? "Meta" : "Control"
 
 // Serial, not parallel: the account is shared LIVE state, and the last test creates/selects/trashes/
 // restores real items by name — running it alongside this file's own other tests (which each select

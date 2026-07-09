@@ -3,6 +3,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
+import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { MOD_KEY } from "./helpers/modkey"
 
 // Neither native picker is drivable by Playwright, so every FSA-path test below stubs
 // window.showSaveFilePicker (installed via addInitScript, before the app's own first script runs, so
@@ -23,10 +25,6 @@ import { test, expect } from "./fixtures"
 // trigger covers both the single-file and the zip path below.
 const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
 
-// Meta on macOS (where this suite runs today), Control elsewhere -- mirrors drive-actions.spec.ts's own
-// multi-select modifier.
-const MOD_KEY = process.platform === "darwin" ? "Meta" : "Control"
-
 // Ambient shim for window.showSaveFilePicker, merged with e2e/global.d.ts's own Window augmentation
 // (same program, same declaration-merging rules) rather than touching that file -- this isn't a real
 // e2e hook the app ships, just this spec's own test double.
@@ -45,91 +43,6 @@ declare global {
 		// test that reads it called stubFsaPicker first (mirrors e2e/global.d.ts's own __filenE2E rationale).
 		__smokeSink: { bytes: number; first4: number[] }
 	}
-}
-
-// Duplicated from drive.spec.ts/uploads.spec.ts rather than shared -- this package has no cross-spec e2e
-// helpers module yet, and every other spec file here owns its helpers locally too.
-async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	const listbox = page.getByRole("listbox", { name: "Directory contents" })
-	const empty = page.getByText("Nothing here yet")
-
-	await expect(listbox.or(empty)).toBeVisible()
-
-	return { listbox, hasItems: await listbox.isVisible() }
-}
-
-// Every test below nests its fixture file(s) inside a per-test scratch directory rather than creating
-// them at /drive's root -- mirrors drive-actions.spec.ts's own hardened convention (see the comment on
-// that file's one mutating test). Under this suite's fullyParallel config (playwright.config.ts),
-// root-level create/trash from one spec races root-level reads from another: drive.spec.ts's own
-// "selection" test snapshots the root listbox's option COUNT, then asserts a select-all against it --
-// a TOCTOU a concurrent create/trash at root can break, and this exact interference already reproduced
-// live once as a flaky drive.spec.ts failure (drive-actions.spec.ts's own comment documents it).
-// Nesting confines every count-shifting moment to the two around the scratch directory itself (create,
-// final trash) instead of one pair per fixture file.
-async function enterScratchDirectory(page: Page, name: string): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	// The listing virtualizes its rows (directory-listing.tsx's useVirtualizer, keyed by item uuid) --
-	// on a long/shared listing a row sorted well below the fold may not be mounted in the DOM at all, so
-	// a locator that depends on finding a SPECIFIC named row (this function's own scratchRow below,
-	// trashScratchDirectory's row) can silently miss it. A generously tall viewport makes the scroll
-	// container's height exceed any realistic item count's total row height, so the virtualizer renders
-	// every row in one pass for the rest of this test -- simpler and more robust here than driving
-	// synthetic scroll/wheel events against an unknown scroll container to hunt for one row.
-	await page.setViewportSize({ width: 1280, height: 8000 })
-
-	const { listbox } = await waitForListingSettled(page)
-
-	await page.getByRole("button", { name: "New directory", exact: true }).click()
-	const dialog = page.getByRole("dialog")
-	await expect(dialog).toBeVisible()
-	await page.getByLabel("Name", { exact: true }).fill(name)
-	await page.getByRole("button", { name: "Create", exact: true }).click()
-	await expect(dialog).toHaveCount(0)
-
-	const scratchRow = listbox.getByRole("option", { name })
-	await expect(scratchRow).toBeVisible()
-
-	// A real double-click (an in-app client-side route change, same as drive-actions.spec.ts's own
-	// descent) -- everything the calling test does until trashScratchDirectory below stays inside this
-	// directory and never touches the root listing again.
-	await scratchRow.dblclick()
-
-	return waitForListingSettled(page)
-}
-
-// Failure-proof companion to enterScratchDirectory above -- called from every test's own finally, so the
-// scratch directory (and everything uploaded into it) is trashed even when an assertion above throws.
-// Escape first: every test below opens the rail's Transfers popover, which renders close enough to the
-// sidebar to risk covering its own "My Drive" link, and dismissing an already-closed popover is a
-// harmless no-op.
-async function trashScratchDirectory(page: Page, name: string): Promise<void> {
-	await page.keyboard.press("Escape")
-	await page.getByRole("complementary").getByRole("link", { name: "My Drive", exact: true }).click()
-
-	const { listbox } = await waitForListingSettled(page)
-	const row = listbox.getByRole("option", { name })
-
-	// waitForListingSettled only proves SOME listbox is showing, not that it reflects the scratch
-	// directory just created: React Query serves this root query key's LAST-cached result instantly
-	// (queries/client.ts's staleTime 0 still triggers a background refetch, but never blocks the
-	// already-cached render) -- root was cached once already, at this test's own initial goto, before
-	// the scratch directory existed. A one-shot visibility check races that background refetch and
-	// reliably loses under load; polling rides it out. A genuine timeout (the scratch directory never
-	// made it into the listing at all, e.g. enterScratchDirectory itself failed before creating it) is
-	// the one case there is nothing to trash.
-	try {
-		await expect(row).toBeVisible({ timeout: 15_000 })
-	} catch {
-		return
-	}
-
-	await row.click()
-	await page.getByRole("button", { name: "Trash", exact: true }).click()
-
-	const confirm = page.getByRole("alertdialog")
-	await expect(confirm).toBeVisible()
-	await confirm.getByRole("button", { name: "Trash", exact: true }).click()
-	await expect(confirm).toHaveCount(0)
 }
 
 // Trick 1 (FSA path, Chromium's default) -- see the file-level comment above for the full rationale.

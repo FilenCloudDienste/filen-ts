@@ -1,6 +1,8 @@
-import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { SW_DOWNLOAD_PREFIX, SW_PROTOCOL_VERSION } from "@/lib/sw/protocol"
+import { SW_DOWNLOAD_PREFIX } from "@/lib/sw/protocol"
+import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { waitForSwReady } from "./helpers/sw"
+import { trackCspViolations } from "./helpers/csp"
 
 // The one live proof the streamed-preview architecture actually works: a service worker is PROD-only
 // (never registered under `vite dev`), so this only ever runs against
@@ -35,81 +37,6 @@ const MP3_BYTES = Buffer.from(
 	"base64"
 )
 
-// Duplicated from preview.spec.ts/downloads.spec.ts — this package has no cross-spec e2e helpers
-// module yet, and every other spec file here owns its helpers locally too.
-async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	const listbox = page.getByRole("listbox", { name: "Directory contents" })
-	const empty = page.getByText("Nothing here yet")
-
-	await expect(listbox.or(empty)).toBeVisible()
-
-	return { listbox, hasItems: await listbox.isVisible() }
-}
-
-async function enterScratchDirectory(page: Page, name: string): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	await page.setViewportSize({ width: 1280, height: 8000 })
-
-	const { listbox } = await waitForListingSettled(page)
-
-	await page.getByRole("button", { name: "New directory", exact: true }).click()
-	const dialog = page.getByRole("dialog")
-	await expect(dialog).toBeVisible()
-	await page.getByLabel("Name", { exact: true }).fill(name)
-	await page.getByRole("button", { name: "Create", exact: true }).click()
-	await expect(dialog).toHaveCount(0)
-
-	const scratchRow = listbox.getByRole("option", { name })
-	await expect(scratchRow).toBeVisible()
-
-	await scratchRow.dblclick()
-
-	return waitForListingSettled(page)
-}
-
-async function trashScratchDirectory(page: Page, name: string): Promise<void> {
-	await page.keyboard.press("Escape")
-	await page.getByRole("complementary").getByRole("link", { name: "My Drive", exact: true }).click()
-
-	const { listbox } = await waitForListingSettled(page)
-	const row = listbox.getByRole("option", { name })
-
-	try {
-		await expect(row).toBeVisible({ timeout: 15_000 })
-	} catch {
-		return
-	}
-
-	await row.click()
-	await page.getByRole("button", { name: "Trash", exact: true }).click()
-
-	const confirm = page.getByRole("alertdialog")
-	await expect(confirm).toBeVisible()
-	await confirm.getByRole("button", { name: "Trash", exact: true }).click()
-	await expect(confirm).toHaveCount(0)
-}
-
-// Polls the synthetic version endpoint until the worker has activated and claimed the page — mirrors
-// sw.spec.ts's own identical helper. A successful poll IS proof this page is SW-controlled (an
-// uncontrolled page's fetch would never reach the worker's own fetch listener in the first place), so
-// every viewer's isMediaStreamAvailable() is guaranteed true from this point on.
-async function waitForSwReady(page: Page): Promise<void> {
-	await expect
-		.poll(
-			() =>
-				page.evaluate(async () => {
-					try {
-						const res = await fetch("/__sw/version")
-
-						return res.ok ? ((await res.json()) as unknown) : null
-					} catch {
-						return null
-					}
-				}),
-			{ timeout: 30_000 }
-		)
-		.toEqual({ v: SW_PROTOCOL_VERSION })
-}
-
 interface SwResponseLog {
 	status: number
 	contentType: string | null
@@ -133,7 +60,6 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 	const nameAudio = `e2e-preview-media-${runId}.mp3`
 
 	const swResponses: SwResponseLog[] = []
-	const cspViolations: string[] = []
 
 	page.on("response", res => {
 		if (res.url().includes(SW_DOWNLOAD_PREFIX)) {
@@ -147,11 +73,7 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 			})
 		}
 	})
-	page.on("console", msg => {
-		if (msg.type() === "error" && /content security policy|refused to/i.test(msg.text())) {
-			cspViolations.push(msg.text())
-		}
-	})
+	const cspViolations = trackCspViolations(page)
 
 	await page.goto("/drive")
 
