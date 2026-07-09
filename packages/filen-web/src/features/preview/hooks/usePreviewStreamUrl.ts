@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { type DriveItem } from "@/lib/drive/item"
 import { narrowToAnyFile } from "@/lib/drive/download"
-import { previewStreamUrl } from "@/lib/preview/preview-stream"
+import { previewStreamUrl } from "@/features/preview/lib/previewStream"
 
 export type UsePreviewStreamUrlResult = { status: "pending" } | { status: "success"; url: string } | { status: "error" }
 

@@ -4,7 +4,7 @@ import { getDocument, GlobalWorkerOptions, PasswordResponses, type PDFDocumentPr
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
 import { type DriveItem } from "@/lib/drive/item"
 import { clampListboxIndex } from "@/lib/drive/listbox"
-import { usePreviewBytes } from "@/components/preview/use-preview-bytes"
+import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import {
 	mostVisiblePage,
 	canvasDimsForViewport,
@@ -13,7 +13,7 @@ import {
 	PDF_PAGE_RENDER_MARGIN_PX,
 	PDF_PAGE_EVICT_MARGIN_PX,
 	type PageVisibility
-} from "@/components/preview/pdf-viewer.logic"
+} from "@/features/preview/components/pdfViewer.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"

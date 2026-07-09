@@ -31,21 +31,21 @@ const { transformHeicBytesMock } = vi.hoisted(() => ({
 	transformHeicBytesMock: vi.fn<(bytes: Uint8Array, opts?: { maxDimension?: number }) => Promise<Blob>>()
 }))
 
-vi.mock("@/lib/preview/heic-transform", () => ({ transformHeicBytes: transformHeicBytesMock }))
+vi.mock("@/features/preview/lib/heicTransform", () => ({ transformHeicBytes: transformHeicBytesMock }))
 
 const { isMediaStreamAvailableMock, previewStreamUrlMock } = vi.hoisted(() => ({
 	isMediaStreamAvailableMock: vi.fn<() => boolean>(),
 	previewStreamUrlMock: vi.fn<(file: unknown, name: string, contentType: string) => Promise<string>>()
 }))
 
-vi.mock("@/lib/preview/preview-stream", () => ({
+vi.mock("@/features/preview/lib/previewStream", () => ({
 	isMediaStreamAvailable: isMediaStreamAvailableMock,
 	previewStreamUrl: previewStreamUrlMock
 }))
 
 const { allowedMediaContentTypeMock } = vi.hoisted(() => ({ allowedMediaContentTypeMock: vi.fn<(item: DriveItem) => string | null>() }))
 
-vi.mock("@/lib/preview/media-type", () => ({ allowedMediaContentType: allowedMediaContentTypeMock }))
+vi.mock("@/features/preview/lib/mediaType", () => ({ allowedMediaContentType: allowedMediaContentTypeMock }))
 
 import { generateHeicThumb, generateVideoThumb, generatePdfThumb } from "@/lib/drive/thumb-generators"
 

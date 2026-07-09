@@ -7,7 +7,7 @@ import {
 	PDF_PAGE_RENDER_MARGIN_PX,
 	PDF_PAGE_EVICT_MARGIN_PX,
 	type PageVisibility
-} from "@/components/preview/pdf-viewer.logic"
+} from "@/features/preview/components/pdfViewer.logic"
 
 describe("mostVisiblePage", () => {
 	it("picks the entry with the highest ratio", () => {

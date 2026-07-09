@@ -1,7 +1,7 @@
 // Pure logic for markdown-viewer.tsx — framework-free so it is testable in node
 // (markdown-viewer.logic.test.ts) with no DOM involved.
 
-import { isSafeLinkHref } from "@/components/preview/docx-viewer.logic"
+import { isSafeLinkHref } from "@/features/preview/components/docxViewer.logic"
 
 // react-markdown's own `urlTransform` prop, applied to every URL-bearing attribute it finds (href from
 // links/autolinks, src from images — the only two possible from pure CommonMark/GFM source, since raw

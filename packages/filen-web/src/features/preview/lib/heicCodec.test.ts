@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { HeicDecoderModule, HeicTransformDeps } from "@/lib/preview/heic-codec"
+import type { HeicDecoderModule, HeicTransformDeps } from "@/features/preview/lib/heicCodec"
 
 // heic-codec.ts keeps its shared-decoder memoization in a module-level `let`, so every test needs its
 // own module instance -- vi.resetModules() + a dynamic re-import before each one (mirrors
@@ -14,7 +14,7 @@ vi.mock("@/lib/log", () => ({
 
 async function freshModule() {
 	vi.resetModules()
-	return import("@/lib/preview/heic-codec")
+	return import("@/features/preview/lib/heicCodec")
 }
 
 afterEach(() => {

@@ -6,9 +6,9 @@ import { narrowToAnyFile } from "@/lib/drive/download"
 import { registerThumbGenerator, type ThumbGenerator } from "@/lib/drive/thumbnails"
 import { THUMB_MAX_DIM } from "@/lib/drive/thumbnails.logic"
 import { fitWithin, encodeCanvasThumb } from "@/lib/drive/thumb-generators.logic"
-import { transformHeicBytes } from "@/lib/preview/heic-transform"
-import { previewStreamUrl, isMediaStreamAvailable } from "@/lib/preview/preview-stream"
-import { allowedMediaContentType } from "@/lib/preview/media-type"
+import { transformHeicBytes } from "@/features/preview/lib/heicTransform"
+import { previewStreamUrl, isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
+import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { type BaseFileItem } from "@/lib/drive/item"
 
 // heic/pdf both pull the whole file into memory through the same buffered download the preview

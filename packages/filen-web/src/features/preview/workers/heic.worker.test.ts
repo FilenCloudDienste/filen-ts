@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import * as Comlink from "comlink"
-import type { DecodedHeicImage, HeicDecoderModule, HeicTransformDeps } from "@/lib/preview/heic-codec"
+import type { DecodedHeicImage, HeicDecoderModule, HeicTransformDeps } from "@/features/preview/lib/heicCodec"
 import type { HeicWorkerApi } from "@/features/preview/workers/heic.worker"
 
 // heic.worker.ts can't be imported directly here: Comlink.expose(api) runs at module load against
@@ -18,7 +18,7 @@ import type { HeicWorkerApi } from "@/features/preview/workers/heic.worker"
 // leaking into the next.
 async function exposeOverChannel(deps: HeicTransformDeps): Promise<{ remote: Comlink.Remote<HeicWorkerApi>; close: () => void }> {
 	vi.resetModules()
-	const { runHeicTransform } = await import("@/lib/preview/heic-codec")
+	const { runHeicTransform } = await import("@/features/preview/lib/heicCodec")
 
 	const { port1, port2 } = new MessageChannel()
 	port1.start()

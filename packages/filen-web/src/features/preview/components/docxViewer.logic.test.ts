@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isSafeLinkHref } from "@/components/preview/docx-viewer.logic"
+import { isSafeLinkHref } from "@/features/preview/components/docxViewer.logic"
 
 describe("isSafeLinkHref", () => {
 	it("allows https", () => {

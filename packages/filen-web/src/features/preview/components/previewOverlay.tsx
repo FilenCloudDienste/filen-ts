@@ -15,9 +15,9 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
-import { ImageViewer } from "@/components/preview/image-viewer"
-import { MediaViewer } from "@/components/preview/media-viewer"
-import { isTextEditingTarget } from "@/components/preview/preview-overlay.logic"
+import { ImageViewer } from "@/features/preview/components/imageViewer"
+import { MediaViewer } from "@/features/preview/components/mediaViewer"
+import { isTextEditingTarget } from "@/features/preview/components/previewOverlay.logic"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
@@ -27,10 +27,10 @@ import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
 // own initial bundle (image/video/audio all stream or buffer directly, no heavy renderer library
 // involved). markdown-viewer.tsx's own "view source" toggle lazy-imports TextViewer a second time —
 // the same underlying chunk as this one, deduped by the bundler.
-const PdfViewer = lazy(() => import("@/components/preview/pdf-viewer"))
-const DocxViewer = lazy(() => import("@/components/preview/docx-viewer"))
-const TextViewer = lazy(() => import("@/components/preview/text-viewer"))
-const MarkdownViewer = lazy(() => import("@/components/preview/markdown-viewer"))
+const PdfViewer = lazy(() => import("@/features/preview/components/pdfViewer"))
+const DocxViewer = lazy(() => import("@/features/preview/components/docxViewer"))
+const TextViewer = lazy(() => import("@/features/preview/components/textViewer"))
+const MarkdownViewer = lazy(() => import("@/features/preview/components/markdownViewer"))
 
 // Cmd/Ctrl+S — SHARES its literal combo with the already-registered "drive.download" (mod+s,
 // directory-listing.tsx), deliberately: that action's own handler already no-ops (after an

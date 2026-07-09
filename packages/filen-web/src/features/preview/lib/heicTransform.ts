@@ -1,7 +1,7 @@
 import * as Comlink from "comlink"
 import HeicWorker from "@/features/preview/workers/heic.worker.ts?worker"
 import type { HeicWorkerApi } from "@/features/preview/workers/heic.worker"
-import type { HeicTransformOpts } from "@/lib/preview/heic-codec"
+import type { HeicTransformOpts } from "@/features/preview/lib/heicCodec"
 
 // Spun up on the first HEIC/HEIF preview, not at module load — most sessions never open one. Wrapped
 // with Comlink exactly like sdk.worker.ts/db.worker.ts's own workers (client.ts, storage/leader.ts);

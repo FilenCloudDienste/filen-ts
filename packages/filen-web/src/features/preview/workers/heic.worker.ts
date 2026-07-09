@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import * as Comlink from "comlink"
-import { runHeicTransform, productionDeps, type HeicTransformOpts } from "@/lib/preview/heic-codec"
+import { runHeicTransform, productionDeps, type HeicTransformOpts } from "@/features/preview/lib/heicCodec"
 
 // Thin glue only — heic-codec.ts owns every real step (decode, orientation, freeing WASM handles, JPEG
 // encode, error normalization). One dedicated worker per tab, spun up lazily by heic-transform.ts on

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
-import { allowedMediaContentType } from "@/lib/preview/media-type"
+import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 
 // Mirrors preview.logic.test.ts's own testUuid/mockFile/mockDir fixtures — each test file here owns
 // its own local fixtures, no shared test-utils module.

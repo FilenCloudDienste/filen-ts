@@ -5,8 +5,8 @@ import remarkGfm from "remark-gfm"
 import { CodeIcon, EyeIcon } from "lucide-react"
 import { type DriveItem } from "@/lib/drive/item"
 import { decodeUtf8 } from "@/lib/drive/preview.logic"
-import { markdownUrlTransform } from "@/components/preview/markdown-viewer.logic"
-import { usePreviewBytes } from "@/components/preview/use-preview-bytes"
+import { markdownUrlTransform } from "@/features/preview/components/markdownViewer.logic"
+import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -20,7 +20,7 @@ export interface MarkdownViewerProps {
 // lazy() (not a plain import) so opening a markdown file never pulls CodeMirror's chunk in; it fetches
 // only when the toggle is actually used, resolving to the SAME chunk preview-overlay.tsx's own
 // TextViewer lazy() produces.
-const TextViewer = lazy(() => import("@/components/preview/text-viewer"))
+const TextViewer = lazy(() => import("@/features/preview/components/textViewer"))
 
 // react-markdown never parses raw HTML in the source into real elements (no rehype-raw plugin is used,
 // deliberately) — a `<script>`/`<img onerror>` written into a .md file renders as an escaped, inert

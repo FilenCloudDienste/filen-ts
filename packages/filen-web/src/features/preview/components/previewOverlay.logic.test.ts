@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isTextEditingTarget } from "@/components/preview/preview-overlay.logic"
+import { isTextEditingTarget } from "@/features/preview/components/previewOverlay.logic"
 
 // Minimal duck-typed stand-in for a DOM EventTarget — no jsdom/happy-dom in this project
 // (vitest.config.ts: environment "node"), mirroring lib/auth/referral.test.ts's own stubbed `document`
