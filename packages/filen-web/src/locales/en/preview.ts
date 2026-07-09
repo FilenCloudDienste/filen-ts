@@ -11,6 +11,8 @@ export const preview = {
 	previewNextAction: "Next file",
 	/** Preview overlay header — accessible label for the button downloading the open item; hidden in trash */
 	previewDownloadAction: "Download",
+	/** Preview overlay header — accessible label for the button saving the editable text/code buffer; shown only while editable and dirty, also the Cmd/Ctrl+S keymap command's description */
+	previewSaveAction: "Save",
 
 	// ── Body ─────────────────────────────────────────────────────────────────
 	/** Preview overlay body — shown in place of a viewer for a previewable category with no renderer built yet */
@@ -19,6 +21,18 @@ export const preview = {
 	previewStreamFailed: "This preview failed and the file is too large to retry.",
 	/** Preview overlay body — a HEIC/HEIF image could not be converted for preview (corrupt or unsupported file) */
 	previewTransformFailed: "This image couldn't be converted for preview.",
+	/** Preview overlay body — shown by the scoped error boundary when a viewer throws while rendering (e.g. a parse failure) */
+	previewRenderError: "This preview couldn't be displayed.",
+
+	// ── Editable save ────────────────────────────────────────────────────────
+	/** Unsaved-changes confirm dialog — title, shown on Escape/close/prev/next while the editable buffer is dirty */
+	previewUnsavedChangesTitle: "Unsaved changes",
+	/** Unsaved-changes confirm dialog — body */
+	previewUnsavedChangesBody: "You have unsaved changes to this file. Discard them?",
+	/** Unsaved-changes confirm dialog — the destructive confirm button, discards the buffer and proceeds */
+	previewDiscardAction: "Discard",
+	/** Toast shown after a save fails — the editor is locked read-only for the rest of this session (mobile parity: retrying against the same broken parent would only fail again) */
+	previewReadOnlyAfterSaveFailure: "This file is now read-only — saving failed and can't be retried until you reopen it.",
 
 	// ── PDF ──────────────────────────────────────────────────────────────────
 	/** PDF viewer — password dialog title, shown both on the first prompt and on a wrong-password retry */

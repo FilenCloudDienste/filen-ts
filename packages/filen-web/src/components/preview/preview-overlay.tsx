@@ -1,15 +1,25 @@
-import { useEffect, useRef, lazy, Suspense, type KeyboardEvent } from "react"
+import { useEffect, useRef, useState, lazy, Suspense, Component, type KeyboardEvent, type ReactNode, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
-import { XIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon } from "lucide-react"
+import { XIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, SaveIcon } from "lucide-react"
+import { toast } from "sonner"
 import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
 import { previewType } from "@/lib/drive/preview.logic"
 import { startDownloads } from "@/lib/drive/download"
+import { isEditable, runPreviewSave } from "@/lib/drive/preview-save.logic"
+import { currentRootUuid } from "@/lib/drive/actions"
+import { driveListingQueryUpdate } from "@/queries/drive"
+import { sdkApi } from "@/lib/sdk/client"
+import { errorLabel } from "@/lib/i18n/errorLabel"
+import { registerAction } from "@/lib/keymap/registry"
+import { useAction } from "@/lib/keymap/useAction"
+import { log } from "@/lib/log"
 import { ImageViewer } from "@/components/preview/image-viewer"
 import { MediaViewer } from "@/components/preview/media-viewer"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"
 
 // Lazy chunks: pdf.js (~1MB+), docx-preview, CodeMirror (+ its per-language grammar chunks) and
 // react-markdown only ever download once a file needing them is actually opened, never on the app's
@@ -20,6 +30,22 @@ const PdfViewer = lazy(() => import("@/components/preview/pdf-viewer"))
 const DocxViewer = lazy(() => import("@/components/preview/docx-viewer"))
 const TextViewer = lazy(() => import("@/components/preview/text-viewer"))
 const MarkdownViewer = lazy(() => import("@/components/preview/markdown-viewer"))
+
+// Cmd/Ctrl+S — SHARES its literal combo with the already-registered "drive.download" (mod+s,
+// directory-listing.tsx), deliberately: that action's own handler already no-ops (after an
+// unconditional preventDefault, which is what actually suppresses the browser's native Save-Page-As)
+// whenever a dialog — this one included — is open, so the two never race for real effect, only for
+// the harmless preventDefault. `enableOnContentEditable` is load-bearing: react-hotkeys-hook's default
+// ignore-list stops a hotkey whose event target is contentEditable (verified against the installed
+// package's own compiled source), and CodeMirror's own content DOM sets `contenteditable="true"` while
+// editable — without this override, Cmd/Ctrl+S would silently never fire while the cursor is actually
+// inside the editor, exactly the moment a user would press it.
+registerAction({
+	id: "preview.save",
+	defaultCombo: "mod+s",
+	scope: "editor",
+	descriptionKey: "previewSaveAction"
+})
 
 export interface PreviewOverlayProps {
 	variant: DriveVariant
@@ -41,17 +67,78 @@ function isMediaTarget(target: EventTarget | null): boolean {
 	return target instanceof HTMLMediaElement
 }
 
+// What close/prev/next resolve to once an unsaved-changes prompt is answered — the SAME confirm
+// dialog serves all three trigger points (Escape/backdrop/X, the two pager buttons, and the in-dialog
+// arrow keys), so this is the only state needed to remember which of them was actually requested.
+type PendingIntent = "close" | "prev" | "next"
+
+interface PreviewErrorBoundaryState {
+	hasError: boolean
+}
+
+// The only React API for a render-phase catch (no hook equivalent). Scoped to the preview body ONLY —
+// the header (Save/prev/next/download/close) lives outside it, so the overlay stays fully closeable
+// even while this is showing its fallback. A synchronous viewer throw (e.g. the markdown parser, which
+// runs during render, not inside an effect) would otherwise propagate past this dialog uncaught and
+// white-screen the whole app — no boundary exists anywhere else in this tree. Keyed by item uuid at
+// its call site below (the same key PreviewBody itself used to carry) so a crash on one item can never
+// stick once the user steps to a different one — getDerivedStateFromError has no other way back to a
+// clean state.
+class PreviewErrorBoundary extends Component<{ children: ReactNode }, PreviewErrorBoundaryState> {
+	override state: PreviewErrorBoundaryState = { hasError: false }
+
+	static getDerivedStateFromError(): PreviewErrorBoundaryState {
+		return { hasError: true }
+	}
+
+	override componentDidCatch(error: unknown): void {
+		log.error("preview", "viewer render failed", error)
+	}
+
+	override render(): ReactNode {
+		return this.state.hasError ? <PreviewRenderError /> : this.props.children
+	}
+}
+
+function PreviewRenderError() {
+	const { t } = useTranslation("preview")
+
+	return (
+		<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
+			{t("previewRenderError")}
+		</div>
+	)
+}
+
 // Full-bleed preview surface, mounted by the drive dialog host (directory-listing.tsx) exactly like its
 // sibling dialog kinds — composed directly from Base UI's dialog primitives (not the shared centered
-// ui/dialog.tsx) since no full-screen surface exists yet to reuse. Unlike every other dialog in this
-// app, closing here is NEVER blocked on a pending state: every viewer's own data load is a read-only,
-// ephemeral fetch (a buffered whole-file download cancels on unmount, a streamed SW registration has
-// nothing server-side to cancel in the first place), never a write worth protecting against an
-// interrupted close.
+// ui/dialog.tsx) since no full-screen surface exists yet to reuse. Closing is blocked on a pending
+// state in exactly one case now: an editable text/code buffer with unsaved edits (see requestOrRun) —
+// every other viewer's own data load stays a read-only, ephemeral fetch never worth protecting an
+// interrupted close against.
 export function PreviewOverlay({ variant, items, index, onStep, onClose }: PreviewOverlayProps) {
 	const { t } = useTranslation(["preview", "common"])
-	const item = items[index]
+	const rawItem = items[index]
 	const popupRef = useRef<HTMLDivElement>(null)
+	// Write-only side channel for performSave to read the live buffer without this component
+	// re-rendering on every keystroke — see TextViewer's own contentRef prop doc.
+	const contentRef = useRef<string | null>(null)
+
+	// Local override for the currently-displayed item: `items` is a FROZEN pager snapshot (see the
+	// props' own comment) a save's uuid rotation can never update in place. Keyed to the RAW (pre-save)
+	// uuid so it stops applying — PreviewBody naturally re-keys back onto `rawItem` — the moment the
+	// user steps to a different sibling (a genuinely different `rawItem`).
+	const [saved, setSaved] = useState<{ forUuid: string; item: DriveItem } | null>(null)
+	// Same keying trick for the mobile-parity "a failed save locks the file read-only" rule (see
+	// runPreviewSave's own comment) — a fresh item (navigation) or a fresh overlay mount (close+reopen)
+	// both clear it for free, derived rather than reset by an effect.
+	const [lockedReadOnly, setLockedReadOnly] = useState<{ forUuid: string } | null>(null)
+	const [dirty, setDirty] = useState(false)
+	const [saving, setSaving] = useState(false)
+	const [pendingIntent, setPendingIntent] = useState<PendingIntent | null>(null)
+
+	const item = rawItem !== undefined && saved?.forUuid === rawItem.data.uuid ? saved.item : rawItem
+	const editable = item !== undefined && isEditable(item, variant) && lockedReadOnly?.forUuid !== rawItem?.data.uuid
 
 	// A step can disable the very pager button that triggered it (index lands on the first/last item,
 	// see the Prev/Next Buttons' own `disabled` below) — the browser blurs a disabled focused control
@@ -67,9 +154,78 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 		}
 	}, [index])
 
+	// The one write path: encode -> upload -> patch listing -> re-key onto the rotated uuid (success),
+	// or lock the buffer read-only with a LABEL-FIRST toast (failure) — see preview-save.logic.ts's own
+	// comment for why a retry against the same broken parent is never offered. `dirty` resets for free:
+	// success re-keys PreviewBody (a new `item.data.uuid`), which remounts TextViewer fresh and reports
+	// its own clean `dirty=false` right back up (see text-viewer.tsx's own mount-time effect).
+	async function performSave(): Promise<void> {
+		// Locals, not the outer `item`/`rawItem` directly — this closure runs asynchronously, well after
+		// this render's narrowing; re-binding here gives the guard below its own, freshly-narrowable copy.
+		const targetItem = item
+		const targetRawItem = rawItem
+
+		if (!editable || !dirty || saving || targetItem === undefined || targetRawItem === undefined) {
+			return
+		}
+
+		const content = contentRef.current
+
+		if (content === null) {
+			return
+		}
+
+		setSaving(true)
+
+		const outcome = await runPreviewSave(
+			{
+				uploadFileBytes: (parentUuid, data, name, mime) => sdkApi.uploadFileBytes(parentUuid, data, name, mime),
+				patchListing: driveListingQueryUpdate,
+				rootUuid: currentRootUuid()
+			},
+			{ item: targetItem, content }
+		)
+
+		setSaving(false)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+			setLockedReadOnly({ forUuid: targetRawItem.data.uuid })
+			toast.warning(t("previewReadOnlyAfterSaveFailure"))
+			return
+		}
+
+		setSaved({ forUuid: targetRawItem.data.uuid, item: outcome.item })
+	}
+
+	useAction(
+		"preview.save",
+		keyboardEvent => {
+			// Unconditional, mirroring drive.download's own mod+s handler — the browser's native
+			// Save-Page-As must never fire here regardless of whether a save is actually possible right now.
+			keyboardEvent.preventDefault()
+			void performSave()
+		},
+		{ enableOnContentEditable: true },
+		[editable, dirty, saving, item, rawItem]
+	)
+
+	// Routes a close/prev/next intent through the unsaved-changes prompt when the open item is a dirty
+	// editable buffer; runs it immediately otherwise. Every dismissal route (Escape, backdrop, the X
+	// button — all three fold into Base UI's own onOpenChange(false)), both pager buttons, and the
+	// in-dialog arrow keys funnel through this, so none of them can silently drop an in-progress edit.
+	function requestOrRun(intent: PendingIntent, run: () => void): void {
+		if (editable && dirty) {
+			setPendingIntent(intent)
+			return
+		}
+
+		run()
+	}
+
 	function handleOpenChange(next: boolean): void {
 		if (!next) {
-			onClose()
+			requestOrRun("close", onClose)
 		}
 	}
 
@@ -89,9 +245,26 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 
 		if (event.key === "ArrowLeft") {
 			event.preventDefault()
-			onStep(-1)
+			requestOrRun("prev", () => {
+				onStep(-1)
+			})
 		} else if (event.key === "ArrowRight") {
 			event.preventDefault()
+			requestOrRun("next", () => {
+				onStep(1)
+			})
+		}
+	}
+
+	function handleUnsavedConfirm(): void {
+		const intent = pendingIntent
+		setPendingIntent(null)
+
+		if (intent === "close") {
+			onClose()
+		} else if (intent === "prev") {
+			onStep(-1)
+		} else if (intent === "next") {
 			onStep(1)
 		}
 	}
@@ -116,13 +289,28 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 				>
 					<header className="flex h-14 shrink-0 items-center gap-1 border-b border-border px-4">
 						<PreviewName name={name} />
+						{editable && dirty ? (
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								disabled={saving}
+								aria-label={t("previewSaveAction")}
+								onClick={() => {
+									void performSave()
+								}}
+							>
+								{saving ? <Spinner className="size-4" /> : <SaveIcon />}
+							</Button>
+						) : null}
 						<Button
 							variant="ghost"
 							size="icon-sm"
-							disabled={index <= 0}
+							disabled={index <= 0 || saving}
 							aria-label={t("previewPreviousAction")}
 							onClick={() => {
-								onStep(-1)
+								requestOrRun("prev", () => {
+									onStep(-1)
+								})
 							}}
 						>
 							<ChevronLeftIcon />
@@ -130,10 +318,12 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 						<Button
 							variant="ghost"
 							size="icon-sm"
-							disabled={index >= items.length - 1}
+							disabled={index >= items.length - 1 || saving}
 							aria-label={t("previewNextAction")}
 							onClick={() => {
-								onStep(1)
+								requestOrRun("next", () => {
+									onStep(1)
+								})
 							}}
 						>
 							<ChevronRightIcon />
@@ -163,11 +353,34 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 						</DialogPrimitive.Close>
 					</header>
 					<div className="min-h-0 flex-1">
-						<PreviewBody
-							key={item.data.uuid}
-							item={item}
-						/>
+						<PreviewErrorBoundary key={item.data.uuid}>
+							<PreviewBody
+								item={item}
+								editable={editable}
+								onDirtyChange={setDirty}
+								contentRef={contentRef}
+							/>
+						</PreviewErrorBoundary>
 					</div>
+					{/* Nested confirmation dialog — Base UI supports nesting a dialog inside another normally
+					(see versions-dialog.tsx's own identical precedent); this must stay a child of the outer
+					Dialog, not a sibling rendered outside it, for the stacked focus-trap/backdrop behavior to
+					apply. Shared by close/prev/next — see PendingIntent — rather than one instance per trigger. */}
+					<ConfirmDialog
+						open={pendingIntent !== null}
+						pending={false}
+						title={t("previewUnsavedChangesTitle")}
+						body={t("previewUnsavedChangesBody")}
+						confirmLabel={t("previewDiscardAction")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								setPendingIntent(null)
+							}
+						}}
+						onConfirm={handleUnsavedConfirm}
+					/>
 				</DialogPrimitive.Popup>
 			</DialogPrimitive.Portal>
 		</DialogPrimitive.Root>
@@ -195,13 +408,22 @@ function PreviewName({ name }: { name: string }) {
 	)
 }
 
-// Dispatches to the right viewer by category — remounted (keyed by uuid) on every item change so a
-// viewer's own pending/success/error state never flashes the previous item's content. Bytes are no
-// longer loaded centrally here: image/video/audio each own their own data source (a streamed SW URL or
-// a buffered blob, see image-viewer.tsx/media-viewer.tsx), pdf/docx each own a lazy chunk plus their
-// own whole-buffer load (see pdf-viewer.tsx/docx-viewer.tsx) — a category still rendered by the
-// fallback below (text/code/markdown) has nothing to load yet.
-function PreviewBody({ item }: { item: DriveItem }) {
+interface PreviewBodyProps {
+	item: DriveItem
+	editable: boolean
+	onDirtyChange: (dirty: boolean) => void
+	contentRef: RefObject<string | null>
+}
+
+// Dispatches to the right viewer by category — remounted (keyed by uuid, see the error boundary one
+// level up) on every item change so a viewer's own pending/success/error state never flashes the
+// previous item's content. Bytes are no longer loaded centrally here: image/video/audio each own their
+// own data source (a streamed SW URL or a buffered blob, see image-viewer.tsx/media-viewer.tsx),
+// pdf/docx each own a lazy chunk plus their own whole-buffer load (see pdf-viewer.tsx/docx-viewer.tsx)
+// — a category still rendered by the fallback below (text/code/markdown) has nothing to load yet.
+// `editable`/`onDirtyChange`/`contentRef` only ever reach TextViewer (the "text"/"code" case) — every
+// other category ignores them.
+function PreviewBody({ item, editable, onDirtyChange, contentRef }: PreviewBodyProps) {
 	const { t } = useTranslation("preview")
 
 	// Narrows `data.decryptedMeta` to the file-arm's DecryptedFileMeta (which alone carries `.mime`) —
@@ -280,6 +502,9 @@ function PreviewBody({ item }: { item: DriveItem }) {
 					<TextViewer
 						item={item}
 						alt={alt}
+						editable={editable}
+						onDirtyChange={onDirtyChange}
+						contentRef={contentRef}
 					/>
 				</Suspense>
 			)

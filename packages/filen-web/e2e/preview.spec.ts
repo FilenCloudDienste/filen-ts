@@ -469,6 +469,96 @@ test("text preview decodes and renders read-only content, no CSP console errors"
 	}
 })
 
+// The one live proof the editable path actually works end to end: a real writable CodeMirror surface,
+// a real worker uploadFileBytes round trip (uuid rotation included), and the dirty-guard confirm —
+// unlike preview-save.logic.test.ts's injected-deps unit coverage, none of that is provable without a
+// real worker. Net-zero via the same scratch-directory convention every other leg in this file uses
+// (enterScratchDirectory/trashScratchDirectory) — the edited file never leaves the scratch directory,
+// which the teardown trashes whole. Drives the Save button, not Cmd/Ctrl+S itself — mirrors
+// downloads.spec.ts's own documented choice for this exact "mod+s" combo (a reserved browser shortcut;
+// Chromium never delivers it to page JS under CDP-simulated keypresses, headless or not, live-verified
+// while building this leg) — the keymap registration (preview.save, "mod+s", scope "editor") is a real
+// user-facing shortcut in a real browser regardless, just not one Playwright can drive here.
+test("editable text preview saves via its Save button, persists across reopen, and prompts on unsaved close", async ({
+	page,
+	injectedSession,
+	browserName
+}) => {
+	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test.setTimeout(120_000)
+	expect(injectedSession.length).toBeGreaterThan(0)
+
+	const runId = crypto.randomUUID()
+	const scratchName = `e2e-preview-edit-${runId}`
+	const nameTxt = `e2e-preview-edit-${runId}.txt`
+	// Mirrors drive-actions.spec.ts's own MOD_KEY — Meta on macOS (where this suite actually runs
+	// today), Control everywhere else.
+	const modKey = process.platform === "darwin" ? "Meta" : "Control"
+
+	await page.goto("/drive")
+
+	try {
+		const { listbox } = await enterScratchDirectory(page, scratchName)
+
+		const input = page.locator('input[type="file"]').first()
+		await input.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }])
+
+		const row = listbox.getByRole("option", { name: nameTxt })
+		await expect(row).toBeVisible({ timeout: 45_000 })
+
+		await row.dblclick()
+		const original = page.getByText("Hello from a tiny text fixture.")
+		await expect(original).toBeVisible({ timeout: 30_000 })
+
+		// Select-all + type replaces the whole buffer with a deterministic string (basicSetup's
+		// defaultKeymap, on by default, binds Mod-a — verified against the installed
+		// @uiw/codemirror-extensions-basic-setup) — simpler to assert on than an appended tail, and
+		// exercises onChange/dirty-tracking across the WHOLE buffer, not just its end.
+		const editor = page.locator(".cm-content")
+		await editor.click()
+		await page.keyboard.press(`${modKey}+a`)
+		await page.keyboard.type("edited content one")
+
+		const saveButton = page.getByRole("button", { name: "Save" })
+		await expect(saveButton).toBeVisible()
+		await saveButton.click()
+		// The save clears the dirty bit once it resolves — the Save button (shown only while
+		// editable+dirty) disappearing is the save's own success signal, no separate toast to wait on.
+		await expect(saveButton).toHaveCount(0, { timeout: 15_000 })
+
+		// Escape now closes cleanly (not dirty) — proves the confirm-on-close guard is dirty-gated, not
+		// unconditional.
+		await page.keyboard.press("Escape")
+		await expect(page.locator(".cm-content")).toHaveCount(0)
+
+		// Re-open: a fresh worker round trip against the ROTATED uuid (the row's own uuid changed, but
+		// its NAME and listing position didn't — the same row is still reachable by name) — proves the
+		// edit persisted server-side, not just an optimistic local echo.
+		await expect(row).toBeVisible({ timeout: 15_000 })
+		await row.dblclick()
+		await expect(page.getByText("edited content one")).toBeVisible({ timeout: 30_000 })
+		await expect(original).toHaveCount(0)
+
+		// Dirty again, then Escape prompts a confirm instead of closing outright.
+		const editorAgain = page.locator(".cm-content")
+		await editorAgain.click()
+		await page.keyboard.press(`${modKey}+a`)
+		await page.keyboard.type("edited content two")
+		await expect(page.getByRole("button", { name: "Save" })).toBeVisible()
+
+		await page.keyboard.press("Escape")
+		const confirmDialog = page.getByRole("alertdialog")
+		await expect(confirmDialog).toBeVisible()
+		await expect(confirmDialog).toContainText("Unsaved changes")
+
+		await confirmDialog.getByRole("button", { name: "Discard" }).click()
+		await expect(confirmDialog).toHaveCount(0)
+		await expect(page.locator(".cm-content")).toHaveCount(0)
+	} finally {
+		await trashScratchDirectory(page, scratchName)
+	}
+})
+
 // Proves language routing actually engages a real @codemirror/lang-javascript chunk (not just plain
 // text): a highlighted line wraps its tokens in <span>s, a plain one (the text leg above) doesn't.
 test("code preview renders with syntax highlighting, no CSP console errors", async ({ page, injectedSession, browserName }) => {

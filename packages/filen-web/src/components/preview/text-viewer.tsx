@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type RefObject } from "react"
 import CodeMirror from "@uiw/react-codemirror"
 import { EditorView } from "@codemirror/view"
 import { type Extension } from "@codemirror/state"
@@ -13,6 +13,19 @@ import { Spinner } from "@/components/ui/spinner"
 export interface TextViewerProps {
 	item: DriveItem
 	alt: string
+	// Writable mode for the preview-save feature — omitted (or false) by every read-only caller
+	// (markdown-viewer.tsx's own view-source toggle never edits its source), so those call sites need
+	// no changes. `onDirtyChange`/`contentRef` are only ever read while `editable` is true.
+	editable?: boolean
+	// Fired whenever the dirty bit flips (never on every keystroke) — the overlay mirrors it into its
+	// own state to gate the Save button/Cmd+S/close+nav confirm, none of which this component renders
+	// itself (the header lives in preview-overlay.tsx).
+	onDirtyChange?: (dirty: boolean) => void
+	// Write-only side channel for the overlay's Save handler to read the CURRENT buffer on demand
+	// (Cmd+S/button click) without this component re-rendering the overlay on every keystroke — a
+	// plain reactive callback would force that; a ref lets the overlay pull, not push. Kept up to date
+	// from an effect (never during render — refs are an event-handler/effect-only escape hatch).
+	contentRef?: RefObject<string | null>
 }
 
 // tag -> a loader for the matching CodeMirror language Extension, one dynamic import() per entry so
@@ -97,10 +110,24 @@ function useLanguageExtension(tag: string): Extension | null {
 	return loaded?.tag === tag ? loaded.extension : null
 }
 
+interface TextSourceProps {
+	text: string
+	tag: string
+	alt: string
+	editable: boolean
+	onDirtyChange: (dirty: boolean) => void
+	contentRef: RefObject<string | null> | undefined
+}
+
 // The actual CodeMirror surface, once bytes are decoded — split from TextViewer below so the
 // pending/error states above it never mount a CodeMirror instance (and never trigger a language chunk
-// fetch) in the first place.
-function TextSource({ text, tag, alt }: { text: string; tag: string; alt: string }) {
+// fetch) in the first place. `text` seeds `content` ONCE, at mount (useState's initial argument is
+// only ever consumed on the first render) — the EDITOR INVARIANT: this component is remounted fresh
+// per item (preview-overlay.tsx keys the whole preview body by item uuid), which is the ONLY path that
+// may ever reseed it; nothing in here ever re-derives `content` from a later `text` prop change, so a
+// re-render from an unrelated cause (theme flip, language chunk landing) can never clobber in-progress
+// edits or echo-loop.
+function TextSource({ text, tag, alt, editable, onDirtyChange, contentRef }: TextSourceProps) {
 	const { theme } = useTheme()
 	// "system" resolves once per render against the live media query — cheap, and consistent with this
 	// being a low-stakes styling read rather than a value anything else depends on; a live OS-theme flip
@@ -110,29 +137,52 @@ function TextSource({ text, tag, alt }: { text: string; tag: string; alt: string
 	const resolvedTheme = theme === "system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : theme
 	const languageExtension = useLanguageExtension(tag)
 	const extensions = languageExtension ? [languageExtension, EditorView.lineWrapping] : [EditorView.lineWrapping]
+	const [content, setContent] = useState(text)
+	// `text` itself never changes across this component's own lifetime (a genuinely different item
+	// forces a remount, not a prop update — see the invariant above), so comparing against it directly
+	// doubles as "compare against the frozen original" with no extra ref of its own.
+	const dirty = editable && content !== text
+
+	useEffect(() => {
+		onDirtyChange(dirty)
+	}, [dirty, onDirtyChange])
+
+	// Refs are an event-handler/effect-only escape hatch — never written during render — so this
+	// mirrors `content` into it on every commit instead of the ref-during-render shortcut.
+	useEffect(() => {
+		if (contentRef) {
+			contentRef.current = editable ? content : null
+		}
+	}, [contentRef, editable, content])
 
 	return (
 		<div className="size-full">
 			<CodeMirror
-				value={text}
+				value={editable ? content : text}
 				extensions={extensions}
-				editable={false}
-				readOnly
+				editable={editable}
+				readOnly={!editable}
 				theme={resolvedTheme}
 				height="100%"
 				aria-label={alt}
+				// exactOptionalPropertyTypes rejects an explicit onChange={undefined} (the prop's own type
+				// has no `| undefined` arm) — omit the key entirely in read-only mode instead.
+				{...(editable ? { onChange: setContent } : {})}
 			/>
 		</div>
 	)
 }
 
+function noopDirtyChange(): void {
+	// Default for every read-only caller (this component's own default, and markdown-viewer.tsx's
+	// view-source toggle) — TextSource always calls onDirtyChange, so a real no-op keeps that call
+	// unconditional rather than every render site branching on whether a callback was even passed.
+}
+
 // Top-level gate on the whole-buffer download (usePreviewBytes, shared with every other buffered
 // category), then a non-fatal UTF-8 decode (decodeUtf8 — never throws) and a per-extension language
-// lookup. Read-only ONLY for now: `editable`/`readOnly` above are hard-set, not parameterized, so this
-// stays the fully-inert preview surface for text/code. The next task threads an `editable` prop through
-// to make this the same component's writable mode (frozen-seed/remount, its own concern) rather than a
-// rewrite — TextSource's props (text/tag/alt) don't change shape either way.
-function TextViewer({ item, alt }: TextViewerProps) {
+// lookup.
+function TextViewer({ item, alt, editable = false, onDirtyChange = noopDirtyChange, contentRef }: TextViewerProps) {
 	const result = usePreviewBytes(item)
 
 	if (result.status === "pending") {
@@ -166,6 +216,9 @@ function TextViewer({ item, alt }: TextViewerProps) {
 			text={text}
 			tag={tag}
 			alt={alt}
+			editable={editable}
+			onDirtyChange={onDirtyChange}
+			contentRef={contentRef}
 		/>
 	)
 }

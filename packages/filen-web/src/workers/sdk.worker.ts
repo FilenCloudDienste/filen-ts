@@ -452,6 +452,20 @@ const api = {
 	resumeUpload(transferId: string): void {
 		uploadPauses.get(transferId)?.resume()
 	},
+	// Whole-buffer save for the editable text/code preview — the non-streaming sibling of uploadFile
+	// above: a decoded string re-encoded to bytes is already fully in memory on the caller side, so
+	// there is no stream/reader to build, no transferId to register, and no progress/abort/pause
+	// plumbing (a save is small and immediate, never a tracked transfer). `data` arrives via
+	// Comlink.transfer from the caller (lib/drive/preview-save.logic.ts) — never structured-cloned.
+	// Same cache-first parent resolve as every create/move op; a missing parent throws (caught by the
+	// Comlink.expose proxy below, surfaced to the caller as a read-only outcome — mobile parity).
+	// Files are never cached in lib/drive/cache.ts (directories only — see deleteFilePermanently
+	// above), so there is nothing to evict on the old, now-stale uuid the backend rotates in.
+	async uploadFileBytes(parentUuid: string | null, data: Uint8Array, name: string, mime: string): Promise<File> {
+		const c = requireClient()
+		const parent = await resolveNormalDirParent(c, parentUuid)
+		return c.uploadFile(data, { parent, name, ...(mime ? { mime } : {}) })
+	},
 	// ── Download ───────────────────────────────────────────────────────────────
 	// The reverse of uploadFile: the WritableStream SINK arrives via Comlink.transfer (a transferable
 	// stream, moved once — the decrypted bytes stream through it and are pulled on the main side, never

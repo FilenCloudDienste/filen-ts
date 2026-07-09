@@ -34,11 +34,10 @@ export type ContactsKey = Extract<keyof typeof contacts, string>
 // this type without this file needing a matching edit at that time.
 export type TransfersKey = Extract<keyof typeof transfers, string>
 
-// Same derivation for the "preview" namespace, exported ahead of need like TransfersKey above — no
-// preview action registers a keymap command today (the in-dialog pager steps ArrowLeft/ArrowRight
-// locally, see preview-overlay.tsx's own onKeyDown — a document-level action can't reach a key
-// trapped inside the open dialog), but a later one can extend ActionDef.descriptionKey with this
-// type without this file needing a matching edit at that time.
+// Same derivation for the "preview" namespace — the pager itself still steps ArrowLeft/ArrowRight
+// locally (preview-overlay.tsx's own onKeyDown — a document-level action can't reach a key trapped
+// inside the open dialog), but "preview.save" (Cmd/Ctrl+S, scope "editor") does register through the
+// keymap registry and describes itself with previewSaveAction, this union's first real consumer.
 export type PreviewKey = Extract<keyof typeof preview, string>
 
 // `Intl.PluralRules` gate: i18next's plural-key resolution (`_one`/
