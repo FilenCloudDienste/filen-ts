@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from "react"
+import { useEffect, useRef, lazy, Suspense, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { XIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon } from "lucide-react"
@@ -9,6 +9,13 @@ import { startDownloads } from "@/lib/drive/download"
 import { ImageViewer } from "@/components/preview/image-viewer"
 import { MediaViewer } from "@/components/preview/media-viewer"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+
+// Lazy chunks: pdf.js (~1MB+) and docx-preview only ever download once a pdf/docx is actually
+// opened, never on the app's own initial bundle — the first two categories to use React.lazy in
+// this app (image/video/audio all stream or buffer directly, no heavy renderer library involved).
+const PdfViewer = lazy(() => import("@/components/preview/pdf-viewer"))
+const DocxViewer = lazy(() => import("@/components/preview/docx-viewer"))
 
 export interface PreviewOverlayProps {
 	variant: DriveVariant
@@ -187,8 +194,9 @@ function PreviewName({ name }: { name: string }) {
 // Dispatches to the right viewer by category — remounted (keyed by uuid) on every item change so a
 // viewer's own pending/success/error state never flashes the previous item's content. Bytes are no
 // longer loaded centrally here: image/video/audio each own their own data source (a streamed SW URL or
-// a buffered blob, see image-viewer.tsx/media-viewer.tsx), since only some categories stream — a
-// category still rendered by the fallback below (pdf/docx/text/code/markdown) has nothing to load yet.
+// a buffered blob, see image-viewer.tsx/media-viewer.tsx), pdf/docx each own a lazy chunk plus their
+// own whole-buffer load (see pdf-viewer.tsx/docx-viewer.tsx) — a category still rendered by the
+// fallback below (text/code/markdown) has nothing to load yet.
 function PreviewBody({ item }: { item: DriveItem }) {
 	const { t } = useTranslation("preview")
 
@@ -225,10 +233,38 @@ function PreviewBody({ item }: { item: DriveItem }) {
 					alt={alt}
 				/>
 			)
+		case "pdf":
+			return (
+				<Suspense
+					fallback={
+						<div className="flex size-full items-center justify-center">
+							<Spinner className="size-6" />
+						</div>
+					}
+				>
+					<PdfViewer
+						item={item}
+						alt={alt}
+					/>
+				</Suspense>
+			)
+		case "docx":
+			return (
+				<Suspense
+					fallback={
+						<div className="flex size-full items-center justify-center">
+							<Spinner className="size-6" />
+						</div>
+					}
+				>
+					<DocxViewer
+						item={item}
+						alt={alt}
+					/>
+				</Suspense>
+			)
 		// Every other previewable category has no viewer yet — later tasks replace this branch with a
 		// real one per category as they land, shrinking this fallback over time.
-		case "pdf":
-		case "docx":
 		case "text":
 		case "code":
 		case "markdown":
