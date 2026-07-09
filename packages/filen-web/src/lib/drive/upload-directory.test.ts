@@ -3,7 +3,7 @@ import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import type { DriveItem } from "@/lib/drive/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
-import type { Transfer, TerminalStatus } from "@/stores/transfers"
+import type { Transfer, TerminalStatus } from "@/features/transfers/store/useTransfersStore"
 
 // Same mock boundary as upload.test.ts/create-directory.test.ts/queries/drive.test.ts: the real sdk
 // client/query client modules touch a Vite `?worker` / an OPFS-backed persister, unresolvable/unwanted
@@ -33,7 +33,7 @@ import {
 	startDirectoryUpload,
 	type RunDirectoryUploadDeps
 } from "@/lib/drive/upload-directory"
-import { useTransfersStore } from "@/stores/transfers"
+import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 
 // ---------------------------------------------------------------------------
 // Shared fixtures

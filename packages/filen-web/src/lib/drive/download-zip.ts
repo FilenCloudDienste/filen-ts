@@ -8,7 +8,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/lib/drive/item"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/drive/upload"
 import { saveDownload, triggerSwZipDownload, isPickerCancelled, type SaveTarget, type FsaSaveTarget } from "@/lib/drive/save-download"
-import { useTransfersStore, type TransfersStore } from "@/stores/transfers"
+import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 
 // Maps a selection to what downloadItemsToZip wants. A file narrows the same way narrowToAnyFile does
 // (download.ts): item.data is a structural superset of AnyFile, assignable with no adapter — a shared

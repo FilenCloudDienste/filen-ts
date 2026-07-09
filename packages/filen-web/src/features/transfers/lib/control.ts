@@ -1,5 +1,5 @@
 import { sdkApi } from "@/lib/sdk/client"
-import { isActiveTransfer, useTransfersStore } from "@/stores/transfers"
+import { isActiveTransfer, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 
 // Direction-agnostic cancel entry point for the active-row cancel button (transfer-row.tsx). Reads
 // the live transfer straight from the store — this fires outside any particular runUpload/runDownload

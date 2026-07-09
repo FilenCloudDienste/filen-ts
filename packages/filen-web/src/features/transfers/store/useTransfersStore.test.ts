@@ -8,7 +8,7 @@ import {
 	useTransfersStore,
 	type SpeedSample,
 	type Transfer
-} from "@/stores/transfers"
+} from "@/features/transfers/store/useTransfersStore"
 
 function makeTransfer(overrides: Partial<Transfer> = {}): Transfer {
 	return {

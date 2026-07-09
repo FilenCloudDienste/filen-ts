@@ -3,7 +3,7 @@ import { QueryClient } from "@tanstack/react-query"
 import type { File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import type { DriveItem } from "@/lib/drive/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
-import type { Transfer, TerminalStatus } from "@/stores/transfers"
+import type { Transfer, TerminalStatus } from "@/features/transfers/store/useTransfersStore"
 
 // The real sdk client/query client modules import a Vite `?worker` / touch an OPFS-backed
 // persister, unresolvable/unwanted under node vitest — mock both down to what this module actually
@@ -27,7 +27,7 @@ const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), 
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
 import { runUpload, startUploads, throttle, defaultUploadDeps, type RunUploadDeps } from "@/lib/drive/upload"
-import { useTransfersStore } from "@/stores/transfers"
+import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
 // readable test label into a shape that satisfies it, mirroring queries/drive.test.ts's own fixture.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { type Transfer } from "@/stores/transfers"
-import { sortTransfersByStartedAt, hasFinishedTransfers } from "@/components/transfers/transfers-panel.logic"
+import { type Transfer } from "@/features/transfers/store/useTransfersStore"
+import { sortTransfersByStartedAt, hasFinishedTransfers } from "@/features/transfers/components/transfersPanel.logic"
 
 function transfer(overrides: Partial<Transfer> = {}): Transfer {
 	return {

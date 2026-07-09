@@ -1,4 +1,4 @@
-import { type Transfer } from "@/stores/transfers"
+import { type Transfer } from "@/features/transfers/store/useTransfersStore"
 
 // Per-row value fed straight into <Progress value={...}> (Base UI's 0-max range, max defaults to
 // 100 — see ui/progress.tsx), scaled 0-100 same as useTransfersAggregate's own percent.

@@ -1,16 +1,16 @@
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
 import { ArrowDownUpIcon, PauseIcon, PlayIcon, Trash2Icon, XIcon } from "lucide-react"
-import { useTransfersStore } from "@/stores/transfers"
-import { hasFinishedTransfers } from "@/components/transfers/transfers-panel.logic"
+import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { hasFinishedTransfers } from "@/features/transfers/components/transfersPanel.logic"
 import {
 	buildTransfersDisplayList,
 	cancellableTransferIds,
 	pausableTransferIds,
 	resumableTransferIds
-} from "@/components/transfers/transfers-screen.logic"
-import { cancelTransfer, pauseTransfer, resumeTransfer } from "@/lib/transfers/control"
-import { TransferRow } from "@/components/transfers/transfer-row"
+} from "@/features/transfers/screens/transfers.logic"
+import { cancelTransfer, pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
+import { TransferRow } from "@/features/transfers/components/transferRow"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 

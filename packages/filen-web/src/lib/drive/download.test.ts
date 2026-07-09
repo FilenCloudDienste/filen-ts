@@ -45,7 +45,7 @@ const { startZipDownloadMock } = vi.hoisted(() => ({ startZipDownloadMock: vi.fn
 vi.mock("@/lib/drive/download-zip", () => ({ startZipDownload: startZipDownloadMock }))
 
 import { runDownload, narrowToAnyFile, defaultDownloadDeps, startDownloads, needsZip, type RunDownloadDeps } from "@/lib/drive/download"
-import { useTransfersStore, type Transfer, type TerminalStatus } from "@/stores/transfers"
+import { useTransfersStore, type Transfer, type TerminalStatus } from "@/features/transfers/store/useTransfersStore"
 
 const PARENT_UUID = "22222222-2222-2222-2222-222222222222" as UuidStr
 let uuidCounter = 0

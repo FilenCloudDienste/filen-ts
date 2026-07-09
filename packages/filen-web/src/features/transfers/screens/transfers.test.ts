@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { type Transfer } from "@/stores/transfers"
+import { type Transfer } from "@/features/transfers/store/useTransfersStore"
 import {
 	buildTransfersDisplayList,
 	cancellableTransferIds,
 	pausableTransferIds,
 	resumableTransferIds
-} from "@/components/transfers/transfers-screen.logic"
+} from "@/features/transfers/screens/transfers.logic"
 
 function transfer(overrides: Partial<Transfer> = {}): Transfer {
 	return {

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { TransfersScreen } from "@/components/transfers/transfers-screen"
+import { TransfersScreen } from "@/features/transfers/screens/transfers"
 
 // Flat page, no splat — the full active+finished history and bulk actions the rail popover's "See
 // all" links to.

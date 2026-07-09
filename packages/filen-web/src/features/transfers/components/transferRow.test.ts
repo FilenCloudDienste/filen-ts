@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { type Transfer } from "@/stores/transfers"
-import { transferProgress, activeStatusLabelKey } from "@/components/transfers/transfer-row.logic"
+import { type Transfer } from "@/features/transfers/store/useTransfersStore"
+import { transferProgress, activeStatusLabelKey } from "@/features/transfers/components/transferRow.logic"
 
 function transfer(overrides: Partial<Transfer> = {}): Transfer {
 	return {

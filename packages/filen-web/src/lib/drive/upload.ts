@@ -7,7 +7,7 @@ import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { narrowItem, upsertDriveItem } from "@/lib/drive/item"
 import { driveListingQueryUpdate } from "@/queries/drive"
-import { useTransfersStore, type TransfersStore } from "@/stores/transfers"
+import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 
 // Leading+trailing throttle, written locally rather than pulling a dependency — no throttle/debounce
 // util exists in src/lib yet. The leading edge invokes immediately so the first progress

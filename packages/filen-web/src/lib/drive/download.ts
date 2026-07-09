@@ -8,7 +8,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/drive/upload"
 import { saveDownload, triggerSwDownload, isPickerCancelled, type SaveTarget, type FsaSaveTarget } from "@/lib/drive/save-download"
-import { useTransfersStore, type TransfersStore } from "@/stores/transfers"
+import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { startZipDownload } from "@/lib/drive/download-zip"
 
 // Extracts the SDK AnyFile a download op wants from a DriveItem's file arm. A directory item is a

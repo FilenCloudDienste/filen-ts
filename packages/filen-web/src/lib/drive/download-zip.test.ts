@@ -36,7 +36,7 @@ import {
 	startZipDownload,
 	type RunZipDownloadDeps
 } from "@/lib/drive/download-zip"
-import { useTransfersStore, type Transfer, type TerminalStatus } from "@/stores/transfers"
+import { useTransfersStore, type Transfer, type TerminalStatus } from "@/features/transfers/store/useTransfersStore"
 
 const PARENT_UUID = "22222222-2222-2222-2222-222222222222" as UuidStr
 let uuidCounter = 0

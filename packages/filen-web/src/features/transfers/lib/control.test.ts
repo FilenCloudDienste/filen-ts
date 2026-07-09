@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { Transfer } from "@/stores/transfers"
+import type { Transfer } from "@/features/transfers/store/useTransfersStore"
 
 // Same mock boundary as lib/drive/download.test.ts's own cancel test: the real sdk client module
 // touches a Vite `?worker`, unresolvable/unwanted under node vitest.
@@ -16,8 +16,8 @@ vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: { cancelUpload, cancelDownload, pauseUpload, pauseDownload, resumeUpload, resumeDownload }
 }))
 
-import { cancelTransfer, pauseTransfer, resumeTransfer } from "@/lib/transfers/control"
-import { useTransfersStore } from "@/stores/transfers"
+import { cancelTransfer, pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
+import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 
 function makeTransfer(overrides: Partial<Transfer> = {}): Transfer {
 	return {

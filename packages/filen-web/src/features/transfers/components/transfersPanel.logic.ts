@@ -1,4 +1,4 @@
-import { isActiveTransfer, type Transfer } from "@/stores/transfers"
+import { isActiveTransfer, type Transfer } from "@/features/transfers/store/useTransfersStore"
 
 // Newest-first — a freshly started upload surfaces at the top without the user scrolling, mirroring
 // a browser downloads panel. Returns a new array; the store's own array is never mutated in place.

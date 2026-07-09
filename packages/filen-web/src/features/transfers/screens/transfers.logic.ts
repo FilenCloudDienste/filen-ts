@@ -1,4 +1,4 @@
-import { isActiveTransfer, type Transfer } from "@/stores/transfers"
+import { isActiveTransfer, type Transfer } from "@/features/transfers/store/useTransfersStore"
 
 // The screen's two rendered sections. Active on top, oldest-running first (ASC startedAt) — the
 // longest-waiting transfer stays anchored at the top instead of being bumped down every time a newer
