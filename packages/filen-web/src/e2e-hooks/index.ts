@@ -147,7 +147,7 @@ export function installE2eHooks(router: RouterLike): void {
 			await whenBootReady()
 
 			// listDirectory returns raw SDK File records, not app-level DriveItems — meta arrives as the
-			// tagged union (mirrors lib/drive/item.ts's own narrowItem extraction) rather than the
+			// tagged union (mirrors features/drive/lib/item.ts's own narrowItem extraction) rather than the
 			// pre-narrowed decryptedMeta field the drive UI reads.
 			const { files } = await sdkApi.listDirectory({ kind: "uuid", uuid: parentUuid })
 			const file = files.find(f => f.meta.type === "decoded" && f.meta.data.name === name)

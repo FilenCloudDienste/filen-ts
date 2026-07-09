@@ -23,7 +23,7 @@ class X {
 
 describe("toErrorDTO", () => {
 	it("classifies an SDK error by shape even when its class name is minified (no constructor.name match)", () => {
-		expect(X.name).not.toBe("FilenSdkError") // the invariant the old name-pinned suite could not catch
+		expect(X.name).not.toBe("FilenSdkError")
 		const dto = toErrorDTO(new X())
 		expect(dto.species).toBe("sdk")
 		expect(dto.kind).toBe("Unauthenticated")
@@ -48,7 +48,7 @@ describe("toErrorDTO", () => {
 		expect(labelFirst(dto)).toBe("invalid type: string")
 	})
 
-	// A named custom Error subclass (e.g. workers/search-engine.ts's SearchSupersededError) is the
+	// A named custom Error subclass (e.g. workers/searchEngine.ts's SearchSupersededError) is the
 	// real-world case this exists for: the class/prototype itself never survives the worker boundary
 	// (sdk.worker.ts's Comlink.expose proxy converts every throw to a plain DTO before Comlink even
 	// sees it), so `.name` carried through as `kind` is the only identity a main-thread catch can key

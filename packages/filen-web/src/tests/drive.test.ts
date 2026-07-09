@@ -295,7 +295,7 @@ describe("fetchItemInfo", () => {
 		await expect(fetchItemInfo(file)).resolves.toEqual(result)
 	})
 
-	// dirContext is what a shared directory's caller (info-dialog.tsx, via item.ts's
+	// dirContext is what a shared directory's caller (infoDialog.tsx, via item.ts's
 	// toAnyDirWithContext) passes so getDirSize dispatches through the SDK's Shared arm instead of the
 	// owned one a bare Dir would land on — forwarded as a second argument only when given, so the
 	// "unchanged" pass-through above still exercises the plain owned-directory call shape.

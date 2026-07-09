@@ -3,7 +3,7 @@ import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 
 // Field x direction. "type" groups files by MIME (directories have none, so they fall back to
 // name — see typeSortKey); the other fields are self-explanatory. Recents forces uploadDateDesc
-// unconditionally (see @/lib/drive/preferences) and never reaches this module through a menu.
+// unconditionally (see @/features/drive/lib/preferences) and never reaches this module through a menu.
 export type DriveSortBy =
 	| "nameAsc"
 	| "nameDesc"
@@ -245,7 +245,7 @@ function sortPartition(partition: DriveItem[], mode: SortMode, directorySizes?: 
 		for (let i = 0; i < length; i++) {
 			const item = at(partition, i)
 			// Directories carry no real size on the item itself (synthetic 0n — see narrowItem in
-			// @/lib/drive/item) — substitute the caller's display-cache value when provided. Values
+			// @/features/drive/lib/item) — substitute the caller's display-cache value when provided. Values
 			// arrive as integral byte counts; guard the BigInt conversion anyway (BigInt(NaN/fraction)
 			// throws).
 			const known = directorySizes && asDirectoryOrFile(item).type === "directory" ? directorySizes.get(item.data.uuid) : undefined

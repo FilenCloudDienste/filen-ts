@@ -4,7 +4,7 @@ import { SW_DOWNLOAD_PREFIX, SW_MSG_REGISTER_PREVIEW } from "@/lib/sw/protocol"
 
 // Registers `file` against the SW's inline-preview route (no attachment disposition, an allowlisted
 // Content-Type, Range/206-capable) and returns its fetchable, same-origin URL — the src a
-// <video>/<audio>/<img> element streams+seeks against directly. Mirrors save-download.ts's own
+// <video>/<audio>/<img> element streams+seeks against directly. Mirrors saveDownload.ts's own
 // triggerSwDownload registration step, minus the FSA branch and the plain-navigation trigger: an
 // inline media element just needs a stable URL, it never "saves" anything.
 export async function previewStreamUrl(file: AnyFile, name: string, contentType: string): Promise<string> {

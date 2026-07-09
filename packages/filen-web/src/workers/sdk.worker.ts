@@ -67,7 +67,7 @@ export type BootResult =
 let client: Client | null = null
 
 // Single instance for this worker's lifetime — the cache-backed search's own handle registry, token
-// supersession, and configure-once guard (search-engine.ts).
+// supersession, and configure-once guard (searchEngine.ts).
 const searchEngine = createSearchEngine()
 
 // Per-transfer AbortControllers so cancelDownload(transferId) can abort an in-flight download.
@@ -500,10 +500,10 @@ const api = {
 	// above: a decoded string re-encoded to bytes is already fully in memory on the caller side, so
 	// there is no stream/reader to build, no transferId to register, and no progress/abort/pause
 	// plumbing (a save is small and immediate, never a tracked transfer). `data` arrives via
-	// Comlink.transfer from the caller (lib/drive/preview-save.logic.ts) — never structured-cloned.
+	// Comlink.transfer from the caller (features/drive/lib/previewSave.logic.ts) — never structured-cloned.
 	// Same cache-first parent resolve as every create/move op; a missing parent throws (caught by the
 	// Comlink.expose proxy below, surfaced to the caller as a read-only outcome — mobile parity).
-	// Files are never cached in lib/drive/cache.ts (directories only — see deleteFilePermanently
+	// Files are never cached in features/drive/lib/cache.ts (directories only — see deleteFilePermanently
 	// above), so there is nothing to evict on the old, now-stale uuid the backend rotates in.
 	async uploadFileBytes(parentUuid: string | null, data: Uint8Array, name: string, mime: string): Promise<File> {
 		const c = requireClient()
@@ -608,7 +608,7 @@ const api = {
 	// Held-item ops throughout this section take the caller's already-fetched DriveItem.data
 	// directly (Dir & ExtraData & {decryptedMeta} / File & ExtraData & {decryptedMeta}) — no uuid
 	// re-resolve. That shape is a structural superset of the plain Dir/File these ops declare, so it
-	// passes through with no adapter (see lib/drive/item.test.ts's assignability check); the wasm
+	// passes through with no adapter (see driveItem.test.ts's assignability check); the wasm
 	// serde layer has no deny_unknown_fields, so the extra own fields cross the boundary as harmless
 	// JSON. A live authed call confirming this at runtime has not been run in this environment (no
 	// login available) — flagged for QA.
@@ -664,7 +664,7 @@ const api = {
 		evictDirs([dir.uuid])
 	},
 	deleteFilePermanently(file: File): Promise<void> {
-		// Files are never cached (lib/drive/cache.ts only tracks directories), so there is nothing to
+		// Files are never cached (features/drive/lib/cache.ts only tracks directories), so there is nothing to
 		// evict here.
 		return requireClient().deleteFilePermanently(file)
 	},
@@ -703,11 +703,11 @@ const api = {
 	},
 	// ── Item info (info panel) ───────────────────────────────────────────────
 	// Single op over the NonRootNormalItem union, mirroring getItemPath's own signature — a file is
-	// the only arm with a `chunks` field (see lib/drive/item.ts's identical isFile probe), so the `in`
+	// the only arm with a `chunks` field (see features/drive/lib/item.ts's identical isFile probe), so the `in`
 	// check below narrows Dir vs File exhaustively. getDirSize only applies to directories; a file
 	// already carries its own size on the held item, so the two calls only ever run together, in
 	// parallel, when both are actually needed. `dirContext` is the AnyDirWithContext the caller builds
-	// via item.ts's toAnyDirWithContext for a shared directory (info-dialog.tsx) — getDirSize is a
+	// via item.ts's toAnyDirWithContext for a shared directory (infoDialog.tsx) — getDirSize is a
 	// category-dispatched op, so a bare owned Dir only dispatches correctly for an OWNED directory;
 	// omitted, `item` itself is passed, which is exactly right for that owned case (already an
 	// AnyNormalDir).
@@ -758,7 +758,7 @@ const api = {
 		return requireClient().removeFileLink(file, link)
 	},
 	// Breadcrumb primitive: the "/drive/$" splat carries the full ancestor-uuid path in the URL
-	// already (see lib/drive/navigate.ts), so this only resolves DISPLAY NAMES for a batch of
+	// already (see features/drive/lib/navigate.ts), so this only resolves DISPLAY NAMES for a batch of
 	// uuids — no getItemPath walk. Cache-first per uuid; only a cold miss (e.g. a deep-linked path
 	// this tab has never listed before) calls getDirOptional, and every miss resolves IN PARALLEL —
 	// a cold multi-segment link costs one round trip per uncached segment, not one per depth level
@@ -913,11 +913,11 @@ const api = {
 		await writeThumb(uuid, bytes)
 	},
 	// ── Search ───────────────────────────────────────────────────────────────
-	// Thin pass-throughs onto the single searchEngine instance (search-engine.ts owns the actual
+	// Thin pass-throughs onto the single searchEngine instance (searchEngine.ts owns the actual
 	// wasm handle lifecycle — it can't cross Comlink). `onPush` arrives as the caller's
 	// Comlink.proxy, same shape as uploadFile/downloadFileToWriter's onProgress above; the engine
 	// stores and calls it directly and never hands it to a wasm call itself, so no extra wrap
-	// belongs at this boundary (see search-engine.ts's own statusListener/listener comments).
+	// belongs at this boundary (see searchEngine.ts's own statusListener/listener comments).
 	searchOpen(params: { rootUuid: string | null; name: string }, onPush: (p: SearchPush) => void): Promise<SearchSnapshotDTO> {
 		return searchEngine.open(requireClient(), params, onPush)
 	},
@@ -927,7 +927,7 @@ const api = {
 	searchClose(): Promise<void> {
 		return searchEngine.close()
 	},
-	// Closes the live search BEFORE releasing the client — search-engine.ts's teardown calls
+	// Closes the live search BEFORE releasing the client — searchEngine.ts's teardown calls
 	// close()/free() on handles that belong to THIS client; releasing it first would race that.
 	async logout(): Promise<void> {
 		await searchEngine.close()

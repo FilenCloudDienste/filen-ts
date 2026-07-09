@@ -5,7 +5,7 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { FsaSaveTarget, SaveTarget, SwSaveTarget } from "@/features/drive/lib/saveDownload"
 
-// Mock boundaries mirror lib/drive/download.test.ts's own: the worker client, save-download, query
+// Mock boundaries mirror download.test.ts's own: the worker client, save-download, query
 // client, and sonner are all unresolvable/unwanted (or assertion-only) under node vitest.
 const { downloadItemsToZip } = vi.hoisted(() => ({ downloadItemsToZip: vi.fn() }))
 

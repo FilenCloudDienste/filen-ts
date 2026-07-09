@@ -64,7 +64,7 @@ export interface DirectoryListingProps {
 }
 
 // Module scope, not inside the component: runs exactly once per module evaluation (see
-// theme-provider.tsx's own "app.toggleTheme" registration for the full StrictMode/HMR rationale).
+// themeProvider.tsx's own "app.toggleTheme" registration for the full StrictMode/HMR rationale).
 //
 // Reconciling these with the listbox's own roving-tabindex `onKeyDown` (useDriveListboxNav): select-all
 // and clear-selection used to be hand-rolled checks inside that handler, matching Cmd/Ctrl+A and
@@ -140,7 +140,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// listing has no confirmed uuid to target yet. Shared by NewDirectory, UploadMenu and
 	// UploadDropzone below (all three write into the same `uuid`).
 	const writeDisabled = variant !== "drive" || listingQuery.status !== "success"
-	// Gates the underlying contacts/blocked fetch itself (see use-blocked-users.ts) — only sharedIn
+	// Gates the underlying contacts/blocked fetch itself (see useBlockedUsers.ts) — only sharedIn
 	// filters by it, so the other 5 variants skip the getContacts/getBlockedContacts worker round trip
 	// on every mount and window refocus.
 	const blocked = useBlockedUsers(variant === "sharedIn")

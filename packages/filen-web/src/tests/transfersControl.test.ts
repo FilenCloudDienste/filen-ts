@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Transfer } from "@/features/transfers/store/useTransfersStore"
 
-// Same mock boundary as lib/drive/download.test.ts's own cancel test: the real sdk client module
+// Same mock boundary as download.test.ts's own cancel test: the real sdk client module
 // touches a Vite `?worker`, unresolvable/unwanted under node vitest.
 const { cancelUpload, cancelDownload, pauseUpload, pauseDownload, resumeUpload, resumeDownload } = vi.hoisted(() => ({
 	cancelUpload: vi.fn(),

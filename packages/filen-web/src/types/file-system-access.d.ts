@@ -1,6 +1,6 @@
 // File System Access API — absent from TypeScript's DOM lib (verified: no lib.dom*.d.ts under
 // this project's installed typescript declares showSaveFilePicker) and no @types package is
-// installed. Ambient global shim for exactly the subset save-download.ts's FSA branch calls:
+// installed. Ambient global shim for exactly the subset saveDownload.ts's FSA branch calls:
 // window.showSaveFilePicker -> a file handle -> createWritable() -> a WritableStream-compatible
 // sink. No top-level import/export, so this augments the global scope directly (mirrors
 // vite-env.d.ts), unlike sdk-rs-shims.d.ts's module augmentation.
@@ -27,7 +27,7 @@ interface SaveFilePickerOptions {
 
 interface Window {
 	// Optional: Chromium-only — isFsaAvailable() feature-detects this before ever calling it.
-	// Property-typed (not method-shorthand) so extracting it into a local const (save-download.ts's
+	// Property-typed (not method-shorthand) so extracting it into a local const (saveDownload.ts's
 	// pickFsaTarget) doesn't trip @typescript-eslint/unbound-method — it never reads `this` anyway.
 	showSaveFilePicker?: (options?: SaveFilePickerOptions) => Promise<FileSystemFileHandle>
 }

@@ -25,7 +25,7 @@ export interface ContactPickerDialogProps {
 
 const SKELETON_ROW_COUNT = 5
 
-// Contact picker — mounted-when-active by the listing's dialog host (directory-listing.tsx's "share"
+// Contact picker — mounted-when-active by the listing's dialog host (directoryListing.tsx's "share"
 // case) for both the per-item menu and the bulk bar. Multi-selects from the established contact list
 // (reusing ContactRow's avatar/name/presence visuals + its selectable-option treatment) and shares
 // every chosen item with every chosen contact via shareItems. No confirm step — picking contacts and

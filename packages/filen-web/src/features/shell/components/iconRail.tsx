@@ -45,7 +45,7 @@ import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { Kbd } from "@/lib/keymap/kbd"
 
-// Registered at module scope (runs once per module evaluation — mirrors theme-provider.tsx's own
+// Registered at module scope (runs once per module evaluation — mirrors themeProvider.tsx's own
 // "app.toggleTheme" registration right next to its useAction call below). Default UNASSIGNED
 // ("" — react-hotkeys-hook's own combo parser accepts an empty string as "matches no key", verified
 // against the installed package's parseHotkeys, so this never fires until a user rebinds it): the

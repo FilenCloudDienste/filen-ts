@@ -6,7 +6,7 @@ import { fitWithin, encodeCanvasThumb } from "@/features/drive/lib/thumbGenerato
 // no OffscreenCanvas involved. heic.worker.ts is the only real caller: browsers can't decode HEIC/HEIF
 // natively (preview.logic.ts's needsImageTransform), and libheif's decode is a synchronous embind call
 // — running it in place would freeze the tab for as long as a multi-megapixel photo takes to decode.
-// image-viewer.tsx never imports this file directly; heic-transform.ts is its entry point and owns
+// imageViewer.tsx never imports this file directly; heicTransform.ts is its entry point and owns
 // getting bytes to that worker and a Blob back.
 
 // Matches the old web app's HEIC->JPEG quality. That app reaches JPEG output via a WebP-first path
@@ -207,9 +207,9 @@ export const productionDeps: HeicTransformDeps = {
 // memoization + error-mapping below run with no WASM/OffscreenCanvas involved. This is also the
 // boundary every failure mode gets normalized at, before a thrown value has any chance to cross the
 // worker's postMessage hop back to its caller (see heic.worker.test.ts for why that ordering matters).
-// `opts` is omitted by every preview caller (image-viewer.tsx via heic-transform.ts) — the
+// `opts` is omitted by every preview caller (imageViewer.tsx via heicTransform.ts) — the
 // full-resolution, always-JPEG behavior above is byte-for-byte unchanged from before opts existed.
-// Only the thumbnail generator (thumb-generators.ts) passes maxDimension, switching the encode step
+// Only the thumbnail generator (thumbGenerators.ts) passes maxDimension, switching the encode step
 // to the downscaled, webp-first path instead.
 export async function runHeicTransform(bytes: Uint8Array, deps: HeicTransformDeps, opts?: HeicTransformOpts): Promise<Blob> {
 	try {
@@ -221,7 +221,7 @@ export async function runHeicTransform(bytes: Uint8Array, deps: HeicTransformDep
 	} catch (e) {
 		// Never a throw-through: a WASM abort/trap can reject with a bare string or some other non-Error
 		// shape. Logged here — the only place the raw detail is available — before normalizing to a real
-		// Error; the caller (image-viewer.tsx) maps any rejection to the same one labeled error state
+		// Error; the caller (imageViewer.tsx) maps any rejection to the same one labeled error state
 		// regardless of content.
 		log.error("heic-decode", e)
 

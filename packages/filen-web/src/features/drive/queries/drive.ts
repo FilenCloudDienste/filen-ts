@@ -124,7 +124,7 @@ export function normalizeParentUuid(parentUuid: string | null, rootUuid: string)
 }
 
 // Breadcrumb primitive: the "/drive/$" splat carries the full ancestor-uuid path in the URL itself
-// (see lib/drive/navigate.ts's splatToUuids) — this only resolves DISPLAY NAMES for that path's
+// (see features/drive/lib/navigate.ts's splatToUuids) — this only resolves DISPLAY NAMES for that path's
 // uuids, cache-first, in one batched worker call. No getItemPath walk, no per-ancestor Dir/File
 // narrowing (a name lookup has no item-type union to narrow). A uuid this call can't resolve
 // (not-found, undecryptable meta) is simply absent from the returned record — never a query error —
@@ -195,7 +195,7 @@ export function useFileVersionsQuery(file: File): UseQueryResult<FileVersion[]> 
 	})
 }
 
-// Sort/view-mode preferences live in kv storage (lib/drive/preferences.ts), not the SDK — reading
+// Sort/view-mode preferences live in kv storage (features/drive/lib/preferences.ts), not the SDK — reading
 // them as queries anyway keeps every async read in this app on the same primitive (caching,
 // persistence, refetch-on-focus) instead of a one-off useEffect. Writes stay plain-fn-then-refetch,
 // same convention as every other write in this app (see queries/client.ts's zero-useMutation note):

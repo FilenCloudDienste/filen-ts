@@ -11,7 +11,7 @@ import { PopoverHeader, PopoverTitle } from "@/components/ui/popover"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 
 export interface TransfersPanelProps {
-	// icon-rail.tsx's TransfersEntry owns the Popover root; this fires once the "See all" link below
+	// iconRail.tsx's TransfersEntry owns the Popover root; this fires once the "See all" link below
 	// actually navigates away, so the caller can close the popover instead of it lingering open over
 	// the destination page (a plain uncontrolled Popover has no "close on internal link click"
 	// behavior of its own — verified against the installed Base UI: a click landing on a descendant of
@@ -19,14 +19,14 @@ export interface TransfersPanelProps {
 	onClose: () => void
 }
 
-// The rail Transfers popover's content (icon-rail.tsx owns the Popover root/trigger/positioning —
+// The rail Transfers popover's content (iconRail.tsx owns the Popover root/trigger/positioning —
 // this is purely the surface: header + rows + empty state + a "See all" footer). Direct children of
 // PopoverContent, not a single wrapping div, so its own flex-col/gap/padding (ui/popover.tsx) spaces
 // them without this component duplicating that chrome — mirrors PopoverHeader/PopoverTitle's own
 // content-only design.
 export function TransfersPanel({ onClose }: TransfersPanelProps) {
 	const { t } = useTranslation("transfers")
-	// mirrors directory-listing.tsx's useDriveStore(useShallow(state => state.selectedItems)) — the
+	// mirrors directoryListing.tsx's useDriveStore(useShallow(state => state.selectedItems)) — the
 	// store's own array reference only changes when a transfer is actually added/updated/removed.
 	const transfers = useTransfersStore(useShallow(state => state.transfers))
 	const sorted = sortTransfersByStartedAt(transfers)
@@ -50,8 +50,8 @@ export function TransfersPanel({ onClose }: TransfersPanelProps) {
 						variant="ghost"
 						size="sm"
 						onClick={() => {
-							// Action call outside render — same .getState() idiom directory-listing.tsx/
-							// bulk-action-bar.tsx use for every store mutation triggered from an event handler.
+							// Action call outside render — same .getState() idiom directoryListing.tsx/
+							// bulkActionBar.tsx use for every store mutation triggered from an event handler.
 							useTransfersStore.getState().clearFinished()
 						}}
 					>

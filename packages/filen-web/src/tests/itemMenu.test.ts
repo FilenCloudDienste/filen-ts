@@ -19,9 +19,9 @@ import {
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
-// item-menu.logic.ts imports lib/drive/download.ts (for startDownloads) which in turn touches the
+// item-menu.logic.ts imports features/drive/lib/download.ts (for startDownloads) which in turn touches the
 // worker client and query client — unresolvable/unwanted under node vitest, mirrors
-// lib/drive/download.test.ts's own mock boundary. startDownloads is replaced, since actually running
+// download.test.ts's own mock boundary. startDownloads is replaced, since actually running
 // it would reach the (also mocked) worker.
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))

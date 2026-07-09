@@ -4,8 +4,8 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 
 // One row per in-flight or finished transfer, in-memory only (no persistence — mirrors
 // useDriveStore's selection state, not a query). `direction` now carries real "download" rows
-// alongside "upload" (lib/drive/upload.ts's runUpload, lib/drive/download.ts's runDownload, including
-// a zip transfer's own single row — lib/drive/download-zip.ts's runZipDownload). "cancelled" is a
+// alongside "upload" (features/drive/lib/upload.ts's runUpload, features/drive/lib/download.ts's runDownload, including
+// a zip transfer's own single row — features/drive/lib/downloadZip.ts's runZipDownload). "cancelled" is a
 // real, if short-lived, status: a download's cancel path settles to it then immediately removes the
 // row (mobile parity — no history entry for an aborted transfer), so it is never expected to render.
 // "completedWithErrors" stays unused: it models a resolve-with-per-entry-failures outcome, but the
@@ -87,7 +87,7 @@ export interface SpeedSample {
 const SPEED_WINDOW_MS = 5_000
 
 // Pure and independently testable (vi.useFakeTimers()/vi.setSystemTime() drives `Date.now()`
-// deterministically in tests, same technique lib/drive/upload.test.ts already uses for the progress
+// deterministically in tests, same technique upload.test.ts already uses for the progress
 // throttle). Bytes/sec across the window: the earliest and latest samples still inside the last 5s
 // anchor the rate. Fewer than two in-window samples (transfer just started, or nothing has
 // progressed in the last 5s) reads 0 rather than a NaN/Infinity spike.
@@ -116,18 +116,18 @@ export interface TransfersStore {
 	// place bytesTransferred actually changes over time; never written to directly by a consumer.
 	speedSamples: SpeedSample[]
 	// Omits `paused` — every newly added transfer starts unpaused, enforced here rather than trusted
-	// to each call site (lib/drive/upload.ts's runUpload, lib/drive/download.ts's runDownload).
+	// to each call site (features/drive/lib/upload.ts's runUpload, features/drive/lib/download.ts's runDownload).
 	add: (transfer: Omit<Transfer, "paused">) => void
 	setProgress: (id: string, bytesTransferred: number) => void
 	// Updates a transfer's total size after add() — every upload and single-file download already
 	// knows its size upfront (the source File/DriveItem carries it), but a zip transfer's total isn't
 	// known until the SDK's own progress callback reports it, and can keep growing as the recursive
-	// walk discovers more files (lib/drive/download-zip.ts's runZipDownload adds the row at size 0 and
+	// walk discovers more files (features/drive/lib/downloadZip.ts's runZipDownload adds the row at size 0 and
 	// calls this on every throttled tick).
 	setSize: (id: string, size: number) => void
 	// Flips ONLY the paused flag — never touches status (paused is not a terminal state; see
 	// Transfer["paused"]'s own comment). Backs the active-row pause/resume toggle
-	// (lib/transfers/control.ts's pauseTransfer/resumeTransfer).
+	// (features/transfers/lib/control.ts's pauseTransfer/resumeTransfer).
 	setPaused: (id: string, paused: boolean) => void
 	settle: (id: string, status: TerminalStatus, error?: ErrorDTO) => void
 	remove: (id: string) => void
@@ -227,7 +227,7 @@ export function computeTransfersAggregate(
 // Selector hook, not a plain accessor — React-Compiler standing constraint: a component reads this
 // store through a selector hook returning primitives/stable refs, never `.getState()` in render.
 // useShallow keeps the returned object's IDENTITY stable across renders where neither field actually
-// changed (mirrors directory-listing.tsx's own useShallow(state => state.selectedItems)), since
+// changed (mirrors directoryListing.tsx's own useShallow(state => state.selectedItems)), since
 // computeTransfersAggregate otherwise returns a brand-new object on every store update. `percent` is
 // 0-100, ready to feed straight into a progress bar — not a 0..1 ratio.
 export function useTransfersAggregate(): { activeCount: number; percent: number; speed: number } {

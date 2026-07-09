@@ -199,7 +199,7 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 // The one live proof the trash-preview parity rule actually wires together: canPreview(item, "trash")
 // stays true (preview.logic.test.ts) rather than excluding trash like an undecryptable item, but
 // isEditable(item, "trash") is false (preview-save.logic.test.ts) and the header hides Download in
-// trash (preview-overlay.tsx's own variant check) — none of that is provable without a real trashed
+// trash (previewOverlay.tsx's own variant check) — none of that is provable without a real trashed
 // item reachable from a real Trash listing. Trashes the FILE itself (the single-item Trash flow
 // drive-actions.spec.ts's own bulk test exercises for multiple items), not the scratch directory, so
 // the item is a top-level Trash entry (a trashed directory's own contents stay unbrowsable — this
@@ -263,7 +263,7 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 		await expect(line).toBeVisible({ timeout: 30_000 })
 
 		// Read-only: isEditable gates off outside the drive variant, so the Save button (rendered only
-		// while editable, see preview-overlay.tsx) never appears — the trash listing's own item-level
+		// while editable, see previewOverlay.tsx) never appears — the trash listing's own item-level
 		// menu still offers Restore/Delete-permanently (drive-actions.spec.ts covers that surface), just
 		// not from inside this overlay.
 		await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0)

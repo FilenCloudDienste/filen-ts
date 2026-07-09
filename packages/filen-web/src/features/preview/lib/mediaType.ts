@@ -21,7 +21,7 @@ export function allowedMediaContentType(item: DriveItem): string | null {
 
 	// HEIC/HEIF resolve to "image" but can never stream (no browser decodes them inline) — excluded
 	// independently of the mime check below, so a spoofed streamable mime on a HEIC-named file can't
-	// slip through (defense-in-depth: image-viewer.tsx's own dispatch checks this first too).
+	// slip through (defense-in-depth: imageViewer.tsx's own dispatch checks this first too).
 	if (needsImageTransform(item)) {
 		return null
 	}

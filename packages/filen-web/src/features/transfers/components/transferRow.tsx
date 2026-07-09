@@ -54,8 +54,8 @@ function TransferStatusIcon({ status, direction }: { status: Transfer["status"];
 
 // Small decorative direction glyph (upload vs download), aria-hidden — purely an at-a-glance visual
 // cue; the accessible direction distinction lives in TransferStatusIcon's own sr-only label above.
-// Reuses the same icons the rest of the app already associates with each direction (upload-menu.tsx/
-// upload-dropzone.tsx's UploadIcon, bulk-action-bar.logic.ts's DownloadIcon) rather than a generic
+// Reuses the same icons the rest of the app already associates with each direction (uploadMenu.tsx/
+// uploadDropzone.tsx's UploadIcon, bulk-action-bar.logic.ts's DownloadIcon) rather than a generic
 // arrow pair.
 function TransferDirectionIcon({ direction }: { direction: Transfer["direction"] }) {
 	const Icon = direction === "upload" ? UploadIcon : DownloadIcon
@@ -69,8 +69,8 @@ function TransferDirectionIcon({ direction }: { direction: Transfer["direction"]
 }
 
 // One row: name + live progress bar, mirroring DriveRow's icon+truncate+trailing idiom (drive/
-// drive-row.tsx) scaled down for the panel's narrower surface. Active (uploading/downloading) rows get
-// a pause/resume toggle plus a Cancel button, wired to lib/transfers/control.ts's
+// driveRow.tsx) scaled down for the panel's narrower surface. Active (uploading/downloading) rows get
+// a pause/resume toggle plus a Cancel button, wired to features/transfers/lib/control.ts's
 // pauseTransfer/resumeTransfer/cancelTransfer — the in-flight runUpload/runDownload catch does the
 // actual store settle+remove once a cancelled worker call rejects with "Cancelled"; pause/resume never
 // reject, so the toggle flips the store's `paused` flag itself (see pauseTransfer/resumeTransfer). A

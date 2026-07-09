@@ -33,7 +33,7 @@ export interface LinkFormEdits {
 
 // DirPublicLinkRW's download flag is `enableDownload`; FilePublicLink's is `downloadable` — mutually
 // exclusive field names (never both present on the same object), so this is an exact structural
-// probe, not a heuristic — mirrors lib/drive/item.ts's identical isFile ("chunks" in raw) check.
+// probe, not a heuristic — mirrors features/drive/lib/item.ts's identical isFile ("chunks" in raw) check.
 function isDirLink(status: DirPublicLinkRW | FilePublicLink): status is DirPublicLinkRW {
 	return "enableDownload" in status
 }

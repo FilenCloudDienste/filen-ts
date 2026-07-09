@@ -7,7 +7,7 @@ import { resolveModKey } from "./helpers/modkey"
 // resilience notes). Nothing here ever creates, renames, moves, or deletes anything: the new-directory
 // flow is exercised only up to dialog validation, never submitted — a live create has no net-zero
 // counterpart yet (trash/delete land in a later drive sub-slice) and the create logic itself already
-// has unit coverage (lib/drive/create-directory.test.ts).
+// has unit coverage (createDirectory.test.ts).
 //
 // Chromium-only, empirically (not merely per the reload/second-tab precedent auth.spec.ts and
 // storage.spec.ts document): every test here needs the listing's real, authenticated listDir call to
@@ -64,7 +64,7 @@ test.describe("drive", () => {
 		const beforeUrl = page.url()
 		await listbox.getByRole("option").first().dblclick()
 
-		// A file has no navigation target (lib/drive/navigate.ts resolves directories only) — opening
+		// A file has no navigation target (features/drive/lib/navigate.ts resolves directories only) — opening
 		// one is a safe no-op. Only proceed with the deeper assertions if the URL actually grew a splat
 		// segment, so an account whose first row happens to be a file degrades to a skip, not a failure.
 		const navigated = await page

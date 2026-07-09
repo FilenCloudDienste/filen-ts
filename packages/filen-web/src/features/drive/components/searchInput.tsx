@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 
 // Module scope, not inside the component: runs exactly once per module evaluation (see
-// directory-listing.tsx's own drive.* registrations for the full StrictMode/HMR rationale). Old-web
+// directoryListing.tsx's own drive.* registrations for the full StrictMode/HMR rationale). Old-web
 // parity: mod+f intercepts the browser's own find-in-page ONLY while a drive listing has this
 // registered (see the useAction below's preventDefault) — user-rebindable like every other action.
 registerAction({

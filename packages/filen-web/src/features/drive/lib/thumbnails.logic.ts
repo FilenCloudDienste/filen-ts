@@ -65,7 +65,7 @@ export function thumbnailCategory(item: DriveItem): ThumbnailCategory {
 	return "none"
 }
 
-// name/size/lastModified projection of one cached .thumb file — thumb-store.ts's listThumbs() own
+// name/size/lastModified projection of one cached .thumb file — thumbStore.ts's listThumbs() own
 // return shape, and pickEvictions' own input below.
 export interface ThumbCacheEntry {
 	name: string

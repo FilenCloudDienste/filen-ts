@@ -28,11 +28,11 @@ export async function fetchContacts(): Promise<ContactsQueryData> {
 }
 
 // `enabled` lets a caller skip the fetch entirely, same convention as queries/drive.ts's
-// useItemInfoQuery — use-blocked-users.ts uses this to fetch contacts/blocked only for the sharedIn
+// useItemInfoQuery — useBlockedUsers.ts uses this to fetch contacts/blocked only for the sharedIn
 // drive listing (the one variant that filters by the blocked set), instead of paying a getContacts +
 // getBlockedContacts worker round trip on every mount and window refocus of every other variant
 // (queries/client.ts's staleTime: 0 would otherwise refire it there too). Defaults to true so
-// contacts-list.tsx's own bare call is unaffected.
+// contactsList.tsx's own bare call is unaffected.
 export function useContactsQuery(options?: { enabled?: boolean }): UseQueryResult<ContactsQueryData> {
 	return useQuery({
 		queryKey: CONTACTS_QUERY_KEY,

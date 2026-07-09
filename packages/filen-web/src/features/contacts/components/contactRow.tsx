@@ -16,13 +16,13 @@ interface ContactRowShellProps {
 	online?: boolean
 	// Present only while the listing is in bulk-selection mode — its presence (not its value) is what
 	// turns the row into a clickable, selectable listbox option; `selected` is meaningless without it.
-	// Mirrors DriveRow's role="option"/aria-selected treatment (drive/drive-row.tsx), no separate
+	// Mirrors DriveRow's role="option"/aria-selected treatment (drive/driveRow.tsx), no separate
 	// checkbox glyph.
 	selected?: boolean | undefined
 	onToggleSelect?: (() => void) | undefined
 	// Trailing slot: the per-row action buttons/menu (accept/deny, cancel, remove/block, unblock) in
 	// normal mode; left empty while onToggleSelect is set — bulk mode hides per-row actions in favor
-	// of the bulk bar (see contacts-list.tsx's renderSectionItems).
+	// of the bulk bar (see contactsList.tsx's renderSectionItems).
 	children?: ReactNode
 }
 
@@ -148,8 +148,8 @@ export function BlockedContactRow({ contact, selected, onToggleSelect, children 
 
 // ── Per-row action slots ─────────────────────────────────────────────────
 // Every component below only signals intent upward via callback props — none of them call an action
-// helper or open a confirm dialog directly. contacts-list.tsx's dialog host owns every confirm +
-// mutation, mirroring drive's item-menu.tsx (dialog-routed descriptors report a kind, the listing
+// helper or open a confirm dialog directly. contactsList.tsx's dialog host owns every confirm +
+// mutation, mirroring drive's itemMenu.tsx (dialog-routed descriptors report a kind, the listing
 // resolves it) — the one exception is Accept, which runs with no confirm (mirrors mobile), so it's
 // still just a reported intent (the caller runs it immediately instead of opening a dialog).
 
@@ -216,7 +216,7 @@ export interface ContactActionsProps {
 	onBlock: (contact: Contact) => void
 }
 
-// DropdownMenu Root > Trigger + Content, mirroring drive-row.tsx's exact nesting for its own ⋯
+// DropdownMenu Root > Trigger + Content, mirroring driveRow.tsx's exact nesting for its own ⋯
 // dropdown: Trigger is a render-prop'd Button (not a child), Content (ContactMenuContent, which
 // already wraps Portal>Positioner>Popup) is the Root's other direct child.
 export function ContactActions({ contact, onRemove, onBlock }: ContactActionsProps) {

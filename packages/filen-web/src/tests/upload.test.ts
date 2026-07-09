@@ -126,7 +126,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		const patched = updater([])
 		expect(patched).toHaveLength(1)
 		// narrowItem routes the uploaded SDK file to the plain "file" arm (has `chunks`, and carries
-		// `favorited` — see lib/drive/item.ts's narrowFile).
+		// `favorited` — see features/drive/lib/item.ts's narrowFile).
 		expect(patched[0]).toMatchObject({ type: "file", data: { uuid: testUuid("new") } })
 	})
 

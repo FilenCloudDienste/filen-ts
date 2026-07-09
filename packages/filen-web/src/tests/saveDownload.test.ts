@@ -3,7 +3,7 @@ import type { AnyFile, ZipItem } from "@filen/sdk-rs"
 import { type SwSaveTarget } from "@/features/drive/lib/saveDownload"
 import { SW_DOWNLOAD_PREFIX, SW_MSG_INIT_CLIENT, SW_MSG_REGISTER_DOWNLOAD, SW_MSG_REGISTER_ZIP_DOWNLOAD } from "@/lib/sw/protocol"
 
-// save-download.ts keeps its SW-client-ready state in a module-level `let` (mirrors
+// saveDownload.ts keeps its SW-client-ready state in a module-level `let` (mirrors
 // lib/sw/register.ts) — every test that touches the sw path needs its own module instance, so
 // tests dynamically re-import after vi.resetModules() instead of relying on a single static import
 // (same freshModule() pattern as lib/sw/register.test.ts). sdkApi is mocked module-wide up front;

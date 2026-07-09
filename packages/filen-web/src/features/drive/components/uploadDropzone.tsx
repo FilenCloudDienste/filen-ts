@@ -11,12 +11,12 @@ export interface UploadDropzoneProps {
 	// True outside the "drive" variant (recents/favorites/trash/shared have no navigable directory to
 	// upload into) or while the listing hasn't loaded yet — mirrors NewDirectory/UploadMenu's
 	// disabled-not-hidden convention. The zone never highlights or starts an upload while disabled —
-	// defense-in-depth alongside the mount-point gate in directory-listing.tsx.
+	// defense-in-depth alongside the mount-point gate in directoryListing.tsx.
 	disabled?: boolean
 	children: ReactNode
 }
 
-// Drop target wrapping the listing's list/scroll area (mounted in directory-listing.tsx). A drop
+// Drop target wrapping the listing's list/scroll area (mounted in directoryListing.tsx). A drop
 // carrying at least one directory (DataTransferItem.webkitGetAsEntry returning a
 // FileSystemDirectoryEntry) goes through the tree-walking directory-upload path; a plain files-only
 // drop keeps using the flat startUploads path unchanged.
@@ -28,7 +28,7 @@ export interface UploadDropzoneProps {
 // A separate window-level guard below preventDefaults dragover/drop globally (not just inside this
 // zone) so a stray drop anywhere on the page can't make the browser navigate away to open the file.
 // Scoped to this component's own mount lifecycle, same as every other subscription effect in this
-// codebase (see theme-provider.tsx's storage listener) — added on mount, removed on unmount.
+// codebase (see themeProvider.tsx's storage listener) — added on mount, removed on unmount.
 export function UploadDropzone({ parentUuid, disabled = false, children }: UploadDropzoneProps) {
 	const { t } = useTranslation("drive")
 	const [dragDepth, setDragDepth] = useState(0)

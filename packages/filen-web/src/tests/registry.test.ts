@@ -172,10 +172,10 @@ describe("keymap registry", () => {
 	})
 })
 
-// drive.download (directory-listing.tsx's module-scope registration, mirrored here since registry.ts
+// drive.download (directoryListing.tsx's module-scope registration, mirrored here since registry.ts
 // itself holds no concrete actions — every feature registers its own). Combos below mirror the app's
-// REAL default registrations as of this task (directory-listing.tsx/new-directory.tsx/
-// theme-provider.tsx/icon-rail.tsx) so a genuine collision would fail this test, not just a synthetic
+// REAL default registrations as of this task (directoryListing.tsx/newDirectory.tsx/
+// themeProvider.tsx/iconRail.tsx) so a genuine collision would fail this test, not just a synthetic
 // one.
 describe("keymap registry — drive.download registration", () => {
 	it("registers with its chosen default combo (mod+s)", async () => {
@@ -189,7 +189,7 @@ describe("keymap registry — drive.download registration", () => {
 	it("does not collide with any other registered default combo in the app", async () => {
 		const { registerAction, comboFor } = await freshRegistry()
 
-		// drive scope (directory-listing.tsx + new-directory.tsx)
+		// drive scope (directoryListing.tsx + newDirectory.tsx)
 		registerAction({ id: "drive.selectAll", defaultCombo: "mod+a", scope: "drive", descriptionKey: "driveCommandSelectAll" })
 		registerAction({ id: "drive.clearSelection", defaultCombo: "escape", scope: "drive", descriptionKey: "driveCommandClearSelection" })
 		registerAction({ id: "drive.toggleView", defaultCombo: "v", scope: "drive", descriptionKey: "driveCommandToggleView" })
@@ -198,7 +198,7 @@ describe("keymap registry — drive.download registration", () => {
 		registerAction({ id: "drive.newDirectory", defaultCombo: "n", scope: "drive", descriptionKey: "driveCommandNewDirectory" })
 		registerAction({ id: "drive.download", defaultCombo: "mod+s", scope: "drive", descriptionKey: "driveCommandDownload" })
 		registerAction({ id: "drive.search", defaultCombo: "mod+f", scope: "drive", descriptionKey: "driveCommandSearch" })
-		// global scope (theme-provider.tsx + icon-rail.tsx) — scope isn't enforced yet (every action
+		// global scope (themeProvider.tsx + iconRail.tsx) — scope isn't enforced yet (every action
 		// fires unconditionally, see registry.ts's ActionScope comment), so these are live collision
 		// candidates too, not just drive-scope ones.
 		registerAction({ id: "app.toggleTheme", defaultCombo: "d", scope: "global", descriptionKey: "toggleTheme" })

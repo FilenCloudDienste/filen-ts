@@ -22,7 +22,7 @@ async function createDirectory(page: Page, listbox: ReturnType<Page["getByRole"]
 // The one live proof the whole subtree search feature works end to end: a real
 // configureCache/createSearch/getRange round trip against the live cache-search engine, real
 // convergence timing, and the toolbar/keymap/navigation wiring around it — none of that is provable
-// at the unit level (search-status.logic.test.ts/use-drive-search.test.ts/search-engine.test.ts all
+// at the unit level (searchStatus.logic.test.ts/useDriveSearch.test.ts/searchEngine.test.ts all
 // inject or fake the engine). Runs as one scenario rather than several smaller tests: every leg reuses
 // the SAME scratch tree, and splitting it would multiply the number of cold convergence waits (each
 // several seconds) without adding coverage.

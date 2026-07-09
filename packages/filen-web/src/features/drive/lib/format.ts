@@ -3,8 +3,8 @@ import { asDirectoryOrFile, getSharerIdentity, type DriveItem } from "@/features
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 
 // Directories carry no real size on the item itself (synthetic 0n — see narrowItem in
-// @/lib/drive/item), so the size column is blank for them rather than showing "0 B". A shared file
-// reads as a file, a shared directory as a directory (asDirectoryOrFile).
+// @/features/drive/lib/item), so the size column is blank for them rather than showing "0 B". A shared
+// file reads as a file, a shared directory as a directory (asDirectoryOrFile).
 export function formatItemSize(item: DriveItem): string {
 	const base = asDirectoryOrFile(item)
 	return base.type === "file" ? formatBytes(Number(base.data.size)) : ""

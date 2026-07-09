@@ -25,7 +25,7 @@ export const SW_MSG_REGISTER_DOWNLOAD = "FILEN_SW_REGISTER_DOWNLOAD"
 export const SW_MSG_REGISTER_ZIP_DOWNLOAD = "FILEN_SW_REGISTER_ZIP_DOWNLOAD"
 // Same cross-only-via-structured-clone-postMessage rule, registering an INLINE (non-attachment)
 // stream instead — the `<video>`/`<audio>`/`<img>` preview route. `contentType` is the caller's own
-// allowlist-checked claim (lib/preview/media-type.ts's allowedMediaContentType); the SW re-validates
+// allowlist-checked claim (features/preview/lib/mediaType.ts's allowedMediaContentType); the SW re-validates
 // it independently at serve time (isAllowedInlineContentType below) rather than trusting the message,
 // so a compromised/buggy sender can never force an arbitrary inline Content-Type through.
 export const SW_MSG_REGISTER_PREVIEW = "FILEN_SW_REGISTER_PREVIEW"
@@ -40,7 +40,7 @@ export const SW_MSG_PING = "FILEN_SW_PING"
 // nosniff header is the real defense there); image uses an explicit, small enumerated set instead of
 // a broad `image/*` match — svg+xml specifically needs an exact allowlisted Content-Type rather than
 // a pattern, since an over-broad image match is the wrong place to make that call. Shared by the
-// page-side gate (lib/preview/media-type.ts's allowedMediaContentType, decides what to even attempt
+// page-side gate (features/preview/lib/mediaType.ts's allowedMediaContentType, decides what to even attempt
 // registering) and the SW's own independent re-check in sw.ts's handleDownload (defense-in-depth:
 // the SW never trusts that the page applied this correctly, it re-validates whatever contentType it
 // actually received over postMessage).

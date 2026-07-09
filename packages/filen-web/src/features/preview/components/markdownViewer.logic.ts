@@ -1,4 +1,4 @@
-// Pure logic for markdown-viewer.tsx — framework-free so it is testable in node
+// Pure logic for markdownViewer.tsx — framework-free so it is testable in node
 // (markdown-viewer.logic.test.ts) with no DOM involved.
 
 import { isSafeLinkHref } from "@/features/preview/components/docxViewer.logic"
@@ -6,7 +6,7 @@ import { isSafeLinkHref } from "@/features/preview/components/docxViewer.logic"
 // react-markdown's own `urlTransform` prop, applied to every URL-bearing attribute it finds (href from
 // links/autolinks, src from images — the only two possible from pure CommonMark/GFM source, since raw
 // HTML in the source is already escaped/dropped rather than parsed into real elements, see
-// markdown-viewer.tsx's own comment). Reuses docx-viewer's isSafeLinkHref rather than a second
+// markdownViewer.tsx's own comment). Reuses docx-viewer's isSafeLinkHref rather than a second
 // definition of the same scheme allowlist — one URL-safety verdict for the whole preview surface.
 // Returning undefined (not "") drops the attribute entirely: hast-util-to-jsx-runtime omits an
 // undefined prop, mirroring docx-viewer's own `removeAttribute` for the same unsafe case. Signature

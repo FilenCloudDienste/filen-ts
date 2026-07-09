@@ -4,7 +4,7 @@ import { useComboFor } from "@/lib/keymap/registry"
 
 // Holding a key down re-fires the native `keydown` event with `repeat: true` on every OS-level
 // autorepeat tick — without this, a held combo would spam the action's handler instead of firing
-// once. This matches the hand-rolled listener it replaces (theme-provider.tsx's old
+// once. This matches the hand-rolled listener it replaces (themeProvider.tsx's old
 // `if (event.repeat) return`) and is a sane default for keyboard *shortcuts* generally; a caller
 // that genuinely wants repeat-fire can override it via `options`.
 //
@@ -14,7 +14,7 @@ import { useComboFor } from "@/lib/keymap/registry"
 // repro (real click, then a real keypress) — react-hotkeys-hook silently drops every hotkey whose
 // event target has `role="option"`, treating it exactly like a stray keypress inside an `<input>`.
 // Drive's roving-tabindex rows/tiles are real DOM focus targets with `role="option"` (see
-// directory-listing.tsx's moveActive/registerRef) — without this override every drive.* command
+// directoryListing.tsx's moveActive/registerRef) — without this override every drive.* command
 // would silently never fire while a row actually has focus, which is the normal, expected state
 // during keyboard-driven listbox use, not an edge case.
 const DEFAULT_OPTIONS: Options = {

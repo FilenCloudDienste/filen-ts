@@ -1,6 +1,6 @@
 import type { BlockedContact } from "@filen/sdk-rs"
 
-// Identity sets for the sharedIn block filter (see components/drive/directory-listing.logic.ts) —
+// Identity sets for the sharedIn block filter (see features/drive/components/directoryListing.logic.ts) —
 // ports filen-mobile's blockedSelectors. userId is the primary key (stable across an email change);
 // emails is a lowercased, trimmed fallback for callers that only have a shared item's email.
 export interface BlockedUsers {

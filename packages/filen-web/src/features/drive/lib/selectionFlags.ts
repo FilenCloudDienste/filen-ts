@@ -1,7 +1,7 @@
 import { type DriveItem } from "@/features/drive/lib/item"
 
 // Aggregated flags for a Drive multi-selection, computed in a single pass — the bulk-action bar's
-// only source of gating truth (directory-listing.tsx computes this once per render from
+// only source of gating truth (directoryListing.tsx computes this once per render from
 // `selectedItems`, React Compiler memoizes). Mirrors filen-mobile's driveSelectors.ts
 // DriveSelectionFlags/aggregateDriveSelectionFlags; `everyFile`/`everyDirectory` match only the two
 // BASE arms (a shared item's own type, e.g. sharedRootFile, counts as neither) — there is no

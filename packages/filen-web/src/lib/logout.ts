@@ -2,10 +2,10 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 
 // Injected collaborators so the phased wipe is unit-testable without a worker, kv backend, or DOM —
-// mirrors login-attempt.ts/reset-attempt.ts's shape (and, like that module, stays free of any
+// mirrors loginAttempt.ts/resetAttempt.ts's shape (and, like that module, stays free of any
 // worker-constructing import: @/lib/sdk/client builds its worker eagerly at module load, which
 // would crash this file's own node-environment test the moment it was merely imported). The real
-// collaborators are wired at the call site — see icon-rail.tsx's AccountMenu. Sync ops
+// collaborators are wired at the call site — see iconRail.tsx's AccountMenu. Sync ops
 // (clearQueryCache/broadcast/reload) stay `void`-returning, matching their real counterparts
 // (QueryClient#clear, broadcastAuth, location.reload).
 export interface LogoutDeps {

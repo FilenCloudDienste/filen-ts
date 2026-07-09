@@ -18,14 +18,14 @@ export interface MarkdownViewerProps {
 
 // "View source" mounts the SAME read-only CodeMirror surface every text/code file uses — a nested
 // lazy() (not a plain import) so opening a markdown file never pulls CodeMirror's chunk in; it fetches
-// only when the toggle is actually used, resolving to the SAME chunk preview-overlay.tsx's own
+// only when the toggle is actually used, resolving to the SAME chunk previewOverlay.tsx's own
 // TextViewer lazy() produces.
 const TextViewer = lazy(() => import("@/features/preview/components/textViewer"))
 
 // react-markdown never parses raw HTML in the source into real elements (no rehype-raw plugin is used,
 // deliberately) — a `<script>`/`<img onerror>` written into a .md file renders as an escaped, inert
 // text string, never runs. urlTransform closes the remaining hole (a crafted `[link](javascript:...)`
-// or `![x](javascript:...)`) via the SAME scheme allowlist docx-viewer.tsx's own sanitizeLinks sweep
+// or `![x](javascript:...)`) via the SAME scheme allowlist docxViewer.tsx's own sanitizeLinks sweep
 // uses — see markdown-viewer.logic.ts.
 function MarkdownLink({ href, children }: { href?: string | undefined; children?: ReactNode | undefined }) {
 	return (
@@ -40,7 +40,7 @@ function MarkdownLink({ href, children }: { href?: string | undefined; children?
 }
 
 // Fenced code blocks (```lang ... ```) carry a `language-xxx` className from remark/rehype; inline
-// `code` spans don't. No fence-internal syntax highlighting here (unlike text-viewer.tsx's CodeMirror
+// `code` spans don't. No fence-internal syntax highlighting here (unlike textViewer.tsx's CodeMirror
 // grammars) — a monospace block is the whole scope for a nested code span inside rendered markdown.
 function MarkdownCode({ className, children }: { className?: string | undefined; children?: ReactNode | undefined }) {
 	if (typeof className === "string" && className.startsWith("language-")) {

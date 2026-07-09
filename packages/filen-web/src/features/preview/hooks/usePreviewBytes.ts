@@ -12,7 +12,7 @@ export type UsePreviewBytesResult = { status: "pending" } | { status: "success";
 // `item` changing, so arrow-stepping away from a still-loading file never lets its bytes land after the
 // fact. Previews are never registered as transfers (ephemeral, own spinner, no row).
 //
-// The caller is expected to key its host element by the item's uuid (preview-overlay.tsx's
+// The caller is expected to key its host element by the item's uuid (previewOverlay.tsx's
 // PreviewBody) so a genuine item change remounts this hook fresh — the initial "pending" state then
 // covers every real case with no redundant synchronous reset inside the effect (which would only
 // double-render and trip react-hooks/set-state-in-effect for no behavioral gain: an item-changed

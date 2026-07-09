@@ -18,7 +18,7 @@ export const PREVIEW_MAX_BYTES = 268_435_456n // 256 MiB
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico", "apng", "avif"])
 // HEIC/HEIF resolve to the "image" category below like every other image extension, but browsers
 // cannot decode them inline — needsImageTransform/canPreview single them out to route through the
-// buffered download + a client-side transform (lib/preview/heic-transform.ts) instead of the SW's
+// buffered download + a client-side transform (features/preview/lib/heicTransform.ts) instead of the SW's
 // streamed route every other image extension uses.
 const HEIC_EXTENSIONS = new Set(["heic", "heif"])
 const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mkv", "mov", "m4v"])
@@ -86,7 +86,7 @@ const CODE_EXTENSIONS = new Set([
 
 // Lowercased extension with no leading dot; "" when the name has none (including a dotfile like
 // ".gitignore", where the only "." is the leading one — not a real extension). Exported for
-// text-viewer.tsx (resolves a CodeMirror language the same way previewType resolves a category).
+// textViewer.tsx (resolves a CodeMirror language the same way previewType resolves a category).
 export function extensionOf(name: string): string {
 	const dot = name.lastIndexOf(".")
 
@@ -188,18 +188,18 @@ export function previewType(item: DriveItem): PreviewCategory {
 	return byMime ?? "other"
 }
 
-// image joins video/audio here: all three prefer the SW's inline Range route (lib/preview/preview-
-// stream.ts) and fall whole-buffer only as a capability fallback (dev / SW absent / registration
+// image joins video/audio here: all three prefer the SW's inline Range route
+// (features/preview/lib/previewStream.ts) and fall whole-buffer only as a capability fallback (dev / SW absent / registration
 // failure) — see PREVIEW_MAX_BYTES's own comment on the tradeoff that fallback accepts. HEIC/HEIF are
 // the one "image" exception: needsImageTransform below excludes them from ever attempting the
 // streamed route at all — canPreview applies the whole-buffer cap to them instead, same as pdf/docx.
 const STREAMED_CATEGORIES = new Set<PreviewCategory>(["video", "audio", "image"])
 
 // True for HEIC/HEIF — an "image"-category item that still can't stream, since no browser decodes it
-// inline. image-viewer.tsx checks this before ever considering the SW route, routing these through the
-// buffered download + a client-side transform (lib/preview/heic-transform.ts) instead. Extension-only
+// inline. imageViewer.tsx checks this before ever considering the SW route, routing these through the
+// buffered download + a client-side transform (features/preview/lib/heicTransform.ts) instead. Extension-only
 // (mirrors how previewType itself resolves category), never the item's own mime — a spoofed or absent
-// mime must not let a HEIC file slip into the streamed branch (media-type.ts independently excludes it
+// mime must not let a HEIC file slip into the streamed branch (mediaType.ts independently excludes it
 // too, defense-in-depth, the same pattern as the SW's own content-type re-validation).
 export function needsImageTransform(item: DriveItem): boolean {
 	const base = asDirectoryOrFile(item)
@@ -277,13 +277,13 @@ export function decodeUtf8(bytes: Uint8Array): string {
 	return new TextDecoder("utf-8").decode(bytes)
 }
 
-// ext -> the language tag text-viewer.tsx's own loader switches on to pick a CodeMirror language
+// ext -> the language tag textViewer.tsx's own loader switches on to pick a CodeMirror language
 // package (lazily imported there — this file stays framework-free, so the map value is a plain string,
 // never a CodeMirror Extension). "" means no grammar is wired for that extension; the file still
 // renders as a fully usable read-only, unhighlighted CodeMirror view, never a blocked preview. Every
 // CODE_EXTENSIONS entry above is covered (some intentionally unmapped — no maintained CodeMirror 6
 // grammar exists for a bare Makefile/DOS-batch, and "vue"/"svelte" SFC parsing is out of scope), plus
-// the two markdown extensions for the view-source fallback (markdown-viewer.tsx delegating to
+// the two markdown extensions for the view-source fallback (markdownViewer.tsx delegating to
 // TextViewer). Several tags share one CodeMirror package family (js/cjs/mjs/jsx/tsx/ts all resolve via
 // @codemirror/lang-javascript with different jsx/typescript flags; c/cpp/h/hpp share
 // @codemirror/lang-cpp's C-family grammar; cs/kt/dart/gradle route through the legacy clike/groovy

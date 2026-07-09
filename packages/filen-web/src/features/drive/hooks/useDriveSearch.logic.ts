@@ -3,7 +3,7 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { resolveDriveNavigationTarget, type DriveNavigationTarget } from "@/features/drive/lib/navigate"
 import { type SearchHitDTO } from "@/workers/searchEngine"
 
-// Pure bits pulled out of use-drive-search.ts's async/timer-driven wiring so they're table-testable
+// Pure bits pulled out of useDriveSearch.ts's async/timer-driven wiring so they're table-testable
 // without a worker, Comlink, or React.
 
 // Which async action a change in the toolbar's active/inactive state should trigger — "active" is

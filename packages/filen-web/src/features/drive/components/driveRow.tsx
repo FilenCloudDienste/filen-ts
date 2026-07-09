@@ -126,7 +126,7 @@ export function DriveRow({
 										tabIndex={active ? 0 : -1}
 										className="shrink-0 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
 										onClick={event => {
-											// Must not select the row — see item-menu.tsx's own onClick for why a click
+											// Must not select the row — see itemMenu.tsx's own onClick for why a click
 											// inside the (portaled) menu content needs the same guard.
 											event.stopPropagation()
 										}}

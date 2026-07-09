@@ -63,7 +63,7 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 
 	// Steps the open preview by one sibling (no wrap) — the single implementation behind PreviewOverlay's
 	// onStep prop, which both the header's prev/next buttons AND its own local in-dialog arrow-key
-	// handler call (preview-overlay.tsx — arrow keys can't reach a document-level keymap action while
+	// handler call (previewOverlay.tsx — arrow keys can't reach a document-level keymap action while
 	// the dialog traps focus, see that handler's own comment). A no-op outside kind:"preview".
 	function stepPreview(delta: 1 | -1): void {
 		setActiveDialog(prev => {
@@ -88,7 +88,7 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 
 	// Threaded into DriveRow/DriveTile as onItemAction (consistent with onPointerSelect/onOpen) — every
 	// "dialog"-run item-menu descriptor calls this with its own kind; "direct"-run ones (favorite/
-	// restore) resolve fully inside item-menu.tsx and never reach here.
+	// restore) resolve fully inside itemMenu.tsx and never reach here.
 	function handleItemAction(kind: ItemActionDialogKind, item: DriveItem): void {
 		setActiveDialog({ kind, items: [item] })
 	}
@@ -100,7 +100,7 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 
 		if (outcome.status === "error") {
 			// Dialog stays open on error (e.g. a name clash) so the user can fix the name and retry —
-			// mirrors new-directory.tsx's identical convention.
+			// mirrors newDirectory.tsx's identical convention.
 			toast.error(errorLabel(outcome.dto))
 			return
 		}

@@ -5,7 +5,7 @@ import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it down
-// to the ops this file exercises, mirroring lib/drive/actions.test.ts's mock boundary.
+// to the ops this file exercises, mirroring driveActions.test.ts's mock boundary.
 const { shareDirectory, shareFile, removeSharedItem } = vi.hoisted(() => ({
 	shareDirectory: vi.fn(),
 	shareFile: vi.fn(),
@@ -21,7 +21,7 @@ vi.mock("@/lib/sdk/client", () => ({
 }))
 
 // A bare, unconfigured QueryClient stands in for the real singleton — same rationale as
-// lib/drive/actions.test.ts: this helper only needs genuine invalidateQueries mechanics, never the
+// driveActions.test.ts: this helper only needs genuine invalidateQueries mechanics, never the
 // production client's OPFS-backed persistence pipeline.
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
@@ -35,7 +35,7 @@ beforeEach(() => {
 })
 
 // UuidStr is a template-literal brand requiring at least 3 dashes — pad a short readable label into a
-// shape that satisfies it, mirroring lib/drive/actions.test.ts's own fixture.
+// shape that satisfies it, mirroring driveActions.test.ts's own fixture.
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
 }
@@ -167,7 +167,7 @@ function mockContact(label: string): Contact {
 }
 
 // Worker-boundary errors arrive as plain DTOs (the Comlink proxy throws toErrorDTO output) — mirrors
-// lib/drive/actions.test.ts's sdkDto fixture.
+// driveActions.test.ts's sdkDto fixture.
 function sdkDto(kind: string): ErrorDTO {
 	return { species: "sdk", kind, message: `${kind} message`, label: `${kind} label` }
 }
@@ -225,7 +225,7 @@ describe("shareItems", () => {
 		const dto = sdkDto("Forbidden")
 		// items.map dispatches synchronously in array order (each callback's first await is its
 		// shareDirectory call), so [ok, bad] queues these two outcomes in order — same call-order
-		// technique as lib/drive/actions.test.ts's moveItems partial-failure test.
+		// technique as driveActions.test.ts's moveItems partial-failure test.
 		shareDirectory.mockResolvedValueOnce(undefined).mockRejectedValueOnce(dto)
 
 		const outcome = await shareItems([ok, bad], [contact])

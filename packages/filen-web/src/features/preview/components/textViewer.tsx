@@ -14,12 +14,12 @@ export interface TextViewerProps {
 	item: DriveItem
 	alt: string
 	// Writable mode for the preview-save feature — omitted (or false) by every read-only caller
-	// (markdown-viewer.tsx's own view-source toggle never edits its source), so those call sites need
+	// (markdownViewer.tsx's own view-source toggle never edits its source), so those call sites need
 	// no changes. `onDirtyChange`/`contentRef` are only ever read while `editable` is true.
 	editable?: boolean
 	// Fired whenever the dirty bit flips (never on every keystroke) — the overlay mirrors it into its
 	// own state to gate the Save button/Cmd+S/close+nav confirm, none of which this component renders
-	// itself (the header lives in preview-overlay.tsx).
+	// itself (the header lives in previewOverlay.tsx).
 	onDirtyChange?: (dirty: boolean) => void
 	// Write-only side channel for the overlay's Save handler to read the CURRENT buffer on demand
 	// (Cmd+S/button click) without this component re-rendering the overlay on every keystroke — a
@@ -123,7 +123,7 @@ interface TextSourceProps {
 // pending/error states above it never mount a CodeMirror instance (and never trigger a language chunk
 // fetch) in the first place. `text` seeds `content` ONCE, at mount (useState's initial argument is
 // only ever consumed on the first render) — the EDITOR INVARIANT: this component is remounted fresh
-// per item (preview-overlay.tsx keys the whole preview body by item uuid), which is the ONLY path that
+// per item (previewOverlay.tsx keys the whole preview body by item uuid), which is the ONLY path that
 // may ever reseed it; nothing in here ever re-derives `content` from a later `text` prop change, so a
 // re-render from an unrelated cause (theme flip, language chunk landing) can never clobber in-progress
 // edits or echo-loop.
@@ -143,7 +143,7 @@ function TextSource({ text, tag, alt, editable, onDirtyChange, contentRef }: Tex
 	// doubles as "compare against the frozen original" with no extra ref of its own. Unconditional — no
 	// `editable &&` guard: `content` can only ever diverge from `text` through `onChange` below, which
 	// itself requires `editable`, so this is a no-op for an always-read-only mount, and, unlike a guarded
-	// version, SURVIVES a later editable->false flip (a failed save's read-only lock, preview-overlay.tsx)
+	// version, SURVIVES a later editable->false flip (a failed save's read-only lock, previewOverlay.tsx)
 	// instead of masking genuinely unsaved edits as clean.
 	const dirty = content !== text
 
@@ -165,7 +165,7 @@ function TextSource({ text, tag, alt, editable, onDirtyChange, contentRef }: Tex
 				// Always the live buffer, never `text` directly — `content` only diverges from it through
 				// `onChange` below (itself editable-gated), so this is a no-op for an always-read-only
 				// mount, and, for one whose `editable` flips false mid-session (a failed save's read-only
-				// lock, preview-overlay.tsx), keeps the user's typed edits ON SCREEN instead of visibly
+				// lock, previewOverlay.tsx), keeps the user's typed edits ON SCREEN instead of visibly
 				// reverting them to the pre-edit original.
 				value={content}
 				extensions={extensions}
@@ -183,7 +183,7 @@ function TextSource({ text, tag, alt, editable, onDirtyChange, contentRef }: Tex
 }
 
 function noopDirtyChange(): void {
-	// Default for every read-only caller (this component's own default, and markdown-viewer.tsx's
+	// Default for every read-only caller (this component's own default, and markdownViewer.tsx's
 	// view-source toggle) — TextSource always calls onDirtyChange, so a real no-op keeps that call
 	// unconditional rather than every render site branching on whether a callback was even passed.
 }

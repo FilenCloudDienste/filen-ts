@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 
 export interface ContactsBulkBarProps {
 	// The current (unfiltered) query data per section — search can't change while this bar is showing
-	// (contacts-list.tsx swaps the search box out for this bar), so filtering by `selection` against
+	// (contactsList.tsx swaps the search box out for this bar), so filtering by `selection` against
 	// either the filtered or unfiltered set yields the same rows; the unfiltered arrays are already
 	// sitting in the caller's scope, so this reuses them directly rather than re-deriving anything.
 	requests: ContactRequestIn[]
@@ -19,8 +19,8 @@ export interface ContactsBulkBarProps {
 	onClear: () => void
 	// Direct — no confirm (mirrors mobile: accept never confirms).
 	onAccept: (items: ContactRequestIn[]) => void
-	// The rest only signal intent upward — contacts-list.tsx's dialog host owns the confirm + the
-	// actual mutation, same split as the per-row actions in contact-row.tsx.
+	// The rest only signal intent upward — contactsList.tsx's dialog host owns the confirm + the
+	// actual mutation, same split as the per-row actions in contactRow.tsx.
 	onDeny: (items: ContactRequestIn[]) => void
 	onCancel: (items: ContactRequestOut[]) => void
 	onRemove: (items: Contact[]) => void
@@ -29,7 +29,7 @@ export interface ContactsBulkBarProps {
 }
 
 // Replaces the toolbar's search region while bulk-selection mode is active (mounted by
-// contacts-list.tsx) — mirrors drive/bulk-action-bar.tsx's two-flex-child shape (clear+count on the
+// contactsList.tsx) — mirrors drive/bulkActionBar.tsx's two-flex-child shape (clear+count on the
 // left, actions on the right) and its "compute selected items from a selection set, gate the
 // descriptor list, dispatch by kind" structure.
 export function ContactsBulkBar({

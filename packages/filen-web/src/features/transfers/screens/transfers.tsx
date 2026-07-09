@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 
 // Full-page transfers surface (header+actionbar+content shell mirrors ContactsList) — the rail
-// popover (transfers-panel.tsx) stays the quick glance and links here via "See all". TransferRow is
+// popover (transfersPanel.tsx) stays the quick glance and links here via "See all". TransferRow is
 // reused verbatim from the popover (same component, no fork) so a row looks and behaves identically
 // in both surfaces; only the surrounding chrome (sections, bulk header actions) differs.
 export function TransfersScreen() {
@@ -83,7 +83,7 @@ export function TransfersScreen() {
 					size="sm"
 					disabled={!clearable}
 					onClick={() => {
-						// Same .getState() idiom transfers-panel.tsx's own Clear finished button uses — the
+						// Same .getState() idiom transfersPanel.tsx's own Clear finished button uses — the
 						// exact store call, just reachable from this screen's persistent toolbar too.
 						useTransfersStore.getState().clearFinished()
 					}}

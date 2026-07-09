@@ -1,4 +1,4 @@
-// Pure helpers backing export-master-keys.tsx, split out so both are unit-testable without a
+// Pure helpers backing exportMasterKeys.tsx, split out so both are unit-testable without a
 // worker, a query client, or the DOM (see download.ts for why the actual Blob/anchor download
 // itself is not unit-tested here).
 

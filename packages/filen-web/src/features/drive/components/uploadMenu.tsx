@@ -19,7 +19,7 @@ export interface UploadMenuProps {
 // files" and "Upload directory" side by side.
 //
 // Each picker is a hidden <input type="file">, triggered via ref+click (mirrors
-// master-keys-file-field.tsx) — its value is reset after every pick so choosing the exact same
+// masterKeysFileField.tsx) — its value is reset after every pick so choosing the exact same
 // file(s)/directory again still fires change.
 export function UploadMenu({ parentUuid, disabled = false }: UploadMenuProps) {
 	const { t } = useTranslation("drive")

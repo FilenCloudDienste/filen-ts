@@ -31,7 +31,7 @@ export function buildTransfersDisplayList(transfers: Transfer[]): TransfersDispl
 }
 
 // Bulk-header target selection. Each helper returns exactly the id list its header button hands to
-// lib/transfers/control.ts, and an empty return doubles as the button's own disable signal
+// features/transfers/lib/control.ts, and an empty return doubles as the button's own disable signal
 // (`.length === 0`) — the screen never duplicates the selection rule between "what runs" and "when is
 // this greyed out".
 

@@ -8,20 +8,20 @@ import { MOD_KEY } from "./helpers/modkey"
 
 // Neither native picker is drivable by Playwright, so every FSA-path test below stubs
 // window.showSaveFilePicker (installed via addInitScript, before the app's own first script runs, so
-// isFsaAvailable() -- save-download.ts -- sees it from first paint) with a function that returns a fake
+// isFsaAvailable() -- saveDownload.ts -- sees it from first paint) with a function that returns a fake
 // FileSystemFileHandle-alike whose createWritable() resolves to a REAL WritableStream (required:
 // ReadableStream.pipeTo's own brand check rejects a duck-typed non-WritableStream object) backed by a
 // custom sink. The app still runs its real FSA code path end to end (capability check -> picker ->
-// TransformStream bridge -> coordinated teardown -- save-download.ts/download.ts) against that
+// TransformStream bridge -> coordinated teardown -- saveDownload.ts/download.ts) against that
 // controllable sink, which accumulates into window.__smokeSink for the test to read back. The SW-path
 // test instead DELETES the picker so isFsaAvailable() is false and the app takes the service-worker
 // route, whose plain navigation becomes a real browser download caught via page.waitForEvent("download").
 //
 // Every test drives the SAME UI trigger: select the row(s), then the bulk-action bar's "Download"
-// button (bulk-action-bar.tsx) -- chosen over the per-item ⋯ menu (its trigger is opacity-0 until
+// button (bulkActionBar.tsx) -- chosen over the per-item ⋯ menu (its trigger is opacity-0 until
 // row-hover, an extra, unnecessary step to drive from Playwright) and over the mod+s keymap (an
 // invisible interaction with no visible affordance to assert against first). Selecting a row always
-// swaps the toolbar for the bulk bar, even for a single-item selection (directory-listing.tsx), so one
+// swaps the toolbar for the bulk bar, even for a single-item selection (directoryListing.tsx), so one
 // trigger covers both the single-file and the zip path below.
 const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
 
@@ -38,7 +38,7 @@ declare global {
 			createWritable: () => Promise<WritableStream<Uint8Array>>
 		}>
 		// Set by stubFsaPicker's addInitScript before the app's own first script runs -- accumulates every
-		// byte the app's real FSA code path (save-download.ts/download.ts) writes into the fake sink below,
+		// byte the app's real FSA code path (saveDownload.ts/download.ts) writes into the fake sink below,
 		// plus the first 4 bytes written (the zip test's magic-number check). Declared non-optional: every
 		// test that reads it called stubFsaPicker first (mirrors e2e/global.d.ts's own __filenE2E rationale).
 		__smokeSink: { bytes: number; first4: number[] }
@@ -89,11 +89,11 @@ function readSmokeSink(page: Page): Promise<{ bytes: number; first4: number[] }>
 }
 
 // Fixture files are uploaded through the SAME real UI path a user would use -- the hidden file input
-// upload-menu.tsx wires up, targeting whatever directory the app is currently navigated into
-// (directory-listing.tsx passes it the current listing's own uuid) -- rather than through the
+// uploadMenu.tsx wires up, targeting whatever directory the app is currently navigated into
+// (directoryListing.tsx passes it the current listing's own uuid) -- rather than through the
 // createTestFile e2e hook: that hook's own doc comment says it uploads at the account ROOT with no
 // parentUuid option, which would defeat the whole point of nesting above. Driving the UI instead also
-// means the upload lands through runUpload's own optimistic cache patch (lib/drive/upload.ts), so the
+// means the upload lands through runUpload's own optimistic cache patch (features/drive/lib/upload.ts), so the
 // new row appears in the already-open scratch listing on its own -- no forced refetch needed. Mirrors
 // uploads.spec.ts's own picker-driven test.
 async function uploadTestFiles(page: Page, files: { name: string; content: string }[]): Promise<void> {
@@ -117,10 +117,10 @@ async function uploadLargeTestFile(page: Page, name: string, sizeBytes: number):
 
 // A real, UI-driven fixture upload (uploadTestFiles/uploadLargeTestFile above) leaves a FINISHED
 // "upload" transfer row behind in the same store the download flow below reads -- and a transfer row's
-// accessible name is just its bare file name regardless of direction (transfer-row.tsx's own
+// accessible name is just its bare file name regardless of direction (transferRow.tsx's own
 // `<Progress aria-label={transfer.name} />`), so an upload and a later download of the SAME file
 // collide on every getByRole("progressbar", { name: fileName })/getByText("Done") locator below unless
-// the upload's own row is cleared first. The panel's "Clear finished" button (transfers-panel.tsx)
+// the upload's own row is cleared first. The panel's "Clear finished" button (transfersPanel.tsx)
 // clears every finished row in one click, so this works the same whether one file or several were just
 // uploaded.
 async function clearFinishedTransfers(page: Page): Promise<void> {
@@ -226,7 +226,7 @@ test.describe("downloads", () => {
 				.click()
 
 			// A mixed multi-item selection has no single source name to derive from, so the zip falls back to
-			// the shared generic archive name (download-zip.ts's resolveSuggestedZipName). exact: true guards
+			// the shared generic archive name (downloadZip.ts's resolveSuggestedZipName). exact: true guards
 			// against Playwright's default substring/case-insensitive accessible-name matching picking up an
 			// unrelated row that merely CONTAINS this literal name.
 			await expect(page.getByRole("progressbar", { name: "Filen.zip", exact: true })).toBeVisible({ timeout: 10_000 })
@@ -280,7 +280,7 @@ test.describe("downloads", () => {
 			expect(download.suggestedFilename()).toBe(fileName)
 			expect(statSync(await download.path()).size).toBe(Buffer.byteLength(content, "utf8"))
 
-			// The sw path is fire-and-forget once the navigation triggers (save-download.ts's
+			// The sw path is fire-and-forget once the navigation triggers (saveDownload.ts's
 			// triggerSwDownload; download.ts's runDownload sw branch has no per-byte progress to report,
 			// unlike the fsa branch) -- live-verified against runDownload's own settle call that the row
 			// still reaches Done for a file this size, so that is what this asserts, not an invented

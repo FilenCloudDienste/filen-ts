@@ -34,7 +34,7 @@ const SWATCHES: Swatch[] = [
 	{ color: "gray", labelKey: "driveColorGray", hex: "#8F8E93" }
 ]
 
-// Small swatch-grid modal, mounted-when-active by the listing's dialog host (directory-listing.tsx) —
+// Small swatch-grid modal, mounted-when-active by the listing's dialog host (directoryListing.tsx) —
 // there's no trigger element left to anchor a popover to by the time this opens (the context menu it
 // was dispatched from is already closed), so this renders as a modal like its sibling dialogs.
 export function ColorDialog({ directory, onClose }: ColorDialogProps) {

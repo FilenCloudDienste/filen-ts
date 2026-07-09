@@ -31,7 +31,7 @@ setup("sign in through the real form and harvest the session", async ({ page }) 
 	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
 	// Harvest the now-live worker session — NOT the kv copy: a persist failure (persisted: false, a
-	// real documented outcome — see login-attempt.ts) would leave nothing there even though the login
+	// real documented outcome — see loginAttempt.ts) would leave nothing there even though the login
 	// itself succeeded and the worker holds a perfectly good client.
 	const session = await page.evaluate(() => window.__filenE2E.dumpSession())
 

@@ -1,6 +1,6 @@
-// Pure sizing/encoding helpers shared by every thumbnail generator, including heic-codec.ts's own
+// Pure sizing/encoding helpers shared by every thumbnail generator, including heicCodec.ts's own
 // thumbnail-encode path — that file imports this one (lib/preview -> lib/drive, an already-
-// established direction, see media-type.ts/preview-stream.ts) rather than duplicating the math,
+// established direction, see mediaType.ts/previewStream.ts) rather than duplicating the math,
 // since this module has zero dependencies of its own and so creates no import cycle back into it.
 
 // Aspect-preserving max-dimension fit, never upscaling — a source already at or under maxDim in both
@@ -53,7 +53,7 @@ async function attemptEncode(canvas: OffscreenCanvas | HTMLCanvasElement, type: 
 }
 
 // webp-first, jpeg-0.85 fallback — the one on-disk thumbnail format policy every generator shares
-// (the client-side ones in thumb-generators.ts, and heic-codec.ts's own downscale-to-thumbnail path).
+// (the client-side ones in thumbGenerators.ts, and heicCodec.ts's own downscale-to-thumbnail path).
 export async function encodeCanvasThumb(canvas: OffscreenCanvas | HTMLCanvasElement): Promise<Blob> {
 	const webp = await attemptEncode(canvas, "image/webp")
 

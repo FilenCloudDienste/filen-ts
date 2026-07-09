@@ -22,7 +22,7 @@ interface ChangePasswordCardProps {
 
 // Current + new + confirm, gated on the same minimum-strength rule as register/reset
 // (isPasswordStrongEnough — weak is the only blocked tier). Submit runs runChangePasswordAttempt
-// (lib/auth/change-password.ts), which owns the fingerprint re-sync law: it persists the
+// (changePassword.logic.ts), which owns the fingerprint re-sync law: it persists the
 // RETURNED, post-mutation session blob before this component does anything else with the result.
 function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 	const { t } = useTranslation("auth")

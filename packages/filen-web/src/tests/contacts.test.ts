@@ -18,7 +18,7 @@ vi.mock("@/lib/sdk/client", () => ({
 // Every other hook wrapper below is a one-line pass-through no node-environment test can render (no
 // DOM — see vitest.config.ts). useContactsQuery's `enabled` default is worth covering directly
 // anyway, same rationale as drive.test.ts's useItemInfoQuery coverage: get the fallback wrong (e.g.
-// defaulting to false) and contacts-list.tsx's own bare call silently stops fetching. This only
+// defaulting to false) and contactsList.tsx's own bare call silently stops fetching. This only
 // intercepts useQuery itself — real `useQuery` internals are never exercised, just whether our
 // wrapper forwards `enabled` into its options — so QueryClient (used below to build testQueryClient)
 // and the rest of the module stay real.
@@ -136,7 +136,7 @@ describe("fetchContacts", () => {
 })
 
 describe("useContactsQuery", () => {
-	// contacts-list.tsx's own call passes no options at all — a wrong default here would silently
+	// contactsList.tsx's own call passes no options at all — a wrong default here would silently
 	// stop it from ever fetching.
 	it("defaults enabled to true when no options are given", () => {
 		useQuery.mockReturnValue({ status: "pending" })
@@ -146,7 +146,7 @@ describe("useContactsQuery", () => {
 		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ enabled: true }))
 	})
 
-	// use-blocked-users.ts disables this query on every drive variant except sharedIn (the only one
+	// useBlockedUsers.ts disables this query on every drive variant except sharedIn (the only one
 	// that filters by the blocked set) — `enabled` reaching useQuery unchanged is the one thing this
 	// thin wrapper must get right, same rationale as drive.test.ts's useItemInfoQuery coverage.
 	it("forwards enabled: false through to useQuery, unmodified", () => {

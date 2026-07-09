@@ -25,7 +25,7 @@ import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 // Lazy chunks: pdf.js (~1MB+), docx-preview, CodeMirror (+ its per-language grammar chunks) and
 // react-markdown only ever download once a file needing them is actually opened, never on the app's
 // own initial bundle (image/video/audio all stream or buffer directly, no heavy renderer library
-// involved). markdown-viewer.tsx's own "view source" toggle lazy-imports TextViewer a second time —
+// involved). markdownViewer.tsx's own "view source" toggle lazy-imports TextViewer a second time —
 // the same underlying chunk as this one, deduped by the bundler.
 const PdfViewer = lazy(() => import("@/features/preview/components/pdfViewer"))
 const DocxViewer = lazy(() => import("@/features/preview/components/docxViewer"))
@@ -33,7 +33,7 @@ const TextViewer = lazy(() => import("@/features/preview/components/textViewer")
 const MarkdownViewer = lazy(() => import("@/features/preview/components/markdownViewer"))
 
 // Cmd/Ctrl+S — SHARES its literal combo with the already-registered "drive.download" (mod+s,
-// directory-listing.tsx), deliberately: that action's own handler already no-ops (after an
+// directoryListing.tsx), deliberately: that action's own handler already no-ops (after an
 // unconditional preventDefault, which is what actually suppresses the browser's native Save-Page-As)
 // whenever a dialog — this one included — is open, so the two never race for real effect, only for
 // the harmless preventDefault. `enableOnContentEditable` is load-bearing: react-hotkeys-hook's default
@@ -50,7 +50,7 @@ registerAction({
 
 export interface PreviewOverlayProps {
 	variant: DriveVariant
-	// Frozen previewable-sibling snapshot taken at open time (directory-listing.tsx's handleOpen) — the
+	// Frozen previewable-sibling snapshot taken at open time (directoryListing.tsx's handleOpen) — the
 	// pager's whole candidate list, not just the opened item.
 	items: DriveItem[]
 	index: number
@@ -111,7 +111,7 @@ function PreviewRenderError() {
 	)
 }
 
-// Full-bleed preview surface, mounted by the drive dialog host (directory-listing.tsx) exactly like its
+// Full-bleed preview surface, mounted by the drive dialog host (directoryListing.tsx) exactly like its
 // sibling dialog kinds — composed directly from Base UI's dialog primitives (not the shared centered
 // ui/dialog.tsx) since no full-screen surface exists yet to reuse. Closing is blocked on a pending
 // state in exactly one case now: an editable text/code buffer with unsaved edits (see requestOrRun) —
@@ -125,23 +125,17 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 	// re-rendering on every keystroke — see TextViewer's own contentRef prop doc.
 	const contentRef = useRef<string | null>(null)
 
-	// Local override for the currently-displayed item, ACCUMULATED per pager slot across the whole
-	// overlay session: `items` is a FROZEN pager snapshot (see the props' own comment) a save's uuid
-	// rotation can never update in place, and a single `{forUuid, item}` slot (this state's prior shape)
-	// loses every OTHER already-saved sibling's override the moment a save happens on a DIFFERENT slot —
-	// paging back to it then resolves the stale pre-save uuid, which the worker's own download op 404s
-	// on (it was already rotated away by that earlier save). Keyed to each slot's own FROZEN (pre-save)
-	// `rawItem.data.uuid` — never the possibly-already-overridden `item.data.uuid` — so a REPEAT save of
-	// the same still-open slot (re-editing an already-saved item, no navigation in between) naturally
-	// overwrites the SAME map entry instead of chaining a second key; the lookup below needs no
-	// chain-walk. Never reset except by a fresh mount (a close+reopen), same as `lockedReadOnly` below.
+	// Override for the currently-displayed item, accumulated per pager slot across the whole overlay
+	// session (never reset on navigation, only on remount) — `items` is a FROZEN pager snapshot that a
+	// save's uuid rotation can't update in place, and a single-slot override would drop every other
+	// already-saved sibling's override. Keyed by each slot's frozen pre-save `rawItem.data.uuid` (never
+	// the already-overridden `item.data.uuid`), so a repeat save of the same slot overwrites the same
+	// entry instead of chaining a new key.
 	const [saved, setSaved] = useState<ReadonlyMap<string, DriveItem>>(() => new Map<string, DriveItem>())
-	// Single-slot (unlike `saved` above) — the read-only lock is keyed to the CURRENT pager slot only,
-	// so navigating to a different sibling and back can, in principle, forget an earlier slot's lock;
-	// accepted for now (a lost SAFETY lock, not a 404 — the failure class this guards against re-asserts
-	// itself on the very next failed save). Mirrors mobile parity's own "a failed save locks the file
-	// read-only" rule (see runPreviewSave's own comment) — a fresh item (navigation) or a fresh overlay
-	// mount (close+reopen) both clear it for free, derived rather than reset by an effect.
+	// Single-slot (unlike `saved` above): keyed to the CURRENT pager slot only, so navigating away and
+	// back can forget an earlier slot's lock (accepted — the guarded failure re-asserts on the next
+	// failed save). Mirrors mobile parity's "a failed save locks the file read-only" rule; cleared by a
+	// fresh item or a fresh overlay mount, never by an effect.
 	const [lockedReadOnly, setLockedReadOnly] = useState<{ forUuid: string } | null>(null)
 	const [dirty, setDirty] = useState(false)
 	const [saving, setSaving] = useState(false)
@@ -169,7 +163,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 	// can never fix (isUnresolvableParentError, see preview-save.logic.ts's own comment on why); every
 	// other failure leaves the buffer editable+dirty for a retry. `dirty` resets for free on SUCCESS
 	// only: a new `item.data.uuid` re-keys PreviewBody, remounting TextViewer fresh with its own clean
-	// `dirty=false` (see text-viewer.tsx's own mount-time effect) — a FAILURE never remounts anything, so
+	// `dirty=false` (see textViewer.tsx's own mount-time effect) — a FAILURE never remounts anything, so
 	// the buffer (and its dirty bit) simply survives untouched, which is exactly what keeps the typed
 	// content visible and the close/nav prompt still armed either way.
 	async function performSave(): Promise<void> {
@@ -264,14 +258,14 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 	// keymap listener useAction/react-hotkeys-hook registers — so ArrowLeft/ArrowRight can never reach a
 	// global drive.previewPrev/drive.previewNext action while the dialog holds focus. Merged onKeyDown
 	// props run right-to-left (merge-props.js), so a handler passed directly on Popup (below) still runs
-	// BEFORE that internal stopPropagation — this is that handler, mirroring move-target-dialog.tsx's own
+	// BEFORE that internal stopPropagation — this is that handler, mirroring moveTargetDialog.tsx's own
 	// local onKeyDown for the identical in-dialog-focus-trap reason.
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
 		// A focused media scrubber wins over the pager — native seek expectation (see isMediaTarget
 		// above). A focused CodeMirror surface wins too — its own arrow bindings move the cursor/
 		// selection and never stopPropagation, so without this a Left/Right meant for the caret would
 		// also page the overlay (or pop the unsaved-changes prompt on every press) — see
-		// preview-overlay.logic.ts's own isTextEditingTarget for why this checks read-only CodeMirror
+		// previewOverlay.logic.ts's own isTextEditingTarget for why this checks read-only CodeMirror
 		// too, not just the editable case.
 		if (isMediaTarget(event.target) || isTextEditingTarget(event.target)) {
 			return
@@ -397,7 +391,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 						</PreviewErrorBoundary>
 					</div>
 					{/* Nested confirmation dialog — Base UI supports nesting a dialog inside another normally
-					(see versions-dialog.tsx's own identical precedent); this must stay a child of the outer
+					(see versionsDialog.tsx's own identical precedent); this must stay a child of the outer
 					Dialog, not a sibling rendered outside it, for the stacked focus-trap/backdrop behavior to
 					apply. Shared by close/prev/next — see PendingIntent — rather than one instance per trigger. */}
 					<ConfirmDialog
@@ -452,8 +446,8 @@ interface PreviewBodyProps {
 // Dispatches to the right viewer by category — remounted (keyed by uuid, see the error boundary one
 // level up) on every item change so a viewer's own pending/success/error state never flashes the
 // previous item's content. Bytes are no longer loaded centrally here: image/video/audio each own their
-// own data source (a streamed SW URL or a buffered blob, see image-viewer.tsx/media-viewer.tsx),
-// pdf/docx each own a lazy chunk plus their own whole-buffer load (see pdf-viewer.tsx/docx-viewer.tsx)
+// own data source (a streamed SW URL or a buffered blob, see imageViewer.tsx/mediaViewer.tsx),
+// pdf/docx each own a lazy chunk plus their own whole-buffer load (see pdfViewer.tsx/docxViewer.tsx)
 // — a category still rendered by the fallback below (text/code/markdown) has nothing to load yet.
 // `editable`/`onDirtyChange`/`contentRef` only ever reach TextViewer (the "text"/"code" case) — every
 // other category ignores them.

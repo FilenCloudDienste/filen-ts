@@ -14,7 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { InputDialog } from "@/components/dialogs/inputDialog"
 
 // Module scope, not inside the component: runs exactly once per module evaluation, which is what
-// `registerAction`'s duplicate-id guard assumes (see theme-provider.tsx's own "app.toggleTheme"
+// `registerAction`'s duplicate-id guard assumes (see themeProvider.tsx's own "app.toggleTheme"
 // registration for the full StrictMode/HMR rationale — identical here).
 registerAction({
 	id: "drive.newDirectory",

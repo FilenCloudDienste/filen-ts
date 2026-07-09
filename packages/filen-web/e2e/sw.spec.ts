@@ -81,7 +81,7 @@ test.describe("service worker", () => {
 					// null-check narrowing above on the original `registration.active` access.
 					const activeWorker: ServiceWorker = registration.active
 
-					// Mirrors save-download.ts's own sendToSw: one MessageChannel round trip, resolving on
+					// Mirrors saveDownload.ts's own sendToSw: one MessageChannel round trip, resolving on
 					// the SW's single {ok}/{ok:false,error} ack.
 					function send(type: string, payload: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
 						return new Promise(resolve => {
@@ -108,7 +108,7 @@ test.describe("service worker", () => {
 					}
 
 					// A plain fetch (never `<a download>`) mirrors the real page's own navigation trigger —
-					// the SW answers both identically (see save-download.ts's own triggerSwDownload comment).
+					// the SW answers both identically (see saveDownload.ts's own triggerSwDownload comment).
 					const res = await fetch(`${prefix}${id}`)
 					const buf = new Uint8Array(await res.arrayBuffer())
 

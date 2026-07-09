@@ -30,7 +30,7 @@ export interface DriveTileProps {
 }
 
 // Grid tiles are plain CSS-grid children of an already-positioned virtual row (see
-// directory-listing.tsx) — unlike DriveRow, no per-tile absolute-positioning style is needed.
+// directoryListing.tsx) — unlike DriveRow, no per-tile absolute-positioning style is needed.
 export function DriveTile({
 	item,
 	index,
@@ -106,7 +106,7 @@ export function DriveTile({
 										tabIndex={active ? 0 : -1}
 										className="absolute top-1 right-1 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
 										onClick={event => {
-											// Must not select the tile — see item-menu.tsx's own onClick for why a click
+											// Must not select the tile — see itemMenu.tsx's own onClick for why a click
 											// inside the (portaled) menu content needs the same guard.
 											event.stopPropagation()
 										}}

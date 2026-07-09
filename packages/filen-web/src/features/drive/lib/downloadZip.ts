@@ -41,7 +41,7 @@ export function narrowToZipItems(items: DriveItem[]): ZipItem[] {
 }
 
 // DI mirror of RunDownloadDeps (download.ts) for the zip path — one archive, one transfer row, one
-// save dialog. No `cancel` field: cancelTransfer/pauseTransfer (lib/transfers/control.ts) already
+// save dialog. No `cancel` field: cancelTransfer/pauseTransfer (features/transfers/lib/control.ts) already
 // dispatch to sdkApi.cancelDownload/pauseDownload by transferId for any "download"-direction row, and a
 // zip transfer registers under the exact same downloadAborts/downloadPauses maps sdk.worker.ts already
 // keys single-file downloads by — no zip-specific control wiring is needed here.

@@ -16,21 +16,21 @@ export function isVisibleSharedInItem(item: DriveItem, blocked: BlockedUsers): b
 	return !sharer || !isBlocked(sharer, blocked)
 }
 
-// The sharedIn listing filter — directory-listing.tsx only ever calls this for the sharedIn
+// The sharedIn listing filter — directoryListing.tsx only ever calls this for the sharedIn
 // variant; every other variant's listing data passes straight through untouched.
 export function filterSharedInByBlocked(items: readonly DriveItem[], blocked: BlockedUsers): DriveItem[] {
 	return items.filter(item => isVisibleSharedInItem(item, blocked))
 }
 
 // Uuids of currently-selected items that just became blocked (e.g. the user blocked a contact
-// while viewing that contact's shared items) — directory-listing.tsx's stale-selection purge prunes
+// while viewing that contact's shared items) — directoryListing.tsx's stale-selection purge prunes
 // exactly these from useDriveStore so the bulk bar can never target a now-hidden item. An item whose
 // identity is unresolved is never included here (fail-open — mirrors isVisibleSharedInItem).
 export function staleBlockedSelectionUuids(selectedItems: readonly DriveItem[], blocked: BlockedUsers): string[] {
 	return selectedItems.filter(item => !isVisibleSharedInItem(item, blocked)).map(item => item.data.uuid)
 }
 
-// Uuids of currently-selected items no longer present in a live item set — directory-listing.tsx's
+// Uuids of currently-selected items no longer present in a live item set — directoryListing.tsx's
 // search-result purge uses this to drop a selection ghost the instant a push drops a hit the user
 // had selected. Generic over its second argument (not search-specific) so a future caller could
 // reuse it for the normal listing's own, rarer refetch-drop case.

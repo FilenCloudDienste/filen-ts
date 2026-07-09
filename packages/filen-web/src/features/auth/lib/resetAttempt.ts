@@ -10,7 +10,7 @@ export interface ResetParams {
 }
 
 // Injected collaborators so the attempt is unit-testable without a worker — mirrors runLoginAttempt's
-// shape (see login-attempt.ts), simplified: completePasswordReset has no two-factor retry and nothing
+// shape (see loginAttempt.ts), simplified: completePasswordReset has no two-factor retry and nothing
 // analogous to a dismissible mid-flight dialog to cancel against, so there is no generation counter.
 export interface ResetAttemptDeps {
 	completeReset: (params: ResetParams) => Promise<StringifiedClient>

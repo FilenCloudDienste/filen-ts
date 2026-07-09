@@ -16,7 +16,7 @@ export type { VoidActionOutcome }
 // One typed async helper per contact action — zero-`useMutation`: each calls its worker op, then
 // (only on success) patches the affected query cache directly. Every helper returns a
 // VoidActionOutcome and never throws; LABEL-FIRST error shaping comes from runOp/asErrorDTO, mirrored
-// from lib/drive/actions.ts. Cache-patch semantics mirror the mobile contacts feature exactly.
+// from features/drive/lib/actions.ts. Cache-patch semantics mirror the mobile contacts feature exactly.
 
 export async function sendContactRequest(email: string): Promise<VoidActionOutcome> {
 	let outgoing: ContactRequestOut[]
@@ -48,7 +48,7 @@ export async function acceptRequest(uuid: string): Promise<VoidActionOutcome> {
 	// uuid — not enough to reconstruct a Contact (nickname/avatar/publicKey/... are unknown here).
 	// Invalidating both queries lets a real refetch fill the gap instead of leaving one inconsistent
 	// until the next focus/reconnect. Fire-and-forget, same as renameItem's names-cache invalidation in
-	// lib/drive/actions.ts: the removal above already covers the immediate feedback, and
+	// features/drive/lib/actions.ts: the removal above already covers the immediate feedback, and
 	// invalidateQueries resolves even when the refetch it triggers fails (the query's own error state
 	// absorbs that, not this call's promise).
 	void queryClient.invalidateQueries({ queryKey: CONTACTS_QUERY_KEY })

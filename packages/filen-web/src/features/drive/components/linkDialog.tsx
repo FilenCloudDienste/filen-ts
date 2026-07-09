@@ -26,7 +26,7 @@ export interface LinkDialogProps {
 	onClose: () => void
 }
 
-// Fixed 8-value enum -> a select (module scope: a genuinely static list, mirrors color-dialog.tsx's
+// Fixed 8-value enum -> a select (module scope: a genuinely static list, mirrors colorDialog.tsx's
 // own SWATCHES constant).
 const EXPIRATION_OPTIONS: { value: PublicLinkExpiration; labelKey: DriveKey }[] = [
 	{ value: "never", labelKey: "driveLinkExpirationNever" },

@@ -2,7 +2,7 @@
 // component only ever wires DOM events to arithmetic, never re-derives it inline.
 
 // Clamps a cursor into [0, length-1]. Callers must not invoke this against an empty list (the
-// listbox itself is not rendered in that state — see directory-listing.tsx's empty branch); the 0
+// listbox itself is not rendered in that state — see directoryListing.tsx's empty branch); the 0
 // fallback here exists only so a transient zero-length render can never throw.
 export function clampListboxIndex(index: number, length: number): number {
 	if (length <= 0) {

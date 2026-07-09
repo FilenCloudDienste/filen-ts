@@ -27,7 +27,7 @@ export type ActionOutcome = GenericActionOutcome<DriveItem>
 // The account query is warm by the time any drive listing can render (the rail/account menu fetch
 // it eagerly) — a cache miss degrades to "", a value no real directory uuid or the null root
 // sentinel can ever equal, so normalizeParentUuid becomes a harmless pass-through rather than
-// needing a guard at every call site. Exported for preview-overlay.tsx's own save flow — the
+// needing a guard at every call site. Exported for previewOverlay.tsx's own save flow — the
 // .logic.ts split keeps preview-save.logic.ts itself framework-free, so its rootUuid dependency is
 // resolved by the caller instead, same as every other action here.
 export function currentRootUuid(): string {

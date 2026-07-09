@@ -1,4 +1,4 @@
-// Pure keydown-guard logic for preview-overlay.tsx's own in-dialog onKeyDown — extracted (like every
+// Pure keydown-guard logic for previewOverlay.tsx's own in-dialog onKeyDown — extracted (like every
 // other viewer's own *.logic.ts sibling, e.g. docx-viewer.logic.ts) so it is unit-testable under this
 // project's DOM-free vitest environment (vitest.config.ts: environment "node", no jsdom/happy-dom).
 
@@ -19,7 +19,7 @@ function hasClosest(target: EventTarget | null): target is EventTarget & { close
 // only, not caret/selection movement, so a read-only text/code preview keeps its native arrow-key
 // navigation once focus is inside it too — the pager buttons (or stepping back out to the listing)
 // remain how you page one of those instead, exactly like a focused <video>/<audio> scrubber already
-// claims Left/Right for seeking (see preview-overlay.tsx's own isMediaTarget).
+// claims Left/Right for seeking (see previewOverlay.tsx's own isMediaTarget).
 export function isTextEditingTarget(target: EventTarget | null): boolean {
 	return hasClosest(target) && target.closest(".cm-editor") !== null
 }

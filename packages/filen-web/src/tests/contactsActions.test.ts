@@ -4,7 +4,7 @@ import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut, Uuid
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it down
-// to the ops these helpers call, mirroring lib/drive/actions.test.ts's mock boundary.
+// to the ops these helpers call, mirroring driveActions.test.ts's mock boundary.
 const {
 	sendContactRequest,
 	listOutgoingContactRequests,

@@ -1,8 +1,8 @@
 import { THUMB_DIR, THUMB_EXT } from "@/features/drive/lib/thumbnails.logic"
 
 // Main-thread read side of the OPFS thumbnail store — async only (no createSyncAccessHandle, which
-// is dedicated-worker-only by spec; see workers/thumb-store.ts for the worker-side write path over
-// the same tree). Deliberately its own small directory-walk rather than importing thumb-store.ts:
+// is dedicated-worker-only by spec; see workers/thumbStore.ts for the worker-side write path over
+// the same tree). Deliberately its own small directory-walk rather than importing thumbStore.ts:
 // that module is worker-only in intent, and this one runs on the main thread — duplicating four
 // lines keeps the two from becoming accidentally coupled.
 async function thumbDirHandle(): Promise<FileSystemDirectoryHandle> {

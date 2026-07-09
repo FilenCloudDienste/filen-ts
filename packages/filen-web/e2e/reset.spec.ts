@@ -116,7 +116,7 @@ test.describe("reset", { tag: "@no-sdk" }, () => {
 		// Deliberately NOT combined with a submit click here: with a file chosen, submit calls
 		// completePasswordReset directly (no ceremony, no gate) — a real SDK call this suite must
 		// never trigger. The direct-vs-ceremony branch itself is a one-line, already-reviewed
-		// conditional in reset-form.tsx; its network path is covered by manual QA, not here.
+		// conditional in resetForm.tsx; its network path is covered by manual QA, not here.
 		await page.getByRole("button", { name: "Remove master keys file" }).click()
 
 		await expect(page.getByText("Master keys imported", { exact: false })).toHaveCount(0)

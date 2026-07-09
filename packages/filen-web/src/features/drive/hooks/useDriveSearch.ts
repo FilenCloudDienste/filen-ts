@@ -37,19 +37,19 @@ interface SearchPushState {
 const INITIAL_PUSH_STATE: SearchPushState = { hits: [], total: 0n, live: true, resyncing: false, rootDeleted: false, hasSnapshot: false }
 
 // The engine's supersede rejection is expected on every reopen/retune race, never a genuine failure —
-// see search-engine.ts's own SearchSupersededError doc comment. Never `instanceof
+// see searchEngine.ts's own SearchSupersededError doc comment. Never `instanceof
 // SearchSupersededError` or `.name`: verified live (see the smoke evidence) that no worker-thrown
 // value survives to the main thread as a real Error instance for ANY op, superseded or not —
 // sdk.worker.ts's Comlink.expose proxy converts every throw to a plain ErrorDTO before Comlink's own
 // (separately lossy) error handling ever runs. `kind` is the one identity that DOES survive —
 // lib/sdk/errors.ts's toErrorDTO carries a named custom Error subclass's own `.name` through as
-// `dto.kind`, which is why search-engine.ts sets `.name` explicitly on the class.
+// `dto.kind`, which is why searchEngine.ts sets `.name` explicitly on the class.
 function isSupersededRejection(e: unknown): boolean {
 	return typeof e === "object" && e !== null && "kind" in e && (e as { kind?: unknown }).kind === "SearchSupersededError"
 }
 
 // Main-thread orchestration for the cache-backed drive search: owns the debounced-retune/grace/
-// watchdog/stall timers deriveSearchStatus's caller is expected to arm (search-status.logic.ts's own
+// watchdog/stall timers deriveSearchStatus's caller is expected to arm (searchStatus.logic.ts's own
 // doc comments), and folds the engine's push stream into hook state. `enabled` gates whether the
 // feature is even wired up for the current listing (drive variant only) — `rootUuid` is a real,
 // meaningful root (null means "resolve to the account root", not "disabled").
@@ -59,7 +59,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 	const [graceElapsed, setGraceElapsed] = useState(false)
 	const [watchdogTripped, setWatchdogTripped] = useState(false)
 
-	// Generation counter, not a single live-flag boolean (use-thumbnail.ts's own idiom) — this hook has
+	// Generation counter, not a single live-flag boolean (useThumbnail.ts's own idiom) — this hook has
 	// more than one place that can supersede an in-flight async call (a fresh open, a retune-triggered
 	// reopen, an explicit close, a root/enabled change), so every async continuation below compares
 	// against the CURRENT value instead of one captured flag. activeRef mirrors whether the user's
@@ -103,7 +103,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 		}, GRACE_MS)
 	}
 
-	// One flag, two durations (search-status.logic.ts's own deriveSearchStatus doc comment): the fatal
+	// One flag, two durations (searchStatus.logic.ts's own deriveSearchStatus doc comment): the fatal
 	// pre-first-result ceiling while nothing has landed yet, the soft post-result stall backstop once
 	// it has.
 	function armWatchdog(hasResults: boolean): void {
@@ -268,7 +268,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 	}
 
 	// Root/enabled change or unmount: close whatever's active and blank the box — mirrors
-	// use-thumbnail.ts's live-flag idiom, generalized to the generation counter above (see its own
+	// useThumbnail.ts's live-flag idiom, generalized to the generation counter above (see its own
 	// comment) since more than one trigger can supersede the in-flight close here.
 	useEffect(() => {
 		return () => {

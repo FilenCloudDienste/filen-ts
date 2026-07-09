@@ -5,13 +5,12 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { Transfer, TerminalStatus } from "@/features/transfers/store/useTransfersStore"
 
-// Same mock boundary as upload.test.ts/create-directory.test.ts/queries/drive.test.ts: the real sdk
-// client/query client modules touch a Vite `?worker` / an OPFS-backed persister, unresolvable/unwanted
-// under node vitest. Mocking `@/lib/sdk/client` and `@/queries/client` (not `@/queries/drive` or
-// `@/lib/drive/upload`/`@/lib/drive/create-directory` themselves) lets startDirectoryUpload's real
-// defaultDirectoryUploadDeps wiring — driveListingQueryUpdate, runCreateDirectory, runUpload,
-// defaultUploadDeps — run for real against those two mocked leaves, same as upload.test.ts's own
-// startUploads block.
+// Same mock boundary as upload.test.ts/createDirectory.test.ts/drive.test.ts: the real sdk
+// client/query client modules touch a Vite `?worker` / an OPFS-backed persister, unresolvable under
+// node vitest. Mocking `@/lib/sdk/client` and `@/queries/client` (not `@/queries/drive`,
+// `@/features/drive/lib/upload`, or `@/features/drive/lib/createDirectory`) lets startDirectoryUpload's
+// real defaultDirectoryUploadDeps wiring — driveListingQueryUpdate, runCreateDirectory, runUpload,
+// defaultUploadDeps — run for real against those two mocked leaves.
 const { createDirectory, uploadFile } = vi.hoisted(() => ({
 	createDirectory: vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>(),
 	uploadFile:
@@ -98,7 +97,7 @@ function mockRelFile(relPath: string, size = 64): File {
 }
 
 // Structurally required by FileSystemEntry/FileSystemDirectoryEntry/FileSystemFileEntry but never
-// read by upload-directory.ts's own walk (only name/isFile/isDirectory/createReader/file matter) —
+// read by uploadDirectory.ts's own walk (only name/isFile/isDirectory/createReader/file matter) —
 // a permissive Record avoids constructing FileSystem's genuinely circular `root` shape for fields the
 // code under test can't observe either way; each factory below casts once, at its own boundary.
 function baseEntry(name: string, isDirectory: boolean): Record<string, unknown> {
@@ -498,7 +497,7 @@ describe("startDirectoryUpload (real wiring)", () => {
 		expect(transfers.every(transfer => transfer.status === "done")).toBe(true)
 
 		// The top-level directory landed in the root listing's own cache — driveListingQueryUpdate
-		// patches synchronously, no refetch needed (per create-directory.ts/upload.ts's own contract).
+		// patches synchronously, no refetch needed (per createDirectory.ts/upload.ts's own contract).
 		const rootListing = testQueryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: null }))
 		expect(rootListing?.some(item => item.data.uuid === testUuid("myfolder"))).toBe(true)
 	})

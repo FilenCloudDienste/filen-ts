@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
-// Mock boundaries mirror lib/drive/download.test.ts's own: the real sdk client imports a Vite
+// Mock boundaries mirror download.test.ts's own: the real sdk client imports a Vite
 // `?worker` module (unresolvable/unwanted under node vitest), and the real thumb-cache module calls
 // navigator.storage.getDirectory(), which doesn't exist under node either.
 const { makeThumbnailMock, storeThumbnailMock } = vi.hoisted(() => ({

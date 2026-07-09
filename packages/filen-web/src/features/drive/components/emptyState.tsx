@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 // Discriminated on variant so an "error" render can never be constructed without its error/retry —
-// the same two branches directory-listing.tsx's placeholder rendered inline, now shared with the
+// the same two branches directoryListing.tsx's placeholder rendered inline, now shared with the
 // real listing.
 export type EmptyStateProps = { variant: "empty" } | { variant: "error"; error: ErrorDTO; onRetry: () => void }
 

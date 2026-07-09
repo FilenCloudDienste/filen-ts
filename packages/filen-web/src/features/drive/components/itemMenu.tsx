@@ -21,7 +21,7 @@ export interface ItemMenuContentProps {
 	item: DriveItem
 	variant: DriveVariant
 	// Fires for every "dialog"-run descriptor (rename/move/color/versions/info/link/trash/delete) —
-	// the listing-level dialog host (directory-listing.tsx) owns turning this into an open dialog.
+	// the listing-level dialog host (directoryListing.tsx) owns turning this into an open dialog.
 	// "direct"-run descriptors (favorite/restore) never call this — they resolve fully in place below.
 	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
 }
@@ -80,7 +80,7 @@ function ItemMenuEntries({ item, variant, onItemAction, family }: ItemMenuConten
 		// "favorite" and "restore" are the only ids the builder ever marks "direct" — restore is the
 		// remaining case. A restored item always vanishes from the trash listing it was selected in
 		// (see actions.ts), so a successful outcome also drops it from selection — mirrors
-		// directory-listing.tsx's identical cleanup after a trash/delete confirm.
+		// directoryListing.tsx's identical cleanup after a trash/delete confirm.
 		const outcome = await restoreItems([item])
 		toastBulkOutcome(outcome)
 		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(succeededItem => succeededItem.data.uuid))
@@ -119,7 +119,7 @@ function ItemMenuEntries({ item, variant, onItemAction, family }: ItemMenuConten
 	)
 }
 
-// Right-click surface — rendered inside a per-row/tile <ContextMenu> (see drive-row.tsx/drive-tile.tsx).
+// Right-click surface — rendered inside a per-row/tile <ContextMenu> (see driveRow.tsx/driveTile.tsx).
 export function DriveContextMenuContent({ item, variant, onItemAction }: ItemMenuContentProps) {
 	return (
 		<ContextMenuContent>
@@ -133,7 +133,7 @@ export function DriveContextMenuContent({ item, variant, onItemAction }: ItemMen
 	)
 }
 
-// ⋯ trigger surface — rendered inside a per-row/tile <DropdownMenu> (see drive-row.tsx/drive-tile.tsx).
+// ⋯ trigger surface — rendered inside a per-row/tile <DropdownMenu> (see driveRow.tsx/driveTile.tsx).
 export function DriveDropdownMenuContent({ item, variant, onItemAction }: ItemMenuContentProps) {
 	return (
 		<DropdownMenuContent align="end">

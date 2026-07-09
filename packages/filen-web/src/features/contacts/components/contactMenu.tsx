@@ -5,15 +5,15 @@ import { DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-
 
 export interface ContactMenuContentProps {
 	contact: Contact
-	// Both only signal intent upward — the listing-level dialog host (contacts-list.tsx) owns the
-	// confirm and the actual mutation, mirroring drive's item-menu.tsx: this component is presentation
+	// Both only signal intent upward — the listing-level dialog host (contactsList.tsx) owns the
+	// confirm and the actual mutation, mirroring drive's itemMenu.tsx: this component is presentation
 	// only.
 	onRemove: (contact: Contact) => void
 	onBlock: (contact: Contact) => void
 }
 
 // The contact-row ⋯ menu — always rendered as a MenuPrimitive.Popup inside a DropdownMenu Root/
-// Trigger/Portal/Positioner (see contact-row.tsx's ContactActions, which owns that nesting), mirrors
+// Trigger/Portal/Positioner (see contactRow.tsx's ContactActions, which owns that nesting), mirrors
 // drive's DriveDropdownMenuContent exactly. Remove then Block, both destructive-styled (the locale
 // catalog's own doc comments: "Only Remove and Block render as destructive"), Block LAST as the more
 // severe of the two — it also prevents the other person from re-requesting, Remove alone does not.

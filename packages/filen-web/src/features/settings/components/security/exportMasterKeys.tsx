@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- this file exports the card component AND
-   the useExportKeysReminder hook it shares a domain with (mirrors theme-provider.tsx's own
+   the useExportKeysReminder hook it shares a domain with (mirrors themeProvider.tsx's own
    ThemeProvider + useTheme pairing) */
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -93,7 +93,7 @@ function ExportMasterKeysCard({ accountQuery }: ExportMasterKeysCardProps) {
 	)
 }
 
-// Once-per-boot export-keys nag: mounted once from the authed shell (icon-rail.tsx), independent of
+// Once-per-boot export-keys nag: mounted once from the authed shell (iconRail.tsx), independent of
 // whether the security page itself is open. Module-level `reminderFired`/`markReminderFired` (see
 // export-master-keys.logic.ts) stand in for a native app's "once per unlock" gate — the web app has
 // no lock/unlock concept, so "once per app boot" (i.e. once per module instance / page load) is the

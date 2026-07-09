@@ -7,7 +7,7 @@ import { ResetForm } from "@/features/auth/components/resetForm"
 
 // Unauthed page: a live session bounces straight to /drive. Same shared guard as /login and
 // /register — see guard.ts. The reset link carries only a token, no email — the form itself asks for
-// it (see reset-form.tsx).
+// it (see resetForm.tsx).
 export const Route = createFileRoute("/reset/$token")({
 	beforeLoad: redirectIfAuthed,
 	component: ResetPage

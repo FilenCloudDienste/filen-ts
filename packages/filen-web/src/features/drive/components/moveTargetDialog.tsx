@@ -26,7 +26,7 @@ export interface MoveTargetDialogProps {
 // to this dialog (a uuid stack from root, not the "/drive/$" route) so browsing here never disturbs
 // the app's own navigation history; it always browses the "drive" variant regardless of where the
 // move was dispatched from — recents/favorites/trash have no navigable tree of their own to move into
-// (mirrors new-directory.tsx's identical rule for creating a directory).
+// (mirrors newDirectory.tsx's identical rule for creating a directory).
 export function MoveTargetDialog({ items, onClose }: MoveTargetDialogProps) {
 	const { t } = useTranslation("drive")
 	const [pathStack, setPathStack] = useState<string[]>([])
@@ -62,7 +62,7 @@ export function MoveTargetDialog({ items, onClose }: MoveTargetDialogProps) {
 		toastBulkOutcome(outcome)
 		// A moved item vanishes from whichever listing it was selected in (see actions.ts) — leaving it
 		// selected would strand a phantom entry in the "N selected" count, same cleanup
-		// directory-listing.tsx's own trash/delete confirms already do.
+		// directoryListing.tsx's own trash/delete confirms already do.
 		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
 	}
 

@@ -20,7 +20,7 @@ export const WATCHDOG_MS = 15_000
 // and finalize on whatever landed.
 export const STALL_CEILING_MS = 30_000
 
-// Whole-set single window (mobile parity) — see search-engine.ts's own CEILING; re-exported here only
+// Whole-set single window (mobile parity) — see searchEngine.ts's own CEILING; re-exported here only
 // as documentation of the number this status machine's "background"/"searching-empty" states are
 // tracking convergence toward, not an input to deriveSearchStatus itself.
 export const RESULT_CEILING = 1_000

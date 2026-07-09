@@ -42,7 +42,7 @@ const SORT_BY_FROM_PARTS: Record<SortField, Record<SortDirection, DriveSortBy>> 
 export interface SortMenuProps {
 	value: DriveSortBy
 	onChange: (next: DriveSortBy) => void
-	// Recents is a fixed chronological view (@/lib/drive/preferences resolves it to
+	// Recents is a fixed chronological view (@/features/drive/lib/preferences resolves it to
 	// uploadDateDesc unconditionally) — the consuming shell passes true there so the trigger
 	// renders inert instead of offering a choice that never takes effect.
 	disabled?: boolean

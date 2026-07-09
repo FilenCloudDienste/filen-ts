@@ -155,11 +155,11 @@ function BufferedMediaBytes({
 	const [url, setUrl] = useState<string | null>(null)
 
 	useEffect(() => {
-		// Mirrors image-viewer.tsx's own blob-mint effect — see its comment for the ArrayBuffer-narrowing
+		// Mirrors imageViewer.tsx's own blob-mint effect — see its comment for the ArrayBuffer-narrowing
 		// and double-invoke-safety rationale, identical here.
 		const objectUrl = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime ?? "application/octet-stream" }))
 
-		// eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate, see image-viewer.tsx's own identical effect
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate, see imageViewer.tsx's own identical effect
 		setUrl(objectUrl)
 
 		return () => {
@@ -182,7 +182,7 @@ function BufferedMediaBytes({
 
 // Buffered mode: a whole-buffer download played back from a blob URL. Unlike the streamed path this
 // is NEVER size-capped for video/audio (STREAMED_CATEGORIES, preview.logic.ts) — an accepted tradeoff
-// of the dev/SW-absent fallback, same as image-viewer.tsx's own buffered path.
+// of the dev/SW-absent fallback, same as imageViewer.tsx's own buffered path.
 function BufferedMedia({ item, category, alt }: { item: DriveItem; category: "video" | "audio"; alt: string }) {
 	const result = usePreviewBytes(item)
 
@@ -218,7 +218,7 @@ function BufferedMedia({ item, category, alt }: { item: DriveItem; category: "vi
 // Picks the SW's inline-preview route (streamed, seekable, uncapped) when a service worker is
 // controlling the tab AND this item's mime passes the inline allowlist, else falls back to the
 // buffered whole-file blob path (dev / SW absent / a failed stream registration) — mirrors
-// image-viewer.tsx's own ImageViewer picker exactly; see preview-stream.ts's isMediaStreamAvailable
+// imageViewer.tsx's own ImageViewer picker exactly; see previewStream.ts's isMediaStreamAvailable
 // for the single capability flip point.
 export function MediaViewer({ item, category, alt }: MediaViewerProps) {
 	const contentType = allowedMediaContentType(item)

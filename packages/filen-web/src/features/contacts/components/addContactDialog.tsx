@@ -8,9 +8,9 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Button } from "@/components/ui/button"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 
-// Self-contained trigger + dialog, mirroring drive/new-directory.tsx's shape exactly (a toolbar-level
+// Self-contained trigger + dialog, mirroring drive/newDirectory.tsx's shape exactly (a toolbar-level
 // action with no per-item target, so it owns its own open/pending state rather than routing through
-// contacts-list.tsx's per-row confirm-dialog host). The dialog itself IS the confirm — sending a
+// contactsList.tsx's per-row confirm-dialog host). The dialog itself IS the confirm — sending a
 // request needs no separate ConfirmDialog, matching every other "type a value, submit" flow.
 export function AddContactDialog() {
 	const { t } = useTranslation("contacts")
@@ -24,7 +24,7 @@ export function AddContactDialog() {
 
 		if (outcome.status === "error") {
 			// Dialog stays open on error (e.g. no account for that address) so the user can fix the
-			// email and retry — mirrors new-directory.tsx's identical convention.
+			// email and retry — mirrors newDirectory.tsx's identical convention.
 			toast.error(errorLabel(outcome.dto))
 			return
 		}

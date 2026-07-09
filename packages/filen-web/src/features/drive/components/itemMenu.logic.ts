@@ -6,9 +6,9 @@ import { canShareVariant, isSharedVariant } from "@/features/drive/lib/share/gat
 import { type DriveKey } from "@/lib/i18n"
 import { startDownloads } from "@/features/drive/lib/download"
 
-// Dialog kinds a per-item action can open in the listing-level dialog host (directory-listing.tsx's
+// Dialog kinds a per-item action can open in the listing-level dialog host (directoryListing.tsx's
 // own activeDialog state). "emptyTrash" is a listing-level action (the trash toolbar, no per-item
-// trigger), so it deliberately isn't part of this union — directory-listing.tsx's own ActiveDialog
+// trigger), so it deliberately isn't part of this union — directoryListing.tsx's own ActiveDialog
 // kind widens this with that one extra literal.
 export type ItemActionDialogKind = "rename" | "move" | "color" | "versions" | "info" | "link" | "share" | "unshare" | "trash" | "delete"
 
@@ -94,16 +94,16 @@ function downloadDescriptor(): ItemActionDescriptor {
 }
 
 // Download's "direct" action needs no await before it — startDownloads' FSA save picker requires the
-// click's own live user gesture (see download.ts), and item-menu.tsx's onClick can't be exercised
+// click's own live user gesture (see download.ts), and itemMenu.tsx's onClick can't be exercised
 // under this project's DOM-less vitest setup (vitest.config.ts's node environment), so this is the
-// unit-testable seam proving the wiring: item-menu.tsx calls this synchronously off the click, never
+// unit-testable seam proving the wiring: itemMenu.tsx calls this synchronously off the click, never
 // `await`ed.
 export function startItemDownload(item: DriveItem): void {
 	void startDownloads([item])
 }
 
 // Pure per-item menu builder shared by both the right-click context menu and the ⋯ dropdown (see
-// item-menu.tsx) — same descriptor list either way, gated purely by variant/type/undecryptable so it
+// itemMenu.tsx) — same descriptor list either way, gated purely by variant/type/undecryptable so it
 // stays trivially testable without rendering anything. Operates on a SINGLE item; bulk multi-select
 // actions are the selection bar's own concern, not this menu's.
 export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemActionDescriptor[] {

@@ -3,7 +3,7 @@ import { type Transfer } from "@/features/transfers/store/useTransfersStore"
 // Per-row value fed straight into <Progress value={...}> (Base UI's 0-max range, max defaults to
 // 100 — see ui/progress.tsx), scaled 0-100 same as useTransfersAggregate's own percent.
 // - "done" is always 100, never derived from bytesTransferred: setProgress/settle are two separate
-//   store writes (lib/drive/upload.ts's runUpload throttles the former), so a row can observably
+//   store writes (features/drive/lib/upload.ts's runUpload throttles the former), so a row can observably
 //   settle to "done" a tick before its final bytesTransferred catches up to size. Trusting the
 //   terminal status instead avoids a finished row momentarily rendering a not-quite-full bar.
 // - "uploading"/"error" both read the live (or, for error, last-known) ratio — an error row keeps

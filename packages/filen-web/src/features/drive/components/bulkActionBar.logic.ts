@@ -8,7 +8,7 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { startDownloads } from "@/features/drive/lib/download"
 
 // Dialog kinds the bulk-action bar can ask the listing's dialog host to open — a narrow subset of
-// directory-listing.tsx's own ActiveDialogKind (the per-item-only kinds — rename/color/versions/info/
+// directoryListing.tsx's own ActiveDialogKind (the per-item-only kinds — rename/color/versions/info/
 // link — can never be bulk-dispatched, so they have no place here). "share"/"unshare" are both
 // bulk-dispatchable (the contact picker / unshare confirm each take the whole selection), unlike the
 // other link/access kinds.
@@ -108,9 +108,9 @@ export function isBulkDownloadEnabled(items: DriveItem[]): boolean {
 }
 
 // Download's "direct" action needs no await before it — startDownloads' FSA save picker requires the
-// click's own live user gesture (see lib/drive/download.ts), and bulk-action-bar.tsx's onClick can't
+// click's own live user gesture (see features/drive/lib/download.ts), and bulkActionBar.tsx's onClick can't
 // be exercised under this project's DOM-less vitest setup, so this is the unit-testable seam proving
-// the wiring: bulk-action-bar.tsx calls this synchronously off the click, never `await`ed.
+// the wiring: bulkActionBar.tsx calls this synchronously off the click, never `await`ed.
 export function startBulkDownload(items: DriveItem[]): void {
 	void startDownloads(items)
 }

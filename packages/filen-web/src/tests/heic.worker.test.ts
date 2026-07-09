@@ -10,10 +10,10 @@ import type { HeicWorkerApi } from "@/features/preview/workers/heic.worker"
 // MessageChannel is a spec-compliant implementation (not a mock of one), so a call through `remote`
 // below is a genuine postMessage round trip. That's the one thing heic-codec.test.ts's in-process tests
 // can't prove: that a value runHeicTransform throws still arrives at the caller as a clean Error after
-// actually crossing a worker boundary — the guarantee heic-transform.ts's caller (image-viewer.tsx)
+// actually crossing a worker boundary — the guarantee heicTransform.ts's caller (imageViewer.tsx)
 // depends on now that the decode runs on a separate thread instead of being awaited in place.
 
-// heic-codec.ts caches its decoder promise in a module-level `let` (see heic-codec.test.ts's own
+// heicCodec.ts caches its decoder promise in a module-level `let` (see heic-codec.test.ts's own
 // freshModule()) — resetModules + a fresh dynamic import per call is what keeps one test's fakeLib from
 // leaking into the next.
 async function exposeOverChannel(deps: HeicTransformDeps): Promise<{ remote: Comlink.Remote<HeicWorkerApi>; close: () => void }> {

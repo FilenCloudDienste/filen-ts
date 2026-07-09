@@ -230,7 +230,7 @@ describe("needsImageTransform", () => {
 	})
 
 	// Extension-only, never the item's own mime — a spoofed streamable mime on a HEIC-named file must
-	// still resolve true (media-type.ts's own test file separately proves this keeps it off the SW route).
+	// still resolve true (mediaType.ts's own test file separately proves this keeps it off the SW route).
 	it("ignores a spoofed streamable mime on a HEIC-named file", () => {
 		expect(needsImageTransform(fileNamed("photo.heic", { mime: "image/jpeg" }))).toBe(true)
 	})
@@ -428,7 +428,7 @@ describe("decodeUtf8", () => {
 
 describe("codeMirrorLanguageFor — extension to CodeMirror language tag", () => {
 	// The full code-extension set (previewType's own CODE_EXTENSIONS) mapped to the tag
-	// text-viewer.tsx's own loader switches on, or "" when no CodeMirror grammar is wired for it (still
+	// textViewer.tsx's own loader switches on, or "" when no CodeMirror grammar is wired for it (still
 	// a fully usable read-only plain-text view, just unhighlighted).
 	const EXPECTED: Record<string, string> = {
 		js: "javascript",
@@ -490,7 +490,7 @@ describe("codeMirrorLanguageFor — extension to CodeMirror language tag", () =>
 		expect(codeMirrorLanguageFor(ext)).toBe(expected)
 	})
 
-	// Markdown's own "view source" fallback (markdown-viewer.tsx delegating to TextViewer) resolves a
+	// Markdown's own "view source" fallback (markdownViewer.tsx delegating to TextViewer) resolves a
 	// language too, even though md/markdown never reach here via the "code" category.
 	it.each(["md", "markdown"])("%s -> markdown (view-source fallback)", ext => {
 		expect(codeMirrorLanguageFor(ext)).toBe("markdown")
@@ -504,7 +504,7 @@ describe("codeMirrorLanguageFor — extension to CodeMirror language tag", () =>
 		expect(codeMirrorLanguageFor("")).toBe("")
 	})
 
-	// The real call path (text-viewer.tsx) always feeds it extensionOf(name)'s already-lowercased
+	// The real call path (textViewer.tsx) always feeds it extensionOf(name)'s already-lowercased
 	// output — proven end to end here, mirroring previewType's own case-insensitivity proof.
 	it("is case-insensitive end to end through extensionOf", () => {
 		expect(codeMirrorLanguageFor(extensionOf("SCRIPT.TS"))).toBe("typescript")

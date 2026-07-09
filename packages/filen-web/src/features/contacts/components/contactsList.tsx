@@ -141,7 +141,7 @@ export function ContactsList() {
 	}
 
 	// Shared tail for a per-row single confirm: run the singular action helper, close silently on
-	// success, toast + stay open (so the user can retry) on failure — mirrors directory-listing.tsx's
+	// success, toast + stay open (so the user can retry) on failure — mirrors directoryListing.tsx's
 	// rename handler, the closest single-item (non-bulk-shaped) precedent there.
 	async function runSingleDialogAction<T>(item: T, op: (item: T) => Promise<VoidActionOutcome>): Promise<void> {
 		setDialogPending(true)
@@ -158,7 +158,7 @@ export function ContactsList() {
 
 	// Shared tail for a bulk confirm: run every item independently via runContactsBulk, always close
 	// (the toast conveys any partial failure), and prune succeeded uuids from the selection — mirrors
-	// directory-listing.tsx's runBulkDialogAction.
+	// directoryListing.tsx's runBulkDialogAction.
 	async function runBulkDialogAction<T>(
 		section: ContactSectionKey,
 		items: T[],
@@ -380,7 +380,7 @@ export function ContactsList() {
 	// One row per section item, dispatched on the section's own key — the key already discriminates
 	// `items`' concrete type (see contacts-list.logic.ts's ContactSection), so no per-item type tag is
 	// needed the way mobile's flat single-list rendering requires one. In bulk-selection mode every row
-	// becomes a selectable option instead (see contact-row.tsx's ContactRowShell) and the trailing
+	// becomes a selectable option instead (see contactRow.tsx's ContactRowShell) and the trailing
 	// action slot is left empty — the bulk bar replaces the per-row actions entirely.
 	function renderSectionItems(section: ContactSection): ReactNode {
 		switch (section.key) {

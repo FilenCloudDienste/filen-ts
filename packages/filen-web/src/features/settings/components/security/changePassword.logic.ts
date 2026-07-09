@@ -8,7 +8,7 @@ export interface ChangePasswordParams {
 }
 
 // Injected collaborators so the attempt is unit-testable without a worker — same shape as
-// runLoginAttempt/runResetAttempt (see login-attempt.ts/reset-attempt.ts): change-password has no
+// runLoginAttempt/runResetAttempt (see loginAttempt.ts/resetAttempt.ts): change-password has no
 // two-factor retry and nothing analogous to a dismissible mid-flight dialog to cancel against, so
 // there is no generation counter either.
 export interface ChangePasswordAttemptDeps {

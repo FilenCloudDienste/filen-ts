@@ -25,7 +25,7 @@ export async function enterScratchDirectory(
 	page: Page,
 	name: string
 ): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
-	// The listing virtualizes its rows (directory-listing.tsx's useVirtualizer, keyed by item uuid) —
+	// The listing virtualizes its rows (directoryListing.tsx's useVirtualizer, keyed by item uuid) —
 	// on a long/shared listing a row sorted well below the fold may not be mounted in the DOM at all, so
 	// a locator that depends on finding a SPECIFIC named row (this function's own scratchRow below,
 	// trashScratchDirectory's row) can silently miss it. A generously tall viewport makes the scroll

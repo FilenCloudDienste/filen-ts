@@ -5,7 +5,7 @@ import { THUMB_DIR, THUMB_EXT, pickEvictions, type ThumbCacheEntry } from "@/fea
 // Worker-only OPFS blob store for cached thumbnails — no wasm import anywhere in this module, so it
 // stays trivially importable from sdk.worker.ts without dragging the SDK's own init/thread-pool
 // concerns along. createSyncAccessHandle is dedicated-worker-only by spec; this module is never
-// imported main-thread (see thumb-cache.ts for the async main-thread read side over the same tree).
+// imported main-thread (see thumbCache.ts for the async main-thread read side over the same tree).
 async function thumbDirHandle(): Promise<FileSystemDirectoryHandle> {
 	let dir = await navigator.storage.getDirectory()
 

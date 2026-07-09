@@ -28,7 +28,7 @@ export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
 }
 
 // Injected collaborators so a save attempt is unit-testable without a worker or a query client —
-// mirrors RunUploadDeps (lib/drive/upload.ts)/CreateDirectoryDeps (create-directory.ts). `patchListing`
+// mirrors RunUploadDeps (features/drive/lib/upload.ts)/CreateDirectoryDeps (createDirectory.ts). `patchListing`
 // matches driveListingQueryUpdate's own (parentUuid, updater) shape (queries/drive.ts) rather than the
 // global fan-out variant: a save never changes the item's parent, so exactly one listing can ever gain
 // or lose a row from it — the single-parent patch is the one that can never leak a phantom row into an
@@ -48,11 +48,11 @@ function dropUuid(items: DriveItem[], uuid: string): DriveItem[] {
 
 // One save attempt: encode the edited buffer, transfer it into the worker's whole-buffer uploadFileBytes
 // op (never cloned), then patch the item's own listing for the ROTATED uuid a content change always
-// produces — mirrors restoreVersion's identical uuid-rotation reconcile (lib/drive/actions.ts):
+// produces — mirrors restoreVersion's identical uuid-rotation reconcile (features/drive/lib/actions.ts):
 // upsertDriveItem's name-collision dedup already drops the stale row (same parent, same name), and the
 // explicit dropUuid below is the same defense-in-depth restoreVersion applies for a row whose meta
 // isn't decodable enough to match on name alone. Never throws — a worker rejection comes back as an
-// error outcome; the caller (preview-overlay.tsx) degrades the editor to read-only ONLY for the one
+// error outcome; the caller (previewOverlay.tsx) degrades the editor to read-only ONLY for the one
 // class isUnresolvableParentError below identifies (e.g. the containing directory was deleted from
 // another session mid-edit) — retrying against a parent that will only ever fail again is pointless
 // (mobile parity). Every other rejection leaves the buffer editable for a retry.
@@ -93,7 +93,7 @@ export async function runPreviewSave(deps: PreviewSaveDeps, args: { item: DriveI
 // True for the one save-failure class where retrying is pointless — resolveNormalDirParent's own
 // thrown message (sdk.worker.ts, PARENT_NOT_FOUND_PREFIX) when the file's own parent directory no
 // longer exists (deleted from another session mid-edit, etc.). Every other failure (network blip,
-// quota, a transient SDK error) is worth letting the user retry — preview-overlay.tsx's performSave
+// quota, a transient SDK error) is worth letting the user retry — previewOverlay.tsx's performSave
 // reserves its read-only lockdown for this class alone.
 export function isUnresolvableParentError(dto: ErrorDTO): boolean {
 	return dto.species === "plain" && dto.message.startsWith(PARENT_NOT_FOUND_PREFIX)

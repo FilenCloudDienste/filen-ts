@@ -111,7 +111,7 @@ function usePdfDocument(bytes: Uint8Array): { state: DocumentState; submitPasswo
 }
 
 // The password prompt: an InputDialog (the shared single-field-prompt primitive, nested inside the
-// preview overlay's own dialog exactly like versions-dialog.tsx nests a ConfirmDialog) that can be
+// preview overlay's own dialog exactly like versionsDialog.tsx nests a ConfirmDialog) that can be
 // dismissed without resolving it — pdf.js just leaves the task waiting rather than failing, so a
 // small reopen button stands in for the dialog once dismissed rather than stranding the user with no
 // way back in.

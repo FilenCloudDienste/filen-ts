@@ -36,7 +36,7 @@ export function Breadcrumb({ variant, splat }: BreadcrumbProps) {
 	const uuids = splatToUuids(splat)
 	// One route id for every crumb link — the shared variants link within their own splat routes, so
 	// a breadcrumb ancestor click stays on "/shared-in/$" / "/shared-out/$" instead of jumping to the
-	// owned "/drive/$" (see lib/drive/navigate.ts's driveRouteIdFor). All three routes take the same
+	// owned "/drive/$" (see features/drive/lib/navigate.ts's driveRouteIdFor). All three routes take the same
 	// splat param, so only the `to` differs.
 	const routeId = driveRouteIdFor(variant)
 	const namesQuery = useDirectoryNamesQuery(uuids)

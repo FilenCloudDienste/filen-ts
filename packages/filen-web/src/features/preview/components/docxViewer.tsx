@@ -41,7 +41,7 @@ function sanitizeLinks(container: HTMLElement): void {
 
 		// docx-preview emits no target/rel at all, so a click would otherwise navigate this app's own
 		// tab away to whatever the document links to. target="_blank" + rel="noreferrer" (this app's
-		// external-link convention, register-form.tsx) keeps the preview in place and drops the new
+		// external-link convention, registerForm.tsx) keeps the preview in place and drops the new
 		// tab's window.opener access.
 		anchor.target = "_blank"
 		anchor.rel = "noreferrer"

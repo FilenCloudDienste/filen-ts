@@ -322,7 +322,7 @@ function TransformedImage({ item, alt }: { item: DriveItem; alt: string }) {
 // Picks the SW's inline-preview route (streamed, no whole-buffer download) when a service worker is
 // controlling the tab AND this item's mime passes the inline allowlist, else falls back to the
 // buffered whole-file blob path (dev / SW absent / a failed stream registration) — see
-// preview-stream.ts's isMediaStreamAvailable for the single capability flip point. The buffered path
+// previewStream.ts's isMediaStreamAvailable for the single capability flip point. The buffered path
 // is also where an item the allowlist rejects outright (e.g. an unrecognized mime) always lands.
 function StreamableImage({ item, alt }: { item: DriveItem; alt: string }) {
 	const contentType = allowedMediaContentType(item)
@@ -351,7 +351,7 @@ function StreamableImage({ item, alt }: { item: DriveItem; alt: string }) {
 }
 
 // Top-level dispatch, hook-free so needsImageTransform can short-circuit before StreamableImage's own
-// useState runs — HEIC/HEIF never reach the streamed branch at all (media-type.ts independently
+// useState runs — HEIC/HEIF never reach the streamed branch at all (mediaType.ts independently
 // excludes them too, defense-in-depth), every other image extension is unaffected.
 export function ImageViewer({ item, alt }: ImageViewerProps) {
 	if (needsImageTransform(item)) {

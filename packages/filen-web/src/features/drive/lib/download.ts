@@ -27,9 +27,9 @@ export function narrowToAnyFile(item: DriveItem): AnyFile {
 	return base.data
 }
 
-// DI mirror of RunUploadDeps (lib/drive/upload.ts), minus patchListing — a download is read-only
+// DI mirror of RunUploadDeps (features/drive/lib/upload.ts), minus patchListing — a download is read-only
 // w.r.t. the drive, so there is no cache to patch on success. `cancel` is unused by runDownload
-// itself — the cancel button (transfer-row.tsx) calls lib/transfers/control.ts's cancelTransfer,
+// itself — the cancel button (transferRow.tsx) calls features/transfers/lib/control.ts's cancelTransfer,
 // which dispatches straight to sdkApi.cancelDownload/cancelUpload rather than through either deps
 // object; this field stays for DI/testability parity with RunUploadDeps.
 export interface RunDownloadDeps {
@@ -162,7 +162,7 @@ export function needsZip(items: DriveItem[]): boolean {
 }
 
 // The one call a download entry point makes. Mirrors startUploads' partial-failure toast
-// (lib/drive/upload.ts) on error, but deliberately drops the success toast: runDownload's return is
+// (features/drive/lib/upload.ts) on error, but deliberately drops the success toast: runDownload's return is
 // the shared 2-state VoidActionOutcome, so a user cancelling the save picker (a clean no-op) is
 // INDISTINGUISHABLE here from a real completed download — both resolve {status:"success"}. Rather
 // than widen that cross-cutting type, this just never claims "downloaded" on success; the transfers

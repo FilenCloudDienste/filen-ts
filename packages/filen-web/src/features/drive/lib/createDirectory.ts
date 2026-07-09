@@ -3,7 +3,7 @@ import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 
 // Injected collaborators so the attempt is unit-testable without a worker or a query client —
-// mirrors runLoginAttempt/runResetAttempt's shape (see lib/auth/login-attempt.ts). No generation
+// mirrors runLoginAttempt/runResetAttempt's shape (see features/auth/lib/loginAttempt.ts). No generation
 // counter: unlike the two-factor dialog, InputDialog blocks dismissal while pending (see
 // dismissal.logic.ts), so there is no "user canceled mid-flight" race to guard against here.
 export interface CreateDirectoryDeps {

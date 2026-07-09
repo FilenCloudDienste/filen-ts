@@ -18,7 +18,7 @@ const REGISTER_CHECK_LEARN_MORE_URL = "https://filen.io/hub/free-10-gb-at-signup
 
 // Self-contained: decides on its own whether it has anything to show, so the form never needs to
 // know the query exists. Renders only on POSITIVE eligibility — a failed check and a genuine
-// ineligible result collapse to the same "show nothing" outcome (see register-check.ts), so this
+// ineligible result collapse to the same "show nothing" outcome (see registerCheck.ts), so this
 // never asserts a negative the check couldn't actually confirm.
 function EligibilityBanner() {
 	const { t } = useTranslation("auth")

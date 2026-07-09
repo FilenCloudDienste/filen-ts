@@ -39,7 +39,7 @@ export function registerThumbGenerator(category: ThumbGeneratorCategory, generat
 }
 
 // Injected collaborators so the service is unit-testable without a worker, OPFS, or a real Blob-URL
-// registry — mirrors RunUploadDeps (lib/drive/upload.ts).
+// registry — mirrors RunUploadDeps (features/drive/lib/upload.ts).
 export interface ThumbnailServiceDeps {
 	readThumbnailBlob: (uuid: string) => Promise<Blob | null>
 	deleteThumbnail: (uuid: string) => Promise<void>
@@ -51,7 +51,7 @@ export interface ThumbnailServiceDeps {
 }
 
 // The real wiring: readThumbnailBlob/deleteThumbnail go straight to the main-thread OPFS read side
-// (no worker round trip — see thumb-cache.ts), makeThumbnail/storeThumbnail cross to the sdk worker.
+// (no worker round trip — see thumbCache.ts), makeThumbnail/storeThumbnail cross to the sdk worker.
 // storeThumbnail Comlink.transfers its buffer in, mirroring preview-save.logic.ts's uploadFileBytes.
 export const defaultThumbnailDeps: ThumbnailServiceDeps = {
 	readThumbnailBlob,
@@ -146,7 +146,7 @@ async function generate(
 		// makes an unparameterized Uint8Array reject BlobPart's stricter ArrayBufferView<ArrayBuffer> —
 		// bytes here is always backed by a real ArrayBuffer (a Comlink.transfer out of the sdk worker, or
 		// a generator's own freshly-allocated buffer, never a SharedArrayBuffer), so this narrows the
-		// generic parameter only, mirroring image-viewer.tsx's identical cast. Built BEFORE the persist
+		// generic parameter only, mirroring imageViewer.tsx's identical cast. Built BEFORE the persist
 		// call below: the Blob constructor copies bytes into its own storage immediately, whereas
 		// storeThumbnail's Comlink.transfer detaches this SAME buffer synchronously, at the call itself
 		// (postMessage's transfer-list handoff, not once the call resolves) — persisting first would

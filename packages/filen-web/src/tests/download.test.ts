@@ -5,9 +5,9 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { FsaSaveTarget, SaveTarget, SwSaveTarget } from "@/features/drive/lib/saveDownload"
 
-// Mock boundaries mirror lib/drive/upload.test.ts's own mock boundary: the worker client and query
+// Mock boundaries mirror upload.test.ts's own mock boundary: the worker client and query
 // client are unresolvable/unwanted under node vitest, and sonner is mocked to assert the summary
-// toast without a mounted <Toaster/>. lib/drive/save-download.ts is ALSO mocked here — runDownload
+// toast without a mounted <Toaster/>. features/drive/lib/saveDownload.ts is ALSO mocked here — runDownload
 // calls its real `saveDownload`/`isPickerCancelled` directly (they are not part of RunDownloadDeps),
 // so this file controls them the same way it controls the sdk client; save-download.test.ts is
 // where saveDownload's OWN mechanism-picking and SW-protocol correctness are proven.

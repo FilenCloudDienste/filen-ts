@@ -50,7 +50,7 @@ vi.mock("@/features/preview/lib/mediaType", () => ({ allowedMediaContentType: al
 import { generateHeicThumb, generateVideoThumb, generatePdfThumb } from "@/features/drive/lib/thumbGenerators"
 
 // Captured immediately after import: registerThumbGenerator only ever runs once, as a module-scope
-// side effect at import time (see thumb-generators.ts's own closing comment) — this must be read
+// side effect at import time (see thumbGenerators.ts's own closing comment) — this must be read
 // before the beforeEach below's vi.clearAllMocks() has any chance to wipe it.
 const registrationCallsAtImport = registerThumbGeneratorMock.mock.calls.slice()
 

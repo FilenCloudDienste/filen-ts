@@ -6,7 +6,7 @@ import type { HeicTransformOpts } from "@/features/preview/lib/heicCodec"
 // Spun up on the first HEIC/HEIF preview, not at module load — most sessions never open one. Wrapped
 // with Comlink exactly like sdk.worker.ts/db.worker.ts's own workers (client.ts, storage/leader.ts);
 // unlike those, this one has no cross-tab role, so it's just created lazily and memoized the same way
-// heic-codec.ts memoizes its own decoder (getSharedDecoder): a failed spin-up isn't cached, so the next
+// heicCodec.ts memoizes its own decoder (getSharedDecoder): a failed spin-up isn't cached, so the next
 // preview attempt gets a fresh worker instead of staying broken for the rest of the tab session.
 let sharedWorker: Promise<Comlink.Remote<HeicWorkerApi>> | null = null
 
@@ -25,15 +25,15 @@ async function getSharedWorker(): Promise<Comlink.Remote<HeicWorkerApi>> {
 	}
 }
 
-// The one entry point image-viewer.tsx calls (TransformedImageBytes) — decode + JPEG re-encode both run
+// The one entry point imageViewer.tsx calls (TransformedImageBytes) — decode + JPEG re-encode both run
 // off the main thread in the worker above, so a multi-megapixel photo (iPhone default) never blocks the
 // tab. Signature and error behavior are unchanged from before this moved worker-side: any failure still
 // surfaces as a plain rejected Error, which the caller maps to one labeled error state regardless of
-// content. `opts` is omitted by image-viewer.tsx (every preview call) — only the thumbnail generator
-// (thumb-generators.ts) passes `{maxDimension}` to request the downscaled, webp-first encode instead.
+// content. `opts` is omitted by imageViewer.tsx (every preview call) — only the thumbnail generator
+// (thumbGenerators.ts) passes `{maxDimension}` to request the downscaled, webp-first encode instead.
 export async function transformHeicBytes(bytes: Uint8Array, opts?: HeicTransformOpts): Promise<Blob> {
 	const worker = await getSharedWorker()
-	// Narrowed the same way image-viewer.tsx's BufferedImageBytes narrows a worker-sourced Uint8Array:
+	// Narrowed the same way imageViewer.tsx's BufferedImageBytes narrows a worker-sourced Uint8Array:
 	// this buffer is always a fresh ArrayBuffer allocation (usePreviewBytes's buffered download), never a
 	// SharedArrayBuffer, so the cast only widens the generic parameter Comlink's transfer list requires —
 	// it doesn't change what's actually backing the value. Transferred, not cloned: HEIC originals run

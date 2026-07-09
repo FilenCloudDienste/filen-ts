@@ -1,12 +1,12 @@
 // English source catalog — "transfers" namespace: the icon-rail Transfers trigger, its popover panel,
-// and the full /transfers screen (components/transfers/*) tracking in-flight and finished uploads AND
-// downloads, plus the upload/download-summary toasts startUploads (lib/drive/upload.ts) /
-// startDownloads (lib/drive/download.ts) fire once a batch finishes. Same typed-catalog rules as
+// and the full /transfers screen (features/transfers/components/*) tracking in-flight and finished
+// uploads AND downloads, plus the upload/download-summary toasts startUploads (features/drive/lib/upload.ts) /
+// startDownloads (features/drive/lib/download.ts) fire once a batch finishes. Same typed-catalog rules as
 // common/errors/auth/drive/contacts: flat `as const` object, camelCase keys, no literal '.' or ':'
 // (real i18next namespaces, keySeparator/nsSeparator both ON).
 //
 // No "cancelled"/"completedWithErrors" copy yet — those statuses exist at the store level
-// (stores/transfers.ts) but no row in this panel renders them today: a cancelled transfer is removed
+// (useTransfersStore.ts) but no row in this panel renders them today: a cancelled transfer is removed
 // right after settling (never displayed), and completedWithErrors backs a zip transfer no code
 // produces yet. Active (uploading/downloading) rows get transfersRowCancel plus a pause/resume
 // toggle (transfersRowPause/transfersRowResume); finished rows get transfersRowRemove.

@@ -4,7 +4,7 @@ import { type DriveSortBy } from "@/features/drive/lib/sort"
 
 // The listing surfaces sort/view-mode preferences apply to — the NormalDirsAndFiles roots (My
 // Drive, recents, favorites, trash) plus the two shared roots (sharedIn/sharedOut), which carry the
-// widened DriveItem shape (see lib/drive/item.ts). links carry a different item shape entirely and
+// widened DriveItem shape (see features/drive/lib/item.ts). links carry a different item shape entirely and
 // are not part of this surface yet.
 export type DriveVariant = "drive" | "recents" | "favorites" | "trash" | "sharedIn" | "sharedOut"
 

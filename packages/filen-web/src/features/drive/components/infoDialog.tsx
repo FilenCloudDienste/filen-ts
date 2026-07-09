@@ -45,7 +45,7 @@ function InfoRow({ label, value }: { label: string; value: ReactNode }) {
 
 // Read-only item-info panel — mounted-when-active by the listing's dialog host. Works for a directory
 // or a file — including any of the four shared arms, routed through asDirectoryOrFile same as
-// formatItemSize (lib/drive/format.ts) so a shared item's Size/MIME or size/file/dir-count rows render
+// formatItemSize (features/drive/lib/format.ts) so a shared item's Size/MIME or size/file/dir-count rows render
 // same as an owned one — and for an item in any variant including trash (info is offered there too —
 // see item-menu.logic.ts). Two tiers of data: item.data-derived rows (name, created, modified, and a
 // file's size/mime) are synchronous and need no network, so they always render regardless of variant

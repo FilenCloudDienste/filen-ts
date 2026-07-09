@@ -4,7 +4,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { SW_DOWNLOAD_PREFIX, SW_MSG_INIT_CLIENT, SW_MSG_REGISTER_DOWNLOAD, SW_MSG_REGISTER_ZIP_DOWNLOAD } from "@/lib/sw/protocol"
 
 // The disk mechanism a download writes to, picked once per saveDownload() call by capability —
-// callers (lib/drive/download.ts) branch on `kind`, never on the browser directly. FSA carries a
+// callers (features/drive/lib/download.ts) branch on `kind`, never on the browser directly. FSA carries a
 // real writable sink; the SW branch carries just enough (an opaque token + the virtual URL) for
 // triggerSwDownload to register the concrete file against it once one is known.
 export interface FsaSaveTarget {
@@ -50,7 +50,7 @@ async function pickFsaTarget(suggestedName: string): Promise<FsaSaveTarget> {
 // channel's port2 transferred, resolve/reject on its single ack (`{ok: true}` / `{ok: false, error}`)
 // — the exact reply shape sw.ts's own message listener posts back for SW_MSG_INIT_CLIENT and
 // SW_MSG_REGISTER_DOWNLOAD. Exported alongside activeServiceWorker/ensureSwClientReady below: the
-// preview-streaming module (lib/preview/preview-stream.ts) reuses this exact round trip for its own
+// preview-streaming module (features/preview/lib/previewStream.ts) reuses this exact round trip for its own
 // registration message rather than duplicating it.
 export function sendToSw(target: ServiceWorker, type: string, payload: Record<string, unknown>): Promise<void> {
 	return new Promise((resolve, reject) => {

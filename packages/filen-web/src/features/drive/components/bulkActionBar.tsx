@@ -34,7 +34,7 @@ const KEYMAP_ACTION_FOR: Partial<Record<BulkActionDescriptor["id"], string>> = {
 }
 
 // Replaces the toolbar's item-count/New-View-Sort region while a selection exists (mounted by
-// directory-listing.tsx). Two flex children so the surrounding `justify-between` row keeps the same
+// directoryListing.tsx). Two flex children so the surrounding `justify-between` row keeps the same
 // left-cluster/right-cluster split the non-selected toolbar already has.
 export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkActionBarProps) {
 	const { t } = useTranslation("drive")
@@ -50,7 +50,7 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 	}
 
 	// download is checked FIRST, before dialog/favorite — startBulkDownload's FSA save picker needs
-	// this click's own live user gesture (see lib/drive/download.ts), so nothing here may yield to the
+	// this click's own live user gesture (see features/drive/lib/download.ts), so nothing here may yield to the
 	// event loop ahead of it. A disabled Button's onClick never fires at all (see the disabled prop
 	// below), which today only guards the empty-selection edge case — every dir/multi selection is
 	// downloadable too now (the sw zip route).

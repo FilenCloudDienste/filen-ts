@@ -10,7 +10,7 @@ import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 // Directory upload: pick/drop a whole directory and recreate its sub-directory tree in the current
 // listing, uploading every file into its recreated parent. The wasm SDK has no recursive-upload
 // primitive, so this module walks the picked tree in JS, creates each sub-directory
-// parent-before-child via runCreateDirectory (create-directory.ts — the RAW worker op only caches
+// parent-before-child via runCreateDirectory (createDirectory.ts — the RAW worker op only caches
 // worker-side, it never patches the query cache, so a created sub-directory would stay invisible
 // until a refetch), then fans the files out through runUpload (upload.ts) exactly like a plain
 // multi-file upload.
@@ -34,8 +34,8 @@ export interface CollectedDirectoryUpload {
 }
 
 // The two shapes a directory pick arrives in: a `webkitdirectory` file input's FileList, already
-// flattened to File[] by the caller (upload-menu.tsx) — each File carries its own
-// `webkitRelativePath`; or a drag-and-drop's top-level FileSystemEntry list (upload-dropzone.tsx),
+// flattened to File[] by the caller (uploadMenu.tsx) — each File carries its own
+// `webkitRelativePath`; or a drag-and-drop's top-level FileSystemEntry list (uploadDropzone.tsx),
 // which this module walks itself. Both normalize to the same { dirs, files } shape.
 export type DirectoryUploadInput = { kind: "files"; files: File[] } | { kind: "entries"; entries: FileSystemEntry[] }
 

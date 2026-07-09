@@ -1,5 +1,5 @@
 // English source catalog — "preview" namespace: the full-bleed drive file-preview overlay
-// (components/preview/*) opened from a listing's handleOpen — header chrome (prev/next, download,
+// (features/preview/components/*) opened from a listing's handleOpen — header chrome (prev/next, download,
 // close) and per-category viewer copy. Same typed-catalog rules as the other namespaces: flat `as
 // const` object, camelCase keys, no literal '.' or ':' (real i18next namespaces, keySeparator/
 // nsSeparator both ON).

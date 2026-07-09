@@ -1,7 +1,7 @@
 import { sdkApi } from "@/lib/sdk/client"
 import { isActiveTransfer, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 
-// Direction-agnostic cancel entry point for the active-row cancel button (transfer-row.tsx). Reads
+// Direction-agnostic cancel entry point for the active-row cancel button (transferRow.tsx). Reads
 // the live transfer straight from the store — this fires outside any particular runUpload/runDownload
 // call's own scope, so there is no deps object to route through — and dispatches the worker-side abort
 // by direction. The in-flight runUpload/runDownload catch does the actual store settle+remove once the
@@ -23,7 +23,7 @@ export function cancelTransfer(id: string): void {
 	void sdkApi.cancelDownload(id)
 }
 
-// Direction-agnostic pause entry point for the active-row pause/resume toggle (transfer-row.tsx).
+// Direction-agnostic pause entry point for the active-row pause/resume toggle (transferRow.tsx).
 // Mirrors cancelTransfer's dispatch, but pause never rejects the in-flight call the way abort does —
 // the worker-side PauseSignal just stops delivering bytes/progress until resumeTransfer — so there is
 // no later catch to react to, and setPaused is flipped right here so the row reflects it immediately.
