@@ -9,7 +9,7 @@ import {
 	advanceDeleteAccountChain,
 	type DeleteAccountConfirmStage,
 	type DeleteAccountStage
-} from "@/components/settings/security/delete-account.logic"
+} from "@/features/settings/components/security/deleteAccount.logic"
 import { Card, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/dialogs/confirm-dialog"

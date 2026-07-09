@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildOtpauthUri, canDismissRecoveryKeyPanel } from "@/components/settings/security/two-factor.logic"
+import { buildOtpauthUri, canDismissRecoveryKeyPanel } from "@/features/settings/components/security/twoFactor.logic"
 
 describe("buildOtpauthUri", () => {
 	it("percent-encodes the Filen:<email> label and the secret into a scannable otpauth URI", () => {

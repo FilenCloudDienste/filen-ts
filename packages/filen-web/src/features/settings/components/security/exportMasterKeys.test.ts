@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { buildMasterKeysFilename, shouldShowExportReminder } from "@/components/settings/security/export-master-keys.logic"
+import { buildMasterKeysFilename, shouldShowExportReminder } from "@/features/settings/components/security/exportMasterKeys.logic"
 
 describe("buildMasterKeysFilename", () => {
 	it("joins email, the masterKeys marker, and the timestamp with dots, ending .txt", () => {
@@ -44,7 +44,7 @@ describe("reminderFired / markReminderFired (module-level singleton, reset via f
 	})
 
 	it("starts unfired and flips permanently once marked", async () => {
-		const { reminderFired, markReminderFired } = await import("@/components/settings/security/export-master-keys.logic")
+		const { reminderFired, markReminderFired } = await import("@/features/settings/components/security/exportMasterKeys.logic")
 
 		expect(reminderFired()).toBe(false)
 
@@ -54,13 +54,13 @@ describe("reminderFired / markReminderFired (module-level singleton, reset via f
 	})
 
 	it("a fresh module instance (simulating a new boot) starts unfired again", async () => {
-		const first = await import("@/components/settings/security/export-master-keys.logic")
+		const first = await import("@/features/settings/components/security/exportMasterKeys.logic")
 		first.markReminderFired()
 		expect(first.reminderFired()).toBe(true)
 
 		vi.resetModules()
 
-		const second = await import("@/components/settings/security/export-master-keys.logic")
+		const second = await import("@/features/settings/components/security/exportMasterKeys.logic")
 		expect(second.reminderFired()).toBe(false)
 	})
 })

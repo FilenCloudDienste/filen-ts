@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { advanceDeleteAccountChain } from "@/components/settings/security/delete-account.logic"
+import { advanceDeleteAccountChain } from "@/features/settings/components/security/deleteAccount.logic"
 
 describe("advanceDeleteAccountChain", () => {
 	it("cancelling stage1 aborts the whole chain", () => {

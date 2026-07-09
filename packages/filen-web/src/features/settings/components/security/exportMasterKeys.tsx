@@ -8,14 +8,14 @@ import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { downloadTextFile } from "@/lib/download"
+import { downloadTextFile } from "@/features/settings/lib/downloadTextFile"
 import { useAccountQuery, type AccountQuerySuccess } from "@/queries/account"
 import {
 	buildMasterKeysFilename,
 	shouldShowExportReminder,
 	reminderFired,
 	markReminderFired
-} from "@/components/settings/security/export-master-keys.logic"
+} from "@/features/settings/components/security/exportMasterKeys.logic"
 import { Card, CardAction, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
