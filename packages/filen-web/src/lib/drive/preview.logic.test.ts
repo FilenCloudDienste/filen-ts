@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/lib/drive/item"
-import { previewType, canPreview, previewableSiblings, stepPreviewIndex, PREVIEW_MAX_BYTES } from "@/lib/drive/preview.logic"
+import {
+	previewType,
+	canPreview,
+	previewableSiblings,
+	stepPreviewIndex,
+	streamFailureAction,
+	PREVIEW_MAX_BYTES
+} from "@/lib/drive/preview.logic"
 
 // Mirrors contact-picker-dialog.logic.test.ts's own testUuid helper — UuidStr is a branded template
 // literal type (`${string}-${string}-${string}-${string}`) a plain dynamic string can't satisfy
@@ -227,6 +234,24 @@ describe("canPreview", () => {
 		for (const variant of ["drive", "recents", "favorites", "trash", "sharedIn", "sharedOut"] as const) {
 			expect(canPreview(fileNamed("photo.jpg"), variant)).toBe(true)
 		}
+	})
+})
+
+describe("streamFailureAction", () => {
+	it("is 'buffer' for an in-range item — safe to retry via the whole-buffer fallback", () => {
+		expect(streamFailureAction(fileNamed("clip.mp4", { size: 1_024n }))).toBe("buffer")
+	})
+
+	it("is 'buffer' for an item exactly at the size cap", () => {
+		expect(streamFailureAction(fileNamed("clip.mp4", { size: PREVIEW_MAX_BYTES }))).toBe("buffer")
+	})
+
+	it("is 'error' for an item over the size cap — retrying would re-download the whole oversize file", () => {
+		expect(streamFailureAction(fileNamed("clip.mp4", { size: PREVIEW_MAX_BYTES + 1n }))).toBe("error")
+	})
+
+	it("is 'buffer' for a directory — synthetic 0n size never exceeds the cap", () => {
+		expect(streamFailureAction(dirItem())).toBe("buffer")
 	})
 })
 

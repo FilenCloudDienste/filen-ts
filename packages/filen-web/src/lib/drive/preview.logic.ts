@@ -216,6 +216,18 @@ export function canPreview(item: DriveItem, variant: DriveVariant): boolean {
 	return base.data.size <= PREVIEW_MAX_BYTES
 }
 
+// Decision for a streamed viewer's POST-resolution failure (network drop mid-seek, an SW-side decrypt
+// abort, a lifecycle hiccup) — distinct from a registration failure, which always retries buffered
+// (StreamedMedia/StreamedImage's own onFallback effect). That retry re-downloads the WHOLE file into
+// memory (usePreviewBytes), and a streamed category is never capped at the open gate above — safe for
+// the common case, but retrying at arbitrary size is exactly the tab-crashing allocation
+// PREVIEW_MAX_BYTES exists to avoid elsewhere. "error" keeps the item on a labeled error state instead
+// of ever attempting that download; ExtraData's `size` is present on every DriveItem arm (synthetic
+// 0n for a directory), so no file-arm narrow is needed here.
+export function streamFailureAction(item: DriveItem): "buffer" | "error" {
+	return asDirectoryOrFile(item).data.size <= PREVIEW_MAX_BYTES ? "buffer" : "error"
+}
+
 // The pager's candidate list — every previewable item in a listing, in the listing's own sorted order
 // (no re-sort of its own; the caller's array is already in display order).
 export function previewableSiblings(items: DriveItem[], variant: DriveVariant): DriveItem[] {

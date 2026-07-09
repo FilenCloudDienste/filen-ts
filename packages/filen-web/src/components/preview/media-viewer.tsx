@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { allowedMediaContentType } from "@/lib/preview/media-type"
 import { isMediaStreamAvailable } from "@/lib/preview/preview-stream"
+import { streamFailureAction } from "@/lib/drive/preview.logic"
 import { usePreviewBytes } from "@/components/preview/use-preview-bytes"
 import { usePreviewStreamUrl } from "@/components/preview/use-preview-stream-url"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -18,7 +20,19 @@ export interface MediaViewerProps {
 // avoids eagerly streaming the whole file just to show a scrubber; the SW route/blob URL both support
 // seeking past that point either way (the SW via Range/206, a blob URL via the browser's own in-memory
 // random access).
-function MediaElement({ category, url, alt }: { category: "video" | "audio"; url: string; alt: string }) {
+function MediaElement({
+	category,
+	url,
+	alt,
+	onError
+}: {
+	category: "video" | "audio"
+	url: string
+	alt: string
+	// Only ever wired by the streamed path (StreamedMedia below) — the buffered blob path has nowhere
+	// further to fall back to, so it leaves this unset and keeps the browser's own native error state.
+	onError?: () => void
+}) {
 	if (category === "video") {
 		return (
 			<div className="flex size-full items-center justify-center overflow-hidden p-4">
@@ -27,6 +41,7 @@ function MediaElement({ category, url, alt }: { category: "video" | "audio"; url
 					preload="metadata"
 					src={url}
 					aria-label={alt}
+					onError={onError}
 					className="max-h-full max-w-full"
 				/>
 			</div>
@@ -40,6 +55,7 @@ function MediaElement({ category, url, alt }: { category: "video" | "audio"; url
 				preload="metadata"
 				src={url}
 				aria-label={alt}
+				onError={onError}
 				className="w-full max-w-md"
 			/>
 		</div>
@@ -62,8 +78,13 @@ function StreamedMedia({
 	contentType: string
 	onFallback: () => void
 }) {
+	const { t } = useTranslation("preview")
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
 	const result = usePreviewStreamUrl(item, name, contentType)
+	// One-way, mirrors MediaViewer's own useBuffered below: once set, this branch renders the labeled
+	// error state for the rest of this mount — there is no path back to the <video>/<audio> element, so
+	// a repeat native error event (unmounted subtree) can never re-fire this.
+	const [capExceeded, setCapExceeded] = useState(false)
 
 	useEffect(() => {
 		if (result.status === "error") {
@@ -79,11 +100,29 @@ function StreamedMedia({
 		)
 	}
 
+	if (capExceeded) {
+		return (
+			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
+				{t("previewStreamFailed")}
+			</div>
+		)
+	}
+
 	return (
 		<MediaElement
 			category={category}
 			url={result.url}
 			alt={alt}
+			onError={() => {
+				// A mid-consumption failure (network drop mid-seek, an SW-side decrypt abort, a lifecycle
+				// hiccup) — unlike the registration-failure effect above, retrying buffered here would
+				// re-download the whole file, so an oversize item gets the labeled error instead.
+				if (streamFailureAction(item) === "buffer") {
+					onFallback()
+				} else {
+					setCapExceeded(true)
+				}
+			}}
 		/>
 	)
 }

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { asDirectoryOrFile, type DriveItem } from "@/lib/drive/item"
 import { allowedMediaContentType } from "@/lib/preview/media-type"
 import { isMediaStreamAvailable } from "@/lib/preview/preview-stream"
+import { streamFailureAction } from "@/lib/drive/preview.logic"
 import { usePreviewBytes } from "@/components/preview/use-preview-bytes"
 import { usePreviewStreamUrl } from "@/components/preview/use-preview-stream-url"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -20,7 +22,17 @@ const ZOOM_SENSITIVITY = 0.0015
 // <img> from an already-resolved URL (either mode below). Fit-to-screen via object-contain, plus a
 // basic uniform wheel-zoom (no pan, no lib) — identical rendering regardless of whether `url` is a
 // blob: URL or the SW's inline-preview route.
-function ZoomableImage({ url, alt }: { url: string; alt: string }) {
+function ZoomableImage({
+	url,
+	alt,
+	onError
+}: {
+	url: string
+	alt: string
+	// Only ever wired by the streamed path (StreamedImage below) — the buffered blob path has nowhere
+	// further to fall back to, so it leaves this unset and keeps the browser's own native error state.
+	onError?: () => void
+}) {
 	const [scale, setScale] = useState(1)
 	const containerRef = useRef<HTMLDivElement | null>(null)
 
@@ -56,6 +68,7 @@ function ZoomableImage({ url, alt }: { url: string; alt: string }) {
 				src={url}
 				alt={alt}
 				draggable={false}
+				onError={onError}
 				className="max-h-full max-w-full object-contain select-none"
 				style={{ transform: `scale(${String(scale)})` }}
 			/>
@@ -77,8 +90,13 @@ function StreamedImage({
 	contentType: string
 	onFallback: () => void
 }) {
+	const { t } = useTranslation("preview")
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
 	const result = usePreviewStreamUrl(item, name, contentType)
+	// One-way, mirrors ImageViewer's own useBuffered below: once set, this branch renders the labeled
+	// error state for the rest of this mount — there is no path back to the <img> element, so a repeat
+	// native error event (unmounted subtree) can never re-fire this.
+	const [capExceeded, setCapExceeded] = useState(false)
 
 	useEffect(() => {
 		if (result.status === "error") {
@@ -94,10 +112,28 @@ function StreamedImage({
 		)
 	}
 
+	if (capExceeded) {
+		return (
+			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
+				{t("previewStreamFailed")}
+			</div>
+		)
+	}
+
 	return (
 		<ZoomableImage
 			url={result.url}
 			alt={alt}
+			onError={() => {
+				// A mid-consumption failure (network drop mid-load, an SW-side decrypt abort, a lifecycle
+				// hiccup) — unlike the registration-failure effect above, retrying buffered here would
+				// re-download the whole file, so an oversize item gets the labeled error instead.
+				if (streamFailureAction(item) === "buffer") {
+					onFallback()
+				} else {
+					setCapExceeded(true)
+				}
+			}}
 		/>
 	)
 }

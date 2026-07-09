@@ -216,6 +216,38 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 		await video.evaluate(el => (el as HTMLVideoElement).play())
 		await expect.poll(() => video.evaluate(el => !(el as HTMLVideoElement).paused), { timeout: 15_000 }).toBe(true)
 
+		// ---- a focused native scrubber owns ArrowRight as a seek — the overlay's pager must not steal
+		// it. nameAsc sort (mp3 < mp4 < png) puts the video at the MIDDLE pager index, so Next is enabled
+		// and a real pager advance (a regression) would be observable as the heading switching to the
+		// image. getByText (raw textContent) rather than getByRole("heading", {name}) — PreviewName
+		// splits the filename across two sibling <span>s for its own ellipsis styling, and the
+		// accessible-NAME computation (unlike textContent) joins separate elements with an inserted
+		// space, breaking a name match right at the split point. ----
+		await expect(page.getByRole("button", { name: "Next file" })).toBeEnabled()
+		const heading = page.getByRole("dialog").getByText(nameVideo)
+		await expect(heading).toBeVisible()
+		await video.evaluate(el => {
+			;(el as HTMLVideoElement).focus()
+		})
+		await page.keyboard.press("ArrowRight")
+		await expect(heading).toBeVisible()
+
+		// ---- a resolved stream that fails MID-CONSUMPTION (network drop, an SW-side decrypt abort, a
+		// lifecycle hiccup) — never just a registration failure — must still recover, not strand the
+		// browser's own broken-media state on screen. Swapping to a same-prefix, never-registered id and
+		// forcing a reload reproduces exactly that: handleDownload (sw.ts) 404s any unknown id the same
+		// way an aborted/expired one would. Reuses the `video` locator across the ensuing React remount
+		// (StreamedMedia -> BufferedMedia) rather than a stale element handle. ----
+		await video.evaluate((el, prefix) => {
+			const videoEl = el as HTMLVideoElement
+
+			videoEl.src = `${prefix}e2e-stream-failure-probe`
+			videoEl.load()
+		}, SW_DOWNLOAD_PREFIX)
+
+		await expect.poll(() => video.evaluate(el => (el as HTMLVideoElement).currentSrc), { timeout: 30_000 }).toMatch(/^blob:/)
+		await expect.poll(() => video.evaluate(el => (el as HTMLVideoElement).duration || 0), { timeout: 30_000 }).toBeGreaterThan(0)
+
 		await page.keyboard.press("Escape")
 		await expect(video).toHaveCount(0)
 

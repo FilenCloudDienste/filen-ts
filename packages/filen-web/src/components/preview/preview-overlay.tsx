@@ -20,6 +20,16 @@ export interface PreviewOverlayProps {
 	onClose: () => void
 }
 
+// True while focus sits on (or inside) a <video>/<audio> element — its own native controls own
+// Left/Right as a seek, so the pager below must not steal them. `instanceof` also covers the "target
+// can be a non-Element EventTarget" case for free (null/Document/etc. all just return false), unlike a
+// closest() call that would need its own Element check first. The user-agent shadow root the native
+// `controls` UI renders into retargets any bubbled event's `target` back to this host element anyway,
+// so no tree walk is needed even for a click on the scrubber itself.
+function isMediaTarget(target: EventTarget | null): boolean {
+	return target instanceof HTMLMediaElement
+}
+
 // Full-bleed preview surface, mounted by the drive dialog host (directory-listing.tsx) exactly like its
 // sibling dialog kinds — composed directly from Base UI's dialog primitives (not the shared centered
 // ui/dialog.tsx) since no full-screen surface exists yet to reuse. Unlike every other dialog in this
@@ -61,6 +71,11 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 	// BEFORE that internal stopPropagation — this is that handler, mirroring move-target-dialog.tsx's own
 	// local onKeyDown for the identical in-dialog-focus-trap reason.
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
+		// A focused media scrubber wins over the pager — native seek expectation (see isMediaTarget above).
+		if (isMediaTarget(event.target)) {
+			return
+		}
+
 		if (event.key === "ArrowLeft") {
 			event.preventDefault()
 			onStep(-1)
