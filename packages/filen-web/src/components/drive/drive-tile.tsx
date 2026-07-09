@@ -1,12 +1,14 @@
-import { createElement, type MouseEvent } from "react"
+import { createElement, useState, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { MoreHorizontalIcon } from "lucide-react"
 import { type DriveItem } from "@/lib/drive/item"
 import { type DriveVariant } from "@/lib/drive/preferences"
 import { fileIconFor } from "@/lib/drive/icon"
 import { sharedIdentityLabel } from "@/lib/drive/format"
+import { invalidateThumbnail } from "@/lib/drive/thumbnails"
 import { type ItemActionDialogKind } from "@/components/drive/item-menu.logic"
 import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/components/drive/item-menu"
+import { useThumbnail } from "@/components/drive/use-thumbnail"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
@@ -30,6 +32,10 @@ export function DriveTile({ item, index, selected, active, variant, onPointerSel
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
 	// Only the two shared variants resolve a counterparty; every other variant gets null (no badge).
 	const shared = sharedIdentityLabel(item, variant)
+	const thumbUrl = useThumbnail(item)
+	// Downgrades a torn/corrupt cache entry back to the icon without waiting for a remount — see the
+	// img's own onError below. Never reset back to false: this mount already gave up on this uuid.
+	const [thumbFailed, setThumbFailed] = useState(false)
 
 	return (
 		<ContextMenu>
@@ -52,7 +58,21 @@ export function DriveTile({ item, index, selected, active, variant, onPointerSel
 							onOpen(index)
 						}}
 					>
-						{createElement(fileIconFor(item), { "aria-hidden": true, className: "size-10 shrink-0 text-muted-foreground" })}
+						{thumbUrl !== null && !thumbFailed ? (
+							<img
+								src={thumbUrl}
+								alt=""
+								draggable={false}
+								decoding="async"
+								className="size-10 shrink-0 rounded-sm object-cover"
+								onError={() => {
+									invalidateThumbnail(item.data.uuid)
+									setThumbFailed(true)
+								}}
+							/>
+						) : (
+							createElement(fileIconFor(item), { "aria-hidden": true, className: "size-10 shrink-0 text-muted-foreground" })
+						)}
 						<span className="line-clamp-2 w-full text-xs break-words">{name}</span>
 						{shared ? (
 							<span className="w-full truncate text-[0.7rem] text-muted-foreground">
