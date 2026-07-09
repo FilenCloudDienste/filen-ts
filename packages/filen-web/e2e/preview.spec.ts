@@ -11,6 +11,16 @@ import { test, expect } from "./fixtures"
 // failure this once produced live).
 const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
 
+// Sequential within this file (one worker), overriding the config's fullyParallel — the same
+// live-account rationale as drive-actions.spec.ts's own serial mode, but "default" so one test's
+// failure doesn't skip the rest. Every test here creates and trashes a root-level scratch directory;
+// with this file's own tests racing each other across workers, a teardown's root-row click can retry
+// forever against a listing whose rows keep detaching/remounting under the concurrent creates/trashes
+// plus focus-driven refetches (reproduced live: a teardown click stayed "element is not stable /
+// detached from the DOM" for its whole remaining budget). Cross-FILE churn from other specs remains an
+// accepted residual, exactly as drive-actions.spec.ts documents.
+test.describe.configure({ mode: "default" })
+
 // A real 1x1 transparent PNG.
 const PNG_BYTES = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64")
 
@@ -659,6 +669,87 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 		await expect(heading).toHaveCount(0)
 
 		expect(cspViolations).toEqual([])
+	} finally {
+		await trashScratchDirectory(page, scratchName)
+	}
+})
+
+// The one live proof the trash-preview parity rule actually wires together: canPreview(item, "trash")
+// stays true (preview.logic.test.ts) rather than excluding trash like an undecryptable item, but
+// isEditable(item, "trash") is false (preview-save.logic.test.ts) and the header hides Download in
+// trash (preview-overlay.tsx's own variant check) — none of that is provable without a real trashed
+// item reachable from a real Trash listing. Trashes the FILE itself (the single-item Trash flow
+// drive-actions.spec.ts's own bulk test exercises for multiple items), not the scratch directory, so
+// the item is a top-level Trash entry (a trashed directory's own contents stay unbrowsable — this
+// proves the file case only). The now-empty scratch directory still gets trashed as usual in the
+// teardown, same as every other test in this file.
+test("a trashed file opens its preview read-only: content renders, no save action, no download action", async ({
+	page,
+	injectedSession,
+	browserName
+}) => {
+	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test.setTimeout(120_000)
+	expect(injectedSession.length).toBeGreaterThan(0)
+
+	const runId = crypto.randomUUID()
+	const scratchName = `e2e-preview-trash-${runId}`
+	const nameTxt = `e2e-preview-trash-${runId}.txt`
+
+	await page.goto("/drive")
+
+	try {
+		const { listbox } = await enterScratchDirectory(page, scratchName)
+
+		const input = page.locator('input[type="file"]').first()
+		await input.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }])
+
+		const row = listbox.getByRole("option", { name: nameTxt })
+		await expect(row).toBeVisible({ timeout: 45_000 })
+
+		await row.click()
+		await page.getByRole("button", { name: "Trash", exact: true }).click()
+		const trashConfirm = page.getByRole("alertdialog")
+		await expect(trashConfirm).toBeVisible()
+		await trashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
+		await expect(trashConfirm).toHaveCount(0)
+		await expect(row).toHaveCount(0)
+
+		// An in-app sidebar-link click keeps this a client-side route change on the same booted app
+		// instance — mirrors drive-actions.spec.ts's own identical rationale (a goto reload would race
+		// listTrash() against the just-completed trash write).
+		await page.getByRole("complementary").getByRole("link", { name: "Trash", exact: true }).click()
+		const trashListing = await waitForListingSettled(page)
+		const trashRow = trashListing.listbox.getByRole("option", { name: nameTxt })
+
+		// The shared account's trash accumulates every net-zero run's scratch items (312 at the time
+		// this was written), and directories sort before files, so this just-trashed FILE mounts far
+		// below even the tall viewport's virtualization window — the row simply doesn't exist in the
+		// DOM until scrolled to (reproduced live). Wheel down in steps smaller than the window (no
+		// overshoot past a mounted-but-not-yet-checked row), settling briefly so the virtualizer has
+		// rendered before each probe; the real assertion still follows the loop, so a genuine absence
+		// fails loudly rather than silently scrolling forever.
+		await trashListing.listbox.hover()
+		for (let i = 0; i < 30 && !(await trashRow.isVisible()); i++) {
+			await page.mouse.wheel(0, 5000)
+			await page.waitForTimeout(250)
+		}
+		await expect(trashRow).toBeVisible({ timeout: 15_000 })
+
+		await trashRow.dblclick()
+		const line = page.getByText("Hello from a tiny text fixture.")
+		await expect(line).toBeVisible({ timeout: 30_000 })
+
+		// Read-only: isEditable gates off outside the drive variant, so the Save button (rendered only
+		// while editable, see preview-overlay.tsx) never appears — the trash listing's own item-level
+		// menu still offers Restore/Delete-permanently (drive-actions.spec.ts covers that surface), just
+		// not from inside this overlay.
+		await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0)
+		// The header's Download action is hidden in trash — mirrors the listing's own download gating.
+		await expect(page.getByRole("button", { name: "Download", exact: true })).toHaveCount(0)
+
+		await page.keyboard.press("Escape")
+		await expect(line).toHaveCount(0)
 	} finally {
 		await trashScratchDirectory(page, scratchName)
 	}
