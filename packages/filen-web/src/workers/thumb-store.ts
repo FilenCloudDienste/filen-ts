@@ -32,7 +32,15 @@ export async function writeThumb(uuid: string, bytes: Uint8Array): Promise<void>
 	try {
 		handle = await fileHandle.createSyncAccessHandle()
 	} catch (e) {
-		log.info("thumb-store", "writeThumb: sync access handle unavailable, skipping persist", uuid, e)
+		// The benign case: another tab/worker holds the handle for the same uuid (sync access handles
+		// are exclusive) — its write persists the identical bytes, so skipping is lossless. Anything
+		// else (quota, permissions) is unexpected and logged louder, but still skip-not-throw: the
+		// caller's in-hand bytes render either way and persistence stays best-effort.
+		if (e instanceof DOMException && e.name === "NoModificationAllowedError") {
+			log.info("thumb-store", "writeThumb: concurrent writer holds the handle, skipping persist", uuid)
+		} else {
+			log.warn("thumb-store", "writeThumb: sync access handle unavailable, skipping persist", uuid, e)
+		}
 		return
 	}
 

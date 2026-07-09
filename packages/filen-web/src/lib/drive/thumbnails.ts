@@ -99,7 +99,17 @@ async function generate(
 	await semaphore.acquire()
 
 	try {
-		const cached = await deps.readThumbnailBlob(uuid)
+		// A read failure beyond the clean miss (readThumbnailBlob only maps NotFoundError to null —
+		// e.g. a quota/permission DOMException, or an eviction sweep racing this read) must degrade to
+		// the ordinary generate path, NOT reject out of the shared pending promise: a rejection would
+		// break the never-throws contract for every caller joined on this uuid AND skip the failure
+		// counter below, bypassing the blacklist into a retry-forever loop.
+		let cached: Blob | null = null
+		try {
+			cached = await deps.readThumbnailBlob(uuid)
+		} catch (e) {
+			log.warn("thumbnails", "generate: cache read failed", uuid, e)
+		}
 
 		if (cached !== null) {
 			return finalize(deps, uuid, cached)
