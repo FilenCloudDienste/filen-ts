@@ -224,6 +224,40 @@ describe("getThumbnailUrl — routing by category", () => {
 		expect(deps.storeThumbnail).toHaveBeenCalledWith(item.data.uuid, bytes)
 	})
 
+	it("the rendered blob survives a persist that detaches the bytes' buffer", async () => {
+		// The real storeThumbnail Comlink.transfers the buffer, which detaches it SYNCHRONOUSLY at the
+		// postMessage call — this fake reproduces that exact hazard via structuredClone's transfer list.
+		// Regression pin: the Blob must be constructed from the bytes BEFORE the persist call; ordering
+		// them the other way round silently produces an empty Blob (zero-byte thumbnails, blacklisted
+		// after three files) while every plain-vi.fn() assertion still passes.
+		const item = heicItem()
+		const bytes = new Uint8Array([1, 2, 3, 4])
+		const capturedBlobs: Blob[] = []
+		const deps = makeFakeDeps({
+			getGenerator: vi.fn().mockReturnValue(vi.fn().mockResolvedValue(bytes)),
+			storeThumbnail: vi.fn().mockImplementation((_uuid: string, stored: Uint8Array) => {
+				structuredClone(stored.buffer, { transfer: [stored.buffer as ArrayBuffer] })
+				return Promise.resolve()
+			}),
+			createObjectUrl: vi.fn().mockImplementation((blob: Blob) => {
+				capturedBlobs.push(blob)
+				return "blob:pinned"
+			})
+		})
+
+		const url = await getThumbnailUrl(item, deps)
+
+		expect(url).toBe("blob:pinned")
+		const rendered = capturedBlobs[0]
+
+		if (rendered === undefined) {
+			throw new Error("no blob was rendered")
+		}
+
+		expect(rendered.size).toBe(4)
+		expect(new Uint8Array(await rendered.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3, 4]))
+	})
+
 	it("an unregistered category resolves null without throwing", async () => {
 		const item = heicItem()
 		const deps = makeFakeDeps() // getGenerator returns undefined by default

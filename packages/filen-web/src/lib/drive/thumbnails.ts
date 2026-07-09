@@ -8,10 +8,11 @@ import { readThumbnailBlob, deleteThumbnail as deleteThumbnailBlob } from "@/lib
 import { thumbnailCategory, THUMB_MAX_DIM, type ThumbnailCategory } from "@/lib/drive/thumbnails.logic"
 import { type BaseFileItem, type DriveItem } from "@/lib/drive/item"
 
-// makeThumbnailInMemory always encodes to webp (MakeThumbnailInMemoryResult.webpData); a client-side
-// generator is expected to match that on-disk format too, so every rendered thumbnail blob uses the
-// same mime regardless of which category produced its bytes.
-const THUMB_MIME = "image/webp"
+// No declared mime on rendered thumbnail blobs: the SDK path is always webp, but a client generator's
+// canvas encode legally falls back to jpeg where webp encoding is unavailable — a hardcoded label
+// would lie for those bytes, and the OPFS cache-hit path (a raw File for a .thumb extension) carries
+// no reliable type either. <img> sources are content-sniffed regardless, so untyped is the one
+// consistent, honest option for every path.
 
 // How many generation attempts (OPFS read + SDK call/generator) run at once, app-wide — shapes
 // DEMAND on the SDK/CPU, never a limit the SDK itself needs (D21: never reimplement SDK-side
@@ -151,7 +152,7 @@ async function generate(
 		// (postMessage's transfer-list handoff, not once the call resolves) — persisting first would
 		// leave `bytes` a zero-length view by the time this line ran, silently producing an empty Blob.
 		const attachedBytes = bytes as Uint8Array<ArrayBuffer>
-		const blob = new Blob([attachedBytes], { type: THUMB_MIME })
+		const blob = new Blob([attachedBytes])
 
 		if (needsPersist) {
 			await deps.storeThumbnail(uuid, attachedBytes).catch((e: unknown) => {
