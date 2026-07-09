@@ -94,6 +94,20 @@ export default function useDriveItemInteraction({
 				return
 			}
 
+			// In a select-intention picker, tapping a file row/tile toggles the pick —
+			// opening a preview here would hijack the selection flow. Must run before the
+			// areDriveItemsSelected branch so a lingering in-drive multi-select can't
+			// swallow picker taps into the wrong store. Directories keep navigating;
+			// their pick affordance is the checkbox.
+			if (
+				drivePath.selectOptions?.intention === "select" &&
+				(info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile")
+			) {
+				onPressSelectForDriveSelect()
+
+				return
+			}
+
 			if (areDriveItemsSelected) {
 				useDriveStore.getState().setSelectedItems(prev => {
 					const prevSelected = prev.some(i => i.data.uuid === info.item.data.uuid)
