@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import { StarIcon, StarOffIcon, FolderInputIcon, UserMinusIcon, Trash2Icon, RotateCcwIcon, DownloadIcon } from "lucide-react"
+import { StarIcon, StarOffIcon, FolderInputIcon, UsersIcon, UserMinusIcon, Trash2Icon, RotateCcwIcon, DownloadIcon } from "lucide-react"
 import type { Dir, File } from "@filen/sdk-rs"
 import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
@@ -88,6 +88,59 @@ function flags(overrides: Partial<DriveSelectionFlags> = {}): DriveSelectionFlag
 		...overrides
 	}
 }
+
+// Pins the shared per-action label + icon facts (factored into ACTION_DEFS) so a drift in either the
+// map or a builder's reference surfaces here — the id-only lists elsewhere prove ordering/gating but
+// never which label or icon a bulk descriptor carries.
+function facts(
+	variant: Parameters<typeof driveBulkActions>[0],
+	selection: DriveSelectionFlags
+): { id: string; labelKey: string; icon: unknown }[] {
+	return driveBulkActions(variant, selection).map(descriptor => ({
+		id: descriptor.id,
+		labelKey: descriptor.labelKey,
+		icon: descriptor.icon
+	}))
+}
+
+// Every descriptor derived from ACTION_DEFS, pinned to its label + icon across the surfaces it
+// appears on: drive (favorite/move/share/download/trash), the favorited-state toggle, trash
+// (restoreSelected/delete), and sharedOut everySharedRoot (unshare). A wrong ACTION_DEFS entry or a
+// mis-wired builder reference fails here.
+describe("driveBulkActions — descriptor label/icon facts (ACTION_DEFS drift guard)", () => {
+	it("drive variant, none favorited: each descriptor carries its expected label and icon", () => {
+		expect(facts("drive", flags({ includesFavorited: false, includesUndecryptable: false }))).toEqual([
+			{ id: "favorite", labelKey: "driveActionFavorite", icon: StarIcon },
+			{ id: "move", labelKey: "driveActionMove", icon: FolderInputIcon },
+			{ id: "share", labelKey: "driveActionShare", icon: UsersIcon },
+			{ id: "download", labelKey: "driveActionDownload", icon: DownloadIcon },
+			{ id: "trash", labelKey: "driveActionTrash", icon: Trash2Icon }
+		])
+	})
+
+	it("drive variant, any favorited: favorite toggles to the Unfavorite label and star-off icon", () => {
+		expect(facts("drive", flags({ includesFavorited: true, includesUndecryptable: false }))).toContainEqual({
+			id: "favorite",
+			labelKey: "driveActionUnfavorite",
+			icon: StarOffIcon
+		})
+	})
+
+	it("trash variant: restoreSelected/delete carry their expected labels and icons", () => {
+		expect(facts("trash", flags())).toEqual([
+			{ id: "restoreSelected", labelKey: "driveActionRestore", icon: RotateCcwIcon },
+			{ id: "delete", labelKey: "driveActionDeletePermanently", icon: Trash2Icon }
+		])
+	})
+
+	it("sharedOut everySharedRoot: the unshare descriptor carries its expected label and icon", () => {
+		expect(facts("sharedOut", flags({ everySharedRoot: true, includesUndecryptable: false }))).toContainEqual({
+			id: "unshare",
+			labelKey: "driveActionUnshare",
+			icon: UserMinusIcon
+		})
+	})
+})
 
 describe("driveBulkActions", () => {
 	it("trash variant: exactly restoreSelected then delete, regardless of flags — no favorite/move surface in trash", () => {

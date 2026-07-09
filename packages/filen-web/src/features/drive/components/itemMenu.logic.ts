@@ -1,20 +1,5 @@
-import {
-	PencilIcon,
-	FolderInputIcon,
-	StarIcon,
-	StarOffIcon,
-	PaletteIcon,
-	HistoryIcon,
-	InfoIcon,
-	LinkIcon,
-	CopyIcon,
-	UsersIcon,
-	UserMinusIcon,
-	Trash2Icon,
-	RotateCcwIcon,
-	DownloadIcon,
-	type LucideIcon
-} from "lucide-react"
+import { type LucideIcon } from "lucide-react"
+import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { canShareVariant, isSharedVariant } from "@/features/drive/lib/share/gating"
@@ -61,70 +46,43 @@ interface ItemActionDescriptorShared {
 export type ItemActionDescriptor =
 	(ItemActionDescriptorShared & { run: "direct" }) | (ItemActionDescriptorShared & { run: "dialog"; dialogKind: ItemActionDialogKind })
 
-const RENAME: ItemActionDescriptor = { id: "rename", labelKey: "driveActionRename", icon: PencilIcon, run: "dialog", dialogKind: "rename" }
-const MOVE: ItemActionDescriptor = { id: "move", labelKey: "driveActionMove", icon: FolderInputIcon, run: "dialog", dialogKind: "move" }
-const COLOR: ItemActionDescriptor = { id: "color", labelKey: "driveActionColor", icon: PaletteIcon, run: "dialog", dialogKind: "color" }
-const VERSIONS: ItemActionDescriptor = {
-	id: "versions",
-	labelKey: "driveActionVersions",
-	icon: HistoryIcon,
-	run: "dialog",
-	dialogKind: "versions"
-}
-const INFO: ItemActionDescriptor = { id: "info", labelKey: "driveActionInfo", icon: InfoIcon, run: "dialog", dialogKind: "info" }
+const RENAME: ItemActionDescriptor = { id: "rename", ...ACTION_DEFS.rename, run: "dialog", dialogKind: "rename" }
+const MOVE: ItemActionDescriptor = { id: "move", ...ACTION_DEFS.move, run: "dialog", dialogKind: "move" }
+const COLOR: ItemActionDescriptor = { id: "color", ...ACTION_DEFS.color, run: "dialog", dialogKind: "color" }
+const VERSIONS: ItemActionDescriptor = { id: "versions", ...ACTION_DEFS.versions, run: "dialog", dialogKind: "versions" }
+const INFO: ItemActionDescriptor = { id: "info", ...ACTION_DEFS.info, run: "dialog", dialogKind: "info" }
 // Copy-link's real behavior (read existing link status, write the URL to the clipboard) needs
 // link-status data this menu doesn't have — it deliberately dispatches the same dialog kind as
 // Public link rather than duplicating that fetch here; the dialog's own Copy button IS copy-link's
 // implementation.
-const PUBLIC_LINK: ItemActionDescriptor = {
-	id: "publicLink",
-	labelKey: "driveActionPublicLink",
-	icon: LinkIcon,
-	run: "dialog",
-	dialogKind: "link"
-}
-const COPY_LINK: ItemActionDescriptor = {
-	id: "copyLink",
-	labelKey: "driveActionCopyLink",
-	icon: CopyIcon,
-	run: "dialog",
-	dialogKind: "link"
-}
+const PUBLIC_LINK: ItemActionDescriptor = { id: "publicLink", ...ACTION_DEFS.publicLink, run: "dialog", dialogKind: "link" }
+const COPY_LINK: ItemActionDescriptor = { id: "copyLink", ...ACTION_DEFS.copyLink, run: "dialog", dialogKind: "link" }
 // Share the item with a Filen contact (opens the contact picker) — distinct from a public link (a
 // URL anyone can open): this grants a specific existing contact access. Variant-gated (see
 // canShareVariant / driveItemActions).
-const SHARE: ItemActionDescriptor = { id: "share", labelKey: "driveActionShare", icon: UsersIcon, run: "dialog", dialogKind: "share" }
+const SHARE: ItemActionDescriptor = { id: "share", ...ACTION_DEFS.share, run: "dialog", dialogKind: "share" }
 // Stop sharing a shared-root item (removeSharedItem) — root-only: gated below to the
 // sharedRootDirectory/sharedRootFile arms alone, the only two whose shareSource is a SharedRootItem
-// (see item.ts's shareSource retention) — removeSharedItem's own wasm signature. Destructive-styled,
-// mirroring mobile's own removeShare/stopSharing menu entries (both destructive there too) — the
-// other party loses access immediately.
-const UNSHARE: ItemActionDescriptor = {
-	id: "unshare",
-	labelKey: "driveActionUnshare",
-	icon: UserMinusIcon,
-	run: "dialog",
-	dialogKind: "unshare",
-	destructive: true
-}
+// (see item.ts's shareSource retention) — removeSharedItem's own wasm signature. Destructive-styled
+// (via ACTION_DEFS.unshare), mirroring mobile's own removeShare/stopSharing menu entries (both
+// destructive there too) — the other party loses access immediately.
+const UNSHARE: ItemActionDescriptor = { id: "unshare", ...ACTION_DEFS.unshare, run: "dialog", dialogKind: "unshare" }
 // Recoverable — not destructive-styled, matching the trash-confirm dialog it opens.
-const TRASH: ItemActionDescriptor = { id: "trash", labelKey: "driveActionTrash", icon: Trash2Icon, run: "dialog", dialogKind: "trash" }
+const TRASH: ItemActionDescriptor = { id: "trash", ...ACTION_DEFS.trash, run: "dialog", dialogKind: "trash" }
 // A single item restores directly, no confirm (mobile parity — see driveRestoreSelectedConfirmTitle's
 // own doc comment: that confirm is bulk-selection only).
-const RESTORE: ItemActionDescriptor = { id: "restore", labelKey: "driveActionRestore", icon: RotateCcwIcon, run: "direct" }
+const RESTORE: ItemActionDescriptor = { id: "restore", ...ACTION_DEFS.restore, run: "direct" }
 const DELETE_PERMANENTLY: ItemActionDescriptor = {
 	id: "deletePermanently",
-	labelKey: "driveActionDeletePermanently",
-	icon: Trash2Icon,
+	...ACTION_DEFS.deletePermanently,
 	run: "dialog",
-	dialogKind: "delete",
-	destructive: true
+	dialogKind: "delete"
 }
 
 function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
 	return item.data.favorited
-		? { id: "favorite", labelKey: "driveActionUnfavorite", icon: StarOffIcon, run: "direct" }
-		: { id: "favorite", labelKey: "driveActionFavorite", icon: StarIcon, run: "direct" }
+		? { id: "favorite", ...ACTION_DEFS.unfavorite, run: "direct" }
+		: { id: "favorite", ...ACTION_DEFS.favorite, run: "direct" }
 }
 
 // Download is unconditionally enabled for any item that reaches this descriptor — the service-worker
@@ -132,7 +90,7 @@ function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
 // Access API. PRESENCE is still gated elsewhere (trash/undecryptable never reach this call site at
 // all) — kept as an explicit field rather than omitted, mirroring the shared field's own doc comment.
 function downloadDescriptor(): ItemActionDescriptor {
-	return { id: "download", labelKey: "driveActionDownload", icon: DownloadIcon, run: "direct", enabled: true }
+	return { id: "download", ...ACTION_DEFS.download, run: "direct", enabled: true }
 }
 
 // Download's "direct" action needs no await before it — startDownloads' FSA save picker requires the

@@ -1,6 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import { UserMinusIcon, DownloadIcon } from "lucide-react"
+import {
+	PencilIcon,
+	FolderInputIcon,
+	StarIcon,
+	StarOffIcon,
+	PaletteIcon,
+	HistoryIcon,
+	InfoIcon,
+	LinkIcon,
+	CopyIcon,
+	UsersIcon,
+	UserMinusIcon,
+	Trash2Icon,
+	RotateCcwIcon,
+	DownloadIcon
+} from "lucide-react"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
@@ -137,6 +152,13 @@ function sharedFileItem(): DriveItem {
 
 function ids(item: DriveItem, variant: Parameters<typeof driveItemActions>[1]): string[] {
 	return driveItemActions(item, variant).map(descriptor => descriptor.id)
+}
+
+// Pins the shared per-action label + icon facts (factored into ACTION_DEFS) so a drift in either the
+// map or a builder's reference to it surfaces here — the id-only lists above prove ordering/gating
+// but never which label or icon a descriptor carries.
+function facts(item: DriveItem, variant: Parameters<typeof driveItemActions>[1]): { id: string; labelKey: string; icon: unknown }[] {
+	return driveItemActions(item, variant).map(descriptor => ({ id: descriptor.id, labelKey: descriptor.labelKey, icon: descriptor.icon }))
 }
 
 describe("driveItemActions (item menu gating)", () => {
@@ -392,6 +414,55 @@ describe("driveItemActions — download gating (enabled unconditionally, transpo
 
 		expect(driveItemActions(undecryptableFile, "drive").find(d => d.id === "download")).toBeUndefined()
 		expect(driveItemActions(undecryptableDir, "drive").find(d => d.id === "download")).toBeUndefined()
+	})
+})
+
+// Every descriptor derived from ACTION_DEFS, pinned to its label + icon across the variants that
+// surface it: drive dir (rename/move/favorite/color/info/download/share/publicLink/copyLink/trash),
+// drive file (versions), trash (restore/deletePermanently), sharedOut root (unshare), plus the
+// favorited-state toggle. A wrong entry in ACTION_DEFS or a mis-wired builder reference fails here.
+describe("driveItemActions — descriptor label/icon facts (ACTION_DEFS drift guard)", () => {
+	it("drive variant, directory: each descriptor carries its expected label and icon", () => {
+		expect(facts(dirItem(), "drive")).toEqual([
+			{ id: "rename", labelKey: "driveActionRename", icon: PencilIcon },
+			{ id: "move", labelKey: "driveActionMove", icon: FolderInputIcon },
+			{ id: "favorite", labelKey: "driveActionFavorite", icon: StarIcon },
+			{ id: "color", labelKey: "driveActionColor", icon: PaletteIcon },
+			{ id: "info", labelKey: "driveActionInfo", icon: InfoIcon },
+			{ id: "download", labelKey: "driveActionDownload", icon: DownloadIcon },
+			{ id: "share", labelKey: "driveActionShare", icon: UsersIcon },
+			{ id: "publicLink", labelKey: "driveActionPublicLink", icon: LinkIcon },
+			{ id: "copyLink", labelKey: "driveActionCopyLink", icon: CopyIcon },
+			{ id: "trash", labelKey: "driveActionTrash", icon: Trash2Icon }
+		])
+	})
+
+	it("drive variant, file: the versions descriptor carries its expected label and icon", () => {
+		expect(facts(fileItem(), "drive")).toContainEqual({ id: "versions", labelKey: "driveActionVersions", icon: HistoryIcon })
+	})
+
+	it("favorited item: favorite toggles to the Unfavorite label and star-off icon", () => {
+		expect(facts(dirItem({ favorited: true }), "drive")).toContainEqual({
+			id: "favorite",
+			labelKey: "driveActionUnfavorite",
+			icon: StarOffIcon
+		})
+	})
+
+	it("trash variant: restore/deletePermanently/info carry their expected labels and icons", () => {
+		expect(facts(dirItem(), "trash")).toEqual([
+			{ id: "restore", labelKey: "driveActionRestore", icon: RotateCcwIcon },
+			{ id: "deletePermanently", labelKey: "driveActionDeletePermanently", icon: Trash2Icon },
+			{ id: "info", labelKey: "driveActionInfo", icon: InfoIcon }
+		])
+	})
+
+	it("sharedOut root: the unshare descriptor carries its expected label and icon", () => {
+		expect(facts(sharedRootDirItem(), "sharedOut")).toContainEqual({
+			id: "unshare",
+			labelKey: "driveActionUnshare",
+			icon: UserMinusIcon
+		})
 	})
 })
 

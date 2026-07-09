@@ -1,14 +1,5 @@
-import {
-	StarIcon,
-	StarOffIcon,
-	FolderInputIcon,
-	UsersIcon,
-	UserMinusIcon,
-	Trash2Icon,
-	RotateCcwIcon,
-	DownloadIcon,
-	type LucideIcon
-} from "lucide-react"
+import { type LucideIcon } from "lucide-react"
+import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { canShareVariant, isSharedVariant } from "@/features/drive/lib/share/gating"
@@ -45,15 +36,8 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 	// neither gated by undecryptable (both are pure-uuid dispositions, no decrypted metadata needed).
 	if (variant === "trash") {
 		return [
-			{ id: "restoreSelected", labelKey: "driveActionRestore", icon: RotateCcwIcon, run: "dialog", dialogKind: "restoreSelected" },
-			{
-				id: "delete",
-				labelKey: "driveActionDeletePermanently",
-				icon: Trash2Icon,
-				destructive: true,
-				run: "dialog",
-				dialogKind: "delete"
-			}
+			{ id: "restoreSelected", ...ACTION_DEFS.restore, run: "dialog", dialogKind: "restoreSelected" },
+			{ id: "delete", ...ACTION_DEFS.deletePermanently, run: "dialog", dialogKind: "delete" }
 		]
 	}
 
@@ -74,11 +58,10 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 		if (ownerMutable) {
 			descriptors.push({
 				id: "favorite",
-				labelKey: flags.includesFavorited ? "driveActionUnfavorite" : "driveActionFavorite",
-				icon: flags.includesFavorited ? StarOffIcon : StarIcon,
+				...(flags.includesFavorited ? ACTION_DEFS.unfavorite : ACTION_DEFS.favorite),
 				run: "direct"
 			})
-			descriptors.push({ id: "move", labelKey: "driveActionMove", icon: FolderInputIcon, run: "dialog", dialogKind: "move" })
+			descriptors.push({ id: "move", ...ACTION_DEFS.move, run: "dialog", dialogKind: "move" })
 		}
 
 		// Share the whole selection with contacts — same undecryptable gate as favorite/move above (an
@@ -86,7 +69,7 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 		// excludes sharedIn; trash already returned above). Mirrors mobile's bulkShareFilenUser gating
 		// (drive/recents/favorites/sharedOut, no undecryptable items).
 		if (canShareVariant(variant)) {
-			descriptors.push({ id: "share", labelKey: "driveActionShare", icon: UsersIcon, run: "dialog", dialogKind: "share" })
+			descriptors.push({ id: "share", ...ACTION_DEFS.share, run: "dialog", dialogKind: "share" })
 		}
 
 		// Download shares the includesUndecryptable gate above (unlike favorite/move/share, it is never
@@ -96,13 +79,13 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 		// reachable from (owned or shared). Its own ENABLED state is a separate concern
 		// (isBulkDownloadEnabled below) — this only controls presence, mirroring item-menu.logic.ts's
 		// downloadDescriptor.
-		descriptors.push({ id: "download", labelKey: "driveActionDownload", icon: DownloadIcon, run: "direct" })
+		descriptors.push({ id: "download", ...ACTION_DEFS.download, run: "direct" })
 	}
 
 	// Trash is NOT gated by undecryptable (pure uuid, same as restore/delete above) and is never
 	// destructive-styled — recoverable, matching the per-item TRASH descriptor's own rationale.
 	if (ownerMutable) {
-		descriptors.push({ id: "trash", labelKey: "driveActionTrash", icon: Trash2Icon, run: "dialog", dialogKind: "trash" })
+		descriptors.push({ id: "trash", ...ACTION_DEFS.trash, run: "dialog", dialogKind: "trash" })
 	}
 
 	// Root-only, same gate as the per-item menu's own UNSHARE (item-menu.logic.ts): only fires when
@@ -110,14 +93,7 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 	// above — same pure-uuid-disposition rationale as trash — and destructive-styled, mirroring mobile's
 	// removeShare/stopSharing menu entries.
 	if (flags.everySharedRoot) {
-		descriptors.push({
-			id: "unshare",
-			labelKey: "driveActionUnshare",
-			icon: UserMinusIcon,
-			destructive: true,
-			run: "dialog",
-			dialogKind: "unshare"
-		})
+		descriptors.push({ id: "unshare", ...ACTION_DEFS.unshare, run: "dialog", dialogKind: "unshare" })
 	}
 
 	return descriptors
