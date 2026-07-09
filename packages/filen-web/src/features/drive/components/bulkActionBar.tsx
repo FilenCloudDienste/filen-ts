@@ -13,7 +13,7 @@ import {
 	startBulkDownload,
 	type BulkActionDescriptor,
 	type BulkDialogActionKind
-} from "@/components/drive/bulk-action-bar.logic"
+} from "@/features/drive/components/bulkActionBar.logic"
 import { Kbd } from "@/lib/keymap/Kbd"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"

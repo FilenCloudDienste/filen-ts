@@ -31,7 +31,7 @@ vi.mock("@/features/drive/lib/saveDownload", async importOriginal => {
 	return { ...actual, isFsaAvailable: isFsaAvailableMock }
 })
 
-import { driveItemActions, startItemDownload } from "@/components/drive/item-menu.logic"
+import { driveItemActions, startItemDownload } from "@/features/drive/components/itemMenu.logic"
 
 beforeEach(() => {
 	isFsaAvailableMock.mockReturnValue(false)

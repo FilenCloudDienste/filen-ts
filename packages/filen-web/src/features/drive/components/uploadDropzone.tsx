@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { UploadIcon } from "lucide-react"
 import { startUploads } from "@/features/drive/lib/upload"
 import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
-import { enterDragDepth, leaveDragDepth } from "@/components/drive/upload-dropzone.logic"
+import { enterDragDepth, leaveDragDepth } from "@/features/drive/components/uploadDropzone.logic"
 
 export interface UploadDropzoneProps {
 	// The directory dropped files land in — the current listing's own uuid (null at My Drive's root).

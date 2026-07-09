@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { enterDragDepth, leaveDragDepth } from "@/components/drive/upload-dropzone.logic"
+import { enterDragDepth, leaveDragDepth } from "@/features/drive/components/uploadDropzone.logic"
 
 describe("enterDragDepth", () => {
 	it("increments from zero", () => {

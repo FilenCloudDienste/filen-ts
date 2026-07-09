@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Contact, UuidStr } from "@filen/sdk-rs"
-import { resolveSelectedContacts, togglePickerContact } from "@/components/drive/contact-picker-dialog.logic"
+import { resolveSelectedContacts, togglePickerContact } from "@/features/drive/components/contactPickerDialog.logic"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr

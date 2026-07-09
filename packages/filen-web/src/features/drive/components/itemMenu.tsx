@@ -13,7 +13,7 @@ import {
 	type ItemActionDescriptor,
 	type ItemActionDialogKind,
 	type ItemActionId
-} from "@/components/drive/item-menu.logic"
+} from "@/features/drive/components/itemMenu.logic"
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 

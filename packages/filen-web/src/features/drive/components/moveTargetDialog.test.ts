@@ -6,7 +6,7 @@ import {
 	isMoveDestinationForbidden,
 	isMoveNoOp,
 	isMoveRowDisabled
-} from "@/components/drive/move-target-dialog.logic"
+} from "@/features/drive/components/moveTargetDialog.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
 // readable test label into a shape that satisfies it, mirroring actions.test.ts's own fixture. The

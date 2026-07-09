@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { DirectoryListing } from "@/components/drive/directory-listing"
+import { DirectoryListing } from "@/features/drive/components/directoryListing"
 
 // Full-path splat for the "shared with me" surface, mirroring drive.$.tsx: `_splat` is the
 // "/"-joined ancestor-uuid chain with no leading/trailing slash. An empty splat matches bare

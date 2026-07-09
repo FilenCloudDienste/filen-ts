@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, File, UuidStr } from "@filen/sdk-rs"
-import { buildSearchResults, resolveSearchTransition, searchHitNavigationTarget } from "@/components/drive/use-drive-search.logic"
+import { buildSearchResults, resolveSearchTransition, searchHitNavigationTarget } from "@/features/drive/hooks/useDriveSearch.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — mirrors
 // directory-listing.test.ts's own testUuid helper.

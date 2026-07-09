@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { File, FileVersion, UuidStr } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 import type { FileItem } from "@/features/drive/lib/actions"
-import { hasNoPreviousVersions, isCurrentVersion } from "@/components/drive/versions-dialog.logic"
+import { hasNoPreviousVersions, isCurrentVersion } from "@/features/drive/components/versionsDialog.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
 // readable test label into a shape that satisfies it, mirroring actions.test.ts's own fixture.

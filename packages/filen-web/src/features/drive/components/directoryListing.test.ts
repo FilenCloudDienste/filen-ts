@@ -8,7 +8,7 @@ import {
 	resolveSearchDisplayItems,
 	staleBlockedSelectionUuids,
 	staleSelectionUuids
-} from "@/components/drive/directory-listing.logic"
+} from "@/features/drive/components/directoryListing.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — mirrors
 // queries/drive.test.ts's own testUuid helper.

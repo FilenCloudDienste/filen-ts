@@ -12,7 +12,7 @@ import {
 	type SearchStatus
 } from "@/features/drive/lib/searchStatus.logic"
 import { type SearchPush, type SearchHitDTO } from "@/workers/search-engine"
-import { buildSearchResults, resolveSearchTransition } from "@/components/drive/use-drive-search.logic"
+import { buildSearchResults, resolveSearchTransition } from "@/features/drive/hooks/useDriveSearch.logic"
 
 export interface UseDriveSearchResult {
 	input: string
