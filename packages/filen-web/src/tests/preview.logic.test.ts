@@ -14,14 +14,14 @@ import {
 	PREVIEW_MAX_BYTES
 } from "@/features/drive/lib/preview.logic"
 
-// Mirrors contact-picker-dialog.logic.test.ts's own testUuid helper — UuidStr is a branded template
+// Mirrors contactPickerDialog.logic.test.ts's own testUuid helper — UuidStr is a branded template
 // literal type (`${string}-${string}-${string}-${string}`) a plain dynamic string can't satisfy
 // structurally, so a labeled fixture uuid needs this one cast, same as every other test fixture here.
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
 }
 
-// Local fixtures mirror bulk-action-bar.test.ts's own per-file convention.
+// Local fixtures mirror bulkActionBar.test.ts's own per-file convention.
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: "33333333-3333-3333-3333-333333333333",

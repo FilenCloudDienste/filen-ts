@@ -110,7 +110,7 @@ test("image preview opens, pages with the button and the arrow key, and closes w
 
 // The one live proof the HEIC path actually decodes: a real WASM library, lazy-loaded on first HEIC
 // preview, running in a real browser — unlike the pure logic seams (preview.logic.test.ts,
-// media-type.test.ts, heic-transform.test.ts), an injected/mocked decoder can't prove this. Also
+// mediaType.test.ts, heicCodec.test.ts), an injected/mocked decoder can't prove this. Also
 // proves the buffered-not-streamed guarantee end to end (the img's own src) and zero CSP violations
 // during the WASM load + decode (the CSP concession this feature could have needed, but didn't).
 test("HEIC preview transforms client-side and renders via the buffered path, never the SW route", async ({
@@ -161,7 +161,7 @@ test("HEIC preview transforms client-side and renders via the buffered path, nev
 })
 
 // The one live proof the pdf.js path actually works: a real lazy chunk, a real dedicated worker
-// (worker-src 'self'), real canvas rendering, in a real browser — unlike pdf-viewer.logic.test.ts's
+// (worker-src 'self'), real canvas rendering, in a real browser — unlike pdfViewer.logic.test.ts's
 // pure page-visibility/canvas-sizing math, none of that is provable without one. Also proves the
 // page-nav toolbar (button clicks, not the overlay's own file-level arrow keys) actually drives a
 // real scroll and that the lazy render gate keeps up with it, and that the whole load produces zero

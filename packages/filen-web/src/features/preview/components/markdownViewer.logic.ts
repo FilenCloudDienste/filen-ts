@@ -1,5 +1,5 @@
 // Pure logic for markdownViewer.tsx — framework-free so it is testable in node
-// (markdown-viewer.logic.test.ts) with no DOM involved.
+// (markdownViewer.logic.test.ts) with no DOM involved.
 
 import { isSafeLinkHref } from "@/features/preview/components/docxViewer.logic"
 

@@ -378,7 +378,7 @@ export function ContactsList() {
 	}
 
 	// One row per section item, dispatched on the section's own key — the key already discriminates
-	// `items`' concrete type (see contacts-list.logic.ts's ContactSection), so no per-item type tag is
+	// `items`' concrete type (see contactsList.logic.ts's ContactSection), so no per-item type tag is
 	// needed the way mobile's flat single-list rendering requires one. In bulk-selection mode every row
 	// becomes a selectable option instead (see contactRow.tsx's ContactRowShell) and the trailing
 	// action slot is left empty — the bulk bar replaces the per-row actions entirely.

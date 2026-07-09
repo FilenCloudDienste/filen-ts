@@ -1,7 +1,7 @@
 import { shouldResetOnOpen } from "@/components/dialogs/typedConfirmDialog.logic"
 
 // Pure value-on-open resolver, split out of the component file for the same react-refresh reason as
-// typed-confirm-dialog.logic.ts. Mirrors TypedConfirmDialog's own reset-during-render pattern (a
+// typedConfirmDialog.logic.ts. Mirrors TypedConfirmDialog's own reset-during-render pattern (a
 // closed→open transition only, via the shared shouldResetOnOpen predicate) except the seed is the
 // caller's initialValue (rename's pre-filled name) rather than always blank — a caller with no
 // initialValue passes "" and gets the original always-blank behavior back. Returns null when no

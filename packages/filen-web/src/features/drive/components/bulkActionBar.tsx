@@ -96,7 +96,7 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 			<div className="flex items-center gap-2">
 				{descriptors.map(descriptor => {
 					// isBulkDownloadEnabled is effectively always true here (the bar only mounts once a
-					// selection exists) — kept as a defensive check mirroring item-menu.logic.ts's own
+					// selection exists) — kept as a defensive check mirroring itemMenu.logic.ts's own
 					// downloadDescriptor rather than assuming the caller never renders an empty selection.
 					// Every other descriptor stays always-enabled.
 					const disabled = descriptor.id === "download" && !isBulkDownloadEnabled(selectedItems)

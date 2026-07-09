@@ -5,7 +5,7 @@ import type { Dir, File } from "@filen/sdk-rs"
 import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
-// bulk-action-bar.logic.ts imports features/drive/lib/download.ts (for startDownloads), which in turn touches
+// bulkActionBar.logic.ts imports features/drive/lib/download.ts (for startDownloads), which in turn touches
 // the worker client and query client — unresolvable/unwanted under node vitest, mirrors
 // download.test.ts's own mock boundary. startDownloads is replaced, since actually running
 // it would reach the (also mocked) worker.
@@ -37,7 +37,7 @@ beforeEach(() => {
 	isFsaAvailableMock.mockReturnValue(false)
 })
 
-// Local fixtures mirror item-menu.test.ts's own per-file convention.
+// Local fixtures mirror itemMenu.test.ts's own per-file convention.
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: "33333333-3333-3333-3333-333333333333",
@@ -243,7 +243,7 @@ describe("driveBulkActions", () => {
 })
 
 // Unshare (removeSharedItem) is root-only — gated purely on everySharedRoot (the WHOLE selection is
-// sharedRootDirectory/sharedRootFile arms), mirroring item-menu.logic.ts's own per-item type gate.
+// sharedRootDirectory/sharedRootFile arms), mirroring itemMenu.logic.ts's own per-item type gate.
 describe("driveBulkActions — unshare gating (everySharedRoot)", () => {
 	it("appears when the whole selection is shared-root arms, on both sharedOut and sharedIn", () => {
 		expect(driveBulkActions("sharedOut", flags({ everySharedRoot: true })).map(d => d.id)).toContain("unshare")
@@ -278,7 +278,7 @@ describe("driveBulkActions — unshare gating (everySharedRoot)", () => {
 	})
 })
 
-// sharedIn/sharedOut bulk mirrors the per-item menu's safe subset (item-menu.logic.ts) — no
+// sharedIn/sharedOut bulk mirrors the per-item menu's safe subset (itemMenu.logic.ts) — no
 // bulk favorite/move/trash on either shared surface, regardless of undecryptable/everySharedRoot.
 // sharedOut keeps bulk share (canShareVariant); either surface keeps bulk unshare (everySharedRoot).
 describe("driveBulkActions — shared-surface safe subset (sharedIn/sharedOut)", () => {
@@ -330,7 +330,7 @@ describe("driveBulkActions — download descriptor shape", () => {
 })
 
 // Download's ENABLED state (distinct from its presence in driveBulkActions) — mirrored in
-// item-menu.logic.ts and the drive keymap: enabled iff the selection is non-empty. The service-worker
+// itemMenu.logic.ts and the drive keymap: enabled iff the selection is non-empty. The service-worker
 // zip path removed the isFsaAvailable() requirement a dir/multi selection used to need — both FSA
 // states are still exercised below as documentation that its value no longer changes the outcome.
 describe("isBulkDownloadEnabled", () => {

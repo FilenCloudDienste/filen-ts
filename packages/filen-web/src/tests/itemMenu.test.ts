@@ -19,7 +19,7 @@ import {
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
-// item-menu.logic.ts imports features/drive/lib/download.ts (for startDownloads) which in turn touches the
+// itemMenu.logic.ts imports features/drive/lib/download.ts (for startDownloads) which in turn touches the
 // worker client and query client — unresolvable/unwanted under node vitest, mirrors
 // download.test.ts's own mock boundary. startDownloads is replaced, since actually running
 // it would reach the (also mocked) worker.
@@ -377,7 +377,7 @@ describe("driveItemActions — shared-surface safe subset (sharedIn/sharedOut)",
 	})
 })
 
-// Download's single unifying ENABLED gate (mirrored in bulk-action-bar.logic.ts and the drive
+// Download's single unifying ENABLED gate (mirrored in bulkActionBar.logic.ts and the drive
 // keymap): present on every decryptable, non-trash item, enabled unconditionally now that the
 // service-worker zip path covers every dir/multi selection too. PRESENCE has its own separate
 // exclusions — trash (see the trash-variant test above) and undecryptable (below). Both FSA states

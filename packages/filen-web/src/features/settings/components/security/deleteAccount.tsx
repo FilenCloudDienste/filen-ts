@@ -20,7 +20,7 @@ interface DeleteAccountCardProps {
 }
 
 // Two destructive confirms, then — only when the account has two-factor authentication enabled —
-// a code prompt (advanceDeleteAccountChain, delete-account.logic.ts owns the pure transition).
+// a code prompt (advanceDeleteAccountChain, deleteAccount.logic.ts owns the pure transition).
 // deleteAccount() only REQUESTS deletion: the server emails a confirmation link and actual deletion
 // completes on filen.io (homepage-owned, mirroring how registration confirmation and reset
 // completion are also email-link-driven flows this app does not own a route for). This card never

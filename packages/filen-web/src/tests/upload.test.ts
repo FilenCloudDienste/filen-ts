@@ -73,7 +73,7 @@ afterEach(() => {
 
 // ---------------------------------------------------------------------------
 // runUpload — all collaborators injected, no worker or query client (mirrors
-// create-directory.test.ts's harness style).
+// createDirectory.test.ts's harness style).
 // ---------------------------------------------------------------------------
 
 describe("runUpload (injected deps, no worker or query client)", () => {

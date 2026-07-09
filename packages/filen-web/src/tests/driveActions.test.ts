@@ -211,7 +211,7 @@ function mockFileLink(overrides: Partial<FilePublicLink> = {}): FilePublicLink {
 }
 
 // Worker-boundary errors arrive as plain DTOs (the Comlink proxy throws toErrorDTO output) — mirrors
-// create-directory.test.ts's sdkDto fixture.
+// createDirectory.test.ts's sdkDto fixture.
 function sdkDto(kind: string): ErrorDTO {
 	return { species: "sdk", kind, message: `${kind} message`, label: `${kind} label` }
 }

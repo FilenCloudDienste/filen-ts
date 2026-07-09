@@ -95,7 +95,7 @@ function ExportMasterKeysCard({ accountQuery }: ExportMasterKeysCardProps) {
 
 // Once-per-boot export-keys nag: mounted once from the authed shell (iconRail.tsx), independent of
 // whether the security page itself is open. Module-level `reminderFired`/`markReminderFired` (see
-// export-master-keys.logic.ts) stand in for a native app's "once per unlock" gate — the web app has
+// exportMasterKeys.logic.ts) stand in for a native app's "once per unlock" gate — the web app has
 // no lock/unlock concept, so "once per app boot" (i.e. once per module instance / page load) is the
 // web-appropriate equivalent.
 function useExportKeysReminder(): void {

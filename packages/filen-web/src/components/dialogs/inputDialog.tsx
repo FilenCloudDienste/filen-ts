@@ -38,7 +38,7 @@ interface InputDialogProps {
 // like every dialog primitive in this directory: every label is caller-resolved. The typed value
 // starts at initialValue (blank when omitted) and resets on every open transition (adjusting state
 // during render, same "reset state when a prop changes" pattern the forgot-password dialog and
-// TypedConfirmDialog use — see input-dialog.logic.ts) so a dismissed prompt never resurfaces a stale
+// TypedConfirmDialog use — see inputDialog.logic.ts) so a dismissed prompt never resurfaces a stale
 // value the next time it opens. Dismissal is BLOCKED while `pending` — Escape, outside-press and the
 // X close button (also visually disabled) all funnel through onOpenChange, and a `false` while the
 // operation runs is a no-op, so the dialog stays open until it settles — rationale in

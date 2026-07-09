@@ -55,7 +55,7 @@ function TransferStatusIcon({ status, direction }: { status: Transfer["status"];
 // Small decorative direction glyph (upload vs download), aria-hidden — purely an at-a-glance visual
 // cue; the accessible direction distinction lives in TransferStatusIcon's own sr-only label above.
 // Reuses the same icons the rest of the app already associates with each direction (uploadMenu.tsx/
-// uploadDropzone.tsx's UploadIcon, bulk-action-bar.logic.ts's DownloadIcon) rather than a generic
+// uploadDropzone.tsx's UploadIcon, bulkActionBar.logic.ts's DownloadIcon) rather than a generic
 // arrow pair.
 function TransferDirectionIcon({ direction }: { direction: Transfer["direction"] }) {
 	const Icon = direction === "upload" ? UploadIcon : DownloadIcon

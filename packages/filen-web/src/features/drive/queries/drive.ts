@@ -216,7 +216,7 @@ export function useViewModePreferencesQuery(): UseQueryResult<DrivePreferences<D
 
 // Public-link panel primitive: tags the worker's per-type status read with which type it is —
 // DirPublicLinkRW and FilePublicLink share no discriminant field of their own (their download flag
-// is even named differently, see link-dialog.logic.ts), so callers that need to know which shape
+// is even named differently, see linkDialog.logic.ts), so callers that need to know which shape
 // they're holding (building an update, constructing the link URL) would otherwise have to re-derive
 // it structurally. `null` means no link exists yet (the SDK's own idempotent-check-first shape);
 // there is no separate "not fetched" state here — that's the query's own pending/error status.

@@ -3,7 +3,7 @@ import { isActiveTransfer, type Transfer } from "@/features/transfers/store/useT
 // The screen's two rendered sections. Active on top, oldest-running first (ASC startedAt) — the
 // longest-waiting transfer stays anchored at the top instead of being bumped down every time a newer
 // one starts. Finished below, newest first (DESC startedAt — there is no finishedAt field, startedAt
-// is the nearest proxy, same convention transfers-panel.logic.ts's sortTransfersByStartedAt already
+// is the nearest proxy, same convention transfersPanel.logic.ts's sortTransfersByStartedAt already
 // uses). "Finished" is simply isActiveTransfer's complement (done/error in practice: cancelled never
 // reaches the store's list — removed on settle — and completedWithErrors is unused; see
 // stores/transfers.ts's own header comment), so no per-status branching is needed here either.

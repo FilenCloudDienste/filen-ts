@@ -1,5 +1,5 @@
 // Pure keydown-guard logic for previewOverlay.tsx's own in-dialog onKeyDown — extracted (like every
-// other viewer's own *.logic.ts sibling, e.g. docx-viewer.logic.ts) so it is unit-testable under this
+// other viewer's own *.logic.ts sibling, e.g. docxViewer.logic.ts) so it is unit-testable under this
 // project's DOM-free vitest environment (vitest.config.ts: environment "node", no jsdom/happy-dom).
 
 // Duck-typed rather than `target instanceof Element` — this module's own unit test has no real DOM

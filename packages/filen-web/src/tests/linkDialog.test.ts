@@ -5,7 +5,7 @@ import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import { buildLinkUpdate, buildPublicLinkUrl, readLinkForm } from "@/features/drive/components/linkDialog.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
-// readable test label into a shape that satisfies it, mirroring versions-dialog.test.ts's own fixture.
+// readable test label into a shape that satisfies it, mirroring versionsDialog.test.ts's own fixture.
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
 }
@@ -42,7 +42,7 @@ function fileStatus(overrides: Partial<FilePublicLink> = {}): DriveItemLinkStatu
 	return { type: "file", status: mockFileLink(overrides) }
 }
 
-// Local Dir/File fixtures mirror versions-dialog.test.ts / item-menu.test.ts's own per-file
+// Local Dir/File fixtures mirror versionsDialog.test.ts / itemMenu.test.ts's own per-file
 // convention: a plain Dir/File builder, narrowed into a DriveItem by a separate wrapper.
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {

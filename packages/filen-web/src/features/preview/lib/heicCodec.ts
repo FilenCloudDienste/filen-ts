@@ -2,7 +2,7 @@ import { log } from "@/lib/log"
 import { fitWithin, encodeCanvasThumb } from "@/features/drive/lib/thumbGenerators.logic"
 
 // Pure decode (HEIC/HEIF bytes -> RGBA) + encode (RGBA -> JPEG Blob) logic, dependency-injected so
-// runHeicTransform below runs in node against a fake decoder (see heic-codec.test.ts) with no WASM and
+// runHeicTransform below runs in node against a fake decoder (see heicCodec.test.ts) with no WASM and
 // no OffscreenCanvas involved. heic.worker.ts is the only real caller: browsers can't decode HEIC/HEIF
 // natively (preview.logic.ts's needsImageTransform), and libheif's decode is a synchronous embind call
 // — running it in place would freeze the tab for as long as a multi-megapixel photo takes to decode.
@@ -173,7 +173,7 @@ async function encodeJpegReal(pixels: DecodedHeicImage, quality: number): Promis
 // Thumbnail encode path: downscales to maxDimension first (a no-op draw when the source is already
 // at or under it — decodeHeic's own RGBA is used as-is, matching encodeJpegReal's full-resolution
 // draw) then hands off to the same webp-first/jpeg-fallback policy every other thumbnail generator
-// shares (thumb-generators.logic.ts) — unlike encodeJpegReal, this never re-encodes at the source's
+// shares (thumbGenerators.logic.ts) — unlike encodeJpegReal, this never re-encodes at the source's
 // full resolution, since a thumbnail's whole point is the smaller target size.
 async function encodeThumbReal(pixels: DecodedHeicImage, maxDimension: number): Promise<Blob> {
 	const { width, height } = fitWithin(pixels.width, pixels.height, maxDimension)

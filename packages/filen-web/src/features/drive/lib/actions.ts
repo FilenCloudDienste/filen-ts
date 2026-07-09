@@ -28,7 +28,7 @@ export type ActionOutcome = GenericActionOutcome<DriveItem>
 // it eagerly) — a cache miss degrades to "", a value no real directory uuid or the null root
 // sentinel can ever equal, so normalizeParentUuid becomes a harmless pass-through rather than
 // needing a guard at every call site. Exported for previewOverlay.tsx's own save flow — the
-// .logic.ts split keeps preview-save.logic.ts itself framework-free, so its rootUuid dependency is
+// .logic.ts split keeps previewSave.logic.ts itself framework-free, so its rootUuid dependency is
 // resolved by the caller instead, same as every other action here.
 export function currentRootUuid(): string {
 	return queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY)?.rootDirUuid ?? ""
@@ -290,7 +290,7 @@ export async function createLink(
 	return { status: "success", link }
 }
 
-// `next` carries the merged object (see link-dialog.logic.ts's buildLinkUpdate) — the item/link type
+// `next` carries the merged object (see linkDialog.logic.ts's buildLinkUpdate) — the item/link type
 // pairing is re-verified here rather than trusted blindly, since the two are independently-typed
 // parameters the type system can't itself correlate.
 export async function updateLink(item: DriveItem, next: DriveItemLinkStatus): Promise<LinkActionOutcome> {

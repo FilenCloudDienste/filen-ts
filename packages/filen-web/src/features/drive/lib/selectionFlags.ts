@@ -19,7 +19,7 @@ export interface DriveSelectionFlags {
 	// True iff every selected item is a shared-root arm (sharedRootDirectory/sharedRootFile) — the
 	// only two arms removeSharedItem accepts, since only their shareSource is a SharedRootItem (see
 	// item.ts's shareSource retention). Drives the bulk Unshare button's gate, mirroring the per-item
-	// menu's own item.type check (item-menu.logic.ts).
+	// menu's own item.type check (itemMenu.logic.ts).
 	everySharedRoot: boolean
 }
 

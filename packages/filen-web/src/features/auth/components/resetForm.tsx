@@ -24,7 +24,7 @@ interface ResetFormProps {
 }
 
 // Reset-completion form. With a master-keys file chosen, submit runs the reset directly; without one,
-// submit walks the full 4-stage skip-master-keys ceremony first (see skip-master-keys-chain.logic.ts)
+// submit walks the full 4-stage skip-master-keys ceremony first (see skipMasterKeysChain.logic.ts)
 // — cancelling at ANY stage aborts the submit entirely, it never falls back a stage. Both paths end in
 // the same attemptReset call, with masterKeysFileText simply omitted on the ceremony path — matching
 // completePasswordReset's own optional recoverKey param.
@@ -100,7 +100,7 @@ function ResetForm({ token }: ResetFormProps) {
 	}
 
 	// Fires from a ceremony dialog's onConfirm (confirmed=true) or any dismissal route funneled through
-	// its onOpenChange (confirmed=false) — see skip-master-keys-chain.logic.ts for the transition rules.
+	// its onOpenChange (confirmed=false) — see skipMasterKeysChain.logic.ts for the transition rules.
 	function handleStageOutcome(stage: SkipMasterKeysStage, confirmed: boolean): void {
 		const outcome = advanceSkipMasterKeysChain(stage, confirmed)
 		switch (outcome.status) {

@@ -3,7 +3,7 @@ import type { HeicDecoderModule, HeicTransformDeps } from "@/features/preview/li
 
 // heicCodec.ts keeps its shared-decoder memoization in a module-level `let`, so every test needs its
 // own module instance -- vi.resetModules() + a dynamic re-import before each one (mirrors
-// save-download.test.ts's own freshModule() pattern), instead of a reset export added just for tests.
+// saveDownload.test.ts's own freshModule() pattern), instead of a reset export added just for tests.
 // log is hoisted-mocked up front: a plain vi.spyOn on the statically-imported instance wouldn't reach
 // the freshly re-imported module's own reference to it once resetModules() decouples them.
 const { errorSpy } = vi.hoisted(() => ({ errorSpy: vi.fn() }))

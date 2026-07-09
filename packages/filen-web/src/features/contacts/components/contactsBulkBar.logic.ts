@@ -18,7 +18,7 @@ export interface ContactBulkActionDescriptor {
 	destructive?: boolean
 }
 
-// Pure gating builder for the contacts bulk-action bar — mirrors drive's bulk-action-bar.logic.ts
+// Pure gating builder for the contacts bulk-action bar — mirrors drive's bulkActionBar.logic.ts
 // (a flat descriptor list built from aggregated counts, trivially testable without rendering
 // anything). Fixed order mirrors filen-mobile's contactsHeader.tsx exactly: affirmative actions
 // first (unblock, accept), then the less-harsh rejections (deny, cancel), then the destructive pair

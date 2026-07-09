@@ -117,7 +117,7 @@ describe("isUnresolvableParentError", () => {
 	})
 })
 
-// All collaborators injected — no module mocks, mirroring create-directory.test.ts.
+// All collaborators injected — no module mocks, mirroring createDirectory.test.ts.
 function makeHarness() {
 	const uploadFileBytes = vi.fn<(parentUuid: string | null, data: Uint8Array, name: string, mime: string) => Promise<SdkFile>>()
 	const patchListing = vi.fn<(parentUuid: string | null, updater: (items: DriveItem[]) => DriveItem[]) => void>()

@@ -21,7 +21,7 @@ export interface UploadDropzoneProps {
 // FileSystemDirectoryEntry) goes through the tree-walking directory-upload path; a plain files-only
 // drop keeps using the flat startUploads path unchanged.
 //
-// The highlight uses a depth counter (upload-dropzone.logic.ts) rather than a plain dragover/
+// The highlight uses a depth counter (uploadDropzone.logic.ts) rather than a plain dragover/
 // dragleave boolean: dragenter/dragleave bubble up from every descendant the cursor crosses, and a
 // naive boolean would flicker the highlight off each time it passes over a row inside the zone.
 //

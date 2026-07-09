@@ -28,7 +28,7 @@ interface RecoveryKeyPanelProps {
 // artifact, see the naming law in locales/en/auth.ts) is shown here exactly once, straight from
 // enable2FA's return value, and lives ONLY in this component's state — it is never persisted,
 // logged, or refetched. It can only be dismissed via the explicit "I've saved it" confirm; every
-// other dismissal route is blocked (canDismissRecoveryKeyPanel, two-factor.logic.ts) so a stray
+// other dismissal route is blocked (canDismissRecoveryKeyPanel, twoFactor.logic.ts) so a stray
 // Escape or outside-click can never lose it before the user has acknowledged saving it.
 function RecoveryKeyPanel({ recoveryKey, onClose }: RecoveryKeyPanelProps) {
 	const { t } = useTranslation("auth")

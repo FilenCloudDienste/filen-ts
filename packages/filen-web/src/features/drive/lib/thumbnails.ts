@@ -52,7 +52,7 @@ export interface ThumbnailServiceDeps {
 
 // The real wiring: readThumbnailBlob/deleteThumbnail go straight to the main-thread OPFS read side
 // (no worker round trip — see thumbCache.ts), makeThumbnail/storeThumbnail cross to the sdk worker.
-// storeThumbnail Comlink.transfers its buffer in, mirroring preview-save.logic.ts's uploadFileBytes.
+// storeThumbnail Comlink.transfers its buffer in, mirroring previewSave.logic.ts's uploadFileBytes.
 export const defaultThumbnailDeps: ThumbnailServiceDeps = {
 	readThumbnailBlob,
 	deleteThumbnail: deleteThumbnailBlob,

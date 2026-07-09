@@ -9,7 +9,7 @@ import type { FsaSaveTarget, SaveTarget, SwSaveTarget } from "@/features/drive/l
 // client are unresolvable/unwanted under node vitest, and sonner is mocked to assert the summary
 // toast without a mounted <Toaster/>. features/drive/lib/saveDownload.ts is ALSO mocked here — runDownload
 // calls its real `saveDownload`/`isPickerCancelled` directly (they are not part of RunDownloadDeps),
-// so this file controls them the same way it controls the sdk client; save-download.test.ts is
+// so this file controls them the same way it controls the sdk client; saveDownload.test.ts is
 // where saveDownload's OWN mechanism-picking and SW-protocol correctness are proven.
 const { downloadFileToWriter, cancelDownload, toStringified } = vi.hoisted(() => ({
 	downloadFileToWriter: vi.fn(),
@@ -38,7 +38,7 @@ const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), 
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
 // The real zip orchestration (runZipDownload/narrowToZipItems/etc.) lives in, and is unit-tested by,
-// download-zip.test.ts — this file only needs to prove startDownloads ROUTES to it, so the whole
+// downloadZip.test.ts — this file only needs to prove startDownloads ROUTES to it, so the whole
 // module is replaced with a spy rather than exercising the real zip path here too.
 const { startZipDownloadMock } = vi.hoisted(() => ({ startZipDownloadMock: vi.fn() }))
 

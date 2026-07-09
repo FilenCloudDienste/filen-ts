@@ -1,5 +1,5 @@
 // Pure page-visibility/canvas-sizing math for pdfViewer.tsx — framework-free so it is testable in
-// node (pdf-viewer.logic.test.ts) with no pdf.js, canvas, or DOM involved.
+// node (pdfViewer.logic.test.ts) with no pdf.js, canvas, or DOM involved.
 
 // Two IntersectionObserver rootMargin values per page: RENDER (tight) triggers the first render as a
 // page approaches the viewport; EVICT (generous) releases that page's canvas only once it has

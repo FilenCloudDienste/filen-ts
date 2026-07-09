@@ -150,7 +150,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const effectiveSort = resolveEffectiveSort(sortPrefs, driveLocation)
 	const effectiveViewMode = resolveEffectiveViewMode(viewModePrefs, driveLocation)
 
-	// sharedIn ONLY: hide items shared by a blocked user (fail-open — see directory-listing.logic.ts).
+	// sharedIn ONLY: hide items shared by a blocked user (fail-open — see directoryListing.logic.ts).
 	// Every other variant's listing data passes straight through, untouched.
 	const visibleItems = variant === "sharedIn" ? filterSharedInByBlocked(listingQuery.data ?? [], blocked) : (listingQuery.data ?? [])
 	// Subtree search rooted at the CURRENT directory (uuid), gated to the "drive" variant — recents/
@@ -382,7 +382,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// Registered above at module scope. preventDefault unconditionally — mod+s's browser default
 	// (Save Page As) must never fire while this listing has focus. Guards mirror drive.trash's own
 	// (an open dialog, the trash variant — download isn't offered there, matching item-menu/bulk-bar's
-	// own trash exclusion) plus isBulkDownloadEnabled (bulk-action-bar.logic.ts) — the single unifying
+	// own trash exclusion) plus isBulkDownloadEnabled (bulkActionBar.logic.ts) — the single unifying
 	// ENABLED gate every download entry point shares, empty selection included (false for []). Also
 	// inert when the selection includes an undecryptable item — its meta is ciphertext with no content
 	// key, so it can never decrypt (mirrors item-menu/bulk-bar's own undecryptable exclusion) — void,

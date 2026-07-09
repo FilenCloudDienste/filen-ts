@@ -41,8 +41,8 @@ const CODE_BYTES = Buffer.from("export function add(a: number, b: number): numbe
 
 // A tiny GFM markdown fixture — a heading (real <h1> once rendered), bold text, and one safe external
 // link (proves the target="_blank"/rel="noreferrer" + urlTransform link-hygiene path renders correctly
-// for a SAFE link; the reject case is covered at the unit level, markdown-viewer.logic.test.ts, mirroring
-// docx-viewer.logic.test.ts's own precedent).
+// for a SAFE link; the reject case is covered at the unit level, markdownViewer.logic.test.ts, mirroring
+// docxViewer.logic.test.ts's own precedent).
 const MARKDOWN_BYTES = Buffer.from("# Hello Markdown\n\nThis is **bold** text and a [safe link](https://example.com/safe).\n", "utf8")
 
 // The one live proof the docx-preview path actually works: real JSZip/DOMParser XML parsing (neither

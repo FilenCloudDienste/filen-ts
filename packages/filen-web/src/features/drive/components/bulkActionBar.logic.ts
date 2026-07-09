@@ -22,12 +22,12 @@ interface BulkActionDescriptorShared {
 }
 
 // "direct" calls the bulk favorite SET helper immediately; "dialog" asks the host to open the given
-// kind — mirrors item-menu.logic.ts's ItemActionDescriptor split (same rationale: a discriminated
+// kind — mirrors itemMenu.logic.ts's ItemActionDescriptor split (same rationale: a discriminated
 // union instead of an optional field, so a caller can never observe an inconsistent combination).
 export type BulkActionDescriptor =
 	(BulkActionDescriptorShared & { run: "direct" }) | (BulkActionDescriptorShared & { run: "dialog"; dialogKind: BulkDialogActionKind })
 
-// Pure gating builder for the bulk-action bar — mirrors item-menu.logic.ts's driveItemActions
+// Pure gating builder for the bulk-action bar — mirrors itemMenu.logic.ts's driveItemActions
 // (variant/flag-gated descriptor list, trivially testable without rendering anything). Covers all 6
 // web variants, sharedIn/sharedOut included (mobile's buildBulkActionMenu also covers links/offline,
 // neither of which exist on web yet).
@@ -44,7 +44,7 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 	const descriptors: BulkActionDescriptor[] = []
 
 	// Favorite/move/trash are owner-mutating — gated off sharedIn/sharedOut entirely (isSharedVariant;
-	// see item-menu.logic.ts's driveItemActions for the full per-surface rationale, mirrored here).
+	// see itemMenu.logic.ts's driveItemActions for the full per-surface rationale, mirrored here).
 	// What's left for those two surfaces: SHARE (still undecryptable-gated below, sharedOut only via
 	// canShareVariant) and UNSHARE (everySharedRoot, either surface).
 	const ownerMutable = !isSharedVariant(variant)
@@ -77,7 +77,7 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 		// is ciphertext with no content key, so it can never decrypt — a guaranteed-failing click, worse
 		// than a disabled control. Offered on every non-trash, decryptable surface this point is
 		// reachable from (owned or shared). Its own ENABLED state is a separate concern
-		// (isBulkDownloadEnabled below) — this only controls presence, mirroring item-menu.logic.ts's
+		// (isBulkDownloadEnabled below) — this only controls presence, mirroring itemMenu.logic.ts's
 		// downloadDescriptor.
 		descriptors.push({ id: "download", ...ACTION_DEFS.download, run: "direct" })
 	}
@@ -88,7 +88,7 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 		descriptors.push({ id: "trash", ...ACTION_DEFS.trash, run: "dialog", dialogKind: "trash" })
 	}
 
-	// Root-only, same gate as the per-item menu's own UNSHARE (item-menu.logic.ts): only fires when
+	// Root-only, same gate as the per-item menu's own UNSHARE (itemMenu.logic.ts): only fires when
 	// EVERY selected item is a sharedRootDirectory/sharedRootFile arm. Independent of includesUndecryptable
 	// above — same pure-uuid-disposition rationale as trash — and destructive-styled, mirroring mobile's
 	// removeShare/stopSharing menu entries.
@@ -100,7 +100,7 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 }
 
 // Download's ENABLED state (distinct from its PRESENCE in driveBulkActions above) — mirrored in
-// item-menu.logic.ts and the drive keymap: enabled iff the selection is non-empty. The service-worker
+// itemMenu.logic.ts and the drive keymap: enabled iff the selection is non-empty. The service-worker
 // zip path removed the isFsaAvailable() requirement a dir/multi selection used to need — every
 // selection downloads on every browser now, empty selections excepted.
 export function isBulkDownloadEnabled(items: DriveItem[]): boolean {

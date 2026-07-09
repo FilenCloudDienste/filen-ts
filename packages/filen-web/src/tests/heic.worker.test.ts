@@ -8,12 +8,12 @@ import type { HeicWorkerApi } from "@/features/preview/workers/heic.worker"
 // exact one-method api shape heic.worker.ts exposes — HeicWorkerApi is imported as a type only, so this
 // never actually evaluates that module — and wires it up over a real MessagePort pair instead. Node's
 // MessageChannel is a spec-compliant implementation (not a mock of one), so a call through `remote`
-// below is a genuine postMessage round trip. That's the one thing heic-codec.test.ts's in-process tests
+// below is a genuine postMessage round trip. That's the one thing heicCodec.test.ts's in-process tests
 // can't prove: that a value runHeicTransform throws still arrives at the caller as a clean Error after
 // actually crossing a worker boundary — the guarantee heicTransform.ts's caller (imageViewer.tsx)
 // depends on now that the decode runs on a separate thread instead of being awaited in place.
 
-// heicCodec.ts caches its decoder promise in a module-level `let` (see heic-codec.test.ts's own
+// heicCodec.ts caches its decoder promise in a module-level `let` (see heicCodec.test.ts's own
 // freshModule()) — resetModules + a fresh dynamic import per call is what keeps one test's fakeLib from
 // leaking into the next.
 async function exposeOverChannel(deps: HeicTransformDeps): Promise<{ remote: Comlink.Remote<HeicWorkerApi>; close: () => void }> {
@@ -38,7 +38,7 @@ async function exposeOverChannel(deps: HeicTransformDeps): Promise<{ remote: Com
 }
 
 // A minimal libheif-shaped fake — just enough surface for runHeicTransform's happy/throw paths.
-// heic-codec.test.ts owns the exhaustive decode/encode matrix; this file only needs the two shapes
+// heicCodec.test.ts owns the exhaustive decode/encode matrix; this file only needs the two shapes
 // below to prove the boundary-crossing behavior, not re-prove decode correctness.
 function fakeLib(decodeThrows?: unknown): HeicDecoderModule {
 	class HeifDecoder {

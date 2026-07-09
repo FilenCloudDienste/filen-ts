@@ -28,7 +28,7 @@ function sdkDto(kind: string): ErrorDTO {
 	return { species: "sdk", kind, message: `${kind} message`, label: `${kind} label` }
 }
 
-// All collaborators injected — no module mocks, mirroring login-attempt.test.ts/reset-attempt.test.ts.
+// All collaborators injected — no module mocks, mirroring loginAttempt.test.ts/resetAttempt.test.ts.
 function makeHarness() {
 	const createDirectory = vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>()
 	const patchListing = vi.fn<(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void>()

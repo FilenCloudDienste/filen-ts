@@ -94,6 +94,6 @@ export function asErrorDTO(e: unknown): ErrorDTO {
 // resolveNormalDirParent's own thrown message (sdk.worker.ts) when a create/move/save target's parent
 // directory no longer exists — shared here rather than duplicated since it's the one signal
 // main-thread logic needs out of a worker throw's otherwise-opaque plain Error (see
-// preview-save.logic.ts's own isUnresolvableParentError, today's only consumer). Not a general
+// previewSave.logic.ts's own isUnresolvableParentError, today's only consumer). Not a general
 // error-kind taxonomy entry: a plain Error has no `kind`, only this literal `message` prefix to match.
 export const PARENT_NOT_FOUND_PREFIX = "parent directory not found: "

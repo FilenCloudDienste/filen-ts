@@ -267,7 +267,7 @@ describe("collectDirectoryUploads — drag-and-drop FileSystemEntry input", () =
 })
 
 // ---------------------------------------------------------------------------
-// runDirectoryUpload — injected deps (mirrors create-directory.test.ts/upload.test.ts's own
+// runDirectoryUpload — injected deps (mirrors createDirectory.test.ts/upload.test.ts's own
 // injected-deps harness style): the REAL runCreateDirectory/runUpload run against mocked leaf calls.
 // ---------------------------------------------------------------------------
 

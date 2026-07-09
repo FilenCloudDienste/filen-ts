@@ -1,5 +1,5 @@
 // Pure hyperlink-scheme validation for docxViewer.tsx — framework-free so it is testable in node
-// (docx-viewer.logic.test.ts) with no DOM involved.
+// (docxViewer.logic.test.ts) with no DOM involved.
 
 const SAFE_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"])
 

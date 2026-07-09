@@ -160,7 +160,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 
 	// The one write path: encode -> upload -> patch listing -> re-key onto the rotated uuid (success), or
 	// a LABEL-FIRST toast (failure) — read-only lockdown is reserved for the ONE failure class retrying
-	// can never fix (isUnresolvableParentError, see preview-save.logic.ts's own comment on why); every
+	// can never fix (isUnresolvableParentError, see previewSave.logic.ts's own comment on why); every
 	// other failure leaves the buffer editable+dirty for a retry. `dirty` resets for free on SUCCESS
 	// only: a new `item.data.uuid` re-keys PreviewBody, remounting TextViewer fresh with its own clean
 	// `dirty=false` (see textViewer.tsx's own mount-time effect) — a FAILURE never remounts anything, so

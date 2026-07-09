@@ -1,6 +1,6 @@
 // Pure state transition for the delete-account chain: two sequential destructive ConfirmDialogs,
 // then — only when the account has two-factor authentication enabled — a code prompt before the
-// actual request. Mirrors skip-master-keys-chain.logic.ts's shape (confirming advances exactly one
+// actual request. Mirrors skipMasterKeysChain.logic.ts's shape (confirming advances exactly one
 // step; cancelling from ANY step aborts the whole chain, never falls back a step), extended with
 // the 2FA branch at the end instead of a fixed final stage.
 export type DeleteAccountConfirmStage = "stage1" | "stage2"

@@ -3,7 +3,7 @@ import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 import { buildSearchResults, resolveSearchTransition, searchHitNavigationTarget } from "@/features/drive/hooks/useDriveSearch.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — mirrors
-// directory-listing.test.ts's own testUuid helper.
+// directoryListing.test.ts's own testUuid helper.
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
 }

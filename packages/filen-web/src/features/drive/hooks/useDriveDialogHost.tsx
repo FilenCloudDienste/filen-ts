@@ -24,10 +24,10 @@ import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 
-// The listing-level dialog host's own state shape. Widens item-menu.logic.ts's ItemActionDialogKind
+// The listing-level dialog host's own state shape. Widens itemMenu.logic.ts's ItemActionDialogKind
 // with two listing-level kinds neither dispatched by a per-item menu, so neither has a place in that
 // narrower, per-item-scoped union: "emptyTrash" (the trash toolbar) and "restoreSelected" (the bulk
-// bar's confirm — a single-item restore stays direct/unconfirmed, see item-menu.logic.ts's RESTORE).
+// bar's confirm — a single-item restore stays direct/unconfirmed, see itemMenu.logic.ts's RESTORE).
 type ActiveDialogKind = ItemActionDialogKind | "emptyTrash" | "restoreSelected" | "preview"
 
 interface ActiveDialog {
@@ -130,12 +130,12 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 	}
 
 	// Bulk restore CONFIRMS (unlike a single item's direct, unconfirmed restore — see
-	// item-menu.logic.ts's RESTORE descriptor and driveRestoreSelectedConfirmTitle's own doc comment).
+	// itemMenu.logic.ts's RESTORE descriptor and driveRestoreSelectedConfirmTitle's own doc comment).
 	async function handleRestoreSelectedConfirm(items: DriveItem[]): Promise<void> {
 		await runBulkDialogAction(items, restoreItems)
 	}
 
-	// Root-only (see item-menu.logic.ts's UNSHARE gate) — the sharedIn/sharedOut root-listing patch
+	// Root-only (see itemMenu.logic.ts's UNSHARE gate) — the sharedIn/sharedOut root-listing patch
 	// lives inside unshareItems itself, keyed off the CURRENT variant (this listing's own).
 	async function handleUnshareConfirm(items: DriveItem[]): Promise<void> {
 		await runBulkDialogAction(items, targetItems => unshareItems(targetItems, variant))
@@ -290,7 +290,7 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 			case "color": {
 				const item = activeDialog.items[0]
 
-				// The menu only ever offers Color for a directory (see item-menu.logic.ts) — this narrows
+				// The menu only ever offers Color for a directory (see itemMenu.logic.ts) — this narrows
 				// that guarantee into a type, it doesn't impose a new one.
 				if (item?.type !== "directory") {
 					return null
@@ -357,8 +357,8 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 				) : null
 			case "unshare":
 				// Reached from a per-item menu (items: [item]) or the bulk bar (items: selectedItems) — both
-				// only ever dispatch this for sharedRootDirectory/sharedRootFile arms (item-menu.logic.ts /
-				// bulk-action-bar.logic.ts's own root-only gate).
+				// only ever dispatch this for sharedRootDirectory/sharedRootFile arms (itemMenu.logic.ts /
+				// bulkActionBar.logic.ts's own root-only gate).
 				return (
 					<ConfirmDialog
 						open

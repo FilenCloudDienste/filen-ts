@@ -16,7 +16,7 @@ function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
 }
 
-// Local fixtures mirror item-menu.test.ts's own per-file convention (each test file owns its minimal
+// Local fixtures mirror itemMenu.test.ts's own per-file convention (each test file owns its minimal
 // Dir/File shape rather than sharing one across files).
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {

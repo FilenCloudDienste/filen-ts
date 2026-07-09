@@ -26,7 +26,7 @@ const TEXT_BYTES = Buffer.from("Hello from a tiny text fixture.\nSecond line her
 
 // The one live proof the editable path actually works end to end: a real writable CodeMirror surface,
 // a real worker uploadFileBytes round trip (uuid rotation included), and the dirty-guard confirm —
-// unlike preview-save.logic.test.ts's injected-deps unit coverage, none of that is provable without a
+// unlike previewSave.logic.test.ts's injected-deps unit coverage, none of that is provable without a
 // real worker. Net-zero via the same scratch-directory convention every other leg in this file uses
 // (enterScratchDirectory/trashScratchDirectory) — the edited file never leaves the scratch directory,
 // which the teardown trashes whole. Drives the Save button, not Cmd/Ctrl+S itself — mirrors
@@ -198,7 +198,7 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 
 // The one live proof the trash-preview parity rule actually wires together: canPreview(item, "trash")
 // stays true (preview.logic.test.ts) rather than excluding trash like an undecryptable item, but
-// isEditable(item, "trash") is false (preview-save.logic.test.ts) and the header hides Download in
+// isEditable(item, "trash") is false (previewSave.logic.test.ts) and the header hides Download in
 // trash (previewOverlay.tsx's own variant check) — none of that is provable without a real trashed
 // item reachable from a real Trash listing. Trashes the FILE itself (the single-item Trash flow
 // drive-actions.spec.ts's own bulk test exercises for multiple items), not the scratch directory, so

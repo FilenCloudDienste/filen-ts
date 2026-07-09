@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { markdownUrlTransform } from "@/features/preview/components/markdownViewer.logic"
 
-// Mirrors docx-viewer.logic.test.ts's own isSafeLinkHref cases — markdownUrlTransform delegates to
+// Mirrors docxViewer.logic.test.ts's own isSafeLinkHref cases — markdownUrlTransform delegates to
 // that exact function, so the safe/unsafe scheme verdicts must match it one for one.
 describe("markdownUrlTransform", () => {
 	it("keeps an https URL", () => {

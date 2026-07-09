@@ -68,7 +68,7 @@ function removeByUuid(items: DriveItem[], uuid: string): DriveItem[] {
 }
 
 // Stops sharing a shared-root item — a directory shared out, or an item shared in the caller wants
-// gone. Root-only: item-menu.logic.ts/bulk-action-bar.logic.ts gate this action to the
+// gone. Root-only: itemMenu.logic.ts/bulkActionBar.logic.ts gate this action to the
 // sharedRootDirectory/sharedRootFile arms alone, the only two whose shareSource is a SharedRootItem
 // (see item.ts's union doc comment) — the type guard below is a defense-in-depth backstop for a caller
 // bug, never a state the real gated callers can reach.

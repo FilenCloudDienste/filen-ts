@@ -26,7 +26,7 @@ const TextViewer = lazy(() => import("@/features/preview/components/textViewer")
 // deliberately) — a `<script>`/`<img onerror>` written into a .md file renders as an escaped, inert
 // text string, never runs. urlTransform closes the remaining hole (a crafted `[link](javascript:...)`
 // or `![x](javascript:...)`) via the SAME scheme allowlist docxViewer.tsx's own sanitizeLinks sweep
-// uses — see markdown-viewer.logic.ts.
+// uses — see markdownViewer.logic.ts.
 function MarkdownLink({ href, children }: { href?: string | undefined; children?: ReactNode | undefined }) {
 	return (
 		<a
