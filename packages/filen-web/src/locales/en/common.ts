@@ -52,6 +52,10 @@ export const common = {
 	signOut: "Sign out",
 	/** Icon rail — tooltip + accessible label on the storage-usage meter */
 	storage: "Storage",
+	/** Icon rail — collapse toggle accessible label while the sidebar is shown (clicking hides it) */
+	collapseSidebar: "Collapse sidebar",
+	/** Icon rail — collapse toggle accessible label while the sidebar is hidden (clicking shows it) */
+	expandSidebar: "Expand sidebar",
 	// Drive sidebar — sharing and public-link destinations; kept here (not in the "drive" namespace,
 	// which holds the rest of the listing surface) until their own listing surface ships.
 	/** Drive sidebar — item for content other users shared with the user */

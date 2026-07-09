@@ -24,7 +24,7 @@ export function BootErrorScreen({ reason, error }: BootErrorScreenProps) {
 	const detail = error ? errorLabel(error) : undefined
 
 	return (
-		<div className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
+		<div className="flex min-h-svh items-center justify-center bg-canvas p-6 text-foreground">
 			<Empty className="max-w-md">
 				<EmptyHeader>
 					<EmptyMedia

@@ -13,7 +13,7 @@ function NoCoiPage() {
 	const { t } = useTranslation()
 
 	return (
-		<div className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
+		<div className="flex min-h-svh items-center justify-center bg-canvas p-6 text-foreground">
 			<Empty className="max-w-md">
 				<EmptyHeader>
 					<EmptyMedia

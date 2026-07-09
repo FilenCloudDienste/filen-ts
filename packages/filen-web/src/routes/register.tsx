@@ -17,7 +17,7 @@ function RegisterPage() {
 	const { t } = useTranslation("auth")
 
 	return (
-		<div className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
+		<div className="flex min-h-svh items-center justify-center bg-canvas p-6 text-foreground">
 			<Card className="w-full max-w-sm">
 				<CardHeader className="justify-items-center gap-3 text-center">
 					<Logo className="size-10 text-primary" />

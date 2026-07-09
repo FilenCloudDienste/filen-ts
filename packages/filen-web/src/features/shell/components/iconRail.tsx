@@ -11,9 +11,11 @@ import {
 	MoonIcon,
 	SettingsIcon,
 	LogOutIcon,
-	UserIcon
+	UserIcon,
+	PanelLeftIcon
 } from "lucide-react"
 import type { CommonKey } from "@/lib/i18n"
+import { cn } from "@/lib/utils"
 import { runLogout } from "@/lib/logout"
 import { sdkApi } from "@/lib/sdk/client"
 import { clearSession, broadcastAuth } from "@/lib/sdk/session"
@@ -24,12 +26,11 @@ import { useTransfersAggregate } from "@/features/transfers/store/useTransfersSt
 import { useExportKeysReminder } from "@/features/settings/components/security/exportMasterKeys"
 import { TransfersPanel } from "@/features/transfers/components/transfersPanel"
 import { Logo } from "@/features/shell/components/logo"
+import { useShellStore } from "@/features/shell/store/useShellStore"
 import { useTheme } from "@/providers/themeProvider"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Separator } from "@/components/ui/separator"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -38,6 +39,7 @@ import {
 	DropdownMenuGroup,
 	DropdownMenuItem,
 	DropdownMenuLabel,
+	DropdownMenuSeparator,
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
@@ -80,37 +82,21 @@ const MODULES: { key: CommonKey; icon: IconType }[] = [
 	{ key: "moduleChats", icon: MessagesSquareIcon }
 ]
 
-function ThemeToggle() {
-	const { t } = useTranslation()
-	const { setTheme } = useTheme()
-
-	return (
-		<Tooltip>
-			<TooltipTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-lg"
-						aria-label={t("toggleTheme")}
-						onClick={() => {
-							setTheme(document.documentElement.classList.contains("dark") ? "light" : "dark")
-						}}
-					>
-						<SunIcon className="dark:hidden" />
-						<MoonIcon className="hidden dark:block" />
-					</Button>
-				}
-			/>
-			<TooltipContent side="right">
-				{t("toggleTheme")}
-				<Kbd action="app.toggleTheme" />
-			</TooltipContent>
-		</Tooltip>
+// Rail section slot: the active section rides a white chip (soft shadow); inactive glyphs are plain
+// muted marks on the canvas that tint on hover. No borders — the chip and hover fills carry the
+// state entirely. Reused by every real section entry (Drive, Contacts, Transfers) so they stay
+// visually identical.
+function railItemClass(active: boolean): string {
+	return cn(
+		"flex size-10 items-center justify-center rounded-xl transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/40 [&_svg]:size-[22px] [&_svg]:shrink-0",
+		active ? "bg-rail-chip text-rail-chip-foreground shadow-sm" : "text-muted-foreground hover:bg-rail-hover hover:text-foreground"
 	)
 }
 
 function AccountMenu() {
 	const { t } = useTranslation(["common", "auth"])
+	const navigate = useNavigate()
+	const { setTheme } = useTheme()
 	const accountQuery = useAccountQuery()
 	const [confirmOpen, setConfirmOpen] = useState(false)
 	const [pending, setPending] = useState(false)
@@ -164,19 +150,47 @@ function AccountMenu() {
 					side="right"
 					align="end"
 					sideOffset={8}
-					className="min-w-44"
+					className="min-w-52"
 				>
+					<DropdownMenuLabel className="truncate">{accountQuery.data?.email ?? t("account")}</DropdownMenuLabel>
+					<DropdownMenuSeparator />
 					<DropdownMenuGroup>
-						<DropdownMenuLabel className="truncate">{accountQuery.data?.email ?? t("account")}</DropdownMenuLabel>
+						{/* Settings moved off the rail into the account menu (rail footer is now collapse + avatar
+						    only). */}
 						<DropdownMenuItem
 							onClick={() => {
-								setConfirmOpen(true)
+								void navigate({ to: "/settings/security" })
 							}}
 						>
-							<LogOutIcon />
-							{t("signOut")}
+							<SettingsIcon />
+							{t("settings")}
+							<span className="ml-auto">
+								<Kbd action="app.openSettings" />
+							</span>
+						</DropdownMenuItem>
+						<DropdownMenuItem
+							onClick={() => {
+								setTheme(document.documentElement.classList.contains("dark") ? "light" : "dark")
+							}}
+						>
+							<SunIcon className="dark:hidden" />
+							<MoonIcon className="hidden dark:block" />
+							{t("toggleTheme")}
+							<span className="ml-auto">
+								<Kbd action="app.toggleTheme" />
+							</span>
 						</DropdownMenuItem>
 					</DropdownMenuGroup>
+					<DropdownMenuSeparator />
+					<DropdownMenuItem
+						variant="destructive"
+						onClick={() => {
+							setConfirmOpen(true)
+						}}
+					>
+						<LogOutIcon />
+						{t("signOut")}
+					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>
 			<ConfirmDialog
@@ -216,17 +230,16 @@ function TransfersEntry() {
 		>
 			<PopoverTrigger
 				render={
-					<Button
-						variant="ghost"
-						size="icon-lg"
+					<button
+						type="button"
 						aria-label={
 							activeCount > 0 ? t("transfers:transfersActiveBadge", { count: activeCount }) : t("common:moduleTransfers")
 						}
-						className="relative"
+						className={cn(railItemClass(open), "relative")}
 					>
 						<ArrowDownUpIcon />
 						{activeCount > 0 ? (
-							// aria-hidden: the count is already folded into the Button's own aria-label above —
+							// aria-hidden: the count is already folded into the button's own aria-label above —
 							// a button with an explicit aria-label ignores descendant content (including any
 							// aria-label on this badge) when computing its accessible name, so a label here would
 							// be dead weight, not a second announcement.
@@ -237,7 +250,7 @@ function TransfersEntry() {
 								{activeCount}
 							</Badge>
 						) : null}
-					</Button>
+					</button>
 				}
 			/>
 			<PopoverContent
@@ -252,6 +265,35 @@ function TransfersEntry() {
 				/>
 			</PopoverContent>
 		</Popover>
+	)
+}
+
+// Pinned rail footer control: hides/shows the whole sidebar column (rail stays). White rounded-square
+// button with a subtle border — the one intentionally bordered control, reading as a physical toggle
+// against the borderless rail.
+function SidebarToggle() {
+	const { t } = useTranslation()
+	const sidebarCollapsed = useShellStore(state => state.sidebarCollapsed)
+	const toggleSidebar = useShellStore(state => state.toggleSidebar)
+	const label = sidebarCollapsed ? t("expandSidebar") : t("collapseSidebar")
+
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<button
+						type="button"
+						aria-label={label}
+						aria-pressed={sidebarCollapsed}
+						onClick={toggleSidebar}
+						className="flex size-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-sm transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/40 [&_svg]:size-[18px]"
+					>
+						<PanelLeftIcon />
+					</button>
+				}
+			/>
+			<TooltipContent side="right">{label}</TooltipContent>
+		</Tooltip>
 	)
 }
 
@@ -295,15 +337,15 @@ export function IconRail() {
 	return (
 		<nav
 			aria-label={t("appName")}
-			className="flex h-svh w-16 shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar py-3"
+			className="flex h-svh w-14 shrink-0 flex-col items-center gap-1.5 py-3"
 		>
 			<Link
 				to="/drive/$"
 				params={{ _splat: "" }}
 				aria-label={t("moduleDrive")}
-				className="mb-1 flex size-9 items-center justify-center rounded-2xl text-primary outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+				className="mb-1.5 flex size-8 items-center justify-center rounded-xl bg-primary text-primary-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/40 dark:bg-rail-chip dark:text-rail-chip-foreground"
 			>
-				<Logo className="size-7" />
+				<Logo className="size-5" />
 			</Link>
 
 			<Tooltip>
@@ -314,7 +356,7 @@ export function IconRail() {
 							params={{ _splat: "" }}
 							aria-current={driveActive ? "page" : undefined}
 							aria-label={t("moduleDrive")}
-							className={buttonVariants({ variant: driveActive ? "secondary" : "ghost", size: "icon-lg" })}
+							className={railItemClass(driveActive)}
 						>
 							<FolderClosedIcon />
 						</Link>
@@ -330,7 +372,7 @@ export function IconRail() {
 							to="/contacts"
 							aria-current={contactsActive ? "page" : undefined}
 							aria-label={t("moduleContacts")}
-							className={buttonVariants({ variant: contactsActive ? "secondary" : "ghost", size: "icon-lg" })}
+							className={railItemClass(contactsActive)}
 						>
 							<UsersIcon />
 						</Link>
@@ -345,15 +387,14 @@ export function IconRail() {
 				<Tooltip key={key}>
 					<TooltipTrigger
 						render={
-							<Button
-								variant="ghost"
-								size="icon-lg"
+							<button
+								type="button"
 								aria-disabled="true"
 								aria-label={t(key)}
-								className="text-muted-foreground/60 hover:bg-transparent hover:text-muted-foreground/60"
+								className="flex size-10 items-center justify-center rounded-xl text-muted-foreground/50 [&_svg]:size-[22px] [&_svg]:shrink-0"
 							>
 								<Icon />
-							</Button>
+							</button>
 						}
 					/>
 					<TooltipContent side="right">
@@ -364,43 +405,8 @@ export function IconRail() {
 			))}
 
 			<div className="mt-auto flex w-full flex-col items-center gap-2">
+				<SidebarToggle />
 				<AccountMenu />
-
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<div
-								className="flex w-full flex-col items-center gap-1.5 px-3 py-1"
-								aria-label={t("storage")}
-							>
-								<Skeleton className="h-1.5 w-full rounded-full" />
-								<Skeleton className="h-1.5 w-6 rounded-full" />
-							</div>
-						}
-					/>
-					<TooltipContent side="right">{t("storage")}</TooltipContent>
-				</Tooltip>
-
-				<Separator className="w-8" />
-				<ThemeToggle />
-
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<Link
-								to="/settings/security"
-								aria-label={t("settings")}
-								className={buttonVariants({ variant: "ghost", size: "icon-lg" })}
-							>
-								<SettingsIcon />
-							</Link>
-						}
-					/>
-					<TooltipContent side="right">
-						{t("settings")}
-						<Kbd action="app.openSettings" />
-					</TooltipContent>
-				</Tooltip>
 			</div>
 		</nav>
 	)

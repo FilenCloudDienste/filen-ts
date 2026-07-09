@@ -93,7 +93,7 @@ export function DriveSidebar() {
 	]
 
 	return (
-		<aside className="hidden h-svh w-60 shrink-0 flex-col border-r border-border bg-sidebar md:flex">
+		<aside className="hidden h-svh w-52 shrink-0 flex-col bg-sidebar md:flex">
 			<div className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
 				<SplatNavItem
 					icon={FolderClosedIcon}
@@ -120,6 +120,15 @@ export function DriveSidebar() {
 						)
 					)}
 				</div>
+			</div>
+			{/* Bottom block reserved for the storage-usage meter (lands in a later step); a later step
+			    fills this slot. The separator is tonal only, no hard rule. */}
+			<div className="shrink-0 px-3 pb-3">
+				<Separator className="mb-3" />
+				<div
+					className="h-12"
+					aria-hidden="true"
+				/>
 			</div>
 		</aside>
 	)
