@@ -1,0 +1,431 @@
+import { useState, type ReactNode } from "react"
+import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
+import { type DriveItem } from "@/features/drive/lib/item"
+import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { stepPreviewIndex } from "@/features/drive/lib/preview.logic"
+import { renameItem, trashItems, restoreItems, deleteItemsPermanently, emptyTrash } from "@/features/drive/lib/actions"
+import { unshareItems } from "@/features/drive/lib/share/actions"
+import { type BulkOutcome } from "@/features/drive/lib/bulk"
+import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
+import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import { errorLabel } from "@/lib/i18n/errorLabel"
+import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
+import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar"
+import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
+import { ContactPickerDialog } from "@/features/drive/components/contactPickerDialog"
+import { ColorDialog } from "@/features/drive/components/colorDialog"
+import { VersionsDialog } from "@/features/drive/components/versionsDialog"
+import { InfoDialog } from "@/features/drive/components/infoDialog"
+import { LinkDialog } from "@/features/drive/components/linkDialog"
+import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
+import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
+import { InputDialog } from "@/components/dialogs/inputDialog"
+
+// The listing-level dialog host's own state shape. Widens item-menu.logic.ts's ItemActionDialogKind
+// with two listing-level kinds neither dispatched by a per-item menu, so neither has a place in that
+// narrower, per-item-scoped union: "emptyTrash" (the trash toolbar) and "restoreSelected" (the bulk
+// bar's confirm — a single-item restore stays direct/unconfirmed, see item-menu.logic.ts's RESTORE).
+type ActiveDialogKind = ItemActionDialogKind | "emptyTrash" | "restoreSelected" | "preview"
+
+interface ActiveDialog {
+	kind: ActiveDialogKind
+	items: DriveItem[]
+	// Only meaningful for kind:"preview" — the opened item's position within `items` (the frozen
+	// previewable-sibling snapshot taken at open time). Every other kind leaves this unset.
+	index?: number
+}
+
+// Kinds the dialog host below actually renders — every ActiveDialogKind is wired today, but the set
+// stays explicit (rather than collapsing to a bare `activeDialog !== null` check) so a future kind
+// added to the union without an immediate dialog implementation degrades safely: an unwired seam kind
+// would otherwise look identical to a real one to the F2/Delete guards below, permanently wedging
+// activeDialog !== null (and so those shortcuts) the moment a menu dispatched one, since nothing
+// would ever render to close it again.
+const WIRED_DIALOG_KINDS = new Set<ActiveDialogKind>([
+	"rename",
+	"trash",
+	"delete",
+	"emptyTrash",
+	"move",
+	"color",
+	"versions",
+	"info",
+	"link",
+	"share",
+	"unshare",
+	"restoreSelected",
+	"preview"
+])
+
+export interface DriveDialogHost {
+	// True only while a dialog that actually RENDERS something is open — every kind renders one today
+	// (see WIRED_DIALOG_KINDS), but the check stays explicit so a future seam kind can't silently wedge
+	// the F2/Delete guards open forever.
+	isDialogOpen: boolean
+	handleItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
+	handleBulkDialogAction: (kind: BulkDialogActionKind) => void
+	openPreview: (items: DriveItem[], index: number) => void
+	renderActiveDialog: () => ReactNode
+}
+
+interface UseDriveDialogHostParams {
+	variant: DriveVariant
+	selectedItems: DriveItem[]
+}
+
+// One instance of whichever dialog activeDialog.kind names is rendered at a time (renderActiveDialog),
+// never more than one. `dialogPending` is shared across the kinds whose async call the HOST itself owns
+// (rename/trash/delete/emptyTrash/restoreSelected) — the move/color/versions/info dialogs run their own
+// async calls internally and track their own pending state, since each needs more than one shared
+// boolean can express (e.g. versions has an independent restore vs. delete-confirm flow).
+export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHostParams): DriveDialogHost {
+	const { t } = useTranslation(["drive", "common"])
+	const [activeDialog, setActiveDialog] = useState<ActiveDialog | null>(null)
+	const [dialogPending, setDialogPending] = useState(false)
+	const isDialogOpen = activeDialog !== null && WIRED_DIALOG_KINDS.has(activeDialog.kind)
+
+	function closeActiveDialog(): void {
+		setActiveDialog(null)
+	}
+
+	// Steps the open preview by one sibling (no wrap) — the single implementation behind PreviewOverlay's
+	// onStep prop, which both the header's prev/next buttons AND its own local in-dialog arrow-key
+	// handler call (preview-overlay.tsx — arrow keys can't reach a document-level keymap action while
+	// the dialog traps focus, see that handler's own comment). A no-op outside kind:"preview".
+	function stepPreview(delta: 1 | -1): void {
+		setActiveDialog(prev => {
+			if (prev?.kind !== "preview" || prev.index === undefined) {
+				return prev
+			}
+
+			const current = prev.items[prev.index]
+
+			if (!current) {
+				return prev
+			}
+
+			return { ...prev, index: stepPreviewIndex(current.data.uuid, prev.items, delta) }
+		})
+	}
+
+	// Opens the preview overlay for a frozen previewable-sibling snapshot at the given position.
+	function openPreview(items: DriveItem[], index: number): void {
+		setActiveDialog({ kind: "preview", items, index })
+	}
+
+	// Threaded into DriveRow/DriveTile as onItemAction (consistent with onPointerSelect/onOpen) — every
+	// "dialog"-run item-menu descriptor calls this with its own kind; "direct"-run ones (favorite/
+	// restore) resolve fully inside item-menu.tsx and never reach here.
+	function handleItemAction(kind: ItemActionDialogKind, item: DriveItem): void {
+		setActiveDialog({ kind, items: [item] })
+	}
+
+	async function handleRenameSubmit(item: DriveItem, value: string): Promise<void> {
+		setDialogPending(true)
+		const outcome = await renameItem(item, value.trim())
+		setDialogPending(false)
+
+		if (outcome.status === "error") {
+			// Dialog stays open on error (e.g. a name clash) so the user can fix the name and retry —
+			// mirrors new-directory.tsx's identical convention.
+			toast.error(errorLabel(outcome.dto))
+			return
+		}
+
+		closeActiveDialog()
+	}
+
+	// Shared tail for every HOST-owned bulk-dialog confirm (trash/delete/restoreSelected): runs `op`
+	// against `items`, tracks the shared dialogPending flag, closes the dialog, toasts the outcome,
+	// and prunes succeeded items from the selection — a no-op for whichever failed (still visible,
+	// correctly still selected, so the user can retry without re-selecting).
+	async function runBulkDialogAction(items: DriveItem[], op: (items: DriveItem[]) => Promise<BulkOutcome<DriveItem>>): Promise<void> {
+		setDialogPending(true)
+		const outcome = await op(items)
+		setDialogPending(false)
+		closeActiveDialog()
+		toastBulkOutcome(outcome)
+		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
+	}
+
+	async function handleTrashConfirm(items: DriveItem[]): Promise<void> {
+		await runBulkDialogAction(items, trashItems)
+	}
+
+	async function handleDeleteConfirm(items: DriveItem[]): Promise<void> {
+		await runBulkDialogAction(items, deleteItemsPermanently)
+	}
+
+	// Bulk restore CONFIRMS (unlike a single item's direct, unconfirmed restore — see
+	// item-menu.logic.ts's RESTORE descriptor and driveRestoreSelectedConfirmTitle's own doc comment).
+	async function handleRestoreSelectedConfirm(items: DriveItem[]): Promise<void> {
+		await runBulkDialogAction(items, restoreItems)
+	}
+
+	// Root-only (see item-menu.logic.ts's UNSHARE gate) — the sharedIn/sharedOut root-listing patch
+	// lives inside unshareItems itself, keyed off the CURRENT variant (this listing's own).
+	async function handleUnshareConfirm(items: DriveItem[]): Promise<void> {
+		await runBulkDialogAction(items, targetItems => unshareItems(targetItems, variant))
+	}
+
+	// Routes a bulk-action-bar click to the dialog host, dispatching against the CURRENT selection —
+	// mirrors the drive.trash keymap command's identical setActiveDialog({kind:"trash", items:
+	// selectedItems}).
+	function handleBulkDialogAction(kind: BulkDialogActionKind): void {
+		setActiveDialog({ kind, items: selectedItems })
+	}
+
+	async function handleEmptyTrashConfirm(): Promise<void> {
+		setDialogPending(true)
+		const outcome = await emptyTrash()
+		setDialogPending(false)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+			return
+		}
+
+		closeActiveDialog()
+	}
+
+	// One instance of whichever dialog is active, switching on activeDialog.kind — never more than one
+	// mounted at a time.
+	function renderActiveDialog(): ReactNode {
+		if (!activeDialog) {
+			return null
+		}
+
+		switch (activeDialog.kind) {
+			case "rename": {
+				const item = activeDialog.items[0]
+
+				if (!item) {
+					return null
+				}
+
+				return (
+					<InputDialog
+						open
+						pending={dialogPending}
+						title={t("driveActionRename")}
+						body={t("driveRenameDialogBody")}
+						label={t("driveNewDirectoryLabel")}
+						initialValue={item.data.decryptedMeta?.name ?? ""}
+						submitLabel={t("driveActionRename")}
+						validate={value => value.trim().length > 0}
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onSubmit={value => {
+							void handleRenameSubmit(item, value)
+						}}
+					/>
+				)
+			}
+			case "trash":
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("driveTrashConfirmTitle")}
+						body={t("driveTrashConfirmBody", { count: activeDialog.items.length })}
+						confirmLabel={t("driveActionTrash")}
+						cancelLabel={t("common:cancel")}
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleTrashConfirm(activeDialog.items)
+						}}
+					/>
+				)
+			case "delete":
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("driveDeletePermanentlyConfirmTitle")}
+						body={t("driveDeletePermanentlyConfirmBody", { count: activeDialog.items.length })}
+						confirmLabel={t("driveActionDeletePermanently")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleDeleteConfirm(activeDialog.items)
+						}}
+					/>
+				)
+			case "restoreSelected":
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("driveRestoreSelectedConfirmTitle")}
+						body={t("driveRestoreSelectedConfirmBody", { count: activeDialog.items.length })}
+						confirmLabel={t("driveActionRestore")}
+						cancelLabel={t("common:cancel")}
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleRestoreSelectedConfirm(activeDialog.items)
+						}}
+					/>
+				)
+			case "emptyTrash": {
+				const phrase = t("driveEmptyTrashTypedConfirmPhrase")
+
+				return (
+					<TypedConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("driveEmptyTrashConfirmTitle")}
+						body={t("driveEmptyTrashConfirmBody", { phrase })}
+						matchLabel={t("driveEmptyTrashTypedConfirmLabel")}
+						matchValue={phrase}
+						confirmLabel={t("driveActionEmptyTrash")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleEmptyTrashConfirm()
+						}}
+					/>
+				)
+			}
+			case "move":
+				return activeDialog.items.length > 0 ? (
+					<MoveTargetDialog
+						items={activeDialog.items}
+						onClose={closeActiveDialog}
+					/>
+				) : null
+			case "color": {
+				const item = activeDialog.items[0]
+
+				// The menu only ever offers Color for a directory (see item-menu.logic.ts) — this narrows
+				// that guarantee into a type, it doesn't impose a new one.
+				if (item?.type !== "directory") {
+					return null
+				}
+
+				return (
+					<ColorDialog
+						directory={item}
+						onClose={closeActiveDialog}
+					/>
+				)
+			}
+			case "versions": {
+				const item = activeDialog.items[0]
+
+				if (item?.type !== "file") {
+					return null
+				}
+
+				return (
+					<VersionsDialog
+						file={item}
+						onClose={closeActiveDialog}
+					/>
+				)
+			}
+			case "info": {
+				const item = activeDialog.items[0]
+
+				if (!item) {
+					return null
+				}
+
+				return (
+					<InfoDialog
+						item={item}
+						remoteInfoEnabled={variant !== "trash"}
+						onClose={closeActiveDialog}
+					/>
+				)
+			}
+			case "link": {
+				const item = activeDialog.items[0]
+
+				if (!item) {
+					return null
+				}
+
+				return (
+					<LinkDialog
+						item={item}
+						onClose={closeActiveDialog}
+					/>
+				)
+			}
+			case "share":
+				// Reached from a per-item menu (items: [item]) or the bulk bar (items: selectedItems) — the
+				// picker itself shares each item with every chosen contact.
+				return activeDialog.items.length > 0 ? (
+					<ContactPickerDialog
+						items={activeDialog.items}
+						onClose={closeActiveDialog}
+					/>
+				) : null
+			case "unshare":
+				// Reached from a per-item menu (items: [item]) or the bulk bar (items: selectedItems) — both
+				// only ever dispatch this for sharedRootDirectory/sharedRootFile arms (item-menu.logic.ts /
+				// bulk-action-bar.logic.ts's own root-only gate).
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("driveUnshareConfirmTitle")}
+						body={t("driveUnshareConfirmBody", { count: activeDialog.items.length })}
+						confirmLabel={t("driveActionUnshare")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleUnshareConfirm(activeDialog.items)
+						}}
+					/>
+				)
+			case "preview": {
+				const previewIndex = activeDialog.index
+
+				if (previewIndex === undefined) {
+					return null
+				}
+
+				return (
+					<PreviewOverlay
+						variant={variant}
+						items={activeDialog.items}
+						index={previewIndex}
+						onStep={stepPreview}
+						onClose={closeActiveDialog}
+					/>
+				)
+			}
+		}
+	}
+
+	return { isDialogOpen, handleItemAction, handleBulkDialogAction, openPreview, renderActiveDialog }
+}

@@ -1,9 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
+import { useEffect, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
-import { useVirtualizer } from "@tanstack/react-virtual"
 import { useShallow } from "zustand/shallow"
-import { toast } from "sonner"
 import { SearchXIcon, CircleAlertIcon } from "lucide-react"
 import {
 	resolveEffectiveSort,
@@ -21,22 +19,16 @@ import {
 } from "@/features/drive/lib/preferences"
 import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
 import { resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
-import { clampListboxIndex, listboxRange } from "@/features/drive/lib/listbox"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { canPreview, previewableSiblings, stepPreviewIndex } from "@/features/drive/lib/preview.logic"
-import { renameItem, trashItems, restoreItems, deleteItemsPermanently, emptyTrash } from "@/features/drive/lib/actions"
-import { unshareItems } from "@/features/drive/lib/share/actions"
+import { asDirectoryOrFile } from "@/features/drive/lib/item"
+import { canPreview, previewableSiblings } from "@/features/drive/lib/preview.logic"
 import { startDownloads } from "@/features/drive/lib/download"
-import { type BulkOutcome } from "@/features/drive/lib/bulk"
-import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { useDirectoryListingQuery, useSortPreferencesQuery, useViewModePreferencesQuery } from "@/features/drive/queries/drive"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { errorLabel } from "@/lib/i18n/errorLabel"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
-import { driveItemActions, type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
+import { driveItemActions } from "@/features/drive/components/itemMenu.logic"
 import { isBulkDownloadEnabled } from "@/features/drive/components/bulkActionBar.logic"
 import {
 	filterSharedInByBlocked,
@@ -50,7 +42,7 @@ import { ViewModeToggle } from "@/features/drive/components/viewModeToggle"
 import { NewDirectory } from "@/features/drive/components/newDirectory"
 import { UploadMenu } from "@/features/drive/components/uploadMenu"
 import { UploadDropzone } from "@/features/drive/components/uploadDropzone"
-import { BulkActionBar, type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar"
+import { BulkActionBar } from "@/features/drive/components/bulkActionBar"
 import { EmptyState } from "@/features/drive/components/emptyState"
 import { ListingSkeleton } from "@/features/drive/components/listingSkeleton"
 import { DriveRow } from "@/features/drive/components/driveRow"
@@ -58,18 +50,11 @@ import { DriveTile } from "@/features/drive/components/driveTile"
 import { SearchInput } from "@/features/drive/components/searchInput"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
 import { searchHitNavigationTarget } from "@/features/drive/hooks/useDriveSearch.logic"
+import { useDriveVirtualizer } from "@/features/drive/hooks/useDriveVirtualizer"
+import { useDriveListboxNav } from "@/features/drive/hooks/useDriveListboxNav"
+import { useDriveDialogHost } from "@/features/drive/hooks/useDriveDialogHost"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
-import { ContactPickerDialog } from "@/features/drive/components/contactPickerDialog"
-import { ColorDialog } from "@/features/drive/components/colorDialog"
-import { VersionsDialog } from "@/features/drive/components/versionsDialog"
-import { InfoDialog } from "@/features/drive/components/infoDialog"
-import { LinkDialog } from "@/features/drive/components/linkDialog"
-import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
-import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
-import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
-import { InputDialog } from "@/components/dialogs/inputDialog"
 
 export interface DirectoryListingProps {
 	variant: DriveVariant
@@ -78,47 +63,11 @@ export interface DirectoryListingProps {
 	splat: string
 }
 
-// The listing-level dialog host's own state shape. Widens item-menu.logic.ts's ItemActionDialogKind
-// with two listing-level kinds neither dispatched by a per-item menu, so neither has a place in that
-// narrower, per-item-scoped union: "emptyTrash" (the trash toolbar) and "restoreSelected" (the bulk
-// bar's confirm — a single-item restore stays direct/unconfirmed, see item-menu.logic.ts's RESTORE).
-type ActiveDialogKind = ItemActionDialogKind | "emptyTrash" | "restoreSelected" | "preview"
-
-interface ActiveDialog {
-	kind: ActiveDialogKind
-	items: DriveItem[]
-	// Only meaningful for kind:"preview" — the opened item's position within `items` (the frozen
-	// previewable-sibling snapshot taken at open time). Every other kind leaves this unset.
-	index?: number
-}
-
-// Kinds the dialog host below actually renders — every ActiveDialogKind is wired today, but the set
-// stays explicit (rather than collapsing to a bare `activeDialog !== null` check) so a future kind
-// added to the union without an immediate dialog implementation degrades safely: an unwired seam kind
-// would otherwise look identical to a real one to the F2/Delete guards below, permanently wedging
-// activeDialog !== null (and so those shortcuts) the moment a menu dispatched one, since nothing
-// would ever render to close it again.
-const WIRED_DIALOG_KINDS = new Set<ActiveDialogKind>([
-	"rename",
-	"trash",
-	"delete",
-	"emptyTrash",
-	"move",
-	"color",
-	"versions",
-	"info",
-	"link",
-	"share",
-	"unshare",
-	"restoreSelected",
-	"preview"
-])
-
 // Module scope, not inside the component: runs exactly once per module evaluation (see
 // theme-provider.tsx's own "app.toggleTheme" registration for the full StrictMode/HMR rationale).
 //
-// Reconciling these with the listbox's own roving-tabindex `onKeyDown` (below): select-all and
-// clear-selection used to be hand-rolled checks inside that handler, matching Cmd/Ctrl+A and
+// Reconciling these with the listbox's own roving-tabindex `onKeyDown` (useDriveListboxNav): select-all
+// and clear-selection used to be hand-rolled checks inside that handler, matching Cmd/Ctrl+A and
 // Escape unconditionally whenever the listbox had focus. They are registered as commands here
 // INSTEAD of that (not in addition to it — a stray double-registration would double-fire, since
 // useAction's useHotkeys binds document-wide, not scoped to the listbox element) so a user remap
@@ -172,14 +121,6 @@ registerAction({
 	scope: "drive",
 	descriptionKey: "driveCommandDownload"
 })
-const ROW_HEIGHT = 40
-const TILE_WIDTH = 140
-const TILE_ROW_HEIGHT = 124
-const LIST_OVERSCAN = 8
-const GRID_OVERSCAN = 3
-// Bounds the rAF poll moveActive() uses to focus a cursor target that scrollToIndex just brought
-// into range but that hasn't mounted (and registered its ref) yet.
-const FOCUS_RETRY_FRAMES = 10
 
 // Every drive route (drive.$.tsx, recents/favorites/trash.tsx) renders this one container with its
 // own {variant,splat} — the single place the placeholder body is swapped for the real virtualized
@@ -228,33 +169,66 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// O(visible * selected).
 	const selectedUuids = new Set(selectedItems.map(item => item.data.uuid))
 
-	const [activeIndex, setActiveIndex] = useState(0)
-	const [anchorIndex, setAnchorIndex] = useState(0)
-	const safeActiveIndex = clampListboxIndex(activeIndex, sortedItems.length)
-	const safeAnchorIndex = clampListboxIndex(anchorIndex, sortedItems.length)
+	const { isDialogOpen, handleItemAction, handleBulkDialogAction, openPreview, renderActiveDialog } = useDriveDialogHost({
+		variant,
+		selectedItems
+	})
 
-	// The dialog host's own state — one instance of whichever dialog activeDialog.kind names is
-	// rendered below (renderActiveDialog), never more than one at a time. `dialogPending` is shared
-	// across the kinds whose async call the HOST itself owns (rename/trash/delete/emptyTrash/
-	// restoreSelected) — the move/color/versions/info dialogs run their own async calls internally and
-	// track their own pending state, since each needs more than one shared boolean can express (e.g.
-	// versions has an independent restore vs. delete-confirm flow).
-	const [activeDialog, setActiveDialog] = useState<ActiveDialog | null>(null)
-	const [dialogPending, setDialogPending] = useState(false)
-	// True only while a dialog that actually RENDERS something is open — every kind renders one today
-	// (see WIRED_DIALOG_KINDS), but the check stays explicit so a future seam kind can't silently wedge
-	// the F2/Delete guards below open forever.
-	const isDialogOpen = activeDialog !== null && WIRED_DIALOG_KINDS.has(activeDialog.kind)
+	const { setScrollElement, columns, listVirtualizer, gridVirtualizer, activeVirtualizer, registerRef, itemRefs } = useDriveVirtualizer(
+		sortedItems,
+		effectiveViewMode
+	)
 
-	// A fresh directory/variant must never inherit the previous one's selection or cursor. Routes
-	// that only change `splat` (deeper nav within the same drive.$.tsx route) re-render this
-	// component in place rather than remounting it, so a plain mount effect would miss that case —
-	// keying on [variant, splat] instead covers both a remount and an in-place param change.
-	useEffect(() => {
-		useDriveStore.getState().clearSelectedItems()
-		setActiveIndex(0)
-		setAnchorIndex(0)
-	}, [variant, splat])
+	function handleOpen(index: number) {
+		const item = sortedItems[index]
+
+		if (!item) {
+			return
+		}
+
+		// A file opens the preview overlay when previewable, else no-ops (mirrors the prior behavior:
+		// resolveDriveNavigationTarget already returns null for every file arm — see its own comment).
+		// A directory falls through to the unchanged navigation path below.
+		if (asDirectoryOrFile(item).type === "file") {
+			if (!canPreview(item, variant)) {
+				return
+			}
+
+			const siblings = previewableSiblings(sortedItems, variant)
+			const siblingIndex = siblings.findIndex(sibling => sibling.data.uuid === item.data.uuid)
+
+			openPreview(siblings, siblingIndex === -1 ? 0 : siblingIndex)
+
+			return
+		}
+
+		// A search hit is found via a subtree search rooted at the CURRENT directory, but the hit itself
+		// can be anywhere under it — searchHitNavigationTarget rebuilds a fresh, root-relative target
+		// from the hit's own uuid (never appended to `splat`); the in-place open below stays unchanged
+		// for the normal (non-search) listing.
+		const target = search.active ? searchHitNavigationTarget(item, variant) : resolveDriveNavigationTarget(item, variant, splat)
+
+		if (target) {
+			void navigate(target)
+
+			// Old-web parity: opening a directory hit always leaves search (the destination is a normal
+			// listing, not another search).
+			if (search.active) {
+				search.clear()
+			}
+		}
+	}
+
+	const { safeActiveIndex, handleKeyDown, handlePointerSelect } = useDriveListboxNav({
+		items: sortedItems,
+		viewMode: effectiveViewMode,
+		columns,
+		virtualizer: activeVirtualizer,
+		itemRefs,
+		variant,
+		splat,
+		onOpen: handleOpen
+	})
 
 	// Stale-selection purge (sharedIn only): drops any selected item that just became blocked (the
 	// user blocked its sharer while viewing this listing) so the bulk bar can never target a
@@ -274,9 +248,9 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	// Ghost-selection purge (search only): search results are PUSH-FED — a live resync can drop a
 	// selected hit with no navigation involved — so nothing else intersects `selectedItems` with the
-	// live result set ([variant, splat] above only resets on navigation; SearchInput's own onKeyDown
-	// consumes Escape locally to clear the query, so drive.clearSelection never reaches the store
-	// either). Mirrors the sharedIn purge above.
+	// live result set ([variant, splat] in useDriveListboxNav only resets on navigation; SearchInput's
+	// own onKeyDown consumes Escape locally to clear the query, so drive.clearSelection never reaches
+	// the store either). Mirrors the sharedIn purge above.
 	//
 	// Keyed on a uuid-content signature, not `sortedItems` itself: resolveSearchDisplayItems/
 	// buildSearchResults rebuild a brand-new array of brand-new items every render regardless of
@@ -305,255 +279,6 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the signature above, not sortedItems — see comment above
 	}, [search.active, searchResultUuids])
 
-	// State (not `useRef`) so it's settable from a callback ref below — the pending/error/empty
-	// branches render a ref-less div, so a cold mount whose first render is "pending" would, with a
-	// `useRef` + `[]`-dep effect, never attach an observer for the component's whole lifetime, and a
-	// later pending<->success swap would leave one observing a detached node. A callback ref instead
-	// fires on every mount/unmount of the actual DOM node regardless of which branch renders it first.
-	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
-	const itemRefs = useRef(new Map<number, HTMLDivElement>())
-	const focusRequestRef = useRef(0)
-
-	const [containerWidth, setContainerWidth] = useState(0)
-
-	useEffect(() => {
-		if (!scrollElement) {
-			return
-		}
-
-		const observer = new ResizeObserver(entries => {
-			const entry = entries[0]
-
-			if (entry) {
-				setContainerWidth(entry.contentRect.width)
-			}
-		})
-
-		observer.observe(scrollElement)
-
-		return () => {
-			observer.disconnect()
-		}
-	}, [scrollElement])
-
-	const columns = Math.max(1, Math.floor(containerWidth / TILE_WIDTH))
-	const rowCount = Math.ceil(sortedItems.length / columns)
-
-	const listVirtualizer = useVirtualizer({
-		count: sortedItems.length,
-		getScrollElement: () => scrollElement,
-		estimateSize: () => ROW_HEIGHT,
-		overscan: LIST_OVERSCAN,
-		getItemKey: index => sortedItems[index]?.data.uuid ?? index
-	})
-
-	const gridVirtualizer = useVirtualizer({
-		count: rowCount,
-		getScrollElement: () => scrollElement,
-		estimateSize: () => TILE_ROW_HEIGHT,
-		overscan: GRID_OVERSCAN,
-		getItemKey: index => index
-	})
-
-	const activeVirtualizer = effectiveViewMode === "list" ? listVirtualizer : gridVirtualizer
-
-	function registerRef(index: number, el: HTMLDivElement | null) {
-		if (el) {
-			itemRefs.current.set(index, el)
-		} else {
-			itemRefs.current.delete(index)
-		}
-	}
-
-	// Focus is imperative by nature here: the target index may be scrolled fully out of the mounted
-	// window, and scrollToIndex's resulting re-render happens through the virtualizer's own
-	// scroll-event subscription, not synchronously with the state update below — so on the very next
-	// render the target row/tile may not exist in the DOM (and its ref) yet. A bounded rAF poll picks
-	// it up once it mounts; `focusRequestRef` lets a rapid run of keypresses invalidate an older,
-	// still-polling request instead of it stealing focus back after a newer one already landed.
-	function moveActive(nextIndexRaw: number): number {
-		const next = clampListboxIndex(nextIndexRaw, sortedItems.length)
-		const rowIndex = effectiveViewMode === "grid" ? Math.floor(next / columns) : next
-
-		setActiveIndex(next)
-		activeVirtualizer.scrollToIndex(rowIndex, { align: "auto" })
-		focusRequestRef.current = next
-
-		const attemptFocus = (attemptsLeft: number) => {
-			if (focusRequestRef.current !== next) {
-				return
-			}
-
-			const el = itemRefs.current.get(next)
-
-			if (el) {
-				if (document.activeElement !== el) {
-					el.focus({ preventScroll: true })
-				}
-
-				return
-			}
-
-			if (attemptsLeft <= 0) {
-				return
-			}
-
-			requestAnimationFrame(() => {
-				attemptFocus(attemptsLeft - 1)
-			})
-		}
-
-		requestAnimationFrame(() => {
-			attemptFocus(FOCUS_RETRY_FRAMES)
-		})
-
-		return next
-	}
-
-	function selectRange(anchor: number, active: number) {
-		const rangeItems: DriveItem[] = []
-
-		for (const i of listboxRange(anchor, active)) {
-			const item = sortedItems[i]
-
-			if (item) {
-				rangeItems.push(item)
-			}
-		}
-
-		useDriveStore.getState().setSelectedItems(rangeItems)
-	}
-
-	function handleOpen(index: number) {
-		const item = sortedItems[index]
-
-		if (!item) {
-			return
-		}
-
-		// A file opens the preview overlay when previewable, else no-ops (mirrors the prior behavior:
-		// resolveDriveNavigationTarget already returns null for every file arm — see its own comment).
-		// A directory falls through to the unchanged navigation path below.
-		if (asDirectoryOrFile(item).type === "file") {
-			if (!canPreview(item, variant)) {
-				return
-			}
-
-			const siblings = previewableSiblings(sortedItems, variant)
-			const siblingIndex = siblings.findIndex(sibling => sibling.data.uuid === item.data.uuid)
-
-			setActiveDialog({ kind: "preview", items: siblings, index: siblingIndex === -1 ? 0 : siblingIndex })
-
-			return
-		}
-
-		// A search hit is found via a subtree search rooted at the CURRENT directory, but the hit itself
-		// can be anywhere under it — searchHitNavigationTarget rebuilds a fresh, root-relative target
-		// from the hit's own uuid (never appended to `splat`); the in-place open below stays unchanged
-		// for the normal (non-search) listing.
-		const target = search.active ? searchHitNavigationTarget(item, variant) : resolveDriveNavigationTarget(item, variant, splat)
-
-		if (target) {
-			void navigate(target)
-
-			// Old-web parity: opening a directory hit always leaves search (the destination is a normal
-			// listing, not another search).
-			if (search.active) {
-				search.clear()
-			}
-		}
-	}
-
-	function handlePointerSelect(index: number, event: MouseEvent<HTMLDivElement>) {
-		const item = sortedItems[index]
-
-		if (!item) {
-			return
-		}
-
-		if (event.shiftKey) {
-			selectRange(safeAnchorIndex, index)
-			setActiveIndex(index)
-
-			return
-		}
-
-		if (event.metaKey || event.ctrlKey) {
-			useDriveStore.getState().toggleSelectedItem(item)
-			setActiveIndex(index)
-			setAnchorIndex(index)
-
-			return
-		}
-
-		useDriveStore.getState().setSelectedItems([item])
-		setActiveIndex(index)
-		setAnchorIndex(index)
-	}
-
-	// ARIA listbox cursor semantics (roving tabindex): plain Arrow/Home/End move the cursor only —
-	// they never change the selection — Space toggles the active item, Shift+Arrow extends a range
-	// from the last non-shift cursor position. Select-all (Cmd/Ctrl+A) and clear-selection (Escape)
-	// are NOT handled here — they're registered drive.selectAll/drive.clearSelection commands (see
-	// the module-scope registerAction calls above) so they stay user-remappable with one firing
-	// owner; keeping a second hand-rolled check here would double-fire on every keypress.
-	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-		if (sortedItems.length === 0) {
-			return
-		}
-
-		if (event.key === " ") {
-			event.preventDefault()
-
-			const item = sortedItems[safeActiveIndex]
-
-			if (item) {
-				useDriveStore.getState().toggleSelectedItem(item)
-				setAnchorIndex(safeActiveIndex)
-			}
-
-			return
-		}
-
-		if (event.key === "Enter") {
-			event.preventDefault()
-			handleOpen(safeActiveIndex)
-
-			return
-		}
-
-		const step = effectiveViewMode === "grid" ? columns : 1
-		let target: number | null = null
-
-		if (event.key === "ArrowDown") {
-			target = safeActiveIndex + step
-		} else if (event.key === "ArrowUp") {
-			target = safeActiveIndex - step
-		} else if (event.key === "ArrowRight" && effectiveViewMode === "grid") {
-			target = safeActiveIndex + 1
-		} else if (event.key === "ArrowLeft" && effectiveViewMode === "grid") {
-			target = safeActiveIndex - 1
-		} else if (event.key === "Home") {
-			target = 0
-		} else if (event.key === "End") {
-			target = sortedItems.length - 1
-		}
-
-		if (target === null) {
-			return
-		}
-
-		event.preventDefault()
-
-		const next = moveActive(target)
-
-		if (event.shiftKey) {
-			selectRange(safeAnchorIndex, next)
-		} else {
-			setAnchorIndex(next)
-		}
-	}
-
 	async function applySortChange(next: DriveSortBy): Promise<void> {
 		await setSortPreferences(withSortSelection(sortPrefs, driveLocation, next))
 		await sortPrefsQuery.refetch()
@@ -562,342 +287,6 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	async function applyViewModeChange(next: DriveViewMode): Promise<void> {
 		await setViewModePreferences(withViewModeSelection(viewModePrefs, driveLocation, next))
 		await viewModePrefsQuery.refetch()
-	}
-
-	function closeActiveDialog(): void {
-		setActiveDialog(null)
-	}
-
-	// Steps the open preview by one sibling (no wrap) — the single implementation behind PreviewOverlay's
-	// onStep prop, which both the header's prev/next buttons AND its own local in-dialog arrow-key
-	// handler call (preview-overlay.tsx — arrow keys can't reach a document-level keymap action while
-	// the dialog traps focus, see that handler's own comment). A no-op outside kind:"preview".
-	function stepPreview(delta: 1 | -1): void {
-		setActiveDialog(prev => {
-			if (prev?.kind !== "preview" || prev.index === undefined) {
-				return prev
-			}
-
-			const current = prev.items[prev.index]
-
-			if (!current) {
-				return prev
-			}
-
-			return { ...prev, index: stepPreviewIndex(current.data.uuid, prev.items, delta) }
-		})
-	}
-
-	// Threaded into DriveRow/DriveTile as onItemAction (consistent with onPointerSelect/onOpen) — every
-	// "dialog"-run item-menu descriptor calls this with its own kind; "direct"-run ones (favorite/
-	// restore) resolve fully inside item-menu.tsx and never reach here.
-	function handleItemAction(kind: ItemActionDialogKind, item: DriveItem): void {
-		setActiveDialog({ kind, items: [item] })
-	}
-
-	async function handleRenameSubmit(item: DriveItem, value: string): Promise<void> {
-		setDialogPending(true)
-		const outcome = await renameItem(item, value.trim())
-		setDialogPending(false)
-
-		if (outcome.status === "error") {
-			// Dialog stays open on error (e.g. a name clash) so the user can fix the name and retry —
-			// mirrors new-directory.tsx's identical convention.
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		closeActiveDialog()
-	}
-
-	// Shared tail for every HOST-owned bulk-dialog confirm (trash/delete/restoreSelected): runs `op`
-	// against `items`, tracks the shared dialogPending flag, closes the dialog, toasts the outcome,
-	// and prunes succeeded items from the selection — a no-op for whichever failed (still visible,
-	// correctly still selected, so the user can retry without re-selecting).
-	async function runBulkDialogAction(items: DriveItem[], op: (items: DriveItem[]) => Promise<BulkOutcome<DriveItem>>): Promise<void> {
-		setDialogPending(true)
-		const outcome = await op(items)
-		setDialogPending(false)
-		closeActiveDialog()
-		toastBulkOutcome(outcome)
-		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
-	}
-
-	async function handleTrashConfirm(items: DriveItem[]): Promise<void> {
-		await runBulkDialogAction(items, trashItems)
-	}
-
-	async function handleDeleteConfirm(items: DriveItem[]): Promise<void> {
-		await runBulkDialogAction(items, deleteItemsPermanently)
-	}
-
-	// Bulk restore CONFIRMS (unlike a single item's direct, unconfirmed restore — see
-	// item-menu.logic.ts's RESTORE descriptor and driveRestoreSelectedConfirmTitle's own doc comment).
-	async function handleRestoreSelectedConfirm(items: DriveItem[]): Promise<void> {
-		await runBulkDialogAction(items, restoreItems)
-	}
-
-	// Root-only (see item-menu.logic.ts's UNSHARE gate) — the sharedIn/sharedOut root-listing patch
-	// lives inside unshareItems itself, keyed off the CURRENT variant (this listing's own).
-	async function handleUnshareConfirm(items: DriveItem[]): Promise<void> {
-		await runBulkDialogAction(items, targetItems => unshareItems(targetItems, variant))
-	}
-
-	// Routes a bulk-action-bar click to the dialog host, dispatching against the CURRENT selection —
-	// mirrors the drive.trash keymap command's identical setActiveDialog({kind:"trash", items:
-	// selectedItems}) below.
-	function handleBulkDialogAction(kind: BulkDialogActionKind): void {
-		setActiveDialog({ kind, items: selectedItems })
-	}
-
-	async function handleEmptyTrashConfirm(): Promise<void> {
-		setDialogPending(true)
-		const outcome = await emptyTrash()
-		setDialogPending(false)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
-		}
-
-		closeActiveDialog()
-	}
-
-	// One instance of whichever dialog is active, switching on activeDialog.kind — never more than one
-	// mounted at a time.
-	function renderActiveDialog(): ReactNode {
-		if (!activeDialog) {
-			return null
-		}
-
-		switch (activeDialog.kind) {
-			case "rename": {
-				const item = activeDialog.items[0]
-
-				if (!item) {
-					return null
-				}
-
-				return (
-					<InputDialog
-						open
-						pending={dialogPending}
-						title={t("driveActionRename")}
-						body={t("driveRenameDialogBody")}
-						label={t("driveNewDirectoryLabel")}
-						initialValue={item.data.decryptedMeta?.name ?? ""}
-						submitLabel={t("driveActionRename")}
-						validate={value => value.trim().length > 0}
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
-						onSubmit={value => {
-							void handleRenameSubmit(item, value)
-						}}
-					/>
-				)
-			}
-			case "trash":
-				return (
-					<ConfirmDialog
-						open
-						pending={dialogPending}
-						title={t("driveTrashConfirmTitle")}
-						body={t("driveTrashConfirmBody", { count: activeDialog.items.length })}
-						confirmLabel={t("driveActionTrash")}
-						cancelLabel={t("common:cancel")}
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
-						onConfirm={() => {
-							void handleTrashConfirm(activeDialog.items)
-						}}
-					/>
-				)
-			case "delete":
-				return (
-					<ConfirmDialog
-						open
-						pending={dialogPending}
-						title={t("driveDeletePermanentlyConfirmTitle")}
-						body={t("driveDeletePermanentlyConfirmBody", { count: activeDialog.items.length })}
-						confirmLabel={t("driveActionDeletePermanently")}
-						cancelLabel={t("common:cancel")}
-						destructive
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
-						onConfirm={() => {
-							void handleDeleteConfirm(activeDialog.items)
-						}}
-					/>
-				)
-			case "restoreSelected":
-				return (
-					<ConfirmDialog
-						open
-						pending={dialogPending}
-						title={t("driveRestoreSelectedConfirmTitle")}
-						body={t("driveRestoreSelectedConfirmBody", { count: activeDialog.items.length })}
-						confirmLabel={t("driveActionRestore")}
-						cancelLabel={t("common:cancel")}
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
-						onConfirm={() => {
-							void handleRestoreSelectedConfirm(activeDialog.items)
-						}}
-					/>
-				)
-			case "emptyTrash": {
-				const phrase = t("driveEmptyTrashTypedConfirmPhrase")
-
-				return (
-					<TypedConfirmDialog
-						open
-						pending={dialogPending}
-						title={t("driveEmptyTrashConfirmTitle")}
-						body={t("driveEmptyTrashConfirmBody", { phrase })}
-						matchLabel={t("driveEmptyTrashTypedConfirmLabel")}
-						matchValue={phrase}
-						confirmLabel={t("driveActionEmptyTrash")}
-						cancelLabel={t("common:cancel")}
-						destructive
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
-						onConfirm={() => {
-							void handleEmptyTrashConfirm()
-						}}
-					/>
-				)
-			}
-			case "move":
-				return activeDialog.items.length > 0 ? (
-					<MoveTargetDialog
-						items={activeDialog.items}
-						onClose={closeActiveDialog}
-					/>
-				) : null
-			case "color": {
-				const item = activeDialog.items[0]
-
-				// The menu only ever offers Color for a directory (see item-menu.logic.ts) — this narrows
-				// that guarantee into a type, it doesn't impose a new one.
-				if (item?.type !== "directory") {
-					return null
-				}
-
-				return (
-					<ColorDialog
-						directory={item}
-						onClose={closeActiveDialog}
-					/>
-				)
-			}
-			case "versions": {
-				const item = activeDialog.items[0]
-
-				if (item?.type !== "file") {
-					return null
-				}
-
-				return (
-					<VersionsDialog
-						file={item}
-						onClose={closeActiveDialog}
-					/>
-				)
-			}
-			case "info": {
-				const item = activeDialog.items[0]
-
-				if (!item) {
-					return null
-				}
-
-				return (
-					<InfoDialog
-						item={item}
-						remoteInfoEnabled={variant !== "trash"}
-						onClose={closeActiveDialog}
-					/>
-				)
-			}
-			case "link": {
-				const item = activeDialog.items[0]
-
-				if (!item) {
-					return null
-				}
-
-				return (
-					<LinkDialog
-						item={item}
-						onClose={closeActiveDialog}
-					/>
-				)
-			}
-			case "share":
-				// Reached from a per-item menu (items: [item]) or the bulk bar (items: selectedItems) — the
-				// picker itself shares each item with every chosen contact.
-				return activeDialog.items.length > 0 ? (
-					<ContactPickerDialog
-						items={activeDialog.items}
-						onClose={closeActiveDialog}
-					/>
-				) : null
-			case "unshare":
-				// Reached from a per-item menu (items: [item]) or the bulk bar (items: selectedItems) — both
-				// only ever dispatch this for sharedRootDirectory/sharedRootFile arms (item-menu.logic.ts /
-				// bulk-action-bar.logic.ts's own root-only gate).
-				return (
-					<ConfirmDialog
-						open
-						pending={dialogPending}
-						title={t("driveUnshareConfirmTitle")}
-						body={t("driveUnshareConfirmBody", { count: activeDialog.items.length })}
-						confirmLabel={t("driveActionUnshare")}
-						cancelLabel={t("common:cancel")}
-						destructive
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
-						onConfirm={() => {
-							void handleUnshareConfirm(activeDialog.items)
-						}}
-					/>
-				)
-			case "preview": {
-				const previewIndex = activeDialog.index
-
-				if (previewIndex === undefined) {
-					return null
-				}
-
-				return (
-					<PreviewOverlay
-						variant={variant}
-						items={activeDialog.items}
-						index={previewIndex}
-						onStep={stepPreview}
-						onClose={closeActiveDialog}
-					/>
-				)
-			}
-		}
 	}
 
 	// Registered above at module scope. Browser default for mod+a is "select all page text" — must
@@ -965,7 +354,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				return
 			}
 
-			setActiveDialog({ kind: "rename", items: [item] })
+			handleItemAction("rename", item)
 		},
 		undefined,
 		[isDialogOpen, sortedItems, safeActiveIndex, variant]
@@ -984,7 +373,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				return
 			}
 
-			setActiveDialog({ kind: "trash", items: selectedItems })
+			handleBulkDialogAction("trash")
 		},
 		undefined,
 		[selectedItems, isDialogOpen, variant]
