@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { HeicDecoderModule, HeicTransformDeps } from "@/lib/preview/heic-transform"
+import type { HeicDecoderModule, HeicTransformDeps } from "@/lib/preview/heic-codec"
 
-// heic-transform.ts keeps its decoder-load memoization in a module-level `let`, so every test needs
-// its own module instance -- vi.resetModules() + a dynamic re-import before each one (mirrors
+// heic-codec.ts keeps its shared-decoder memoization in a module-level `let`, so every test needs its
+// own module instance -- vi.resetModules() + a dynamic re-import before each one (mirrors
 // save-download.test.ts's own freshModule() pattern), instead of a reset export added just for tests.
 // log is hoisted-mocked up front: a plain vi.spyOn on the statically-imported instance wouldn't reach
 // the freshly re-imported module's own reference to it once resetModules() decouples them.
@@ -14,7 +14,7 @@ vi.mock("@/lib/log", () => ({
 
 async function freshModule() {
 	vi.resetModules()
-	return import("@/lib/preview/heic-transform")
+	return import("@/lib/preview/heic-codec")
 }
 
 afterEach(() => {
@@ -87,13 +87,13 @@ function fakeLib(options: { width?: number; height?: number; displayResult?: unk
 }
 
 function depsFor(lib: HeicDecoderModule, encodeJpeg?: HeicTransformDeps["encodeJpeg"]) {
-	const loadDecoderSpy = vi.fn(() => Promise.resolve(lib))
+	const getDecoderSpy = vi.fn(() => Promise.resolve(lib))
 	const deps: HeicTransformDeps = {
-		loadDecoder: loadDecoderSpy,
+		getDecoder: getDecoderSpy,
 		encodeJpeg: encodeJpeg ?? (() => Promise.resolve(new Blob(["jpeg"], { type: "image/jpeg" })))
 	}
 
-	return { deps, loadDecoderSpy }
+	return { deps, getDecoderSpy }
 }
 
 describe("runHeicTransform — happy path", () => {
@@ -133,39 +133,39 @@ describe("runHeicTransform — decoder memoization", () => {
 	it("loads the decoder once across sequential calls", async () => {
 		const { runHeicTransform } = await freshModule()
 		const { lib } = fakeLib()
-		const { deps, loadDecoderSpy } = depsFor(lib)
+		const { deps, getDecoderSpy } = depsFor(lib)
 
 		await runHeicTransform(BYTES, deps)
 		await runHeicTransform(BYTES, deps)
 
-		expect(loadDecoderSpy).toHaveBeenCalledTimes(1)
+		expect(getDecoderSpy).toHaveBeenCalledTimes(1)
 	})
 
 	it("loads the decoder once across concurrent calls", async () => {
 		const { runHeicTransform } = await freshModule()
 		const { lib } = fakeLib()
-		const { deps, loadDecoderSpy } = depsFor(lib)
+		const { deps, getDecoderSpy } = depsFor(lib)
 
 		await Promise.all([runHeicTransform(BYTES, deps), runHeicTransform(BYTES, deps)])
 
-		expect(loadDecoderSpy).toHaveBeenCalledTimes(1)
+		expect(getDecoderSpy).toHaveBeenCalledTimes(1)
 	})
 
 	it("does not cache a failed decoder load — a later call retries", async () => {
 		const { runHeicTransform } = await freshModule()
 		const { lib } = fakeLib()
 		let attempt = 0
-		const loadDecoderSpy = vi.fn(() => {
+		const getDecoderSpy = vi.fn(() => {
 			attempt += 1
 
 			return attempt === 1 ? Promise.reject(new Error("wasm init failed")) : Promise.resolve(lib)
 		})
-		const deps: HeicTransformDeps = { loadDecoder: loadDecoderSpy, encodeJpeg: () => Promise.resolve(new Blob(["jpeg"])) }
+		const deps: HeicTransformDeps = { getDecoder: getDecoderSpy, encodeJpeg: () => Promise.resolve(new Blob(["jpeg"])) }
 
 		await expect(runHeicTransform(BYTES, deps)).rejects.toThrow()
 		await expect(runHeicTransform(BYTES, deps)).resolves.toBeInstanceOf(Blob)
 
-		expect(loadDecoderSpy).toHaveBeenCalledTimes(2)
+		expect(getDecoderSpy).toHaveBeenCalledTimes(2)
 	})
 })
 
@@ -235,6 +235,6 @@ describe("runHeicTransform — error mapping (never a throw-through)", () => {
 
 		await runHeicTransform(BYTES, deps).catch(() => undefined)
 
-		expect(errorSpy).toHaveBeenCalledWith("heic-transform", expect.anything())
+		expect(errorSpy).toHaveBeenCalledWith("heic-decode", expect.anything())
 	})
 })
