@@ -17,6 +17,10 @@ const BASE_URL = `http://localhost:${String(PORT)}`
 export default defineConfig({
 	testDir: "./e2e",
 	fullyParallel: true,
+	// Bounded: at this suite's size, unbounded workers (one chromium + a full SDK wasm thread pool
+	// each) saturate a dev host and the live rate-limited API — runs blow up ~5x slower with disjoint
+	// spurious failure sets. Four is empirically fast AND stable.
+	workers: 4,
 	forbidOnly: Boolean(process.env["CI"]),
 	// The authed specs reuse a single injected session, so a retry never re-logs in (auth.setup itself
 	// forces retries: 0). Retries only cover transient infra flakiness of the SDK-free specs on CI.

@@ -11,6 +11,18 @@ import { test, expect } from "./fixtures"
 // failure this once produced live).
 const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
 
+// The "mod" pseudo-modifier must be resolved from the PAGE's own userAgent, never process.platform —
+// Playwright's chromium device profile reports Windows regardless of the host, desyncing the two Mac
+// checks so a Meta-keyed press never matches the in-page keymap (see drive.spec.ts's resolveModKey
+// comment for the full mechanism). Duplicated per this suite's local-helpers convention.
+async function resolveModKey(page: Page): Promise<"Meta" | "Control"> {
+	const looksLikeMacToBrowser = await page.evaluate(
+		() => /mac/i.test(navigator.userAgent) && !/iphone|ipad|ipod/i.test(navigator.userAgent)
+	)
+
+	return looksLikeMacToBrowser ? "Meta" : "Control"
+}
+
 // Sequential within this file (one worker), overriding the config's fullyParallel — the same
 // live-account rationale as drive-actions.spec.ts's own serial mode, but "default" so one test's
 // failure doesn't skip the rest. Every test here creates and trashes a root-level scratch directory;
@@ -501,9 +513,7 @@ test("editable text preview saves via its Save button, persists across reopen, a
 	const runId = crypto.randomUUID()
 	const scratchName = `e2e-preview-edit-${runId}`
 	const nameTxt = `e2e-preview-edit-${runId}.txt`
-	// Mirrors drive-actions.spec.ts's own MOD_KEY — Meta on macOS (where this suite actually runs
-	// today), Control everywhere else.
-	const modKey = process.platform === "darwin" ? "Meta" : "Control"
+	const modKey = await resolveModKey(page)
 
 	await page.goto("/drive")
 
@@ -597,7 +607,7 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 	const scratchName = `e2e-preview-edit-pager-${runId}`
 	const nameA = `e2e-preview-edit-pager-a-${runId}.txt`
 	const nameB = `e2e-preview-edit-pager-b-${runId}.txt`
-	const modKey = process.platform === "darwin" ? "Meta" : "Control"
+	const modKey = await resolveModKey(page)
 
 	await page.goto("/drive")
 
