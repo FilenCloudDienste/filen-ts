@@ -179,7 +179,7 @@ export function DriveSidebar() {
 		<aside
 			// Drag region (Electron plumbing): inert in a plain browser (-webkit-app-region is ignored
 			// outside Chromium/Electron). Interactive descendants opt back out with app-region-no-drag.
-			className="hidden w-48 shrink-0 flex-col rounded-xl bg-sidebar app-region-drag md:flex"
+			className="hidden w-52 shrink-0 flex-col rounded-xl bg-sidebar app-region-drag md:flex"
 		>
 			<div className="flex flex-1 flex-col overflow-y-auto p-3">
 				<h2 className="truncate px-2.5 pt-1 pb-2.5 text-[15px] font-semibold">{t("driveMyDrive")}</h2>

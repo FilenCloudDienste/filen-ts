@@ -71,7 +71,6 @@ export function UploadMenu({ parentUuid, disabled = false }: UploadMenuProps) {
 				<DropdownMenuTrigger
 					render={
 						<Button
-							variant="outline"
 							size="sm"
 							disabled={disabled}
 						>

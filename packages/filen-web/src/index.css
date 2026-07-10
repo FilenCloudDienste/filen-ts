@@ -65,9 +65,10 @@
 }
 
 :root {
-    /* Page canvas the rail + sidebar sit on; the content card floats above it. One light neutral
-       gray, no hue cast — every zone separation is tone/elevation, never a border line. */
-    --canvas: oklch(0.928 0 0);
+    /* Page canvas the rail sits on and the two panels float above: a clearly perceivable neutral
+       gray, no hue cast — the panels stay near-white, so the canvas showing through the page
+       padding and panel gaps is what separates every zone, never a border line. */
+    --canvas: oklch(0.94 0 0);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -95,30 +96,29 @@
     /* Centered content-column cap inside the card. Presets: 60rem smaller / 68rem default / 76rem
        bigger; `none` for full width. One knob, project-wide. */
     --content-column: 68rem;
-    /* Sidebar sits directly on the canvas in a subtly lighter tone (0.928 -> 0.945), building
-       elevation toward the white card without any border line. Hover fill is a touch darker so it
-       reads against the sidebar tone. */
-    --sidebar: oklch(0.945 0 0);
+    /* Sidebar is a floating near-white panel on the gray canvas (same family as the content card);
+       hover/active fills are tonal against that panel surface. */
+    --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.205 0 0);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.9 0 0);
+    --sidebar-accent: oklch(0.94 0 0);
     --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.9 0 0);
+    --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
     /* Icon rail: active section rides a white chip; inactive glyphs hover onto a canvas-darker fill. */
     --rail-chip: oklch(1 0 0);
     --rail-chip-foreground: oklch(0.205 0 0);
-    --rail-hover: oklch(0.895 0 0);
+    --rail-hover: oklch(0.9 0 0);
     /* Thin overlay scrollbar thumb, tuned per theme (index.css base layer below). */
     --scrollbar-thumb: oklch(0 0 0 / 15%);
     --scrollbar-thumb-hover: oklch(0 0 0 / 28%);
 }
 
 .dark {
-    /* Same geometry as light on a dark canvas: near-black page, the content card an elevated dark
-       surface floating above it. Popover sits one step above the card so menus read as lifted. */
-    --canvas: oklch(0.19 0 0);
+    /* Same geometry as light on a dark canvas: near-black page, the two panels clearly elevated
+       above it. Popover sits one step above the card so menus read as lifted. */
+    --canvas: oklch(0.16 0 0);
     --background: oklch(0.24 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.24 0 0);
@@ -142,8 +142,8 @@
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    /* Sidebar subtly above the canvas (0.19 -> 0.205); hover fill lifts a step further. */
-    --sidebar: oklch(0.205 0 0);
+    /* Sidebar floats clearly above the canvas (0.16 -> 0.22), same family as the card. */
+    --sidebar: oklch(0.22 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
     --sidebar-primary: oklch(0.488 0.243 264.376);
     --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -154,7 +154,7 @@
     /* Icon rail: elevated dark chip for the active section; hover a subtle lift on the canvas. */
     --rail-chip: oklch(0.28 0 0);
     --rail-chip-foreground: oklch(0.985 0 0);
-    --rail-hover: oklch(0.24 0 0);
+    --rail-hover: oklch(0.21 0 0);
     --scrollbar-thumb: oklch(1 0 0 / 15%);
     --scrollbar-thumb-hover: oklch(1 0 0 / 25%);
 }
