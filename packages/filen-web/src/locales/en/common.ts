@@ -54,10 +54,10 @@ export const common = {
 	storage: "Storage",
 	/** Drive sidebar — storage meter caption; {{used}} and {{total}} are pre-formatted byte sizes (e.g. "1.2 GB of 100 GB used") */
 	storageUsage: "{{used}} of {{total}} used",
-	/** Icon rail — collapse toggle accessible label while the sidebar is shown (clicking hides it) */
-	collapseSidebar: "Collapse sidebar",
-	/** Icon rail — collapse toggle accessible label while the sidebar is hidden (clicking shows it) */
-	expandSidebar: "Expand sidebar",
+	/** Icon rail — help entry tooltip/accessible label (its destination ships later) */
+	help: "Help",
+	/** Drive sidebar — heading of the bottom usage block (above the storage meter) */
+	usage: "Usage",
 	// Drive sidebar — sharing and public-link destinations; kept here (not in the "drive" namespace,
 	// which holds the rest of the listing surface) until their own listing surface ships.
 	/** Drive sidebar — item for content other users shared with the user */

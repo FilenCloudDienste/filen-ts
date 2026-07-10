@@ -12,7 +12,7 @@ import {
 	SettingsIcon,
 	LogOutIcon,
 	UserIcon,
-	PanelLeftIcon
+	CircleHelpIcon
 } from "lucide-react"
 import type { CommonKey } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
@@ -26,7 +26,6 @@ import { useTransfersAggregate } from "@/features/transfers/store/useTransfersSt
 import { useExportKeysReminder } from "@/features/settings/components/security/exportMasterKeys"
 import { TransfersPanel } from "@/features/transfers/components/transfersPanel"
 import { Logo } from "@/features/shell/components/logo"
-import { useShellStore } from "@/features/shell/store/useShellStore"
 import { useTheme } from "@/providers/themeProvider"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -90,8 +89,35 @@ function railItemClass(active: boolean): string {
 	return cn(
 		// app-region-no-drag: every rail item is a real click target inside the rail's own drag region
 		// (see IconRail's <nav> below).
-		"flex size-10 items-center justify-center rounded-xl transition-colors outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/40 [&_svg]:size-[22px] [&_svg]:shrink-0",
+		"flex size-9 items-center justify-center rounded-lg transition-colors outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/40 [&_svg]:size-[22px] [&_svg]:shrink-0",
 		active ? "bg-rail-chip text-rail-chip-foreground shadow-sm" : "text-muted-foreground hover:bg-rail-hover hover:text-foreground"
+	)
+}
+
+// Help destination ships later (the real support URL is a pending product decision) — rendered inert
+// like the pending module entries below, so the rail slot and its affordance already exist.
+function HelpEntry() {
+	const { t } = useTranslation()
+
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<button
+						type="button"
+						aria-disabled="true"
+						aria-label={t("help")}
+						className={cn(railItemClass(false), "text-muted-foreground/70")}
+					>
+						<CircleHelpIcon />
+					</button>
+				}
+			/>
+			<TooltipContent side="right">
+				{t("help")}
+				<span className="text-background/60">· {t("comingSoon")}</span>
+			</TooltipContent>
+		</Tooltip>
 	)
 }
 
@@ -273,35 +299,6 @@ function TransfersEntry() {
 	)
 }
 
-// Pinned rail footer control: hides/shows the whole sidebar column (rail stays). White rounded-square
-// button with a subtle border — the one intentionally bordered control, reading as a physical toggle
-// against the borderless rail.
-function SidebarToggle() {
-	const { t } = useTranslation()
-	const sidebarCollapsed = useShellStore(state => state.sidebarCollapsed)
-	const toggleSidebar = useShellStore(state => state.toggleSidebar)
-	const label = sidebarCollapsed ? t("expandSidebar") : t("collapseSidebar")
-
-	return (
-		<Tooltip>
-			<TooltipTrigger
-				render={
-					<button
-						type="button"
-						aria-label={label}
-						aria-pressed={sidebarCollapsed}
-						onClick={toggleSidebar}
-						className="flex size-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-sm transition-colors outline-none app-region-no-drag hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/40 [&_svg]:size-[18px]"
-					>
-						<PanelLeftIcon />
-					</button>
-				}
-			/>
-			<TooltipContent side="right">{label}</TooltipContent>
-		</Tooltip>
-	)
-}
-
 export function IconRail() {
 	const { t } = useTranslation()
 	const navigate = useNavigate()
@@ -345,13 +342,13 @@ export function IconRail() {
 			// Drag region (Electron plumbing): a plain browser ignores -webkit-app-region entirely, so
 			// this is inert weight everywhere else. Every interactive descendant below opts back out
 			// with app-region-no-drag so it stays clickable.
-			className="flex h-full w-14 shrink-0 flex-col items-center gap-1.5 py-3 app-region-drag"
+			className="flex w-12 shrink-0 flex-col items-center gap-1.5 py-1.5 app-region-drag"
 		>
 			<Link
 				to="/drive/$"
 				params={{ _splat: "" }}
 				aria-label={t("moduleDrive")}
-				className="mb-1.5 flex size-8 items-center justify-center rounded-xl bg-primary text-primary-foreground outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/40 dark:bg-rail-chip dark:text-rail-chip-foreground"
+				className="mb-1.5 flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/40 dark:bg-rail-chip dark:text-rail-chip-foreground"
 			>
 				<Logo className="size-5" />
 			</Link>
@@ -399,7 +396,7 @@ export function IconRail() {
 								type="button"
 								aria-disabled="true"
 								aria-label={t(key)}
-								className="flex size-10 items-center justify-center rounded-xl text-muted-foreground/50 app-region-no-drag [&_svg]:size-[22px] [&_svg]:shrink-0"
+								className="flex size-9 items-center justify-center rounded-lg text-muted-foreground/50 app-region-no-drag [&_svg]:size-[22px] [&_svg]:shrink-0"
 							>
 								<Icon />
 							</button>
@@ -412,8 +409,10 @@ export function IconRail() {
 				</Tooltip>
 			))}
 
-			<div className="mt-auto flex w-full flex-col items-center gap-2">
-				<SidebarToggle />
+			{/* Pinned footer — the rail's extensible utility slot list; future entries stack above the
+			    account menu. */}
+			<div className="mt-auto flex w-full flex-col items-center gap-1.5">
+				<HelpEntry />
 				<AccountMenu />
 			</div>
 		</nav>
