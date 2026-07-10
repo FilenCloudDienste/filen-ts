@@ -102,10 +102,11 @@ function RootLayout() {
 			<ThemeProvider>
 				<TooltipProvider>
 					<BootGate />
-					{/* Default bottom-right — the one corner clear of standing chrome. The floating selection
-					    bar stays compact and centered specifically so the two never overlap; top positions
-					    intercepted the header buttons and the listing's first rows. */}
-					<Toaster />
+					{/* Bottom-right, lifted above the floating selection bar's band: the bar's trailing
+					    buttons and the default toast viewport measurably overlap at ~1280px width, and a
+					    transient toast then swallows clicks on a visibly-present button. Top positions are
+					    no alternative — they intercepted the header buttons and the listing's first rows. */}
+					<Toaster offset={{ bottom: 96 }} />
 				</TooltipProvider>
 			</ThemeProvider>
 		</QueryClientProvider>
