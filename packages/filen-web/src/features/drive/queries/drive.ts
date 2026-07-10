@@ -4,8 +4,8 @@ import { queryClient } from "@/queries/client"
 // Whole-statement `import type` here too — sdk.worker.ts's own top-level code pulls in
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
-import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink, AnyDirWithContext, DirColor } from "@filen/sdk-rs"
-import { narrowItem, asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink, AnyDirWithContext, DirColor, DirSizeResponse } from "@filen/sdk-rs"
+import { narrowItem, asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
 import {
 	getSortPreferences,
 	getViewModePreferences,
@@ -236,6 +236,45 @@ export function useItemInfoQuery(
 		queryFn: () => fetchItemInfo(item, options?.dirContext),
 		enabled: options?.enabled ?? true
 	})
+}
+
+// Per-directory recursive size aggregate (bytes + child file/dir counts), keyed on the directory's
+// own uuid. One cache slice serves two consumers: the size sort (useDriveDirectorySizes prefetches a
+// listing's directories under this exact key) and any future per-row size display. Deliberately NOT
+// folded into itemInfo — that op also walks getItemPath, dead weight for bulk size prefetch; both
+// resolve the same underlying getDirSize, so a directory read both ways fetches twice, an accepted
+// cost for keeping the size-only path path-walk-free.
+export type DirectorySizeItem = Extract<DriveItem, { type: "directory" | "sharedDirectory" | "sharedRootDirectory" }>
+
+// 15-minute staleTime: a directory's recursive size is expensive to recompute server-side and drifts
+// slowly, so unlike the client's refetch-everything default (staleTime 0) this holds its value across
+// mounts/focus. (TODO: revisit with API v4.)
+export const DIRECTORY_SIZE_STALE_TIME = 15 * 60 * 1000
+
+export function directorySizeQueryKey(uuid: string) {
+	return ["drive", "dirSize", uuid] as const
+}
+
+// Builds the AnyDirWithContext on the main thread (item.ts's toAnyDirWithContext handles owned-vs-
+// shared dispatch) and hands it to the thin worker op. Exported bare so node-environment unit tests
+// exercise the routing against a mocked sdkApi, same as every other fetch in this module.
+export async function fetchDirectorySize(item: DirectorySizeItem): Promise<DirSizeResponse> {
+	return sdkApi.getDirSize(toAnyDirWithContext(item))
+}
+
+// Key + fn + freshness in ONE builder so useDirectorySizeQuery (a row) and prefetchQuery (the size-
+// sort bridge) can never drift onto different keys — a prefetch under a mismatched key would fetch a
+// second time and the reader would find nothing.
+export function directorySizeQueryOptions(item: DirectorySizeItem) {
+	return {
+		queryKey: directorySizeQueryKey(item.data.uuid),
+		queryFn: () => fetchDirectorySize(item),
+		staleTime: DIRECTORY_SIZE_STALE_TIME
+	}
+}
+
+export function useDirectorySizeQuery(item: DirectorySizeItem): UseQueryResult<DirSizeResponse> {
+	return useQuery(directorySizeQueryOptions(item))
 }
 
 // Versions panel primitive: an on-demand read of a single file's version history, newest first (the

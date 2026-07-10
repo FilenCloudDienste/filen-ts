@@ -3,6 +3,7 @@ import { QueryClient } from "@tanstack/react-query"
 import type {
 	AnyDirWithContext,
 	Dir,
+	DirSizeResponse,
 	DirPublicLinkRW,
 	File,
 	FilePublicLink,
@@ -22,6 +23,7 @@ const {
 	listDirectory,
 	resolveDirectoryNames,
 	getItemInfo,
+	getDirSize,
 	listFileVersionsOp,
 	getDirectoryLinkStatus,
 	getFileLinkStatus,
@@ -32,6 +34,7 @@ const {
 	listDirectory: vi.fn<(target: unknown) => Promise<NormalDirsAndFiles>>(),
 	resolveDirectoryNames: vi.fn<(uuids: string[]) => Promise<Record<string, string>>>(),
 	getItemInfo: vi.fn(),
+	getDirSize: vi.fn(),
 	listFileVersionsOp: vi.fn(),
 	getDirectoryLinkStatus: vi.fn(),
 	getFileLinkStatus: vi.fn(),
@@ -45,6 +48,7 @@ vi.mock("@/lib/sdk/client", () => ({
 		listDirectory,
 		resolveDirectoryNames,
 		getItemInfo,
+		getDirSize,
 		listFileVersionsOp,
 		getDirectoryLinkStatus,
 		getFileLinkStatus,
@@ -86,6 +90,7 @@ import {
 	driveNamesQueryKey,
 	fetchDirectoryListing,
 	fetchDirectoryNames,
+	fetchDirectorySize,
 	fetchDriveItemLinkStatus,
 	fetchFileVersions,
 	fetchItemInfo,
@@ -307,6 +312,35 @@ describe("fetchItemInfo", () => {
 
 		await expect(fetchItemInfo(dir, dirContext)).resolves.toEqual(result)
 		expect(getItemInfo).toHaveBeenCalledExactlyOnceWith(dir, dirContext)
+	})
+})
+
+describe("fetchDirectorySize", () => {
+	// An owned directory's AnyDirWithContext IS the bare Dir (item.ts's toAnyDirWithContext), so the
+	// worker op receives it unchanged — the size-only counterpart of fetchItemInfo's owned case.
+	it("dispatches an owned directory to sdkApi.getDirSize as its bare Dir", async () => {
+		const item = narrowItem(mockDir())
+		const result: DirSizeResponse = { size: 4_096n, files: 3n, dirs: 1n }
+		getDirSize.mockResolvedValueOnce(result)
+
+		if (item.type !== "directory") {
+			throw new Error("expected a directory item")
+		}
+
+		await expect(fetchDirectorySize(item)).resolves.toEqual(result)
+		expect(getDirSize).toHaveBeenCalledExactlyOnceWith(item.data)
+	})
+
+	it("propagates a rejection from sdkApi.getDirSize unchanged", async () => {
+		const item = narrowItem(mockDir())
+		const error = new Error("no authenticated client")
+		getDirSize.mockRejectedValueOnce(error)
+
+		if (item.type !== "directory") {
+			throw new Error("expected a directory item")
+		}
+
+		await expect(fetchDirectorySize(item)).rejects.toBe(error)
 	})
 })
 

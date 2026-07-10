@@ -739,6 +739,15 @@ const api = {
 		const [pathResult, size] = await Promise.all([pathPromise, c.getDirSize(dirContext ?? item).catch(() => null)])
 		return { path: pathResult?.path ?? null, ancestors: pathResult?.ancestors ?? [], size }
 	},
+	// Size-only aggregate (bytes + child file/dir counts) for ONE directory, split out from
+	// getItemInfo (which also walks getItemPath) so the size-sort bridge can prefetch a whole
+	// listing's directories without paying for a path walk each. `dir` is the AnyDirWithContext the
+	// caller builds via item.ts's toAnyDirWithContext, so an owned directory and a shared one both
+	// dispatch correctly. No abort param: the wasm getDirSize carries none — a superseded
+	// computation on rapid navigation is left to settle unused.
+	getDirSize(dir: AnyDirWithContext): Promise<DirSizeResponse> {
+		return requireClient().getDirSize(dir)
+	},
 	// ── Public links ─────────────────────────────────────────────────────────
 	getDirectoryLinkStatus(dir: Dir): Promise<DirPublicLinkRW | undefined> {
 		return requireClient().getDirLinkStatus(dir)
