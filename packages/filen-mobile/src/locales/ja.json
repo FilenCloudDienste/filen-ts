@@ -611,6 +611,7 @@
 	"password_strength_normal": "普通",
 	"password_strength_strong": "強い",
 	"password_strength_weak": "弱い",
+	"password_too_weak_to_register": "続行するにはより強力なパスワードを設定してください",
 	"passwords_do_not_match": "パスワードが一致しません",
 	"pause": "一時停止",
 	"pause_all": "すべて一時停止",

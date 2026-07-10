@@ -619,6 +619,7 @@
 	"password_strength_normal": "Dostatečné",
 	"password_strength_strong": "Silné",
 	"password_strength_weak": "Slabé",
+	"password_too_weak_to_register": "Pro pokračování zvolte silnější heslo",
 	"passwords_do_not_match": "Hesla se neshodují",
 	"pause": "Pozastavit",
 	"pause_all": "Pozastavit vše",

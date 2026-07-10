@@ -611,6 +611,7 @@
 	"password_strength_normal": "মোটামুটি",
 	"password_strength_strong": "শক্তিশালী",
 	"password_strength_weak": "দুর্বল",
+	"password_too_weak_to_register": "চালিয়ে যেতে আরও শক্তিশালী একটি পাসওয়ার্ড বেছে নিন",
 	"passwords_do_not_match": "পাসওয়ার্ড মিলছে না",
 	"pause": "বিরতি দিন",
 	"pause_all": "সব বিরতি দিন",

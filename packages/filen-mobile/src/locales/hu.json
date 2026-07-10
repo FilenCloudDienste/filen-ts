@@ -611,6 +611,7 @@
 	"password_strength_normal": "Megfelelő",
 	"password_strength_strong": "Erős",
 	"password_strength_weak": "Gyenge",
+	"password_too_weak_to_register": "Válassz erősebb jelszót a folytatáshoz",
 	"passwords_do_not_match": "A jelszavak nem egyeznek",
 	"pause": "Szüneteltetés",
 	"pause_all": "Összes szüneteltetése",

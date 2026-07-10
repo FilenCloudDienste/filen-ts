@@ -611,6 +611,7 @@
 	"password_strength_normal": "Mittel",
 	"password_strength_strong": "Stark",
 	"password_strength_weak": "Schwach",
+	"password_too_weak_to_register": "Wähle ein stärkeres Passwort, um fortzufahren",
 	"passwords_do_not_match": "Passwörter stimmen nicht überein",
 	"pause": "Pausieren",
 	"pause_all": "Alle pausieren",

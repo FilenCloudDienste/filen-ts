@@ -611,6 +611,7 @@
 	"password_strength_normal": "Trung bình",
 	"password_strength_strong": "Mạnh",
 	"password_strength_weak": "Yếu",
+	"password_too_weak_to_register": "Chọn mật khẩu mạnh hơn để tiếp tục",
 	"passwords_do_not_match": "Mật khẩu không khớp",
 	"pause": "Tạm dừng",
 	"pause_all": "Tạm dừng tất cả",

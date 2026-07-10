@@ -611,6 +611,7 @@
 	"password_strength_normal": "Aceptable",
 	"password_strength_strong": "Fuerte",
 	"password_strength_weak": "Débil",
+	"password_too_weak_to_register": "Elige una contraseña más segura para continuar",
 	"passwords_do_not_match": "Las contraseñas no coinciden",
 	"pause": "Pausar",
 	"pause_all": "Pausar todas",

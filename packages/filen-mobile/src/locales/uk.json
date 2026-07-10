@@ -627,6 +627,7 @@
 	"password_strength_normal": "Помірний",
 	"password_strength_strong": "Сильний",
 	"password_strength_weak": "Слабкий",
+	"password_too_weak_to_register": "Виберіть надійніший пароль, щоб продовжити",
 	"passwords_do_not_match": "Паролі не збігаються",
 	"pause": "Призупинити",
 	"pause_all": "Призупинити всі",
