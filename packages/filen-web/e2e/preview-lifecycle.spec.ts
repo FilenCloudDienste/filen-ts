@@ -24,6 +24,15 @@ test.describe.configure({ mode: "default" })
 // no language grammar involved.
 const TEXT_BYTES = Buffer.from("Hello from a tiny text fixture.\nSecond line here.\n", "utf8")
 
+// Many short lines rather than a few long ones — small on the wire (a few KB), but at CodeMirror's
+// default line height, taller in total than any reasonable preview viewport, so the scroll leg below
+// exercises a genuine overflow instead of a container that merely COULD scroll.
+const LONG_TEXT_LINE_COUNT = 400
+const LONG_TEXT_BYTES = Buffer.from(
+	`${Array.from({ length: LONG_TEXT_LINE_COUNT }, (_, i) => `line ${i.toString().padStart(4, "0")}`).join("\n")}\n`,
+	"utf8"
+)
+
 // The one live proof the editable path actually works end to end: a real writable CodeMirror surface,
 // a real worker uploadFileBytes round trip (uuid rotation included), and the dirty-guard confirm —
 // unlike previewSave.logic.test.ts's injected-deps unit coverage, none of that is provable without a
@@ -114,6 +123,67 @@ test("editable text preview saves via its Save button, persists across reopen, a
 
 		await confirmDialog.getByRole("button", { name: "Discard" }).click()
 		await expect(confirmDialog).toHaveCount(0)
+		await expect(page.locator(".cm-content")).toHaveCount(0)
+	} finally {
+		await trashScratchDirectory(page, scratchName)
+	}
+})
+
+// Founder-reported regression: the CodeMirror wrapper div had no height class of its own, so it
+// collapsed to its content's height instead of the bounded preview area — content past the fold was
+// simply unreachable, wheel and keyboard scroll alike (textViewer.tsx's own className comment has the
+// full mechanism). Asserts the FIX, not just the symptom's absence: the scroller's own box is taller
+// than its visible area (a container that never overflowed would trivially "not be stuck" too), and a
+// keyboard-driven scroll actually moves it.
+test("editable text preview: a long file's editor actually scrolls", async ({ page, injectedSession, browserName }) => {
+	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test.setTimeout(120_000)
+	expect(injectedSession.length).toBeGreaterThan(0)
+
+	const runId = crypto.randomUUID()
+	const scratchName = `e2e-preview-scroll-${runId}`
+	const nameTxt = `e2e-preview-scroll-${runId}.txt`
+	const modKey = await resolveEditorModKey(page)
+
+	await page.goto("/drive")
+
+	try {
+		const { listbox } = await enterScratchDirectory(page, scratchName)
+
+		const input = page.locator('input[type="file"]').first()
+		await input.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: LONG_TEXT_BYTES }])
+
+		const row = listbox.getByRole("option", { name: nameTxt })
+		await expect(row).toBeVisible({ timeout: 45_000 })
+
+		// A short viewport (not enterScratchDirectory's tall one, which exists only to defeat the drive
+		// LISTING's own virtualization) — mirrors preview-media-formats.spec.ts's PDF leg. The fixture's
+		// 400 lines can't all fit at once here, so what follows exercises a genuine overflow.
+		await page.setViewportSize({ width: 1280, height: 800 })
+
+		await row.dblclick()
+		await expect(page.getByRole("dialog").getByText("line 0000")).toBeVisible({ timeout: 30_000 })
+
+		const scroller = page.locator(".cm-scroller")
+		const { scrollHeight, clientHeight } = await scroller.evaluate(el => ({
+			scrollHeight: el.scrollHeight,
+			clientHeight: el.clientHeight
+		}))
+		expect(scrollHeight).toBeGreaterThan(clientHeight)
+
+		// Mod-End is CodeMirror's own defaultKeymap binding (cursorDocEnd, @codemirror/commands) — moves
+		// the caret to the document's last character and scrolls it into view, the same outcome a real
+		// user's manual wheel scroll to the bottom would produce.
+		const editor = page.locator(".cm-content")
+		await editor.click()
+		const scrollTopBefore = await scroller.evaluate(el => el.scrollTop)
+		await page.keyboard.press(`${modKey}+End`)
+
+		const lastLine = `line ${(LONG_TEXT_LINE_COUNT - 1).toString().padStart(4, "0")}`
+		await expect(page.getByRole("dialog").getByText(lastLine)).toBeVisible({ timeout: 15_000 })
+		await expect.poll(async () => scroller.evaluate(el => el.scrollTop), { timeout: 15_000 }).toBeGreaterThan(scrollTopBefore)
+
+		await page.keyboard.press("Escape")
 		await expect(page.locator(".cm-content")).toHaveCount(0)
 	} finally {
 		await trashScratchDirectory(page, scratchName)

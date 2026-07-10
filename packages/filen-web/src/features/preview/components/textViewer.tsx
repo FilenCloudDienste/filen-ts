@@ -162,6 +162,13 @@ function TextSource({ text, tag, alt, editable, onDirtyChange, contentRef }: Tex
 	return (
 		<div className="size-full">
 			<CodeMirror
+				// @uiw's own wrapper div (the one this className lands on) has no height of its own — the
+				// `height="100%"` prop below only reaches `.cm-editor`/`.cm-scroller` INSIDE that wrapper, so
+				// without this the wrapper collapses to content height and everything past the fold is
+				// unreachable (unscrollable, looks broken). The parent `size-full` div above is already
+				// bounded by previewOverlay.tsx's `min-h-0 flex-1` chain — this just extends that bound one
+				// level further in.
+				className="size-full"
 				// Always the live buffer, never `text` directly — `content` only diverges from it through
 				// `onChange` below (itself editable-gated), so this is a no-op for an always-read-only
 				// mount, and, for one whose `editable` flips false mid-session (a failed save's read-only
