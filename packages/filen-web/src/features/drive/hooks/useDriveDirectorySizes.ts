@@ -8,9 +8,10 @@ import {
 	isDirectorySizeSuccessEvent
 } from "@/features/drive/hooks/useDriveDirectorySizes.logic"
 
-// Feeds REAL directory sizes into the size sort. Directories are constructed with a synthetic 0n size
-// (item.ts's narrowItem) — their true recursive sizes live only in the useDirectorySizeQuery cache
-// the rows read from. This hook makes that cache usable at sort time, cheaply:
+// Feeds REAL directory sizes to the listing's row size column (and, at sort time, the size sort).
+// Directories are constructed with a synthetic 0n size (item.ts's narrowItem) — their true recursive
+// sizes live only in the useDirectorySizeQuery cache a row would otherwise mount individually. This
+// hook makes that cache usable in bulk, cheaply, from ONE call site (directoryListing.tsx):
 //
 //   - PREFETCH, don't observe: every directory in the listing (capped, see logic) gets a
 //     prefetchQuery under the exact key a row would use (shared directorySizeQueryOptions builder) —
@@ -23,8 +24,9 @@ import {
 //
 // The version counter + useMemo is load-bearing, not micro-perf: it is the reactivity bridge to an
 // external mutable store (the query cache), and the memo keeps the returned map's identity stable so
-// the downstream sort re-runs only when a size actually lands. Returns undefined while disabled (any
-// non-size sort) so the sorter takes its zero-cost path.
+// a row/sort re-runs only when a size actually lands. Returns undefined while `enabled` is false (grid
+// view, where nothing displays a size — see directoryListing.tsx's own call site) so the caller takes
+// its zero-cost path.
 export function useDriveDirectorySizes({
 	items,
 	enabled

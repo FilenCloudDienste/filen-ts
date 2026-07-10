@@ -54,6 +54,7 @@ import { SearchInput } from "@/features/drive/components/searchInput"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
 import { searchHitNavigationTarget } from "@/features/drive/hooks/useDriveSearch.logic"
 import { useDriveVirtualizer } from "@/features/drive/hooks/useDriveVirtualizer"
+import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
 import { useDriveListboxNav } from "@/features/drive/hooks/useDriveListboxNav"
 import { useDriveDialogHost } from "@/features/drive/hooks/useDriveDialogHost"
 import { Spinner } from "@/components/ui/spinner"
@@ -62,6 +63,10 @@ import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empt
 // Centered content column inside the card — the width cap rides one CSS var (see index.css) so the
 // preset flips project-wide in one place.
 const CONTENT_COLUMN_CLASS = "mx-auto w-full max-w-(--content-column)"
+
+// Stable identity so a disabled/empty directorySizes read never re-triggers row renders — module scope,
+// not recreated per render (a fresh `new Map()` every render would defeat DriveRow's memoization).
+const EMPTY_DIRECTORY_SIZES: ReadonlyMap<string, number> = new Map()
 
 export interface DirectoryListingProps {
 	variant: DriveVariant
@@ -169,6 +174,12 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const sortedItems = search.active
 		? resolveSearchDisplayItems(search.results, search.total, effectiveSort)
 		: sortDriveItems(visibleItems, effectiveSort)
+
+	// Threaded ONCE here (not per-row — see driveRow.tsx's own comment) and read down into every row's
+	// size column. Gated to list view: DriveTile shows no size at all (mirrors filen-mobile's grid
+	// item, which never mounts a size query either), so prefetching while the grid is showing would
+	// pay for recursive server-side size walks nothing on screen reads.
+	const directorySizes = useDriveDirectorySizes({ items: sortedItems, enabled: effectiveViewMode === "list" }) ?? EMPTY_DIRECTORY_SIZES
 
 	const selectedItems = useDriveStore(useShallow(state => state.selectedItems))
 	// Derived once per render so each row/tile's membership check is an O(1) `.has()` instead of an
@@ -472,6 +483,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 												transform: `translateY(${String(virtualRow.start)}px)`
 											}}
 											{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
+											directorySizes={directorySizes}
 											onPointerSelect={handlePointerSelect}
 											onOpen={handleOpen}
 											onItemAction={handleItemAction}

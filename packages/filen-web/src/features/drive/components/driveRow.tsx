@@ -25,6 +25,9 @@ export interface DriveRowProps {
 	// Search results only: the item's ancestor-name chain from the search root (empty for a direct
 	// child of it) — undefined outside an active search, where a row has nothing to show here.
 	searchParentPath?: string
+	// uuid -> resolved directory bytes, threaded down from the listing's ONE useDriveDirectorySizes call
+	// (never mounted per-row — see directoryListing.tsx) — passed straight through to formatItemSize.
+	directorySizes: ReadonlyMap<string, number>
 	onPointerSelect: (index: number, event: MouseEvent<HTMLDivElement>) => void
 	onOpen: (index: number) => void
 	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
@@ -39,6 +42,7 @@ export function DriveRow({
 	variant,
 	style,
 	searchParentPath,
+	directorySizes,
 	onPointerSelect,
 	onOpen,
 	onItemAction,
@@ -115,7 +119,9 @@ export function DriveRow({
 								<span className="sr-only">{t("driveFavorited")}</span>
 							</>
 						) : null}
-						<span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">{formatItemSize(item)}</span>
+						<span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+							{formatItemSize(item, directorySizes)}
+						</span>
 						<span className="w-28 shrink-0 text-right text-xs text-muted-foreground">{formatModifiedDate(item)}</span>
 						<DropdownMenu>
 							<DropdownMenuTrigger

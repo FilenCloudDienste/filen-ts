@@ -84,8 +84,29 @@ describe("formatItemSize", () => {
 		expect(formatItemSize(narrowItem(mockFile({ size: 2_048n })))).toBe("2 KiB")
 	})
 
-	it("returns an empty string for a directory — it carries no real size on the item itself", () => {
+	it("returns an empty string for a directory with no directorySizes map at all", () => {
 		expect(formatItemSize(narrowItem(mockDir()))).toBe("")
+	})
+
+	it("returns an empty string for a directory whose uuid hasn't resolved in the map yet (pending)", () => {
+		const item = narrowItem(mockDir({ uuid: "11111111-1111-1111-1111-111111111111" }))
+		const directorySizes = new Map([["22222222-2222-2222-2222-222222222222", 4_096]])
+
+		expect(formatItemSize(item, directorySizes)).toBe("")
+	})
+
+	it("formats a directory's resolved size once its uuid lands in the directorySizes map", () => {
+		const item = narrowItem(mockDir({ uuid: "11111111-1111-1111-1111-111111111111" }))
+		const directorySizes = new Map([["11111111-1111-1111-1111-111111111111", 4_096]])
+
+		expect(formatItemSize(item, directorySizes)).toBe("4 KiB")
+	})
+
+	it("ignores the directorySizes map for a file — its own byte size always wins", () => {
+		const item = narrowItem(mockFile({ size: 1_024n }))
+		const directorySizes = new Map([[item.data.uuid, 999_999]])
+
+		expect(formatItemSize(item, directorySizes)).toBe("1 KiB")
 	})
 })
 

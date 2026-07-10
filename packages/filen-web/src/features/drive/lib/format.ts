@@ -3,11 +3,21 @@ import { asDirectoryOrFile, getSharerIdentity, type DriveItem } from "@/features
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 
 // Directories carry no real size on the item itself (synthetic 0n — see narrowItem in
-// @/features/drive/lib/item), so the size column is blank for them rather than showing "0 B". A shared
-// file reads as a file, a shared directory as a directory (asDirectoryOrFile).
-export function formatItemSize(item: DriveItem): string {
+// @/features/drive/lib/item); their true recursive size lives only in the directorySizes map a caller
+// threads in from useDriveDirectorySizes. `directorySizes` is keyed by uuid and omitted entirely for
+// a directory whose size hasn't resolved yet — that renders as blank, mirroring filen-mobile's own
+// row (its Size component returns null while the query is pending, no spinner/skeleton). A shared file
+// reads as a file, a shared directory as a directory (asDirectoryOrFile).
+export function formatItemSize(item: DriveItem, directorySizes?: ReadonlyMap<string, number>): string {
 	const base = asDirectoryOrFile(item)
-	return base.type === "file" ? formatBytes(Number(base.data.size)) : ""
+
+	if (base.type === "file") {
+		return formatBytes(Number(base.data.size))
+	}
+
+	const size = directorySizes?.get(item.data.uuid)
+
+	return size !== undefined ? formatBytes(size) : ""
 }
 
 function formatTimestamp(timestamp: bigint): string {

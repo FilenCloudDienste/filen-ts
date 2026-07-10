@@ -239,11 +239,13 @@ export function useItemInfoQuery(
 }
 
 // Per-directory recursive size aggregate (bytes + child file/dir counts), keyed on the directory's
-// own uuid. One cache slice serves two consumers: the size sort (useDriveDirectorySizes prefetches a
-// listing's directories under this exact key) and any future per-row size display. Deliberately NOT
-// folded into itemInfo — that op also walks getItemPath, dead weight for bulk size prefetch; both
-// resolve the same underlying getDirSize, so a directory read both ways fetches twice, an accepted
-// cost for keeping the size-only path path-walk-free.
+// own uuid. One cache slice serves two consumers: the row size column (useDriveDirectorySizes
+// prefetches a listing's directories under this exact key — see directoryListing.tsx) and, at sort
+// time, the size sort. Deliberately NOT folded into itemInfo — that op also walks getItemPath, dead
+// weight for bulk size prefetch; both resolve the same underlying getDirSize, so a directory read both
+// ways (opening its info dialog after its row has already resolved a size) fetches twice, an accepted
+// cost for keeping the size-only path path-walk-free and the info dialog's getItemPath/getDirSize
+// trashed-item resilience (see sdk.worker.ts's getItemInfo) unentangled from the bulk prefetch path.
 export type DirectorySizeItem = Extract<DriveItem, { type: "directory" | "sharedDirectory" | "sharedRootDirectory" }>
 
 // 15-minute staleTime: a directory's recursive size is expensive to recompute server-side and drifts
