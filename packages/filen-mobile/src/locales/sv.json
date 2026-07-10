@@ -611,6 +611,7 @@
 	"password_strength_normal": "Medel",
 	"password_strength_strong": "Stark",
 	"password_strength_weak": "Svag",
+	"password_too_weak_to_register": "Välj ett starkare lösenord för att fortsätta",
 	"passwords_do_not_match": "Lösenorden matchar inte",
 	"pause": "Pausa",
 	"pause_all": "Pausa alla",

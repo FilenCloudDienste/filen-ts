@@ -611,6 +611,7 @@
 	"password_strength_normal": "양호",
 	"password_strength_strong": "강함",
 	"password_strength_weak": "약함",
+	"password_too_weak_to_register": "계속하려면 더 강력한 비밀번호를 선택하세요",
 	"passwords_do_not_match": "비밀번호가 일치하지 않습니다",
 	"pause": "일시 정지",
 	"pause_all": "모두 일시 정지",

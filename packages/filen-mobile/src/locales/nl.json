@@ -611,6 +611,7 @@
 	"password_strength_normal": "Redelijk",
 	"password_strength_strong": "Sterk",
 	"password_strength_weak": "Zwak",
+	"password_too_weak_to_register": "Kies een sterker wachtwoord om door te gaan",
 	"passwords_do_not_match": "Wachtwoorden komen niet overeen",
 	"pause": "Pauzeren",
 	"pause_all": "Alles pauzeren",

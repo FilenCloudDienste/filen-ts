@@ -611,6 +611,7 @@
 	"password_strength_normal": "Orta",
 	"password_strength_strong": "Güçlü",
 	"password_strength_weak": "Zayıf",
+	"password_too_weak_to_register": "Devam etmek için daha güçlü bir parola seçin",
 	"passwords_do_not_match": "Parolalar eşleşmiyor",
 	"pause": "Duraklat",
 	"pause_all": "Tümünü duraklat",

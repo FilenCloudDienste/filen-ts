@@ -627,6 +627,7 @@
 	"password_strength_normal": "Средний",
 	"password_strength_strong": "Надёжный",
 	"password_strength_weak": "Слабый",
+	"password_too_weak_to_register": "Выберите более надёжный пароль, чтобы продолжить",
 	"passwords_do_not_match": "Пароли не совпадают",
 	"pause": "Пауза",
 	"pause_all": "Приостановить все",

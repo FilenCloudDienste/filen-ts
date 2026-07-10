@@ -611,6 +611,7 @@
 	"password_strength_normal": "พอใช้",
 	"password_strength_strong": "แข็งแรง",
 	"password_strength_weak": "อ่อน",
+	"password_too_weak_to_register": "เลือกรหัสผ่านที่คาดเดายากขึ้นเพื่อดำเนินการต่อ",
 	"passwords_do_not_match": "รหัสผ่านไม่ตรงกัน",
 	"pause": "หยุดชั่วคราว",
 	"pause_all": "หยุดทั้งหมดชั่วคราว",
