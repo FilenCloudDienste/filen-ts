@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { waitForListingSettled } from "./helpers/listing"
+import { waitForListingSettled, dismissStartupReminders } from "./helpers/listing"
 
 // Sharing/unsharing are OUTWARD-FACING mutations (a share reaches ANOTHER account; unshare revokes
 // real access) and premium-gated, so every test below is render/gate-only — the contact picker is
@@ -21,6 +21,12 @@ test.describe("sharing", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await page.goto("/drive")
+
+		// The authed shell raises a blocking startup reminder modal that renders the rest of the app
+		// inert/aria-hidden until dismissed — while it is open the shell's own nav/sidebar are not in the
+		// role tree, so it must be dismissed BEFORE the nav assertion or sidebar clicks below. This test
+		// activates the shared surfaces via direct sidebar clicks, never through the listing gate.
+		await dismissStartupReminders(page)
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
 		// The e2e injection hook re-seeds the session and navigates to "/" on every hard load (see

@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
+import { dismissStartupReminders } from "./helpers/listing"
 
 // Contact requests, blocks, and removals are OUTWARD-FACING: a request lands in another Filen
 // account's inbox, and a block/remove changes another account's own contact list too. Unlike drive's
@@ -27,6 +28,12 @@ const FIREFOX_HANG_REASON =
 // click on the rail link reaches /contacts without ever hard-loading it.
 async function gotoContacts(page: Page): Promise<void> {
 	await page.goto("/drive")
+
+	// The authed shell raises a blocking startup reminder modal that renders the rest of the app inert/
+	// aria-hidden until dismissed — while it is open the shell's own nav/rail are not in the role tree,
+	// so it must be dismissed BEFORE the nav assertion or rail click below. This path reaches /contacts
+	// via a direct rail click, never through the listing gate that dismisses it.
+	await dismissStartupReminders(page)
 	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
 	await page.getByRole("link", { name: "Contacts", exact: true }).click()

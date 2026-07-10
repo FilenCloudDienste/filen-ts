@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import type { Page } from "@playwright/test"
 import { test, expect, SESSION_FILE } from "./fixtures"
+import { dismissStartupReminders } from "./helpers/listing"
 
 // Mirrors fixtures.ts's own (non-exported) constant — see storage.spec.ts's follower-tab test for
 // the same local-redeclaration precedent.
@@ -145,6 +146,12 @@ test.describe("auth", () => {
 
 		await seedOncePerPage(page, session)
 		await page.goto("/")
+		// The authed shell raises a blocking startup reminder modal that renders the rest of the app
+		// inert/aria-hidden until dismissed — while it is open the shell's own nav is not even in the role
+		// tree, so it must be dismissed BEFORE any role-based shell assertion or interaction below, not
+		// just before the Account click. This spec drives the shell directly (never through the listing
+		// gate that dismisses it), so it dismisses per tab here.
+		await dismissStartupReminders(page)
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
 		// A second, already-signed-in tab opened BEFORE logout — the realistic multi-tab scenario the
@@ -156,6 +163,7 @@ test.describe("auth", () => {
 
 		await seedOncePerPage(second, session)
 		await second.goto("/")
+		await dismissStartupReminders(second)
 		await expect(second.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
 		await page.getByRole("button", { name: "Account", exact: true }).click()

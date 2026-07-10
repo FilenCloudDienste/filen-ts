@@ -3,9 +3,12 @@ import { expect } from "../fixtures"
 
 // Startup account reminders (master-keys export, storage over limit) are BLOCKING modal alertdialogs
 // the authed shell raises once per page LOAD, keys before storage — while open they render the rest of
-// the app inert/aria-hidden, so they sit over every authed spec's first interaction. Dismissed here in
-// the one shared listing gate so every spec inherits it, by each reminder's dismiss-button accessible
-// name. The "already handled" guard lives in a window flag rather than a WeakSet<Page> ON PURPOSE: a
+// the app inert/aria-hidden, so they sit over every authed spec's first interaction. Dismissed by each
+// reminder's dismiss-button accessible name. Most authed specs inherit this for free through the shared
+// listing gate (waitForListingSettled calls it first); the few that drive the shell directly WITHOUT
+// settling a listing first (auth logout, boot rail-hover, contacts/share sidebar navigation) call it
+// themselves before their first shell interaction. The "already handled" guard lives in a window flag
+// rather than a WeakSet<Page> ON PURPOSE: a
 // reload re-arms the reminders but keeps the same Page object, so a WeakSet would wrongly suppress the
 // second dismissal — the window flag clears on reload exactly as the reminders do. First pass per load:
 // dismiss never exports keys, so the keys reminder deterministically re-appears for the e2e account and

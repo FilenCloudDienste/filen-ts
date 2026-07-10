@@ -1,4 +1,5 @@
 import { test, expect } from "./fixtures"
+import { dismissStartupReminders } from "./helpers/listing"
 
 test.describe("boot", () => {
 	test("boots to a ready shell and forwards to sign-in when unauthenticated", async ({ page }) => {
@@ -15,6 +16,12 @@ test.describe("boot", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await page.goto("/")
+
+		// The authed shell raises a blocking startup reminder modal that renders the rest of the app
+		// inert/aria-hidden until dismissed — while it is open the shell's own nav/rail are not in the
+		// role tree, so it must be dismissed BEFORE any role-based shell assertion or interaction below.
+		// This spec drives the shell directly (never through the listing gate that dismisses it).
+		await dismissStartupReminders(page)
 
 		// The hook injects the session then re-runs the guards, so the authed shell renders — which is
 		// itself proof the session authenticated the router (`hasClient()` gated the redirect).
