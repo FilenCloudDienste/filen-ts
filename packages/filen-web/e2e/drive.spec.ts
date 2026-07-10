@@ -27,6 +27,10 @@ test.describe("drive", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await page.goto("/drive")
+		// Settle (and thereby dismiss the blocking startup reminders) BEFORE asserting the shell — the
+		// reminder modal renders everything behind it aria-hidden the moment the account query lands.
+		const { listbox, hasItems } = await waitForListingSettled(page)
+
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
 		const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" })
@@ -34,8 +38,6 @@ test.describe("drive", () => {
 		const rootCrumb = breadcrumb.getByText("Cloud Drive", { exact: true })
 		await expect(rootCrumb).toBeVisible()
 		await expect(rootCrumb).toHaveAttribute("aria-current", "page")
-
-		const { listbox, hasItems } = await waitForListingSettled(page)
 
 		if (hasItems) {
 			await expect(listbox.getByRole("option").first()).toBeVisible()

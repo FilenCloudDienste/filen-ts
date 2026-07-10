@@ -3,18 +3,15 @@ import { expect } from "../fixtures"
 
 // Startup account reminders (master-keys export, storage over limit) are BLOCKING modal alertdialogs
 // the authed shell raises once per page LOAD, keys before storage — while open they render the rest of
-// the app inert/aria-hidden, so they sit over every authed spec's first interaction. Dismissed by each
-// reminder's dismiss-button accessible name. Most authed specs inherit this for free through the shared
-// listing gate (waitForListingSettled calls it first); the few that drive the shell directly WITHOUT
-// settling a listing first (auth logout, boot rail-hover, contacts/share sidebar navigation) call it
-// themselves before their first shell interaction. The "already handled" guard lives in a window flag
-// rather than a WeakSet<Page> ON PURPOSE: a
-// reload re-arms the reminders but keeps the same Page object, so a WeakSet would wrongly suppress the
-// second dismissal — the window flag clears on reload exactly as the reminders do. First pass per load:
-// dismiss never exports keys, so the keys reminder deterministically re-appears for the e2e account and
-// is bounded-waited for; storage only fires when over limit, so it is a non-blocking snapshot after
-// keys closes. Later same-load calls read the flag and return immediately (no 15s wait for a modal that
-// cannot re-appear until the next reload).
+// the app inert/aria-hidden. THE RULE for every authed spec: no shell interaction or landmark
+// assertion before either waitForListingSettled (which calls this first) or an explicit
+// dismissStartupReminders on that page — and again after every reload/new page, which re-arms the
+// reminders. The "already handled" guard lives in a window flag rather than a WeakSet<Page> ON
+// PURPOSE: a reload re-arms the reminders but keeps the same Page object, so a WeakSet would wrongly
+// suppress the second dismissal — the window flag clears on reload exactly as the reminders do. First
+// pass per load: dismiss never exports keys, so the keys reminder deterministically re-appears for the
+// e2e account and is bounded-waited for; storage only fires when over limit, so it is a non-blocking
+// snapshot after keys closes. Later same-load calls read the flag and return immediately.
 export async function dismissStartupReminders(page: Page): Promise<void> {
 	const handled = await page
 		.evaluate(() => Boolean((window as unknown as { __e2eRemindersHandled?: boolean }).__e2eRemindersHandled))

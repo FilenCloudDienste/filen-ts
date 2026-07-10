@@ -1,4 +1,5 @@
 import { test, expect } from "./fixtures"
+import { dismissStartupReminders } from "./helpers/listing"
 
 const SESSION_SLOT = "filen.e2e.session"
 
@@ -29,6 +30,7 @@ test.describe("storage", () => {
 
 		// Leader tab: wins the Web Lock, opens OPFS directly, and writes a value into its own sqlite.
 		await page.goto("/")
+		await dismissStartupReminders(page)
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 		await page.evaluate(() => window.__filenE2E.kvSet("e2e.storage.leader", "from-leader"))
 
@@ -44,6 +46,8 @@ test.describe("storage", () => {
 		)
 		await follower.goto("/")
 
+		// The blocking startup reminders arm per page load — the follower is its own load.
+		await dismissStartupReminders(follower)
 		await expect(follower.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
 		const readThrough = await follower.evaluate(() => window.__filenE2E.kvGet("e2e.storage.leader"))

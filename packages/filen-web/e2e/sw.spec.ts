@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures"
 import { SW_DOWNLOAD_PREFIX, SW_MSG_INIT_CLIENT, SW_MSG_REGISTER_ZIP_DOWNLOAD } from "@/lib/sw/protocol"
-import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { enterScratchDirectory, trashScratchDirectory, dismissStartupReminders } from "./helpers/listing"
 import { waitForSwReady } from "./helpers/sw"
 
 // Registration is PROD-only and gated on boot ready, so this runs against preview. webkit is excluded
@@ -38,6 +38,8 @@ test.describe("service worker", () => {
 		// The drive listing (not just the bare authed shell) so the scratch directory below has
 		// somewhere to be created — the authed nav still renders here exactly as it does at "/".
 		await page.goto("/drive")
+		// The blocking startup reminders render the shell inert until dismissed.
+		await dismissStartupReminders(page)
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 		await waitForSwReady(page)
 
