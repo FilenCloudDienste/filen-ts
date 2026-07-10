@@ -132,7 +132,13 @@ export async function fetchSharedListing(variant: "sharedIn" | "sharedOut", uuid
 // no navigable parent to create/move into. A cache miss (nobody has viewed this directory yet)
 // defaults to [] so the patch still lands for whenever it first mounts.
 export function driveListingQueryUpdate(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]): void {
-	queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: parentUuid }), prev => updater(prev ?? []))
+	const queryKey = driveListingQueryKey({ variant: "drive", uuid: parentUuid })
+
+	// A refetch snapshotted on the server BEFORE this write would land after the patch and silently
+	// overwrite it — abort anything in flight first (the cancellation itself is signalled
+	// synchronously; the next mount/focus refetch reconciles with the server).
+	void queryClient.cancelQueries({ queryKey })
+	queryClient.setQueryData<DriveItem[]>(queryKey, prev => updater(prev ?? []))
 }
 
 // Fan-out patch across EVERY currently-instantiated listing, any variant, any uuid — a
@@ -146,6 +152,9 @@ export function driveListingQueryUpdate(parentUuid: string | null, updater: (pre
 // data; the updater never runs for it (returning `undefined` from the per-query updater is
 // setQueryData's own documented no-op), so this can never conjure a `[]` into an unfetched query.
 export function driveListingQueryUpdateGlobal(updater: (items: DriveItem[]) => DriveItem[]): void {
+	// Same in-flight-refetch hazard as driveListingQueryUpdate above, across every matched listing.
+	void queryClient.cancelQueries({ queryKey: ["drive", "listing"] })
+
 	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
 		queryClient.setQueryData<DriveItem[]>(query.queryKey, prev => (prev === undefined ? undefined : updater(prev)))
 	}
