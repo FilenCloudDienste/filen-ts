@@ -58,7 +58,7 @@ function WindowControlButton({
 			onClick={onClick}
 			className={cn(
 				"flex h-full w-11 items-center justify-center text-muted-foreground transition-colors outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:ring-inset [&_svg]:size-4",
-				destructive ? "hover:text-destructive-foreground hover:bg-destructive" : "hover:bg-rail-hover hover:text-foreground"
+				destructive ? "hover:bg-destructive hover:text-primary-foreground" : "hover:bg-rail-hover hover:text-foreground"
 			)}
 		>
 			<Icon />
