@@ -115,6 +115,17 @@ export async function descendInto(page: Page, listbox: ReturnType<Page["getByRol
 	await waitForListingSettled(page)
 }
 
+// Sonner (src/components/ui/sonner.tsx) renders no close affordance and every bulk/action toast here
+// is transient (default 4s duration, no persistent reminder survives past dismissStartupReminders) —
+// so waiting out the stack is strictly more robust than hunting for a dismiss button that doesn't
+// exist. The floating selection bar (bulkActionBar.tsx) and Sonner's default viewport both anchor
+// bottom-right, so a toast still fading can sit directly over the bar's own buttons and swallow the
+// click. Generous timeout: this can be several toasts deep under parallel-spec load, each observed
+// independently rather than assumed to expire in lockstep.
+async function waitForToastsClear(page: Page): Promise<void> {
+	await expect(page.locator("[data-sonner-toast]")).toHaveCount(0, { timeout: 20_000 })
+}
+
 // Failure-proof companion to enterScratchDirectory above — called from every test's own finally, so
 // the scratch directory (and everything created/uploaded into it) is trashed even when an assertion
 // above throws. Escape first: authed specs may leave a popover/overlay open (Transfers popover,
@@ -144,6 +155,7 @@ export async function trashScratchDirectory(page: Page, name: string, confirmTim
 	}
 
 	await row.click()
+	await waitForToastsClear(page)
 	await page.getByRole("button", { name: "Trash", exact: true }).click()
 
 	const confirm = page.getByRole("alertdialog")
