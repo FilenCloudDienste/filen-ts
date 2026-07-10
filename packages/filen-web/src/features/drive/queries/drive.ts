@@ -135,9 +135,13 @@ export function driveListingQueryUpdate(parentUuid: string | null, updater: (pre
 	const queryKey = driveListingQueryKey({ variant: "drive", uuid: parentUuid })
 
 	// A refetch snapshotted on the server BEFORE this write would land after the patch and silently
-	// overwrite it — abort anything in flight first (the cancellation itself is signalled
-	// synchronously; the next mount/focus refetch reconciles with the server).
-	void queryClient.cancelQueries({ queryKey })
+	// overwrite it — abort anything in flight first. Only when cached data already exists: cancelling
+	// a query's INITIAL fetch would strand it on its loading state with nothing to show until the
+	// next mount/focus trigger, and the overwrite hazard only applies to data a patch can lose.
+	if (queryClient.getQueryData(queryKey) !== undefined) {
+		void queryClient.cancelQueries({ queryKey })
+	}
+
 	queryClient.setQueryData<DriveItem[]>(queryKey, prev => updater(prev ?? []))
 }
 
@@ -152,10 +156,13 @@ export function driveListingQueryUpdate(parentUuid: string | null, updater: (pre
 // data; the updater never runs for it (returning `undefined` from the per-query updater is
 // setQueryData's own documented no-op), so this can never conjure a `[]` into an unfetched query.
 export function driveListingQueryUpdateGlobal(updater: (items: DriveItem[]) => DriveItem[]): void {
-	// Same in-flight-refetch hazard as driveListingQueryUpdate above, across every matched listing.
-	void queryClient.cancelQueries({ queryKey: ["drive", "listing"] })
-
 	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
+		// Same in-flight-refetch hazard as driveListingQueryUpdate above, with the same initial-fetch
+		// carve-out — only queries that already hold data get their in-flight fetch aborted.
+		if (query.state.data !== undefined) {
+			void queryClient.cancelQueries({ queryKey: query.queryKey, exact: true })
+		}
+
 		queryClient.setQueryData<DriveItem[]>(query.queryKey, prev => (prev === undefined ? undefined : updater(prev)))
 	}
 }
