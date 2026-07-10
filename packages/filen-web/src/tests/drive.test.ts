@@ -82,6 +82,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import {
+	directorySizeQueryKey,
 	driveItemLinkStatusQueryKey,
 	driveItemLinkStatusQueryUpdate,
 	driveListingQueryKey,
@@ -96,6 +97,7 @@ import {
 	fetchItemInfo,
 	fetchSharedListing,
 	fileVersionsQueryKey,
+	invalidateDirectorySize,
 	itemInfoQueryKey,
 	normalizeParentUuid,
 	toListingTarget,
@@ -341,6 +343,29 @@ describe("fetchDirectorySize", () => {
 		}
 
 		await expect(fetchDirectorySize(item)).rejects.toBe(error)
+	})
+})
+
+describe("invalidateDirectorySize", () => {
+	// upload.ts's own trigger: a landed write into a directory stales that directory's cached
+	// recursive size (see the export's own comment) — invalidateQueries marks it, it does not refetch
+	// (no active per-row observer to refetch for — useDriveDirectorySizes prefetches only).
+	it("marks a directory's cached dirSize entry stale", () => {
+		const uuid = testUuid("dir")
+		const queryKey = directorySizeQueryKey(uuid)
+		testQueryClient.setQueryData(queryKey, { size: 1_000n, files: 1n, dirs: 0n })
+
+		expect(testQueryClient.getQueryState(queryKey)?.isInvalidated).toBe(false)
+
+		invalidateDirectorySize(uuid)
+
+		expect(testQueryClient.getQueryState(queryKey)?.isInvalidated).toBe(true)
+	})
+
+	it("is a no-op for a null (root) parent — root has no dirSize entry of its own", () => {
+		expect(() => {
+			invalidateDirectorySize(null)
+		}).not.toThrow()
 	})
 })
 

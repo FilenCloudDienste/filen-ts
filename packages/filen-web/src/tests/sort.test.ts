@@ -227,6 +227,43 @@ describe("sortDriveItems", () => {
 
 			expect(names(sortDriveItems([big, small], "sizeAsc", sizes))).toEqual(["small-dir", "big-dir"])
 		})
+
+		// The async transition this map exists for: a directory's size query hasn't landed yet (absent
+		// from the map — still on the synthetic 0n fallback) alongside one that already resolved, mixed
+		// with files. Mirrors filen-mobile/src/lib/sort.ts's identical fallback (raw `data.size` + name
+		// tiebreak) — an unresolved directory is never placed as if it were "biggest" or dropped last on
+		// purpose, it sorts exactly where a real 0-byte item would.
+		it("a directory missing from the map sorts by its 0n fallback among resolved dirs and real-sized files", () => {
+			const resolvedUuid = "00000000-0000-0000-0000-0000res01ved" as UuidStr
+			const unresolvedUuid = "00000000-0000-0000-0000-000unres01ve" as UuidStr
+			const resolved = dirItem({ uuid: resolvedUuid, name: "resolved-dir" })
+			const unresolved = dirItem({ uuid: unresolvedUuid, name: "unresolved-dir" })
+			const zeroByteFile = fileItem({ name: "zero-byte-file", size: 0n })
+			const sizes = new Map<string, number>([[resolvedUuid, 1_000]])
+
+			// Dirs-first partitioning keeps the unresolved dir ahead of every file regardless of the
+			// file's own size — only the two directories are ordered against each other by the map, and
+			// the unresolved one (0n fallback) sorts before the resolved 1,000-byte one.
+			expect(names(sortDriveItems([resolved, unresolved, zeroByteFile], "sizeAsc", sizes))).toEqual([
+				"unresolved-dir",
+				"resolved-dir",
+				"zero-byte-file"
+			])
+
+			// As the size lands (the map gains an entry for it), the directory re-positions past the
+			// previously-larger resolved one — the exact re-sort behavior directoryListing.tsx relies on
+			// when useDriveDirectorySizes' query cache subscription bumps mid-listing.
+			const nowResolved = new Map<string, number>([
+				[resolvedUuid, 1_000],
+				[unresolvedUuid, 5_000]
+			])
+
+			expect(names(sortDriveItems([resolved, unresolved, zeroByteFile], "sizeAsc", nowResolved))).toEqual([
+				"resolved-dir",
+				"unresolved-dir",
+				"zero-byte-file"
+			])
+		})
 	})
 
 	describe("type sort", () => {

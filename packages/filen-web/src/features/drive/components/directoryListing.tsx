@@ -171,15 +171,19 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// keyboard nav, context menus, the bulk bar, and preview siblings all read `sortedItems` alone, so
 	// swapping its one source here is what makes every one of them inherited for free.
 	const search = useDriveSearch(uuid, variant === "drive")
-	const sortedItems = search.active
-		? resolveSearchDisplayItems(search.results, search.total, effectiveSort)
-		: sortDriveItems(visibleItems, effectiveSort)
 
 	// Threaded ONCE here (not per-row — see driveRow.tsx's own comment) and read down into every row's
-	// size column. Gated to list view: DriveTile shows no size at all (mirrors filen-mobile's grid
-	// item, which never mounts a size query either), so prefetching while the grid is showing would
-	// pay for recursive server-side size walks nothing on screen reads.
-	const directorySizes = useDriveDirectorySizes({ items: sortedItems, enabled: effectiveViewMode === "list" }) ?? EMPTY_DIRECTORY_SIZES
+	// size column AND the size sort below. Fed the PRE-sort item set (uuid-keyed, order-independent —
+	// see useDriveDirectorySizes.logic.ts), not sortedItems: sortedItems below depends on this map, so
+	// feeding it sortedItems would be circular. Gated to list view: DriveTile shows no size at all
+	// (mirrors filen-mobile's grid item, which never mounts a size query either), so prefetching while
+	// the grid is showing would pay for recursive server-side size walks nothing on screen reads.
+	const directorySizes =
+		useDriveDirectorySizes({ items: search.active ? search.results : visibleItems, enabled: effectiveViewMode === "list" }) ??
+		EMPTY_DIRECTORY_SIZES
+	const sortedItems = search.active
+		? resolveSearchDisplayItems(search.results, search.total, effectiveSort, directorySizes)
+		: sortDriveItems(visibleItems, effectiveSort, directorySizes)
 
 	const selectedItems = useDriveStore(useShallow(state => state.selectedItems))
 	// Derived once per render so each row/tile's membership check is an O(1) `.has()` instead of an

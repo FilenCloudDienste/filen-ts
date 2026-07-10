@@ -6,7 +6,7 @@ import { i18n } from "@/lib/i18n"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { narrowItem, upsertDriveItem } from "@/features/drive/lib/item"
-import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
+import { driveListingQueryUpdate, invalidateDirectorySize } from "@/features/drive/queries/drive"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 
 // Leading+trailing throttle, written locally rather than pulling a dependency — no throttle/debounce
@@ -68,6 +68,10 @@ export interface RunUploadDeps {
 	cancel?: (transferId: string) => void
 	store: Pick<TransfersStore, "add" | "setProgress" | "settle" | "remove">
 	patchListing: typeof driveListingQueryUpdate
+	// Optional (mirrors `cancel` above): a landed upload staled the destination directory's own cached
+	// recursive size (see queries/drive.ts's invalidateDirectorySize) — real wiring always supplies it,
+	// tests that don't care about the size-sort path simply omit it.
+	invalidateDirectorySize?: typeof invalidateDirectorySize
 }
 
 // One upload attempt: register it in the transfers store, stream it through the injected `upload` op
@@ -119,6 +123,7 @@ export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string 
 
 	deps.store.settle(id, "done")
 	deps.patchListing(parentUuid, prev => upsertDriveItem(prev, narrowItem(uploaded)))
+	deps.invalidateDirectorySize?.(parentUuid)
 
 	return { status: "success" }
 }
@@ -139,7 +144,8 @@ export const defaultUploadDeps: RunUploadDeps = {
 		void sdkApi.cancelUpload(id)
 	},
 	store: useTransfersStore.getState(),
-	patchListing: driveListingQueryUpdate
+	patchListing: driveListingQueryUpdate,
+	invalidateDirectorySize
 }
 
 // Fan out every file in parallel — no JS queue/semaphore: the SDK's own Tower layer throttles actual

@@ -279,6 +279,20 @@ export function useDirectorySizeQuery(item: DirectorySizeItem): UseQueryResult<D
 	return useQuery(directorySizeQueryOptions(item))
 }
 
+// A directory's own cached size (if any consumer has ever prefetched/read it) goes stale the moment
+// something writes new content into it — upload.ts is the caller, right after a file lands. No active
+// observer exists for a bare dirSize key (useDriveDirectorySizes prefetches, it never `useQuery`s per
+// row — see that hook's own comment), so this only flags the entry stale; the next listing that shows
+// this directory re-prefetches for real instead of serving pre-write bytes for the rest of
+// DIRECTORY_SIZE_STALE_TIME. Root (null parent) has no dirSize entry of its own to invalidate.
+export function invalidateDirectorySize(uuid: string | null): void {
+	if (uuid === null) {
+		return
+	}
+
+	void queryClient.invalidateQueries({ queryKey: directorySizeQueryKey(uuid) })
+}
+
 // Versions panel primitive: an on-demand read of a single file's version history, newest first (the
 // SDK sorts server-side — see filen-sdk-rs's list_file_versions). Keyed on the file's own (current)
 // uuid, same rationale as itemInfoQueryKey.

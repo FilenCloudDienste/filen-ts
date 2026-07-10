@@ -54,7 +54,14 @@ export function isEmptyTrashTriggerVisible(variant: DriveVariant, itemCount: num
 // results.length) — the search engine's own window is a fixed 1,000-item ceiling (mirrors mobile), so
 // while more matches exist than currently landed, re-sorting the PARTIAL set every time a new one
 // streams in would visibly reshuffle rows the user is looking at. Truncated results instead keep the
-// SDK's own delivered (name) order, which is stable across a growing result set.
-export function resolveSearchDisplayItems(results: DriveItem[], total: bigint, sortBy: DriveSortBy): DriveItem[] {
-	return total <= BigInt(results.length) ? sortDriveItems(results, sortBy) : results
+// SDK's own delivered (name) order, which is stable across a growing result set. `directorySizes`
+// passes straight through to sortDriveItems so a size-sorted search re-positions directories as their
+// sizes land, same as the normal listing.
+export function resolveSearchDisplayItems(
+	results: DriveItem[],
+	total: bigint,
+	sortBy: DriveSortBy,
+	directorySizes?: ReadonlyMap<string, number>
+): DriveItem[] {
+	return total <= BigInt(results.length) ? sortDriveItems(results, sortBy, directorySizes) : results
 }

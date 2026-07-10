@@ -85,8 +85,9 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		const settle = vi.fn<(id: string, status: TerminalStatus, error?: ErrorDTO) => void>()
 		const remove = vi.fn<(id: string) => void>()
 		const patchListing = vi.fn<(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void>()
-		const deps: RunUploadDeps = { upload, store: { add, setProgress, settle, remove }, patchListing }
-		return { deps, upload, add, setProgress, settle, remove, patchListing }
+		const invalidateDirectorySize = vi.fn<(parentUuid: string | null) => void>()
+		const deps: RunUploadDeps = { upload, store: { add, setProgress, settle, remove }, patchListing, invalidateDirectorySize }
+		return { deps, upload, add, setProgress, settle, remove, patchListing, invalidateDirectorySize }
 	}
 
 	it("adds an uploading transfer before calling upload", async () => {
@@ -118,6 +119,9 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		expect(outcome).toEqual({ status: "success" })
 		expect(h.settle).toHaveBeenCalledWith(expect.any(String), "done")
 		expect(h.patchListing).toHaveBeenCalledWith("parent-uuid", expect.any(Function))
+		// The destination directory's own cached recursive size is now stale (see queries/drive.ts's
+		// invalidateDirectorySize) — the size-sort's async re-position depends on this firing.
+		expect(h.invalidateDirectorySize).toHaveBeenCalledWith("parent-uuid")
 
 		const updater = h.patchListing.mock.calls[0]?.[1]
 		if (!updater) {
@@ -138,6 +142,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 
 		expect(h.upload).toHaveBeenCalledWith(null, expect.any(String), expect.any(File), expect.any(Function))
 		expect(h.patchListing).toHaveBeenCalledWith(null, expect.any(Function))
+		expect(h.invalidateDirectorySize).toHaveBeenCalledWith(null)
 	})
 
 	it("reports the first progress notification through to store.setProgress, narrowed to a number", async () => {
@@ -180,6 +185,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		expect(outcome).toEqual({ status: "error", dto })
 		expect(h.settle).toHaveBeenCalledWith(expect.any(String), "error", dto)
 		expect(h.patchListing).not.toHaveBeenCalled()
+		expect(h.invalidateDirectorySize).not.toHaveBeenCalled()
 	})
 
 	it("normalizes a plain Error rejection through asErrorDTO", async () => {
@@ -204,6 +210,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		const id = h.settle.mock.calls[0]?.[0]
 		expect(h.settle).toHaveBeenCalledWith(id, "cancelled")
 		expect(h.remove).toHaveBeenCalledWith(id)
+		expect(h.invalidateDirectorySize).not.toHaveBeenCalled()
 	})
 })
 
