@@ -4,8 +4,11 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
 
 const ROW_HEIGHT = 40
-const TILE_WIDTH = 140
-const TILE_ROW_HEIGHT = 124
+// Fixed tile width (DriveTile pins itself to this via w-44 + justify-self-center rather than
+// stretching to fill its grid column) — the face square is derived from it, so this and
+// TILE_ROW_HEIGHT below must stay in lockstep with driveTile.tsx's own layout classes.
+const TILE_WIDTH = 176
+const TILE_ROW_HEIGHT = 244
 const LIST_OVERSCAN = 8
 const GRID_OVERSCAN = 3
 

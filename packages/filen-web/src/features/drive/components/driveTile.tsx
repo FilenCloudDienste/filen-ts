@@ -66,7 +66,11 @@ export function DriveTile({
 						aria-selected={selected}
 						tabIndex={active ? 0 : -1}
 						title={searchParentPath !== undefined && searchParentPath.length > 0 ? searchParentPath : undefined}
-						className="group/tile relative flex flex-col items-center gap-2 rounded-2xl p-3 text-center text-sm outline-none select-none not-aria-selected:hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
+						// Fixed width (not full-bleed 1fr) + justify-self-center: the tile stays pinned to
+						// TILE_WIDTH regardless of how much extra space its grid column gets, so the face
+						// below stays the deterministic square useDriveVirtualizer's row-height estimate
+						// assumes — see that file's own comment on the two constants.
+						className="group/tile relative flex w-44 shrink-0 flex-col gap-2 justify-self-center rounded-2xl p-2 text-center text-sm outline-none select-none not-aria-selected:hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
 						onClick={event => {
 							onPointerSelect(index, event)
 						}}
@@ -74,56 +78,65 @@ export function DriveTile({
 							onOpen(index)
 						}}
 					>
-						{thumbUrl !== null && !thumbFailed ? (
-							<img
-								src={thumbUrl}
-								alt=""
-								draggable={false}
-								decoding="async"
-								className="size-10 shrink-0 rounded-sm object-cover"
-								onError={() => {
-									invalidateThumbnail(item.data.uuid)
-									setThumbFailed(true)
-								}}
-							/>
-						) : (
-							createElement(fileIconFor(item), { "aria-hidden": true, className: "size-10 shrink-0 text-muted-foreground" })
-						)}
+						{/* The tile's face: a square that fills the tile's width, thumbnail or icon alike —
+						the icon case keeps a tinted backdrop so it reads as the same card shape rather than
+						a bare glyph floating on the canvas. An opaque thumbnail paints over the tile's own
+						aria-selected background, so selection needs its own ring here too — see
+						colorDialog.tsx's identical ring-on-a-filled-swatch idiom. */}
+						<div className="relative aspect-square w-full overflow-hidden rounded-xl bg-muted/40 group-aria-selected/tile:ring-2 group-aria-selected/tile:ring-ring">
+							{thumbUrl !== null && !thumbFailed ? (
+								<img
+									src={thumbUrl}
+									alt=""
+									draggable={false}
+									decoding="async"
+									className="size-full object-cover"
+									onError={() => {
+										invalidateThumbnail(item.data.uuid)
+										setThumbFailed(true)
+									}}
+								/>
+							) : (
+								<div className="flex size-full items-center justify-center">
+									{createElement(fileIconFor(item), { "aria-hidden": true, className: "size-14 text-muted-foreground" })}
+								</div>
+							)}
+							<DropdownMenu>
+								<DropdownMenuTrigger
+									render={
+										<Button
+											variant="ghost"
+											size="icon-xs"
+											aria-label={t("driveItemMenuTrigger")}
+											// Roving-tabindex-friendly — see DriveRow's identical comment.
+											tabIndex={active ? 0 : -1}
+											className="absolute top-1 right-1 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
+											onClick={event => {
+												// Must not select the tile — see itemMenu.tsx's own onClick for why a click
+												// inside the (portaled) menu content needs the same guard.
+												event.stopPropagation()
+											}}
+											onDoubleClick={event => {
+												event.stopPropagation()
+											}}
+										>
+											<MoreHorizontalIcon />
+										</Button>
+									}
+								/>
+								<DriveDropdownMenuContent
+									item={item}
+									variant={variant}
+									onItemAction={onItemAction}
+								/>
+							</DropdownMenu>
+						</div>
 						<span className="line-clamp-2 w-full text-xs break-words">{name}</span>
 						{shared ? (
 							<span className="w-full truncate text-[0.7rem] text-muted-foreground">
 								{t(shared.labelKey, { name: shared.name })}
 							</span>
 						) : null}
-						<DropdownMenu>
-							<DropdownMenuTrigger
-								render={
-									<Button
-										variant="ghost"
-										size="icon-xs"
-										aria-label={t("driveItemMenuTrigger")}
-										// Roving-tabindex-friendly — see DriveRow's identical comment.
-										tabIndex={active ? 0 : -1}
-										className="absolute top-1 right-1 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
-										onClick={event => {
-											// Must not select the tile — see itemMenu.tsx's own onClick for why a click
-											// inside the (portaled) menu content needs the same guard.
-											event.stopPropagation()
-										}}
-										onDoubleClick={event => {
-											event.stopPropagation()
-										}}
-									>
-										<MoreHorizontalIcon />
-									</Button>
-								}
-							/>
-							<DriveDropdownMenuContent
-								item={item}
-								variant={variant}
-								onItemAction={onItemAction}
-							/>
-						</DropdownMenu>
 					</div>
 				}
 			/>
