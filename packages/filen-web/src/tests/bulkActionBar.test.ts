@@ -170,6 +170,12 @@ describe("driveBulkActions", () => {
 		}
 	)
 
+	it("links variant, decryptable selection, none favorited: favorite, download, trash — move dropped (canMoveVariant), no share", () => {
+		const descriptors = driveBulkActions("links", flags({ includesFavorited: false, includesUndecryptable: false }))
+
+		expect(descriptors.map(d => d.id)).toEqual(["favorite", "download", "trash"])
+	})
+
 	// Bulk share gates like single-item share: the owned surfaces only (drive/recents/favorites/
 	// sharedOut), never shared-with-me, and never when the selection includes an undecryptable item.
 	it("share is present on sharedOut bulk but absent on sharedIn bulk (owned surfaces only)", () => {

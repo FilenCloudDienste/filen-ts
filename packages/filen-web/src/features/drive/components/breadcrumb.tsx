@@ -14,6 +14,7 @@ const VARIANT_ROOT_LABEL_KEY = {
 	recents: "driveRecents",
 	favorites: "driveFavorites",
 	trash: "driveTrash",
+	links: "driveLinks",
 	sharedIn: "driveSharedIn",
 	sharedOut: "driveSharedOut"
 } as const satisfies Record<DriveVariant, string>

@@ -27,9 +27,9 @@ export function driveListingQueryKey(params: DriveListingParams) {
 	return ["drive", "listing", params] as const
 }
 
-// Root only applies to the "drive" variant (client.root() has no equivalent for the three flat
-// listings); recents/favorites/trash are always their own flat listing regardless of how the caller
-// got there. The two shared variants list through their own worker ops (different result shapes — see
+// Root only applies to the "drive" variant (client.root() has no equivalent for the flat listings);
+// recents/favorites/trash/links are always their own flat listing regardless of how the caller got
+// there. The two shared variants list through their own worker ops (different result shapes — see
 // fetchSharedListing), never listDirectory, so they have no target here.
 export function toListingTarget(variant: DriveVariant, uuid: string | null): ListDirectoryTarget {
 	switch (variant) {
@@ -38,6 +38,7 @@ export function toListingTarget(variant: DriveVariant, uuid: string | null): Lis
 		case "recents":
 		case "favorites":
 		case "trash":
+		case "links":
 			return { kind: variant }
 		case "sharedIn":
 		case "sharedOut":

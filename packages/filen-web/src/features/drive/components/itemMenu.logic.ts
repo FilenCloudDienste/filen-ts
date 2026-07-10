@@ -1,7 +1,7 @@
 import { type LucideIcon } from "lucide-react"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { canMoveVariant, type DriveVariant } from "@/features/drive/lib/preferences"
 import { canShareVariant, isSharedVariant } from "@/features/drive/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
 import { startDownloads } from "@/features/drive/lib/download"
@@ -145,8 +145,16 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 		return actions
 	}
 
+	// MOVE is dropped in the links view (canMoveVariant) — see its own doc comment; the rest of the
+	// owned-item set (rename/favorite/color|versions/link/download/trash) is offered there unchanged.
 	const actions: ItemActionDescriptor[] = ownerMutable
-		? [RENAME, MOVE, favoriteDescriptor(item), asDirectoryOrFile(item).type === "directory" ? COLOR : VERSIONS, INFO]
+		? [
+				RENAME,
+				...(canMoveVariant(variant) ? [MOVE] : []),
+				favoriteDescriptor(item),
+				asDirectoryOrFile(item).type === "directory" ? COLOR : VERSIONS,
+				INFO
+			]
 		: [INFO]
 
 	// Download sits right after Info (the other read/reference action) — offered on every surface this

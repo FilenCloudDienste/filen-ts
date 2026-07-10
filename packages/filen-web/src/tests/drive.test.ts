@@ -190,7 +190,7 @@ describe("fetchDirectoryListing", () => {
 		expect(listDirectory).toHaveBeenCalledWith({ kind: "uuid", uuid: "some-uuid" })
 	})
 
-	it.each(["recents", "favorites", "trash"] as const)("targets the flat %s listing regardless of uuid", async variant => {
+	it.each(["recents", "favorites", "trash", "links"] as const)("targets the flat %s listing regardless of uuid", async variant => {
 		listDirectory.mockResolvedValueOnce({ dirs: [], files: [] })
 
 		await fetchDirectoryListing(variant, "some-uuid")
@@ -565,7 +565,7 @@ describe("toListingTarget", () => {
 		expect(toListingTarget("drive", "abc")).toEqual({ kind: "uuid", uuid: "abc" })
 	})
 
-	it.each(["recents", "favorites", "trash"] as const)("maps the flat %s variant to its own kind, ignoring uuid", variant => {
+	it.each(["recents", "favorites", "trash", "links"] as const)("maps the flat %s variant to its own kind, ignoring uuid", variant => {
 		expect(toListingTarget(variant, "ignored")).toEqual({ kind: variant })
 	})
 

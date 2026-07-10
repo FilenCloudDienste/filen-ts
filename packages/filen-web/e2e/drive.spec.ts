@@ -252,4 +252,59 @@ test.describe("drive", () => {
 		await page.keyboard.press("Escape")
 		await expect(dialog).toHaveCount(0)
 	})
+
+	// The FREE e2e account cannot create public links (a premium feature), so this leg is graceful-
+	// render only: the sidebar Links row must navigate to the /links virtual root, which renders the
+	// shell and settles to its listing-or-empty terminal state (whichever the live account happens to
+	// be), with no console errors on the links leg — never a link-creation flow. The nav is client-side
+	// (starting from /drive) rather than a cold goto("/links"): the e2e session-injection hook always
+	// lands the first authed load on /drive (see src/e2e-hooks/index.ts's seedFromSlot), so a deep-link
+	// cold load is not a path this harness can exercise.
+	test("the sidebar Links row navigates to the /links virtual root, which renders the shell and settles with no console errors", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await page.goto("/drive")
+		await waitForListingSettled(page)
+
+		// Scope the console-error capture to the links leg alone (post-boot): the assertion below is
+		// about the /links render, not the authed shell's own boot.
+		const consoleErrors: string[] = []
+
+		page.on("console", msg => {
+			if (msg.type() !== "error") {
+				return
+			}
+
+			const text = msg.text()
+
+			// arktype's benign CSP probe (see shell.spec.ts) — blocked by no-unsafe-eval, not a failure.
+			if (/unsafe-eval/i.test(text)) {
+				return
+			}
+
+			consoleErrors.push(text)
+		})
+
+		await page.getByRole("complementary").getByRole("link", { name: "Links", exact: true }).click()
+		await page.waitForURL(/\/links$/)
+
+		// The links query must settle to its own listing-or-empty terminal state (waitForListingSettled
+		// resolves on neither only for a real query error) before the shell/breadcrumb assertions.
+		await waitForListingSettled(page)
+
+		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+
+		const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" })
+		await expect(breadcrumb).toBeVisible()
+		const rootCrumb = breadcrumb.getByText("Links", { exact: true })
+		await expect(rootCrumb).toBeVisible()
+		await expect(rootCrumb).toHaveAttribute("aria-current", "page")
+
+		expect(consoleErrors, consoleErrors.join("\n")).toEqual([])
+	})
 })

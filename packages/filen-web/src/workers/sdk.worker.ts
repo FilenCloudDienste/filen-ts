@@ -211,7 +211,7 @@ async function preflightArtifacts(): Promise<string | null> {
 
 // Named (not inlined) so queries/drive.ts's target-mapping helper can import the exact union
 // instead of duplicating it.
-export type ListDirectoryTarget = { kind: "root" } | { kind: "uuid"; uuid: string } | { kind: "recents" | "favorites" | "trash" }
+export type ListDirectoryTarget = { kind: "root" } | { kind: "uuid"; uuid: string } | { kind: "recents" | "favorites" | "trash" | "links" }
 
 // The non-uuid arms of ParentUuid: pseudo-parent sentinels with no navigable ancestry, so
 // getItemPath has nothing to walk and would only fail (or stall) resolving them.
@@ -416,6 +416,10 @@ const api = {
 					return c.listFavorites()
 				case "trash":
 					return c.listTrash()
+				case "links":
+					// The owned items that carry a public link — a NormalDirsAndFiles like the other flat
+					// roots, so its dirs/files narrow to plain directory/file arms.
+					return c.listLinkedItems()
 				case "uuid": {
 					// Cache-first: a directory just listed as part of its own parent's listing is
 					// already held here, so browsing into it costs zero extra round trips.

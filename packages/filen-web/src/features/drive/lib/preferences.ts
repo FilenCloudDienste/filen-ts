@@ -3,10 +3,11 @@ import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { type DriveSortBy } from "@/features/drive/lib/sort"
 
 // The listing surfaces sort/view-mode preferences apply to — the NormalDirsAndFiles roots (My
-// Drive, recents, favorites, trash) plus the two shared roots (sharedIn/sharedOut), which carry the
-// widened DriveItem shape (see features/drive/lib/item.ts). links carry a different item shape entirely and
-// are not part of this surface yet.
-export type DriveVariant = "drive" | "recents" | "favorites" | "trash" | "sharedIn" | "sharedOut"
+// Drive, recents, favorites, trash, links), plus the two shared roots (sharedIn/sharedOut), which
+// carry the widened DriveItem shape (see features/drive/lib/item.ts). links lists via the SDK's own
+// listLinkedItems() (a NormalDirsAndFiles of the owned items that carry a public link), so its rows
+// are plain directory/file arms just like the other flat roots.
+export type DriveVariant = "drive" | "recents" | "favorites" | "trash" | "links" | "sharedIn" | "sharedOut"
 
 // Minimal location a preference is scoped to: which listing surface, and (for "drive") which
 // directory within it. `uuid` is null for the three flat listings and for My Drive's own root.
@@ -30,6 +31,15 @@ export interface DrivePreferences<T extends string> {
 // the user never sees.
 export function isSortableVariant(variant: DriveVariant): boolean {
 	return variant !== "recents"
+}
+
+// Move relocates an item within the owned drive tree — meaningless in the links view, a cross-tree
+// aggregation of every owned item that carries a public link (a "move" would silently reparent an
+// item the user is viewing purely for its link). Gates MOVE out of both the per-item menu and the
+// bulk bar for that variant alone; every other variant's move disposition is decided elsewhere
+// (isSharedVariant/trash), so this only ever subtracts links.
+export function canMoveVariant(variant: DriveVariant): boolean {
+	return variant !== "links"
 }
 
 const SORT_PREFERENCES_KV_KEY = "drive.sortPreferences.v1"

@@ -46,6 +46,8 @@ export const drive = {
 	driveFavorites: "Favorites",
 	/** Drive sidebar — item for trashed files and directories */
 	driveTrash: "Trash",
+	/** Drive breadcrumb — root label for the owned items that carry a public link */
+	driveLinks: "Links",
 	/** Drive breadcrumb — root label for the items other users share with you */
 	driveSharedIn: "Shared with me",
 	/** Drive breadcrumb — root label for the items you share with other users */

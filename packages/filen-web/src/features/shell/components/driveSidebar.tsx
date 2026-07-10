@@ -14,9 +14,9 @@ type IconType = ComponentType<{ className?: string }>
 
 // The flat listing surfaces, whose routes take no params — they ride NavItem's plain `to`. The splat
 // surfaces (the two shared roots) each take a required `_splat` param, so they can't share this
-// param-less union and render through SplatNavItem instead (see DriveRouteId). `links` alone stays
-// inert — its public-link listing surface ships later.
-type DriveSidebarRoute = "/recents" | "/favorites" | "/trash"
+// param-less union and render through SplatNavItem instead (see DriveRouteId). `/links` is flat too
+// (listLinkedItems has no nested path of its own), so it joins this union rather than SplatNavItem's.
+type DriveSidebarRoute = "/recents" | "/favorites" | "/trash" | "/links"
 
 // One entry per virtual-root row: a flat route (plain `to`), a splat route (`splatTo`, rendered at its
 // root), or an inert row (neither) — discriminated structurally so the whole IA stays one ordered
@@ -47,7 +47,8 @@ const NAV_ITEM_CLASS = cn(
 
 // `to` present renders a real `<Link>` — TanStack Router stamps `data-status="active"` and
 // `aria-current="page"` on it automatically whenever the current location matches. `to` absent
-// renders the original inert row — `links` has no destination yet.
+// renders an inert row — no live virtual root uses that arm today, kept for a future destination-less
+// entry.
 function NavItem({ icon: Icon, label, to }: { icon: IconType; label: string; to?: DriveSidebarRoute | undefined }) {
 	if (to === undefined) {
 		return (
@@ -154,7 +155,7 @@ export function DriveSidebar() {
 	const sharedItems: DriveSidebarItem[] = [
 		{ id: "sharedIn", label: t("common:driveSharedIn"), icon: UsersIcon, splatTo: "/shared-in/$" },
 		{ id: "sharedOut", label: t("common:driveSharedOut"), icon: Share2Icon, splatTo: "/shared-out/$" },
-		{ id: "links", label: t("common:driveLinks"), icon: Link2Icon }
+		{ id: "links", label: t("common:driveLinks"), icon: Link2Icon, to: "/links" }
 	]
 
 	function renderItem(item: DriveSidebarItem) {

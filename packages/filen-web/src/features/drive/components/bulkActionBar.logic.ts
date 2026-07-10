@@ -1,6 +1,6 @@
 import { type LucideIcon } from "lucide-react"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
-import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { canMoveVariant, type DriveVariant } from "@/features/drive/lib/preferences"
 import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { canShareVariant, isSharedVariant } from "@/features/drive/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
@@ -61,7 +61,12 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 				...(flags.includesFavorited ? ACTION_DEFS.unfavorite : ACTION_DEFS.favorite),
 				run: "direct"
 			})
-			descriptors.push({ id: "move", ...ACTION_DEFS.move, run: "dialog", dialogKind: "move" })
+
+			// MOVE is dropped in the links view (canMoveVariant) — matches the per-item menu's own
+			// omission; every other owned surface keeps it.
+			if (canMoveVariant(variant)) {
+				descriptors.push({ id: "move", ...ACTION_DEFS.move, run: "dialog", dialogKind: "move" })
+			}
 		}
 
 		// Share the whole selection with contacts — same undecryptable gate as favorite/move above (an

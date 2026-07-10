@@ -279,6 +279,37 @@ describe("driveItemActions (item menu gating)", () => {
 	})
 })
 
+// links lists owned items that carry a public link (listLinkedItems) — an owned surface, so it keeps
+// the full owner-mutating set EXCEPT move (canMoveVariant): a "move" in this cross-tree aggregation
+// would silently reparent an item the user is viewing for its link. Link management (publicLink/
+// copyLink) and download/info behave as on every other owned surface. Share is absent: canShareVariant
+// doesn't include links.
+describe("driveItemActions — links variant gating", () => {
+	it("directory: rename/favorite/color/info/download/publicLink/copyLink/trash, in that order (no move, no share)", () => {
+		expect(ids(dirItem(), "links")).toEqual(["rename", "favorite", "color", "info", "download", "publicLink", "copyLink", "trash"])
+	})
+
+	it("file: rename/favorite/versions/info/download/publicLink/copyLink/trash, in that order (no move, no share)", () => {
+		expect(ids(fileItem(), "links")).toEqual(["rename", "favorite", "versions", "info", "download", "publicLink", "copyLink", "trash"])
+	})
+
+	it("never offers move (the one action dropped versus drive/recents/favorites)", () => {
+		expect(ids(dirItem(), "links")).not.toContain("move")
+		expect(ids(fileItem(), "links")).not.toContain("move")
+	})
+
+	it("reaches link management (publicLink/copyLink both dispatch the link dialog)", () => {
+		const descriptors = driveItemActions(dirItem(), "links")
+		expect(descriptors.find(d => d.id === "publicLink")).toMatchObject({ run: "dialog", dialogKind: "link" })
+		expect(descriptors.find(d => d.id === "copyLink")).toMatchObject({ run: "dialog", dialogKind: "link" })
+	})
+
+	it("an undecryptable links item reduces to info/trash (same as any other owned surface)", () => {
+		const undecryptable = narrowItem(mockFile({ meta: { type: "encrypted", data: "ciphertext" } }))
+		expect(ids(undecryptable, "links")).toEqual(["info", "trash"])
+	})
+})
+
 // Unshare (removeSharedItem) is root-only — gated purely on item.type, never variant alone: only a
 // sharedRootDirectory/sharedRootFile arm carries the raw shareSource removeSharedItem needs (item.ts).
 describe("driveItemActions — unshare gating (shared-root arms only)", () => {
