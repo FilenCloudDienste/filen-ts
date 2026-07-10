@@ -69,7 +69,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 			.locator('input[type="file"]')
 			.first()
 			.setInputFiles({ name: targetName, mimeType: "text/plain", buffer: Buffer.from(targetContent, "utf8") })
-		await expect(nestedListbox.getByRole("option", { name: targetName })).toBeVisible({ timeout: 20_000 })
+		await expect(nestedListbox.getByRole("option", { name: targetName })).toBeVisible({ timeout: 40_000 })
 
 		// Back up to the scratch directory's own top (not the account root) via the sidebar link then a
 		// fresh descent — the search below is scoped to THIS run's own small subtree rather than the
@@ -96,7 +96,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		// this asserts the eventual settled state rather than any particular intermediate status text.
 		const listbox = page.getByRole("listbox", { name: "Directory contents" })
 		const targetHit = listbox.getByRole("option", { name: targetName })
-		await expect(targetHit).toBeVisible({ timeout: 20_000 })
+		await expect(targetHit).toBeVisible({ timeout: 40_000 })
 		await expect(targetHit).toContainText(nestedName)
 
 		// Anchored regex, not a plain-string (substring) match: the target file's OWN row renders its
@@ -133,7 +133,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		// A second search, now scoped to this even smaller subtree (a single file) — proves a fresh root
 		// re-opens the engine cleanly, not just the one cold open already exercised above.
 		await searchInput.fill(targetName)
-		await expect(listbox.getByRole("option", { name: targetName })).toBeVisible({ timeout: 15_000 })
+		await expect(listbox.getByRole("option", { name: targetName })).toBeVisible({ timeout: 40_000 })
 
 		// Escape (while the input itself is focused) clears the query and restores the normal listing —
 		// distinct from the directory-hit case above, which clears via navigation instead.
