@@ -1,6 +1,13 @@
 /// <reference lib="webworker" />
 import { log } from "@/lib/log"
-import { THUMB_DIR, THUMB_EXT, pickEvictions, type ThumbCacheEntry } from "@/features/drive/lib/thumbnails.logic"
+import {
+	THUMB_DIR,
+	THUMB_DIR_ROOT,
+	THUMB_GENERATION,
+	THUMB_EXT,
+	pickEvictions,
+	type ThumbCacheEntry
+} from "@/features/drive/lib/thumbnails.logic"
 
 // Worker-only OPFS blob store for cached thumbnails — no wasm import anywhere in this module, so it
 // stays trivially importable from sdk.worker.ts without dragging the SDK's own init/thread-pool
@@ -70,6 +77,32 @@ export async function listThumbs(): Promise<ThumbCacheEntry[]> {
 	}
 
 	return entries
+}
+
+// Evicts every generation directory under THUMB_DIR_ROOT other than the live THUMB_GENERATION — a
+// stale "v1" tree (the old 512px cache) never serves and never sits around consuming quota once this
+// has run. Called once per worker session alongside sweepThumbs (see sdk.worker.ts's
+// armThumbSweep), fire-and-forget: this is a housekeeping pass, not something a thumbnail request
+// should ever wait on. Per-entry failures are logged and skipped, same rationale as sweepThumbs'
+// eviction loop below — one locked directory must not strand every other stale generation.
+export async function removeStaleThumbGenerations(): Promise<void> {
+	let dir = await navigator.storage.getDirectory()
+
+	for (const segment of THUMB_DIR_ROOT) {
+		dir = await dir.getDirectoryHandle(segment, { create: true })
+	}
+
+	for await (const handle of dir.values()) {
+		if (handle.kind !== "directory" || handle.name === THUMB_GENERATION) {
+			continue
+		}
+
+		try {
+			await dir.removeEntry(handle.name, { recursive: true })
+		} catch (e) {
+			log.warn("thumb-store", "removeStaleThumbGenerations: evict failed", handle.name, e)
+		}
+	}
 }
 
 // Oldest-first cap enforcement — called once per worker session (see sdk.worker.ts's own once-flag)

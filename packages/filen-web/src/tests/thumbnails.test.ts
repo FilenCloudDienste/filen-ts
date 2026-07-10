@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { THUMB_MAX_DIM } from "@/features/drive/lib/thumbnails.logic"
 
 // Mock boundaries mirror download.test.ts's own: the real sdk client imports a Vite
 // `?worker` module (unresolvable/unwanted under node vitest), and the real thumb-cache module calls
@@ -197,7 +198,7 @@ describe("getThumbnailUrl — routing by category", () => {
 
 		await getThumbnailUrl(item, deps)
 
-		expect(deps.makeThumbnail).toHaveBeenCalledWith(item.type === "file" ? item.data : undefined, 512)
+		expect(deps.makeThumbnail).toHaveBeenCalledWith(item.type === "file" ? item.data : undefined, THUMB_MAX_DIM)
 		expect(deps.getGenerator).not.toHaveBeenCalled()
 	})
 
@@ -479,9 +480,9 @@ describe("registerThumbGenerator + defaultThumbnailDeps — real wiring", () => 
 		makeThumbnailMock.mockResolvedValue(new Uint8Array([1]))
 		const file = mockFile()
 
-		const result = await defaultThumbnailDeps.makeThumbnail(file, 512)
+		const result = await defaultThumbnailDeps.makeThumbnail(file, THUMB_MAX_DIM)
 
-		expect(makeThumbnailMock).toHaveBeenCalledWith(file, 512)
+		expect(makeThumbnailMock).toHaveBeenCalledWith(file, THUMB_MAX_DIM)
 		expect(result).toEqual(new Uint8Array([1]))
 	})
 

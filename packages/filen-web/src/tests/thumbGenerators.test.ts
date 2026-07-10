@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type BaseFileItem, type DriveItem } from "@/features/drive/lib/item"
 import { type ThumbGeneratorCategory, type ThumbGenerator } from "@/features/drive/lib/thumbnails"
+import { THUMB_MAX_DIM } from "@/features/drive/lib/thumbnails.logic"
 
 // Mock boundaries: registerThumbGenerator is replaced so module-scope registration (this file's own
 // side effect under test) never touches the real service's Map; the sdk client, download narrowing,
@@ -155,7 +156,7 @@ describe("generateHeicThumb", () => {
 		const result = await generateHeicThumb(heicItem())
 
 		expect(result).toEqual(new Uint8Array([9, 9]))
-		expect(transformHeicBytesMock).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]), { maxDimension: 512 })
+		expect(transformHeicBytesMock).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]), { maxDimension: THUMB_MAX_DIM })
 	})
 
 	it("resolves null when the transform rejects", async () => {

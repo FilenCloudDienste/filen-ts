@@ -46,7 +46,7 @@ import {
 	getSharedDirContext
 } from "@/features/drive/lib/cache"
 import { THUMB_CACHE_CAP } from "@/features/drive/lib/thumbnails.logic"
-import { sweepThumbs, writeThumb } from "@/workers/thumbStore"
+import { removeStaleThumbGenerations, sweepThumbs, writeThumb } from "@/workers/thumbStore"
 import { createSearchEngine, type SearchPush, type SearchSnapshotDTO } from "@/workers/searchEngine"
 
 // NEITHER a fixed `/` nor `/assets/`: the wasm holds a RELATIVE `./filen-sdk-worker-thread.js`
@@ -113,22 +113,27 @@ async function withPauseSignal<T>(
 // rather than borrowing that one.
 const previewAborts = new Map<string, AbortController>()
 
-// Fires sweepThumbs at most once per worker lifetime (this worker's own first makeThumbnail OR
-// storeThumbnail call, see armThumbSweep below), never re-armed — a long-lived tab's OPFS thumbnail
-// cache still gets cap-enforced without every generation paying for a listing pass.
+// Fires sweepThumbs and removeStaleThumbGenerations at most once per worker lifetime (this worker's
+// own first makeThumbnail OR storeThumbnail call, see armThumbSweep below), never re-armed — a
+// long-lived tab's OPFS thumbnail cache still gets cap-enforced and stale generations still get
+// reclaimed without every generation paying for a listing pass.
 let thumbsSweptThisSession = false
 
 // Arms the once-per-session eviction sweep — called from both makeThumbnail (the SDK-decoded route)
 // and storeThumbnail (every client-side heic/video/pdf generator's persist call), since a session
 // that only ever produces client-generated thumbnails (a directory with no plain raster images in it)
-// would otherwise never sweep at all. Fire-and-forget: eviction is a cap-enforcement housekeeping
-// pass, never something a thumbnail request should wait on.
+// would otherwise never sweep at all. Fire-and-forget, both passes: eviction and stale-generation
+// cleanup are housekeeping, never something a thumbnail request should wait on.
 function armThumbSweep(): void {
 	if (thumbsSweptThisSession) {
 		return
 	}
 
 	thumbsSweptThisSession = true
+
+	void removeStaleThumbGenerations().catch((e: unknown) => {
+		log.warn("sdk.worker", "removeStaleThumbGenerations failed", e)
+	})
 
 	void sweepThumbs(THUMB_CACHE_CAP).catch((e: unknown) => {
 		log.warn("sdk.worker", "sweepThumbs failed", e)

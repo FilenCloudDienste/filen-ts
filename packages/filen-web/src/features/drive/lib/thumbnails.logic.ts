@@ -8,7 +8,7 @@ export type ThumbnailCategory = "sdk-image" | "heic" | "video" | "pdf" | "none"
 
 // Square thumbnail bound (both dimensions) fed to makeThumbnailInMemory and, later, every
 // client-side generator — one shared target keeps every cached .thumb file roughly the same size.
-export const THUMB_MAX_DIM = 512
+export const THUMB_MAX_DIM = 256
 
 // Whole-buffer decode/generate ceiling (64 MiB) for the categories that pull the ENTIRE file into
 // memory to produce a thumbnail (sdk-image, heic, pdf) — an oversize file skips thumbnailing
@@ -20,9 +20,18 @@ export const THUMB_SIZE_GATE = 67_108_864n
 // this, so a long-lived session's thumbnail cache never grows unbounded.
 export const THUMB_CACHE_CAP = 268_435_456
 
-// OPFS path segments under the origin's private root. "v1" lets a future format change (a different
-// encode, a different max dimension) start from an empty store instead of migrating old bytes.
-export const THUMB_DIR = ["thumbnails", "v1"]
+// Parent OPFS directory holding every thumbnail-cache generation, each as its own child directory —
+// removeStaleThumbGenerations (thumbStore.ts) walks this root's children to evict everything that
+// isn't THUMB_GENERATION, so a format change reclaims the old bytes instead of leaking them forever.
+export const THUMB_DIR_ROOT = ["thumbnails"]
+
+// Bumped whenever the cached bytes themselves change shape (a different max dimension, a different
+// encode) — "v1" -> "v2" here for the 512 -> 256 THUMB_MAX_DIM drop above, so a stale 512px file can
+// never serve under the new code; the store starts empty and the old generation gets swept.
+export const THUMB_GENERATION = "v2"
+
+// OPFS path segments under the origin's private root for the live generation's own cache tree.
+export const THUMB_DIR = [...THUMB_DIR_ROOT, THUMB_GENERATION]
 
 export const THUMB_EXT = ".thumb"
 
