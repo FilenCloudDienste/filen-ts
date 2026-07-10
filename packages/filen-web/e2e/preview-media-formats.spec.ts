@@ -1,6 +1,7 @@
 import { test, expect } from "./fixtures"
 import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
+import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Format-specific preview rendering: image (the overlay's own pager loop), HEIC (client-side
 // transform), and PDF (multi-page scroll, password retry) — every leg opens a real worker/decoder
@@ -9,7 +10,6 @@ import { trackCspViolations } from "./helpers/csp"
 // /drive's root — this suite runs fullyParallel (playwright.config.ts), and a root-level create/trash
 // races drive.spec.ts's own root-listing assertions (see drive-actions.spec.ts's comment for the exact
 // failure this once produced live).
-const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
 
 // Sequential within this file (one worker), overriding the config's fullyParallel — the same
 // live-account rationale as drive-actions.spec.ts's own serial mode, but "default" so one test's

@@ -3,12 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test, expect } from "./fixtures"
 import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
-
-// Mirrors drive.spec.ts's own FIREFOX_HANG_REASON — every test below needs the listing's own
-// authenticated listDir call to settle before the picker inputs are even enabled (directoryListing.tsx's
-// writeDisabled gates on listingQuery.status), and that hangs indefinitely on Playwright-firefox under
-// COI (see drive.spec.ts's own comment for the live-verified root cause).
-const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
+import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Drag-and-drop upload — both the files dropzone and a dropped directory's FileSystemEntry walk — is
 // NOT covered anywhere in this suite: Playwright has no API to synthesize a real OS file drop (there is

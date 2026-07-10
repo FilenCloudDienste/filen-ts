@@ -1,10 +1,7 @@
 import { test, expect } from "./fixtures"
 import { waitForListingSettled, enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
-
-// Duplicated from preview.spec.ts/downloads.spec.ts rather than shared — this package has no
-// cross-spec e2e helpers module yet, and every other spec file here owns its helpers locally too.
-const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
+import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // A real 1x1 transparent PNG — the same fixture preview.spec.ts uses for its own image-preview leg.
 // The client-side createImageBitmap decode reads real bytes, so this has to be a genuinely valid

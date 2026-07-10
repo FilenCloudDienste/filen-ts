@@ -1,6 +1,7 @@
 import { test, expect } from "./fixtures"
 import { waitForListingSettled } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
+import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // The injected session's own account content (Cloud Drive's root) is real, live, and unknown ahead of
 // time — every test below holds regardless of whether it is empty or populated (see the per-test
@@ -9,13 +10,10 @@ import { resolveModKey } from "./helpers/modkey"
 // counterpart yet (trash/delete land in a later drive sub-slice) and the create logic itself already
 // has unit coverage (createDirectory.test.ts).
 //
-// Chromium-only, empirically (not merely per the reload/second-tab precedent auth.spec.ts and
-// storage.spec.ts document): every test here needs the listing's real, authenticated listDir call to
-// settle, and that hangs indefinitely on Playwright-firefox under COI — the same root cause
-// boot.spec.ts already carves probeAuthedRead out for, just reached from a different call site. Live-
-// verified: on firefox the listing sits on its loading skeleton forever and the toolbar stays
-// permanently disabled, never reaching either terminal render state.
-const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
+// Every test here needs the listing's real, authenticated listDir call to settle, which hangs on
+// Playwright-firefox — see helpers/firefox.ts (FIREFOX_HANG_REASON) for the proven root cause. Live-
+// verified: on firefox the listing sits on its loading skeleton forever, the toolbar stays permanently
+// disabled, and neither terminal render state is reached.
 
 test.describe("drive", () => {
 	test("the Cloud Drive listing renders the shell, breadcrumb, and directory contents region", async ({

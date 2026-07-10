@@ -3,6 +3,7 @@ import { SW_DOWNLOAD_PREFIX } from "@/lib/sw/protocol"
 import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
 import { waitForSwReady } from "./helpers/sw"
 import { trackCspViolations } from "./helpers/csp"
+import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // The one live proof the streamed-preview architecture actually works: a service worker is PROD-only
 // (never registered under `vite dev`), so this only ever runs against
@@ -16,7 +17,6 @@ import { trackCspViolations } from "./helpers/csp"
 // initial `preload="metadata"` fetch cannot plausibly cover the whole file — a mid-file seek is
 // guaranteed to need bytes beyond it. Net-zero via the same scratch-directory convention as
 // preview.spec.ts/downloads.spec.ts.
-const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
 
 // A real 1x1 transparent PNG — duplicated from preview.spec.ts (no cross-spec e2e helpers module).
 const PNG_BYTES = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64")

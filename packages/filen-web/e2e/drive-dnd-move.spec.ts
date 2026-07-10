@@ -1,10 +1,7 @@
 import type { ElementHandle, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { descendInto, enterScratchDirectory, trashScratchDirectory, waitForListingSettled } from "./helpers/listing"
-
-// Mirrors drive.spec.ts's FIREFOX_HANG_REASON — needs the authenticated listDir to settle (and the
-// New-directory / upload inputs it gates) before any drag, which hangs on Playwright-firefox under COI.
-const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
+import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Playwright's mouse cannot synthesize a native HTML5 drag (there is no way to populate a real
 // DataTransfer via move+down+up). Drive the exact browser event sequence instead: one shared

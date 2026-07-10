@@ -1,6 +1,7 @@
 import { test, expect } from "./fixtures"
 import { waitForListingSettled, enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
 import { resolveEditorModKey } from "./helpers/modkey"
+import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Preview overlay lifecycle: editable-text save/persist/dirty-guard (including cross-sibling paging),
 // and a trashed file's read-only preview variant. The edited/trashed files never leave their own
@@ -8,7 +9,6 @@ import { resolveEditorModKey } from "./helpers/modkey"
 // trashScratchDirectory convention) rather than at /drive's root — this suite runs fullyParallel
 // (playwright.config.ts), and a root-level create/trash races drive.spec.ts's own root-listing
 // assertions (see drive-actions.spec.ts's comment for the exact failure this once produced live).
-const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
 
 // Sequential within this file (one worker), overriding the config's fullyParallel — the same
 // live-account rationale as drive-actions.spec.ts's own serial mode, but "default" so one test's

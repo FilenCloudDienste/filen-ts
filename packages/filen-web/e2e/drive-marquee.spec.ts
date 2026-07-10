@@ -2,11 +2,7 @@ import type { Locator } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
-
-// Mirrors drive.spec.ts's own FIREFOX_HANG_REASON — this test needs the listing's authenticated listDir
-// call to settle (and the picker inputs it gates) before it can upload or marquee, and that hangs
-// indefinitely on Playwright-firefox under COI (see drive.spec.ts's comment for the live root cause).
-const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
+import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Strict null handling (no `!`): a locator with no box on screen is a real failure, surfaced here.
 async function boxOf(locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> {

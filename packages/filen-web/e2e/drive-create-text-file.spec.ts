@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures"
 import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // "New text file" (Upload menu's third entry, uploadMenu.tsx): create -> row appears instantly ->
 // editor opens automatically -> type + save round trip (the editable-preview save flow this reuses is
@@ -8,7 +9,6 @@ import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
 // rather than at /drive's root — this suite runs fullyParallel (playwright.config.ts), and a
 // root-level create/trash races other specs' own root-listing assertions (see drive-actions.spec.ts's
 // comment for the exact failure this once produced live).
-const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
 
 test.describe.configure({ mode: "default" })
 

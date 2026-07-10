@@ -5,6 +5,7 @@ import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
+import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Neither native picker is drivable by Playwright, so every FSA-path test below stubs
 // window.showSaveFilePicker (installed via addInitScript, before the app's own first script runs, so
@@ -23,7 +24,6 @@ import { MOD_KEY } from "./helpers/modkey"
 // invisible interaction with no visible affordance to assert against first). Selecting a row always
 // swaps the toolbar for the bulk bar, even for a single-item selection (directoryListing.tsx), so one
 // trigger covers both the single-file and the zip path below.
-const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
 
 // Ambient shim for window.showSaveFilePicker, merged with e2e/global.d.ts's own Window augmentation
 // (same program, same declaration-merging rules) rather than touching that file -- this isn't a real

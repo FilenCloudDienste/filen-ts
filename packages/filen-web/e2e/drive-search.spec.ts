@@ -3,10 +3,7 @@ import { test, expect } from "./fixtures"
 import { waitForListingSettled, trashScratchDirectory, descendInto } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
-
-// Duplicated from drive.spec.ts/preview.spec.ts rather than shared — this package has no cross-spec
-// e2e helpers module yet, and every other spec file here owns its helpers locally too.
-const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
+import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 async function createDirectory(page: Page, listbox: ReturnType<Page["getByRole"]>, name: string): Promise<void> {
 	await page.getByRole("button", { name: "New directory", exact: true }).click()

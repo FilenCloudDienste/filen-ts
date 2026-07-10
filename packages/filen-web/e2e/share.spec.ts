@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures"
 import { waitForListingSettled, dismissStartupReminders } from "./helpers/listing"
+import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Sharing/unsharing are OUTWARD-FACING mutations (a share reaches ANOTHER account; unshare revokes
 // real access) and premium-gated, so every test below is render/gate-only — the contact picker is
@@ -10,10 +11,8 @@ import { waitForListingSettled, dismissStartupReminders } from "./helpers/listin
 // nothing to exercise in-browser on this account (no shared items to filter or unshare, no blocked
 // contacts to unblock) — both are covered by unit tests and manual QA instead, not here.
 //
-// Mirrors drive.spec.ts's own FIREFOX_HANG_REASON — every test below needs an authenticated listDir
-// call to settle (the shared listings, or /drive itself for the picker test), and that hangs
-// indefinitely on Playwright-firefox under COI.
-const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
+// Every test below needs an authenticated listDir call to settle (the shared listings, or /drive
+// itself for the picker test), which hangs on Playwright-firefox — see helpers/firefox.ts.
 
 test.describe("sharing", () => {
 	test("shared surfaces render and activate from the sidebar", async ({ page, injectedSession, browserName }) => {

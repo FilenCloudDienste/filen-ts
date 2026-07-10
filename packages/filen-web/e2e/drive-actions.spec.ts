@@ -1,11 +1,7 @@
 import { test, expect } from "./fixtures"
 import { waitForListingSettled, descendInto } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
-
-// Mirrors drive.spec.ts's own FIREFOX_HANG_REASON — every test below needs the SAME authenticated
-// listDir call to settle before it can do anything, and that hangs indefinitely on Playwright-firefox
-// under COI (see drive.spec.ts's own comment for the live-verified root cause).
-const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
+import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Serial, not parallel: the account is shared LIVE state, and the last test creates/selects/trashes/
 // restores real items by name — running it alongside this file's own other tests (which each select

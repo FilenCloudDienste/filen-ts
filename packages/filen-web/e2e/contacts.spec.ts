@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { dismissStartupReminders } from "./helpers/listing"
+import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Contact requests, blocks, and removals are OUTWARD-FACING: a request lands in another Filen
 // account's inbox, and a block/remove changes another account's own contact list too. Unlike drive's
@@ -17,11 +18,8 @@ import { dismissStartupReminders } from "./helpers/listing"
 // by a real in-app click on the rail link — see gotoContacts below, the one path that survives it.
 //
 // Chromium-only: ContactsList fires two real authenticated reads on mount (useContactsQuery,
-// useContactRequestsQuery), the same sdkApi call path drive's listDir hangs on under
-// Playwright-firefox + COI (see drive.spec.ts's own FIREFOX_HANG_REASON) — reached from a different
-// call site, but the same underlying worker/COI root cause.
-const FIREFOX_HANG_REASON =
-	"contacts needs authenticated getContacts/listContactRequests calls, which hang indefinitely on Playwright-firefox under COI"
+// useContactRequestsQuery) — the same worker cross-origin SDK call path drive's listDir hangs on, from
+// a different call site but the same root cause (helpers/firefox.ts, FIREFOX_HANG_REASON).
 
 // The one path into /contacts that survives the injection hook's own re-seed-then-navigate (see the
 // module doc comment above): goto("/drive") always lands correctly, then a real in-app client-side
