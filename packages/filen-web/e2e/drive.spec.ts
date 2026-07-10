@@ -2,7 +2,7 @@ import { test, expect } from "./fixtures"
 import { waitForListingSettled } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 
-// The injected session's own account content (My Drive's root) is real, live, and unknown ahead of
+// The injected session's own account content (Cloud Drive's root) is real, live, and unknown ahead of
 // time — every test below holds regardless of whether it is empty or populated (see the per-test
 // resilience notes). Nothing here ever creates, renames, moves, or deletes anything: the new-directory
 // flow is exercised only up to dialog validation, never submitted — a live create has no net-zero
@@ -18,7 +18,7 @@ import { resolveModKey } from "./helpers/modkey"
 const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
 
 test.describe("drive", () => {
-	test("the My Drive listing renders the shell, breadcrumb, and directory contents region", async ({
+	test("the Cloud Drive listing renders the shell, breadcrumb, and directory contents region", async ({
 		page,
 		injectedSession,
 		browserName
@@ -31,7 +31,7 @@ test.describe("drive", () => {
 
 		const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" })
 		await expect(breadcrumb).toBeVisible()
-		const rootCrumb = breadcrumb.getByText("My Drive", { exact: true })
+		const rootCrumb = breadcrumb.getByText("Cloud Drive", { exact: true })
 		await expect(rootCrumb).toBeVisible()
 		await expect(rootCrumb).toHaveAttribute("aria-current", "page")
 
@@ -79,7 +79,7 @@ test.describe("drive", () => {
 
 		// The root breadcrumb segment becomes a real link once a step deeper than root.
 		const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" })
-		await expect(breadcrumb.getByRole("link", { name: "My Drive", exact: true })).toBeVisible()
+		await expect(breadcrumb.getByRole("link", { name: "Cloud Drive", exact: true })).toBeVisible()
 
 		// The listing re-queries for the new directory and settles the same way root did.
 		await waitForListingSettled(page)

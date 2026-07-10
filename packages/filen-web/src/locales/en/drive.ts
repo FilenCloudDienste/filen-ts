@@ -37,7 +37,7 @@ export const drive = {
 
 	// ── Sidebar ──────────────────────────────────────────────────────────────
 	/** Drive sidebar — root item for the user's own drive */
-	driveMyDrive: "My Drive",
+	driveMyDrive: "Cloud Drive",
 	/** Drive sidebar — item listing recent files */
 	driveRecents: "Recents",
 	/** Drive sidebar — item listing favorited files and directories */
@@ -48,6 +48,10 @@ export const drive = {
 	driveSharedIn: "Shared with me",
 	/** Drive breadcrumb — root label for the items you share with other users */
 	driveSharedOut: "Shared with others",
+	/** Drive sidebar tree — accessible label on the chevron that expands a directory node; {{name}} = directory name */
+	driveTreeExpandNode: "Expand {{name}}",
+	/** Drive sidebar tree — accessible label on the chevron that collapses a directory node; {{name}} = directory name */
+	driveTreeCollapseNode: "Collapse {{name}}",
 
 	// ── Empty state ──────────────────────────────────────────────────────────
 	/** Drive page — empty-state title for a directory with no content */

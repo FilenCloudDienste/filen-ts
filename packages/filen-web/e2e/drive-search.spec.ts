@@ -79,7 +79,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		// bounded ~5s a two-item scratch subtree converges in (the number the timeouts below are sized
 		// against) — reproduced live: an account-root-scoped search here timed out past 45s. Subtree
 		// recursion is still fully proven (the file sits two levels below where the search opens).
-		await page.getByRole("complementary").getByRole("link", { name: "My Drive", exact: true }).click()
+		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
 		const { listbox: rootListboxAgain } = await waitForListingSettled(page)
 		await rootListboxAgain.getByRole("option", { name: scratchName }).dblclick()
 		await waitForListingSettled(page)

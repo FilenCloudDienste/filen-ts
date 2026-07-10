@@ -70,6 +70,45 @@ export function useDirectoryListingQuery(variant: DriveVariant, uuid: string | n
 	})
 }
 
+// Sidebar directory-tree primitive: the minimal per-node shape the collapsible Cloud Drive tree
+// renders — just a uuid and a display name (its raw meta name, uuid-fallback like every listing row).
+// Deliberately narrower than DriveItem: the tree only ever shows directories and never needs their
+// files, meta, sort keys or share context, so it keys its own cache slice rather than reusing (and
+// force-fetching the files of) the full listing query. The move-dialog can adopt the same primitive
+// later by feeding it this same hook.
+export interface DirectoryTreeChild {
+	uuid: string
+	name: string
+}
+
+export function directoryTreeQueryKey(uuid: string | null) {
+	return ["drive", "tree", uuid] as const
+}
+
+// Reuses the existing listDirectory worker op (no new SDK surface) and filters to directories
+// client-side — the tree never lists a directory's files. `uuid === null` is the drive root, matching
+// toListingTarget's own root sentinel. Exported bare (no hook wrapper) so this project's
+// node-environment unit tests can exercise it against a mocked sdkApi, same as fetchDirectoryListing.
+export async function fetchDirectoryTreeChildren(uuid: string | null): Promise<DirectoryTreeChild[]> {
+	const { dirs } = await sdkApi.listDirectory(uuid === null ? { kind: "root" } : { kind: "uuid", uuid })
+	return dirs.map(dir => {
+		const item = narrowItem(dir)
+		return { uuid: item.data.uuid, name: item.data.decryptedMeta?.name ?? item.data.uuid }
+	})
+}
+
+// One query per tree node, lazily fetched: a node's children are only requested once its own subtree
+// mounts (the tree renders a node's DirectoryTree child only while it's open — see directoryTree.tsx),
+// so an unopened node never fetches. Keyed per uuid in the shared TanStack cache, so re-expanding a
+// previously-opened node serves instantly from cache and a directory listing already viewed elsewhere
+// stays independent of this slice.
+export function useDirectoryTreeChildrenQuery(uuid: string | null): UseQueryResult<DirectoryTreeChild[]> {
+	return useQuery({
+		queryKey: directoryTreeQueryKey(uuid),
+		queryFn: () => fetchDirectoryTreeChildren(uuid)
+	})
+}
+
 // Shared listings, keyed in the same taxonomy as normal listings (variant carries sharedIn/sharedOut)
 // but fetched through their own worker ops. A null uuid lists the shared root (each returned item
 // already carries its own share role, so narrowItem classifies it structurally); a non-null uuid

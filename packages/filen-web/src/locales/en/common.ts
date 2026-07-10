@@ -52,6 +52,8 @@ export const common = {
 	signOut: "Sign out",
 	/** Icon rail — tooltip + accessible label on the storage-usage meter */
 	storage: "Storage",
+	/** Drive sidebar — storage meter caption; {{used}} and {{total}} are pre-formatted byte sizes (e.g. "1.2 GB of 100 GB used") */
+	storageUsage: "{{used}} of {{total}} used",
 	/** Icon rail — collapse toggle accessible label while the sidebar is shown (clicking hides it) */
 	collapseSidebar: "Collapse sidebar",
 	/** Icon rail — collapse toggle accessible label while the sidebar is hidden (clicking shows it) */

@@ -57,13 +57,13 @@ export async function enterScratchDirectory(
 // Failure-proof companion to enterScratchDirectory above — called from every test's own finally, so
 // the scratch directory (and everything created/uploaded into it) is trashed even when an assertion
 // above throws. Escape first: authed specs may leave a popover/overlay open (Transfers popover,
-// preview overlay) close enough to the sidebar to risk covering its own "My Drive" link, and
+// preview overlay) close enough to the sidebar to risk covering its own "Cloud Drive" link, and
 // dismissing an already-closed one is a harmless no-op. `confirmTimeoutMs` lets a caller whose scratch
 // directory holds a larger subtree (e.g. drive-search.spec.ts's nested tree) widen the confirm-dialog
 // wait past the default.
 export async function trashScratchDirectory(page: Page, name: string, confirmTimeoutMs?: number): Promise<void> {
 	await page.keyboard.press("Escape")
-	await page.getByRole("complementary").getByRole("link", { name: "My Drive", exact: true }).click()
+	await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
 
 	const { listbox } = await waitForListingSettled(page)
 	const row = listbox.getByRole("option", { name })

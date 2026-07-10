@@ -226,7 +226,7 @@ test.describe("drive bulk actions", () => {
 
 		// restoreItems restores each item to its OWN previous parent — the scratch directory, not root
 		// — so getting back to them means re-descending, not just returning to /drive.
-		await page.getByRole("complementary").getByRole("link", { name: "My Drive", exact: true }).click()
+		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
 		const rootAfterRestore = await waitForListingSettled(page)
 		const scratchRowAfterRestore = rootAfterRestore.listbox.getByRole("option", { name: scratchName })
 		await expect(scratchRowAfterRestore).toBeVisible()
@@ -252,7 +252,7 @@ test.describe("drive bulk actions", () => {
 		// Final cleanup: trash the now-empty scratch directory itself — the only other root-level
 		// mutation this test makes, ending everything in Trash (recoverable, net-zero on the live
 		// account: nothing permanent was created or destroyed).
-		await page.getByRole("complementary").getByRole("link", { name: "My Drive", exact: true }).click()
+		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
 		const rootBeforeFinalCleanup = await waitForListingSettled(page)
 		const finalScratchRow = rootBeforeFinalCleanup.listbox.getByRole("option", { name: scratchName })
 		await expect(finalScratchRow).toBeVisible()
