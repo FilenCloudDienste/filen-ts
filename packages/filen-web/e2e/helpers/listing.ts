@@ -48,8 +48,15 @@ export async function enterScratchDirectory(
 
 	// A real double-click (an in-app client-side route change) — everything the calling test does
 	// until trashScratchDirectory below stays inside this directory and never touches the root
-	// listing again.
-	await scratchRow.dblclick()
+	// listing again. Retried until the URL actually grows a splat segment: on the shared live
+	// listing a freshly created row can shift position between the double-click's two clicks (the
+	// optimistic insert settles against the confirming refetch while parallel specs churn the same
+	// root), in which case the two clicks land on different rows and no navigation happens. Failing
+	// here, loudly, also prevents every downstream step from leaking root-level artifacts.
+	await expect(async () => {
+		await scratchRow.dblclick()
+		await page.waitForURL(/\/drive\/[^/]+/, { timeout: 3000 })
+	}).toPass({ timeout: 30_000 })
 
 	return waitForListingSettled(page)
 }
