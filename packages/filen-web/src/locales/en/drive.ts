@@ -48,6 +48,10 @@ export const drive = {
 	driveSharedIn: "Shared with me",
 	/** Drive breadcrumb — root label for the items you share with other users */
 	driveSharedOut: "Shared with others",
+	/** Drive sidebar — group header over the recents/favorites/trash rows */
+	driveGroupOther: "Other",
+	/** Drive sidebar — group header over the sharing and public-link rows */
+	driveGroupShared: "Shared",
 	/** Drive sidebar tree — accessible label on the chevron that expands a directory node; {{name}} = directory name */
 	driveTreeExpandNode: "Expand {{name}}",
 	/** Drive sidebar tree — accessible label on the chevron that collapses a directory node; {{name}} = directory name */

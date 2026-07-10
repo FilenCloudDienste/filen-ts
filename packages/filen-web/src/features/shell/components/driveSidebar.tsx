@@ -32,6 +32,9 @@ type DriveSidebarItem =
 // descendant's recorded state untouched (see useDirectoryTreeStore).
 const ROOT_KEY = "root"
 
+// Muted group header over each virtual-root cluster ("Other", "Shared").
+const GROUP_HEADER_CLASS = "px-2.5 pt-4 pb-1 text-xs font-medium text-muted-foreground/80"
+
 // Shared by NavItem and the splat links below, so all stay visually identical without recomputing the
 // same static class string on every render.
 const NAV_ITEM_CLASS = cn(
@@ -140,25 +143,46 @@ export function DriveSidebar() {
 		useChildren: useDirectoryTreeChildrenQuery
 	}
 
-	// Virtual roots, grouped below the tree. Built inside the component rather than as a module-level
-	// constant: its labels span two namespaces (the drive listing surface plus the still-common
-	// sharing/link destinations), so each needs its own resolved `t()` call.
-	const items: DriveSidebarItem[] = [
+	// Virtual roots in two groups, each under a muted header. Built inside the component rather than as
+	// module-level constants: labels span two namespaces (the drive listing surface plus the
+	// still-common sharing/link destinations), so each needs its own resolved `t()` call.
+	const otherItems: DriveSidebarItem[] = [
 		{ id: "recents", label: t("driveRecents"), icon: ClockIcon, to: "/recents" },
 		{ id: "favorites", label: t("driveFavorites"), icon: StarIcon, to: "/favorites" },
-		{ id: "trash", label: t("driveTrash"), icon: Trash2Icon, to: "/trash" },
+		{ id: "trash", label: t("driveTrash"), icon: Trash2Icon, to: "/trash" }
+	]
+	const sharedItems: DriveSidebarItem[] = [
 		{ id: "sharedIn", label: t("common:driveSharedIn"), icon: UsersIcon, splatTo: "/shared-in/$" },
 		{ id: "sharedOut", label: t("common:driveSharedOut"), icon: Share2Icon, splatTo: "/shared-out/$" },
 		{ id: "links", label: t("common:driveLinks"), icon: Link2Icon }
 	]
 
+	function renderItem(item: DriveSidebarItem) {
+		return "splatTo" in item ? (
+			<SplatNavItem
+				key={item.id}
+				icon={item.icon}
+				label={item.label}
+				to={item.splatTo}
+			/>
+		) : (
+			<NavItem
+				key={item.id}
+				icon={item.icon}
+				label={item.label}
+				to={"to" in item ? item.to : undefined}
+			/>
+		)
+	}
+
 	return (
 		<aside
 			// Drag region (Electron plumbing): inert in a plain browser (-webkit-app-region is ignored
 			// outside Chromium/Electron). Interactive descendants opt back out with app-region-no-drag.
-			className="hidden h-full w-52 shrink-0 flex-col bg-sidebar app-region-drag md:flex"
+			className="hidden w-48 shrink-0 flex-col rounded-xl bg-sidebar app-region-drag md:flex"
 		>
-			<div className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
+			<div className="flex flex-1 flex-col overflow-y-auto p-3">
+				<h2 className="truncate px-2.5 pt-1 pb-2.5 text-[15px] font-semibold">{t("driveMyDrive")}</h2>
 				<div className="flex flex-col gap-0.5">
 					<CloudDriveRoot
 						label={t("driveMyDrive")}
@@ -169,26 +193,10 @@ export function DriveSidebar() {
 					/>
 					{rootOpen ? <DirectoryTree tree={tree} /> : null}
 				</div>
-				<Separator className="my-2 bg-border/50" />
-				<div className="flex flex-col gap-0.5">
-					{items.map(item =>
-						"splatTo" in item ? (
-							<SplatNavItem
-								key={item.id}
-								icon={item.icon}
-								label={item.label}
-								to={item.splatTo}
-							/>
-						) : (
-							<NavItem
-								key={item.id}
-								icon={item.icon}
-								label={item.label}
-								to={"to" in item ? item.to : undefined}
-							/>
-						)
-					)}
-				</div>
+				<p className={GROUP_HEADER_CLASS}>{t("driveGroupOther")}</p>
+				<div className="flex flex-col gap-0.5">{otherItems.map(renderItem)}</div>
+				<p className={GROUP_HEADER_CLASS}>{t("driveGroupShared")}</p>
+				<div className="flex flex-col gap-0.5">{sharedItems.map(renderItem)}</div>
 			</div>
 			{/* Bottom block: storage-usage meter above a tonal-only separator (no hard rule). */}
 			<div className="shrink-0 px-3 pb-3">

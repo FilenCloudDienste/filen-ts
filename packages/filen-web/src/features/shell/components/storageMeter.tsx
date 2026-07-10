@@ -16,26 +16,31 @@ export function StorageMeter() {
 	const { t } = useTranslation("common")
 	const accountQuery = useAccountQuery()
 
-	if (accountQuery.status === "pending") {
-		return (
-			<div className={BLOCK_HEIGHT}>
-				<Skeleton className="h-2 w-full rounded-2xl" />
-				<Skeleton className="mt-2 h-3 w-32 rounded-md" />
-			</div>
-		)
-	}
+	return (
+		<div>
+			<p className="mb-2 text-xs font-medium text-muted-foreground/80">{t("usage")}</p>
+			{accountQuery.status === "pending" ? (
+				<div className={BLOCK_HEIGHT}>
+					<Skeleton className="h-2 w-full rounded-2xl" />
+					<Skeleton className="mt-2 h-3 w-32 rounded-md" />
+				</div>
+			) : accountQuery.status === "error" ? (
+				<div
+					className={BLOCK_HEIGHT}
+					aria-hidden="true"
+				/>
+			) : (
+				<StorageRow
+					used={Number(accountQuery.data.storageUsed)}
+					max={Number(accountQuery.data.maxStorage)}
+				/>
+			)}
+		</div>
+	)
+}
 
-	if (accountQuery.status === "error") {
-		return (
-			<div
-				className={BLOCK_HEIGHT}
-				aria-hidden="true"
-			/>
-		)
-	}
-
-	const used = Number(accountQuery.data.storageUsed)
-	const max = Number(accountQuery.data.maxStorage)
+function StorageRow({ used, max }: { used: number; max: number }) {
+	const { t } = useTranslation("common")
 	const percent = max > 0 ? Math.min(100, Math.max(0, (used / max) * 100)) : 0
 
 	return (
