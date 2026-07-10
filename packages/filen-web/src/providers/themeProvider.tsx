@@ -2,6 +2,7 @@
 import * as React from "react"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
+import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 
 type Theme = "dark" | "light" | "system"
 type ResolvedTheme = "dark" | "light"
@@ -131,9 +132,19 @@ export function ThemeProvider({
 	// excluded by react-hotkeys-hook's own combo-matching and `enableOnFormTags`/
 	// `enableOnContentEditable` defaults (both false), and `useAction`'s default `ignoreEventWhen`
 	// drops key-repeat — together the same guards the old hand-rolled listener implemented itself.
+	// That combo-matching alone does NOT cover a READ-ONLY surface with focus (e.g. the preview
+	// overlay's rendered-markdown or read-only-CodeMirror panes: neither is a form tag, and neither
+	// sets `contenteditable`), so this provider — mounted above the whole app, outside the drive
+	// feature's own isDialogOpen chain (directoryListing.tsx/useDriveDialogHost.tsx) — additionally
+	// guards on isAnyDialogOpen(), the shared Base UI signal (see dialogGuard.ts) that catches the
+	// preview overlay the same way it catches every other modal dialog.
 	useAction(
 		"app.toggleTheme",
 		() => {
+			if (isAnyDialogOpen()) {
+				return
+			}
+
 			setThemeState(currentTheme => {
 				const nextTheme =
 					currentTheme === "dark" ? "light" : currentTheme === "light" ? "dark" : getSystemTheme() === "dark" ? "light" : "dark"

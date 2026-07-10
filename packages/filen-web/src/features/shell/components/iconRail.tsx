@@ -44,6 +44,7 @@ import {
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
+import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import { Kbd } from "@/lib/keymap/kbd"
 
 // Registered at module scope (runs once per module evaluation — mirrors themeProvider.tsx's own
@@ -316,10 +317,17 @@ export function IconRail() {
 
 	// Registered above at module scope (default unassigned) — this only wires the LIVE combo, which
 	// starts as "" (react-hotkeys-hook's parser treats it as "never matches") and works the instant a
-	// user rebinds it via a future shortcuts UI, with no further code change.
+	// user rebinds it via a future shortcuts UI, with no further code change. Guarded on
+	// isAnyDialogOpen() (dialogGuard.ts, the same shared Base UI signal themeProvider.tsx uses — this
+	// rail is mounted outside the drive feature's own isDialogOpen chain too) so a rebound combo can't
+	// navigate away out from under an open dialog/preview.
 	useAction(
 		"app.openSettings",
 		() => {
+			if (isAnyDialogOpen()) {
+				return
+			}
+
 			void navigate({ to: "/settings/security" })
 		},
 		undefined,
@@ -330,6 +338,10 @@ export function IconRail() {
 	useAction(
 		"app.openTransfers",
 		() => {
+			if (isAnyDialogOpen()) {
+				return
+			}
+
 			void navigate({ to: "/transfers" })
 		},
 		undefined,

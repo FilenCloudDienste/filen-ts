@@ -552,6 +552,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						<NewDirectory
 							parentUuid={uuid}
 							disabled={writeDisabled}
+							dialogOpen={isDialogOpen}
 						/>
 						<UploadMenu
 							parentUuid={uuid}
@@ -583,6 +584,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							value={search.input}
 							onChange={search.setInput}
 							onClear={search.clear}
+							dialogOpen={isDialogOpen}
 						/>
 					) : null}
 				</div>

@@ -22,22 +22,33 @@ export interface SearchInputProps {
 	value: string
 	onChange: (value: string) => void
 	onClear: () => void
+	// directoryListing.tsx's own useDriveDialogHost().isDialogOpen — see newDirectory.tsx's identical
+	// prop for the full rationale (covers the preview overlay too). Without this, mod+f while a
+	// dialog/preview is open would steal focus onto this input, sitting behind the dialog's own focus
+	// trap.
+	dialogOpen: boolean
 }
 
-export function SearchInput({ value, onChange, onClear }: SearchInputProps) {
+export function SearchInput({ value, onChange, onClear, dialogOpen }: SearchInputProps) {
 	const { t } = useTranslation("drive")
 	const inputRef = useRef<HTMLInputElement>(null)
 
 	// Registered above at module scope. preventDefault unconditionally — every browser intercepts
-	// mod+f for its own find-in-page, which must never fire while a drive listing has this mounted.
+	// mod+f for its own find-in-page, which must never fire while a drive listing has this mounted;
+	// the focus steal itself is guarded on dialogOpen (see its own prop comment).
 	useAction(
 		"drive.search",
 		keyboardEvent => {
 			keyboardEvent.preventDefault()
+
+			if (dialogOpen) {
+				return
+			}
+
 			inputRef.current?.focus()
 		},
 		undefined,
-		[]
+		[dialogOpen]
 	)
 
 	return (

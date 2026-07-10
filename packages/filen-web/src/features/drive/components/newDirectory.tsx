@@ -31,24 +31,31 @@ export interface NewDirectoryProps {
 	// into) or while the listing hasn't loaded yet — mirrors SortMenu's disabled-not-hidden
 	// convention so the toolbar's layout stays stable across variant switches.
 	disabled?: boolean
+	// directoryListing.tsx's own useDriveDialogHost().isDialogOpen — true while ANY of that host's
+	// dialogs (including the preview overlay, kind:"preview") is open. Threaded in rather than read
+	// here directly since the host lives one level up; guards this action the same way its
+	// drive.selectAll/clearSelection/toggleView/rename/trash/download siblings guard themselves in
+	// directoryListing.tsx.
+	dialogOpen: boolean
 }
 
-export function NewDirectory({ parentUuid, disabled = false }: NewDirectoryProps) {
+export function NewDirectory({ parentUuid, disabled = false, dialogOpen }: NewDirectoryProps) {
 	const { t } = useTranslation("drive")
 	const [open, setOpen] = useState(false)
 	const [pending, setPending] = useState(false)
 
-	// Registered above at module scope. Guards on `disabled` itself (rather than being conditionally
-	// registered/mounted) since a keyboard command's live handler must stay a plain hook call.
+	// Registered above at module scope. Guards on `disabled`/`dialogOpen` themselves (rather than
+	// being conditionally registered/mounted) since a keyboard command's live handler must stay a
+	// plain hook call.
 	useAction(
 		"drive.newDirectory",
 		() => {
-			if (!disabled) {
+			if (!disabled && !dialogOpen) {
 				setOpen(true)
 			}
 		},
 		undefined,
-		[disabled]
+		[disabled, dialogOpen]
 	)
 
 	async function handleSubmit(name: string): Promise<void> {
