@@ -119,6 +119,14 @@ test.describe("drive bulk actions", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
+		// Same tall-viewport workaround as enterScratchDirectory (listing.ts): both the root and the
+		// trash listing virtualize their rows, and the shared account's /trash has accumulated enough
+		// leftover directories from prior runs of this very test that a freshly-trashed row can sort
+		// below the virtualizer's render window and never mount, making a name-based row locator miss it
+		// entirely. A tall viewport makes the scroll container exceed any realistic item count's total
+		// row height so every row renders for the rest of this test.
+		await page.setViewportSize({ width: 1280, height: 8000 })
+
 		const suffix = crypto.randomUUID()
 		const scratchName = `e2e-bulk-actions-${suffix}`
 		const nameA = `e2e-bulk-actions-${suffix}-a`
