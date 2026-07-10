@@ -27,6 +27,9 @@ export interface DriveListboxNav {
 	safeActiveIndex: number
 	handleKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void
 	handlePointerSelect: (index: number, event: MouseEvent<HTMLDivElement>) => void
+	// Moves the roving cursor + range anchor to `index` without scrolling/focusing — mirrors what a
+	// plain click does (setActive + setAnchor), used by the marquee to land the cursor at drag end.
+	setCursor: (index: number) => void
 }
 
 // ARIA listbox roving-cursor navigation on top of the virtualizer: owns the cursor (activeIndex) and
@@ -212,5 +215,12 @@ export function useDriveListboxNav({
 		}
 	}
 
-	return { safeActiveIndex, handleKeyDown, handlePointerSelect }
+	function setCursor(index: number) {
+		const clamped = clampListboxIndex(index, items.length)
+
+		setActiveIndex(clamped)
+		setAnchorIndex(clamped)
+	}
+
+	return { safeActiveIndex, handleKeyDown, handlePointerSelect, setCursor }
 }

@@ -56,6 +56,7 @@ import { searchHitNavigationTarget } from "@/features/drive/hooks/useDriveSearch
 import { useDriveVirtualizer } from "@/features/drive/hooks/useDriveVirtualizer"
 import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
 import { useDriveListboxNav } from "@/features/drive/hooks/useDriveListboxNav"
+import { useDriveMarquee } from "@/features/drive/hooks/useDriveMarquee"
 import { useDriveDialogHost } from "@/features/drive/hooks/useDriveDialogHost"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -197,10 +198,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			selectedItems
 		})
 
-	const { setScrollElement, columns, listVirtualizer, gridVirtualizer, activeVirtualizer, registerRef, itemRefs } = useDriveVirtualizer(
-		sortedItems,
-		effectiveViewMode
-	)
+	const { setScrollElement, scrollElement, columns, listVirtualizer, gridVirtualizer, activeVirtualizer, registerRef, itemRefs } =
+		useDriveVirtualizer(sortedItems, effectiveViewMode)
 
 	function handleOpen(index: number) {
 		const item = sortedItems[index]
@@ -242,7 +241,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		}
 	}
 
-	const { safeActiveIndex, handleKeyDown, handlePointerSelect } = useDriveListboxNav({
+	const { safeActiveIndex, handleKeyDown, handlePointerSelect, setCursor } = useDriveListboxNav({
 		items: sortedItems,
 		viewMode: effectiveViewMode,
 		columns,
@@ -251,6 +250,16 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		variant,
 		splat,
 		onOpen: handleOpen
+	})
+
+	// Rubber-band selection over blank listbox space (list + grid). Owns its own pointer/keyboard/rAF
+	// listeners; renders the rectangle returned below inside the scrolled content layer.
+	const marquee = useDriveMarquee({
+		items: sortedItems,
+		viewMode: effectiveViewMode,
+		columns,
+		scrollElement,
+		setCursor
 	})
 
 	// Stale-selection purge (sharedIn only): drops any selected item that just became blocked (the
@@ -456,9 +465,24 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					aria-label={t("driveListLabel")}
 					tabIndex={-1}
 					onKeyDown={handleKeyDown}
+					onPointerDown={marquee.onPointerDown}
 					className="min-h-0 flex-1 overflow-y-auto"
 				>
 					<div style={{ position: "relative", width: "100%", height: activeVirtualizer.getTotalSize() }}>
+						{/* Marquee rectangle — content-space, so it stretches correctly as the listing auto-scrolls.
+						    Non-interactive (pointer-events-none) so it never intercepts the ongoing drag. */}
+						{marquee.rect ? (
+							<div
+								aria-hidden="true"
+								className="pointer-events-none absolute z-20 rounded-xs border border-primary/60 bg-primary/15"
+								style={{
+									left: marquee.rect.left,
+									top: marquee.rect.top,
+									width: marquee.rect.right - marquee.rect.left,
+									height: marquee.rect.bottom - marquee.rect.top
+								}}
+							/>
+						) : null}
 						{effectiveViewMode === "list"
 							? listVirtualizer.getVirtualItems().map(virtualRow => {
 									const item = sortedItems[virtualRow.index]

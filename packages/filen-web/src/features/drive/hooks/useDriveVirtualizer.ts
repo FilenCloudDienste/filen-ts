@@ -80,7 +80,7 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 		}
 	}
 
-	return { setScrollElement, columns, listVirtualizer, gridVirtualizer, activeVirtualizer, registerRef, itemRefs }
+	return { setScrollElement, scrollElement, columns, listVirtualizer, gridVirtualizer, activeVirtualizer, registerRef, itemRefs }
 }
 
 export type DriveVirtualizer = ReturnType<typeof useDriveVirtualizer>
