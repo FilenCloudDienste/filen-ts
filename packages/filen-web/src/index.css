@@ -92,6 +92,9 @@
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
     --radius: 0.625rem;
+    /* Centered content-column cap inside the card. Presets: 60rem smaller / 68rem default / 76rem
+       bigger; `none` for full width. One knob, project-wide. */
+    --content-column: 68rem;
     /* Sidebar sits directly on the canvas in a subtly lighter tone (0.928 -> 0.945), building
        elevation toward the white card without any border line. Hover fill is a touch darker so it
        reads against the sidebar tone. */

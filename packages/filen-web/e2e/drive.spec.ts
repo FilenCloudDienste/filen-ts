@@ -96,21 +96,30 @@ test.describe("drive", () => {
 		await page.goto("/drive")
 		await waitForListingSettled(page)
 
-		const listBtn = page.getByRole("button", { name: "List view", exact: true })
-		const gridBtn = page.getByRole("button", { name: "Grid view", exact: true })
+		const displayBtn = page.getByRole("button", { name: "Display", exact: true })
+		await displayBtn.click()
 
-		await expect(listBtn).toHaveAttribute("aria-pressed", "true")
-		await expect(gridBtn).toHaveAttribute("aria-pressed", "false")
+		const listRadio = page.getByRole("menuitemradio", { name: "List view", exact: true })
+		const gridRadio = page.getByRole("menuitemradio", { name: "Grid view", exact: true })
 
-		await gridBtn.click()
-		// The pref write + refetch round-trips through OPFS kv asynchronously — an auto-retrying
-		// assertion (not a one-shot read) is required for the DOM to reflect the settled state.
-		await expect(gridBtn).toHaveAttribute("aria-pressed", "true")
-		await expect(listBtn).toHaveAttribute("aria-pressed", "false")
+		await expect(listRadio).toHaveAttribute("aria-checked", "true")
+		await expect(gridRadio).toHaveAttribute("aria-checked", "false")
+
+		await gridRadio.click()
+		await page.keyboard.press("Escape")
+
+		// The pref write + refetch round-trips through OPFS kv asynchronously — reopening the menu reads
+		// the settled state through an auto-retrying assertion.
+		await displayBtn.click()
+		await expect(page.getByRole("menuitemradio", { name: "Grid view", exact: true })).toHaveAttribute("aria-checked", "true")
+		await page.keyboard.press("Escape")
 
 		await page.reload()
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
-		await expect(page.getByRole("button", { name: "Grid view", exact: true })).toHaveAttribute("aria-pressed", "true")
+		await waitForListingSettled(page)
+		await page.getByRole("button", { name: "Display", exact: true }).click()
+		await expect(page.getByRole("menuitemradio", { name: "Grid view", exact: true })).toHaveAttribute("aria-checked", "true")
+		await page.keyboard.press("Escape")
 	})
 
 	test("the sort menu opens, a field/direction selection reflects and survives close/reopen", async ({

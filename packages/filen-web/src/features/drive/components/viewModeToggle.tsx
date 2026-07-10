@@ -1,57 +1,58 @@
 import { useTranslation } from "react-i18next"
-import { LayoutGridIcon, ListIcon } from "lucide-react"
+import { LayoutGridIcon, ListIcon, SlidersHorizontalIcon } from "lucide-react"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuLabel,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
+	DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu"
 
 export interface ViewModeToggleProps {
 	value: DriveViewMode
 	onChange: (next: DriveViewMode) => void
 }
 
-// A 2-way toggle button pair (WAI-ARIA "button" pattern with aria-pressed), not a radiogroup —
-// each button already carries its own accessible name, so no wrapping group label is needed.
+// The toolbar's "Display" control: list/grid presentation behind one bordered dropdown slot that can
+// grow further display options later (replaces the earlier two-button pressed toggle).
 export function ViewModeToggle({ value, onChange }: ViewModeToggleProps) {
 	const { t } = useTranslation("drive")
 
 	return (
-		<div className="inline-flex items-center gap-0.5 p-0.5">
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Button
-							variant={value === "list" ? "secondary" : "ghost"}
-							size="icon-sm"
-							aria-pressed={value === "list"}
-							aria-label={t("driveViewList")}
-							onClick={() => {
-								onChange("list")
-							}}
-						>
-							<ListIcon />
-						</Button>
-					}
-				/>
-				<TooltipContent>{t("driveViewList")}</TooltipContent>
-			</Tooltip>
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Button
-							variant={value === "grid" ? "secondary" : "ghost"}
-							size="icon-sm"
-							aria-pressed={value === "grid"}
-							aria-label={t("driveViewGrid")}
-							onClick={() => {
-								onChange("grid")
-							}}
-						>
-							<LayoutGridIcon />
-						</Button>
-					}
-				/>
-				<TooltipContent>{t("driveViewGrid")}</TooltipContent>
-			</Tooltip>
-		</div>
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				render={
+					<Button
+						variant="outline"
+						size="sm"
+					>
+						<SlidersHorizontalIcon />
+						{t("driveDisplay")}
+					</Button>
+				}
+			/>
+			<DropdownMenuContent align="start">
+				<DropdownMenuRadioGroup
+					value={value}
+					onValueChange={(next: DriveViewMode) => {
+						onChange(next)
+					}}
+				>
+					{/* Base UI's Menu.GroupLabel must nest inside the radio group it labels (see sortMenu.tsx). */}
+					<DropdownMenuLabel>{t("driveDisplay")}</DropdownMenuLabel>
+					<DropdownMenuRadioItem value="list">
+						<ListIcon />
+						{t("driveViewList")}
+					</DropdownMenuRadioItem>
+					<DropdownMenuRadioItem value="grid">
+						<LayoutGridIcon />
+						{t("driveViewGrid")}
+					</DropdownMenuRadioItem>
+				</DropdownMenuRadioGroup>
+			</DropdownMenuContent>
+		</DropdownMenu>
 	)
 }

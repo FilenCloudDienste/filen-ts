@@ -24,6 +24,7 @@ import { canPreview, previewableSiblings } from "@/features/drive/lib/preview.lo
 import { startDownloads } from "@/features/drive/lib/download"
 import { useDirectoryListingQuery, useSortPreferencesQuery, useViewModePreferencesQuery } from "@/features/drive/queries/drive"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import { cn } from "@/lib/utils"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
@@ -55,6 +56,10 @@ import { useDriveListboxNav } from "@/features/drive/hooks/useDriveListboxNav"
 import { useDriveDialogHost } from "@/features/drive/hooks/useDriveDialogHost"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+
+// Centered content column inside the card — the width cap rides one CSS var (see index.css) so the
+// preset flips project-wide in one place.
+const CONTENT_COLUMN_CLASS = "mx-auto w-full max-w-(--content-column)"
 
 export interface DirectoryListingProps {
 	variant: DriveVariant
@@ -535,117 +540,133 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	return (
 		<>
-			<header className="flex h-14 shrink-0 items-center px-4">
-				<Breadcrumb
-					variant={variant}
-					splat={splat}
-				/>
-			</header>
-			<div className="flex h-12 shrink-0 items-center justify-between gap-4 px-4">
-				{listingQuery.status === "success" && selectedItems.length > 0 ? (
-					<BulkActionBar
+			{/* Card top row: breadcrumbs left, the action-button cluster right, content column-capped —
+			    the bottom hairline is the card's one sanctioned full-width rule. */}
+			<header className="shrink-0 border-b border-border/50 px-6">
+				<div className={cn(CONTENT_COLUMN_CLASS, "flex h-14 items-center justify-between gap-4")}>
+					<Breadcrumb
 						variant={variant}
-						selectedItems={selectedItems}
-						onDialogAction={handleBulkDialogAction}
+						splat={splat}
 					/>
-				) : (
-					<>
-						<p className="text-sm text-muted-foreground">
-							{listingQuery.status === "success" ? t("driveItemCount", { count: sortedItems.length }) : null}
-						</p>
-						<div className="flex items-center gap-2">
-							{variant === "drive" ? (
-								<SearchInput
-									value={search.input}
-									onChange={search.setInput}
-									onClear={search.clear}
-								/>
-							) : null}
-							<NewDirectory
-								parentUuid={uuid}
-								disabled={writeDisabled}
-							/>
-							<UploadMenu
-								parentUuid={uuid}
-								disabled={writeDisabled}
-							/>
-							<ViewModeToggle
-								value={effectiveViewMode}
-								onChange={next => {
-									void applyViewModeChange(next)
-								}}
-							/>
-							<SortMenu
-								value={effectiveSort}
-								onChange={next => {
-									void applySortChange(next)
-								}}
-								disabled={!isSortableVariant(variant) || listingQuery.status !== "success"}
-							/>
-						</div>
-					</>
-				)}
+					<div className="flex shrink-0 items-center gap-2">
+						<NewDirectory
+							parentUuid={uuid}
+							disabled={writeDisabled}
+						/>
+						<UploadMenu
+							parentUuid={uuid}
+							disabled={writeDisabled}
+						/>
+					</div>
+				</div>
+			</header>
+			{/* Controls row: sort + display left, search right — bordered controls, room to grow. */}
+			<div className="shrink-0 px-6 pt-4">
+				<div className={cn(CONTENT_COLUMN_CLASS, "flex items-center justify-between gap-2")}>
+					<div className="flex items-center gap-2">
+						<SortMenu
+							value={effectiveSort}
+							onChange={next => {
+								void applySortChange(next)
+							}}
+							disabled={!isSortableVariant(variant) || listingQuery.status !== "success"}
+						/>
+						<ViewModeToggle
+							value={effectiveViewMode}
+							onChange={next => {
+								void applyViewModeChange(next)
+							}}
+						/>
+					</div>
+					{variant === "drive" ? (
+						<SearchInput
+							value={search.input}
+							onChange={search.setInput}
+							onClear={search.clear}
+						/>
+					) : null}
+				</div>
 			</div>
 			<UploadDropzone
 				parentUuid={uuid}
 				disabled={writeDisabled}
 			>
-				{search.active ? (
-					search.status === "warming" ? (
-						<div className="flex-1 overflow-y-auto">
-							<ListingSkeleton viewMode={effectiveViewMode} />
-						</div>
-					) : search.status === "searching-empty" ? (
-						<div className="flex flex-1 flex-col items-center justify-center gap-2 overflow-y-auto">
-							<Spinner className="size-5 text-muted-foreground" />
-							<p className="text-sm text-muted-foreground">{t("driveSearchStillSearching")}</p>
-						</div>
-					) : search.status === "terminal" ? (
-						<div className="flex flex-1 overflow-y-auto">
-							<Empty>
-								<EmptyHeader>
-									<EmptyMedia variant="icon">
-										<CircleAlertIcon />
-									</EmptyMedia>
-									<EmptyTitle>{t("driveSearchUnavailable")}</EmptyTitle>
-								</EmptyHeader>
-							</Empty>
-						</div>
-					) : sortedItems.length === 0 ? (
-						<div className="flex flex-1 overflow-y-auto">
-							<Empty>
-								<EmptyHeader>
-									<EmptyMedia variant="icon">
-										<SearchXIcon />
-									</EmptyMedia>
-									<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>
-								</EmptyHeader>
-							</Empty>
-						</div>
-					) : (
-						renderListboxContent()
-					)
-				) : listingQuery.status === "pending" ? (
-					<div className="flex-1 overflow-y-auto">
-						<ListingSkeleton viewMode={effectiveViewMode} />
+				<div className="relative flex min-h-0 flex-1 flex-col px-6 pt-4 pb-6">
+					<div
+						className={cn(
+							CONTENT_COLUMN_CLASS,
+							"flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/70 bg-background"
+						)}
+					>
+						{search.active ? (
+							search.status === "warming" ? (
+								<div className="flex-1 overflow-y-auto">
+									<ListingSkeleton viewMode={effectiveViewMode} />
+								</div>
+							) : search.status === "searching-empty" ? (
+								<div className="flex flex-1 flex-col items-center justify-center gap-2 overflow-y-auto">
+									<Spinner className="size-5 text-muted-foreground" />
+									<p className="text-sm text-muted-foreground">{t("driveSearchStillSearching")}</p>
+								</div>
+							) : search.status === "terminal" ? (
+								<div className="flex flex-1 overflow-y-auto">
+									<Empty>
+										<EmptyHeader>
+											<EmptyMedia variant="icon">
+												<CircleAlertIcon />
+											</EmptyMedia>
+											<EmptyTitle>{t("driveSearchUnavailable")}</EmptyTitle>
+										</EmptyHeader>
+									</Empty>
+								</div>
+							) : sortedItems.length === 0 ? (
+								<div className="flex flex-1 overflow-y-auto">
+									<Empty>
+										<EmptyHeader>
+											<EmptyMedia variant="icon">
+												<SearchXIcon />
+											</EmptyMedia>
+											<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>
+										</EmptyHeader>
+									</Empty>
+								</div>
+							) : (
+								renderListboxContent()
+							)
+						) : listingQuery.status === "pending" ? (
+							<div className="flex-1 overflow-y-auto">
+								<ListingSkeleton viewMode={effectiveViewMode} />
+							</div>
+						) : listingQuery.status === "error" ? (
+							<div className="flex flex-1 overflow-y-auto">
+								<EmptyState
+									variant="error"
+									error={asErrorDTO(listingQuery.error)}
+									onRetry={() => {
+										void listingQuery.refetch()
+									}}
+								/>
+							</div>
+						) : sortedItems.length === 0 ? (
+							<div className="flex flex-1 overflow-y-auto">
+								<EmptyState variant="empty" />
+							</div>
+						) : (
+							renderListboxContent()
+						)}
 					</div>
-				) : listingQuery.status === "error" ? (
-					<div className="flex flex-1 overflow-y-auto">
-						<EmptyState
-							variant="error"
-							error={asErrorDTO(listingQuery.error)}
-							onRetry={() => {
-								void listingQuery.refetch()
-							}}
-						/>
-					</div>
-				) : sortedItems.length === 0 ? (
-					<div className="flex flex-1 overflow-y-auto">
-						<EmptyState variant="empty" />
-					</div>
-				) : (
-					renderListboxContent()
-				)}
+					{/* Bottom-anchored floating selection bar — overlays the listing container, replacing
+					    nothing in the toolbar. */}
+					{listingQuery.status === "success" && selectedItems.length > 0 ? (
+						<div className="pointer-events-none absolute inset-x-6 bottom-10 z-10 flex justify-center">
+							<BulkActionBar
+								variant={variant}
+								selectedItems={selectedItems}
+								onDialogAction={handleBulkDialogAction}
+							/>
+						</div>
+					) : null}
+				</div>
 			</UploadDropzone>
 			{renderActiveDialog()}
 		</>

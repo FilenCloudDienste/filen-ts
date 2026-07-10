@@ -22,6 +22,8 @@ export const drive = {
 	driveViewList: "List view",
 	/** Drive toolbar — accessible label on the grid-view toggle button */
 	driveViewGrid: "Grid view",
+	/** Drive toolbar — trigger of the display dropdown holding the list/grid choice */
+	driveDisplay: "Display",
 
 	// ── New menu (opened via driveNew) ──────────────────────────────────────
 	/** New menu — entry opening the browser file picker to upload one or more files into the current directory */

@@ -77,15 +77,18 @@ test("an image renders a real thumbnail in both listing views, text/svg siblings
 
 		// Grid view renders the identical thumbnail through a different slot (DriveTile, not DriveRow) —
 		// the service's own uuid-keyed url cache makes this a render-path proof, not a second generation.
-		await page.getByRole("button", { name: "Grid view", exact: true }).click()
-		await expect(page.getByRole("button", { name: "Grid view", exact: true })).toHaveAttribute("aria-pressed", "true")
+		await page.getByRole("button", { name: "Display", exact: true }).click()
+		await page.getByRole("menuitemradio", { name: "Grid view", exact: true }).click()
+		await page.keyboard.press("Escape")
 
 		const tilePng = page.getByRole("option", { name: namePng })
 		const pngThumbGrid = tilePng.locator("img")
 		await expect(pngThumbGrid).toBeVisible({ timeout: 15_000 })
 		await expect(pngThumbGrid).toHaveAttribute("src", /^blob:/)
 
-		await page.getByRole("button", { name: "List view", exact: true }).click()
+		await page.getByRole("button", { name: "Display", exact: true }).click()
+		await page.getByRole("menuitemradio", { name: "List view", exact: true }).click()
+		await page.keyboard.press("Escape")
 
 		const statBeforeReload = await page.evaluate(({ parentUuid, name }) => window.__filenE2E.thumbnailFileStat(parentUuid, name), {
 			parentUuid: scratchUuid,

@@ -33,9 +33,8 @@ const KEYMAP_ACTION_FOR: Partial<Record<BulkActionDescriptor["id"], string>> = {
 	download: "drive.download"
 }
 
-// Replaces the toolbar's item-count/New-View-Sort region while a selection exists (mounted by
-// directoryListing.tsx). Two flex children so the surrounding `justify-between` row keeps the same
-// left-cluster/right-cluster split the non-selected toolbar already has.
+// Bottom-anchored floating selection bar (directoryListing.tsx overlays it on the listing container
+// while a selection exists) — the toolbar stays put; this replaces nothing.
 export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkActionBarProps) {
 	const { t } = useTranslation("drive")
 	const flags = aggregateDriveSelectionFlags(selectedItems)
@@ -69,7 +68,7 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 	}
 
 	return (
-		<>
+		<div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-popover px-3 py-2 text-popover-foreground shadow-lg">
 			<div className="flex items-center gap-2">
 				<Tooltip>
 					<TooltipTrigger
@@ -145,6 +144,6 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 					)
 				})}
 			</div>
-		</>
+		</div>
 	)
 }
