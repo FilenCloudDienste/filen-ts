@@ -229,6 +229,35 @@ describe("buildEventDetails", () => {
 		expect(rows.find(r => r.title === "favorited")?.value).toBe("yes")
 	})
 
+	it("extracts the folder name from DecryptedUTF8 metadata for a folder ItemFavorite", () => {
+		// A favorited FOLDER arrives as FileMeta::DecryptedUTF8 (raw JSON), not Decoded, because the
+		// folder meta schema doesn't match the file one. The name is still present in cleartext JSON.
+		const event = makeEvent("ItemFavorite", {
+			ip: "1.1.1.1",
+			userAgent: "ua",
+			metadata: { tag: "DecryptedUTF8", inner: ['{"name":"My Folder","creation":123}'] },
+			value: true
+		})
+
+		const rows = buildEventDetails(event, echo)
+
+		expect(rows.find(r => r.title === "name")?.value).toBe("My Folder")
+		expect(rows.find(r => r.title === "favorited")?.value).toBe("yes")
+	})
+
+	it("falls back to the encrypted label for a DecryptedUTF8 blob without a string name", () => {
+		const event = makeEvent("ItemFavorite", {
+			ip: "1.1.1.1",
+			userAgent: "ua",
+			metadata: { tag: "DecryptedUTF8", inner: ["not valid json"] },
+			value: false
+		})
+
+		const rows = buildEventDetails(event, echo)
+
+		expect(rows.find(r => r.title === "name")?.value).toBe("encrypted")
+	})
+
 	it("maps favorited boolean false to 'no' for ItemFavorite with value=false", () => {
 		const event = makeEvent("ItemFavorite", {
 			ip: "1.1.1.1",

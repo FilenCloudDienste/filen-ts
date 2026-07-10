@@ -68,6 +68,23 @@ function extractFileMetaName(meta: FileMeta, t: TFunction): string {
 		return meta.inner[0].name
 	}
 
+	// A favorited FOLDER arrives as FileMeta::DecryptedUTF8 — decrypted cleartext, but raw JSON
+	// (the folder meta schema doesn't match the file one, so the SDK can't build a Decoded file
+	// meta). The name is still present in that JSON, so parse it out instead of masking it as
+	// "Encrypted". Fall back to the encrypted label only for genuinely-undecrypted tags or if the
+	// blob isn't the expected {"name":...} shape.
+	if (meta.tag === FileMeta_Tags.DecryptedUtf8) {
+		try {
+			const parsed = JSON.parse(meta.inner[0]) as { name?: unknown }
+
+			if (typeof parsed.name === "string") {
+				return parsed.name
+			}
+		} catch {
+			// Not parseable JSON — fall through to the encrypted label.
+		}
+	}
+
 	return t("encrypted")
 }
 
