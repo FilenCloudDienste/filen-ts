@@ -11,10 +11,11 @@ export const SETCONFIG_DEBOUNCE_MS = 350
 // an empty snapshot this fresh may just not have converged yet.
 export const GRACE_MS = 400
 
-// Past this much time with nothing back at all, give up and collapse to terminal — an open that
-// never produces so much as an empty snapshot is a dead end, and staying on an unresolved loading
-// state forever is a worse outcome than telling the user it failed.
-export const WATCHDOG_MS = 15_000
+// Past this much time with nothing back at all, give up and collapse to terminal. Deliberately a
+// LAST resort, not a responsiveness knob: a first index over a large account can legitimately take
+// minutes, and the engine's resync pushes are lossy (try_send) so a silent stretch does not imply a
+// dead open — collapsing early misreports a slow-but-live search as failed.
+export const WATCHDOG_MS = 180_000
 
 // Backstop for a dropped resync-finished push: stop waiting on a stalled convergence after this long
 // and finalize on whatever landed.

@@ -169,6 +169,9 @@ test.describe("drive", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
+		// Tall viewport so the virtualizer mounts every row: the selected-rows count below must equal
+		// the bar's total, which only holds when no selected row sits unmounted below the fold.
+		await page.setViewportSize({ width: 1280, height: 8000 })
 		await page.goto("/drive")
 		const { listbox, hasItems } = await waitForListingSettled(page)
 		const modKey = await resolveModKey(page)

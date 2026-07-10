@@ -144,7 +144,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 
 		// A query with no chance of ever matching anything in this small subtree.
 		await searchInput.fill(`e2e-search-no-such-query-${crypto.randomUUID()}`)
-		await expect(page.getByText("No matches", { exact: true })).toBeVisible({ timeout: 15_000 })
+		await expect(page.getByText("No matches", { exact: true })).toBeVisible({ timeout: 45_000 })
 
 		await page.getByRole("button", { name: "Clear search", exact: true }).click()
 		await expect(searchInput).toHaveValue("")
