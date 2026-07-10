@@ -7,16 +7,23 @@ import { trackCspViolations } from "./helpers/csp"
 const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, which hangs indefinitely on Playwright-firefox under COI"
 
 // A real 1x1 transparent PNG — the same fixture preview.spec.ts uses for its own image-preview leg.
-// canMakeThumbnail is metadata-only (extension-derived), but makeThumbnailInMemory itself decodes
-// real bytes, so this has to be a genuinely valid image, not just a correctly-named one.
+// The client-side createImageBitmap decode reads real bytes, so this has to be a genuinely valid
+// image, not just a correctly-named one.
 const PNG_BYTES = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64")
 
-// The one live proof the whole thumbnail pipeline works end to end: a real makeThumbnailInMemory
-// worker round trip, a real OPFS write/read, and the icon-slot swap in both listing views — none of
-// that is provable at the unit level (thumbnails.test.ts/thumbnails.logic.test.ts inject every
-// collaborator). Also the one deliberate reload in this suite (every other spec stays client-nav):
-// proves the OPFS cache survives a real cold document boot, not just a component remount.
-test("an image renders a real thumbnail in both listing views, text/svg siblings keep their icon, and a fresh reload repaints from the OPFS cache without regenerating", async ({
+// A real 2x2 24bpp BMP. The SDK's wasm decoder never handled bmp (canMakeThumbnail is false for it),
+// so this leg proves the JS decode path admits a format the old SDK route couldn't — the whole point
+// of moving decode into the browser.
+const BMP_BYTES = Buffer.from("Qk1GAAAAAAAAADYAAAAoAAAAAgAAAAIAAAABABgAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAGb/AGb/AAAAZv8AZv8AAA==", "base64")
+
+// The one live proof the whole thumbnail pipeline works end to end: a real client-side decode worker
+// round trip (createImageBitmap + OffscreenCanvas), a real OPFS write/read, and the icon-slot swap in
+// both listing views — none of that is provable at the unit level (thumbnails.test.ts/
+// thumbnails.logic.test.ts inject every collaborator). A png and a bmp both render, proving the JS
+// decode admits a format (bmp) the old wasm route couldn't. Also the one deliberate reload in this
+// suite (every other spec stays client-nav): proves the OPFS cache survives a real cold document boot,
+// not just a component remount.
+test("png and bmp images render real thumbnails in both listing views, text/svg siblings keep their icon, and a fresh reload repaints from the OPFS cache without regenerating", async ({
 	page,
 	injectedSession,
 	browserName
@@ -28,6 +35,7 @@ test("an image renders a real thumbnail in both listing views, text/svg siblings
 	const runId = crypto.randomUUID()
 	const scratchName = `e2e-thumbnails-${runId}`
 	const namePng = `e2e-thumb-${runId}.png`
+	const nameBmp = `e2e-thumb-${runId}.bmp`
 	const nameTxt = `e2e-thumb-${runId}.txt`
 	const nameSvg = `e2e-thumb-${runId}.svg`
 
@@ -50,24 +58,33 @@ test("an image renders a real thumbnail in both listing views, text/svg siblings
 		const input = page.locator('input[type="file"]').first()
 		await input.setInputFiles([
 			{ name: namePng, mimeType: "image/png", buffer: PNG_BYTES },
+			{ name: nameBmp, mimeType: "image/bmp", buffer: BMP_BYTES },
 			{ name: nameTxt, mimeType: "text/plain", buffer: Buffer.from("not an image", "utf8") },
 			{ name: nameSvg, mimeType: "image/svg+xml", buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>', "utf8") }
 		])
 
 		const rowPng = listbox.getByRole("option", { name: namePng })
+		const rowBmp = listbox.getByRole("option", { name: nameBmp })
 		const rowTxt = listbox.getByRole("option", { name: nameTxt })
 		const rowSvg = listbox.getByRole("option", { name: nameSvg })
 		await expect(rowPng).toBeVisible({ timeout: 45_000 })
+		await expect(rowBmp).toBeVisible({ timeout: 45_000 })
 		await expect(rowTxt).toBeVisible({ timeout: 45_000 })
 		await expect(rowSvg).toBeVisible({ timeout: 45_000 })
 
-		// The PNG's icon slot swaps to a real <img> once the worker round trip resolves — a generous
-		// timeout covers the makeThumbnailInMemory call, not just the upload that already landed the
-		// row. alt="" makes this element decorative (no accessible "img" role), so it's found by tag,
-		// not role.
+		// The PNG's icon slot swaps to a real <img> once the decode worker round trip resolves — a
+		// generous timeout covers the download + createImageBitmap decode, not just the upload that
+		// already landed the row. alt="" makes this element decorative (no accessible "img" role), so
+		// it's found by tag, not role.
 		const pngThumbList = rowPng.locator("img")
 		await expect(pngThumbList).toBeVisible({ timeout: 30_000 })
 		await expect(pngThumbList).toHaveAttribute("src", /^blob:/)
+
+		// The BMP renders through the exact same JS decode path — a format the SDK's wasm decoder never
+		// produced a thumbnail for, now admitted because the browser owns decode.
+		const bmpThumbList = rowBmp.locator("img")
+		await expect(bmpThumbList).toBeVisible({ timeout: 30_000 })
+		await expect(bmpThumbList).toHaveAttribute("src", /^blob:/)
 
 		// Neither sibling ever gets an <img>: no extension routes a .txt to any thumbnail category, and
 		// svg is excluded outright (sanitization risk, kept an icon everywhere this app renders one) —

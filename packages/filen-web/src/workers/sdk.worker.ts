@@ -114,16 +114,15 @@ async function withPauseSignal<T>(
 const previewAborts = new Map<string, AbortController>()
 
 // Fires sweepThumbs and removeStaleThumbGenerations at most once per worker lifetime (this worker's
-// own first makeThumbnail OR storeThumbnail call, see armThumbSweep below), never re-armed — a
-// long-lived tab's OPFS thumbnail cache still gets cap-enforced and stale generations still get
-// reclaimed without every generation paying for a listing pass.
+// own first storeThumbnail call, see armThumbSweep below), never re-armed — a long-lived tab's OPFS
+// thumbnail cache still gets cap-enforced and stale generations still get reclaimed without every
+// generation paying for a listing pass.
 let thumbsSweptThisSession = false
 
-// Arms the once-per-session eviction sweep — called from both makeThumbnail (the SDK-decoded route)
-// and storeThumbnail (every client-side heic/video/pdf generator's persist call), since a session
-// that only ever produces client-generated thumbnails (a directory with no plain raster images in it)
-// would otherwise never sweep at all. Fire-and-forget, both passes: eviction and stale-generation
-// cleanup are housekeeping, never something a thumbnail request should wait on.
+// Arms the once-per-session eviction sweep — called from storeThumbnail, the single persist path every
+// client-side generator (image/heic/video/pdf) routes its bytes through. Fire-and-forget, both passes:
+// eviction and stale-generation cleanup are housekeeping, never something a thumbnail request should
+// wait on.
 function armThumbSweep(): void {
 	if (thumbsSweptThisSession) {
 		return
@@ -881,38 +880,13 @@ const api = {
 		return requireClient().removeSharedItem(item)
 	},
 	// ── Thumbnails ───────────────────────────────────────────────────────────
-	// SDK-decoded thumbnail for one already-fetched file (the caller's own DriveItem file-arm data —
-	// structurally a File, same held-item convention as renameFile/trashFile above). `undefined`
-	// means the SDK itself produced no thumbnail (still a clean outcome, not an error) and passes
-	// straight through. On bytes: persist to the OPFS store first — a persist failure is logged and
-	// non-fatal, the caller's own bytes still render either way — then transfer the buffer out
-	// (never cloned).
-	async makeThumbnail(file: File, maxDim: number): Promise<Uint8Array | undefined> {
-		armThumbSweep()
-
-		const c = requireClient()
-		const result = await c.makeThumbnailInMemory({ file, maxWidth: maxDim, maxHeight: maxDim })
-
-		if (result === undefined) {
-			return undefined
-		}
-
-		const bytes = result.webpData
-
-		try {
-			await writeThumb(file.uuid, bytes)
-		} catch (e) {
-			log.warn("sdk.worker", "makeThumbnail: persist failed", file.uuid, e)
-		}
-
-		return Comlink.transfer(bytes, [bytes.buffer])
-	},
-	// Persists thumbnail bytes a CLIENT-side generator produced outside this worker (its own decode
-	// runs elsewhere — HEIC/video/pdf never route through makeThumbnailInMemory). Callers
-	// Comlink.transfer the buffer in, never clone; rejection is the caller's own to handle (mirrors
-	// writeThumb's own propagation past the second-open collision it already swallows). Also arms the
-	// sweep (see armThumbSweep) — a session that only ever produces client-generated thumbnails would
-	// otherwise never sweep, since makeThumbnail (the only other arming call site) is never reached.
+	// Persists thumbnail bytes a CLIENT-side generator produced outside this worker — every thumbnail
+	// category (image/heic/video/pdf) now decodes on the main thread or in its own decode worker and
+	// routes its result through here; no thumbnail is ever decoded by the SDK. Callers Comlink.transfer
+	// the buffer in, never clone; rejection is the caller's own to handle (mirrors writeThumb's own
+	// propagation past the second-open collision it already swallows). Also arms the once-per-session
+	// cache sweep (see armThumbSweep) — this is now the only arming call site, so a session that ever
+	// produces a thumbnail sweeps exactly once.
 	async storeThumbnail(uuid: string, bytes: Uint8Array): Promise<void> {
 		armThumbSweep()
 		await writeThumb(uuid, bytes)

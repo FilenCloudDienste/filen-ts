@@ -1,32 +1,31 @@
 import * as Comlink from "comlink"
 import { Semaphore } from "@filen/utils"
-import type { File as SdkFile } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
-import { runOp } from "@/lib/actions/outcome"
 import { log } from "@/lib/log"
 import { readThumbnailBlob, deleteThumbnail as deleteThumbnailBlob } from "@/features/drive/lib/thumbCache"
-import { thumbnailCategory, THUMB_MAX_DIM, type ThumbnailCategory } from "@/features/drive/lib/thumbnails.logic"
+import { thumbnailCategory, type ThumbnailCategory } from "@/features/drive/lib/thumbnails.logic"
 import { type BaseFileItem, type DriveItem } from "@/features/drive/lib/item"
 
-// No declared mime on rendered thumbnail blobs: the SDK path is always webp, but a client generator's
-// canvas encode legally falls back to jpeg where webp encoding is unavailable — a hardcoded label
-// would lie for those bytes, and the OPFS cache-hit path (a raw File for a .thumb extension) carries
-// no reliable type either. <img> sources are content-sniffed regardless, so untyped is the one
-// consistent, honest option for every path.
+// No declared mime on rendered thumbnail blobs: a generator's canvas encode is webp where the browser
+// supports it and legally falls back to jpeg where it doesn't — a hardcoded label would lie for those
+// bytes, and the OPFS cache-hit path (a raw File for a .thumb extension) carries no reliable type
+// either. <img> sources are content-sniffed regardless, so untyped is the one consistent, honest
+// option for every path.
 
-// How many generation attempts (OPFS read + SDK call/generator) run at once, app-wide — shapes
-// DEMAND on the SDK/CPU, never a limit the SDK itself needs (D21: never reimplement SDK-side
+// How many generation attempts (OPFS read + generator) run at once, app-wide — shapes DEMAND on the
+// CPU/SDK-download layer, never a limit the SDK itself needs (D21: never reimplement SDK-side
 // concurrency; this bounds how many requests THIS app issues concurrently).
 const CONCURRENT_GENERATIONS = 3
 
 // Permanent-failure threshold — the third failed generation for a uuid blacklists it for the rest of
-// the session, short-circuiting every later call instead of repeating pointless work (a corrupt
-// file, an SDK decode refusal, or — until generators are registered — an unimplemented category).
+// the session, short-circuiting every later call instead of repeating pointless work (a corrupt or
+// undecodable file, or — until generators are registered — an unimplemented category).
 const BLACKLIST_LIMIT = 3
 
-// heic/video/pdf only — sdk-image always routes to makeThumbnailInMemory and never consults this
-// registry.
-export type ThumbGeneratorCategory = Exclude<ThumbnailCategory, "sdk-image" | "none">
+// Every non-"none" category routes through the generator registry — image/heic/video/pdf alike. There
+// is no longer a special SDK-decoded arm; a plain raster image is just another registered generator
+// (thumbGenerators.ts's generateImageThumb, a client-side createImageBitmap decode).
+export type ThumbGeneratorCategory = Exclude<ThumbnailCategory, "none">
 export type ThumbGenerator = (item: BaseFileItem) => Promise<Uint8Array | null>
 
 const generators = new Map<ThumbGeneratorCategory, ThumbGenerator>()
@@ -43,7 +42,6 @@ export function registerThumbGenerator(category: ThumbGeneratorCategory, generat
 export interface ThumbnailServiceDeps {
 	readThumbnailBlob: (uuid: string) => Promise<Blob | null>
 	deleteThumbnail: (uuid: string) => Promise<void>
-	makeThumbnail: (file: SdkFile, maxDim: number) => Promise<Uint8Array | undefined>
 	storeThumbnail: (uuid: string, bytes: Uint8Array) => Promise<void>
 	createObjectUrl: (blob: Blob) => string
 	revokeObjectUrl: (url: string) => void
@@ -51,12 +49,12 @@ export interface ThumbnailServiceDeps {
 }
 
 // The real wiring: readThumbnailBlob/deleteThumbnail go straight to the main-thread OPFS read side
-// (no worker round trip — see thumbCache.ts), makeThumbnail/storeThumbnail cross to the sdk worker.
-// storeThumbnail Comlink.transfers its buffer in, mirroring previewSave.logic.ts's uploadFileBytes.
+// (no worker round trip — see thumbCache.ts), storeThumbnail crosses to the sdk worker (which owns
+// writeThumb and arms the once-per-session cache sweep there). storeThumbnail Comlink.transfers its
+// buffer in, mirroring previewSave.logic.ts's uploadFileBytes.
 export const defaultThumbnailDeps: ThumbnailServiceDeps = {
 	readThumbnailBlob,
 	deleteThumbnail: deleteThumbnailBlob,
-	makeThumbnail: (file, maxDim) => sdkApi.makeThumbnail(file, maxDim),
 	storeThumbnail: (uuid, bytes) => sdkApi.storeThumbnail(uuid, Comlink.transfer(bytes, [bytes.buffer])),
 	createObjectUrl: blob => URL.createObjectURL(blob),
 	revokeObjectUrl: url => {
@@ -85,12 +83,11 @@ function finalize(deps: ThumbnailServiceDeps, uuid: string, blob: Blob): string 
 
 // The one real generation attempt for a uuid, gated by the app-wide semaphore: check the OPFS cache
 // first (another tab, or an earlier session, may have already produced this thumbnail), then route
-// by category — sdk-image through the SDK worker, everything else through the registered generator
-// (an unregistered category resolves no bytes, same as any other failure below). A persisted
-// client-generated result is written back through storeThumbnail — a persist failure there is
-// logged and non-fatal, mirroring the worker's own makeThumbnail persist. Any failure to obtain
-// bytes — a thrown error, `undefined`, an empty buffer, or no generator — is LOGGED ONLY (never
-// surfaced to a user: thumbnail generation is silent by design) and counted against the blacklist.
+// through the registered generator for the category (an unregistered category resolves no bytes, same
+// as any other failure below). A generated result is written back through storeThumbnail — a persist
+// failure there is logged and non-fatal. Any failure to obtain bytes — a thrown error, an empty
+// buffer, or no generator — is LOGGED ONLY (never surfaced to a user: thumbnail generation is silent
+// by design) and counted against the blacklist.
 async function generate(
 	deps: ThumbnailServiceDeps,
 	item: BaseFileItem,
@@ -117,21 +114,13 @@ async function generate(
 		}
 
 		let bytes: Uint8Array | undefined
-		let needsPersist = false
 
 		try {
-			if (category === "sdk-image") {
-				// The worker's own makeThumbnail op already persisted this (writeThumb, before it ever
-				// transfers the buffer back out) — nothing left for this thread to store.
-				bytes = await runOp(deps.makeThumbnail(item.data, THUMB_MAX_DIM))
-			} else {
-				const generator = deps.getGenerator(category)
-				const generated = generator === undefined ? null : await generator(item)
+			const generator = deps.getGenerator(category)
+			const generated = generator === undefined ? null : await generator(item)
 
-				if (generated !== null) {
-					bytes = generated
-					needsPersist = true
-				}
+			if (generated !== null) {
+				bytes = generated
 			}
 		} catch (e) {
 			log.warn("thumbnails", "generate: generation failed", uuid, e)
@@ -144,21 +133,19 @@ async function generate(
 
 		// The generic ArrayBufferLike-vs-ArrayBuffer parameter on Uint8Array (TS lib.es2024.arraybuffer)
 		// makes an unparameterized Uint8Array reject BlobPart's stricter ArrayBufferView<ArrayBuffer> —
-		// bytes here is always backed by a real ArrayBuffer (a Comlink.transfer out of the sdk worker, or
-		// a generator's own freshly-allocated buffer, never a SharedArrayBuffer), so this narrows the
-		// generic parameter only, mirroring imageViewer.tsx's identical cast. Built BEFORE the persist
-		// call below: the Blob constructor copies bytes into its own storage immediately, whereas
-		// storeThumbnail's Comlink.transfer detaches this SAME buffer synchronously, at the call itself
-		// (postMessage's transfer-list handoff, not once the call resolves) — persisting first would
-		// leave `bytes` a zero-length view by the time this line ran, silently producing an empty Blob.
+		// bytes here is always backed by a real ArrayBuffer (a generator's own freshly-allocated buffer,
+		// never a SharedArrayBuffer), so this narrows the generic parameter only, mirroring
+		// imageViewer.tsx's identical cast. Built BEFORE the persist call below: the Blob constructor
+		// copies bytes into its own storage immediately, whereas storeThumbnail's Comlink.transfer
+		// detaches this SAME buffer synchronously, at the call itself (postMessage's transfer-list
+		// handoff, not once the call resolves) — persisting first would leave `bytes` a zero-length view
+		// by the time this line ran, silently producing an empty Blob.
 		const attachedBytes = bytes as Uint8Array<ArrayBuffer>
 		const blob = new Blob([attachedBytes])
 
-		if (needsPersist) {
-			await deps.storeThumbnail(uuid, attachedBytes).catch((e: unknown) => {
-				log.warn("thumbnails", "generate: persist failed", uuid, e)
-			})
-		}
+		await deps.storeThumbnail(uuid, attachedBytes).catch((e: unknown) => {
+			log.warn("thumbnails", "generate: persist failed", uuid, e)
+		})
 
 		return finalize(deps, uuid, blob)
 	} finally {

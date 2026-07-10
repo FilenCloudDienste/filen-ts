@@ -34,6 +34,15 @@ const { transformHeicBytesMock } = vi.hoisted(() => ({
 
 vi.mock("@/features/preview/lib/heicTransform", () => ({ transformHeicBytes: transformHeicBytesMock }))
 
+const { transformImageThumbMock } = vi.hoisted(() => ({
+	transformImageThumbMock: vi.fn<(bytes: Uint8Array, maxDim: number) => Promise<Uint8Array>>()
+}))
+
+// The real module imports a Vite `?worker` — unresolvable under node vitest, same reason heicTransform
+// is mocked above. The worker's own createImageBitmap/OffscreenCanvas decode is proven live (the e2e
+// leg), not here.
+vi.mock("@/features/drive/lib/imageThumb", () => ({ transformImageThumb: transformImageThumbMock }))
+
 const { isMediaStreamAvailableMock, previewStreamUrlMock } = vi.hoisted(() => ({
 	isMediaStreamAvailableMock: vi.fn<() => boolean>(),
 	previewStreamUrlMock: vi.fn<(file: unknown, name: string, contentType: string) => Promise<string>>()
@@ -48,7 +57,7 @@ const { allowedMediaContentTypeMock } = vi.hoisted(() => ({ allowedMediaContentT
 
 vi.mock("@/features/preview/lib/mediaType", () => ({ allowedMediaContentType: allowedMediaContentTypeMock }))
 
-import { generateHeicThumb, generateVideoThumb, generatePdfThumb } from "@/features/drive/lib/thumbGenerators"
+import { generateImageThumb, generateHeicThumb, generateVideoThumb, generatePdfThumb } from "@/features/drive/lib/thumbGenerators"
 
 // Captured immediately after import: registerThumbGenerator only ever runs once, as a module-scope
 // side effect at import time (see thumbGenerators.ts's own closing comment) — this must be read
@@ -111,6 +120,19 @@ function videoItem(): BaseFileItem {
 	return itemAsBaseFile(narrowItem(mockFile()))
 }
 
+function imageItem(): BaseFileItem {
+	return itemAsBaseFile(
+		narrowItem(
+			mockFile({
+				meta: {
+					type: "decoded",
+					data: { name: "photo.png", mime: "image/png", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
+				}
+			})
+		)
+	)
+}
+
 function pdfItem(): BaseFileItem {
 	return itemAsBaseFile(
 		narrowItem(
@@ -130,12 +152,43 @@ beforeEach(() => {
 })
 
 describe("registration", () => {
-	it("registers heic/video/pdf generators exactly once, at import", () => {
+	it("registers image/heic/video/pdf generators exactly once, at import", () => {
 		expect(registrationCallsAtImport).toEqual([
+			["image", generateImageThumb],
 			["heic", generateHeicThumb],
 			["video", generateVideoThumb],
 			["pdf", generatePdfThumb]
 		])
+	})
+})
+
+describe("generateImageThumb", () => {
+	it("resolves null and never calls transformImageThumb when the download fails", async () => {
+		downloadFileBytesMock.mockRejectedValue(new Error("network"))
+
+		const result = await generateImageThumb(imageItem())
+
+		expect(result).toBeNull()
+		expect(transformImageThumbMock).not.toHaveBeenCalled()
+	})
+
+	it("downloads then decodes at THUMB_MAX_DIM, returning the encoded bytes", async () => {
+		downloadFileBytesMock.mockResolvedValue(new Uint8Array([1, 2, 3]))
+		transformImageThumbMock.mockResolvedValue(new Uint8Array([9, 9]))
+
+		const result = await generateImageThumb(imageItem())
+
+		expect(result).toEqual(new Uint8Array([9, 9]))
+		expect(transformImageThumbMock).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]), THUMB_MAX_DIM)
+	})
+
+	it("resolves null when the decode rejects — an unsupported or corrupt image falls through to the blacklist", async () => {
+		downloadFileBytesMock.mockResolvedValue(new Uint8Array([1]))
+		transformImageThumbMock.mockRejectedValue(new Error("decode failed"))
+
+		const result = await generateImageThumb(imageItem())
+
+		expect(result).toBeNull()
 	})
 })
 

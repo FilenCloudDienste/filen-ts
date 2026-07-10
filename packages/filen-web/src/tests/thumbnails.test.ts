@@ -1,17 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { THUMB_MAX_DIM } from "@/features/drive/lib/thumbnails.logic"
 
 // Mock boundaries mirror download.test.ts's own: the real sdk client imports a Vite
 // `?worker` module (unresolvable/unwanted under node vitest), and the real thumb-cache module calls
-// navigator.storage.getDirectory(), which doesn't exist under node either.
-const { makeThumbnailMock, storeThumbnailMock } = vi.hoisted(() => ({
-	makeThumbnailMock: vi.fn<(file: SdkFile, maxDim: number) => Promise<Uint8Array | undefined>>(),
+// navigator.storage.getDirectory(), which doesn't exist under node either. Only storeThumbnail crosses
+// to the sdk worker now — every category (image included) decodes client-side and persists through it.
+const { storeThumbnailMock } = vi.hoisted(() => ({
 	storeThumbnailMock: vi.fn<(uuid: string, bytes: Uint8Array) => Promise<void>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { makeThumbnail: makeThumbnailMock, storeThumbnail: storeThumbnailMock } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { storeThumbnail: storeThumbnailMock } }))
 
 const { readThumbnailBlobMock, deleteThumbnailMock } = vi.hoisted(() => ({
 	readThumbnailBlobMock: vi.fn<(uuid: string) => Promise<Blob | null>>(),
@@ -25,6 +24,7 @@ import {
 	invalidateThumbnail,
 	registerThumbGenerator,
 	defaultThumbnailDeps,
+	type ThumbGenerator,
 	type ThumbnailServiceDeps
 } from "@/features/drive/lib/thumbnails"
 
@@ -61,7 +61,7 @@ function mockFile(overrides: Partial<SdkFile> = {}): SdkFile {
 	}
 }
 
-function sdkImageItem(overrides: Partial<SdkFile> = {}): DriveItem {
+function imageItem(overrides: Partial<SdkFile> = {}): DriveItem {
 	return narrowItem(mockFile(overrides))
 }
 
@@ -88,8 +88,8 @@ function dirItem(): DriveItem {
 	})
 }
 
-// A fully-stubbed deps object, success by default (no cache hit, empty bytes back — overridden per
-// test) — mirrors download.test.ts's own makeHarness(). createObjectUrl returns a distinct,
+// A fully-stubbed deps object, success by default (no cache hit, no generator registered — overridden
+// per test) — mirrors download.test.ts's own makeHarness(). createObjectUrl returns a distinct,
 // deterministic string per call so "reused the same url" assertions are meaningful.
 function makeFakeDeps(overrides: Partial<ThumbnailServiceDeps> = {}): ThumbnailServiceDeps {
 	let urlCounter = 0
@@ -97,7 +97,6 @@ function makeFakeDeps(overrides: Partial<ThumbnailServiceDeps> = {}): ThumbnailS
 	return {
 		readThumbnailBlob: vi.fn().mockResolvedValue(null),
 		deleteThumbnail: vi.fn().mockResolvedValue(undefined),
-		makeThumbnail: vi.fn().mockResolvedValue(undefined),
 		storeThumbnail: vi.fn().mockResolvedValue(undefined),
 		createObjectUrl: vi.fn(() => {
 			urlCounter += 1
@@ -108,6 +107,12 @@ function makeFakeDeps(overrides: Partial<ThumbnailServiceDeps> = {}): ThumbnailS
 		getGenerator: vi.fn().mockReturnValue(undefined),
 		...overrides
 	}
+}
+
+// Every category routes through the generator registry now, so most tests need a registered generator.
+// This wires getGenerator to hand back `generator` for any category, plus any other overrides.
+function depsWithGenerator(generator: ThumbGenerator, overrides: Partial<ThumbnailServiceDeps> = {}): ThumbnailServiceDeps {
+	return makeFakeDeps({ getGenerator: vi.fn().mockReturnValue(generator), ...overrides })
 }
 
 // Lets a test resolve/reject one mock call at a time, keyed by its first argument — the semaphore
@@ -146,7 +151,6 @@ beforeEach(() => {
 	vi.clearAllMocks()
 	readThumbnailBlobMock.mockResolvedValue(null)
 	deleteThumbnailMock.mockResolvedValue(undefined)
-	makeThumbnailMock.mockResolvedValue(undefined)
 	storeThumbnailMock.mockResolvedValue(undefined)
 })
 
@@ -158,14 +162,15 @@ describe("getThumbnailUrl — category gate", () => {
 
 		expect(url).toBeNull()
 		expect(deps.readThumbnailBlob).not.toHaveBeenCalled()
-		expect(deps.makeThumbnail).not.toHaveBeenCalled()
+		expect(deps.getGenerator).not.toHaveBeenCalled()
 	})
 })
 
 describe("getThumbnailUrl — objectURL cache", () => {
 	it("reuses the same url on a second call, never re-reading or re-generating", async () => {
-		const item = sdkImageItem()
-		const deps = makeFakeDeps({ makeThumbnail: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])) })
+		const item = imageItem()
+		const generator = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]))
+		const deps = depsWithGenerator(generator)
 
 		const first = await getThumbnailUrl(item, deps)
 		const second = await getThumbnailUrl(item, deps)
@@ -173,13 +178,13 @@ describe("getThumbnailUrl — objectURL cache", () => {
 		expect(first).not.toBeNull()
 		expect(second).toBe(first)
 		expect(deps.readThumbnailBlob).toHaveBeenCalledTimes(1)
-		expect(deps.makeThumbnail).toHaveBeenCalledTimes(1)
+		expect(generator).toHaveBeenCalledTimes(1)
 	})
 })
 
 describe("getThumbnailUrl — OPFS cache hit (miss on urls map, hit on disk)", () => {
-	it("renders the cached blob without ever calling makeThumbnail", async () => {
-		const item = sdkImageItem()
+	it("renders the cached blob without ever consulting the generator registry", async () => {
+		const item = imageItem()
 		const blob = new Blob(["cached"], { type: "image/webp" })
 		const deps = makeFakeDeps({ readThumbnailBlob: vi.fn().mockResolvedValue(blob) })
 
@@ -187,38 +192,39 @@ describe("getThumbnailUrl — OPFS cache hit (miss on urls map, hit on disk)", (
 
 		expect(url).not.toBeNull()
 		expect(deps.createObjectUrl).toHaveBeenCalledWith(blob)
-		expect(deps.makeThumbnail).not.toHaveBeenCalled()
+		expect(deps.getGenerator).not.toHaveBeenCalled()
 	})
 })
 
 describe("getThumbnailUrl — routing by category", () => {
-	it("sdk-image calls makeThumbnail and never consults the generator registry", async () => {
-		const item = sdkImageItem()
-		const deps = makeFakeDeps({ makeThumbnail: vi.fn().mockResolvedValue(new Uint8Array([9])) })
+	it("an image routes through the generator registry, keyed by its category", async () => {
+		const item = imageItem()
+		const generator = vi.fn().mockResolvedValue(new Uint8Array([9]))
+		const deps = depsWithGenerator(generator)
 
-		await getThumbnailUrl(item, deps)
+		const url = await getThumbnailUrl(item, deps)
 
-		expect(deps.makeThumbnail).toHaveBeenCalledWith(item.type === "file" ? item.data : undefined, THUMB_MAX_DIM)
-		expect(deps.getGenerator).not.toHaveBeenCalled()
+		expect(url).not.toBeNull()
+		expect(deps.getGenerator).toHaveBeenCalledWith("image")
+		expect(generator).toHaveBeenCalledWith(item)
 	})
 
-	it("a non-sdk-image category consults the generator registry, never makeThumbnail", async () => {
+	it("a heic item routes through the generator registry, keyed by its category", async () => {
 		const item = heicItem()
 		const generator = vi.fn().mockResolvedValue(new Uint8Array([9]))
-		const deps = makeFakeDeps({ getGenerator: vi.fn().mockReturnValue(generator) })
+		const deps = depsWithGenerator(generator)
 
 		const url = await getThumbnailUrl(item, deps)
 
 		expect(url).not.toBeNull()
 		expect(deps.getGenerator).toHaveBeenCalledWith("heic")
 		expect(generator).toHaveBeenCalledWith(item)
-		expect(deps.makeThumbnail).not.toHaveBeenCalled()
 	})
 
-	it("persists a client-generated result through storeThumbnail", async () => {
-		const item = heicItem()
+	it("persists a generated result through storeThumbnail", async () => {
+		const item = imageItem()
 		const bytes = new Uint8Array([9])
-		const deps = makeFakeDeps({ getGenerator: vi.fn().mockReturnValue(vi.fn().mockResolvedValue(bytes)) })
+		const deps = depsWithGenerator(vi.fn().mockResolvedValue(bytes))
 
 		await getThumbnailUrl(item, deps)
 
@@ -231,11 +237,10 @@ describe("getThumbnailUrl — routing by category", () => {
 		// Regression pin: the Blob must be constructed from the bytes BEFORE the persist call; ordering
 		// them the other way round silently produces an empty Blob (zero-byte thumbnails, blacklisted
 		// after three files) while every plain-vi.fn() assertion still passes.
-		const item = heicItem()
+		const item = imageItem()
 		const bytes = new Uint8Array([1, 2, 3, 4])
 		const capturedBlobs: Blob[] = []
-		const deps = makeFakeDeps({
-			getGenerator: vi.fn().mockReturnValue(vi.fn().mockResolvedValue(bytes)),
+		const deps = depsWithGenerator(vi.fn().mockResolvedValue(bytes), {
 			storeThumbnail: vi.fn().mockImplementation((_uuid: string, stored: Uint8Array) => {
 				structuredClone(stored.buffer, { transfer: [stored.buffer as ArrayBuffer] })
 				return Promise.resolve()
@@ -269,11 +274,10 @@ describe("getThumbnailUrl — routing by category", () => {
 		expect(deps.storeThumbnail).not.toHaveBeenCalled()
 	})
 
-	it("a persist failure on a client-generated result is non-fatal — the url still resolves", async () => {
-		const item = heicItem()
+	it("a persist failure on a generated result is non-fatal — the url still resolves", async () => {
+		const item = imageItem()
 		const bytes = new Uint8Array([9])
-		const deps = makeFakeDeps({
-			getGenerator: vi.fn().mockReturnValue(vi.fn().mockResolvedValue(bytes)),
+		const deps = depsWithGenerator(vi.fn().mockResolvedValue(bytes), {
 			storeThumbnail: vi.fn().mockRejectedValue(new Error("disk full"))
 		})
 
@@ -285,17 +289,17 @@ describe("getThumbnailUrl — routing by category", () => {
 
 describe("getThumbnailUrl — failure and the 3-strike blacklist", () => {
 	it("a rejected generation resolves null and counts as one failure", async () => {
-		const item = sdkImageItem()
-		const deps = makeFakeDeps({ makeThumbnail: vi.fn().mockRejectedValue(new Error("decode failed")) })
+		const item = imageItem()
+		const deps = depsWithGenerator(vi.fn().mockRejectedValue(new Error("decode failed")))
 
 		const url = await getThumbnailUrl(item, deps)
 
 		expect(url).toBeNull()
 	})
 
-	it("an undefined (no-thumbnail) result also counts as a failure", async () => {
-		const item = sdkImageItem()
-		const deps = makeFakeDeps({ makeThumbnail: vi.fn().mockResolvedValue(undefined) })
+	it("a null (no-thumbnail) generator result also counts as a failure", async () => {
+		const item = imageItem()
+		const deps = depsWithGenerator(vi.fn().mockResolvedValue(null))
 
 		const url = await getThumbnailUrl(item, deps)
 
@@ -303,33 +307,35 @@ describe("getThumbnailUrl — failure and the 3-strike blacklist", () => {
 	})
 
 	it("the third failure short-circuits every later call — no fourth generation attempt", async () => {
-		const item = sdkImageItem()
-		const deps = makeFakeDeps({ makeThumbnail: vi.fn().mockRejectedValue(new Error("decode failed")) })
+		const item = imageItem()
+		const generator = vi.fn().mockRejectedValue(new Error("decode failed"))
+		const deps = depsWithGenerator(generator)
 
 		await getThumbnailUrl(item, deps)
 		await getThumbnailUrl(item, deps)
 		await getThumbnailUrl(item, deps)
 
-		expect(deps.makeThumbnail).toHaveBeenCalledTimes(3)
+		expect(generator).toHaveBeenCalledTimes(3)
 
 		const fourth = await getThumbnailUrl(item, deps)
 
 		expect(fourth).toBeNull()
-		expect(deps.makeThumbnail).toHaveBeenCalledTimes(3) // unchanged — short-circuited before generating
+		expect(generator).toHaveBeenCalledTimes(3) // unchanged — short-circuited before generating
 	})
 })
 
 describe("getThumbnailUrl — dedupe (pending-map join)", () => {
 	it("two concurrent calls for the same uuid share exactly one generation", async () => {
-		const item = sdkImageItem()
-		const deferred = deferredCalls<Uint8Array | undefined>()
-		const deps = makeFakeDeps({ makeThumbnail: vi.fn(() => deferred.fn("x")) })
+		const item = imageItem()
+		const deferred = deferredCalls<Uint8Array | null>()
+		const generator = vi.fn(() => deferred.fn("x"))
+		const deps = depsWithGenerator(generator)
 
 		const first = getThumbnailUrl(item, deps)
 		const second = getThumbnailUrl(item, deps)
 
 		await flushMicrotasks()
-		expect(deps.makeThumbnail).toHaveBeenCalledTimes(1)
+		expect(generator).toHaveBeenCalledTimes(1)
 		expect(deps.readThumbnailBlob).toHaveBeenCalledTimes(1)
 
 		deferred.resolve("x", new Uint8Array([1]))
@@ -338,12 +344,12 @@ describe("getThumbnailUrl — dedupe (pending-map join)", () => {
 
 		expect(firstUrl).not.toBeNull()
 		expect(secondUrl).toBe(firstUrl)
-		expect(deps.makeThumbnail).toHaveBeenCalledTimes(1)
+		expect(generator).toHaveBeenCalledTimes(1)
 	})
 
 	it("a later call after the first settles starts a fresh generation (pending entry cleared)", async () => {
-		const item = sdkImageItem()
-		const deps = makeFakeDeps({ makeThumbnail: vi.fn().mockResolvedValue(new Uint8Array([1])) })
+		const item = imageItem()
+		const deps = depsWithGenerator(vi.fn().mockResolvedValue(new Uint8Array([1])))
 
 		await getThumbnailUrl(item, deps)
 
@@ -359,11 +365,10 @@ describe("getThumbnailUrl — dedupe (pending-map join)", () => {
 
 describe("getThumbnailUrl — semaphore (max 3 concurrent generations)", () => {
 	it("a 4th concurrent call for a different uuid queues until a slot frees", async () => {
-		const items = [sdkImageItem(), sdkImageItem(), sdkImageItem(), sdkImageItem()]
+		const items = [imageItem(), imageItem(), imageItem(), imageItem()]
 		const deferred = deferredCalls<Blob | null>()
-		const deps = makeFakeDeps({
-			readThumbnailBlob: vi.fn((uuid: string) => deferred.fn(uuid)),
-			makeThumbnail: vi.fn().mockResolvedValue(new Uint8Array([1]))
+		const deps = depsWithGenerator(vi.fn().mockResolvedValue(new Uint8Array([1])), {
+			readThumbnailBlob: vi.fn((uuid: string) => deferred.fn(uuid))
 		})
 
 		const attempts = items.map(item => getThumbnailUrl(item, deps))
@@ -402,8 +407,8 @@ describe("getThumbnailUrl — semaphore (max 3 concurrent generations)", () => {
 
 describe("invalidateThumbnail", () => {
 	it("revokes the objectURL and deletes the on-disk entry", async () => {
-		const item = sdkImageItem()
-		const deps = makeFakeDeps({ makeThumbnail: vi.fn().mockResolvedValue(new Uint8Array([1])) })
+		const item = imageItem()
+		const deps = depsWithGenerator(vi.fn().mockResolvedValue(new Uint8Array([1])))
 
 		const url = await getThumbnailUrl(item, deps)
 
@@ -432,26 +437,28 @@ describe("invalidateThumbnail", () => {
 	})
 
 	it("clears exactly one blacklist strike, allowing exactly one more attempt", async () => {
-		const item = sdkImageItem()
-		const deps = makeFakeDeps({ makeThumbnail: vi.fn().mockRejectedValue(new Error("decode failed")) })
+		const item = imageItem()
+		const failing = vi.fn().mockRejectedValue(new Error("decode failed"))
+		const deps = depsWithGenerator(failing)
 
 		await getThumbnailUrl(item, deps)
 		await getThumbnailUrl(item, deps)
 		await getThumbnailUrl(item, deps)
-		expect(deps.makeThumbnail).toHaveBeenCalledTimes(3)
+		expect(failing).toHaveBeenCalledTimes(3)
 
 		const shortCircuited = await getThumbnailUrl(item, deps)
 		expect(shortCircuited).toBeNull()
-		expect(deps.makeThumbnail).toHaveBeenCalledTimes(3) // still short-circuited, strike untouched
+		expect(failing).toHaveBeenCalledTimes(3) // still short-circuited, strike untouched
 
 		invalidateThumbnail(item.data.uuid, deps)
 
 		// One strike cleared (3 -> 2): the next call is allowed to attempt again.
-		deps.makeThumbnail = vi.fn().mockResolvedValue(new Uint8Array([1]))
+		const succeeding = vi.fn().mockResolvedValue(new Uint8Array([1]))
+		deps.getGenerator = vi.fn().mockReturnValue(succeeding)
 		const afterInvalidate = await getThumbnailUrl(item, deps)
 
 		expect(afterInvalidate).not.toBeNull()
-		expect(deps.makeThumbnail).toHaveBeenCalledTimes(1)
+		expect(succeeding).toHaveBeenCalledTimes(1)
 	})
 })
 
@@ -474,16 +481,6 @@ describe("registerThumbGenerator + defaultThumbnailDeps — real wiring", () => 
 		expect(url).not.toBeNull()
 		expect(url).toMatch(/^blob:/)
 		expect(storeThumbnailMock).toHaveBeenCalledWith(item.data.uuid, bytes)
-	})
-
-	it("defaultThumbnailDeps.makeThumbnail forwards to the real sdkApi.makeThumbnail", async () => {
-		makeThumbnailMock.mockResolvedValue(new Uint8Array([1]))
-		const file = mockFile()
-
-		const result = await defaultThumbnailDeps.makeThumbnail(file, THUMB_MAX_DIM)
-
-		expect(makeThumbnailMock).toHaveBeenCalledWith(file, THUMB_MAX_DIM)
-		expect(result).toEqual(new Uint8Array([1]))
 	})
 
 	it("defaultThumbnailDeps.readThumbnailBlob/deleteThumbnail forward to the real thumb-cache module", async () => {

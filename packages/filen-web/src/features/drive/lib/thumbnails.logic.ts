@@ -4,16 +4,16 @@ import { extensionOf } from "@/features/drive/lib/preview.logic"
 // Every category this app can produce a cached thumbnail for; "none" covers every non-"file" arm
 // (directory, every shared arm — out of scope here), an undecryptable file, an unrecognized
 // extension, and a whole-buffer category over the size gate.
-export type ThumbnailCategory = "sdk-image" | "heic" | "video" | "pdf" | "none"
+export type ThumbnailCategory = "image" | "heic" | "video" | "pdf" | "none"
 
-// Square thumbnail bound (both dimensions) fed to makeThumbnailInMemory and, later, every
-// client-side generator — one shared target keeps every cached .thumb file roughly the same size.
+// Square thumbnail bound (both dimensions) fed to every client-side generator — one shared target
+// keeps every cached .thumb file roughly the same size.
 export const THUMB_MAX_DIM = 256
 
 // Whole-buffer decode/generate ceiling (64 MiB) for the categories that pull the ENTIRE file into
-// memory to produce a thumbnail (sdk-image, heic, pdf) — an oversize file skips thumbnailing
-// entirely rather than risking a tab-crashing allocation for a preview-sized image. video is exempt:
-// its generator only ever reads a single frame off a stream, never the whole file.
+// memory to produce a thumbnail (image, heic, pdf) — an oversize file skips thumbnailing entirely
+// rather than risking a tab-crashing allocation for a preview-sized image. video is exempt: its
+// generator only ever reads a single frame off a stream, never the whole file.
 export const THUMB_SIZE_GATE = 67_108_864n
 
 // On-disk cache ceiling (256 MiB) — sweepThumbs evicts the oldest entries once the store exceeds
@@ -35,18 +35,23 @@ export const THUMB_DIR = [...THUMB_DIR_ROOT, THUMB_GENERATION]
 
 export const THUMB_EXT = ".thumb"
 
-// SDK-decodable raster extensions — verified against the installed wasm build's own
-// canMakeThumbnail flag survey: bmp and avif both report false, so neither routes here (no
-// client-side generator exists or is planned for either, matching old-web parity).
-const SDK_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp"])
+// Raster extensions the "image" category CANDIDATES for a client-side createImageBitmap decode. This
+// is a candidacy list, NOT a support claim: whether the browser can actually decode a given format is
+// proven per-file at decode time (createImageBitmap either yields a bitmap or throws), and a decode
+// failure falls through to the service's own 3-strike blacklist rather than a hardcoded per-format
+// gate here — so a format an older browser can't decode simply blacklists after three tries instead
+// of pretending support up front. bmp and avif join the SDK-era set (jpg/jpeg/png/gif/webp) now that
+// the browser, not the wasm decoder, owns decode; the item's own canMakeThumbnail flag no longer
+// gates this arm for the same reason (it only ever described SDK-side decodability). svg stays
+// EXCLUDED on purpose (sanitization posture — an untrusted svg is never fed to a decoder).
+const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"])
 const HEIC_EXTENSIONS = new Set(["heic", "heif"])
 const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "webm", "m4v", "mkv"])
 
 // Extension-first category routing, "file" arm only — a directory or any shared arm (shared items
 // are out of scope here) always resolves "none", same as an undecryptable file (no name to route
-// on). sdk-image additionally requires the item's own canMakeThumbnail flag; every whole-buffer
-// category (sdk-image, heic, pdf) additionally requires the file to be at or under
-// THUMB_SIZE_GATE — video is exempt, its generator never buffers the whole file.
+// on). Every whole-buffer category (image, heic, pdf) additionally requires the file to be at or
+// under THUMB_SIZE_GATE — video is exempt, its generator never buffers the whole file.
 export function thumbnailCategory(item: DriveItem): ThumbnailCategory {
 	if (item.type !== "file" || item.data.undecryptable) {
 		return "none"
@@ -55,8 +60,8 @@ export function thumbnailCategory(item: DriveItem): ThumbnailCategory {
 	const name = item.data.decryptedMeta?.name
 	const ext = name !== undefined ? extensionOf(name) : ""
 
-	if (SDK_IMAGE_EXTENSIONS.has(ext)) {
-		return item.data.canMakeThumbnail && item.data.size <= THUMB_SIZE_GATE ? "sdk-image" : "none"
+	if (IMAGE_EXTENSIONS.has(ext)) {
+		return item.data.size <= THUMB_SIZE_GATE ? "image" : "none"
 	}
 
 	if (HEIC_EXTENSIONS.has(ext)) {

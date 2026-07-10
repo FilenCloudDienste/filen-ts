@@ -99,19 +99,26 @@ function fileNamed(name: string, options: { canMakeThumbnail?: boolean; size?: b
 }
 
 describe("thumbnailCategory", () => {
-	it.each(["jpg", "jpeg", "png", "gif", "webp"])("%s -> sdk-image when canMakeThumbnail is true and under the size gate", ext => {
-		expect(thumbnailCategory(fileNamed(`photo.${ext}`))).toBe("sdk-image")
+	// The client-side createImageBitmap decode owns the format list now, not the SDK's wasm decoder —
+	// bmp and avif join the raster set the browser can decode.
+	it.each(["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"])("%s -> image when under the size gate", ext => {
+		expect(thumbnailCategory(fileNamed(`photo.${ext}`))).toBe("image")
 	})
 
-	// bmp and avif both surveyed canMakeThumbnail=false on the installed wasm build — neither is in
-	// SDK_IMAGE_EXTENSIONS, so both fall through to "none" regardless of the flag (no client-side
-	// generator exists for either).
-	it.each(["bmp", "avif"])("%s -> none — not an SDK-decodable extension, even with canMakeThumbnail true", ext => {
-		expect(thumbnailCategory(fileNamed(`photo.${ext}`, { canMakeThumbnail: true }))).toBe("none")
+	// canMakeThumbnail is an SDK-decodability flag; the JS decode path no longer consults it, so a
+	// decodable extension routes to "image" regardless of the flag's value.
+	it("routes to image even when canMakeThumbnail is false — the flag no longer gates the JS decode", () => {
+		expect(thumbnailCategory(fileNamed("photo.jpg", { canMakeThumbnail: false }))).toBe("image")
+	})
+
+	// svg is deliberately excluded (sanitization posture — never fed to a decoder), unlike every other
+	// raster extension above.
+	it("svg -> none — excluded on purpose, never decoded", () => {
+		expect(thumbnailCategory(fileNamed("vector.svg"))).toBe("none")
 	})
 
 	it("is case-insensitive on the extension", () => {
-		expect(thumbnailCategory(fileNamed("PHOTO.JPG"))).toBe("sdk-image")
+		expect(thumbnailCategory(fileNamed("PHOTO.JPG"))).toBe("image")
 	})
 
 	it.each(["heic", "heif"])("%s -> heic when under the size gate", ext => {
@@ -134,15 +141,9 @@ describe("thumbnailCategory", () => {
 		expect(thumbnailCategory(fileNamed(".gitignore"))).toBe("none")
 	})
 
-	describe("sdk-image flag gate", () => {
-		it("resolves none when canMakeThumbnail is false, even for a decodable extension", () => {
-			expect(thumbnailCategory(fileNamed("photo.jpg", { canMakeThumbnail: false }))).toBe("none")
-		})
-	})
-
-	describe("whole-buffer size gate (sdk-image, heic, pdf)", () => {
-		it("is sdk-image exactly at the size gate", () => {
-			expect(thumbnailCategory(fileNamed("photo.jpg", { size: THUMB_SIZE_GATE }))).toBe("sdk-image")
+	describe("whole-buffer size gate (image, heic, pdf)", () => {
+		it("is image exactly at the size gate", () => {
+			expect(thumbnailCategory(fileNamed("photo.jpg", { size: THUMB_SIZE_GATE }))).toBe("image")
 		})
 
 		it("is none one byte over the size gate", () => {
