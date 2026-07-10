@@ -177,6 +177,13 @@
   [contenteditable] {
     @apply select-text;
     }
+  /* Toast title/description (errorLabel() can surface raw server messages worth copying,
+     same class of support-copy text as the boot-error screen's detail/reason text above) —
+     scoped to the text nodes, not the toast's buttons/close/icon chrome. */
+  .cn-toast [data-title],
+  .cn-toast [data-description] {
+    @apply select-text;
+    }
   /* Thin overlay-style scrollbars, consistent across themes — no thick native gutter. */
   *::-webkit-scrollbar {
     width: 10px;
