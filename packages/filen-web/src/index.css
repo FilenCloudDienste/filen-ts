@@ -5,6 +5,18 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Electron drag regions (spec: "Electron plumbing") — inert in every browser, `-webkit-app-region`
+   is a Chromium/Electron-only property browsers elsewhere ignore. `app-region-drag` marks a whole
+   background (the system strip, rail, sidebar) draggable; `app-region-no-drag` opts individual
+   interactive descendants back out so they stay clickable. */
+@utility app-region-drag {
+    -webkit-app-region: drag;
+}
+
+@utility app-region-no-drag {
+    -webkit-app-region: no-drag;
+}
+
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Inter Variable', sans-serif;

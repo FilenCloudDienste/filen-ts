@@ -23,9 +23,23 @@ interface E2eHooks {
 	thumbnailFileStat: (parentUuid: string, name: string) => Promise<{ size: number; lastModified: number } | null>
 }
 
+// Mirrors src/types/desktop.d.ts's DesktopBridge for the same reason as E2eHooks above: this project
+// can't import the app source tree. No spec here ever exercises a populated bridge (Electron isn't
+// part of this suite) — boot.spec.ts only asserts window.desktop stays undefined in a plain browser,
+// so the shape only needs to exist for that read to typecheck.
+interface DesktopBridge {
+	readonly platform: "darwin" | "win32" | "linux"
+	minimize(): void
+	toggleMaximize(): void
+	hide(): void
+	close(): void
+	onMaximizedChange(cb: (maximized: boolean) => void): () => void
+}
+
 declare global {
 	interface Window {
 		__filenE2E: E2eHooks
+		readonly desktop?: DesktopBridge
 	}
 }
 

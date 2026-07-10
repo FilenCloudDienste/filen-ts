@@ -64,6 +64,18 @@ export const common = {
 	driveSharedOut: "Shared with others",
 	/** Drive sidebar — item for the user's public links */
 	driveLinks: "Links",
+	// Desktop system strip — win32/linux custom window controls (darwin uses native traffic lights,
+	// no custom buttons); only rendered when window.desktop is present (see src/types/desktop.d.ts)
+	/** System strip — minimize-window button accessible label */
+	windowMinimize: "Minimize",
+	/** System strip — maximize-window button accessible label, shown while the window is not maximized */
+	windowMaximize: "Maximize",
+	/** System strip — restore-window button accessible label, shown while the window is maximized */
+	windowRestore: "Restore",
+	/** System strip — hide-window button accessible label */
+	windowHide: "Hide",
+	/** System strip — close-window button accessible label */
+	windowClose: "Close window",
 	// Service worker update prompt
 	/** Update toast — title raised when a new version has been installed and is waiting */
 	updateReadyTitle: "Update ready",

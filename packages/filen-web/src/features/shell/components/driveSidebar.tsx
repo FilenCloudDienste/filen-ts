@@ -25,7 +25,9 @@ type DriveSidebarItem =
 // Shared by NavItem and the splat links below, so all stay visually identical without recomputing the
 // same static class string on every render.
 const NAV_ITEM_CLASS = cn(
-	"group flex h-8 w-full items-center gap-2.5 rounded-xl px-2.5 text-sm transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/30 [&_svg]:size-4 [&_svg]:shrink-0",
+	// app-region-no-drag: every row is a real click target inside the sidebar's own drag region (see
+	// the <aside> below).
+	"group flex h-8 w-full items-center gap-2.5 rounded-xl px-2.5 text-sm transition-colors outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/30 [&_svg]:size-4 [&_svg]:shrink-0",
 	"text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
 	"data-[status=active]:bg-sidebar-accent data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground"
 )
@@ -93,7 +95,11 @@ export function DriveSidebar() {
 	]
 
 	return (
-		<aside className="hidden h-svh w-52 shrink-0 flex-col bg-sidebar md:flex">
+		<aside
+			// Drag region (Electron plumbing): inert in a plain browser (-webkit-app-region is ignored
+			// outside Chromium/Electron). NAV_ITEM_CLASS opts every row back out with app-region-no-drag.
+			className="hidden h-full w-52 shrink-0 flex-col bg-sidebar app-region-drag md:flex"
+		>
 			<div className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
 				<SplatNavItem
 					icon={FolderClosedIcon}

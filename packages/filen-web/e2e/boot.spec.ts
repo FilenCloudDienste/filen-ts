@@ -23,6 +23,12 @@ test.describe("boot", () => {
 		// its toolbar is a stable, always-rendered proof the route mounted past the shell chrome.
 		await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeVisible()
 
+		// The desktop system strip (Electron plumbing) is runtime-detected off window.desktop, which a
+		// plain browser never defines - proves the strip has zero footprint here, not merely that it
+		// wasn't asserted for.
+		expect(await page.evaluate(() => window.desktop)).toBeUndefined()
+		await expect(page.getByRole("button", { name: "Close window" })).toHaveCount(0)
+
 		// A rail tooltip renders on hover.
 		await page.getByRole("button", { name: "Notes" }).hover()
 		await expect(page.getByText("Coming soon")).toBeVisible()

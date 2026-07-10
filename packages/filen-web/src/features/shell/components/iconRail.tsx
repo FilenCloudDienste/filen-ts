@@ -88,7 +88,9 @@ const MODULES: { key: CommonKey; icon: IconType }[] = [
 // visually identical.
 function railItemClass(active: boolean): string {
 	return cn(
-		"flex size-10 items-center justify-center rounded-xl transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/40 [&_svg]:size-[22px] [&_svg]:shrink-0",
+		// app-region-no-drag: every rail item is a real click target inside the rail's own drag region
+		// (see IconRail's <nav> below).
+		"flex size-10 items-center justify-center rounded-xl transition-colors outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/40 [&_svg]:size-[22px] [&_svg]:shrink-0",
 		active ? "bg-rail-chip text-rail-chip-foreground shadow-sm" : "text-muted-foreground hover:bg-rail-hover hover:text-foreground"
 	)
 }
@@ -136,7 +138,7 @@ function AccountMenu() {
 							variant="ghost"
 							size="icon-lg"
 							aria-label={t("account")}
-							className="rounded-full"
+							className="rounded-full app-region-no-drag"
 						>
 							<Avatar size="sm">
 								<AvatarFallback>
@@ -289,7 +291,7 @@ function SidebarToggle() {
 						aria-label={label}
 						aria-pressed={sidebarCollapsed}
 						onClick={toggleSidebar}
-						className="flex size-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-sm transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/40 [&_svg]:size-[18px]"
+						className="flex size-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-sm transition-colors outline-none app-region-no-drag hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/40 [&_svg]:size-[18px]"
 					>
 						<PanelLeftIcon />
 					</button>
@@ -340,13 +342,16 @@ export function IconRail() {
 	return (
 		<nav
 			aria-label={t("appName")}
-			className="flex h-svh w-14 shrink-0 flex-col items-center gap-1.5 py-3"
+			// Drag region (Electron plumbing): a plain browser ignores -webkit-app-region entirely, so
+			// this is inert weight everywhere else. Every interactive descendant below opts back out
+			// with app-region-no-drag so it stays clickable.
+			className="flex h-full w-14 shrink-0 flex-col items-center gap-1.5 py-3 app-region-drag"
 		>
 			<Link
 				to="/drive/$"
 				params={{ _splat: "" }}
 				aria-label={t("moduleDrive")}
-				className="mb-1.5 flex size-8 items-center justify-center rounded-xl bg-primary text-primary-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/40 dark:bg-rail-chip dark:text-rail-chip-foreground"
+				className="mb-1.5 flex size-8 items-center justify-center rounded-xl bg-primary text-primary-foreground outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/40 dark:bg-rail-chip dark:text-rail-chip-foreground"
 			>
 				<Logo className="size-5" />
 			</Link>
@@ -394,7 +399,7 @@ export function IconRail() {
 								type="button"
 								aria-disabled="true"
 								aria-label={t(key)}
-								className="flex size-10 items-center justify-center rounded-xl text-muted-foreground/50 [&_svg]:size-[22px] [&_svg]:shrink-0"
+								className="flex size-10 items-center justify-center rounded-xl text-muted-foreground/50 app-region-no-drag [&_svg]:size-[22px] [&_svg]:shrink-0"
 							>
 								<Icon />
 							</button>
