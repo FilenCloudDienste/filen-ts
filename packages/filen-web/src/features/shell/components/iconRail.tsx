@@ -23,7 +23,6 @@ import { kvClear } from "@/lib/storage/adapter"
 import { queryClient } from "@/queries/client"
 import { useAccountQuery } from "@/queries/account"
 import { useTransfersAggregate } from "@/features/transfers/store/useTransfersStore"
-import { useExportKeysReminder } from "@/features/settings/components/security/exportMasterKeys"
 import { TransfersPanel } from "@/features/transfers/components/transfersPanel"
 import { Logo } from "@/features/shell/components/logo"
 import { useTheme } from "@/providers/themeProvider"
@@ -309,11 +308,6 @@ export function IconRail() {
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const driveActive = pathname === "/drive" || pathname.startsWith("/drive/")
 	const contactsActive = pathname === "/contacts"
-
-	// Mounted once here (the icon rail exists for the app's whole authed lifetime, independent of
-	// which route is active) rather than on the security route itself, so the nag can fire and route
-	// TO that page even when the user never opens it unprompted.
-	useExportKeysReminder()
 
 	// Registered above at module scope (default unassigned) — this only wires the LIVE combo, which
 	// starts as "" (react-hotkeys-hook's parser treats it as "never matches") and works the instant a

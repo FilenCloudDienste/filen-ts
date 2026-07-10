@@ -265,6 +265,12 @@ export const auth = {
 	exportMasterKeysReminderAction: "Export now",
 	/** Master-keys reminder banner — dismiss action that postpones the reminder */
 	exportMasterKeysReminderDismiss: "Remind me later",
+	/** Storage-over-limit reminder dialog — title shown when used storage exceeds the plan's limit */
+	storageLimitReminderTitle: "Storage limit reached",
+	/** Storage-over-limit reminder dialog — body telling the user to free up space or upgrade */
+	storageLimitReminderBody: "You've reached your storage limit. Delete some files or upgrade your plan to keep uploading.",
+	/** Storage-over-limit reminder dialog — sole acknowledge/dismiss button (no upgrade deep-link on web) */
+	storageLimitReminderDismiss: "OK",
 
 	// ── Delete account: two-stage confirm, then "check your email" ─────────────
 	/** Delete-account section — heading and first confirmation dialog title */

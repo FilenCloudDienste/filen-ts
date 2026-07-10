@@ -1,11 +1,54 @@
 import type { Page } from "@playwright/test"
 import { expect } from "../fixtures"
 
+// Startup account reminders (master-keys export, storage over limit) are BLOCKING modal alertdialogs
+// the authed shell raises once per page LOAD, keys before storage — while open they render the rest of
+// the app inert/aria-hidden, so they sit over every authed spec's first interaction. Dismissed here in
+// the one shared listing gate so every spec inherits it, by each reminder's dismiss-button accessible
+// name. The "already handled" guard lives in a window flag rather than a WeakSet<Page> ON PURPOSE: a
+// reload re-arms the reminders but keeps the same Page object, so a WeakSet would wrongly suppress the
+// second dismissal — the window flag clears on reload exactly as the reminders do. First pass per load:
+// dismiss never exports keys, so the keys reminder deterministically re-appears for the e2e account and
+// is bounded-waited for; storage only fires when over limit, so it is a non-blocking snapshot after
+// keys closes. Later same-load calls read the flag and return immediately (no 15s wait for a modal that
+// cannot re-appear until the next reload).
+export async function dismissStartupReminders(page: Page): Promise<void> {
+	const handled = await page
+		.evaluate(() => Boolean((window as unknown as { __e2eRemindersHandled?: boolean }).__e2eRemindersHandled))
+		.catch(() => false)
+
+	if (handled) {
+		return
+	}
+
+	const keysDismiss = page.getByRole("alertdialog").getByRole("button", { name: "Remind me later", exact: true })
+
+	try {
+		await keysDismiss.click({ timeout: 15_000 })
+	} catch {
+		// Keys already exported (or reminder otherwise not shown) — nothing to dismiss.
+	}
+
+	const storageDismiss = page.getByRole("alertdialog").getByRole("button", { name: "OK", exact: true })
+
+	if (await storageDismiss.isVisible().catch(() => false)) {
+		await storageDismiss.click()
+	}
+
+	await page
+		.evaluate(() => {
+			;(window as unknown as { __e2eRemindersHandled?: boolean }).__e2eRemindersHandled = true
+		})
+		.catch(() => undefined)
+}
+
 // Resolves once the listing has settled to one of its two terminal render states for the CURRENT
 // directory — there is no third: a query error would leave neither locator visible, which is a real,
 // actionable failure like any other timeout here. Returns the listbox locator and whether it actually
 // has content, so callers can gate content-dependent assertions on real, live account state.
 export async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
+	await dismissStartupReminders(page)
+
 	const listbox = page.getByRole("listbox", { name: "Directory contents" })
 	const empty = page.getByText("Nothing here yet")
 

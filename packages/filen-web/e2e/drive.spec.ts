@@ -111,8 +111,11 @@ test.describe("drive", () => {
 		await page.keyboard.press("Escape")
 
 		await page.reload()
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+		// A reload re-arms the blocking startup reminder modal, which renders the shell inert/aria-hidden
+		// until dismissed — settle the listing first (its shared gate dismisses the reminder) so the nav
+		// below is reachable.
 		await waitForListingSettled(page)
+		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 		await page.getByRole("button", { name: "Display", exact: true }).click()
 		await expect(page.getByRole("menuitemradio", { name: "Grid view", exact: true })).toHaveAttribute("aria-checked", "true")
 		await page.keyboard.press("Escape")

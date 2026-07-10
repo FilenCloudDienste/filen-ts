@@ -1,21 +1,12 @@
-/* eslint-disable react-refresh/only-export-components -- this file exports the card component AND
-   the useExportKeysReminder hook it shares a domain with (mirrors themeProvider.tsx's own
-   ThemeProvider + useTheme pairing) */
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { downloadTextFile } from "@/features/settings/lib/downloadTextFile"
-import { useAccountQuery, type AccountQuerySuccess } from "@/queries/account"
-import {
-	buildMasterKeysFilename,
-	shouldShowExportReminder,
-	reminderFired,
-	markReminderFired
-} from "@/features/settings/components/security/exportMasterKeys.logic"
+import { type AccountQuerySuccess } from "@/queries/account"
+import { buildMasterKeysFilename } from "@/features/settings/components/security/exportMasterKeys.logic"
 import { Card, CardAction, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -93,44 +84,4 @@ function ExportMasterKeysCard({ accountQuery }: ExportMasterKeysCardProps) {
 	)
 }
 
-// Once-per-boot export-keys nag: mounted once from the authed shell (iconRail.tsx), independent of
-// whether the security page itself is open. Module-level `reminderFired`/`markReminderFired` (see
-// exportMasterKeys.logic.ts) stand in for a native app's "once per unlock" gate — the web app has
-// no lock/unlock concept, so "once per app boot" (i.e. once per module instance / page load) is the
-// web-appropriate equivalent.
-function useExportKeysReminder(): void {
-	const { t } = useTranslation("auth")
-	const navigate = useNavigate()
-	const accountQuery = useAccountQuery()
-
-	useEffect(() => {
-		if (
-			!shouldShowExportReminder({
-				accountStatus: accountQuery.status,
-				didExportMasterKeys: accountQuery.data?.didExportMasterKeys ?? false,
-				alreadyFired: reminderFired()
-			})
-		) {
-			return
-		}
-
-		markReminderFired()
-
-		toast(t("exportMasterKeysReminderTitle"), {
-			description: t("exportMasterKeysReminderBody"),
-			duration: Infinity,
-			action: {
-				label: t("exportMasterKeysReminderAction"),
-				onClick: () => {
-					void navigate({ to: "/settings/security" })
-				}
-			},
-			cancel: {
-				label: t("exportMasterKeysReminderDismiss"),
-				onClick: () => undefined
-			}
-		})
-	}, [accountQuery.status, accountQuery.data?.didExportMasterKeys, navigate, t])
-}
-
-export { ExportMasterKeysCard, useExportKeysReminder }
+export { ExportMasterKeysCard }

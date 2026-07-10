@@ -8,19 +8,29 @@ export function buildMasterKeysFilename(email: string, timestampMs: number): str
 	return `${email}.masterKeys.${String(timestampMs)}.txt`
 }
 
-// Module-level "fired this boot" flag for the export-keys reminder toast — a fresh page load (or
-// tab) gets a fresh module instance and can fire again, matching "once per app boot" (there is no
+// Module-level "fired this boot" flags for the two startup reminders — a fresh page load (or tab)
+// gets a fresh module instance and can fire again, matching "once per app boot" (there is no
 // unlock/lock concept on web to hang a "once per unlock" rule on, unlike a native app's lifecycle).
-// Tests reset this via `vi.resetModules()` + a fresh dynamic import (mirrors the keymap registry's
-// own singleton-state test pattern) rather than exposing a test-only reset export.
-let fired = false
+// Dismissing a reminder ("remind me later") sets its flag so it does not re-appear until the next
+// reload. Tests reset these via `vi.resetModules()` + a fresh dynamic import (mirrors the keymap
+// registry's own singleton-state test pattern) rather than exposing a test-only reset export.
+let keysFired = false
+let storageFired = false
 
 export function reminderFired(): boolean {
-	return fired
+	return keysFired
 }
 
 export function markReminderFired(): void {
-	fired = true
+	keysFired = true
+}
+
+export function storageReminderFired(): boolean {
+	return storageFired
+}
+
+export function markStorageReminderFired(): void {
+	storageFired = true
 }
 
 // Pure gating predicate for the boot reminder — deliberately takes `alreadyFired` as an explicit
@@ -34,4 +44,41 @@ export function shouldShowExportReminder(params: {
 	alreadyFired: boolean
 }): boolean {
 	return !params.alreadyFired && params.accountStatus === "success" && !params.didExportMasterKeys
+}
+
+// Storage-over-limit trigger, ported verbatim from the mobile account reminders (`storageUsed >
+// maxStorage`). Bigint-typed to match UserInfo's fields — never coerce to Number for the comparison.
+export function isStorageOverLimit(storageUsed: bigint, maxStorage: bigint): boolean {
+	return storageUsed > maxStorage
+}
+
+// The two startup reminders, in the order they surface.
+export type ReminderKind = "exportKeys" | "storage"
+
+// One-at-a-time selector for the blocking startup reminders: returns the single reminder to surface
+// next, keys before storage, or null when none apply. It never returns "storage" while the keys
+// reminder is still eligible, so a caller that marks a reminder's fired-flag on dismissal and
+// re-evaluates gets the next one in sequence (keys → storage → done) without ever stacking modals.
+export function selectActiveReminder(params: {
+	accountStatus: "pending" | "error" | "success"
+	didExportMasterKeys: boolean
+	storageOverLimit: boolean
+	keysFired: boolean
+	storageFired: boolean
+}): ReminderKind | null {
+	if (
+		shouldShowExportReminder({
+			accountStatus: params.accountStatus,
+			didExportMasterKeys: params.didExportMasterKeys,
+			alreadyFired: params.keysFired
+		})
+	) {
+		return "exportKeys"
+	}
+
+	if (params.accountStatus === "success" && !params.storageFired && params.storageOverLimit) {
+		return "storage"
+	}
+
+	return null
 }

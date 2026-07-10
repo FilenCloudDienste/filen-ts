@@ -2,6 +2,7 @@ import { Outlet } from "@tanstack/react-router"
 import { IconRail } from "@/features/shell/components/iconRail"
 import { DriveSidebar } from "@/features/shell/components/driveSidebar"
 import { SystemStrip } from "@/features/shell/components/systemStrip"
+import { AccountReminders } from "@/features/shell/components/accountReminders"
 
 // Padded canvas holding the three shell zones: a bare icon rail sitting directly on the canvas, then
 // two floating rounded panels — the contextual module sidebar and the content card. Nothing touches a
@@ -14,6 +15,7 @@ import { SystemStrip } from "@/features/shell/components/systemStrip"
 export function AppShell() {
 	return (
 		<div className="flex h-svh w-full flex-col overflow-hidden bg-canvas text-foreground">
+			<AccountReminders />
 			<SystemStrip />
 			<div className="flex min-h-0 flex-1 gap-2 overflow-hidden p-2">
 				<IconRail />

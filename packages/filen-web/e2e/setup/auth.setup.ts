@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs"
 import { test as setup, expect } from "@playwright/test"
 import { AUTH_DIR, SESSION_FILE } from "../fixtures"
+import { dismissStartupReminders } from "../helpers/listing"
 
 // Exactly one real login per run: this setup project runs once and every authed spec reuses the blob
 // it writes (via the injection fixture) rather than logging in again — the production API rate-limits
@@ -27,6 +28,10 @@ setup("sign in through the real form and harvest the session", async ({ page }) 
 	await page.getByLabel("Email", { exact: true }).fill(email)
 	await page.getByLabel("Password", { exact: true }).fill(password)
 	await page.getByRole("button", { name: "Sign in", exact: true }).click()
+
+	// The authed shell raises a blocking startup reminder modal (master-keys export) that renders the
+	// rest of the app inert/aria-hidden until dismissed — the nav below is unreachable while it is open.
+	await dismissStartupReminders(page)
 
 	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
