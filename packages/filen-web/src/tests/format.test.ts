@@ -226,4 +226,25 @@ describe("sharedIdentityLabel", () => {
 
 		expect(sharedIdentityLabel(item, "sharedOut")).toEqual({ labelKey: "driveSharedWithLabel", name: "sharer@filen.io" })
 	})
+
+	// Root-only: a nested sharedFile (a plain File the fetcher spread a resolvable role onto —
+	// narrowItem's "favorited" branch) must stay unlabeled even though its role reads fine, matching
+	// filen-mobile's shareEmail.tsx gate — only the shared virtual ROOT disambiguates rows by
+	// counterparty; every item inside a shared subdirectory shares the same one.
+	it("returns null for a nested sharedFile even with a resolvable role — only the shared root labels", () => {
+		const item = narrowItem({ ...mockFile({ favorited: true }), sharingRole: sharerRole(42, "sharer@filen.io") })
+
+		expect(item.type).toBe("sharedFile")
+		expect(sharedIdentityLabel(item, "sharedIn")).toBeNull()
+	})
+
+	// Same gate on the directory arm: a nested sharedDirectory with its role spread on (the fetcher's
+	// context-tag for a browsed-into shared subdirectory — see fetchSharedListing) still stays
+	// unlabeled despite a resolvable role.
+	it("returns null for a nested sharedDirectory even with a resolvable role — only the shared root labels", () => {
+		const item = narrowItem({ ...mockSharedDir(), sharingRole: sharerRole(42, "sharer@filen.io") })
+
+		expect(item.type).toBe("sharedDirectory")
+		expect(sharedIdentityLabel(item, "sharedOut")).toBeNull()
+	})
 })

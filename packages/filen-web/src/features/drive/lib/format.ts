@@ -57,11 +57,23 @@ export function formatVersionTimestamp(timestamp: bigint): string {
 // counterparty email; null for a non-shared variant, or a shared item whose role couldn't be read
 // (an undecryptable/unknown role) — the caller renders nothing then, never the badge for the four
 // non-shared variants.
+//
+// Root-only, mirroring filen-mobile's shareEmail.tsx: a nested sharedFile/sharedDirectory inside a
+// shared subdirectory shares the same counterparty as every sibling under it, so repeating the email
+// on each row is redundant — only the ROOT listing (where one row can be a different sender/recipient
+// per item) shows it. sharedRootFile/sharedRootDirectory are structurally root-only (narrowItem's
+// fetchSharedListing split narrows a `uuid === null` fetch to the two root arms, a nested fetch to
+// sharedFile/sharedDirectory — see item.ts), so this type check alone equals "the listing is at the
+// root" without threading a uuid/listing prop through the row/tile.
 export function sharedIdentityLabel(
 	item: DriveItem,
 	variant: DriveVariant
 ): { labelKey: "driveSharedByLabel" | "driveSharedWithLabel"; name: string } | null {
 	if (variant !== "sharedIn" && variant !== "sharedOut") {
+		return null
+	}
+
+	if (item.type !== "sharedRootFile" && item.type !== "sharedRootDirectory") {
 		return null
 	}
 

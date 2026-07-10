@@ -45,7 +45,8 @@ export function DriveTile({
 }: DriveTileProps) {
 	const { t } = useTranslation("drive")
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
-	// Only the two shared variants resolve a counterparty; every other variant gets null (no badge).
+	// Only the two shared variants' ROOT listing resolve a counterparty; every other variant/nested
+	// item gets null (no badge) — see sharedIdentityLabel's own doc comment.
 	const shared = sharedIdentityLabel(item, variant)
 	const thumbUrl = useThumbnail(item)
 	// Downgrades a torn/corrupt cache entry back to the icon without waiting for a remount — see the
