@@ -324,6 +324,30 @@ export const drive = {
 	driveInfoModified: "Modified",
 	/** Info panel — row label: MIME type of a file */
 	driveInfoMimeType: "MIME type",
+	/** Info panel — row label: upload date (raw server timestamp, distinct from Created/Modified) */
+	driveInfoUploaded: "Uploaded",
+	/** Info panel — row label: a file's preview kind (the Kind row value comes from drivePreviewKind*) */
+	driveInfoKind: "Kind",
+	/** Info panel — hero type label under a file's name */
+	driveItemTypeFile: "File",
+	/** Info panel — hero type label under a directory's name */
+	driveItemTypeDirectory: "Directory",
+	/** Info panel — Kind row value: an image file */
+	drivePreviewKindImage: "Image",
+	/** Info panel — Kind row value: a video file */
+	drivePreviewKindVideo: "Video",
+	/** Info panel — Kind row value: an audio file */
+	drivePreviewKindAudio: "Audio",
+	/** Info panel — Kind row value: a PDF document */
+	drivePreviewKindPdf: "PDF document",
+	/** Info panel — Kind row value: a Word document */
+	drivePreviewKindDocx: "Word document",
+	/** Info panel — Kind row value: a plain-text file */
+	drivePreviewKindText: "Text",
+	/** Info panel — Kind row value: a source-code file */
+	drivePreviewKindCode: "Code",
+	/** Info panel — Kind row value: a Markdown file */
+	drivePreviewKindMarkdown: "Markdown",
 
 	// ── Public link dialog ───────────────────────────────────────────────────
 	/** Public-link dialog — title (opened via driveActionPublicLink) */

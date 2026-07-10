@@ -36,6 +36,14 @@ export function formatCreatedDate(item: DriveItem): string {
 	return formatTimestamp(item.data.decryptedMeta?.created ?? item.data.timestamp)
 }
 
+// The info panel's own "Uploaded" row: the item's raw server-side upload timestamp, distinct from the
+// meta-derived Created/Modified dates — a file re-uploaded over an older name can carry an upload time
+// later than its own recorded created/modified. Present on every arm (unlike the optional meta
+// fields), so this never falls back. Mirrors filen-mobile's rawUploadTimestamp row.
+export function formatUploadedDate(item: DriveItem): string {
+	return formatTimestamp(item.data.timestamp)
+}
+
 // The versions panel's own per-row label. Unlike formatModifiedDate/formatCreatedDate this includes
 // the time of day: a file's version history can carry several entries from the same calendar day
 // (autosave, rapid re-uploads), where a date-only label would leave them indistinguishable.

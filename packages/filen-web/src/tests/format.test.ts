@@ -5,6 +5,7 @@ import {
 	formatCreatedDate,
 	formatItemSize,
 	formatModifiedDate,
+	formatUploadedDate,
 	formatVersionTimestamp,
 	sharedIdentityLabel
 } from "@/features/drive/lib/format"
@@ -162,6 +163,28 @@ describe("formatCreatedDate", () => {
 		const item = narrowItem(mockDir({ timestamp: 1_700_000_000_000n, meta: { type: "encrypted", data: "ciphertext" } }))
 
 		expect(formatCreatedDate(item)).toBe(expectedDate(1_700_000_000_000))
+	})
+})
+
+describe("formatUploadedDate", () => {
+	it("uses the item's own raw upload timestamp, ignoring the meta-derived created/modified fields", () => {
+		const item = narrowItem(
+			mockFile({
+				timestamp: 1_700_000_000_000n,
+				meta: {
+					type: "decoded",
+					data: { name: "x", mime: "text/plain", created: 1n, modified: 2n, size: 1n, key: "k", version: 2 }
+				}
+			})
+		)
+
+		expect(formatUploadedDate(item)).toBe(expectedDate(1_700_000_000_000))
+	})
+
+	it("reads the raw timestamp even for an undecryptable item (never falls back — it is the source)", () => {
+		const item = narrowItem(mockDir({ timestamp: 1_700_000_000_000n, meta: { type: "encrypted", data: "ciphertext" } }))
+
+		expect(formatUploadedDate(item)).toBe(expectedDate(1_700_000_000_000))
 	})
 })
 

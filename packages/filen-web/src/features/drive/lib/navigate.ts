@@ -1,3 +1,4 @@
+import type { Dir } from "@filen/sdk-rs"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 
@@ -52,4 +53,16 @@ export function resolveDriveNavigationTarget(item: DriveItem, variant: DriveVari
 	const nextSplat = currentSplat === "" ? item.data.uuid : `${currentSplat}/${item.data.uuid}`
 
 	return { to: driveRouteIdFor(variant), params: { _splat: nextSplat } }
+}
+
+// The info dialog's Location-row click target: the item's PARENT directory in the owner's own drive
+// tree. getItemInfo returns the item's ancestor Dir chain root-first, the immediate parent last, the
+// item itself excluded (see the worker's getItemInfo / the SDK's get_item_path), so the parent's
+// splat is exactly those ancestor uuids joined. Always the owned "/drive/$" route: get_item_path
+// walks to the account root, a chain only that route's splat expresses — a shared subtree's path
+// rarely resolves at all (its cross-account ancestors aren't fetchable), so the Location row simply
+// doesn't appear there to be clicked. An empty chain means the item sits at the drive root, and the
+// target is that root listing.
+export function parentNavigationTarget(ancestors: Dir[]): DriveNavigationTarget {
+	return { to: "/drive/$", params: { _splat: ancestors.map(ancestor => ancestor.uuid).join("/") } }
 }

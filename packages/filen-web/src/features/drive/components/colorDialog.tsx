@@ -6,6 +6,7 @@ import type { DialogRoot } from "@base-ui/react/dialog"
 import type { DirColor } from "@filen/sdk-rs"
 import type { DriveKey } from "@/lib/i18n"
 import { type DirectoryItem, setColor } from "@/features/drive/lib/actions"
+import { dirColorHex } from "@/features/drive/lib/dirColor"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { cn } from "@/lib/utils"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
@@ -19,19 +20,18 @@ export interface ColorDialogProps {
 interface Swatch {
 	color: DirColor
 	labelKey: DriveKey
-	// Mirrors filen-mobile's directoryColorToHex (components/itemIcons/index.tsx) so the swatch a user
-	// picks here looks the same on both platforms — only the 6 named colors are offered (no freeform
-	// hex picker on web yet, unlike mobile's DirColor.Custom).
-	hex: string
 }
 
+// Only the 6 named colors are offered (no freeform hex picker on web yet, unlike mobile's
+// DirColor.Custom); each swatch's fill comes from the shared dirColorHex map so it matches the tint
+// the same directory shows in its listing row/tile and info-dialog hero.
 const SWATCHES: Swatch[] = [
-	{ color: "default", labelKey: "driveColorDefault", hex: "#85BCFF" },
-	{ color: "blue", labelKey: "driveColorBlue", hex: "#037AFF" },
-	{ color: "green", labelKey: "driveColorGreen", hex: "#33C759" },
-	{ color: "purple", labelKey: "driveColorPurple", hex: "#AF52DE" },
-	{ color: "red", labelKey: "driveColorRed", hex: "#FF3B30" },
-	{ color: "gray", labelKey: "driveColorGray", hex: "#8F8E93" }
+	{ color: "default", labelKey: "driveColorDefault" },
+	{ color: "blue", labelKey: "driveColorBlue" },
+	{ color: "green", labelKey: "driveColorGreen" },
+	{ color: "purple", labelKey: "driveColorPurple" },
+	{ color: "red", labelKey: "driveColorRed" },
+	{ color: "gray", labelKey: "driveColorGray" }
 ]
 
 // Small swatch-grid modal, mounted-when-active by the listing's dialog host (directoryListing.tsx) —
@@ -94,7 +94,7 @@ export function ColorDialog({ directory, onClose }: ColorDialogProps) {
 									"flex size-10 items-center justify-center rounded-full ring-1 ring-foreground/10 transition-transform outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
 									selected && "ring-2 ring-ring ring-offset-2 ring-offset-popover"
 								)}
-								style={{ backgroundColor: swatch.hex }}
+								style={{ backgroundColor: dirColorHex(swatch.color) }}
 							>
 								{selected ? (
 									<CheckIcon

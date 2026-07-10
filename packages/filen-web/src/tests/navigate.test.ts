@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { Dir, File, UuidStr, SharedDir, SharedFile, SharingRole } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { driveRouteIdFor, resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
+import { driveRouteIdFor, parentNavigationTarget, resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
 // readable test label into a shape that satisfies it, mirroring sort.test.ts's own uuid fixtures.
@@ -192,5 +192,40 @@ describe("resolveDriveNavigationTarget", () => {
 		const target = resolveDriveNavigationTarget(directoryItem(uuid), variant, "")
 
 		expect(target?.params._splat).toBe(uuid)
+	})
+})
+
+// getItemInfo's ancestor chain is Dir[]; only each ancestor's uuid feeds the parent splat.
+function ancestorDir(uuid: UuidStr): Dir {
+	return {
+		uuid,
+		parent: testUuid("grandparent"),
+		color: "default",
+		timestamp: 1_700_000_000_000n,
+		favorited: false,
+		meta: { type: "decoded", data: { name: "Ancestor" } }
+	}
+}
+
+describe("parentNavigationTarget", () => {
+	it("targets the drive root (empty splat) for an item whose ancestor chain is empty", () => {
+		expect(parentNavigationTarget([])).toEqual({ to: "/drive/$", params: { _splat: "" } })
+	})
+
+	it("joins the ancestor uuids root-first into the parent's splat, always on the owned drive route", () => {
+		const top = testUuid("top")
+		const middle = testUuid("middle")
+		const parent = testUuid("parent-dir")
+
+		expect(parentNavigationTarget([ancestorDir(top), ancestorDir(middle), ancestorDir(parent)])).toEqual({
+			to: "/drive/$",
+			params: { _splat: `${top}/${middle}/${parent}` }
+		})
+	})
+
+	it("uses only the ancestor uuids, never any other Dir field", () => {
+		const parent = testUuid("only-parent")
+
+		expect(parentNavigationTarget([ancestorDir(parent)]).params._splat).toBe(parent)
 	})
 })
