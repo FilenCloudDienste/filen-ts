@@ -30,6 +30,8 @@ export const drive = {
 	driveUploadFiles: "Upload files",
 	/** New menu — entry opening the browser directory picker to upload an entire directory tree into the current directory */
 	driveUploadDirectory: "Upload directory",
+	/** Upload menu — entry opening the new-text-file name dialog */
+	driveNewTextFile: "New text file",
 
 	// ── Upload ───────────────────────────────────────────────────────────────
 	/** Drive toolbar — trigger button opening the standalone upload menu (Upload files, later Upload directory) */
@@ -106,6 +108,18 @@ export const drive = {
 	driveNewDirectoryPlaceholder: "Untitled directory",
 	/** New-directory dialog — submit button label */
 	driveNewDirectorySubmit: "Create",
+
+	// ── New-text-file dialog ─────────────────────────────────────────────────
+	/** New-text-file dialog — title */
+	driveNewTextFileTitle: "New text file",
+	/** New-text-file dialog — body under the title */
+	driveNewTextFileBody: "Enter a name for the new text file.",
+	/** New-text-file dialog — name field label */
+	driveNewTextFileLabel: "Name",
+	/** New-text-file dialog — name field placeholder */
+	driveNewTextFilePlaceholder: "Untitled",
+	/** New-text-file dialog — submit button label */
+	driveNewTextFileSubmit: "Create",
 
 	// ── Breadcrumb ───────────────────────────────────────────────────────────
 	/** Drive breadcrumb — accessible label on the breadcrumb navigation landmark */

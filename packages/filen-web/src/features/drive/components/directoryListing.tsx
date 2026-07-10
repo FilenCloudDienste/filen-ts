@@ -561,6 +561,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						<UploadMenu
 							parentUuid={uuid}
 							disabled={writeDisabled}
+							openPreview={openPreview}
 						/>
 					</div>
 				</div>
