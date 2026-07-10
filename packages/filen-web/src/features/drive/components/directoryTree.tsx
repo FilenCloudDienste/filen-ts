@@ -1,7 +1,8 @@
 import { useTranslation } from "react-i18next"
-import { ChevronRightIcon, FolderIcon } from "lucide-react"
+import { ChevronRightIcon } from "lucide-react"
 import type { UseQueryResult } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
+import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import type { DirectoryTreeChild } from "@/features/drive/queries/drive"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -149,7 +150,10 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 					}}
 					className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-left text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/30 [&_svg]:size-4 [&_svg]:shrink-0"
 				>
-					<FolderIcon className={cn(active ? "text-primary" : "text-muted-foreground")} />
+					<DirectoryGlyph
+						color={child.color}
+						className="size-4 shrink-0"
+					/>
 					<span className="truncate">{child.name}</span>
 				</button>
 			</div>

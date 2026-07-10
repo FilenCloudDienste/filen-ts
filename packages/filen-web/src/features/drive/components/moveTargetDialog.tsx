@@ -1,6 +1,6 @@
 import { Fragment, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { ChevronRightIcon, FolderIcon } from "lucide-react"
+import { ChevronRightIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { moveItems } from "@/features/drive/lib/actions"
@@ -11,6 +11,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { cn } from "@/lib/utils"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { isMoveConfirmDisabled, isMoveRowDisabled } from "@/features/drive/components/moveTargetDialog.logic"
+import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import { EmptyState } from "@/features/drive/components/emptyState"
 import { ListingSkeleton } from "@/features/drive/components/listingSkeleton"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -161,9 +162,9 @@ export function MoveTargetDialog({ items, onClose }: MoveTargetDialogProps) {
 											}}
 											className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
 										>
-											<FolderIcon
-												aria-hidden="true"
-												className="size-4 shrink-0 text-muted-foreground"
+											<DirectoryGlyph
+												color={directory.data.color}
+												className="size-4 shrink-0"
 											/>
 											<span className="min-w-0 flex-1 truncate">
 												{directory.data.decryptedMeta?.name ?? directory.data.uuid}

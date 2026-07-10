@@ -15,14 +15,16 @@ export type PreviewCategory = "image" | "video" | "audio" | "pdf" | "docx" | "te
 // deliberate tradeoff of joining the streamed set, not a regression this cap is meant to catch.
 export const PREVIEW_MAX_BYTES = 268_435_456n // 256 MiB
 
-const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico", "apng", "avif"])
+// Exported so icon.logic's file-type routing classifies image/video/audio identically to preview — a
+// file's type icon and its preview category can never disagree.
+export const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico", "apng", "avif"])
 // HEIC/HEIF resolve to the "image" category below like every other image extension, but browsers
 // cannot decode them inline — needsImageTransform/canPreview single them out to route through the
 // buffered download + a client-side transform (features/preview/lib/heicTransform.ts) instead of the SW's
 // streamed route every other image extension uses.
-const HEIC_EXTENSIONS = new Set(["heic", "heif"])
-const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mkv", "mov", "m4v"])
-const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "wav", "ogg", "flac", "opus"])
+export const HEIC_EXTENSIONS = new Set(["heic", "heif"])
+export const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mkv", "mov", "m4v"])
+export const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "wav", "ogg", "flac", "opus"])
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown"])
 const TEXT_EXTENSIONS = new Set(["txt", "log"])
 // Mirrors filen-mobile's previewType.ts code-extension set (itself ported from old-web), minus the two

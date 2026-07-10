@@ -1,9 +1,9 @@
-import { createElement, useState, type MouseEvent } from "react"
+import { useState, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { MoreHorizontalIcon } from "lucide-react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { fileIconFor } from "@/features/drive/lib/icon"
+import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { sharedIdentityLabel } from "@/features/drive/lib/format"
 import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
@@ -98,7 +98,10 @@ export function DriveTile({
 								/>
 							) : (
 								<div className="flex size-full items-center justify-center">
-									{createElement(fileIconFor(item), { "aria-hidden": true, className: "size-14 text-muted-foreground" })}
+									<ItemIcon
+										item={item}
+										className="size-14"
+									/>
 								</div>
 							)}
 							<DropdownMenu>

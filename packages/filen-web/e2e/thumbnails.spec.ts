@@ -86,11 +86,14 @@ test("png and bmp images render real thumbnails in both listing views, text/svg 
 		await expect(bmpThumbList).toBeVisible({ timeout: 30_000 })
 		await expect(bmpThumbList).toHaveAttribute("src", /^blob:/)
 
-		// Neither sibling ever gets an <img>: no extension routes a .txt to any thumbnail category, and
-		// svg is excluded outright (sanitization risk, kept an icon everywhere this app renders one) —
-		// their icon element is never replaced.
-		await expect(rowTxt.locator("img")).toHaveCount(0)
-		await expect(rowSvg.locator("img")).toHaveCount(0)
+		// Neither sibling is ever swapped to a thumbnail: no extension routes a .txt to any thumbnail
+		// category, and svg is excluded outright (sanitization risk, kept an icon everywhere this app
+		// renders one). Each keeps its file-type icon — itself an <img> of a static asset (not a blob:
+		// object URL like a real thumbnail), so the proof is the src stays a non-blob asset URL.
+		await expect(rowTxt.locator("img")).toHaveCount(1)
+		await expect(rowTxt.locator("img")).not.toHaveAttribute("src", /^blob:/)
+		await expect(rowSvg.locator("img")).toHaveCount(1)
+		await expect(rowSvg.locator("img")).not.toHaveAttribute("src", /^blob:/)
 
 		// Grid view renders the identical thumbnail through a different slot (DriveTile, not DriveRow) —
 		// the service's own uuid-keyed url cache makes this a render-path proof, not a second generation.

@@ -1,9 +1,9 @@
-import { createElement, useState, type CSSProperties, type MouseEvent } from "react"
+import { useState, type CSSProperties, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { StarIcon, MoreHorizontalIcon } from "lucide-react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { fileIconFor } from "@/features/drive/lib/icon"
+import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { formatItemSize, formatModifiedDate, sharedIdentityLabel } from "@/features/drive/lib/format"
 import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
@@ -91,7 +91,10 @@ export function DriveRow({
 								}}
 							/>
 						) : (
-							createElement(fileIconFor(item), { "aria-hidden": true, className: "size-4 shrink-0 text-muted-foreground" })
+							<ItemIcon
+								item={item}
+								className="size-4 shrink-0"
+							/>
 						)}
 						<span className="min-w-0 flex-1 truncate">{name}</span>
 						{searchParentPath !== undefined && searchParentPath.length > 0 ? (

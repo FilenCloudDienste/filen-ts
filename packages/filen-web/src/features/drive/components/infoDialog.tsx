@@ -1,11 +1,11 @@
-import { createElement, useState, type ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { formatBytes } from "@filen/utils"
 import { StarIcon } from "lucide-react"
 import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
-import { fileIconFor } from "@/features/drive/lib/icon"
+import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { formatCreatedDate, formatItemSize, formatModifiedDate, formatUploadedDate } from "@/features/drive/lib/format"
 import { previewType } from "@/features/drive/lib/preview.logic"
 import { dirColorHex } from "@/features/drive/lib/dirColor"
@@ -132,11 +132,10 @@ export function InfoDialog({ item, remoteInfoEnabled, onClose }: InfoDialogProps
 								}}
 							/>
 						) : (
-							createElement(fileIconFor(item), {
-								"aria-hidden": true,
-								className: cn("size-12", !isDirectory && "text-muted-foreground"),
-								...(isDirectory ? { style: { color: dirHex } } : {})
-							})
+							<ItemIcon
+								item={item}
+								className="size-12"
+							/>
 						)}
 					</div>
 					<div className="flex flex-col items-center gap-1">

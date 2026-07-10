@@ -4,7 +4,7 @@ import { queryClient } from "@/queries/client"
 // Whole-statement `import type` here too — sdk.worker.ts's own top-level code pulls in
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
-import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink, AnyDirWithContext } from "@filen/sdk-rs"
+import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink, AnyDirWithContext, DirColor } from "@filen/sdk-rs"
 import { narrowItem, asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import {
 	getSortPreferences,
@@ -80,6 +80,7 @@ export function useDirectoryListingQuery(variant: DriveVariant, uuid: string | n
 export interface DirectoryTreeChild {
 	uuid: string
 	name: string
+	color: DirColor
 }
 
 export function directoryTreeQueryKey(uuid: string | null) {
@@ -94,7 +95,11 @@ export async function fetchDirectoryTreeChildren(uuid: string | null): Promise<D
 	const { dirs } = await sdkApi.listDirectory(uuid === null ? { kind: "root" } : { kind: "uuid", uuid })
 	return dirs.map(dir => {
 		const item = narrowItem(dir)
-		return { uuid: item.data.uuid, name: item.data.decryptedMeta?.name ?? item.data.uuid }
+		return {
+			uuid: item.data.uuid,
+			name: item.data.decryptedMeta?.name ?? item.data.uuid,
+			color: item.type === "directory" ? item.data.color : "default"
+		}
 	})
 }
 
