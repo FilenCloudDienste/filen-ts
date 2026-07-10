@@ -191,6 +191,8 @@ export const drive = {
 	driveActionInfo: "Info",
 	/** Item menu — download the selected item to disk; disabled for a directory or a multi-selection until zip download ships */
 	driveActionDownload: "Download",
+	/** Item menu (shared-with-me only) — copy the selected item into your own drive; opens the destination picker (driveImportDialogTitle) */
+	driveActionImport: "Import",
 	/** Item menu — open the public-link dialog for the selected item */
 	driveActionPublicLink: "Public link",
 	/** Item menu — copy the selected item's existing public-link URL to the clipboard */
@@ -253,6 +255,14 @@ export const drive = {
 	driveMoveDialogTitle: "Select destination",
 	/** Move dialog — confirm button moving the selection into the currently open directory */
 	driveMoveHereAction: "Move here",
+
+	// ── Import dialog (reuses the move dialog's destination picker, see moveTargetDialog.tsx's mode prop) ──
+	/** Import dialog — title of the destination-directory picker (driveActionImport) */
+	driveImportDialogTitle: "Import to",
+	/** Import dialog — confirm button copying the shared item into the currently open directory */
+	driveImportHereAction: "Import here",
+	/** Import — error toast when a directory import completed with at least one nested file/sub-directory failure (a scan failure, a create failure, or a download/upload failure); the item may have imported partially */
+	driveImportPartial: "Import completed with errors — some files may be missing.",
 
 	// ── Share dialog (contact picker) ────────────────────────────────────────
 	/** Share dialog — title of the contact picker (opened via driveActionShare); the submit button reuses driveActionShare */

@@ -70,6 +70,29 @@ test.describe("drive bulk actions", () => {
 		await expect(dialog).toHaveCount(0)
 	})
 
+	// Import (itemMenu.logic.ts's IMPORT — copy a sharedIn item into your own drive) is gated to the
+	// sharedIn variant alone. The shared FREE e2e account has zero shared items (share.spec.ts's own
+	// comment), so there is nothing to open an Import menu ON there — this is the gating-only
+	// counterpart proven live instead: the per-item menu on an OWNED /drive item never offers it. The
+	// sharedIn-presence side of the gate is unit-tested (itemMenu.test.ts's "import gating" block).
+	test("the per-item menu never offers Import on an owned /drive item", async ({ page, injectedSession, browserName }) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await page.goto("/drive")
+		const { listbox, hasItems } = await waitForListingSettled(page)
+		test.skip(!hasItems, "drive root has no items in this account — nothing to open a menu on")
+
+		await listbox.getByRole("option").first().getByRole("button", { name: "More actions", exact: true }).click()
+
+		const menu = page.getByRole("menu")
+		await expect(menu).toBeVisible()
+		await expect(menu.getByRole("menuitem", { name: "Import", exact: true })).toHaveCount(0)
+
+		await page.keyboard.press("Escape")
+		await expect(menu).toHaveCount(0)
+	})
+
 	test("the bulk Trash button opens the trash confirm; dismissing leaves the item selected and in place", async ({
 		page,
 		injectedSession,

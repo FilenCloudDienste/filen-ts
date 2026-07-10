@@ -155,15 +155,19 @@ function readFileEntry(entry: FileSystemFileEntry): Promise<File> {
 
 // The containing directory's relPath, or null for a top-level entry with no ancestor — "a/b/c.txt"
 // -> "a/b", "a.txt" -> null. Shared by the dir-creation loop (a dir's own parent) and the file
-// fan-out (a file's containing dir) in runDirectoryUpload below.
-function dirnameOf(relPath: string): string | null {
+// fan-out (a file's containing dir) in runDirectoryUpload below. Exported for import.ts's own
+// parent-before-child directory recreation over the SDK's recursive-listing paths — the exact same
+// relPath convention (relative to the walked root, no leading segment for it), just a different path
+// source (a remote listing instead of a picked/dropped local tree).
+export function dirnameOf(relPath: string): string | null {
 	const index = relPath.lastIndexOf("/")
 
 	return index === -1 ? null : relPath.slice(0, index)
 }
 
-// The final path segment — the `name` runCreateDirectory creates.
-function basenameOf(relPath: string): string {
+// The final path segment — the `name` runCreateDirectory creates. Exported alongside dirnameOf for
+// import.ts's own reuse.
+export function basenameOf(relPath: string): string {
 	const index = relPath.lastIndexOf("/")
 
 	return index === -1 ? relPath : relPath.slice(index + 1)
@@ -183,8 +187,8 @@ function ancestorPaths(relPath: string): string[] {
 }
 
 // Segment count — the depth-ascending sort key so every parent is created before any of its
-// children ("a" < "a/b" < "a/b/c").
-function depthOf(relPath: string): number {
+// children ("a" < "a/b" < "a/b/c"). Exported alongside dirnameOf/basenameOf for import.ts's own reuse.
+export function depthOf(relPath: string): number {
 	return relPath.split("/").length
 }
 

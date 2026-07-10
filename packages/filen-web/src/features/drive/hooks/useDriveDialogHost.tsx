@@ -295,6 +295,17 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 						onClose={closeActiveDialog}
 					/>
 				) : null
+			case "import":
+				// itemMenu.logic.ts's IMPORT gates sharedIn only, dispatched one item at a time (see
+				// handleItemAction below) — reuses the same destination picker as Move, just against
+				// importItems (features/drive/lib/import.ts) instead.
+				return activeDialog.items.length > 0 ? (
+					<MoveTargetDialog
+						items={activeDialog.items}
+						mode="import"
+						onClose={closeActiveDialog}
+					/>
+				) : null
 			case "color": {
 				const item = activeDialog.items[0]
 

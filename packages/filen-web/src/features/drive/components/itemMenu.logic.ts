@@ -10,7 +10,8 @@ import { startDownloads } from "@/features/drive/lib/download"
 // own activeDialog state). "emptyTrash" is a listing-level action (the trash toolbar, no per-item
 // trigger), so it deliberately isn't part of this union — directoryListing.tsx's own ActiveDialog
 // kind widens this with that one extra literal.
-export type ItemActionDialogKind = "rename" | "move" | "color" | "versions" | "info" | "link" | "share" | "unshare" | "trash" | "delete"
+export type ItemActionDialogKind =
+	"rename" | "move" | "color" | "versions" | "info" | "link" | "share" | "unshare" | "trash" | "delete" | "import"
 
 export type ItemActionId =
 	| "rename"
@@ -20,6 +21,7 @@ export type ItemActionId =
 	| "versions"
 	| "info"
 	| "download"
+	| "import"
 	| "publicLink"
 	| "copyLink"
 	| "share"
@@ -78,6 +80,12 @@ const DELETE_PERMANENTLY: ItemActionDescriptor = {
 	run: "dialog",
 	dialogKind: "delete"
 }
+// Copies an item you don't own into your own drive — sharedIn only (mobile parity: menuActionsDownload.ts's
+// own Download > Import gates on `!isOwner`, and web has no equivalent of mobile's other gate,
+// browsing a followed public link — see driveItemActions' own sharedIn-only push below). Opens the
+// same destination picker as Move (moveTargetDialog.tsx's mode="import" branch) rather than a
+// separate dialog.
+const IMPORT: ItemActionDescriptor = { id: "import", ...ACTION_DEFS.import, run: "dialog", dialogKind: "import" }
 
 function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
 	return item.data.favorited
@@ -161,6 +169,14 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 	// point is reachable from, owned or shared alike, never gated by ownerMutable/canShareVariant
 	// (download mutates nothing).
 	actions.push(downloadDescriptor())
+
+	// Import sits right after Download (mobile parity — menuActionsDownload.ts nests Import inside the
+	// same Download submenu) — sharedIn ONLY, root or nested alike: sharedOut is excluded (you already
+	// own those items — isOwner is true there on mobile too, see IMPORT's own doc comment), and every
+	// owner-mutating surface below never reaches sharedIn in the first place (ownerMutable is false).
+	if (variant === "sharedIn") {
+		actions.push(IMPORT)
+	}
 
 	// Share sits with the other access-granting actions (info/link) after the type-specific group; it
 	// only appears on the owned surfaces (canShareVariant excludes sharedIn — you can't grant access to

@@ -4,6 +4,7 @@ import { ChevronRightIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { moveItems } from "@/features/drive/lib/actions"
+import { importItems } from "@/features/drive/lib/import"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useDirectoryListingQuery, useDirectoryNamesQuery } from "@/features/drive/queries/drive"
@@ -21,14 +22,20 @@ import { Spinner } from "@/components/ui/spinner"
 export interface MoveTargetDialogProps {
 	items: DriveItem[]
 	onClose: () => void
+	// "move" (default) relocates the selection and, on success, clears it from the source listing's
+	// selection (mirrors every other destructive-to-the-source bulk action's own cleanup). "import"
+	// (itemMenu.logic.ts's IMPORT — mobile parity, menuActionsDownload.ts's Download > Import) copies a
+	// sharedIn item into the chosen destination instead: the source is owned by someone else and stays
+	// exactly where it was, so it is never removed from selection.
+	mode?: "move" | "import"
 }
 
 // Destination-directory picker — mounted-when-active by the listing's dialog host. Navigation is LOCAL
 // to this dialog (a uuid stack from root, not the "/drive/$" route) so browsing here never disturbs
 // the app's own navigation history; it always browses the "drive" variant regardless of where the
-// move was dispatched from — recents/favorites/trash have no navigable tree of their own to move into
-// (mirrors newDirectory.tsx's identical rule for creating a directory).
-export function MoveTargetDialog({ items, onClose }: MoveTargetDialogProps) {
+// move/import was dispatched from — recents/favorites/trash/sharedIn have no navigable tree of their
+// own to land into (mirrors newDirectory.tsx's identical rule for creating a directory).
+export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDialogProps) {
 	const { t } = useTranslation("drive")
 	const [pathStack, setPathStack] = useState<string[]>([])
 	const [pending, setPending] = useState(false)
@@ -55,16 +62,20 @@ export function MoveTargetDialog({ items, onClose }: MoveTargetDialogProps) {
 		}
 	}
 
-	async function handleMoveHere(): Promise<void> {
+	async function handleConfirm(): Promise<void> {
 		setPending(true)
-		const outcome = await moveItems(items, targetUuid)
+		const outcome = mode === "import" ? await importItems(items, targetUuid) : await moveItems(items, targetUuid)
 		setPending(false)
 		onClose()
 		toastBulkOutcome(outcome)
+
 		// A moved item vanishes from whichever listing it was selected in (see actions.ts) — leaving it
 		// selected would strand a phantom entry in the "N selected" count, same cleanup
-		// directoryListing.tsx's own trash/delete confirms already do.
-		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
+		// directoryListing.tsx's own trash/delete confirms already do. An imported item is a COPY — the
+		// sharedIn source is untouched, so it stays exactly as selected as it was.
+		if (mode === "move") {
+			useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
+		}
 	}
 
 	return (
@@ -77,7 +88,7 @@ export function MoveTargetDialog({ items, onClose }: MoveTargetDialogProps) {
 				className="sm:max-w-lg"
 			>
 				<DialogHeader>
-					<DialogTitle>{t("driveMoveDialogTitle")}</DialogTitle>
+					<DialogTitle>{t(mode === "import" ? "driveImportDialogTitle" : "driveMoveDialogTitle")}</DialogTitle>
 				</DialogHeader>
 				<nav
 					aria-label={t("driveBreadcrumbLabel")}
@@ -182,11 +193,11 @@ export function MoveTargetDialog({ items, onClose }: MoveTargetDialogProps) {
 							pending || listingQuery.status !== "success" || isMoveConfirmDisabled(pathStack, items, listingQuery.data)
 						}
 						onClick={() => {
-							void handleMoveHere()
+							void handleConfirm()
 						}}
 					>
 						{pending && <Spinner data-icon="inline-start" />}
-						{t("driveMoveHereAction")}
+						{t(mode === "import" ? "driveImportHereAction" : "driveMoveHereAction")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

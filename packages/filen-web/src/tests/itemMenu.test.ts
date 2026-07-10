@@ -14,7 +14,8 @@ import {
 	UserMinusIcon,
 	Trash2Icon,
 	RotateCcwIcon,
-	DownloadIcon
+	DownloadIcon,
+	ImportIcon
 } from "lucide-react"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
@@ -361,10 +362,66 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 		expect(descriptor).toMatchObject({ run: "dialog", dialogKind: "unshare", destructive: true, icon: UserMinusIcon })
 	})
 
-	it("unshare is the last action offered on a decryptable shared-root item, after info (sharedIn has no owner actions)", () => {
+	it("unshare is the last action offered on a decryptable shared-root item, after info and import (sharedIn has no owner actions)", () => {
 		const descriptors = ids(sharedRootFileItem(), "sharedIn")
 
-		expect(descriptors).toEqual(["info", "download", "unshare"])
+		expect(descriptors).toEqual(["info", "download", "import", "unshare"])
+	})
+})
+
+// Import (copy a sharedIn item into your own drive — mobile parity, menuActionsDownload.ts's own
+// Download > Import) is gated on the sharedIn variant alone: mobile ALSO offers it on its
+// "linked" drivePath (browsing a followed public link), which has no web equivalent yet, so web's
+// gate collapses to sharedIn only. sharedOut is deliberately excluded — you already own those items.
+describe("driveItemActions — import gating (sharedIn only, mobile Download > Import parity)", () => {
+	it("offers import on a sharedIn root item, file and directory alike", () => {
+		expect(ids(sharedRootDirItem(), "sharedIn")).toContain("import")
+		expect(ids(sharedRootFileItem(), "sharedIn")).toContain("import")
+	})
+
+	it("offers import on a nested sharedIn item, file and directory alike", () => {
+		expect(ids(sharedDirItem(), "sharedIn")).toContain("import")
+		expect(ids(sharedFileItem(), "sharedIn")).toContain("import")
+	})
+
+	it("never offers import on sharedOut — the caller already owns those items", () => {
+		expect(ids(sharedRootDirItem(), "sharedOut")).not.toContain("import")
+		expect(ids(sharedRootFileItem(), "sharedOut")).not.toContain("import")
+		expect(ids(sharedDirItem(), "sharedOut")).not.toContain("import")
+		expect(ids(sharedFileItem(), "sharedOut")).not.toContain("import")
+	})
+
+	it("never offers import on an owned surface (drive/recents/favorites/links)", () => {
+		expect(ids(dirItem(), "drive")).not.toContain("import")
+		expect(ids(fileItem(), "recents")).not.toContain("import")
+		expect(ids(dirItem(), "favorites")).not.toContain("import")
+		expect(ids(fileItem(), "links")).not.toContain("import")
+	})
+
+	it("never offers import in the trash-reduced menu", () => {
+		expect(ids(dirItem(), "trash")).not.toContain("import")
+		expect(ids(fileItem(), "trash")).not.toContain("import")
+	})
+
+	it("never offers import for an undecryptable sharedIn item — same reduction as download", () => {
+		const undecryptableRootDir = narrowItem(
+			mockSharedRootDir({
+				inner: {
+					uuid: "99999999-9999-9999-9999-999999999999",
+					color: "default",
+					timestamp: 1_700_000_000_000n,
+					meta: { type: "encrypted", data: "ciphertext" }
+				}
+			})
+		)
+
+		expect(ids(undecryptableRootDir, "sharedIn")).not.toContain("import")
+	})
+
+	it("dispatches its own dialog kind and carries the import label/icon", () => {
+		const descriptor = driveItemActions(sharedRootFileItem(), "sharedIn").find(d => d.id === "import")
+
+		expect(descriptor).toMatchObject({ run: "dialog", dialogKind: "import", icon: ImportIcon })
 	})
 })
 
@@ -377,14 +434,14 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 describe("driveItemActions — shared-surface safe subset (sharedIn/sharedOut)", () => {
 	const OWNER_ONLY_IDS = ["rename", "move", "favorite", "color", "versions", "publicLink", "copyLink", "trash"]
 
-	it("sharedIn root: exactly info + download + unshare", () => {
-		expect(ids(sharedRootDirItem(), "sharedIn")).toEqual(["info", "download", "unshare"])
-		expect(ids(sharedRootFileItem(), "sharedIn")).toEqual(["info", "download", "unshare"])
+	it("sharedIn root: exactly info + download + import + unshare", () => {
+		expect(ids(sharedRootDirItem(), "sharedIn")).toEqual(["info", "download", "import", "unshare"])
+		expect(ids(sharedRootFileItem(), "sharedIn")).toEqual(["info", "download", "import", "unshare"])
 	})
 
-	it("sharedIn nested: exactly info + download (unshare stays root-only)", () => {
-		expect(ids(sharedDirItem(), "sharedIn")).toEqual(["info", "download"])
-		expect(ids(sharedFileItem(), "sharedIn")).toEqual(["info", "download"])
+	it("sharedIn nested: exactly info + download + import (unshare stays root-only)", () => {
+		expect(ids(sharedDirItem(), "sharedIn")).toEqual(["info", "download", "import"])
+		expect(ids(sharedFileItem(), "sharedIn")).toEqual(["info", "download", "import"])
 	})
 
 	it("sharedOut root: exactly info + download + share + unshare", () => {
