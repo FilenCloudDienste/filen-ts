@@ -26,8 +26,7 @@ export interface BulkActionBarProps {
 	onDialogAction: (kind: BulkDialogActionKind) => void
 }
 
-// Descriptors with a registered keyboard shortcut get the toolbar's Tooltip+Kbd pairing (mirrors
-// NewDirectory/ViewModeToggle); every other descriptor renders as a plain button.
+// Descriptors with a registered keyboard shortcut surface it in their tooltip alongside the label.
 const KEYMAP_ACTION_FOR: Partial<Record<BulkActionDescriptor["id"], string>> = {
 	trash: "drive.trash",
 	download: "drive.download"
@@ -99,46 +98,30 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 					// downloadDescriptor rather than assuming the caller never renders an empty selection.
 					// Every other descriptor stays always-enabled.
 					const disabled = descriptor.id === "download" && !isBulkDownloadEnabled(selectedItems)
-					const buttonProps = {
-						variant: descriptor.destructive ? ("destructive" as const) : ("outline" as const),
-						size: "sm" as const,
-						disabled,
-						onClick: () => {
-							runDescriptor(descriptor)
-						}
-					}
-
-					// Trash/Download duplicate their registered keyboard command exactly (same selection,
-					// same target) — surfaced here so the shortcut stays discoverable from the bar too,
-					// matching every other toolbar trigger's own Tooltip+Kbd pairing (NewDirectory/
-					// ViewModeToggle). None of the other bulk actions have a registered shortcut yet.
+					// Icon-only keeps the floating pill compact enough to never reach the toast corner;
+					// the label lives on aria-label (stable accessible name) and in the tooltip.
 					const keymapAction = KEYMAP_ACTION_FOR[descriptor.id]
-
-					if (keymapAction === undefined) {
-						return (
-							<Button
-								key={descriptor.id}
-								{...buttonProps}
-							>
-								{createElement(descriptor.icon, { "aria-hidden": true })}
-								{t(descriptor.labelKey)}
-							</Button>
-						)
-					}
 
 					return (
 						<Tooltip key={descriptor.id}>
 							<TooltipTrigger
 								render={
-									<Button {...buttonProps}>
+									<Button
+										variant={descriptor.destructive ? "destructive" : "outline"}
+										size="icon-sm"
+										disabled={disabled}
+										aria-label={t(descriptor.labelKey)}
+										onClick={() => {
+											runDescriptor(descriptor)
+										}}
+									>
 										{createElement(descriptor.icon, { "aria-hidden": true })}
-										{t(descriptor.labelKey)}
 									</Button>
 								}
 							/>
 							<TooltipContent>
 								{t(descriptor.labelKey)}
-								<Kbd action={keymapAction} />
+								{keymapAction === undefined ? null : <Kbd action={keymapAction} />}
 							</TooltipContent>
 						</Tooltip>
 					)

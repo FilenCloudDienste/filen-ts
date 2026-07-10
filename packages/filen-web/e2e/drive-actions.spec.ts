@@ -15,11 +15,7 @@ const FIREFOX_HANG_REASON = "drive listing needs an authenticated listDir call, 
 test.describe.configure({ mode: "serial" })
 
 test.describe("drive bulk actions", () => {
-	test("selecting an item swaps the toolbar for the bulk-action bar; clear-selection reverts it", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
+	test("selecting an item floats the bulk-action bar; clear-selection dismisses it", async ({ page, injectedSession, browserName }) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
@@ -31,10 +27,10 @@ test.describe("drive bulk actions", () => {
 
 		await listbox.getByRole("option").first().click()
 
-		// The bulk bar replaced the New/View/Sort toolbar — both regions never coexist.
+		// The floating selection bar appears; the toolbar stays put — the two coexist.
 		await expect(page.getByRole("button", { name: "Clear selection", exact: true })).toBeVisible()
 		await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
-		await expect(page.getByRole("button", { name: "New directory", exact: true })).toHaveCount(0)
+		await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeVisible()
 
 		// Trash is never gated by undecryptable — always present for a /drive selection regardless of
 		// what this unknown account's first item happens to be.
@@ -45,7 +41,7 @@ test.describe("drive bulk actions", () => {
 
 		await page.getByRole("button", { name: "Clear selection", exact: true }).click()
 
-		await expect(page.getByText(/^\d+ items?$/)).toBeVisible()
+		await expect(page.getByText("1 selected", { exact: true })).toHaveCount(0)
 		await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeVisible()
 		await expect(page.getByRole("button", { name: "Clear selection", exact: true })).toHaveCount(0)
 	})

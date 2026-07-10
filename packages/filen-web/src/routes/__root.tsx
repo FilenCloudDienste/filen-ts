@@ -102,9 +102,10 @@ function RootLayout() {
 			<ThemeProvider>
 				<TooltipProvider>
 					<BootGate />
-					{/* Top-center: the one standing-empty region in the new layout — bottom-right toasts
-					    intercepted the floating selection bar, top-right the header button cluster. */}
-					<Toaster position="top-center" />
+					{/* Default bottom-right — the one corner clear of standing chrome. The floating selection
+					    bar stays compact and centered specifically so the two never overlap; top positions
+					    intercepted the header buttons and the listing's first rows. */}
+					<Toaster />
 				</TooltipProvider>
 			</ThemeProvider>
 		</QueryClientProvider>
