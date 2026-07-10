@@ -40,10 +40,17 @@ export default defineConfig({
 	},
 	projects: [
 		{ name: "auth-setup", testMatch: /auth\.setup\.ts/ },
+		// Self-cleaning sweep: trashes every root item matching a retired e2e scratch-name prefix before
+		// any spec project starts (see setup/cleanup.setup.ts). Depends on auth-setup rather than
+		// duplicating its login, and every spec project below depends on THIS instead of auth-setup
+		// directly — Playwright resolves the chain, so auth-setup still always runs first.
+		// Generous timeout: a debris-heavy root sweeps one item per round (see cleanup.setup.ts), and a
+		// backlog run has genuinely needed more than the suite's default 90s.
+		{ name: "cleanup-setup", testMatch: /cleanup\.setup\.ts/, dependencies: ["auth-setup"], timeout: 300_000 },
 		{
 			name: "chromium",
 			use: { ...devices["Desktop Chrome"] },
-			dependencies: ["auth-setup"]
+			dependencies: ["cleanup-setup"]
 		},
 		{
 			// Verified empirically (login-free probe, real getDirectory()/SAH-pool open against this
@@ -51,7 +58,7 @@ export default defineConfig({
 			// boots the app like chromium and runs the full suite — unlike webkit below.
 			name: "firefox",
 			use: { ...devices["Desktop Firefox"] },
-			dependencies: ["auth-setup"]
+			dependencies: ["cleanup-setup"]
 		},
 		{
 			// Playwright's bundled WebKit cannot open OPFS-SAH storage (verified empirically: it

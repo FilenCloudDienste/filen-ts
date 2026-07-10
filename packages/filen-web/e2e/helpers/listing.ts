@@ -126,6 +126,34 @@ async function waitForToastsClear(page: Page): Promise<void> {
 	await expect(page.locator("[data-sonner-toast]")).toHaveCount(0, { timeout: 20_000 })
 }
 
+// Selects then trashes exactly ONE row by name — the whole select → toolbar-click → confirm sequence
+// retried as a single unit against a FRESHLY re-resolved row locator each attempt. A row captured once
+// outside the retry can go from visible to "element is not stable"/detached mid-sequence when the root
+// listing reorders underneath it (a concurrent spec's own root-level mutation, or the background
+// refetch waitForListingSettled's own doc comment describes) — re-querying `listbox.getByRole` inside
+// the callback is what actually recovers, the same shape as descendInto's own toPass above. Exported for
+// the debris sweep in setup/cleanup.setup.ts, which hits this exact churn by construction (it runs
+// against a root that, by definition, still has rows left to remove).
+export async function selectAndTrashRow(
+	page: Page,
+	listbox: ReturnType<Page["getByRole"]>,
+	name: string,
+	confirmTimeoutMs?: number
+): Promise<void> {
+	await expect(async () => {
+		const row = listbox.getByRole("option", { name })
+		await expect(row).toBeVisible({ timeout: 5_000 })
+		await row.click({ timeout: 5_000 })
+		await waitForToastsClear(page)
+		await page.getByRole("button", { name: "Trash", exact: true }).click({ timeout: 5_000 })
+
+		const confirm = page.getByRole("alertdialog")
+		await expect(confirm).toBeVisible({ timeout: 5_000 })
+		await confirm.getByRole("button", { name: "Trash", exact: true }).click({ timeout: 5_000 })
+		await expect(confirm).toHaveCount(0, { timeout: confirmTimeoutMs ?? 5_000 })
+	}).toPass({ timeout: 30_000 })
+}
+
 // Failure-proof companion to enterScratchDirectory above — called from every test's own finally, so
 // the scratch directory (and everything created/uploaded into it) is trashed even when an assertion
 // above throws. Escape first: authed specs may leave a popover/overlay open (Transfers popover,
@@ -138,7 +166,6 @@ export async function trashScratchDirectory(page: Page, name: string, confirmTim
 	await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
 
 	const { listbox } = await waitForListingSettled(page)
-	const row = listbox.getByRole("option", { name })
 
 	// waitForListingSettled only proves SOME listbox is showing, not that it reflects the scratch
 	// directory just created: React Query serves this root query key's LAST-cached result instantly
@@ -149,17 +176,24 @@ export async function trashScratchDirectory(page: Page, name: string, confirmTim
 	// made it into the listing at all, e.g. enterScratchDirectory itself failed before creating it) is
 	// the one case there is nothing to trash.
 	try {
-		await expect(row).toBeVisible({ timeout: 15_000 })
+		await expect(listbox.getByRole("option", { name })).toBeVisible({ timeout: 15_000 })
 	} catch {
 		return
 	}
 
-	await row.click()
-	await waitForToastsClear(page)
-	await page.getByRole("button", { name: "Trash", exact: true }).click()
+	await selectAndTrashRow(page, listbox, name, confirmTimeoutMs)
+}
 
-	const confirm = page.getByRole("alertdialog")
-	await expect(confirm).toBeVisible()
-	await confirm.getByRole("button", { name: "Trash", exact: true }).click()
-	await expect(confirm).toHaveCount(0, confirmTimeoutMs === undefined ? undefined : { timeout: confirmTimeoutMs })
+// Reads the first VISIBLE row's item name that satisfies `predicate`, straight off the live DOM rather
+// than a cached snapshot — the debris sweep re-calls this every round specifically so a reorder between
+// rounds just yields a different row next time, never a stale one. The row's accessible name also
+// carries its size/date columns (see driveRow.tsx), so this reads the name span directly rather than
+// the full accessible name a `{ name }` locator filter would substring-match against.
+export async function firstMatchingRowName(
+	listbox: ReturnType<Page["getByRole"]>,
+	predicate: (name: string) => boolean
+): Promise<string | null> {
+	const names = await listbox.getByRole("option").evaluateAll(rows => rows.map(row => row.querySelector("span")?.textContent ?? ""))
+
+	return names.find(predicate) ?? null
 }
