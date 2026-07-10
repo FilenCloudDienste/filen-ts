@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState, lazy, Suspense, Component, type KeyboardEvent, type ReactNode, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
-import { XIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, SaveIcon } from "lucide-react"
+import { XIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, SaveIcon, MoreHorizontalIcon } from "lucide-react"
 import { toast } from "sonner"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { previewCategoryForName, previewType } from "@/features/drive/lib/preview.logic"
 import { startDownloads } from "@/features/drive/lib/download"
 import { isEditable, isUnresolvableParentError, runPreviewSave } from "@/features/drive/lib/previewSave.logic"
-import { currentRootUuid } from "@/features/drive/lib/actions"
+import { currentRootUuid, renameItem, trashItems, deleteItemsPermanently } from "@/features/drive/lib/actions"
+import { unshareItems } from "@/features/drive/lib/share/actions"
 import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
+import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { registerAction } from "@/lib/keymap/registry"
@@ -17,11 +19,20 @@ import { useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
 import { ImageViewer, ZoomableImage } from "@/features/preview/components/imageViewer"
 import { MediaViewer, MediaElement } from "@/features/preview/components/mediaViewer"
-import { isTextEditingTarget } from "@/features/preview/components/previewOverlay.logic"
+import { isTextEditingTarget, previewMenuVisible, PREVIEW_MENU_HIDDEN_ACTION_IDS } from "@/features/preview/components/previewOverlay.logic"
 import { type PreviewSource, previewSourceKey, previewSourceName } from "@/features/preview/lib/previewSource"
+import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
+import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
+import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
+import { InfoDialog } from "@/features/drive/components/infoDialog"
+import { LinkDialog } from "@/features/drive/components/linkDialog"
+import { ContactPickerDialog } from "@/features/drive/components/contactPickerDialog"
+import { VersionsDialog } from "@/features/drive/components/versionsDialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
+import { InputDialog } from "@/components/dialogs/inputDialog"
+import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 // Lazy chunks: pdf.js (~1MB+), docx-preview, CodeMirror (+ its per-language grammar chunks) and
 // react-markdown only ever download once a file needing them is actually opened, never on the app's
@@ -59,6 +70,13 @@ export interface PreviewOverlayProps {
 	index: number
 	onStep: (delta: 1 | -1) => void
 	onClose: () => void
+	// Trash/delete-permanently/restore-from-trash on the CURRENTLY VIEWED item, run from the header's own
+	// item menu below — the host owns the frozen pager list, so it (not this component) drops the slot
+	// and either steps to a neighbour or closes outright once none remain (useDriveDialogHost's
+	// removeCurrentPreviewItem, mirroring new mobile's driveItemRemoved gallery subscriber). Unshare uses
+	// the plain `onClose` above instead — new mobile dismisses the whole preview immediately for that one
+	// rather than stepping to a neighbour (menuActions.ts's own dismissOnSuccess: isPreview === true).
+	onItemRemoved: () => void
 }
 
 // True while focus sits on (or inside) a <video>/<audio> element — its own native controls own
@@ -120,8 +138,8 @@ function PreviewRenderError() {
 // state in exactly one case now: an editable text/code buffer with unsaved edits (see requestOrRun) —
 // every other viewer's own data load stays a read-only, ephemeral fetch never worth protecting an
 // interrupted close against.
-export function PreviewOverlay({ variant, items, index, onStep, onClose }: PreviewOverlayProps) {
-	const { t } = useTranslation(["preview", "common"])
+export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemRemoved }: PreviewOverlayProps) {
+	const { t } = useTranslation(["preview", "common", "drive"])
 	const rawSource = items[index]
 	// The drive item at this slot BEFORE any per-slot save override — undefined for the external arm (and
 	// for an out-of-range index). The save/uuid-rotation/read-only machinery below is drive-only; the
@@ -147,6 +165,14 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 	const [dirty, setDirty] = useState(false)
 	const [saving, setSaving] = useState(false)
 	const [pendingIntent, setPendingIntent] = useState<PendingIntent | null>(null)
+	// Which secondary dialog the header's item menu (below) currently has open, if any — a single slot
+	// since only ever one item (the currently-viewed one) is ever being acted on from in here, unlike
+	// useDriveDialogHost's own activeDialog which also has to carry a whole bulk-selection items[].
+	// "color" is part of the shared ItemActionDialogKind union but unreachable here — driveItemActions
+	// only ever offers Color for a directory, and canPreview already excludes directories from ever
+	// opening this overlay in the first place.
+	const [menuDialogKind, setMenuDialogKind] = useState<ItemActionDialogKind | null>(null)
+	const [menuPending, setMenuPending] = useState(false)
 
 	// Applies the per-slot save override (drive arm only) — for the external arm there is nothing to
 	// override, so it passes straight through untouched.
@@ -167,6 +193,252 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 		driveItem !== undefined &&
 		isEditable(driveItem, variant) &&
 		lockedReadOnly?.forUuid !== rawDriveItem.data.uuid
+
+	// Header item-menu action handlers — every one below only ever runs against `driveItem`/`rawDriveItem`
+	// at the CURRENT slot (the menu is only ever mounted for it, see the header JSX). Rename/favorite
+	// write into the same per-slot `saved` override map performSave already uses, so the header title and
+	// a reopened menu's own "Unfavorite"/"Favorite" label both reflect the change immediately, with no
+	// dependency on the listing query refetching. Trash/delete/restore instead hand off to onItemRemoved
+	// (the host's frozen-pager-list housekeeping) — see PreviewOverlayProps' own doc comment for why that
+	// one lives on the host, not here.
+	async function handleMenuRename(value: string): Promise<void> {
+		if (driveItem === undefined || rawDriveItem === undefined) {
+			return
+		}
+
+		setMenuPending(true)
+		const outcome = await renameItem(driveItem, value.trim())
+		setMenuPending(false)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+			return
+		}
+
+		setSaved(prev => new Map(prev).set(rawDriveItem.data.uuid, outcome.item))
+		setMenuDialogKind(null)
+	}
+
+	async function handleMenuTrash(): Promise<void> {
+		if (driveItem === undefined) {
+			return
+		}
+
+		setMenuPending(true)
+		const outcome = await trashItems([driveItem])
+		setMenuPending(false)
+		setMenuDialogKind(null)
+		toastBulkOutcome(outcome)
+
+		if (outcome.succeeded.length > 0) {
+			onItemRemoved()
+		}
+	}
+
+	async function handleMenuDelete(): Promise<void> {
+		if (driveItem === undefined) {
+			return
+		}
+
+		setMenuPending(true)
+		const outcome = await deleteItemsPermanently([driveItem])
+		setMenuPending(false)
+		setMenuDialogKind(null)
+		toastBulkOutcome(outcome)
+
+		if (outcome.succeeded.length > 0) {
+			onItemRemoved()
+		}
+	}
+
+	// Mirrors new mobile's removeShare/stopSharing dismissOnSuccess: isPreview === true — closes the
+	// WHOLE preview immediately on success rather than stepping to a neighbour (unlike trash/delete
+	// above), since new mobile's own gallery has no driveItemRemoved-driven "step past it" behavior for
+	// this one.
+	async function handleMenuUnshare(): Promise<void> {
+		if (driveItem === undefined) {
+			return
+		}
+
+		setMenuPending(true)
+		const outcome = await unshareItems([driveItem], variant)
+		setMenuPending(false)
+		setMenuDialogKind(null)
+		toastBulkOutcome(outcome)
+
+		if (outcome.succeeded.length > 0) {
+			onClose()
+		}
+	}
+
+	// "favorite" descriptor's onFavoriteToggled — see itemMenu.tsx's own doc comment on why this extension
+	// point exists only for the preview.
+	function handleMenuFavoriteToggled(item: DriveItem): void {
+		if (rawDriveItem === undefined) {
+			return
+		}
+
+		setSaved(prev => new Map(prev).set(rawDriveItem.data.uuid, item))
+	}
+
+	// "restore" descriptor's onRestored (trash variant only) — a restored item leaves the trash listing
+	// entirely, the same "gap in the pager" shape as trash/delete above.
+	function handleMenuRestored(): void {
+		onItemRemoved()
+	}
+
+	// The header item-menu's secondary dialog, if any — nested inside the outer DialogPrimitive.Root
+	// exactly like the unsaved-changes ConfirmDialog below (Base UI supports nesting a dialog inside
+	// another normally, see that one's own doc comment). Move/versions/info/link/share are entirely
+	// self-contained dialog components (own state, own action calls) — reused completely unmodified,
+	// mirroring useDriveDialogHost's identical per-kind dispatch for the row-level menu.
+	function renderMenuDialog(): ReactNode {
+		if (menuDialogKind === null || driveItem === undefined) {
+			return null
+		}
+
+		switch (menuDialogKind) {
+			case "rename":
+				return (
+					<InputDialog
+						open
+						pending={menuPending}
+						title={t("drive:driveActionRename")}
+						body={t("drive:driveRenameDialogBody")}
+						label={t("drive:driveNewDirectoryLabel")}
+						initialValue={driveItem.data.decryptedMeta?.name ?? ""}
+						submitLabel={t("drive:driveActionRename")}
+						validate={value => value.trim().length > 0}
+						onOpenChange={open => {
+							if (!open) {
+								setMenuDialogKind(null)
+							}
+						}}
+						onSubmit={value => {
+							void handleMenuRename(value)
+						}}
+					/>
+				)
+			case "move":
+				return (
+					<MoveTargetDialog
+						items={[driveItem]}
+						onClose={() => {
+							setMenuDialogKind(null)
+						}}
+					/>
+				)
+			case "import":
+				return (
+					<MoveTargetDialog
+						items={[driveItem]}
+						mode="import"
+						onClose={() => {
+							setMenuDialogKind(null)
+						}}
+					/>
+				)
+			case "versions":
+				return driveItem.type === "file" ? (
+					<VersionsDialog
+						file={driveItem}
+						onClose={() => {
+							setMenuDialogKind(null)
+						}}
+					/>
+				) : null
+			case "info":
+				return (
+					<InfoDialog
+						item={driveItem}
+						remoteInfoEnabled={variant !== "trash"}
+						onClose={() => {
+							setMenuDialogKind(null)
+						}}
+					/>
+				)
+			case "link":
+				return (
+					<LinkDialog
+						item={driveItem}
+						onClose={() => {
+							setMenuDialogKind(null)
+						}}
+					/>
+				)
+			case "share":
+				return (
+					<ContactPickerDialog
+						items={[driveItem]}
+						onClose={() => {
+							setMenuDialogKind(null)
+						}}
+					/>
+				)
+			case "unshare":
+				return (
+					<ConfirmDialog
+						open
+						pending={menuPending}
+						title={t("drive:driveUnshareConfirmTitle")}
+						body={t("drive:driveUnshareConfirmBody", { count: 1 })}
+						confirmLabel={t("drive:driveActionUnshare")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								setMenuDialogKind(null)
+							}
+						}}
+						onConfirm={() => {
+							void handleMenuUnshare()
+						}}
+					/>
+				)
+			case "trash":
+				return (
+					<ConfirmDialog
+						open
+						pending={menuPending}
+						title={t("drive:driveTrashConfirmTitle")}
+						body={t("drive:driveTrashConfirmBody", { count: 1 })}
+						confirmLabel={t("drive:driveActionTrash")}
+						cancelLabel={t("common:cancel")}
+						onOpenChange={open => {
+							if (!open) {
+								setMenuDialogKind(null)
+							}
+						}}
+						onConfirm={() => {
+							void handleMenuTrash()
+						}}
+					/>
+				)
+			case "delete":
+				return (
+					<ConfirmDialog
+						open
+						pending={menuPending}
+						title={t("drive:driveDeletePermanentlyConfirmTitle")}
+						body={t("drive:driveDeletePermanentlyConfirmBody", { count: 1 })}
+						confirmLabel={t("drive:driveActionDeletePermanently")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								setMenuDialogKind(null)
+							}
+						}}
+						onConfirm={() => {
+							void handleMenuDelete()
+						}}
+					/>
+				)
+			case "color":
+				// Unreachable — see menuDialogKind's own doc comment.
+				return null
+		}
+	}
 
 	// A step can disable the very pager button that triggered it (index lands on the first/last item,
 	// see the Prev/Next Buttons' own `disabled` below) — the browser blurs a disabled focused control
@@ -392,6 +664,37 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 								<DownloadIcon />
 							</Button>
 						) : null}
+						{/* Drive-sourced items only — the external arm (chat/note attachments) has no drive item
+						for driveItemActions to gate against, so it shows no menu at all, same as the tile/row
+						faces' own ⋯ trigger. Same descriptor list + dropdown renderer those use (itemMenu.tsx),
+						just with "download" hidden (the button above already covers it) and the two extra
+						"direct"-outcome hooks wired into this overlay's own per-slot `saved` override / pager
+						housekeeping — see PREVIEW_MENU_HIDDEN_ACTION_IDS and the handleMenu* functions above. */}
+						{previewMenuVisible(currentSource) && driveItem !== undefined ? (
+							<DropdownMenu>
+								<DropdownMenuTrigger
+									render={
+										<Button
+											variant="ghost"
+											size="icon-sm"
+											aria-label={t("drive:driveItemMenuTrigger")}
+										>
+											<MoreHorizontalIcon />
+										</Button>
+									}
+								/>
+								<DriveDropdownMenuContent
+									item={driveItem}
+									variant={variant}
+									onItemAction={kind => {
+										setMenuDialogKind(kind)
+									}}
+									onFavoriteToggled={handleMenuFavoriteToggled}
+									onRestored={handleMenuRestored}
+									hiddenActionIds={PREVIEW_MENU_HIDDEN_ACTION_IDS}
+								/>
+							</DropdownMenu>
+						) : null}
 						<DialogPrimitive.Close
 							render={
 								<Button
@@ -433,6 +736,9 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 						}}
 						onConfirm={handleUnsavedConfirm}
 					/>
+					{/* The header item-menu's own secondary dialog (rename/move/trash/etc.) — same nesting
+					precedent as the unsaved-changes ConfirmDialog above. */}
+					{renderMenuDialog()}
 				</DialogPrimitive.Popup>
 			</DialogPrimitive.Portal>
 		</DialogPrimitive.Root>

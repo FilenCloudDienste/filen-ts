@@ -346,3 +346,106 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 		await trashScratchDirectory(page, scratchName)
 	}
 })
+
+// The preview header's own item menu (d6-preview-menu): same descriptor set the row/tile ⋯ dropdown
+// offers (itemMenu.tsx), Download stripped since the header already has its own dedicated button right
+// beside the trigger. Favorite round-trips silently (no dialog, no dirty state) via the menu's
+// onFavoriteToggled hook into the overlay's own per-slot override map. Trash on a two-item preview
+// proves the mirrored new-mobile behavior live: the pager steps to the remaining sibling in place
+// rather than closing the whole overlay (useDriveDialogHost's removeCurrentPreviewItem) — unlike
+// unshare, which new mobile (and this port) close outright instead (menuActions.ts's own
+// dismissOnSuccess: isPreview === true), not exercisable here since the shared e2e account has no
+// shared-root items to open a preview on (project_filen_web_free_e2e_account).
+test("the preview header's own item menu: matches the row menu's set (no Download), favorite round-trips, trash advances to the next sibling", async ({
+	page,
+	injectedSession,
+	browserName
+}) => {
+	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	test.setTimeout(120_000)
+	expect(injectedSession.length).toBeGreaterThan(0)
+
+	const runId = crypto.randomUUID()
+	const scratchName = `e2e-preview-menu-${runId}`
+	const nameA = `e2e-preview-menu-a-${runId}.txt`
+	const nameB = `e2e-preview-menu-b-${runId}.txt`
+	const contentA = Buffer.from("Preview menu content A\n", "utf8")
+	const contentB = Buffer.from("Preview menu content B\n", "utf8")
+
+	await page.goto("/drive")
+
+	try {
+		const { listbox } = await enterScratchDirectory(page, scratchName)
+
+		const input = page.locator('input[type="file"]').first()
+		await input.setInputFiles([
+			{ name: nameA, mimeType: "text/plain", buffer: contentA },
+			{ name: nameB, mimeType: "text/plain", buffer: contentB }
+		])
+
+		const rowA = listbox.getByRole("option", { name: nameA })
+		const rowB = listbox.getByRole("option", { name: nameB })
+		await expect(rowA).toBeVisible({ timeout: 45_000 })
+		await expect(rowB).toBeVisible({ timeout: 45_000 })
+
+		// "a" sorts before "b" — opening A leaves B as its one sibling to advance onto after trash below.
+		await rowA.dblclick()
+		const dialog = page.getByRole("dialog")
+		await expect(dialog.getByText("Preview menu content A")).toBeVisible({ timeout: 30_000 })
+
+		const menuTrigger = dialog.getByRole("button", { name: "More actions", exact: true })
+		const menu = page.getByRole("menu")
+
+		await menuTrigger.click()
+		await expect(menu).toBeVisible()
+		// The row/tile ⋯ dropdown's own drive-variant set (itemMenu.test.ts), minus Download — the
+		// header's separate Download button (still present, asserted below) covers that one.
+		for (const label of ["Rename", "Move", "Favorite", "Info", "Share", "Public link", "Copy link", "Trash"]) {
+			await expect(menu.getByRole("menuitem", { name: label, exact: true })).toBeVisible()
+		}
+		await expect(menu.getByRole("menuitem", { name: "Download", exact: true })).toHaveCount(0)
+		await expect(dialog.getByRole("button", { name: "Download", exact: true })).toBeVisible()
+
+		// Base UI's menu, like its Dialog sibling, stops propagation for composite keys (Arrow*) while
+		// open — live-verified here: ArrowLeft with the menu open must neither page the (single-item-
+		// behind, this account has no prior sibling to land on anyway) pager nor leak out and do
+		// anything else observable; Escape closes just the menu, leaving the preview itself open on A.
+		await page.keyboard.press("ArrowLeft")
+		await expect(dialog.getByText("Preview menu content A")).toBeVisible()
+		await page.keyboard.press("Escape")
+		await expect(menu).toHaveCount(0)
+		await expect(dialog).toBeVisible()
+		await expect(dialog.getByText("Preview menu content A")).toBeVisible()
+
+		// Favorite: direct, no dialog — settles silently, and a reopened menu reflects the new state.
+		await menuTrigger.click()
+		await expect(menu).toBeVisible()
+		await menu.getByRole("menuitem", { name: "Favorite", exact: true }).click()
+		await expect(menu).toHaveCount(0)
+		await menuTrigger.click()
+		await expect(menu.getByRole("menuitem", { name: "Unfavorite", exact: true })).toBeVisible()
+
+		// Net-zero the favorite before trashing A.
+		await menu.getByRole("menuitem", { name: "Unfavorite", exact: true }).click()
+		await expect(menu).toHaveCount(0)
+
+		// Trash A from inside the preview — the confirm nests over the overlay (Base UI dialog stacking).
+		await menuTrigger.click()
+		await menu.getByRole("menuitem", { name: "Trash", exact: true }).click()
+		const trashConfirm = page.getByRole("alertdialog")
+		await expect(trashConfirm).toBeVisible()
+		await expect(trashConfirm.getByRole("heading", { name: "Move to trash?", exact: true })).toBeVisible()
+		await trashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
+		await expect(trashConfirm).toHaveCount(0)
+
+		// The pager steps onto B IN PLACE rather than closing the whole preview — the frozen two-item
+		// snapshot now has one slot left, and A's removed index (0) clamps onto it.
+		await expect(dialog).toBeVisible()
+		await expect(dialog.getByText("Preview menu content B")).toBeVisible({ timeout: 30_000 })
+
+		await page.keyboard.press("Escape")
+		await expect(dialog).toHaveCount(0)
+	} finally {
+		await trashScratchDirectory(page, scratchName)
+	}
+})

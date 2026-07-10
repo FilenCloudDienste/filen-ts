@@ -92,6 +92,29 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 		setActiveDialog({ kind: "preview", items: [], index, previewSources: sources })
 	}
 
+	// Drops the currently-viewed slot out of the frozen pager snapshot — the preview header's own item
+	// menu (previewOverlay.tsx) calls this after a successful trash/delete-permanently/restore-from-trash
+	// on the previewed item, mirroring new mobile's driveItemRemoved gallery subscriber: stay on the same
+	// visual position (which now shows the next sibling, clamped to the new last slot), or close outright
+	// once the removed slot was the only one left. Unlike unshare (see previewOverlay.tsx's own direct
+	// onClose call) this never closes the whole preview while a sibling remains — the pager just steps
+	// past the gap in place.
+	function removeCurrentPreviewItem(): void {
+		setActiveDialog(prev => {
+			if (prev?.kind !== "preview" || prev.index === undefined || prev.previewSources === undefined) {
+				return prev
+			}
+
+			const remaining = prev.previewSources.filter((_, sourceIndex) => sourceIndex !== prev.index)
+
+			if (remaining.length === 0) {
+				return null
+			}
+
+			return { ...prev, previewSources: remaining, index: Math.min(prev.index, remaining.length - 1) }
+		})
+	}
+
 	// Threaded into DriveRow/DriveTile as onItemAction (consistent with onPointerSelect/onOpen) — every
 	// "dialog"-run item-menu descriptor calls this with its own kind; "direct"-run ones (favorite/
 	// restore) resolve fully inside itemMenu.tsx and never reach here.
@@ -417,6 +440,7 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 						index={previewIndex}
 						onStep={stepPreview}
 						onClose={closeActiveDialog}
+						onItemRemoved={removeCurrentPreviewItem}
 					/>
 				)
 			}

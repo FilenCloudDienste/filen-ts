@@ -24,6 +24,14 @@ export interface ItemMenuContentProps {
 	// the listing-level dialog host (directoryListing.tsx) owns turning this into an open dialog.
 	// "direct"-run descriptors (favorite/restore) never call this — they resolve fully in place below.
 	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
+	// Preview-only extension points (both omitted by every row/tile caller — current behavior there is
+	// unchanged). The preview overlay keeps its own per-slot item override map instead of relying on a
+	// listing refetch, so it needs the updated item the instant a "direct" descriptor resolves.
+	onFavoriteToggled?: ((item: DriveItem) => void) | undefined
+	onRestored?: ((item: DriveItem) => void) | undefined
+	// Preview-only: descriptor ids to omit from the rendered list — the preview drops "download" since
+	// its header already has its own dedicated download button (previewOverlay.tsx).
+	hiddenActionIds?: ReadonlySet<ItemActionId> | undefined
 }
 
 interface MenuItemFamily {
@@ -43,9 +51,17 @@ const SEPARATOR_BEFORE = new Set<ItemActionId>(["info", "trash", "deletePermanen
 // families with their own Item/Separator primitives (not interchangeable across triggers even though
 // their props are structurally identical), so the one piece each caller supplies is which family to
 // render rows with.
-function ItemMenuEntries({ item, variant, onItemAction, family }: ItemMenuContentProps & { family: MenuItemFamily }) {
+function ItemMenuEntries({
+	item,
+	variant,
+	onItemAction,
+	onFavoriteToggled,
+	onRestored,
+	hiddenActionIds,
+	family
+}: ItemMenuContentProps & { family: MenuItemFamily }) {
 	const { t } = useTranslation("drive")
-	const descriptors = driveItemActions(item, variant)
+	const descriptors = driveItemActions(item, variant).filter(descriptor => !hiddenActionIds?.has(descriptor.id))
 	const { Item, Separator } = family
 
 	async function runDirect(descriptor: Extract<ItemActionDescriptor, { run: "direct" }>): Promise<void> {
@@ -74,6 +90,8 @@ function ItemMenuEntries({ item, variant, onItemAction, family }: ItemMenuConten
 				useDriveStore.getState().removeFromSelection([outcome.item.data.uuid])
 			}
 
+			onFavoriteToggled?.(outcome.item)
+
 			return
 		}
 
@@ -84,6 +102,10 @@ function ItemMenuEntries({ item, variant, onItemAction, family }: ItemMenuConten
 		const outcome = await restoreItems([item])
 		toastBulkOutcome(outcome)
 		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(succeededItem => succeededItem.data.uuid))
+
+		if (outcome.succeeded.some(succeededItem => succeededItem.data.uuid === item.data.uuid)) {
+			onRestored?.(item)
+		}
 	}
 
 	return (
@@ -120,27 +142,48 @@ function ItemMenuEntries({ item, variant, onItemAction, family }: ItemMenuConten
 }
 
 // Right-click surface — rendered inside a per-row/tile <ContextMenu> (see driveRow.tsx/driveTile.tsx).
-export function DriveContextMenuContent({ item, variant, onItemAction }: ItemMenuContentProps) {
+export function DriveContextMenuContent({
+	item,
+	variant,
+	onItemAction,
+	onFavoriteToggled,
+	onRestored,
+	hiddenActionIds
+}: ItemMenuContentProps) {
 	return (
 		<ContextMenuContent>
 			<ItemMenuEntries
 				item={item}
 				variant={variant}
 				onItemAction={onItemAction}
+				onFavoriteToggled={onFavoriteToggled}
+				onRestored={onRestored}
+				hiddenActionIds={hiddenActionIds}
 				family={{ Item: ContextMenuItem, Separator: ContextMenuSeparator }}
 			/>
 		</ContextMenuContent>
 	)
 }
 
-// ⋯ trigger surface — rendered inside a per-row/tile <DropdownMenu> (see driveRow.tsx/driveTile.tsx).
-export function DriveDropdownMenuContent({ item, variant, onItemAction }: ItemMenuContentProps) {
+// ⋯ trigger surface — rendered inside a per-row/tile <DropdownMenu> (see driveRow.tsx/driveTile.tsx),
+// and by the preview header's own item menu (previewOverlay.tsx).
+export function DriveDropdownMenuContent({
+	item,
+	variant,
+	onItemAction,
+	onFavoriteToggled,
+	onRestored,
+	hiddenActionIds
+}: ItemMenuContentProps) {
 	return (
 		<DropdownMenuContent align="end">
 			<ItemMenuEntries
 				item={item}
 				variant={variant}
 				onItemAction={onItemAction}
+				onFavoriteToggled={onFavoriteToggled}
+				onRestored={onRestored}
+				hiddenActionIds={hiddenActionIds}
 				family={{ Item: DropdownMenuItem, Separator: DropdownMenuSeparator }}
 			/>
 		</DropdownMenuContent>
