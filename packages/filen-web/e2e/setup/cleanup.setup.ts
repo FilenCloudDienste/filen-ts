@@ -1,4 +1,4 @@
-import { test as setup } from "../fixtures"
+import { test as setup, expect } from "../fixtures"
 import { firstMatchingRowName, selectAndTrashRow, waitForListingSettled } from "../helpers/listing"
 import { isScratchDebrisName } from "@/e2e-hooks/scratchDebris"
 
@@ -14,11 +14,11 @@ setup.describe.configure({ retries: 0 })
 const MAX_ROUNDS = 500
 
 setup("sweep every root item matching a retired scratch-name prefix", async ({ page, injectedSession }) => {
-	// Requesting injectedSession (unused past this point) is what actually triggers the fixture's
-	// addInitScript seeding below, and cleanly skips this whole step when no e2e credentials are
-	// configured — same as every authed spec, and the reason auth-setup's own skip needs no mirroring
-	// here.
-	void injectedSession
+	// Same convention every other authed spec uses (auth.spec.ts, downloads.spec.ts, contacts.spec.ts,
+	// boot.spec.ts): asserting the session actually came back — not just requesting it — proves the
+	// fixture's addInitScript seeding ran, rather than silently continuing against an unauthenticated
+	// page that would only surface as a confusing waitForListingSettled timeout below.
+	expect(injectedSession.length).toBeGreaterThan(0)
 
 	await page.goto("/drive")
 

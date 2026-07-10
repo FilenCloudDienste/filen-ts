@@ -134,24 +134,34 @@ async function waitForToastsClear(page: Page): Promise<void> {
 // the callback is what actually recovers, the same shape as descendInto's own toPass above. Exported for
 // the debris sweep in setup/cleanup.setup.ts, which hits this exact churn by construction (it runs
 // against a root that, by definition, still has rows left to remove).
+//
+// No per-step timeout overrides inside the callback: they fall back to the same budgets the
+// pre-toPass version of this sequence relied on (expect's config default of 15s, and actions' own
+// default — unbounded, i.e. bounded only by the enclosing test's timeout) rather than a tight
+// hardcoded 5s each, which left too little slack for a single attempt (let alone a retry) once
+// waitForToastsClear's own up-to-20s wait was in the mix. The outer envelope is sized off
+// confirmTimeoutMs so a caller's wider override (e.g. drive-search.spec.ts's nested-tree 30s) still
+// gets real headroom around it instead of being silently capped by a fixed outer ceiling.
 export async function selectAndTrashRow(
 	page: Page,
 	listbox: ReturnType<Page["getByRole"]>,
 	name: string,
 	confirmTimeoutMs?: number
 ): Promise<void> {
+	const envelopeTimeoutMs = Math.max(60_000, (confirmTimeoutMs ?? 0) + 40_000)
+
 	await expect(async () => {
 		const row = listbox.getByRole("option", { name })
-		await expect(row).toBeVisible({ timeout: 5_000 })
-		await row.click({ timeout: 5_000 })
+		await expect(row).toBeVisible()
+		await row.click()
 		await waitForToastsClear(page)
-		await page.getByRole("button", { name: "Trash", exact: true }).click({ timeout: 5_000 })
+		await page.getByRole("button", { name: "Trash", exact: true }).click()
 
 		const confirm = page.getByRole("alertdialog")
-		await expect(confirm).toBeVisible({ timeout: 5_000 })
-		await confirm.getByRole("button", { name: "Trash", exact: true }).click({ timeout: 5_000 })
-		await expect(confirm).toHaveCount(0, { timeout: confirmTimeoutMs ?? 5_000 })
-	}).toPass({ timeout: 30_000 })
+		await expect(confirm).toBeVisible()
+		await confirm.getByRole("button", { name: "Trash", exact: true }).click()
+		await expect(confirm).toHaveCount(0, confirmTimeoutMs === undefined ? undefined : { timeout: confirmTimeoutMs })
+	}).toPass({ timeout: envelopeTimeoutMs })
 }
 
 // Failure-proof companion to enterScratchDirectory above — called from every test's own finally, so
@@ -188,12 +198,17 @@ export async function trashScratchDirectory(page: Page, name: string, confirmTim
 // than a cached snapshot — the debris sweep re-calls this every round specifically so a reorder between
 // rounds just yields a different row next time, never a stale one. The row's accessible name also
 // carries its size/date columns (see driveRow.tsx), so this reads the name span directly rather than
-// the full accessible name a `{ name }` locator filter would substring-match against.
+// the full accessible name a `{ name }` locator filter would substring-match against. Excludes
+// `.sr-only` spans: list view's name span is already the row's first span (driveRow.tsx), but grid
+// view's favorited badge renders an `.sr-only` label span BEFORE the tile's name span (driveTile.tsx) —
+// without the exclusion, a favorited item's "first span" would be that badge, not its name.
 export async function firstMatchingRowName(
 	listbox: ReturnType<Page["getByRole"]>,
 	predicate: (name: string) => boolean
 ): Promise<string | null> {
-	const names = await listbox.getByRole("option").evaluateAll(rows => rows.map(row => row.querySelector("span")?.textContent ?? ""))
+	const names = await listbox
+		.getByRole("option")
+		.evaluateAll(rows => rows.map(row => row.querySelector("span:not(.sr-only)")?.textContent ?? ""))
 
 	return names.find(predicate) ?? null
 }
