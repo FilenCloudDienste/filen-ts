@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { waitForListingSettled } from "./helpers/listing"
+import { waitForListingSettled, descendInto } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 
 // Mirrors drive.spec.ts's own FIREFOX_HANG_REASON — every test below needs the SAME authenticated
@@ -137,13 +137,10 @@ test.describe("drive bulk actions", () => {
 		const { listbox: rootListbox } = await waitForListingSettled(page)
 
 		await createDirectory(scratchName)
-		const scratchRow = rootListbox.getByRole("option", { name: scratchName })
-		await expect(scratchRow).toBeVisible()
-
 		// Descend via a real double-click (an in-app client-side route change, same as drive.spec.ts's
 		// own subdirectory-navigation test) — everything below this point, until the final cleanup,
 		// stays inside the scratch directory and never touches the root listing again.
-		await scratchRow.dblclick()
+		await descendInto(page, rootListbox, scratchName)
 		const { listbox } = await waitForListingSettled(page)
 
 		await createDirectory(nameA)
@@ -224,9 +221,7 @@ test.describe("drive bulk actions", () => {
 		// — so getting back to them means re-descending, not just returning to /drive.
 		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
 		const rootAfterRestore = await waitForListingSettled(page)
-		const scratchRowAfterRestore = rootAfterRestore.listbox.getByRole("option", { name: scratchName })
-		await expect(scratchRowAfterRestore).toBeVisible()
-		await scratchRowAfterRestore.dblclick()
+		await descendInto(page, rootAfterRestore.listbox, scratchName)
 
 		const restoredListing = await waitForListingSettled(page)
 		const restoredRowA = restoredListing.listbox.getByRole("option", { name: nameA })

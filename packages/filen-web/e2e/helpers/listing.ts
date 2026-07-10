@@ -43,29 +43,33 @@ export async function enterScratchDirectory(
 	await page.getByRole("button", { name: "Create", exact: true }).click()
 	await expect(dialog).toHaveCount(0)
 
-	const scratchRow = listbox.getByRole("option", { name })
-	await expect(scratchRow).toBeVisible()
-
-	// A real double-click (an in-app client-side route change) — everything the calling test does
-	// until trashScratchDirectory below stays inside this directory and never touches the root
-	// listing again. Retried until the URL actually grows a splat segment: on the shared live
-	// listing a freshly created row can shift position between the double-click's two clicks (the
-	// optimistic insert settles against the confirming refetch while parallel specs churn the same
-	// root), in which case the two clicks land on different rows and no navigation happens. Failing
-	// here, loudly, also prevents every downstream step from leaking root-level artifacts.
-	await expect(async () => {
-		await scratchRow.dblclick()
-		await page.waitForURL(/\/drive\/[^/]+/, { timeout: 3000 })
-	}).toPass({ timeout: 30_000 })
-
-	// The URL flips before React commits the new listing render (router navigations are
-	// transition-wrapped), so under CPU load the OLD view — old upload-input props included — can
-	// linger past the URL change; an upload fired in that window lands in the previous directory.
-	// The breadcrumb renders from the same committed tree as the toolbar's inputs: once it shows the
-	// scratch name, everything below it carries the scratch directory's own props.
-	await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText(name, { exact: true })).toBeVisible()
+	await descendInto(page, listbox, name)
 
 	return waitForListingSettled(page)
+}
+
+// Double-click descent into a directory row, hardened for the shared live account. Retried until the
+// URL actually changes: a freshly created row can shift position between the double-click's two
+// clicks (the optimistic insert settles against the confirming refetch while parallel specs churn the
+// same listing), in which case the two clicks land on different rows and no navigation happens. Then
+// gated on the breadcrumb showing the target name: the URL flips before React commits the new listing
+// render (router navigations are transition-wrapped), so under CPU load the OLD view — old
+// upload-input props included — can linger past the URL change, and an upload fired in that window
+// lands in the previous directory. The breadcrumb renders from the same committed tree as the
+// toolbar's inputs, so its name is the commit barrier.
+export async function descendInto(page: Page, listbox: ReturnType<Page["getByRole"]>, name: string): Promise<void> {
+	const row = listbox.getByRole("option", { name })
+	await expect(row).toBeVisible()
+
+	const before = page.url()
+
+	await expect(async () => {
+		await row.dblclick()
+		await page.waitForURL(url => url.toString() !== before, { timeout: 3000 })
+	}).toPass({ timeout: 30_000 })
+
+	await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText(name, { exact: true })).toBeVisible()
+	await waitForListingSettled(page)
 }
 
 // Failure-proof companion to enterScratchDirectory above — called from every test's own finally, so

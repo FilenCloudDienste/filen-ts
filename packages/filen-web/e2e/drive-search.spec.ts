@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { waitForListingSettled, trashScratchDirectory } from "./helpers/listing"
+import { waitForListingSettled, trashScratchDirectory, descendInto } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
 
@@ -58,11 +58,11 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		// the file proves real subtree recursion, not just a one-level filter. Both directory names ride
 		// the run's own unique suffix so a search for it also surfaces a directory hit, not only the file.
 		await createDirectory(page, rootListbox, scratchName)
-		await rootListbox.getByRole("option", { name: scratchName }).dblclick()
+		await descendInto(page, rootListbox, scratchName)
 
 		const { listbox: scratchListbox } = await waitForListingSettled(page)
 		await createDirectory(page, scratchListbox, nestedName)
-		await scratchListbox.getByRole("option", { name: nestedName }).dblclick()
+		await descendInto(page, scratchListbox, nestedName)
 
 		const { listbox: nestedListbox } = await waitForListingSettled(page)
 		await page
@@ -81,8 +81,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		// recursion is still fully proven (the file sits two levels below where the search opens).
 		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
 		const { listbox: rootListboxAgain } = await waitForListingSettled(page)
-		await rootListboxAgain.getByRole("option", { name: scratchName }).dblclick()
-		await waitForListingSettled(page)
+		await descendInto(page, rootListboxAgain, scratchName)
 
 		const searchInput = page.getByLabel("Search this directory", { exact: true })
 		await expect(searchInput).not.toBeFocused()

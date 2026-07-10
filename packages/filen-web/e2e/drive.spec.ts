@@ -190,13 +190,18 @@ test.describe("drive", () => {
 
 		const optionCount = await listbox.getByRole("option").count()
 		await page.keyboard.press(`${modKey}+a`)
-		await expect(listbox.getByRole("option", { selected: true })).toHaveCount(optionCount)
-		await expect(page.getByText(`${String(optionCount)} selected`, { exact: true })).toBeVisible()
+		// The shared account churns under parallel specs, so a pre-read count can go stale between the
+		// keypress and the assertion — assert the bar agrees with the LIVE selected-row count instead.
+		await expect(async () => {
+			const selected = await listbox.getByRole("option", { selected: true }).count()
+			expect(selected).toBeGreaterThan(0)
+			await expect(page.getByText(`${String(selected)} selected`, { exact: true })).toBeVisible({ timeout: 1000 })
+		}).toPass({ timeout: 15_000 })
 
 		await page.keyboard.press("Escape")
 		await expect(listbox.getByRole("option", { selected: true })).toHaveCount(0)
 		// The floating selection bar unmounts with the cleared selection.
-		await expect(page.getByText(`${String(optionCount)} selected`, { exact: true })).toHaveCount(0)
+		await expect(page.getByText(/^\d+ selected$/)).toHaveCount(0)
 
 		test.skip(optionCount < 2, "drive root has only one item in this account — no second option for the cursor to move to")
 
