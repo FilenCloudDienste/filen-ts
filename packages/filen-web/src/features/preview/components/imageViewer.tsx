@@ -24,7 +24,7 @@ const ZOOM_SENSITIVITY = 0.0015
 // <img> from an already-resolved URL (either mode below). Fit-to-screen via object-contain, plus a
 // basic uniform wheel-zoom (no pan, no lib) — identical rendering regardless of whether `url` is a
 // blob: URL or the SW's inline-preview route.
-function ZoomableImage({
+export function ZoomableImage({
 	url,
 	alt,
 	onError

@@ -4,7 +4,7 @@ import { toast } from "sonner"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { stepPreviewIndex } from "@/features/drive/lib/preview.logic"
+import { type PreviewSource, previewSourceKey, stepPreviewSourceIndex } from "@/features/preview/lib/previewSource"
 import { renameItem, trashItems, restoreItems, deleteItemsPermanently, emptyTrash } from "@/features/drive/lib/actions"
 import { unshareItems } from "@/features/drive/lib/share/actions"
 import { type BulkOutcome } from "@/features/drive/lib/bulk"
@@ -33,9 +33,13 @@ type ActiveDialogKind = ItemActionDialogKind | "emptyTrash" | "restoreSelected" 
 interface ActiveDialog {
 	kind: ActiveDialogKind
 	items: DriveItem[]
-	// Only meaningful for kind:"preview" — the opened item's position within `items` (the frozen
-	// previewable-sibling snapshot taken at open time). Every other kind leaves this unset.
+	// Only meaningful for kind:"preview" — the opened slot's position within `previewSources` (the frozen
+	// snapshot taken at open time). Every other kind leaves this unset.
 	index?: number
+	// Only meaningful for kind:"preview" — the frozen PreviewSource[] snapshot the pager steps through
+	// (the shared `items` above stays the DriveItem[] the other dialog kinds use). Every other kind
+	// leaves this unset.
+	previewSources?: PreviewSource[]
 }
 
 export interface DriveDialogHost {
@@ -43,7 +47,7 @@ export interface DriveDialogHost {
 	handleItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
 	handleBulkDialogAction: (kind: BulkDialogActionKind) => void
 	handleEmptyTrash: () => void
-	openPreview: (items: DriveItem[], index: number) => void
+	openPreview: (sources: PreviewSource[], index: number) => void
 	renderActiveDialog: () => ReactNode
 }
 
@@ -68,23 +72,24 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 	// the dialog traps focus, see that handler's own comment). A no-op outside kind:"preview".
 	function stepPreview(delta: 1 | -1): void {
 		setActiveDialog(prev => {
-			if (prev?.kind !== "preview" || prev.index === undefined) {
+			if (prev?.kind !== "preview" || prev.index === undefined || prev.previewSources === undefined) {
 				return prev
 			}
 
-			const current = prev.items[prev.index]
+			const current = prev.previewSources[prev.index]
 
 			if (!current) {
 				return prev
 			}
 
-			return { ...prev, index: stepPreviewIndex(current.data.uuid, prev.items, delta) }
+			return { ...prev, index: stepPreviewSourceIndex(previewSourceKey(current), prev.previewSources, delta) }
 		})
 	}
 
-	// Opens the preview overlay for a frozen previewable-sibling snapshot at the given position.
-	function openPreview(items: DriveItem[], index: number): void {
-		setActiveDialog({ kind: "preview", items, index })
+	// Opens the preview overlay for a frozen source snapshot at the given position. The shared `items`
+	// field stays empty for this kind — the pager reads `previewSources` (see ActiveDialog).
+	function openPreview(sources: PreviewSource[], index: number): void {
+		setActiveDialog({ kind: "preview", items: [], index, previewSources: sources })
 	}
 
 	// Threaded into DriveRow/DriveTile as onItemAction (consistent with onPointerSelect/onOpen) — every
@@ -399,15 +404,16 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 				)
 			case "preview": {
 				const previewIndex = activeDialog.index
+				const previewSources = activeDialog.previewSources
 
-				if (previewIndex === undefined) {
+				if (previewIndex === undefined || previewSources === undefined) {
 					return null
 				}
 
 				return (
 					<PreviewOverlay
 						variant={variant}
-						items={activeDialog.items}
+						items={previewSources}
 						index={previewIndex}
 						onStep={stepPreview}
 						onClose={closeActiveDialog}

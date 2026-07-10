@@ -6,7 +6,7 @@ import { startUploads } from "@/features/drive/lib/upload"
 import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
 import { normalizeTextFileName, runCreateTextFile } from "@/features/drive/lib/createTextFile"
 import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
-import { type DriveItem } from "@/features/drive/lib/item"
+import { type PreviewSource, drivePreviewSources } from "@/features/preview/lib/previewSource"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Button } from "@/components/ui/button"
@@ -24,7 +24,7 @@ export interface UploadMenuProps {
 	// own useDriveDialogHost().openPreview, threaded in so the newly created text file opens its
 	// editor immediately (mobile parity: useDriveUpload.ts's createTextFile does the same once its own
 	// upload settles).
-	openPreview: (items: DriveItem[], index: number) => void
+	openPreview: (sources: PreviewSource[], index: number) => void
 }
 
 // Toolbar entry point for starting an upload. A DropdownMenu (not a bare button) holds "Upload
@@ -92,7 +92,7 @@ export function UploadMenu({ parentUuid, disabled = false, openPreview }: Upload
 		// Opens the editor immediately (mobile parity — useDriveUpload.ts's createTextFile does the
 		// same). A single-item frozen snapshot, same as a lone previewable item's own open path
 		// (directoryListing.tsx's handleOpen).
-		openPreview([outcome.item], 0)
+		openPreview(drivePreviewSources([outcome.item]), 0)
 	}
 
 	return (

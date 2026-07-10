@@ -190,6 +190,13 @@ export function previewType(item: DriveItem): PreviewCategory {
 	return byMime ?? "other"
 }
 
+// Category for a bare filename, extension-only — the external preview arm (a url with no drive item,
+// hence no mime) resolves what it can render this way. Mirrors previewType's extension-first path
+// without the file-arm/mime machinery; an unmapped extension is "other" (the unsupported state).
+export function previewCategoryForName(name: string): PreviewCategory {
+	return categoryForExtension(extensionOf(name)) ?? "other"
+}
+
 // image joins video/audio here: all three prefer the SW's inline Range route
 // (features/preview/lib/previewStream.ts) and fall whole-buffer only as a capability fallback (dev / SW absent / registration
 // failure) — see PREVIEW_MAX_BYTES's own comment on the tradeoff that fallback accepts. HEIC/HEIF are

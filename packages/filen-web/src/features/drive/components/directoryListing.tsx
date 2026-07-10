@@ -21,6 +21,7 @@ import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
 import { resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
 import { asDirectoryOrFile } from "@/features/drive/lib/item"
 import { canPreview, previewableSiblings } from "@/features/drive/lib/preview.logic"
+import { drivePreviewSources } from "@/features/preview/lib/previewSource"
 import { startDownloads } from "@/features/drive/lib/download"
 import { useDirectoryListingQuery, useSortPreferencesQuery, useViewModePreferencesQuery } from "@/features/drive/queries/drive"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
@@ -219,7 +220,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			const siblings = previewableSiblings(sortedItems, variant)
 			const siblingIndex = siblings.findIndex(sibling => sibling.data.uuid === item.data.uuid)
 
-			openPreview(siblings, siblingIndex === -1 ? 0 : siblingIndex)
+			openPreview(drivePreviewSources(siblings), siblingIndex === -1 ? 0 : siblingIndex)
 
 			return
 		}

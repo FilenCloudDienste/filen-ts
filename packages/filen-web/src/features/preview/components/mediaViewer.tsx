@@ -20,7 +20,7 @@ export interface MediaViewerProps {
 // avoids eagerly streaming the whole file just to show a scrubber; the SW route/blob URL both support
 // seeking past that point either way (the SW via Range/206, a blob URL via the browser's own in-memory
 // random access).
-function MediaElement({
+export function MediaElement({
 	category,
 	url,
 	alt,

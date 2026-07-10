@@ -5,7 +5,7 @@ import { XIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, SaveIcon } from
 import { toast } from "sonner"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { previewType } from "@/features/drive/lib/preview.logic"
+import { previewCategoryForName, previewType } from "@/features/drive/lib/preview.logic"
 import { startDownloads } from "@/features/drive/lib/download"
 import { isEditable, isUnresolvableParentError, runPreviewSave } from "@/features/drive/lib/previewSave.logic"
 import { currentRootUuid } from "@/features/drive/lib/actions"
@@ -15,9 +15,10 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
-import { ImageViewer } from "@/features/preview/components/imageViewer"
-import { MediaViewer } from "@/features/preview/components/mediaViewer"
+import { ImageViewer, ZoomableImage } from "@/features/preview/components/imageViewer"
+import { MediaViewer, MediaElement } from "@/features/preview/components/mediaViewer"
 import { isTextEditingTarget } from "@/features/preview/components/previewOverlay.logic"
+import { type PreviewSource, previewSourceKey, previewSourceName } from "@/features/preview/lib/previewSource"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
@@ -51,8 +52,10 @@ registerAction({
 export interface PreviewOverlayProps {
 	variant: DriveVariant
 	// Frozen previewable-sibling snapshot taken at open time (directoryListing.tsx's handleOpen) — the
-	// pager's whole candidate list, not just the opened item.
-	items: DriveItem[]
+	// pager's whole candidate list, not just the opened item. A PreviewSource[] so the overlay is agnostic
+	// to where each slot came from: today every caller emits the drive arm (behaviorally identical to the
+	// prior DriveItem[] flow), the external arm is the seam for future chat/note attachments.
+	items: PreviewSource[]
 	index: number
 	onStep: (delta: 1 | -1) => void
 	onClose: () => void
@@ -81,9 +84,9 @@ interface PreviewErrorBoundaryState {
 // the header (Save/prev/next/download/close) lives outside it, so the overlay stays fully closeable
 // even while this is showing its fallback. A synchronous viewer throw (e.g. the markdown parser, which
 // runs during render, not inside an effect) would otherwise propagate past this dialog uncaught and
-// white-screen the whole app — no boundary exists anywhere else in this tree. Keyed by item uuid at
-// its call site below (the same key PreviewBody itself used to carry) so a crash on one item can never
-// stick once the user steps to a different one — getDerivedStateFromError has no other way back to a
+// white-screen the whole app — no boundary exists anywhere else in this tree. Keyed by the source key
+// at its call site below (drive uuid / external url, the same key PreviewBody itself remounts on) so a
+// crash on one slot can never stick once the user steps to a different one — getDerivedStateFromError has no other way back to a
 // clean state.
 class PreviewErrorBoundary extends Component<{ children: ReactNode }, PreviewErrorBoundaryState> {
 	override state: PreviewErrorBoundaryState = { hasError: false }
@@ -119,7 +122,11 @@ function PreviewRenderError() {
 // interrupted close against.
 export function PreviewOverlay({ variant, items, index, onStep, onClose }: PreviewOverlayProps) {
 	const { t } = useTranslation(["preview", "common"])
-	const rawItem = items[index]
+	const rawSource = items[index]
+	// The drive item at this slot BEFORE any per-slot save override — undefined for the external arm (and
+	// for an out-of-range index). The save/uuid-rotation/read-only machinery below is drive-only; the
+	// external arm carries no drive item so all of it stays inert for it.
+	const rawDriveItem = rawSource?.type === "drive" ? rawSource.item : undefined
 	const popupRef = useRef<HTMLDivElement>(null)
 	// Write-only side channel for performSave to read the live buffer without this component
 	// re-rendering on every keystroke — see TextViewer's own contentRef prop doc.
@@ -128,9 +135,9 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 	// Override for the currently-displayed item, accumulated per pager slot across the whole overlay
 	// session (never reset on navigation, only on remount) — `items` is a FROZEN pager snapshot that a
 	// save's uuid rotation can't update in place, and a single-slot override would drop every other
-	// already-saved sibling's override. Keyed by each slot's frozen pre-save `rawItem.data.uuid` (never
-	// the already-overridden `item.data.uuid`), so a repeat save of the same slot overwrites the same
-	// entry instead of chaining a new key.
+	// already-saved sibling's override. Keyed by each slot's frozen pre-save `rawDriveItem.data.uuid`
+	// (never the already-overridden `driveItem.data.uuid`), so a repeat save of the same slot overwrites
+	// the same entry instead of chaining a new key. Drive arm only — the external arm has no save.
 	const [saved, setSaved] = useState<ReadonlyMap<string, DriveItem>>(() => new Map<string, DriveItem>())
 	// Single-slot (unlike `saved` above): keyed to the CURRENT pager slot only, so navigating away and
 	// back can forget an earlier slot's lock (accepted — the guarded failure re-asserts on the next
@@ -141,8 +148,25 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 	const [saving, setSaving] = useState(false)
 	const [pendingIntent, setPendingIntent] = useState<PendingIntent | null>(null)
 
-	const item = rawItem !== undefined ? (saved.get(rawItem.data.uuid) ?? rawItem) : undefined
-	const editable = item !== undefined && isEditable(item, variant) && lockedReadOnly?.forUuid !== rawItem?.data.uuid
+	// Applies the per-slot save override (drive arm only) — for the external arm there is nothing to
+	// override, so it passes straight through untouched.
+	const driveItem = rawDriveItem !== undefined ? (saved.get(rawDriveItem.data.uuid) ?? rawDriveItem) : undefined
+	// The resolved slot the body actually renders: the drive arm carries its override; the external arm is
+	// its raw source. Undefined only for an out-of-range index.
+	const currentSource: PreviewSource | undefined =
+		rawSource === undefined
+			? undefined
+			: rawSource.type === "external"
+				? rawSource
+				: { type: "drive", item: driveItem ?? rawSource.item }
+	// Editable is intrinsically drive-only: the external arm never carries an editable buffer. Compared
+	// against the FROZEN pre-save uuid (rawDriveItem), never the possibly-rotated override's uuid — see
+	// `saved`'s own comment on why that's the stable key.
+	const editable =
+		rawDriveItem !== undefined &&
+		driveItem !== undefined &&
+		isEditable(driveItem, variant) &&
+		lockedReadOnly?.forUuid !== rawDriveItem.data.uuid
 
 	// A step can disable the very pager button that triggered it (index lands on the first/last item,
 	// see the Prev/Next Buttons' own `disabled` below) — the browser blurs a disabled focused control
@@ -167,10 +191,10 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 	// the buffer (and its dirty bit) simply survives untouched, which is exactly what keeps the typed
 	// content visible and the close/nav prompt still armed either way.
 	async function performSave(): Promise<void> {
-		// Locals, not the outer `item`/`rawItem` directly — this closure runs asynchronously, well after
-		// this render's narrowing; re-binding here gives the guard below its own, freshly-narrowable copy.
-		const targetItem = item
-		const targetRawItem = rawItem
+		// Locals, not the outer `driveItem`/`rawDriveItem` directly — this closure runs asynchronously, well
+		// after this render's narrowing; re-binding here gives the guard below its own, freshly-narrowable copy.
+		const targetItem = driveItem
+		const targetRawItem = rawDriveItem
 
 		if (!editable || !dirty || saving || targetItem === undefined || targetRawItem === undefined) {
 			return
@@ -220,7 +244,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 			void performSave()
 		},
 		{ enableOnContentEditable: true },
-		[editable, dirty, saving, item, rawItem]
+		[editable, dirty, saving, driveItem, rawDriveItem]
 	)
 
 	// Routes a close/prev/next intent through the unsaved-changes prompt whenever the buffer is dirty;
@@ -297,11 +321,11 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 		}
 	}
 
-	if (!item) {
+	if (currentSource === undefined) {
 		return null
 	}
 
-	const name = item.data.decryptedMeta?.name ?? item.data.uuid
+	const name = previewSourceName(currentSource)
 
 	return (
 		<DialogPrimitive.Root
@@ -356,13 +380,13 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 						>
 							<ChevronRightIcon />
 						</Button>
-						{variant !== "trash" ? (
+						{currentSource.type === "drive" && variant !== "trash" ? (
 							<Button
 								variant="ghost"
 								size="icon-sm"
 								aria-label={t("previewDownloadAction")}
 								onClick={() => {
-									void startDownloads([item])
+									void startDownloads([currentSource.item])
 								}}
 							>
 								<DownloadIcon />
@@ -381,9 +405,9 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 						</DialogPrimitive.Close>
 					</header>
 					<div className="min-h-0 flex-1">
-						<PreviewErrorBoundary key={item.data.uuid}>
+						<PreviewErrorBoundary key={previewSourceKey(currentSource)}>
 							<PreviewBody
-								item={item}
+								source={currentSource}
 								editable={editable}
 								onDirtyChange={setDirty}
 								contentRef={contentRef}
@@ -437,10 +461,45 @@ function PreviewName({ name }: { name: string }) {
 }
 
 interface PreviewBodyProps {
-	item: DriveItem
+	source: PreviewSource
 	editable: boolean
 	onDirtyChange: (dirty: boolean) => void
 	contentRef: RefObject<string | null>
+}
+
+// The external arm's body — a bare url with no drive item, so no SW range route, byte-buffering, HEIC
+// transform, editability or save exists for it (external urls load natively in the browser). Renders
+// only the url-loadable kinds through the media viewers' own plain-url render paths (ZoomableImage /
+// MediaElement); everything else shows the standard unsupported state. This is the minimal-but-real
+// seam for future chat/note attachment sources.
+function ExternalPreviewBody({ url, name }: { url: string; name: string }) {
+	const { t } = useTranslation("preview")
+	const category = previewCategoryForName(name)
+
+	switch (category) {
+		case "image":
+			return (
+				<ZoomableImage
+					url={url}
+					alt={name}
+				/>
+			)
+		case "video":
+		case "audio":
+			return (
+				<MediaElement
+					category={category}
+					url={url}
+					alt={name}
+				/>
+			)
+		default:
+			return (
+				<div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+					{t("previewUnsupportedType")}
+				</div>
+			)
+	}
 }
 
 // Dispatches to the right viewer by category — remounted (keyed by uuid, see the error boundary one
@@ -451,8 +510,19 @@ interface PreviewBodyProps {
 // — a category still rendered by the fallback below (text/code/markdown) has nothing to load yet.
 // `editable`/`onDirtyChange`/`contentRef` only ever reach TextViewer (the "text"/"code" case) — every
 // other category ignores them.
-function PreviewBody({ item, editable, onDirtyChange, contentRef }: PreviewBodyProps) {
+function PreviewBody({ source, editable, onDirtyChange, contentRef }: PreviewBodyProps) {
 	const { t } = useTranslation("preview")
+
+	if (source.type === "external") {
+		return (
+			<ExternalPreviewBody
+				url={source.url}
+				name={source.name}
+			/>
+		)
+	}
+
+	const item = source.item
 
 	// Narrows `data.decryptedMeta` to the file-arm's DecryptedFileMeta (which alone carries `.mime`) —
 	// previewType/canPreview already guarantee a file arm for every item that ever reaches this
