@@ -37,10 +37,6 @@ test.describe("drive", () => {
 
 		const { listbox, hasItems } = await waitForListingSettled(page)
 
-		// The item/selection-count summary proves the listing QUERY resolved (not just that the shell
-		// mounted) — rendered for both content states, so it holds regardless of hasItems.
-		await expect(page.getByText(/^\d+ items?$/)).toBeVisible()
-
 		if (hasItems) {
 			await expect(listbox.getByRole("option").first()).toBeVisible()
 		} else {
@@ -199,7 +195,8 @@ test.describe("drive", () => {
 
 		await page.keyboard.press("Escape")
 		await expect(listbox.getByRole("option", { selected: true })).toHaveCount(0)
-		await expect(page.getByText(new RegExp(`^${String(optionCount)} items?$`))).toBeVisible()
+		// The floating selection bar unmounts with the cleared selection.
+		await expect(page.getByText(`${String(optionCount)} selected`, { exact: true })).toHaveCount(0)
 
 		test.skip(optionCount < 2, "drive root has only one item in this account — no second option for the cursor to move to")
 

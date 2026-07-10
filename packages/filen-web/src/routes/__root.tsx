@@ -102,7 +102,9 @@ function RootLayout() {
 			<ThemeProvider>
 				<TooltipProvider>
 					<BootGate />
-					<Toaster />
+					{/* Top-right: the bottom strip belongs to the floating selection bar — bottom toasts
+					    physically intercepted its buttons. */}
+					<Toaster position="top-right" />
 				</TooltipProvider>
 			</ThemeProvider>
 		</QueryClientProvider>
