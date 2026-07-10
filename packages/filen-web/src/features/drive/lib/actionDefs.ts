@@ -44,5 +44,6 @@ export const ACTION_DEFS = {
 	unshare: { labelKey: "driveActionUnshare", icon: UserMinusIcon, destructive: true },
 	trash: { labelKey: "driveActionTrash", icon: Trash2Icon },
 	restore: { labelKey: "driveActionRestore", icon: RotateCcwIcon },
-	deletePermanently: { labelKey: "driveActionDeletePermanently", icon: Trash2Icon, destructive: true }
+	deletePermanently: { labelKey: "driveActionDeletePermanently", icon: Trash2Icon, destructive: true },
+	emptyTrash: { labelKey: "driveActionEmptyTrash", icon: Trash2Icon, destructive: true }
 } satisfies Record<string, ActionDef>

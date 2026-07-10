@@ -4,6 +4,7 @@ import { narrowItem } from "@/features/drive/lib/item"
 import { deriveBlockedUsers, type BlockedUsers } from "@/features/contacts/lib/blocking"
 import {
 	filterSharedInByBlocked,
+	isEmptyTrashTriggerVisible,
 	isVisibleSharedInItem,
 	resolveSearchDisplayItems,
 	staleBlockedSelectionUuids,
@@ -237,6 +238,22 @@ describe("staleSelectionUuids", () => {
 		const b = narrowItem(mockFile({ uuid: testUuid("now-gone-b") }))
 
 		expect(staleSelectionUuids([a, b], [])).toEqual([a.data.uuid, b.data.uuid])
+	})
+})
+
+describe("isEmptyTrashTriggerVisible", () => {
+	it("shows the trigger for a non-empty trash listing", () => {
+		expect(isEmptyTrashTriggerVisible("trash", 3)).toBe(true)
+	})
+
+	it("hides the trigger for an empty trash listing — nothing for the confirm to act on", () => {
+		expect(isEmptyTrashTriggerVisible("trash", 0)).toBe(false)
+	})
+
+	it("hides the trigger outside the trash variant regardless of item count", () => {
+		expect(isEmptyTrashTriggerVisible("drive", 3)).toBe(false)
+		expect(isEmptyTrashTriggerVisible("favorites", 3)).toBe(false)
+		expect(isEmptyTrashTriggerVisible("recents", 0)).toBe(false)
 	})
 })
 

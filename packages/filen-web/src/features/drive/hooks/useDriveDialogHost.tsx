@@ -42,6 +42,7 @@ export interface DriveDialogHost {
 	isDialogOpen: boolean
 	handleItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
 	handleBulkDialogAction: (kind: BulkDialogActionKind) => void
+	handleEmptyTrash: () => void
 	openPreview: (items: DriveItem[], index: number) => void
 	renderActiveDialog: () => ReactNode
 }
@@ -146,6 +147,13 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 	// selectedItems}).
 	function handleBulkDialogAction(kind: BulkDialogActionKind): void {
 		setActiveDialog({ kind, items: selectedItems })
+	}
+
+	// Trash toolbar's own trigger — targets the WHOLE trash, never a selection, so unlike
+	// handleBulkDialogAction this carries no items (renderActiveDialog's "emptyTrash" arm never reads
+	// activeDialog.items).
+	function handleEmptyTrash(): void {
+		setActiveDialog({ kind: "emptyTrash", items: [] })
 	}
 
 	async function handleEmptyTrashConfirm(): Promise<void> {
@@ -398,5 +406,5 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 		}
 	}
 
-	return { isDialogOpen, handleItemAction, handleBulkDialogAction, openPreview, renderActiveDialog }
+	return { isDialogOpen, handleItemAction, handleBulkDialogAction, handleEmptyTrash, openPreview, renderActiveDialog }
 }

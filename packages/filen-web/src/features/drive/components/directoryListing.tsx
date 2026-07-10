@@ -33,6 +33,7 @@ import { driveItemActions } from "@/features/drive/components/itemMenu.logic"
 import { isBulkDownloadEnabled } from "@/features/drive/components/bulkActionBar.logic"
 import {
 	filterSharedInByBlocked,
+	isEmptyTrashTriggerVisible,
 	resolveSearchDisplayItems,
 	staleBlockedSelectionUuids,
 	staleSelectionUuids
@@ -41,6 +42,7 @@ import { Breadcrumb } from "@/features/drive/components/breadcrumb"
 import { SortMenu } from "@/features/drive/components/sortMenu"
 import { ViewModeToggle } from "@/features/drive/components/viewModeToggle"
 import { NewDirectory } from "@/features/drive/components/newDirectory"
+import { EmptyTrashButton } from "@/features/drive/components/emptyTrashButton"
 import { UploadMenu } from "@/features/drive/components/uploadMenu"
 import { UploadDropzone } from "@/features/drive/components/uploadDropzone"
 import { BulkActionBar } from "@/features/drive/components/bulkActionBar"
@@ -174,10 +176,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// O(visible * selected).
 	const selectedUuids = new Set(selectedItems.map(item => item.data.uuid))
 
-	const { isDialogOpen, handleItemAction, handleBulkDialogAction, openPreview, renderActiveDialog } = useDriveDialogHost({
-		variant,
-		selectedItems
-	})
+	const { isDialogOpen, handleItemAction, handleBulkDialogAction, handleEmptyTrash, openPreview, renderActiveDialog } =
+		useDriveDialogHost({
+			variant,
+			selectedItems
+		})
 
 	const { setScrollElement, columns, listVirtualizer, gridVirtualizer, activeVirtualizer, registerRef, itemRefs } = useDriveVirtualizer(
 		sortedItems,
@@ -549,6 +552,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						splat={splat}
 					/>
 					<div className="flex shrink-0 items-center gap-2">
+						{isEmptyTrashTriggerVisible(variant, sortedItems.length) ? <EmptyTrashButton onClick={handleEmptyTrash} /> : null}
 						<NewDirectory
 							parentUuid={uuid}
 							disabled={writeDisabled}

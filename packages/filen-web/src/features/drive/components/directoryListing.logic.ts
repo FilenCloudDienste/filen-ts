@@ -1,6 +1,7 @@
 import { getSharerIdentity, type DriveItem } from "@/features/drive/lib/item"
 import { isBlocked, type BlockedUsers } from "@/features/contacts/lib/blocking"
 import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
+import { type DriveVariant } from "@/features/drive/lib/preferences"
 
 // Fail-open visibility check for a sharedIn item: an unresolved sharer identity (getSharerIdentity
 // returns null — the item isn't shared, or its role couldn't be read) always KEEPS the item; only a
@@ -38,6 +39,15 @@ export function staleSelectionUuids(selectedItems: readonly DriveItem[], liveIte
 	const liveUuids = new Set(liveItems.map(item => item.data.uuid))
 
 	return selectedItems.filter(item => !liveUuids.has(item.data.uuid)).map(item => item.data.uuid)
+}
+
+// Trash toolbar's own Empty trash trigger — present only in the trash variant, and only once the
+// listing actually holds something to empty. An already-empty trash has nothing for the confirm
+// dialog to act on, so hiding the trigger avoids a guaranteed no-op (mirrors
+// bulkActionBar.logic.ts's isBulkDownloadEnabled non-empty rationale, applied to a whole-listing
+// action instead of a selection).
+export function isEmptyTrashTriggerVisible(variant: DriveVariant, itemCount: number): boolean {
+	return variant === "trash" && itemCount > 0
 }
 
 // Search results only get re-sorted once the whole match set is actually in hand (total <=

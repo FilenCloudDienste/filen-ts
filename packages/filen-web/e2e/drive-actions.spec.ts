@@ -196,6 +196,18 @@ test.describe("drive bulk actions", () => {
 		await expect(trashRowA).toBeVisible()
 		await expect(trashRowB).toBeVisible()
 
+		// Toolbar's own Empty trash trigger: present because the trash listing is non-empty. Opens the
+		// already-wired typed-confirm dialog and dismisses without ever typing the match phrase — this
+		// spec must never actually empty the shared account's trash.
+		await page.getByRole("button", { name: "Empty trash", exact: true }).click()
+		const emptyTrashConfirm = page.getByRole("alertdialog")
+		await expect(emptyTrashConfirm).toBeVisible()
+		await expect(emptyTrashConfirm.getByRole("heading", { name: "Empty trash?", exact: true })).toBeVisible()
+		await page.keyboard.press("Escape")
+		await expect(emptyTrashConfirm).toHaveCount(0)
+		await expect(trashRowA).toBeVisible()
+		await expect(trashRowB).toBeVisible()
+
 		await trashRowA.click()
 		await trashRowB.click({ modifiers: [MOD_KEY] })
 		await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
