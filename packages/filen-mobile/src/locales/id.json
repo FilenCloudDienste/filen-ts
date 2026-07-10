@@ -611,6 +611,7 @@
 	"password_strength_normal": "Cukup",
 	"password_strength_strong": "Kuat",
 	"password_strength_weak": "Lemah",
+	"password_too_weak_to_register": "Pilih kata sandi yang lebih kuat untuk melanjutkan",
 	"passwords_do_not_match": "Kata sandi tidak cocok",
 	"pause": "Jeda",
 	"pause_all": "Jeda semua",

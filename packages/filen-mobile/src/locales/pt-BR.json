@@ -611,6 +611,7 @@
 	"password_strength_normal": "Razoável",
 	"password_strength_strong": "Forte",
 	"password_strength_weak": "Fraca",
+	"password_too_weak_to_register": "Escolha uma senha mais forte para continuar",
 	"passwords_do_not_match": "As palavras-passe não coincidem",
 	"pause": "Pausar",
 	"pause_all": "Pausar todas",

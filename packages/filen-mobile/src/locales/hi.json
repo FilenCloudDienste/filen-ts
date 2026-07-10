@@ -611,6 +611,7 @@
 	"password_strength_normal": "सामान्य",
 	"password_strength_strong": "मज़बूत",
 	"password_strength_weak": "कमज़ोर",
+	"password_too_weak_to_register": "जारी रखने के लिए एक मजबूत पासवर्ड चुनें",
 	"passwords_do_not_match": "पासवर्ड मेल नहीं खाते",
 	"pause": "रोकें",
 	"pause_all": "सभी रोकें",

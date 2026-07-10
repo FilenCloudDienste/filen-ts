@@ -611,6 +611,7 @@
 	"password_strength_normal": "一般",
 	"password_strength_strong": "强",
 	"password_strength_weak": "弱",
+	"password_too_weak_to_register": "请设置更强的密码以继续",
 	"passwords_do_not_match": "两次输入的密码不一致",
 	"pause": "暂停",
 	"pause_all": "全部暂停",

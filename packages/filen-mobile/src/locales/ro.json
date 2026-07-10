@@ -619,6 +619,7 @@
 	"password_strength_normal": "Acceptabilă",
 	"password_strength_strong": "Puternică",
 	"password_strength_weak": "Slabă",
+	"password_too_weak_to_register": "Alege o parolă mai puternică pentru a continua",
 	"passwords_do_not_match": "Parolele nu coincid",
 	"pause": "Întrerupe",
 	"pause_all": "Întrerupe tot",

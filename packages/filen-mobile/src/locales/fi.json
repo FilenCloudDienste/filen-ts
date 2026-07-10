@@ -611,6 +611,7 @@
 	"password_strength_normal": "Kohtalainen",
 	"password_strength_strong": "Vahva",
 	"password_strength_weak": "Heikko",
+	"password_too_weak_to_register": "Valitse vahvempi salasana jatkaaksesi",
 	"passwords_do_not_match": "Salasanat eivät täsmää",
 	"pause": "Keskeytä",
 	"pause_all": "Keskeytä kaikki",

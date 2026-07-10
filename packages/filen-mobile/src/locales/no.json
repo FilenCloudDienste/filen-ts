@@ -611,6 +611,7 @@
 	"password_strength_normal": "Middels",
 	"password_strength_strong": "Sterk",
 	"password_strength_weak": "Svak",
+	"password_too_weak_to_register": "Velg et sterkere passord for å fortsette",
 	"passwords_do_not_match": "Passordene stemmer ikke overens",
 	"pause": "Sett på pause",
 	"pause_all": "Sett alle på pause",

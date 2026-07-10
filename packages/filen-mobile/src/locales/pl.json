@@ -627,6 +627,7 @@
 	"password_strength_normal": "Przeciętne",
 	"password_strength_strong": "Silne",
 	"password_strength_weak": "Słabe",
+	"password_too_weak_to_register": "Wybierz silniejsze hasło, aby kontynuować",
 	"passwords_do_not_match": "Hasła nie są zgodne",
 	"pause": "Wstrzymaj",
 	"pause_all": "Wstrzymaj wszystkie",
