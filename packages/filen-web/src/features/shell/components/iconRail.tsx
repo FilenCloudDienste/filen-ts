@@ -152,7 +152,10 @@ function AccountMenu() {
 					sideOffset={8}
 					className="min-w-52"
 				>
-					<DropdownMenuLabel className="truncate">{accountQuery.data?.email ?? t("account")}</DropdownMenuLabel>
+					<DropdownMenuGroup>
+						{/* Base UI MenuGroupLabel requires an enclosing group. */}
+						<DropdownMenuLabel className="truncate">{accountQuery.data?.email ?? t("account")}</DropdownMenuLabel>
+					</DropdownMenuGroup>
 					<DropdownMenuSeparator />
 					<DropdownMenuGroup>
 						{/* Settings moved off the rail into the account menu (rail footer is now collapse + avatar
