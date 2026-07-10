@@ -6,9 +6,14 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { formatItemSize, formatModifiedDate, sharedIdentityLabel } from "@/features/drive/lib/format"
 import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
+import { splatToUuids } from "@/features/drive/lib/navigate"
+import { canDragVariant } from "@/features/drive/lib/dnd.logic"
+import { buildDragSourceProps } from "@/features/drive/lib/dnd"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
+import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
+import { cn } from "@/lib/utils"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
@@ -22,6 +27,9 @@ export interface DriveRowProps {
 	// Absolute-positioning style computed by the virtualizer (position/top/left/width/transform) —
 	// the row owns none of that itself, only its own visual/layout concerns.
 	style: CSSProperties
+	// The current listing's "/drive/$" splat — the row's own ancestry (for the drag-move self/descendant
+	// guard) is this chain plus the row's uuid. A primitive so a memoized row keeps its identity.
+	splat: string
 	// Search results only: the item's ancestor-name chain from the search root (empty for a direct
 	// child of it) — undefined outside an active search, where a row has nothing to show here.
 	searchParentPath?: string
@@ -41,6 +49,7 @@ export function DriveRow({
 	active,
 	variant,
 	style,
+	splat,
 	searchParentPath,
 	directorySizes,
 	onPointerSelect,
@@ -50,6 +59,15 @@ export function DriveRow({
 }: DriveRowProps) {
 	const { t } = useTranslation("drive")
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
+	// Drag-to-move: a move-capable row is a drag source; a directory row is also a drop target for a
+	// move (self/descendant/same-parent guarded via its own ancestry). The accessible move route stays
+	// the item menu's "Move" action — this is a pointer-only enhancement.
+	const dragSource = buildDragSourceProps(item, variant)
+	const drop = useDriveDropTarget({
+		targetUuid: item.data.uuid,
+		targetAncestry: [...splatToUuids(splat), item.data.uuid],
+		disabled: item.type !== "directory" || !canDragVariant(variant)
+	})
 	// Only the two shared variants' ROOT listing resolve a counterparty; every other variant/nested
 	// item gets null (no badge) — see sharedIdentityLabel's own doc comment.
 	const shared = sharedIdentityLabel(item, variant)
@@ -75,13 +93,21 @@ export function DriveRow({
 						aria-selected={selected}
 						tabIndex={active ? 0 : -1}
 						style={style}
-						className="group/row flex h-10 items-center gap-3 rounded-xl px-3 text-sm outline-none select-none not-aria-selected:hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
+						className={cn(
+							"group/row flex h-10 items-center gap-3 rounded-xl px-3 text-sm outline-none select-none not-aria-selected:hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
+							drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset"
+						)}
+						{...dragSource}
 						onClick={event => {
 							onPointerSelect(index, event)
 						}}
 						onDoubleClick={() => {
 							onOpen(index)
 						}}
+						onDragEnter={drop.onDragEnter}
+						onDragOver={drop.onDragOver}
+						onDragLeave={drop.onDragLeave}
+						onDrop={drop.onDrop}
 					>
 						{thumbUrl !== null && !thumbFailed ? (
 							<img

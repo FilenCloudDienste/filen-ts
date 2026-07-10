@@ -503,6 +503,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 											selected={selectedUuids.has(item.data.uuid)}
 											active={virtualRow.index === safeActiveIndex}
 											variant={variant}
+											splat={splat}
 											style={{
 												position: "absolute",
 												top: 0,
@@ -552,6 +553,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 													selected={selectedUuids.has(item.data.uuid)}
 													active={itemIndex === safeActiveIndex}
 													variant={variant}
+													splat={splat}
 													{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
 													onPointerSelect={handlePointerSelect}
 													onOpen={handleOpen}

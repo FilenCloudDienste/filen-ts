@@ -4,6 +4,7 @@ import type { UseQueryResult } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import type { DirectoryTreeChild } from "@/features/drive/queries/drive"
+import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { Spinner } from "@/components/ui/spinner"
 
 // Reusable collapsible directory tree. Data wiring is fully injected (`useChildren`, `isOpen`,
@@ -26,6 +27,9 @@ export interface DirectoryTreeContext {
 	onNavigate: (path: string[]) => void
 	// Injected data source — named `use…` so it reads as the hook it is; called unconditionally per level.
 	useChildren: (uuid: string | null) => UseQueryResult<DirectoryTreeChild[]>
+	// Opt-in: each node becomes a drag-to-move drop target (a collapsed one auto-expands on hover-dwell).
+	// Off by default so a non-drive reuse of this primitive (e.g. the move dialog) stays inert.
+	enableDrop?: boolean
 }
 
 export interface DirectoryTreeProps {
@@ -116,11 +120,27 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 	const open = tree.isOpen(child.uuid)
 	const active = arraysEqual(path, tree.activePath)
 	const onBranch = !active && isStrictPrefix(path, tree.activePath)
+	// A drag-to-move drop target for this node's directory. A collapsed node auto-expands after a
+	// hover-dwell so the drag can descend into it; an open node needs no dwell.
+	const drop = useDriveDropTarget({
+		targetUuid: child.uuid,
+		targetAncestry: path,
+		disabled: !tree.enableDrop,
+		onDwell: open
+			? undefined
+			: () => {
+					tree.onToggle(child.uuid)
+				}
+	})
 
 	return (
 		<li>
 			<div
 				style={{ paddingInlineStart: levelInset(depth) }}
+				onDragEnter={drop.onDragEnter}
+				onDragOver={drop.onDragOver}
+				onDragLeave={drop.onDragLeave}
+				onDrop={drop.onDrop}
 				className={cn(
 					// Soft-chrome row: rounded tonal hover/active, no divider lines. app-region-no-drag keeps
 					// the row clickable inside the sidebar's Electron drag region.
@@ -129,7 +149,8 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 						? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
 						: onBranch
 							? "text-sidebar-accent-foreground hover:bg-sidebar-accent/60"
-							: "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
+							: "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+					drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset"
 				)}
 			>
 				<button

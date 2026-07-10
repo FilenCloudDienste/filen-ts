@@ -6,9 +6,14 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { sharedIdentityLabel } from "@/features/drive/lib/format"
 import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
+import { splatToUuids } from "@/features/drive/lib/navigate"
+import { canDragVariant } from "@/features/drive/lib/dnd.logic"
+import { buildDragSourceProps } from "@/features/drive/lib/dnd"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
+import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
+import { cn } from "@/lib/utils"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
@@ -19,6 +24,8 @@ export interface DriveTileProps {
 	selected: boolean
 	active: boolean
 	variant: DriveVariant
+	// The current listing's "/drive/$" splat — see DriveRow's identical prop (drag-move ancestry guard).
+	splat: string
 	// Search results only: the item's ancestor-name chain from the search root — undefined outside an
 	// active search. Shown as a native hover tooltip (title attr), not inline text — a tile has far
 	// less room than a row for a second line.
@@ -37,6 +44,7 @@ export function DriveTile({
 	selected,
 	active,
 	variant,
+	splat,
 	searchParentPath,
 	onPointerSelect,
 	onOpen,
@@ -45,6 +53,14 @@ export function DriveTile({
 }: DriveTileProps) {
 	const { t } = useTranslation("drive")
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
+	// Drag-to-move — see DriveRow's identical wiring. Pointer-only enhancement; the item menu's "Move"
+	// stays the accessible route.
+	const dragSource = buildDragSourceProps(item, variant)
+	const drop = useDriveDropTarget({
+		targetUuid: item.data.uuid,
+		targetAncestry: [...splatToUuids(splat), item.data.uuid],
+		disabled: item.type !== "directory" || !canDragVariant(variant)
+	})
 	// Only the two shared variants' ROOT listing resolve a counterparty; every other variant/nested
 	// item gets null (no badge) — see sharedIdentityLabel's own doc comment.
 	const shared = sharedIdentityLabel(item, variant)
@@ -71,13 +87,21 @@ export function DriveTile({
 						// TILE_WIDTH regardless of how much extra space its grid column gets, so the face
 						// below stays the deterministic square useDriveVirtualizer's row-height estimate
 						// assumes — see gridLayout.ts's own comment on the shared constants.
-						className="group/tile relative flex w-44 shrink-0 flex-col gap-2 justify-self-center rounded-2xl p-2 text-center text-sm outline-none select-none not-aria-selected:hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
+						className={cn(
+							"group/tile relative flex w-44 shrink-0 flex-col gap-2 justify-self-center rounded-2xl p-2 text-center text-sm outline-none select-none not-aria-selected:hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
+							drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset"
+						)}
+						{...dragSource}
 						onClick={event => {
 							onPointerSelect(index, event)
 						}}
 						onDoubleClick={() => {
 							onOpen(index)
 						}}
+						onDragEnter={drop.onDragEnter}
+						onDragOver={drop.onDragOver}
+						onDragLeave={drop.onDragLeave}
+						onDrop={drop.onDrop}
 					>
 						{/* The tile's face: a square that fills the tile's width, thumbnail or icon alike —
 						the icon case keeps a tinted backdrop so it reads as the same card shape rather than

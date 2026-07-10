@@ -3,10 +3,13 @@ import { Link } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { ChevronRightIcon } from "lucide-react"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { driveRouteIdFor, splatToUuids } from "@/features/drive/lib/navigate"
+import { driveRouteIdFor, type DriveRouteId, splatToUuids } from "@/features/drive/lib/navigate"
 import { useDirectoryNamesQuery } from "@/features/drive/queries/drive"
+import { canDragVariant } from "@/features/drive/lib/dnd.logic"
+import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
+import { cn } from "@/lib/utils"
 import { Spinner } from "@/components/ui/spinner"
 
 const VARIANT_ROOT_LABEL_KEY = {
@@ -25,6 +28,47 @@ const CRUMB_CURRENT_CLASS = "font-medium text-foreground"
 export interface BreadcrumbProps {
 	variant: DriveVariant
 	splat: string
+}
+
+interface CrumbLinkProps {
+	variant: DriveVariant
+	routeId: DriveRouteId
+	// The link's splat param — "" for the root crumb, else the ancestor uuid chain.
+	splatValue: string
+	// Drop-target identity: null uuid + empty ancestry for the root crumb; else the segment's uuid and
+	// its root-to-segment ancestry.
+	targetUuid: string | null
+	targetAncestry: readonly string[]
+	label: string
+}
+
+// An ancestor breadcrumb crumb that doubles as a drag-to-move drop target (gated to the drive variant
+// — its own component so the drop hook is called once per crumb, never in a loop). The current (last)
+// segment stays a plain span, so it is never a target.
+function CrumbLink({ variant, routeId, splatValue, targetUuid, targetAncestry, label }: CrumbLinkProps) {
+	const drop = useDriveDropTarget({
+		targetUuid,
+		targetAncestry,
+		disabled: !canDragVariant(variant)
+	})
+
+	return (
+		<Link
+			to={routeId}
+			params={{ _splat: splatValue }}
+			onDragEnter={drop.onDragEnter}
+			onDragOver={drop.onDragOver}
+			onDragLeave={drop.onDragLeave}
+			onDrop={drop.onDrop}
+			className={cn(
+				CRUMB_LINK_CLASS,
+				"rounded-sm px-1",
+				drop.isOver && "bg-primary/10 text-foreground ring-2 ring-primary/60 ring-inset"
+			)}
+		>
+			{label}
+		</Link>
+	)
 }
 
 // Root (an empty splat) renders its variant's own label directly — nothing to resolve, since the
@@ -54,13 +98,14 @@ export function Breadcrumb({ variant, splat }: BreadcrumbProps) {
 							{rootLabel}
 						</span>
 					) : (
-						<Link
-							to={routeId}
-							params={{ _splat: "" }}
-							className={CRUMB_LINK_CLASS}
-						>
-							{rootLabel}
-						</Link>
+						<CrumbLink
+							variant={variant}
+							routeId={routeId}
+							splatValue=""
+							targetUuid={null}
+							targetAncestry={[]}
+							label={rootLabel}
+						/>
 					)}
 				</li>
 
@@ -108,13 +153,14 @@ export function Breadcrumb({ variant, splat }: BreadcrumbProps) {
 												{label}
 											</span>
 										) : (
-											<Link
-												to={routeId}
-												params={{ _splat: uuids.slice(0, index + 1).join("/") }}
-												className={CRUMB_LINK_CLASS}
-											>
-												{label}
-											</Link>
+											<CrumbLink
+												variant={variant}
+												routeId={routeId}
+												splatValue={uuids.slice(0, index + 1).join("/")}
+												targetUuid={uuid}
+												targetAncestry={uuids.slice(0, index + 1)}
+												label={label}
+											/>
 										)}
 									</li>
 								</Fragment>

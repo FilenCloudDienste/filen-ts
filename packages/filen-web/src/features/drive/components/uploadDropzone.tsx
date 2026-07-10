@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { UploadIcon } from "lucide-react"
 import { startUploads } from "@/features/drive/lib/upload"
 import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
+import { isInternalDrag } from "@/features/drive/lib/dnd"
 import { enterDragDepth, leaveDragDepth } from "@/features/drive/components/uploadDropzone.logic"
 
 export interface UploadDropzoneProps {
@@ -48,7 +49,16 @@ export function UploadDropzone({ parentUuid, disabled = false, children }: Uploa
 		}
 	}, [])
 
+	// An INTERNAL move drag (a row/tile dragged within the drive — see dnd.ts) is never an upload: bow
+	// out entirely so no upload hint overlay shows and no drop starts an upload. The move drop targets
+	// (directory rows, tree, breadcrumb) claim it instead. Returning WITHOUT preventDefault also leaves
+	// the browser rejecting this zone as a drop target for the internal drag, so a stray internal drop
+	// on blank listing space is a harmless no-op rather than an upload.
 	function handleDragEnter(event: DragEvent<HTMLDivElement>): void {
+		if (isInternalDrag(event.dataTransfer)) {
+			return
+		}
+
 		event.preventDefault()
 
 		if (disabled) {
@@ -59,12 +69,20 @@ export function UploadDropzone({ parentUuid, disabled = false, children }: Uploa
 	}
 
 	function handleDragOver(event: DragEvent<HTMLDivElement>): void {
+		if (isInternalDrag(event.dataTransfer)) {
+			return
+		}
+
 		// Required for onDrop to fire at all (the browser default rejects the element as a drop
 		// target) — no state change here, dragenter/dragleave alone drive the depth counter.
 		event.preventDefault()
 	}
 
 	function handleDragLeave(event: DragEvent<HTMLDivElement>): void {
+		if (isInternalDrag(event.dataTransfer)) {
+			return
+		}
+
 		event.preventDefault()
 
 		if (disabled) {
@@ -75,6 +93,10 @@ export function UploadDropzone({ parentUuid, disabled = false, children }: Uploa
 	}
 
 	function handleDrop(event: DragEvent<HTMLDivElement>): void {
+		if (isInternalDrag(event.dataTransfer)) {
+			return
+		}
+
 		event.preventDefault()
 		setDragDepth(0)
 

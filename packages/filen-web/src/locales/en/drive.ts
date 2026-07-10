@@ -140,6 +140,10 @@ export const drive = {
 	driveSelectionCount_other: "{{count}} selected",
 	/** Drive listing row — visually-hidden label announcing a favorited item's star indicator */
 	driveFavorited: "Favorited",
+	/** Drag-to-move drag image — multi-item badge count; {{count}} = items being dragged; singular */
+	driveDragItemCount_one: "{{count}} item",
+	/** Drag-to-move drag image — multi-item badge count; {{count}} = items being dragged; plural */
+	driveDragItemCount_other: "{{count}} items",
 
 	// ── Search ───────────────────────────────────────────────────────────────
 	/** Drive search input — accessible label on the button clearing the current search text */

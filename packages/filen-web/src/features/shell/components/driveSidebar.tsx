@@ -7,6 +7,7 @@ import { type DriveRouteId, splatToUuids } from "@/features/drive/lib/navigate"
 import { useDirectoryTreeChildrenQuery } from "@/features/drive/queries/drive"
 import { useDirectoryTreeStore } from "@/features/drive/store/useDirectoryTreeStore"
 import { DirectoryTree, type DirectoryTreeContext } from "@/features/drive/components/directoryTree"
+import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { StorageMeter } from "@/features/shell/components/storageMeter"
 import { Separator } from "@/components/ui/separator"
 
@@ -94,9 +95,25 @@ function SplatNavItem({ icon: Icon, label, to }: { icon: IconType; label: string
 // stays the sidebar's stable "Cloud Drive" landmark link). Its own open flag rides ROOT_KEY.
 function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) {
 	const { t } = useTranslation("drive")
+	// The drive root as a drag-to-move drop target (empty ancestry). A collapsed root auto-expands on
+	// hover-dwell, same as any tree node.
+	const drop = useDriveDropTarget({
+		targetUuid: null,
+		targetAncestry: [],
+		onDwell: open ? undefined : onToggle
+	})
 
 	return (
-		<div className="group flex h-8 items-center gap-1 rounded-xl pr-1 transition-colors app-region-no-drag hover:bg-sidebar-accent/60">
+		<div
+			onDragEnter={drop.onDragEnter}
+			onDragOver={drop.onDragOver}
+			onDragLeave={drop.onDragLeave}
+			onDrop={drop.onDrop}
+			className={cn(
+				"group flex h-8 items-center gap-1 rounded-xl pr-1 transition-colors app-region-no-drag hover:bg-sidebar-accent/60",
+				drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset"
+			)}
+		>
 			<button
 				type="button"
 				aria-expanded={open}
@@ -141,7 +158,9 @@ export function DriveSidebar() {
 		onNavigate: path => {
 			void navigate({ to: "/drive/$", params: { _splat: path.join("/") } })
 		},
-		useChildren: useDirectoryTreeChildrenQuery
+		useChildren: useDirectoryTreeChildrenQuery,
+		// The sidebar tree accepts drag-to-move drops (the move dialog's reuse of this primitive won't).
+		enableDrop: true
 	}
 
 	// Virtual roots in two groups, each under a muted header. Built inside the component rather than as
