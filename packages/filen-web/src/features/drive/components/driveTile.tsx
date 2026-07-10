@@ -1,6 +1,6 @@
 import { useState, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
-import { MoreHorizontalIcon } from "lucide-react"
+import { MoreHorizontalIcon, StarIcon } from "lucide-react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
@@ -105,6 +105,18 @@ export function DriveTile({
 									/>
 								</div>
 							)}
+							{item.data.favorited ? (
+								// Opposite corner from the menu trigger (top-right) so the two never overlap;
+								// the ring in the aria-selected case sits at the face's own edge, outside this
+								// inset badge. Tonal backdrop keeps it legible over busy thumbnails.
+								<div className="absolute top-1 left-1 flex size-6 items-center justify-center rounded-full bg-background/80 shadow-sm">
+									<StarIcon
+										aria-hidden="true"
+										className="size-3.5 fill-amber-500 text-amber-500"
+									/>
+									<span className="sr-only">{t("driveFavorited")}</span>
+								</div>
+							) : null}
 							<DropdownMenu>
 								<DropdownMenuTrigger
 									render={
