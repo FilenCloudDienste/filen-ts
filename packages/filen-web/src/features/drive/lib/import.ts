@@ -133,19 +133,24 @@ export interface RunImportFileDeps {
 	upload: RunUploadDeps
 }
 
-// A cancelled download drops the whole import with no upload attempt and no error toast (mirrors
-// runDownload's own cancel-is-not-a-failure convention) — the upload leg is runUpload UNCHANGED, so a
-// completed import's upload row is indistinguishable in the transfers panel from one picked off local
-// disk.
+// Unlike VoidActionOutcome, a cancelled download is reported as its OWN status rather than folded
+// into "success" — runImportFile has two callers (runImportDirectory's file loop, importItem) that
+// each need to compensate differently (skip vs. drop-silently), so the distinction can't be erased
+// here the way runDownload/runUpload erase it for their own single-op callers.
+export type ImportFileOutcome = { status: "success" } | { status: "cancelled" } | { status: "error"; dto: ErrorDTO }
+
+// A cancelled download drops the whole import with no upload attempt (mirrors runDownload's own
+// cancel-is-not-a-failure convention) — the upload leg is runUpload UNCHANGED, so a completed
+// import's upload row is indistinguishable in the transfers panel from one picked off local disk.
 export async function runImportFile(
 	deps: RunImportFileDeps,
 	args: { file: AnyFile; name: string; size: number; mime?: string; parentUuid: string | null }
-): Promise<VoidActionOutcome> {
+): Promise<ImportFileOutcome> {
 	const { file, name, size, mime, parentUuid } = args
 	const downloadOutcome = await runImportDownload(deps.download, { file, name, size })
 
 	if (downloadOutcome.status === "cancelled") {
-		return { status: "success" }
+		return { status: "cancelled" }
 	}
 
 	if (downloadOutcome.status === "error") {
@@ -247,7 +252,10 @@ export async function runImportDirectory(
 			parentUuid: parentUuidForPath
 		})
 
-		if (outcome.status === "error") {
+		// A cancelled nested file counts the same as a failed one here: silently leaving it out would
+		// hand back a tree that LOOKS complete (status: "success") but is missing a file — the exact
+		// hollowed-out-copy outcome this function's own doc comment above guards against.
+		if (outcome.status === "error" || outcome.status === "cancelled") {
 			failedEntries += 1
 		}
 	}
@@ -269,6 +277,14 @@ export interface RunImportDeps {
 	download: RunImportDownloadDeps
 	listRecursive: RunImportDirectoryDeps["listRecursive"]
 }
+
+// runBulk's perItem is throw-on-failure/resolve-on-success only — no third "neither" state — so a
+// cancelled single-item import throws this identity-checked sentinel instead of a real ErrorDTO.
+// importItems below filters it back out of BulkOutcome.failed before the caller ever sees it: not
+// counted as succeeded (nothing was imported) and not counted as failed (the user asked for exactly
+// this, it is not an error to surface), mirroring runDownload/runUpload's own cancel-is-not-a-failure
+// convention at the single-op layer.
+const IMPORT_CANCELLED = Symbol("import-cancelled")
 
 async function importItem(deps: RunImportDeps, item: DriveItem, targetParentUuid: string | null): Promise<void> {
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
@@ -306,6 +322,11 @@ async function importItem(deps: RunImportDeps, item: DriveItem, targetParentUuid
 		{ file, name, size: Number(item.data.size), ...(mime !== undefined ? { mime } : {}), parentUuid: targetParentUuid }
 	)
 
+	if (outcome.status === "cancelled") {
+		// eslint-disable-next-line @typescript-eslint/only-throw-error -- identity-checked sentinel, see IMPORT_CANCELLED's own comment above
+		throw IMPORT_CANCELLED
+	}
+
 	if (outcome.status === "error") {
 		// eslint-disable-next-line @typescript-eslint/only-throw-error -- see above
 		throw outcome.dto
@@ -328,7 +349,12 @@ export const defaultImportDeps: RunImportDeps = {
 // (itemMenu.logic.ts's IMPORT gates sharedIn only, dispatched one item at a time), but modeled as a
 // bulk op for that reuse rather than a narrower single-item signature. Files fan out independently
 // (runBulk, in parallel) — directories are internally sequential per the comment above, but a
-// multi-item selection's separate directories still run in parallel against each other.
-export function importItems(items: DriveItem[], targetParentUuid: string | null): Promise<BulkOutcome<DriveItem>> {
-	return runBulk(items, item => importItem(defaultImportDeps, item, targetParentUuid))
+// multi-item selection's separate directories still run in parallel against each other. A cancelled
+// item is dropped from `failed` (see IMPORT_CANCELLED) before this resolves — moveTargetDialog.tsx's
+// toastBulkOutcome already treats an all-empty BulkOutcome as a silent no-op, so a single cancelled
+// import (today's only real caller shape) never shows a false success toast.
+export async function importItems(items: DriveItem[], targetParentUuid: string | null): Promise<BulkOutcome<DriveItem>> {
+	const outcome = await runBulk(items, item => importItem(defaultImportDeps, item, targetParentUuid))
+
+	return { succeeded: outcome.succeeded, failed: outcome.failed.filter(failure => failure.error !== IMPORT_CANCELLED) }
 }

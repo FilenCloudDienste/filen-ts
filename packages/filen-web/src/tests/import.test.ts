@@ -201,13 +201,13 @@ describe("runImportFile (injected deps)", () => {
 		expect(h.download).toHaveBeenCalledTimes(1)
 	})
 
-	it("never attempts an upload and returns a clean success when the download is cancelled", async () => {
+	it("never attempts an upload and reports its own cancelled status when the download is cancelled", async () => {
 		const h = makeHarness()
 		h.download.mockRejectedValue(sdkDto("Cancelled"))
 
 		const outcome = await runImportFile(h.deps, { file: testFile(), name: "a.txt", size: 0, parentUuid: null })
 
-		expect(outcome).toEqual({ status: "success" })
+		expect(outcome).toEqual({ status: "cancelled" })
 		expect(h.upload).not.toHaveBeenCalled()
 		expect(h.settle).toHaveBeenCalledWith(expect.any(String), "cancelled")
 	})
@@ -311,6 +311,21 @@ describe("runImportDirectory (injected deps, real runCreateDirectory/runImportFi
 		)
 	})
 
+	it("reports a partial-import error rather than a hollow success when a nested file's download is cancelled", async () => {
+		const h = makeHarness()
+		resolveDirByName(h)
+		h.download.mockRejectedValue(sdkDto("Cancelled"))
+		h.listRecursive.mockResolvedValue({
+			listing: { dirs: [], files: [nestedFile("a.txt", "a.txt")] },
+			hadScanErrors: false
+		})
+
+		const outcome = await runImportDirectory(h.deps, { item: dirItem(), name: "Shared", parentUuid: "dest-root" })
+
+		expect(outcome.status).toBe("error")
+		expect(h.upload).not.toHaveBeenCalled()
+	})
+
 	it("returns a partial-import error and creates no sub-tree when the recursive scan reports scan errors", async () => {
 		const h = makeHarness()
 		resolveDirByName(h)
@@ -401,6 +416,16 @@ describe("importItems (real wiring)", () => {
 
 		expect(outcome.succeeded).toEqual([])
 		expect(outcome.failed).toHaveLength(1)
+		expect(uploadFile).not.toHaveBeenCalled()
+	})
+
+	it("reports neither a success nor a failure when the download is cancelled — toastBulkOutcome's own empty-outcome case", async () => {
+		downloadFileToWriter.mockRejectedValue(sdkDto("Cancelled"))
+
+		const outcome = await importItems([fileItem()], "dest-uuid")
+
+		expect(outcome.succeeded).toEqual([])
+		expect(outcome.failed).toEqual([])
 		expect(uploadFile).not.toHaveBeenCalled()
 	})
 
