@@ -32,7 +32,14 @@ import init, {
 	type SharedDir,
 	type SharedRootItem,
 	type SharingRole,
-	type DirsAndFilesWithPaths
+	type DirsAndFilesWithPaths,
+	type Note,
+	type NoteTag,
+	type NoteHistory,
+	type NoteParticipant,
+	type NoteType,
+	type DuplicateNoteResponse,
+	type AddTagToNoteResponse
 } from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
 import { toErrorDTO, PARENT_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
@@ -849,6 +856,89 @@ const api = {
 	},
 	deleteContact(uuid: string): Promise<void> {
 		return requireClient().deleteContact(uuid)
+	},
+	// ── Notes ────────────────────────────────────────────────────────────────
+	// Plain pass-throughs, same shape as the Contacts section above — no note method on the wasm
+	// surface takes an AbortSignal/options param (unlike drive's download/upload ops), so none is
+	// plumbed through here. No worker-side cache: features/notes/queries owns the note list as one
+	// TanStack Query cache slice instead.
+	listNotes(): Promise<Note[]> {
+		return requireClient().listNotes()
+	},
+	getNote(uuid: string): Promise<Note | undefined> {
+		return requireClient().getNote(uuid)
+	},
+	getNoteContent(note: Note): Promise<string | undefined> {
+		return requireClient().getNoteContent(note)
+	},
+	createNote(title?: string): Promise<Note> {
+		return requireClient().createNote(title)
+	},
+	setNoteContent(note: Note, content: string, preview: string): Promise<Note> {
+		return requireClient().setNoteContent(note, content, preview)
+	},
+	setNoteTitle(note: Note, title: string): Promise<Note> {
+		return requireClient().setNoteTitle(note, title)
+	},
+	setNoteType(note: Note, noteType: NoteType, knownContent?: string): Promise<Note> {
+		return requireClient().setNoteType(note, noteType, knownContent)
+	},
+	duplicateNote(note: Note): Promise<DuplicateNoteResponse> {
+		return requireClient().duplicateNote(note)
+	},
+	setNotePinned(note: Note, pinned: boolean): Promise<Note> {
+		return requireClient().setNotePinned(note, pinned)
+	},
+	setNoteFavorited(note: Note, favorite: boolean): Promise<Note> {
+		return requireClient().setNoteFavorited(note, favorite)
+	},
+	archiveNote(note: Note): Promise<Note> {
+		return requireClient().archiveNote(note)
+	},
+	restoreNote(note: Note): Promise<Note> {
+		return requireClient().restoreNote(note)
+	},
+	trashNote(note: Note): Promise<Note> {
+		return requireClient().trashNote(note)
+	},
+	deleteNote(note: Note): Promise<void> {
+		return requireClient().deleteNote(note)
+	},
+	getNoteHistory(note: Note): Promise<NoteHistory[]> {
+		return requireClient().getNoteHistory(note)
+	},
+	restoreNoteFromHistory(note: Note, history: NoteHistory): Promise<Note> {
+		return requireClient().restoreNoteFromHistory(note, history)
+	},
+	listNoteTags(): Promise<NoteTag[]> {
+		return requireClient().listNoteTags()
+	},
+	createNoteTag(name: string): Promise<NoteTag> {
+		return requireClient().createNoteTag(name)
+	},
+	renameNoteTag(tag: NoteTag, name: string): Promise<NoteTag> {
+		return requireClient().renameNoteTag(tag, name)
+	},
+	deleteNoteTag(tag: NoteTag): Promise<void> {
+		return requireClient().deleteNoteTag(tag)
+	},
+	setNoteTagFavorited(tag: NoteTag, favorite: boolean): Promise<NoteTag> {
+		return requireClient().setNoteTagFavorited(tag, favorite)
+	},
+	addTagToNote(note: Note, tag: NoteTag): Promise<AddTagToNoteResponse> {
+		return requireClient().addTagToNote(note, tag)
+	},
+	removeTagFromNote(note: Note, tag: NoteTag): Promise<Note> {
+		return requireClient().removeTagFromNote(note, tag)
+	},
+	addNoteParticipant(note: Note, contact: Contact, write: boolean): Promise<Note> {
+		return requireClient().addNoteParticipant(note, contact, write)
+	},
+	removeNoteParticipant(note: Note, participantId: bigint): Promise<Note> {
+		return requireClient().removeNoteParticipant(note, participantId)
+	},
+	setNoteParticipantPermission(noteUuid: string, participant: NoteParticipant, write: boolean): Promise<NoteParticipant> {
+		return requireClient().setNoteParticipantPermission(noteUuid, participant, write)
 	},
 	// ── Sharing ──────────────────────────────────────────────────────────────
 	// shareDir's progress callback is a REQUIRED param on the wasm surface, but this app shows no
