@@ -99,7 +99,7 @@ function DocxRender({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 				ref={containerRef}
 				role="document"
 				aria-label={alt}
-				className={status === "success" ? "" : "hidden"}
+				className={status === "success" ? "select-text" : "hidden"}
 			/>
 		</div>
 	)

@@ -38,7 +38,7 @@ function InfoRow({ label, value }: { label: string; value: ReactNode }) {
 	return (
 		<div className="flex items-center justify-between gap-4 border-b border-border/50 py-2 text-sm last:border-b-0">
 			<span className="shrink-0 text-muted-foreground">{label}</span>
-			<span className="min-w-0 truncate text-right font-medium">{value}</span>
+			<span className="min-w-0 truncate text-right font-medium select-text">{value}</span>
 		</div>
 	)
 }

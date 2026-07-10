@@ -163,10 +163,19 @@
     scrollbar-color: var(--scrollbar-thumb) transparent;
     }
   body {
-    @apply bg-canvas text-foreground;
+    @apply bg-canvas text-foreground select-none;
     }
   html {
     @apply font-sans;
+    }
+  /* Opt-in text selection (spec: "restrict selection ONLY to components that actually need it") —
+     `body`'s select-none above is the default; inputs/textareas and any contenteditable surface (this
+     also covers CodeMirror's .cm-content, which carries the attribute even while read-only) opt back
+     in globally since they're native/third-party DOM, not call sites this app's own classNames reach. */
+  input,
+  textarea,
+  [contenteditable] {
+    @apply select-text;
     }
   /* Thin overlay-style scrollbars, consistent across themes — no thick native gutter. */
   *::-webkit-scrollbar {

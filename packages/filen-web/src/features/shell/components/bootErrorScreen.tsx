@@ -34,7 +34,7 @@ export function BootErrorScreen({ reason, error }: BootErrorScreenProps) {
 						<TriangleAlertIcon />
 					</EmptyMedia>
 					<EmptyTitle>{t("bootErrorTitle")}</EmptyTitle>
-					{detail ? <EmptyDescription>{detail}</EmptyDescription> : null}
+					{detail ? <EmptyDescription className="select-text">{detail}</EmptyDescription> : null}
 				</EmptyHeader>
 				<EmptyContent>
 					<Button
@@ -44,7 +44,7 @@ export function BootErrorScreen({ reason, error }: BootErrorScreenProps) {
 					>
 						{t("reload")}
 					</Button>
-					{reason ? <span className="font-mono text-xs text-muted-foreground">{reason}</span> : null}
+					{reason ? <span className="font-mono text-xs text-muted-foreground select-text">{reason}</span> : null}
 				</EmptyContent>
 			</Empty>
 		</div>

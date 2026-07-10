@@ -91,7 +91,7 @@ function MarkdownRender({ text, alt }: { text: string; alt: string }) {
 		<div
 			role="document"
 			aria-label={alt}
-			className="size-full overflow-auto px-6 py-4"
+			className="size-full overflow-auto px-6 py-4 select-text"
 		>
 			<Markdown
 				remarkPlugins={[remarkGfm]}
