@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react"
 import { queryClient } from "@/queries/client"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { directorySizeQueryOptions } from "@/features/drive/queries/drive"
@@ -27,6 +27,15 @@ import {
 // a row/sort re-runs only when a size actually lands. Returns undefined while `enabled` is false (grid
 // view, where nothing displays a size — see directoryListing.tsx's own call site) so the caller takes
 // its zero-cost path.
+//
+// useSyncExternalStore, not a useEffect+useState subscription: a plain effect attaches its listener
+// AFTER the commit that produced the render it reacts to, leaving a real gap on initial mount (or any
+// remount, e.g. navigating into a listing with directories already mid-prefetch from a previous mount)
+// where a size-success event lands between this component's render and its subscribe effect running —
+// that event bumps nothing, and the affected directory sticks on the 0n fallback under size-sort until
+// some LATER, unrelated size event happens to bump the version and drag it in. useSyncExternalStore
+// closes exactly that gap: React re-checks the snapshot immediately after subscribing and re-renders
+// if it already moved, so no event landing in that window is ever silently missed.
 export function useDriveDirectorySizes({
 	items,
 	enabled
@@ -34,19 +43,29 @@ export function useDriveDirectorySizes({
 	items: DriveItem[] | undefined
 	enabled: boolean
 }): ReadonlyMap<string, number> | undefined {
-	const [version, setVersion] = useState<number>(0)
+	// The store's "value" is a monotonic counter kept OUTSIDE React state (a ref, not useState) — only
+	// its identity change matters to useSyncExternalStore, never the number itself.
+	const versionRef = useRef(0)
 
-	useEffect(() => {
-		if (!enabled) {
-			return
-		}
-
-		return queryClient.getQueryCache().subscribe(event => {
-			if (isDirectorySizeSuccessEvent(event)) {
-				setVersion(previous => previous + 1)
+	const subscribe = useCallback(
+		(onStoreChange: () => void) => {
+			if (!enabled) {
+				return () => undefined
 			}
-		})
-	}, [enabled])
+
+			return queryClient.getQueryCache().subscribe(event => {
+				if (isDirectorySizeSuccessEvent(event)) {
+					versionRef.current += 1
+					onStoreChange()
+				}
+			})
+		},
+		[enabled]
+	)
+
+	const getSnapshot = useCallback(() => versionRef.current, [])
+
+	const version = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 
 	useEffect(() => {
 		if (!enabled || items === undefined) {
