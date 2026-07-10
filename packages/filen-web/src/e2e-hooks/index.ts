@@ -60,6 +60,10 @@ interface E2eHooks {
 	createTestFile: (name: string, content: string, parentUuid?: string | null) => Promise<File>
 	// Trashes a File this hook created — keeps the shared e2e account net-zero after a test run.
 	trashTestFile: (file: File) => Promise<void>
+	// Permanently removes a note by uuid — trashes then deletes — keeping the shared e2e account
+	// net-zero after a UI-driven create smoke test (this shell has no trash/delete UI yet; that lands
+	// in the actions step). No-op when the uuid isn't found.
+	deleteTestNoteByUuid: (uuid: string) => Promise<void>
 	// Reads one cached thumbnail's on-disk size + write time, found by file name inside a parent
 	// directory. The only way to prove a repaint after a real page reload came from the existing OPFS
 	// cache entry rather than a fresh generation: a regenerate rewrites the file (a new
@@ -142,6 +146,18 @@ export function installE2eHooks(router: RouterLike): void {
 		},
 		trashTestFile: async file => {
 			await sdkApi.trashFile(file)
+		},
+		deleteTestNoteByUuid: async uuid => {
+			await whenBootReady()
+
+			const note = (await sdkApi.listNotes()).find(n => n.uuid === uuid)
+
+			if (note === undefined) {
+				return
+			}
+
+			// deleteNote is permanent; trash first so a note in any lifecycle state is removable.
+			await sdkApi.deleteNote(await sdkApi.trashNote(note))
 		},
 		thumbnailFileStat: async (parentUuid, name) => {
 			await whenBootReady()

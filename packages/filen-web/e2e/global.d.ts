@@ -20,6 +20,7 @@ interface E2eHooks {
 	rawStringifiedClient: () => Promise<unknown>
 	createTestFile: (name: string, content: string, parentUuid?: string | null) => Promise<unknown>
 	trashTestFile: (file: unknown) => Promise<void>
+	deleteTestNoteByUuid: (uuid: string) => Promise<void>
 	thumbnailFileStat: (parentUuid: string, name: string) => Promise<{ size: number; lastModified: number } | null>
 }
 

@@ -1,6 +1,6 @@
 // Type augmentation that gives `t()`/`i18n.t()` fully type-safe key IntelliSense — a key not
-// present in the "common" (default), "errors", "auth", "drive", "contacts", "transfers", or
-// "preview" namespace becomes a compile error.
+// present in the "common" (default), "errors", "auth", "drive", "contacts", "transfers",
+// "preview", or "notes" namespace becomes a compile error.
 //
 // MUST live directly under `src/` so tsconfig's `include: ["src"]` (tsconfig.app.json) picks it
 // up — mirrors a gotcha from the filen-mobile port (a repo-root `i18next.d.ts` is silently ignored
@@ -19,6 +19,7 @@ import { type drive } from "@/locales/en/drive"
 import { type contacts } from "@/locales/en/contacts"
 import { type transfers } from "@/locales/en/transfers"
 import { type preview } from "@/locales/en/preview"
+import { type notes } from "@/locales/en/notes"
 
 declare module "i18next" {
 	interface CustomTypeOptions {
@@ -32,6 +33,7 @@ declare module "i18next" {
 			contacts: typeof contacts
 			transfers: typeof transfers
 			preview: typeof preview
+			notes: typeof notes
 		}
 	}
 }

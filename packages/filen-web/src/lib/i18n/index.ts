@@ -7,6 +7,7 @@ import { drive } from "@/locales/en/drive"
 import { contacts } from "@/locales/en/contacts"
 import { transfers } from "@/locales/en/transfers"
 import { preview } from "@/locales/en/preview"
+import { notes } from "@/locales/en/notes"
 
 // Consumed by `ActionDef.descriptionKey` (keymap registry) — a compile-time-checked subset
 // of the "common" namespace's own key set, derived straight from the catalog so it can never
@@ -40,6 +41,11 @@ export type TransfersKey = Extract<keyof typeof transfers, string>
 // keymap registry and describes itself with previewSaveAction, this union's first real consumer.
 export type PreviewKey = Extract<keyof typeof preview, string>
 
+// Same derivation for the "notes" namespace, exported ahead of need — no notes action registers a
+// keymap command yet, but a later new-note/search command can extend ActionDef.descriptionKey's union
+// with this type without this file needing a matching edit then.
+export type NotesKey = Extract<keyof typeof notes, string>
+
 // `Intl.PluralRules` gate: i18next's plural-key resolution (`_one`/
 // `_other` suffixes, unused by rev 1's catalogs but load-bearing the moment a count-based key
 // lands) needs it. Unlike React Native/Hermes — which mobile polyfills via `intl-pluralrules` —
@@ -61,7 +67,8 @@ void i18n.use(initReactI18next).init({
 			drive,
 			contacts,
 			transfers,
-			preview
+			preview,
+			notes
 		}
 	},
 	lng: "en",

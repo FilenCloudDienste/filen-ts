@@ -19,12 +19,15 @@ import { Route as ResetTokenRouteImport } from './routes/reset.$token'
 import { Route as AppTrashRouteImport } from './routes/_app/trash'
 import { Route as AppTransfersRouteImport } from './routes/_app/transfers'
 import { Route as AppRecentsRouteImport } from './routes/_app/recents'
+import { Route as AppNotesRouteImport } from './routes/_app/notes'
 import { Route as AppLinksRouteImport } from './routes/_app/links'
 import { Route as AppFavoritesRouteImport } from './routes/_app/favorites'
 import { Route as AppContactsRouteImport } from './routes/_app/contacts'
+import { Route as AppNotesIndexRouteImport } from './routes/_app/notes.index'
 import { Route as AppSharedOutSplatRouteImport } from './routes/_app/shared-out.$'
 import { Route as AppSharedInSplatRouteImport } from './routes/_app/shared-in.$'
 import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/security'
+import { Route as AppNotesUuidRouteImport } from './routes/_app/notes.$uuid'
 import { Route as AppDriveSplatRouteImport } from './routes/_app/drive.$'
 
 const RegisterRoute = RegisterRouteImport.update({
@@ -76,6 +79,11 @@ const AppRecentsRoute = AppRecentsRouteImport.update({
   path: '/recents',
   getParentRoute: () => AppRouteRoute,
 } as any)
+const AppNotesRoute = AppNotesRouteImport.update({
+  id: '/notes',
+  path: '/notes',
+  getParentRoute: () => AppRouteRoute,
+} as any)
 const AppLinksRoute = AppLinksRouteImport.update({
   id: '/links',
   path: '/links',
@@ -90,6 +98,11 @@ const AppContactsRoute = AppContactsRouteImport.update({
   id: '/contacts',
   path: '/contacts',
   getParentRoute: () => AppRouteRoute,
+} as any)
+const AppNotesIndexRoute = AppNotesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppNotesRoute,
 } as any)
 const AppSharedOutSplatRoute = AppSharedOutSplatRouteImport.update({
   id: '/shared-out/$',
@@ -106,6 +119,11 @@ const AppSettingsSecurityRoute = AppSettingsSecurityRouteImport.update({
   path: '/settings/security',
   getParentRoute: () => AppRouteRoute,
 } as any)
+const AppNotesUuidRoute = AppNotesUuidRouteImport.update({
+  id: '/$uuid',
+  path: '/$uuid',
+  getParentRoute: () => AppNotesRoute,
+} as any)
 const AppDriveSplatRoute = AppDriveSplatRouteImport.update({
   id: '/drive/$',
   path: '/drive/$',
@@ -121,14 +139,17 @@ export interface FileRoutesByFullPath {
   '/contacts': typeof AppContactsRoute
   '/favorites': typeof AppFavoritesRoute
   '/links': typeof AppLinksRoute
+  '/notes': typeof AppNotesRouteWithChildren
   '/recents': typeof AppRecentsRoute
   '/transfers': typeof AppTransfersRoute
   '/trash': typeof AppTrashRoute
   '/reset/$token': typeof ResetTokenRoute
   '/drive/$': typeof AppDriveSplatRoute
+  '/notes/$uuid': typeof AppNotesUuidRoute
   '/settings/security': typeof AppSettingsSecurityRoute
   '/shared-in/$': typeof AppSharedInSplatRoute
   '/shared-out/$': typeof AppSharedOutSplatRoute
+  '/notes/': typeof AppNotesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -144,9 +165,11 @@ export interface FileRoutesByTo {
   '/trash': typeof AppTrashRoute
   '/reset/$token': typeof ResetTokenRoute
   '/drive/$': typeof AppDriveSplatRoute
+  '/notes/$uuid': typeof AppNotesUuidRoute
   '/settings/security': typeof AppSettingsSecurityRoute
   '/shared-in/$': typeof AppSharedInSplatRoute
   '/shared-out/$': typeof AppSharedOutSplatRoute
+  '/notes': typeof AppNotesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -159,14 +182,17 @@ export interface FileRoutesById {
   '/_app/contacts': typeof AppContactsRoute
   '/_app/favorites': typeof AppFavoritesRoute
   '/_app/links': typeof AppLinksRoute
+  '/_app/notes': typeof AppNotesRouteWithChildren
   '/_app/recents': typeof AppRecentsRoute
   '/_app/transfers': typeof AppTransfersRoute
   '/_app/trash': typeof AppTrashRoute
   '/reset/$token': typeof ResetTokenRoute
   '/_app/drive/$': typeof AppDriveSplatRoute
+  '/_app/notes/$uuid': typeof AppNotesUuidRoute
   '/_app/settings/security': typeof AppSettingsSecurityRoute
   '/_app/shared-in/$': typeof AppSharedInSplatRoute
   '/_app/shared-out/$': typeof AppSharedOutSplatRoute
+  '/_app/notes/': typeof AppNotesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -179,14 +205,17 @@ export interface FileRouteTypes {
     | '/contacts'
     | '/favorites'
     | '/links'
+    | '/notes'
     | '/recents'
     | '/transfers'
     | '/trash'
     | '/reset/$token'
     | '/drive/$'
+    | '/notes/$uuid'
     | '/settings/security'
     | '/shared-in/$'
     | '/shared-out/$'
+    | '/notes/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -202,9 +231,11 @@ export interface FileRouteTypes {
     | '/trash'
     | '/reset/$token'
     | '/drive/$'
+    | '/notes/$uuid'
     | '/settings/security'
     | '/shared-in/$'
     | '/shared-out/$'
+    | '/notes'
   id:
     | '__root__'
     | '/'
@@ -216,14 +247,17 @@ export interface FileRouteTypes {
     | '/_app/contacts'
     | '/_app/favorites'
     | '/_app/links'
+    | '/_app/notes'
     | '/_app/recents'
     | '/_app/transfers'
     | '/_app/trash'
     | '/reset/$token'
     | '/_app/drive/$'
+    | '/_app/notes/$uuid'
     | '/_app/settings/security'
     | '/_app/shared-in/$'
     | '/_app/shared-out/$'
+    | '/_app/notes/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -308,6 +342,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRecentsRouteImport
       parentRoute: typeof AppRouteRoute
     }
+    '/_app/notes': {
+      id: '/_app/notes'
+      path: '/notes'
+      fullPath: '/notes'
+      preLoaderRoute: typeof AppNotesRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
     '/_app/links': {
       id: '/_app/links'
       path: '/links'
@@ -328,6 +369,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/contacts'
       preLoaderRoute: typeof AppContactsRouteImport
       parentRoute: typeof AppRouteRoute
+    }
+    '/_app/notes/': {
+      id: '/_app/notes/'
+      path: '/'
+      fullPath: '/notes/'
+      preLoaderRoute: typeof AppNotesIndexRouteImport
+      parentRoute: typeof AppNotesRoute
     }
     '/_app/shared-out/$': {
       id: '/_app/shared-out/$'
@@ -350,6 +398,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsSecurityRouteImport
       parentRoute: typeof AppRouteRoute
     }
+    '/_app/notes/$uuid': {
+      id: '/_app/notes/$uuid'
+      path: '/$uuid'
+      fullPath: '/notes/$uuid'
+      preLoaderRoute: typeof AppNotesUuidRouteImport
+      parentRoute: typeof AppNotesRoute
+    }
     '/_app/drive/$': {
       id: '/_app/drive/$'
       path: '/drive/$'
@@ -360,10 +415,25 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AppNotesRouteChildren {
+  AppNotesUuidRoute: typeof AppNotesUuidRoute
+  AppNotesIndexRoute: typeof AppNotesIndexRoute
+}
+
+const AppNotesRouteChildren: AppNotesRouteChildren = {
+  AppNotesUuidRoute: AppNotesUuidRoute,
+  AppNotesIndexRoute: AppNotesIndexRoute,
+}
+
+const AppNotesRouteWithChildren = AppNotesRoute._addFileChildren(
+  AppNotesRouteChildren,
+)
+
 interface AppRouteRouteChildren {
   AppContactsRoute: typeof AppContactsRoute
   AppFavoritesRoute: typeof AppFavoritesRoute
   AppLinksRoute: typeof AppLinksRoute
+  AppNotesRoute: typeof AppNotesRouteWithChildren
   AppRecentsRoute: typeof AppRecentsRoute
   AppTransfersRoute: typeof AppTransfersRoute
   AppTrashRoute: typeof AppTrashRoute
@@ -377,6 +447,7 @@ const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppContactsRoute: AppContactsRoute,
   AppFavoritesRoute: AppFavoritesRoute,
   AppLinksRoute: AppLinksRoute,
+  AppNotesRoute: AppNotesRouteWithChildren,
   AppRecentsRoute: AppRecentsRoute,
   AppTransfersRoute: AppTransfersRoute,
   AppTrashRoute: AppTrashRoute,

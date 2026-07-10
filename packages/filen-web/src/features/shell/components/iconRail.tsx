@@ -71,15 +71,12 @@ registerAction({
 type IconType = ComponentType<{ className?: string }>
 
 // The remaining module surfaces land later — rendered as inert, muted rail entries so the
-// information architecture reads intact without pretending the destinations exist yet (Contacts and
-// Transfers have since landed as real entries: Contacts a Link mirroring Drive above, Transfers the
-// TransfersEntry popover below). Native `disabled` is deliberately avoided (it suppresses pointer
-// events, which would kill the tooltip); `aria-disabled` + muted styling conveys the same state while
-// keeping hover/focus explainers.
-const MODULES: { key: CommonKey; icon: IconType }[] = [
-	{ key: "moduleNotes", icon: NotebookPenIcon },
-	{ key: "moduleChats", icon: MessagesSquareIcon }
-]
+// information architecture reads intact without pretending the destinations exist yet (Contacts,
+// Transfers and Notes have since landed as real entries: Contacts/Notes as Links mirroring Drive
+// above, Transfers the TransfersEntry popover below). Native `disabled` is deliberately avoided (it
+// suppresses pointer events, which would kill the tooltip); `aria-disabled` + muted styling conveys the
+// same state while keeping hover/focus explainers.
+const MODULES: { key: CommonKey; icon: IconType }[] = [{ key: "moduleChats", icon: MessagesSquareIcon }]
 
 // Rail section slot: the active section rides a white chip (soft shadow); inactive glyphs are plain
 // muted marks on the canvas that tint on hover. No borders — the chip and hover fills carry the
@@ -308,6 +305,9 @@ export function IconRail() {
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const driveActive = pathname === "/drive" || pathname.startsWith("/drive/")
 	const contactsActive = pathname === "/contacts"
+	// Notes is a two-route module (/notes selection index + /notes/$uuid) — like Drive's splat, its
+	// active state must cover the nested selection path too, not just the bare root.
+	const notesActive = pathname === "/notes" || pathname.startsWith("/notes/")
 
 	// Registered above at module scope (default unassigned) — this only wires the LIVE combo, which
 	// starts as "" (react-hotkeys-hook's parser treats it as "never matches") and works the instant a
@@ -390,6 +390,22 @@ export function IconRail() {
 					}
 				/>
 				<TooltipContent side="right">{t("moduleContacts")}</TooltipContent>
+			</Tooltip>
+
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<Link
+							to="/notes"
+							aria-current={notesActive ? "page" : undefined}
+							aria-label={t("moduleNotes")}
+							className={railItemClass(notesActive)}
+						>
+							<NotebookPenIcon />
+						</Link>
+					}
+				/>
+				<TooltipContent side="right">{t("moduleNotes")}</TooltipContent>
 			</Tooltip>
 
 			<TransfersEntry />
