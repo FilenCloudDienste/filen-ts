@@ -58,6 +58,13 @@ export async function enterScratchDirectory(
 		await page.waitForURL(/\/drive\/[^/]+/, { timeout: 3000 })
 	}).toPass({ timeout: 30_000 })
 
+	// The URL flips before React commits the new listing render (router navigations are
+	// transition-wrapped), so under CPU load the OLD view — old upload-input props included — can
+	// linger past the URL change; an upload fired in that window lands in the previous directory.
+	// The breadcrumb renders from the same committed tree as the toolbar's inputs: once it shows the
+	// scratch name, everything below it carries the scratch directory's own props.
+	await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText(name, { exact: true })).toBeVisible()
+
 	return waitForListingSettled(page)
 }
 
