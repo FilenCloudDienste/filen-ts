@@ -125,7 +125,7 @@ export function MoveTargetDialog({ items, onClose }: MoveTargetDialogProps) {
 						)
 					})}
 				</nav>
-				<div className="h-72 overflow-y-auto rounded-xl border border-border">
+				<div className="h-72 overflow-y-auto rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
 					{listingQuery.status === "pending" ? (
 						<ListingSkeleton viewMode="list" />
 					) : listingQuery.status === "error" ? (

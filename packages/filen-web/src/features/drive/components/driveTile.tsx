@@ -66,7 +66,7 @@ export function DriveTile({
 						aria-selected={selected}
 						tabIndex={active ? 0 : -1}
 						title={searchParentPath !== undefined && searchParentPath.length > 0 ? searchParentPath : undefined}
-						className="group/tile relative flex flex-col items-center gap-2 rounded-2xl p-3 text-center text-sm outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
+						className="group/tile relative flex flex-col items-center gap-2 rounded-2xl p-3 text-center text-sm outline-none select-none not-aria-selected:hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
 						onClick={event => {
 							onPointerSelect(index, event)
 						}}

@@ -418,7 +418,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				{effectiveViewMode === "list" ? (
 					<div
 						aria-hidden="true"
-						className="flex h-8 shrink-0 items-center gap-3 border-b border-border px-3 text-xs font-medium text-muted-foreground"
+						className="flex h-8 shrink-0 items-center gap-3 border-b border-border/50 px-3 text-xs font-medium text-muted-foreground"
 					>
 						<span className="size-4 shrink-0" />
 						<span className="min-w-0 flex-1">{t("driveColumnName")}</span>
@@ -517,7 +517,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					</div>
 				</div>
 				{search.active && (search.status === "background" || search.total > BigInt(sortedItems.length)) ? (
-					<div className="flex h-8 shrink-0 items-center justify-center gap-2 border-t border-border px-3 text-xs text-muted-foreground">
+					<div className="flex h-8 shrink-0 items-center justify-center gap-2 border-t border-border/50 px-3 text-xs text-muted-foreground">
 						{search.status === "background" ? (
 							<Spinner
 								aria-hidden="true"
@@ -535,13 +535,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	return (
 		<>
-			<header className="flex h-14 shrink-0 items-center border-b border-border px-4">
+			<header className="flex h-14 shrink-0 items-center px-4">
 				<Breadcrumb
 					variant={variant}
 					splat={splat}
 				/>
 			</header>
-			<div className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border px-4">
+			<div className="flex h-12 shrink-0 items-center justify-between gap-4 px-4">
 				{listingQuery.status === "success" && selectedItems.length > 0 ? (
 					<BulkActionBar
 						variant={variant}

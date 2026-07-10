@@ -106,7 +106,7 @@ export function TransferRow({ transfer }: TransferRowProps) {
 		: t(transfer.status === "done" ? "transfersStatusDone" : "transfersStatusError")
 
 	return (
-		<div className="flex flex-col gap-1.5 rounded-xl px-1 py-1.5">
+		<div className="flex flex-col gap-1.5 rounded-xl px-1 py-1.5 hover:bg-accent/50">
 			<div className="flex items-center gap-2">
 				<TransferStatusIcon
 					status={transfer.status}

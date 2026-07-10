@@ -47,10 +47,10 @@ export function TransfersScreen() {
 
 	return (
 		<>
-			<header className="flex h-14 shrink-0 items-center border-b border-border px-4">
+			<header className="flex h-14 shrink-0 items-center px-4">
 				<h1 className="text-sm font-medium">{t("common:moduleTransfers")}</h1>
 			</header>
-			<div className="flex h-12 shrink-0 items-center justify-end gap-2 border-b border-border px-4">
+			<div className="flex h-12 shrink-0 items-center justify-end gap-2 px-4">
 				<Button
 					variant="outline"
 					size="sm"

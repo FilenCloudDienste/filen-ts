@@ -15,7 +15,7 @@ export function ViewModeToggle({ value, onChange }: ViewModeToggleProps) {
 	const { t } = useTranslation("drive")
 
 	return (
-		<div className="inline-flex items-center gap-0.5 rounded-2xl border border-border p-0.5">
+		<div className="inline-flex items-center gap-0.5 p-0.5">
 			<Tooltip>
 				<TooltipTrigger
 					render={

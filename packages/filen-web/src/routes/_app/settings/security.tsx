@@ -23,7 +23,7 @@ function SecurityPage() {
 
 	return (
 		<>
-			<header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
+			<header className="flex h-14 shrink-0 items-center gap-3 px-4">
 				<div className="flex items-center gap-2">
 					<ShieldIcon className="size-4 text-muted-foreground" />
 					<h1 className="font-heading text-base font-medium tracking-tight">{t("securityTitle")}</h1>

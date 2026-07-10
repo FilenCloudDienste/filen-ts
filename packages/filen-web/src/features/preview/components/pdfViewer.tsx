@@ -395,7 +395,7 @@ function PdfPageList({ doc, alt }: { doc: PDFDocumentProxy; alt: string }) {
 
 	return (
 		<div className="flex size-full flex-col">
-			<div className="flex h-10 shrink-0 items-center justify-center gap-2 border-b border-border">
+			<div className="flex h-10 shrink-0 items-center justify-center gap-2">
 				<Button
 					variant="ghost"
 					size="icon-sm"

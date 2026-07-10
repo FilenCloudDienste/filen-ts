@@ -315,7 +315,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose }: Previ
 					onKeyDown={handleKeyDown}
 					className="fixed inset-0 z-50 flex flex-col bg-background duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
 				>
-					<header className="flex h-14 shrink-0 items-center gap-1 border-b border-border px-4">
+					<header className="flex h-14 shrink-0 items-center gap-1 px-4">
 						<PreviewName name={name} />
 						{editable && dirty ? (
 							<Button

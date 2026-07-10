@@ -491,10 +491,10 @@ export function ContactsList() {
 
 	return (
 		<>
-			<header className="flex h-14 shrink-0 items-center border-b border-border px-4">
+			<header className="flex h-14 shrink-0 items-center px-4">
 				<h1 className="text-sm font-medium">{t("common:moduleContacts")}</h1>
 			</header>
-			<div className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border px-4">
+			<div className="flex h-12 shrink-0 items-center justify-between gap-4 px-4">
 				{selectMode ? (
 					<ContactsBulkBar
 						requests={incomingData}

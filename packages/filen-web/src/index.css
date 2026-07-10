@@ -95,6 +95,9 @@
     --rail-chip: oklch(1 0 0);
     --rail-chip-foreground: oklch(0.205 0 0);
     --rail-hover: oklch(0.895 0 0);
+    /* Thin overlay scrollbar thumb, tuned per theme (index.css base layer below). */
+    --scrollbar-thumb: oklch(0 0 0 / 15%);
+    --scrollbar-thumb-hover: oklch(0 0 0 / 28%);
 }
 
 .dark {
@@ -137,16 +140,37 @@
     --rail-chip: oklch(0.28 0 0);
     --rail-chip-foreground: oklch(0.985 0 0);
     --rail-hover: oklch(0.24 0 0);
+    --scrollbar-thumb: oklch(1 0 0 / 15%);
+    --scrollbar-thumb-hover: oklch(1 0 0 / 25%);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
     }
   body {
     @apply bg-canvas text-foreground;
     }
   html {
     @apply font-sans;
+    }
+  /* Thin overlay-style scrollbars, consistent across themes — no thick native gutter. */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+    }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+    }
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
     }
 }

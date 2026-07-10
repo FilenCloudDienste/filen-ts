@@ -100,7 +100,7 @@ export function DriveSidebar() {
 					label={t("driveMyDrive")}
 					to="/drive/$"
 				/>
-				<Separator className="my-2" />
+				<Separator className="my-2 bg-border/50" />
 				<div className="flex flex-col gap-0.5">
 					{items.map(item =>
 						"splatTo" in item ? (
@@ -124,7 +124,7 @@ export function DriveSidebar() {
 			{/* Bottom block reserved for the storage-usage meter (lands in a later step); a later step
 			    fills this slot. The separator is tonal only, no hard rule. */}
 			<div className="shrink-0 px-3 pb-3">
-				<Separator className="mb-3" />
+				<Separator className="mb-3 bg-border/50" />
 				<div
 					className="h-12"
 					aria-hidden="true"

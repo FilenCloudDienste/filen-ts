@@ -108,7 +108,7 @@ function MarkdownToolbar({ mode, onToggle }: { mode: "rendered" | "source"; onTo
 	const { t } = useTranslation("preview")
 
 	return (
-		<div className="flex h-10 shrink-0 items-center justify-end border-b border-border px-2">
+		<div className="flex h-10 shrink-0 items-center justify-end px-2">
 			<Button
 				variant="ghost"
 				size="sm"

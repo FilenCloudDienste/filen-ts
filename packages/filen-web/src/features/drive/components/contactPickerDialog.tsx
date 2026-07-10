@@ -169,7 +169,9 @@ export function ContactPickerDialog({ items, onClose }: ContactPickerDialogProps
 					<DialogTitle>{t("driveShareDialogTitle")}</DialogTitle>
 					<DialogDescription>{t("driveShareDialogBody", { count: items.length })}</DialogDescription>
 				</DialogHeader>
-				<div className="flex h-72 flex-col overflow-hidden rounded-xl border border-border">{renderBody()}</div>
+				<div className="flex h-72 flex-col overflow-hidden rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
+					{renderBody()}
+				</div>
 				<DialogFooter>
 					<Button
 						variant="outline"

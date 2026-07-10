@@ -70,7 +70,7 @@ export function DriveRow({
 						aria-selected={selected}
 						tabIndex={active ? 0 : -1}
 						style={style}
-						className="group/row flex h-10 items-center gap-3 rounded-xl px-3 text-sm outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
+						className="group/row flex h-10 items-center gap-3 rounded-xl px-3 text-sm outline-none select-none not-aria-selected:hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
 						onClick={event => {
 							onPointerSelect(index, event)
 						}}
