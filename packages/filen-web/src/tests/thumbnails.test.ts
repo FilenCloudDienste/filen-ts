@@ -462,6 +462,30 @@ describe("invalidateThumbnail", () => {
 	})
 })
 
+describe("invalidateThumbnail — bounded cache interplay", () => {
+	it("removing one uuid's entry never disturbs another live uuid's cached url, and frees its own slot for a fresh generation", async () => {
+		const first = imageItem()
+		const second = imageItem()
+		const deps = depsWithGenerator(vi.fn().mockResolvedValue(new Uint8Array([1])))
+
+		const firstUrl = await getThumbnailUrl(first, deps)
+		const secondUrl = await getThumbnailUrl(second, deps)
+
+		invalidateThumbnail(first.data.uuid, deps)
+
+		// A different uuid's cached url survives untouched — invalidate targets exactly the key asked
+		// for, never a capacity-driven sweep of unrelated live entries.
+		const secondAgain = await getThumbnailUrl(second, deps)
+		expect(secondAgain).toBe(secondUrl)
+
+		// The invalidated uuid regenerates a fresh url, proving its bounded-cache slot was actually
+		// removed (not left as a stale, still-counted key).
+		const firstAgain = await getThumbnailUrl(first, deps)
+		expect(firstAgain).not.toBeNull()
+		expect(firstAgain).not.toBe(firstUrl)
+	})
+})
+
 // registerThumbGenerator + defaultThumbnailDeps — the real module-level registry and the real
 // worker/OPFS wiring, with only the sdk client and thumb-cache modules mocked (see the top of this
 // file). Proves the registration seam is wired all the way through, not merely typed.

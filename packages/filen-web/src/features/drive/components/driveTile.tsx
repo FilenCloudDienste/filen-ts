@@ -69,7 +69,7 @@ export function DriveTile({
 						// Fixed width (not full-bleed 1fr) + justify-self-center: the tile stays pinned to
 						// TILE_WIDTH regardless of how much extra space its grid column gets, so the face
 						// below stays the deterministic square useDriveVirtualizer's row-height estimate
-						// assumes — see that file's own comment on the two constants.
+						// assumes — see gridLayout.ts's own comment on the shared constants.
 						className="group/tile relative flex w-44 shrink-0 flex-col gap-2 justify-self-center rounded-2xl p-2 text-center text-sm outline-none select-none not-aria-selected:hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
 						onClick={event => {
 							onPointerSelect(index, event)

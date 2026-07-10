@@ -5,6 +5,8 @@ import { log } from "@/lib/log"
 import { readThumbnailBlob, deleteThumbnail as deleteThumbnailBlob } from "@/features/drive/lib/thumbCache"
 import { thumbnailCategory, type ThumbnailCategory } from "@/features/drive/lib/thumbnails.logic"
 import { type BaseFileItem, type DriveItem } from "@/features/drive/lib/item"
+import { type DriveViewMode } from "@/features/drive/lib/preferences"
+import { createThumbnailUrlCache, computeThumbnailCapacity } from "@/features/drive/lib/thumbnailUrlCache"
 
 // No declared mime on rendered thumbnail blobs: a generator's canvas encode is webp where the browser
 // supports it and legally falls back to jpeg where it doesn't — a hardcoded label would lie for those
@@ -63,10 +65,16 @@ export const defaultThumbnailDeps: ThumbnailServiceDeps = {
 	getGenerator: category => generators.get(category)
 }
 
-// uuid -> live objectURL for a rendered thumbnail. Module-level for the tab's whole lifetime — every
-// entry is only ever dropped by invalidateThumbnail (uuid rotation, or a caller giving up on a torn
-// render), never by a timer.
-const urls = new Map<string, string>()
+// uuid -> live objectURL for a rendered thumbnail. Module-level for the tab's whole lifetime, bounded
+// to a viewport-derived LRU capacity (see thumbnailUrlCache.ts) — every entry is dropped either by
+// invalidateThumbnail (uuid rotation, or a caller giving up on a torn render) or by the LRU itself once
+// capacity is exceeded, never by a timer. Eviction always revokes through defaultThumbnailDeps: the
+// real objectURL registry is a single browser-global resource regardless of which deps a particular
+// caller injected to CREATE the url (tests inject fakes for that; production only ever uses
+// defaultThumbnailDeps, so this is the one wiring that matters at runtime).
+const urls = createThumbnailUrlCache(computeThumbnailCapacity(0, 0, "list"), (_uuid, url) => {
+	defaultThumbnailDeps.revokeObjectUrl(url)
+})
 // uuid -> accumulated failure count, capped by BLACKLIST_LIMIT — see generate()'s own failure path.
 const failures = new Map<string, number>()
 // uuid -> the in-flight generation attempt, so two concurrent callers for the same uuid share one
@@ -219,4 +227,13 @@ export function invalidateThumbnail(uuid: string, deps: ThumbnailServiceDeps = d
 			failures.set(uuid, count - 1)
 		}
 	}
+}
+
+// Resizes the bounded objectURL cache to whatever the current listing viewport can actually show —
+// called from useDriveVirtualizer's own ResizeObserver effect (that observer already fires on every
+// layout change that matters here: OS window resize, sidebar collapse, view-mode toggle), so there is
+// no separate window-resize listener in this module. Shrinking capacity evicts down to the new size
+// immediately, via the same LRU order get()/set() maintain everywhere else.
+export function setThumbnailViewport(viewportWidth: number, viewportHeight: number, viewMode: DriveViewMode): void {
+	urls.setCapacity(computeThumbnailCapacity(viewportWidth, viewportHeight, viewMode))
 }

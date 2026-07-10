@@ -2,13 +2,9 @@ import { useEffect, useRef, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
+import { ROW_HEIGHT, TILE_WIDTH, TILE_ROW_HEIGHT } from "@/features/drive/lib/gridLayout"
+import { setThumbnailViewport } from "@/features/drive/lib/thumbnails"
 
-const ROW_HEIGHT = 40
-// Fixed tile width (DriveTile pins itself to this via w-44 + justify-self-center rather than
-// stretching to fill its grid column) — the face square is derived from it, so this and
-// TILE_ROW_HEIGHT below must stay in lockstep with driveTile.tsx's own layout classes.
-const TILE_WIDTH = 176
-const TILE_ROW_HEIGHT = 244
 const LIST_OVERSCAN = 8
 const GRID_OVERSCAN = 3
 
@@ -24,6 +20,7 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const itemRefs = useRef(new Map<number, HTMLDivElement>())
 	const [containerWidth, setContainerWidth] = useState(0)
+	const [containerHeight, setContainerHeight] = useState(0)
 
 	useEffect(() => {
 		if (!scrollElement) {
@@ -35,6 +32,7 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 
 			if (entry) {
 				setContainerWidth(entry.contentRect.width)
+				setContainerHeight(entry.contentRect.height)
 			}
 		})
 
@@ -44,6 +42,14 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 			observer.disconnect()
 		}
 	}, [scrollElement])
+
+	// Keeps the thumbnail service's bounded objectURL cache sized to what this listing can actually
+	// show — this ResizeObserver already fires on every layout change that matters (OS window resize,
+	// sidebar collapse, and the width/height jump a view-mode toggle causes), so there is no separate
+	// window-resize listener anywhere in the thumbnail service itself.
+	useEffect(() => {
+		setThumbnailViewport(containerWidth, containerHeight, viewMode)
+	}, [containerWidth, containerHeight, viewMode])
 
 	const columns = Math.max(1, Math.floor(containerWidth / TILE_WIDTH))
 	const rowCount = Math.ceil(items.length / columns)
