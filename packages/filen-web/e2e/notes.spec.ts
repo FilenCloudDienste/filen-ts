@@ -343,6 +343,15 @@ test.describe("notes", () => {
 		const menuTrigger = main.getByRole("button", { name: "More actions", exact: true })
 
 		try {
+			// Settle-wait (mirrors "checklist note opens in the editor" below): the create/type-change/
+			// content writes land via separate realtime events that patch useNotes()'s list-query cache
+			// asynchronously, and note.noteType there — not a fresh per-note fetch — is what NoteEditorPane
+			// resolves to render this note. Firing Export before the checklist editor has actually mounted
+			// races that patch: the note can still read noteType "text" at click time, producing a wrong,
+			// un-converted .txt download. Waiting for the two checklist rows to render proves the cache has
+			// already settled to "checklist" before the menu opens.
+			await expect(main.getByRole("textbox")).toHaveCount(2)
+
 			// Single-note export (noteMenu.tsx's "Export" entry, direct — no dialog).
 			const [download] = await Promise.all([
 				page.waitForEvent("download", { timeout: 20_000 }),
