@@ -3,6 +3,8 @@ import type { Note } from "@filen/sdk-rs"
 import { useNoteEditor, type NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
 import { NoteTextCodeEditor } from "@/features/notes/components/noteTextCodeEditor"
 import { NoteMarkdownEditor } from "@/features/notes/components/noteMarkdownEditor"
+import { RichTextEditor } from "@/features/notes/components/editor/richTextEditor"
+import { ChecklistEditor } from "@/features/notes/components/editor/checklistEditor"
 import { TextCodeReader } from "@/features/notes/components/reader/textCodeReader"
 import { MarkdownReader } from "@/features/notes/components/reader/markdownReader"
 import { RichReader } from "@/features/notes/components/reader/richReader"
@@ -12,10 +14,10 @@ import { Spinner } from "@/components/ui/spinner"
 
 // Per-type dispatch, once the editor controller has a seed to render. `noteType` is the wasm STRING
 // union (never the uniffi enum object) — exhaustive over its 5 members so a future variant fails to
-// compile until mapped. text/code/md are the live CodeMirror editors this step; a trashed note stays
-// read-only (deriveEditorReadOnly); rich/checklist stay read-only readers until the next step. Each
-// branch is keyed on remountKey so a real reseed remounts the editor/reader fresh — the EDITOR
-// INVARIANT the CodeMirror-backed surfaces rely on (their `content` state freezes at mount).
+// compile until mapped. Every writable type has a live editor (CodeMirror for text/code/md, Quill for
+// rich, the custom widget for checklist); a trashed / non-writable note (deriveEditorReadOnly) stays on
+// its read-only reader. Each branch is keyed on remountKey so a real reseed remounts the editor/reader
+// fresh — the EDITOR INVARIANT the seed-at-mount surfaces rely on.
 function BodyByType({ note, controller }: { note: Note; controller: NoteEditorController }) {
 	switch (note.noteType) {
 		case "text":
@@ -48,17 +50,27 @@ function BodyByType({ note, controller }: { note: Note; controller: NoteEditorCo
 				/>
 			)
 		case "rich":
-			return (
+			return controller.readOnly ? (
 				<RichReader
 					key={controller.remountKey}
 					content={controller.seed}
 				/>
+			) : (
+				<RichTextEditor
+					key={controller.remountKey}
+					controller={controller}
+				/>
 			)
 		case "checklist":
-			return (
+			return controller.readOnly ? (
 				<ChecklistReader
 					key={controller.remountKey}
 					content={controller.seed}
+				/>
+			) : (
+				<ChecklistEditor
+					key={controller.remountKey}
+					controller={controller}
 				/>
 			)
 	}

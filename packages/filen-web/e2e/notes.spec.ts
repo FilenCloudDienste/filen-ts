@@ -433,7 +433,11 @@ test.describe("notes: read-only content renderers", () => {
 		}
 	})
 
-	test("checklist note renders disabled checkbox rows with faithful checked state", async ({ page, injectedSession, browserName }) => {
+	// A writable (non-trashed) checklist note opens in the editable checklist widget, not the read-only
+	// reader — the seed is parsed into faithful rows (values + checked state). The read-only ChecklistReader
+	// is now reached only by a trashed note (deriveEditorReadOnly), which this shared FREE account has no
+	// UI-free path to open; the seed-faithfulness it used to prove is covered here on the editor surface.
+	test("checklist note opens in the editor with faithful rows and checked state", async ({ page, injectedSession, browserName }) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
@@ -443,15 +447,15 @@ test.describe("notes: read-only content renderers", () => {
 		const main = page.getByRole("main")
 
 		try {
-			await expect(main.getByText("Buy milk", { exact: true })).toBeVisible()
-			await expect(main.getByText("Already done", { exact: true })).toBeVisible()
+			const rows = main.getByRole("textbox")
+			await expect(rows).toHaveCount(2)
+			await expect(rows.nth(0)).toHaveValue("Buy milk")
+			await expect(rows.nth(1)).toHaveValue("Already done")
 
 			const checkboxes = main.getByRole("checkbox")
 			await expect(checkboxes).toHaveCount(2)
-			expect(await checkboxes.nth(0).isChecked()).toBe(false)
-			expect(await checkboxes.nth(1).isChecked()).toBe(true)
-			await expect(checkboxes.nth(0)).toBeDisabled()
-			await expect(checkboxes.nth(1)).toBeDisabled()
+			await expect(checkboxes.nth(0)).not.toBeChecked()
+			await expect(checkboxes.nth(1)).toBeChecked()
 		} finally {
 			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
 		}
@@ -461,7 +465,11 @@ test.describe("notes: read-only content renderers", () => {
 // Live CodeMirror editing wired to the fault-tolerant outbox (e2-editor-text). These two legs are the
 // proof of the founder's mandate: an edit survives a window-kill mid-edit AND still reaches the server.
 // Serial + net-zero like every note-creating test above.
-async function createEmptyNoteAndOpen(page: Page, noteType: "text" | "md", titlePrefix: string): Promise<{ uuid: string; title: string }> {
+async function createEmptyNoteAndOpen(
+	page: Page,
+	noteType: "text" | "md" | "rich" | "checklist",
+	titlePrefix: string
+): Promise<{ uuid: string; title: string }> {
 	const title = `${titlePrefix} ${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 
 	await page.goto("/drive")
@@ -572,6 +580,144 @@ test.describe("notes: live editors", () => {
 			// Left pane: the raw markdown source (CodeMirror). Right pane: the rendered heading.
 			await expect(main.getByText(typed, { exact: true })).toBeVisible()
 			await expect(main.getByRole("heading", { level: 1, name: headingText })).toBeVisible()
+		} finally {
+			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+		}
+	})
+})
+
+// Rich (Quill) + custom checklist editors wired to the same fault-tolerant outbox (e2-editor-rich).
+// Serial + net-zero like every note-creating test above.
+test.describe("notes: rich and checklist editors", () => {
+	test("rich toolbar formatting survives an immediate reload and reaches the server", async ({ page, injectedSession, browserName }) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+		test.setTimeout(120_000)
+
+		const marker = `RichBold${String(Date.now())}${String(Math.floor(Math.random() * 100_000))}`
+		const { uuid, title } = await createEmptyNoteAndOpen(page, "rich", "e2e rich-edit")
+		const main = page.getByRole("main")
+
+		try {
+			// Type bold content straight into the live Quill surface: focus the editor, toggle Bold, type.
+			const editor = main.locator(".ql-editor")
+			await expect(editor).toBeVisible()
+			await editor.click()
+			await main.getByRole("button", { name: "Bold", exact: true }).click()
+			await page.keyboard.type(marker)
+
+			// The bold run is on screen before any reload — proves the toolbar drove quill.format.
+			await expect(main.locator("strong", { hasText: marker })).toBeVisible()
+
+			// The immediate-persist landed on OPFS (survives-window-close) well under the 3s debounce.
+			await expect
+				.poll(
+					async () => {
+						const persisted = await page.evaluate(id => window.__filenE2E.readPersistedInflightContent(id), uuid)
+
+						return (persisted ?? "").includes(marker)
+					},
+					{ timeout: 10_000 }
+				)
+				.toBe(true)
+
+			// The tab dies mid-edit; the outbox replays from OPFS on boot and the editor seeds inflight-first.
+			await reloadToShell(page)
+			await openNoteByTitle(page, title, uuid)
+
+			// The formatting survived the reload — the bold run is back in the editor.
+			await expect(main.locator(".ql-editor strong", { hasText: marker })).toBeVisible()
+
+			// ...and it reaches the server as sanitized rich HTML (the <strong> wrapper preserved).
+			await expect
+				.poll(
+					async () => {
+						const content = (await page.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), uuid)) ?? ""
+
+						return content.includes(marker) && content.includes("<strong>")
+					},
+					{ timeout: 30_000 }
+				)
+				.toBe(true)
+		} finally {
+			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+		}
+	})
+
+	test("a hostile-HTML rich note opens sanitized in the editor and never executes its script", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		const content = "<p>Safe <strong>rich</strong> body</p><script>window.__e2eEditorXss = true</script>"
+		const uuid = await createAndOpenTestNote(page, "rich", content, "e2e rich-xss")
+		const main = page.getByRole("main")
+
+		try {
+			// The note is writable, so it opens in the EDITOR (not the reader) — its seed is sanitized
+			// before Quill ever sees it, so the safe structure renders and the script neither entered the
+			// DOM nor ran.
+			await expect(main.locator(".ql-editor")).toBeVisible()
+			await expect(main.locator(".ql-editor strong", { hasText: "rich" })).toBeVisible()
+			expect(await page.locator("script", { hasText: "__e2eEditorXss" }).count()).toBe(0)
+			expect(await page.evaluate(() => (window as unknown as { __e2eEditorXss?: boolean }).__e2eEditorXss)).toBeUndefined()
+		} finally {
+			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+		}
+	})
+
+	test("checklist rows added and toggled survive an immediate reload", async ({ page, injectedSession, browserName }) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+		test.setTimeout(120_000)
+
+		const first = `Chk1-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const second = `Chk2-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const { uuid, title } = await createEmptyNoteAndOpen(page, "checklist", "e2e checklist-edit")
+		const main = page.getByRole("main")
+
+		try {
+			// A brand-new checklist opens as one empty editable row. Type the first item, append a second
+			// with Enter, type it, then check the first row's toggle.
+			const rows = main.getByRole("textbox")
+			await expect(rows.first()).toBeVisible()
+			await rows.first().fill(first)
+			await rows.first().press("Enter")
+			await expect(rows).toHaveCount(2)
+			await rows.nth(1).fill(second)
+
+			const toggles = main.getByRole("checkbox")
+			await toggles.nth(0).click()
+			await expect(toggles.nth(0)).toBeChecked()
+
+			// The serialized checklist landed on OPFS before the debounce — both items present.
+			await expect
+				.poll(
+					async () => {
+						const persisted = (await page.evaluate(id => window.__filenE2E.readPersistedInflightContent(id), uuid)) ?? ""
+
+						return persisted.includes(first) && persisted.includes(second)
+					},
+					{ timeout: 10_000 }
+				)
+				.toBe(true)
+
+			// Kill the tab mid-edit; the outbox replays and the editor seeds inflight-first.
+			await reloadToShell(page)
+			await openNoteByTitle(page, title, uuid)
+
+			// Both rows are back with faithful text and checked state (first checked, second not).
+			const reloadedRows = main.getByRole("textbox")
+			await expect(reloadedRows).toHaveCount(2)
+			await expect(reloadedRows.nth(0)).toHaveValue(first)
+			await expect(reloadedRows.nth(1)).toHaveValue(second)
+
+			const reloadedToggles = main.getByRole("checkbox")
+			await expect(reloadedToggles.nth(0)).toBeChecked()
+			await expect(reloadedToggles.nth(1)).not.toBeChecked()
 		} finally {
 			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
 		}

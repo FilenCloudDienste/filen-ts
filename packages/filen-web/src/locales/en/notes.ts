@@ -83,6 +83,44 @@ export const notes = {
 	/** Keymap — description for the Cmd/Ctrl+S action that flushes the pending save immediately */
 	notesSaveAction: "Save note now",
 
+	// ── Rich-text editor toolbar (richTextEditor.tsx) ─────────────────────────────
+	/** Rich editor — placeholder shown in the empty Quill surface */
+	noteRichPlaceholder: "Write something…",
+	/** Rich editor toolbar — bold toggle */
+	noteRichBold: "Bold",
+	/** Rich editor toolbar — italic toggle */
+	noteRichItalic: "Italic",
+	/** Rich editor toolbar — underline toggle */
+	noteRichUnderline: "Underline",
+	/** Rich editor toolbar — heading cycle (none → H1 → H2 → H3) */
+	noteRichHeading: "Heading",
+	/** Rich editor toolbar — code block toggle */
+	noteRichCode: "Code block",
+	/** Rich editor toolbar — blockquote toggle */
+	noteRichQuote: "Quote",
+	/** Rich editor toolbar — ordered (numbered) list toggle */
+	noteRichOrderedList: "Numbered list",
+	/** Rich editor toolbar — bulleted list toggle */
+	noteRichBulletList: "Bulleted list",
+	/** Rich editor toolbar — checklist toggle */
+	noteRichCheckList: "Checklist",
+	/** Rich editor toolbar — opens the add-link popover */
+	noteRichLink: "Add link",
+	/** Rich editor toolbar — link URL field label and placeholder */
+	noteRichLinkUrl: "Link URL",
+	/** Rich editor toolbar — submits the link popover */
+	noteRichLinkAdd: "Add",
+	/** Rich editor toolbar — removes the link on the selection */
+	noteRichUnlink: "Remove link",
+
+	// ── Checklist editor (checklistEditor.tsx) ────────────────────────────────────
+	/** Checklist editor — accessible label on a row's checked toggle */
+	noteChecklistToggle: "Toggle item",
+	/** Checklist editor — accessible label on a row's text field */
+	noteChecklistRowInput: "Checklist item",
+	/** Checklist editor — placeholder in an empty checklist row */
+	noteChecklistItemPlaceholder: "List item",
+
 	// ── Note menu (noteMenu.tsx) ─────────────────────────────────────────────
 	/** Note menu trigger — accessible label on the row/header ⋯ button, mirrors driveItemMenuTrigger */
 	noteItemMenuTrigger: "More actions",
