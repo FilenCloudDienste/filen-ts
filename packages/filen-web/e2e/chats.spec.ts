@@ -336,4 +336,17 @@ test.describe("chats", () => {
 			await page.evaluate(u => window.__filenE2E.deleteTestChatByUuid(u), uuid)
 		})
 	})
+
+	// Realtime receive (messageNew live-render + sidebar update + the typing indicator) needs a SECOND,
+	// DIFFERENT participant to originate foreign events — the whole point of the socket path is another
+	// user's action reaching this one. The shared e2e account is FREE and zero-contacts, so the only
+	// conversation obtainable here is a zero-participant SELF-chat: a second session on the same account is
+	// the SAME user, so its messages self-reconcile through the own-message dedup and its typing signals are
+	// self-filtered (visibleTypingUsers drops own senderId) — neither is observable as a foreign event.
+	// Compounded by the HOT create-limiter on this account, this flow is not provable end-to-end here. The
+	// realtime handlers + typing state machine are fully covered unit-level (chatsSocketHandlers.test.ts);
+	// the `sendTestTypingSignal` hook is the seam a two-user harness would drive once one exists.
+	test.skip("realtime: page B's message + typing reach page A live (needs a second distinct user)", async () => {
+		// Intentionally empty — documented skip (see the block comment above). Unit coverage stands.
+	})
 })

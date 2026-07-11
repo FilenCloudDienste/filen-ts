@@ -5,6 +5,7 @@ import type { Chat } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
 import { chatDisplayName, isChatUndecryptable, chatMessagePreview } from "@/features/chats/lib/sort"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
+import { useChatTypingLabel } from "@/features/chats/hooks/useChatTyping"
 import { formatListTimestamp } from "@/features/chats/lib/time"
 import { ChatContextMenuContent, ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
 import { type ChatActionDialogKind } from "@/features/chats/components/chatMenu.logic"
@@ -47,7 +48,10 @@ export function ChatRow({ chat, selected, currentUserId, onAction }: ChatRowProp
 	const { t } = useTranslation("chats")
 	const undecryptable = isChatUndecryptable(chat)
 	const name = undecryptable ? t("chatUndecryptable") : currentUserId !== undefined ? chatDisplayName(chat, currentUserId) : chat.uuid
-	const preview = chatMessagePreview(chat) ?? t("chatNoMessages")
+	// Typing beats the last-message preview while any remote user is actively typing (the C0 preview
+	// helper documented this deferred tier). Falls back to the message preview when nobody is typing.
+	const typingLabel = useChatTypingLabel(chat.uuid, currentUserId)
+	const preview = typingLabel ?? chatMessagePreview(chat) ?? t("chatNoMessages")
 	const avatarUrl = resolveAvatarUrl(chat, currentUserId)
 	const unread = chatHasUnread(chat, currentUserId)
 	const timestamp = chat.lastMessage?.sentTimestamp

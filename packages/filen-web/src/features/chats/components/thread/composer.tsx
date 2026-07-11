@@ -6,6 +6,7 @@ import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { enqueueChatMessage } from "@/features/chats/lib/sync"
+import { signalTyping, signalStopped } from "@/features/chats/lib/typing"
 import { editMessage } from "@/features/chats/lib/messageActions"
 import type { OptimisticSender } from "@/features/chats/lib/sync.logic"
 import {
@@ -87,6 +88,11 @@ export function Composer({
 	// Caret to restore after a store-driven value change (mention/emoji insert) lands in the DOM.
 	const pendingCaretRef = useRef<number | null>(null)
 	const sendingRef = useRef(false)
+	// Hold the live chat so the typing "stopped" cleanup keys on chatUuid only — the chat prop's identity
+	// changes on every conversation-list cache patch (a socket update mints a new object), which must NOT
+	// fire a premature "up" mid-typing. Written in an effect (not during render — React Compiler forbids
+	// ref writes in render).
+	const chatRef = useRef(chat)
 
 	// ── Autocomplete derivation (mention wins over emoji when both could match) ──
 	const mention = activeMentionQuery(draft, caret)
@@ -184,10 +190,26 @@ export function Composer({
 		}
 	}
 
+	// Keep the ref pointed at the live chat (updated after every render).
+	useEffect(() => {
+		chatRef.current = chat
+	})
+
+	// Emit the throttled "typing" signal on unmount / chat change (the "up" fires only if a "down" is
+	// outstanding, so a chat switch mid-typing tells the peer we stopped).
+	useEffect(() => {
+		return () => {
+			signalStopped(chatRef.current)
+		}
+	}, [chatUuid])
+
 	function onChange(event: React.ChangeEvent<HTMLTextAreaElement>): void {
 		setManualClose(false)
 		setDraft(chatUuid, event.target.value)
 		setCaret(event.target.selectionStart)
+
+		// Fire the throttled typing signal on every keystroke (the controller owns the throttle + idle "up").
+		signalTyping(chat)
 
 		// Emptying the input while editing cancels the edit (mobile: onChangeText empty clears edit).
 		if (event.target.value.length === 0 && mode.kind === "edit") {
@@ -262,6 +284,9 @@ export function Composer({
 		sendingRef.current = true
 
 		const replyTo = mode.kind === "reply" ? buildReplyPartial(mode.message) : undefined
+
+		// A send ends the typing burst — tell the peer we stopped (mobile fires "up" on send).
+		signalStopped(chat)
 
 		// Optimistic clear FIRST (the outbox paints the bubble + persists), then enqueue. reset() bumps the
 		// focus nonce so the input keeps focus after send.
@@ -465,6 +490,10 @@ export function Composer({
 					onKeyUp={syncCaret}
 					onClick={syncCaret}
 					onSelect={syncCaret}
+					onBlur={() => {
+						// Leaving the input ends the typing burst (mobile fires "up" onBlur).
+						signalStopped(chat)
+					}}
 					rows={1}
 					aria-label={t("chatComposerPlaceholder")}
 					placeholder={t("chatComposerPlaceholder")}

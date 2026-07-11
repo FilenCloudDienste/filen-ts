@@ -184,5 +184,13 @@ export const chats = {
 	/** Message delete confirm — heading */
 	chatMessageDeleteDialogTitle: "Delete message?",
 	/** Message delete confirm — body copy */
-	chatMessageDeleteDialogBody: "Are you sure you want to delete this message? This cannot be undone."
+	chatMessageDeleteDialogBody: "Are you sure you want to delete this message? This cannot be undone.",
+
+	// ── Typing indicators ────────────────────────────────────────────────────────
+	/** Typing indicator — a single remote user is typing (thread footer + sidebar row preview) */
+	chatTypingSingle: "{{name}} is typing…",
+	/** Typing indicator — exactly two remote users are typing */
+	chatTypingDouble: "{{name}} and {{other}} are typing…",
+	/** Typing indicator — three or more remote users are typing */
+	chatTypingSeveral: "Several people are typing…"
 } as const

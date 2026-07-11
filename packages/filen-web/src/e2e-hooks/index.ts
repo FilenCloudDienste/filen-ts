@@ -146,6 +146,9 @@ interface E2eHooks {
 	// Defensive sweep (cleanup.setup.ts): deletes every conversation whose name starts with `prefix`.
 	// Returns the count removed.
 	sweepTestChatsByNamePrefix: (prefix: string) => Promise<number>
+	// Fires a realtime typing signal ("down"/"up") for a chat — the seam a second page drives so the
+	// first page's typing indicator can be exercised end-to-end. No-op when the uuid isn't found.
+	sendTestTypingSignal: (chatUuid: string, signalType: "up" | "down") => Promise<void>
 }
 
 // Minimal shape of the TanStack router main.tsx hands in — enough to re-run route guards after the
@@ -454,6 +457,17 @@ export function installE2eHooks(router: RouterLike): void {
 			}
 
 			return matches.length
+		},
+		sendTestTypingSignal: async (chatUuid, signalType) => {
+			await whenBootReady()
+
+			const chat = chatsQueryGet()?.find(c => c.uuid === chatUuid) ?? (await sdkApi.listChats()).find(c => c.uuid === chatUuid)
+
+			if (chat === undefined) {
+				return
+			}
+
+			await sdkApi.sendTypingSignal(chat, signalType)
 		}
 	}
 

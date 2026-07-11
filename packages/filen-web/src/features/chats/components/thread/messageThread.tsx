@@ -8,6 +8,8 @@ import { buildThreadRows, computeScrollAfterPrepend } from "@/features/chats/com
 import { composeMessageList, type OptimisticSender } from "@/features/chats/lib/sync.logic"
 import { useChatsInflightStore } from "@/features/chats/store/useChatsInflight"
 import { Composer } from "@/features/chats/components/thread/composer"
+import { TypingIndicator } from "@/features/chats/components/thread/typingIndicator"
+import { setFocusedChat } from "@/features/chats/lib/focusedChat"
 import { dayKind, formatFullDate } from "@/features/chats/lib/time"
 import { chatDisplayName, isChatUndecryptable } from "@/features/chats/lib/sort"
 import { MessageRow } from "@/features/chats/components/thread/messageRow"
@@ -108,6 +110,17 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	useEffect(() => {
 		hasMoreRef.current = true
 		lastCursorRef.current = null
+	}, [chatUuid])
+
+	// Track the open conversation OUTSIDE React so the socket handlers can gate derived-unread: a foreign
+	// message landing in the chat the user is looking at must not flip it unread (D4). Cleared on unmount /
+	// chat change.
+	useEffect(() => {
+		setFocusedChat(chatUuid)
+
+		return () => {
+			setFocusedChat(null)
+		}
 	}, [chatUuid])
 
 	// Open pinned to the bottom, once per chat. Fires when this chat's rows first populate; the chat-uuid
@@ -285,6 +298,10 @@ export function MessageThread({ chat }: { chat: Chat }) {
 			</header>
 			<div className="h-px shrink-0 bg-border/50" />
 			{renderList()}
+			<TypingIndicator
+				chatUuid={chatUuid}
+				currentUserId={currentUserId}
+			/>
 			<Composer
 				chat={chat}
 				messages={messages}

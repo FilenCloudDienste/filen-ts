@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils"
 import { runLogout } from "@/lib/logout"
 import { sync as notesSync } from "@/features/notes/lib/sync"
 import { sync as chatsSync } from "@/features/chats/lib/sync"
+import { clearAllTyping } from "@/features/chats/lib/typing"
 import { useChatsUnread } from "@/features/chats/queries/chatsUnread"
 import { socketBridge } from "@/lib/sdk/socket"
 import { sdkApi } from "@/lib/sdk/client"
@@ -125,6 +126,8 @@ function AccountMenu() {
 		// write so a late flush can never resurrect this account's plaintext queue after kv-clear lands.
 		notesSync.cancel()
 		chatsSync.cancel()
+		// Stop every typing watchdog + wipe the typing store so no timer fires into the cleared session.
+		clearAllTyping()
 		// Tear the realtime socket down before the client is released — unsubscribeFromSocket needs the
 		// live client. Fire-and-forget: the worker also frees the listener in releaseClient as a backstop.
 		void socketBridge.stop()
