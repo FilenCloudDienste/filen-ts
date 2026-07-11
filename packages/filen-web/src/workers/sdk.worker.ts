@@ -41,7 +41,11 @@ import init, {
 	type DuplicateNoteResponse,
 	type AddTagToNoteResponse,
 	type SocketEvent,
-	type ListenerHandle
+	type ListenerHandle,
+	type Chat,
+	type ChatMessage,
+	type ChatMessagePartial,
+	type ChatTypingType
 } from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
 import { toErrorDTO, PARENT_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
@@ -959,6 +963,71 @@ const api = {
 	},
 	setNoteParticipantPermission(noteUuid: string, participant: NoteParticipant, write: boolean): Promise<NoteParticipant> {
 		return requireClient().setNoteParticipantPermission(noteUuid, participant, write)
+	},
+	// ── Chats ────────────────────────────────────────────────────────────────
+	// Plain pass-throughs, same shape as the Notes section above — no chat method on the wasm
+	// surface takes an AbortSignal/options param either, so none is plumbed through here. Skips
+	// listMessages (mobile always uses listMessagesBefore, even for the initial load),
+	// getChatUnreadCount (unread is derived client-side from cached messages, not a per-chat SDK
+	// round trip) and updateChatOnlineStatus (compiled-in but unreachable from any mobile product
+	// code path — vestigial) per the wasm surface study. No worker-side cache: features/chats/
+	// queries owns the chat list + per-chat message arrays as TanStack Query cache slices, same as
+	// notes. sendChatMessage lands here now (trivial pass-through) even though nothing calls it
+	// until the send-outbox wave — it returns the sent message on the *chat's* lastMessage, not a
+	// bare ChatMessage (wasm-chats study §2), unwrapped by that later call site, not here.
+	listChats(): Promise<Chat[]> {
+		return requireClient().listChats()
+	},
+	getChat(uuid: string): Promise<Chat | undefined> {
+		return requireClient().getChat(uuid)
+	},
+	listMessagesBefore(chat: Chat, before: bigint): Promise<ChatMessage[]> {
+		return requireClient().listMessagesBefore(chat, before)
+	},
+	createChat(contacts: Contact[]): Promise<Chat> {
+		return requireClient().createChat(contacts)
+	},
+	renameChat(chat: Chat, newName: string): Promise<Chat> {
+		return requireClient().renameChat(chat, newName)
+	},
+	muteChat(chat: Chat, mute: boolean): Promise<Chat> {
+		return requireClient().muteChat(chat, mute)
+	},
+	leaveChat(chat: Chat): Promise<void> {
+		return requireClient().leaveChat(chat)
+	},
+	deleteChat(chat: Chat): Promise<void> {
+		return requireClient().deleteChat(chat)
+	},
+	addChatParticipant(chat: Chat, contact: Contact): Promise<Chat> {
+		return requireClient().addChatParticipant(chat, contact)
+	},
+	removeChatParticipant(chat: Chat, participantId: bigint): Promise<Chat> {
+		return requireClient().removeChatParticipant(chat, participantId)
+	},
+	markChatRead(chat: Chat): Promise<void> {
+		return requireClient().markChatRead(chat)
+	},
+	updateLastChatFocusTimesNow(chats: Chat[]): Promise<Chat[]> {
+		return requireClient().updateLastChatFocusTimesNow(chats)
+	},
+	getAllChatsUnreadCount(): Promise<bigint> {
+		return requireClient().getAllChatsUnreadCount()
+	},
+	sendChatMessage(chat: Chat, message: string, replyTo?: ChatMessagePartial): Promise<Chat> {
+		return requireClient().sendChatMessage(chat, message, replyTo)
+	},
+	editMessage(chat: Chat, message: ChatMessage, newMessage: string): Promise<ChatMessage> {
+		return requireClient().editMessage(chat, message, newMessage)
+	},
+	deleteMessage(chat: Chat, message: ChatMessage): Promise<Chat> {
+		return requireClient().deleteMessage(chat, message)
+	},
+	disableMessageEmbed(message: ChatMessage): Promise<ChatMessage> {
+		return requireClient().disableMessageEmbed(message)
+	},
+	sendTypingSignal(chat: Chat, signalType: ChatTypingType): Promise<void> {
+		return requireClient().sendTypingSignal(chat, signalType)
 	},
 	// ── Sharing ──────────────────────────────────────────────────────────────
 	// shareDir's progress callback is a REQUIRED param on the wasm surface, but this app shows no
