@@ -52,7 +52,7 @@ export function enterIntent(event: { key: string; shiftKey: boolean }): "send" |
 }
 
 // ArrowUp in an EMPTY composer edits the last own message (old-web affordance; mobile has no equivalent
-// — kept because the synthesis flags it as a small, loved web power-shortcut). Only fires on a truly
+// — kept because it is a small, loved web power-shortcut). Only fires on a truly
 // empty input so it never hijacks caret navigation inside a draft.
 export function shouldEditLastOnArrowUp(value: string): boolean {
 	return value.length === 0
@@ -60,7 +60,7 @@ export function shouldEditLastOnArrowUp(value: string): boolean {
 
 // The composer's per-chat mode. "reply" pins a quoted target above the input (embedded on the send as a
 // denormalized ChatMessagePartial); "edit" loads a committed own message's text for an in-place edit
-// (online-best-effort, NOT outbox-queued — parity with mobile/old-web, synthesis §1g).
+// (online-best-effort, NOT outbox-queued — parity with mobile/old-web).
 export type ChatComposerMode = { kind: "new" } | { kind: "reply"; message: ChatMessage } | { kind: "edit"; message: ChatMessage }
 
 export const NEW_MODE: ChatComposerMode = { kind: "new" }

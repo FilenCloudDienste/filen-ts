@@ -15,13 +15,13 @@ interface DeleteAllVersionsCardProps {
 	accountQuery: AccountQuerySuccess
 }
 
-// D2: the exact same TypedConfirmDialog primitive drive's emptyTrashButton already uses for an
+// The exact same TypedConfirmDialog primitive drive's emptyTrashButton already uses for an
 // equally severe whole-drive-scale destructive op (rather than DeleteAccountCard's plain double
 // ConfirmDialog chain — that card's two-stage shape exists for its 2FA-code branch, which this
 // single-stage op has no equivalent of). `isArmed`'s exact-match gate is what makes "type a wrong
 // phrase, the button stays disabled" true — verified once in typedConfirmDialog.test.ts, not
-// re-derived here. deleteAllVersions() is NEVER e2e-invoked (settings study §3: irreversibly wipes the
-// shared account's version history) — this card is unit/render-only in this repo's own test suite.
+// re-derived here. deleteAllVersions() is NEVER e2e-invoked — it would irreversibly wipe the
+// shared account's version history — this card is unit/render-only in this repo's own test suite.
 function DeleteAllVersionsCard({ accountQuery }: DeleteAllVersionsCardProps) {
 	const { t } = useTranslation(["settings", "common"])
 	const { versionedFiles, versionedStorage } = accountQuery.data

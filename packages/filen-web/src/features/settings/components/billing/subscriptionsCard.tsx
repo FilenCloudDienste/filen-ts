@@ -20,7 +20,7 @@ const STATUS_BADGE_VARIANT = {
 // Plain semantic <table> markup (no ui/table.tsx primitive exists in the locked registry — the
 // storage breakdown card's own precedent is "compose with existing primitives, never add to the
 // registry"), reused by InvoicesCard below with the same column/empty-state shape. FREE-account
-// reality (settings study §3): `subs` is empty on the shared e2e account — the empty state below IS
+// reality: `subs` is empty on the shared e2e account — the empty state below IS
 // the e2e assertion for this card, never populated rows.
 function SubscriptionsCard({ accountQuery }: SubscriptionsCardProps) {
 	const { t } = useTranslation("settings")

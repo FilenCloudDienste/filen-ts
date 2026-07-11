@@ -6,15 +6,15 @@ import { chatsQueryGet } from "@/features/chats/queries/chats"
 
 // Per-chat message list, keyed on uuid so switching between two threads never shows a stale read
 // while the new one is still in flight — same rationale as notes' noteContentQueryKey. The cache
-// holds a FLAT ChatMessage[] (ascending sentTimestamp — oldest first, newest last, matching D3's
-// non-inverted dense-row layout), NOT a useInfiniteQuery page list: `loadOlderChatMessages` below
+// holds a FLAT ChatMessage[] (ascending sentTimestamp — oldest first, newest last, matching this
+// app's non-inverted dense-row layout), NOT a useInfiniteQuery page list: `loadOlderChatMessages` below
 // mutates this one cache slice in place (prepend + dedupe) rather than tracking pages, so there is
 // exactly one query per chat regardless of how many older pages have been pulled in.
 export function chatMessagesQueryKey(chatUuid: string) {
 	return ["chats", "messages", { chatUuid }] as const
 }
 
-// The pagination CURSOR (`before: bigint`, a sentTimestamp — wasm-chats study §4) deliberately
+// The pagination CURSOR (`before: bigint`, a sentTimestamp) deliberately
 // never enters the query key above: queries/client.ts's own convention forbids bigint in a query
 // key (the default hasher is JSON.stringify-based and throws on it), and — independent of that —
 // this design has no per-cursor cache entry to key by in the first place. `loadOlderChatMessages`
@@ -33,15 +33,15 @@ function resolveChat(chatUuid: string): Chat | undefined {
 }
 
 // Exported bare, same rationale as fetchNoteContent: node-environment tests exercise this against
-// a mocked sdkApi without a React render. Resolves the Chat from the chats list cache (the only
-// chat source this foundation wave has — a socket-delivered chat's cache seeding is a later
-// wave's concern, same carve-out notes' own socket handlers document).
+// a mocked sdkApi without a React render. Resolves the Chat from the chats list cache — a
+// socket-delivered chat is seeded into that same cache by socketHandlers.ts's own conversationsNew
+// handler before this ever needs to resolve it.
 export async function fetchChatMessages(chatUuid: string): Promise<ChatMessage[]> {
 	const chat = resolveChat(chatUuid)
 
 	if (!chat) {
 		// True miss: return whatever's already cached rather than [] so a remount/focus/reconnect
-		// re-run does not clobber a previously loaded (or, in a later wave, optimistic/socket-
+		// re-run does not clobber a previously loaded (or optimistic/socket-
 		// delivered) message list just because the chats list hasn't resolved this uuid yet.
 		return chatMessagesQueryGet(chatUuid) ?? []
 	}
@@ -73,7 +73,7 @@ export function chatMessagesQueryUpdate(chatUuid: string, updater: (prev: ChatMe
 }
 
 // Replaces (or inserts, keeping ascending order) a single message by uuid — the shape a confirmed
-// edit/delete-undo/socket-reconciled message needs once later waves wire those call sites.
+// edit/delete-undo/socket-reconciled message needs (messageActions.ts is the current caller).
 export function chatMessagesQueryUpsert(chatUuid: string, message: ChatMessage): void {
 	chatMessagesQueryUpdate(chatUuid, prev => {
 		const index = prev.findIndex(m => m.uuid === message.uuid)
@@ -98,7 +98,7 @@ export function chatMessagesQueryGet(chatUuid: string): ChatMessage[] | undefine
 
 // Fetches one older page via listMessagesBefore(chat, before) and PREPENDS it into the chat's
 // single cache slice, deduped by uuid against whatever's already cached (a concurrent socket
-// delivery or — in a later wave — an optimistic send could already occupy the overlap window).
+// delivery or an optimistic send could already occupy the overlap window).
 // Returns the raw page (not the merged cache) so a caller can inspect `page.length` to decide
 // whether more history remains, mirroring mobile's own `hasMoreRef` signal.
 export async function loadOlderChatMessages(chat: Chat, before: bigint): Promise<ChatMessage[]> {

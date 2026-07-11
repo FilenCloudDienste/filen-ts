@@ -96,7 +96,7 @@ export const chats = {
 	/** Composer — toast when a queued send couldn't be written to disk (survives in memory only) */
 	chatMessageNotSaved: "Message couldn't be saved to this device",
 
-	// ── Conversation actions (C2 — no send/composer) ──────────────────────────────
+	// ── Conversation actions ──────────────────────────────
 	/** Sidebar — opens the new-conversation contact picker */
 	chatsSidebarNewChat: "New chat",
 	/** Row / thread header — accessible label on the ⋯ / ⋮ menu trigger */

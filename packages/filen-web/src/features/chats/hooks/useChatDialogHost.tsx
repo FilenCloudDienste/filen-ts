@@ -31,7 +31,7 @@ export interface UseChatDialogHostParams {
 }
 
 // One instance of whichever dialog `ChatActionDialogKind` (or "create") names is rendered at a time —
-// the chat-menu counterpart to notes' useNoteDialogHost, sized to the five kinds this wave's surfaces
+// the chat-menu counterpart to notes' useNoteDialogHost, sized to the five kinds the chat surfaces
 // ever dispatch (rename/delete/leave/participants/create).
 export function useChatDialogHost({ currentUuid }: UseChatDialogHostParams): ChatDialogHost {
 	const { t } = useTranslation(["chats", "common"])

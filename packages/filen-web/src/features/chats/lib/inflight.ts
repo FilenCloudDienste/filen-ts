@@ -11,8 +11,8 @@ import useChatsInflightStore, { type ChatMessageWithInflightId } from "@/feature
 
 // Purges every piece of per-chat send state when a chat is removed: queued unsent messages, their
 // error/strike records, the persisted queue on disk, AND the per-chat composer draft. Called from all
-// removal paths (leaveChat, deleteChat in lib/actions.ts, and — a later wave — the conversationDeleted
-// socket event). Never throws; never fires UI.
+// removal paths (leaveChat, deleteChat in lib/actions.ts, and the conversationDeleted
+// socket event, via socketHandlers.ts's handleConversationDeleted). Never throws; never fires UI.
 export async function purgeChatInflightState(chatUuid: string): Promise<void> {
 	// Drop the persisted draft (best-effort, never throws).
 	await deleteDraft(chatUuid)

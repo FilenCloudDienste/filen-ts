@@ -13,7 +13,7 @@ import {
 	setChecklistItemContent
 } from "@/features/notes/components/editor/checklistEditor.logic"
 
-// Custom checklist editor (01-DECISIONS D2, mobile content/checklist): one text input per row with a
+// Custom checklist editor (mirrors mobile's content/checklist screen): one text input per row with a
 // leading toggle. Enter on a non-empty row appends a row and focuses it; Backspace on an empty row
 // removes it and focuses the previous; the toggle checks/unchecks. Every mutation serializes through
 // @filen/utils checklistParser to the canonical `<ul data-checked>` HTML and enqueues it on the

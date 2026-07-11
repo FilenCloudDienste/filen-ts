@@ -11,8 +11,8 @@ import { runOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions
 
 export type { ActionOutcome, VoidActionOutcome }
 
-// The conversation-management action layer — no send, no composer (that's a later wave's own concern,
-// gated on the send outbox). Every helper is a plain async function: call the SDK, then (only on
+// The conversation-management action layer — no send, no composer (that lives separately, gated on the
+// send outbox: composer.tsx / lib/sync.ts). Every helper is a plain async function: call the SDK, then (only on
 // success) patch the chats-list cache directly (confirm-then-patch, mirrors notes/lib/actions.ts).
 // Nothing here calls toast — every caller (chatMenu.tsx, useChatDialogHost, createChatDialog, ...)
 // resolves the outcome and surfaces `errorLabel(dto)` itself, same convention as notes.
@@ -157,11 +157,11 @@ export async function deleteChat(chat: Chat, opts?: LeaveOrDeleteChatOptions): P
 	return { status: "success" }
 }
 
-// ── Mark read (explicit action only — D3.6/1g: never auto-fired on thread open) ─────────────────────
+// ── Mark read (explicit action only — never auto-fired on thread open) ─────────────────────
 
 // Wired from chatMenu's own "Mark as read" entry (row context menu + thread header trigger), never
-// from a route-mount effect — old-web's explicit-mark model, not mobile's screen-open trigger (the
-// synthesis's own recommendation: "Do NOT auto-mark-read on open"). Both SDK calls fire together
+// from a route-mount effect — old-web's explicit-mark model, not mobile's screen-open trigger.
+// Both SDK calls fire together
 // (mirrors mobile's UI-level markAsRead handler, chat.tsx: Promise.all, not allSettled — an explicit
 // user action's failure should surface, unlike the send path's best-effort post-commit housekeeping).
 export async function markChatRead(chat: Chat): Promise<VoidActionOutcome> {

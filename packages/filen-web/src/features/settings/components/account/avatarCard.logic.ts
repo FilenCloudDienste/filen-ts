@@ -3,7 +3,7 @@
 // settings/account avatar input exactly (`file.size >= 1024 * 1024 * 2` + `accept="image/png,
 // image/jpeg, image/jpg"`) — the current web precedent, not mobile's native image-manipulator
 // pipeline (there is no equivalent transcode step in a browser without a heavier dependency this
-// wave doesn't need).
+// codebase doesn't need).
 export const AVATAR_MAX_BYTES = 1024 * 1024 * 2
 export const AVATAR_ACCEPTED_TYPES = new Set(["image/png", "image/jpeg"])
 

@@ -40,7 +40,7 @@ export async function exportNote(note: Note): Promise<VoidActionOutcome> {
 	return { status: "success" }
 }
 
-// One Notes.zip, every non-trashed note as its own faithful file (D3) — content fetched via
+// One Notes.zip, every non-trashed note as its own faithful file — content fetched via
 // getNoteContent PER NOTE, SEQUENTIALLY (never Promise.all): the shared e2e account's note cap is a
 // hard 10, but the real constraint is the same one runOp/the SDK worker apply everywhere else —
 // concurrency/rate-limit policy is the SDK's job, never a JS-side parallel burst (CLAUDE.md). A

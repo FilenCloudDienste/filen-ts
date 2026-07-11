@@ -13,8 +13,8 @@ export function extractMessageLinks(text: string | undefined): string[] {
 		.map(segment => segment.href)
 }
 
-// D2 EXACT scope: Filen public-link cards + direct image/video ONLY. No YouTube/X/OpenGraph — those
-// need a CORS-proxy/oEmbed/OG-scrape path the wasm SDK has none of (00-SYNTHESIS.md §3.5/§5 Q2). This
+// EXACT embed scope: Filen public-link cards + direct image/video ONLY. No YouTube/X/OpenGraph — those
+// need a CORS-proxy/oEmbed/OG-scrape path the wasm SDK has none of. This
 // module is PURE (no network, no React) — the two async legs (Filen-link metadata read, direct-media
 // content-type probe) live in queries/chatMessageLinks.ts, which calls back into these classifiers.
 
@@ -85,7 +85,7 @@ export function parseFilenPublicLink(raw: string): FilenPublicLink | null {
 
 // ── Direct media URL classification ─────────────────────────────────────────────────────────────
 // Extension-first (previewCategoryForName — the SAME name-only classifier the external preview arm
-// uses, features/drive/lib/preview.logic.ts), narrowed to image|video (D2 excludes audio/pdf/etc, and
+// uses, features/drive/lib/preview.logic.ts), narrowed to image|video (out of scope for audio/pdf/etc, and
 // HEIC — no browser decodes it inline, needsImageTransform's rule ported name-only since there is no
 // drive item here to check).
 export type DirectMediaCategory = "image" | "video"
@@ -128,7 +128,7 @@ export function isEmbeddableHttpsUrl(raw: string): boolean {
 
 // One classified embed candidate for a single extracted link (regexed.logic's "link" segments are
 // the caller's only source of urls — never raw message text re-scanned here). "none" means "render as
-// a plain link, no embed" — the D2 out-of-scope case (YouTube/X/OG/anything else) collapses to this.
+// a plain link, no embed" — the out-of-scope case (YouTube/X/OG/anything else) collapses to this.
 export type EmbedCandidate =
 	| { kind: "filenLink"; url: string; link: FilenPublicLink }
 	| { kind: "media"; url: string; category: DirectMediaCategory }
@@ -156,14 +156,14 @@ export function classifyEmbedUrl(url: string): EmbedCandidate {
 	return category !== null ? { kind: "media", url, category } : { kind: "none", url }
 }
 
-// No explicit "embeds per message" cap was found in either source study (mobile's Attachments renders
-// every resolved link with no slice; old-web's doc pass didn't surface one either) — this is a
-// defensive UI bound this wave introduces, NOT a ported mobile constant. Applied by the caller
+// No explicit "embeds per message" cap exists on either reference client (mobile's Attachments renders
+// every resolved link with no cap; old-web has none either) — this is a
+// defensive UI bound this codebase introduces, NOT a ported mobile constant. Applied by the caller
 // (messageContent.tsx) after dedup, oldest-first (message order), so a message with many links still
 // renders its first few embeds deterministically rather than silently degrading to zero.
 export const MAX_MESSAGE_EMBEDS = 6
 
-// Every UNIQUE, D2-in-scope embed candidate for a message's link segments, capped and order-preserving
+// Every UNIQUE, in-scope embed candidate for a message's link segments, capped and order-preserving
 // (first occurrence wins on a repeated URL). Pure — the caller (messageContent.tsx) feeds it the "link"
 // segments regexed.logic.ts already extracted, so this never re-implements url extraction.
 export function embedCandidatesForLinks(urls: readonly string[]): RenderableEmbedCandidate[] {

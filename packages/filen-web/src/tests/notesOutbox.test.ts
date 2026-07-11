@@ -3,7 +3,7 @@ import { QueryClient, onlineManager } from "@tanstack/react-query"
 import type { Note } from "@filen/sdk-rs"
 
 // Same worker-free seams as notesSync.test: the sdk client, the kv adapter, the persisted query client,
-// and sonner are all mocked so the outbox runs under node vitest. This file exercises the B1
+// and sonner are all mocked so the outbox runs under node vitest. This file exercises the
 // leader-owned MULTI-TAB layer: follower routing, leader ingest, reconcile-on-broadcast, and the
 // leadership-change replay. The cross-tab CHANNEL + db-lock signal are mocked at the transport seam
 // (sync.attachTransport) and by driving role methods directly — no real BroadcastChannel/Web Locks.

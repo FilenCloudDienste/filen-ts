@@ -1,9 +1,9 @@
 import DOMPurify from "dompurify"
 
 // Read-only rich-note render — sanitize config MUST match the new mobile app byte-for-byte
-// (01-DECISIONS D1, mobile reference packages/filen-mobile/src/components/textEditor/richText/dom.tsx).
-// The live-edit path (Quill) lands next wave and re-sanitizes with this SAME config before every seed
-// paste; this module is shared ahead of that so the two paths can never drift.
+// (mobile reference: packages/filen-mobile/src/components/textEditor/richText/dom.tsx).
+// The live-edit path (Quill) re-sanitizes with this SAME config before every seed
+// paste; this module is shared between both paths so they can never drift.
 
 export const RICH_TEXT_ALLOWED_TAGS = [
 	"p",

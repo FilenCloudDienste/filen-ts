@@ -9,7 +9,7 @@ import { runOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions
 export type { ActionOutcome, VoidActionOutcome }
 
 // Tag actions — same plain-function, confirm-then-patch shape as lib/actions.ts. Reserved pseudo-tag
-// names collide with the sidebar's future All/Favorites/Pinned filter chips (oldweb-notes §1c); rejected
+// names collide with the sidebar's future All/Favorites/Pinned filter chips; rejected
 // case-insensitively, matching old-web's own `createTag` guard.
 const RESERVED_TAG_NAMES = new Set(["all", "favorites", "pinned"])
 
@@ -77,7 +77,7 @@ export async function deleteNoteTag(tag: NoteTag): Promise<VoidActionOutcome> {
 	}
 
 	noteTagsQueryRemove(tag.uuid)
-	// Strip the tag from every cached note row (mobile-notes §2.5's stripTagFromNotes) — the backend
+	// Strip the tag from every cached note row (mirrors mobile's stripTagFromNotes) — the backend
 	// has already un-tagged every note the deleted tag touched, so this only mirrors that locally
 	// instead of waiting on a refetch.
 	notesQueryUpdate(prev => prev.map(note => ({ ...note, tags: note.tags.filter(t => t.uuid !== tag.uuid) })))
@@ -109,7 +109,7 @@ function noteHasTag(note: Note, tagUuid: string): boolean {
 	return note.tags.some(t => t.uuid === tagUuid)
 }
 
-// Idempotent (mobile-notes §2.5's addTag guard): a note already carrying the tag returns success
+// Idempotent (mirrors mobile's addTag guard): a note already carrying the tag returns success
 // without a wasted round trip.
 export async function addTagToNote(note: Note, tag: NoteTag): Promise<ActionOutcome<Note>> {
 	if (noteHasTag(note, tag.uuid)) {

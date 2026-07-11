@@ -34,7 +34,7 @@ export async function deleteMessage(chat: Chat, message: ChatMessage): Promise<V
 
 // Sender-only (gate lives in messageMenu.logic — the entry is absent for a non-sender). editMessage
 // returns the re-encrypted ChatMessage (same uuid, edited=true); the returned message patches the
-// thread cache so the edited marker appears without waiting for the socket echo (C5). Online-best-
+// thread cache so the edited marker appears without waiting for the socket echo. Online-best-
 // effort: a failure returns an error DTO and the caller (composer) restores the input for a retry.
 export async function editMessage(chat: Chat, message: ChatMessage, newMessage: string): Promise<VoidActionOutcome> {
 	let updated: ChatMessage

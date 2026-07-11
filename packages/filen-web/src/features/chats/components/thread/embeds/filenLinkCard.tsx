@@ -3,8 +3,8 @@ import { FileIcon, FolderIcon } from "lucide-react"
 import type { FilenPublicLink } from "@/features/chats/lib/embeds.logic"
 import type { ChatLinkResolution } from "@/features/chats/queries/chatMessageLinks"
 
-// Compact card for a Filen public link (file or directory) pasted into a message — D2's "Filen
-// public-link cards", the same category old-web rendered as a same-origin viewer iframe, deferred here
+// Compact card for a Filen public link (file or directory) pasted into a message — the same category
+// old-web rendered as a same-origin viewer iframe, deferred here
 // to a plain card (no public-link VIEWER exists on this web build yet — that's a drive-feature surface,
 // out of scope for a chat embed). Clicking opens the link itself in a new tab, same as any other
 // auto-linked URL — this is chrome around the existing plain-link affordance, not a replacement for it.

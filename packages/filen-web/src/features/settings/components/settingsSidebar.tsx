@@ -21,7 +21,7 @@ interface SettingsSidebarItem {
 }
 
 // Account first (the index redirect's landing section — see routes/_app/settings/index.tsx),
-// Security second (the already-shipped page, unchanged), then Appearance/Events/Billing per D3.
+// Security second (the already-shipped page, unchanged), then Appearance/Events/Billing.
 const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 	{ id: "account", labelKey: "settingsSectionAccount", icon: UserIcon, to: "/settings/account" },
 	{ id: "security", labelKey: "settingsSectionSecurity", icon: ShieldIcon, to: "/settings/security" },
@@ -39,7 +39,7 @@ const NAV_ITEM_CLASS = cn(
 	"data-[status=active]:bg-sidebar-accent data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground"
 )
 
-// The shell's settings contextual sidebar (D3): a flat list of section nav links, same w-52
+// The shell's settings contextual sidebar: a flat list of section nav links, same w-52
 // rounded-xl borderless panel geometry as the other three module sidebars. TanStack stamps
 // `data-status="active"` on the matching Link automatically — no manual pathname comparison needed
 // (unlike DriveSidebar's splat routes, every settings route here takes no params).

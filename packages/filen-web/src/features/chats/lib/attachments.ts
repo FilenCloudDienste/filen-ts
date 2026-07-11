@@ -11,8 +11,8 @@ import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/features/drive/lib/upload"
 import { noop } from "@/lib/utils"
 
-// Composer attachment flow (synthesis §3 wave-C6 spec item 4): "no first-class attachment message type
-// on either mobile or old-web — attachments are Filen public links pasted into the message body". A
+// Composer attachment flow: no first-class attachment message type
+// on either mobile or old-web — attachments are Filen public links pasted into the message body. A
 // LOCAL file (file-input / drag-drop) uploads into a dedicated directory then gets a public link; an
 // EXISTING drive item (the drive-file picker) skips the upload and just gets/reuses its link. Both
 // converge on the same public-link-url text the composer inserts. Every step is a plain confirm-then-

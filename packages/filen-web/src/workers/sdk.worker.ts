@@ -441,9 +441,8 @@ const api = {
 	// ── Settings/Account ── plain requireClient() pass-throughs, same shape as changePassword/
 	// exportMasterKeys above. changeEmail/setNickname/updatePersonalInfo/setVersioningEnabled/
 	// setLoginAlertsEnabled/deleteAllVersions/deleteAllItems are all mutations the settings UI never
-	// live-exercises in e2e (see the settings study's e2e safety classes) — wired here regardless so
-	// the account cards have a real worker seam to call. getUserEvents/getUserEvent land now even
-	// though the Events UI itself ships in a later wave.
+	// live-exercises in e2e (they mutate or invalidate the shared account, so e2e coverage stays
+	// unit/render-only) — wired here regardless so the account cards have a real worker seam to call.
 	async changeEmail(password: string, newEmail: string): Promise<void> {
 		await requireClient().changeEmail(password, newEmail)
 	},
@@ -860,7 +859,7 @@ const api = {
 	// OWNS. These resolve a link pasted by ANYONE (the uuid+key the message text carries), same as
 	// opening the link in a browser would; `getLinkedFile`'s optional password param is never supplied
 	// (a password-protected link degrades to the plain-link fallback, same as a resolution failure —
-	// there is no in-chat password prompt this wave).
+	// there is no in-chat password prompt).
 	getLinkedFile(linkUuid: string, fileKey: string): Promise<LinkedFile> {
 		return requireClient().getLinkedFile(linkUuid, fileKey)
 	},
@@ -1031,11 +1030,11 @@ const api = {
 	// listMessages (mobile always uses listMessagesBefore, even for the initial load),
 	// getChatUnreadCount (unread is derived client-side from cached messages, not a per-chat SDK
 	// round trip) and updateChatOnlineStatus (compiled-in but unreachable from any mobile product
-	// code path — vestigial) per the wasm surface study. No worker-side cache: features/chats/
+	// code path — vestigial). No worker-side cache: features/chats/
 	// queries owns the chat list + per-chat message arrays as TanStack Query cache slices, same as
-	// notes. sendChatMessage lands here now (trivial pass-through) even though nothing calls it
-	// until the send-outbox wave — it returns the sent message on the *chat's* lastMessage, not a
-	// bare ChatMessage (wasm-chats study §2), unwrapped by that later call site, not here.
+	// notes. sendChatMessage is a trivial pass-through — it returns the sent message on the
+	// *chat's* lastMessage, not a bare ChatMessage, unwrapped by the send-outbox call site
+	// (features/chats/lib/sync.ts), not here.
 	listChats(): Promise<Chat[]> {
 		return requireClient().listChats()
 	},

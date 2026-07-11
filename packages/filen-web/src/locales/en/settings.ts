@@ -1,11 +1,11 @@
-// English source catalog — "settings" namespace: the settings sidebar (D3's Account / Security /
+// English source catalog — "settings" namespace: the settings sidebar (Account / Security /
 // Appearance / Events / Billing sections) plus the Account and Appearance section content. The
 // existing "auth" namespace keeps the Security section's copy unchanged (that page ships as-is);
 // this namespace never duplicates those keys. Same typed-catalog rules as every other namespace:
 // flat `as const` object, camelCase keys, no literal '.' or ':' (real i18next namespaces,
 // keySeparator/nsSeparator both ON).
 export const settings = {
-	// ── Sidebar section nav (D3) ────────────────────────────────────────────
+	// ── Sidebar section nav ────────────────────────────────────────────
 	/** Settings sidebar — Account section nav label and that section's page heading */
 	settingsSectionAccount: "Account",
 	/** Settings sidebar — Security section nav label (the page itself renders its own "auth:securityTitle" heading) */
@@ -99,7 +99,7 @@ export const settings = {
 	settingsLoginAlertsTitle: "Login alerts",
 	settingsLoginAlertsDescription: "Get an email whenever a new device signs in to your account",
 
-	// ── Account: destructive data controls (D2) ──────────────────────────────
+	// ── Account: destructive data controls ──────────────────────────────
 	/** Shared across both bulk-delete TypedConfirmDialogs — the input field's label */
 	settingsTypedConfirmLabel: "Confirmation phrase",
 	settingsDeleteAllVersionsTitle: "Delete all versioned files",
@@ -184,7 +184,7 @@ export const settings = {
 	settingsEventDetailNo: "No",
 	settingsEventDetailEncrypted: "Encrypted",
 
-	// ── Billing (D1, read-only) ───────────────────────────────────────────────
+	// ── Billing (read-only) ───────────────────────────────────────────────
 	/** Tier label rule (account-plans-stack): derived from isPremium only, never a raw plan name */
 	settingsBillingTierFree: "Free",
 	settingsBillingTierPro: "Pro",

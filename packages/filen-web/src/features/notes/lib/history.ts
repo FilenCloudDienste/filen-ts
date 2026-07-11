@@ -12,7 +12,7 @@ import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
 export type { ActionOutcome }
 
 // Restore-from-history — the history dialog's own action. Mirrors mobile's restoreFromHistory
-// (notesLifecycle.ts) inflight-clear sequencing VERBATIM (mobile-notes §2.5): the restored version
+// (notesLifecycle.ts) inflight-clear sequencing VERBATIM: the restored version
 // wins outright, so any unsynced local edit for this note must never survive to be pushed back over
 // it by the outbox's next pass. This is the same drop-entry/clear-rejections/flush-to-disk seam
 // socketHandlers.ts's reloadRemoteEdit already uses for the analogous "server wins" case.

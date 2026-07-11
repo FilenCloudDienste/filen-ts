@@ -48,10 +48,10 @@ export interface MessageRowProps {
 	currentUserId: bigint | undefined
 }
 
-// One message row (D3 dense grouped flat rows). A burst opener renders the avatar gutter + a header line
+// One message row (dense grouped flat rows). A burst opener renders the avatar gutter + a header line
 // (name + time); a continuation renders the body only, indented under the gutter. There is no deleted
-// tombstone: the wasm ChatMessage has no deleted flag — deletions remove the message outright (a later
-// wave's socket handler drops it from the cache), so the only special body state here is undecryptable
+// tombstone: the wasm ChatMessage has no deleted flag — deletions remove the message outright
+// (socketHandlers.ts's messageDelete handler drops it from the cache), so the only special body state here is undecryptable
 // (message === undefined → placeholder). Carries its own right-click menu (copy/delete — messageMenu.tsx),
 // the minimal set that needs no composer; the delete confirm dialog is owned HERE (not the menu content)
 // so it survives past the menu's own close.

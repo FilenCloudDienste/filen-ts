@@ -25,9 +25,9 @@ export interface HistoryDialogProps {
 	onClose: () => void
 }
 
-// Version-history panel — mounted-when-active by the surface's dialog host, open to every participant
-// (parity matrix: history is view-open, restore is not further gated by this dialog — the SDK itself
-// is the authority on write access). List view first; selecting a row swaps to a read-only preview of
+// Version-history panel — mounted-when-active by the surface's dialog host, open to every participant:
+// history is view-open, restore is not further gated by this dialog — the SDK itself
+// is the authority on write access. List view first; selecting a row swaps to a read-only preview of
 // that version (NoteReaderByType, the same dispatch the live editor's own trashed/non-writable branch
 // uses) rather than a second nested dialog — one panel, two "pages", mirrors versionsDialog.tsx's own
 // list+nested-confirm shape but adds this extra preview page since a note version, unlike a file

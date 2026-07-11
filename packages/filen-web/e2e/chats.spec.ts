@@ -3,13 +3,13 @@ import { test, expect } from "./fixtures"
 import { dismissStartupReminders } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
-// Chats shell smoke + C2 conversation-action affordances + the C3 send-outbox proof + C6 embeds. The rail
+// Chats shell smoke + conversation-action affordances + the send-outbox proof + link/media embeds. The rail
 // entry navigates to /chats, the contextual sidebar renders, the empty-conversation state shows on the
 // zero-contacts FREE account, the index/thread route shows its select prompt, and the New chat button
 // opens the contact picker up to (never past) its own disabled submit — those four tests create nothing
 // (createChat is UI-gated on picking a contact the shared account doesn't have).
 //
-// ONE-CHAT DISCIPLINE (C7 restructure): `conversations/create` is a hot, long-window rate limit on the
+// ONE-CHAT DISCIPLINE: `conversations/create` is a hot, long-window rate limit on the
 // shared account, and every send/kill-path/composer/embeds proof below needs a REAL conversation to run
 // against. Rather than each test minting (and deleting) its own self-chat — 5 creates + 5 deletes per full
 // run — this file creates exactly ONE zero-participant self-chat (`createChat([])`, backend-accepted,
@@ -140,8 +140,8 @@ test.describe("chats", () => {
 		await expect(page.getByText("Select a conversation", { exact: true })).toBeVisible()
 	})
 
-	// The one thing about conversation CREATION confidently e2e-provable on the zero-contacts account
-	// (synthesis §4): the picker opens, settles on its own terminal state (this account's empty-contacts
+	// The one thing about conversation CREATION confidently e2e-provable on the zero-contacts account:
+	// the picker opens, settles on its own terminal state (this account's empty-contacts
 	// copy; a populated listbox is asserted too so this test still holds if that ever changes — mirrors
 	// share.spec.ts's own hasContacts-agnostic pattern), and is dismissed via Escape WITHOUT ever
 	// selecting a contact. createChat is UI-gated on a non-empty selection (the submit stays disabled),
@@ -379,7 +379,7 @@ test.describe("chats", () => {
 		expect(texts.filter(t => t === text)).toHaveLength(1)
 	})
 
-	// C6 embeds — the ONE e2e-provable slice (synthesis §4/wave-spec §6): a real Filen public-link CARD
+	// Embeds — the ONE e2e-provable case: a real Filen public-link CARD
 	// resolution needs a premium account to actually own a link (the shared account is FREE), so this
 	// proves the two things reachable without one, in the SAME shared self-chat/thread: (1) a
 	// syntactically-valid but NON-EXISTENT Filen public-link url degrades gracefully — the card renders from

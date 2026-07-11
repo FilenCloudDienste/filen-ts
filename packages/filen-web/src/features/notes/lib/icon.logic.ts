@@ -1,8 +1,8 @@
 import { ListChecksIcon, TextIcon, CodeIcon, NotepadTextIcon, BookMarkedIcon, ArchiveIcon, Trash2Icon, type LucideIcon } from "lucide-react"
 import type { Note, NoteType } from "@filen/sdk-rs"
 
-// Type → icon + color, the fixed mapping shared with the new mobile app and old-web (01-DECISIONS D1,
-// oldweb-notes §2): checklist purple, text blue, code red, rich cyan, md indigo. Colors are decorative
+// Type → icon + color, the fixed mapping shared with the new mobile app and old-web:
+// checklist purple, text blue, code red, rich cyan, md indigo. Colors are decorative
 // per-type marks (raw palette shades, like drive's text-amber-500 undecryptable mark), not semantic
 // tokens. `noteType` is the wasm STRING union here, not the uniffi enum object — a plain record keyed
 // by the literal strings, exhaustive over NoteType so a future variant fails to compile until mapped.
@@ -19,7 +19,7 @@ export interface NoteIcon {
 	colorClass: string
 }
 
-// Archive/trash override the type icon (oldweb-notes §1 row content): a trashed note shows the trash
+// Archive/trash override the type icon, matching old-web's row content rule: a trashed note shows the trash
 // mark, an archived note the archive mark, otherwise the per-type icon. Trash wins over archive to
 // mirror the sort bucket's own trash-over-archive tiering (features/notes/lib/sort.ts).
 export function noteIcon(note: Note): NoteIcon {

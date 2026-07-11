@@ -50,7 +50,7 @@ function senderName(message: ChatMessage): string {
 	return message.senderNickName !== undefined && message.senderNickName.length > 0 ? message.senderNickName : message.senderEmail
 }
 
-// The composer — replaces C1's disabled strip. EVERY send goes through the C3 outbox (enqueueChatMessage),
+// The composer — replaces the earlier disabled strip. EVERY send goes through the durable outbox (enqueueChatMessage),
 // never sdkApi.sendChatMessage directly, so a send survives a window close / lost connection. Edits are
 // the one exception: online-best-effort (editMessage), NOT outbox-queued, mirroring mobile/old-web. The
 // send button is disabled only on an empty / over-limit body — NEVER offline (an offline send queues, the

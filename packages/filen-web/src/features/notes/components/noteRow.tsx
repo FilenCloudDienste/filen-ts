@@ -25,9 +25,9 @@ export interface NoteRowProps {
 }
 
 // One note row, shared by both sidebar views (the notes list and a tag group's expanded members). Most
-// of the row is a Link to /notes/$uuid — the uuid is a selection key, not a path hierarchy (D4) — with
+// of the row is a Link to /notes/$uuid — the uuid is a selection key, not a path hierarchy — with
 // the ⋯ trigger button as its sibling, not its descendant (see the ContextMenuTrigger comment below).
-// Pinned/favorited stay subtle muted marks (spec) rather than loud badges. Carries its own row-level
+// Pinned/favorited stay subtle muted marks rather than loud badges. Carries its own row-level
 // context menu (right-click) and ⋯ trigger (hover-revealed), both rendering the SAME shared descriptor
 // list (noteMenu.logic.ts) the editor header's own menu uses.
 export function NoteRow({ note, selected, nested = false, allTags, currentUserId, onAction, onDuplicated }: NoteRowProps) {

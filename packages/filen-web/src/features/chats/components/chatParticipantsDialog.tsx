@@ -44,7 +44,8 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 	const chatsQuery = useChats()
 	const accountQuery = useAccountQuery()
 	// Re-resolved from the live list cache every render so an in-dialog add/remove — or a realtime
-	// participant* socket event landing while this is open (a later wave) — repaints immediately, never
+	// participant* socket event landing while this is open (socketHandlers.ts's conversationParticipantNew/
+	// conversationParticipantLeft handlers) — repaints immediately, never
 	// the chat snapshot the menu happened to be holding at open time.
 	const chat = chatsQuery.data?.find(c => c.uuid === initialChat.uuid) ?? initialChat
 	const currentUserId = accountQuery.data?.id

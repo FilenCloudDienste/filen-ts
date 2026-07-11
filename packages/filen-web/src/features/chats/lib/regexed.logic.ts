@@ -9,8 +9,8 @@
 //
 // INJECTION SAFETY: every segment is plain data (strings), rendered downstream into React text nodes /
 // elements only — never `dangerouslySetInnerHTML`, never parsed HTML. Injection is structurally
-// impossible on this path, so — unlike notes' rich-HTML read path — NO DOMPurify is needed (synthesis
-// §3.5). Link hardening below is defense-in-depth for the anchor a link segment becomes, not sanitization.
+// impossible on this path, so — unlike notes' rich-HTML read path — NO DOMPurify is needed.
+// Link hardening below is defense-in-depth for the anchor a link segment becomes, not sanitization.
 
 // @<local>@<domain>.<tld> or the literal @everyone. Mirrors mobile's MENTION_REGEX exactly.
 const MENTION_SOURCE = "@[\\w.-]+@[\\w.-]+\\.\\w+|@everyone"
@@ -20,8 +20,8 @@ const CODE_SOURCE = "```[\\s\\S]*?```"
 // rejected again by hardenLinkHref below as defense-in-depth).
 const URL_SOURCE = "https?://[^\\s]+"
 // :shortcode: (optionally ::skin-tone-N:). Detected so the ordering slot exists and jumbo-emoji sizing
-// can be computed; actual emoji IMAGE rendering needs the shared custom-emoji pack, which lands with the
-// composer wave — until then an emoji segment renders as its literal shortcode text (see messageContent).
+// can be computed; resolved to a standard unicode glyph via emoji.ts's lookup table — an unknown
+// shortcode (a custom-pack name from a mobile/old-web peer) stays literal text (see messageContent.tsx).
 const EMOJI_SOURCE = ":[\\d+_a-z-]+(?:::skin-tone-\\d+)?:"
 const LINE_BREAK_SOURCE = "\\n"
 
@@ -143,7 +143,8 @@ export function segmentMessage(text: string | undefined): MessageSegment[] {
 
 // A message is "emoji-only" (jumbo sizing candidate) when it contains at least one emoji shortcode and,
 // once every shortcode is removed, only whitespace remains — mirrors mobile's emojiSize heuristic. The
-// jumbo IMAGE render itself lands with the emoji pack in a later wave; this predicate is exported now so
+// jumbo IMAGE render itself is not wired to any component yet (it needs the shared custom-emoji pack,
+// which this web build does not ship — see emoji.ts); this predicate is exported now so
 // the sizing decision has a tested home.
 export function isEmojiOnly(text: string | undefined): boolean {
 	if (text === undefined || text.length === 0) {

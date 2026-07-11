@@ -31,8 +31,8 @@ const SKELETON_ROW_COUNT = 5
 // ContactRow's avatar/name/presence visuals, same as drive's ContactPickerDialog) and calls createChat
 // with every chosen contact. Picker treats 0 selections as cancel — createChat is NEVER called with an
 // empty array (the SDK sees no call at all until at least one contact is selected), matching both
-// mobile and old-web (parity matrix §1f). The zero-contacts FREE e2e account lands on this dialog's own
-// empty state, never a crash — the one thing this flow is confidently e2e-provable up to (§4).
+// mobile and old-web. The zero-contacts FREE e2e account lands on this dialog's own
+// empty state, never a crash — the one thing this flow is confidently e2e-provable up to.
 export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) {
 	const { t } = useTranslation(["chats", "contacts", "common"])
 	const contactsQuery = useContactsQuery()

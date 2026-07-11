@@ -2,7 +2,7 @@ import type { ChatMessage } from "@filen/sdk-rs"
 
 // Thread row model + scroll math — PURE, no React, unit-tested.
 //
-// D3 (founder decision): DENSE GROUPED FLAT ROWS. Messages ascend (oldest first, newest last — the query
+// DENSE GROUPED FLAT ROWS. Messages ascend (oldest first, newest last — the query
 // cache's own order). Consecutive messages from the SAME sender within a 2-minute window collapse into one
 // visual burst: the first row carries the avatar + name + timestamp header, subsequent rows in the burst
 // render indented with no repeated header. A day boundary or a sender change always starts a new burst
@@ -58,7 +58,7 @@ function continuesBurst(previous: ChatMessage, current: ChatMessage): boolean {
 // number so React reconciles stably across prepends (loading older pages).
 //
 // `unread`, when given, inserts a single `{kind:"unread"}` divider row immediately before the first
-// message that qualifies (old-web's NewDivider placement/guard — §00-SYNTHESIS.md 1b). Omitted entirely
+// message that qualifies (old-web's NewDivider placement/guard). Omitted entirely
 // once `currentUserId` is unresolved (nothing to compare senderId against) or once the chat has no
 // qualifying message at all — never renders past the first insertion.
 export function buildThreadRows(messages: readonly ChatMessage[], unread?: { lastFocus: bigint; currentUserId: bigint }): ThreadRow[] {
@@ -128,7 +128,7 @@ export function countNewTailMessages(previous: readonly ChatMessage[], next: rea
 
 // Scroll-to-bottom affordance state (the floating pill that appears once the user has scrolled up AND a
 // new message has landed below the viewport — mobile's FAB re-imagined with old-web's "new since" count,
-// D4 in-app-only). PURE reducer over two event kinds so the count-while-scrolled-up / clear-on-bottom
+// in-app-only). PURE reducer over two event kinds so the count-while-scrolled-up / clear-on-bottom
 // rules are unit-testable without a DOM: a `scroll` event resolves the current bottom-proximity (clearing
 // the count the instant the user reaches bottom, whether by the pill or by their own scrolling); a
 // `messagesArrived` event only grows the count while NOT at bottom — while at bottom the thread is already

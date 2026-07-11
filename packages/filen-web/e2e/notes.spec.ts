@@ -178,7 +178,7 @@ test.describe("notes", () => {
 		})
 	})
 
-	// Full action leg (e1-actions): create → rename → pin → favorite → tag assign (+ tags-view
+	// Full action leg: create → rename → pin → favorite → tag assign (+ tags-view
 	// expansion + tag-menu delete) → trash → restore → delete permanently, all through the editor
 	// header's own ⋯ menu (noteMenu.tsx — the same descriptor list the sidebar row's menu renders).
 	// One serial test covering the whole surface rather than one test per action: every step depends
@@ -363,7 +363,7 @@ test.describe("notes", () => {
 		}
 	})
 
-	// Faithful export (D3): a checklist note's exported file has real "- [x]"/"- [ ]" markdown lines
+	// Faithful export: a checklist note's exported file has real "- [x]"/"- [ ]" markdown lines
 	// (never old-web's lossy flat-text dump), and export-all's Notes.zip carries the SAME faithful
 	// content under that note's own file. Both downloads are a plain Blob+anchor click (export.ts's
 	// downloadBlob — never the drive FSA/SW path), so a real "download" event fires the instant the
@@ -432,8 +432,8 @@ test.describe("notes", () => {
 	})
 })
 
-// Read-only content renderers (e1-reader): each note is created with a distinctive title + content
-// through the programmatic hook layer (no editor UI exists yet), located in the sidebar via search
+// Read-only content renderers: each note is created with a distinctive title + content
+// through the programmatic hook layer (bypassing the editor UI for a fast, deterministic seed), located in the sidebar via search
 // (title is a random-suffixed string, so an exact-text match is unambiguous even against whatever else
 // lives in the shared account), then opened for a render assertion. Net-zero teardown per test.
 async function createAndOpenTestNote(
@@ -576,8 +576,8 @@ test.describe("notes: read-only content renderers", () => {
 	})
 })
 
-// Live CodeMirror editing wired to the fault-tolerant outbox (e2-editor-text). These two legs are the
-// proof of the founder's mandate: an edit survives a window-kill mid-edit AND still reaches the server.
+// Live CodeMirror editing wired to the fault-tolerant outbox. These two legs are the
+// core durability proof: an edit survives a window-kill mid-edit AND still reaches the server.
 // Serial + net-zero like every note-creating test above.
 async function createEmptyNoteAndOpen(
 	page: Page,
@@ -700,7 +700,7 @@ test.describe("notes: live editors", () => {
 	})
 })
 
-// Rich (Quill) + custom checklist editors wired to the same fault-tolerant outbox (e2-editor-rich).
+// Rich (Quill) + custom checklist editors wired to the same fault-tolerant outbox.
 // Serial + net-zero like every note-creating test above.
 test.describe("notes: rich and checklist editors", () => {
 	test("rich toolbar formatting survives an immediate reload and reaches the server", async ({ page, injectedSession, browserName }) => {
@@ -838,13 +838,14 @@ test.describe("notes: rich and checklist editors", () => {
 	})
 })
 
-// Realtime socket bridge (e3-socket): a TWO-PAGE proof in one browser context — both pages share the
+// Realtime socket bridge: a TWO-PAGE proof in one browser context — both pages share the
 // injected session, so page B's programmatic write is a genuine second-connection edit the server
 // broadcasts back to page A's live socket. Two facts are proven:
 //   1. A metadata event (titleEdited) lands LIVE on page A — no reload — patching both the editor header
 //      and the sidebar row. Metadata events carry no echo suppression, so a same-account edit shows.
 //   2. A ContentEdited event authored by the SAME account is ECHO-SUPPRESSED (mobile keys suppression on
-//      editorId === own userId; all our tabs share one userId until the multi-tab leader wave). A
+//      editorId === own userId; all our tabs share one userId as long as tabs stay uncoordinated by a
+//      per-tab leader, which there is none of today). A
 //      same-account e2e therefore CANNOT observe the un-suppressed ContentEdited path — that (clean→
 //      invalidate, dirty→banner) is unit-covered in src/tests/notesSocketHandlers.test.ts. Here we prove
 //      the suppressed path: page A shows NO reload banner and its editor is NOT clobbered.
@@ -971,7 +972,7 @@ test.describe("notes: realtime", () => {
 	})
 })
 
-// Dialogs wave (e3-dialogs): history's full list→preview→restore round trip, and participants' owner
+// History's full list→preview→restore round trip, and participants' owner
 // management surface (render-only past the point a second account would be needed — see below).
 // Serial + net-zero like every other note-creating block in this file.
 test.describe("notes: participants and history dialogs", () => {
@@ -1090,7 +1091,7 @@ test.describe("notes: participants and history dialogs", () => {
 	})
 })
 
-// B1 leader-owned outbox across tabs (e4-leader). Two tabs of the SAME account share OPFS + Web Locks +
+// Leader-owned outbox across tabs. Two tabs of the SAME account share OPFS + Web Locks +
 // BroadcastChannel in one Playwright context: the FIRST to boot wins the db lock and runs the single
 // push loop; the second is a follower that FORWARDS its edits to the leader. The money test is the
 // failover — kill the leader inside the debounce window and the follower, promoted via the released db

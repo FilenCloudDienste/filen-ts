@@ -8,7 +8,7 @@ import {
 } from "@/features/notes/lib/sort"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 
-// Pure view-model builders for the two-view sidebar (01-DECISIONS D4). No React, no cache — the
+// Pure view-model builders for the two-view sidebar. No React, no cache — the
 // component feeds in the raw notes/tags lists + the current search/expand/sort state, and gets back the
 // exact row model the virtualizer walks. Tested directly against these inputs (notesSidebar.logic.test.ts).
 
@@ -47,8 +47,8 @@ function tagNameMatches(tag: NoteTag, normalized: string): boolean {
 	return tagDisplayName(tag).toLowerCase().includes(normalized)
 }
 
-// A tag is shown in the tags view when the search matches its NAME or any of its member notes (the
-// D4/spec "filters tags by name AND matches within expanded members" rule). Empty search shows all.
+// A tag is shown in the tags view when the search matches its NAME or any of its member notes.
+// Empty search shows all.
 export function filterTagsForView(tags: readonly NoteTag[], notesByTag: Record<string, readonly Note[]>, search: string): NoteTag[] {
 	const normalized = normalizeSearch(search)
 

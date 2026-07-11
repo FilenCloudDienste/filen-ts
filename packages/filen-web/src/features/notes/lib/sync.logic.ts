@@ -8,7 +8,7 @@ import type { InflightContent, InflightEntry } from "@/features/notes/store/useN
 // importer of this module's classifier surface (sync.ts, the notes tests) resolves unchanged.
 export { isNetworkClassError, isRetryableAuthError, isNonSdkError, MAX_NON_RETRYABLE_REJECTIONS } from "@/lib/sdk/retry"
 
-// D3: cheap stable content hash used for overwrite-conflict DETECTION — the same xxHash32 lib +
+// Cheap stable content hash used for overwrite-conflict DETECTION — the same xxHash32 lib +
 // hex format filen-mobile uses. Persisted inside inflight entries as `baseContentHash`, so the
 // algorithm must stay stable across app versions: changing it only costs a one-pass grace (entries
 // fall back to the legacy no-hash path), never data. Local-only bookkeeping; never sent to the server.
@@ -22,18 +22,19 @@ export function noteKindForPreview(noteType: NoteType): "rich" | "checklist" | "
 	return noteType === "checklist" ? "checklist" : noteType === "rich" ? "rich" : "other"
 }
 
-// M1 + D3: pure builder for a note's inflight entry list after a keystroke.
+// Pure builder for a note's inflight entry list after a keystroke.
 //
-// M1: the author timestamp is PER-NOTE MONOTONIC — `max(now, newest existing + 1)` — so a backward
+// The author timestamp is PER-NOTE MONOTONIC — `max(now, newest existing + 1)` — so a backward
 // clock step (NTP correction mid-editing) can never leave an OLDER entry outranking the text just
 // typed: sync's max-timestamp pick would push the stale entry and its `> syncedUpTo` prune would
 // then discard the newest text. All comparisons stay local-vs-local; server clocks are never consulted.
 //
-// D3: an ongoing session CARRIES its existing base hash forward unchanged (including the legacy
+// An ongoing session CARRIES its existing base hash forward unchanged (including the legacy
 // no-hash grace for entries persisted by older app versions — stamping a fresh base mid-session
 // would claim a sync point the session never had). Only a FRESH session (no existing entries) stamps
 // `sessionBaseHash` — the hash of the synced/loaded content the editor was seeded from, or none when
-// nothing synced is known. The editor wave supplies `sessionBaseHash`; omitting it is the legacy grace.
+// nothing synced is known. The caller supplies `sessionBaseHash` when a session starts; omitting it is
+// the legacy grace.
 export function buildInflightEntries({
 	previous,
 	note,

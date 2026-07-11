@@ -67,13 +67,13 @@ interface E2eHooks {
 	// Trashes a File this hook created — keeps the shared e2e account net-zero after a test run.
 	trashTestFile: (file: File) => Promise<void>
 	// Permanently removes a note by uuid — trashes then deletes — keeping the shared e2e account
-	// net-zero after a UI-driven create smoke test (this shell has no trash/delete UI yet; that lands
-	// in the actions step). No-op when the uuid isn't found.
+	// net-zero after a UI-driven create smoke test, bypassing the trash/delete menu UI for a faster,
+	// more direct teardown. No-op when the uuid isn't found.
 	deleteTestNoteByUuid: (uuid: string) => Promise<void>
 	// Creates a note, switches it to `noteType` (a no-op for the SDK's own "text" default), writes
 	// `content` with a matching preview, and renames it to `title` — the worker seam every read-only
-	// reader test drives content through, with no editor UI required yet (this shell has no live
-	// editing until the sync-outbox wave). `title` is a distinctive string a spec can locate in the
+	// reader test drives content through, bypassing the editor UI so a test can seed content directly
+	// without depending on keystroke timing or the sync debounce. `title` is a distinctive string a spec can locate in the
 	// sidebar via the search box (rather than depending on the SDK's own default title, which carries
 	// no test-chosen identity). Returns the final Note row for the caller to navigate to and later pass
 	// to deleteTestNoteByUuid for net-zero teardown.
@@ -134,9 +134,9 @@ interface E2eHooks {
 	// full listMessagesBefore(now + 1h). The kill-path proof counts how many copies of a text landed —
 	// the temporal-dedupe "exactly one" assertion. Empty array when the uuid isn't found.
 	readTestChatMessageTexts: (uuid: string) => Promise<string[]>
-	// Drives the SEND OUTBOX transport directly (no composer UI this wave): resolves the chat + the
-	// current user, then enqueues through the same optimistic-persist-then-push path the composer will
-	// use. Returns the persist result. This is the outbox intake the durability + kill-path proofs
+	// Drives the SEND OUTBOX transport directly, bypassing the composer UI: resolves the chat + the
+	// current user, then enqueues through the same optimistic-persist-then-push path the composer
+	// itself uses. Returns the persist result. This is the outbox intake the durability + kill-path proofs
 	// exercise. No-op-false when the uuid isn't found.
 	enqueueTestChatMessage: (chatUuid: string, content: string) => Promise<boolean>
 	// The DURABLE (OPFS) send-outbox contents for a chat, read straight from the kv store the outbox

@@ -55,7 +55,7 @@ export function useNoteEditor(note: Note): NoteEditorController {
 	const remountKey = deriveEditorRemountKey({ uuid: note.uuid, dataUpdatedAt: query.dataUpdatedAt })
 	const errorDto = query.isError ? asErrorDTO(query.error) : undefined
 
-	// D3 session base hash: the hash of the content THIS editing session was seeded from, stamped onto
+	// Session base hash: the hash of the content THIS editing session was seeded from, stamped onto
 	// the first outbox entry of a session (buildInflightEntries) for overwrite-conflict detection. The
 	// ref renews only when a fresh seed arrives with no session ongoing (no inflight for this note) —
 	// stamping mid-session would claim a sync point the session never had. Mobile's sessionBaseHashRef.

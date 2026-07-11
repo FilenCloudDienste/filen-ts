@@ -104,15 +104,15 @@ function ScrollToBottomFab({ count, onClick }: { count: number; onClick: () => v
 	)
 }
 
-// Read-only conversation thread (D3 dense grouped flat rows). Messages ascend (oldest→newest); the list is
+// Conversation thread (dense grouped flat rows). Messages ascend (oldest→newest); the list is
 // virtualized (@tanstack/react-virtual — the app's own virtualizer, notesSidebar's convention) and opens
 // pinned to the bottom (newest). Scrolling to the top loads one older page via loadOlderChatMessages
 // (prepend + dedupe) with scroll-position preservation. The composer strip at the bottom routes every
-// send through the C3 outbox (Composer); an own send jumps the view back to the bottom. The header's ⋮
+// send through the outbox (Composer); an own send jumps the view back to the bottom. The header's ⋮
 // trigger hosts the conversation menu
-// (rename/mute/participants/leave/delete + the explicit "mark as read" entry) — the ONLY place this wave
-// wires markChatRead: never auto-fired on mount (synthesis §1g/§3.6 — old-web's explicit-mark model, not
-// mobile's own screen-open trigger).
+// (rename/mute/participants/leave/delete + the explicit "mark as read" entry) — one of two places
+// markChatRead is wired (chatMenu.tsx's row context menu is the other): never auto-fired on mount —
+// old-web's explicit-mark model, not mobile's own screen-open trigger.
 export function MessageThread({ chat }: { chat: Chat }) {
 	const { t } = useTranslation("chats")
 	const chatUuid = chat.uuid
@@ -212,7 +212,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	}, [messages])
 
 	// Track the open conversation OUTSIDE React so the socket handlers can gate derived-unread: a foreign
-	// message landing in the chat the user is looking at must not flip it unread (D4). Cleared on unmount /
+	// message landing in the chat the user is looking at must not flip it unread. Cleared on unmount /
 	// chat change.
 	useEffect(() => {
 		setFocusedChat(chatUuid)

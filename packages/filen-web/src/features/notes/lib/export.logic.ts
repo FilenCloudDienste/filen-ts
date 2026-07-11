@@ -4,7 +4,7 @@ import { extensionOf, codeMirrorLanguageFor } from "@/features/drive/lib/preview
 import { sanitizeRichTextHtml } from "@/features/notes/lib/sanitizeRichText"
 import { sanitizeFilename } from "@/lib/filename"
 
-// Pure per-type export transforms (D3 — FAITHFUL formats, not old-web's lossy always-.txt). Kept
+// Pure per-type export transforms (FAITHFUL formats, not old-web's lossy always-.txt). Kept
 // free of the SDK/i18n/DOM so the whole table is testable with plain strings; export.ts is the thin
 // impure shell that fetches content and triggers the actual browser download.
 
@@ -61,7 +61,7 @@ export function checklistToMarkdown(html: string): string {
 }
 
 // The exported file's actual bytes for a note's raw content, by type. text/md/code are byte-faithful
-// passthroughs (D3 — no lossy re-encoding); rich is sanitized through the SAME allowlist the live
+// passthroughs (no lossy re-encoding); rich is sanitized through the SAME allowlist the live
 // editor/reader use (sanitizeRichText.ts) before ever leaving the app, so participant-authored HTML
 // on a shared note can't carry a script tag into a file on disk; checklist becomes its markdown task
 // lines. Content that failed to load (getNoteContent returned undefined) is the caller's concern —

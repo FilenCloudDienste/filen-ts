@@ -29,7 +29,7 @@ import {
 const OUTBOX_KV_KEY = "inflightNoteContent"
 const SYNC_DEBOUNCE_MS = 3000
 
-// Multi-tab transport (ADAPTATION B1): a follower forwards edits to the leader and asks it to flush;
+// Multi-tab transport: a follower forwards edits to the leader and asks it to flush;
 // the leader broadcasts authoritative state + a hello on takeover. The Sync class depends only on this
 // seam — the wiring over a real BroadcastChannel lives in outboxCoordinator.ts; tests mock it. A
 // single-tab install attaches NO transport, so every call below is a guarded no-op and the leader path
@@ -53,10 +53,11 @@ function isAborted(signal: AbortSignal): boolean {
 
 // A faithful port of filen-mobile's Sync class: the outbox that guarantees a note edit eventually
 // reaches the server even across a window close, a lost connection, or a re-auth — fully fault-tolerant
-// and idempotent (every push is a full-content overwrite). Adaptations from the mobile original are
-// named inline (A durable outbox, C replay-on-launch, D triggers, B1 leader-owned multi-tab).
+// and idempotent (every push is a full-content overwrite). This web port adds a durable outbox, replay
+// on launch, visibilitychange/reconnect triggers, and leader-owned multi-tab coordination on top of the
+// mobile original.
 //
-// B1 — leader-owned outbox across tabs: exactly one tab (the db-lock leader) runs the push loop and
+// Leader-owned outbox across tabs: exactly one tab (the db-lock leader) runs the push loop and
 // owns all disk persistence. A `role` of "leader" is the DEFAULT and its every code path is unchanged
 // from the single-tab outbox, so a lone tab (and the whole unit battery, which never attaches a
 // transport) behaves byte-identically. A follower tab flips `role` to "follower": its enqueue applies
@@ -75,11 +76,12 @@ export class Sync {
 	private abortController: AbortController = new AbortController()
 	// Per-note count of CONSECUTIVE non-network, non-auth SDK rejections. In-memory only (never
 	// persisted), reset on any successful push or when the note's inflight is dropped/drained. Bounds
-	// the #40 drop so a one-off transient error never loses the first edit, while a genuine permission
-	// rejection still un-wedges the content query after N attempts.
+	// how quickly a note's inflight entries get dropped (MAX_NON_RETRYABLE_REJECTIONS) so a one-off
+	// transient error never loses the first edit, while a genuine permission rejection still
+	// un-wedges the content query after N attempts.
 	private readonly nonRetryableRejections: Map<string, number> = new Map<string, number>()
 
-	// B1 multi-tab state. `role` defaults to "leader" so a lone tab and every unit test are the unchanged
+	// Multi-tab state. `role` defaults to "leader" so a lone tab and every unit test are the unchanged
 	// single-tab path. `transport` is null until the coordinator wires a channel (single-tab: stays null,
 	// every broadcast/forward below is a no-op). `unacked` is FOLLOWER-only: the edits this tab has
 	// applied optimistically + forwarded but the leader has not yet confirmed via a state broadcast —
@@ -121,7 +123,7 @@ export class Sync {
 		this.abortController = new AbortController()
 	}
 
-	// Drop a note's consecutive-rejection strike count. For the editor wave's use when it clears a
+	// Drop a note's consecutive-rejection strike count. For the editor's use when it clears a
 	// note's inflight OUTSIDE a push pass (a remote-edit reload / history restore) — those paths never
 	// kick a pass, so the start-of-pass cleanup below would otherwise carry a stale count into the
 	// next editing session and drop a fresh edit after a single failure.
@@ -154,7 +156,7 @@ export class Sync {
 	// Edit intake. Writes the outbox entry AND persists the WHOLE outbox to disk IMMEDIATELY, before
 	// arming the debounce — the immediate-persist is THE survives-window-close guarantee (if the tab
 	// dies during the 3s debounce, the edit is already durable and replays on next launch). Returns
-	// the persist result so the editor wave can surface a failed disk write (an edit that survives in
+	// the persist result so the editor can surface a failed disk write (an edit that survives in
 	// memory only). `sessionBaseHash` is the hash of the editor's mount seed for a FRESH session;
 	// omitting it takes the legacy no-conflict-check grace (see buildInflightEntries).
 	public enqueue(note: Note, content: string, sessionBaseHash?: string | null): Promise<boolean> {
@@ -484,8 +486,9 @@ export class Sync {
 			// One overwrite toast per note per pass (belt-and-braces: each note is pushed at most once).
 			const toastedConflicts = new Set<string>()
 
-			// SINGLE-TAB SEAM: the multi-tab leader adaptation gates this loop behind a leader election
-			// (only the elected tab flushes) — a later wave. Today every authed tab runs its own loop.
+			// SINGLE-TAB SEAM: this loop is not yet gated behind the leader election used elsewhere in this
+			// class (broadcastState/followerEnqueue) — that gating (only the elected tab flushes) is future
+			// work. Today every authed tab runs its own loop.
 			const results = await Promise.allSettled(
 				Object.entries(inflightContent).map(async ([noteUuid, contents]) => {
 					if (isAborted(signal)) {
@@ -514,7 +517,7 @@ export class Sync {
 					// every keystroke typed during the in-flight round trip.
 					const syncedUpTo = mostRecentContent.timestamp
 
-					// D3: conflict DETECTION, never prevention — local edits always win and the push is
+					// Conflict DETECTION, never prevention — local edits always win and the push is
 					// unconditional. When the entry carries its session base hash, peek at the note's
 					// current cloud content: if the cloud moved past our base AND past what we are about
 					// to write, this push buries newer remote work and the user hears about it once.
@@ -662,7 +665,7 @@ export class Sync {
 		}
 	}
 
-	// D3: the 3s debounce trigger, armed on every edit.
+	// The 3s debounce trigger, armed on every edit.
 	public syncDebounced(): void {
 		this.syncTimeout?.cancel()
 
@@ -673,7 +676,7 @@ export class Sync {
 		}, SYNC_DEBOUNCE_MS)
 	}
 
-	// D3: fire any pending debounce now (visibilitychange → hidden, reconnect). Falls through to a
+	// Fire any pending debounce now (visibilitychange → hidden, reconnect). Falls through to a
 	// direct sync() when no debounce is queued — the cold-start + offline + reconnect case, where
 	// restoreFromDisk's boot sync() bailed offline without arming a debounce, so the reconnect trigger
 	// would otherwise have nothing to fire.

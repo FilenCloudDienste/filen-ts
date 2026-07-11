@@ -5,8 +5,8 @@ import { type Extension } from "@codemirror/state"
 import { StreamLanguage } from "@codemirror/language"
 import { useTheme } from "@/providers/themeProvider"
 
-// Shared CodeMirror read/write surface — extracted from textViewer.tsx so the notes reader (and, next
-// wave, the notes editor) reuses the SAME language-loader/theme plumbing as file preview rather than a
+// Shared CodeMirror read/write surface — extracted from textViewer.tsx so the notes reader (and the
+// notes editor) reuses the SAME language-loader/theme plumbing as file preview rather than a
 // second copy. Preview's own textViewer.tsx is this module's regression net (its e2e/unit coverage did
 // not change shape, only its import path did).
 

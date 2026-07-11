@@ -8,14 +8,15 @@ import {
 } from "@/features/chats/lib/embeds.logic"
 
 // Per-message embed resolution — the async leg behind embeds.logic.ts's pure classification. Two
-// independent resolution paths, matched to the two D2-in-scope embed kinds:
+// independent resolution paths, matched to the two in-scope embed kinds (Filen public links and
+// direct image/video):
 //   - filenLink: a metadata-only read against the wasm surface (getLinkedFile / getDirPublicLinkInfo)
 //     — the SAME round trip opening the link in a browser would make, scoped to what this app itself
 //     already exposes (sdk.worker.ts). A password-protected link or a resolution failure both degrade
-//     to `success: false` — there is no in-chat password prompt this wave (FilenLinkCard then renders
+//     to `success: false` — there is no in-chat password prompt (FilenLinkCard then renders
 //     from the URL's own uuid, no network-derived name/icon).
-//   - media: a browser-side content-type PROBE, not a decrypted read — SSRF posture (re-audited for
-//     the browser, synthesis §3.5): `mode:"cors"` + `credentials:"omit"` + https-only (embeds.logic.ts's
+//   - media: a browser-side content-type PROBE, not a decrypted read — SSRF posture re-audited for
+//     the browser: `mode:"cors"` + `credentials:"omit"` + https-only (embeds.logic.ts's
 //     isEmbeddableHttpsUrl) are the REAL boundary here, not a manual IP/redirect check — a target with
 //     no CORS headers fails this probe outright (opaque response, unreadable), which is the common case
 //     for most third-party image/video hosts and is treated the SAME as any other resolution failure:

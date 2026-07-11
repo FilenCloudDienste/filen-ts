@@ -5,7 +5,7 @@ import type { Chat } from "@filen/sdk-rs"
 
 // One global list query, mirroring mobile's useChatsQuery / this app's own notes/queries/notes.ts
 // — exactly one conversation list per session, no per-filter key. listChats() has no pagination
-// (chat counts are small; wasm-chats study §1a) and is a full-list replace on every refetch.
+// (chat counts are small) and is a full-list replace on every refetch.
 export const CHATS_QUERY_KEY = ["chats", "list"] as const
 
 // Plain, testable query function — same rationale as fetchNotes: the hook wrapper below is a
@@ -44,7 +44,7 @@ export function chatsQueryUpdate(updater: (prev: Chat[]) => Chat[]): void {
 
 // Replaces (or inserts) a single chat by uuid, preserving every other row's position — the
 // common shape for an action that returns the one Chat it touched (rename/mute/addParticipant/
-// removeParticipant/markRead reads back through this too, once C2 wires actions), plus create's
+// markRead all read back through this too), plus create's
 // append case.
 export function chatsQueryUpsert(chat: Chat): void {
 	chatsQueryUpdate(prev => {

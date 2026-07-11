@@ -10,10 +10,10 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
-// Read-only billing (D1): plans/subscriptions/invoices tables (from getUserInfo — no separate billing
+// Read-only billing: plans/subscriptions/invoices tables (from getUserInfo — no separate billing
 // read exists) + a referral copy-link + "manage on filen.io" external links wherever a mutation would
-// otherwise live. Billing MANAGEMENT ops stay a reported gap — sdk-rs has no cancelSubscription/
-// generateInvoice/withdrawal equivalent (settings study GAPS) — this section only ever reads. Same
+// otherwise live. Billing MANAGEMENT ops are a known SDK gap — sdk-rs has no cancelSubscription/
+// generateInvoice/withdrawal equivalent — this section only ever reads. Same
 // one-top-level-gate shape as the Account page.
 export const Route = createFileRoute("/_app/settings/billing")({ component: BillingPage })
 

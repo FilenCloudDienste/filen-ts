@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest"
 import { sanitizeRichTextHtml, RICH_TEXT_ALLOWED_TAGS, RICH_TEXT_ALLOWED_ATTR } from "@/features/notes/lib/sanitizeRichText"
 
-// Config pinning (01-DECISIONS D1): the allowlist MUST match
+// Config pinning: the allowlist MUST match
 // packages/filen-mobile/src/components/textEditor/richText/dom.tsx byte-for-byte — a reviewer diffs
 // these two arrays directly, so any drift here is a real cross-client compat bug, not just a test
 // nicety.

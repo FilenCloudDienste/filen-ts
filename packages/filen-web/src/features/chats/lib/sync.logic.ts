@@ -63,7 +63,7 @@ export function buildOptimisticMessage({
 	}
 }
 
-// D1 fix: functional, per-chat MERGE used to hydrate the disk-restored queue into the (possibly
+// Functional, per-chat MERGE used to hydrate the disk-restored queue into the (possibly
 // already-populated) store without clobbering a message the user sent DURING the seconds-long restore
 // window (enqueue writes the store/disk outside the sync mutex). Disk seeds chats the store doesn't
 // have yet; for chats present on both sides the message lists are UNIONED by inflightId with LIVE
@@ -112,7 +112,7 @@ export function mergeChatInflight(current: InflightChatMessages, fromDisk: Infli
 // wins by server uuid, then by inflightId: a query message already carrying an optimistic entry (its
 // uuid === the inflightId) suppresses re-adding that store entry. Confirmed messages have a real server
 // uuid that never equals an inflightId, so they never collide. Returned ASCENDING by sentTimestamp
-// (oldest first) — the web's non-inverted D3 dense-row order, the inverse of mobile's inverted-list
+// (oldest first) — the web's non-inverted dense-row order, the inverse of mobile's inverted-list
 // DESC — so pending/failed entries (newest) naturally land AFTER confirmed ones.
 export function composeMessageList({
 	queryMessages,

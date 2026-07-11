@@ -23,8 +23,8 @@ export interface AttachDriveDialogProps {
 	onAttached: (url: string) => void
 }
 
-// Drive-file picker for the composer's attach flow (synthesis §3 wave-C6 spec item 4: "reuse the
-// move-dialog's tree/picker machinery ... do NOT build a second tree"). Reuses the SAME tree-fetching
+// Drive-file picker for the composer's attach flow — deliberately reuses the move-dialog's tree/picker
+// machinery instead of building a second tree. Reuses the SAME tree-fetching
 // hooks moveTargetDialog.tsx does (useDirectoryListingQuery/useDirectoryNamesQuery, local uuid path
 // stack, "My Drive" breadcrumb) — there is exactly one directory-tree data source in this app and this
 // is it. The SELECTION semantics differ from move on purpose: a directory row descends (browsing), a

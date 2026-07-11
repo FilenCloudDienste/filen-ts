@@ -314,7 +314,7 @@ export function IconRail() {
 	// Chats mirrors Notes: a two-route module (/chats index + /chats/$uuid selection), so its active state
 	// covers the nested thread path too.
 	const chatsActive = pathname === "/chats" || pathname.startsWith("/chats/")
-	// In-app unread signal (D4): a subtle rail dot driven by the global unread count. Always mounted with
+	// In-app unread signal: a subtle rail dot driven by the global unread count. Always mounted with
 	// the authed shell, so the badge reflects unread regardless of which module is open. A background
 	// pending state simply shows no dot.
 	const chatsUnreadQuery = useChatsUnread()

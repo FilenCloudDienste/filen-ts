@@ -54,7 +54,7 @@ export interface RichSeedTarget {
 	}
 }
 
-// Sanitize-before-seed (01-DECISIONS D1): the seed is DOMPurify-sanitized with the pinned allowlist
+// Sanitize-before-seed: the seed is DOMPurify-sanitized with the pinned allowlist
 // (shared sanitizeRichText.ts — the SAME module the read-only renderer uses, so the two paths can never
 // drift) BEFORE it reaches Quill, then pasted "silent" so it does not propagate as a user edit. A
 // hostile seed is neutralized here, once, at mount — the editor never sees raw untrusted HTML.

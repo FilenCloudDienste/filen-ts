@@ -94,9 +94,10 @@ export function noteMenuActions(note: Note, currentUserId: bigint | undefined): 
 
 	const actions: NoteActionDescriptor[] = [RENAME, DUPLICATE, EXPORT, COPY_ID, pinDescriptor(note), favoriteDescriptor(note), TAGS, TYPE]
 
-	// Participants management is owner-only (parity matrix §1a/§1d) — a participant sees no entry for a
-	// dialog they could never act on. History stays open to any participant (mobile parity — anyone with
-	// access can view a note's history, only the restore-from-history dialog wave gates writes further).
+	// Participants management is owner-only, matching both mobile and old-web — a participant sees no
+	// entry for a dialog they could never act on. History stays open to any participant (mobile parity —
+	// anyone with access can view a note's history; only restoring a version is gated further, by the
+	// restore-from-history dialog itself).
 	if (owner) {
 		actions.push(PARTICIPANTS)
 	}
@@ -105,7 +106,7 @@ export function noteMenuActions(note: Note, currentUserId: bigint | undefined): 
 
 	// Archive/restore are mutually exclusive with each other, not with the rest of the menu — an
 	// archived note keeps rename/duplicate/pin/favorite/tags/type, just swaps Archive for Restore.
-	// Archive itself is owner-gated (parity matrix: "Both gate on ownerId"); restoring OUT of archive
+	// Archive itself is owner-gated (mobile and old-web both gate it on ownerId); restoring OUT of archive
 	// is not (mirrors mobile: any participant can restore, only entering archive is owner-only).
 	if (note.archive) {
 		actions.push(RESTORE)
@@ -114,7 +115,7 @@ export function noteMenuActions(note: Note, currentUserId: bigint | undefined): 
 	}
 
 	// Trash (owner) vs. Leave (non-owner self-remove) — the two ways a note can vanish from an owner's
-	// vs. a participant's own list, mutually exclusive per the parity matrix's §1a/§1d split.
+	// vs. a participant's own list, mutually exclusive by ownership just like the archive gate above.
 	actions.push(owner ? TRASH : LEAVE)
 
 	return actions
@@ -163,7 +164,7 @@ export interface NoteTypeSubmenuEntry {
 	labelKey: NotesKey
 }
 
-// Type submenu rows, fixed order (D1's five types) — a plain constant, not derived from NOTE_ACTION_DEFS
+// Type submenu rows, fixed order over the five note types — a plain constant, not derived from NOTE_ACTION_DEFS
 // (that map is keyed by action id, not by NoteType).
 export const NOTE_TYPE_SUBMENU: readonly NoteTypeSubmenuEntry[] = [
 	{ noteType: "text", labelKey: "noteTypeText" },

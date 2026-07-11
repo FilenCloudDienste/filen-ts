@@ -46,7 +46,7 @@ registerAction({ id: "notes.newNote", defaultCombo: "n", scope: "notes", descrip
 const NOTE_ROW_HEIGHT = 56
 const TAG_ROW_HEIGHT = 40
 
-// The URL owns the selected note: /notes/<uuid> is a selection key, not a path hierarchy (D4). The
+// The URL owns the selected note: /notes/<uuid> is a selection key, not a path hierarchy. The
 // sidebar renders in the app shell (outside the notes route match), so it reads the raw pathname rather
 // than route params. Empty at "/notes" (nothing selected).
 function selectedUuidFromPath(pathname: string): string {
@@ -140,7 +140,7 @@ export function NotesSidebar() {
 	const currentUserId = accountQuery.data?.id
 
 	const [search, setSearch] = useState("")
-	// Collapse state is in-memory only (D4) — a tag uuid present here is expanded.
+	// Collapse state is in-memory only — a tag uuid present here is expanded.
 	const [expandedTags, setExpandedTags] = useState<ReadonlySet<string>>(() => new Set())
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 

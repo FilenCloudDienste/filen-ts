@@ -4,7 +4,7 @@ import { useChatComposerStore, useChatComposerEntry } from "@/features/chats/sto
 
 // The composer store is the cross-component channel between the (portaled) message menu and the composer:
 // the menu requests reply/edit, the composer renders it. Reducer-level assertions (no React); the
-// reply-chip / edit-mode transitions are the "state machine" the composer wave owns.
+// reply-chip / edit-mode transitions are the "state machine" the composer owns.
 
 const CHAT = "chat-a-a-a"
 

@@ -10,11 +10,11 @@ interface CurrentPlanCardProps {
 	accountQuery: AccountQuerySuccess
 }
 
-// The one place D1's "current plan card" shows a tier — Free/Pro derived from `isPremium` only (the
+// The one place the "current plan card" shows a tier — Free/Pro derived from `isPremium` only (the
 // account-plans-stack rule in billing.ts), never a raw plan name. Total storage reuses the same
 // `maxStorage` field storageBreakdownCard already reads, so the two cards can never disagree on it.
-// "Manage on filen.io" is the only mutation surface D1 allows — external link, never a client-side
-// billing-management call (sdk-rs has none — see the settings study's GAPS section).
+// "Manage on filen.io" is the only mutation surface this card allows — external link, never a client-side
+// billing-management call (sdk-rs exposes no such endpoint).
 function CurrentPlanCard({ accountQuery }: CurrentPlanCardProps) {
 	const { t } = useTranslation("settings")
 	const { isPremium, storageUsed, maxStorage } = accountQuery.data

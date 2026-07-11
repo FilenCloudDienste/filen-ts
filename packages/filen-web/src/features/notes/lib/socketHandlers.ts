@@ -138,9 +138,10 @@ async function refetchNotesList(): Promise<void> {
 function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "contentEdited" }>): void {
 	// Echo suppression — mobile keys on editorId === own userId (screens content/index.tsx): the server
 	// echoes a note author's OWN edit back to them, and applying it would clobber the editor. All our
-	// tabs share one userId, so cross-TAB echoes are suppressed too — correct until the multi-tab leader
-	// wave. A missing account id (cache not warm) can't suppress; it falls through to the dirty/clean
-	// branch below, which is safe (a clean note refetches server-authoritative content anyway).
+	// tabs share one userId, so cross-TAB echoes are suppressed too — correct as long as tabs stay
+	// uncoordinated by a per-tab leader (there is none today). A missing account id (cache not warm) can't
+	// suppress; it falls through to the dirty/clean branch below, which is safe (a clean note refetches
+	// server-authoritative content anyway).
 	const userId = currentUserId()
 
 	if (userId !== undefined && BigInt(inner.editorId) === userId) {

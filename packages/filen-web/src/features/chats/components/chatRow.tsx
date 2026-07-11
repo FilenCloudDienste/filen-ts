@@ -25,7 +25,7 @@ export interface ChatRowProps {
 
 // Participant-derived avatar (mobile's own rule, list/chat/index.tsx): the other participants sans self,
 // keeping only real http avatar URLs. A 1:1 uses the other person's image; anything else falls back to the
-// display name's initial. No composite group avatar this wave — a single representative image or initial.
+// display name's initial. No composite group avatar — a single representative image or initial.
 function resolveAvatarUrl(chat: Chat, currentUserId: bigint | undefined): string | undefined {
 	const others = chat.participants.filter(p => p.userId !== currentUserId)
 
@@ -39,7 +39,7 @@ function resolveAvatarUrl(chat: Chat, currentUserId: bigint | undefined): string
 }
 
 // One conversation row: avatar, display name, last-message preview, relative time, a per-row unread badge
-// (D4, derived client-side), and a muted affordance. Most of the row is a Link to /chats/$uuid — the uuid
+// (derived client-side), and a muted affordance. Most of the row is a Link to /chats/$uuid — the uuid
 // is a selection key, not a path hierarchy (mirrors NoteRow) — with the ⋯ trigger button as its sibling,
 // not its descendant (a <button> nested inside an <a> is invalid content model — same rationale as
 // noteRow.tsx). Carries its own row-level context menu (right-click) and ⋯ trigger (hover-revealed), both
@@ -48,8 +48,8 @@ export function ChatRow({ chat, selected, currentUserId, onAction }: ChatRowProp
 	const { t } = useTranslation("chats")
 	const undecryptable = isChatUndecryptable(chat)
 	const name = undecryptable ? t("chatUndecryptable") : currentUserId !== undefined ? chatDisplayName(chat, currentUserId) : chat.uuid
-	// Typing beats the last-message preview while any remote user is actively typing (the C0 preview
-	// helper documented this deferred tier). Falls back to the message preview when nobody is typing.
+	// Typing beats the last-message preview while any remote user is actively typing — the tier
+	// chatMessagePreview (lib/sort.ts) itself does not cover. Falls back to the message preview when nobody is typing.
 	const typingLabel = useChatTypingLabel(chat.uuid, currentUserId)
 	const preview = typingLabel ?? chatMessagePreview(chat) ?? t("chatNoMessages")
 	const avatarUrl = resolveAvatarUrl(chat, currentUserId)

@@ -280,7 +280,8 @@ export class Sync {
 	// signal.
 	public async flushToDisk(inflightChatMessages: InflightChatMessages): Promise<boolean> {
 		// The leader owns the disk. A follower NEVER persists (two tabs writing the one kv key is exactly the
-		// clobber this wave fixes) — and its initPromise never resolves (restoreFromDisk is leader-only), so an
+		// clobber the leader/follower election exists to prevent) — and its initPromise never resolves
+		// (restoreFromDisk is leader-only), so an
 		// await here would hang. Report success so a follower-side purge/retry (in-memory only) still completes;
 		// the leader's own copy of that event flushes the real disk state.
 		if (this.role === "follower") {

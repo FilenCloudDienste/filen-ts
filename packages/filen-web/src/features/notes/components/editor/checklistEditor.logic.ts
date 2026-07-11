@@ -3,7 +3,7 @@ import { checklistParser, type Checklist } from "@filen/utils"
 // Pure checklist mutation transforms for the custom checklist editor — ported from mobile's
 // checklistEdit.ts. They compute the next list (and which row to focus) WITHOUT touching React state, so
 // the component applies the result, moves focus, and serializes through the SAME @filen/utils
-// checklistParser both mobile and old-web write (01-DECISIONS D1/D2). Keeping them pure makes the
+// checklistParser both mobile and old-web write. Keeping them pure makes the
 // add/remove/toggle → serialize round-trip unit-testable without rendering.
 
 export interface ChecklistEditResult {

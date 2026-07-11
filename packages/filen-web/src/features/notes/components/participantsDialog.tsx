@@ -35,8 +35,8 @@ export interface ParticipantsDialogProps {
 const SKELETON_ROW_COUNT = 3
 
 // Note-participants panel — mounted-when-active by the surface's dialog host (useNoteDialogHost), the
-// menu's owner-only "Participants" entry. Any participant can open and VIEW this dialog (parity matrix
-// §1a/§1d); only the owner sees the per-row permission switch, remove button, and the "Add
+// menu's owner-only "Participants" entry. Any participant can open and VIEW this dialog;
+// only the owner sees the per-row permission switch, remove button, and the "Add
 // participants" affordance (participantRows' canManage gate). Self-leave is intentionally NOT here —
 // it stays the note menu's own dialog-routed "Leave" entry (noteMenu.logic.ts), so a participant's own
 // row in this list never carries a remove control even when viewed by the owner.

@@ -4,8 +4,8 @@ import type { NoteType } from "@filen/sdk-rs"
 
 // The sidebar's two-view toggle, persisted with the same kv-backed convention drive's view mode uses
 // (features/drive/lib/preferences.ts): a single global value, arktype-validated on read, self-healing
-// to the default on any absent/corrupt value. Mirrors mobile's secure-store `notesViewMode` key
-// (01-DECISIONS D4). Unlike drive's view mode this carries no per-directory scope — notes has one
+// to the default on any absent/corrupt value. Mirrors mobile's secure-store `notesViewMode` key.
+// Unlike drive's view mode this carries no per-directory scope — notes has one
 // sidebar, not a per-listing surface.
 export type NotesViewMode = "notes" | "tags"
 
@@ -25,8 +25,8 @@ export async function setNotesViewMode(next: NotesViewMode): Promise<void> {
 	await kvSetJson(NOTES_VIEW_MODE_KV_KEY, next)
 }
 
-// md split-pane preview ratio (01-DECISIONS D1 "md ALSO gets the split live preview... ratio persisted
-// per the preferences convention") — one global value, same kv-backed shape as the view mode above.
+// md split-pane preview ratio — md notes also get the split live-preview layout, and the ratio is
+// persisted, one global value, same kv-backed shape as the view mode above.
 // Clamped well inside [0,1] so a drag never collapses either pane to zero width.
 const MD_SPLIT_RATIO_KV_KEY = "notes.mdSplitRatio.v1"
 
@@ -50,7 +50,7 @@ export async function setMdSplitRatio(ratio: number): Promise<void> {
 	await kvSetJson(MD_SPLIT_RATIO_KV_KEY, clampMdSplitRatio(ratio))
 }
 
-// The persisted default-note-type preference (oldweb-notes §1: create always calls createNote() first —
+// The persisted default-note-type preference (create always calls createNote() first —
 // the SDK's own default is "text" — then setNoteType only if this preference differs). No settings UI
 // exists yet (old-web's own Settings → General dropdown lands later); the key is persisted from day one
 // so a future settings control has somewhere real to read/write.

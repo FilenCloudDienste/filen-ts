@@ -7,7 +7,7 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // time — every test below holds regardless of whether it is empty or populated (see the per-test
 // resilience notes). Nothing here ever creates, renames, moves, or deletes anything: the new-directory
 // flow is exercised only up to dialog validation, never submitted — a live create has no net-zero
-// counterpart yet (trash/delete land in a later drive sub-slice) and the create logic itself already
+// counterpart yet (trash/delete are not exercised live here) and the create logic itself already
 // has unit coverage (createDirectory.test.ts).
 //
 // Every test here needs the listing's real, authenticated listDir call to settle, which hangs on

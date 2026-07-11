@@ -14,7 +14,7 @@ import { isChatFocused, getFocusedChat, setFocusedChat } from "@/features/chats/
 // The realtime CHAT event handlers — a faithful port of filen-mobile's chats socketHandlers.ts semantics
 // onto the flat wasm surface, registered on the generic socket bridge (a pure consumer; the bridge itself
 // is untouched). One handler per top-level type: "chat" for the domain events, plus "reconnecting" /
-// "authSuccess" for the reconnect full-reconcile (§3).
+// "authSuccess" for the reconnect full-reconcile (see the section below).
 
 type UuidStr = Chat["uuid"]
 
@@ -220,7 +220,7 @@ function handleMessageNew(msg: ChatMessage): void {
 
 			// Patch the conversation row AFTER the message cache (mobile's ordering). Always refresh
 			// lastMessage/timestamp; for a FOREIGN message in the FOCUSED chat, advance lastFocus so the
-			// derived per-row unread stays false — unread accrues ONLY when the chat is not the open one (D4).
+			// derived per-row unread stays false — unread accrues ONLY when the chat is not the open one.
 			setTimeout(() => {
 				chatsQueryUpdate(prev =>
 					prev.map(c => {
@@ -271,7 +271,7 @@ export async function handleConversationDeleted(uuid: string): Promise<void> {
 	}
 }
 
-// ── Reconnect full-reconcile (§3) ──────────────────────────────────────────────
+// ── Reconnect full-reconcile ──────────────────────────────────────────────
 // The SDK owns the socket's own reconnect and surfaces it through this same event stream as a
 // "reconnecting" then (on success) an "authSuccess". We reconcile ONLY on the authSuccess that FOLLOWS a
 // reconnecting — never the initial post-login authSuccess (the list/thread are already fetching then) — by

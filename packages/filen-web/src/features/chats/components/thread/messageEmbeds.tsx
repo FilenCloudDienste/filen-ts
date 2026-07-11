@@ -3,7 +3,7 @@ import { useChatMessageLinksQuery } from "@/features/chats/queries/chatMessageLi
 import { FilenLinkCard } from "@/features/chats/components/thread/embeds/filenLinkCard"
 import { MediaEmbed } from "@/features/chats/components/thread/embeds/mediaEmbed"
 
-// D2 embed rendering — one per unique in-scope URL (embeds.logic.ts's cap + dedup), stacked under the
+// Embed rendering — one per unique in-scope URL (embeds.logic.ts's cap + dedup), stacked under the
 // message text (messageRow.tsx mounts this directly below MessageContent). `embedDisabled` (the sender's
 // own disableMessageEmbed toggle, socket-synced) short-circuits to nothing rendered at all — the plain
 // link inline in the text is untouched either way, this component only ever ADDS chrome on top of it,

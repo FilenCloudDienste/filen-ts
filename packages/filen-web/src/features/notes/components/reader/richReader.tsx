@@ -1,8 +1,10 @@
 import { sanitizeRichTextHtml } from "@/features/notes/lib/sanitizeRichText"
 
-// rich note render — sanitized static HTML (live-edit Quill lands next wave). Untrusted participant
+// rich note render — sanitized static HTML. NoteReaderByType only mounts this for read-only contexts
+// (a trashed/non-writable note, or the history dialog's preview); the live-editable path is
+// richTextEditor.tsx. Untrusted participant
 // HTML is DOMPurify-sanitized with mobile's exact allowlist before it ever reaches
-// dangerouslySetInnerHTML (01-DECISIONS D1) — this component never receives raw content directly, only
+// dangerouslySetInnerHTML — this component never receives raw content directly, only
 // through sanitizeRichTextHtml, so there is no path from note content to script execution.
 export function RichReader({ content }: { content: string }) {
 	return (

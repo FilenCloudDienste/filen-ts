@@ -10,8 +10,8 @@ interface InvoicesCardProps {
 }
 
 // No download column: `UserAccountSubsInvoices` carries no URL and sdk-rs has no `generateInvoice`
-// equivalent (the settings study's GAPS section — old-web's own per-row download hits a raw v3
-// endpoint this SDK doesn't expose, and #6 forbids adding one client-side this pass). This table is
+// equivalent — old-web's own per-row download hits a raw v3 endpoint this SDK doesn't expose, and
+// this codebase never reimplements API calls in JS to work around a gap in the SDK. This table is
 // read-only by construction, not by an omitted button.
 function InvoicesCard({ accountQuery }: InvoicesCardProps) {
 	const { t } = useTranslation("settings")

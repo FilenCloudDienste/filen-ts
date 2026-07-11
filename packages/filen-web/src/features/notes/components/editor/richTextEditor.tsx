@@ -89,7 +89,7 @@ function ToolbarButton({
 	)
 }
 
-// Quill rich-text editor (01-DECISIONS D1: mobile parity — sanitized, XSS-safe), driving the Quill
+// Quill rich-text editor (mobile parity — sanitized, XSS-safe), driving the Quill
 // instance directly (no WebView bridge). A custom React toolbar calls quill.format(...) and reflects
 // active formats from the selection. The CALLER keys this on controller.remountKey so the seed freezes
 // at mount and only a real reseed remounts it (the EDITOR INVARIANT).

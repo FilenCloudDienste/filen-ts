@@ -39,7 +39,7 @@ export function sortNotes(notes: readonly Note[]): Note[] {
 }
 
 // Undecryptable-placeholder handling is a presentation concern (mobile's cannotDecryptPlaceholder)
-// deferred to the wave that renders note rows; this foundation layer only needs the raw fallback so
+// left to the component that renders note rows; this module only needs the raw fallback so
 // search has stable text to match against.
 export function noteDisplayTitle(note: Note): string {
 	return note.title ?? note.uuid
@@ -102,7 +102,7 @@ export function filterNoteTagsBySearch(tags: readonly NoteTag[], search: string)
 
 // Mirrors mobile's notesTagsSortPreference.ts semantics exactly (NOTES_TAGS_SORT_OPTIONS +
 // DEFAULT_NOTES_TAGS_SORT_BY = "lastActivityDesc"). The secure-store-backed preference hook itself
-// is a later wave's concern (this module stays pure/no-React); only the comparator ports here.
+// lives elsewhere (this module stays pure/no-React); only the comparator ports here.
 export const NOTE_TAGS_SORT_OPTIONS = [
 	"lastActivityDesc",
 	"lastActivityAsc",

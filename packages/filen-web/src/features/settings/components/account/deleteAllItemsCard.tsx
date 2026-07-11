@@ -16,8 +16,8 @@ interface DeleteAllItemsCardProps {
 }
 
 // Same TypedConfirmDialog pattern as DeleteAllVersionsCard, one severity level up: this wipes every
-// file and directory in the account, not just version history. deleteAllItems() is NEVER e2e-invoked
-// (settings study §3: would nuke every other module's e2e fixtures on the shared account) — unit/
+// file and directory in the account, not just version history. deleteAllItems() is NEVER e2e-invoked —
+// it would nuke every other module's e2e fixtures on the shared account — unit/
 // render-only in this repo's own test suite, same as DeleteAccountCard.
 function DeleteAllItemsCard({ accountQuery }: DeleteAllItemsCardProps) {
 	const { t } = useTranslation(["settings", "common"])

@@ -3,7 +3,7 @@ import { isArmed } from "@/components/dialogs/typedConfirmDialog.logic"
 import { DELETE_ALL_VERSIONS_PHRASE, DELETE_ALL_ITEMS_PHRASE } from "@/features/settings/lib/dangerPhrases"
 
 // The actual arm/disarm behavior (exact-match only, no trim/case-fold) is already proven once against
-// the shared primitive in typedConfirmDialog.test.ts — this file only proves the two D2 bulk-delete
+// the shared primitive in typedConfirmDialog.test.ts — this file only proves the two bulk-delete
 // cards' OWN phrase constants behave correctly under that gate and can never collide with each other
 // or with drive's own "EMPTY TRASH" phrase, which would let a copy-pasted dialog accidentally arm the
 // wrong destructive op if the two cards were ever composed onto the same screen.

@@ -5,7 +5,7 @@ import { setMdSplitRatio, clampMdSplitRatio, DEFAULT_MD_SPLIT_RATIO } from "@/fe
 
 // The resizable horizontal split shared by the md reader (read-only left) and the md editor
 // (editable left) — extracted so the ratio-persistence + drag logic lives in exactly one place and the
-// editor is literally "the reader's split with an editable left pane" (spec e2-editor-text §3). `left`
+// editor is literally "the reader's split with an editable left pane". `left`
 // and `right` are rendered as-is; this owns only the geometry.
 export function MarkdownSplitPane({ left, right }: { left: ReactNode; right: ReactNode }) {
 	const { t } = useTranslation("notes")

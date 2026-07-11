@@ -28,8 +28,8 @@ export interface NoteDialogHost {
 export interface UseNoteDialogHostParams {
 	// The uuid currently shown in this surface's editor route ("" when none) — delete/leave navigate
 	// away from THIS uuid before removing the note from cache, so the route never briefly resolves to a
-	// gone note (the router-native equivalent of mobile's deferred-cache-removal nav-race guard,
-	// mobile-notes §2.5). Both the sidebar and the editor header instantiate their own host with this
+	// gone note (the router-native equivalent of mobile's deferred-cache-removal nav-race guard). Both
+	// the sidebar and the editor header instantiate their own host with this
 	// param, so a row-triggered delete of the currently-open note still navigates correctly.
 	currentUuid: string
 }
@@ -142,7 +142,7 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 			return
 		}
 
-		// old-web parity (oldweb-notes §1c): creating a tag from a note's own menu immediately tags that
+		// old-web parity: creating a tag from a note's own menu immediately tags that
 		// note too, saving the user a second interaction.
 		const tagged = await addTagToNote(note, tagOutcome.item)
 		setDialogPending(false)

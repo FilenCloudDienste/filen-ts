@@ -51,7 +51,7 @@ export function registerSocketHandler<T extends SocketEvent["type"]>(type: T, ha
 
 // The single entry point the worker's proxied callback invokes for every event. Fans out to the
 // handlers registered for that category; a throwing handler is logged and never aborts the fan-out or
-// the socket. An unregistered category (e.g. "drive" before the drive wave) is a silent no-op.
+// the socket. An unregistered category (e.g. "drive", which has no handler yet) is a silent no-op.
 function dispatch(event: SocketEvent): void {
 	const handlers = registry.get(event.type)
 

@@ -20,7 +20,7 @@ function nameFromUrl(url: string): string {
 	}
 }
 
-// Direct image/video embed (D2's "direct image/video" category — never a Filen public link, see
+// Direct image/video embed (never a Filen public link, see
 // FilenLinkCard for that). `resolution` undefined = the content-type probe is in flight (skeleton);
 // `success: false` = the probe failed (CORS block, timeout, non-matching Content-Type — see
 // queries/chatMessageLinks.ts's honest browser SSRF-posture comment) — renders NOTHING, degrading to

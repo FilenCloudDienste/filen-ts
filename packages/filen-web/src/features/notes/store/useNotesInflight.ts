@@ -15,7 +15,7 @@ export interface InflightEntry {
 	// durable outbox; the push loop prefers the LIVE note from the list cache and only falls back to
 	// this snapshot when the note has left the cache (concurrently deleted).
 	note: Note
-	// D3: hash (hashNoteContent) of the synced/loaded content this editing session was BASED on — NOT
+	// Hash (hashNoteContent) of the synced/loaded content this editing session was BASED on — NOT
 	// the typed text. Compared against the note's current cloud content to DETECT (never prevent —
 	// local edits always win) that a push buried newer remote work. OPTIONAL because the queue is
 	// persisted: entries written by an older app version carry no hash and push WITHOUT the conflict
@@ -39,7 +39,7 @@ export const useNotesInflightStore = create<NotesInflightStore>(set => ({
 	}
 }))
 
-// Reactive subscription for the editor wave — the header spinner + menu suppression + the content
+// Reactive subscription for the editor — the header spinner + menu suppression + the content
 // query's `enabled` gate all rerun off whether a note has pending outbox entries. Boolean-collapsed
 // so a subscriber re-renders only on the has/has-not EDGE, never on every keystroke that grows the
 // entry list.

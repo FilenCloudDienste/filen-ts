@@ -21,7 +21,7 @@ interface AvatarCardProps {
 // shape old-web's account avatar picker uses (its `#avatar-input` + label click), reset to "" in
 // `finally` so re-picking the SAME file still fires a change event. Size/type constraints mirror
 // that same old-web precedent (avatarCard.logic.ts) rather than mobile's native transcode pipeline,
-// which has no browser equivalent this wave needs.
+// which has no browser equivalent this codebase needs.
 function AvatarCard({ accountQuery }: AvatarCardProps) {
 	const { t } = useTranslation("settings")
 	const { avatarUrl, nickName, email } = accountQuery.data

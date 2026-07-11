@@ -7,13 +7,13 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // Every settings section here is either a plain, read-only render (Account/Appearance/Security's own
 // existing assertions) or a client-side-only preference (theme) — nothing in this spec live-mutates
 // session-invalidating or irreversible account state (changeEmail/setNickname/updatePersonalInfo/
-// uploadAvatar/deleteAll* all stay unit/render-only per the settings study's e2e safety classes).
+// uploadAvatar/deleteAll* all stay unit/render-only, never invoked against the live shared account).
 // getUserInfo/getGdprInfo are the only live network reads exercised, both read-only.
 //
 // Client-nav only (same constraint as contacts.spec.ts/notes.spec.ts): the injection hook re-seeds and
 // navigates to "/" → /drive on every load, so a hard goto to any other authed route bounces back before
 // it renders. The one path into /settings is goto("/drive") then a real in-app click through the
-// account menu — the "Settings" entry now lands on /settings/account (D3's index redirect target).
+// account menu — the "Settings" entry now lands on /settings/account (the index route's redirect target).
 //
 // Chromium-only: the account query (useAccountQuery -> getUserInfo) fires a real authenticated read on
 // every settings page mount — the same worker cross-origin SDK path that hangs on Playwright-firefox

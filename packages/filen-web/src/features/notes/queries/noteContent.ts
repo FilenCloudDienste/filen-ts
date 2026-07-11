@@ -27,12 +27,12 @@ export async function fetchNoteContent(note: Note): Promise<string | undefined> 
 // invalidation still owns freshness after a confirmed write. `note` is optional so a caller can mount
 // the hook before its Note is resolved (the editor route's first render) without a conditional hook.
 //
-// USAGE NOTE for the editor: `dataUpdatedAt` on this hook's result is the editor remount key (synthesis
-// §3.3) — because the query is disabled while the note has an inflight outbox entry, `dataUpdatedAt`
+// USAGE NOTE for the editor: `dataUpdatedAt` on this hook's result is the editor remount key —
+// because the query is disabled while the note has an inflight outbox entry, `dataUpdatedAt`
 // cannot advance mid-edit, so a component keyed on it never remounts (and blows away in-progress
 // keystrokes) while a local edit is still pending.
 export function useNoteContentQuery(note: Note | undefined, options?: { enabled?: boolean }): UseQueryResult<string | undefined> {
-	// UI gating seam (synthesis §3.3): disable the read while the note has a pending sync-outbox entry.
+	// UI gating seam: disable the read while the note has a pending sync-outbox entry.
 	// `dataUpdatedAt` (the editor's remount key) therefore cannot advance mid-edit, so the editor never
 	// remounts and blows away in-progress keystrokes while a local edit is still queued. Re-enables the
 	// instant the outbox drains this note. Reactive — subscribes to the store's has/has-not edge.

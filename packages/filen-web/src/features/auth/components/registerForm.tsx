@@ -56,7 +56,7 @@ function RegisterForm() {
 	const passwordStrength = password.length > 0 ? ratePasswordStrength(password) : null
 	const passwordsMatch = password.length > 0 && password === confirmPassword
 	// Minimum-strength gate, shared with the reset form via isPasswordStrongEnough (weak is the only
-	// blocked tier — the meter's weak state explains why). No `isOnline` term: this slice ships no
+	// blocked tier — the meter's weak state explains why). No `isOnline` term: this form ships no
 	// connectivity infra, a real network failure surfaces as the SDK's own error toast instead.
 	const canSubmit = emailValid && passwordsMatch && isPasswordStrongEnough(passwordStrength)
 

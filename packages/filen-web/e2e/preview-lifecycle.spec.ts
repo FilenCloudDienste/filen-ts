@@ -129,7 +129,7 @@ test("editable text preview saves via its Save button, persists across reopen, a
 	}
 })
 
-// Founder-reported regression: the CodeMirror wrapper div had no height class of its own, so it
+// Regression test: the CodeMirror wrapper div had no height class of its own, so it
 // collapsed to its content's height instead of the bounded preview area — content past the fold was
 // simply unreachable, wheel and keyboard scroll alike (textViewer.tsx's own className comment has the
 // full mechanism). Asserts the FIX, not just the symptom's absence: the scroller's own box is taller

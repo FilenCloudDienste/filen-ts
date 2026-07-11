@@ -19,9 +19,8 @@ import { SocketHost } from "@/features/shell/components/socketHost"
 // to exactly the row below. Under Electron it adds its own height on top instead of eating into the
 // page padding — the row gets `min-h-0 flex-1` so it never has to know the strip exists.
 export function AppShell() {
-	// The sidebar panel is contextual (fulfilling this shell's own "becomes contextual as other modules
-	// land" note): /chats* gets the ChatsSidebar, /notes* the NotesSidebar, /settings* the
-	// SettingsSidebar (D3), everything else the DriveSidebar. All four share the same panel geometry
+	// The sidebar panel is contextual: /chats* gets the ChatsSidebar, /notes* the NotesSidebar, /settings* the
+	// SettingsSidebar, everything else the DriveSidebar. All four share the same panel geometry
 	// (w-52, rounded-xl, borderless), so the switch is invisible to the surrounding layout.
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const onNotes = pathname === "/notes" || pathname.startsWith("/notes/")

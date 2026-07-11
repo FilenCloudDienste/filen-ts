@@ -7,8 +7,8 @@ import { emojiForShortcode } from "@/features/chats/lib/emoji"
 import { contactDisplayName } from "@/features/contacts/components/contactsList.logic"
 
 // Renders one message body from the pure segment list. Every branch emits a React text node or element —
-// never parsed HTML, never dangerouslySetInnerHTML — so injection is structurally impossible (synthesis
-// §3.5). Links are hardened at the segment layer (regexed.logic.hardenLinkHref) AND rendered with
+// never parsed HTML, never dangerouslySetInnerHTML — so injection is structurally impossible.
+// Links are hardened at the segment layer (regexed.logic.hardenLinkHref) AND rendered with
 // rel="noopener noreferrer nofollow" + target="_blank". Emoji shortcodes resolve to standard unicode
 // glyphs (emoji.ts); an unknown shortcode (a custom-pack name from a mobile/old-web peer) stays literal.
 export function MessageContent({ chat, text }: { chat: Chat; text: string | undefined }) {

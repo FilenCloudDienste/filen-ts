@@ -10,8 +10,8 @@ import { Card, CardFooter, CardHeader, CardTitle, CardDescription } from "@/comp
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 
-// Read-only fetch (getUserInfo/getUserEvents/getGdprInfo are all e2e-safe per the settings study)
-// → client-built JSON blob → the shared download primitive (downloadBlob.ts), same anchor-click
+// Read-only fetch (getUserInfo/getUserEvents/getGdprInfo mutate nothing, so they are safe to
+// e2e-invoke live) → client-built JSON blob → the shared download primitive (downloadBlob.ts), same anchor-click
 // convention as notes export and the security cards' text exports. No dialog, no confirmation —
 // this never mutates account state.
 function GdprExportCard() {

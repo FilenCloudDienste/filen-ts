@@ -4,8 +4,8 @@ import { checklistRows } from "@/features/notes/components/reader/checklistReade
 
 // checklist note render — disabled checkboxes, checked state faithful to the parsed
 // `<ul data-checked>` HTML (@filen/utils checklistParser, the canonical cross-client format).
-// Read-only this step: the custom editable widget (mobile-style, per 01-DECISIONS D2) lands with the
-// sync outbox next wave.
+// Read-only here: NoteReaderByType only mounts this for read-only contexts (a trashed/non-writable note,
+// or the history dialog's preview) — the editable checklist widget lives in checklistEditor.tsx.
 export function ChecklistReader({ content }: { content: string }) {
 	const { t } = useTranslation("notes")
 	const rows = checklistRows(content)

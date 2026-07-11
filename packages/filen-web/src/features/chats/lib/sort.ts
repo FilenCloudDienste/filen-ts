@@ -1,9 +1,9 @@
 import { fastLocaleCompare, parseNumbersFromString } from "@filen/utils"
 import type { Chat } from "@filen/sdk-rs"
 
-// Conversation-list ordering — VERIFIED against mobile source this session (the synthesis left
-// this UNVERIFIED; ported from `filen-mobile/src/features/chats/components/list/index.tsx:36-45`,
-// not a guess). There is no server-side re-sort and no separate "sort" SDK op — `listChats()`
+// Conversation-list ordering — ported from
+// `filen-mobile/src/features/chats/components/list/index.tsx:36-45`, not a guess. There is no
+// server-side re-sort and no separate "sort" SDK op — `listChats()`
 // returns chats in whatever order the API gives them, and mobile re-sorts client-side, every
 // render, by:
 //   1. the chat's lastMessage.sentTimestamp descending (chats with no lastMessage sort as 0 — to
@@ -34,8 +34,8 @@ export function sortChats(chats: readonly Chat[]): Chat[] {
 	return [...chats].sort(compareChats)
 }
 
-// A chat's group key failing to decrypt (`Chat.key === undefined` — wasm-chats study §1, "group
-// key not decryptable") is this surface's undecryptable signal; there is no `.undecryptable`
+// A chat's group key failing to decrypt (`Chat.key === undefined`) is this surface's
+// undecryptable signal; there is no `.undecryptable`
 // field on the wasm Chat the way mobile's own wrapper type adds one.
 export function isChatUndecryptable(chat: Chat): boolean {
 	return chat.key === undefined
@@ -46,10 +46,10 @@ export function isChatUndecryptable(chat: Chat): boolean {
 // falls back to that participant's nickName-or-email; a group with no name joins every other
 // participant's nickName-or-email, locale-sorted for a stable, readable order.
 //
-// Undecryptable-placeholder COPY (mobile's i18n `cannot_decrypt_${uuid}` string) is deferred to
-// the wave that renders chat rows — same posture notes/lib/sort.ts already took for
-// noteDisplayTitle (falls back to the raw uuid, not a placeholder string, at this foundation
-// layer).
+// Undecryptable-placeholder COPY (mobile's i18n `cannot_decrypt_${uuid}` string) lives in the
+// component that renders chat rows (chatRow.tsx's `t("chatUndecryptable")`) — same posture
+// notes/lib/sort.ts takes for noteDisplayTitle (falls back to the raw uuid, not a placeholder
+// string, at this foundation layer).
 export function chatDisplayName(chat: Chat, currentUserId: bigint): string {
 	if (isChatUndecryptable(chat)) {
 		return chat.uuid
@@ -75,11 +75,10 @@ export function chatDisplayName(chat: Chat, currentUserId: bigint): string {
 }
 
 // lastMessage preview-line derivation — the "last-message" tier ONLY of mobile's full precedence
-// (`typing > blocked > last-message > "no messages yet"`, list/chat/index.tsx). The other two
-// tiers need live state this foundation layer doesn't have: typing comes from a socket-fed store
-// (later wave, socketHandlers.ts), and "message from a blocked sender" needs the contacts
-// blocking model cross-referenced (also a later wave, per the synthesis's 1e "Block sender" row).
-// Returns null when there is no previewable text — the caller renders "no messages yet" for both
+// (`typing > blocked > last-message > "no messages yet"`, list/chat/index.tsx). The typing tier is
+// layered on top by the caller (chatRow.tsx's useChatTypingLabel, fed by the socket-driven typing
+// store); "message from a blocked sender" needs the contacts blocking model cross-referenced —
+// not yet implemented here. Returns null when there is no previewable text — the caller renders "no messages yet" for both
 // "no lastMessage at all" and "lastMessage exists but is undecryptable" (mobile's own fallthrough:
 // an undecryptable message has `message === undefined`, which this treats identically to absent).
 export function chatMessagePreview(chat: Chat): string | null {

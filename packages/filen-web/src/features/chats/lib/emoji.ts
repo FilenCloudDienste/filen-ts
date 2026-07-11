@@ -1,9 +1,8 @@
-// Standard-unicode emoji shortcode table + lookup — the web's resolution of the emoji handling C1
-// deferred (shortcodes rendered literal). Mobile ships a CUSTOM emoji pack (@/assets/customEmojis, a
-// ~6000-line dataset of CDN-hosted .webp images); that pack is mobile-asset-bound (its skins are remote
-// image URLs, not glyphs) and re-bundling it here would drag in an external image dependency the wasm
-// build has no business fetching. Per the composer wave's brief, the web instead completes / renders
-// against a curated STANDARD-unicode shortcode table (a subset of the gemoji/emoji-mart short-name
+// Standard-unicode emoji shortcode table + lookup. Mobile ships a CUSTOM emoji pack
+// (@/assets/customEmojis, a ~6000-line dataset of CDN-hosted .webp images); that pack is
+// mobile-asset-bound (its skins are remote image URLs, not glyphs) and re-bundling it here would drag
+// in an external image dependency the wasm build has no business fetching. The web instead completes /
+// renders against a curated STANDARD-unicode shortcode table (a subset of the gemoji/emoji-mart short-name
 // convention): `:name:` completes to and renders as the native unicode glyph, self-contained and
 // asset-free. Custom-pack-only shortcodes a peer sends from mobile/old-web still render as their literal
 // `:shortcode:` (unknown here) — an accepted gap until the shared pack has a sanctioned web home.
