@@ -1,13 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
+import { MoreHorizontalIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
 import { useChatMessages, loadOlderChatMessages } from "@/features/chats/queries/chatMessages"
 import { buildThreadRows, computeScrollAfterPrepend } from "@/features/chats/components/thread/thread.logic"
 import { dayKind, formatFullDate } from "@/features/chats/lib/time"
 import { chatDisplayName, isChatUndecryptable } from "@/features/chats/lib/sort"
 import { MessageRow } from "@/features/chats/components/thread/messageRow"
+import { ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
+import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
 import { useAccountQuery } from "@/queries/account"
+import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 
 // Estimates for the virtualizer's first pass; real heights come from measureElement (message rows vary in
@@ -33,7 +38,10 @@ function DaySeparator({ timestamp }: { timestamp: bigint }) {
 // virtualized (@tanstack/react-virtual — the app's own virtualizer, notesSidebar's convention) and opens
 // pinned to the bottom (newest). Scrolling to the top loads one older page via loadOlderChatMessages
 // (prepend + dedupe) with scroll-position preservation. NO composer — a disabled placeholder strip keeps
-// the layout honest until the send wave lands.
+// the layout honest until the send wave lands. The header's ⋮ trigger hosts the conversation menu
+// (rename/mute/participants/leave/delete + the explicit "mark as read" entry) — the ONLY place this wave
+// wires markChatRead: never auto-fired on mount (synthesis §1g/§3.6 — old-web's explicit-mark model, not
+// mobile's own screen-open trigger).
 export function MessageThread({ chat }: { chat: Chat }) {
 	const { t } = useTranslation("chats")
 	const chatUuid = chat.uuid
@@ -41,6 +49,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	const currentUserId = accountQuery.data?.id
 	const messagesQuery = useChatMessages(chatUuid)
 	const messages = messagesQuery.data ?? []
+	const dialogHost = useChatDialogHost({ currentUuid: chatUuid })
 
 	const scrollRef = useRef<HTMLDivElement | null>(null)
 	const [loadingOlder, setLoadingOlder] = useState(false)
@@ -189,6 +198,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 										chat={chat}
 										message={row.message}
 										showHeader={row.showHeader}
+										currentUserId={currentUserId}
 									/>
 								)}
 							</div>
@@ -209,6 +219,24 @@ export function MessageThread({ chat }: { chat: Chat }) {
 		<div className="flex min-h-0 flex-1 flex-col">
 			<header className="flex shrink-0 items-center gap-2.5 px-5 py-4">
 				<h1 className="min-w-0 flex-1 truncate text-base font-semibold">{headerTitle}</h1>
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								aria-label={t("chatItemMenuTrigger")}
+							>
+								<MoreHorizontalIcon />
+							</Button>
+						}
+					/>
+					<ChatDropdownMenuContent
+						chat={chat}
+						currentUserId={currentUserId}
+						onAction={dialogHost.openChatDialog}
+					/>
+				</DropdownMenu>
 			</header>
 			<div className="h-px shrink-0 bg-border/50" />
 			{renderList()}
@@ -220,6 +248,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 					<span className="shrink-0 text-xs">{t("chatComposerUnavailable")}</span>
 				</div>
 			</div>
+			{dialogHost.renderActiveDialog()}
 		</div>
 	)
 }

@@ -71,5 +71,95 @@ export const chats = {
 	/** Thread — placeholder text inside the disabled composer strip */
 	chatComposerPlaceholder: "Message",
 	/** Thread — note explaining the composer is not yet interactive */
-	chatComposerUnavailable: "Sending isn't available yet"
+	chatComposerUnavailable: "Sending isn't available yet",
+
+	// ── Conversation actions (C2 — no send/composer) ──────────────────────────────
+	/** Sidebar — opens the new-conversation contact picker */
+	chatsSidebarNewChat: "New chat",
+	/** Row / thread header — accessible label on the ⋯ / ⋮ menu trigger */
+	chatItemMenuTrigger: "Conversation menu",
+	/** Conversation menu — marks the conversation as read (shown only while it has unread messages) */
+	chatActionMarkRead: "Mark as read",
+	/** Conversation menu — mutes the conversation */
+	chatActionMute: "Mute",
+	/** Conversation menu — unmutes an already-muted conversation */
+	chatActionUnmute: "Unmute",
+	/** Conversation menu — opens the participants dialog */
+	chatActionParticipants: "Participants",
+	/** Conversation menu — renames the conversation (opens chatRenameDialog, owner-only) */
+	chatActionRename: "Rename",
+	/** Conversation menu — permanently deletes the conversation (owner-only) */
+	chatActionDelete: "Delete",
+	/** Conversation menu — a non-owner participant removes themselves (opens chatLeaveDialog) */
+	chatActionLeave: "Leave",
+	/** Action error — shown when a non-owner attempts an owner-only conversation action */
+	chatOwnerOnlyError: "Only the conversation owner can do this.",
+	/** Action error — defense-in-depth guard, createChat is never called with an empty selection */
+	chatCreateNoContactsError: "Choose at least one contact.",
+
+	// ── Create-conversation dialog ─────────────────────────────────────────────────
+	/** Create-chat dialog — heading */
+	chatCreateDialogTitle: "New chat",
+	/** Create-chat dialog — body copy above the contact list */
+	chatCreateDialogBody: "Choose one or more contacts to start a conversation.",
+	/** Create-chat dialog — submit button */
+	chatCreateDialogSubmit: "Create",
+
+	// ── Rename dialog ────────────────────────────────────────────────────────────
+	/** Rename dialog — heading */
+	chatRenameDialogTitle: "Rename conversation",
+	/** Rename dialog — body copy */
+	chatRenameDialogBody: "Enter a new name.",
+	/** Rename dialog — field label */
+	chatRenameDialogLabel: "Name",
+	/** Rename dialog — submit button */
+	chatRenameDialogSubmit: "Rename",
+
+	// ── Delete / leave dialogs ───────────────────────────────────────────────────
+	/** Delete dialog — heading */
+	chatDeleteDialogTitle: "Delete conversation?",
+	/** Delete dialog — body copy */
+	chatDeleteDialogBody: "Are you sure you want to permanently delete this conversation? This cannot be undone.",
+	/** Leave dialog — heading */
+	chatLeaveDialogTitle: "Leave conversation?",
+	/** Leave dialog — body copy */
+	chatLeaveDialogBody: "Are you sure you want to leave this conversation? You will lose access to it.",
+
+	// ── Participants dialog ──────────────────────────────────────────────────────
+	/** Participants dialog — heading (list mode) */
+	chatParticipantsDialogTitle: "Participants",
+	/** Participants dialog — owner-only "add participants" button */
+	chatParticipantsAddAction: "Add participants",
+	/** Participants dialog — accessible label on the crown icon next to the owner's row */
+	chatParticipantsOwnerBadge: "Owner",
+	/** Participants dialog — accessible label on a manageable row's remove button */
+	chatParticipantRemoveAction: "Remove {{email}}",
+	/** Participants dialog — shown when the conversation has no other participants */
+	chatParticipantsEmpty: "No other participants",
+	/** Remove-participant confirm — heading */
+	chatParticipantRemoveDialogTitle: "Remove participant?",
+	/** Remove-participant confirm — confirm button */
+	chatParticipantRemoveDialogConfirm: "Remove",
+	/** Remove-participant confirm — body copy */
+	chatParticipantRemoveDialogBody: "{{email}} will lose access to this conversation.",
+	/** Add-participants dialog — heading (add mode) */
+	chatParticipantsAddDialogTitle: "Add participants",
+	/** Add-participants dialog — body copy */
+	chatParticipantsAddDialogBody: "Choose one or more contacts to add to this conversation.",
+	/** Add-participants dialog — submit button */
+	chatParticipantsAddSubmit: "Add",
+	/** Add-participants dialog — shown when every contact is already a participant */
+	chatParticipantsAddEmpty: "No contacts available to add",
+
+	// ── Message menu (copy/delete only — reply/edit land with the composer wave) ─────
+	/** Message menu — copies the message text to the clipboard */
+	chatMessageActionCopy: "Copy",
+	/** Message menu — deletes the message (sender-only, opens chatMessageDeleteDialog) */
+	chatMessageActionDelete: "Delete",
+	/** Toast shown after a successful message-text copy */
+	chatMessageCopyToast: "Copied to clipboard",
+	/** Message delete confirm — heading */
+	chatMessageDeleteDialogTitle: "Delete message?",
+	/** Message delete confirm — body copy */
+	chatMessageDeleteDialogBody: "Are you sure you want to delete this message? This cannot be undone."
 } as const

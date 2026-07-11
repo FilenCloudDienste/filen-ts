@@ -3,11 +3,14 @@ import { test, expect } from "./fixtures"
 import { dismissStartupReminders } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
-// Chats shell smoke (read-only wave): the rail entry navigates to /chats, the contextual sidebar renders,
-// the empty-conversation state shows on the zero-contacts FREE account, and the index/thread route shows
-// its select prompt. Net-zero — nothing is created (createChat is UI-gated on picking a contact, and the
-// shared account has zero contacts, so no real conversation can exist; the composer sends nothing this
-// wave). Deeper coverage is unit-level.
+// Chats shell smoke + C2 conversation-action affordances: the rail entry navigates to /chats, the
+// contextual sidebar renders, the empty-conversation state shows on the zero-contacts FREE account, the
+// index/thread route shows its select prompt, and the New chat button opens the contact picker up to
+// (never past) its own disabled submit. Net-zero — nothing is created (createChat is UI-gated on picking
+// a contact, and the shared account has zero contacts, so no real conversation can exist; the composer
+// sends nothing this wave). Menus on an actual conversation row need a conversation this account can
+// never have — that coverage is unit-level (chatMenu.test.ts, chatsActions.test.ts, chatsParticipants.
+// test.ts, chatsMessageMenu.test.ts).
 //
 // Client-nav only (same constraint as contacts.spec.ts / notes.spec.ts): the injection hook re-seeds and
 // navigates to "/" → /drive on every load, so a hard goto to /chats bounces back before it renders. The
@@ -64,5 +67,41 @@ test.describe("chats", () => {
 		// and the URL stays on bare /chats.
 		await expect(page).toHaveURL(/\/chats$/)
 		await expect(page.getByText("Select a conversation", { exact: true })).toBeVisible()
+	})
+
+	// The one thing about conversation CREATION confidently e2e-provable on the zero-contacts account
+	// (synthesis §4): the picker opens, settles on its own terminal state (this account's empty-contacts
+	// copy; a populated listbox is asserted too so this test still holds if that ever changes — mirrors
+	// share.spec.ts's own hasContacts-agnostic pattern), and is dismissed via Escape WITHOUT ever
+	// selecting a contact. createChat is UI-gated on a non-empty selection (the submit stays disabled),
+	// so this path never calls it — net-zero, no conversation exists afterward.
+	test("the New chat button opens the contact picker; dismissing creates nothing", async ({ page, injectedSession, browserName }) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await gotoChats(page)
+
+		await page.getByRole("button", { name: "New chat", exact: true }).click()
+
+		const dialog = page.getByRole("dialog")
+		await expect(dialog).toBeVisible()
+		await expect(dialog.getByRole("heading", { name: "New chat", exact: true })).toBeVisible()
+
+		// Terminal render state only, either is acceptable (see the test's own doc comment above) — proves
+		// the picker settled instead of hanging on a stuck loading skeleton.
+		const noContacts = dialog.getByText("No contacts", { exact: true })
+		const contactsListbox = dialog.getByRole("listbox", { name: "Contacts" })
+		await expect(noContacts.or(contactsListbox)).toBeVisible()
+
+		// Nothing is selected — the submit stays disabled regardless of whether any contacts rendered.
+		const createSubmit = dialog.getByRole("button", { name: "Create", exact: true })
+		await expect(createSubmit).toBeDisabled()
+
+		// Dismiss without ever selecting a contact — createChat is never called.
+		await page.keyboard.press("Escape")
+		await expect(dialog).toHaveCount(0)
+
+		// Still on the bare index route — nothing changed.
+		await expect(page).toHaveURL(/\/chats$/)
 	})
 })

@@ -1,17 +1,25 @@
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
-import { VolumeOffIcon } from "lucide-react"
+import { VolumeOffIcon, MoreHorizontalIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
 import { chatDisplayName, isChatUndecryptable, chatMessagePreview } from "@/features/chats/lib/sort"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
 import { formatListTimestamp } from "@/features/chats/lib/time"
+import { ChatContextMenuContent, ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
+import { type ChatActionDialogKind } from "@/features/chats/components/chatMenu.logic"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Button } from "@/components/ui/button"
 
 export interface ChatRowProps {
 	chat: Chat
 	selected: boolean
 	currentUserId: bigint | undefined
+	// Threaded straight through to the row's own menu (chatMenu.tsx's onAction) — the sidebar's ONE
+	// dialog host (useChatDialogHost) is the actual dialog-opening implementation, not this row.
+	onAction: (kind: ChatActionDialogKind, chat: Chat) => void
 }
 
 // Participant-derived avatar (mobile's own rule, list/chat/index.tsx): the other participants sans self,
@@ -30,10 +38,12 @@ function resolveAvatarUrl(chat: Chat, currentUserId: bigint | undefined): string
 }
 
 // One conversation row: avatar, display name, last-message preview, relative time, a per-row unread badge
-// (D4, derived client-side), and a muted affordance. The whole row is a Link to /chats/$uuid — the uuid is
-// a selection key, not a path hierarchy (mirrors NoteRow). Menus/actions land in a later wave, so this row
-// carries no context menu yet.
-export function ChatRow({ chat, selected, currentUserId }: ChatRowProps) {
+// (D4, derived client-side), and a muted affordance. Most of the row is a Link to /chats/$uuid — the uuid
+// is a selection key, not a path hierarchy (mirrors NoteRow) — with the ⋯ trigger button as its sibling,
+// not its descendant (a <button> nested inside an <a> is invalid content model — same rationale as
+// noteRow.tsx). Carries its own row-level context menu (right-click) and ⋯ trigger (hover-revealed), both
+// rendering the SAME shared descriptor list (chatMenu.logic.ts) the thread header's own menu uses.
+export function ChatRow({ chat, selected, currentUserId, onAction }: ChatRowProps) {
 	const { t } = useTranslation("chats")
 	const undecryptable = isChatUndecryptable(chat)
 	const name = undecryptable ? t("chatUndecryptable") : currentUserId !== undefined ? chatDisplayName(chat, currentUserId) : chat.uuid
@@ -43,44 +53,96 @@ export function ChatRow({ chat, selected, currentUserId }: ChatRowProps) {
 	const timestamp = chat.lastMessage?.sentTimestamp
 
 	return (
-		<Link
-			to="/chats/$uuid"
-			params={{ uuid: chat.uuid }}
-			aria-current={selected ? "page" : undefined}
-			className={cn(
-				"group flex h-full w-full items-center gap-2.5 rounded-xl px-2.5 transition-colors outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/30",
-				selected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/60"
-			)}
-		>
-			<Avatar>
-				{avatarUrl !== undefined ? <AvatarImage src={avatarUrl} /> : null}
-				<AvatarFallback>{name.trim().charAt(0).toUpperCase() || "?"}</AvatarFallback>
-			</Avatar>
-			<div className="flex min-w-0 flex-1 flex-col">
-				<div className="flex min-w-0 items-center gap-1.5">
-					{chat.muted ? (
-						<VolumeOffIcon
-							aria-label={t("chatMuted")}
-							className="size-3 shrink-0 text-muted-foreground"
-						/>
-					) : null}
-					<span className={cn("min-w-0 flex-1 truncate text-sm", unread ? "font-semibold" : "font-medium")}>{name}</span>
-					{timestamp !== undefined ? (
-						<span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">{formatListTimestamp(timestamp)}</span>
-					) : null}
-				</div>
-				<div className="flex min-w-0 items-center gap-1.5">
-					<span className={cn("min-w-0 flex-1 truncate text-xs", unread ? "text-foreground" : "text-muted-foreground")}>
-						{preview}
-					</span>
-					{unread ? (
-						<span
-							aria-label={t("chatUnread")}
-							className="size-2 shrink-0 rounded-full bg-primary"
-						/>
-					) : null}
-				</div>
-			</div>
-		</Link>
+		<ContextMenu>
+			{/* render-prop merge onto the row's own div (mirrors noteRow.tsx's own idiom) — Base UI's
+			ContextMenuTrigger merges its onContextMenu handler + ref onto the given element rather than
+			wrapping it. */}
+			<ContextMenuTrigger
+				render={
+					<div
+						className={cn(
+							"group flex h-full w-full items-center gap-2.5 rounded-xl px-2.5 transition-colors app-region-no-drag",
+							selected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/60"
+						)}
+					>
+						<Link
+							to="/chats/$uuid"
+							params={{ uuid: chat.uuid }}
+							aria-current={selected ? "page" : undefined}
+							className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+						>
+							<Avatar>
+								{avatarUrl !== undefined ? <AvatarImage src={avatarUrl} /> : null}
+								<AvatarFallback>{name.trim().charAt(0).toUpperCase() || "?"}</AvatarFallback>
+							</Avatar>
+							<div className="flex min-w-0 flex-1 flex-col">
+								<div className="flex min-w-0 items-center gap-1.5">
+									{chat.muted ? (
+										<VolumeOffIcon
+											aria-label={t("chatMuted")}
+											className="size-3 shrink-0 text-muted-foreground"
+										/>
+									) : null}
+									<span className={cn("min-w-0 flex-1 truncate text-sm", unread ? "font-semibold" : "font-medium")}>
+										{name}
+									</span>
+									{timestamp !== undefined ? (
+										<span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+											{formatListTimestamp(timestamp)}
+										</span>
+									) : null}
+								</div>
+								<div className="flex min-w-0 items-center gap-1.5">
+									<span
+										className={cn(
+											"min-w-0 flex-1 truncate text-xs",
+											unread ? "text-foreground" : "text-muted-foreground"
+										)}
+									>
+										{preview}
+									</span>
+									{unread ? (
+										<span
+											aria-label={t("chatUnread")}
+											className="size-2 shrink-0 rounded-full bg-primary"
+										/>
+									) : null}
+								</div>
+							</div>
+						</Link>
+						<DropdownMenu>
+							<DropdownMenuTrigger
+								render={
+									<Button
+										variant="ghost"
+										size="icon-xs"
+										aria-label={t("chatItemMenuTrigger")}
+										className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
+										onClick={event => {
+											// The button is a sibling of the Link now, not a descendant, so a click here
+											// can never bubble into a navigation — this only stops it reaching the row
+											// div's own onContextMenu, mirroring noteRow.tsx's matching trigger.
+											event.stopPropagation()
+										}}
+									>
+										<MoreHorizontalIcon />
+									</Button>
+								}
+							/>
+							<ChatDropdownMenuContent
+								chat={chat}
+								currentUserId={currentUserId}
+								onAction={onAction}
+							/>
+						</DropdownMenu>
+					</div>
+				}
+			/>
+			<ChatContextMenuContent
+				chat={chat}
+				currentUserId={currentUserId}
+				onAction={onAction}
+			/>
+		</ContextMenu>
 	)
 }

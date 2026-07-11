@@ -2,12 +2,14 @@ import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useRouterState } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { SearchIcon, XIcon, MessagesSquareIcon } from "lucide-react"
+import { SearchIcon, XIcon, MessagesSquareIcon, PlusIcon } from "lucide-react"
 import { useChats } from "@/features/chats/queries/chats"
 import { useAccountQuery } from "@/queries/account"
 import { filterChats } from "@/features/chats/components/chatsSidebar.logic"
 import { ChatRow } from "@/features/chats/components/chatRow"
+import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 
 // Fixed row height — the single virtualizer needs no measureElement pass (both lines are pinned to a known
@@ -35,8 +37,9 @@ function SidebarNotice({ icon, title, description }: { icon: ReactNode; title: s
 }
 
 // Contextual conversation list — the shell's sidebar slot when on /chats*. Same panel geometry as
-// NotesSidebar/DriveSidebar (w-52, rounded-xl, borderless). Read-only this wave: no new-chat affordance, no
-// row menus (both land in the conversation-actions wave); a virtualized list + client-side search only.
+// NotesSidebar/DriveSidebar (w-52, rounded-xl, borderless). A virtualized list + client-side search, a
+// "New chat" button opening the contact picker (createChatDialog.tsx via useChatDialogHost), and per-row
+// menus (chatRow.tsx's own context/dropdown menu).
 export function ChatsSidebar() {
 	const { t } = useTranslation("chats")
 	const pathname = useRouterState({ select: state => state.location.pathname })
@@ -45,6 +48,7 @@ export function ChatsSidebar() {
 	const chatsQuery = useChats()
 	const accountQuery = useAccountQuery()
 	const currentUserId = accountQuery.data?.id
+	const dialogHost = useChatDialogHost({ currentUuid: selectedUuid })
 
 	const [search, setSearch] = useState("")
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
@@ -117,6 +121,7 @@ export function ChatsSidebar() {
 								chat={chat}
 								selected={chat.uuid === selectedUuid}
 								currentUserId={currentUserId}
+								onAction={dialogHost.openChatDialog}
 							/>
 						</div>
 					)
@@ -132,7 +137,20 @@ export function ChatsSidebar() {
 			className="hidden w-52 shrink-0 flex-col rounded-xl bg-sidebar app-region-drag md:flex"
 		>
 			<div className="flex flex-col gap-2 p-3">
-				<h2 className="truncate px-1 text-[15px] font-semibold">{t("chatsSidebarTitle")}</h2>
+				<div className="flex items-center justify-between gap-2">
+					<h2 className="truncate px-1 text-[15px] font-semibold">{t("chatsSidebarTitle")}</h2>
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						aria-label={t("chatsSidebarNewChat")}
+						className="app-region-no-drag"
+						onClick={() => {
+							dialogHost.openCreateChatDialog()
+						}}
+					>
+						<PlusIcon />
+					</Button>
+				</div>
 
 				<div className="relative app-region-no-drag">
 					<SearchIcon
@@ -176,6 +194,7 @@ export function ChatsSidebar() {
 			>
 				{renderBody()}
 			</div>
+			{dialogHost.renderActiveDialog()}
 		</aside>
 	)
 }
