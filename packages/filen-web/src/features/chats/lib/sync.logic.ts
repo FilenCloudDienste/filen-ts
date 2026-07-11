@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import type { ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
+import type { Chat, ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
 import type { ChatMessageWithInflightId, InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 
 // Pure, testable core of the chat send outbox — a faithful port of filen-mobile's chats sync/store
@@ -163,3 +163,75 @@ const inflightChatGroupSchema = type({
 export const inflightChatMessagesSchema = type({
 	"[string]": inflightChatGroupSchema
 }).as<InflightChatMessages>()
+
+// ── Multi-tab outbox (leader-owned) ─────────────────────────────────────────
+//
+// One tab (the db-lock leader) owns the sequential push loop + all disk persistence. Follower tabs forward
+// each send to the leader over a dedicated BroadcastChannel and apply it OPTIMISTICALLY to their own store so
+// the pending bubble paints without a round trip (composeMessageList re-injects the store queue on top of the
+// confirmed message cache). The leader is authoritative: its state broadcast (the whole per-chat queue)
+// reconciles followers by inflightId UNION — chat sends are append-only, so a union, never notes' newest-per-
+// key overwrite. The follower's own realtime echo delivers the COMMITTED copy after the leader sends; a
+// follower learns a send FAILURE only as leader-only detail (no error broadcast — same leader-owned rejection
+// model as notes) — retry/remove stay leader-tab affordances.
+
+// A single send a follower forwards to the leader: the FULLY-BUILT optimistic message (carrying its own
+// inflightId, content, replyTo, sender snapshot + sentTimestamp) plus the live Chat it targets. The leader
+// unions it into its queue AS-IS (idempotent by inflightId) and never rebuilds it — the send re-resolves a
+// live sendable Chat regardless (sync.resolveSendableChat), so the forwarded snapshot only rides along for the
+// queue key + row preview.
+export interface RemoteChatEnqueue {
+	chat: Chat
+	message: ChatMessageWithInflightId
+}
+
+// Trust-boundary schema for a forwarded send (invalid → dropped, the channel's convention): the same
+// load-bearing scalars the durable queue validates, `chat` as a non-null object only.
+export const remoteChatEnqueueSchema = type({
+	chat: "object",
+	message: {
+		inflightId: "string",
+		uuid: "string",
+		chat: "string",
+		sentTimestamp: "bigint"
+	}
+}).as<RemoteChatEnqueue>()
+
+// Rebuild a follower's displayed store + its still-outstanding unacked queue from the leader's authoritative
+// broadcast. A forwarded send is CONFIRMED (dropped from unacked) once the leader's state carries its
+// inflightId — proof the leader received it; the store then mirrors the leader for that chat, so a later drain
+// (leader commits + omits it) makes the pending bubble disappear (the follower's realtime echo has by then
+// delivered the committed copy). A send the leader has NOT caught up to (its inflightId absent — an in-flight
+// or lost forward) keeps its unacked entry, which wins the union so the optimistic bubble is never dropped
+// before the leader has it. Pure: the caller owns the unacked ref and the store write.
+export function reconcileChatFollower(
+	leaderState: InflightChatMessages,
+	unacked: InflightChatMessages
+): { store: InflightChatMessages; unacked: InflightChatMessages } {
+	const remaining: InflightChatMessages = {}
+
+	for (const chatUuid of Object.keys(unacked)) {
+		const localGroup = unacked[chatUuid]
+
+		if (!localGroup) {
+			continue
+		}
+
+		const leaderIds = new Set((leaderState[chatUuid]?.messages ?? []).map(message => message.inflightId))
+		const stillUnacked = localGroup.messages.filter(message => !leaderIds.has(message.inflightId))
+
+		if (stillUnacked.length === 0) {
+			continue
+		}
+
+		remaining[chatUuid] = {
+			...localGroup,
+			messages: stillUnacked
+		}
+	}
+
+	return {
+		store: mergeChatInflight(leaderState, remaining),
+		unacked: remaining
+	}
+}
