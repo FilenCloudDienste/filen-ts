@@ -136,11 +136,6 @@ function NoteMenuEntries({ note, allTags, currentUserId, onAction, onDuplicated,
 
 				return
 			}
-			default:
-				// "participants"/"history" reach here only if their disabled guard is ever bypassed
-				// (it can't be — a disabled MenuItem never fires onClick) — a defensive no-op, not a dead
-				// branch removed, since both placeholders share this same "direct" run kind.
-				return
 		}
 	}
 
@@ -242,7 +237,6 @@ function NoteMenuEntries({ note, allTags, currentUserId, onAction, onDuplicated,
 				{separator}
 				<Item
 					variant={descriptor.destructive ? "destructive" : "default"}
-					disabled={descriptor.enabled === false}
 					onClick={event => {
 						// Stop propagation — the portaled popup's synthetic events still bubble through the
 						// REACT tree even though the DOM node lives elsewhere (same rationale as drive's

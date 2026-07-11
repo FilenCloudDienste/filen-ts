@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Note, NoteTag, UuidStr } from "@filen/sdk-rs"
+import type { Note, NoteHistory, NoteTag, UuidStr } from "@filen/sdk-rs"
 import {
 	DEFAULT_NOTE_TAGS_SORT_BY,
 	filterNotesBySearch,
@@ -7,6 +7,7 @@ import {
 	noteDisplayTitle,
 	sortAndFilterNotes,
 	sortNotes,
+	sortNoteHistory,
 	sortNoteTags,
 	tagDisplayName,
 	tagLastActivity
@@ -302,6 +303,42 @@ describe("sortNoteTags", () => {
 		const snapshot = [...input]
 
 		sortNoteTags(input, "nameAsc", {})
+
+		expect(input).toEqual(snapshot)
+	})
+})
+
+function mockHistory(overrides: Partial<NoteHistory> = {}): NoteHistory {
+	return {
+		id: 1n,
+		editedTimestamp: 0n,
+		editorId: 1n,
+		noteType: "text",
+		...overrides
+	}
+}
+
+describe("sortNoteHistory", () => {
+	it("sorts newest-first by editedTimestamp, staying in bigint (never Number())", () => {
+		const oldest = mockHistory({ id: 1n, editedTimestamp: 1_700_000_000_000n })
+		const newest = mockHistory({ id: 2n, editedTimestamp: 1_800_000_000_000n })
+		const middle = mockHistory({ id: 3n, editedTimestamp: 1_750_000_000_000n })
+
+		expect(sortNoteHistory([oldest, newest, middle]).map(h => h.id)).toEqual([2n, 3n, 1n])
+	})
+
+	it("breaks a timestamp tie by the higher (later) id", () => {
+		const lowerId = mockHistory({ id: 1n, editedTimestamp: 5n })
+		const higherId = mockHistory({ id: 2n, editedTimestamp: 5n })
+
+		expect(sortNoteHistory([lowerId, higherId]).map(h => h.id)).toEqual([2n, 1n])
+	})
+
+	it("does not mutate the input array", () => {
+		const input = [mockHistory({ id: 1n }), mockHistory({ id: 2n, editedTimestamp: 1n })]
+		const snapshot = [...input]
+
+		sortNoteHistory(input)
 
 		expect(input).toEqual(snapshot)
 	})

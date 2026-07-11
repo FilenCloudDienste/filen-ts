@@ -5,10 +5,7 @@ import { NoteTextCodeEditor } from "@/features/notes/components/noteTextCodeEdit
 import { NoteMarkdownEditor } from "@/features/notes/components/noteMarkdownEditor"
 import { RichTextEditor } from "@/features/notes/components/editor/richTextEditor"
 import { ChecklistEditor } from "@/features/notes/components/editor/checklistEditor"
-import { TextCodeReader } from "@/features/notes/components/reader/textCodeReader"
-import { MarkdownReader } from "@/features/notes/components/reader/markdownReader"
-import { RichReader } from "@/features/notes/components/reader/richReader"
-import { ChecklistReader } from "@/features/notes/components/reader/checklistReader"
+import { NoteReaderByType } from "@/features/notes/components/reader/noteReaderByType"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -19,16 +16,20 @@ import { Spinner } from "@/components/ui/spinner"
 // its read-only reader. Each branch is keyed on remountKey so a real reseed remounts the editor/reader
 // fresh — the EDITOR INVARIANT the seed-at-mount surfaces rely on.
 function BodyByType({ note, controller }: { note: Note; controller: NoteEditorController }) {
+	if (controller.readOnly) {
+		return (
+			<NoteReaderByType
+				key={controller.remountKey}
+				note={note}
+				content={controller.seed}
+			/>
+		)
+	}
+
 	switch (note.noteType) {
 		case "text":
 		case "code":
-			return controller.readOnly ? (
-				<TextCodeReader
-					key={controller.remountKey}
-					note={note}
-					content={controller.seed}
-				/>
-			) : (
+			return (
 				<NoteTextCodeEditor
 					key={controller.remountKey}
 					note={note}
@@ -36,13 +37,7 @@ function BodyByType({ note, controller }: { note: Note; controller: NoteEditorCo
 				/>
 			)
 		case "md":
-			return controller.readOnly ? (
-				<MarkdownReader
-					key={controller.remountKey}
-					note={note}
-					content={controller.seed}
-				/>
-			) : (
+			return (
 				<NoteMarkdownEditor
 					key={controller.remountKey}
 					note={note}
@@ -50,24 +45,14 @@ function BodyByType({ note, controller }: { note: Note; controller: NoteEditorCo
 				/>
 			)
 		case "rich":
-			return controller.readOnly ? (
-				<RichReader
-					key={controller.remountKey}
-					content={controller.seed}
-				/>
-			) : (
+			return (
 				<RichTextEditor
 					key={controller.remountKey}
 					controller={controller}
 				/>
 			)
 		case "checklist":
-			return controller.readOnly ? (
-				<ChecklistReader
-					key={controller.remountKey}
-					content={controller.seed}
-				/>
-			) : (
+			return (
 				<ChecklistEditor
 					key={controller.remountKey}
 					controller={controller}

@@ -6,7 +6,7 @@ import type { NotesKey } from "@/lib/i18n"
 
 // Dialog kinds a note-menu entry can dispatch to the surface-level dialog host (useNoteDialogHost) —
 // mirrors drive's ItemActionDialogKind split (itemMenu.logic.ts).
-export type NoteActionDialogKind = "rename" | "delete" | "leave" | "createTag"
+export type NoteActionDialogKind = "rename" | "delete" | "leave" | "createTag" | "participants" | "history"
 
 // Tag-row dialog kinds — disjoint from NoteActionDialogKind so the dialog host's active-dialog union
 // discriminates on `kind` alone (a tag dialog carries a NoteTag, not a Note).
@@ -32,9 +32,6 @@ interface NoteActionDescriptorShared {
 	labelKey: NotesKey
 	icon: LucideIcon
 	destructive?: boolean
-	// Present-but-disabled (never absent) — today only the participants/history placeholders use this,
-	// same "a dead click is worse than a disabled control" rule as drive's own `enabled?`.
-	enabled?: boolean
 }
 
 // "direct" resolves immediately (pin/favorite/duplicate/archive/restore/trash/type-change/tag-toggle);
@@ -49,10 +46,13 @@ const RENAME: NoteActionDescriptor = { id: "rename", ...NOTE_ACTION_DEFS.rename,
 const DUPLICATE: NoteActionDescriptor = { id: "duplicate", ...NOTE_ACTION_DEFS.duplicate, run: "direct" }
 const TAGS: NoteActionDescriptor = { id: "tags", ...NOTE_ACTION_DEFS.tags, run: "submenu", submenu: "tags" }
 const TYPE: NoteActionDescriptor = { id: "type", ...NOTE_ACTION_DEFS.type, run: "submenu", submenu: "type" }
-// Placeholders — the dialogs wave wires their real dialog kind; present so the menu's shape doesn't
-// jump around later, disabled so nothing here can be clicked into a dead end meanwhile.
-const PARTICIPANTS: NoteActionDescriptor = { id: "participants", ...NOTE_ACTION_DEFS.participants, run: "direct", enabled: false }
-const HISTORY: NoteActionDescriptor = { id: "history", ...NOTE_ACTION_DEFS.history, run: "direct", enabled: false }
+const PARTICIPANTS: NoteActionDescriptor = {
+	id: "participants",
+	...NOTE_ACTION_DEFS.participants,
+	run: "dialog",
+	dialogKind: "participants"
+}
+const HISTORY: NoteActionDescriptor = { id: "history", ...NOTE_ACTION_DEFS.history, run: "dialog", dialogKind: "history" }
 const ARCHIVE: NoteActionDescriptor = { id: "archive", ...NOTE_ACTION_DEFS.archive, run: "direct" }
 const RESTORE: NoteActionDescriptor = { id: "restore", ...NOTE_ACTION_DEFS.restore, run: "direct" }
 const TRASH: NoteActionDescriptor = { id: "trash", ...NOTE_ACTION_DEFS.trash, run: "direct" }

@@ -142,9 +142,9 @@ export const notes = {
 	noteActionCreateTag: "New tag",
 	/** Note menu — opens the type submenu (text/md/code/rich/checklist) */
 	noteActionType: "Change type",
-	/** Note menu — opens the participants dialog (owner only; disabled placeholder until the dialogs wave) */
+	/** Note menu — opens the participants dialog (owner only) */
 	noteActionParticipants: "Participants",
-	/** Note menu — opens the history dialog (disabled placeholder until the dialogs wave) */
+	/** Note menu — opens the history dialog */
 	noteActionHistory: "History",
 	/** Note menu — archives the note (owner only) */
 	noteActionArchive: "Archive",
@@ -240,5 +240,57 @@ export const notes = {
 	/** Reload-vs-keep banner — take the server version, discarding local edits */
 	noteRemoteEditReload: "Reload",
 	/** Reload-vs-keep banner — dismiss and keep the local edits */
-	noteRemoteEditKeep: "Keep mine"
+	noteRemoteEditKeep: "Keep mine",
+
+	// ── Participants dialog ────────────────────────────────────────────────────
+	/** Participants dialog — title */
+	noteParticipantsDialogTitle: "Participants",
+	/** Participants dialog — owner-only "add participants" button, opens the contact-picker sub-view */
+	noteParticipantsAddAction: "Add participants",
+	/** Participants dialog — badge/label on the owner's own row */
+	noteParticipantsOwnerBadge: "Owner",
+	/** Participants dialog — accessible label on a row's permission switch; {{email}} = the participant's email */
+	noteParticipantsCanEditLabel: "{{email}} can edit",
+	/** Participants dialog — accessible label on a row's remove button; {{email}} = the participant's email */
+	noteParticipantsRemoveAction: "Remove {{email}}",
+	/** Participants dialog — empty state when the note has no participants besides the current user */
+	noteParticipantsEmpty: "No other participants yet",
+	/** Participants dialog — remove confirm dialog title */
+	noteParticipantRemoveDialogTitle: "Remove participant?",
+	/** Participants dialog — remove confirm dialog's own submit button (no email, unlike the row's aria-labeled icon button) */
+	noteParticipantRemoveDialogConfirm: "Remove",
+	/** Participants dialog — remove confirm dialog body; {{email}} = the participant's email */
+	noteParticipantRemoveDialogBody: "{{email}} will lose access to this note.",
+	/** Participants dialog — load-error title; the body is the failing query's own errorLabel */
+	noteParticipantsLoadError: "Couldn't load participants",
+	/** Add-participants sub-view — dialog title */
+	noteParticipantsAddDialogTitle: "Add participants",
+	/** Add-participants sub-view — body above the contact list */
+	noteParticipantsAddDialogBody: "Choose one or more contacts to add to this note.",
+	/** Add-participants sub-view — submit button */
+	noteParticipantsAddSubmit: "Add",
+	/** Add-participants sub-view — empty state when every contact is already a participant, or the account has no contacts */
+	noteParticipantsAddEmpty: "No contacts available to add",
+
+	// ── History dialog ─────────────────────────────────────────────────────────
+	/** History dialog — title */
+	noteHistoryDialogTitle: "History",
+	/** History dialog — empty state when the note has no recorded versions yet */
+	noteHistoryEmpty: "No history yet",
+	/** History dialog — load-error title; the body is the failing query's own errorLabel */
+	noteHistoryLoadError: "Couldn't load history",
+	/** History dialog — fallback subtitle for a version with no preview text */
+	noteHistoryNoPreview: "No preview available",
+	/** History dialog — a version row's "view" action, opens its read-only preview below the list */
+	noteHistoryViewAction: "View",
+	/** History dialog — a version row's "restore" action */
+	noteHistoryRestoreAction: "Restore",
+	/** History dialog — the preview panel's own back-to-list action */
+	noteHistoryBackToList: "Back to list",
+	/** History dialog — preview panel shown for a version whose content wasn't returned */
+	noteHistoryPreviewUnavailable: "Preview unavailable for this version.",
+	/** History dialog — restore confirm dialog title */
+	noteHistoryRestoreDialogTitle: "Restore this version?",
+	/** History dialog — restore confirm dialog body */
+	noteHistoryRestoreDialogBody: "The note's current content will be replaced with this version. This cannot be undone."
 } as const

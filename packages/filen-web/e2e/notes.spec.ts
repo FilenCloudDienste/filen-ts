@@ -53,6 +53,40 @@ async function gotoNotes(page: Page): Promise<void> {
 	}
 }
 
+// Bounded, self-healing menu interaction. Every await inside carries its own explicit timeout well
+// under the toPass envelope, so a silently-swallowed step (a menu closed from under the click by a
+// concurrent re-render — the header re-renders whenever a mutation's cache patch lands, and popups
+// anchored to a re-rendering tree can drop a click on the floor) RETRIES the whole open→click
+// sequence instead of wedging an actionability wait against the full test budget: that exact mode
+// once ran a 240s test to death with the menu still open in the failure screenshot. Idempotent by
+// construction: the menu-open step is skipped when a previous attempt already left the menu open,
+// and every target is re-resolved from the live tree per attempt (descendInto's proven pattern).
+// Known tradeoff, accepted: for flip-label actions (Pin→Unpin, Trash→Restore) a retry AFTER the
+// effect landed (click fired but the close-wait lapsed — a sub-second window) finds the item gone
+// and fails the envelope with a clear "menuitem not found" — a diagnosable error, never a hang.
+// Module-scoped (not describe-local) — the participants/history dialogs suite below reuses it too.
+async function runMenuAction(page: Page, trigger: Locator, itemName: string, until: "menuClosed" | "dialogOpen"): Promise<void> {
+	const menu = page.getByRole("menu")
+
+	await expect(async () => {
+		if ((await menu.count()) === 0) {
+			await trigger.click({ timeout: 10_000 })
+			await expect(menu).toBeVisible({ timeout: 10_000 })
+		}
+
+		await page.getByRole("menuitem", { name: itemName, exact: true }).click({ timeout: 10_000 })
+
+		if (until === "menuClosed") {
+			// A "direct" descriptor's click closes the popup asynchronously (Base UI's close
+			// animation) — the next action's own open would silently no-op against a half-closed
+			// menu, so closure is part of THIS step's completion condition.
+			await expect(menu).toHaveCount(0, { timeout: 10_000 })
+		} else {
+			await expect(page.getByRole("dialog").or(page.getByRole("alertdialog"))).toBeVisible({ timeout: 10_000 })
+		}
+	}).toPass({ timeout: 90_000 })
+}
+
 test.describe("notes", () => {
 	test("rail entry navigates to /notes and renders the contextual sidebar", async ({ page, injectedSession, browserName }) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
@@ -112,39 +146,6 @@ test.describe("notes", () => {
 		// Net-zero teardown: permanently remove the created note through the programmatic hook.
 		await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
 	})
-
-	// Bounded, self-healing menu interaction. Every await inside carries its own explicit timeout well
-	// under the toPass envelope, so a silently-swallowed step (a menu closed from under the click by a
-	// concurrent re-render — the header re-renders whenever a mutation's cache patch lands, and popups
-	// anchored to a re-rendering tree can drop a click on the floor) RETRIES the whole open→click
-	// sequence instead of wedging an actionability wait against the full test budget: that exact mode
-	// once ran a 240s test to death with the menu still open in the failure screenshot. Idempotent by
-	// construction: the menu-open step is skipped when a previous attempt already left the menu open,
-	// and every target is re-resolved from the live tree per attempt (descendInto's proven pattern).
-	// Known tradeoff, accepted: for flip-label actions (Pin→Unpin, Trash→Restore) a retry AFTER the
-	// effect landed (click fired but the close-wait lapsed — a sub-second window) finds the item gone
-	// and fails the envelope with a clear "menuitem not found" — a diagnosable error, never a hang.
-	async function runMenuAction(page: Page, trigger: Locator, itemName: string, until: "menuClosed" | "dialogOpen"): Promise<void> {
-		const menu = page.getByRole("menu")
-
-		await expect(async () => {
-			if ((await menu.count()) === 0) {
-				await trigger.click({ timeout: 10_000 })
-				await expect(menu).toBeVisible({ timeout: 10_000 })
-			}
-
-			await page.getByRole("menuitem", { name: itemName, exact: true }).click({ timeout: 10_000 })
-
-			if (until === "menuClosed") {
-				// A "direct" descriptor's click closes the popup asynchronously (Base UI's close
-				// animation) — the next action's own open would silently no-op against a half-closed
-				// menu, so closure is part of THIS step's completion condition.
-				await expect(menu).toHaveCount(0, { timeout: 10_000 })
-			} else {
-				await expect(page.getByRole("dialog").or(page.getByRole("alertdialog"))).toBeVisible({ timeout: 10_000 })
-			}
-		}).toPass({ timeout: 90_000 })
-	}
 
 	// Full action leg (e1-actions): create → rename → pin → favorite → tag assign (+ tags-view
 	// expansion + tag-menu delete) → trash → restore → delete permanently, all through the editor
@@ -854,6 +855,125 @@ test.describe("notes: realtime", () => {
 			await pageB.close()
 			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
 			await page.evaluate(prefix => window.__filenE2E.sweepTestNotesByTitlePrefix(prefix), "e2e realtime-content")
+		}
+	})
+})
+
+// Dialogs wave (e3-dialogs): history's full list→preview→restore round trip, and participants' owner
+// management surface (render-only past the point a second account would be needed — see below).
+// Serial + net-zero like every other note-creating block in this file.
+test.describe("notes: participants and history dialogs", () => {
+	test("history dialog lists both versions, previews the old one read-only, and restores it", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+		test.setTimeout(120_000)
+
+		const v1 = `HistV1-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const v2 = `HistV2-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const v3 = `HistV3-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const uuid = await createAndOpenTestNote(page, "text", v1, "e2e history")
+		const main = page.getByRole("main")
+
+		try {
+			// Two more writes through this page's own client (not the editor). Live-verified: getNoteHistory
+			// returns one entry per SAVED state INCLUDING the current one (not just prior versions) — so
+			// after v1→v2→v3 the dialog lists three rows (v3 current, v2, v1), each keyed to its own <li> by
+			// its distinctive marker text, rather than assuming a fixed row count or list order by position.
+			await page.evaluate(args => window.__filenE2E.setTestNoteContentByUuid(args.uuid, args.content), { uuid, content: v2 })
+			await expect
+				.poll(() => page.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), uuid), { timeout: 30_000 })
+				.toBe(v2)
+			await page.evaluate(args => window.__filenE2E.setTestNoteContentByUuid(args.uuid, args.content), { uuid, content: v3 })
+			await expect
+				.poll(() => page.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), uuid), { timeout: 30_000 })
+				.toBe(v3)
+
+			// Open the history dialog through the editor header's ⋯ menu — "History" is open to every
+			// participant (owner included), never gated like "Participants" below.
+			const menuTrigger = main.getByRole("button", { name: "More actions", exact: true })
+			await runMenuAction(page, menuTrigger, "History", "dialogOpen")
+
+			const dialog = page.getByRole("dialog")
+			await expect(dialog.getByRole("heading", { name: "History", exact: true })).toBeVisible()
+			// Both older versions are listed — createNotePreviewFromContentText makes a short plain-text
+			// note's own row preview equal its raw content, so each version's marker is visible directly.
+			const v1Row = dialog.locator("li").filter({ hasText: v1 })
+			const v2Row = dialog.locator("li").filter({ hasText: v2 })
+			await expect(v1Row).toBeVisible({ timeout: 15_000 })
+			await expect(v2Row).toBeVisible()
+
+			// View the OLDEST (v1) row's read-only preview.
+			await v1Row.getByRole("button", { name: "View", exact: true }).click()
+			await expect(dialog.getByText(v1, { exact: true })).toBeVisible()
+			await expect(dialog.getByRole("button", { name: "Back to list", exact: true })).toBeVisible()
+
+			// Back to the list, then restore that same (oldest) version — a destructive confirm dialog.
+			// Re-resolved from the live tree (not the pre-preview `v1Row` handle) — same idempotent-retry
+			// rationale as runMenuAction's own re-resolve-per-attempt comment above.
+			await dialog.getByRole("button", { name: "Back to list", exact: true }).click()
+			await dialog.locator("li").filter({ hasText: v1 }).getByRole("button", { name: "Restore", exact: true }).click()
+
+			const confirm = page.getByRole("alertdialog")
+			await expect(confirm).toBeVisible()
+			await confirm.getByRole("button", { name: "Restore", exact: true }).click()
+			await expect(confirm).toHaveCount(0)
+			await expect(dialog).toHaveCount(0)
+
+			// The editor reflects the restored content once the remount lands, and the server agrees.
+			await expect(main.getByText(v1, { exact: true })).toBeVisible({ timeout: 15_000 })
+			await expect
+				.poll(() => page.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), uuid), { timeout: 30_000 })
+				.toBe(v1)
+		} finally {
+			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+		}
+	})
+
+	// The FREE shared e2e account currently has zero established contacts (contacts.spec.ts's own
+	// waitForContactsSettled finds it empty) — a genuine cross-account add needs a second real account
+	// this fixture doesn't have, so this test is graceful-render only: the owner management surface
+	// (the dialog itself, its own "Add participants" affordance, and the add sub-view's terminal state,
+	// whichever of empty/populated it turns out to be) renders without ever asserting a specific
+	// outcome past that point, mirroring contacts.spec.ts's own hasContacts-agnostic pattern. Dismissed
+	// via Escape, never submitted — no outward-facing add on the shared account.
+	test("participants dialog renders the owner management surface", async ({ page, injectedSession, browserName }) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+		test.setTimeout(90_000)
+
+		const { uuid } = await createEmptyNoteAndOpen(page, "text", "e2e participants")
+		const main = page.getByRole("main")
+
+		try {
+			const menuTrigger = main.getByRole("button", { name: "More actions", exact: true })
+			await runMenuAction(page, menuTrigger, "Participants", "dialogOpen")
+
+			const dialog = page.getByRole("dialog")
+			await expect(dialog.getByRole("heading", { name: "Participants", exact: true })).toBeVisible()
+			// A freshly-created note has no OTHER participants — the owner-only empty state renders,
+			// never a crash/blank panel.
+			await expect(dialog.getByText("No other participants yet", { exact: true })).toBeVisible()
+
+			// The owner-only add affordance is present (this account owns every note it creates).
+			const addButton = dialog.getByRole("button", { name: "Add participants", exact: true })
+			await expect(addButton).toBeVisible()
+			await addButton.click()
+
+			await expect(dialog.getByRole("heading", { name: "Add participants", exact: true })).toBeVisible()
+			// Terminal state only, either is acceptable (see the test's own doc comment above) — proves
+			// the picker settled instead of hanging on a stuck loading skeleton.
+			const noContacts = dialog.getByText("No contacts available to add", { exact: true })
+			const contactOption = dialog.getByRole("option").first()
+			await expect(noContacts.or(contactOption)).toBeVisible({ timeout: 15_000 })
+
+			await page.keyboard.press("Escape")
+			await expect(dialog).toHaveCount(0)
+		} finally {
+			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
 		}
 	})
 })

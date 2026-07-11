@@ -1,5 +1,5 @@
 import { fastLocaleCompare } from "@filen/utils"
-import type { Note, NoteTag } from "@filen/sdk-rs"
+import type { Note, NoteHistory, NoteTag } from "@filen/sdk-rs"
 
 // Port of mobile's notesSorter.sort (src/lib/sort.ts) onto the wasm Note shape. `editedTimestamp`
 // is a bigint on this surface — every comparison below stays in bigint (`<`/`>`), never Number(): a
@@ -47,6 +47,20 @@ export function noteDisplayTitle(note: Note): string {
 
 export function tagDisplayName(tag: NoteTag): string {
 	return tag.name ?? tag.uuid
+}
+
+// History dialog's own sort — newest first by editedTimestamp (mobile's sortNoteHistoryNewestFirst),
+// bigint-safe throughout like compareNotes above. `id` (also bigint) is the deterministic tiebreak for
+// two entries sharing a timestamp — history ids are server-assigned and monotonically increasing, so
+// the higher id is the later edit.
+export function sortNoteHistory(history: readonly NoteHistory[]): NoteHistory[] {
+	return [...history].sort((a, b) => {
+		if (a.editedTimestamp !== b.editedTimestamp) {
+			return a.editedTimestamp > b.editedTimestamp ? -1 : 1
+		}
+
+		return a.id === b.id ? 0 : a.id > b.id ? -1 : 1
+	})
 }
 
 // Search filter over title + preview (mobile's filterNoteListItemsBySearchQuery matches title +

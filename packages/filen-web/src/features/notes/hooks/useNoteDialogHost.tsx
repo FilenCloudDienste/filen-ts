@@ -8,6 +8,8 @@ import { setNoteTitle, deleteNote, leaveNote } from "@/features/notes/lib/action
 import { createNoteTag, addTagToNote, renameNoteTag, deleteNoteTag } from "@/features/notes/lib/tags"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { type NoteActionDialogKind, type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
+import { ParticipantsDialog } from "@/features/notes/components/participantsDialog"
+import { HistoryDialog } from "@/features/notes/components/historyDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 
@@ -280,6 +282,20 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 						onConfirm={() => {
 							void handleDeleteTagConfirm(activeDialog.tag)
 						}}
+					/>
+				)
+			case "participants":
+				return (
+					<ParticipantsDialog
+						note={activeDialog.note}
+						onClose={closeActiveDialog}
+					/>
+				)
+			case "history":
+				return (
+					<HistoryDialog
+						note={activeDialog.note}
+						onClose={closeActiveDialog}
 					/>
 				)
 		}

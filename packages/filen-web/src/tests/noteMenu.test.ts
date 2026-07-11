@@ -198,11 +198,14 @@ describe("noteMenuActions — run kinds", () => {
 		}
 	})
 
-	it("participants and history are present-but-disabled placeholders", () => {
+	it("participants and history dispatch their own dialog kind", () => {
 		const note = mockNote({ ownerId: 1n })
 
-		expect(noteMenuActions(note, 1n).find(d => d.id === "participants")).toMatchObject({ run: "direct", enabled: false })
-		expect(noteMenuActions(note, 1n).find(d => d.id === "history")).toMatchObject({ run: "direct", enabled: false })
+		expect(noteMenuActions(note, 1n).find(d => d.id === "participants")).toMatchObject({
+			run: "dialog",
+			dialogKind: "participants"
+		})
+		expect(noteMenuActions(note, 1n).find(d => d.id === "history")).toMatchObject({ run: "dialog", dialogKind: "history" })
 	})
 })
 
