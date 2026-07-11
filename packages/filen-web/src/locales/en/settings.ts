@@ -12,16 +12,12 @@ export const settings = {
 	settingsSectionSecurity: "Security",
 	/** Settings sidebar — Appearance section nav label and that section's page heading */
 	settingsSectionAppearance: "Appearance",
-	/** Settings sidebar — Events section nav label and that section's placeholder heading (audit log ships in a later wave) */
+	/** Settings sidebar — Events section nav label and that section's page heading */
 	settingsSectionEvents: "Events",
-	/** Settings sidebar — Billing section nav label and that section's placeholder heading (read-only billing ships in a later wave) */
+	/** Settings sidebar — Billing section nav label and that section's page heading */
 	settingsSectionBilling: "Billing",
 	/** Account page — error-state title, mirrors "auth:securityLoadError" for its own section */
 	settingsAccountLoadError: "Couldn't load your account",
-
-	// ── Placeholder sections (Events / Billing — present but minimal until a later wave) ─────
-	/** Events/Billing placeholder page — body under the section title + "common:comingSoon" badge */
-	settingsPlaceholderBody: "This section is on its way.",
 
 	// ── Account: avatar ──────────────────────────────────────────────────────
 	settingsAvatarTitle: "Profile picture",
@@ -93,5 +89,128 @@ export const settings = {
 	settingsThemeDescription: "Choose how Filen looks on this device",
 	settingsThemeLight: "Light",
 	settingsThemeDark: "Dark",
-	settingsThemeSystem: "System"
+	settingsThemeSystem: "System",
+
+	// ── Account: preferences (versioning / login alerts) ────────────────────
+	settingsPreferencesTitle: "Preferences",
+	settingsPreferencesDescription: "Safe, reversible account settings",
+	settingsVersioningTitle: "File versioning",
+	settingsVersioningDescription: "Keep previous versions of files when they're overwritten",
+	settingsLoginAlertsTitle: "Login alerts",
+	settingsLoginAlertsDescription: "Get an email whenever a new device signs in to your account",
+
+	// ── Account: destructive data controls (D2) ──────────────────────────────
+	/** Shared across both bulk-delete TypedConfirmDialogs — the input field's label */
+	settingsTypedConfirmLabel: "Confirmation phrase",
+	settingsDeleteAllVersionsTitle: "Delete all versioned files",
+	/** Delete-versions card description; {{count}} is the number of versioned files, {{size}} a pre-formatted byte size */
+	settingsDeleteAllVersionsDescription: "Permanently delete {{count}} versioned file(s), freeing up {{size}}. This cannot be undone.",
+	settingsDeleteAllVersionsSubmit: "Delete versioned files",
+	/** {{phrase}} interpolates DELETE_ALL_VERSIONS_PHRASE (dangerPhrases.ts) */
+	settingsDeleteAllVersionsConfirmBody: 'Type "{{phrase}}" below to permanently delete every versioned file. This cannot be undone.',
+	settingsDeleteAllVersionsSuccess: "All versioned files have been deleted.",
+	settingsDeleteAllItemsTitle: "Delete all files and directories",
+	/** Delete-everything card description; {{size}} is a pre-formatted byte size */
+	settingsDeleteAllItemsDescription:
+		"Permanently delete every file and directory in your account ({{size}} total). This cannot be undone.",
+	settingsDeleteAllItemsSubmit: "Delete everything",
+	/** {{phrase}} interpolates DELETE_ALL_ITEMS_PHRASE (dangerPhrases.ts) */
+	settingsDeleteAllItemsConfirmBody: 'Type "{{phrase}}" below to permanently delete every file and directory. This cannot be undone.',
+	settingsDeleteAllItemsSuccess: "Everything has been deleted.",
+
+	// ── Events (audit log) ────────────────────────────────────────────────────
+	settingsEventsEmptyTitle: "No events yet",
+	settingsEventsEmptyDescription: "Activity on your account — logins, uploads, sharing — will show up here.",
+	/** {{count}} events on the first page couldn't be decrypted (undecryptable rather than genuinely empty) */
+	settingsEventsUndecryptable: "{{count}} event(s) couldn't be decrypted.",
+	settingsEventsLoadError: "Couldn't load your events",
+	/** Event row fallback for a server event type this build doesn't recognize yet; {{type}} is the raw wasm UserEventKind tag */
+	settingsEventUnknown: "Account activity ({{type}})",
+	settingsEventFileUploaded: "File uploaded",
+	settingsEventFileVersioned: "File versioned",
+	settingsEventFileRestored: "File restored",
+	settingsEventVersionedFileRestored: "Versioned file restored",
+	settingsEventFileMoved: "File moved",
+	settingsEventFileRenamed: "File renamed",
+	settingsEventFileMetadataChanged: "File metadata changed",
+	settingsEventFileTrash: "File moved to trash",
+	settingsEventFileRm: "File deleted",
+	settingsEventFileShared: "File shared",
+	settingsEventFileLinkEdited: "File link edited",
+	settingsEventDeleteFilePermanently: "File permanently deleted",
+	settingsEventFolderTrash: "Directory moved to trash",
+	settingsEventFolderShared: "Directory shared",
+	settingsEventFolderMoved: "Directory moved",
+	settingsEventFolderRenamed: "Directory renamed",
+	settingsEventFolderMetadataChanged: "Directory metadata changed",
+	settingsEventSubFolderCreated: "Subdirectory created",
+	settingsEventBaseFolderCreated: "Directory created",
+	settingsEventFolderRestored: "Directory restored",
+	settingsEventFolderColorChanged: "Directory color changed",
+	settingsEventDeleteFolderPermanently: "Directory permanently deleted",
+	settingsEventFolderLinkEdited: "Directory link edited",
+	settingsEventLogin: "Signed in",
+	settingsEventFailedLogin: "Failed sign-in attempt",
+	settingsEventPasswordChanged: "Password changed",
+	settingsEventTwoFaEnabled: "Two-factor authentication enabled",
+	settingsEventTwoFaDisabled: "Two-factor authentication disabled",
+	settingsEventRequestAccountDeletion: "Account deletion requested",
+	settingsEventTrashEmptied: "Trash emptied",
+	settingsEventDeleteAll: "All files and directories deleted",
+	settingsEventDeleteVersioned: "Versioned files deleted",
+	settingsEventDeleteUnfinished: "Unfinished uploads deleted",
+	settingsEventCodeRedeemed: "Code redeemed",
+	settingsEventEmailChanged: "Email address changed",
+	settingsEventEmailChangeAttempt: "Email change requested",
+	settingsEventRemovedSharedInItems: "Removed items shared with you",
+	settingsEventRemovedSharedOutItems: "Removed items you shared",
+	settingsEventItemFavorite: "Favorite changed",
+
+	// ── Event detail dialog ───────────────────────────────────────────────────
+	settingsEventDetailIp: "IP address",
+	settingsEventDetailUserAgent: "Device",
+	settingsEventDetailName: "Name",
+	settingsEventDetailOldName: "Previous name",
+	settingsEventDetailReceiverEmail: "Shared with",
+	settingsEventDetailSharerEmail: "Shared by",
+	settingsEventDetailCode: "Code",
+	settingsEventDetailEmail: "Email",
+	settingsEventDetailOldEmail: "Previous email",
+	settingsEventDetailNewEmail: "New email",
+	settingsEventDetailCount: "Count",
+	settingsEventDetailLinkUuid: "Link",
+	settingsEventDetailFavorited: "Favorited",
+	settingsEventDetailYes: "Yes",
+	settingsEventDetailNo: "No",
+	settingsEventDetailEncrypted: "Encrypted",
+
+	// ── Billing (D1, read-only) ───────────────────────────────────────────────
+	/** Tier label rule (account-plans-stack): derived from isPremium only, never a raw plan name */
+	settingsBillingTierFree: "Free",
+	settingsBillingTierPro: "Pro",
+	settingsBillingCurrentPlanTitle: "Current plan",
+	settingsBillingManageOnFilen: "Manage on filen.io",
+	settingsBillingSubscriptionsTitle: "Subscriptions",
+	settingsBillingSubscriptionsDescription: "Every plan contributing to your account's total storage",
+	settingsBillingSubscriptionsEmptyTitle: "No subscriptions",
+	settingsBillingSubscriptionsEmptyDescription: "Active subscriptions will be listed here.",
+	settingsBillingInvoicesTitle: "Invoices",
+	settingsBillingInvoicesDescription: "Your billing history",
+	settingsBillingInvoicesEmptyTitle: "No invoices",
+	settingsBillingInvoicesEmptyDescription: "Invoices will be listed here once you have a paid subscription.",
+	settingsBillingColumnPlan: "Plan",
+	settingsBillingColumnStorage: "Storage",
+	settingsBillingColumnCost: "Cost",
+	settingsBillingColumnStarted: "Started",
+	settingsBillingColumnDate: "Date",
+	settingsBillingColumnGateway: "Method",
+	settingsBillingColumnStatus: "Status",
+	settingsBillingStatusActive: "Active",
+	settingsBillingStatusCancelled: "Cancelled",
+	settingsBillingStatusPending: "Pending",
+	settingsBillingReferralTitle: "Invite friends",
+	/** {{earned}} is a pre-formatted byte size, {{count}} the number of people referred */
+	settingsBillingReferralEarned: "{{earned}} earned from {{count}} referral(s)",
+	settingsBillingReferralCopy: "Copy link",
+	settingsBillingReferralCopied: "Referral link copied to clipboard."
 } as const

@@ -1,11 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { HistoryIcon } from "lucide-react"
-import { SettingsPlaceholder } from "@/features/settings/components/settingsPlaceholder"
+import { EventsList } from "@/features/settings/components/events/eventsList"
 
-// Audit-log placeholder — the real Events section (paginated getUserEvents + the ~40-case
-// UserEventKind → localized-string switch, mind the twoFaEnabled/twoFaDisabled rename) ships in a
-// later wave. The worker seam (getUserEvents/getUserEvent) is already wired.
+// The audit log: paginated getUserEvents + the 39-case UserEventKind → localized-string switch (mind
+// the twoFaEnabled/twoFaDisabled rename — see eventKind.ts). EventsList owns the whole scrollable
+// virtualized body; this route only supplies the section header, same split as every other settings
+// route.
 export const Route = createFileRoute("/_app/settings/events")({ component: EventsPage })
 
 function EventsPage() {
@@ -19,12 +20,7 @@ function EventsPage() {
 					<h1 className="font-heading text-base font-medium tracking-tight">{t("settingsSectionEvents")}</h1>
 				</div>
 			</header>
-			<div className="flex flex-1 flex-col overflow-y-auto p-6">
-				<SettingsPlaceholder
-					icon={HistoryIcon}
-					title={t("settingsSectionEvents")}
-				/>
-			</div>
+			<EventsList />
 		</>
 	)
 }

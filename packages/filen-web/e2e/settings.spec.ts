@@ -81,7 +81,7 @@ test.describe("settings", () => {
 		await expect(page.getByText("Delete account", { exact: true })).toBeVisible()
 	})
 
-	test("Events and Billing render present-but-minimal placeholders, not broken routes", async ({
+	test("the Events section renders live getUserEvents rows (the e2e account has login history)", async ({
 		page,
 		injectedSession,
 		browserName
@@ -93,11 +93,64 @@ test.describe("settings", () => {
 
 		await page.getByRole("link", { name: "Events", exact: true }).click()
 		await page.waitForURL(/\/settings\/events$/)
-		await expect(page.getByText("Coming soon", { exact: true })).toBeVisible()
+
+		await expect(page.getByText("No events yet", { exact: true })).toHaveCount(0)
+		await expect(page.locator('[aria-label="Events"]').getByRole("button").first()).toBeVisible()
+	})
+
+	test("the Billing section renders every table's empty state (the e2e account is FREE)", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await gotoSettings(page)
 
 		await page.getByRole("link", { name: "Billing", exact: true }).click()
 		await page.waitForURL(/\/settings\/billing$/)
-		await expect(page.getByText("Coming soon", { exact: true })).toBeVisible()
+
+		await expect(page.getByText("Free", { exact: true })).toBeVisible()
+		await expect(page.getByText("No subscriptions", { exact: true })).toBeVisible()
+		await expect(page.getByText("No invoices", { exact: true })).toBeVisible()
+		await expect(page.getByRole("button", { name: "Copy link", exact: true })).toBeVisible()
+	})
+
+	test("the destructive data-control cards render but their typed-confirm gate blocks a wrong phrase (never live-mutated)", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await gotoSettings(page)
+
+		await expect(page.getByText("Delete all versioned files", { exact: true })).toBeVisible()
+		await page.getByRole("button", { name: "Delete versioned files", exact: true }).click()
+
+		const versionsDialog = page.getByRole("alertdialog")
+		const versionsConfirm = versionsDialog.getByRole("button", { name: "Delete versioned files", exact: true })
+
+		await expect(versionsConfirm).toBeDisabled()
+		await versionsDialog.getByLabel("Confirmation phrase", { exact: true }).fill("delete versions") // near-miss: wrong case
+		await expect(versionsConfirm).toBeDisabled()
+		// Deliberately never filled with the exact phrase and clicked — that would call
+		// deleteAllVersions() against the shared e2e account's real drive.
+		await versionsDialog.getByRole("button", { name: "Cancel", exact: true }).click()
+		await expect(versionsDialog).toHaveCount(0)
+
+		await expect(page.getByText("Delete all files and directories", { exact: true })).toBeVisible()
+		await page.getByRole("button", { name: "Delete everything", exact: true }).click()
+
+		const itemsDialog = page.getByRole("alertdialog")
+		const itemsConfirm = itemsDialog.getByRole("button", { name: "Delete everything", exact: true })
+
+		await expect(itemsConfirm).toBeDisabled()
+		await itemsDialog.getByLabel("Confirmation phrase", { exact: true }).fill("delete everything") // near-miss: wrong case
+		await expect(itemsConfirm).toBeDisabled()
+		await itemsDialog.getByRole("button", { name: "Cancel", exact: true }).click()
 	})
 
 	test("the theme three-way switch round-trips through light/dark/system", async ({ page, injectedSession, browserName }) => {

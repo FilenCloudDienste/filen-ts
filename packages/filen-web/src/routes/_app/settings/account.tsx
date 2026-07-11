@@ -8,6 +8,9 @@ import { NicknameCard } from "@/features/settings/components/account/nicknameCar
 import { PersonalInfoCard } from "@/features/settings/components/account/personalInfoCard"
 import { StorageBreakdownCard } from "@/features/settings/components/account/storageBreakdownCard"
 import { GdprExportCard } from "@/features/settings/components/account/gdprExportCard"
+import { AccountPreferencesCard } from "@/features/settings/components/account/accountPreferencesCard"
+import { DeleteAllVersionsCard } from "@/features/settings/components/account/deleteAllVersionsCard"
+import { DeleteAllItemsCard } from "@/features/settings/components/account/deleteAllItemsCard"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -63,6 +66,9 @@ function AccountPage() {
 						<PersonalInfoCard accountQuery={accountQuery} />
 						<StorageBreakdownCard accountQuery={accountQuery} />
 						<GdprExportCard />
+						<AccountPreferencesCard accountQuery={accountQuery} />
+						<DeleteAllVersionsCard accountQuery={accountQuery} />
+						<DeleteAllItemsCard accountQuery={accountQuery} />
 					</div>
 				)}
 			</div>
