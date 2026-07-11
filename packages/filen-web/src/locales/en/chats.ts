@@ -54,6 +54,10 @@ export const chats = {
 	chatMessageEdited: "(edited)",
 	/** Message — placeholder body for a message that could not be decrypted */
 	chatMessageUndecryptable: "Message could not be decrypted",
+	/** Message — sub-line under an own message whose send is still queued/in flight (send outbox) */
+	chatMessageSending: "Sending…",
+	/** Message — sub-line under an own message whose send failed after exhausting its retry budget */
+	chatMessageFailed: "Not sent",
 	/** Message — prefix on the compact reply-to reference line above a reply */
 	chatReplyingTo: "Replying to {{name}}",
 	/** Message — rendered mention label for @everyone */
@@ -156,6 +160,10 @@ export const chats = {
 	chatMessageActionCopy: "Copy",
 	/** Message menu — deletes the message (sender-only, opens chatMessageDeleteDialog) */
 	chatMessageActionDelete: "Delete",
+	/** Message menu — re-queues a failed send (send outbox), resetting its retry budget */
+	chatMessageActionRetry: "Retry",
+	/** Message menu — discards a failed send entirely (drops it from the send outbox) */
+	chatMessageActionRemove: "Remove",
 	/** Toast shown after a successful message-text copy */
 	chatMessageCopyToast: "Copied to clipboard",
 	/** Message delete confirm — heading */

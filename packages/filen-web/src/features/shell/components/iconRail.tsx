@@ -17,6 +17,7 @@ import {
 import { cn } from "@/lib/utils"
 import { runLogout } from "@/lib/logout"
 import { sync as notesSync } from "@/features/notes/lib/sync"
+import { sync as chatsSync } from "@/features/chats/lib/sync"
 import { useChatsUnread } from "@/features/chats/queries/chatsUnread"
 import { socketBridge } from "@/lib/sdk/socket"
 import { sdkApi } from "@/lib/sdk/client"
@@ -120,9 +121,10 @@ function AccountMenu() {
 
 	async function handleSignOut(): Promise<void> {
 		setPending(true)
-		// Notes sync cancels BEFORE the wipe: abort the outbox loop and suppress any further disk write
-		// so a late flush can never resurrect this account's plaintext queue after kv-clear lands.
+		// Notes + chats sync cancel BEFORE the wipe: abort each outbox loop and suppress any further disk
+		// write so a late flush can never resurrect this account's plaintext queue after kv-clear lands.
 		notesSync.cancel()
+		chatsSync.cancel()
 		// Tear the realtime socket down before the client is released — unsubscribeFromSocket needs the
 		// live client. Fire-and-forget: the worker also frees the listener in releaseClient as a backstop.
 		void socketBridge.stop()

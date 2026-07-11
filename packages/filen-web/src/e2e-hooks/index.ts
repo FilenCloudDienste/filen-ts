@@ -11,6 +11,9 @@ import { whenBootReady } from "@/lib/sdk/boot"
 import { readThumbnailBlob } from "@/features/drive/lib/thumbCache"
 import { inflightContentSchema } from "@/features/notes/lib/sync.logic"
 import { latestInflightContent } from "@/features/notes/hooks/useNoteEditor.logic"
+import { enqueueChatMessage } from "@/features/chats/lib/sync"
+import { inflightChatMessagesSchema } from "@/features/chats/lib/sync.logic"
+import { chatsQueryUpsert, chatsQueryGet } from "@/features/chats/queries/chats"
 import { log } from "@/lib/log"
 
 // Test-only hooks, loaded ONLY when the app is built with VITE_E2E=1 (a dynamic import behind that
@@ -112,6 +115,37 @@ interface E2eHooks {
 	// lastModified), a cache hit never touches the write path. Null when the file or its cache entry
 	// doesn't exist.
 	thumbnailFileStat: (parentUuid: string, name: string) => Promise<{ size: number; lastModified: number } | null>
+	// Creates a ZERO-participant self-chat (createChat([]) — backend-accepted) and immediately renames
+	// it "e2e-chat-<ts>" so a leak is sweepable by prefix. The one way to get a real conversation on the
+	// zero-contacts shared account; the send outbox's real round-trip + kill-path replay are proven
+	// against it. Returns the renamed Chat's uuid for teardown.
+	createTestSelfChat: () => Promise<string>
+	// Permanently removes a conversation by uuid (owner delete) — keeps the shared account net-zero.
+	// No-op when the uuid isn't found.
+	deleteTestChatByUuid: (uuid: string) => Promise<void>
+	// Every conversation uuid currently on the account — the leak-guard seam (diff before/after a
+	// create, sweep any new uuid under serial mode).
+	listTestChatUuids: () => Promise<string[]>
+	// Fresh server read (bypassing every client cache — a full listChats) of a conversation's last
+	// message text by uuid. The real-send + kill-path cases poll this to prove a queued message
+	// actually reached the server. Null when the uuid isn't found or the chat has no message yet.
+	readTestChatLastMessage: (uuid: string) => Promise<string | null>
+	// Fresh server read (bypassing every client cache) of every message text in a conversation, via a
+	// full listMessagesBefore(now + 1h). The kill-path proof counts how many copies of a text landed —
+	// the temporal-dedupe "exactly one" assertion. Empty array when the uuid isn't found.
+	readTestChatMessageTexts: (uuid: string) => Promise<string[]>
+	// Drives the SEND OUTBOX transport directly (no composer UI this wave): resolves the chat + the
+	// current user, then enqueues through the same optimistic-persist-then-push path the composer will
+	// use. Returns the persist result. This is the outbox intake the durability + kill-path proofs
+	// exercise. No-op-false when the uuid isn't found.
+	enqueueTestChatMessage: (chatUuid: string, content: string) => Promise<boolean>
+	// The DURABLE (OPFS) send-outbox contents for a chat, read straight from the kv store the outbox
+	// persists to — proves the immediate-persist landed on disk BEFORE a reload (the survives-close
+	// crux). Returns the queued message texts, or null when nothing is persisted for the uuid.
+	readPersistedInflightChatMessages: (chatUuid: string) => Promise<string[] | null>
+	// Defensive sweep (cleanup.setup.ts): deletes every conversation whose name starts with `prefix`.
+	// Returns the count removed.
+	sweepTestChatsByNamePrefix: (prefix: string) => Promise<number>
 }
 
 // Minimal shape of the TanStack router main.tsx hands in — enough to re-run route guards after the
@@ -322,6 +356,104 @@ export function installE2eHooks(router: RouterLike): void {
 			const stat = blob as Blob & { lastModified: number }
 
 			return { size: stat.size, lastModified: stat.lastModified }
+		},
+		createTestSelfChat: async () => {
+			await whenBootReady()
+
+			// Zero participants is backend-accepted; rename immediately so a leaked conversation is
+			// sweepable by the "e2e-chat-" prefix.
+			const chat = await sdkApi.createChat([])
+			const renamed = await sdkApi.renameChat(chat, `e2e-chat-${String(Date.now())}`)
+
+			// Seed the list cache so enqueueTestChatMessage can resolve the chat WITHOUT a network read
+			// (the kill-path drives the outbox while offline, where listChats would hang).
+			chatsQueryUpsert(renamed)
+
+			return renamed.uuid
+		},
+		deleteTestChatByUuid: async uuid => {
+			await whenBootReady()
+
+			const chat = (await sdkApi.listChats()).find(c => c.uuid === uuid)
+
+			if (chat === undefined) {
+				return
+			}
+
+			await sdkApi.deleteChat(chat)
+		},
+		listTestChatUuids: async () => {
+			await whenBootReady()
+
+			return (await sdkApi.listChats()).map(chat => chat.uuid)
+		},
+		readTestChatLastMessage: async uuid => {
+			await whenBootReady()
+
+			const chat = (await sdkApi.listChats()).find(c => c.uuid === uuid)
+
+			return chat?.lastMessage?.message ?? null
+		},
+		readTestChatMessageTexts: async uuid => {
+			await whenBootReady()
+
+			const chat = (await sdkApi.listChats()).find(c => c.uuid === uuid)
+
+			if (chat === undefined) {
+				return []
+			}
+
+			const messages = await sdkApi.listMessagesBefore(chat, BigInt(Date.now() + 3_600_000))
+
+			return messages.map(message => message.message ?? "")
+		},
+		enqueueTestChatMessage: async (chatUuid, content) => {
+			await whenBootReady()
+
+			// Prefer the list cache (offline-safe — the kill-path enqueues while offline); fall back to a
+			// network read only when the cache misses.
+			const chat = chatsQueryGet()?.find(c => c.uuid === chatUuid) ?? (await sdkApi.listChats()).find(c => c.uuid === chatUuid)
+
+			if (chat === undefined) {
+				return false
+			}
+
+			const user = await sdkApi.getUserInfo()
+
+			return enqueueChatMessage({
+				chat,
+				content,
+				sender: { id: user.id, email: user.email, avatarUrl: user.avatarUrl, nickName: user.nickName }
+			})
+		},
+		readPersistedInflightChatMessages: async chatUuid => {
+			await whenBootReady()
+
+			const outbox = await kvGetJson("inflightChatMessages", inflightChatMessagesSchema)
+
+			if (outbox === null) {
+				return null
+			}
+
+			const group = outbox[chatUuid]
+
+			if (group === undefined) {
+				return null
+			}
+
+			return group.messages.map(message => message.message ?? "")
+		},
+		sweepTestChatsByNamePrefix: async prefix => {
+			await whenBootReady()
+
+			const matches = (await sdkApi.listChats()).filter(chat => (chat.name ?? "").startsWith(prefix))
+
+			for (const chat of matches) {
+				// Sequential, same rationale as the note/tag sweeps above.
+				await sdkApi.deleteChat(chat)
+			}
+
+			return matches.length
 		}
 	}
 

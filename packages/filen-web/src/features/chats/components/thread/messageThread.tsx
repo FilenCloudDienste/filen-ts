@@ -5,6 +5,8 @@ import { MoreHorizontalIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
 import { useChatMessages, loadOlderChatMessages } from "@/features/chats/queries/chatMessages"
 import { buildThreadRows, computeScrollAfterPrepend } from "@/features/chats/components/thread/thread.logic"
+import { composeMessageList } from "@/features/chats/lib/sync.logic"
+import { useChatsInflightStore } from "@/features/chats/store/useChatsInflight"
 import { dayKind, formatFullDate } from "@/features/chats/lib/time"
 import { chatDisplayName, isChatUndecryptable } from "@/features/chats/lib/sort"
 import { MessageRow } from "@/features/chats/components/thread/messageRow"
@@ -48,7 +50,20 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	const accountQuery = useAccountQuery()
 	const currentUserId = accountQuery.data?.id
 	const messagesQuery = useChatMessages(chatUuid)
-	const messages = messagesQuery.data ?? []
+	// Select the raw outbox maps (stable references — only change on a store write, so no getSnapshot
+	// churn) and derive this chat's pending/failed entries in render; the composed list re-injects them
+	// on top of the confirmed message cache so a query refetch never drops an in-flight/failed bubble.
+	const inflightMessagesMap = useChatsInflightStore(state => state.inflightMessages)
+	const inflightErrorsMap = useChatsInflightStore(state => state.inflightErrors)
+	const queuedMessages = inflightMessagesMap[chatUuid]?.messages ?? []
+	const failedMessages = Object.values(inflightErrorsMap)
+		.filter(entry => entry.message.chat === chatUuid)
+		.map(entry => entry.message)
+	const messages = composeMessageList({
+		queryMessages: messagesQuery.data ?? [],
+		inflightMessages: queuedMessages,
+		failedMessages
+	})
 	const dialogHost = useChatDialogHost({ currentUuid: chatUuid })
 
 	const scrollRef = useRef<HTMLDivElement | null>(null)

@@ -3,14 +3,14 @@ import { test, expect } from "./fixtures"
 import { dismissStartupReminders } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
-// Chats shell smoke + C2 conversation-action affordances: the rail entry navigates to /chats, the
-// contextual sidebar renders, the empty-conversation state shows on the zero-contacts FREE account, the
-// index/thread route shows its select prompt, and the New chat button opens the contact picker up to
-// (never past) its own disabled submit. Net-zero — nothing is created (createChat is UI-gated on picking
-// a contact, and the shared account has zero contacts, so no real conversation can exist; the composer
-// sends nothing this wave). Menus on an actual conversation row need a conversation this account can
-// never have — that coverage is unit-level (chatMenu.test.ts, chatsActions.test.ts, chatsParticipants.
-// test.ts, chatsMessageMenu.test.ts).
+// Chats shell smoke + C2 conversation-action affordances + the C3 send-outbox proof: the rail entry
+// navigates to /chats, the contextual sidebar renders, the empty-conversation state shows on the
+// zero-contacts FREE account, the index/thread route shows its select prompt, and the New chat button
+// opens the contact picker up to (never past) its own disabled submit. The UI-driven surface stays
+// net-zero (createChat is UI-gated on picking a contact the shared account doesn't have). The outbox
+// tests DO create real conversations — via a zero-participant self-chat (createChat([]), backend-
+// accepted) renamed "e2e-chat-<ts>" for sweepability — and delete them in a leak-guarded teardown, so
+// the account is left net-zero. Menus on an actual conversation row are covered unit-level.
 //
 // Client-nav only (same constraint as contacts.spec.ts / notes.spec.ts): the injection hook re-seeds and
 // navigates to "/" → /drive on every load, so a hard goto to /chats bounces back before it renders. The
@@ -30,6 +30,30 @@ async function gotoChats(page: Page): Promise<void> {
 
 	await page.getByRole("link", { name: "Chats", exact: true }).click()
 	await page.waitForURL(/\/chats(\/|$)/)
+}
+
+// Leak guard: any conversation created during `body` that survives it (a failed teardown) is swept by
+// diffing the account's chat-uuid set before/after — serial mode guarantees any new uuid belongs to the
+// running test. Mirrors notes.spec's withNoteLeakGuard; the "e2e-chat-" name prefix is the cleanup-setup
+// backstop for a body that dies before it even learns its uuid.
+async function withChatLeakGuard(page: Page, body: () => Promise<void>): Promise<void> {
+	const before = new Set(await page.evaluate(() => window.__filenE2E.listTestChatUuids()))
+
+	try {
+		await body()
+	} finally {
+		try {
+			const after = await page.evaluate(() => window.__filenE2E.listTestChatUuids())
+
+			for (const uuid of after) {
+				if (!before.has(uuid)) {
+					await page.evaluate(id => window.__filenE2E.deleteTestChatByUuid(id), uuid)
+				}
+			}
+		} catch {
+			// Page already gone — the real failure stays the reported one.
+		}
+	}
 }
 
 test.describe("chats", () => {
@@ -103,5 +127,84 @@ test.describe("chats", () => {
 
 		// Still on the bare index route — nothing changed.
 		await expect(page).toHaveURL(/\/chats$/)
+	})
+
+	// The send outbox's crown-jewel proof, reachable on the zero-contacts account via a self-chat
+	// (createChat([]), backend-accepted). Drives the outbox transport through the test hook (no composer
+	// UI this wave) rather than through a keystroke. OFFLINE while enqueuing so the durable-persist is
+	// observable BEFORE any send, then reconnects and asserts the reconnect trigger delivers it.
+	test("the send outbox persists a message to disk and delivers it on reconnect (self-chat)", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await gotoChats(page)
+
+		await withChatLeakGuard(page, async () => {
+			const uuid = await page.evaluate(() => window.__filenE2E.createTestSelfChat())
+			const text = `outbox-${String(Date.now())}`
+
+			// Enqueue while OFFLINE: the send can't fire, so the durable persist is observable on its own.
+			await page.context().setOffline(true)
+
+			const flushed = await page.evaluate(([u, t]) => window.__filenE2E.enqueueTestChatMessage(u, t), [uuid, text] as const)
+			expect(flushed).toBe(true)
+
+			// The message is durable on disk (OPFS) BEFORE any send — the survives-window-close guarantee.
+			await expect.poll(() => page.evaluate(u => window.__filenE2E.readPersistedInflightChatMessages(u), uuid)).toContain(text)
+
+			// Reconnect: the outbox's onlineManager trigger flushes the queue → the send commits.
+			await page.context().setOffline(false)
+
+			await expect
+				.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
+				.toContain(text)
+
+			await page.evaluate(u => window.__filenE2E.deleteTestChatByUuid(u), uuid)
+		})
+	})
+
+	// Kill-path: enqueue → kill the tab before the send can complete → reopen → replay-on-launch sends it
+	// → the server has EXACTLY ONE copy (the temporal commit-boundary dedupe held). Asserts both delivery
+	// and count. Enqueues OFFLINE so the ONLY delivery path is the post-reload replay (the send never
+	// fires pre-kill), which is exactly what proves durability + at-least-once + the dedupe bound.
+	test("kill-path: a queued send survives a tab reload and replays exactly once", async ({ page, injectedSession, browserName }) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await gotoChats(page)
+
+		await withChatLeakGuard(page, async () => {
+			const uuid = await page.evaluate(() => window.__filenE2E.createTestSelfChat())
+			const text = `killpath-${String(Date.now())}`
+
+			// Enqueue offline: persisted to disk, never sent before the kill.
+			await page.context().setOffline(true)
+
+			await page.evaluate(([u, t]) => window.__filenE2E.enqueueTestChatMessage(u, t), [uuid, text] as const)
+
+			await expect.poll(() => page.evaluate(u => window.__filenE2E.readPersistedInflightChatMessages(u), uuid)).toContain(text)
+
+			// Kill the tab. A fresh page + fresh outbox: the only way the message can now reach the server
+			// is the replay of the durable queue on the reloaded shell.
+			await page.context().setOffline(false)
+			await page.reload()
+			await dismissStartupReminders(page)
+			await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+
+			// Replay delivered it...
+			await expect
+				.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
+				.toContain(text)
+
+			// ...exactly once — the commit-boundary dedupe (dequeue-on-commit) held, no duplicate.
+			const texts = await page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid)
+			expect(texts.filter(t => t === text)).toHaveLength(1)
+
+			await page.evaluate(u => window.__filenE2E.deleteTestChatByUuid(u), uuid)
+		})
 	})
 })

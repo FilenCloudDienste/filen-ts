@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { CornerUpRightIcon } from "lucide-react"
+import { CornerUpRightIcon, ClockIcon, AlertCircleIcon } from "lucide-react"
 import type { Chat, ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
 import { formatClockTime } from "@/features/chats/lib/time"
@@ -9,6 +9,7 @@ import { deleteMessage } from "@/features/chats/lib/messageActions"
 import { MessageContextMenuContent } from "@/features/chats/components/thread/messageMenu"
 import { MessageContent } from "@/features/chats/components/thread/messageContent"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { useChatSendState } from "@/features/chats/store/useChatsInflight"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -58,6 +59,9 @@ export function MessageRow({ chat, message, showHeader, currentUserId }: Message
 	const senderAvatar = message.senderAvatar
 	const avatarUrl = senderAvatar?.startsWith("http") === true ? senderAvatar : undefined
 	const name = senderName(message)
+	// The optimistic copy's uuid IS its inflightId, so this read resolves an in-flight/failed own message
+	// to "pending"/"failed" and every confirmed (real-uuid) message to "confirmed".
+	const sendState = useChatSendState(message.uuid)
 
 	const [confirmingDelete, setConfirmingDelete] = useState(false)
 	const [deletePending, setDeletePending] = useState(false)
@@ -100,7 +104,7 @@ export function MessageRow({ chat, message, showHeader, currentUserId }: Message
 								{undecryptable ? (
 									<span className="text-sm text-muted-foreground italic">{t("chatMessageUndecryptable")}</span>
 								) : (
-									<span className="min-w-0">
+									<span className={cn("min-w-0", sendState === "pending" && "opacity-60")}>
 										<MessageContent
 											chat={chat}
 											text={message.message}
@@ -110,13 +114,27 @@ export function MessageRow({ chat, message, showHeader, currentUserId }: Message
 										) : null}
 									</span>
 								)}
+								{sendState === "pending" ? (
+									<span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+										<ClockIcon className="size-3 shrink-0" />
+										{t("chatMessageSending")}
+									</span>
+								) : null}
+								{sendState === "failed" ? (
+									<span className="mt-0.5 flex items-center gap-1 text-[11px] text-destructive">
+										<AlertCircleIcon className="size-3 shrink-0" />
+										{t("chatMessageFailed")}
+									</span>
+								) : null}
 							</div>
 						</div>
 					}
 				/>
 				<MessageContextMenuContent
+					chat={chat}
 					message={message}
 					currentUserId={currentUserId}
+					sendState={sendState}
 					onRequestDelete={() => {
 						setConfirmingDelete(true)
 					}}

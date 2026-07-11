@@ -1,6 +1,11 @@
 import { test as setup, expect } from "../fixtures"
 import { firstMatchingRowName, selectAndTrashRow, waitForListingSettled } from "../helpers/listing"
-import { isScratchDebrisName, NOTE_DEBRIS_TITLE_PREFIXES, TAG_DEBRIS_NAME_PREFIXES } from "@/e2e-hooks/scratchDebris"
+import {
+	isScratchDebrisName,
+	NOTE_DEBRIS_TITLE_PREFIXES,
+	TAG_DEBRIS_NAME_PREFIXES,
+	CHAT_DEBRIS_NAME_PREFIXES
+} from "@/e2e-hooks/scratchDebris"
 
 // Runs after auth-setup (project dependency in playwright.config.ts). Every suite run self-cleans
 // before any spec project starts: a spec that dies mid-flight never reaches its own finally-teardown,
@@ -77,6 +82,16 @@ setup("sweep notes and tags matching a spec-minted debris prefix", async ({ page
 
 		if (removed > 0) {
 			console.log(`cleanup-setup: swept ${String(removed)} leaked tag(s) named "${prefix}…"`)
+		}
+	}
+
+	// Chats-side counterpart: self-chat fixtures leaked by a dead chats.spec run (createChat fights a
+	// conversations/create rate limit, so leaks compound fast). Same programmatic-hook sweep, no UI.
+	for (const prefix of CHAT_DEBRIS_NAME_PREFIXES) {
+		const removed = await page.evaluate(p => window.__filenE2E.sweepTestChatsByNamePrefix(p), prefix)
+
+		if (removed > 0) {
+			console.log(`cleanup-setup: swept ${String(removed)} leaked conversation(s) named "${prefix}…"`)
 		}
 	}
 })

@@ -21,10 +21,19 @@ export function isScratchDebrisName(name: string): boolean {
 export const NOTE_DEBRIS_TITLE_PREFIXES: readonly string[] = ["e2e ", "e2e-"]
 export const TAG_DEBRIS_NAME_PREFIXES: readonly string[] = ["e2e-tag-"]
 
+// Chats-side debris: chats.spec's self-chat fixtures are renamed "e2e-chat-<ts>" immediately after
+// creation so any conversation leaked by a spec that dies before its own teardown is sweepable by this
+// prefix (createChat fights a server-side conversations/create rate limit, so leaks compound quickly).
+export const CHAT_DEBRIS_NAME_PREFIXES: readonly string[] = ["e2e-chat-"]
+
 export function isNoteDebrisTitle(title: string): boolean {
 	return NOTE_DEBRIS_TITLE_PREFIXES.some(prefix => title.startsWith(prefix))
 }
 
 export function isTagDebrisName(name: string): boolean {
 	return TAG_DEBRIS_NAME_PREFIXES.some(prefix => name.startsWith(prefix))
+}
+
+export function isChatDebrisName(name: string): boolean {
+	return CHAT_DEBRIS_NAME_PREFIXES.some(prefix => name.startsWith(prefix))
 }

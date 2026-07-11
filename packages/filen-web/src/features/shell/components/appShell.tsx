@@ -6,6 +6,7 @@ import { ChatsSidebar } from "@/features/chats/components/chatsSidebar"
 import { SystemStrip } from "@/features/shell/components/systemStrip"
 import { AccountReminders } from "@/features/shell/components/accountReminders"
 import { SyncHost } from "@/features/notes/components/syncHost"
+import { ChatsSyncHost } from "@/features/chats/components/syncHost"
 import { SocketHost } from "@/features/shell/components/socketHost"
 
 // Padded canvas holding the three shell zones: a bare icon rail sitting directly on the canvas, then
@@ -31,6 +32,9 @@ export function AppShell() {
 			{/* Notes sync outbox driver — mounted once in the authed shell so a pending edit flushes even
 			    while the user is on drive, not scoped to the notes route. Renders nothing. */}
 			<SyncHost />
+			{/* Chat send outbox driver — same rationale as the notes SyncHost above: mounted once so a
+			    pending chat send flushes even off the chats route. Renders nothing. */}
+			<ChatsSyncHost />
 			{/* Realtime socket bridge — one subscription for the whole authed session; registers the note
 			    domain's handlers (drive/chats reuse the bridge later). Renders nothing. */}
 			<SocketHost />

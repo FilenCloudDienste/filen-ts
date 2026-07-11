@@ -36,6 +36,14 @@ interface E2eHooks {
 	sweepTestNotesByTitlePrefix: (prefix: string) => Promise<number>
 	sweepTestTagsByNamePrefix: (prefix: string) => Promise<number>
 	thumbnailFileStat: (parentUuid: string, name: string) => Promise<{ size: number; lastModified: number } | null>
+	createTestSelfChat: () => Promise<string>
+	deleteTestChatByUuid: (uuid: string) => Promise<void>
+	listTestChatUuids: () => Promise<string[]>
+	readTestChatLastMessage: (uuid: string) => Promise<string | null>
+	readTestChatMessageTexts: (uuid: string) => Promise<string[]>
+	enqueueTestChatMessage: (chatUuid: string, content: string) => Promise<boolean>
+	readPersistedInflightChatMessages: (chatUuid: string) => Promise<string[] | null>
+	sweepTestChatsByNamePrefix: (prefix: string) => Promise<number>
 }
 
 // Mirrors src/types/desktop.d.ts's DesktopBridge for the same reason as E2eHooks above: this project
