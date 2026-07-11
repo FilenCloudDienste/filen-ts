@@ -1,13 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { ArrowUpIcon, XIcon, CornerUpLeftIcon, PencilIcon } from "lucide-react"
+import { ArrowUpIcon, XIcon, CornerUpLeftIcon, PencilIcon, PaperclipIcon, UploadIcon, HardDriveIcon } from "lucide-react"
 import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
-import { cn } from "@/lib/utils"
+import { cn, noop } from "@/lib/utils"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { enqueueChatMessage } from "@/features/chats/lib/sync"
 import { signalTyping, signalStopped } from "@/features/chats/lib/typing"
 import { editMessage } from "@/features/chats/lib/messageActions"
+import { uploadAttachment } from "@/features/chats/lib/attachments"
 import type { OptimisticSender } from "@/features/chats/lib/sync.logic"
 import {
 	MAX_CHAT_MESSAGE_LENGTH,
@@ -18,6 +19,7 @@ import {
 	enterIntent,
 	shouldEditLastOnArrowUp,
 	buildReplyPartial,
+	appendAttachmentUrl,
 	activeMentionQuery,
 	activeEmojiQuery,
 	filterMentionParticipants,
@@ -32,8 +34,10 @@ import { contactDisplayName, contactInitials } from "@/features/contacts/compone
 import type { EmojiSuggestion } from "@/features/chats/lib/emoji"
 import { useChatComposerEntry, useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import { loadDraft, saveDraftDebounced } from "@/features/chats/lib/drafts"
+import { AttachDriveDialog } from "@/features/chats/components/thread/attachDriveDialog"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
 
 // Grow the input with its content up to this many px, then scroll internally (mobile caps at a quarter
 // screen; a fixed desktop cap reads cleaner).
@@ -80,8 +84,14 @@ export function Composer({
 	const reset = useChatComposerStore(state => state.reset)
 
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+	const fileInputRef = useRef<HTMLInputElement | null>(null)
 	const [caret, setCaret] = useState(0)
 	const [activeIndex, setActiveIndex] = useState(0)
+	// Count, not a boolean: file-input/drag-drop can hand over several files at once, each its own
+	// independent upload (mirrors drive's startUploads fan-out — one failing file never blocks the
+	// rest); the attach affordances stay disabled while ANY of them is still in flight.
+	const [uploadingCount, setUploadingCount] = useState(0)
+	const [attachDriveOpen, setAttachDriveOpen] = useState(false)
 	// Escape closes an open popover WITHOUT touching the draft; cleared on the next keystroke so a fresh
 	// token re-opens it.
 	const [manualClose, setManualClose] = useState(false)
@@ -251,6 +261,51 @@ export function Composer({
 		}
 	}
 
+	// Appends a just-created attachment url to whichever draft is live AT THE TIME it resolves — reads
+	// fresh store state rather than closing over the render's own `draft`, since an upload can easily
+	// outlive several keystrokes (or, for a multi-file drop, several sibling uploads finishing out of
+	// order — each append must stack on the LATEST value, never clobber a concurrent one).
+	function insertAttachmentUrl(url: string): void {
+		const current = useChatComposerStore.getState().entries[chatUuid]?.draft ?? ""
+		setDraft(chatUuid, appendAttachmentUrl(current, url))
+	}
+
+	// One file → one upload → one link → one append. Every step is confirm-then-patch with an
+	// errorLabel toast (attachments.ts's own header comment); a premium-gate rejection on the
+	// enablePublicLink leg surfaces the SERVER's own label here, unaltered — the FREE e2e account's
+	// expected path (spec item 4).
+	async function attachLocalFile(file: File): Promise<void> {
+		setUploadingCount(count => count + 1)
+
+		try {
+			const outcome = await uploadAttachment(file, noop)
+
+			if (outcome.status === "error") {
+				toast.error(errorLabel(outcome.dto))
+				return
+			}
+
+			insertAttachmentUrl(outcome.url)
+		} finally {
+			setUploadingCount(count => count - 1)
+		}
+	}
+
+	function attachLocalFiles(files: FileList | File[]): void {
+		for (const file of files) {
+			void attachLocalFile(file)
+		}
+	}
+
+	function onDrop(event: React.DragEvent<HTMLDivElement>): void {
+		if (event.dataTransfer.files.length === 0) {
+			return
+		}
+
+		event.preventDefault()
+		attachLocalFiles(event.dataTransfer.files)
+	}
+
 	async function submit(): Promise<void> {
 		if (sendingRef.current || !canSend(draft)) {
 			return
@@ -385,7 +440,27 @@ export function Composer({
 	}
 
 	return (
-		<div className="relative shrink-0 p-3">
+		<div
+			className="relative shrink-0 p-3"
+			onDragOver={event => {
+				event.preventDefault()
+			}}
+			onDrop={onDrop}
+		>
+			<input
+				ref={fileInputRef}
+				type="file"
+				multiple
+				className="hidden"
+				onChange={event => {
+					if (event.target.files !== null) {
+						attachLocalFiles(event.target.files)
+					}
+
+					// Reset so selecting the SAME file twice in a row still fires onChange the second time.
+					event.target.value = ""
+				}}
+			/>
 			{suggestKind !== null && suggestCount > 0 ? (
 				<div className="absolute right-3 bottom-full left-3 z-10 mb-1 max-h-64 overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-md">
 					{suggestKind === "mention"
@@ -482,6 +557,39 @@ export function Composer({
 			) : null}
 
 			<div className="flex items-end gap-2 rounded-xl bg-muted px-3 py-2">
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								className="size-8 shrink-0 self-end rounded-full"
+								disabled={uploadingCount > 0}
+								aria-label={t("chatComposerAttach")}
+							>
+								<PaperclipIcon />
+							</Button>
+						}
+					/>
+					<DropdownMenuContent align="start">
+						<DropdownMenuItem
+							onClick={() => {
+								fileInputRef.current?.click()
+							}}
+						>
+							<UploadIcon aria-hidden="true" />
+							{t("chatComposerAttachUpload")}
+						</DropdownMenuItem>
+						<DropdownMenuItem
+							onClick={() => {
+								setAttachDriveOpen(true)
+							}}
+						>
+							<HardDriveIcon aria-hidden="true" />
+							{t("chatComposerAttachFromDrive")}
+						</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
 				<textarea
 					ref={textareaRef}
 					value={draft}
@@ -521,6 +629,18 @@ export function Composer({
 
 			{overLimit ? (
 				<p className="mt-1 px-1 text-xs text-destructive">{t("chatComposerOverLimit", { max: MAX_CHAT_MESSAGE_LENGTH })}</p>
+			) : null}
+
+			{attachDriveOpen ? (
+				<AttachDriveDialog
+					onClose={() => {
+						setAttachDriveOpen(false)
+					}}
+					onAttached={url => {
+						insertAttachmentUrl(url)
+						setAttachDriveOpen(false)
+					}}
+				/>
 			) : null}
 		</div>
 	)

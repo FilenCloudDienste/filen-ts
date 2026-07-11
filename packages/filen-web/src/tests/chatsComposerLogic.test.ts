@@ -15,7 +15,8 @@ import {
 	filterEmojiSuggestions,
 	applyMention,
 	applyEmoji,
-	lastEditableOwnMessage
+	lastEditableOwnMessage,
+	appendAttachmentUrl
 } from "@/features/chats/lib/composer.logic"
 import { emojiForShortcode } from "@/features/chats/lib/emoji"
 
@@ -208,5 +209,32 @@ describe("lastEditableOwnMessage", () => {
 
 		expect(lastEditableOwnMessage(messages, 7n)).toBeUndefined()
 		expect(lastEditableOwnMessage(messages, undefined)).toBeUndefined()
+	})
+})
+
+describe("appendAttachmentUrl", () => {
+	it("becomes just the url on a blank draft", () => {
+		expect(appendAttachmentUrl("", "https://app.filen.io/#/d/uuid%23key")).toBe("https://app.filen.io/#/d/uuid%23key")
+	})
+
+	it("appends with a single separating space on a non-blank draft", () => {
+		expect(appendAttachmentUrl("check this out", "https://app.filen.io/#/d/uuid%23key")).toBe(
+			"check this out https://app.filen.io/#/d/uuid%23key"
+		)
+	})
+
+	it("trims trailing whitespace before appending, never doubling the separator", () => {
+		expect(appendAttachmentUrl("check this out   ", "https://x.example.com/a")).toBe("check this out https://x.example.com/a")
+	})
+
+	it("a whitespace-only draft collapses to just the url (mirrors the blank case)", () => {
+		expect(appendAttachmentUrl("   ", "https://x.example.com/a")).toBe("https://x.example.com/a")
+	})
+
+	it("stacks a second attachment after the first (sequential appends both space-separated)", () => {
+		const once = appendAttachmentUrl("", "https://x.example.com/a")
+		const twice = appendAttachmentUrl(once, "https://x.example.com/b")
+
+		expect(twice).toBe("https://x.example.com/a https://x.example.com/b")
 	})
 })

@@ -45,7 +45,9 @@ import init, {
 	type Chat,
 	type ChatMessage,
 	type ChatMessagePartial,
-	type ChatTypingType
+	type ChatTypingType,
+	type LinkedFile,
+	type DirPublicInfo
 } from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
 import { toErrorDTO, PARENT_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
@@ -805,6 +807,18 @@ const api = {
 	},
 	removeFileLink(file: File, link: FilePublicLink): Promise<void> {
 		return requireClient().removeFileLink(file, link)
+	},
+	// Read-only public-link METADATA lookups (chat embeds, embeds.logic.ts's parseFilenPublicLink) —
+	// distinct from the status/create/update/remove ops above, which all target a link this account
+	// OWNS. These resolve a link pasted by ANYONE (the uuid+key the message text carries), same as
+	// opening the link in a browser would; `getLinkedFile`'s optional password param is never supplied
+	// (a password-protected link degrades to the plain-link fallback, same as a resolution failure —
+	// there is no in-chat password prompt this wave).
+	getLinkedFile(linkUuid: string, fileKey: string): Promise<LinkedFile> {
+		return requireClient().getLinkedFile(linkUuid, fileKey)
+	},
+	getDirPublicLinkInfo(linkUuid: string, linkKey: string): Promise<DirPublicInfo> {
+		return requireClient().getDirPublicLinkInfo(linkUuid, linkKey)
 	},
 	// Breadcrumb primitive: the "/drive/$" splat carries the full ancestor-uuid path in the URL
 	// already (see features/drive/lib/navigate.ts), so this only resolves DISPLAY NAMES for a batch of

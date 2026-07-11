@@ -337,6 +337,69 @@ test.describe("chats", () => {
 		})
 	})
 
+	// C6 embeds — the ONE e2e-provable slice (synthesis §4/wave-spec §6): a real Filen public-link CARD
+	// resolution needs a premium account to actually own a link (the shared account is FREE), so this
+	// proves the two things reachable without one, in the SAME self-chat/thread (one create, per the
+	// shared-conversation discipline): (1) a syntactically-valid but NON-EXISTENT Filen public-link url
+	// degrades gracefully — the card renders from the URL'S OWN PARTS (its uuid) rather than hanging or
+	// erroring, since getLinkedFile rejects for a link nobody owns; (2) the sender-only "Disable embed"
+	// menu entry (gated on classification alone, not resolution success — embeds.logic.ts's hasEmbeds is
+	// pure/offline) collapses the card back to a plain link. Direct image/video embed RENDERING has no
+	// CORS-safe external host reachable from this harness (queries/chatMessageLinks.ts's own honest
+	// browser-SSRF-posture comment) — that leg's classification + resolution logic is covered unit-level
+	// only (chatsEmbeds.test.ts, chatsMessageLinks.test.ts), not e2e.
+	test("embeds: a Filen-shaped public link renders a degraded card, then Disable embed collapses it (self-chat)", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await gotoChats(page)
+
+		await withChatLeakGuard(page, async () => {
+			const uuid = await openSelfChatThread(page)
+			const thread = page.getByRole("main")
+
+			// A syntactically-valid Filen file-link shape (drive/components/linkDialog.logic.ts's own
+			// FILE_PUBLIC_LINK_URL_PREFIX) pointing at a uuid nobody owns — getLinkedFile rejects, so the
+			// card can only ever render from the url's own parts (no name resolves).
+			const linkUuid = crypto.randomUUID()
+			const embedUrl = `https://app.filen.io/#/d/${linkUuid}%23${"a".repeat(24)}`
+
+			await sendViaComposer(page, embedUrl)
+
+			// The plain link (MessageContent's own auto-link render) is always present regardless of embed
+			// resolution — this is what a failed/disabled embed degrades TO.
+			await expect(thread.getByRole("link", { name: embedUrl })).toBeVisible()
+
+			// The card degrades to the raw uuid (FilenLinkCard's own fallback) + its "Filen file" subtitle —
+			// proves it rendered from URL PARTS, not a hung/blank state, without ever resolving a name.
+			await expect(thread.getByText(linkUuid, { exact: true })).toBeVisible({ timeout: 15_000 })
+			await expect(thread.getByText("Filen file", { exact: true })).toBeVisible()
+
+			await expect
+				.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
+				.toContain(embedUrl)
+
+			// The menu's "Disable embed" entry is sender-only AND confirmed-only (messageMenu.logic.ts) — wait
+			// for the UI's own reconciliation (not just the server read above) before opening the menu, same
+			// gate the composer test waits on before its own reply/edit menu actions.
+			await expect(thread.getByText("Sending…", { exact: true })).toHaveCount(0)
+
+			// Sender-only menu entry, confirm-free — collapses the card back to just the plain link.
+			await thread.getByText(linkUuid, { exact: true }).click({ button: "right" })
+			await page.getByRole("menuitem", { name: "Disable embed", exact: true }).click()
+
+			await expect(thread.getByText("Filen file", { exact: true })).toHaveCount(0)
+			await expect(thread.getByText(linkUuid, { exact: true })).toHaveCount(0)
+			await expect(thread.getByRole("link", { name: embedUrl })).toBeVisible()
+
+			await page.evaluate(u => window.__filenE2E.deleteTestChatByUuid(u), uuid)
+		})
+	})
+
 	// Realtime receive (messageNew live-render + sidebar update + the typing indicator) needs a SECOND,
 	// DIFFERENT participant to originate foreign events — the whole point of the socket path is another
 	// user's action reaching this one. The shared e2e account is FREE and zero-contacts, so the only

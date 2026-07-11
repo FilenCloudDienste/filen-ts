@@ -8,6 +8,8 @@ import { formatClockTime } from "@/features/chats/lib/time"
 import { deleteMessage } from "@/features/chats/lib/messageActions"
 import { MessageContextMenuContent } from "@/features/chats/components/thread/messageMenu"
 import { MessageContent } from "@/features/chats/components/thread/messageContent"
+import { MessageEmbeds } from "@/features/chats/components/thread/messageEmbeds"
+import { extractMessageLinks, embedCandidatesForLinks } from "@/features/chats/lib/embeds.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useChatSendState } from "@/features/chats/store/useChatsInflight"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
@@ -62,6 +64,9 @@ export function MessageRow({ chat, message, showHeader, currentUserId }: Message
 	// The optimistic copy's uuid IS its inflightId, so this read resolves an in-flight/failed own message
 	// to "pending"/"failed" and every confirmed (real-uuid) message to "confirmed".
 	const sendState = useChatSendState(message.uuid)
+	// Pure/sync (no query) — just enough to gate the menu's "Disable embed" entry without waiting on
+	// the async resolution MessageEmbeds itself triggers.
+	const hasEmbeds = !message.embedDisabled && embedCandidatesForLinks(extractMessageLinks(message.message)).length > 0
 
 	const [confirmingDelete, setConfirmingDelete] = useState(false)
 	const [deletePending, setDeletePending] = useState(false)
@@ -112,6 +117,10 @@ export function MessageRow({ chat, message, showHeader, currentUserId }: Message
 										{message.edited ? (
 											<span className="ml-1 text-[11px] text-muted-foreground">{t("chatMessageEdited")}</span>
 										) : null}
+										<MessageEmbeds
+											text={message.message}
+											embedDisabled={message.embedDisabled}
+										/>
 									</span>
 								)}
 								{sendState === "pending" ? (
@@ -135,6 +144,7 @@ export function MessageRow({ chat, message, showHeader, currentUserId }: Message
 					message={message}
 					currentUserId={currentUserId}
 					sendState={sendState}
+					hasEmbeds={hasEmbeds}
 					onRequestDelete={() => {
 						setConfirmingDelete(true)
 					}}

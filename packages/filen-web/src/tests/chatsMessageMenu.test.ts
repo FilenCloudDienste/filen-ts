@@ -10,15 +10,21 @@ function testUuid(label: string): UuidStr {
 // Mock boundary matching chatsQueries.test.ts: the real sdk client module imports a Vite `?worker`,
 // unresolvable under node vitest. messageMenuActions itself needs neither mock (pure logic, no sdk/
 // queryClient import) — only deleteMessage/editMessage (lib/messageActions.ts) do.
-const { deleteMessageOp, editMessageOp } = vi.hoisted(() => ({ deleteMessageOp: vi.fn(), editMessageOp: vi.fn() }))
+const { deleteMessageOp, editMessageOp, disableMessageEmbedOp } = vi.hoisted(() => ({
+	deleteMessageOp: vi.fn(),
+	editMessageOp: vi.fn(),
+	disableMessageEmbedOp: vi.fn()
+}))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { deleteMessage: deleteMessageOp, editMessage: editMessageOp } }))
+vi.mock("@/lib/sdk/client", () => ({
+	sdkApi: { deleteMessage: deleteMessageOp, editMessage: editMessageOp, disableMessageEmbed: disableMessageEmbedOp }
+}))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { CHATS_QUERY_KEY, chatsQueryGet } from "@/features/chats/queries/chats"
 import { chatMessagesQueryKey, chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
-import { deleteMessage, editMessage } from "@/features/chats/lib/messageActions"
+import { deleteMessage, editMessage, disableMessageEmbed } from "@/features/chats/lib/messageActions"
 import { messageMenuActions } from "@/features/chats/components/thread/messageMenu.logic"
 
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
@@ -79,6 +85,30 @@ describe("messageMenuActions", () => {
 		const message = mockMessage({ senderId: 1 })
 
 		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["reply", "copy", "edit", "delete"])
+	})
+
+	it("adds disableEmbed between edit and delete when the caller reports the message has an active embed", () => {
+		const message = mockMessage({ senderId: 1 })
+
+		expect(messageMenuActions(message, 1n, "confirmed", true).map(d => d.id)).toEqual([
+			"reply",
+			"copy",
+			"edit",
+			"disableEmbed",
+			"delete"
+		])
+	})
+
+	it("omits disableEmbed for someone else's message even when hasEmbeds is true (sender-only)", () => {
+		const message = mockMessage({ senderId: 5 })
+
+		expect(messageMenuActions(message, 1n, "confirmed", true).map(d => d.id)).toEqual(["reply", "copy"])
+	})
+
+	it("omits disableEmbed by default (hasEmbeds defaults to false)", () => {
+		const message = mockMessage({ senderId: 1 })
+
+		expect(messageMenuActions(message, 1n, "confirmed").map(d => d.id)).toEqual(["reply", "copy", "edit", "delete"])
 	})
 
 	it("coerces senderId (number) to BigInt before comparing to the bigint userId — not a raw ===", () => {
@@ -194,6 +224,39 @@ describe("editMessage", () => {
 		editMessageOp.mockRejectedValueOnce(new Error("fail"))
 
 		const outcome = await editMessage(chat, message, "after")
+
+		expect(outcome.status).toBe("error")
+		expect(chatMessagesQueryGet(chat.uuid)).toEqual([message])
+	})
+})
+
+describe("disableMessageEmbed", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		testQueryClient.clear()
+	})
+
+	it("takes only the message (no chat arg — the wasm op needs none) and patches by message.chat", async () => {
+		const chat = mockChat()
+		const message = mockMessage({ chat: chat.uuid, embedDisabled: false })
+		testQueryClient.setQueryData(chatMessagesQueryKey(chat.uuid), [message])
+		const disabled = { ...message, embedDisabled: true }
+		disableMessageEmbedOp.mockResolvedValueOnce(disabled)
+
+		const outcome = await disableMessageEmbed(message)
+
+		expect(disableMessageEmbedOp).toHaveBeenCalledExactlyOnceWith(message)
+		expect(outcome).toEqual({ status: "success" })
+		expect(chatMessagesQueryGet(chat.uuid)).toEqual([disabled])
+	})
+
+	it("returns an error outcome on rejection, leaving the cache untouched", async () => {
+		const chat = mockChat()
+		const message = mockMessage({ chat: chat.uuid, embedDisabled: false })
+		testQueryClient.setQueryData(chatMessagesQueryKey(chat.uuid), [message])
+		disableMessageEmbedOp.mockRejectedValueOnce(new Error("fail"))
+
+		const outcome = await disableMessageEmbed(message)
 
 		expect(outcome.status).toBe("error")
 		expect(chatMessagesQueryGet(chat.uuid)).toEqual([message])

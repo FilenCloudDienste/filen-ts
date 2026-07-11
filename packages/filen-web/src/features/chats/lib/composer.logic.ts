@@ -31,6 +31,17 @@ export function canSend(value: string): boolean {
 	return value.trim().length > 0 && !isOverLimit(value)
 }
 
+// Inserts a just-created attachment public-link url at the END of the current draft — mobile/old-web
+// both append rather than caret-inserting an attachment (unlike mention/emoji, which replace the
+// in-progress trigger token at the caret). A blank draft becomes just the url; a non-blank one gets a
+// single separating space (never a newline — the composer is a single logical message, and a bare url
+// on its own trailing token is exactly what embeds.logic.ts's classifier needs to recognize it later).
+export function appendAttachmentUrl(draft: string, url: string): string {
+	const trimmedEnd = draft.replace(/\s+$/, "")
+
+	return trimmedEnd.length === 0 ? url : `${trimmedEnd} ${url}`
+}
+
 // Enter sends, Shift+Enter inserts a newline (the browser default). null when it isn't the Enter key.
 export function enterIntent(event: { key: string; shiftKey: boolean }): "send" | "newline" | null {
 	if (event.key !== "Enter") {

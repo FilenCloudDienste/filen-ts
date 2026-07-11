@@ -6,6 +6,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { messageMenuActions, type MessageActionDescriptor } from "@/features/chats/components/thread/messageMenu.logic"
 import { retryInflightMessage, removeInflightMessage } from "@/features/chats/lib/inflight"
+import { disableMessageEmbed } from "@/features/chats/lib/messageActions"
 import { useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import type { ChatSendState } from "@/features/chats/store/useChatsInflight"
 import { ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu"
@@ -16,6 +17,9 @@ export interface MessageMenuContentProps {
 	currentUserId: bigint | undefined
 	// Send state drives which entries appear: failed → retry/remove; confirmed → delete (sender-only).
 	sendState: ChatSendState
+	// Pure embeds.logic.ts classification, computed once in messageRow.tsx (network-free) — gates the
+	// "Disable embed" entry without this menu re-deriving link segments itself.
+	hasEmbeds: boolean
 	// Delete needs a confirm step; the confirm dialog itself lives with the mounting row (messageRow.tsx)
 	// so it survives past the menu's own close — this content-only component just requests it.
 	onRequestDelete: () => void
@@ -25,12 +29,21 @@ export interface MessageMenuContentProps {
 // FAILED optimistic send (the durable send outbox's actionable failed bubble). Copy is self-contained
 // (clipboard + toast); retry/remove call the silent inflight helpers directly (the optimistic copy's
 // uuid IS its inflightId, so the ChatMessageWithInflightId they need is reconstructed here); delete only
-// ever dispatches the confirm request.
-export function MessageContextMenuContent({ chat, message, currentUserId, sendState, onRequestDelete }: MessageMenuContentProps) {
+// ever dispatches the confirm request; disableEmbed is confirm-free (online-only, best-effort, same
+// posture as edit/delete — see messageActions.ts) and patches the cache straight from its own click
+// handler, no dialog to defer to.
+export function MessageContextMenuContent({
+	chat,
+	message,
+	currentUserId,
+	sendState,
+	hasEmbeds,
+	onRequestDelete
+}: MessageMenuContentProps) {
 	const { t } = useTranslation("chats")
 	const beginReply = useChatComposerStore(state => state.beginReply)
 	const beginEdit = useChatComposerStore(state => state.beginEdit)
-	const descriptors = messageMenuActions(message, currentUserId, sendState)
+	const descriptors = messageMenuActions(message, currentUserId, sendState, hasEmbeds)
 
 	async function handleCopy(): Promise<void> {
 		if (message.message === undefined) {
@@ -45,9 +58,23 @@ export function MessageContextMenuContent({ chat, message, currentUserId, sendSt
 		}
 	}
 
+	async function handleDisableEmbed(): Promise<void> {
+		const outcome = await disableMessageEmbed(message)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+		}
+	}
+
 	function handleClick(descriptor: MessageActionDescriptor): void {
 		if (descriptor.id === "reply") {
 			beginReply(chat.uuid, { kind: "reply", message })
+
+			return
+		}
+
+		if (descriptor.id === "disableEmbed") {
+			void handleDisableEmbed()
 
 			return
 		}

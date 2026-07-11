@@ -179,12 +179,36 @@ export const chats = {
 	chatMessageActionRetry: "Retry",
 	/** Message menu — discards a failed send entirely (drops it from the send outbox) */
 	chatMessageActionRemove: "Remove",
+	/** Message menu — sender-only, only shown on a message with an active embed; turns it back into a plain link */
+	chatMessageActionDisableEmbed: "Disable embed",
 	/** Toast shown after a successful message-text copy */
 	chatMessageCopyToast: "Copied to clipboard",
 	/** Message delete confirm — heading */
 	chatMessageDeleteDialogTitle: "Delete message?",
 	/** Message delete confirm — body copy */
 	chatMessageDeleteDialogBody: "Are you sure you want to delete this message? This cannot be undone.",
+
+	// ── Embeds ───────────────────────────────────────────────────────────────────
+	/** Filen-link embed card — subtitle under the name for a directory link */
+	chatEmbedFilenDirectory: "Filen directory",
+	/** Filen-link embed card — subtitle under the name for a file link */
+	chatEmbedFilenFile: "Filen file",
+	/** Media embed — accessible label on the loading skeleton while the content-type probe is in flight */
+	chatEmbedLoading: "Loading preview…",
+	/** Media embed — accessible label on the click-to-open-preview image button */
+	chatEmbedOpenPreview: "Open preview of {{name}}",
+	/** Composer attach menu — trigger button accessible label */
+	chatComposerAttach: "Attach",
+	/** Composer attach menu — uploads a local file */
+	chatComposerAttachUpload: "Upload a file",
+	/** Composer attach menu — opens the Drive picker */
+	chatComposerAttachFromDrive: "Choose from Drive",
+	/** Toast shown while an attachment upload + link creation is in flight */
+	chatAttachmentUploading: "Uploading attachment…",
+	/** Drive-attach picker — dialog heading */
+	chatAttachDriveDialogTitle: "Attach from Drive",
+	/** Drive-attach picker — confirm/select hint shown under a selectable file row (not a button, click-to-attach) */
+	chatAttachDriveDialogHint: "Click a file to attach it",
 
 	// ── Typing indicators ────────────────────────────────────────────────────────
 	/** Typing indicator — a single remote user is typing (thread footer + sidebar row preview) */

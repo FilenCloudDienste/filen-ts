@@ -7,9 +7,11 @@ import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
 // and its makeDriveItemPublicLink (src/lib/sdkUnwrap.ts) exactly — cross-checked against
 // @filen/utils' parseFilenPublicLink (the parser these URLs round-trip through on open): a `d`/`f`
 // path segment, the link's uuid, a literal or percent-encoded "#", then the key — hex-encoded so it
-// round-trips through that parser's 64-hex-char branch.
-const FILE_PUBLIC_LINK_URL_PREFIX = "https://app.filen.io/#/d/"
-const DIRECTORY_PUBLIC_LINK_URL_PREFIX = "https://app.filen.io/#/f/"
+// round-trips through that parser's 64-hex-char branch. Exported: chats' embeds.logic.ts recognizes a
+// pasted link against these SAME two prefixes rather than re-declaring the URL shape — one source of
+// truth for what a Filen public link built by THIS app looks like.
+export const FILE_PUBLIC_LINK_URL_PREFIX = "https://app.filen.io/#/d/"
+export const DIRECTORY_PUBLIC_LINK_URL_PREFIX = "https://app.filen.io/#/f/"
 
 // Normalized shape the dialog's form reads from — collapses the dir/file field-name asymmetry
 // (`enableDownload` vs `downloadable`) into one internal name.
