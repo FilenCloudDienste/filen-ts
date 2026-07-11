@@ -79,6 +79,9 @@ interface E2eHooks {
 	// suite-wide failures far sooner than a stray drive item would. Trashes+deletes every note whose
 	// title starts with `prefix`. Returns the count removed.
 	sweepTestNotesByTitlePrefix: (prefix: string) => Promise<number>
+	// Tag counterpart: a spec that dies between creating its tag and deleting it leaves the tag behind
+	// (tags survive their notes — deleting a note never deletes the tags on it). Returns the count.
+	sweepTestTagsByNamePrefix: (prefix: string) => Promise<number>
 	// Reads one cached thumbnail's on-disk size + write time, found by file name inside a parent
 	// directory. The only way to prove a repaint after a real page reload came from the existing OPFS
 	// cache entry rather than a fresh generation: a regenerate rewrites the file (a new
@@ -203,6 +206,18 @@ export function installE2eHooks(router: RouterLike): void {
 				// Sequential (not Promise.all): a bulk sweep racing many notes through the same worker
 				// gains nothing from parallelism here and is easier to reason about mid-failure.
 				await sdkApi.deleteNote(await sdkApi.trashNote(note))
+			}
+
+			return matches.length
+		},
+		sweepTestTagsByNamePrefix: async prefix => {
+			await whenBootReady()
+
+			const matches = (await sdkApi.listNoteTags()).filter(tag => (tag.name ?? "").startsWith(prefix))
+
+			for (const tag of matches) {
+				// Sequential for the same reason as the note sweep above.
+				await sdkApi.deleteNoteTag(tag)
 			}
 
 			return matches.length

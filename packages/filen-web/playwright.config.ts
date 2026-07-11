@@ -36,7 +36,13 @@ export default defineConfig({
 	use: {
 		baseURL: BASE_URL,
 		trace: "off",
-		screenshot: "only-on-failure"
+		screenshot: "only-on-failure",
+		// Bounded, not Playwright's unlimited default: an action whose target silently detaches
+		// mid-interaction (a menu closed by a concurrent re-render) must FAIL with a diagnosable
+		// actionability error, not absorb the whole test budget — a menu click once hung a 240s test
+		// this way. 30s is triple the expect timeout; nothing legitimately waits longer to become
+		// actionable (slow STATE changes belong in expect polls / toPass envelopes, not action waits).
+		actionTimeout: 30_000
 	},
 	projects: [
 		{ name: "auth-setup", testMatch: /auth\.setup\.ts/ },

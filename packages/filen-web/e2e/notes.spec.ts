@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test"
+import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { dismissStartupReminders } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
@@ -113,12 +113,46 @@ test.describe("notes", () => {
 		await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
 	})
 
+	// Bounded, self-healing menu interaction. Every await inside carries its own explicit timeout well
+	// under the toPass envelope, so a silently-swallowed step (a menu closed from under the click by a
+	// concurrent re-render — the header re-renders whenever a mutation's cache patch lands, and popups
+	// anchored to a re-rendering tree can drop a click on the floor) RETRIES the whole open→click
+	// sequence instead of wedging an actionability wait against the full test budget: that exact mode
+	// once ran a 240s test to death with the menu still open in the failure screenshot. Idempotent by
+	// construction: the menu-open step is skipped when a previous attempt already left the menu open,
+	// and every target is re-resolved from the live tree per attempt (descendInto's proven pattern).
+	// Known tradeoff, accepted: for flip-label actions (Pin→Unpin, Trash→Restore) a retry AFTER the
+	// effect landed (click fired but the close-wait lapsed — a sub-second window) finds the item gone
+	// and fails the envelope with a clear "menuitem not found" — a diagnosable error, never a hang.
+	async function runMenuAction(page: Page, trigger: Locator, itemName: string, until: "menuClosed" | "dialogOpen"): Promise<void> {
+		const menu = page.getByRole("menu")
+
+		await expect(async () => {
+			if ((await menu.count()) === 0) {
+				await trigger.click({ timeout: 10_000 })
+				await expect(menu).toBeVisible({ timeout: 10_000 })
+			}
+
+			await page.getByRole("menuitem", { name: itemName, exact: true }).click({ timeout: 10_000 })
+
+			if (until === "menuClosed") {
+				// A "direct" descriptor's click closes the popup asynchronously (Base UI's close
+				// animation) — the next action's own open would silently no-op against a half-closed
+				// menu, so closure is part of THIS step's completion condition.
+				await expect(menu).toHaveCount(0, { timeout: 10_000 })
+			} else {
+				await expect(page.getByRole("dialog").or(page.getByRole("alertdialog"))).toBeVisible({ timeout: 10_000 })
+			}
+		}).toPass({ timeout: 90_000 })
+	}
+
 	// Full action leg (e1-actions): create → rename → pin → favorite → tag assign (+ tags-view
-	// expansion) → trash → restore → delete permanently, all through the editor header's own ⋯ menu
-	// (noteMenu.tsx — the same descriptor list the sidebar row's menu renders). One serial test covering
-	// the whole surface rather than one test per action: every step depends on the previous one's live
-	// state (a rename before a pin has something to assert on, trash before restore has something to
-	// restore), so splitting would only duplicate the create+rename setup per test for no isolation gain.
+	// expansion + tag-menu delete) → trash → restore → delete permanently, all through the editor
+	// header's own ⋯ menu (noteMenu.tsx — the same descriptor list the sidebar row's menu renders).
+	// One serial test covering the whole surface rather than one test per action: every step depends
+	// on the previous one's live state (a rename before a pin has something to assert on, trash before
+	// restore has something to restore), so splitting would only duplicate the create+rename setup per
+	// test for no isolation gain.
 	test("action menu: rename, pin, favorite, tag assign, trash/restore, delete permanently", async ({
 		page,
 		injectedSession,
@@ -127,12 +161,11 @@ test.describe("notes", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		// Generous budget: this single test drives ~9 real, sequential SDK mutations (create/rename/pin/
-		// favorite/createTag/addTag/trash/restore/delete) against the shared account — well beyond the
-		// suite's default 90s if any one of them lands behind the SDK's own internal rate-limit backoff
-		// (CLAUDE.md: retry/backoff is the SDK's job, never re-implemented here). Live-measured a full
-		// run landing right at 180s under real backoff, close enough to the old budget to risk the test
-		// timeout firing mid-flight and skipping its own net-zero teardown (worse than a slow pass).
+		// Generous budget: this single test drives ~10 real, sequential SDK mutations against the shared
+		// account — well beyond the suite's default 90s if any one of them lands behind the SDK's own
+		// internal rate-limit backoff (CLAUDE.md: retry/backoff is the SDK's job, never re-implemented
+		// here). Live-measured a full run landing right at 180s under real backoff. The per-step toPass
+		// envelopes (runMenuAction) keep any single wedged interaction from consuming this budget whole.
 		test.setTimeout(240_000)
 
 		await gotoNotes(page)
@@ -151,20 +184,14 @@ test.describe("notes", () => {
 		const sidebar = page.getByRole("complementary")
 		const row = sidebar.locator(`a[href="/notes/${uuid}"]`)
 		const menuTrigger = main.getByRole("button", { name: "More actions", exact: true })
-		// A "direct" descriptor's click closes the popup asynchronously (Base UI's own close animation)
-		// — reopening the menu before that settles can silently no-op the next click, so every reopen
-		// below waits for the menu to be visible right after opening, and gone right after a direct
-		// click, before moving on.
 		const menu = page.getByRole("menu")
+		const tagName = `e2e-tag-${String(Date.now())}`
 
 		try {
 			// Rename — InputDialog (role="dialog"), the field pre-filled with the SDK's default title.
 			const newTitle = `e2e action note ${String(Date.now())}`
-			await menuTrigger.click()
-			await expect(menu).toBeVisible()
-			await page.getByRole("menuitem", { name: "Rename", exact: true }).click()
+			await runMenuAction(page, menuTrigger, "Rename", "dialogOpen")
 			const renameDialog = page.getByRole("dialog")
-			await expect(renameDialog).toBeVisible()
 			await renameDialog.getByLabel("Title", { exact: true }).fill(newTitle)
 			await renameDialog.getByRole("button", { name: "Rename", exact: true }).click()
 			await expect(renameDialog).toHaveCount(0)
@@ -173,35 +200,33 @@ test.describe("notes", () => {
 			// Pin — direct action, no dialog; verified on the note's own sidebar row. The row's pin/
 			// favorite marks are bare aria-labeled <svg> icons (no ARIA role), so a plain attribute
 			// selector is used rather than getByLabel (which targets form-control label association).
-			await menuTrigger.click()
-			await expect(menu).toBeVisible()
-			await page.getByRole("menuitem", { name: "Pin", exact: true }).click()
-			await expect(menu).toHaveCount(0)
+			await runMenuAction(page, menuTrigger, "Pin", "menuClosed")
 			await expect(row.locator('[aria-label="Pinned"]')).toBeVisible()
 
 			// Favorite — direct action, no dialog.
-			await menuTrigger.click()
-			await expect(menu).toBeVisible()
-			await page.getByRole("menuitem", { name: "Favorite", exact: true }).click()
-			await expect(menu).toHaveCount(0)
+			await runMenuAction(page, menuTrigger, "Favorite", "menuClosed")
 			await expect(row.locator('[aria-label="Favorite"]')).toBeVisible()
 
 			// Tags submenu: the inline "New tag" entry creates a tag AND assigns it to this note in one
-			// round trip (old-web parity, useNoteDialogHost's own handleCreateTagSubmit).
-			const tagName = `e2e-tag-${String(Date.now())}`
-			await menuTrigger.click()
-			await expect(menu).toBeVisible()
-			// The registry's SubmenuTrigger (ui/dropdown-menu.tsx, verbatim) defaults to openOnHover with
-			// ignoreMouse on its click handler — a real mouse .click() is silently ignored and never opens
-			// the submenu, so this must hover and wait for the submenu's own content before interacting
-			// with it (a .click() here previously hung the whole test until its timeout, never finding
-			// "New tag" in a submenu that never opened).
-			await page.getByRole("menuitem", { name: "Tags", exact: true }).hover()
-			const newTagItem = page.getByRole("menuitem", { name: "New tag", exact: true })
-			await expect(newTagItem).toBeVisible()
-			await newTagItem.click()
+			// round trip (old-web parity, useNoteDialogHost's own handleCreateTagSubmit). Same bounded
+			// toPass shape as runMenuAction, with the submenu's hover step inside the retried body — the
+			// registry's SubmenuTrigger (ui/dropdown-menu.tsx, verbatim) defaults to openOnHover with
+			// ignoreMouse on its click handler, so a real mouse .click() is silently ignored and never
+			// opens the submenu (a .click() here previously hung the whole test until its timeout).
+			await expect(async () => {
+				if ((await menu.count()) === 0) {
+					await menuTrigger.click({ timeout: 10_000 })
+					// .first(): once the submenu opens, BOTH menus carry role="menu" — a bare toBeVisible
+					// would strict-mode fail on the second attempt through this body.
+					await expect(menu.first()).toBeVisible({ timeout: 10_000 })
+				}
+
+				await page.getByRole("menuitem", { name: "Tags", exact: true }).hover({ timeout: 10_000 })
+				const newTagItem = page.getByRole("menuitem", { name: "New tag", exact: true })
+				await newTagItem.click({ timeout: 10_000 })
+				await expect(page.getByRole("dialog")).toBeVisible({ timeout: 10_000 })
+			}).toPass({ timeout: 90_000 })
 			const tagDialog = page.getByRole("dialog")
-			await expect(tagDialog).toBeVisible()
 			await tagDialog.getByLabel("Name", { exact: true }).fill(tagName)
 			await tagDialog.getByRole("button", { name: "Create", exact: true }).click()
 			await expect(tagDialog).toHaveCount(0)
@@ -217,38 +242,79 @@ test.describe("notes", () => {
 			// (noteRow.tsx) — the title text legitimately renders twice in the expanded row (title +
 			// preview spans); .first() is enough proof the note is nested under the tag.
 			await expect(sidebar.getByText(newTitle, { exact: true }).first()).toBeVisible()
+
+			// Tag-row context menu (rename/favorite/delete — TagContextMenuContent): delete the created
+			// tag through it. Dogfoods the tags-view row menu AND keeps the account's tag list net-zero
+			// on the success path (the finally's sweep below only exists for failure paths). The row is
+			// expanded at this point, so its accessible name is the Collapse variant.
+			await expect(async () => {
+				if ((await menu.count()) === 0) {
+					await sidebar
+						.getByRole("button", { name: `Collapse ${tagName}`, exact: true })
+						.click({ button: "right", timeout: 10_000 })
+					await expect(menu).toBeVisible({ timeout: 10_000 })
+				}
+
+				await page.getByRole("menuitem", { name: "Delete", exact: true }).click({ timeout: 10_000 })
+				await expect(page.getByRole("alertdialog")).toBeVisible({ timeout: 10_000 })
+			}).toPass({ timeout: 90_000 })
+			const tagDeleteDialog = page.getByRole("alertdialog")
+			await tagDeleteDialog.getByRole("button", { name: "Delete", exact: true }).click()
+			await expect(tagDeleteDialog).toHaveCount(0)
+			// The group row disappears with its tag; the note itself survives (deleteNoteTag only strips
+			// the tag) — asserted implicitly by every step below still operating on it.
+			await expect(sidebar.getByRole("button", { name: `Collapse ${tagName}`, exact: true })).toHaveCount(0)
+
 			await search.fill("")
 			await page.getByRole("button", { name: "Notes", exact: true }).click()
 
 			// Trash (direct, reversible — no confirm) then restore from within the notes UI.
-			await menuTrigger.click()
-			await expect(menu).toBeVisible()
-			await page.getByRole("menuitem", { name: "Trash", exact: true }).click()
-			await expect(menu).toHaveCount(0)
+			await runMenuAction(page, menuTrigger, "Trash", "menuClosed")
 
-			await menuTrigger.click()
-			await expect(menu).toBeVisible()
-			const restoreItem = page.getByRole("menuitem", { name: "Restore", exact: true })
-			await expect(restoreItem).toBeVisible()
-			// Trashed reduces the menu to restore/deletePermanently only (noteMenuActions) — proven live.
-			await expect(page.getByRole("menuitem", { name: "Trash", exact: true })).toHaveCount(0)
-			await restoreItem.click()
-			await expect(menu).toHaveCount(0)
+			// Restore + the trashed-variant pin. The trash confirm-then-patch lands async after its menu
+			// closed, and an OPEN menu re-renders its variant in place when it does — so wait for Restore
+			// to appear (patch landed) rather than asserting on whatever variant happened to render
+			// first, then pin the reduction (trashed = restore/deletePermanently ONLY, noteMenuActions)
+			// on the live menu before clicking.
+			await expect(async () => {
+				if ((await menu.count()) === 0) {
+					await menuTrigger.click({ timeout: 10_000 })
+					await expect(menu).toBeVisible({ timeout: 10_000 })
+				}
 
-			await menuTrigger.click()
-			await expect(menu).toBeVisible()
-			await expect(page.getByRole("menuitem", { name: "Trash", exact: true })).toBeVisible()
+				await expect(page.getByRole("menuitem", { name: "Restore", exact: true })).toBeVisible({ timeout: 15_000 })
+				await expect(page.getByRole("menuitem", { name: "Trash", exact: true })).toHaveCount(0, { timeout: 2_000 })
+				await page.getByRole("menuitem", { name: "Restore", exact: true }).click({ timeout: 10_000 })
+				await expect(menu).toHaveCount(0, { timeout: 10_000 })
+			}).toPass({ timeout: 90_000 })
+
+			// Re-trash so Delete permanently is reachable: it only renders on the trashed variant, and
+			// deleteNote itself no-ops on a non-trashed note (the original tail clicked it straight after
+			// restore — an item that never existed on the restored menu; an unbounded click wait on it is
+			// what once ran this test to its whole budget). This runMenuAction succeeding is ALSO the
+			// restore proof: "Trash" only renders on a non-trashed menu, so the click waits for exactly
+			// the restore patch. The delete step's own retry then absorbs the re-trash patch lag the same
+			// way (its item appears once the trashed variant lands).
+			await runMenuAction(page, menuTrigger, "Trash", "menuClosed")
+			await runMenuAction(page, menuTrigger, "Delete permanently", "dialogOpen")
 
 			// Delete permanently (confirm) — the note IS the currently-routed one, so a successful
 			// confirm navigates away from it (useNoteDialogHost's nav-race guard) before this test's own
 			// net-zero teardown call below (a no-op by then, since the note is already gone).
-			await page.getByRole("menuitem", { name: "Delete permanently", exact: true }).click()
 			const deleteDialog = page.getByRole("alertdialog")
-			await expect(deleteDialog).toBeVisible()
 			await deleteDialog.getByRole("button", { name: "Delete permanently", exact: true }).click()
 			await page.waitForURL(url => !url.pathname.includes(uuid))
 		} finally {
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			// Best-effort: when the test-budget timeout killed the page, evaluate throws against the
+			// closed target — swallowing that keeps the REAL failure as the test's reported error, and
+			// cleanup-setup's own notes/tags sweep self-heals whatever a dead page left behind on the
+			// next suite run.
+			try {
+				await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+				await page.evaluate(prefix => window.__filenE2E.sweepTestTagsByNamePrefix(prefix), tagName)
+			} catch {
+				// Covered by cleanup-setup on the next run.
+			}
 		}
 	})
 })

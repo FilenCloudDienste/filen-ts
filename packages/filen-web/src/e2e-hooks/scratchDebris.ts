@@ -11,3 +11,20 @@ const SCRATCH_DEBRIS_PATTERN = /^(e2e-|debug-|_debug|zz-|_tmp|tmp-|d4-|dlagt5-|d
 export function isScratchDebrisName(name: string): boolean {
 	return SCRATCH_DEBRIS_PATTERN.test(name)
 }
+
+// Notes-side debris (cleanup.setup.ts's second sweep): note TITLES and tag NAMES the notes specs mint.
+// Same union-only-grows rule as the drive pattern above — and a tighter deadline: the FREE e2e account's
+// note cap is a hard 10 (server-enforced `note_limit_reached`), so leaked notes starve later runs
+// outright rather than merely churning sort order. Every spec-minted title starts "e2e " (spaced) or
+// "e2e-" (dashed); both prefixes stay anchored via startsWith so a real note merely CONTAINING "e2e"
+// never matches.
+export const NOTE_DEBRIS_TITLE_PREFIXES: readonly string[] = ["e2e ", "e2e-"]
+export const TAG_DEBRIS_NAME_PREFIXES: readonly string[] = ["e2e-tag-"]
+
+export function isNoteDebrisTitle(title: string): boolean {
+	return NOTE_DEBRIS_TITLE_PREFIXES.some(prefix => title.startsWith(prefix))
+}
+
+export function isTagDebrisName(name: string): boolean {
+	return TAG_DEBRIS_NAME_PREFIXES.some(prefix => name.startsWith(prefix))
+}

@@ -29,6 +29,7 @@ interface E2eHooks {
 		title: string
 	) => Promise<{ uuid: string }>
 	sweepTestNotesByTitlePrefix: (prefix: string) => Promise<number>
+	sweepTestTagsByNamePrefix: (prefix: string) => Promise<number>
 	thumbnailFileStat: (parentUuid: string, name: string) => Promise<{ size: number; lastModified: number } | null>
 }
 
