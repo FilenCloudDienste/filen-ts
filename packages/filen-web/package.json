@@ -57,6 +57,7 @@
 		"dompurify": "3.4.11",
 		"i18next": "^26.3.4",
 		"js-xxhash": "^5.0.1",
+		"jszip": "^3.10.1",
 		"libheif-js": "1.19.8",
 		"lucide-react": "^1.23.0",
 		"pdfjs-dist": "6.1.200",

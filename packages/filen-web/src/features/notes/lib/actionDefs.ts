@@ -1,6 +1,8 @@
 import {
 	PencilIcon,
 	CopyIcon,
+	DownloadIcon,
+	HashIcon,
 	PinIcon,
 	PinOffIcon,
 	HeartIcon,
@@ -32,6 +34,8 @@ export interface NoteActionDef {
 export const NOTE_ACTION_DEFS = {
 	rename: { labelKey: "noteActionRename", icon: PencilIcon },
 	duplicate: { labelKey: "noteActionDuplicate", icon: CopyIcon },
+	export: { labelKey: "noteActionExport", icon: DownloadIcon },
+	copyId: { labelKey: "noteActionCopyId", icon: HashIcon },
 	pin: { labelKey: "noteActionPin", icon: PinIcon },
 	unpin: { labelKey: "noteActionUnpin", icon: PinOffIcon },
 	favorite: { labelKey: "noteActionFavorite", icon: HeartIcon },

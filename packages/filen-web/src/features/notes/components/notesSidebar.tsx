@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { toast } from "sonner"
-import { PlusIcon, SearchIcon, XIcon, ChevronRightIcon, StarIcon, StickyNoteIcon, TagIcon } from "lucide-react"
+import { PlusIcon, SearchIcon, XIcon, ChevronRightIcon, StarIcon, StickyNoteIcon, TagIcon, MoreHorizontalIcon } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
 import { useNotes } from "@/features/notes/queries/notes"
@@ -20,6 +20,7 @@ import {
 	type NotesSidebarRow
 } from "@/features/notes/components/notesSidebar.logic"
 import { createNote } from "@/features/notes/lib/actions"
+import { exportAllNotes } from "@/features/notes/lib/export"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { registerAction } from "@/lib/keymap/registry"
@@ -31,6 +32,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 // Module scope, not inside the component — mirrors drive's "drive.newDirectory" registration
 // (newDirectory.tsx): runs once per module evaluation, which registerAction's duplicate-id guard
@@ -214,6 +216,14 @@ export function NotesSidebar() {
 		await navigate({ to: "/notes/$uuid", params: { uuid: duplicated.uuid } })
 	}
 
+	async function handleExportAll(): Promise<void> {
+		const outcome = await exportAllNotes(allNotes)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+		}
+	}
+
 	// Registered at module scope above; guards on dialogHost.isDialogOpen so "n" never fires a second
 	// create while a note dialog (rename/delete/leave/createTag) is already open — same convention as
 	// drive.newDirectory's own dialogOpen guard.
@@ -334,17 +344,46 @@ export function NotesSidebar() {
 			<div className="flex flex-col gap-2 p-3">
 				<div className="flex items-center justify-between gap-2">
 					<h2 className="truncate px-1 text-[15px] font-semibold">{t("notesSidebarTitle")}</h2>
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={t("notesNewNote")}
-						className="app-region-no-drag"
-						onClick={() => {
-							void handleNewNote()
-						}}
-					>
-						<PlusIcon />
-					</Button>
+					<div className="flex items-center gap-0.5">
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							aria-label={t("notesNewNote")}
+							className="app-region-no-drag"
+							onClick={() => {
+								void handleNewNote()
+							}}
+						>
+							<PlusIcon />
+						</Button>
+						{/* Single-entry bulk-ops menu — a natural home for future additions (import, print, ...)
+						next to the new-note button. Disabled while the list query is still loading or
+						resolves empty: nothing to zip either way. */}
+						<DropdownMenu>
+							<DropdownMenuTrigger
+								render={
+									<Button
+										variant="ghost"
+										size="icon-sm"
+										aria-label={t("notesSidebarMoreActions")}
+										disabled={notesQuery.isPending || allNotes.length === 0}
+										className="app-region-no-drag"
+									>
+										<MoreHorizontalIcon />
+									</Button>
+								}
+							/>
+							<DropdownMenuContent align="end">
+								<DropdownMenuItem
+									onClick={() => {
+										void handleExportAll()
+									}}
+								>
+									{t("notesExportAllAction")}
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					</div>
 				</div>
 
 				<div className="relative app-region-no-drag">

@@ -15,6 +15,8 @@ export type NoteTagDialogKind = "renameTag" | "deleteTag"
 export type NoteActionId =
 	| "rename"
 	| "duplicate"
+	| "export"
+	| "copyId"
 	| "pin"
 	| "favorite"
 	| "tags"
@@ -44,6 +46,10 @@ export type NoteActionDescriptor =
 
 const RENAME: NoteActionDescriptor = { id: "rename", ...NOTE_ACTION_DEFS.rename, run: "dialog", dialogKind: "rename" }
 const DUPLICATE: NoteActionDescriptor = { id: "duplicate", ...NOTE_ACTION_DEFS.duplicate, run: "direct" }
+// Read-only utility actions, grouped right after duplicate — neither mutates the note, so both stay
+// available regardless of ownership (unlike participants/archive below).
+const EXPORT: NoteActionDescriptor = { id: "export", ...NOTE_ACTION_DEFS.export, run: "direct" }
+const COPY_ID: NoteActionDescriptor = { id: "copyId", ...NOTE_ACTION_DEFS.copyId, run: "direct" }
 const TAGS: NoteActionDescriptor = { id: "tags", ...NOTE_ACTION_DEFS.tags, run: "submenu", submenu: "tags" }
 const TYPE: NoteActionDescriptor = { id: "type", ...NOTE_ACTION_DEFS.type, run: "submenu", submenu: "type" }
 const PARTICIPANTS: NoteActionDescriptor = {
@@ -86,7 +92,7 @@ export function noteMenuActions(note: Note, currentUserId: bigint | undefined): 
 		return [RESTORE, DELETE_PERMANENTLY]
 	}
 
-	const actions: NoteActionDescriptor[] = [RENAME, DUPLICATE, pinDescriptor(note), favoriteDescriptor(note), TAGS, TYPE]
+	const actions: NoteActionDescriptor[] = [RENAME, DUPLICATE, EXPORT, COPY_ID, pinDescriptor(note), favoriteDescriptor(note), TAGS, TYPE]
 
 	// Participants management is owner-only (parity matrix §1a/§1d) — a participant sees no entry for a
 	// dialog they could never act on. History stays open to any participant (mobile parity — anyone with

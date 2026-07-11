@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { PlusIcon } from "lucide-react"
 import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { asErrorDTO } from "@/lib/sdk/errors"
 import {
 	togglePinned,
 	toggleFavorited,
@@ -13,6 +14,7 @@ import {
 	trashNote,
 	setNoteType
 } from "@/features/notes/lib/actions"
+import { exportNote } from "@/features/notes/lib/export"
 import { addTagToNote, removeTagFromNote, setNoteTagFavorited } from "@/features/notes/lib/tags"
 import {
 	noteMenuActions,
@@ -89,6 +91,25 @@ function NoteMenuEntries({ note, allTags, currentUserId, onAction, onDuplicated,
 				}
 
 				onDuplicated?.(outcome.item)
+				return
+			}
+			case "export": {
+				const outcome = await exportNote(note)
+
+				if (outcome.status === "error") {
+					toast.error(errorLabel(outcome.dto))
+				}
+
+				return
+			}
+			case "copyId": {
+				try {
+					await navigator.clipboard.writeText(note.uuid)
+					toast.success(t("noteCopyIdToast"))
+				} catch (e) {
+					toast.error(errorLabel(asErrorDTO(e)))
+				}
+
 				return
 			}
 			case "pin": {

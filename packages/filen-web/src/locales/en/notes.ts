@@ -14,6 +14,12 @@ export const notes = {
 	notesSearch: "Search notes",
 	/** Notes sidebar — clears the search box */
 	notesSearchClear: "Clear search",
+	/** Notes sidebar — header ⋯ trigger next to "New note", opens the bulk-ops menu */
+	notesSidebarMoreActions: "More options",
+	/** Notes sidebar bulk-ops menu — downloads every non-trashed note as one archive */
+	notesExportAllAction: "Export all",
+	/** Notes sidebar bulk-ops menu — the downloaded archive's own file name */
+	notesExportAllFilename: "Notes.zip",
 
 	// ── View toggle ────────────────────────────────────────────────────────────
 	/** Notes sidebar — toggle option showing the flat note list */
@@ -128,6 +134,12 @@ export const notes = {
 	noteActionRename: "Rename",
 	/** Note menu — duplicates the note */
 	noteActionDuplicate: "Duplicate",
+	/** Note menu — downloads the note as a faithful file (.md/.txt/.html per type) */
+	noteActionExport: "Export",
+	/** Note menu — copies the note's uuid to the clipboard */
+	noteActionCopyId: "Copy ID",
+	/** Note menu — copyId's clipboard-write confirmation toast */
+	noteCopyIdToast: "Note ID copied to clipboard",
 	/** Note menu — pins the note to the top of the list */
 	noteActionPin: "Pin",
 	/** Note menu — unpins an already-pinned note */

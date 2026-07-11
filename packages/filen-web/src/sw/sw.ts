@@ -19,6 +19,7 @@ import {
 	SW_MSG_PING,
 	isAllowedInlineContentType
 } from "@/lib/sw/protocol"
+import { sanitizeFilename } from "@/lib/filename"
 
 // ── SW-hosted trimmed SDK (single-threaded — no COI, no rayon pool) ─────────────────────────────
 // Lazy: only fetch+compile the 2 MB wasm and reconstruct the Client when a session is handed over, so
@@ -86,14 +87,6 @@ async function adoptSwClient(blob: SwStringifiedClient): Promise<void> {
 	const next = fromStringified(blob)
 	swClient?.free()
 	swClient = next
-}
-
-// Strip anything that could break out of the quoted Content-Disposition filename or inject a header
-// (the name is decrypted-but-attacker-controlled). RFC 5987 `filename*` encoding for non-ASCII is a
-// later refinement; this keeps the ASCII fallback safe.
-function sanitizeFilename(name: string): string {
-	// eslint-disable-next-line no-control-regex -- deliberately stripping control chars from a filename
-	return name.replace(/[\x00-\x1f"\\/\r\n]/g, "_") || "download"
 }
 
 // Parse a single-range `bytes=` header against the known total; null = unsatisfiable/absent.

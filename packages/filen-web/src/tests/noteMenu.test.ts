@@ -3,6 +3,8 @@ import { QueryClient } from "@tanstack/react-query"
 import {
 	PencilIcon,
 	CopyIcon,
+	DownloadIcon,
+	HashIcon,
 	PinIcon,
 	PinOffIcon,
 	HeartIcon,
@@ -76,10 +78,12 @@ function facts(note: Note, userId: bigint | undefined): { id: string; labelKey: 
 }
 
 describe("noteMenuActions — owner, normal (not trashed/archived) note", () => {
-	it("rename/duplicate/pin/favorite/tags/type/participants/history/archive/trash, in that order", () => {
+	it("rename/duplicate/export/copyId/pin/favorite/tags/type/participants/history/archive/trash, in that order", () => {
 		expect(ids(mockNote({ ownerId: 1n }), 1n)).toEqual([
 			"rename",
 			"duplicate",
+			"export",
+			"copyId",
 			"pin",
 			"favorite",
 			"tags",
@@ -94,7 +98,18 @@ describe("noteMenuActions — owner, normal (not trashed/archived) note", () => 
 
 describe("noteMenuActions — non-owner (participant), normal note", () => {
 	it("omits participants and archive; ends in leave instead of trash", () => {
-		expect(ids(mockNote({ ownerId: 1n }), 2n)).toEqual(["rename", "duplicate", "pin", "favorite", "tags", "type", "history", "leave"])
+		expect(ids(mockNote({ ownerId: 1n }), 2n)).toEqual([
+			"rename",
+			"duplicate",
+			"export",
+			"copyId",
+			"pin",
+			"favorite",
+			"tags",
+			"type",
+			"history",
+			"leave"
+		])
 	})
 
 	it("an unresolved current user (undefined) is treated as non-owner", () => {
@@ -123,6 +138,8 @@ describe("noteMenuActions — archived (not trashed) note", () => {
 		expect(ids(mockNote({ archive: true, ownerId: 1n }), 1n)).toEqual([
 			"rename",
 			"duplicate",
+			"export",
+			"copyId",
 			"pin",
 			"favorite",
 			"tags",
@@ -138,6 +155,8 @@ describe("noteMenuActions — archived (not trashed) note", () => {
 		expect(ids(mockNote({ archive: true, ownerId: 1n }), 2n)).toEqual([
 			"rename",
 			"duplicate",
+			"export",
+			"copyId",
 			"pin",
 			"favorite",
 			"tags",
@@ -189,9 +208,9 @@ describe("noteMenuActions — run kinds", () => {
 		expect(noteMenuActions(note, 1n).find(d => d.id === "type")).toMatchObject({ run: "submenu", submenu: "type" })
 	})
 
-	it("pin/favorite/duplicate/archive/restore/trash run directly (no dialog)", () => {
+	it("pin/favorite/duplicate/export/copyId/archive/restore/trash run directly (no dialog)", () => {
 		const note = mockNote({ ownerId: 1n })
-		const directIds: NoteActionDescriptor["id"][] = ["pin", "favorite", "duplicate", "archive", "trash"]
+		const directIds: NoteActionDescriptor["id"][] = ["pin", "favorite", "duplicate", "export", "copyId", "archive", "trash"]
 
 		for (const id of directIds) {
 			expect(noteMenuActions(note, 1n).find(d => d.id === id)).toMatchObject({ run: "direct" })
@@ -214,6 +233,8 @@ describe("noteMenuActions — descriptor label/icon facts (NOTE_ACTION_DEFS drif
 		expect(facts(mockNote({ ownerId: 1n }), 1n)).toEqual([
 			{ id: "rename", labelKey: "noteActionRename", icon: PencilIcon },
 			{ id: "duplicate", labelKey: "noteActionDuplicate", icon: CopyIcon },
+			{ id: "export", labelKey: "noteActionExport", icon: DownloadIcon },
+			{ id: "copyId", labelKey: "noteActionCopyId", icon: HashIcon },
 			{ id: "pin", labelKey: "noteActionPin", icon: PinIcon },
 			{ id: "favorite", labelKey: "noteActionFavorite", icon: HeartIcon },
 			{ id: "tags", labelKey: "noteActionTags", icon: TagIcon },

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import JSZip from "jszip"
 import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { dismissStartupReminders } from "./helpers/listing"
@@ -318,6 +320,65 @@ test.describe("notes", () => {
 			}
 		}
 	})
+
+	// Faithful export (D3): a checklist note's exported file has real "- [x]"/"- [ ]" markdown lines
+	// (never old-web's lossy flat-text dump), and export-all's Notes.zip carries the SAME faithful
+	// content under that note's own file. Both downloads are a plain Blob+anchor click (export.ts's
+	// downloadBlob — never the drive FSA/SW path), so a real "download" event fires the instant the
+	// click lands; no picker stub needed, unlike downloads.spec.ts's drive-file cases.
+	test("export: a checklist note downloads faithful markdown lines, and export-all zips the same content", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		const content = '<ul data-checked="false"><li>Buy milk</li></ul><ul data-checked="true"><li>Already done</li></ul>'
+		const expectedMarkdown = "- [ ] Buy milk\n- [x] Already done"
+		const { uuid, title } = await createAndOpenTestNote(page, "checklist", content, "e2e export checklist")
+
+		const main = page.getByRole("main")
+		const sidebar = page.getByRole("complementary")
+		const menuTrigger = main.getByRole("button", { name: "More actions", exact: true })
+
+		try {
+			// Single-note export (noteMenu.tsx's "Export" entry, direct — no dialog).
+			const [download] = await Promise.all([
+				page.waitForEvent("download", { timeout: 20_000 }),
+				runMenuAction(page, menuTrigger, "Export", "menuClosed")
+			])
+
+			expect(download.suggestedFilename()).toBe(`${title}.md`)
+			expect(readFileSync(await download.path(), "utf8")).toBe(expectedMarkdown)
+
+			// Export-all (the sidebar header's ⋯ bulk-ops menu, one entry today) — same bounded
+			// open→click envelope as runMenuAction, since the header re-renders on cache changes too.
+			const exportAllMenu = page.getByRole("menu")
+			const [zipDownload] = await Promise.all([
+				page.waitForEvent("download", { timeout: 30_000 }),
+				expect(async () => {
+					if ((await exportAllMenu.count()) === 0) {
+						await sidebar.getByRole("button", { name: "More options", exact: true }).click({ timeout: 10_000 })
+						await expect(exportAllMenu).toBeVisible({ timeout: 10_000 })
+					}
+
+					await page.getByRole("menuitem", { name: "Export all", exact: true }).click({ timeout: 10_000 })
+				}).toPass({ timeout: 60_000 })
+			])
+
+			expect(zipDownload.suggestedFilename()).toBe("Notes.zip")
+
+			// Looked up by this note's own faithful file name (exportFilename's md branch) — the shared
+			// account may carry other notes, so only THIS entry's presence and content are asserted.
+			const zip = await JSZip.loadAsync(readFileSync(await zipDownload.path()))
+			const entry = zip.file(`${title}.md`)
+			expect(entry).not.toBeNull()
+			await expect(entry?.async("string")).resolves.toBe(expectedMarkdown)
+		} finally {
+			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+		}
+	})
 })
 
 // Read-only content renderers (e1-reader): each note is created with a distinctive title + content
@@ -329,7 +390,7 @@ async function createAndOpenTestNote(
 	noteType: "text" | "code" | "md" | "rich" | "checklist",
 	content: string,
 	titlePrefix: string
-): Promise<string> {
+): Promise<{ uuid: string; title: string }> {
 	const title = `${titlePrefix} ${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 
 	// The hook only exists once the app has booted — goto + dismiss first (same boot as gotoNotes), THEN
@@ -357,7 +418,7 @@ async function createAndOpenTestNote(
 	await page.getByRole("complementary").locator(`a[href="/notes/${note.uuid}"]`).click()
 	await page.waitForURL(new RegExp(`/notes/${note.uuid}$`))
 
-	return note.uuid
+	return { uuid: note.uuid, title }
 }
 
 // try/finally (not a trailing call) around every assertion below: the shared FREE account's note cap
@@ -371,7 +432,7 @@ test.describe("notes: read-only content renderers", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const content = "Hello from a plain text e2e note."
-		const uuid = await createAndOpenTestNote(page, "text", content, "e2e text")
+		const { uuid } = await createAndOpenTestNote(page, "text", content, "e2e text")
 
 		try {
 			// Scoped to <main> (the editor card) — the sidebar row's own preview snippet can equal the
@@ -387,7 +448,7 @@ test.describe("notes: read-only content renderers", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const content = "const answer = 42;"
-		const uuid = await createAndOpenTestNote(page, "code", content, "e2e code")
+		const { uuid } = await createAndOpenTestNote(page, "code", content, "e2e code")
 
 		try {
 			await expect(page.getByRole("main").getByText(content, { exact: true })).toBeVisible()
@@ -401,7 +462,7 @@ test.describe("notes: read-only content renderers", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const content = "# E2E Heading\n\nSome **bold** text."
-		const uuid = await createAndOpenTestNote(page, "md", content, "e2e md")
+		const { uuid } = await createAndOpenTestNote(page, "md", content, "e2e md")
 		const main = page.getByRole("main")
 
 		try {
@@ -420,7 +481,7 @@ test.describe("notes: read-only content renderers", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const content = "<p>Hello <strong>rich</strong> note</p><script>window.__e2eRichXss = true</script>"
-		const uuid = await createAndOpenTestNote(page, "rich", content, "e2e rich")
+		const { uuid } = await createAndOpenTestNote(page, "rich", content, "e2e rich")
 		const main = page.getByRole("main")
 
 		try {
@@ -444,7 +505,7 @@ test.describe("notes: read-only content renderers", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const content = '<ul data-checked="false"><li>Buy milk</li></ul><ul data-checked="true"><li>Already done</li></ul>'
-		const uuid = await createAndOpenTestNote(page, "checklist", content, "e2e checklist")
+		const { uuid } = await createAndOpenTestNote(page, "checklist", content, "e2e checklist")
 
 		const main = page.getByRole("main")
 
@@ -655,7 +716,7 @@ test.describe("notes: rich and checklist editors", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const content = "<p>Safe <strong>rich</strong> body</p><script>window.__e2eEditorXss = true</script>"
-		const uuid = await createAndOpenTestNote(page, "rich", content, "e2e rich-xss")
+		const { uuid } = await createAndOpenTestNote(page, "rich", content, "e2e rich-xss")
 		const main = page.getByRole("main")
 
 		try {
@@ -875,7 +936,7 @@ test.describe("notes: participants and history dialogs", () => {
 		const v1 = `HistV1-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 		const v2 = `HistV2-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 		const v3 = `HistV3-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
-		const uuid = await createAndOpenTestNote(page, "text", v1, "e2e history")
+		const { uuid } = await createAndOpenTestNote(page, "text", v1, "e2e history")
 		const main = page.getByRole("main")
 
 		try {
