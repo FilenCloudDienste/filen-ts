@@ -3,6 +3,7 @@ import type { ChatMessage, UuidStr } from "@filen/sdk-rs"
 import {
 	buildThreadRows,
 	computeScrollAfterPrepend,
+	countNewTailMessages,
 	isScrollNearBottom,
 	nextScrollAffordanceState,
 	INITIAL_SCROLL_AFFORDANCE,
@@ -175,6 +176,53 @@ describe("buildThreadRows — unread divider (old-web NewDivider placement/guard
 		// timestamp — simulated here directly on the same messages array.
 		const afterMarkRead = buildThreadRows([a], { lastFocus: a.sentTimestamp, currentUserId: BigInt(SELF) })
 		expect(afterMarkRead.some(r => r.kind === "unread")).toBe(false)
+	})
+})
+
+describe("countNewTailMessages — real arrival vs. older-history prepend (review fix: length alone can't tell)", () => {
+	it("counts messages appended past the previous last message (a real tail arrival)", () => {
+		const a = mockMessage()
+		const b = mockMessage()
+		const c = mockMessage()
+
+		expect(countNewTailMessages([a], [a, b, c])).toBe(2)
+	})
+
+	it("is zero when older history is PREPENDED — the tail (last message) is unchanged", () => {
+		const older1 = mockMessage()
+		const older2 = mockMessage()
+		const a = mockMessage()
+
+		// loadOlderChatMessages prepends: [...olderPage, ...prev]. `a` stays last both times.
+		expect(countNewTailMessages([a], [older1, older2, a])).toBe(0)
+	})
+
+	it("counts only the genuine tail growth when a prepend and an arrival land together", () => {
+		const older = mockMessage()
+		const a = mockMessage()
+		const b = mockMessage()
+
+		expect(countNewTailMessages([a], [older, a, b])).toBe(1)
+	})
+
+	it("is zero with no prior snapshot (initial load) — the atBottom guard handles this case anyway", () => {
+		const a = mockMessage()
+
+		expect(countNewTailMessages([], [a])).toBe(0)
+	})
+
+	it("is zero when the previous last message is no longer present (never guesses)", () => {
+		const a = mockMessage()
+		const b = mockMessage()
+
+		expect(countNewTailMessages([a], [b])).toBe(0)
+	})
+
+	it("is zero when nothing changed", () => {
+		const a = mockMessage()
+		const b = mockMessage()
+
+		expect(countNewTailMessages([a, b], [a, b])).toBe(0)
 	})
 })
 

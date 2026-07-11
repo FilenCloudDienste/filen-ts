@@ -2,11 +2,12 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { MoreHorizontalIcon, ArrowDownIcon } from "lucide-react"
-import type { Chat } from "@filen/sdk-rs"
+import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { useChatMessages, loadOlderChatMessages } from "@/features/chats/queries/chatMessages"
 import {
 	buildThreadRows,
 	computeScrollAfterPrepend,
+	countNewTailMessages,
 	isScrollNearBottom,
 	nextScrollAffordanceState,
 	INITIAL_SCROLL_AFFORDANCE
@@ -146,12 +147,17 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	// Set at load-older trigger time so the post-prepend layout effect can restore the viewport.
 	const restoreRef = useRef<{ prevScrollHeight: number; prevScrollTop: number } | null>(null)
 	// Set on an own send so the next list growth jumps the view to the bottom (mobile parity — sending
-	// while scrolled up snaps back to the newest message).
+	// while scrolled up snaps back to the newest message). Also tells the messagesArrived effect below
+	// this particular tail growth is our own — don't badge it, the stick-to-bottom scroll is already
+	// underway.
 	const stickBottomRef = useRef(false)
+	const suppressNextArrivalRef = useRef(false)
 	// The scroll-to-bottom pill's derived state (thread.logic.ts's pure reducer) — needs to drive a
 	// visible re-render (the pill's own count), unlike the pagination bookkeeping above.
 	const [affordance, setAffordance] = useState(INITIAL_SCROLL_AFFORDANCE)
-	const prevMessagesLengthRef = useRef(0)
+	// Full previous snapshot (not just `.length`) — countNewTailMessages needs the actual last message to
+	// tell a tail arrival from a head prepend; length alone can't.
+	const prevMessagesRef = useRef<readonly ChatMessage[]>([])
 
 	const sender: OptimisticSender | undefined =
 		accountQuery.data !== undefined
@@ -178,20 +184,32 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	useEffect(() => {
 		hasMoreRef.current = true
 		lastCursorRef.current = null
-		prevMessagesLengthRef.current = 0
+		prevMessagesRef.current = []
+		suppressNextArrivalRef.current = false
 		setAffordance(INITIAL_SCROLL_AFFORDANCE)
 	}, [chatUuid])
 
-	// Grow the pill's count when messages land while the user is scrolled up (thread.logic.ts's reducer
-	// no-ops this while at bottom, so an own send — which already jumps the view — never bumps it).
+	// Grow the pill's count when messages land at the TAIL while the user is scrolled up (thread.logic.ts's
+	// reducer no-ops this while at bottom). Keyed off countNewTailMessages, not raw length growth: a
+	// loadOlderChatMessages prepend also grows `messages.length` (it fires precisely when scrolled to the
+	// top), and that must NOT inflate this count. An own send DOES momentarily grow the tail before the
+	// stick-to-bottom layout effect's scroll fires — suppressNextArrivalRef (set alongside stickBottomRef)
+	// swallows exactly that one growth so the pill never flashes for our own message.
 	useEffect(() => {
-		const delta = messages.length - prevMessagesLengthRef.current
-		prevMessagesLengthRef.current = messages.length
+		const newTailCount = countNewTailMessages(prevMessagesRef.current, messages)
+		prevMessagesRef.current = messages
 
-		if (delta > 0) {
-			setAffordance(prev => nextScrollAffordanceState(prev, { kind: "messagesArrived", count: delta }))
+		if (newTailCount <= 0) {
+			return
 		}
-	}, [messages.length])
+
+		if (suppressNextArrivalRef.current) {
+			suppressNextArrivalRef.current = false
+			return
+		}
+
+		setAffordance(prev => nextScrollAffordanceState(prev, { kind: "messagesArrived", count: newTailCount }))
+	}, [messages])
 
 	// Track the open conversation OUTSIDE React so the socket handlers can gate derived-unread: a foreign
 	// message landing in the chat the user is looking at must not flip it unread (D4). Cleared on unmount /
@@ -427,6 +445,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				sender={sender}
 				onSent={() => {
 					stickBottomRef.current = true
+					suppressNextArrivalRef.current = true
 				}}
 			/>
 			{dialogHost.renderActiveDialog()}

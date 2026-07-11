@@ -103,6 +103,29 @@ export function isScrollNearBottom(scrollTop: number, scrollHeight: number, clie
 	return scrollHeight - scrollTop - clientHeight <= threshold
 }
 
+// Counts messages newly appended at the TAIL between two ascending snapshots of the same chat. Raw
+// length growth can't distinguish a real arrival (appends past the last message) from an older-history
+// prepend (loadOlderChatMessages grows the HEAD, leaving the tail untouched) — both grow `.length`.
+// Walking backward from `next`'s end to find `previous`'s last message pinpoints exactly how many rows
+// landed after it; a pure prepend finds it still last (0), a real arrival finds it short of the end (>0).
+// Returns 0 (never guesses) when there's no prior snapshot or the prior last message is gone from `next`
+// (e.g. a delete) — those aren't "new arrivals" this affordance should badge.
+export function countNewTailMessages(previous: readonly ChatMessage[], next: readonly ChatMessage[]): number {
+	const previousLast = previous[previous.length - 1]
+
+	if (previousLast === undefined || next.length === 0) {
+		return 0
+	}
+
+	for (let i = next.length - 1; i >= 0; i--) {
+		if (next[i]?.uuid === previousLast.uuid) {
+			return next.length - 1 - i
+		}
+	}
+
+	return 0
+}
+
 // Scroll-to-bottom affordance state (the floating pill that appears once the user has scrolled up AND a
 // new message has landed below the viewport — mobile's FAB re-imagined with old-web's "new since" count,
 // D4 in-app-only). PURE reducer over two event kinds so the count-while-scrolled-up / clear-on-bottom
