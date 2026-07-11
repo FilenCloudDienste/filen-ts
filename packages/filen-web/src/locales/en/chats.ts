@@ -23,8 +23,6 @@ export const chats = {
 	chatsSearchEmptyDescription: "No conversations match your search.",
 	/** Chats sidebar — shown when the conversation list query fails */
 	chatsLoadError: "Couldn't load conversations",
-	/** Chats sidebar — icon-rail unread badge accessible label (count of unread conversations/messages) */
-	chatsRailUnread: "{{count}} unread",
 
 	// ── Conversation row ─────────────────────────────────────────────────────────
 	/** Conversation row — preview-line fallback when a conversation has no readable last message */
@@ -49,6 +47,16 @@ export const chats = {
 	chatThreadEmpty: "No messages in this conversation yet.",
 	/** Thread — accessible label on the older-messages loading spinner at the top of the list */
 	chatLoadingOlder: "Loading earlier messages…",
+	/** Thread — label on the one-time "New" divider inserted at the first unread message; click marks read */
+	chatUnreadDivider: "New",
+	/** Thread — accessible label on the floating scroll-to-bottom pill (singular) */
+	chatScrollToBottom_one: "{{count}} new message",
+	/** Thread — accessible label on the floating scroll-to-bottom pill (plural) */
+	chatScrollToBottom_other: "{{count}} new messages",
+	/** Thread — visible text on the floating scroll-to-bottom pill (singular) */
+	chatNewMessagesCount_one: "{{count}} new",
+	/** Thread — visible text on the floating scroll-to-bottom pill (plural) */
+	chatNewMessagesCount_other: "{{count}} new",
 	/** Message — trailing marker on an edited message */
 	chatMessageEdited: "(edited)",
 	/** Message — placeholder body for a message that could not be decrypted */
@@ -203,8 +211,6 @@ export const chats = {
 	chatComposerAttachUpload: "Upload a file",
 	/** Composer attach menu — opens the Drive picker */
 	chatComposerAttachFromDrive: "Choose from Drive",
-	/** Toast shown while an attachment upload + link creation is in flight */
-	chatAttachmentUploading: "Uploading attachment…",
 	/** Drive-attach picker — dialog heading */
 	chatAttachDriveDialogTitle: "Attach from Drive",
 	/** Drive-attach picker — confirm/select hint shown under a selectable file row (not a button, click-to-attach) */

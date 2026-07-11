@@ -1,10 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { MoreHorizontalIcon } from "lucide-react"
+import { MoreHorizontalIcon, ArrowDownIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
 import { useChatMessages, loadOlderChatMessages } from "@/features/chats/queries/chatMessages"
-import { buildThreadRows, computeScrollAfterPrepend } from "@/features/chats/components/thread/thread.logic"
+import {
+	buildThreadRows,
+	computeScrollAfterPrepend,
+	isScrollNearBottom,
+	nextScrollAffordanceState,
+	INITIAL_SCROLL_AFFORDANCE
+} from "@/features/chats/components/thread/thread.logic"
 import { composeMessageList, type OptimisticSender } from "@/features/chats/lib/sync.logic"
 import { useChatsInflightStore } from "@/features/chats/store/useChatsInflight"
 import { Composer } from "@/features/chats/components/thread/composer"
@@ -12,6 +18,7 @@ import { TypingIndicator } from "@/features/chats/components/thread/typingIndica
 import { setFocusedChat } from "@/features/chats/lib/focusedChat"
 import { dayKind, formatFullDate } from "@/features/chats/lib/time"
 import { chatDisplayName, isChatUndecryptable } from "@/features/chats/lib/sort"
+import { markChatRead } from "@/features/chats/lib/actions"
 import { MessageRow } from "@/features/chats/components/thread/messageRow"
 import { ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
@@ -26,6 +33,8 @@ const DAY_ROW_ESTIMATE = 44
 const MESSAGE_ROW_ESTIMATE = 56
 // Load older when the user scrolls within this many px of the top.
 const TOP_THRESHOLD = 120
+// "At bottom" for the scroll-to-bottom affordance / auto-stick purposes.
+const BOTTOM_THRESHOLD = 80
 
 function DaySeparator({ timestamp }: { timestamp: bigint }) {
 	const { t } = useTranslation("chats")
@@ -36,6 +45,61 @@ function DaySeparator({ timestamp }: { timestamp: bigint }) {
 		<div className="flex items-center justify-center py-2">
 			<span className="rounded-full bg-muted px-3 py-0.5 text-[11px] font-medium text-muted-foreground">{label}</span>
 		</div>
+	)
+}
+
+// The "New" divider — old-web's NewDivider, one-time-guarded placement (thread.logic.ts's buildThreadRows)
+// AND click-to-mark-read (old-web: clicking it emits chatMarkAsRead). The chat's own lastFocus advancing
+// on success removes this row on the next render — never dismissed locally, always server-driven.
+function UnreadDivider({ chat }: { chat: Chat }) {
+	const { t } = useTranslation("chats")
+	const [pending, setPending] = useState(false)
+
+	async function handleClick(): Promise<void> {
+		if (pending) {
+			return
+		}
+
+		setPending(true)
+		await markChatRead(chat)
+		setPending(false)
+	}
+
+	return (
+		<div className="flex items-center gap-2 px-4 py-2">
+			<button
+				type="button"
+				disabled={pending}
+				onClick={() => {
+					void handleClick()
+				}}
+				className="flex flex-1 items-center gap-2 disabled:opacity-60"
+			>
+				<span className="shrink-0 rounded-full bg-destructive px-2 py-0.5 text-[11px] font-medium text-white">
+					{t("chatUnreadDivider")}
+				</span>
+				<span className="h-px flex-1 bg-destructive/60" />
+			</button>
+		</div>
+	)
+}
+
+// Floating scroll-to-bottom pill — appears once the user has scrolled up AND at least one message has
+// landed below the viewport since (thread.logic.ts's nextScrollAffordanceState). Click scrolls to bottom;
+// the resulting scroll event clears it via the same reducer (no separate "dismiss" path).
+function ScrollToBottomFab({ count, onClick }: { count: number; onClick: () => void }) {
+	const { t } = useTranslation("chats")
+
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			aria-label={t("chatScrollToBottom", { count })}
+			className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-md"
+		>
+			<ArrowDownIcon className="size-3.5" />
+			{t("chatNewMessagesCount", { count })}
+		</button>
 	)
 }
 
@@ -84,6 +148,10 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	// Set on an own send so the next list growth jumps the view to the bottom (mobile parity — sending
 	// while scrolled up snaps back to the newest message).
 	const stickBottomRef = useRef(false)
+	// The scroll-to-bottom pill's derived state (thread.logic.ts's pure reducer) — needs to drive a
+	// visible re-render (the pill's own count), unlike the pagination bookkeeping above.
+	const [affordance, setAffordance] = useState(INITIAL_SCROLL_AFFORDANCE)
+	const prevMessagesLengthRef = useRef(0)
 
 	const sender: OptimisticSender | undefined =
 		accountQuery.data !== undefined
@@ -95,22 +163,35 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				}
 			: undefined
 
-	const rows = buildThreadRows(messages)
+	const rows = buildThreadRows(messages, currentUserId !== undefined ? { lastFocus: chat.lastFocus, currentUserId } : undefined)
 
 	const virtualizer = useVirtualizer({
 		count: rows.length,
 		getScrollElement: () => scrollRef.current,
-		estimateSize: index => (rows[index]?.kind === "day" ? DAY_ROW_ESTIMATE : MESSAGE_ROW_ESTIMATE),
+		estimateSize: index => (rows[index]?.kind === "message" ? MESSAGE_ROW_ESTIMATE : DAY_ROW_ESTIMATE),
 		overscan: 8,
 		getItemKey: index => rows[index]?.key ?? index
 	})
 
-	// Reset pagination when the selected conversation changes — a fresh chat may have older history and its
-	// own bottom-anchor.
+	// Reset pagination + the scroll-to-bottom pill when the selected conversation changes — a fresh chat may
+	// have older history and its own bottom-anchor; the previous chat's unseen count never carries over.
 	useEffect(() => {
 		hasMoreRef.current = true
 		lastCursorRef.current = null
+		prevMessagesLengthRef.current = 0
+		setAffordance(INITIAL_SCROLL_AFFORDANCE)
 	}, [chatUuid])
+
+	// Grow the pill's count when messages land while the user is scrolled up (thread.logic.ts's reducer
+	// no-ops this while at bottom, so an own send — which already jumps the view — never bumps it).
+	useEffect(() => {
+		const delta = messages.length - prevMessagesLengthRef.current
+		prevMessagesLengthRef.current = messages.length
+
+		if (delta > 0) {
+			setAffordance(prev => nextScrollAffordanceState(prev, { kind: "messagesArrived", count: delta }))
+		}
+	}, [messages.length])
 
 	// Track the open conversation OUTSIDE React so the socket handlers can gate derived-unread: a foreign
 	// message landing in the chat the user is looking at must not flip it unread (D4). Cleared on unmount /
@@ -162,7 +243,32 @@ export function MessageThread({ chat }: { chat: Chat }) {
 		el.scrollTop = el.scrollHeight
 	}, [rows.length])
 
+	function scrollToBottom(): void {
+		const el = scrollRef.current
+
+		if (el === null) {
+			return
+		}
+
+		el.scrollTop = el.scrollHeight
+	}
+
+	// Recomputes bottom-proximity on every scroll (clears the pill's count the instant the user — or the
+	// pill's own click — reaches bottom; the reducer no-ops a redundant "still at bottom" event).
+	function trackScrollAffordance(): void {
+		const el = scrollRef.current
+
+		if (el === null) {
+			return
+		}
+
+		const atBottom = isScrollNearBottom(el.scrollTop, el.scrollHeight, el.clientHeight, BOTTOM_THRESHOLD)
+		setAffordance(prev => nextScrollAffordanceState(prev, { kind: "scroll", atBottom }))
+	}
+
 	async function handleScroll(): Promise<void> {
+		trackScrollAffordance()
+
 		const el = scrollRef.current
 
 		if (el === null || el.scrollTop > TOP_THRESHOLD || loadingOlder || !hasMoreRef.current) {
@@ -251,6 +357,8 @@ export function MessageThread({ chat }: { chat: Chat }) {
 							>
 								{row.kind === "day" ? (
 									<DaySeparator timestamp={row.timestamp} />
+								) : row.kind === "unread" ? (
+									<UnreadDivider chat={chat} />
 								) : (
 									<MessageRow
 										chat={chat}
@@ -266,6 +374,8 @@ export function MessageThread({ chat }: { chat: Chat }) {
 			</div>
 		)
 	}
+
+	const showScrollToBottomFab = !affordance.atBottom && affordance.unseenCount > 0
 
 	const headerTitle = isChatUndecryptable(chat)
 		? t("chatUndecryptable")
@@ -297,7 +407,15 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				</DropdownMenu>
 			</header>
 			<div className="h-px shrink-0 bg-border/50" />
-			{renderList()}
+			<div className="relative flex min-h-0 flex-1 flex-col">
+				{renderList()}
+				{showScrollToBottomFab ? (
+					<ScrollToBottomFab
+						count={affordance.unseenCount}
+						onClick={scrollToBottom}
+					/>
+				) : null}
+			</div>
 			<TypingIndicator
 				chatUuid={chatUuid}
 				currentUserId={currentUserId}
