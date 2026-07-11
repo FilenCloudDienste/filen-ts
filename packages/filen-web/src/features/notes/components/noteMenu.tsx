@@ -13,13 +13,15 @@ import {
 	trashNote,
 	setNoteType
 } from "@/features/notes/lib/actions"
-import { addTagToNote, removeTagFromNote } from "@/features/notes/lib/tags"
+import { addTagToNote, removeTagFromNote, setNoteTagFavorited } from "@/features/notes/lib/tags"
 import {
 	noteMenuActions,
 	noteTagSubmenuEntries,
+	tagMenuActions,
 	NOTE_TYPE_SUBMENU,
 	type NoteActionDescriptor,
 	type NoteActionDialogKind,
+	type NoteTagDialogKind,
 	type NoteActionId
 } from "@/features/notes/components/noteMenu.logic"
 import {
@@ -280,6 +282,56 @@ export function NoteContextMenuContent(props: NoteMenuContentProps) {
 					CheckboxItem: ContextMenuCheckboxItem
 				}}
 			/>
+		</ContextMenuContent>
+	)
+}
+
+export interface TagMenuContentProps {
+	tag: NoteTag
+	// Fires for the two "dialog"-run tag descriptors (renameTag/deleteTag) — the sidebar's dialog host
+	// (useNoteDialogHost.openTagDialog) turns this into an open dialog. The favorite toggle resolves in
+	// place below, same split as NoteMenuEntries' own direct-vs-dialog rule.
+	onTagAction: (kind: NoteTagDialogKind, tag: NoteTag) => void
+}
+
+// Right-click surface for a tags-view group row (notesSidebar.tsx's TagGroupRow) — rename/favorite/
+// delete only. Context-menu family only: tag rows keep no hover ⋯ trigger (the count badge owns that
+// slot), mirroring old-web where tag management was right-click-only too.
+export function TagContextMenuContent({ tag, onTagAction }: TagMenuContentProps) {
+	const { t } = useTranslation("notes")
+	const descriptors = tagMenuActions(tag)
+
+	async function handleFavoriteToggle(): Promise<void> {
+		const outcome = await setNoteTagFavorited(tag, !tag.favorite)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+		}
+	}
+
+	return (
+		<ContextMenuContent>
+			{descriptors.map(descriptor => (
+				<ContextMenuItem
+					key={descriptor.id}
+					variant={descriptor.run === "dialog" && descriptor.destructive === true ? "destructive" : "default"}
+					onClick={event => {
+						// Same propagation stop as NoteMenuEntries — without it the click would also toggle
+						// the tag group's own expand/collapse underneath the (portaled) menu.
+						event.stopPropagation()
+
+						if (descriptor.run === "direct") {
+							void handleFavoriteToggle()
+							return
+						}
+
+						onTagAction(descriptor.dialogKind, tag)
+					}}
+				>
+					{createElement(descriptor.icon, { "aria-hidden": true })}
+					{t(descriptor.labelKey)}
+				</ContextMenuItem>
+			))}
 		</ContextMenuContent>
 	)
 }

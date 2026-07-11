@@ -27,6 +27,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import {
 	noteMenuActions,
 	noteTagSubmenuEntries,
+	tagMenuActions,
 	NOTE_TYPE_SUBMENU,
 	type NoteActionDescriptor
 } from "@/features/notes/components/noteMenu.logic"
@@ -276,5 +277,32 @@ describe("NOTE_TYPE_SUBMENU", () => {
 			{ noteType: "rich", labelKey: "noteTypeRich" },
 			{ noteType: "checklist", labelKey: "noteTypeChecklist" }
 		])
+	})
+})
+
+describe("tagMenuActions — the tags-view row menu", () => {
+	it("lists rename, favorite, delete in that order for an unfavorited tag", () => {
+		expect(tagMenuActions(mockTag()).map(d => ({ id: d.id, labelKey: d.labelKey, run: d.run }))).toEqual([
+			{ id: "tagRename", labelKey: "noteTagActionRename", run: "dialog" },
+			{ id: "tagFavorite", labelKey: "noteTagActionFavorite", run: "direct" },
+			{ id: "tagDelete", labelKey: "noteTagActionDelete", run: "dialog" }
+		])
+	})
+
+	it("flips the favorite entry's label for an already-favorited tag, keeping order stable", () => {
+		const descriptors = tagMenuActions(mockTag({ favorite: true }))
+
+		expect(descriptors.map(d => d.id)).toEqual(["tagRename", "tagFavorite", "tagDelete"])
+		expect(descriptors[1]?.labelKey).toBe("noteTagActionUnfavorite")
+	})
+
+	it("routes rename and delete to their disjoint tag dialog kinds, delete destructive", () => {
+		const descriptors = tagMenuActions(mockTag())
+		const rename = descriptors[0]
+		const del = descriptors[2]
+
+		expect(rename?.run === "dialog" && rename.dialogKind).toBe("renameTag")
+		expect(del?.run === "dialog" && del.dialogKind).toBe("deleteTag")
+		expect(del?.run === "dialog" && del.destructive).toBe(true)
 	})
 })

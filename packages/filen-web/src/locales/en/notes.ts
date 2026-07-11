@@ -123,6 +123,16 @@ export const notes = {
 	/** Type submenu — the "checklist" note type */
 	noteTypeChecklist: "Checklist",
 
+	// ── Tag row menu (tagMenuActions) ──────────────────────────────────────────
+	/** Tag row menu — renames the tag (opens noteTagRenameDialog) */
+	noteTagActionRename: "Rename",
+	/** Tag row menu — favorites the tag */
+	noteTagActionFavorite: "Favorite",
+	/** Tag row menu — unfavorites an already-favorited tag */
+	noteTagActionUnfavorite: "Unfavorite",
+	/** Tag row menu — deletes the tag (opens noteTagDeleteDialog); notes carrying it only lose the tag */
+	noteTagActionDelete: "Delete",
+
 	// ── Tags submenu ───────────────────────────────────────────────────────────
 	/** Tags submenu — shown instead of the tag list when the account has no tags yet */
 	noteTagsSubmenuEmpty: "No tags yet",
@@ -159,5 +169,17 @@ export const notes = {
 	/** Create-tag dialog — field placeholder */
 	noteCreateTagDialogPlaceholder: "Tag name",
 	/** Create-tag dialog — submit button */
-	noteCreateTagDialogSubmit: "Create"
+	noteCreateTagDialogSubmit: "Create",
+	/** Rename-tag dialog — title */
+	noteTagRenameDialogTitle: "Rename tag",
+	/** Rename-tag dialog — body */
+	noteTagRenameDialogBody: "Enter a new name.",
+	/** Rename-tag dialog — field label */
+	noteTagRenameDialogLabel: "Name",
+	/** Rename-tag dialog — submit button */
+	noteTagRenameDialogSubmit: "Rename",
+	/** Delete-tag confirm dialog — title */
+	noteTagDeleteDialogTitle: "Delete tag?",
+	/** Delete-tag confirm dialog — body */
+	noteTagDeleteDialogBody: "Notes carrying this tag are not deleted — they only lose the tag. This cannot be undone."
 } as const

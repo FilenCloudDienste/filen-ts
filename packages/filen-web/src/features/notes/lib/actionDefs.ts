@@ -14,6 +14,8 @@ import {
 	Trash2Icon,
 	LogOutIcon,
 	PlusIcon,
+	StarIcon,
+	StarOffIcon,
 	type LucideIcon
 } from "lucide-react"
 import { type NotesKey } from "@/lib/i18n"
@@ -43,5 +45,11 @@ export const NOTE_ACTION_DEFS = {
 	restore: { labelKey: "noteActionRestore", icon: ArchiveRestoreIcon },
 	trash: { labelKey: "noteActionTrash", icon: Trash2Icon },
 	deletePermanently: { labelKey: "noteActionDeletePermanently", icon: Trash2Icon, destructive: true },
-	leave: { labelKey: "noteActionLeave", icon: LogOutIcon, destructive: true }
+	leave: { labelKey: "noteActionLeave", icon: LogOutIcon, destructive: true },
+	// Tag-row menu (tagMenuActions) — Star, not Heart: matches the tag row's own favorite indicator
+	// (notesSidebar.tsx renders a StarIcon on favorited tags; notes use hearts, tags use stars).
+	tagRename: { labelKey: "noteTagActionRename", icon: PencilIcon },
+	tagFavorite: { labelKey: "noteTagActionFavorite", icon: StarIcon },
+	tagUnfavorite: { labelKey: "noteTagActionUnfavorite", icon: StarOffIcon },
+	tagDelete: { labelKey: "noteTagActionDelete", icon: Trash2Icon, destructive: true }
 } satisfies Record<string, NoteActionDef>

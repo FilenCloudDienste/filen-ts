@@ -8,6 +8,10 @@ import type { NotesKey } from "@/lib/i18n"
 // mirrors drive's ItemActionDialogKind split (itemMenu.logic.ts).
 export type NoteActionDialogKind = "rename" | "delete" | "leave" | "createTag"
 
+// Tag-row dialog kinds — disjoint from NoteActionDialogKind so the dialog host's active-dialog union
+// discriminates on `kind` alone (a tag dialog carries a NoteTag, not a Note).
+export type NoteTagDialogKind = "renameTag" | "deleteTag"
+
 export type NoteActionId =
 	| "rename"
 	| "duplicate"
@@ -108,6 +112,31 @@ export function noteMenuActions(note: Note, currentUserId: bigint | undefined): 
 	actions.push(owner ? TRASH : LEAVE)
 
 	return actions
+}
+
+// Tag-row context-menu descriptors (the sidebar tags view's own small menu) — same pure-builder shape
+// as noteMenuActions so the entry list + favorite-label flip stay unit-testable without rendering.
+export type TagActionDescriptor =
+	| {
+			id: "tagRename" | "tagDelete"
+			labelKey: NotesKey
+			icon: LucideIcon
+			destructive?: boolean
+			run: "dialog"
+			dialogKind: NoteTagDialogKind
+	  }
+	| { id: "tagFavorite"; labelKey: NotesKey; icon: LucideIcon; run: "direct" }
+
+export function tagMenuActions(tag: NoteTag): TagActionDescriptor[] {
+	const favorite: TagActionDescriptor = tag.favorite
+		? { id: "tagFavorite", ...NOTE_ACTION_DEFS.tagUnfavorite, run: "direct" }
+		: { id: "tagFavorite", ...NOTE_ACTION_DEFS.tagFavorite, run: "direct" }
+
+	return [
+		{ id: "tagRename", ...NOTE_ACTION_DEFS.tagRename, run: "dialog", dialogKind: "renameTag" },
+		favorite,
+		{ id: "tagDelete", ...NOTE_ACTION_DEFS.tagDelete, run: "dialog", dialogKind: "deleteTag" }
+	]
 }
 
 export interface NoteTagSubmenuEntry {

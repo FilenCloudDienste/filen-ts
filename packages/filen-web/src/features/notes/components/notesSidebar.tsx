@@ -4,7 +4,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { toast } from "sonner"
 import { PlusIcon, SearchIcon, XIcon, ChevronRightIcon, StarIcon, StickyNoteIcon, TagIcon } from "lucide-react"
-import type { Note } from "@filen/sdk-rs"
+import type { Note, NoteTag } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
 import { useNotes } from "@/features/notes/queries/notes"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
@@ -25,9 +25,12 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { NoteRow } from "@/features/notes/components/noteRow"
+import { TagContextMenuContent } from "@/features/notes/components/noteMenu"
+import { type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 
 // Module scope, not inside the component — mirrors drive's "drive.newDirectory" registration
 // (newDirectory.tsx): runs once per module evaluation, which registerAction's duplicate-id guard
@@ -68,34 +71,56 @@ function segmentClass(active: boolean): string {
 	)
 }
 
-function TagGroupRow({ row, onToggle }: { row: Extract<NotesSidebarRow, { kind: "tag" }>; onToggle: () => void }) {
+function TagGroupRow({
+	row,
+	onToggle,
+	onTagAction
+}: {
+	row: Extract<NotesSidebarRow, { kind: "tag" }>
+	onToggle: () => void
+	onTagAction: (kind: NoteTagDialogKind, tag: NoteTag) => void
+}) {
 	const { t } = useTranslation("notes")
 	const name = tagDisplayName(row.tag)
 
 	return (
-		<button
-			type="button"
-			aria-expanded={row.expanded}
-			aria-label={t(row.expanded ? "notesTagCollapse" : "notesTagExpand", { name })}
-			onClick={onToggle}
-			className="group flex h-full w-full items-center gap-1.5 rounded-xl px-2.5 text-left transition-colors outline-none app-region-no-drag hover:bg-sidebar-accent/60 focus-visible:ring-3 focus-visible:ring-ring/30"
-		>
-			<ChevronRightIcon className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", row.expanded && "rotate-90")} />
-			<TagIcon className="size-4 shrink-0 text-muted-foreground" />
-			<span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
-			{row.tag.favorite ? (
-				<StarIcon
-					aria-label={t("notesTagFavorite")}
-					className="size-3 shrink-0 text-amber-500"
-				/>
-			) : null}
-			<span
-				aria-label={t("notesTagCount", { count: row.noteCount })}
-				className="shrink-0 text-xs text-muted-foreground tabular-nums"
-			>
-				{row.noteCount}
-			</span>
-		</button>
+		<ContextMenu>
+			{/* Same render-prop merge as NoteRow's own trigger — Base UI merges onContextMenu + ref onto
+			the button rather than wrapping it, so the row's geometry stays untouched. */}
+			<ContextMenuTrigger
+				render={
+					<button
+						type="button"
+						aria-expanded={row.expanded}
+						aria-label={t(row.expanded ? "notesTagCollapse" : "notesTagExpand", { name })}
+						onClick={onToggle}
+						className="group flex h-full w-full items-center gap-1.5 rounded-xl px-2.5 text-left transition-colors outline-none app-region-no-drag hover:bg-sidebar-accent/60 focus-visible:ring-3 focus-visible:ring-ring/30"
+					>
+						<ChevronRightIcon
+							className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", row.expanded && "rotate-90")}
+						/>
+						<TagIcon className="size-4 shrink-0 text-muted-foreground" />
+						<span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
+						{row.tag.favorite ? (
+							<StarIcon
+								aria-label={t("notesTagFavorite")}
+								className="size-3 shrink-0 text-amber-500"
+							/>
+						) : null}
+						<span
+							aria-label={t("notesTagCount", { count: row.noteCount })}
+							className="shrink-0 text-xs text-muted-foreground tabular-nums"
+						>
+							{row.noteCount}
+						</span>
+					</button>
+				}
+			/>
+			<TagContextMenuContent
+				tag={row.tag}
+				onTagAction={onTagAction}
+			/>
+		</ContextMenu>
 	)
 }
 
@@ -277,6 +302,7 @@ export function NotesSidebar() {
 									onToggle={() => {
 										toggleTag(row.tag.uuid)
 									}}
+									onTagAction={dialogHost.openTagDialog}
 								/>
 							) : (
 								<NoteRow

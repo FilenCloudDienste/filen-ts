@@ -2,23 +2,24 @@ import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
-import type { Note } from "@filen/sdk-rs"
+import type { Note, NoteTag } from "@filen/sdk-rs"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { setNoteTitle, deleteNote, leaveNote } from "@/features/notes/lib/actions"
-import { createNoteTag, addTagToNote } from "@/features/notes/lib/tags"
+import { createNoteTag, addTagToNote, renameNoteTag, deleteNoteTag } from "@/features/notes/lib/tags"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { type NoteActionDialogKind } from "@/features/notes/components/noteMenu.logic"
+import { type NoteActionDialogKind, type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 
-interface ActiveNoteDialog {
-	kind: NoteActionDialogKind
-	note: Note
-}
+// Discriminates on `kind` alone — NoteActionDialogKind and NoteTagDialogKind are disjoint string
+// unions (noteMenu.logic.ts), so the note arm carries a Note and the tag arm a NoteTag without a
+// separate discriminant field.
+type ActiveNoteDialog = { kind: NoteActionDialogKind; note: Note } | { kind: NoteTagDialogKind; tag: NoteTag }
 
 export interface NoteDialogHost {
 	isDialogOpen: boolean
 	openNoteDialog: (kind: NoteActionDialogKind, note: Note) => void
+	openTagDialog: (kind: NoteTagDialogKind, tag: NoteTag) => void
 	renderActiveDialog: () => ReactNode
 }
 
@@ -42,6 +43,10 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 
 	function openNoteDialog(kind: NoteActionDialogKind, note: Note): void {
 		setActiveDialog({ kind, note })
+	}
+
+	function openTagDialog(kind: NoteTagDialogKind, tag: NoteTag): void {
+		setActiveDialog({ kind, tag })
 	}
 
 	function navigateAwayIfCurrent(note: Note): void {
@@ -87,6 +92,34 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 				navigateAwayIfCurrent(note)
 			}
 		})
+		setDialogPending(false)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+			return
+		}
+
+		closeActiveDialog()
+	}
+
+	async function handleRenameTagSubmit(tag: NoteTag, value: string): Promise<void> {
+		setDialogPending(true)
+		const outcome = await renameNoteTag(tag, value)
+		setDialogPending(false)
+
+		if (outcome.status === "error") {
+			// Dialog stays open on error (e.g. a reserved name) so the user can fix the name and retry —
+			// same convention as the note rename above.
+			toast.error(errorLabel(outcome.dto))
+			return
+		}
+
+		closeActiveDialog()
+	}
+
+	async function handleDeleteTagConfirm(tag: NoteTag): Promise<void> {
+		setDialogPending(true)
+		const outcome = await deleteNoteTag(tag)
 		setDialogPending(false)
 
 		if (outcome.status === "error") {
@@ -208,8 +241,49 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 						}}
 					/>
 				)
+			case "renameTag":
+				return (
+					<InputDialog
+						open
+						pending={dialogPending}
+						title={t("noteTagRenameDialogTitle")}
+						body={t("noteTagRenameDialogBody")}
+						label={t("noteTagRenameDialogLabel")}
+						initialValue={activeDialog.tag.name ?? ""}
+						submitLabel={t("noteTagRenameDialogSubmit")}
+						validate={value => value.trim().length > 0}
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onSubmit={value => {
+							void handleRenameTagSubmit(activeDialog.tag, value)
+						}}
+					/>
+				)
+			case "deleteTag":
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("noteTagDeleteDialogTitle")}
+						body={t("noteTagDeleteDialogBody")}
+						confirmLabel={t("noteTagActionDelete")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleDeleteTagConfirm(activeDialog.tag)
+						}}
+					/>
+				)
 		}
 	}
 
-	return { isDialogOpen, openNoteDialog, renderActiveDialog }
+	return { isDialogOpen, openNoteDialog, openTagDialog, renderActiveDialog }
 }
