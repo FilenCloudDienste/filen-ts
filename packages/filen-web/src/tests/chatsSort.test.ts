@@ -85,7 +85,7 @@ function mockUndecryptableMessage(overrides: Omit<Partial<ChatMessage>, "message
 }
 
 // Mirrors mobile's `components/list/index.tsx:36-45` sort exactly (verified against source this
-// session — the synthesis left this UNVERIFIED).
+// session).
 describe("sortChats", () => {
 	it("orders by lastMessage.sentTimestamp descending", () => {
 		const older = mockChat({ uuid: testUuid("older"), lastMessage: mockMessage({ sentTimestamp: 100n }) })

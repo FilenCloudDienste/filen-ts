@@ -10,7 +10,7 @@ export const SW_SKIP_WAITING_MESSAGE = "SKIP_WAITING"
 
 // ── Download route (SW-hosted trimmed SDK stream) ───────────────────────────────────────────────
 // Virtual URL the SW answers with a streamed, attachment-forced file download. The `<id>` is an
-// opaque per-download token (crypto.randomUUID) — NEVER key material (D16: secrets cross only via
+// opaque per-download token (crypto.randomUUID) — NEVER key material (secrets cross only via
 // the postMessage channels below, never a URL/query/log).
 export const SW_DOWNLOAD_PREFIX = "/sw/download/"
 
@@ -19,7 +19,7 @@ export const SW_DOWNLOAD_PREFIX = "/sw/download/"
 // MessagePort in `event.ports[0]` for its ACK.
 export const SW_MSG_INIT_CLIENT = "FILEN_SW_INIT_CLIENT"
 export const SW_MSG_REGISTER_DOWNLOAD = "FILEN_SW_REGISTER_DOWNLOAD"
-// Same D16 rule as SW_MSG_REGISTER_DOWNLOAD — the ZipItem[] (each item's own decrypted meta/key
+// Same secrets-never-in-a-URL rule as SW_MSG_REGISTER_DOWNLOAD — the ZipItem[] (each item's own decrypted meta/key
 // material) crosses ONLY through this structured-clone postMessage, never a URL/query/log. No `size`:
 // a freshly-generated zip's total byte count isn't known upfront.
 export const SW_MSG_REGISTER_ZIP_DOWNLOAD = "FILEN_SW_REGISTER_ZIP_DOWNLOAD"

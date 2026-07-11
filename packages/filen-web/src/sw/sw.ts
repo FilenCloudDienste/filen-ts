@@ -24,7 +24,7 @@ import { sanitizeFilename } from "@/lib/filename"
 // ── SW-hosted trimmed SDK (single-threaded — no COI, no rayon pool) ─────────────────────────────
 // Lazy: only fetch+compile the 2 MB wasm and reconstruct the Client when a session is handed over, so
 // mere SW registration on every page load stays cheap. The StringifiedClient (decrypted key material)
-// and the resolved AnyFile arrive ONLY via structured-clone postMessage (D16 — never a URL).
+// and the resolved AnyFile arrive ONLY via structured-clone postMessage — never a URL.
 let sdkReady: Promise<void> | null = null
 let swClient: SwClient | null = null
 

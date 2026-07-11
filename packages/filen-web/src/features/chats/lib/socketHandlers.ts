@@ -242,7 +242,7 @@ function handleMessageNew(msg: ChatMessage): void {
 // Exported for the unit tests' purge-order assertion — awaited directly there since handleChatEvent fires
 // it and returns synchronously.
 export async function handleConversationDeleted(uuid: string): Promise<void> {
-	// Purge-first (D4b/M5): drop the deleted chat's queued unsent messages, send errors and input draft
+	// Purge-first: drop the deleted chat's queued unsent messages, send errors and input draft
 	// BEFORE the cache removal so a concurrent send loop never resolves + retries into a gone chat. Best-
 	// effort (never throws).
 	await purgeChatInflightState(uuid)

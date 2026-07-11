@@ -15,7 +15,7 @@ import { createThumbnailUrlCache, computeThumbnailCapacity } from "@/features/dr
 // option for every path.
 
 // How many generation attempts (OPFS read + generator) run at once, app-wide — shapes DEMAND on the
-// CPU/SDK-download layer, never a limit the SDK itself needs (D21: never reimplement SDK-side
+// CPU/SDK-download layer, never a limit the SDK itself needs (never reimplement SDK-side
 // concurrency; this bounds how many requests THIS app issues concurrently).
 const CONCURRENT_GENERATIONS = 3
 
