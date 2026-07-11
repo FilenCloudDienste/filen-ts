@@ -230,5 +230,15 @@ export const notes = {
 	/** Delete-tag confirm dialog — title */
 	noteTagDeleteDialogTitle: "Delete tag?",
 	/** Delete-tag confirm dialog — body */
-	noteTagDeleteDialogBody: "Notes carrying this tag are not deleted — they only lose the tag. This cannot be undone."
+	noteTagDeleteDialogBody: "Notes carrying this tag are not deleted — they only lose the tag. This cannot be undone.",
+
+	// ── Realtime remote-edit banner ──────────────────────────────────────────────
+	/** Reload-vs-keep banner — title (the note changed on the server while you have unsaved edits) */
+	noteRemoteEditTitle: "Updated elsewhere",
+	/** Reload-vs-keep banner — body */
+	noteRemoteEditBody: "This note changed on another device.",
+	/** Reload-vs-keep banner — take the server version, discarding local edits */
+	noteRemoteEditReload: "Reload",
+	/** Reload-vs-keep banner — dismiss and keep the local edits */
+	noteRemoteEditKeep: "Keep mine"
 } as const

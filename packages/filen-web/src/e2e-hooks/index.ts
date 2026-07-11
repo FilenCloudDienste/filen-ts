@@ -79,6 +79,14 @@ interface E2eHooks {
 	// the uuid, decrypts its content. The editor-persistence e2e cases poll this to prove a typed edit
 	// actually reached the server after the debounce fired. Null when the uuid isn't found.
 	readTestNoteContentByUuid: (uuid: string) => Promise<string | null>
+	// Writes a note's content by uuid through THIS page's own SDK client — a genuine REMOTE edit from the
+	// perspective of a second page sharing the same account (the realtime e2e drives one page's editor and
+	// the other page's write). No-op when the uuid isn't found.
+	setTestNoteContentByUuid: (uuid: string, content: string) => Promise<void>
+	// Renames a note by uuid through THIS page's own SDK client — the metadata counterpart of
+	// setTestNoteContentByUuid, used to prove a titleEdited socket event lands live on the other page's
+	// sidebar row + editor header. No-op when the uuid isn't found.
+	renameTestNoteByUuid: (uuid: string, title: string) => Promise<void>
 	// The latest DURABLE (OPFS) outbox content for a note, read straight from the kv store the sync
 	// outbox persists to — proves the immediate-persist landed on disk BEFORE a reload, the crux of the
 	// kill-path proof (survives window close). Null when nothing is persisted for the uuid.
@@ -216,6 +224,30 @@ export function installE2eHooks(router: RouterLike): void {
 			}
 
 			return (await sdkApi.getNoteContent(note)) ?? null
+		},
+		setTestNoteContentByUuid: async (uuid, content) => {
+			await whenBootReady()
+
+			const note = (await sdkApi.listNotes()).find(n => n.uuid === uuid)
+
+			if (note === undefined) {
+				return
+			}
+
+			const previewType = note.noteType === "rich" || note.noteType === "checklist" ? note.noteType : "other"
+
+			await sdkApi.setNoteContent(note, content, createNotePreviewFromContentText(previewType, content))
+		},
+		renameTestNoteByUuid: async (uuid, title) => {
+			await whenBootReady()
+
+			const note = (await sdkApi.listNotes()).find(n => n.uuid === uuid)
+
+			if (note === undefined) {
+				return
+			}
+
+			await sdkApi.setNoteTitle(note, title)
 		},
 		readPersistedInflightContent: async uuid => {
 			await whenBootReady()

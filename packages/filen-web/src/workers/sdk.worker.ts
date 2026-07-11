@@ -39,7 +39,9 @@ import init, {
 	type NoteParticipant,
 	type NoteType,
 	type DuplicateNoteResponse,
-	type AddTagToNoteResponse
+	type AddTagToNoteResponse,
+	type SocketEvent,
+	type ListenerHandle
 } from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
 import { toErrorDTO, PARENT_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
@@ -93,6 +95,22 @@ const uploadAborts = new Map<string, AbortController>()
 // MUST be freed (see uploadFile/downloadFileToWriter's own finally) or it leaks wasm memory.
 const uploadPauses = new Map<string, PauseSignal>()
 const downloadPauses = new Map<string, PauseSignal>()
+
+// The single realtime socket listener for the app's lifetime — the wasm handle returned by
+// addEventListener, kept module-level like the transfer registries above. The SDK owns the socket's
+// own reconnect (it emits "reconnecting"/"authSuccess" SocketEvents through this same listener; the
+// handle survives those internal reconnects, so there is NO re-subscription machinery here). Tied to
+// the live client: freed in releaseClient/adoptClient so a listener from a torn-down session never
+// dangles. `.free()` is the wasm disposal (ListenerHandle, not the uniffi `.uniffiDestroy()`).
+let socketListener: ListenerHandle | null = null
+
+// Free the live socket listener, if any. Idempotent. Shared by unsubscribeFromSocket and by the
+// client-lifecycle paths (releaseClient/adoptClient) so a session teardown/swap can never leave a
+// handle bound to a freed client.
+function freeSocketListener(): void {
+	socketListener?.free()
+	socketListener = null
+}
 
 // Shared shape behind uploadFile/downloadFileToWriter/downloadItemsToZip's per-transfer pause
 // lifecycle: register a fresh PauseSignal, run fn with it, then evict from both maps and free the
@@ -165,6 +183,7 @@ function requireClient(): Client {
 // guarantees a fresh session never reads a prior account's cached directories/names — including
 // the injectClient case, which can adopt a new client without an explicit logout ever running.
 function adoptClient(next: Client): void {
+	freeSocketListener() // a listener bound to the outgoing client must not outlive it
 	client?.free()
 	client = next
 	clearDirectoryCache()
@@ -179,6 +198,7 @@ function adoptClient(next: Client): void {
 function releaseClient(): void {
 	const prev = client
 	client = null
+	freeSocketListener() // the socket listener belongs to this client — free it before the client goes
 	clearDirectoryCache() // wipe cached names/dirs so a signed-out worker never holds decrypted data
 	if (prev !== null) {
 		setTimeout(() => {
@@ -1025,6 +1045,27 @@ const api = {
 	// belongs at this boundary (see searchEngine.ts's own statusListener/listener comments).
 	searchOpen(params: { rootUuid: string | null; name: string }, onPush: (p: SearchPush) => void): Promise<SearchSnapshotDTO> {
 		return searchEngine.open(requireClient(), params, onPush)
+	},
+	// ── Realtime socket ────────────────────────────────────────────────────────
+	// The first-ever socket wiring: one subscription for the whole app. `onEvent` arrives as the
+	// caller's Comlink.proxy — wrapped in a plain worker-side fn (`event => onEvent(event)`), never
+	// handed to the wasm call as the proxy object itself, same rule as uploadFile/searchOpen's callbacks.
+	// `null` event_types subscribes to EVERY category (SocketEventTypeNames is a dangling type on the
+	// wasm surface — always null, switch on event.type main-side). Idempotent: frees any prior handle
+	// first so a re-subscribe never leaks. Note the plain-callback + `.free()` form here, NOT the uniffi
+	// `{ onEvent }` object + `.uniffiDestroy()` mobile uses — that shape does not exist on wasm.
+	async subscribeToSocket(onEvent: (event: SocketEvent) => void): Promise<void> {
+		const c = requireClient()
+
+		freeSocketListener()
+
+		socketListener = await c.addEventListener(event => {
+			onEvent(event)
+		}, null)
+	},
+	// Tears the subscription down (logout, before the client is released). A no-op once already freed.
+	unsubscribeFromSocket(): void {
+		freeSocketListener()
 	},
 	searchSetName(name: string): Promise<boolean> {
 		return searchEngine.setName(name)

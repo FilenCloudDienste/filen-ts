@@ -83,6 +83,28 @@ export class Sync {
 		this.nonRetryableRejections.delete(noteUuid)
 	}
 
+	// Drop a note's entire outbox entry OUTSIDE a push pass — the realtime remote-edit "reload" action
+	// (the editor discards its unsynced local content to take the server's version). Dropping the entry
+	// re-enables the note's content query (enabled: !inflight), so its remount key can advance and the
+	// editor reseeds with fresh server content. The caller pairs this with clearRejections + flushToDisk
+	// so the discard is durable and the next session starts with a clean strike count. Functional update:
+	// a no-op when the note has no entry.
+	public dropEntry(noteUuid: string): void {
+		useNotesInflightStore.getState().setInflightContent(prev => {
+			if (!(noteUuid in prev)) {
+				return prev
+			}
+
+			const updated: InflightContent = {
+				...prev
+			}
+
+			Reflect.deleteProperty(updated, noteUuid)
+
+			return updated
+		})
+	}
+
 	// Edit intake. Writes the outbox entry AND persists the WHOLE outbox to disk IMMEDIATELY, before
 	// arming the debounce — the immediate-persist is THE survives-window-close guarantee (if the tab
 	// dies during the 3s debounce, the edit is already durable and replays on next launch). Returns

@@ -347,12 +347,13 @@ async function createAndOpenTestNote(
 	await page.getByRole("link", { name: "Notes", exact: true }).click()
 	await page.waitForURL(/\/notes(\/|$)/)
 
-	// The newly created note is the most recently edited, so /notes' own first-note redirect (notes.tsx)
-	// may already have selected it before this search even runs — which puts the SAME title in both the
-	// sidebar row (a Link) AND the now-open editor card's h1 header, tripping getByText's strict-match
-	// mode. Scoped to the sidebar's own <aside> landmark, which only ever contains the row match.
+	// Click the row by its stable HREF, not its text (openNoteByTitle's own rationale): the row repeats
+	// its title in BOTH the title span AND the preview snippet whenever the row carries no preview yet —
+	// which the live socket's "new"-event list refetch can transiently produce (the refetch can observe
+	// the note between createNote and setNoteContent, before its preview exists) — so a getByText(title)
+	// click is strict-mode ambiguous. The href is unique regardless of what the preview happens to show.
 	await page.getByRole("searchbox", { name: "Search notes" }).fill(title)
-	await page.getByRole("complementary").getByText(title, { exact: true }).click()
+	await page.getByRole("complementary").locator(`a[href="/notes/${note.uuid}"]`).click()
 	await page.waitForURL(new RegExp(`/notes/${note.uuid}$`))
 
 	return note.uuid
@@ -720,6 +721,139 @@ test.describe("notes: rich and checklist editors", () => {
 			await expect(reloadedToggles.nth(1)).not.toBeChecked()
 		} finally {
 			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+		}
+	})
+})
+
+// Realtime socket bridge (e3-socket): a TWO-PAGE proof in one browser context — both pages share the
+// injected session, so page B's programmatic write is a genuine second-connection edit the server
+// broadcasts back to page A's live socket. Two facts are proven:
+//   1. A metadata event (titleEdited) lands LIVE on page A — no reload — patching both the editor header
+//      and the sidebar row. Metadata events carry no echo suppression, so a same-account edit shows.
+//   2. A ContentEdited event authored by the SAME account is ECHO-SUPPRESSED (mobile keys suppression on
+//      editorId === own userId; all our tabs share one userId until the multi-tab leader wave). A
+//      same-account e2e therefore CANNOT observe the un-suppressed ContentEdited path — that (clean→
+//      invalidate, dirty→banner) is unit-covered in src/tests/notesSocketHandlers.test.ts. Here we prove
+//      the suppressed path: page A shows NO reload banner and its editor is NOT clobbered.
+const SESSION_SLOT = "filen.e2e.session"
+
+// A second authed page in the same context, booted to the shell (its own SDK worker + socket). The
+// injected-session fixture only seeds the fixture's own `page`; a sibling page re-seeds sessionStorage
+// itself, same as storage.spec.ts's follower tab.
+async function bootSecondPage(page: Page, injectedSession: string): Promise<Page> {
+	const pageB = await page.context().newPage()
+
+	await pageB.addInitScript(
+		([slot, blob]) => {
+			sessionStorage.setItem(slot, blob)
+		},
+		[SESSION_SLOT, injectedSession] as const
+	)
+	await pageB.goto("/drive")
+	await dismissStartupReminders(pageB)
+	await expect(pageB.getByRole("navigation", { name: "Filen" })).toBeVisible()
+
+	return pageB
+}
+
+test.describe("notes: realtime", () => {
+	test("a rename on a second page lands live on the editor header and sidebar row", async ({ page, injectedSession, browserName }) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+		test.setTimeout(120_000)
+
+		const { uuid, title } = await createEmptyNoteAndOpen(page, "text", "e2e realtime-meta")
+		const newTitle = `e2e renamed ${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const main = page.getByRole("main")
+		const sidebar = page.getByRole("complementary")
+
+		const pageB = await bootSecondPage(page, injectedSession)
+
+		try {
+			// Page B renames the note through its own client — a real second-connection metadata edit.
+			await pageB.evaluate(args => window.__filenE2E.renameTestNoteByUuid(args.uuid, args.title), { uuid, title: newTitle })
+
+			// Page A updates live, no reload: the editor header (h1) shows the new title once the titleEdited
+			// socket event patches the notes list cache. Generous timeout — the socket round trip crosses the
+			// backend and can land behind the SDK's own reconnect/backoff.
+			await expect(main.getByRole("heading", { level: 1, name: newTitle, exact: true })).toBeVisible({ timeout: 30_000 })
+
+			// The sidebar row carries the new title too. openNoteByTitle left the search box filtering on the
+			// OLD title (which the renamed row no longer matches, so it's filtered out) — re-narrow to the new
+			// title, which the patched cache row now matches, then assert the row by its stable href.
+			await page.getByRole("searchbox", { name: "Search notes" }).fill(newTitle)
+			await expect(sidebar.locator(`a[href="/notes/${uuid}"]`).getByText(newTitle, { exact: true }).first()).toBeVisible({
+				timeout: 30_000
+			})
+
+			// `title` (the pre-rename value) is referenced so its binding is meaningful — the header no longer
+			// carries it.
+			await expect(main.getByRole("heading", { level: 1, name: title, exact: true })).toHaveCount(0)
+		} finally {
+			await pageB.close()
+			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			// Backstop: sweep either title prefix in case a dead page skipped the uuid teardown.
+			await page.evaluate(prefix => window.__filenE2E.sweepTestNotesByTitlePrefix(prefix), "e2e realtime-meta")
+			await page.evaluate(prefix => window.__filenE2E.sweepTestNotesByTitlePrefix(prefix), "e2e renamed")
+		}
+	})
+
+	test("a same-account content edit on a second page is echo-suppressed — no banner, no clobber", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+		test.setTimeout(120_000)
+
+		const initialContent = `initial-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const remoteContent = `remote-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const title = `e2e realtime-content ${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const main = page.getByRole("main")
+
+		// Create the content-bearing note through the hook, then open it BY HREF (openNoteByTitle) rather
+		// than by text — a short single-line content can equal the row's own preview snippet, which would
+		// make a getByText(title) row click strict-mode ambiguous.
+		await page.goto("/drive")
+		await dismissStartupReminders(page)
+		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+
+		const note = await page.evaluate(args => window.__filenE2E.createTestNoteWithContent("text", args.content, args.title), {
+			content: initialContent,
+			title
+		})
+
+		await openNoteByTitle(page, title, note.uuid)
+
+		const uuid = note.uuid
+		const pageB = await bootSecondPage(page, injectedSession)
+
+		try {
+			// Page A's editor is showing the initial content (clean, not editing).
+			await expect(main.getByText(initialContent, { exact: true })).toBeVisible()
+
+			// Page B writes different content through its own client.
+			await pageB.evaluate(args => window.__filenE2E.setTestNoteContentByUuid(args.uuid, args.content), {
+				uuid,
+				content: remoteContent
+			})
+
+			// Confirm the write reached the server (and was therefore broadcast) — read straight from page B.
+			await expect
+				.poll(() => pageB.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), uuid), { timeout: 30_000 })
+				.toBe(remoteContent)
+
+			// Give any socket delivery to page A time to (not) act, then assert suppression held: the reload
+			// banner never appeared and the editor still shows the initial content (never refetched/clobbered).
+			await page.waitForTimeout(3_000)
+			await expect(page.getByText("Updated elsewhere", { exact: true })).toHaveCount(0)
+			await expect(main.getByText(initialContent, { exact: true })).toBeVisible()
+			await expect(main.getByText(remoteContent, { exact: true })).toHaveCount(0)
+		} finally {
+			await pageB.close()
+			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await page.evaluate(prefix => window.__filenE2E.sweepTestNotesByTitlePrefix(prefix), "e2e realtime-content")
 		}
 	})
 })

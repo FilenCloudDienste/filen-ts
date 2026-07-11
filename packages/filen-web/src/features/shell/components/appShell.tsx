@@ -5,6 +5,7 @@ import { NotesSidebar } from "@/features/notes/components/notesSidebar"
 import { SystemStrip } from "@/features/shell/components/systemStrip"
 import { AccountReminders } from "@/features/shell/components/accountReminders"
 import { SyncHost } from "@/features/notes/components/syncHost"
+import { SocketHost } from "@/features/shell/components/socketHost"
 
 // Padded canvas holding the three shell zones: a bare icon rail sitting directly on the canvas, then
 // two floating rounded panels — the contextual module sidebar and the content card. Nothing touches a
@@ -27,6 +28,9 @@ export function AppShell() {
 			{/* Notes sync outbox driver — mounted once in the authed shell so a pending edit flushes even
 			    while the user is on drive, not scoped to the notes route. Renders nothing. */}
 			<SyncHost />
+			{/* Realtime socket bridge — one subscription for the whole authed session; registers the note
+			    domain's handlers (drive/chats reuse the bridge later). Renders nothing. */}
+			<SocketHost />
 			<SystemStrip />
 			<div className="flex min-h-0 flex-1 gap-2 overflow-hidden p-2">
 				<IconRail />

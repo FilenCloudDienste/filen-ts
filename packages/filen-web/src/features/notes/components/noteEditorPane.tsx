@@ -4,6 +4,7 @@ import { StickyNoteIcon, MoreHorizontalIcon } from "lucide-react"
 import type { Note } from "@filen/sdk-rs"
 import { noteIcon } from "@/features/notes/lib/icon.logic"
 import { NoteContentBody } from "@/features/notes/components/noteContentBody"
+import { NoteRemoteEditBanner } from "@/features/notes/components/noteRemoteEditBanner"
 import { NoteDropdownMenuContent } from "@/features/notes/components/noteMenu"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
@@ -135,6 +136,9 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 				</DropdownMenu>
 			</header>
 			<Separator className="bg-border/50" />
+			{/* Realtime reload-vs-keep prompt — shown only when this note is dirty AND the server's content
+			    moved (a clean note refetches silently). Sits above the editor, never blocks it. */}
+			<NoteRemoteEditBanner note={note} />
 			{/* Keyed by uuid so switching the selected note rebuilds the content controller fresh. */}
 			<NoteContentBody
 				key={note.uuid}

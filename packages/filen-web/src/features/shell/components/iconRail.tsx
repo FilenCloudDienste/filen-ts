@@ -18,6 +18,7 @@ import type { CommonKey } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { runLogout } from "@/lib/logout"
 import { sync as notesSync } from "@/features/notes/lib/sync"
+import { socketBridge } from "@/lib/sdk/socket"
 import { sdkApi } from "@/lib/sdk/client"
 import { clearSession, broadcastAuth } from "@/lib/sdk/session"
 import { kvClear } from "@/lib/storage/adapter"
@@ -132,6 +133,9 @@ function AccountMenu() {
 		// Notes sync cancels BEFORE the wipe: abort the outbox loop and suppress any further disk write
 		// so a late flush can never resurrect this account's plaintext queue after kv-clear lands.
 		notesSync.cancel()
+		// Tear the realtime socket down before the client is released — unsubscribeFromSocket needs the
+		// live client. Fire-and-forget: the worker also frees the listener in releaseClient as a backstop.
+		void socketBridge.stop()
 		try {
 			await runLogout({
 				cancelQueries: () => queryClient.cancelQueries(),
