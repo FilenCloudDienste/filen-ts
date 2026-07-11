@@ -1047,3 +1047,93 @@ test.describe("notes: participants and history dialogs", () => {
 		}
 	})
 })
+
+// B1 leader-owned outbox across tabs (e4-leader). Two tabs of the SAME account share OPFS + Web Locks +
+// BroadcastChannel in one Playwright context: the FIRST to boot wins the db lock and runs the single
+// push loop; the second is a follower that FORWARDS its edits to the leader. The money test is the
+// failover — kill the leader inside the debounce window and the follower, promoted via the released db
+// lock, still pushes the pending edit with no user action. Serial + net-zero like every note test here.
+async function typeIntoTextEditor(target: Page, text: string): Promise<void> {
+	const editor = target.getByRole("main").locator(".cm-content")
+
+	await expect(editor).toBeVisible()
+	await editor.click()
+	await target.keyboard.type(text)
+}
+
+test.describe("notes: multi-tab outbox", () => {
+	test("a follower tab's edits reach the server, and a killed leader fails over without losing an edit", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+		test.setTimeout(180_000)
+
+		const stamp = `${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const markerX = `leaderX-${stamp}`
+		const markerY = `followerY-${stamp}`
+		const markerZ = `failoverZ-${stamp}`
+
+		// The LEADER is a sibling tab booted FIRST (so it wins the db lock); the fixture `page` boots
+		// SECOND as the follower + survivor (its own fixture teardown stays valid after the leader dies).
+		const leader = await bootSecondPage(page, injectedSession)
+
+		let uuidX: string | undefined
+		let uuidY: string | undefined
+		let uuidZ: string | undefined
+
+		try {
+			// The leader's OWN edit drains through its push loop to the server.
+			const x = await createEmptyNoteAndOpen(leader, "text", "e2e mt-leader")
+
+			uuidX = x.uuid
+			await typeIntoTextEditor(leader, markerX)
+			await expect
+				.poll(() => leader.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), x.uuid), { timeout: 30_000 })
+				.toBe(markerX)
+
+			// The follower FORWARDS its edit to the leader, which pushes it — the follower never pushes.
+			const y = await createEmptyNoteAndOpen(page, "text", "e2e mt-follower")
+
+			uuidY = y.uuid
+			await typeIntoTextEditor(page, markerY)
+			await expect
+				.poll(() => page.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), y.uuid), { timeout: 30_000 })
+				.toBe(markerY)
+
+			// ── FAILOVER ──────────────────────────────────────────────────────────
+			// A fresh note typed on the follower, forwarded to the leader, persisted on the leader's disk —
+			// then the leader is killed BEFORE its 3s debounce fires, so it never pushes Z itself.
+			const z = await createEmptyNoteAndOpen(page, "text", "e2e mt-failover")
+
+			uuidZ = z.uuid
+			await typeIntoTextEditor(page, markerZ)
+
+			// Confirm the forward reached the LEADER's OPFS (proves cross-tab forward + immediate-persist) —
+			// this settles in tens of ms, far under the debounce, so the kill below still beats any push.
+			await expect
+				.poll(() => leader.evaluate(id => window.__filenE2E.readPersistedInflightContent(id), z.uuid), { timeout: 15_000 })
+				.toBe(markerZ)
+
+			// Kill the leader inside the debounce window. The released db lock promotes the follower, which
+			// replays the persisted outbox and pushes Z with no user action — generous handoff + replay wait.
+			await leader.close()
+			await expect
+				.poll(() => page.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), z.uuid), { timeout: 60_000 })
+				.toBe(markerZ)
+		} finally {
+			// Net-zero: the follower (promoted to leader) keeps its own SDK access to tear all three down.
+			for (const id of [uuidX, uuidY, uuidZ]) {
+				if (id !== undefined) {
+					await page.evaluate(noteId => window.__filenE2E.deleteTestNoteByUuid(noteId), id)
+				}
+			}
+
+			if (!leader.isClosed()) {
+				await leader.close()
+			}
+		}
+	})
+})

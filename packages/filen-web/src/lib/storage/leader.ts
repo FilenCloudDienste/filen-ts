@@ -12,6 +12,38 @@ export interface StorageHandle {
 	api: StorageApi
 }
 
+// Leadership as a live signal (not just the one-shot role on the handle): the notes outbox REUSES this
+// db lock as its single leadership election — the leader tab owns the outbox push loop + disk, and on
+// leader death the promoted tab flips to "leader" here so the outbox can hand the loop over. No second
+// lock, no change to the db RPC protocol (Req/Res/Hello are untouched).
+let currentRole: "leader" | "follower" | null = null
+const leadershipListeners: Set<() => void> = new Set<() => void>()
+
+export function storageRole(): "leader" | "follower" | null {
+	return currentRole
+}
+
+// Subscribe to leadership changes (fires on promotion follower→leader). Returns an unsubscribe fn.
+export function onStorageLeadershipChange(listener: () => void): () => void {
+	leadershipListeners.add(listener)
+
+	return () => {
+		leadershipListeners.delete(listener)
+	}
+}
+
+function setStorageRole(role: "leader" | "follower"): void {
+	if (currentRole === role) {
+		return
+	}
+
+	currentRole = role
+
+	for (const listener of leadershipListeners) {
+		listener()
+	}
+}
+
 interface Req {
 	kind: "req"
 	id: string
@@ -53,6 +85,50 @@ function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => voi
 	}
 }
 
+// Spin up this tab's own db worker, open OPFS, and start serving the RPC channel — the work a tab does
+// the moment it holds the lock, whether it was the FIRST leader or a promoted follower. Returns the
+// direct worker api. A thrown open() (see db.worker.ts) propagates so the caller releases the lock and
+// the next queued tab is granted instead of everyone hanging.
+async function becomeLeader(): Promise<StorageApi> {
+	const worker = new DbWorker()
+	const remote = Comlink.wrap<StorageApi>(worker)
+
+	await remote.open()
+
+	const ch = new BroadcastChannel(CHANNEL)
+	ch.onmessage = (ev: MessageEvent<Msg>) => {
+		void serve(ev.data, remote, ch)
+	}
+	ch.postMessage({ kind: "leader-ready" } satisfies Hello)
+
+	// Comlink.Remote<StorageApi> is structurally StorageApi here (every method already returns a Promise).
+	return remote
+}
+
+// A follower queues a BLOCKING request on the SAME lock (no `ifAvailable`) so the browser hands it
+// leadership when the current leader releases (tab close/crash). On grant it becomes a leader and
+// MUTATES the already-returned handle in place — every kv caller re-reads `.api` per call (see
+// adapter.ts), so the swap from RPC-to-leader to direct-worker takes effect on the next kv op with no
+// re-plumbing. Held for the tab's lifetime once granted (chains to the next queued follower on death).
+function requestPromotion(handle: StorageHandle): void {
+	const promoted = navigator.locks.request(LOCK, async () => {
+		const api = await becomeLeader()
+
+		handle.role = "leader"
+		handle.api = api
+		setStorageRole("leader")
+
+		return new Promise<never>(() => undefined)
+	})
+
+	// A failed promotion (e.g. OPFS open() throws) releases the lock so the next queued follower is
+	// tried; this tab stays a follower with an api pointed at the now-dead leader (its kv times out) —
+	// a degraded state, not a hang, and no worse than the pre-failover behavior.
+	void promoted.catch((e: unknown) => {
+		log.error("db.leader", "promotion failed", e)
+	})
+}
+
 export function acquireStorage(): Promise<StorageHandle> {
 	return new Promise((resolve, reject) => {
 		// Role is decided by the LOCK GRANT (deterministic) — never by racing a timer against open().
@@ -63,27 +139,25 @@ export function acquireStorage(): Promise<StorageHandle> {
 		// surfacing the error.
 		const granted = navigator.locks.request(LOCK, { ifAvailable: true }, async lock => {
 			if (lock === null) {
-				resolve(await followerHandle())
+				const handle = await followerHandle()
+
+				setStorageRole("follower")
+				resolve(handle)
+				// Queue for leadership so a leader death promotes this tab (reusing this same lock).
+				requestPromotion(handle)
+
 				return
 			}
 
-			const worker = new DbWorker()
-			const remote = Comlink.wrap<StorageApi>(worker)
-			// OPFS is a hard requirement — a thrown open() (see db.worker.ts) rejects this whole lock
-			// callback, which navigator.locks.request propagates to `granted` below and releases the
-			// lock without ever posting "leader-ready"; any waiting follower times out instead of
-			// hanging forever.
-			await remote.open()
+			// OPFS is a hard requirement — a thrown open() rejects this whole lock callback, which
+			// navigator.locks.request propagates to `granted` below and releases the lock without ever
+			// posting "leader-ready"; any waiting follower times out instead of hanging forever.
+			const api = await becomeLeader()
 
-			const ch = new BroadcastChannel(CHANNEL)
-			ch.onmessage = (ev: MessageEvent<Msg>) => {
-				void serve(ev.data, remote, ch)
-			}
-			ch.postMessage({ kind: "leader-ready" } satisfies Hello)
+			setStorageRole("leader")
+			resolve({ role: "leader", api })
 
-			resolve({ role: "leader", api: remote as unknown as StorageApi })
-
-			return new Promise<never>(() => undefined) // hold the lock for the tab's lifetime; re-election on leader loss is not implemented yet
+			return new Promise<never>(() => undefined) // hold the lock for the tab's lifetime; a queued follower is promoted on release
 		})
 
 		void granted.catch(reject)

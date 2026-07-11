@@ -9,7 +9,7 @@ import { toast } from "sonner"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { fetchNotes, notesQueryGet } from "@/features/notes/queries/notes"
-import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight"
+import useNotesInflightStore, { type InflightContent, type InflightEntry } from "@/features/notes/store/useNotesInflight"
 import {
 	hashNoteContent,
 	buildInflightEntries,
@@ -19,11 +19,30 @@ import {
 	isNetworkClassError,
 	isRetryableAuthError,
 	isNonSdkError,
+	reconcileFollower,
+	remoteEnqueueToPatch,
+	newestEntry,
+	type RemoteEnqueue,
 	MAX_NON_RETRYABLE_REJECTIONS
 } from "@/features/notes/lib/sync.logic"
 
 const OUTBOX_KV_KEY = "inflightNoteContent"
 const SYNC_DEBOUNCE_MS = 3000
+
+// Multi-tab transport (ADAPTATION B1): a follower forwards edits to the leader and asks it to flush;
+// the leader broadcasts authoritative state + a hello on takeover. The Sync class depends only on this
+// seam — the wiring over a real BroadcastChannel lives in outboxCoordinator.ts; tests mock it. A
+// single-tab install attaches NO transport, so every call below is a guarded no-op and the leader path
+// stays byte-identical to the pre-multi-tab outbox.
+export interface OutboxTransport {
+	// follower → leader
+	sendEnqueue: (msg: RemoteEnqueue) => void
+	sendExecuteNow: () => void
+	requestState: () => void
+	// leader → followers
+	broadcastState: (state: InflightContent) => void
+	broadcastLeaderHello: () => void
+}
 
 // Read the abort flag through a function boundary so an early `if (signal.aborted) return` guard does
 // not narrow later `signal.aborted` reads to a literal `false` (the signal is aborted externally by
@@ -32,12 +51,18 @@ function isAborted(signal: AbortSignal): boolean {
 	return signal.aborted
 }
 
-// A faithful single-tab port of filen-mobile's Sync class: the outbox that guarantees a note edit
-// eventually reaches the server even across a window close, a lost connection, or a re-auth — fully
-// fault-tolerant and idempotent (every push is a full-content overwrite). Adaptations from the mobile
-// original are named inline (A durable outbox, C replay-on-launch, D triggers). The push loop is
-// SINGLE-TAB scoped for now; a multi-tab leader election (only the leader flushes) is a later wave —
-// the seam is marked where the loop begins.
+// A faithful port of filen-mobile's Sync class: the outbox that guarantees a note edit eventually
+// reaches the server even across a window close, a lost connection, or a re-auth — fully fault-tolerant
+// and idempotent (every push is a full-content overwrite). Adaptations from the mobile original are
+// named inline (A durable outbox, C replay-on-launch, D triggers, B1 leader-owned multi-tab).
+//
+// B1 — leader-owned outbox across tabs: exactly one tab (the db-lock leader) runs the push loop and
+// owns all disk persistence. A `role` of "leader" is the DEFAULT and its every code path is unchanged
+// from the single-tab outbox, so a lone tab (and the whole unit battery, which never attaches a
+// transport) behaves byte-identically. A follower tab flips `role` to "follower": its enqueue applies
+// optimistically to the local store AND forwards to the leader, its executeNow forwards a flush
+// request, and it never touches disk or runs the loop. On leader death the db lock hands leadership to
+// a follower, which calls promoteToLeader() and runs the SAME replay-on-launch machinery.
 export class Sync {
 	// Serializes restore/flush/push so a reconcile write never races a push prune. mutex(1) === mobile.
 	private readonly mutex: Semaphore = new Semaphore(1)
@@ -54,10 +79,31 @@ export class Sync {
 	// rejection still un-wedges the content query after N attempts.
 	private readonly nonRetryableRejections: Map<string, number> = new Map<string, number>()
 
+	// B1 multi-tab state. `role` defaults to "leader" so a lone tab and every unit test are the unchanged
+	// single-tab path. `transport` is null until the coordinator wires a channel (single-tab: stays null,
+	// every broadcast/forward below is a no-op). `unacked` is FOLLOWER-only: the edits this tab has
+	// applied optimistically + forwarded but the leader has not yet confirmed via a state broadcast —
+	// they win the follower's merge (so the optimistic edit is never lost) and are re-sent on takeover.
+	private role: "leader" | "follower" = "leader"
+	private transport: OutboxTransport | null = null
+	private unacked: InflightContent = {}
+
 	public constructor() {
 		this.initPromise = new Promise(resolve => {
 			this.resolveInit = resolve
 		})
+	}
+
+	// The coordinator reads this to route incoming channel messages by CURRENT role (role flips live on
+	// promotion), so a single dispatcher stays correct across a takeover.
+	public get outboxRole(): "leader" | "follower" {
+		return this.role
+	}
+
+	// Wire the multi-tab transport (coordinator only). Idempotent-friendly: a single-tab install never
+	// calls this, leaving every forward/broadcast a guarded no-op.
+	public attachTransport(transport: OutboxTransport): void {
+		this.transport = transport
 	}
 
 	// Adaptation C: replay-on-launch. Mounted once in the authed shell (SyncHost), never per route.
@@ -112,6 +158,10 @@ export class Sync {
 	// memory only). `sessionBaseHash` is the hash of the editor's mount seed for a FRESH session;
 	// omitting it takes the legacy no-conflict-check grace (see buildInflightEntries).
 	public enqueue(note: Note, content: string, sessionBaseHash?: string | null): Promise<boolean> {
+		if (this.role === "follower") {
+			return this.followerEnqueue(note, content, sessionBaseHash ?? null)
+		}
+
 		useNotesInflightStore.getState().setInflightContent(prev => ({
 			...prev,
 			[note.uuid]: buildInflightEntries({
@@ -126,9 +176,143 @@ export class Sync {
 		// Persist FIRST (durability), then arm the debounce.
 		const flushed = this.flushToDisk(useNotesInflightStore.getState().inflightContent)
 
+		// Broadcast to followers only AFTER the persist lands (single-tab: no-op) — a follower must
+		// never treat an edit as confirmed before it is durable on the leader's disk (bounds the loss
+		// window on a leader crash to "forwarded but not yet persisted", which the follower still holds).
+		void flushed.then(() => {
+			this.broadcastState()
+		})
+
 		this.syncDebounced()
 
 		return flushed
+	}
+
+	// FOLLOWER enqueue: apply the edit to THIS tab's store optimistically (UI gating must not wait a
+	// round trip), track it as unacked, and forward the newest entry to the leader. No disk write and no
+	// debounce here — the leader owns both. Returns true: the optimistic apply cannot fail locally, and
+	// durability is the leader's immediate-persist (a lost forward is re-sent on the next takeover).
+	private followerEnqueue(note: Note, content: string, sessionBaseHash: string | null): Promise<boolean> {
+		const entries = buildInflightEntries({
+			previous: useNotesInflightStore.getState().inflightContent[note.uuid],
+			note,
+			content,
+			now: Date.now(),
+			sessionBaseHash
+		})
+
+		useNotesInflightStore.getState().setInflightContent(prev => ({
+			...prev,
+			[note.uuid]: entries
+		}))
+
+		this.unacked = {
+			...this.unacked,
+			[note.uuid]: entries
+		}
+
+		const latest = newestEntry(entries)
+
+		if (latest !== undefined) {
+			this.transport?.sendEnqueue(this.toRemoteEnqueue(latest))
+		}
+
+		return Promise.resolve(true)
+	}
+
+	// exactOptionalPropertyTypes: omit the base-hash key entirely when the entry carries none.
+	private toRemoteEnqueue(entry: InflightEntry): RemoteEnqueue {
+		return entry.baseContentHash !== undefined
+			? { note: entry.note, content: entry.content, timestamp: entry.timestamp, baseContentHash: entry.baseContentHash }
+			: { note: entry.note, content: entry.content, timestamp: entry.timestamp }
+	}
+
+	// LEADER: ingest an edit a follower forwarded. Merge it by its (follower-local) timestamp —
+	// last-enqueue-wins per note, reusing mergeInflight — then persist and arm the debounce exactly like
+	// a local enqueue, and broadcast the new authoritative state once it is durable. Two tabs editing the
+	// same note collapse to the newest timestamp here; content is never merged (out of scope).
+	public ingestRemoteEnqueue(msg: RemoteEnqueue): void {
+		if (this.role !== "leader") {
+			return
+		}
+
+		useNotesInflightStore.getState().setInflightContent(prev => mergeInflight(prev, remoteEnqueueToPatch(msg)))
+
+		void this.flushToDisk(useNotesInflightStore.getState().inflightContent).then(() => {
+			this.broadcastState()
+		})
+
+		this.syncDebounced()
+	}
+
+	// FOLLOWER: reconcile against the leader's authoritative state broadcast. Drops unacked entries the
+	// leader has confirmed, keeps the ones it has not (they win the merge), and replaces the store with
+	// the reconciled view so a leader-side drain (push landed) clears this tab's spinner too.
+	public applyLeaderState(state: InflightContent): void {
+		if (this.role !== "follower") {
+			return
+		}
+
+		const reconciled = reconcileFollower(state, this.unacked)
+
+		this.unacked = reconciled.unacked
+		useNotesInflightStore.getState().setInflightContent(() => reconciled.store)
+	}
+
+	// FOLLOWER: on a new leader announcing itself, re-forward every still-unacked edit so an edit that
+	// was in flight to (or lost by) the dead leader reaches the new one. Idempotent by timestamp.
+	public resendUnacked(): void {
+		if (this.role !== "follower") {
+			return
+		}
+
+		for (const entries of Object.values(this.unacked)) {
+			const latest = newestEntry(entries)
+
+			if (latest !== undefined) {
+				this.transport?.sendEnqueue(this.toRemoteEnqueue(latest))
+			}
+		}
+	}
+
+	// Broadcast the leader's current authoritative outbox to followers (no-op unless leader with a
+	// transport). Called after every durable state change and on a follower's state request.
+	public broadcastState(): void {
+		if (this.role !== "leader") {
+			return
+		}
+
+		this.transport?.broadcastState(useNotesInflightStore.getState().inflightContent)
+	}
+
+	// Follower start: adopt the follower role and ask the leader for its current state so a note another
+	// tab already has pending shows its inflight (content-query gate, spinner) here too. Never touches
+	// disk and never runs the loop — the leader owns both.
+	public startAsFollower(): void {
+		this.role = "follower"
+		this.transport?.requestState()
+	}
+
+	// Promotion (this follower just won the db lock after the leader died). Flip to leader, announce so
+	// any OTHER followers re-send their unacked, then run the EXISTING replay-on-launch machinery: our
+	// optimistic edits already live in the store, and restoreFromDisk merges them with whatever the dead
+	// leader persisted (mergeInflight), reconciles against the cloud, and pushes. restoreFromDisk only
+	// kicks a push when DISK had content, so force one when the store holds carried-over optimistic work.
+	public promoteToLeader(): void {
+		this.role = "leader"
+		// Our optimistic edits are authoritative now (they live in the store); clear the follower ledger.
+		this.unacked = {}
+		this.transport?.broadcastLeaderHello()
+
+		void run(async () => {
+			await this.restoreFromDisk()
+
+			if (Object.keys(useNotesInflightStore.getState().inflightContent).length > 0) {
+				this.executeNow()
+			}
+
+			this.broadcastState()
+		})
 	}
 
 	// Adaptation A: durable outbox via the kv adapter. Reports persistence failure as `false` instead
@@ -253,6 +437,10 @@ export class Sync {
 		}
 
 		this.resolveInit()
+
+		// Publish the restored/reconciled outbox so any follower already present reflects it (no-op
+		// single-tab). A follower that joins later drives its own catch-up via requestState().
+		this.broadcastState()
 
 		// Kick sync() only when disk had content AND the store still holds pending work. sync() itself
 		// gates on isOnline(), so calling it offline is a safe no-op that leaves the queue for reconnect.
@@ -460,6 +648,8 @@ export class Sync {
 			// here would resurrect the previous account's plaintext queue onto disk after the wipe.
 			if (!isAborted(signal)) {
 				await this.flushToDisk(useNotesInflightStore.getState().inflightContent)
+				// Followers learn a note drained (spinner clears) only from this post-push broadcast.
+				this.broadcastState()
 			}
 		})
 
@@ -488,6 +678,13 @@ export class Sync {
 	// restoreFromDisk's boot sync() bailed offline without arming a debounce, so the reconnect trigger
 	// would otherwise have nothing to fire.
 	public executeNow(): void {
+		// Follower: the leader owns the loop — forward the flush request instead of running a pass here.
+		if (this.role === "follower") {
+			this.transport?.sendExecuteNow()
+
+			return
+		}
+
 		if (this.syncTimeout) {
 			this.syncTimeout.execute()
 
