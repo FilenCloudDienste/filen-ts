@@ -1,6 +1,7 @@
 import { type } from "arktype"
 import * as Comlink from "comlink"
-import type { StringifiedClient, File } from "@filen/sdk-rs"
+import { createNotePreviewFromContentText } from "@filen/utils"
+import type { StringifiedClient, File, Note, NoteType } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
 import { kvGetJson, kvHas, kvSetJson } from "@/lib/storage/adapter"
@@ -64,6 +65,20 @@ interface E2eHooks {
 	// net-zero after a UI-driven create smoke test (this shell has no trash/delete UI yet; that lands
 	// in the actions step). No-op when the uuid isn't found.
 	deleteTestNoteByUuid: (uuid: string) => Promise<void>
+	// Creates a note, switches it to `noteType` (a no-op for the SDK's own "text" default), writes
+	// `content` with a matching preview, and renames it to `title` — the worker seam every read-only
+	// reader test drives content through, with no editor UI required yet (this shell has no live
+	// editing until the sync-outbox wave). `title` is a distinctive string a spec can locate in the
+	// sidebar via the search box (rather than depending on the SDK's own default title, which carries
+	// no test-chosen identity). Returns the final Note row for the caller to navigate to and later pass
+	// to deleteTestNoteByUuid for net-zero teardown.
+	createTestNoteWithContent: (noteType: NoteType, content: string, title: string) => Promise<Note>
+	// Defensive sweep, same rationale as e2e/setup/cleanup.setup.ts's drive-side scratch-debris sweep:
+	// the FREE e2e account's note cap is a hard 10 (server-enforced `note_limit_reached`), far tighter
+	// than drive's storage quota, so ANY spec that dies before its own teardown compounds into real,
+	// suite-wide failures far sooner than a stray drive item would. Trashes+deletes every note whose
+	// title starts with `prefix`. Returns the count removed.
+	sweepTestNotesByTitlePrefix: (prefix: string) => Promise<number>
 	// Reads one cached thumbnail's on-disk size + write time, found by file name inside a parent
 	// directory. The only way to prove a repaint after a real page reload came from the existing OPFS
 	// cache entry rather than a fresh generation: a regenerate rewrites the file (a new
@@ -158,6 +173,39 @@ export function installE2eHooks(router: RouterLike): void {
 
 			// deleteNote is permanent; trash first so a note in any lifecycle state is removable.
 			await sdkApi.deleteNote(await sdkApi.trashNote(note))
+		},
+		createTestNoteWithContent: async (noteType, content, title) => {
+			await whenBootReady()
+
+			let note = await sdkApi.createNote()
+
+			// The SDK creates every note as "text" by default — only switch when a different type was
+			// asked for. `knownContent` is omitted: the fresh note has no content yet, so there is
+			// nothing meaningful to pass, and the SDK resolves it itself.
+			if (noteType !== "text") {
+				note = await sdkApi.setNoteType(note, noteType)
+			}
+
+			const previewType = noteType === "rich" || noteType === "checklist" ? noteType : "other"
+
+			note = await sdkApi.setNoteContent(note, content, createNotePreviewFromContentText(previewType, content))
+			note = await sdkApi.setNoteTitle(note, title)
+
+			return note
+		},
+		sweepTestNotesByTitlePrefix: async prefix => {
+			await whenBootReady()
+
+			const matches = (await sdkApi.listNotes()).filter(n => (n.title ?? "").startsWith(prefix))
+
+			for (const note of matches) {
+				// deleteNote is permanent; trash first so a note in any lifecycle state is removable.
+				// Sequential (not Promise.all): a bulk sweep racing many notes through the same worker
+				// gains nothing from parallelism here and is easier to reason about mid-failure.
+				await sdkApi.deleteNote(await sdkApi.trashNote(note))
+			}
+
+			return matches.length
 		},
 		thumbnailFileStat: async (parentUuid, name) => {
 			await whenBootReady()

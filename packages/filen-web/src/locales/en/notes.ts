@@ -65,5 +65,13 @@ export const notes = {
 	/** Editor card — body under notesSelectPrompt */
 	notesSelectPromptDescription: "Choose a note from the list, or create a new one.",
 	/** Editor card — centered muted state while the selected note's content is still loading */
-	notesLoadingNote: "Loading note…"
+	notesLoadingNote: "Loading note…",
+	/** Editor card — title shown when the selected note's content fails to load; the body is the failing query's own errorLabel */
+	notesContentLoadError: "Couldn't load note content",
+
+	// ── Read-only content renderers ─────────────────────────────────────────────
+	/** Checklist reader — centered muted state for a checklist note with no items yet */
+	noteChecklistEmpty: "No checklist items yet",
+	/** Markdown reader — accessible label on the draggable divider between the source and preview panes */
+	noteMdSplitResize: "Resize markdown preview"
 } as const

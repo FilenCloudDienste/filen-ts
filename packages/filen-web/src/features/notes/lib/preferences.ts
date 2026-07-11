@@ -23,3 +23,28 @@ export async function getNotesViewMode(): Promise<NotesViewMode> {
 export async function setNotesViewMode(next: NotesViewMode): Promise<void> {
 	await kvSetJson(NOTES_VIEW_MODE_KV_KEY, next)
 }
+
+// md split-pane preview ratio (01-DECISIONS D1 "md ALSO gets the split live preview... ratio persisted
+// per the preferences convention") — one global value, same kv-backed shape as the view mode above.
+// Clamped well inside [0,1] so a drag never collapses either pane to zero width.
+const MD_SPLIT_RATIO_KV_KEY = "notes.mdSplitRatio.v1"
+
+const mdSplitRatioSchema: Type<number> = type("number")
+
+export const DEFAULT_MD_SPLIT_RATIO = 0.5
+export const MD_SPLIT_RATIO_MIN = 0.2
+export const MD_SPLIT_RATIO_MAX = 0.8
+
+export function clampMdSplitRatio(ratio: number): number {
+	return Math.min(MD_SPLIT_RATIO_MAX, Math.max(MD_SPLIT_RATIO_MIN, ratio))
+}
+
+export async function getMdSplitRatio(): Promise<number> {
+	const stored = await kvGetJson(MD_SPLIT_RATIO_KV_KEY, mdSplitRatioSchema)
+
+	return stored === null ? DEFAULT_MD_SPLIT_RATIO : clampMdSplitRatio(stored)
+}
+
+export async function setMdSplitRatio(ratio: number): Promise<void> {
+	await kvSetJson(MD_SPLIT_RATIO_KV_KEY, clampMdSplitRatio(ratio))
+}

@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next"
 import { StickyNoteIcon } from "lucide-react"
 import { noteIcon } from "@/features/notes/lib/icon.logic"
-import { Spinner } from "@/components/ui/spinner"
+import { NoteReader } from "@/features/notes/components/reader/noteReader"
 import { Separator } from "@/components/ui/separator"
 import type { Note } from "@filen/sdk-rs"
 
@@ -12,9 +12,9 @@ export interface NoteEditorPaneProps {
 	loading?: boolean | undefined
 }
 
-// The main content card for the notes module — deliberately thin this step: a titled header for the
-// selected note plus centered muted states. The read-only renderers and the live editors land in the
-// next steps; here the card only needs to read as present and not ugly.
+// The main content card for the notes module: a titled header for the selected note (icon + title;
+// the `⋮` menu lands with the actions step) plus the per-type read-only body (NoteReader). Live
+// editing arrives with the sync outbox — this step never writes.
 export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 	const { t } = useTranslation("notes")
 
@@ -42,10 +42,12 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 				<h1 className="min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
 			</header>
 			<Separator className="bg-border/50" />
-			<div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground">
-				<Spinner className="size-5" />
-				<p className="text-sm">{t("notesLoadingNote")}</p>
-			</div>
+			{/* Keyed by uuid so switching the selected note remounts the reader fresh — required by the
+			EDITOR INVARIANT the CodeMirror-backed readers rely on (noteReader.tsx). */}
+			<NoteReader
+				key={note.uuid}
+				note={note}
+			/>
 		</div>
 	)
 }
