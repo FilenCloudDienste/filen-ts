@@ -257,6 +257,10 @@ export function Composer({
 			return
 		}
 
+		// Guard the send path too (mobile guards both): a sub-frame double-Enter would otherwise reuse this
+		// render's stale draft closure and enqueue twice with distinct inflightIds → a duplicate send.
+		sendingRef.current = true
+
 		const replyTo = mode.kind === "reply" ? buildReplyPartial(mode.message) : undefined
 
 		// Optimistic clear FIRST (the outbox paints the bubble + persists), then enqueue. reset() bumps the
@@ -264,18 +268,25 @@ export function Composer({
 		reset(chatUuid)
 		saveDraftDebounced(chatUuid, "")
 
-		const flushed = await enqueueChatMessage({
-			chat,
-			content: normalized,
-			...(replyTo !== undefined ? { replyTo } : {}),
-			sender
-		})
-
-		if (!flushed) {
-			toast.error(t("chatMessageNotSaved"))
-		}
-
+		// Stick to the bottom BEFORE the enqueue: enqueueChatMessage paints the optimistic bubble
+		// synchronously (growing the thread's row count) before its own disk await, so the flag must be set
+		// ahead of that paint or the thread's grow-triggered jump-to-bottom effect fires without it.
 		onSent()
+
+		try {
+			const flushed = await enqueueChatMessage({
+				chat,
+				content: normalized,
+				...(replyTo !== undefined ? { replyTo } : {}),
+				sender
+			})
+
+			if (!flushed) {
+				toast.error(t("chatMessageNotSaved"))
+			}
+		} finally {
+			sendingRef.current = false
+		}
 	}
 
 	function cancelMode(): void {

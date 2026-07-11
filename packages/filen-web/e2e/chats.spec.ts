@@ -222,6 +222,12 @@ test.describe("chats", () => {
 		await row.click()
 		await page.waitForURL(new RegExp(`/chats/${uuid}`))
 
+		// Wait for the composer to be interactive before returning: the thread is a lazily-loaded route
+		// chunk, and a caller that drops connectivity (the kill-path) inside that load window would fail the
+		// pending fetch and bounce the page to a browser error screen. A real user likewise has the thread
+		// open — composer visible — before losing connection.
+		await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible({ timeout: 30_000 })
+
 		return uuid
 	}
 
@@ -246,32 +252,37 @@ test.describe("chats", () => {
 			const uuid = await openSelfChatThread(page)
 			const text = `ui-send-${String(Date.now())}`
 
+			// Scope every message-body locator to the thread pane: once the outbox commits, the ChatsSidebar
+			// row's last-message preview (in the complementary landmark) renders the SAME text, so an unscoped
+			// getByText would resolve to two nodes and trip Playwright's strict mode.
+			const thread = page.getByRole("main")
+
 			await sendViaComposer(page, text)
 
 			// Optimistic bubble is painted immediately...
-			await expect(page.getByText(text, { exact: true })).toBeVisible()
+			await expect(thread.getByText(text, { exact: true })).toBeVisible()
 			// ...and the outbox commits it (fresh server read) — the "Sending…" marker clears on commit.
 			await expect
 				.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
 				.toContain(text)
-			await expect(page.getByText("Sending…", { exact: true })).toHaveCount(0)
+			await expect(thread.getByText("Sending…", { exact: true })).toHaveCount(0)
 
 			// Reply via the message context menu → the reply chip → a reply that renders its reply-to line.
-			await page.getByText(text, { exact: true }).click({ button: "right" })
+			await thread.getByText(text, { exact: true }).click({ button: "right" })
 			await page.getByRole("menuitem", { name: "Reply", exact: true }).click()
 
 			const replyText = `ui-reply-${String(Date.now())}`
 			await sendViaComposer(page, replyText)
 
-			await expect(page.getByText(replyText, { exact: true })).toBeVisible()
-			await expect(page.getByText(/Replying to/).first()).toBeVisible()
+			await expect(thread.getByText(replyText, { exact: true })).toBeVisible()
+			await expect(thread.getByText(/Replying to/).first()).toBeVisible()
 			await expect
 				.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
 				.toContain(replyText)
 
 			// Edit that reply via the menu → the edited body + the (edited) marker.
-			await expect(page.getByText("Sending…", { exact: true })).toHaveCount(0)
-			await page.getByText(replyText, { exact: true }).click({ button: "right" })
+			await expect(thread.getByText("Sending…", { exact: true })).toHaveCount(0)
+			await thread.getByText(replyText, { exact: true }).click({ button: "right" })
 			await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
 
 			const editedText = `ui-edited-${String(Date.now())}`
@@ -279,8 +290,8 @@ test.describe("chats", () => {
 			await input.fill(editedText)
 			await input.press("Enter")
 
-			await expect(page.getByText(editedText, { exact: true })).toBeVisible({ timeout: 30_000 })
-			await expect(page.getByText("(edited)", { exact: true }).first()).toBeVisible()
+			await expect(thread.getByText(editedText, { exact: true })).toBeVisible({ timeout: 30_000 })
+			await expect(thread.getByText("(edited)", { exact: true }).first()).toBeVisible()
 
 			await page.evaluate(u => window.__filenE2E.deleteTestChatByUuid(u), uuid)
 		})
