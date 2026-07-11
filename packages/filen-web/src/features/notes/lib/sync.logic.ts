@@ -113,7 +113,7 @@ export function mergeInflight(current: InflightContent, fromDisk: InflightConten
 	return merged
 }
 
-// Adaptation A: arktype schema for the DURABLE outbox's read path (invalid → dropped, the kv
+// arktype schema for the DURABLE outbox's read path (invalid → dropped, the kv
 // adapter's convention). Validates the record-of-arrays envelope and each entry's own scalar fields;
 // `note` is validated only as a non-null object, not field-by-field — over-constraining the wasm
 // Note snapshot would drop otherwise-valid entries the moment the SDK adds a field, and the push

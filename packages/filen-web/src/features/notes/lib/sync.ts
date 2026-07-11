@@ -108,7 +108,7 @@ export class Sync {
 		this.transport = transport
 	}
 
-	// Adaptation C: replay-on-launch. Mounted once in the authed shell (SyncHost), never per route.
+	// Replay-on-launch. Mounted once in the authed shell (SyncHost), never per route.
 	public start(): void {
 		void this.restoreFromDisk()
 	}
@@ -317,7 +317,7 @@ export class Sync {
 		})
 	}
 
-	// Adaptation A: durable outbox via the kv adapter. Reports persistence failure as `false` instead
+	// Durable outbox via the kv adapter. Reports persistence failure as `false` instead
 	// of throwing (it never throws). Sync-internal callers ignore the return (the next pass
 	// re-flushes); the enqueue call site surfaces a `false`.
 	public async flushToDisk(inflightContent: InflightContent): Promise<boolean> {
@@ -340,7 +340,7 @@ export class Sync {
 		return result.success
 	}
 
-	// Adaptation C: the ONLY disk→store bridge, so it MUST hydrate the store even with no network.
+	// The ONLY disk→store bridge, so it MUST hydrate the store even with no network.
 	// (1) hydrate UNCONDITIONALLY via a functional merge before any network call — an offline boot
 	// must not strand persisted edits. (2) reconcile against the cloud best-effort only when online;
 	// a failure there must NOT undo the hydration. Then kick sync() if the STORE still holds pending

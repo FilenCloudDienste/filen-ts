@@ -142,7 +142,7 @@ export function composeMessageList({
 	return [...byUuid.values()].sort((a, b) => (a.sentTimestamp === b.sentTimestamp ? 0 : a.sentTimestamp < b.sentTimestamp ? -1 : 1))
 }
 
-// Adaptation A: arktype schema for the DURABLE outbox's read path (invalid/corrupt → dropped, the kv
+// arktype schema for the DURABLE outbox's read path (invalid/corrupt → dropped, the kv
 // adapter's convention). Validates only the load-bearing scalars per entry — arktype objects allow
 // undeclared keys, so the rest of the ChatMessage snapshot (and the Chat snapshot) round-trips through
 // the $bigint envelope untouched; over-constraining it would drop otherwise-valid entries the moment
