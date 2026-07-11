@@ -4,6 +4,7 @@ import { DriveSidebar } from "@/features/shell/components/driveSidebar"
 import { NotesSidebar } from "@/features/notes/components/notesSidebar"
 import { SystemStrip } from "@/features/shell/components/systemStrip"
 import { AccountReminders } from "@/features/shell/components/accountReminders"
+import { SyncHost } from "@/features/notes/components/syncHost"
 
 // Padded canvas holding the three shell zones: a bare icon rail sitting directly on the canvas, then
 // two floating rounded panels — the contextual module sidebar and the content card. Nothing touches a
@@ -23,6 +24,9 @@ export function AppShell() {
 	return (
 		<div className="flex h-svh w-full flex-col overflow-hidden bg-canvas text-foreground">
 			<AccountReminders />
+			{/* Notes sync outbox driver — mounted once in the authed shell so a pending edit flushes even
+			    while the user is on drive, not scoped to the notes route. Renders nothing. */}
+			<SyncHost />
 			<SystemStrip />
 			<div className="flex min-h-0 flex-1 gap-2 overflow-hidden p-2">
 				<IconRail />

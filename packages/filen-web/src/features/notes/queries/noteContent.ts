@@ -1,5 +1,6 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
+import { useNoteInflight } from "@/features/notes/store/useNotesInflight"
 import type { Note } from "@filen/sdk-rs"
 
 // Per-note content, keyed on uuid so switching between two notes' editors never shows a stale read
@@ -27,6 +28,12 @@ export async function fetchNoteContent(note: Note): Promise<string | undefined> 
 // outbox entry, `dataUpdatedAt` cannot advance mid-edit, so a component keyed on it never remounts
 // (and blows away in-progress keystrokes) while a local edit is still pending.
 export function useNoteContentQuery(note: Note | undefined, options?: { enabled?: boolean }): UseQueryResult<string | undefined> {
+	// UI gating seam (synthesis §3.3): disable the read while the note has a pending sync-outbox entry.
+	// `dataUpdatedAt` (the editor's remount key) therefore cannot advance mid-edit, so the editor never
+	// remounts and blows away in-progress keystrokes while a local edit is still queued. Re-enables the
+	// instant the outbox drains this note. Reactive — subscribes to the store's has/has-not edge.
+	const inflight = useNoteInflight(note?.uuid ?? "")
+
 	return useQuery({
 		queryKey: noteContentQueryKey(note?.uuid ?? ""),
 		// `enabled` below guarantees `note` is defined whenever this actually runs — guard-and-throw
@@ -38,7 +45,7 @@ export function useNoteContentQuery(note: Note | undefined, options?: { enabled?
 
 			return fetchNoteContent(note)
 		},
-		enabled: (options?.enabled ?? true) && note !== undefined,
+		enabled: (options?.enabled ?? true) && note !== undefined && !inflight,
 		staleTime: Infinity
 	})
 }

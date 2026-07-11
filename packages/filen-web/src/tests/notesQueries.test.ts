@@ -31,6 +31,13 @@ vi.mock("@tanstack/react-query", async importOriginal => {
 	return { ...actual, useQuery }
 })
 
+// useNoteContentQuery now consults the sync-outbox store (the disabled-while-inflight gate). Mock the
+// reactive selector to a controllable flag so these node-env tests exercise the `enabled` wiring
+// without a React render — the store's own has/has-not logic is covered by notesSync.test.ts.
+const { useNoteInflight } = vi.hoisted(() => ({ useNoteInflight: vi.fn(() => false) }))
+
+vi.mock("@/features/notes/store/useNotesInflight", () => ({ useNoteInflight }))
+
 // A bare, unconfigured QueryClient stands in for the real singleton — the patchers only need
 // genuine setQueryData/getQueryData/cancelQueries cache mechanics, never the production client's
 // OPFS-backed persistence pipeline.
@@ -238,6 +245,15 @@ describe("useNoteContentQuery", () => {
 		useQuery.mockReturnValue({ status: "pending" })
 
 		useNoteContentQuery(mockNote(), { enabled: false })
+
+		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ enabled: false }))
+	})
+
+	it("disables the query while the note has a pending sync-outbox entry (remount-key freeze gate)", () => {
+		useQuery.mockReturnValue({ status: "pending" })
+		useNoteInflight.mockReturnValueOnce(true)
+
+		useNoteContentQuery(mockNote())
 
 		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ enabled: false }))
 	})

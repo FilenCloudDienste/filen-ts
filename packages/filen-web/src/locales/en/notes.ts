@@ -142,6 +142,9 @@ export const notes = {
 	noteOwnerOnlyError: "Only the note owner can do this.",
 	/** leaveNote — no resolved current-user id (account query cold); should not be reachable from the UI */
 	noteNotSignedInError: "You're not signed in.",
+	/** Sync outbox — one toast per note per pass when a local edit overwrote newer remote changes (kept in history) */
+	noteOverwroteNewerRemoteChanges:
+		'"{{name}}" had newer changes on another device. Your version was saved; the previous one is in the note history.',
 
 	// ── Action dialogs ───────────────────────────────────────────────────────────
 	/** Rename dialog — title */
