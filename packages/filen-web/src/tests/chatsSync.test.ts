@@ -5,14 +5,19 @@ import type { Chat } from "@filen/sdk-rs"
 // Worker-free seams (self-contained per the project's test convention). This file exercises the PUSH
 // loop: sequential per-chat order, dequeue-on-commit + cache patch, the commit-boundary never-rethrow
 // tail, the 3-strike failed transition + retry/remove, and the logout-abort flush suppression.
-const { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats } = vi.hoisted(() => ({
+const { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } = vi.hoisted(() => ({
 	sendChatMessage: vi.fn(),
 	markChatRead: vi.fn(() => Promise.resolve()),
 	updateLastChatFocusTimesNow: vi.fn((chats: Chat[]) => Promise.resolve(chats)),
-	listChats: vi.fn(() => Promise.resolve([] as Chat[]))
+	listChats: vi.fn(() => Promise.resolve([] as Chat[])),
+	// The push loop resolves a LIVE chat per uuid (never the disk-restored snapshot). With an empty list
+	// cache the loop falls back to getChat; the default returns a valid live chat so every send resolves.
+	getChat: vi.fn((uuid: string) =>
+		Promise.resolve({ uuid, ownerId: 7n, participants: [], muted: false, created: 0n, lastFocus: 0n } as Chat)
+	)
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } }))
 
 const { kvStore, kvGetJson, kvSetJson, kvDelete } = vi.hoisted(() => {
 	const store = new Map<string, unknown>()
@@ -41,6 +46,7 @@ import { sync, enqueueChatMessage } from "@/features/chats/lib/sync"
 import { retryInflightMessage, removeInflightMessage } from "@/features/chats/lib/inflight"
 import { buildOptimisticMessage, type OptimisticSender } from "@/features/chats/lib/sync.logic"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
+import { chatsQueryUpsert } from "@/features/chats/queries/chats"
 import useChatsInflightStore, { type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 
 const SENDER: OptimisticSender = { id: 7n, email: "me@filen.io", avatarUrl: undefined, nickName: "Me" }
@@ -137,6 +143,50 @@ describe("push loop — sequential per-chat send in queue order (oldest-first)",
 
 		expect(sentContents).toEqual(["m1", "m2", "m3"])
 		expect(queue()["chat-a-a-a"]).toBeUndefined()
+	})
+})
+
+describe("replay-on-launch — the send resolves a LIVE chat, never the disk-restored snapshot", () => {
+	it("sends the cache-resolved chat, not the stale stored (disk-revived) chat object", async () => {
+		let sentChat: Chat | undefined
+		sendChatMessage.mockImplementation((chat: Chat) => {
+			sentChat = chat
+
+			return Promise.resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid, "srv-1-1-1") })
+		})
+
+		// Simulate a disk-restored queue: the stored `chat` is a stale snapshot the wasm send must NOT use
+		// (on the real surface it wedges the loop). It carries a sentinel name so the assertion can prove
+		// the send did not touch it.
+		const stale: Chat = { ...makeChat("chat-a-a-a"), name: "STALE_DISK_SNAPSHOT" }
+
+		useChatsInflightStore.setState({
+			inflightMessages: { "chat-a-a-a": { chat: stale, messages: [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")] } },
+			inflightErrors: {}
+		})
+
+		// A LIVE chat is warm in the list cache (restore's cache-warm / the sidebar).
+		chatsQueryUpsert({ ...makeChat("chat-a-a-a"), name: "LIVE" })
+
+		sync.syncNow()
+		await tick()
+		await tick()
+
+		expect(sentChat?.name).toBe("LIVE")
+		expect(getChat).not.toHaveBeenCalled()
+		expect(queue()["chat-a-a-a"]).toBeUndefined()
+	})
+
+	it("falls back to getChat when the list cache misses (a fresh-boot /drive shell, list not mounted)", async () => {
+		seed("chat-c-c-c", [opt("chat-c-c-c", "inf-1-1-1", 1n, "hi")])
+
+		sync.syncNow()
+		await tick()
+		await tick()
+
+		expect(getChat).toHaveBeenCalledWith("chat-c-c-c")
+		expect(sendChatMessage).toHaveBeenCalledTimes(1)
+		expect(queue()["chat-c-c-c"]).toBeUndefined()
 	})
 })
 

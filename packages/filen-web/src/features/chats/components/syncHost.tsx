@@ -15,10 +15,13 @@ export function ChatsSyncHost(): null {
 	useEffect(() => {
 		sync.start()
 
+		// Mobile fires the outbox on BOTH app-state transitions (background AND active). Web parity: flush
+		// on every visibility change — hiding (about-to-background durability) AND re-showing, the
+		// foreground recovery trigger for an already-online boot whose single restore-time pass hit a
+		// transient failure (there is no reconnect/hidden event on such a boot). sync() self-gates on
+		// isOnline() and no-ops an empty queue, so an extra visible-side fire is free.
 		const onVisibilityChange = (): void => {
-			if (document.hidden) {
-				sync.executeNow()
-			}
+			sync.executeNow()
 		}
 
 		document.addEventListener("visibilitychange", onVisibilityChange)

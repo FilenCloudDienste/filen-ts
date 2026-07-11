@@ -5,7 +5,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
-import { chatsQueryUpsert, fetchChats } from "@/features/chats/queries/chats"
+import { chatsQueryUpsert, chatsQueryGet, chatsQueryReplaceAll, fetchChats } from "@/features/chats/queries/chats"
 import { chatMessagesQueryUpdate } from "@/features/chats/queries/chatMessages"
 import useChatsInflightStore, { type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 import {
@@ -131,6 +131,10 @@ export class Sync {
 				const chatsList = await fetchChats()
 				const existingChatUuids = new Set<string>(chatsList.map(chat => chat.uuid))
 
+				// Warm the list cache with LIVE chats so the push loop resolves a sendable chat WITHOUT a
+				// per-pass network read — the send never uses the disk-restored snapshot (resolveSendableChat).
+				chatsQueryReplaceAll(chatsList)
+
 				useChatsInflightStore.getState().setInflightMessages(prev => {
 					const updated: InflightChatMessages = {
 						...prev
@@ -168,6 +172,23 @@ export class Sync {
 		if (result.data && Object.keys(useChatsInflightStore.getState().inflightMessages).length > 0) {
 			void this.sync()
 		}
+	}
+
+	// Resolve a LIVE, sendable Chat by uuid for the push loop. The durable queue's persisted `chat` is a
+	// DISK-REVIVED plain object, NOT a live wasm-backed Chat handle: the web SDK surface (opaque wasm
+	// handles) diverges from mobile's plain uniffi records, so feeding that revived object to the wasm
+	// sendChatMessage never resolves — it wedges the loop after a replay-on-launch (mobile can send its
+	// snapshot; web must not). So the send ALWAYS resolves a fresh chat here: the warm list cache first
+	// (restore + the sidebar both seed it), a targeted getChat on a cache miss. The stored `chat` snapshot
+	// survives in the queue only for the conversation-row preview, never to send.
+	private async resolveSendableChat(chatUuid: string): Promise<Chat | undefined> {
+		const cached = chatsQueryGet()?.find(chat => chat.uuid === chatUuid)
+
+		if (cached) {
+			return cached
+		}
+
+		return sdkApi.getChat(chatUuid)
 	}
 
 	// The single commit boundary. sendChatMessage's resolution IS the point after which the message is
@@ -225,8 +246,21 @@ export class Sync {
 			}
 
 			const results = await Promise.allSettled(
-				Object.entries(inflightMessages).map(async ([chatUuid, { chat, messages }]) => {
+				Object.entries(inflightMessages).map(async ([chatUuid, { messages }]) => {
 					if (messages.length === 0) {
+						return
+					}
+
+					// Resolve a LIVE chat for the send — NEVER the disk-restored snapshot (resolveSendableChat).
+					const chat = await this.resolveSendableChat(chatUuid)
+
+					if (isAborted(signal)) {
+						return
+					}
+
+					if (!chat) {
+						// Unresolvable right now (list not yet fetched / transient miss). Keep the queue for a
+						// later trigger; a genuinely deleted chat is pruned at restore, never dropped here.
 						return
 					}
 

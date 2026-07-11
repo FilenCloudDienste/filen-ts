@@ -7,14 +7,18 @@ import type { Chat } from "@filen/sdk-rs"
 // outbox runs under node vitest. This file exercises DURABILITY: persist-before-send, replay-on-launch
 // merge/prune, offline-keep, and the durable-schema drop. self-contained vi.mock per the project's
 // test convention.
-const { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats } = vi.hoisted(() => ({
+const { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } = vi.hoisted(() => ({
 	sendChatMessage: vi.fn(),
 	markChatRead: vi.fn(() => Promise.resolve()),
 	updateLastChatFocusTimesNow: vi.fn((chats: Chat[]) => Promise.resolve(chats)),
-	listChats: vi.fn(() => Promise.resolve([] as Chat[]))
+	listChats: vi.fn(() => Promise.resolve([] as Chat[])),
+	// The push loop resolves a LIVE chat per uuid; on a list-cache miss it falls back to getChat.
+	getChat: vi.fn((uuid: string) =>
+		Promise.resolve({ uuid, ownerId: 7n, participants: [], muted: false, created: 0n, lastFocus: 0n } as Chat)
+	)
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { sendChatMessage, markChatRead, updateLastChatFocusTimesNow, listChats, getChat } }))
 
 const { kvStore, kvGetJson, kvSetJson, kvDelete } = vi.hoisted(() => {
 	const store = new Map<string, unknown>()
