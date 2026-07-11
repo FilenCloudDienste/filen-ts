@@ -36,10 +36,9 @@ test.describe("boot", () => {
 		expect(await page.evaluate(() => window.desktop)).toBeUndefined()
 		await expect(page.getByRole("button", { name: "Close window" })).toHaveCount(0)
 
-		// A rail tooltip renders on hover — Chats is the remaining disabled "coming soon" module (Notes
-		// was promoted to a real, enabled rail Link when the notes module landed).
-		await page.getByRole("button", { name: "Chats" }).hover()
-		await expect(page.getByText("Coming soon")).toBeVisible()
+		// Chats and Notes are both real, enabled rail Links now — the chats module promoted the last
+		// remaining "coming soon" module out of the inert loop (same precedent as the notes promotion).
+		await expect(page.getByRole("link", { name: "Chats", exact: true })).toBeVisible()
 		await expect(page.getByRole("link", { name: "Notes", exact: true })).toBeVisible()
 
 		// A real authenticated read against the API settles true — proves the injected session

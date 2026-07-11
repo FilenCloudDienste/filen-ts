@@ -1,4 +1,4 @@
-import { useState, type ComponentType } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import {
@@ -14,10 +14,10 @@ import {
 	UserIcon,
 	CircleHelpIcon
 } from "lucide-react"
-import type { CommonKey } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { runLogout } from "@/lib/logout"
 import { sync as notesSync } from "@/features/notes/lib/sync"
+import { useChatsUnread } from "@/features/chats/queries/chatsUnread"
 import { socketBridge } from "@/lib/sdk/socket"
 import { sdkApi } from "@/lib/sdk/client"
 import { clearSession, broadcastAuth } from "@/lib/sdk/session"
@@ -69,16 +69,6 @@ registerAction({
 	scope: "global",
 	descriptionKey: "moduleTransfers"
 })
-
-type IconType = ComponentType<{ className?: string }>
-
-// The remaining module surfaces land later — rendered as inert, muted rail entries so the
-// information architecture reads intact without pretending the destinations exist yet (Contacts,
-// Transfers and Notes have since landed as real entries: Contacts/Notes as Links mirroring Drive
-// above, Transfers the TransfersEntry popover below). Native `disabled` is deliberately avoided (it
-// suppresses pointer events, which would kill the tooltip); `aria-disabled` + muted styling conveys the
-// same state while keeping hover/focus explainers.
-const MODULES: { key: CommonKey; icon: IconType }[] = [{ key: "moduleChats", icon: MessagesSquareIcon }]
 
 // Rail section slot: the active section rides a white chip (soft shadow); inactive glyphs are plain
 // muted marks on the canvas that tint on hover. No borders — the chip and hover fills carry the
@@ -316,6 +306,14 @@ export function IconRail() {
 	// Notes is a two-route module (/notes selection index + /notes/$uuid) — like Drive's splat, its
 	// active state must cover the nested selection path too, not just the bare root.
 	const notesActive = pathname === "/notes" || pathname.startsWith("/notes/")
+	// Chats mirrors Notes: a two-route module (/chats index + /chats/$uuid selection), so its active state
+	// covers the nested thread path too.
+	const chatsActive = pathname === "/chats" || pathname.startsWith("/chats/")
+	// In-app unread signal (D4): a subtle rail dot driven by the global unread count. Always mounted with
+	// the authed shell, so the badge reflects unread regardless of which module is open. A background
+	// pending state simply shows no dot.
+	const chatsUnreadQuery = useChatsUnread()
+	const hasUnreadChats = (chatsUnreadQuery.data ?? 0n) > 0n
 
 	// Registered above at module scope (default unassigned) — this only wires the LIVE combo, which
 	// starts as "" (react-hotkeys-hook's parser treats it as "never matches") and works the instant a
@@ -418,26 +416,29 @@ export function IconRail() {
 
 			<TransfersEntry />
 
-			{MODULES.map(({ key, icon: Icon }) => (
-				<Tooltip key={key}>
-					<TooltipTrigger
-						render={
-							<button
-								type="button"
-								aria-disabled="true"
-								aria-label={t(key)}
-								className="flex size-9 items-center justify-center rounded-lg text-muted-foreground/50 app-region-no-drag [&_svg]:size-[22px] [&_svg]:shrink-0"
-							>
-								<Icon />
-							</button>
-						}
-					/>
-					<TooltipContent side="right">
-						{t(key)}
-						<span className="text-background/60">· {t("comingSoon")}</span>
-					</TooltipContent>
-				</Tooltip>
-			))}
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<Link
+							to="/chats"
+							aria-current={chatsActive ? "page" : undefined}
+							aria-label={t("moduleChats")}
+							className={cn(railItemClass(chatsActive), "relative")}
+						>
+							<MessagesSquareIcon />
+							{hasUnreadChats ? (
+								// aria-hidden: the rail entry's own aria-label already names the module; the dot is a
+								// decorative unread cue, not a second announcement (mirrors TransfersEntry's badge).
+								<span
+									aria-hidden="true"
+									className="absolute top-1 right-1 size-2 rounded-full bg-primary ring-2 ring-canvas"
+								/>
+							) : null}
+						</Link>
+					}
+				/>
+				<TooltipContent side="right">{t("moduleChats")}</TooltipContent>
+			</Tooltip>
 
 			{/* Pinned footer — the rail's extensible utility slot list; future entries stack above the
 			    account menu. */}

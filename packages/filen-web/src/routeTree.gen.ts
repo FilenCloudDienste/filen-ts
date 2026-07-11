@@ -23,12 +23,15 @@ import { Route as AppNotesRouteImport } from './routes/_app/notes'
 import { Route as AppLinksRouteImport } from './routes/_app/links'
 import { Route as AppFavoritesRouteImport } from './routes/_app/favorites'
 import { Route as AppContactsRouteImport } from './routes/_app/contacts'
+import { Route as AppChatsRouteImport } from './routes/_app/chats'
 import { Route as AppNotesIndexRouteImport } from './routes/_app/notes.index'
+import { Route as AppChatsIndexRouteImport } from './routes/_app/chats.index'
 import { Route as AppSharedOutSplatRouteImport } from './routes/_app/shared-out.$'
 import { Route as AppSharedInSplatRouteImport } from './routes/_app/shared-in.$'
 import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/security'
 import { Route as AppNotesUuidRouteImport } from './routes/_app/notes.$uuid'
 import { Route as AppDriveSplatRouteImport } from './routes/_app/drive.$'
+import { Route as AppChatsUuidRouteImport } from './routes/_app/chats.$uuid'
 
 const RegisterRoute = RegisterRouteImport.update({
   id: '/register',
@@ -99,10 +102,20 @@ const AppContactsRoute = AppContactsRouteImport.update({
   path: '/contacts',
   getParentRoute: () => AppRouteRoute,
 } as any)
+const AppChatsRoute = AppChatsRouteImport.update({
+  id: '/chats',
+  path: '/chats',
+  getParentRoute: () => AppRouteRoute,
+} as any)
 const AppNotesIndexRoute = AppNotesIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppNotesRoute,
+} as any)
+const AppChatsIndexRoute = AppChatsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppChatsRoute,
 } as any)
 const AppSharedOutSplatRoute = AppSharedOutSplatRouteImport.update({
   id: '/shared-out/$',
@@ -129,6 +142,11 @@ const AppDriveSplatRoute = AppDriveSplatRouteImport.update({
   path: '/drive/$',
   getParentRoute: () => AppRouteRoute,
 } as any)
+const AppChatsUuidRoute = AppChatsUuidRouteImport.update({
+  id: '/$uuid',
+  path: '/$uuid',
+  getParentRoute: () => AppChatsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -136,6 +154,7 @@ export interface FileRoutesByFullPath {
   '/no-coi': typeof NoCoiRoute
   '/no-opfs': typeof NoOpfsRoute
   '/register': typeof RegisterRoute
+  '/chats': typeof AppChatsRouteWithChildren
   '/contacts': typeof AppContactsRoute
   '/favorites': typeof AppFavoritesRoute
   '/links': typeof AppLinksRoute
@@ -144,11 +163,13 @@ export interface FileRoutesByFullPath {
   '/transfers': typeof AppTransfersRoute
   '/trash': typeof AppTrashRoute
   '/reset/$token': typeof ResetTokenRoute
+  '/chats/$uuid': typeof AppChatsUuidRoute
   '/drive/$': typeof AppDriveSplatRoute
   '/notes/$uuid': typeof AppNotesUuidRoute
   '/settings/security': typeof AppSettingsSecurityRoute
   '/shared-in/$': typeof AppSharedInSplatRoute
   '/shared-out/$': typeof AppSharedOutSplatRoute
+  '/chats/': typeof AppChatsIndexRoute
   '/notes/': typeof AppNotesIndexRoute
 }
 export interface FileRoutesByTo {
@@ -164,11 +185,13 @@ export interface FileRoutesByTo {
   '/transfers': typeof AppTransfersRoute
   '/trash': typeof AppTrashRoute
   '/reset/$token': typeof ResetTokenRoute
+  '/chats/$uuid': typeof AppChatsUuidRoute
   '/drive/$': typeof AppDriveSplatRoute
   '/notes/$uuid': typeof AppNotesUuidRoute
   '/settings/security': typeof AppSettingsSecurityRoute
   '/shared-in/$': typeof AppSharedInSplatRoute
   '/shared-out/$': typeof AppSharedOutSplatRoute
+  '/chats': typeof AppChatsIndexRoute
   '/notes': typeof AppNotesIndexRoute
 }
 export interface FileRoutesById {
@@ -179,6 +202,7 @@ export interface FileRoutesById {
   '/no-coi': typeof NoCoiRoute
   '/no-opfs': typeof NoOpfsRoute
   '/register': typeof RegisterRoute
+  '/_app/chats': typeof AppChatsRouteWithChildren
   '/_app/contacts': typeof AppContactsRoute
   '/_app/favorites': typeof AppFavoritesRoute
   '/_app/links': typeof AppLinksRoute
@@ -187,11 +211,13 @@ export interface FileRoutesById {
   '/_app/transfers': typeof AppTransfersRoute
   '/_app/trash': typeof AppTrashRoute
   '/reset/$token': typeof ResetTokenRoute
+  '/_app/chats/$uuid': typeof AppChatsUuidRoute
   '/_app/drive/$': typeof AppDriveSplatRoute
   '/_app/notes/$uuid': typeof AppNotesUuidRoute
   '/_app/settings/security': typeof AppSettingsSecurityRoute
   '/_app/shared-in/$': typeof AppSharedInSplatRoute
   '/_app/shared-out/$': typeof AppSharedOutSplatRoute
+  '/_app/chats/': typeof AppChatsIndexRoute
   '/_app/notes/': typeof AppNotesIndexRoute
 }
 export interface FileRouteTypes {
@@ -202,6 +228,7 @@ export interface FileRouteTypes {
     | '/no-coi'
     | '/no-opfs'
     | '/register'
+    | '/chats'
     | '/contacts'
     | '/favorites'
     | '/links'
@@ -210,11 +237,13 @@ export interface FileRouteTypes {
     | '/transfers'
     | '/trash'
     | '/reset/$token'
+    | '/chats/$uuid'
     | '/drive/$'
     | '/notes/$uuid'
     | '/settings/security'
     | '/shared-in/$'
     | '/shared-out/$'
+    | '/chats/'
     | '/notes/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -230,11 +259,13 @@ export interface FileRouteTypes {
     | '/transfers'
     | '/trash'
     | '/reset/$token'
+    | '/chats/$uuid'
     | '/drive/$'
     | '/notes/$uuid'
     | '/settings/security'
     | '/shared-in/$'
     | '/shared-out/$'
+    | '/chats'
     | '/notes'
   id:
     | '__root__'
@@ -244,6 +275,7 @@ export interface FileRouteTypes {
     | '/no-coi'
     | '/no-opfs'
     | '/register'
+    | '/_app/chats'
     | '/_app/contacts'
     | '/_app/favorites'
     | '/_app/links'
@@ -252,11 +284,13 @@ export interface FileRouteTypes {
     | '/_app/transfers'
     | '/_app/trash'
     | '/reset/$token'
+    | '/_app/chats/$uuid'
     | '/_app/drive/$'
     | '/_app/notes/$uuid'
     | '/_app/settings/security'
     | '/_app/shared-in/$'
     | '/_app/shared-out/$'
+    | '/_app/chats/'
     | '/_app/notes/'
   fileRoutesById: FileRoutesById
 }
@@ -370,12 +404,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppContactsRouteImport
       parentRoute: typeof AppRouteRoute
     }
+    '/_app/chats': {
+      id: '/_app/chats'
+      path: '/chats'
+      fullPath: '/chats'
+      preLoaderRoute: typeof AppChatsRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
     '/_app/notes/': {
       id: '/_app/notes/'
       path: '/'
       fullPath: '/notes/'
       preLoaderRoute: typeof AppNotesIndexRouteImport
       parentRoute: typeof AppNotesRoute
+    }
+    '/_app/chats/': {
+      id: '/_app/chats/'
+      path: '/'
+      fullPath: '/chats/'
+      preLoaderRoute: typeof AppChatsIndexRouteImport
+      parentRoute: typeof AppChatsRoute
     }
     '/_app/shared-out/$': {
       id: '/_app/shared-out/$'
@@ -412,8 +460,29 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDriveSplatRouteImport
       parentRoute: typeof AppRouteRoute
     }
+    '/_app/chats/$uuid': {
+      id: '/_app/chats/$uuid'
+      path: '/$uuid'
+      fullPath: '/chats/$uuid'
+      preLoaderRoute: typeof AppChatsUuidRouteImport
+      parentRoute: typeof AppChatsRoute
+    }
   }
 }
+
+interface AppChatsRouteChildren {
+  AppChatsUuidRoute: typeof AppChatsUuidRoute
+  AppChatsIndexRoute: typeof AppChatsIndexRoute
+}
+
+const AppChatsRouteChildren: AppChatsRouteChildren = {
+  AppChatsUuidRoute: AppChatsUuidRoute,
+  AppChatsIndexRoute: AppChatsIndexRoute,
+}
+
+const AppChatsRouteWithChildren = AppChatsRoute._addFileChildren(
+  AppChatsRouteChildren,
+)
 
 interface AppNotesRouteChildren {
   AppNotesUuidRoute: typeof AppNotesUuidRoute
@@ -430,6 +499,7 @@ const AppNotesRouteWithChildren = AppNotesRoute._addFileChildren(
 )
 
 interface AppRouteRouteChildren {
+  AppChatsRoute: typeof AppChatsRouteWithChildren
   AppContactsRoute: typeof AppContactsRoute
   AppFavoritesRoute: typeof AppFavoritesRoute
   AppLinksRoute: typeof AppLinksRoute
@@ -444,6 +514,7 @@ interface AppRouteRouteChildren {
 }
 
 const AppRouteRouteChildren: AppRouteRouteChildren = {
+  AppChatsRoute: AppChatsRouteWithChildren,
   AppContactsRoute: AppContactsRoute,
   AppFavoritesRoute: AppFavoritesRoute,
   AppLinksRoute: AppLinksRoute,

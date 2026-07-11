@@ -2,6 +2,7 @@ import { Outlet, useRouterState } from "@tanstack/react-router"
 import { IconRail } from "@/features/shell/components/iconRail"
 import { DriveSidebar } from "@/features/shell/components/driveSidebar"
 import { NotesSidebar } from "@/features/notes/components/notesSidebar"
+import { ChatsSidebar } from "@/features/chats/components/chatsSidebar"
 import { SystemStrip } from "@/features/shell/components/systemStrip"
 import { AccountReminders } from "@/features/shell/components/accountReminders"
 import { SyncHost } from "@/features/notes/components/syncHost"
@@ -17,10 +18,12 @@ import { SocketHost } from "@/features/shell/components/socketHost"
 // page padding — the row gets `min-h-0 flex-1` so it never has to know the strip exists.
 export function AppShell() {
 	// The sidebar panel is contextual (fulfilling this shell's own "becomes contextual as other modules
-	// land" note): /notes* gets the NotesSidebar, everything else the DriveSidebar. Both share the same
-	// panel geometry (w-52, rounded-xl, borderless), so the switch is invisible to the surrounding layout.
+	// land" note): /chats* gets the ChatsSidebar, /notes* the NotesSidebar, everything else the
+	// DriveSidebar. All three share the same panel geometry (w-52, rounded-xl, borderless), so the switch is
+	// invisible to the surrounding layout.
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const onNotes = pathname === "/notes" || pathname.startsWith("/notes/")
+	const onChats = pathname === "/chats" || pathname.startsWith("/chats/")
 
 	return (
 		<div className="flex h-svh w-full flex-col overflow-hidden bg-canvas text-foreground">
@@ -34,7 +37,7 @@ export function AppShell() {
 			<SystemStrip />
 			<div className="flex min-h-0 flex-1 gap-2 overflow-hidden p-2">
 				<IconRail />
-				{onNotes ? <NotesSidebar /> : <DriveSidebar />}
+				{onChats ? <ChatsSidebar /> : onNotes ? <NotesSidebar /> : <DriveSidebar />}
 				<main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-card shadow-sm">
 					<Outlet />
 				</main>
