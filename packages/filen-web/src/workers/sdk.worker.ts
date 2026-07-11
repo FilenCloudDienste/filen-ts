@@ -47,7 +47,11 @@ import init, {
 	type ChatMessagePartial,
 	type ChatTypingType,
 	type LinkedFile,
-	type DirPublicInfo
+	type DirPublicInfo,
+	type UserPersonalUpdateInfo,
+	type GdprInfo,
+	type UserEvent,
+	type UserEventResult
 } from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
 import { toErrorDTO, PARENT_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
@@ -433,6 +437,49 @@ const api = {
 	},
 	async deleteAccount(code?: string): Promise<void> {
 		await requireClient().deleteAccount(code)
+	},
+	// ── Settings/Account ── plain requireClient() pass-throughs, same shape as changePassword/
+	// exportMasterKeys above. changeEmail/setNickname/updatePersonalInfo/setVersioningEnabled/
+	// setLoginAlertsEnabled/deleteAllVersions/deleteAllItems are all mutations the settings UI never
+	// live-exercises in e2e (see the settings study's e2e safety classes) — wired here regardless so
+	// the account cards have a real worker seam to call. getUserEvents/getUserEvent land now even
+	// though the Events UI itself ships in a later wave.
+	async changeEmail(password: string, newEmail: string): Promise<void> {
+		await requireClient().changeEmail(password, newEmail)
+	},
+	async setNickname(nickname?: string | null): Promise<void> {
+		await requireClient().setNickname(nickname)
+	},
+	// `buffer` crosses Comlink as a transferable-eligible Uint8Array (structured clone handles it
+	// without a boundary serializer, same as every other byte payload on this worker).
+	uploadAvatar(buffer: Uint8Array): Promise<string> {
+		return requireClient().uploadAvatar(buffer)
+	},
+	async updatePersonalInfo(info: UserPersonalUpdateInfo): Promise<void> {
+		await requireClient().updatePersonalInfo(info)
+	},
+	async setVersioningEnabled(enabled: boolean): Promise<void> {
+		await requireClient().setVersioningEnabled(enabled)
+	},
+	async setLoginAlertsEnabled(enabled: boolean): Promise<void> {
+		await requireClient().setLoginAlertsEnabled(enabled)
+	},
+	async deleteAllVersions(): Promise<void> {
+		await requireClient().deleteAllVersions()
+	},
+	async deleteAllItems(): Promise<void> {
+		await requireClient().deleteAllItems()
+	},
+	getGdprInfo(): Promise<GdprInfo> {
+		return requireClient().getGdprInfo()
+	},
+	// `timestamp` is a bigint (event id/cursor) — crosses Comlink via structured clone like every
+	// other bigint field on this worker (getUserInfo's storage counters, Dir.timestamp, …).
+	getUserEvents(filter?: string | null, timestamp?: bigint | null): Promise<UserEventResult[]> {
+		return requireClient().getUserEvents(filter, timestamp)
+	},
+	getUserEvent(uuid: string): Promise<UserEvent> {
+		return requireClient().getUserEvent(uuid)
 	},
 	// `listDir`/`getDirOptional`/`createDir` take no cancellation param (unlike mobile's transfer
 	// facade) — a stale response from a fast navigation is simply discarded once the query key

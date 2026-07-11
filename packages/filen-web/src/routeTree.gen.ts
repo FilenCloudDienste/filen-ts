@@ -24,11 +24,17 @@ import { Route as AppLinksRouteImport } from './routes/_app/links'
 import { Route as AppFavoritesRouteImport } from './routes/_app/favorites'
 import { Route as AppContactsRouteImport } from './routes/_app/contacts'
 import { Route as AppChatsRouteImport } from './routes/_app/chats'
+import { Route as AppSettingsRouteRouteImport } from './routes/_app/settings/route'
+import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
 import { Route as AppNotesIndexRouteImport } from './routes/_app/notes.index'
 import { Route as AppChatsIndexRouteImport } from './routes/_app/chats.index'
 import { Route as AppSharedOutSplatRouteImport } from './routes/_app/shared-out.$'
 import { Route as AppSharedInSplatRouteImport } from './routes/_app/shared-in.$'
 import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/security'
+import { Route as AppSettingsEventsRouteImport } from './routes/_app/settings/events'
+import { Route as AppSettingsBillingRouteImport } from './routes/_app/settings/billing'
+import { Route as AppSettingsAppearanceRouteImport } from './routes/_app/settings/appearance'
+import { Route as AppSettingsAccountRouteImport } from './routes/_app/settings/account'
 import { Route as AppNotesUuidRouteImport } from './routes/_app/notes.$uuid'
 import { Route as AppDriveSplatRouteImport } from './routes/_app/drive.$'
 import { Route as AppChatsUuidRouteImport } from './routes/_app/chats.$uuid'
@@ -107,6 +113,16 @@ const AppChatsRoute = AppChatsRouteImport.update({
   path: '/chats',
   getParentRoute: () => AppRouteRoute,
 } as any)
+const AppSettingsRouteRoute = AppSettingsRouteRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRouteRoute,
+} as any)
+const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
 const AppNotesIndexRoute = AppNotesIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -128,9 +144,29 @@ const AppSharedInSplatRoute = AppSharedInSplatRouteImport.update({
   getParentRoute: () => AppRouteRoute,
 } as any)
 const AppSettingsSecurityRoute = AppSettingsSecurityRouteImport.update({
-  id: '/settings/security',
-  path: '/settings/security',
-  getParentRoute: () => AppRouteRoute,
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
+const AppSettingsEventsRoute = AppSettingsEventsRouteImport.update({
+  id: '/events',
+  path: '/events',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
+const AppSettingsBillingRoute = AppSettingsBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
+const AppSettingsAppearanceRoute = AppSettingsAppearanceRouteImport.update({
+  id: '/appearance',
+  path: '/appearance',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
+const AppSettingsAccountRoute = AppSettingsAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => AppSettingsRouteRoute,
 } as any)
 const AppNotesUuidRoute = AppNotesUuidRouteImport.update({
   id: '/$uuid',
@@ -154,6 +190,7 @@ export interface FileRoutesByFullPath {
   '/no-coi': typeof NoCoiRoute
   '/no-opfs': typeof NoOpfsRoute
   '/register': typeof RegisterRoute
+  '/settings': typeof AppSettingsRouteRouteWithChildren
   '/chats': typeof AppChatsRouteWithChildren
   '/contacts': typeof AppContactsRoute
   '/favorites': typeof AppFavoritesRoute
@@ -166,11 +203,16 @@ export interface FileRoutesByFullPath {
   '/chats/$uuid': typeof AppChatsUuidRoute
   '/drive/$': typeof AppDriveSplatRoute
   '/notes/$uuid': typeof AppNotesUuidRoute
+  '/settings/account': typeof AppSettingsAccountRoute
+  '/settings/appearance': typeof AppSettingsAppearanceRoute
+  '/settings/billing': typeof AppSettingsBillingRoute
+  '/settings/events': typeof AppSettingsEventsRoute
   '/settings/security': typeof AppSettingsSecurityRoute
   '/shared-in/$': typeof AppSharedInSplatRoute
   '/shared-out/$': typeof AppSharedOutSplatRoute
   '/chats/': typeof AppChatsIndexRoute
   '/notes/': typeof AppNotesIndexRoute
+  '/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -188,11 +230,16 @@ export interface FileRoutesByTo {
   '/chats/$uuid': typeof AppChatsUuidRoute
   '/drive/$': typeof AppDriveSplatRoute
   '/notes/$uuid': typeof AppNotesUuidRoute
+  '/settings/account': typeof AppSettingsAccountRoute
+  '/settings/appearance': typeof AppSettingsAppearanceRoute
+  '/settings/billing': typeof AppSettingsBillingRoute
+  '/settings/events': typeof AppSettingsEventsRoute
   '/settings/security': typeof AppSettingsSecurityRoute
   '/shared-in/$': typeof AppSharedInSplatRoute
   '/shared-out/$': typeof AppSharedOutSplatRoute
   '/chats': typeof AppChatsIndexRoute
   '/notes': typeof AppNotesIndexRoute
+  '/settings': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -202,6 +249,7 @@ export interface FileRoutesById {
   '/no-coi': typeof NoCoiRoute
   '/no-opfs': typeof NoOpfsRoute
   '/register': typeof RegisterRoute
+  '/_app/settings': typeof AppSettingsRouteRouteWithChildren
   '/_app/chats': typeof AppChatsRouteWithChildren
   '/_app/contacts': typeof AppContactsRoute
   '/_app/favorites': typeof AppFavoritesRoute
@@ -214,11 +262,16 @@ export interface FileRoutesById {
   '/_app/chats/$uuid': typeof AppChatsUuidRoute
   '/_app/drive/$': typeof AppDriveSplatRoute
   '/_app/notes/$uuid': typeof AppNotesUuidRoute
+  '/_app/settings/account': typeof AppSettingsAccountRoute
+  '/_app/settings/appearance': typeof AppSettingsAppearanceRoute
+  '/_app/settings/billing': typeof AppSettingsBillingRoute
+  '/_app/settings/events': typeof AppSettingsEventsRoute
   '/_app/settings/security': typeof AppSettingsSecurityRoute
   '/_app/shared-in/$': typeof AppSharedInSplatRoute
   '/_app/shared-out/$': typeof AppSharedOutSplatRoute
   '/_app/chats/': typeof AppChatsIndexRoute
   '/_app/notes/': typeof AppNotesIndexRoute
+  '/_app/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -228,6 +281,7 @@ export interface FileRouteTypes {
     | '/no-coi'
     | '/no-opfs'
     | '/register'
+    | '/settings'
     | '/chats'
     | '/contacts'
     | '/favorites'
@@ -240,11 +294,16 @@ export interface FileRouteTypes {
     | '/chats/$uuid'
     | '/drive/$'
     | '/notes/$uuid'
+    | '/settings/account'
+    | '/settings/appearance'
+    | '/settings/billing'
+    | '/settings/events'
     | '/settings/security'
     | '/shared-in/$'
     | '/shared-out/$'
     | '/chats/'
     | '/notes/'
+    | '/settings/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -262,11 +321,16 @@ export interface FileRouteTypes {
     | '/chats/$uuid'
     | '/drive/$'
     | '/notes/$uuid'
+    | '/settings/account'
+    | '/settings/appearance'
+    | '/settings/billing'
+    | '/settings/events'
     | '/settings/security'
     | '/shared-in/$'
     | '/shared-out/$'
     | '/chats'
     | '/notes'
+    | '/settings'
   id:
     | '__root__'
     | '/'
@@ -275,6 +339,7 @@ export interface FileRouteTypes {
     | '/no-coi'
     | '/no-opfs'
     | '/register'
+    | '/_app/settings'
     | '/_app/chats'
     | '/_app/contacts'
     | '/_app/favorites'
@@ -287,11 +352,16 @@ export interface FileRouteTypes {
     | '/_app/chats/$uuid'
     | '/_app/drive/$'
     | '/_app/notes/$uuid'
+    | '/_app/settings/account'
+    | '/_app/settings/appearance'
+    | '/_app/settings/billing'
+    | '/_app/settings/events'
     | '/_app/settings/security'
     | '/_app/shared-in/$'
     | '/_app/shared-out/$'
     | '/_app/chats/'
     | '/_app/notes/'
+    | '/_app/settings/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -411,6 +481,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppChatsRouteImport
       parentRoute: typeof AppRouteRoute
     }
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
+    '/_app/settings/': {
+      id: '/_app/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof AppSettingsIndexRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
     '/_app/notes/': {
       id: '/_app/notes/'
       path: '/'
@@ -441,10 +525,38 @@ declare module '@tanstack/react-router' {
     }
     '/_app/settings/security': {
       id: '/_app/settings/security'
-      path: '/settings/security'
+      path: '/security'
       fullPath: '/settings/security'
       preLoaderRoute: typeof AppSettingsSecurityRouteImport
-      parentRoute: typeof AppRouteRoute
+      parentRoute: typeof AppSettingsRouteRoute
+    }
+    '/_app/settings/events': {
+      id: '/_app/settings/events'
+      path: '/events'
+      fullPath: '/settings/events'
+      preLoaderRoute: typeof AppSettingsEventsRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
+    '/_app/settings/billing': {
+      id: '/_app/settings/billing'
+      path: '/billing'
+      fullPath: '/settings/billing'
+      preLoaderRoute: typeof AppSettingsBillingRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
+    '/_app/settings/appearance': {
+      id: '/_app/settings/appearance'
+      path: '/appearance'
+      fullPath: '/settings/appearance'
+      preLoaderRoute: typeof AppSettingsAppearanceRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
+    '/_app/settings/account': {
+      id: '/_app/settings/account'
+      path: '/account'
+      fullPath: '/settings/account'
+      preLoaderRoute: typeof AppSettingsAccountRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
     }
     '/_app/notes/$uuid': {
       id: '/_app/notes/$uuid'
@@ -469,6 +581,27 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface AppSettingsRouteRouteChildren {
+  AppSettingsAccountRoute: typeof AppSettingsAccountRoute
+  AppSettingsAppearanceRoute: typeof AppSettingsAppearanceRoute
+  AppSettingsBillingRoute: typeof AppSettingsBillingRoute
+  AppSettingsEventsRoute: typeof AppSettingsEventsRoute
+  AppSettingsSecurityRoute: typeof AppSettingsSecurityRoute
+  AppSettingsIndexRoute: typeof AppSettingsIndexRoute
+}
+
+const AppSettingsRouteRouteChildren: AppSettingsRouteRouteChildren = {
+  AppSettingsAccountRoute: AppSettingsAccountRoute,
+  AppSettingsAppearanceRoute: AppSettingsAppearanceRoute,
+  AppSettingsBillingRoute: AppSettingsBillingRoute,
+  AppSettingsEventsRoute: AppSettingsEventsRoute,
+  AppSettingsSecurityRoute: AppSettingsSecurityRoute,
+  AppSettingsIndexRoute: AppSettingsIndexRoute,
+}
+
+const AppSettingsRouteRouteWithChildren =
+  AppSettingsRouteRoute._addFileChildren(AppSettingsRouteRouteChildren)
 
 interface AppChatsRouteChildren {
   AppChatsUuidRoute: typeof AppChatsUuidRoute
@@ -499,6 +632,7 @@ const AppNotesRouteWithChildren = AppNotesRoute._addFileChildren(
 )
 
 interface AppRouteRouteChildren {
+  AppSettingsRouteRoute: typeof AppSettingsRouteRouteWithChildren
   AppChatsRoute: typeof AppChatsRouteWithChildren
   AppContactsRoute: typeof AppContactsRoute
   AppFavoritesRoute: typeof AppFavoritesRoute
@@ -508,12 +642,12 @@ interface AppRouteRouteChildren {
   AppTransfersRoute: typeof AppTransfersRoute
   AppTrashRoute: typeof AppTrashRoute
   AppDriveSplatRoute: typeof AppDriveSplatRoute
-  AppSettingsSecurityRoute: typeof AppSettingsSecurityRoute
   AppSharedInSplatRoute: typeof AppSharedInSplatRoute
   AppSharedOutSplatRoute: typeof AppSharedOutSplatRoute
 }
 
 const AppRouteRouteChildren: AppRouteRouteChildren = {
+  AppSettingsRouteRoute: AppSettingsRouteRouteWithChildren,
   AppChatsRoute: AppChatsRouteWithChildren,
   AppContactsRoute: AppContactsRoute,
   AppFavoritesRoute: AppFavoritesRoute,
@@ -523,7 +657,6 @@ const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppTransfersRoute: AppTransfersRoute,
   AppTrashRoute: AppTrashRoute,
   AppDriveSplatRoute: AppDriveSplatRoute,
-  AppSettingsSecurityRoute: AppSettingsSecurityRoute,
   AppSharedInSplatRoute: AppSharedInSplatRoute,
   AppSharedOutSplatRoute: AppSharedOutSplatRoute,
 }

@@ -9,6 +9,7 @@ import { transfers } from "@/locales/en/transfers"
 import { preview } from "@/locales/en/preview"
 import { notes } from "@/locales/en/notes"
 import { chats } from "@/locales/en/chats"
+import { settings } from "@/locales/en/settings"
 
 // Consumed by `ActionDef.descriptionKey` (keymap registry) — a compile-time-checked subset
 // of the "common" namespace's own key set, derived straight from the catalog so it can never
@@ -52,6 +53,11 @@ export type NotesKey = Extract<keyof typeof notes, string>
 // with this type without this file needing a matching edit then.
 export type ChatsKey = Extract<keyof typeof chats, string>
 
+// Same derivation for the "settings" namespace, exported ahead of need — no settings action
+// registers a keymap command yet, but a later one can extend ActionDef.descriptionKey's union
+// with this type without this file needing a matching edit then.
+export type SettingsKey = Extract<keyof typeof settings, string>
+
 // `Intl.PluralRules` gate: i18next's plural-key resolution (`_one`/
 // `_other` suffixes, unused by rev 1's catalogs but load-bearing the moment a count-based key
 // lands) needs it. Unlike React Native/Hermes — which mobile polyfills via `intl-pluralrules` —
@@ -59,7 +65,7 @@ export type ChatsKey = Extract<keyof typeof chats, string>
 // @/workers/sdk.worker's pre-flight) ships `Intl.PluralRules` natively. No polyfill import here,
 // by design.
 //
-// `resources`/`react.useSuspense`: resources are the seven EN namespaces only
+// `resources`/`react.useSuspense`: resources are the EN namespaces only
 // — no other language ships yet (multi-language catalogs + `SUPPORTED_LANGUAGES` land with the
 // auto-translate pipeline's real script, see .github/workflows/i18n-web.yml). Suspense-throw i18n
 // is OFF: it interacts poorly with the React Compiler and complicates the boot gate; revisit only
@@ -75,7 +81,8 @@ void i18n.use(initReactI18next).init({
 			transfers,
 			preview,
 			notes,
-			chats
+			chats,
+			settings
 		}
 	},
 	lng: "en",

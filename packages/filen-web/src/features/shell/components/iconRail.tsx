@@ -190,7 +190,7 @@ function AccountMenu() {
 						    only). */}
 						<DropdownMenuItem
 							onClick={() => {
-								void navigate({ to: "/settings/security" })
+								void navigate({ to: "/settings/account" })
 							}}
 						>
 							<SettingsIcon />
@@ -333,7 +333,7 @@ export function IconRail() {
 				return
 			}
 
-			void navigate({ to: "/settings/security" })
+			void navigate({ to: "/settings/account" })
 		},
 		undefined,
 		[navigate]
