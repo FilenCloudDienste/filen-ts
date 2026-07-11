@@ -53,7 +53,7 @@ export async function setMdSplitRatio(ratio: number): Promise<void> {
 // The persisted default-note-type preference (oldweb-notes §1: create always calls createNote() first —
 // the SDK's own default is "text" — then setNoteType only if this preference differs). No settings UI
 // exists yet (old-web's own Settings → General dropdown lands later); the key is persisted from day one
-// so a future settings control has somewhere real to read/write, per the founder's create-flow call.
+// so a future settings control has somewhere real to read/write.
 const DEFAULT_NOTE_TYPE_KV_KEY = "notes.defaultNoteType.v1"
 
 const defaultNoteTypeSchema: Type<NoteType> = type("'text'|'md'|'code'|'rich'|'checklist'")

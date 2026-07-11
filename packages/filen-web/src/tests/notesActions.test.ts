@@ -313,7 +313,7 @@ describe("trashNote", () => {
 
 describe("deleteNote", () => {
 	it("removes the note from the cache and clears its content cache on success", async () => {
-		const note = mockNote()
+		const note = mockNote({ trash: true })
 		testQueryClient.setQueryData(NOTES_QUERY_KEY, [note])
 		testQueryClient.setQueryData(noteContentQueryKey(note.uuid), "content")
 		deleteNoteOp.mockResolvedValueOnce(undefined)
@@ -325,8 +325,19 @@ describe("deleteNote", () => {
 		expect(testQueryClient.getQueryData(noteContentQueryKey(note.uuid))).toBeUndefined()
 	})
 
+	it("no-ops without calling the SDK when the note is not trashed — permanent delete requires trash first", async () => {
+		const note = mockNote({ trash: false })
+		testQueryClient.setQueryData(NOTES_QUERY_KEY, [note])
+
+		const outcome = await deleteNote(note)
+
+		expect(outcome).toEqual({ status: "success" })
+		expect(deleteNoteOp).not.toHaveBeenCalled()
+		expect(notesQueryGet()).toEqual([note])
+	})
+
 	it("calls beforeCacheRemoval AFTER the SDK confirms but BEFORE the cache patch — nav-race guard", async () => {
-		const note = mockNote()
+		const note = mockNote({ trash: true })
 		testQueryClient.setQueryData(NOTES_QUERY_KEY, [note])
 		const order: string[] = []
 		deleteNoteOp.mockImplementationOnce(() => {
@@ -349,7 +360,7 @@ describe("deleteNote", () => {
 	})
 
 	it("never calls beforeCacheRemoval and leaves the cache untouched on rejection", async () => {
-		const note = mockNote()
+		const note = mockNote({ trash: true })
 		testQueryClient.setQueryData(NOTES_QUERY_KEY, [note])
 		deleteNoteOp.mockRejectedValueOnce(new Error("fail"))
 		const beforeCacheRemoval = vi.fn()

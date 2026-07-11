@@ -92,13 +92,18 @@ test.describe("notes", () => {
 
 		await gotoNotes(page)
 
+		// gotoNotes may already land on an existing note's own /notes/<uuid> route (its own redirect-race
+		// comment above) — a bare `/\/notes\/[^/]+$/` waitForURL would then trivially match that STALE
+		// url without ever waiting for the real client-side navigate this click triggers, so the wait must
+		// require the url to actually change away from its pre-click value too.
+		const urlBeforeCreate = page.url()
 		await page.getByRole("button", { name: "New note", exact: true }).click()
 
 		// The new note is selected and rendered in the editor card — its titled header (a level-1 heading)
 		// only appears when the $uuid route resolved the note from the list, so this doubles as proof the
 		// created note landed in the cache the sidebar reads from. The SDK assigns a default title, so this
 		// asserts the header exists rather than a specific string.
-		await page.waitForURL(/\/notes\/[^/]+$/)
+		await page.waitForURL(url => url.toString() !== urlBeforeCreate && /\/notes\/[^/]+$/.test(url.pathname))
 		await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toBeVisible()
 
 		const uuid = new URL(page.url()).pathname.split("/").pop() ?? ""
@@ -125,12 +130,19 @@ test.describe("notes", () => {
 		// Generous budget: this single test drives ~9 real, sequential SDK mutations (create/rename/pin/
 		// favorite/createTag/addTag/trash/restore/delete) against the shared account — well beyond the
 		// suite's default 90s if any one of them lands behind the SDK's own internal rate-limit backoff
-		// (CLAUDE.md: retry/backoff is the SDK's job, never re-implemented here).
-		test.setTimeout(180_000)
+		// (CLAUDE.md: retry/backoff is the SDK's job, never re-implemented here). Live-measured a full
+		// run landing right at 180s under real backoff, close enough to the old budget to risk the test
+		// timeout firing mid-flight and skipping its own net-zero teardown (worse than a slow pass).
+		test.setTimeout(240_000)
 
 		await gotoNotes(page)
+
+		// Same stale-url hazard as the "creating a note" test above — gotoNotes can already be sitting on
+		// an existing note's route, so the wait must require an actual url change, not just a broad regex
+		// match a pre-existing route already satisfies.
+		const urlBeforeCreate = page.url()
 		await page.getByRole("button", { name: "New note", exact: true }).click()
-		await page.waitForURL(/\/notes\/[^/]+$/)
+		await page.waitForURL(url => url.toString() !== urlBeforeCreate && /\/notes\/[^/]+$/.test(url.pathname))
 
 		const uuid = new URL(page.url()).pathname.split("/").pop() ?? ""
 		expect(uuid.length).toBeGreaterThan(0)
@@ -179,8 +191,15 @@ test.describe("notes", () => {
 			const tagName = `e2e-tag-${String(Date.now())}`
 			await menuTrigger.click()
 			await expect(menu).toBeVisible()
-			await page.getByRole("menuitem", { name: "Tags", exact: true }).click()
-			await page.getByRole("menuitem", { name: "New tag", exact: true }).click()
+			// The registry's SubmenuTrigger (ui/dropdown-menu.tsx, verbatim) defaults to openOnHover with
+			// ignoreMouse on its click handler — a real mouse .click() is silently ignored and never opens
+			// the submenu, so this must hover and wait for the submenu's own content before interacting
+			// with it (a .click() here previously hung the whole test until its timeout, never finding
+			// "New tag" in a submenu that never opened).
+			await page.getByRole("menuitem", { name: "Tags", exact: true }).hover()
+			const newTagItem = page.getByRole("menuitem", { name: "New tag", exact: true })
+			await expect(newTagItem).toBeVisible()
+			await newTagItem.click()
 			const tagDialog = page.getByRole("dialog")
 			await expect(tagDialog).toBeVisible()
 			await tagDialog.getByLabel("Name", { exact: true }).fill(tagName)

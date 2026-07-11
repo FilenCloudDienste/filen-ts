@@ -194,6 +194,14 @@ export interface DeleteNoteOptions {
 }
 
 export async function deleteNote(note: Note, opts?: DeleteNoteOptions): Promise<VoidActionOutcome> {
+	// Only a trashed note is a valid permanent-delete target (mirrors mobile's own deleteNote guard) —
+	// defense-in-depth, same rule archiveNote/restoreNote/trashNote apply above. The menu only ever
+	// surfaces "Delete permanently" once note.trash is true, but this stays safe for any future direct
+	// caller (bulk actions, a shortcut, ...) that skips the menu gate.
+	if (!note.trash) {
+		return { status: "success" }
+	}
+
 	try {
 		await runOp(sdkApi.deleteNote(note))
 	} catch (e) {

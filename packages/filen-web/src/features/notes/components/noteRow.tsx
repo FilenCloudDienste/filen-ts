@@ -24,11 +24,12 @@ export interface NoteRowProps {
 	onDuplicated: (duplicated: Note) => void
 }
 
-// One note row, shared by both sidebar views (the notes list and a tag group's expanded members). The
-// whole row is a Link to /notes/$uuid — the uuid is a selection key, not a path hierarchy (D4). Pinned/
-// favorited stay subtle muted marks (spec) rather than loud badges. Carries its own row-level context
-// menu (right-click) and ⋯ trigger (hover-revealed), both rendering the SAME shared descriptor list
-// (noteMenu.logic.ts) the editor header's own menu uses.
+// One note row, shared by both sidebar views (the notes list and a tag group's expanded members). Most
+// of the row is a Link to /notes/$uuid — the uuid is a selection key, not a path hierarchy (D4) — with
+// the ⋯ trigger button as its sibling, not its descendant (see the ContextMenuTrigger comment below).
+// Pinned/favorited stay subtle muted marks (spec) rather than loud badges. Carries its own row-level
+// context menu (right-click) and ⋯ trigger (hover-revealed), both rendering the SAME shared descriptor
+// list (noteMenu.logic.ts) the editor header's own menu uses.
 export function NoteRow({ note, selected, nested = false, allTags, currentUserId, onAction, onDuplicated }: NoteRowProps) {
 	const { t } = useTranslation("notes")
 	const { icon: Icon, colorClass } = noteIcon(note)
@@ -39,40 +40,46 @@ export function NoteRow({ note, selected, nested = false, allTags, currentUserId
 
 	return (
 		<ContextMenu>
-			{/* render-prop merge onto the Link itself (mirrors driveRow.tsx's own idiom, div there) — Base
-			UI's ContextMenuTrigger merges its onContextMenu handler + ref onto the given element rather than
-			wrapping it, so the row stays a single real <a>, not an extra nested interactive element. */}
+			{/* render-prop merge onto the row's own div (mirrors driveRow.tsx's own idiom) — Base UI's
+			ContextMenuTrigger merges its onContextMenu handler + ref onto the given element rather than
+			wrapping it. The Link stays a SIBLING of the ⋯ trigger button, not an ancestor: a <button> nested
+			inside an <a> is invalid content model and an accessibility regression (drive's own row solved
+			the identical shape by never using a real anchor at all — see driveRow.tsx). */}
 			<ContextMenuTrigger
 				render={
-					<Link
-						to="/notes/$uuid"
-						params={{ uuid: note.uuid }}
-						aria-current={selected ? "page" : undefined}
+					<div
 						className={cn(
-							"group flex h-full w-full items-center gap-2.5 rounded-xl px-2.5 text-left transition-colors outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/30",
+							"group flex h-full w-full items-center gap-2.5 rounded-xl px-2.5 transition-colors app-region-no-drag",
 							nested && "pl-8",
 							selected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/60"
 						)}
 					>
-						<Icon className={cn("size-4 shrink-0", colorClass)} />
-						<div className="flex min-w-0 flex-1 flex-col">
-							<div className="flex min-w-0 items-center gap-1.5">
-								{note.pinned ? (
-									<PinIcon
-										aria-label={t("notePinned")}
-										className="size-3 shrink-0 text-muted-foreground"
-									/>
-								) : null}
-								{note.favorite ? (
-									<HeartIcon
-										aria-label={t("noteFavorite")}
-										className="size-3 shrink-0 text-muted-foreground"
-									/>
-								) : null}
-								<span className="truncate text-sm font-medium">{title}</span>
+						<Link
+							to="/notes/$uuid"
+							params={{ uuid: note.uuid }}
+							aria-current={selected ? "page" : undefined}
+							className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+						>
+							<Icon className={cn("size-4 shrink-0", colorClass)} />
+							<div className="flex min-w-0 flex-1 flex-col">
+								<div className="flex min-w-0 items-center gap-1.5">
+									{note.pinned ? (
+										<PinIcon
+											aria-label={t("notePinned")}
+											className="size-3 shrink-0 text-muted-foreground"
+										/>
+									) : null}
+									{note.favorite ? (
+										<HeartIcon
+											aria-label={t("noteFavorite")}
+											className="size-3 shrink-0 text-muted-foreground"
+										/>
+									) : null}
+									<span className="truncate text-sm font-medium">{title}</span>
+								</div>
+								<span className="truncate text-xs text-muted-foreground">{preview}</span>
 							</div>
-							<span className="truncate text-xs text-muted-foreground">{preview}</span>
-						</div>
+						</Link>
 						<DropdownMenu>
 							<DropdownMenuTrigger
 								render={
@@ -82,9 +89,9 @@ export function NoteRow({ note, selected, nested = false, allTags, currentUserId
 										aria-label={t("noteItemMenuTrigger")}
 										className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
 										onClick={event => {
-											// Must not navigate the row's own Link — see noteMenu.tsx's own item onClick
-											// for the matching portaled-popup rationale.
-											event.preventDefault()
+											// The button is a sibling of the Link now, not a descendant, so a click here
+											// can never bubble into a navigation — this only stops it reaching the row
+											// div's own onContextMenu, mirroring driveRow.tsx's matching trigger.
 											event.stopPropagation()
 										}}
 									>
@@ -100,7 +107,7 @@ export function NoteRow({ note, selected, nested = false, allTags, currentUserId
 								onDuplicated={onDuplicated}
 							/>
 						</DropdownMenu>
-					</Link>
+					</div>
 				}
 			/>
 			<NoteContextMenuContent
