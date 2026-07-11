@@ -32,6 +32,7 @@ interface E2eHooks {
 	setTestNoteContentByUuid: (uuid: string, content: string) => Promise<void>
 	renameTestNoteByUuid: (uuid: string, title: string) => Promise<void>
 	readPersistedInflightContent: (uuid: string) => Promise<string | null>
+	listTestNoteUuids: () => Promise<string[]>
 	sweepTestNotesByTitlePrefix: (prefix: string) => Promise<number>
 	sweepTestTagsByNamePrefix: (prefix: string) => Promise<number>
 	thumbnailFileStat: (parentUuid: string, name: string) => Promise<{ size: number; lastModified: number } | null>

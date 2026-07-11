@@ -91,6 +91,12 @@ interface E2eHooks {
 	// outbox persists to — proves the immediate-persist landed on disk BEFORE a reload, the crux of the
 	// kill-path proof (survives window close). Null when nothing is persisted for the uuid.
 	readPersistedInflightContent: (uuid: string) => Promise<string | null>
+	// Every note uuid currently on the account — the seam for the specs' leak guard: a UI-create test
+	// that fails BEFORE it learns its new note's uuid (a slow create's waitForURL timeout) can still
+	// sweep exactly what it created by diffing this snapshot before/after (serial mode guarantees any
+	// new uuid belongs to the running test). Default-titled notes never match the debris prefixes, so
+	// the cleanup-setup sweep cannot catch this class.
+	listTestNoteUuids: () => Promise<string[]>
 	// Defensive sweep, same rationale as e2e/setup/cleanup.setup.ts's drive-side scratch-debris sweep:
 	// the FREE e2e account's note cap is a hard 10 (server-enforced `note_limit_reached`), far tighter
 	// than drive's storage quota, so ANY spec that dies before its own teardown compounds into real,
@@ -259,6 +265,11 @@ export function installE2eHooks(router: RouterLike): void {
 			}
 
 			return latestInflightContent(outbox[uuid])
+		},
+		listTestNoteUuids: async () => {
+			await whenBootReady()
+
+			return (await sdkApi.listNotes()).map(note => note.uuid)
 		},
 		sweepTestNotesByTitlePrefix: async prefix => {
 			await whenBootReady()

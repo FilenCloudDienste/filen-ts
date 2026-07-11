@@ -89,6 +89,34 @@ async function runMenuAction(page: Page, trigger: Locator, itemName: string, unt
 	}).toPass({ timeout: 90_000 })
 }
 
+// Leak guard for tests that create a note THROUGH THE UI: they only learn the new note's uuid from
+// the post-create navigation, so any failure before that point (a rate-limited create's waitForURL
+// timeout, an assertion on the navigated route) leaves a default-titled note the cleanup-setup sweep
+// can never match by prefix — the exact class that once poisoned the 10-cap account during a live
+// rate-limit episode. Snapshot the account's uuids up front and sweep the DIFF in finally; the file's
+// serial mode guarantees any new uuid belongs to the running test. Best-effort like every teardown
+// here: a page killed by the test budget makes the finally's evaluate throw, and that residue is
+// accepted (rare) rather than masked.
+async function withNoteLeakGuard(page: Page, body: () => Promise<void>): Promise<void> {
+	const before = new Set(await page.evaluate(() => window.__filenE2E.listTestNoteUuids()))
+
+	try {
+		await body()
+	} finally {
+		try {
+			const after = await page.evaluate(() => window.__filenE2E.listTestNoteUuids())
+
+			for (const uuid of after) {
+				if (!before.has(uuid)) {
+					await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+				}
+			}
+		} catch {
+			// Page already gone — the real failure stays the reported one.
+		}
+	}
+}
+
 test.describe("notes", () => {
 	test("rail entry navigates to /notes and renders the contextual sidebar", async ({ page, injectedSession, browserName }) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
@@ -128,25 +156,26 @@ test.describe("notes", () => {
 
 		await gotoNotes(page)
 
-		// gotoNotes may already land on an existing note's own /notes/<uuid> route (its own redirect-race
-		// comment above) — a bare `/\/notes\/[^/]+$/` waitForURL would then trivially match that STALE
-		// url without ever waiting for the real client-side navigate this click triggers, so the wait must
-		// require the url to actually change away from its pre-click value too.
-		const urlBeforeCreate = page.url()
-		await page.getByRole("button", { name: "New note", exact: true }).click()
+		// The guard owns the teardown: this test only learns the uuid from the navigation it asserts,
+		// so a create that succeeds server-side but fails any wait below would otherwise leak.
+		await withNoteLeakGuard(page, async () => {
+			// gotoNotes may already land on an existing note's own /notes/<uuid> route (its own redirect-race
+			// comment above) — a bare `/\/notes\/[^/]+$/` waitForURL would then trivially match that STALE
+			// url without ever waiting for the real client-side navigate this click triggers, so the wait must
+			// require the url to actually change away from its pre-click value too.
+			const urlBeforeCreate = page.url()
+			await page.getByRole("button", { name: "New note", exact: true }).click()
 
-		// The new note is selected and rendered in the editor card — its titled header (a level-1 heading)
-		// only appears when the $uuid route resolved the note from the list, so this doubles as proof the
-		// created note landed in the cache the sidebar reads from. The SDK assigns a default title, so this
-		// asserts the header exists rather than a specific string.
-		await page.waitForURL(url => url.toString() !== urlBeforeCreate && /\/notes\/[^/]+$/.test(url.pathname))
-		await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toBeVisible()
+			// The new note is selected and rendered in the editor card — its titled header (a level-1 heading)
+			// only appears when the $uuid route resolved the note from the list, so this doubles as proof the
+			// created note landed in the cache the sidebar reads from. The SDK assigns a default title, so this
+			// asserts the header exists rather than a specific string.
+			await page.waitForURL(url => url.toString() !== urlBeforeCreate && /\/notes\/[^/]+$/.test(url.pathname))
+			await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toBeVisible()
 
-		const uuid = new URL(page.url()).pathname.split("/").pop() ?? ""
-		expect(uuid.length).toBeGreaterThan(0)
-
-		// Net-zero teardown: permanently remove the created note through the programmatic hook.
-		await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			const uuid = new URL(page.url()).pathname.split("/").pop() ?? ""
+			expect(uuid.length).toBeGreaterThan(0)
+		})
 	})
 
 	// Full action leg (e1-actions): create → rename → pin → favorite → tag assign (+ tags-view
@@ -173,24 +202,29 @@ test.describe("notes", () => {
 
 		await gotoNotes(page)
 
-		// Same stale-url hazard as the "creating a note" test above — gotoNotes can already be sitting on
-		// an existing note's route, so the wait must require an actual url change, not just a broad regex
-		// match a pre-existing route already satisfies.
-		const urlBeforeCreate = page.url()
-		await page.getByRole("button", { name: "New note", exact: true }).click()
-		await page.waitForURL(url => url.toString() !== urlBeforeCreate && /\/notes\/[^/]+$/.test(url.pathname))
-
-		const uuid = new URL(page.url()).pathname.split("/").pop() ?? ""
-		expect(uuid.length).toBeGreaterThan(0)
-
 		const main = page.getByRole("main")
 		const sidebar = page.getByRole("complementary")
-		const row = sidebar.locator(`a[href="/notes/${uuid}"]`)
 		const menuTrigger = main.getByRole("button", { name: "More actions", exact: true })
 		const menu = page.getByRole("menu")
 		const tagName = `e2e-tag-${String(Date.now())}`
+		// Snapshot for the finally's diff sweep — the create preamble below runs INSIDE the try, so a
+		// create that succeeds server-side but times out its navigation wait still gets swept even
+		// though no uuid was ever captured (the leak class a live rate-limit episode exposed).
+		const uuidsBefore = new Set(await page.evaluate(() => window.__filenE2E.listTestNoteUuids()))
 
 		try {
+			// Same stale-url hazard as the "creating a note" test above — gotoNotes can already be sitting
+			// on an existing note's route, so the wait must require an actual url change, not just a broad
+			// regex match a pre-existing route already satisfies.
+			const urlBeforeCreate = page.url()
+			await page.getByRole("button", { name: "New note", exact: true }).click()
+			await page.waitForURL(url => url.toString() !== urlBeforeCreate && /\/notes\/[^/]+$/.test(url.pathname))
+
+			const uuid = new URL(page.url()).pathname.split("/").pop() ?? ""
+			expect(uuid.length).toBeGreaterThan(0)
+
+			const row = sidebar.locator(`a[href="/notes/${uuid}"]`)
+
 			// Rename — InputDialog (role="dialog"), the field pre-filled with the SDK's default title.
 			const newTitle = `e2e action note ${String(Date.now())}`
 			await runMenuAction(page, menuTrigger, "Rename", "dialogOpen")
@@ -311,9 +345,17 @@ test.describe("notes", () => {
 			// Best-effort: when the test-budget timeout killed the page, evaluate throws against the
 			// closed target — swallowing that keeps the REAL failure as the test's reported error, and
 			// cleanup-setup's own notes/tags sweep self-heals whatever a dead page left behind on the
-			// next suite run.
+			// next suite run. The note teardown is the uuid DIFF against the pre-test snapshot (serial
+			// mode: any new uuid is this test's), which covers failures before the uuid was ever known.
 			try {
-				await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+				const uuidsAfter = await page.evaluate(() => window.__filenE2E.listTestNoteUuids())
+
+				for (const id of uuidsAfter) {
+					if (!uuidsBefore.has(id)) {
+						await page.evaluate(i => window.__filenE2E.deleteTestNoteByUuid(i), id)
+					}
+				}
+
 				await page.evaluate(prefix => window.__filenE2E.sweepTestTagsByNamePrefix(prefix), tagName)
 			} catch {
 				// Covered by cleanup-setup on the next run.
