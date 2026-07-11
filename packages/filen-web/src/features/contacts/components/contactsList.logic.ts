@@ -1,5 +1,6 @@
 import { fastLocaleCompare } from "@filen/utils"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
+import { type ContactsKey } from "@/lib/i18n"
 
 // Minimal shape every contact-like record satisfies (Contact/BlockedContact/ContactRequestIn/
 // ContactRequestOut) — nickName's shape differs only in optionality across those four, never in
@@ -95,4 +96,41 @@ export function buildContactSections(input: BuildContactSectionsInput): ContactS
 	}
 
 	return sections
+}
+
+// i18n key per section kind — shared by the page's own inline section headers (contactsList.tsx) and
+// the sidebar's nav labels (contactsSidebar.tsx), so the two surfaces can never drift out of sync on
+// wording.
+export const CONTACTS_SECTION_HEADER_KEY: Record<ContactSection["key"], ContactsKey> = {
+	requests: "contactsSectionRequests",
+	pending: "contactsSectionPending",
+	contacts: "contactsSectionContacts",
+	blocked: "contactsSectionBlocked"
+}
+
+// The sidebar's section switch: "all" (every section stacked, the page's original shape) plus one
+// entry per real ContactSection kind. Deep-linked via the /contacts route's own `section` search
+// param (see routes/_app/contacts.tsx) — a URL search param rather than a nested path segment, since
+// the route itself takes no path params today (unlike settings' one-file-per-section layout) and this
+// stays the less invasive of the two shapes.
+export type ContactsSectionFilter = "all" | ContactSection["key"]
+
+export const CONTACTS_SECTION_FILTERS: readonly ContactsSectionFilter[] = ["all", "requests", "pending", "contacts", "blocked"]
+
+export const DEFAULT_CONTACTS_SECTION_FILTER: ContactsSectionFilter = "all"
+
+export function isContactsSectionFilter(value: string): value is ContactsSectionFilter {
+	return (CONTACTS_SECTION_FILTERS as readonly string[]).includes(value)
+}
+
+// Narrows an already search-filtered section list down to the sidebar's active filter — "all" is a
+// no-op (the page's original every-section view), any real key keeps at most the one matching section
+// (a section list only ever has zero or one entry per key already, so this is a single-pass filter,
+// never a merge).
+export function filterContactSections(sections: ContactSection[], filter: ContactsSectionFilter): ContactSection[] {
+	if (filter === "all") {
+		return sections
+	}
+
+	return sections.filter(section => section.key === filter)
 }

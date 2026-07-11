@@ -11,13 +11,15 @@
 // contactsHeader.tsx) where an equivalent surface already exists there.
 export const contacts = {
 	// ── Section headers ──────────────────────────────────────────────────────
-	/** Contacts page — section header for incoming contact requests */
+	/** Contacts sidebar/page — nav entry and implicit section label for the unfiltered, every-section view */
+	contactsSectionAll: "All",
+	/** Contacts sidebar/page — section header for incoming contact requests */
 	contactsSectionRequests: "Requests",
-	/** Contacts page — section header for outgoing (sent, not yet accepted) contact requests */
+	/** Contacts sidebar/page — section header for outgoing (sent, not yet accepted) contact requests */
 	contactsSectionPending: "Pending",
-	/** Contacts page — section header for established contacts */
+	/** Contacts sidebar/page — section header for established contacts */
 	contactsSectionContacts: "Contacts",
-	/** Contacts page — section header for blocked contacts */
+	/** Contacts sidebar/page — section header for blocked contacts */
 	contactsSectionBlocked: "Blocked",
 
 	// ── Empty states ─────────────────────────────────────────────────────────
@@ -25,6 +27,10 @@ export const contacts = {
 	contactsEmptyTitle: "No contacts",
 	/** Contacts page — empty-state body under contactsEmptyTitle */
 	contactsEmptyBody: "Add a contact to start sharing and chatting.",
+	/** Contacts page — empty-state title when a sidebar section filter narrows the list to zero rows, but other sections still have data */
+	contactsEmptySectionTitle: "Nothing here",
+	/** Contacts page — empty-state body under contactsEmptySectionTitle */
+	contactsEmptySectionBody: "No entries in this section.",
 	/** Contacts page — title shown when the contacts/requests queries fail to load; the body is the failing query's own errorLabel */
 	contactsLoadError: "Couldn't load contacts",
 

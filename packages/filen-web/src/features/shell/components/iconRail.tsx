@@ -15,6 +15,7 @@ import {
 	CircleHelpIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/contactsList.logic"
 import { runLogout } from "@/lib/logout"
 import { sync as notesSync } from "@/features/notes/lib/sync"
 import { sync as chatsSync } from "@/features/chats/lib/sync"
@@ -392,6 +393,7 @@ export function IconRail() {
 					render={
 						<Link
 							to="/contacts"
+							search={{ section: DEFAULT_CONTACTS_SECTION_FILTER }}
 							aria-current={contactsActive ? "page" : undefined}
 							aria-label={t("moduleContacts")}
 							className={railItemClass(contactsActive)}

@@ -35,7 +35,10 @@ async function gotoContacts(page: Page): Promise<void> {
 	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
 	await page.getByRole("link", { name: "Contacts", exact: true }).click()
-	await page.waitForURL(/\/contacts$/)
+	// The rail's own Contacts entry always passes an explicit `section: "all"` search param (see
+	// iconRail.tsx — required by the route's own non-optional search schema), so the landing URL is
+	// never bare "/contacts".
+	await page.waitForURL(/\/contacts\?section=all$/)
 }
 
 // The content region below the search/Add-contact toolbar has exactly one of three terminal states —
@@ -65,7 +68,54 @@ test.describe("contacts", () => {
 		await waitForContactsSettled(page)
 		await expect(page.getByText("Couldn't load contacts", { exact: true })).toHaveCount(0)
 
-		await expect(page.getByRole("link", { name: "Contacts", exact: true })).toHaveAttribute("aria-current", "page")
+		// Scoped to the rail's own "Filen" nav landmark — the contacts sidebar's own "Contacts" section
+		// filter link (see the sidebar test below) shares this exact accessible name, so an unscoped
+		// lookup here would be a strict-mode violation (two matches) now that the sidebar exists.
+		await expect(page.getByRole("navigation", { name: "Filen" }).getByRole("link", { name: "Contacts", exact: true })).toHaveAttribute(
+			"aria-current",
+			"page"
+		)
+	})
+
+	test("the contacts sidebar renders every section filter, defaults to All, and switching updates the active link, URL, and heading", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await gotoContacts(page)
+		await waitForContactsSettled(page)
+
+		// The sidebar is the one <aside> (role "complementary") on this route — scoping every lookup
+		// below to it avoids colliding with the rail's own "Contacts" entry-point link.
+		const sidebar = page.getByRole("complementary")
+		const main = page.getByRole("main")
+
+		for (const label of ["All", "Requests", "Pending", "Contacts", "Blocked"]) {
+			await expect(sidebar.getByRole("link", { name: label, exact: true })).toBeVisible()
+		}
+
+		// gotoContacts already landed on "?section=all" (the rail's own explicit default) — the sidebar's
+		// "All" entry is current, and the page's own <h1> reads the generic module title rather than any
+		// one section's name.
+		await expect(sidebar.getByRole("link", { name: "All", exact: true })).toHaveAttribute("aria-current", "page")
+		await expect(main.getByRole("heading", { name: "Contacts", exact: true, level: 1 })).toBeVisible()
+
+		await sidebar.getByRole("link", { name: "Blocked", exact: true }).click()
+		await page.waitForURL(/\/contacts\?section=blocked$/)
+
+		await expect(sidebar.getByRole("link", { name: "Blocked", exact: true })).toHaveAttribute("aria-current", "page")
+		await expect(sidebar.getByRole("link", { name: "All", exact: true })).not.toHaveAttribute("aria-current", "page")
+		await expect(main.getByRole("heading", { name: "Blocked", exact: true, level: 1 })).toBeVisible()
+
+		// Switching back to All re-serializes "?section=all" explicitly — every filter, "all" included,
+		// always appears in the URL (see routes/_app/contacts.tsx's own doc comment on why no
+		// default-eliding middleware is used here).
+		await sidebar.getByRole("link", { name: "All", exact: true }).click()
+		await page.waitForURL(/\/contacts\?section=all$/)
+		await expect(sidebar.getByRole("link", { name: "All", exact: true })).toHaveAttribute("aria-current", "page")
 	})
 
 	test("the add-contact dialog gates an invalid email and is dismissed without ever submitting", async ({

@@ -4,7 +4,12 @@ import {
 	buildContactSections,
 	contactDisplayName,
 	contactInitials,
-	isContactOnline
+	isContactOnline,
+	filterContactSections,
+	isContactsSectionFilter,
+	CONTACTS_SECTION_FILTERS,
+	CONTACTS_SECTION_HEADER_KEY,
+	type ContactSection
 } from "@/features/contacts/components/contactsList.logic"
 
 function mockContact(overrides: Partial<Contact> = {}): Contact {
@@ -197,5 +202,50 @@ describe("buildContactSections", () => {
 			{ key: "contacts", items: [contact] },
 			{ key: "blocked", items: [blocked] }
 		])
+	})
+})
+
+describe("isContactsSectionFilter", () => {
+	it("accepts every declared filter value", () => {
+		for (const filter of CONTACTS_SECTION_FILTERS) {
+			expect(isContactsSectionFilter(filter)).toBe(true)
+		}
+	})
+
+	it("rejects an arbitrary string", () => {
+		expect(isContactsSectionFilter("not-a-filter")).toBe(false)
+	})
+
+	it("rejects the empty string", () => {
+		expect(isContactsSectionFilter("")).toBe(false)
+	})
+})
+
+describe("filterContactSections", () => {
+	const allSections: ContactSection[] = [
+		{ key: "requests", items: [mockIncoming()] },
+		{ key: "pending", items: [mockOutgoing()] },
+		{ key: "contacts", items: [mockContact()] },
+		{ key: "blocked", items: [mockBlockedContact()] }
+	]
+
+	it("returns every section unchanged for the 'all' filter", () => {
+		expect(filterContactSections(allSections, "all")).toBe(allSections)
+	})
+
+	it("keeps only the section matching a real filter key", () => {
+		expect(filterContactSections(allSections, "blocked")).toEqual([{ key: "blocked", items: [mockBlockedContact()] }])
+	})
+
+	it("returns an empty array when the filtered section isn't present at all", () => {
+		const withoutBlocked = allSections.filter(section => section.key !== "blocked")
+
+		expect(filterContactSections(withoutBlocked, "blocked")).toEqual([])
+	})
+})
+
+describe("CONTACTS_SECTION_HEADER_KEY", () => {
+	it("has one entry per real ContactSection key, no more, no less", () => {
+		expect(Object.keys(CONTACTS_SECTION_HEADER_KEY).sort()).toEqual(["blocked", "contacts", "pending", "requests"])
 	})
 })

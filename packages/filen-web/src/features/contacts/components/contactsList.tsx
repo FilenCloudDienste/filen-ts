@@ -7,8 +7,13 @@ import { useContactsQuery, useContactRequestsQuery } from "@/features/contacts/q
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useDialogHost } from "@/lib/useDialogHost"
-import { type ContactsKey } from "@/lib/i18n"
-import { buildContactSections, type ContactSection } from "@/features/contacts/components/contactsList.logic"
+import {
+	buildContactSections,
+	filterContactSections,
+	CONTACTS_SECTION_HEADER_KEY,
+	type ContactSection,
+	type ContactsSectionFilter
+} from "@/features/contacts/components/contactsList.logic"
 import {
 	acceptRequest,
 	denyRequest,
@@ -44,13 +49,6 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
-const SECTION_HEADER_KEY: Record<ContactSection["key"], ContactsKey> = {
-	requests: "contactsSectionRequests",
-	pending: "contactsSectionPending",
-	contacts: "contactsSectionContacts",
-	blocked: "contactsSectionBlocked"
-}
-
 const SKELETON_ROW_COUNT = 6
 
 // The per-kind dialog payload threaded through useDialogHost, widened with a `bulk` flag: every kind
@@ -68,8 +66,10 @@ type ActiveContactDialog =
 // Owns both contacts queries, the search box's local state, bulk-selection mode, and the whole
 // status-branch (loading skeleton / load-error / empty / sectioned list) — mirrors DirectoryListing's
 // own self-contained shape (route files stay thin; the content component owns its data + its dialog
-// host).
-export function ContactsList() {
+// host). `section` is owned by the route (its own `section` search param, see
+// routes/_app/contacts.tsx) — the sidebar and this page are siblings under appShell, not
+// parent/child, so the URL is their one shared source of truth for which section is active.
+export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	const { t } = useTranslation(["contacts", "common"])
 	const [search, setSearch] = useState("")
 	const [selectMode, setSelectMode] = useState(false)
@@ -91,13 +91,18 @@ export function ContactsList() {
 	const incomingData = requestsQuery.data?.incoming ?? []
 	const outgoingData = requestsQuery.data?.outgoing ?? []
 
-	const sections = buildContactSections({
+	// search-filtered, every section — the base every the sidebar's "all" view renders, and also what
+	// tells the empty branch below whether the account genuinely has nothing (searchedSections empty
+	// too) or just nothing in the CURRENTLY selected section (searchedSections non-empty, but the
+	// section-narrowed `sections` below is).
+	const searchedSections = buildContactSections({
 		contacts: contactsData,
 		blocked: blockedData,
 		incoming: incomingData,
 		outgoing: outgoingData,
 		search
 	})
+	const sections = filterContactSections(searchedSections, section)
 
 	function handleRetry(): void {
 		void contactsQuery.refetch()
@@ -492,7 +497,9 @@ export function ContactsList() {
 	return (
 		<>
 			<header className="flex h-14 shrink-0 items-center px-4">
-				<h1 className="text-sm font-medium">{t("common:moduleContacts")}</h1>
+				<h1 className="text-sm font-medium">
+					{section === "all" ? t("common:moduleContacts") : t(CONTACTS_SECTION_HEADER_KEY[section])}
+				</h1>
 			</header>
 			<div className="flex h-12 shrink-0 items-center justify-between gap-4 px-4">
 				{selectMode ? (
@@ -588,25 +595,43 @@ export function ContactsList() {
 						</Empty>
 					</div>
 				) : sections.length === 0 ? (
+					// searchedSections is search-filtered but NOT section-filtered — empty here means
+					// genuinely nothing matches anywhere (the generic empty state); non-empty means the
+					// account has data, just none in the currently selected section (the narrower "nothing
+					// HERE" copy, no add-contact CTA — that action isn't relevant to e.g. an empty Blocked view).
 					<div className="flex flex-1 overflow-y-auto">
 						<Empty>
 							<EmptyHeader>
 								<EmptyMedia variant="icon">
 									<UsersIcon />
 								</EmptyMedia>
-								<EmptyTitle>{t("contactsEmptyTitle")}</EmptyTitle>
-								<EmptyDescription>{t("contactsEmptyBody")}</EmptyDescription>
+								{searchedSections.length === 0 ? (
+									<>
+										<EmptyTitle>{t("contactsEmptyTitle")}</EmptyTitle>
+										<EmptyDescription>{t("contactsEmptyBody")}</EmptyDescription>
+									</>
+								) : (
+									<>
+										<EmptyTitle>{t("contactsEmptySectionTitle")}</EmptyTitle>
+										<EmptyDescription>{t("contactsEmptySectionBody")}</EmptyDescription>
+									</>
+								)}
 							</EmptyHeader>
 						</Empty>
 					</div>
 				) : (
 					<div className="flex-1 overflow-y-auto p-2">
-						{sections.map(section => (
-							<section key={section.key}>
-								<h2 className="px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground">
-									{t(SECTION_HEADER_KEY[section.key])}
-								</h2>
-								<div className="flex flex-col gap-0.5">{renderSectionItems(section)}</div>
+						{sections.map(contactSection => (
+							<section key={contactSection.key}>
+								{/* Only "all" stacks more than one section at once — a single filtered section
+								already names itself via the page's own <h1> above, so its inline header would be
+								pure redundancy. */}
+								{section === "all" ? (
+									<h2 className="px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground">
+										{t(CONTACTS_SECTION_HEADER_KEY[contactSection.key])}
+									</h2>
+								) : null}
+								<div className="flex flex-col gap-0.5">{renderSectionItems(contactSection)}</div>
 							</section>
 						))}
 					</div>
