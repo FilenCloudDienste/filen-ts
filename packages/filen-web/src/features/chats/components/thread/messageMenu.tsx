@@ -6,6 +6,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { messageMenuActions, type MessageActionDescriptor } from "@/features/chats/components/thread/messageMenu.logic"
 import { retryInflightMessage, removeInflightMessage } from "@/features/chats/lib/inflight"
+import { useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import type { ChatSendState } from "@/features/chats/store/useChatsInflight"
 import { ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu"
 
@@ -27,6 +28,8 @@ export interface MessageMenuContentProps {
 // ever dispatches the confirm request.
 export function MessageContextMenuContent({ chat, message, currentUserId, sendState, onRequestDelete }: MessageMenuContentProps) {
 	const { t } = useTranslation("chats")
+	const beginReply = useChatComposerStore(state => state.beginReply)
+	const beginEdit = useChatComposerStore(state => state.beginEdit)
 	const descriptors = messageMenuActions(message, currentUserId, sendState)
 
 	async function handleCopy(): Promise<void> {
@@ -43,6 +46,19 @@ export function MessageContextMenuContent({ chat, message, currentUserId, sendSt
 	}
 
 	function handleClick(descriptor: MessageActionDescriptor): void {
+		if (descriptor.id === "reply") {
+			beginReply(chat.uuid, { kind: "reply", message })
+
+			return
+		}
+
+		if (descriptor.id === "edit") {
+			// Load the message body into the draft and pin edit mode in one write (mobile parity).
+			beginEdit(chat.uuid, { kind: "edit", message }, message.message ?? "")
+
+			return
+		}
+
 		if (descriptor.id === "copy") {
 			void handleCopy()
 

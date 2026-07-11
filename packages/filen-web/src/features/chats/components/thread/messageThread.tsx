@@ -5,8 +5,9 @@ import { MoreHorizontalIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
 import { useChatMessages, loadOlderChatMessages } from "@/features/chats/queries/chatMessages"
 import { buildThreadRows, computeScrollAfterPrepend } from "@/features/chats/components/thread/thread.logic"
-import { composeMessageList } from "@/features/chats/lib/sync.logic"
+import { composeMessageList, type OptimisticSender } from "@/features/chats/lib/sync.logic"
 import { useChatsInflightStore } from "@/features/chats/store/useChatsInflight"
+import { Composer } from "@/features/chats/components/thread/composer"
 import { dayKind, formatFullDate } from "@/features/chats/lib/time"
 import { chatDisplayName, isChatUndecryptable } from "@/features/chats/lib/sort"
 import { MessageRow } from "@/features/chats/components/thread/messageRow"
@@ -39,8 +40,9 @@ function DaySeparator({ timestamp }: { timestamp: bigint }) {
 // Read-only conversation thread (D3 dense grouped flat rows). Messages ascend (oldest→newest); the list is
 // virtualized (@tanstack/react-virtual — the app's own virtualizer, notesSidebar's convention) and opens
 // pinned to the bottom (newest). Scrolling to the top loads one older page via loadOlderChatMessages
-// (prepend + dedupe) with scroll-position preservation. NO composer — a disabled placeholder strip keeps
-// the layout honest until the send wave lands. The header's ⋮ trigger hosts the conversation menu
+// (prepend + dedupe) with scroll-position preservation. The composer strip at the bottom routes every
+// send through the C3 outbox (Composer); an own send jumps the view back to the bottom. The header's ⋮
+// trigger hosts the conversation menu
 // (rename/mute/participants/leave/delete + the explicit "mark as read" entry) — the ONLY place this wave
 // wires markChatRead: never auto-fired on mount (synthesis §1g/§3.6 — old-web's explicit-mark model, not
 // mobile's own screen-open trigger).
@@ -64,6 +66,9 @@ export function MessageThread({ chat }: { chat: Chat }) {
 		inflightMessages: queuedMessages,
 		failedMessages
 	})
+	// uuids of uncommitted optimistic entries (queued or failed) — their uuid IS their inflightId, so the
+	// composer excludes them from the ArrowUp-edit target (an uncommitted send has no server uuid to edit).
+	const nonConfirmedUuids = new Set<string>([...queuedMessages, ...failedMessages].map(message => message.uuid))
 	const dialogHost = useChatDialogHost({ currentUuid: chatUuid })
 
 	const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -74,6 +79,19 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	const initialScrollChatRef = useRef<string | null>(null)
 	// Set at load-older trigger time so the post-prepend layout effect can restore the viewport.
 	const restoreRef = useRef<{ prevScrollHeight: number; prevScrollTop: number } | null>(null)
+	// Set on an own send so the next list growth jumps the view to the bottom (mobile parity — sending
+	// while scrolled up snaps back to the newest message).
+	const stickBottomRef = useRef(false)
+
+	const sender: OptimisticSender | undefined =
+		accountQuery.data !== undefined
+			? {
+					id: accountQuery.data.id,
+					email: accountQuery.data.email,
+					avatarUrl: accountQuery.data.avatarUrl,
+					nickName: accountQuery.data.nickName
+				}
+			: undefined
 
 	const rows = buildThreadRows(messages)
 
@@ -117,6 +135,18 @@ export function MessageThread({ chat }: { chat: Chat }) {
 
 		restoreRef.current = null
 		el.scrollTop = computeScrollAfterPrepend(restore.prevScrollHeight, restore.prevScrollTop, el.scrollHeight)
+	}, [rows.length])
+
+	// Jump to the bottom after an own send appends its optimistic bubble (the list grew).
+	useLayoutEffect(() => {
+		const el = scrollRef.current
+
+		if (el === null || !stickBottomRef.current) {
+			return
+		}
+
+		stickBottomRef.current = false
+		el.scrollTop = el.scrollHeight
 	}, [rows.length])
 
 	async function handleScroll(): Promise<void> {
@@ -255,14 +285,15 @@ export function MessageThread({ chat }: { chat: Chat }) {
 			</header>
 			<div className="h-px shrink-0 bg-border/50" />
 			{renderList()}
-			{/* Disabled composer placeholder — the read-only wave renders the strip so the layout matches the
-			    eventual composer, but nothing sends yet (send lands in a later wave). */}
-			<div className="shrink-0 p-3">
-				<div className="flex items-center gap-2 rounded-xl bg-muted px-3 py-2.5 text-sm text-muted-foreground">
-					<span className="flex-1 truncate">{t("chatComposerPlaceholder")}</span>
-					<span className="shrink-0 text-xs">{t("chatComposerUnavailable")}</span>
-				</div>
-			</div>
+			<Composer
+				chat={chat}
+				messages={messages}
+				nonConfirmedUuids={nonConfirmedUuids}
+				sender={sender}
+				onSent={() => {
+					stickBottomRef.current = true
+				}}
+			/>
 			{dialogHost.renderActiveDialog()}
 		</div>
 	)

@@ -3,14 +3,14 @@ import { useTranslation } from "react-i18next"
 import type { Chat } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
 import { segmentMessage } from "@/features/chats/lib/regexed.logic"
+import { emojiForShortcode } from "@/features/chats/lib/emoji"
 import { contactDisplayName } from "@/features/contacts/components/contactsList.logic"
 
 // Renders one message body from the pure segment list. Every branch emits a React text node or element —
 // never parsed HTML, never dangerouslySetInnerHTML — so injection is structurally impossible (synthesis
 // §3.5). Links are hardened at the segment layer (regexed.logic.hardenLinkHref) AND rendered with
-// rel="noopener noreferrer nofollow" + target="_blank". Emoji shortcodes render as their literal text this
-// wave (the custom emoji pack lands with the composer wave); the segment already exists so the image slots
-// in later with no call-site change.
+// rel="noopener noreferrer nofollow" + target="_blank". Emoji shortcodes resolve to standard unicode
+// glyphs (emoji.ts); an unknown shortcode (a custom-pack name from a mobile/old-web peer) stays literal.
 export function MessageContent({ chat, text }: { chat: Chat; text: string | undefined }) {
 	const { t } = useTranslation("chats")
 	const segments = segmentMessage(text)
@@ -72,9 +72,17 @@ export function MessageContent({ chat, text }: { chat: Chat; text: string | unde
 						)
 					}
 
-					case "emoji":
-						// Literal shortcode until the emoji pack lands (see file header).
-						return <Fragment key={index}>:{segment.shortcode}:</Fragment>
+					case "emoji": {
+						// Resolve `:shortcode:` to a standard unicode glyph (emoji.ts); an unknown shortcode
+						// (e.g. a custom-pack name a peer sent) falls back to its literal text.
+						const glyph = emojiForShortcode(segment.shortcode)
+
+						return glyph !== undefined ? (
+							<Fragment key={index}>{glyph}</Fragment>
+						) : (
+							<Fragment key={index}>:{segment.shortcode}:</Fragment>
+						)
+					}
 
 					default:
 						return null

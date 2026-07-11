@@ -207,4 +207,122 @@ test.describe("chats", () => {
 			await page.evaluate(u => window.__filenE2E.deleteTestChatByUuid(u), uuid)
 		})
 	})
+
+	// The FULL UI path (composer → outbox → confirmed → reply → edit), on the zero-contacts account via a
+	// self-chat. Opens the conversation by clicking its sidebar row (client-nav; the hook seeds the list
+	// cache so the row is present), then drives real keystrokes: type + Enter renders the optimistic bubble
+	// and the outbox commits it (asserted by a fresh server read); a menu reply renders its reply-to line;
+	// a menu edit stamps the edited marker.
+	async function openSelfChatThread(page: Page): Promise<string> {
+		const uuid = await page.evaluate(() => window.__filenE2E.createTestSelfChat())
+
+		// The seeded row (named "e2e-chat-…") appears in the sidebar; click it to open the thread.
+		const row = page.getByRole("complementary").getByRole("link", { name: /e2e-chat-/ })
+		await expect(row).toBeVisible({ timeout: 30_000 })
+		await row.click()
+		await page.waitForURL(new RegExp(`/chats/${uuid}`))
+
+		return uuid
+	}
+
+	async function sendViaComposer(page: Page, text: string): Promise<void> {
+		const input = page.getByRole("textbox", { name: "Message" })
+		await input.click()
+		await input.fill(text)
+		await input.press("Enter")
+	}
+
+	test("composer: type + Enter delivers through the outbox, then reply + edit render (self-chat)", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await gotoChats(page)
+
+		await withChatLeakGuard(page, async () => {
+			const uuid = await openSelfChatThread(page)
+			const text = `ui-send-${String(Date.now())}`
+
+			await sendViaComposer(page, text)
+
+			// Optimistic bubble is painted immediately...
+			await expect(page.getByText(text, { exact: true })).toBeVisible()
+			// ...and the outbox commits it (fresh server read) — the "Sending…" marker clears on commit.
+			await expect
+				.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
+				.toContain(text)
+			await expect(page.getByText("Sending…", { exact: true })).toHaveCount(0)
+
+			// Reply via the message context menu → the reply chip → a reply that renders its reply-to line.
+			await page.getByText(text, { exact: true }).click({ button: "right" })
+			await page.getByRole("menuitem", { name: "Reply", exact: true }).click()
+
+			const replyText = `ui-reply-${String(Date.now())}`
+			await sendViaComposer(page, replyText)
+
+			await expect(page.getByText(replyText, { exact: true })).toBeVisible()
+			await expect(page.getByText(/Replying to/).first()).toBeVisible()
+			await expect
+				.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
+				.toContain(replyText)
+
+			// Edit that reply via the menu → the edited body + the (edited) marker.
+			await expect(page.getByText("Sending…", { exact: true })).toHaveCount(0)
+			await page.getByText(replyText, { exact: true }).click({ button: "right" })
+			await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
+
+			const editedText = `ui-edited-${String(Date.now())}`
+			const input = page.getByRole("textbox", { name: "Message" })
+			await input.fill(editedText)
+			await input.press("Enter")
+
+			await expect(page.getByText(editedText, { exact: true })).toBeVisible({ timeout: 30_000 })
+			await expect(page.getByText("(edited)", { exact: true }).first()).toBeVisible()
+
+			await page.evaluate(u => window.__filenE2E.deleteTestChatByUuid(u), uuid)
+		})
+	})
+
+	// Kill-path THROUGH THE UI: type + Enter while offline (the composer enqueues + persists, never sends),
+	// kill the tab, reopen → replay-on-launch delivers it EXACTLY ONCE. Same guarantee as the hook-driven
+	// kill-path, proven end-to-end from a real keystroke.
+	test("composer kill-path: an offline send survives a reload and replays exactly once (self-chat)", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await gotoChats(page)
+
+		await withChatLeakGuard(page, async () => {
+			const uuid = await openSelfChatThread(page)
+			const text = `ui-killpath-${String(Date.now())}`
+
+			await page.context().setOffline(true)
+			await sendViaComposer(page, text)
+
+			// Persisted to disk (OPFS) before any send — the survives-window-close guarantee, from a keystroke.
+			await expect.poll(() => page.evaluate(u => window.__filenE2E.readPersistedInflightChatMessages(u), uuid)).toContain(text)
+
+			// Kill the tab; only the durable-queue replay on reload can now reach the server.
+			await page.context().setOffline(false)
+			await page.reload()
+			await dismissStartupReminders(page)
+			await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+
+			await expect
+				.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
+				.toContain(text)
+
+			const texts = await page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid)
+			expect(texts.filter(t => t === text)).toHaveLength(1)
+
+			await page.evaluate(u => window.__filenE2E.deleteTestChatByUuid(u), uuid)
+		})
+	})
 })

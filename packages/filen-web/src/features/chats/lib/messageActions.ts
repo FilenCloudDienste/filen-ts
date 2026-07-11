@@ -1,16 +1,17 @@
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { chatsQueryUpsert } from "@/features/chats/queries/chats"
-import { chatMessagesQueryRemove } from "@/features/chats/queries/chatMessages"
+import { chatMessagesQueryRemove, chatMessagesQueryUpsert } from "@/features/chats/queries/chatMessages"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 
 export type { VoidActionOutcome }
 
-// Message-level actions LIMITED to what needs no composer this wave (scope fence: edit and
-// disableMessageEmbed both land with the composer/embeds waves). Copy-to-clipboard is a pure client
-// affordance with nothing to patch, so it lives inline in messageMenu.tsx (mirrors noteMenu.tsx's own
-// copyId handling) rather than here.
+// Message-level actions that need no OUTBOX (scope fence: disableMessageEmbed lands with the embeds
+// wave). Copy-to-clipboard is a pure client affordance with nothing to patch, so it lives inline in
+// messageMenu.tsx (mirrors noteMenu.tsx's own copyId handling) rather than here. Edit is ONLINE-only /
+// best-effort — NOT routed through the send outbox — mirroring mobile/old-web: only the initial SEND is
+// fault-tolerant, an edit targets an already-committed server uuid and a failure restores the input.
 
 // Sender-only (verified against mobile's message menu.tsx: `isOwner = message.senderId === userId` —
 // the MESSAGE sender, not the chat owner; a chat owner cannot delete another participant's message).
@@ -27,6 +28,24 @@ export async function deleteMessage(chat: Chat, message: ChatMessage): Promise<V
 
 	chatsQueryUpsert(updatedChat)
 	chatMessagesQueryRemove(chat.uuid, message.uuid)
+
+	return { status: "success" }
+}
+
+// Sender-only (gate lives in messageMenu.logic — the entry is absent for a non-sender). editMessage
+// returns the re-encrypted ChatMessage (same uuid, edited=true); the returned message patches the
+// thread cache so the edited marker appears without waiting for the socket echo (C5). Online-best-
+// effort: a failure returns an error DTO and the caller (composer) restores the input for a retry.
+export async function editMessage(chat: Chat, message: ChatMessage, newMessage: string): Promise<VoidActionOutcome> {
+	let updated: ChatMessage
+
+	try {
+		updated = await runOp(sdkApi.editMessage(chat, message, newMessage))
+	} catch (e) {
+		return { status: "error", dto: asErrorDTO(e) }
+	}
+
+	chatMessagesQueryUpsert(chat.uuid, updated)
 
 	return { status: "success" }
 }

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import { CopyIcon, Trash2Icon } from "lucide-react"
+import { CornerUpLeftIcon, CopyIcon, PencilIcon, Trash2Icon } from "lucide-react"
 import type { Chat, ChatMessage, UuidStr } from "@filen/sdk-rs"
 
 function testUuid(label: string): UuidStr {
@@ -9,16 +9,16 @@ function testUuid(label: string): UuidStr {
 
 // Mock boundary matching chatsQueries.test.ts: the real sdk client module imports a Vite `?worker`,
 // unresolvable under node vitest. messageMenuActions itself needs neither mock (pure logic, no sdk/
-// queryClient import) — only deleteMessage (lib/messageActions.ts) does.
-const { deleteMessageOp } = vi.hoisted(() => ({ deleteMessageOp: vi.fn() }))
+// queryClient import) — only deleteMessage/editMessage (lib/messageActions.ts) do.
+const { deleteMessageOp, editMessageOp } = vi.hoisted(() => ({ deleteMessageOp: vi.fn(), editMessageOp: vi.fn() }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { deleteMessage: deleteMessageOp } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { deleteMessage: deleteMessageOp, editMessage: editMessageOp } }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { CHATS_QUERY_KEY, chatsQueryGet } from "@/features/chats/queries/chats"
 import { chatMessagesQueryKey, chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
-import { deleteMessage } from "@/features/chats/lib/messageActions"
+import { deleteMessage, editMessage } from "@/features/chats/lib/messageActions"
 import { messageMenuActions } from "@/features/chats/components/thread/messageMenu.logic"
 
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
@@ -69,25 +69,37 @@ function mockChat(overrides: Partial<Chat> = {}): Chat {
 }
 
 describe("messageMenuActions", () => {
-	it("copy only, for a decryptable message from someone else", () => {
+	it("reply + copy, for a confirmed decryptable message from someone else", () => {
 		const message = mockMessage({ senderId: 5 })
 
-		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["copy"])
+		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["reply", "copy"])
 	})
 
-	it("copy + delete, for a decryptable message from the current user (sender-only delete)", () => {
+	it("reply + copy + edit + delete, for a confirmed decryptable own message (sender-only edit/delete)", () => {
 		const message = mockMessage({ senderId: 1 })
 
-		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["copy", "delete"])
+		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["reply", "copy", "edit", "delete"])
 	})
 
 	it("coerces senderId (number) to BigInt before comparing to the bigint userId — not a raw ===", () => {
 		const message = mockMessage({ senderId: 42 })
 
-		expect(messageMenuActions(message, 42n).map(d => d.id)).toContain("delete")
+		expect(messageMenuActions(message, 42n).map(d => d.id)).toEqual(["reply", "copy", "edit", "delete"])
 	})
 
-	it("omits copy for an undecryptable message (message === undefined)", () => {
+	it("a pending send offers copy only (no reply/edit — its uuid is not a server uuid yet)", () => {
+		const message = mockMessage({ senderId: 1 })
+
+		expect(messageMenuActions(message, 1n, "pending").map(d => d.id)).toEqual(["copy"])
+	})
+
+	it("a failed send offers copy + retry + remove (never reply/edit/delete)", () => {
+		const message = mockMessage({ senderId: 1 })
+
+		expect(messageMenuActions(message, 1n, "failed").map(d => d.id)).toEqual(["copy", "retry", "remove"])
+	})
+
+	it("an undecryptable own message offers delete only (no reply/copy/edit — no text)", () => {
 		const message = mockUndecryptableMessage({ senderId: 1 })
 
 		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["delete"])
@@ -99,20 +111,22 @@ describe("messageMenuActions", () => {
 		expect(messageMenuActions(message, 1n)).toEqual([])
 	})
 
-	it("no entries when currentUserId is unresolved (undefined) — only copy survives if decryptable", () => {
+	it("with an unresolved currentUserId a confirmed decryptable message still offers reply + copy", () => {
 		const decryptable = mockMessage({ senderId: 1 })
 		const undecryptable = mockUndecryptableMessage({ senderId: 1 })
 
-		expect(messageMenuActions(decryptable, undefined).map(d => d.id)).toEqual(["copy"])
+		expect(messageMenuActions(decryptable, undefined).map(d => d.id)).toEqual(["reply", "copy"])
 		expect(messageMenuActions(undecryptable, undefined)).toEqual([])
 	})
 
-	it("descriptor facts: copy/delete carry their expected label and icon", () => {
+	it("descriptor facts: reply/copy/edit/delete carry their expected label and icon", () => {
 		const message = mockMessage({ senderId: 1 })
 		const descriptors = messageMenuActions(message, 1n)
 
 		expect(descriptors).toEqual([
+			{ id: "reply", labelKey: "chatMessageActionReply", icon: CornerUpLeftIcon, run: "direct" },
 			{ id: "copy", labelKey: "chatMessageActionCopy", icon: CopyIcon, run: "direct" },
+			{ id: "edit", labelKey: "chatMessageActionEdit", icon: PencilIcon, run: "direct" },
 			{ id: "delete", labelKey: "chatMessageActionDelete", icon: Trash2Icon, run: "dialog", destructive: true }
 		])
 	})
@@ -147,6 +161,39 @@ describe("deleteMessage", () => {
 		deleteMessageOp.mockRejectedValueOnce(new Error("fail"))
 
 		const outcome = await deleteMessage(chat, message)
+
+		expect(outcome.status).toBe("error")
+		expect(chatMessagesQueryGet(chat.uuid)).toEqual([message])
+	})
+})
+
+describe("editMessage", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		testQueryClient.clear()
+	})
+
+	it("patches the thread cache with the returned edited message (same uuid, edited=true)", async () => {
+		const chat = mockChat()
+		const message = mockMessage({ message: "before" })
+		testQueryClient.setQueryData(chatMessagesQueryKey(chat.uuid), [message])
+		const edited = { ...message, message: "after", edited: true }
+		editMessageOp.mockResolvedValueOnce(edited)
+
+		const outcome = await editMessage(chat, message, "after")
+
+		expect(editMessageOp).toHaveBeenCalledExactlyOnceWith(chat, message, "after")
+		expect(outcome).toEqual({ status: "success" })
+		expect(chatMessagesQueryGet(chat.uuid)).toEqual([edited])
+	})
+
+	it("returns an error outcome on rejection, leaving the cache untouched (input restored by the caller)", async () => {
+		const chat = mockChat()
+		const message = mockMessage({ message: "before" })
+		testQueryClient.setQueryData(chatMessagesQueryKey(chat.uuid), [message])
+		editMessageOp.mockRejectedValueOnce(new Error("fail"))
+
+		const outcome = await editMessage(chat, message, "after")
 
 		expect(outcome.status).toBe("error")
 		expect(chatMessagesQueryGet(chat.uuid)).toEqual([message])

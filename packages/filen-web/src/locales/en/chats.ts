@@ -1,11 +1,10 @@
-// English source catalog — "chats" namespace: the read-only chats module shell (contextual sidebar
-// conversation list, conversation rows, the message thread with its burst-grouped rows, day
-// separators, reply-to lines, and the disabled composer placeholder strip). Same typed-catalog rules
+// English source catalog — "chats" namespace: the chats module shell (contextual sidebar conversation
+// list, conversation rows, the message thread with its burst-grouped rows, day separators, reply-to
+// lines, message menus, and the composer with its reply/edit/send affordances). Same typed-catalog rules
 // as common/errors/auth/drive/contacts/notes: flat `as const` object, camelCase keys, no literal '.'
 // or ':' (real i18next namespaces, keySeparator/nsSeparator both ON). `moduleChats` (the icon-rail
 // label) stays in "common" — not duplicated here. Wording mirrors filen-mobile's chats feature and the
-// legacy web where an equivalent surface exists. Composer/send copy is intentionally minimal here —
-// the real composer lands in a later wave; this wave only renders a disabled placeholder strip.
+// legacy web where an equivalent surface exists.
 export const chats = {
 	// ── Sidebar ─────────────────────────────────────────────────────────────────
 	/** Chats sidebar — header title over the conversation list column */
@@ -71,11 +70,23 @@ export const chats = {
 	/** Thread — day separator label for messages sent yesterday */
 	chatDayYesterday: "Yesterday",
 
-	// ── Composer placeholder (send lands in a later wave) ─────────────────────────
-	/** Thread — placeholder text inside the disabled composer strip */
+	// ── Composer ──────────────────────────────────────────────────────────────────
+	/** Composer — textarea placeholder + accessible label */
 	chatComposerPlaceholder: "Message",
-	/** Thread — note explaining the composer is not yet interactive */
-	chatComposerUnavailable: "Sending isn't available yet",
+	/** Composer — accessible label on the send button */
+	chatComposerSend: "Send message",
+	/** Composer — accessible label on the send button while editing a message */
+	chatComposerSaveEdit: "Save edit",
+	/** Composer — banner label while editing an existing message */
+	chatComposerEditing: "Editing message",
+	/** Composer — accessible label on the button that cancels an in-progress reply */
+	chatComposerCancelReply: "Cancel reply",
+	/** Composer — accessible label on the button that cancels an in-progress edit */
+	chatComposerCancelEdit: "Cancel edit",
+	/** Composer — shown under the input when the message exceeds the maximum length */
+	chatComposerOverLimit: "Message is too long (max {{max}} characters)",
+	/** Composer — toast when a queued send couldn't be written to disk (survives in memory only) */
+	chatMessageNotSaved: "Message couldn't be saved to this device",
 
 	// ── Conversation actions (C2 — no send/composer) ──────────────────────────────
 	/** Sidebar — opens the new-conversation contact picker */
@@ -155,7 +166,11 @@ export const chats = {
 	/** Add-participants dialog — shown when every contact is already a participant */
 	chatParticipantsAddEmpty: "No contacts available to add",
 
-	// ── Message menu (copy/delete only — reply/edit land with the composer wave) ─────
+	// ── Message menu ─────────────────────────────────────────────────────────────
+	/** Message menu — quotes the message in the composer as a reply target */
+	chatMessageActionReply: "Reply",
+	/** Message menu — loads an own message's text into the composer for an in-place edit (sender-only) */
+	chatMessageActionEdit: "Edit",
 	/** Message menu — copies the message text to the clipboard */
 	chatMessageActionCopy: "Copy",
 	/** Message menu — deletes the message (sender-only, opens chatMessageDeleteDialog) */

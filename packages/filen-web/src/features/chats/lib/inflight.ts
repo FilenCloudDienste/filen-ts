@@ -2,6 +2,7 @@ import { run } from "@filen/utils"
 import type { Chat } from "@filen/sdk-rs"
 import { log } from "@/lib/log"
 import { sync } from "@/features/chats/lib/sync"
+import { deleteDraft } from "@/features/chats/lib/drafts"
 import { chatMessagesQueryUpdate } from "@/features/chats/queries/chatMessages"
 import useChatsInflightStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChatsInflight"
 
@@ -9,10 +10,13 @@ import useChatsInflightStore, { type ChatMessageWithInflightId } from "@/feature
 // best-effort and silent (callers own UX / must not fail a succeeded removal over cleanup).
 
 // Purges every piece of per-chat send state when a chat is removed: queued unsent messages, their
-// error/strike records, and the persisted queue on disk. Called from all removal paths (leaveChat,
-// deleteChat in lib/actions.ts, and — a later wave — the conversationDeleted socket event). Never
-// throws; never fires UI. (Per-chat input drafts land with the composer wave — the seam is here.)
+// error/strike records, the persisted queue on disk, AND the per-chat composer draft. Called from all
+// removal paths (leaveChat, deleteChat in lib/actions.ts, and — a later wave — the conversationDeleted
+// socket event). Never throws; never fires UI.
 export async function purgeChatInflightState(chatUuid: string): Promise<void> {
+	// Drop the persisted draft (best-effort, never throws).
+	await deleteDraft(chatUuid)
+
 	useChatsInflightStore.getState().setInflightMessages(prev => {
 		if (!prev[chatUuid]) {
 			return prev
