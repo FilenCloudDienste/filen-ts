@@ -36,9 +36,11 @@ test.describe("boot", () => {
 		expect(await page.evaluate(() => window.desktop)).toBeUndefined()
 		await expect(page.getByRole("button", { name: "Close window" })).toHaveCount(0)
 
-		// A rail tooltip renders on hover.
-		await page.getByRole("button", { name: "Notes" }).hover()
+		// A rail tooltip renders on hover — Chats is the remaining disabled "coming soon" module (Notes
+		// was promoted to a real, enabled rail Link when the notes module landed).
+		await page.getByRole("button", { name: "Chats" }).hover()
 		await expect(page.getByText("Coming soon")).toBeVisible()
+		await expect(page.getByRole("link", { name: "Notes", exact: true })).toBeVisible()
 
 		// A real authenticated read against the API settles true — proves the injected session
 		// authenticates, not merely that a Client object exists. The SDK worker's cross-origin fetch
