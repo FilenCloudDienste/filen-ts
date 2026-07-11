@@ -16,17 +16,21 @@ export async function fetchNoteContent(note: Note): Promise<string | undefined> 
 	return sdkApi.getNoteContent(note)
 }
 
-// staleTime: Infinity — content never goes stale on its own; the editor wave gates `enabled` on
-// "not currently inflight in the sync outbox" (synthesis §3.3's disabled-while-inflight rule) so a
-// pending local edit is never clobbered by a refetch, and invalidates explicitly after a confirmed
-// write instead. `note` is optional so a caller can mount the hook before its Note is resolved
-// (e.g. the editor route's first render, before the notes list query has settled) without a
-// conditional hook call.
+// staleTime: Infinity + refetchOnMount:"always" — mobile's exact per-note content config. staleTime
+// Infinity stops focus/reconnect refetches from clobbering an open editor mid-session; but this query
+// is PERSISTED per-query (queries/client.ts persister), and the sync loop's post-push cache write does
+// NOT re-persist to disk, so a plain "never stale" query would rehydrate a STALE disk value on the next
+// load and — being never-stale — never refetch it (a reload right after editing would then paint the
+// pre-edit content). refetchOnMount:"always" bypasses the stale check ON MOUNT ONLY, so a fresh editor
+// mount always pulls authoritative server content, while a note that is currently inflight has the
+// query DISABLED (so no mount refetch fires) and its in-flight edit stays protected. Explicit
+// invalidation still owns freshness after a confirmed write. `note` is optional so a caller can mount
+// the hook before its Note is resolved (the editor route's first render) without a conditional hook.
 //
-// USAGE NOTE for the editor wave: `dataUpdatedAt` on this hook's result is the intended editor
-// remount key (synthesis §3.3) — because the query is disabled while the note has an inflight
-// outbox entry, `dataUpdatedAt` cannot advance mid-edit, so a component keyed on it never remounts
-// (and blows away in-progress keystrokes) while a local edit is still pending.
+// USAGE NOTE for the editor: `dataUpdatedAt` on this hook's result is the editor remount key (synthesis
+// §3.3) — because the query is disabled while the note has an inflight outbox entry, `dataUpdatedAt`
+// cannot advance mid-edit, so a component keyed on it never remounts (and blows away in-progress
+// keystrokes) while a local edit is still pending.
 export function useNoteContentQuery(note: Note | undefined, options?: { enabled?: boolean }): UseQueryResult<string | undefined> {
 	// UI gating seam (synthesis §3.3): disable the read while the note has a pending sync-outbox entry.
 	// `dataUpdatedAt` (the editor's remount key) therefore cannot advance mid-edit, so the editor never
@@ -46,6 +50,7 @@ export function useNoteContentQuery(note: Note | undefined, options?: { enabled?
 			return fetchNoteContent(note)
 		},
 		enabled: (options?.enabled ?? true) && note !== undefined && !inflight,
-		staleTime: Infinity
+		staleTime: Infinity,
+		refetchOnMount: "always"
 	})
 }

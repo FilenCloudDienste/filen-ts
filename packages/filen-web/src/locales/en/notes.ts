@@ -75,6 +75,14 @@ export const notes = {
 	/** Markdown reader — accessible label on the draggable divider between the source and preview panes */
 	noteMdSplitResize: "Resize markdown preview",
 
+	// ── Editor (live editing) ────────────────────────────────────────────────────
+	/** Editor header — accessible label on the sync spinner shown while the note's edit is in flight */
+	noteSyncing: "Saving…",
+	/** Editor — banner shown when a note has reached its maximum size; further edits are not saved */
+	noteSizeLimitReached: "This note has reached its maximum size. New changes won't be saved until you shorten it.",
+	/** Keymap — description for the Cmd/Ctrl+S action that flushes the pending save immediately */
+	notesSaveAction: "Save note now",
+
 	// ── Note menu (noteMenu.tsx) ─────────────────────────────────────────────
 	/** Note menu trigger — accessible label on the row/header ⋯ button, mirrors driveItemMenuTrigger */
 	noteItemMenuTrigger: "More actions",

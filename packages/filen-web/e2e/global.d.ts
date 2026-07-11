@@ -28,6 +28,8 @@ interface E2eHooks {
 		content: string,
 		title: string
 	) => Promise<{ uuid: string }>
+	readTestNoteContentByUuid: (uuid: string) => Promise<string | null>
+	readPersistedInflightContent: (uuid: string) => Promise<string | null>
 	sweepTestNotesByTitlePrefix: (prefix: string) => Promise<number>
 	sweepTestTagsByNamePrefix: (prefix: string) => Promise<number>
 	thumbnailFileStat: (parentUuid: string, name: string) => Promise<{ size: number; lastModified: number } | null>

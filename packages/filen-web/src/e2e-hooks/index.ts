@@ -9,6 +9,8 @@ import { comboFor, setUserCombo } from "@/lib/keymap/registry"
 import { persistSession, resumeSession } from "@/lib/sdk/session"
 import { whenBootReady } from "@/lib/sdk/boot"
 import { readThumbnailBlob } from "@/features/drive/lib/thumbCache"
+import { inflightContentSchema } from "@/features/notes/lib/sync.logic"
+import { latestInflightContent } from "@/features/notes/hooks/useNoteEditor.logic"
 import { log } from "@/lib/log"
 
 // Test-only hooks, loaded ONLY when the app is built with VITE_E2E=1 (a dynamic import behind that
@@ -73,6 +75,14 @@ interface E2eHooks {
 	// no test-chosen identity). Returns the final Note row for the caller to navigate to and later pass
 	// to deleteTestNoteByUuid for net-zero teardown.
 	createTestNoteWithContent: (noteType: NoteType, content: string, title: string) => Promise<Note>
+	// Fresh server read of a note's content by uuid, bypassing every client cache — lists notes, finds
+	// the uuid, decrypts its content. The editor-persistence e2e cases poll this to prove a typed edit
+	// actually reached the server after the debounce fired. Null when the uuid isn't found.
+	readTestNoteContentByUuid: (uuid: string) => Promise<string | null>
+	// The latest DURABLE (OPFS) outbox content for a note, read straight from the kv store the sync
+	// outbox persists to — proves the immediate-persist landed on disk BEFORE a reload, the crux of the
+	// kill-path proof (survives window close). Null when nothing is persisted for the uuid.
+	readPersistedInflightContent: (uuid: string) => Promise<string | null>
 	// Defensive sweep, same rationale as e2e/setup/cleanup.setup.ts's drive-side scratch-debris sweep:
 	// the FREE e2e account's note cap is a hard 10 (server-enforced `note_limit_reached`), far tighter
 	// than drive's storage quota, so ANY spec that dies before its own teardown compounds into real,
@@ -195,6 +205,28 @@ export function installE2eHooks(router: RouterLike): void {
 			note = await sdkApi.setNoteTitle(note, title)
 
 			return note
+		},
+		readTestNoteContentByUuid: async uuid => {
+			await whenBootReady()
+
+			const note = (await sdkApi.listNotes()).find(n => n.uuid === uuid)
+
+			if (note === undefined) {
+				return null
+			}
+
+			return (await sdkApi.getNoteContent(note)) ?? null
+		},
+		readPersistedInflightContent: async uuid => {
+			await whenBootReady()
+
+			const outbox = await kvGetJson("inflightNoteContent", inflightContentSchema)
+
+			if (outbox === null) {
+				return null
+			}
+
+			return latestInflightContent(outbox[uuid])
 		},
 		sweepTestNotesByTitlePrefix: async prefix => {
 			await whenBootReady()

@@ -107,6 +107,10 @@ export interface CodeMirrorSourceProps {
 	// component re-rendering its parent on every keystroke. Kept up to date from an effect (never
 	// during render — refs are an event-handler/effect-only escape hatch).
 	contentRef?: RefObject<string | null>
+	// Per-change callback (editable-only): fires the CURRENT buffer on EVERY change, not just the
+	// dirty edge — the notes editor's immediate-persist rule enqueues on every keystroke, unlike the
+	// preview save path that reads on demand via contentRef. Read-only callers omit it (never fires).
+	onValueChange?: (value: string) => void
 }
 
 function noopDirtyChange(): void {
@@ -121,7 +125,15 @@ function noopDirtyChange(): void {
 // that is the ONLY path that may ever reseed it; nothing in here ever re-derives `content` from a
 // later `text` prop change, so a re-render from an unrelated cause (theme flip, language chunk
 // landing) can never clobber in-progress edits or echo-loop.
-export function CodeMirrorSource({ text, tag, alt, editable = false, onDirtyChange = noopDirtyChange, contentRef }: CodeMirrorSourceProps) {
+export function CodeMirrorSource({
+	text,
+	tag,
+	alt,
+	editable = false,
+	onDirtyChange = noopDirtyChange,
+	contentRef,
+	onValueChange
+}: CodeMirrorSourceProps) {
 	const { theme } = useTheme()
 	// "system" resolves once per render against the live media query — cheap, and consistent with this
 	// being a low-stakes styling read rather than a value anything else depends on.
@@ -146,6 +158,14 @@ export function CodeMirrorSource({ text, tag, alt, editable = false, onDirtyChan
 		}
 	}, [contentRef, editable, content])
 
+	// Editable change handler: updates the internal buffer AND forwards every change to a notes
+	// caller's per-keystroke sink. Read-only mode omits onChange entirely (below), so this never runs
+	// for a preview/reader mount and can never echo-loop the frozen seed.
+	function handleChange(value: string): void {
+		setContent(value)
+		onValueChange?.(value)
+	}
+
 	return (
 		<div className="size-full">
 			<CodeMirror
@@ -163,7 +183,7 @@ export function CodeMirrorSource({ text, tag, alt, editable = false, onDirtyChan
 				aria-label={alt}
 				// exactOptionalPropertyTypes rejects an explicit onChange={undefined} — omit the key entirely
 				// in read-only mode instead.
-				{...(editable ? { onChange: setContent } : {})}
+				{...(editable ? { onChange: handleChange } : {})}
 			/>
 		</div>
 	)

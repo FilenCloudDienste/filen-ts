@@ -457,3 +457,123 @@ test.describe("notes: read-only content renderers", () => {
 		}
 	})
 })
+
+// Live CodeMirror editing wired to the fault-tolerant outbox (e2-editor-text). These two legs are the
+// proof of the founder's mandate: an edit survives a window-kill mid-edit AND still reaches the server.
+// Serial + net-zero like every note-creating test above.
+async function createEmptyNoteAndOpen(page: Page, noteType: "text" | "md", titlePrefix: string): Promise<{ uuid: string; title: string }> {
+	const title = `${titlePrefix} ${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+
+	await page.goto("/drive")
+	await dismissStartupReminders(page)
+	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+
+	// Empty content — the editor is what writes the content in these cases, not the hook.
+	const note = await page.evaluate(args => window.__filenE2E.createTestNoteWithContent(args.noteType, "", args.title), {
+		noteType,
+		title
+	})
+
+	await openNoteByTitle(page, title, note.uuid)
+
+	return { uuid: note.uuid, title }
+}
+
+// Enter /notes from the rail and open the note whose title matches, scoped to the sidebar (the same
+// title. The row is clicked by its href, not its text: an EMPTY note repeats its title in BOTH the
+// row's title span AND its preview snippet (noteRow.tsx falls the preview back to the title), so a
+// getByText match would be strict-mode ambiguous.
+async function openNoteByTitle(page: Page, title: string, uuid: string): Promise<void> {
+	await page.getByRole("link", { name: "Notes", exact: true }).click()
+	await page.waitForURL(/\/notes(\/|$)/)
+	await page.getByRole("searchbox", { name: "Search notes" }).fill(title)
+	await page.getByRole("complementary").locator(`a[href="/notes/${uuid}"]`).click()
+	await page.waitForURL(new RegExp(`/notes/${uuid}$`))
+}
+
+async function reloadToShell(page: Page): Promise<void> {
+	await page.reload()
+	await dismissStartupReminders(page)
+	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+}
+
+test.describe("notes: live editors", () => {
+	test("text edit typed then reloaded before the debounce survives and reaches the server", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+		test.setTimeout(120_000)
+
+		const marker = `killpath-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const { uuid, title } = await createEmptyNoteAndOpen(page, "text", "e2e killpath")
+		const main = page.getByRole("main")
+
+		try {
+			// Type distinctive content straight into the live CodeMirror surface.
+			const editor = main.locator(".cm-content")
+			await expect(editor).toBeVisible()
+			await editor.click()
+			await page.keyboard.type(marker)
+
+			// Prove the immediate-persist landed on OPFS BEFORE the reload — the survives-window-close
+			// guarantee. This settles in tens of ms, far under the 3s debounce, so the reload below still
+			// beats any server push the debounce would kick.
+			await expect
+				.poll(() => page.evaluate(id => window.__filenE2E.readPersistedInflightContent(id), uuid), { timeout: 10_000 })
+				.toBe(marker)
+
+			// The tab dies mid-edit. On boot the outbox replays from OPFS; the editor seeds inflight-first.
+			await reloadToShell(page)
+			await openNoteByTitle(page, title, uuid)
+
+			// The typed content is back in the editor after a reload that happened before any debounce push.
+			await expect(main.getByText(marker, { exact: true })).toBeVisible()
+
+			// ...and it reaches the server: replay-on-boot kicks a push even without a fresh debounce.
+			await expect
+				.poll(() => page.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), uuid), { timeout: 30_000 })
+				.toBe(marker)
+		} finally {
+			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+		}
+	})
+
+	test("md edit persists through the debounce and both panes reflect it after reload", async ({ page, injectedSession, browserName }) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+		test.setTimeout(120_000)
+
+		const headingText = `ReloadHeading-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		const typed = `# ${headingText}`
+		const { uuid, title } = await createEmptyNoteAndOpen(page, "md", "e2e md-edit")
+		const main = page.getByRole("main")
+
+		try {
+			// Type a markdown heading into the editable LEFT pane.
+			const editor = main.locator(".cm-content")
+			await expect(editor).toBeVisible()
+			await editor.click()
+			await page.keyboard.type(typed)
+
+			// Let the 3s debounce fire and the push land — the plain type→debounce→persist leg. Generous
+			// timeout: the SDK owns its own retry/backoff, which can stretch a single push (CLAUDE.md).
+			await expect
+				.poll(() => page.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), uuid), { timeout: 30_000 })
+				.toBe(typed)
+
+			// After reload the outbox has drained, so the note re-fetches its now-persisted server content
+			// on mount (the content query's refetchOnMount:"always" overrides its persisted stale value).
+			await reloadToShell(page)
+			await openNoteByTitle(page, title, uuid)
+
+			// Left pane: the raw markdown source (CodeMirror). Right pane: the rendered heading.
+			await expect(main.getByText(typed, { exact: true })).toBeVisible()
+			await expect(main.getByRole("heading", { level: 1, name: headingText })).toBeVisible()
+		} finally {
+			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+		}
+	})
+})

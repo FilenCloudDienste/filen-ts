@@ -3,14 +3,34 @@ import { useNavigate } from "@tanstack/react-router"
 import { StickyNoteIcon, MoreHorizontalIcon } from "lucide-react"
 import type { Note } from "@filen/sdk-rs"
 import { noteIcon } from "@/features/notes/lib/icon.logic"
-import { NoteReader } from "@/features/notes/components/reader/noteReader"
+import { NoteContentBody } from "@/features/notes/components/noteContentBody"
 import { NoteDropdownMenuContent } from "@/features/notes/components/noteMenu"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
+import { useNoteInflight } from "@/features/notes/store/useNotesInflight"
+import { sync } from "@/features/notes/lib/sync"
+import { registerAction } from "@/lib/keymap/registry"
+import { useAction } from "@/lib/keymap/useAction"
 import { useAccountQuery } from "@/queries/account"
 import { Separator } from "@/components/ui/separator"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+
+// Cmd/Ctrl+S — flush the outbox debounce immediately (executeNow), so a user who reflexively saves gets
+// their push kicked at once instead of waiting out the 3s. Nothing is shown on success — the header
+// spinner already communicates in-flight state. Shares its literal combo with the drive/preview save
+// actions, harmlessly: only ONE of those surfaces is mounted at a time (notes route vs drive route vs
+// preview overlay). `enableOnContentEditable`: react-hotkeys-hook's default ignore-list drops a hotkey
+// whose event target is contentEditable, and CodeMirror's content DOM sets contenteditable while
+// editable — without this override Cmd/Ctrl+S would never fire while the cursor is inside the editor,
+// exactly when a user presses it.
+registerAction({
+	id: "notes.saveNow",
+	defaultCombo: "mod+s",
+	scope: "notes",
+	descriptionKey: "notesSaveAction"
+})
 
 export interface NoteEditorPaneProps {
 	// The resolved selected note, or undefined when nothing is selected / not yet resolved.
@@ -20,9 +40,9 @@ export interface NoteEditorPaneProps {
 }
 
 // The main content card for the notes module: a titled header for the selected note (icon + title +
-// the ⋮ menu, sharing noteMenu.logic.ts's descriptor list with the sidebar row's own menu) plus the
-// per-type read-only body (NoteReader). Live editing arrives with the sync outbox — this step never
-// writes note CONTENT, only metadata actions (rename/pin/favorite/tags/type/lifecycle).
+// sync spinner + the ⋮ menu, sharing noteMenu.logic.ts's descriptor list with the sidebar row's menu)
+// plus the per-type content body (NoteContentBody) — live CodeMirror editors for text/code/md, wired to
+// the fault-tolerant outbox; read-only readers for trashed/rich/checklist.
 export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 	const { t } = useTranslation("notes")
 	const navigate = useNavigate()
@@ -32,6 +52,27 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 	// construction (notes.$uuid.tsx resolves it from the route param) — so a delete/leave confirmed here
 	// always navigates away, unlike the sidebar's host which also serves rows for OTHER notes.
 	const dialogHost = useNoteDialogHost({ currentUuid: note?.uuid ?? "" })
+	// Reactive has/has-not edge for THIS note's outbox. "" (no note) is never inflight. Drives the
+	// header sync spinner + menu suppression, mirroring mobile's header (screens/noteEditor.tsx) and
+	// note-menu (components/note/menu.tsx) inflight gating.
+	const isInflight = useNoteInflight(note?.uuid ?? "")
+
+	// Registered before the early return (hook order). Dialog-guarded like every other action: a Cmd+S
+	// with a note-action dialog open returns before preventDefault so the browser default runs, never
+	// flushing behind the modal.
+	useAction(
+		"notes.saveNow",
+		keyboardEvent => {
+			if (dialogHost.isDialogOpen) {
+				return
+			}
+
+			keyboardEvent.preventDefault()
+			sync.executeNow()
+		},
+		{ enableOnContentEditable: true },
+		[dialogHost.isDialogOpen]
+	)
 
 	if (note === undefined) {
 		return (
@@ -59,12 +100,23 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 			<header className="flex shrink-0 items-center gap-2.5 px-5 py-4">
 				<Icon className={`size-5 shrink-0 ${colorClass}`} />
 				<h1 className="min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
+				{/* Subtle in-flight indicator next to the title (mobile parity) — the note is mid-sync. */}
+				{isInflight ? (
+					<Spinner
+						className="size-4 shrink-0 text-muted-foreground"
+						aria-label={t("noteSyncing")}
+					/>
+				) : null}
 				<DropdownMenu>
+					{/* Menu trigger suppressed while inflight — disabled-not-hidden (mobile suppresses the menu
+					entirely mid-sync): acting on a note whose content is mid-flight is blocked, but the
+					control stays in place so the header doesn't reflow. */}
 					<DropdownMenuTrigger
 						render={
 							<Button
 								variant="ghost"
 								size="icon-sm"
+								disabled={isInflight}
 								aria-label={t("noteItemMenuTrigger")}
 							>
 								<MoreHorizontalIcon />
@@ -83,9 +135,8 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 				</DropdownMenu>
 			</header>
 			<Separator className="bg-border/50" />
-			{/* Keyed by uuid so switching the selected note remounts the reader fresh — required by the
-			EDITOR INVARIANT the CodeMirror-backed readers rely on (noteReader.tsx). */}
-			<NoteReader
+			{/* Keyed by uuid so switching the selected note rebuilds the content controller fresh. */}
+			<NoteContentBody
 				key={note.uuid}
 				note={note}
 			/>
