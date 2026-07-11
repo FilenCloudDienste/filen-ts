@@ -1,0 +1,139 @@
+import { type LucideIcon } from "lucide-react"
+import { NOTE_ACTION_DEFS } from "@/features/notes/lib/actionDefs"
+import { isNoteOwner } from "@/features/notes/lib/actions"
+import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
+import type { NotesKey } from "@/lib/i18n"
+
+// Dialog kinds a note-menu entry can dispatch to the surface-level dialog host (useNoteDialogHost) —
+// mirrors drive's ItemActionDialogKind split (itemMenu.logic.ts).
+export type NoteActionDialogKind = "rename" | "delete" | "leave" | "createTag"
+
+export type NoteActionId =
+	| "rename"
+	| "duplicate"
+	| "pin"
+	| "favorite"
+	| "tags"
+	| "type"
+	| "participants"
+	| "history"
+	| "archive"
+	| "restore"
+	| "trash"
+	| "deletePermanently"
+	| "leave"
+
+interface NoteActionDescriptorShared {
+	id: NoteActionId
+	labelKey: NotesKey
+	icon: LucideIcon
+	destructive?: boolean
+	// Present-but-disabled (never absent) — today only the participants/history placeholders use this,
+	// same "a dead click is worse than a disabled control" rule as drive's own `enabled?`.
+	enabled?: boolean
+}
+
+// "direct" resolves immediately (pin/favorite/duplicate/archive/restore/trash/type-change/tag-toggle);
+// "dialog" opens the surface's dialog host on the given kind; "submenu" nests a tags/type picker;
+// mutually exclusive by construction, same rationale as drive's own ItemActionDescriptor union.
+export type NoteActionDescriptor =
+	| (NoteActionDescriptorShared & { run: "direct" })
+	| (NoteActionDescriptorShared & { run: "dialog"; dialogKind: NoteActionDialogKind })
+	| (NoteActionDescriptorShared & { run: "submenu"; submenu: "type" | "tags" })
+
+const RENAME: NoteActionDescriptor = { id: "rename", ...NOTE_ACTION_DEFS.rename, run: "dialog", dialogKind: "rename" }
+const DUPLICATE: NoteActionDescriptor = { id: "duplicate", ...NOTE_ACTION_DEFS.duplicate, run: "direct" }
+const TAGS: NoteActionDescriptor = { id: "tags", ...NOTE_ACTION_DEFS.tags, run: "submenu", submenu: "tags" }
+const TYPE: NoteActionDescriptor = { id: "type", ...NOTE_ACTION_DEFS.type, run: "submenu", submenu: "type" }
+// Placeholders — the dialogs wave wires their real dialog kind; present so the menu's shape doesn't
+// jump around later, disabled so nothing here can be clicked into a dead end meanwhile.
+const PARTICIPANTS: NoteActionDescriptor = { id: "participants", ...NOTE_ACTION_DEFS.participants, run: "direct", enabled: false }
+const HISTORY: NoteActionDescriptor = { id: "history", ...NOTE_ACTION_DEFS.history, run: "direct", enabled: false }
+const ARCHIVE: NoteActionDescriptor = { id: "archive", ...NOTE_ACTION_DEFS.archive, run: "direct" }
+const RESTORE: NoteActionDescriptor = { id: "restore", ...NOTE_ACTION_DEFS.restore, run: "direct" }
+const TRASH: NoteActionDescriptor = { id: "trash", ...NOTE_ACTION_DEFS.trash, run: "direct" }
+const DELETE_PERMANENTLY: NoteActionDescriptor = {
+	id: "deletePermanently",
+	...NOTE_ACTION_DEFS.deletePermanently,
+	run: "dialog",
+	dialogKind: "delete"
+}
+const LEAVE: NoteActionDescriptor = { id: "leave", ...NOTE_ACTION_DEFS.leave, run: "dialog", dialogKind: "leave" }
+
+function pinDescriptor(note: Note): NoteActionDescriptor {
+	return note.pinned ? { id: "pin", ...NOTE_ACTION_DEFS.unpin, run: "direct" } : { id: "pin", ...NOTE_ACTION_DEFS.pin, run: "direct" }
+}
+
+function favoriteDescriptor(note: Note): NoteActionDescriptor {
+	return note.favorite
+		? { id: "favorite", ...NOTE_ACTION_DEFS.unfavorite, run: "direct" }
+		: { id: "favorite", ...NOTE_ACTION_DEFS.favorite, run: "direct" }
+}
+
+// Pure per-note menu builder shared by both the sidebar row's context menu and the editor header's ⋮
+// trigger (noteMenu.tsx) — one descriptor list, gated purely on the note's own flags + ownership, so it
+// stays trivially testable without rendering anything (mirrors driveItemActions).
+export function noteMenuActions(note: Note, currentUserId: bigint | undefined): NoteActionDescriptor[] {
+	const owner = isNoteOwner(note, currentUserId)
+
+	// Trashed is the maximally-reduced set (mirrors drive's own trash-variant menu): only recovery or
+	// permanent removal, nothing else makes sense on a note already on its way out.
+	if (note.trash) {
+		return [RESTORE, DELETE_PERMANENTLY]
+	}
+
+	const actions: NoteActionDescriptor[] = [RENAME, DUPLICATE, pinDescriptor(note), favoriteDescriptor(note), TAGS, TYPE]
+
+	// Participants management is owner-only (parity matrix §1a/§1d) — a participant sees no entry for a
+	// dialog they could never act on. History stays open to any participant (mobile parity — anyone with
+	// access can view a note's history, only the restore-from-history dialog wave gates writes further).
+	if (owner) {
+		actions.push(PARTICIPANTS)
+	}
+
+	actions.push(HISTORY)
+
+	// Archive/restore are mutually exclusive with each other, not with the rest of the menu — an
+	// archived note keeps rename/duplicate/pin/favorite/tags/type, just swaps Archive for Restore.
+	// Archive itself is owner-gated (parity matrix: "Both gate on ownerId"); restoring OUT of archive
+	// is not (mirrors mobile: any participant can restore, only entering archive is owner-only).
+	if (note.archive) {
+		actions.push(RESTORE)
+	} else if (owner) {
+		actions.push(ARCHIVE)
+	}
+
+	// Trash (owner) vs. Leave (non-owner self-remove) — the two ways a note can vanish from an owner's
+	// vs. a participant's own list, mutually exclusive per the parity matrix's §1a/§1d split.
+	actions.push(owner ? TRASH : LEAVE)
+
+	return actions
+}
+
+export interface NoteTagSubmenuEntry {
+	tag: NoteTag
+	checked: boolean
+}
+
+// Tags submenu rows: every account tag, checked when the note already carries it. Pure so the checkmark
+// gating is unit-testable without mounting the submenu.
+export function noteTagSubmenuEntries(note: Note, allTags: readonly NoteTag[]): NoteTagSubmenuEntry[] {
+	const noteTagUuids = new Set(note.tags.map(tag => tag.uuid))
+
+	return allTags.map(tag => ({ tag, checked: noteTagUuids.has(tag.uuid) }))
+}
+
+export interface NoteTypeSubmenuEntry {
+	noteType: NoteType
+	labelKey: NotesKey
+}
+
+// Type submenu rows, fixed order (D1's five types) — a plain constant, not derived from NOTE_ACTION_DEFS
+// (that map is keyed by action id, not by NoteType).
+export const NOTE_TYPE_SUBMENU: readonly NoteTypeSubmenuEntry[] = [
+	{ noteType: "text", labelKey: "noteTypeText" },
+	{ noteType: "md", labelKey: "noteTypeMd" },
+	{ noteType: "code", labelKey: "noteTypeCode" },
+	{ noteType: "rich", labelKey: "noteTypeRich" },
+	{ noteType: "checklist", labelKey: "noteTypeChecklist" }
+]

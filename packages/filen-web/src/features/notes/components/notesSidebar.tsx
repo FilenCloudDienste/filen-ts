@@ -2,11 +2,14 @@ import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
+import { toast } from "sonner"
 import { PlusIcon, SearchIcon, XIcon, ChevronRightIcon, StarIcon, StickyNoteIcon, TagIcon } from "lucide-react"
+import type { Note } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
 import { useNotes } from "@/features/notes/queries/notes"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
 import { useNotesViewModeQuery } from "@/features/notes/queries/preferences"
+import { useAccountQuery } from "@/queries/account"
 import { setNotesViewMode, DEFAULT_NOTES_VIEW_MODE, type NotesViewMode } from "@/features/notes/lib/preferences"
 import { DEFAULT_NOTE_TAGS_SORT_BY, tagDisplayName } from "@/features/notes/lib/sort"
 import {
@@ -17,10 +20,20 @@ import {
 	type NotesSidebarRow
 } from "@/features/notes/components/notesSidebar.logic"
 import { createNote } from "@/features/notes/lib/actions"
+import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
+import { errorLabel } from "@/lib/i18n/errorLabel"
+import { registerAction } from "@/lib/keymap/registry"
+import { useAction } from "@/lib/keymap/useAction"
 import { NoteRow } from "@/features/notes/components/noteRow"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
+
+// Module scope, not inside the component — mirrors drive's "drive.newDirectory" registration
+// (newDirectory.tsx): runs once per module evaluation, which registerAction's duplicate-id guard
+// assumes. Same default combo ("n") as drive's own new-item command — the two never coexist (only one
+// of NotesSidebar/NewDirectory is ever mounted at a time, since they live on mutually exclusive routes).
+registerAction({ id: "notes.newNote", defaultCombo: "n", scope: "notes", descriptionKey: "notesNewNote" })
 
 // Fixed row heights so the single virtualizer needs no measureElement pass — both row kinds render at a
 // known, constant height (the wrapper pins it), so estimateSize is exact and rows never overlap. Note
@@ -96,6 +109,8 @@ export function NotesSidebar() {
 	const tagsQuery = useNoteTags()
 	const viewModeQuery = useNotesViewModeQuery()
 	const viewMode = viewModeQuery.data ?? DEFAULT_NOTES_VIEW_MODE
+	const accountQuery = useAccountQuery()
+	const currentUserId = accountQuery.data?.id
 
 	const [search, setSearch] = useState("")
 	// Collapse state is in-memory only (D4) — a tag uuid present here is expanded.
@@ -104,6 +119,11 @@ export function NotesSidebar() {
 
 	const allNotes = notesQuery.data ?? []
 	const allTags = tagsQuery.data ?? []
+
+	// One host for every row's menu (noteRow.tsx never opens a dialog itself — it only calls onAction).
+	// currentUuid drives the delete/leave nav-away guard: a row-triggered delete of the currently-open
+	// note still navigates to /notes before the row disappears out of the cache.
+	const dialogHost = useNoteDialogHost({ currentUuid: selectedUuid })
 
 	// One flattened row model for BOTH views, so a single virtualizer covers either (never a nested
 	// virtualizer per tag). Notes view: each note as a flat note row. Tags view: tag headers + expanded
@@ -155,10 +175,33 @@ export function NotesSidebar() {
 	}
 
 	async function handleNewNote(): Promise<void> {
-		const note = await createNote()
+		const outcome = await createNote()
 
-		await navigate({ to: "/notes/$uuid", params: { uuid: note.uuid } })
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+			return
+		}
+
+		await navigate({ to: "/notes/$uuid", params: { uuid: outcome.item.uuid } })
 	}
+
+	async function handleDuplicated(duplicated: Note): Promise<void> {
+		await navigate({ to: "/notes/$uuid", params: { uuid: duplicated.uuid } })
+	}
+
+	// Registered at module scope above; guards on dialogHost.isDialogOpen so "n" never fires a second
+	// create while a note dialog (rename/delete/leave/createTag) is already open — same convention as
+	// drive.newDirectory's own dialogOpen guard.
+	useAction(
+		"notes.newNote",
+		() => {
+			if (!dialogHost.isDialogOpen) {
+				void handleNewNote()
+			}
+		},
+		undefined,
+		[dialogHost.isDialogOpen]
+	)
 
 	const activeQuery = viewMode === "notes" ? notesQuery : tagsQuery
 	const searching = search.trim().length > 0
@@ -240,6 +283,12 @@ export function NotesSidebar() {
 									note={row.note}
 									selected={row.note.uuid === selectedUuid}
 									nested={viewMode === "tags"}
+									allTags={allTags}
+									currentUserId={currentUserId}
+									onAction={dialogHost.openNoteDialog}
+									onDuplicated={duplicated => {
+										void handleDuplicated(duplicated)
+									}}
 								/>
 							)}
 						</div>
@@ -342,6 +391,7 @@ export function NotesSidebar() {
 			>
 				{renderBody()}
 			</div>
+			{dialogHost.renderActiveDialog()}
 		</aside>
 	)
 }

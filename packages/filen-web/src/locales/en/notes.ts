@@ -73,5 +73,91 @@ export const notes = {
 	/** Checklist reader — centered muted state for a checklist note with no items yet */
 	noteChecklistEmpty: "No checklist items yet",
 	/** Markdown reader — accessible label on the draggable divider between the source and preview panes */
-	noteMdSplitResize: "Resize markdown preview"
+	noteMdSplitResize: "Resize markdown preview",
+
+	// ── Note menu (noteMenu.tsx) ─────────────────────────────────────────────
+	/** Note menu trigger — accessible label on the row/header ⋯ button, mirrors driveItemMenuTrigger */
+	noteItemMenuTrigger: "More actions",
+	/** Note menu — renames the note (opens noteRenameDialog) */
+	noteActionRename: "Rename",
+	/** Note menu — duplicates the note */
+	noteActionDuplicate: "Duplicate",
+	/** Note menu — pins the note to the top of the list */
+	noteActionPin: "Pin",
+	/** Note menu — unpins an already-pinned note */
+	noteActionUnpin: "Unpin",
+	/** Note menu — favorites the note */
+	noteActionFavorite: "Favorite",
+	/** Note menu — unfavorites an already-favorited note */
+	noteActionUnfavorite: "Unfavorite",
+	/** Note menu — opens the tags submenu (assign/unassign + create) */
+	noteActionTags: "Tags",
+	/** Note menu — tags submenu's inline entry that opens the create-tag dialog */
+	noteActionCreateTag: "New tag",
+	/** Note menu — opens the type submenu (text/md/code/rich/checklist) */
+	noteActionType: "Change type",
+	/** Note menu — opens the participants dialog (owner only; disabled placeholder until the dialogs wave) */
+	noteActionParticipants: "Participants",
+	/** Note menu — opens the history dialog (disabled placeholder until the dialogs wave) */
+	noteActionHistory: "History",
+	/** Note menu — archives the note (owner only) */
+	noteActionArchive: "Archive",
+	/** Note menu — restores an archived or trashed note */
+	noteActionRestore: "Restore",
+	/** Note menu — moves the note to the trash */
+	noteActionTrash: "Trash",
+	/** Note menu — permanently deletes a trashed note (opens noteDeleteDialog) */
+	noteActionDeletePermanently: "Delete permanently",
+	/** Note menu — a non-owner participant removes themselves from a shared note (opens noteLeaveDialog) */
+	noteActionLeave: "Leave",
+
+	// ── Type submenu ───────────────────────────────────────────────────────────
+	/** Type submenu — the "text" note type */
+	noteTypeText: "Text",
+	/** Type submenu — the "md" (markdown) note type */
+	noteTypeMd: "Markdown",
+	/** Type submenu — the "code" note type */
+	noteTypeCode: "Code",
+	/** Type submenu — the "rich" (rich text) note type */
+	noteTypeRich: "Rich text",
+	/** Type submenu — the "checklist" note type */
+	noteTypeChecklist: "Checklist",
+
+	// ── Tags submenu ───────────────────────────────────────────────────────────
+	/** Tags submenu — shown instead of the tag list when the account has no tags yet */
+	noteTagsSubmenuEmpty: "No tags yet",
+	/** createNoteTag/renameNoteTag — rejects a name colliding with a built-in pseudo-tag (all/favorites/pinned) */
+	noteTagReservedName: "That name is reserved. Please choose another.",
+	/** archiveNote — defense-in-depth owner gate, surfaced if the (owner-only) menu entry is ever reached without ownership */
+	noteOwnerOnlyError: "Only the note owner can do this.",
+	/** leaveNote — no resolved current-user id (account query cold); should not be reachable from the UI */
+	noteNotSignedInError: "You're not signed in.",
+
+	// ── Action dialogs ───────────────────────────────────────────────────────────
+	/** Rename dialog — title */
+	noteRenameDialogTitle: "Rename note",
+	/** Rename dialog — body */
+	noteRenameDialogBody: "Enter a new title.",
+	/** Rename dialog — field label */
+	noteRenameDialogLabel: "Title",
+	/** Rename dialog — submit button */
+	noteRenameDialogSubmit: "Rename",
+	/** Delete-permanently confirm dialog — title */
+	noteDeleteDialogTitle: "Delete permanently?",
+	/** Delete-permanently confirm dialog — body */
+	noteDeleteDialogBody: "Are you sure you want to permanently delete this note? This cannot be undone.",
+	/** Leave confirm dialog — title */
+	noteLeaveDialogTitle: "Leave note?",
+	/** Leave confirm dialog — body */
+	noteLeaveDialogBody: "Are you sure you want to leave this note? You will lose access to it.",
+	/** Create-tag dialog — title */
+	noteCreateTagDialogTitle: "New tag",
+	/** Create-tag dialog — body */
+	noteCreateTagDialogBody: "Enter a name for the new tag.",
+	/** Create-tag dialog — field label */
+	noteCreateTagDialogLabel: "Name",
+	/** Create-tag dialog — field placeholder */
+	noteCreateTagDialogPlaceholder: "Tag name",
+	/** Create-tag dialog — submit button */
+	noteCreateTagDialogSubmit: "Create"
 } as const

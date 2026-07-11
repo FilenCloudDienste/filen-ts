@@ -31,6 +31,26 @@ async function gotoNotes(page: Page): Promise<void> {
 
 	await page.getByRole("link", { name: "Notes", exact: true }).click()
 	await page.waitForURL(/\/notes(\/|$)/)
+
+	// The sidebar renders independently of which route currently occupies the main card — a visible row
+	// proves the LIST query has data, but proves NOTHING about whether notes.index.tsx's own
+	// redirect-to-first-note effect has actually fired yet. Landing on bare "/notes" races that effect
+	// against whatever the caller does next (e.g. clicking "New note"): both resolve to a `/notes/<uuid>`
+	// URL, and if the caller's own navigate() wins the race while the index route is STILL mounted, a
+	// later query-cache write (the caller's own create!) can retrigger the index effect's dependency and
+	// have it redirect AGAIN — always toward the sort-first note (pinned beats everything, sort.ts), which
+	// can silently steal the route out from under a just-created note. Live-verified: this raced and
+	// landed on an unrelated pinned note often enough to be a real, not theoretical, hazard.
+	const sidebar = page.getByRole("complementary")
+	const noNotesYet = sidebar.getByText("No notes yet", { exact: true })
+	await expect(sidebar.getByRole("link").first().or(noNotesYet)).toBeVisible()
+
+	// Only wait for the URL to leave bare "/notes" when the account actually has notes to redirect to —
+	// an empty account correctly never redirects, and waiting for a URL change that will never come
+	// would hang forever.
+	if ((await noNotesYet.count()) === 0) {
+		await page.waitForURL(url => url.pathname !== "/notes")
+	}
 }
 
 test.describe("notes", () => {
@@ -86,6 +106,131 @@ test.describe("notes", () => {
 
 		// Net-zero teardown: permanently remove the created note through the programmatic hook.
 		await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+	})
+
+	// Full action leg (e1-actions): create → rename → pin → favorite → tag assign (+ tags-view
+	// expansion) → trash → restore → delete permanently, all through the editor header's own ⋯ menu
+	// (noteMenu.tsx — the same descriptor list the sidebar row's menu renders). One serial test covering
+	// the whole surface rather than one test per action: every step depends on the previous one's live
+	// state (a rename before a pin has something to assert on, trash before restore has something to
+	// restore), so splitting would only duplicate the create+rename setup per test for no isolation gain.
+	test("action menu: rename, pin, favorite, tag assign, trash/restore, delete permanently", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		// Generous budget: this single test drives ~9 real, sequential SDK mutations (create/rename/pin/
+		// favorite/createTag/addTag/trash/restore/delete) against the shared account — well beyond the
+		// suite's default 90s if any one of them lands behind the SDK's own internal rate-limit backoff
+		// (CLAUDE.md: retry/backoff is the SDK's job, never re-implemented here).
+		test.setTimeout(180_000)
+
+		await gotoNotes(page)
+		await page.getByRole("button", { name: "New note", exact: true }).click()
+		await page.waitForURL(/\/notes\/[^/]+$/)
+
+		const uuid = new URL(page.url()).pathname.split("/").pop() ?? ""
+		expect(uuid.length).toBeGreaterThan(0)
+
+		const main = page.getByRole("main")
+		const sidebar = page.getByRole("complementary")
+		const row = sidebar.locator(`a[href="/notes/${uuid}"]`)
+		const menuTrigger = main.getByRole("button", { name: "More actions", exact: true })
+		// A "direct" descriptor's click closes the popup asynchronously (Base UI's own close animation)
+		// — reopening the menu before that settles can silently no-op the next click, so every reopen
+		// below waits for the menu to be visible right after opening, and gone right after a direct
+		// click, before moving on.
+		const menu = page.getByRole("menu")
+
+		try {
+			// Rename — InputDialog (role="dialog"), the field pre-filled with the SDK's default title.
+			const newTitle = `e2e action note ${String(Date.now())}`
+			await menuTrigger.click()
+			await expect(menu).toBeVisible()
+			await page.getByRole("menuitem", { name: "Rename", exact: true }).click()
+			const renameDialog = page.getByRole("dialog")
+			await expect(renameDialog).toBeVisible()
+			await renameDialog.getByLabel("Title", { exact: true }).fill(newTitle)
+			await renameDialog.getByRole("button", { name: "Rename", exact: true }).click()
+			await expect(renameDialog).toHaveCount(0)
+			await expect(main.getByRole("heading", { level: 1, name: newTitle, exact: true })).toBeVisible()
+
+			// Pin — direct action, no dialog; verified on the note's own sidebar row. The row's pin/
+			// favorite marks are bare aria-labeled <svg> icons (no ARIA role), so a plain attribute
+			// selector is used rather than getByLabel (which targets form-control label association).
+			await menuTrigger.click()
+			await expect(menu).toBeVisible()
+			await page.getByRole("menuitem", { name: "Pin", exact: true }).click()
+			await expect(menu).toHaveCount(0)
+			await expect(row.locator('[aria-label="Pinned"]')).toBeVisible()
+
+			// Favorite — direct action, no dialog.
+			await menuTrigger.click()
+			await expect(menu).toBeVisible()
+			await page.getByRole("menuitem", { name: "Favorite", exact: true }).click()
+			await expect(menu).toHaveCount(0)
+			await expect(row.locator('[aria-label="Favorite"]')).toBeVisible()
+
+			// Tags submenu: the inline "New tag" entry creates a tag AND assigns it to this note in one
+			// round trip (old-web parity, useNoteDialogHost's own handleCreateTagSubmit).
+			const tagName = `e2e-tag-${String(Date.now())}`
+			await menuTrigger.click()
+			await expect(menu).toBeVisible()
+			await page.getByRole("menuitem", { name: "Tags", exact: true }).click()
+			await page.getByRole("menuitem", { name: "New tag", exact: true }).click()
+			const tagDialog = page.getByRole("dialog")
+			await expect(tagDialog).toBeVisible()
+			await tagDialog.getByLabel("Name", { exact: true }).fill(tagName)
+			await tagDialog.getByRole("button", { name: "Create", exact: true }).click()
+			await expect(tagDialog).toHaveCount(0)
+
+			// Tags view: the new tag's collapsible group, expanded, shows this note nested inside it.
+			// Search narrows to the tag's own (unique, timestamped) name first — the shared account may
+			// carry other tags, and the search box's state is shared across both sidebar views.
+			await page.getByRole("button", { name: "Tags", exact: true }).click()
+			const search = page.getByRole("searchbox", { name: "Search notes" })
+			await search.fill(tagName)
+			await sidebar.getByRole("button", { name: `Expand ${tagName}`, exact: true }).click()
+			// A fresh note has no content yet, so its preview snippet falls back to the title too
+			// (noteRow.tsx) — the title text legitimately renders twice in the expanded row (title +
+			// preview spans); .first() is enough proof the note is nested under the tag.
+			await expect(sidebar.getByText(newTitle, { exact: true }).first()).toBeVisible()
+			await search.fill("")
+			await page.getByRole("button", { name: "Notes", exact: true }).click()
+
+			// Trash (direct, reversible — no confirm) then restore from within the notes UI.
+			await menuTrigger.click()
+			await expect(menu).toBeVisible()
+			await page.getByRole("menuitem", { name: "Trash", exact: true }).click()
+			await expect(menu).toHaveCount(0)
+
+			await menuTrigger.click()
+			await expect(menu).toBeVisible()
+			const restoreItem = page.getByRole("menuitem", { name: "Restore", exact: true })
+			await expect(restoreItem).toBeVisible()
+			// Trashed reduces the menu to restore/deletePermanently only (noteMenuActions) — proven live.
+			await expect(page.getByRole("menuitem", { name: "Trash", exact: true })).toHaveCount(0)
+			await restoreItem.click()
+			await expect(menu).toHaveCount(0)
+
+			await menuTrigger.click()
+			await expect(menu).toBeVisible()
+			await expect(page.getByRole("menuitem", { name: "Trash", exact: true })).toBeVisible()
+
+			// Delete permanently (confirm) — the note IS the currently-routed one, so a successful
+			// confirm navigates away from it (useNoteDialogHost's nav-race guard) before this test's own
+			// net-zero teardown call below (a no-op by then, since the note is already gone).
+			await page.getByRole("menuitem", { name: "Delete permanently", exact: true }).click()
+			const deleteDialog = page.getByRole("alertdialog")
+			await expect(deleteDialog).toBeVisible()
+			await deleteDialog.getByRole("button", { name: "Delete permanently", exact: true }).click()
+			await page.waitForURL(url => !url.pathname.includes(uuid))
+		} finally {
+			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+		}
 	})
 })
 

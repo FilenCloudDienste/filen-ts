@@ -1,5 +1,6 @@
 import { type, type Type } from "arktype"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
+import type { NoteType } from "@filen/sdk-rs"
 
 // The sidebar's two-view toggle, persisted with the same kv-backed convention drive's view mode uses
 // (features/drive/lib/preferences.ts): a single global value, arktype-validated on read, self-healing
@@ -47,4 +48,22 @@ export async function getMdSplitRatio(): Promise<number> {
 
 export async function setMdSplitRatio(ratio: number): Promise<void> {
 	await kvSetJson(MD_SPLIT_RATIO_KV_KEY, clampMdSplitRatio(ratio))
+}
+
+// The persisted default-note-type preference (oldweb-notes §1: create always calls createNote() first —
+// the SDK's own default is "text" — then setNoteType only if this preference differs). No settings UI
+// exists yet (old-web's own Settings → General dropdown lands later); the key is persisted from day one
+// so a future settings control has somewhere real to read/write, per the founder's create-flow call.
+const DEFAULT_NOTE_TYPE_KV_KEY = "notes.defaultNoteType.v1"
+
+const defaultNoteTypeSchema: Type<NoteType> = type("'text'|'md'|'code'|'rich'|'checklist'")
+
+export const DEFAULT_NOTE_TYPE: NoteType = "text"
+
+export async function getDefaultNoteType(): Promise<NoteType> {
+	return (await kvGetJson(DEFAULT_NOTE_TYPE_KV_KEY, defaultNoteTypeSchema)) ?? DEFAULT_NOTE_TYPE
+}
+
+export async function setDefaultNoteType(next: NoteType): Promise<void> {
+	await kvSetJson(DEFAULT_NOTE_TYPE_KV_KEY, next)
 }
