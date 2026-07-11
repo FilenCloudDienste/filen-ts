@@ -24,7 +24,17 @@ export function transferProgress(transfer: Transfer): number {
 
 // The active-row status icon's sr-only label key, direction-aware — isActiveTransfer's two members
 // ("uploading"/"downloading") each get their own announcement instead of the row hard-coding the
-// upload one for both directions.
-export function activeStatusLabelKey(direction: Transfer["direction"]): "transfersStatusUploading" | "transfersStatusDownloading" {
+// upload one for both directions. `paused` overrides direction: a suspended-in-place transfer (see
+// Transfer["paused"]) isn't currently sending/receiving bytes, so it gets its own label instead of
+// claiming to still be uploading/downloading (mirrors mobile's swap to a pause glyph in place of the
+// live percentage). Defaults to false so every pre-existing direction-only call site is unaffected.
+export function activeStatusLabelKey(
+	direction: Transfer["direction"],
+	paused = false
+): "transfersStatusUploading" | "transfersStatusDownloading" | "transfersStatusPaused" {
+	if (paused) {
+		return "transfersStatusPaused"
+	}
+
 	return direction === "upload" ? "transfersStatusUploading" : "transfersStatusDownloading"
 }

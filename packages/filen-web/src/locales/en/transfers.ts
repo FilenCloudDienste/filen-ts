@@ -9,7 +9,8 @@
 // (useTransfersStore.ts) but no row in this panel renders them today: a cancelled transfer is removed
 // right after settling (never displayed), and completedWithErrors backs a zip transfer no code
 // produces yet. Active (uploading/downloading) rows get transfersRowCancel plus a pause/resume
-// toggle (transfersRowPause/transfersRowResume); finished rows get transfersRowRemove.
+// toggle (transfersRowPause/transfersRowResume) and, while paused, transfersStatusPaused replaces the
+// live percentage; finished rows get transfersRowRemove.
 export const transfers = {
 	// ── Icon rail ───────────────────────────────────────────────────────────
 	/** Icon-rail Transfers trigger — accessible label while at least one upload is active; replaces the plain moduleTransfers label so the count is announced, not just shown in the visual badge; singular */
@@ -52,6 +53,8 @@ export const transfers = {
 	transfersStatusDone: "Done",
 	/** Transfer row — status label when a file failed to upload; the row also surfaces the failing outcome's own error label */
 	transfersStatusError: "Failed",
+	/** Transfer row — status label replacing the live percentage while an active (uploading/downloading) transfer is suspended in place */
+	transfersStatusPaused: "Paused",
 	/** Transfer row — accessible label on the button removing a single finished (done/error) transfer from the list */
 	transfersRowRemove: "Remove",
 	/** Transfer row — accessible label on the button cancelling a single active (uploading/downloading) transfer */

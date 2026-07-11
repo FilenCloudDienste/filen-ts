@@ -55,4 +55,13 @@ describe("activeStatusLabelKey", () => {
 	it("download direction reads the downloading key", () => {
 		expect(activeStatusLabelKey("download")).toBe("transfersStatusDownloading")
 	})
+
+	it("paused overrides direction, regardless of which direction", () => {
+		expect(activeStatusLabelKey("upload", true)).toBe("transfersStatusPaused")
+		expect(activeStatusLabelKey("download", true)).toBe("transfersStatusPaused")
+	})
+
+	it("unpaused (explicit false) behaves the same as the default", () => {
+		expect(activeStatusLabelKey("upload", false)).toBe("transfersStatusUploading")
+	})
 })

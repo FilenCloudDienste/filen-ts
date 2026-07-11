@@ -30,6 +30,7 @@ function PreferenceRow({ title, description, checked, pending, onCheckedChange }
 			<Switch
 				checked={checked}
 				disabled={pending}
+				aria-label={title}
 				onCheckedChange={onCheckedChange}
 			/>
 		</div>

@@ -9,7 +9,7 @@ import { isValidEmail } from "@/lib/validate"
 import { runChangeEmailAttempt } from "@/features/settings/components/account/changeEmail.logic"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -32,6 +32,10 @@ function ChangeEmailCard({ accountQuery }: ChangeEmailCardProps) {
 
 	const emailsMatch = newEmail.length > 0 && newEmail === confirmEmail
 	const canSubmit = emailsMatch && isValidEmail(newEmail) && password.length > 0
+	// Inline, non-blocking feedback for why the submit button below is disabled — both gated on the
+	// field actually having content so an untouched empty form never shows red text on first render.
+	const newEmailInvalid = newEmail.length > 0 && !isValidEmail(newEmail)
+	const confirmEmailMismatched = confirmEmail.length > 0 && !emailsMatch
 
 	async function handleSubmit(e: SubmitEvent): Promise<void> {
 		e.preventDefault()
@@ -99,12 +103,14 @@ function ChangeEmailCard({ accountQuery }: ChangeEmailCardProps) {
 								id="new-email"
 								type="email"
 								autoComplete="email"
+								aria-invalid={newEmailInvalid}
 								value={newEmail}
 								disabled={pending}
 								onChange={e => {
 									setNewEmail(e.target.value)
 								}}
 							/>
+							{newEmailInvalid && <FieldError>{t("settingsChangeEmailInvalid")}</FieldError>}
 						</Field>
 						<Field>
 							<FieldLabel htmlFor="confirm-new-email">{t("settingsChangeEmailConfirm")}</FieldLabel>
@@ -112,12 +118,14 @@ function ChangeEmailCard({ accountQuery }: ChangeEmailCardProps) {
 								id="confirm-new-email"
 								type="email"
 								autoComplete="email"
+								aria-invalid={confirmEmailMismatched}
 								value={confirmEmail}
 								disabled={pending}
 								onChange={e => {
 									setConfirmEmail(e.target.value)
 								}}
 							/>
+							{confirmEmailMismatched && <FieldError>{t("settingsChangeEmailMismatch")}</FieldError>}
 						</Field>
 						<Field>
 							<FieldLabel htmlFor="change-email-password">{t("settingsChangeEmailPassword")}</FieldLabel>

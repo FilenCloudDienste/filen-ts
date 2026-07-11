@@ -180,6 +180,53 @@ test.describe("settings", () => {
 		await expect.poll(() => page.evaluate(() => localStorage.getItem("theme"))).toBe("system")
 	})
 
+	test("every settings section is reachable from the sidebar in one pass, with no console errors", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await gotoSettings(page)
+
+		// Scoped to the settings leg alone (post-boot, post-navigation-into-settings), same convention as
+		// drive.spec.ts's Links-nav console-error capture — the account query's own boot fetch is not part
+		// of what this test is asserting.
+		const consoleErrors: string[] = []
+
+		page.on("console", msg => {
+			if (msg.type() !== "error") {
+				return
+			}
+
+			const text = msg.text()
+
+			// arktype's benign CSP probe (see shell.spec.ts) — blocked by no-unsafe-eval, not a failure.
+			if (/unsafe-eval/i.test(text)) {
+				return
+			}
+
+			consoleErrors.push(text)
+		})
+
+		const sections: { label: string; heading: string; path: string }[] = [
+			{ label: "Account", heading: "Account", path: "/settings/account" },
+			{ label: "Security", heading: "Security", path: "/settings/security" },
+			{ label: "Appearance", heading: "Appearance", path: "/settings/appearance" },
+			{ label: "Events", heading: "Events", path: "/settings/events" },
+			{ label: "Billing", heading: "Billing", path: "/settings/billing" }
+		]
+
+		for (const section of sections) {
+			await page.getByRole("link", { name: section.label, exact: true }).click()
+			await page.waitForURL(new RegExp(`${section.path}$`))
+			await expect(page.getByRole("heading", { name: section.heading, exact: true })).toBeVisible()
+		}
+
+		expect(consoleErrors, consoleErrors.join("\n")).toEqual([])
+	})
+
 	test("GDPR export downloads a JSON file", async ({ page, injectedSession, browserName }) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)

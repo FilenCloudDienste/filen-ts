@@ -1,5 +1,15 @@
 import { useTranslation } from "react-i18next"
-import { CircleAlertIcon, CircleCheckIcon, DownloadIcon, PauseIcon, PlayIcon, UploadIcon, XIcon } from "lucide-react"
+import {
+	CircleAlertIcon,
+	CircleCheckIcon,
+	DownloadIcon,
+	PauseCircleIcon,
+	PauseIcon,
+	PlayIcon,
+	Trash2Icon,
+	UploadIcon,
+	XIcon
+} from "lucide-react"
 import { formatBytes } from "@filen/utils"
 import { isActiveTransfer, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { transferProgress, activeStatusLabelKey } from "@/features/transfers/components/transferRow.logic"
@@ -16,11 +26,22 @@ export interface TransferRowProps {
 
 // Leading status icon — aria-hidden in the "done"/"error" branches since the row's own trailing text
 // (TransferRow below) already spells out "Done"/"Failed" as real accessible text; only the active
-// (uploading/downloading) branch gets a companion sr-only label, resolved direction-aware via
-// activeStatusLabelKey, because its trailing text is a bare percentage with no other accessible
-// mention of the transfer's direction anywhere in the row. Mirrors DriveRow's StarIcon (aria-hidden +
-// a separate sr-only announcement) rather than relying on an aria-label on the icon itself.
-function TransferStatusIcon({ status, direction }: { status: Transfer["status"]; direction: Transfer["direction"] }) {
+// (uploading/downloading) branch gets a companion sr-only label, resolved direction-and-pause-aware
+// via activeStatusLabelKey, because its trailing text is a bare percentage (or, while paused, the word
+// "Paused") with no other accessible mention of the transfer's direction anywhere in the row. A paused
+// row swaps the spinner for a static pause glyph — a spinner reads as "still moving", which a
+// suspended-in-place transfer is not (mirrors mobile's own icon swap while paused). Mirrors DriveRow's
+// StarIcon (aria-hidden + a separate sr-only announcement) rather than relying on an aria-label on the
+// icon itself.
+function TransferStatusIcon({
+	status,
+	direction,
+	paused
+}: {
+	status: Transfer["status"]
+	direction: Transfer["direction"]
+	paused: boolean
+}) {
 	const { t } = useTranslation("transfers")
 
 	if (status === "done") {
@@ -43,11 +64,18 @@ function TransferStatusIcon({ status, direction }: { status: Transfer["status"];
 
 	return (
 		<>
-			<Spinner
-				aria-hidden="true"
-				className="size-4 text-muted-foreground"
-			/>
-			<span className="sr-only">{t(activeStatusLabelKey(direction))}</span>
+			{paused ? (
+				<PauseCircleIcon
+					aria-hidden="true"
+					className="size-4 shrink-0 text-muted-foreground"
+				/>
+			) : (
+				<Spinner
+					aria-hidden="true"
+					className="size-4 text-muted-foreground"
+				/>
+			)}
+			<span className="sr-only">{t(activeStatusLabelKey(direction, paused))}</span>
 		</>
 	)
 }
@@ -70,13 +98,14 @@ function TransferDirectionIcon({ direction }: { direction: Transfer["direction"]
 
 // One row: name + live progress bar, mirroring DriveRow's icon+truncate+trailing idiom (drive/
 // driveRow.tsx) scaled down for the panel's narrower surface. Active (uploading/downloading) rows get
-// a pause/resume toggle plus a Cancel button, wired to features/transfers/lib/control.ts's
+// a pause/resume toggle plus a Cancel button (X glyph), wired to features/transfers/lib/control.ts's
 // pauseTransfer/resumeTransfer/cancelTransfer — the in-flight runUpload/runDownload catch does the
 // actual store settle+remove once a cancelled worker call rejects with "Cancelled"; pause/resume never
 // reject, so the toggle flips the store's `paused` flag itself (see pauseTransfer/resumeTransfer). A
-// finished row (isActiveTransfer false — done/error/completedWithErrors) gets a dismiss button instead,
-// wired straight to the store — a finished transfer is already done, so dismissing just clears its row,
-// no confirm needed.
+// finished row (isActiveTransfer false — done/error/completedWithErrors) gets a Remove button instead
+// (trash glyph, deliberately distinct from Cancel's X — a finished transfer can't be "cancelled", only
+// dismissed from the list), wired straight to the store — a finished transfer is already done, so
+// removing just clears its row, no confirm needed.
 export function TransferRow({ transfer }: TransferRowProps) {
 	const { t, i18n } = useTranslation("transfers")
 	const progress = transferProgress(transfer)
@@ -96,14 +125,23 @@ export function TransferRow({ transfer }: TransferRowProps) {
 		secondary = `${formatBytes(transfer.bytesTransferred)} / ${formatBytes(transfer.size)}`
 	}
 
-	// Active (uploading OR downloading) shows a live percentage (the one number that actually changes
-	// tick to tick); once finished, the word carries more information than a stale/redundant "100%"
-	// would. Intl.NumberFormat (not a hand-rolled `${n}%` template) so the symbol/rounding follow the
-	// active locale — some locales space or place "%" differently, and percent's default
-	// maximumFractionDigits is 0, which is also what rounds the value for display.
-	const trailingLabel = isActiveTransfer(transfer.status)
-		? new Intl.NumberFormat(i18n.language, { style: "percent" }).format(progress / 100)
-		: t(transfer.status === "done" ? "transfersStatusDone" : "transfersStatusError")
+	// Active-and-running shows a live percentage (the one number that actually changes tick to tick);
+	// paused shows the word instead — the percentage is frozen while suspended, so re-displaying it
+	// would misleadingly suggest progress is still happening. Once finished, the word carries more
+	// information than a stale/redundant "100%" would. Intl.NumberFormat (not a hand-rolled `${n}%`
+	// template) so the symbol/rounding follow the active locale — some locales space or place "%"
+	// differently, and percent's default maximumFractionDigits is 0, which is also what rounds the
+	// value for display.
+	const trailingLabel =
+		isActiveTransfer(transfer.status) && !transfer.paused
+			? new Intl.NumberFormat(i18n.language, { style: "percent" }).format(progress / 100)
+			: t(
+					isActiveTransfer(transfer.status)
+						? "transfersStatusPaused"
+						: transfer.status === "done"
+							? "transfersStatusDone"
+							: "transfersStatusError"
+				)
 
 	return (
 		<div className="flex flex-col gap-1.5 rounded-xl px-1 py-1.5 hover:bg-accent/50">
@@ -111,6 +149,7 @@ export function TransferRow({ transfer }: TransferRowProps) {
 				<TransferStatusIcon
 					status={transfer.status}
 					direction={transfer.direction}
+					paused={transfer.paused}
 				/>
 				<TransferDirectionIcon direction={transfer.direction} />
 				<span className="min-w-0 flex-1 truncate text-sm">{transfer.name}</span>
@@ -124,7 +163,7 @@ export function TransferRow({ transfer }: TransferRowProps) {
 							useTransfersStore.getState().remove(transfer.id)
 						}}
 					>
-						<XIcon />
+						<Trash2Icon />
 					</Button>
 				) : (
 					<>
