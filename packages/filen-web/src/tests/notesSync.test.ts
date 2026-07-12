@@ -59,6 +59,7 @@ import {
 	inflightContentSchema,
 	noteKindForPreview
 } from "@/features/notes/lib/sync.logic"
+import { deriveSessionBaseHash } from "@/features/notes/hooks/useNoteEditor.logic"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
 	const note: Note = {
@@ -414,6 +415,67 @@ describe("push loop — conflict DETECTION: local wins, one toast per note per p
 
 		expect(setNoteContent).toHaveBeenCalledTimes(1)
 		expect(toast).not.toHaveBeenCalled()
+	})
+})
+
+describe("push loop — session-base renewal across a full drain (no false overwrite alarm)", () => {
+	// Reproduces the editor↔outbox loop the false-alarm bug lived in: an edit, an autosave that FULLY
+	// drains the outbox (writing the pushed content back into the cache), then another edit of the same
+	// session. The base the editor stamps must track the just-synced content, or the second push mistakes
+	// the note's own prior push for a divergent remote edit and cries wolf.
+	it("does not toast on the edit that follows an autosave drain of the same session", async () => {
+		const s = await startedSync()
+		const note = makeNote("a", { title: "My Note" })
+
+		// Mount: seed is the cloud content ("A"), no session yet.
+		let base = deriveSessionBaseHash({ seed: "A", hasInflight: false, current: null })
+
+		// Cloud is still "A" when the first push peeks it; the push makes "v1" the cloud content.
+		getNoteContent.mockResolvedValue("A")
+		setNoteContent.mockResolvedValue(note)
+
+		// Type "v1" and let the autosave drain the outbox fully.
+		await s.enqueue(note, "v1", base)
+		s.executeNow()
+		await flushAsync()
+
+		expect(hasInflight("a")).toBe(false)
+
+		// The drain wrote "v1" back into the content cache — the seed the editor recomputes is byte-equal
+		// to what it read mid-session, yet the base MUST renew to hash("v1") on the drain edge.
+		const seedAfterDrain = testQueryClient.getQueryData<string>(noteContentQueryKey("a")) ?? ""
+
+		expect(seedAfterDrain).toBe("v1")
+
+		base = deriveSessionBaseHash({ seed: seedAfterDrain, hasInflight: false, current: base })
+
+		// Type "v2". Cloud is now "v1" — our OWN prior push, not a remote edit.
+		getNoteContent.mockResolvedValue("v1")
+		await s.enqueue(note, "v2", base)
+		s.executeNow()
+		await flushAsync()
+
+		expect(setNoteContent).toHaveBeenLastCalledWith(note, "v2", expect.any(String))
+		// The renewed base equals the cloud content, so no false overwrite alarm fires.
+		expect(toast).not.toHaveBeenCalled()
+	})
+
+	it("still toasts when a genuine remote edit diverged from the session base", async () => {
+		const s = await startedSync()
+		const note = makeNote("a", { title: "My Note" })
+		const base = deriveSessionBaseHash({ seed: "A", hasInflight: false, current: null })
+
+		// A real concurrent edit on another device moved the cloud past our base.
+		getNoteContent.mockResolvedValue("changed-on-another-device")
+		setNoteContent.mockResolvedValue(note)
+
+		await s.enqueue(note, "v2", base)
+		s.executeNow()
+		await flushAsync()
+
+		expect(setNoteContent).toHaveBeenCalledWith(note, "v2", expect.any(String))
+		expect(toast).toHaveBeenCalledTimes(1)
+		expect(toast).toHaveBeenCalledWith("notes:noteOverwroteNewerRemoteChanges")
 	})
 })
 

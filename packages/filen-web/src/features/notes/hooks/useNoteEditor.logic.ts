@@ -1,5 +1,6 @@
 import type { Note } from "@filen/sdk-rs"
 import type { InflightEntry } from "@/features/notes/store/useNotesInflight"
+import { hashNoteContent } from "@/features/notes/lib/sync.logic"
 
 // old-web parity: the client-side note-content cap. A push past this would be rejected server-side and
 // wedge the note, so the editor blocks the ENQUEUE past the cap (never the keystroke — CodeMirror keeps
@@ -69,6 +70,52 @@ export function deriveEditorRemountKey({ uuid, dataUpdatedAt }: { uuid: string; 
 // note without write permission) folds in here once participants land, mirroring mobile's hasWriteAccess.
 export function deriveEditorReadOnly(note: Note): boolean {
 	return note.trash
+}
+
+// The session-base hash the overwrite-conflict check compares the note's cloud content against: the
+// hash of the content THIS editing session was seeded from. It renews to the seed's hash whenever no
+// session is ongoing (the note has no inflight entries) and holds steady mid-session, so a keystroke
+// never claims a sync point the session never had. Renewing on the has-inflight EDGE (drain) is
+// load-bearing: after a full drain the push writes the just-synced content back into the content cache,
+// so the seed string is byte-identical to what it was mid-session — a seed-only trigger would observe
+// no change and leave the base frozen at the mount seed, mis-flagging the next edit as an overwrite of
+// the content this session itself just wrote. INVARIANT: after a successful drain the base equals the
+// pushed content's hash. This never weakens genuine detection — a real divergent remote edit is caught
+// at push time against whatever base the session actually holds.
+export function deriveSessionBaseHash({
+	seed,
+	hasInflight,
+	current
+}: {
+	seed: string
+	hasInflight: boolean
+	current: string | null
+}): string | null {
+	if (hasInflight) {
+		return current
+	}
+
+	return hashNoteContent(seed)
+}
+
+// Coalesce the per-keystroke durable-persist results into at most one "not saved to this device"
+// warning per failure streak: warn on the FIRST failure, stay silent through a sustained streak (so a
+// persistent disk/quota fault never spams a toast per keystroke), and re-arm once a persist SUCCEEDS
+// again so a later failure is surfaced anew. Pure so the "N failures → one warning" invariant is
+// directly testable without rendering the hook.
+export function reducePersistFailureNotice({ persisted, alreadyNotified }: { persisted: boolean; alreadyNotified: boolean }): {
+	notified: boolean
+	warn: boolean
+} {
+	if (persisted) {
+		return { notified: false, warn: false }
+	}
+
+	if (alreadyNotified) {
+		return { notified: true, warn: false }
+	}
+
+	return { notified: true, warn: true }
 }
 
 export type EditorLoadState = "pending" | "error" | "ready"

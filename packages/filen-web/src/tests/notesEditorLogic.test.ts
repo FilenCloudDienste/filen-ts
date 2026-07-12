@@ -9,8 +9,11 @@ import {
 	deriveEditorSeed,
 	deriveEditorRemountKey,
 	deriveEditorReadOnly,
-	deriveEditorLoadState
+	deriveEditorLoadState,
+	deriveSessionBaseHash,
+	reducePersistFailureNotice
 } from "@/features/notes/hooks/useNoteEditor.logic"
+import { hashNoteContent } from "@/features/notes/lib/sync.logic"
 
 // Same mockNote shape as notesSort.test.ts / notesReaderLogic.test.ts.
 function mockNote(overrides: Partial<Note> = {}): Note {
@@ -141,5 +144,66 @@ describe("deriveEditorLoadState", () => {
 
 	it("is ready once the query resolves with no inflight", () => {
 		expect(deriveEditorLoadState({ hasInflight: false, queryStatus: "ready" })).toBe("ready")
+	})
+})
+
+describe("deriveSessionBaseHash — renews across a full drain, holds steady mid-session", () => {
+	it("seeds the base from the mount content when no session is ongoing", () => {
+		expect(deriveSessionBaseHash({ seed: "A", hasInflight: false, current: null })).toBe(hashNoteContent("A"))
+	})
+
+	it("holds the base steady while a session is inflight (never claims a sync point mid-edit)", () => {
+		const base = hashNoteContent("A")
+
+		// The seed reads back the user's own unsynced text mid-session — the base must NOT move to it.
+		expect(deriveSessionBaseHash({ seed: "v1", hasInflight: true, current: base })).toBe(base)
+	})
+
+	it("renews the base to the just-synced content on the drain edge even when the seed is byte-unchanged", () => {
+		const mountBase = hashNoteContent("A")
+
+		// After a full drain the push writes the synced content ("v1") back into the cache, so the seed
+		// the hook recomputes is "v1" with hasInflight now false. The base MUST advance to hash("v1"),
+		// not stay frozen at the mount base — the frozen value is what fired the false overwrite alarm.
+		const drained = deriveSessionBaseHash({ seed: "v1", hasInflight: false, current: mountBase })
+
+		expect(drained).toBe(hashNoteContent("v1"))
+		expect(drained).not.toBe(mountBase)
+	})
+})
+
+describe("reducePersistFailureNotice — one warning per failure streak, re-arms on success", () => {
+	it("warns on the first failure only, staying silent through a sustained streak", () => {
+		let notified = false
+		let warnings = 0
+
+		// Ten failing keystrokes in a row.
+		for (let i = 0; i < 10; i++) {
+			const notice = reducePersistFailureNotice({ persisted: false, alreadyNotified: notified })
+
+			notified = notice.notified
+
+			if (notice.warn) {
+				warnings++
+			}
+		}
+
+		expect(warnings).toBe(1)
+		expect(notified).toBe(true)
+	})
+
+	it("re-arms after a persist succeeds so a later failure is surfaced again", () => {
+		const first = reducePersistFailureNotice({ persisted: false, alreadyNotified: false })
+
+		expect(first.warn).toBe(true)
+
+		const recovered = reducePersistFailureNotice({ persisted: true, alreadyNotified: first.notified })
+
+		expect(recovered.notified).toBe(false)
+		expect(recovered.warn).toBe(false)
+
+		const again = reducePersistFailureNotice({ persisted: false, alreadyNotified: recovered.notified })
+
+		expect(again.warn).toBe(true)
 	})
 })

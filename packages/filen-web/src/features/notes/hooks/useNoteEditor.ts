@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 import type { Note } from "@filen/sdk-rs"
 import { useNoteContentQuery } from "@/features/notes/queries/noteContent"
 import useNotesInflightStore, { useNoteInflight } from "@/features/notes/store/useNotesInflight"
 import { sync } from "@/features/notes/lib/sync"
-import { hashNoteContent } from "@/features/notes/lib/sync.logic"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import {
 	deriveEditorSeed,
 	deriveEditorRemountKey,
 	deriveEditorReadOnly,
 	deriveEditorLoadState,
+	deriveSessionBaseHash,
+	reducePersistFailureNotice,
 	latestInflightContent,
 	exceedsNoteSizeCap,
 	type EditorLoadState
@@ -37,6 +40,7 @@ export interface NoteEditorController {
 // hook only wires them to the live query + outbox store. A faithful port of mobile's content/index.tsx
 // editor coordination (editorSeed, sessionBaseHashRef, the read-only/size enqueue guards).
 export function useNoteEditor(note: Note): NoteEditorController {
+	const { t } = useTranslation("notes")
 	const query = useNoteContentQuery(note)
 	const isInflight = useNoteInflight(note.uuid)
 	const [sizeReached, setSizeReached] = useState(false)
@@ -57,19 +61,24 @@ export function useNoteEditor(note: Note): NoteEditorController {
 
 	// Session base hash: the hash of the content THIS editing session was seeded from, stamped onto
 	// the first outbox entry of a session (buildInflightEntries) for overwrite-conflict detection. The
-	// ref renews only when a fresh seed arrives with no session ongoing (no inflight for this note) —
-	// stamping mid-session would claim a sync point the session never had. Mobile's sessionBaseHashRef.
+	// ref renews when a fresh seed arrives with no session ongoing (no inflight for this note) AND on the
+	// drain edge — keying the effect on `isInflight` is load-bearing because a full drain writes the
+	// just-synced content back into the cache, so the seed string is unchanged across the boundary and a
+	// seed-only trigger would leave the base frozen at the mount seed. Mobile's sessionBaseHashRef.
 	const sessionBaseHashRef = useRef<string | null>(null)
 
 	useEffect(() => {
-		const entries = useNotesInflightStore.getState().inflightContent[note.uuid] ?? []
+		sessionBaseHashRef.current = deriveSessionBaseHash({
+			seed,
+			hasInflight: isInflight,
+			current: sessionBaseHashRef.current
+		})
+	}, [note.uuid, seed, isInflight])
 
-		if (entries.length > 0) {
-			return
-		}
-
-		sessionBaseHashRef.current = hashNoteContent(seed)
-	}, [note.uuid, seed])
+	// Coalesced per-note warning that a durable persist failed (the edit lives in memory + is still
+	// pushed when online, but is not safely on this device's disk). One warning per failure streak;
+	// re-arms after a persist succeeds. Instance state in a ref so React Compiler cannot memoize it away.
+	const persistFailureNotifiedRef = useRef(false)
 
 	function onChange(value: string): void {
 		// Defense-in-depth (mobile #40): never enqueue a read-only edit — its push is rejected
@@ -91,8 +100,21 @@ export function useNoteEditor(note: Note): NoteEditorController {
 			setSizeReached(false)
 		}
 
-		// The outbox persists immediately (survives-window-close) and arms the 3s debounce.
-		void sync.enqueue(note, value, sessionBaseHashRef.current)
+		// The outbox persists immediately (survives-window-close) and arms the 3s debounce. Surface a
+		// coalesced warning if that disk write failed — mirrors the chat composer's persist-failure toast,
+		// debounced across keystrokes so a sustained failure warns once, not per character.
+		void sync.enqueue(note, value, sessionBaseHashRef.current).then(persisted => {
+			const notice = reducePersistFailureNotice({
+				persisted,
+				alreadyNotified: persistFailureNotifiedRef.current
+			})
+
+			persistFailureNotifiedRef.current = notice.notified
+
+			if (notice.warn) {
+				toast.error(t("noteNotSavedToDevice"))
+			}
+		})
 	}
 
 	return { status, errorDto, seed, remountKey, readOnly, isInflight, sizeReached, onChange }

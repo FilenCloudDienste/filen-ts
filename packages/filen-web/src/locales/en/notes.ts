@@ -203,6 +203,8 @@ export const notes = {
 	/** Sync outbox — one toast per note per pass when a local edit overwrote newer remote changes (kept in history) */
 	noteOverwroteNewerRemoteChanges:
 		'"{{name}}" had newer changes on another device. Your version was saved; the previous one is in the note history.',
+	/** Editor — coalesced warning that a note edit couldn't be persisted to this device's disk (still pushed when online) */
+	noteNotSavedToDevice: "Your changes couldn't be saved to this device",
 
 	// ── Action dialogs ───────────────────────────────────────────────────────────
 	/** Rename dialog — title */
