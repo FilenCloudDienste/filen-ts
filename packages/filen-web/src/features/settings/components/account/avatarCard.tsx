@@ -7,6 +7,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { validateAvatarFile, AVATAR_MAX_BYTES } from "@/features/settings/components/account/avatarCard.logic"
 import { contactInitials } from "@/features/contacts/components/contactsList.logic"
+import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -24,6 +25,7 @@ interface AvatarCardProps {
 // which has no browser equivalent this codebase needs.
 function AvatarCard({ accountQuery }: AvatarCardProps) {
 	const { t } = useTranslation("settings")
+	const isOnline = useIsOnline()
 	const { avatarUrl, nickName, email } = accountQuery.data
 	const inputRef = useRef<HTMLInputElement>(null)
 	const [pending, setPending] = useState(false)
@@ -77,7 +79,7 @@ function AvatarCard({ accountQuery }: AvatarCardProps) {
 					<Button
 						type="button"
 						variant="outline"
-						disabled={pending}
+						disabled={pending || !isOnline}
 						onClick={() => {
 							inputRef.current?.click()
 						}}
@@ -90,7 +92,7 @@ function AvatarCard({ accountQuery }: AvatarCardProps) {
 						type="file"
 						accept="image/png,image/jpeg"
 						className="hidden"
-						disabled={pending}
+						disabled={pending || !isOnline}
 						onChange={e => {
 							void handleFileChange(e)
 						}}

@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import {
 	advanceDeleteAccountChain,
@@ -29,6 +30,7 @@ interface DeleteAccountCardProps {
 // account.
 function DeleteAccountCard({ accountQuery }: DeleteAccountCardProps) {
 	const { t } = useTranslation(["auth", "common"])
+	const isOnline = useIsOnline()
 	const { twoFactorEnabled } = accountQuery.data
 	const [chainStage, setChainStage] = useState<DeleteAccountStage | null>(null)
 	const [pending, setPending] = useState(false)
@@ -71,6 +73,7 @@ function DeleteAccountCard({ accountQuery }: DeleteAccountCardProps) {
 				<Button
 					type="button"
 					variant="destructive"
+					disabled={!isOnline}
 					onClick={() => {
 						setChainStage("stage1")
 					}}

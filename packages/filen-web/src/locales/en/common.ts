@@ -66,6 +66,14 @@ export const common = {
 	driveSharedOut: "Shared with others",
 	/** Drive sidebar — item for the user's public links */
 	driveLinks: "Links",
+	// Global offline indicator — a fixed, non-blocking pill mounted once at the app root so it covers
+	// every route (authed shell and the unauthenticated sign-in/register/reset pages alike)
+	/** Offline indicator — shown while the browser has no connection */
+	offline: "Offline",
+	/** Offline indicator — transient confirmation shown for a few seconds after connectivity returns */
+	backOnline: "Back online",
+	/** Disabled-control tooltip/title suffix — appended wherever a mutating action is disabled purely because the app is offline */
+	offlineActionDisabled: "Unavailable while offline",
 	// Desktop system strip — win32/linux custom window controls (darwin uses native traffic lights,
 	// no custom buttons); only rendered when window.desktop is present (see src/types/desktop.d.ts)
 	/** System strip — minimize-window button accessible label */

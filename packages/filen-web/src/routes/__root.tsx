@@ -13,6 +13,7 @@ import { registerSW, applyUpdate } from "@/lib/sw/register"
 import { useBootStore } from "@/stores/boot"
 import { BootScreen } from "@/features/shell/components/bootScreen"
 import { BootErrorScreen } from "@/features/shell/components/bootErrorScreen"
+import { OfflineIndicator } from "@/features/shell/components/offlineIndicator"
 
 export const Route = createRootRoute({ component: RootLayout })
 
@@ -102,6 +103,10 @@ function RootLayout() {
 			<ThemeProvider>
 				<TooltipProvider>
 					<BootGate />
+					{/* Mounted once here (not inside AppShell/the auth pages separately) — a fixed overlay
+					    with its own top-center position, so this single instance covers the authed shell
+					    AND the unauthenticated sign-in/register/reset pages without a second subscription. */}
+					<OfflineIndicator />
 					{/* Bottom-right, lifted above the floating selection bar's band: the bar's trailing
 					    buttons and the default toast viewport measurably overlap at ~1280px width, and a
 					    transient toast then swallows clicks on a visibly-present button. Top positions are

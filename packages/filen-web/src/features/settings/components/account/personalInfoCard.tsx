@@ -6,6 +6,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import type { SettingsKey } from "@/lib/i18n"
+import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import {
 	personalToFormState,
@@ -45,6 +46,7 @@ const FIELD_LABEL_KEYS: Record<keyof PersonalFormState, SettingsKey> = {
 // `countries[]` has no web equivalent), so this stays a simplification rather than inventing one.
 function PersonalInfoCard({ accountQuery }: PersonalInfoCardProps) {
 	const { t } = useTranslation("settings")
+	const isOnline = useIsOnline()
 	const [expanded, setExpanded] = useState(false)
 	const [form, setForm] = useState<PersonalFormState>(() => personalToFormState(accountQuery.data.personal))
 	const [pending, setPending] = useState(false)
@@ -104,7 +106,7 @@ function PersonalInfoCard({ accountQuery }: PersonalInfoCardProps) {
 					<CardFooter>
 						<Button
 							type="button"
-							disabled={pending}
+							disabled={pending || !isOnline}
 							onClick={() => {
 								void handleSave()
 							}}

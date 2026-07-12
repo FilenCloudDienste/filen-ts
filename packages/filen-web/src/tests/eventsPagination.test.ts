@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { UserEventResult } from "@filen/sdk-rs"
-import { computeNextEventsPage } from "@/features/settings/lib/eventsPagination"
+import { computeNextEventsPage, shouldSkipEventsScroll } from "@/features/settings/lib/eventsPagination"
 
 function ok(id: bigint): UserEventResult {
 	return {
@@ -40,5 +40,29 @@ describe("computeNextEventsPage", () => {
 
 	it("terminates when every Ok id in the page was already seen (full dedup)", () => {
 		expect(computeNextEventsPage(new Set([1n, 2n]), [ok(1n), ok(2n)]).terminate).toBe(true)
+	})
+})
+
+const READY_STATE = { inflight: false, hasMore: true, queryReady: true, isOnline: true }
+
+describe("shouldSkipEventsScroll", () => {
+	it("does not skip when everything is ready and online", () => {
+		expect(shouldSkipEventsScroll(READY_STATE)).toBe(false)
+	})
+
+	it("skips while offline — WITHOUT the caller needing to touch hasMore itself", () => {
+		expect(shouldSkipEventsScroll({ ...READY_STATE, isOnline: false })).toBe(true)
+	})
+
+	it("skips while a fetch is already in flight", () => {
+		expect(shouldSkipEventsScroll({ ...READY_STATE, inflight: true })).toBe(true)
+	})
+
+	it("skips once hasMore is false (every page already loaded)", () => {
+		expect(shouldSkipEventsScroll({ ...READY_STATE, hasMore: false })).toBe(true)
+	})
+
+	it("skips while the events query hasn't succeeded yet", () => {
+		expect(shouldSkipEventsScroll({ ...READY_STATE, queryReady: false })).toBe(true)
 	})
 })

@@ -17,6 +17,10 @@ interface ChatActionDescriptorShared {
 	labelKey: ChatsKey
 	icon: LucideIcon
 	destructive?: boolean
+	// Present-but-disabled (never absent) once set to false — mirrors itemMenu.logic.ts's own field.
+	// Only applyOfflineGate below ever sets it; chatMenuActions itself never disables a descriptor it
+	// decides to include.
+	enabled?: boolean
 }
 
 // "direct" resolves immediately (markRead/mute-toggle); "dialog" opens the surface's dialog host on
@@ -73,4 +77,18 @@ export function chatMenuActions(chat: Chat, currentUserId: bigint | undefined, h
 	actions.push(owner ? DELETE_CHAT : LEAVE_CHAT)
 
 	return actions
+}
+
+// Offline-gated ids: mute/rename/participants/delete/leave all write to the SDK. markRead is left
+// alone — it fires constantly as a read-state side effect (opening a conversation), not a deliberate
+// user mutation, and mirrors mobile leaving it ungated. "send" is the composer's own concern
+// (composer.tsx) and deliberately NEVER gates offline — it queues through the durable outbox instead.
+const OFFLINE_GATED_IDS: ReadonlySet<ChatActionId> = new Set(["mute", "rename", "participants", "delete", "leave"])
+
+export function applyOfflineGate(actions: ChatActionDescriptor[], isOnline: boolean): ChatActionDescriptor[] {
+	if (isOnline) {
+		return actions
+	}
+
+	return actions.map(action => (OFFLINE_GATED_IDS.has(action.id) ? { ...action, enabled: false } : action))
 }

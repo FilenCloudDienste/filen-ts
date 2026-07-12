@@ -5,13 +5,14 @@ import { Button } from "@/components/ui/button"
 
 export interface EmptyTrashButtonProps {
 	onClick: () => void
+	disabled?: boolean
 }
 
 // Trash toolbar's own trigger — directoryListing.tsx only mounts this once
 // isEmptyTrashTriggerVisible(variant, sortedItems.length) is true (trash variant, non-empty
 // listing). Opens the already-wired TypedConfirmDialog (useDriveDialogHost's "emptyTrash" arm);
 // this component owns no dialog state of its own.
-export function EmptyTrashButton({ onClick }: EmptyTrashButtonProps) {
+export function EmptyTrashButton({ onClick, disabled }: EmptyTrashButtonProps) {
 	const { t } = useTranslation("drive")
 	const { labelKey, icon } = ACTION_DEFS.emptyTrash
 
@@ -19,6 +20,7 @@ export function EmptyTrashButton({ onClick }: EmptyTrashButtonProps) {
 		<Button
 			variant="destructive"
 			size="sm"
+			disabled={disabled}
 			onClick={onClick}
 		>
 			{createElement(icon, { "aria-hidden": true })}

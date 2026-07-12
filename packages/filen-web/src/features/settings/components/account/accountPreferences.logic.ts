@@ -23,3 +23,10 @@ export async function runPreferenceToggle(deps: PreferenceToggleDeps, next: bool
 
 	return { status: "success" }
 }
+
+// A toggle write reaches the SDK immediately (no outbox), so it's proactively disabled offline —
+// pulled out so accountPreferencesCard.tsx's own in-flight `pending` state and the app-wide `isOnline`
+// term combine the same testable way for both the versioning and login-alerts rows.
+export function isPreferenceRowDisabled(pending: boolean, isOnline: boolean): boolean {
+	return pending || !isOnline
+}

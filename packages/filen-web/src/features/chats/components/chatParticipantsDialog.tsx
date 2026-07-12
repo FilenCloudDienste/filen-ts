@@ -17,6 +17,7 @@ import { contactDisplayName, contactInitials } from "@/features/contacts/compone
 import { togglePickerContact, resolveSelectedContacts } from "@/features/drive/components/contactPickerDialog.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -41,6 +42,7 @@ const SKELETON_ROW_COUNT = 3
 // the viewer's own row never appears in this list at all (chatParticipantRows' self-exclusion).
 export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParticipantsDialogProps) {
 	const { t } = useTranslation(["chats", "contacts", "common"])
+	const isOnline = useIsOnline()
 	const chatsQuery = useChats()
 	const accountQuery = useAccountQuery()
 	// Re-resolved from the live list cache every render so an in-dialog add/remove — or a realtime
@@ -148,7 +150,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 								<Button
 									variant="ghost"
 									size="icon-sm"
-									disabled={rowPending}
+									disabled={rowPending || !isOnline}
 									aria-label={t("chatParticipantRemoveAction", { email: participant.email })}
 									onClick={() => {
 										setRemoving(participant)
@@ -286,7 +288,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 							{owner ? (
 								<Button
 									variant="outline"
-									disabled={dialogPending}
+									disabled={dialogPending || !isOnline}
 									onClick={() => {
 										setMode("add")
 									}}
@@ -315,7 +317,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 								{t("common:cancel")}
 							</Button>
 							<Button
-								disabled={selected.size === 0 || addPending}
+								disabled={selected.size === 0 || addPending || !isOnline}
 								onClick={() => {
 									void handleAddSelected()
 								}}

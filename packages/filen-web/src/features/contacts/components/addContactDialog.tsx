@@ -5,6 +5,7 @@ import { UserPlusIcon } from "lucide-react"
 import { isValidEmail } from "@/lib/validate"
 import { sendContactRequest } from "@/features/contacts/lib/actions"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 
@@ -14,6 +15,7 @@ import { InputDialog } from "@/components/dialogs/inputDialog"
 // request needs no separate ConfirmDialog, matching every other "type a value, submit" flow.
 export function AddContactDialog() {
 	const { t } = useTranslation("contacts")
+	const isOnline = useIsOnline()
 	const [open, setOpen] = useState(false)
 	const [pending, setPending] = useState(false)
 
@@ -37,6 +39,7 @@ export function AddContactDialog() {
 			<Button
 				variant="outline"
 				size="sm"
+				disabled={!isOnline}
 				onClick={() => {
 					setOpen(true)
 				}}

@@ -157,9 +157,10 @@ export interface IncomingRequestActionsProps {
 	request: ContactRequestIn
 	onAccept: (request: ContactRequestIn) => void
 	onDeny: (request: ContactRequestIn) => void
+	disabled?: boolean
 }
 
-export function IncomingRequestActions({ request, onAccept, onDeny }: IncomingRequestActionsProps) {
+export function IncomingRequestActions({ request, onAccept, onDeny, disabled }: IncomingRequestActionsProps) {
 	const { t } = useTranslation("contacts")
 
 	return (
@@ -167,6 +168,7 @@ export function IncomingRequestActions({ request, onAccept, onDeny }: IncomingRe
 			<Button
 				variant="outline"
 				size="icon-sm"
+				disabled={disabled}
 				aria-label={t("contactsActionAccept")}
 				onClick={() => {
 					onAccept(request)
@@ -177,6 +179,7 @@ export function IncomingRequestActions({ request, onAccept, onDeny }: IncomingRe
 			<Button
 				variant="outline"
 				size="icon-sm"
+				disabled={disabled}
 				aria-label={t("contactsActionDeny")}
 				onClick={() => {
 					onDeny(request)
@@ -191,15 +194,17 @@ export function IncomingRequestActions({ request, onAccept, onDeny }: IncomingRe
 export interface OutgoingRequestActionsProps {
 	request: ContactRequestOut
 	onCancel: (request: ContactRequestOut) => void
+	disabled?: boolean
 }
 
-export function OutgoingRequestActions({ request, onCancel }: OutgoingRequestActionsProps) {
+export function OutgoingRequestActions({ request, onCancel, disabled }: OutgoingRequestActionsProps) {
 	const { t } = useTranslation("contacts")
 
 	return (
 		<Button
 			variant="outline"
 			size="icon-sm"
+			disabled={disabled}
 			aria-label={t("contactsActionCancelRequest")}
 			onClick={() => {
 				onCancel(request)
@@ -214,12 +219,13 @@ export interface ContactActionsProps {
 	contact: Contact
 	onRemove: (contact: Contact) => void
 	onBlock: (contact: Contact) => void
+	disabled?: boolean
 }
 
 // DropdownMenu Root > Trigger + Content, mirroring driveRow.tsx's exact nesting for its own ⋯
 // dropdown: Trigger is a render-prop'd Button (not a child), Content (ContactMenuContent, which
 // already wraps Portal>Positioner>Popup) is the Root's other direct child.
-export function ContactActions({ contact, onRemove, onBlock }: ContactActionsProps) {
+export function ContactActions({ contact, onRemove, onBlock, disabled }: ContactActionsProps) {
 	const { t } = useTranslation("contacts")
 
 	return (
@@ -239,6 +245,7 @@ export function ContactActions({ contact, onRemove, onBlock }: ContactActionsPro
 				contact={contact}
 				onRemove={onRemove}
 				onBlock={onBlock}
+				disabled={disabled}
 			/>
 		</DropdownMenu>
 	)
@@ -247,15 +254,17 @@ export function ContactActions({ contact, onRemove, onBlock }: ContactActionsPro
 export interface BlockedActionsProps {
 	contact: BlockedContact
 	onUnblock: (contact: BlockedContact) => void
+	disabled?: boolean
 }
 
-export function BlockedActions({ contact, onUnblock }: BlockedActionsProps) {
+export function BlockedActions({ contact, onUnblock, disabled }: BlockedActionsProps) {
 	const { t } = useTranslation("contacts")
 
 	return (
 		<Button
 			variant="outline"
 			size="sm"
+			disabled={disabled}
 			onClick={() => {
 				onUnblock(contact)
 			}}

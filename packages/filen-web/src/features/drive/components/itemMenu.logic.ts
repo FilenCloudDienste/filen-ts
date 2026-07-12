@@ -195,3 +195,27 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 
 	return actions
 }
+
+// Action ids offline never reaches the SDK/network for: the item-mutating set (rename/move/color/
+// public-link+copy-link/trash) plus the transfer-starting set (download/import). Left alone:
+// info/versions/favorite/share/unshare/restore. A post-processing step over driveItemActions' own
+// result rather than a parameter threaded into it: the builder above is variant/undecryptable-pure
+// and already has 22 existing call sites in itemMenu.test.ts pinned to its two-argument shape.
+const OFFLINE_GATED_IDS: ReadonlySet<ItemActionId> = new Set([
+	"rename",
+	"move",
+	"color",
+	"publicLink",
+	"copyLink",
+	"trash",
+	"download",
+	"import"
+])
+
+export function applyOfflineGate(actions: ItemActionDescriptor[], isOnline: boolean): ItemActionDescriptor[] {
+	if (isOnline) {
+		return actions
+	}
+
+	return actions.map(action => (OFFLINE_GATED_IDS.has(action.id) ? { ...action, enabled: false } : action))
+}

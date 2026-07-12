@@ -3,6 +3,7 @@ import type { ChatMessage, ChatParticipant } from "@filen/sdk-rs"
 import {
 	MAX_CHAT_MESSAGE_LENGTH,
 	canSend,
+	isAttachDisabled,
 	isOverLimit,
 	remainingChars,
 	shouldShowCounter,
@@ -83,6 +84,24 @@ describe("character-limit gating", () => {
 	it("only surfaces the counter within the threshold of the cap", () => {
 		expect(shouldShowCounter("short")).toBe(false)
 		expect(shouldShowCounter("x".repeat(MAX_CHAT_MESSAGE_LENGTH - 10))).toBe(true)
+	})
+
+	// H8/L15: send and attach deliberately DISAGREE on offline behavior — send queues through the
+	// durable outbox and must never gate on connectivity; attach starts a network op right now and
+	// must. Both assertions live together so a future edit that accidentally aligns them regresses
+	// visibly here instead of silently in composer.tsx.
+	it("canSend stays true offline — the outbox is the whole point of an offline send", () => {
+		expect(canSend("hi")).toBe(true)
+	})
+
+	it("isAttachDisabled disables the attach menu while offline", () => {
+		expect(isAttachDisabled(0, false)).toBe(true)
+		expect(isAttachDisabled(0, true)).toBe(false)
+	})
+
+	it("isAttachDisabled disables the attach menu while an upload is already in flight, online or not", () => {
+		expect(isAttachDisabled(1, true)).toBe(true)
+		expect(isAttachDisabled(1, false)).toBe(true)
 	})
 })
 

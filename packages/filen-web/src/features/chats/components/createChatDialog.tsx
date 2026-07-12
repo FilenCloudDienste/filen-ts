@@ -10,6 +10,7 @@ import { togglePickerContact, resolveSelectedContacts } from "@/features/drive/c
 import { ContactRow } from "@/features/contacts/components/contactRow"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -35,6 +36,7 @@ const SKELETON_ROW_COUNT = 5
 // empty state, never a crash — the one thing this flow is confidently e2e-provable up to.
 export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) {
 	const { t } = useTranslation(["chats", "contacts", "common"])
+	const isOnline = useIsOnline()
 	const contactsQuery = useContactsQuery()
 	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
 	const [pending, setPending] = useState(false)
@@ -150,7 +152,7 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 		)
 	}
 
-	const canSubmit = selected.size > 0 && !pending
+	const canSubmit = selected.size > 0 && !pending && isOnline
 
 	return (
 		<Dialog

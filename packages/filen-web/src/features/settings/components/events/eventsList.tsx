@@ -4,6 +4,8 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { HistoryIcon } from "lucide-react"
 import type { UserEvent } from "@filen/sdk-rs"
 import { useEventsQuery, loadOlderEvents } from "@/features/settings/queries/events"
+import { shouldSkipEventsScroll } from "@/features/settings/lib/eventsPagination"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { EventRow } from "@/features/settings/components/events/eventRow"
 import { EventDetailDialog } from "@/features/settings/components/events/eventDetailDialog"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -34,6 +36,7 @@ function sortedOkEvents(data: ReturnType<typeof useEventsQuery>["data"]): UserEv
 
 export function EventsList() {
 	const { t } = useTranslation(["settings", "common"])
+	const isOnline = useIsOnline()
 	const eventsQuery = useEventsQuery()
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const [selectedEvent, setSelectedEvent] = useState<UserEvent | null>(null)
@@ -54,7 +57,14 @@ export function EventsList() {
 	})
 
 	async function handleScroll(el: HTMLDivElement): Promise<void> {
-		if (inflightRef.current || !hasMore || eventsQuery.status !== "success") {
+		if (
+			shouldSkipEventsScroll({
+				inflight: inflightRef.current,
+				hasMore,
+				queryReady: eventsQuery.status === "success",
+				isOnline
+			})
+		) {
 			return
 		}
 

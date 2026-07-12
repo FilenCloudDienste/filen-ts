@@ -6,6 +6,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { DELETE_ALL_ITEMS_PHRASE } from "@/features/settings/lib/dangerPhrases"
+import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -21,6 +22,7 @@ interface DeleteAllItemsCardProps {
 // render-only in this repo's own test suite, same as DeleteAccountCard.
 function DeleteAllItemsCard({ accountQuery }: DeleteAllItemsCardProps) {
 	const { t } = useTranslation(["settings", "common"])
+	const isOnline = useIsOnline()
 	const { storageUsed } = accountQuery.data
 	const [open, setOpen] = useState(false)
 	const [pending, setPending] = useState(false)
@@ -49,6 +51,7 @@ function DeleteAllItemsCard({ accountQuery }: DeleteAllItemsCardProps) {
 				<Button
 					type="button"
 					variant="destructive"
+					disabled={!isOnline}
 					onClick={() => {
 						setOpen(true)
 					}}

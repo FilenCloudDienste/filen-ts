@@ -47,7 +47,7 @@ vi.mock("@/features/drive/lib/saveDownload", async importOriginal => {
 	return { ...actual, isFsaAvailable: isFsaAvailableMock }
 })
 
-import { driveItemActions, startItemDownload } from "@/features/drive/components/itemMenu.logic"
+import { applyOfflineGate, driveItemActions, startItemDownload } from "@/features/drive/components/itemMenu.logic"
 
 beforeEach(() => {
 	isFsaAvailableMock.mockReturnValue(false)
@@ -551,6 +551,50 @@ describe("driveItemActions — descriptor label/icon facts (ACTION_DEFS drift gu
 			labelKey: "driveActionUnshare",
 			icon: UserMinusIcon
 		})
+	})
+})
+
+describe("applyOfflineGate", () => {
+	it("leaves every descriptor untouched while online", () => {
+		const actions = driveItemActions(dirItem(), "drive")
+
+		expect(applyOfflineGate(actions, true)).toEqual(actions)
+	})
+
+	it("disables rename/move/color/publicLink/copyLink/trash/download while offline", () => {
+		const gated = applyOfflineGate(driveItemActions(dirItem(), "drive"), false)
+		const gatedIds = new Set(["rename", "move", "color", "publicLink", "copyLink", "trash", "download"])
+
+		for (const descriptor of gated) {
+			if (gatedIds.has(descriptor.id)) {
+				expect(descriptor.enabled).toBe(false)
+			}
+		}
+	})
+
+	it("disables import while offline (sharedIn)", () => {
+		const descriptor = applyOfflineGate(driveItemActions(sharedRootFileItem(), "sharedIn"), false).find(d => d.id === "import")
+
+		expect(descriptor?.enabled).toBe(false)
+	})
+
+	it("leaves read-only actions (info/favorite/share) enabled while offline", () => {
+		const gated = applyOfflineGate(driveItemActions(dirItem(), "drive"), false)
+		const untouchedIds = ["info", "favorite", "share"]
+
+		for (const id of untouchedIds) {
+			const descriptor = gated.find(d => d.id === id)
+			expect(descriptor?.enabled).not.toBe(false)
+		}
+	})
+
+	it("does not mutate the input array's descriptor objects", () => {
+		const actions = driveItemActions(dirItem(), "drive")
+		const renameBefore = actions.find(d => d.id === "rename")
+
+		applyOfflineGate(actions, false)
+
+		expect(renameBefore?.enabled).not.toBe(false)
 	})
 })
 

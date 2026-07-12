@@ -9,6 +9,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isValidEmail, isPasswordStrongEnough } from "@/lib/validate"
 import { runResetAttempt } from "@/features/auth/lib/resetAttempt"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -32,6 +33,7 @@ function ResetForm({ token }: ResetFormProps) {
 	// Both namespaces bound: the ceremony's cancel button reuses the generic common:cancel — a
 	// single-ns bound `t` rejects cross-namespace keys under the typed catalog.
 	const { t } = useTranslation(["auth", "common"])
+	const isOnline = useIsOnline()
 	const navigate = useNavigate()
 	const [email, setEmail] = useState("")
 	const [password, setPassword] = useState("")
@@ -45,7 +47,7 @@ function ResetForm({ token }: ResetFormProps) {
 	const passwordsMatch = password.length > 0 && password === confirmPassword
 	// Minimum-strength gate, shared with the register form via isPasswordStrongEnough (weak is the
 	// only blocked tier — the meter's weak state explains why).
-	const canSubmit = isValidEmail(email) && passwordsMatch && isPasswordStrongEnough(passwordStrength)
+	const canSubmit = isValidEmail(email) && passwordsMatch && isPasswordStrongEnough(passwordStrength) && isOnline
 	const cancelLabel = t("common:cancel")
 	// Resolved ONCE: the stage-4 body copy ({{phrase}}) and its matchValue both read THIS string, so
 	// the phrase the user is told to type and the phrase the input is checked against cannot drift.

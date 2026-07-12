@@ -17,6 +17,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { ImageViewer, ZoomableImage } from "@/features/preview/components/imageViewer"
 import { MediaViewer, MediaElement } from "@/features/preview/components/mediaViewer"
 import { isTextEditingTarget, previewMenuVisible, PREVIEW_MENU_HIDDEN_ACTION_IDS } from "@/features/preview/components/previewOverlay.logic"
@@ -140,6 +141,7 @@ function PreviewRenderError() {
 // interrupted close against.
 export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemRemoved }: PreviewOverlayProps) {
 	const { t } = useTranslation(["preview", "common", "drive"])
+	const isOnline = useIsOnline()
 	const rawSource = items[index]
 	// The drive item at this slot BEFORE any per-slot save override — undefined for the external arm (and
 	// for an out-of-range index). The save/uuid-rotation/read-only machinery below is drive-only; the
@@ -656,6 +658,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 							<Button
 								variant="ghost"
 								size="icon-sm"
+								disabled={!isOnline}
 								aria-label={t("previewDownloadAction")}
 								onClick={() => {
 									void startDownloads([currentSource.item])

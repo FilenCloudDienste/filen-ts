@@ -59,6 +59,7 @@ import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectory
 import { useDriveListboxNav } from "@/features/drive/hooks/useDriveListboxNav"
 import { useDriveMarquee } from "@/features/drive/hooks/useDriveMarquee"
 import { useDriveDialogHost } from "@/features/drive/hooks/useDriveDialogHost"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
@@ -149,11 +150,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const listingQuery = useDirectoryListingQuery(variant, uuid)
 	const sortPrefsQuery = useSortPreferencesQuery()
 	const viewModePrefsQuery = useViewModePreferencesQuery()
+	const isOnline = useIsOnline()
 	// New directory / upload only make sense in the navigable "drive" variant, once the listing has
 	// loaded — recents/favorites/trash/shared have no directory to write into, and a still-loading
 	// listing has no confirmed uuid to target yet. Shared by NewDirectory, UploadMenu and
-	// UploadDropzone below (all three write into the same `uuid`).
-	const writeDisabled = variant !== "drive" || listingQuery.status !== "success"
+	// UploadDropzone below (all three write into the same `uuid`). Offline folds in here too: all
+	// three write to the SDK, which has nothing to reach while offline.
+	const writeDisabled = variant !== "drive" || listingQuery.status !== "success" || !isOnline
 	// Gates the underlying contacts/blocked fetch itself (see useBlockedUsers.ts) — only sharedIn
 	// filters by it, so the other 5 variants skip the getContacts/getBlockedContacts worker round trip
 	// on every mount and window refocus.
@@ -383,14 +386,14 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 			const item = sortedItems[safeActiveIndex]
 
-			if (!item || !driveItemActions(item, variant).some(descriptor => descriptor.id === "rename")) {
+			if (!isOnline || !item || !driveItemActions(item, variant).some(descriptor => descriptor.id === "rename")) {
 				return
 			}
 
 			handleItemAction("rename", item)
 		},
 		undefined,
-		[isDialogOpen, sortedItems, safeActiveIndex, variant]
+		[isDialogOpen, sortedItems, safeActiveIndex, variant, isOnline]
 	)
 
 	// Registered above at module scope. preventDefault unconditionally — Backspace's browser default
@@ -402,25 +405,25 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		keyboardEvent => {
 			keyboardEvent.preventDefault()
 
-			if (selectedItems.length === 0 || isDialogOpen || variant === "trash") {
+			if (selectedItems.length === 0 || isDialogOpen || variant === "trash" || !isOnline) {
 				return
 			}
 
 			handleBulkDialogAction("trash")
 		},
 		undefined,
-		[selectedItems, isDialogOpen, variant]
+		[selectedItems, isDialogOpen, variant, isOnline]
 	)
 
 	// Registered above at module scope. preventDefault unconditionally — mod+s's browser default
 	// (Save Page As) must never fire while this listing has focus. Guards mirror drive.trash's own
 	// (an open dialog, the trash variant — download isn't offered there, matching item-menu/bulk-bar's
 	// own trash exclusion) plus isBulkDownloadEnabled (bulkActionBar.logic.ts) — the single unifying
-	// ENABLED gate every download entry point shares, empty selection included (false for []). Also
-	// inert when the selection includes an undecryptable item — its meta is ciphertext with no content
-	// key, so it can never decrypt (mirrors item-menu/bulk-bar's own undecryptable exclusion) — void,
-	// not awaited, so the FSA save picker inside startDownloads keeps this keydown's own live user
-	// gesture.
+	// ENABLED gate every download entry point shares, empty selection included (false for []), plus
+	// offline — a download has nothing to fetch from without a connection. Also inert
+	// when the selection includes an undecryptable item — its meta is ciphertext with no content key,
+	// so it can never decrypt (mirrors item-menu/bulk-bar's own undecryptable exclusion) — void, not
+	// awaited, so the FSA save picker inside startDownloads keeps this keydown's own live user gesture.
 	useAction(
 		"drive.download",
 		keyboardEvent => {
@@ -429,6 +432,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			if (
 				isDialogOpen ||
 				variant === "trash" ||
+				!isOnline ||
 				!isBulkDownloadEnabled(selectedItems) ||
 				selectedItems.some(item => item.data.undecryptable)
 			) {
@@ -438,7 +442,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			void startDownloads(selectedItems)
 		},
 		undefined,
-		[selectedItems, isDialogOpen, variant]
+		[selectedItems, isDialogOpen, variant, isOnline]
 	)
 
 	// The column header + virtualized listbox — identical shape whether sortedItems is the normal
@@ -595,7 +599,12 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						splat={splat}
 					/>
 					<div className="flex shrink-0 items-center gap-2">
-						{isEmptyTrashTriggerVisible(variant, sortedItems.length) ? <EmptyTrashButton onClick={handleEmptyTrash} /> : null}
+						{isEmptyTrashTriggerVisible(variant, sortedItems.length) ? (
+							<EmptyTrashButton
+								onClick={handleEmptyTrash}
+								disabled={!isOnline}
+							/>
+						) : null}
 						<NewDirectory
 							parentUuid={uuid}
 							disabled={writeDisabled}

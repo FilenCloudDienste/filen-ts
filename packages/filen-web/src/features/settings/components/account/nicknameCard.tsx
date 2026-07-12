@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Field, FieldLabel } from "@/components/ui/field"
@@ -22,6 +23,7 @@ interface NicknameCardProps {
 // the nickname (`setNickname(null)`) — mirrors old-web's dialog (`allowEmptyValue`, 0..32 chars).
 function NicknameCard({ accountQuery }: NicknameCardProps) {
 	const { t } = useTranslation("settings")
+	const isOnline = useIsOnline()
 	const { nickName } = accountQuery.data
 	const [value, setValue] = useState(nickName ?? "")
 	const [pending, setPending] = useState(false)
@@ -70,7 +72,7 @@ function NicknameCard({ accountQuery }: NicknameCardProps) {
 						<Button
 							type="button"
 							variant="outline"
-							disabled={!dirty || pending}
+							disabled={!dirty || pending || !isOnline}
 							onClick={() => {
 								void handleSave()
 							}}

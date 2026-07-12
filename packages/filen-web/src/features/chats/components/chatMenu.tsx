@@ -5,7 +5,13 @@ import type { Chat } from "@filen/sdk-rs"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { setChatMuted, markChatRead } from "@/features/chats/lib/actions"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
-import { chatMenuActions, type ChatActionDescriptor, type ChatActionDialogKind } from "@/features/chats/components/chatMenu.logic"
+import {
+	applyOfflineGate,
+	chatMenuActions,
+	type ChatActionDescriptor,
+	type ChatActionDialogKind
+} from "@/features/chats/components/chatMenu.logic"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 
@@ -32,8 +38,9 @@ const SEPARATOR_BEFORE = new Set<ChatActionDescriptor["id"]>(["delete", "leave"]
 // menu row, mirrors notes' NoteMenuEntries exactly.
 function ChatMenuEntries({ chat, currentUserId, onAction, family }: ChatMenuContentProps & { family: MenuFamily }) {
 	const { t } = useTranslation("chats")
+	const isOnline = useIsOnline()
 	const unread = chatHasUnread(chat, currentUserId)
-	const descriptors = chatMenuActions(chat, currentUserId, unread)
+	const descriptors = applyOfflineGate(chatMenuActions(chat, currentUserId, unread), isOnline)
 	const { Item, Separator } = family
 
 	async function runDirect(descriptor: Extract<ChatActionDescriptor, { run: "direct" }>): Promise<void> {
@@ -67,6 +74,7 @@ function ChatMenuEntries({ chat, currentUserId, onAction, family }: ChatMenuCont
 				{separator}
 				<Item
 					variant={descriptor.destructive ? "destructive" : "default"}
+					disabled={descriptor.enabled === false}
 					onClick={event => {
 						// Stop propagation — the portaled popup's synthetic events still bubble through the
 						// REACT tree even though the DOM node lives elsewhere (same rationale as noteMenu.tsx),

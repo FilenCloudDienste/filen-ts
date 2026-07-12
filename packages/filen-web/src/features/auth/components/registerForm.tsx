@@ -8,6 +8,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isValidEmail, isPasswordStrongEnough } from "@/lib/validate"
 import { getReferral } from "@/features/auth/lib/referral"
 import { useRegisterCheckQuery } from "@/features/auth/queries/registerCheck"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -45,6 +46,7 @@ function EligibilityBanner() {
 
 function RegisterForm() {
 	const { t } = useTranslation("auth")
+	const isOnline = useIsOnline()
 	const [email, setEmail] = useState("")
 	const [password, setPassword] = useState("")
 	const [confirmPassword, setConfirmPassword] = useState("")
@@ -56,9 +58,9 @@ function RegisterForm() {
 	const passwordStrength = password.length > 0 ? ratePasswordStrength(password) : null
 	const passwordsMatch = password.length > 0 && password === confirmPassword
 	// Minimum-strength gate, shared with the reset form via isPasswordStrongEnough (weak is the only
-	// blocked tier — the meter's weak state explains why). No `isOnline` term: this form ships no
-	// connectivity infra, a real network failure surfaces as the SDK's own error toast instead.
-	const canSubmit = emailValid && passwordsMatch && isPasswordStrongEnough(passwordStrength)
+	// blocked tier — the meter's weak state explains why). isOnline proactively disables the button
+	// rather than leaving a real network failure to surface only as the SDK's own error toast.
+	const canSubmit = emailValid && passwordsMatch && isPasswordStrongEnough(passwordStrength) && isOnline
 
 	async function handleSubmit(e: SubmitEvent): Promise<void> {
 		e.preventDefault()

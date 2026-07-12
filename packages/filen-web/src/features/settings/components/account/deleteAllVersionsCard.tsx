@@ -6,6 +6,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { DELETE_ALL_VERSIONS_PHRASE } from "@/features/settings/lib/dangerPhrases"
+import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -24,6 +25,7 @@ interface DeleteAllVersionsCardProps {
 // shared account's version history — this card is unit/render-only in this repo's own test suite.
 function DeleteAllVersionsCard({ accountQuery }: DeleteAllVersionsCardProps) {
 	const { t } = useTranslation(["settings", "common"])
+	const isOnline = useIsOnline()
 	const { versionedFiles, versionedStorage } = accountQuery.data
 	const [open, setOpen] = useState(false)
 	const [pending, setPending] = useState(false)
@@ -57,6 +59,7 @@ function DeleteAllVersionsCard({ accountQuery }: DeleteAllVersionsCardProps) {
 				<Button
 					type="button"
 					variant="destructive"
+					disabled={!isOnline}
 					onClick={() => {
 						setOpen(true)
 					}}

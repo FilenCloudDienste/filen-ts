@@ -31,6 +31,14 @@ export function canSend(value: string): boolean {
 	return value.trim().length > 0 && !isOverLimit(value)
 }
 
+// Attach-menu pre-gate — UNLIKE send above, attach genuinely needs network right now (it starts an
+// upload / opens the drive picker, neither of which queues), so this one DOES gate on connectivity.
+// Kept alongside canSend precisely so the asymmetry between them reads as deliberate, not an
+// oversight — see composer.tsx's own header comment.
+export function isAttachDisabled(uploadingCount: number, isOnline: boolean): boolean {
+	return uploadingCount > 0 || !isOnline
+}
+
 // Inserts a just-created attachment public-link url at the END of the current draft — mobile/old-web
 // both append rather than caret-inserting an attachment (unlike mention/emoji, which replace the
 // in-progress trigger token at the caret). A blank draft becomes just the url; a non-blank one gets a

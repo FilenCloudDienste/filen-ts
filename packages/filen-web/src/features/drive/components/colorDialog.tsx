@@ -9,6 +9,7 @@ import { type DirectoryItem, setColor } from "@/features/drive/lib/actions"
 import { dirColorHex } from "@/features/drive/lib/dirColor"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { cn } from "@/lib/utils"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
@@ -39,6 +40,7 @@ const SWATCHES: Swatch[] = [
 // was dispatched from is already closed), so this renders as a modal like its sibling dialogs.
 export function ColorDialog({ directory, onClose }: ColorDialogProps) {
 	const { t } = useTranslation("drive")
+	const isOnline = useIsOnline()
 	const [pending, setPending] = useState(false)
 
 	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
@@ -84,7 +86,7 @@ export function ColorDialog({ directory, onClose }: ColorDialogProps) {
 							<button
 								key={swatch.color}
 								type="button"
-								disabled={pending}
+								disabled={pending || !isOnline}
 								aria-pressed={selected}
 								aria-label={t(swatch.labelKey)}
 								onClick={() => {

@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { runPreferenceToggle } from "@/features/settings/components/account/accountPreferences.logic"
+import { runPreferenceToggle, isPreferenceRowDisabled } from "@/features/settings/components/account/accountPreferences.logic"
+import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
@@ -43,6 +44,7 @@ function PreferenceRow({ title, description, checked, pending, onCheckedChange }
 // once `refetch` resolves back to the pre-toggle server value (accountPreferences.logic.ts).
 function AccountPreferencesCard({ accountQuery }: AccountPreferencesCardProps) {
 	const { t } = useTranslation("settings")
+	const isOnline = useIsOnline()
 	const { versioningEnabled, loginAlertsEnabled } = accountQuery.data
 	const [versioningPending, setVersioningPending] = useState(false)
 	const [loginAlertsPending, setLoginAlertsPending] = useState(false)
@@ -82,7 +84,7 @@ function AccountPreferencesCard({ accountQuery }: AccountPreferencesCardProps) {
 					title={t("settingsVersioningTitle")}
 					description={t("settingsVersioningDescription")}
 					checked={versioningEnabled}
-					pending={versioningPending}
+					pending={isPreferenceRowDisabled(versioningPending, isOnline)}
 					onCheckedChange={next => {
 						void handleVersioningChange(next)
 					}}
@@ -91,7 +93,7 @@ function AccountPreferencesCard({ accountQuery }: AccountPreferencesCardProps) {
 					title={t("settingsLoginAlertsTitle")}
 					description={t("settingsLoginAlertsDescription")}
 					checked={loginAlertsEnabled}
-					pending={loginAlertsPending}
+					pending={isPreferenceRowDisabled(loginAlertsPending, isOnline)}
 					onCheckedChange={next => {
 						void handleLoginAlertsChange(next)
 					}}

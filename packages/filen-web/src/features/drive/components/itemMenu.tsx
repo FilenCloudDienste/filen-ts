@@ -7,7 +7,9 @@ import { toggleFavorite, restoreItems } from "@/features/drive/lib/actions"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import { useIsOnline } from "@/lib/useIsOnline"
 import {
+	applyOfflineGate,
 	driveItemActions,
 	startItemDownload,
 	type ItemActionDescriptor,
@@ -61,7 +63,10 @@ function ItemMenuEntries({
 	family
 }: ItemMenuContentProps & { family: MenuItemFamily }) {
 	const { t } = useTranslation("drive")
-	const descriptors = driveItemActions(item, variant).filter(descriptor => !hiddenActionIds?.has(descriptor.id))
+	const isOnline = useIsOnline()
+	const descriptors = applyOfflineGate(driveItemActions(item, variant), isOnline).filter(
+		descriptor => !hiddenActionIds?.has(descriptor.id)
+	)
 	const { Item, Separator } = family
 
 	async function runDirect(descriptor: Extract<ItemActionDescriptor, { run: "direct" }>): Promise<void> {

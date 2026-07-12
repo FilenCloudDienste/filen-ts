@@ -26,6 +26,7 @@ export interface ContactsBulkBarProps {
 	onRemove: (items: Contact[]) => void
 	onBlock: (items: Contact[]) => void
 	onUnblock: (items: BlockedContact[]) => void
+	disabled?: boolean
 }
 
 // Replaces the toolbar's search region while bulk-selection mode is active (mounted by
@@ -44,7 +45,8 @@ export function ContactsBulkBar({
 	onCancel,
 	onRemove,
 	onBlock,
-	onUnblock
+	onUnblock,
+	disabled
 }: ContactsBulkBarProps) {
 	const { t } = useTranslation("contacts")
 
@@ -103,6 +105,7 @@ export function ContactsBulkBar({
 						key={descriptor.kind}
 						variant={descriptor.destructive ? "destructive" : "outline"}
 						size="sm"
+						disabled={disabled}
 						onClick={() => {
 							run(descriptor.kind)
 						}}

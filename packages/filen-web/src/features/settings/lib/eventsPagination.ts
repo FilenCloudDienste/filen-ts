@@ -16,3 +16,12 @@ export function computeNextEventsPage(
 
 	return { newOk, terminate: newOk.length === 0 }
 }
+
+// Scroll-triggered pagination's combined guard (eventsList.tsx's handleScroll) — pulled out so the
+// offline branch is unit-testable without mounting the virtualized list. Mirrors mobile's
+// onEndReached: offline early-returns WITHOUT flipping hasMore, so the very next near-bottom scroll
+// after reconnecting resumes pagination instead of the list having been permanently marked
+// "no more pages" by a fetch that never ran.
+export function shouldSkipEventsScroll(state: { inflight: boolean; hasMore: boolean; queryReady: boolean; isOnline: boolean }): boolean {
+	return state.inflight || !state.hasMore || !state.queryReady || !state.isOnline
+}

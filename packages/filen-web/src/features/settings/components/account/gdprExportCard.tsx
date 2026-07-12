@@ -6,6 +6,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { downloadBlob } from "@/lib/downloadBlob"
 import { gdprInfoToJson } from "@/features/settings/lib/gdprExport"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { Card, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -16,6 +17,7 @@ import { Spinner } from "@/components/ui/spinner"
 // this never mutates account state.
 function GdprExportCard() {
 	const { t } = useTranslation("settings")
+	const isOnline = useIsOnline()
 	const [pending, setPending] = useState(false)
 
 	async function handleExport(): Promise<void> {
@@ -41,7 +43,7 @@ function GdprExportCard() {
 				<Button
 					type="button"
 					variant="outline"
-					disabled={pending}
+					disabled={pending || !isOnline}
 					onClick={() => {
 						void handleExport()
 					}}

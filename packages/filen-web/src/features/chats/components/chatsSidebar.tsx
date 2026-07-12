@@ -8,6 +8,7 @@ import { useAccountQuery } from "@/queries/account"
 import { filterChats } from "@/features/chats/components/chatsSidebar.logic"
 import { ChatRow } from "@/features/chats/components/chatRow"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -42,6 +43,7 @@ function SidebarNotice({ icon, title, description }: { icon: ReactNode; title: s
 // menus (chatRow.tsx's own context/dropdown menu).
 export function ChatsSidebar() {
 	const { t } = useTranslation("chats")
+	const isOnline = useIsOnline()
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const selectedUuid = selectedUuidFromPath(pathname)
 
@@ -142,6 +144,7 @@ export function ChatsSidebar() {
 					<Button
 						variant="ghost"
 						size="icon-sm"
+						disabled={!isOnline}
 						aria-label={t("chatsSidebarNewChat")}
 						className="app-region-no-drag"
 						onClick={() => {

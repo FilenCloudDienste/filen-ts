@@ -13,6 +13,7 @@ import type { OptimisticSender } from "@/features/chats/lib/sync.logic"
 import {
 	MAX_CHAT_MESSAGE_LENGTH,
 	canSend,
+	isAttachDisabled,
 	isOverLimit,
 	remainingChars,
 	shouldShowCounter,
@@ -35,6 +36,7 @@ import type { EmojiSuggestion } from "@/features/chats/lib/emoji"
 import { useChatComposerEntry, useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import { loadDraft, saveDraftDebounced } from "@/features/chats/lib/drafts"
 import { AttachDriveDialog } from "@/features/chats/components/thread/attachDriveDialog"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
@@ -73,6 +75,7 @@ export function Composer({
 	onSent: () => void
 }) {
 	const { t } = useTranslation("chats")
+	const isOnline = useIsOnline()
 	const chatUuid = chat.uuid
 	const entry = useChatComposerEntry(chatUuid)
 	const draft = entry.draft
@@ -564,7 +567,10 @@ export function Composer({
 								variant="ghost"
 								size="icon-sm"
 								className="size-8 shrink-0 self-end rounded-full"
-								disabled={uploadingCount > 0}
+								// Attach-menu pre-gate — both entries need network right away (an upload/
+								// drive-attach start, not a durably-queued send), unlike the send button below,
+								// which stays enabled offline by design (its outbox queues and flushes later).
+								disabled={isAttachDisabled(uploadingCount, isOnline)}
 								aria-label={t("chatComposerAttach")}
 							>
 								<PaperclipIcon />

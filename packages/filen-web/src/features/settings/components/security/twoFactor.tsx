@@ -9,6 +9,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { downloadTextFile } from "@/features/settings/lib/downloadTextFile"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { buildOtpauthUri, canDismissRecoveryKeyPanel } from "@/features/settings/components/security/twoFactor.logic"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -117,6 +118,7 @@ function RecoveryKeyPanel({ recoveryKey, onClose }: RecoveryKeyPanelProps) {
 // security ON needs no "are you sure").
 function TwoFactorCard({ accountQuery }: TwoFactorCardProps) {
 	const { t } = useTranslation(["auth", "common"])
+	const isOnline = useIsOnline()
 	const { email, twoFactorEnabled, twoFactorKey } = accountQuery.data
 
 	const [enableCodeOpen, setEnableCodeOpen] = useState(false)
@@ -198,6 +200,7 @@ function TwoFactorCard({ accountQuery }: TwoFactorCardProps) {
 					<Button
 						type="button"
 						variant="destructive"
+						disabled={!isOnline}
 						onClick={() => {
 							setDisableConfirmOpen(true)
 						}}
@@ -207,7 +210,7 @@ function TwoFactorCard({ accountQuery }: TwoFactorCardProps) {
 				) : (
 					<Button
 						type="button"
-						disabled={twoFactorKey === undefined || twoFactorKey.length === 0}
+						disabled={twoFactorKey === undefined || twoFactorKey.length === 0 || !isOnline}
 						onClick={() => {
 							setEnableCodeOpen(true)
 						}}

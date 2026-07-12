@@ -10,6 +10,7 @@ import { useDriveItemLinkStatusQuery, type DriveItemLinkStatus } from "@/feature
 import { buildLinkUpdate, buildPublicLinkUrl, readLinkForm, type LinkFormEdits } from "@/features/drive/components/linkDialog.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
+import { useIsOnline } from "@/lib/useIsOnline"
 import type { DriveKey } from "@/lib/i18n"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -50,6 +51,7 @@ const EXPIRATION_OPTIONS: { value: PublicLinkExpiration; labelKey: DriveKey }[] 
 export function LinkDialog({ item, onClose }: LinkDialogProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const linkStatusQuery = useDriveItemLinkStatusQuery(item)
+	const isOnline = useIsOnline()
 	const [pending, setPending] = useState(false)
 	const [createProgress, setCreateProgress] = useState<{ downloaded: number; total: number | undefined } | null>(null)
 	const [passwordEditing, setPasswordEditing] = useState(false)
@@ -159,7 +161,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 						</EmptyHeader>
 						<EmptyContent>
 							<Button
-								disabled={pending}
+								disabled={pending || !isOnline}
 								onClick={() => {
 									void handleCreate()
 								}}
@@ -183,7 +185,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 							<Switch
 								id="link-downloadable"
 								checked={form.downloadEnabled}
-								disabled={pending}
+								disabled={pending || !isOnline}
 								onCheckedChange={checked => {
 									void handleUpdate(current, { downloadEnabled: checked })
 								}}
@@ -194,7 +196,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 							<Select
 								items={EXPIRATION_OPTIONS.map(option => ({ value: option.value, label: t(option.labelKey) }))}
 								value={form.expiration}
-								disabled={pending}
+								disabled={pending || !isOnline}
 								onValueChange={value => {
 									// The select is never rendered with a null/placeholder entry (EXPIRATION_OPTIONS
 									// covers every PublicLinkExpiration value), so a null callback value can't occur
@@ -230,7 +232,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 										type="password"
 										autoFocus
 										value={passwordDraft}
-										disabled={pending}
+										disabled={pending || !isOnline}
 										placeholder={t("driveLinkPasswordPlaceholder")}
 										className="flex-1"
 										onChange={e => {
@@ -239,7 +241,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 									/>
 									<Button
 										size="sm"
-										disabled={pending || passwordDraft.trim().length === 0}
+										disabled={pending || !isOnline || passwordDraft.trim().length === 0}
 										onClick={() => {
 											void handleSavePassword(current)
 										}}
@@ -250,7 +252,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 									<Button
 										size="sm"
 										variant="ghost"
-										disabled={pending}
+										disabled={pending || !isOnline}
 										onClick={() => {
 											setPasswordEditing(false)
 											setPasswordDraft("")
@@ -267,7 +269,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 									<Button
 										size="sm"
 										variant="outline"
-										disabled={pending}
+										disabled={pending || !isOnline}
 										onClick={() => {
 											setPasswordEditing(true)
 										}}
@@ -278,7 +280,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 										<Button
 											size="sm"
 											variant="ghost"
-											disabled={pending}
+											disabled={pending || !isOnline}
 											onClick={() => {
 												void handleUpdate(current, { password: { kind: "cleared" } })
 											}}
@@ -320,7 +322,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 					<DialogFooter>
 						<Button
 							variant="destructive"
-							disabled={pending}
+							disabled={pending || !isOnline}
 							onClick={() => {
 								void handleDisable(current)
 							}}

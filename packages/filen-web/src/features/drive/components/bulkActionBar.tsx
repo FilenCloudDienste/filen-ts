@@ -9,11 +9,13 @@ import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	driveBulkActions,
+	isBulkActionOfflineDisabled,
 	isBulkDownloadEnabled,
 	startBulkDownload,
 	type BulkActionDescriptor,
 	type BulkDialogActionKind
 } from "@/features/drive/components/bulkActionBar.logic"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { Kbd } from "@/lib/keymap/kbd"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -36,6 +38,7 @@ const KEYMAP_ACTION_FOR: Partial<Record<BulkActionDescriptor["id"], string>> = {
 // while a selection exists) — the toolbar stays put; this replaces nothing.
 export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkActionBarProps) {
 	const { t } = useTranslation("drive")
+	const isOnline = useIsOnline()
 	const flags = aggregateDriveSelectionFlags(selectedItems)
 	const descriptors = driveBulkActions(variant, flags)
 
@@ -97,7 +100,9 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 					// selection exists) — kept as a defensive check mirroring itemMenu.logic.ts's own
 					// downloadDescriptor rather than assuming the caller never renders an empty selection.
 					// Every other descriptor stays always-enabled.
-					const disabled = descriptor.id === "download" && !isBulkDownloadEnabled(selectedItems)
+					const disabled =
+						(descriptor.id === "download" && !isBulkDownloadEnabled(selectedItems)) ||
+						isBulkActionOfflineDisabled(descriptor.id, isOnline)
 					// Icon-only keeps the floating pill compact enough to never reach the toast corner;
 					// the label lives on aria-label (stable accessible name) and in the tooltip.
 					const keymapAction = KEYMAP_ACTION_FOR[descriptor.id]

@@ -8,6 +8,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isValidEmail } from "@/lib/validate"
 import { runLoginAttempt } from "@/features/auth/lib/loginAttempt"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -28,6 +29,7 @@ function ForgotPasswordDialog({
 	onOpenChange: (open: boolean) => void
 }) {
 	const { t } = useTranslation("auth")
+	const isOnline = useIsOnline()
 	const [pending, setPending] = useState(false)
 	// Re-seed on the open TRANSITION only, adjusting state during render (React's documented pattern
 	// for "reset state when a prop changes") rather than in an effect — an effect's setState would
@@ -88,7 +90,7 @@ function ForgotPasswordDialog({
 					<DialogFooter>
 						<Button
 							type="submit"
-							disabled={pending || !isValidEmail(email)}
+							disabled={pending || !isValidEmail(email) || !isOnline}
 						>
 							{pending && <Spinner data-icon="inline-start" />}
 							{t("forgotPasswordSubmit")}
@@ -102,6 +104,7 @@ function ForgotPasswordDialog({
 
 function LoginForm() {
 	const { t } = useTranslation("auth")
+	const isOnline = useIsOnline()
 	const navigate = useNavigate()
 	const [email, setEmail] = useState("")
 	const [password, setPassword] = useState("")
@@ -174,7 +177,7 @@ function LoginForm() {
 		}
 	}
 
-	const canSubmit = isValidEmail(email) && password.length > 0
+	const canSubmit = isValidEmail(email) && password.length > 0 && isOnline
 
 	return (
 		<>

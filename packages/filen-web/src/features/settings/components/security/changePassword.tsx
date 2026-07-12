@@ -8,6 +8,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isPasswordStrongEnough } from "@/lib/validate"
 import { runChangePasswordAttempt } from "@/features/settings/components/security/changePassword.logic"
+import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -26,6 +27,7 @@ interface ChangePasswordCardProps {
 // RETURNED, post-mutation session blob before this component does anything else with the result.
 function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 	const { t } = useTranslation("auth")
+	const isOnline = useIsOnline()
 	const [currentPassword, setCurrentPassword] = useState("")
 	const [newPassword, setNewPassword] = useState("")
 	const [confirmPassword, setConfirmPassword] = useState("")
@@ -33,7 +35,7 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 
 	const passwordStrength = newPassword.length > 0 ? ratePasswordStrength(newPassword) : null
 	const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword
-	const canSubmit = currentPassword.length > 0 && passwordsMatch && isPasswordStrongEnough(passwordStrength)
+	const canSubmit = currentPassword.length > 0 && passwordsMatch && isPasswordStrongEnough(passwordStrength) && isOnline
 
 	async function handleSubmit(e: SubmitEvent): Promise<void> {
 		e.preventDefault()

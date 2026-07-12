@@ -112,6 +112,15 @@ export function isBulkDownloadEnabled(items: DriveItem[]): boolean {
 	return items.length > 0
 }
 
+// Bulk-action ids offline never reaches the SDK/network for — move/trash (item-mutating) plus
+// download (a transfer-starting entry point); share/unshare/favorite/restoreSelected/delete are left
+// for a later gating pass, mirroring itemMenu.logic.ts's applyOfflineGate scope note.
+const OFFLINE_GATED_BULK_IDS: ReadonlySet<BulkActionDescriptor["id"]> = new Set(["move", "trash", "download"])
+
+export function isBulkActionOfflineDisabled(id: BulkActionDescriptor["id"], isOnline: boolean): boolean {
+	return !isOnline && OFFLINE_GATED_BULK_IDS.has(id)
+}
+
 // Download's "direct" action needs no await before it — startDownloads' FSA save picker requires the
 // click's own live user gesture (see features/drive/lib/download.ts), and bulkActionBar.tsx's onClick can't
 // be exercised under this project's DOM-less vitest setup, so this is the unit-testable seam proving

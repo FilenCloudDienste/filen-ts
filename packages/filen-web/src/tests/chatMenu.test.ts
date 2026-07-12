@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { MailOpenIcon, Volume2Icon, VolumeOffIcon, UsersIcon, PencilIcon, Trash2Icon, LogOutIcon } from "lucide-react"
 import type { Chat, ChatParticipant, UuidStr } from "@filen/sdk-rs"
-import { chatMenuActions, type ChatActionDescriptor } from "@/features/chats/components/chatMenu.logic"
+import { applyOfflineGate, chatMenuActions, type ChatActionDescriptor } from "@/features/chats/components/chatMenu.logic"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -155,6 +155,41 @@ describe("chatMenuActions — descriptor label/icon facts (CHAT_ACTION_DEFS drif
 
 	it("non-owner: the leave entry carries its expected label and icon", () => {
 		expect(facts(mockChat({ ownerId: 1n }), 2n)).toContainEqual({ id: "leave", labelKey: "chatActionLeave", icon: LogOutIcon })
+	})
+})
+
+describe("applyOfflineGate", () => {
+	it("leaves every descriptor untouched while online", () => {
+		const chat = mockChat({ ownerId: 1n, muted: false })
+		const actions = chatMenuActions(chat, 1n, true)
+
+		expect(applyOfflineGate(actions, true)).toEqual(actions)
+	})
+
+	it("disables mute/rename/participants/delete while offline (owner)", () => {
+		const chat = mockChat({ ownerId: 1n, muted: false })
+		const gated = applyOfflineGate(chatMenuActions(chat, 1n, true), false)
+		const gatedIds = new Set(["mute", "rename", "participants", "delete"])
+
+		for (const descriptor of gated) {
+			if (gatedIds.has(descriptor.id)) {
+				expect(descriptor.enabled).toBe(false)
+			}
+		}
+	})
+
+	it("leaves markRead enabled while offline — a read-state side effect, not a deliberate mutation", () => {
+		const chat = mockChat({ ownerId: 1n })
+		const descriptor = applyOfflineGate(chatMenuActions(chat, 1n, true), false).find(d => d.id === "markRead")
+
+		expect(descriptor?.enabled).not.toBe(false)
+	})
+
+	it("disables leave while offline (non-owner)", () => {
+		const chat = mockChat({ ownerId: 1n })
+		const descriptor = applyOfflineGate(chatMenuActions(chat, 2n, false), false).find(d => d.id === "leave")
+
+		expect(descriptor?.enabled).toBe(false)
 	})
 })
 

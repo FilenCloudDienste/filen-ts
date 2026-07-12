@@ -5,6 +5,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { downloadTextFile } from "@/features/settings/lib/downloadTextFile"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { type AccountQuerySuccess } from "@/queries/account"
 import { buildMasterKeysFilename } from "@/features/settings/components/security/exportMasterKeys.logic"
 import { Card, CardAction, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -22,6 +23,7 @@ interface ExportMasterKeysCardProps {
 // the badge clears once the refetch lands).
 function ExportMasterKeysCard({ accountQuery }: ExportMasterKeysCardProps) {
 	const { t } = useTranslation(["auth", "common"])
+	const isOnline = useIsOnline()
 	const { email, didExportMasterKeys } = accountQuery.data
 	const [confirmOpen, setConfirmOpen] = useState(false)
 	const [pending, setPending] = useState(false)
@@ -60,6 +62,7 @@ function ExportMasterKeysCard({ accountQuery }: ExportMasterKeysCardProps) {
 				<Button
 					type="button"
 					variant={didExportMasterKeys ? "outline" : "default"}
+					disabled={!isOnline}
 					onClick={() => {
 						setConfirmOpen(true)
 					}}

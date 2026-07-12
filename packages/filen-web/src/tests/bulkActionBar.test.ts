@@ -31,7 +31,12 @@ vi.mock("@/features/drive/lib/saveDownload", async importOriginal => {
 	return { ...actual, isFsaAvailable: isFsaAvailableMock }
 })
 
-import { driveBulkActions, isBulkDownloadEnabled, startBulkDownload } from "@/features/drive/components/bulkActionBar.logic"
+import {
+	driveBulkActions,
+	isBulkActionOfflineDisabled,
+	isBulkDownloadEnabled,
+	startBulkDownload
+} from "@/features/drive/components/bulkActionBar.logic"
 
 beforeEach(() => {
 	isFsaAvailableMock.mockReturnValue(false)
@@ -372,6 +377,24 @@ describe("isBulkDownloadEnabled", () => {
 		isFsaAvailableMock.mockReturnValue(true)
 
 		expect(isBulkDownloadEnabled([])).toBe(false)
+	})
+})
+
+describe("isBulkActionOfflineDisabled", () => {
+	it("disables move/trash/download while offline", () => {
+		expect(isBulkActionOfflineDisabled("move", false)).toBe(true)
+		expect(isBulkActionOfflineDisabled("trash", false)).toBe(true)
+		expect(isBulkActionOfflineDisabled("download", false)).toBe(true)
+	})
+
+	it("leaves move/trash/download enabled while online", () => {
+		expect(isBulkActionOfflineDisabled("move", true)).toBe(false)
+		expect(isBulkActionOfflineDisabled("trash", true)).toBe(false)
+		expect(isBulkActionOfflineDisabled("download", true)).toBe(false)
+	})
+
+	it("leaves favorite enabled offline — untouched by this gating pass", () => {
+		expect(isBulkActionOfflineDisabled("favorite", false)).toBe(false)
 	})
 })
 

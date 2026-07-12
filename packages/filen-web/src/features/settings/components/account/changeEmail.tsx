@@ -7,6 +7,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isValidEmail } from "@/lib/validate"
 import { runChangeEmailAttempt } from "@/features/settings/components/account/changeEmail.logic"
+import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -25,13 +26,14 @@ interface ChangeEmailCardProps {
 // as) — never live-exercised in e2e, unit/render only.
 function ChangeEmailCard({ accountQuery }: ChangeEmailCardProps) {
 	const { t } = useTranslation("settings")
+	const isOnline = useIsOnline()
 	const [newEmail, setNewEmail] = useState("")
 	const [confirmEmail, setConfirmEmail] = useState("")
 	const [password, setPassword] = useState("")
 	const [pending, setPending] = useState(false)
 
 	const emailsMatch = newEmail.length > 0 && newEmail === confirmEmail
-	const canSubmit = emailsMatch && isValidEmail(newEmail) && password.length > 0
+	const canSubmit = emailsMatch && isValidEmail(newEmail) && password.length > 0 && isOnline
 	// Inline, non-blocking feedback for why the submit button below is disabled — both gated on the
 	// field actually having content so an untouched empty form never shows red text on first render.
 	const newEmailInvalid = newEmail.length > 0 && !isValidEmail(newEmail)
