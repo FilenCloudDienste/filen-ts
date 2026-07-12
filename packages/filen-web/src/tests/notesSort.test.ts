@@ -216,7 +216,7 @@ describe("filterNotesBySearch", () => {
 		expect(filterNotesBySearch(notes, "nonexistent")).toEqual([])
 	})
 
-	// M4: full-body search — a `bodies` map, when supplied, wins over the SDK preview snippet.
+	// Full-body search — a `bodies` map, when supplied, wins over the SDK preview snippet.
 	it("matches against the eagerly-fetched full body when supplied, even when it differs from the preview", () => {
 		const bodies = new Map([[testUuid("c"), "the quarterly plan mentions a deep-dive on onboarding metrics"]])
 

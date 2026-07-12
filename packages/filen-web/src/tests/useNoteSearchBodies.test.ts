@@ -29,7 +29,7 @@ function mockNote(overrides: Partial<Note> = {}): Note {
 }
 
 describe("noteSearchBodyCandidates", () => {
-	it("returns no candidates at all for a blank query — M4's whole opt-in gate", () => {
+	it("returns no candidates at all for a blank query — the whole opt-in gate", () => {
 		const notes = [mockNote({ uuid: testUuid("a"), title: "Groceries" })]
 
 		expect(noteSearchBodyCandidates(notes, "")).toEqual([])

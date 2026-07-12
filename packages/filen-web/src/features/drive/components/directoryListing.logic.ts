@@ -66,13 +66,13 @@ export function resolveSearchDisplayItems(
 	return total <= BigInt(results.length) ? sortDriveItems(results, sortBy, directorySizes) : results
 }
 
-// H7's local-substring fallback for every non-"drive" variant (favorites/recents/trash/sharedIn/
+// Local-substring fallback for every non-"drive" variant (favorites/recents/trash/sharedIn/
 // sharedOut/links have no navigable subtree of their own for the cache-backed engine to search — see
 // directoryListing.tsx's own useDriveSearch(uuid, variant === "drive") gate) and for the move/import
 // picker's directory browser (moveTargetDialog.tsx passes its own already-type-filtered `directories`
 // list straight through here). Name-substring only, case-insensitive, over whatever's already loaded —
-// mirrors mobile's non-cache-backed variants (map-search.md #2, #5: "instant local substring filter...
-// no content, no recursion beyond what's already listed"). Same display-name fallback every other
+// mirrors mobile's own non-cache-backed variants, which do an instant local substring filter with no
+// content and no recursion beyond what's already listed. Same display-name fallback every other
 // per-item name read in this codebase uses (decryptedMeta?.name ?? uuid), so an undecryptable item
 // still stays findable by its own uuid text.
 // Generic over T (not the bare DriveItem union) so a caller that already narrowed its input array —
@@ -89,13 +89,13 @@ export function filterDriveItemsByLocalSearch<T extends DriveItem>(items: readon
 	return items.filter(item => (item.data.decryptedMeta?.name ?? item.data.uuid).toLowerCase().includes(normalized))
 }
 
-// P22: reconciles the store's possibly-stale selected-item snapshots against the freshest metadata in
+// Reconciles the store's possibly-stale selected-item snapshots against the freshest metadata in
 // the current live/search result set before either the bulk toolbar or a bulk dialog action reads them
 // — a remote favorite/rename/undecryptable-flip that landed after the item was selected is picked up
-// here instead of the object captured at click time (mirrors mobile's own "bulk actions always operate
-// against the freshest metadata" rule, map-search.md #17). An item no longer present in `liveItems` is
-// passed through unchanged rather than dropped — dropping it is staleSelectionUuids' own job (the
-// ghost-selection purge effect), not this function's; this only ever refreshes fields, never prunes.
+// here instead of the object captured at click time (mirrors mobile's own rule that bulk actions always
+// operate against the freshest metadata). An item no longer present in `liveItems` is passed through
+// unchanged rather than dropped — dropping it is staleSelectionUuids' own job (the ghost-selection purge
+// effect), not this function's; this only ever refreshes fields, never prunes.
 export function reconcileSelectedItems(selectedItems: readonly DriveItem[], liveItems: readonly DriveItem[]): DriveItem[] {
 	const liveByUuid = new Map(liveItems.map(item => [item.data.uuid, item]))
 

@@ -147,7 +147,7 @@ export function NotesSidebar() {
 
 	const allNotes = notesQuery.data ?? []
 	const allTags = tagsQuery.data ?? []
-	// M4 — eager, opt-in full-body fetch feeding the filters below; see useNoteSearchBodies.ts's own
+	// Eager, opt-in full-body fetch feeding the filters below; see useNoteSearchBodies.ts's own
 	// doc comment for why this never fires a single request outside an active search.
 	const searchBodies = useNoteSearchBodies(allNotes, search)
 

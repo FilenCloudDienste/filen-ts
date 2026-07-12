@@ -215,7 +215,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 
 		const filteredAvailable = filterContactsBySearch(available, filter)
 
-		// H7/M22: a non-matching filter gets its own "no results" state, distinct from the "everyone's
+		// A non-matching filter gets its own "no results" state, distinct from the "everyone's
 		// already a participant" branch above.
 		if (filteredAvailable.length === 0) {
 			return (

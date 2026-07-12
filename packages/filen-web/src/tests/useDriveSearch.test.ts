@@ -48,7 +48,7 @@ describe("resolveSearchTransition", () => {
 		expect(resolveSearchTransition(false, true)).toBe("open")
 	})
 
-	it("stays idle once the input empties back out — P23: never closes an engaged engine on blank", () => {
+	it("stays idle once the input empties back out — never closes an engaged engine on blank", () => {
 		expect(resolveSearchTransition(true, false)).toBe("idle")
 	})
 

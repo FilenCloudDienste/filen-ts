@@ -20,7 +20,7 @@ function normalizeSearch(search: string): string {
 
 // The flat note list: filter by search, then the pinned → bucket → editedTimestamp sort. Straight
 // reuse of the foundation's sortAndFilterNotes so both views share one search/sort semantics. `bodies`
-// is M4's eager-fetched full-body map (useNoteSearchBodies.ts) — undefined outside an active search.
+// is the eager-fetched full-body map (useNoteSearchBodies.ts) — undefined outside an active search.
 export function buildNotesView(notes: readonly Note[], search: string, bodies?: ReadonlyMap<string, string | undefined>): Note[] {
 	return sortAndFilterNotes(notes, search, bodies)
 }
@@ -49,7 +49,7 @@ function tagNameMatches(tag: NoteTag, normalized: string): boolean {
 }
 
 // A tag is shown in the tags view when the search matches its NAME or any of its member notes
-// (title or full body — `bodies` is M4's eager-fetched map, see buildNotesView's own comment). Empty
+// (title or full body — `bodies` is the eager-fetched map, see buildNotesView's own comment). Empty
 // search shows all.
 export function filterTagsForView(
 	tags: readonly NoteTag[],
@@ -103,7 +103,7 @@ export interface TagsViewParams {
 	expandedTagUuids: ReadonlySet<string>
 	search: string
 	sortBy: NoteTagsSortBy
-	// M4 — eager-fetched full-body map, undefined outside an active search (see buildNotesView).
+	// Eager-fetched full-body map, undefined outside an active search (see buildNotesView).
 	bodies?: ReadonlyMap<string, string | undefined>
 }
 

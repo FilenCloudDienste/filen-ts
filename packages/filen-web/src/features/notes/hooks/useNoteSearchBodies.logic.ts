@@ -4,9 +4,9 @@ import type { Note } from "@filen/sdk-rs"
 // Pure bits pulled out of useNoteSearchBodies.ts so the fetch-scoping decision is table-testable
 // without React Query or a worker.
 
-// Which notes actually need their body fetched for M4's full-text search: a title hit already
+// Which notes actually need their body fetched for full-text search: a title hit already
 // qualifies the note (filterNotesBySearch checks title first), so fetching its body too would be pure
-// waste — this is the whole "efficient/opt-in" half of M4's mandate, not just gating on `searching`.
+// waste — this is the whole point of keeping the full-body fetch efficient and opt-in, not just gating on `searching`.
 // Returns every note, unfiltered, for a blank query (the hook itself is what skips fetching then, by
 // passing an empty candidate list into useQueries).
 export function noteSearchBodyCandidates(notes: readonly Note[], search: string): Note[] {

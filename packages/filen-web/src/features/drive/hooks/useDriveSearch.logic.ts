@@ -11,7 +11,7 @@ import { type SearchHitDTO } from "@/workers/searchEngine"
 // current root (set the instant an open call succeeds, cleared only when the engine is actually torn
 // down — see useDriveSearch.ts's engagedRef). No timers or Comlink calls here; the hook owns those.
 //
-// A blank query NEVER closes an already-engaged engine (mobile parity — map-search.md #7's
+// A blank query NEVER closes an already-engaged engine (mobile parity — mirrors mobile's own
 // "searchEngaged" latch): clearing the box back to blank only stops the UI from rendering results
 // (`active` itself goes false), it does not tear the underlying search down, so the very next
 // keystroke is an instant in-engine "retune" rather than a cold "open". The engine is only ever

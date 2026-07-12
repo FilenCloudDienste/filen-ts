@@ -612,7 +612,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 						</Empty>
 					</div>
 				) : sections.length === 0 ? (
-					// M22: a non-matching SEARCH query always gets its own "no results" state, checked
+					// A non-matching SEARCH query always gets its own "no results" state, checked
 					// first — searchedSections/sections both collapse to zero the moment a query matches
 					// nothing, which previously fell through to the "genuinely no contacts" branch below and
 					// showed the add-a-contact onboarding copy even on an account that has plenty of

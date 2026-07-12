@@ -182,7 +182,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// swapping its one source here is what makes every one of them inherited for free.
 	const search = useDriveSearch(uuid, variant === "drive")
 
-	// H7's local-substring fallback for every non-"drive" variant (favorites/recents/trash/sharedIn/
+	// Local-substring fallback for every non-"drive" variant (favorites/recents/trash/sharedIn/
 	// sharedOut/links) — those have no navigable subtree of their own for the cache-backed engine above,
 	// so they get an instant, already-loaded-only name filter instead (filterDriveItemsByLocalSearch's
 	// own doc comment). Reset whenever the listing itself changes (variant or the current directory) —
@@ -216,7 +216,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		: sortDriveItems(locallyFilteredItems, effectiveSort, directorySizes)
 
 	const selectedItems = useDriveStore(useShallow(state => state.selectedItems))
-	// P22: bulk consumers (the dialog host + the floating bulk bar below) always read the freshest
+	// Bulk consumers (the dialog host + the floating bulk bar below) always read the freshest
 	// metadata for a still-selected SEARCH hit, not the possibly-stale object captured at select time —
 	// see reconcileSelectedItems' own doc comment. Scoped to the cache-backed engine only: the local
 	// filter above has no live push stream to reconcile against (its source is the same listingQuery
@@ -360,7 +360,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// preventDefault or the native selection would visibly compete with the drive-item selection.
 	// Guarded on isDialogOpen (see its own comment) so a background Cmd+A can't select items behind
 	// an open dialog — returns before preventDefault, so the browser default runs instead in that case.
-	// L28: withheld (preventDefault still runs, so the browser default stays suppressed either way)
+	// Withheld (preventDefault still runs, so the browser default stays suppressed either way)
 	// while the cache-backed search is still converging (warming/searching-empty/background) — only
 	// offered once the result set has settled, so the user can't "select all" a partial/still-growing
 	// window (mirrors mobile's own gate, searchStatus.logic.ts's isSearchConverging).
@@ -682,7 +682,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							}}
 						/>
 					</div>
-					{/* H7: every variant gets a filter box — "drive" drives the cache-backed recursive engine
+					{/* Every variant gets a filter box — "drive" drives the cache-backed recursive engine
 					above, every other variant drives the instant local name filter (localFilter) instead.
 					Same component either way (mod+f focuses it, Escape/the X button clears it) — only which
 					state it's bound to differs. */}
@@ -763,9 +763,9 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						) : sortedItems.length === 0 ? (
 							<div className="flex flex-1 overflow-y-auto">
 								{localSearchActive ? (
-									// H7's local-filter empty state — a non-matching query on a non-empty listing
+									// The local-filter empty state — a non-matching query on a non-empty listing
 									// reads as "no matches", never the generic "nothing here yet" onboarding copy
-									// (same distinction M22 makes for contacts).
+									// (same distinction the contacts list makes for its own search).
 									<Empty>
 										<EmptyHeader>
 											<EmptyMedia variant="icon">

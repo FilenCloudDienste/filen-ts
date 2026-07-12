@@ -71,7 +71,7 @@ describe("notesSidebar.logic — notes view", () => {
 		expect(buildNotesView([recent, older, pinned], "preview")).toHaveLength(3)
 	})
 
-	it("M4: narrows by full body via the bodies map when neither title nor preview matches", () => {
+	it("narrows by full body via the bodies map when neither title nor preview matches", () => {
 		const note = mockNote({ uuid: testUuid("body-only"), title: "gamma", preview: "preview" })
 		const bodies = new Map([[note.uuid, "a term buried deep in the note body"]])
 
@@ -121,7 +121,7 @@ describe("notesSidebar.logic — tags view filtering", () => {
 		expect(filterTagsForView([work, home], notesByTag, "")).toHaveLength(2)
 	})
 
-	// M4: a member note's full body (not just its title/preview) can also qualify its tag.
+	// A member note's full body (not just its title/preview) can also qualify its tag.
 	it("keeps a tag when a MEMBER note's full body matches, via the bodies map", () => {
 		const bodies = new Map([[standup.uuid, "quarterly roadmap review"]])
 
@@ -194,7 +194,7 @@ describe("notesSidebar.logic — buildTagsViewRows flattening", () => {
 		expect(noteRowUuids(memberMatched)).toStrictEqual([a.uuid])
 	})
 
-	it("M4: the bodies map threads through to a member-matched tag's own expansion", () => {
+	it("the bodies map threads through to a member-matched tag's own expansion", () => {
 		const bodies = new Map([[a.uuid, "a rare term nowhere in the title"]])
 
 		const rows = buildTagsViewRows({

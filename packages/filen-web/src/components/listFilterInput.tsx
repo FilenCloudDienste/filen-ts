@@ -9,7 +9,7 @@ export interface ListFilterInputProps {
 	ariaLabel: string
 }
 
-// H7's shared filter box for the picker surfaces that have no reason to hijack a global keyboard
+// Shared filter box for the picker surfaces that have no reason to hijack a global keyboard
 // shortcut the way drive's own SearchInput does (mod+f + its Kbd hint make sense for a full listing,
 // not a modal's contact list): the move/import destination picker and the four contact/participant
 // picker dialogs (share-recipient, chat-participant, note-participant, new-chat contact) all mount this

@@ -4,7 +4,7 @@ import { fetchNoteContent, noteContentQueryKey } from "@/features/notes/queries/
 import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
 import { noteSearchBodyCandidates, buildNoteBodiesMap } from "@/features/notes/hooks/useNoteSearchBodies.logic"
 
-// M4's eager, OPT-IN full-body fetch for notes search: title-matching notes never need their body
+// Eager, OPT-IN full-body fetch for notes search: title-matching notes never need their body
 // fetched at all (noteSearchBodyCandidates' own doc comment), and the whole set stays empty — no
 // queries, no fetches — the instant the search box is blank, so this never runs a single extra request
 // outside an active search. Reuses the EXACT SAME query key/fetcher the note editor's own

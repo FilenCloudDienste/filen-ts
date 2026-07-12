@@ -81,7 +81,7 @@ export function deriveSearchStatus(input: SearchStatusInput): SearchStatus {
 
 // Select-all is offered only once the result set has fully settled (or gone terminal/idle) — never
 // while still warming up or background-resyncing, so the user can't "select all" a partial/still-
-// growing window. Mirrors mobile's own select-all gate (see map-search.md #16); "terminal" and "idle"
+// growing window. Mirrors mobile's own select-all gate; "terminal" and "idle"
 // are excluded here even though they're not literal convergence states because the caller only ever
 // calls this while a search is actually active, and neither reflects a still-growing result set.
 export function isSearchConverging(status: SearchStatus): boolean {

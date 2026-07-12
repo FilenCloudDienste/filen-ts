@@ -124,7 +124,7 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 			)
 		}
 
-		// H7/M22: a non-matching filter gets its own "no results" state.
+		// A non-matching filter gets its own "no results" state.
 		if (filteredContacts.length === 0) {
 			return (
 				<Empty>

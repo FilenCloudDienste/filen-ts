@@ -48,7 +48,7 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 	const listingQuery = useDirectoryListingQuery("drive", targetUuid)
 	const namesQuery = useDirectoryNamesQuery(pathStack)
 	const directories = (listingQuery.data ?? []).filter(item => item.type === "directory")
-	// H7: same instant local name filter the non-"drive" listing variants use — this picker is a pure
+	// Same instant local name filter the non-"drive" listing variants use — this picker is a pure
 	// breadcrumb browser (never wired to the cache-backed engine), so a filtered folder tree is the only
 	// way to search it. Resets on every descend/breadcrumb-jump (pathStack change) — a query scoped to
 	// one folder should never silently carry over and hide everything in the next. Reset IN RENDER

@@ -41,7 +41,7 @@ export function ContactPickerDialog({ items, onClose }: ContactPickerDialogProps
 	const [filter, setFilter] = useState("")
 
 	const contacts = contactsQuery.data?.contacts ?? []
-	// H7's filter box over the picker's own contact list — a selection made before typing stays selected
+	// Filter box over the picker's own contact list — a selection made before typing stays selected
 	// even once its row scrolls out of the filtered view (only `selected` uuids drive submission, see
 	// handleShare below), matching every other picker dialog's own filter-doesn't-touch-selection rule.
 	const filteredContacts = filterContactsBySearch(contacts, filter)
@@ -129,7 +129,7 @@ export function ContactPickerDialog({ items, onClose }: ContactPickerDialogProps
 			)
 		}
 
-		// H7/M22: a non-matching filter gets its own "no results" state, distinct from the genuine
+		// A non-matching filter gets its own "no results" state, distinct from the genuine
 		// no-contacts-at-all branch above.
 		if (filteredContacts.length === 0) {
 			return (

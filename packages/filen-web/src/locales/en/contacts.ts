@@ -31,7 +31,7 @@ export const contacts = {
 	contactsEmptySectionTitle: "Nothing here",
 	/** Contacts page — empty-state body under contactsEmptySectionTitle */
 	contactsEmptySectionBody: "No entries in this section.",
-	/** Contacts page (M22) and every contact-picker dialog — empty-state title when a search/filter query matches nothing, distinct from contactsEmptyTitle's "no contacts at all" onboarding copy */
+	/** Contacts page and every contact-picker dialog — empty-state title when a search/filter query matches nothing, distinct from contactsEmptyTitle's "no contacts at all" onboarding copy */
 	contactsSearchNoResultsTitle: "No matches",
 	/** Contacts page — empty-state body under contactsSearchNoResultsTitle */
 	contactsSearchNoResultsBody: "No contacts match your search.",

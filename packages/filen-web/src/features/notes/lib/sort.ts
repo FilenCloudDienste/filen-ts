@@ -64,13 +64,13 @@ export function sortNoteHistory(history: readonly NoteHistory[]): NoteHistory[] 
 }
 
 // Title-only half of the search match — exported so useNoteSearchBodies.ts can skip fetching a note's
-// body when its title already qualifies (a title hit never needs its body checked too), keeping M4's
+// body when its title already qualifies (a title hit never needs its body checked too), keeping the
 // eager content fetch scoped to only the notes that actually need it.
 export function noteTitleMatchesSearch(note: Note, normalizedSearch: string): boolean {
 	return noteDisplayTitle(note).toLowerCase().includes(normalizedSearch)
 }
 
-// Search filter over title + full decrypted body (M4 — mobile's filterNoteListItemsBySearchQuery
+// Search filter over title + full decrypted body (mirrors mobile's filterNoteListItemsBySearchQuery
 // parity: matches title + eagerly-fetched content, not just a short summary). `bodies` is the
 // uuid-keyed map useNoteSearchBodies.ts eagerly fetches ONLY while a search is active (opt-in, per its
 // own doc comment) — a note absent from the map (fetch still in flight, or the caller never wired

@@ -62,7 +62,7 @@ function matchesSearch(item: ContactLike, searchNormalized: string): boolean {
 	return item.email.toLowerCase().includes(searchNormalized) || contactDisplayName(item).toLowerCase().includes(searchNormalized)
 }
 
-// H7's shared contact-list filter — exported (unlike the section-builder below, which stays this
+// Shared contact-list filter — exported (unlike the section-builder below, which stays this
 // page's own concern) so every picker dialog that lists plain Contact rows (the drive share-recipient
 // picker, the new-chat/add-chat-participant pickers, the add-note-participant picker) can filter on the
 // exact same email-or-display-name substring rule this page's own search box uses, rather than each

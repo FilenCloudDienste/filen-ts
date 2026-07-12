@@ -71,7 +71,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 	// True once the current root's engine has been opened at least once — cleared only on a real
 	// teardown (closeSearchEngine), never on a mere blank-query edit. resolveSearchTransition reads this
 	// (not activeRef) to decide open-vs-retune, which is what keeps the engine warm across a clear —
-	// see useDriveSearch.logic.ts's own doc comment (P23).
+	// see useDriveSearch.logic.ts's own doc comment.
 	const engagedRef = useRef(false)
 	const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const watchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -267,7 +267,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 
 	// Blanks the box without tearing the engine down — same "idle" no-op setInput("") would take,
 	// pulled out only because the X-button/Escape callers have no keystroke event to route through
-	// setInput itself. Mirrors P23: the engine stays warm so the next keystroke retunes instead of
+	// setInput itself. The engine stays warm so the next keystroke retunes instead of
 	// reopening. Real teardown only ever happens via closeSearchEngine (root/enabled change, unmount).
 	function clear(): void {
 		setInputValue("")

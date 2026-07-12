@@ -172,7 +172,7 @@ export function DriveTile({
 							</DropdownMenu>
 						</div>
 						<span className="line-clamp-2 w-full text-xs break-words">{name}</span>
-						{/* P21: a cross-directory search hit gets the same visible sub-line list view already
+						{/* A cross-directory search hit gets the same visible sub-line list view already
 						renders (driveRow.tsx), not just a hover tooltip (the title attr below stays too, for
 						the full untruncated path on hover) — a tile has less room than a row, so this and the
 						shared-identity badge below are mutually exclusive rather than stacked (search only ever
