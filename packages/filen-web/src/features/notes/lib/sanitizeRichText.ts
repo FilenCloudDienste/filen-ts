@@ -40,38 +40,31 @@ export const RICH_TEXT_ALLOWED_ATTR = ["href", "target", "rel", "src", "alt", "c
 const FORBIDDEN_STYLE_PROPERTIES = new Set(["position", "z-index", "top", "right", "bottom", "left", "inset"])
 const VIEWPORT_UNIT = /\d*\.?\d+(vw|vh|vmin|vmax)\b/
 
+// The denylist MUST be applied to CSS-parser-canonical property names and values, never to the raw
+// attribute string. A raw string/regex match is bypassable: browsers decode CSS escape sequences, so
+// `\070osition:fixed` is honoured as `position: fixed` and `100\76w` as `100vw` while a literal
+// comparison sees only the escaped bytes. Routing the raw attribute through the CSSOM (`cssText`)
+// decodes those escapes and drops invalid declarations before the denylist runs, so a forbidden
+// declaration cannot be smuggled past this filter in any form the viewer's browser would render.
 function filterStyleDeclarations(style: string): string {
-	return style
-		.split(";")
-		.map(declaration => declaration.trim())
-		.filter(declaration => {
-			if (declaration.length === 0) {
-				return false
-			}
+	const parsed = document.createElement("span").style
 
-			const separator = declaration.indexOf(":")
+	parsed.cssText = style
 
-			if (separator === -1) {
-				return false
-			}
+	for (const forbidden of FORBIDDEN_STYLE_PROPERTIES) {
+		parsed.removeProperty(forbidden)
+	}
 
-			const property = declaration.slice(0, separator).trim().toLowerCase()
-			const value = declaration
-				.slice(separator + 1)
-				.trim()
-				.toLowerCase()
+	// Iterate backwards: removeProperty shifts the live index list.
+	for (let index = parsed.length - 1; index >= 0; index--) {
+		const property = parsed.item(index)
 
-			if (FORBIDDEN_STYLE_PROPERTIES.has(property)) {
-				return false
-			}
+		if (VIEWPORT_UNIT.test(parsed.getPropertyValue(property))) {
+			parsed.removeProperty(property)
+		}
+	}
 
-			if (VIEWPORT_UNIT.test(value)) {
-				return false
-			}
-
-			return true
-		})
-		.join("; ")
+	return parsed.cssText.replace(/\s*;\s*$/, "")
 }
 
 // Registered once at module load (DOMPurify hooks are global to the imported instance, same as

@@ -103,7 +103,8 @@ describe("sanitizeRichTextHtml — clickjacking-overlay neutralization", () => {
 			'<div style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:99999;background:rgba(0,0,0,0.9)">overlay</div>'
 		)
 
-		expect(out).not.toMatch(/position\s*:/i)
+		// Standalone `position`, not the harmless `background-position` longhand jsdom expands to.
+		expect(out).not.toMatch(/(?<![a-z-])position\s*:/i)
 		expect(out).not.toMatch(/z-index\s*:/i)
 		expect(out).not.toMatch(/100vw/i)
 		expect(out).not.toMatch(/100vh/i)
@@ -128,6 +129,36 @@ describe("sanitizeRichTextHtml — clickjacking-overlay neutralization", () => {
 		expect(out).toMatch(/text-align\s*:\s*center/i)
 		expect(out).toMatch(/color\s*:\s*red/i)
 		expect(out).toContain("centered")
+	})
+
+	// A raw string/regex denylist is bypassable because browsers decode CSS escape sequences: the
+	// property `\070osition` is honoured as `position` and the value `100\76w` as `100vw`. These
+	// payloads must be neutralized by canonicalizing through the CSS parser before the denylist runs;
+	// they defeat a literal-string filter and would keep the full-viewport overlay alive otherwise.
+	it("strips CSS-escaped `position:fixed` (\\070osition) that a literal filter would keep", () => {
+		const out = sanitizeRichTextHtml('<div style="\\070osition:fixed;width:100%;height:100%;background:rgba(0,0,0,0.9)">phish</div>')
+
+		// The escape survives a string denylist byte-for-byte; the canonical filter must drop it.
+		expect(out).not.toContain("\\070")
+		expect(out).not.toContain("fixed")
+		expect(out).not.toMatch(/(?<![a-z-])position\s*:/i)
+		// Re-parsing the sanitized output through the CSS parser must yield no positioning.
+		const reparsed = document.createElement("span").style
+
+		reparsed.cssText = out.replace(/^.*style="/, "").replace(/".*$/, "")
+
+		expect(reparsed.getPropertyValue("position")).toBe("")
+		// The element and its harmless declarations still render.
+		expect(out).toContain("phish")
+	})
+
+	it("strips a CSS-escaped viewport unit (100\\76w) that the viewport-unit regex would miss", () => {
+		const out = sanitizeRichTextHtml('<div style="width:100\\76w">wide</div>')
+
+		expect(out).not.toContain("\\76")
+		expect(out).not.toMatch(/width/i)
+		expect(out).not.toContain("100")
+		expect(out).toContain("wide")
 	})
 })
 
