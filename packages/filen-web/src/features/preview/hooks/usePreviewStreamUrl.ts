@@ -3,7 +3,14 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { previewStreamUrl } from "@/features/preview/lib/previewStream"
 
-export type UsePreviewStreamUrlResult = { status: "pending" } | { status: "success"; url: string } | { status: "error" }
+// `refetch` merged onto every variant — mirrors usePreviewBytes.ts's own identical shape/rationale.
+// Re-registering (rather than just re-rendering) is the correct retry here: a mid-consumption failure
+// means the PREVIOUS registration's stream is already broken, so a retry must mint a fresh one, not
+// reuse the stale url a plain re-render would still be holding.
+export type UsePreviewStreamUrlResult =
+	| { status: "pending"; refetch: () => void }
+	| { status: "success"; url: string; refetch: () => void }
+	| { status: "error"; refetch: () => void }
 
 // Registers `item` against the SW's inline-preview route once per mount and returns its fetchable
 // same-origin URL — mirrors usePreviewBytes.ts's own shape/lifecycle (item-keyed effect, a `live`
@@ -14,9 +21,14 @@ export type UsePreviewStreamUrlResult = { status: "pending" } | { status: "succe
 //
 // A registration failure resolves "error", never a thrown rejection — every caller treats that as a
 // signal to fall back to the buffered blob path, not a user-facing error (see imageViewer.tsx /
-// mediaViewer.tsx's own onFallback wiring).
+// mediaViewer.tsx's own onFallback wiring). An over-cap file (streamFailureAction "error") instead
+// shows a labeled error state with Retry — `refetch` (see `reloadToken` below) is that retry's wiring,
+// re-running this SAME registration rather than falling back to an unbounded buffered download.
 export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: string): UsePreviewStreamUrlResult {
-	const [result, setResult] = useState<UsePreviewStreamUrlResult>({ status: "pending" })
+	const [result, setResult] = useState<{ status: "pending" } | { status: "success"; url: string } | { status: "error" }>({
+		status: "pending"
+	})
+	const [reloadToken, setReloadToken] = useState(0)
 
 	useEffect(() => {
 		let live = true
@@ -41,7 +53,12 @@ export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: 
 		return () => {
 			live = false
 		}
-	}, [item, name, contentType])
+	}, [item, name, contentType, reloadToken])
 
-	return result
+	function refetch(): void {
+		setResult({ status: "pending" })
+		setReloadToken(prev => prev + 1)
+	}
+
+	return { ...result, refetch }
 }

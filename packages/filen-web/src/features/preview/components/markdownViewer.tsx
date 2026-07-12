@@ -8,6 +8,7 @@ import { MarkdownRenderer } from "@/features/preview/components/markdownRenderer
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 
 export interface MarkdownViewerProps {
 	item: DriveItem
@@ -65,9 +66,10 @@ function MarkdownViewer({ item, alt }: MarkdownViewerProps) {
 
 	if (result.status === "error") {
 		return (
-			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-				{errorLabel(result.dto)}
-			</div>
+			<PreviewErrorState
+				message={errorLabel(result.dto)}
+				onRetry={result.refetch}
+			/>
 		)
 	}
 

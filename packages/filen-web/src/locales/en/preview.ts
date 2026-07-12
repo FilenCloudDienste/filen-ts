@@ -55,6 +55,12 @@ export const preview = {
 	previewPdfNextPageAction: "Next page",
 	/** PDF viewer — page-nav indicator and per-page canvas label; {{current}} = the page in view, {{total}} = page count */
 	previewPdfPageIndicator: "Page {{current}} of {{total}}",
+	/** PDF viewer — accessible label for the toolbar button stepping the zoom level down */
+	previewPdfZoomOutAction: "Zoom out",
+	/** PDF viewer — accessible label for the toolbar button stepping the zoom level up */
+	previewPdfZoomInAction: "Zoom in",
+	/** PDF viewer — zoom-level indicator between the zoom out/in buttons; {{percent}} = current zoom relative to the document's own default render scale */
+	previewPdfZoomIndicator: "{{percent}}%",
 
 	// ── Docx ─────────────────────────────────────────────────────────────────
 	/** Docx viewer — shown in place of the document when it fails to load or render */

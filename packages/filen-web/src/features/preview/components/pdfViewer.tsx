@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { getDocument, GlobalWorkerOptions, PasswordResponses, type PDFDocumentProxy, type PDFPageProxy, type RenderTask } from "pdfjs-dist"
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
+import { ChevronLeftIcon, ChevronRightIcon, ZoomInIcon, ZoomOutIcon } from "lucide-react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { clampListboxIndex } from "@/features/drive/lib/listbox"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
@@ -10,14 +10,19 @@ import {
 	canvasDimsForViewport,
 	canvasRenderTransform,
 	pdfPageAction,
+	pdfStepZoomScale,
+	pdfWheelZoomScale,
 	PDF_PAGE_RENDER_MARGIN_PX,
 	PDF_PAGE_EVICT_MARGIN_PX,
+	PDF_MIN_SCALE,
+	PDF_MAX_SCALE,
 	type PageVisibility
 } from "@/features/preview/components/pdfViewer.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { InputDialog } from "@/components/dialogs/inputDialog"
+import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 
 export interface PdfViewerProps {
 	item: DriveItem
@@ -56,9 +61,13 @@ type DocumentState =
 // transfers `bytes`' backing ArrayBuffer to the worker on the FIRST call (detaching it), so a second,
 // independent getDocument() call for a retry would hand the worker an already-empty buffer; onPassword
 // instead resumes the SAME task/transport, which already holds the full file worker-side.
-function usePdfDocument(bytes: Uint8Array): { state: DocumentState; submitPassword: (password: string) => void } {
+function usePdfDocument(bytes: Uint8Array): { state: DocumentState; submitPassword: (password: string) => void; retry: () => void } {
 	const [state, setState] = useState<DocumentState>({ status: "loading" })
 	const updatePasswordRef = useRef<((password: string) => void) | null>(null)
+	// Bumped by the error state's own Retry button — `bytes` never changes on a retry (already the
+	// whole file, held by the caller's usePreviewBytes), so a dedicated counter re-runs this effect
+	// against the SAME buffer, mirroring imageViewer.tsx's own TransformedImageBytes retry idiom.
+	const [retryToken, setRetryToken] = useState(0)
 
 	useEffect(() => {
 		let live = true
@@ -94,7 +103,7 @@ function usePdfDocument(bytes: Uint8Array): { state: DocumentState; submitPasswo
 			updatePasswordRef.current = null
 			void task.destroy()
 		}
-	}, [bytes])
+	}, [bytes, retryToken])
 
 	function submitPassword(password: string): void {
 		const updatePassword = updatePasswordRef.current
@@ -107,7 +116,12 @@ function usePdfDocument(bytes: Uint8Array): { state: DocumentState; submitPasswo
 		updatePassword(password)
 	}
 
-	return { state, submitPassword }
+	function retry(): void {
+		setState({ status: "loading" })
+		setRetryToken(prev => prev + 1)
+	}
+
+	return { state, submitPassword, retry }
 }
 
 // The password prompt: an InputDialog (the shared single-field-prompt primitive, nested inside the
@@ -166,6 +180,7 @@ function PdfPage({
 	label,
 	root,
 	shouldRender,
+	scale,
 	onIntersect,
 	wrapperRef
 }: {
@@ -174,13 +189,23 @@ function PdfPage({
 	label: string
 	root: RefObject<HTMLDivElement | null>
 	shouldRender: boolean
+	// The user's current zoom level (PdfPageList's own state) — every page re-renders at this scale;
+	// see the render effect below for how a scale change (without a fresh page or visibility change)
+	// still triggers a re-render at the new size.
+	scale: number
 	onIntersect: (pageNumber: number, ratio: number, isIntersecting: boolean) => void
 	wrapperRef: (el: HTMLDivElement | null) => void
 }) {
 	const divRef = useRef<HTMLDivElement | null>(null)
 	const canvasRef = useRef<HTMLCanvasElement | null>(null)
 	const [page, setPage] = useState<PDFPageProxy | null>(null)
-	const [rendered, setRendered] = useState(false)
+	// Which scale this page's canvas was last painted at, if any — `null` before any render (or right
+	// after eviction). Storing the SCALE (not just a rendered boolean) is what lets a zoom change force
+	// a fresh render without a separate reset effect: `rendered` below is derived fresh every render
+	// from a straight `=== scale` comparison, so a scale change alone flips it to false in the SAME
+	// render pass, no extra round-trip needed.
+	const [renderedAtScale, setRenderedAtScale] = useState<number | null>(null)
+	const rendered = renderedAtScale === scale
 	// Live (non-monotonic, unlike the parent's renderSet) membership in the wider eviction margin —
 	// gates the render effect below (see pdfPageAction) and is itself set from the eviction observer.
 	const [withinExtendedView, setWithinExtendedView] = useState(false)
@@ -264,7 +289,7 @@ function PdfPage({
 					// Releases a fully-rendered canvas, or one an in-flight render had already sized before
 					// the render effect's own cleanup (triggered by the withinExtendedView update above)
 					// cancels that task — safe either way; a resized canvas just stops accepting meaningful
-					// draws. setRendered(false) when already false is a no-op React bails out on.
+					// draws. setRenderedAtScale(null) when already null is a no-op React bails out on.
 					const canvas = canvasRef.current
 
 					if (canvas) {
@@ -272,7 +297,7 @@ function PdfPage({
 						canvas.height = 0
 					}
 
-					setRendered(false)
+					setRenderedAtScale(null)
 				}
 			},
 			{ root: container, rootMargin: `${String(PDF_PAGE_EVICT_MARGIN_PX)}px 0px` }
@@ -301,7 +326,7 @@ function PdfPage({
 		}
 
 		let cancelled = false
-		const viewport = page.getViewport({ scale: BASE_SCALE })
+		const viewport = page.getViewport({ scale })
 		const ratio = window.devicePixelRatio
 		const dims = canvasDimsForViewport(viewport.width, viewport.height, ratio)
 
@@ -315,25 +340,27 @@ function PdfPage({
 		task.promise
 			.then(() => {
 				if (!cancelled) {
-					setRendered(true)
+					setRenderedAtScale(scale)
 				}
 			})
 			.catch(() => {
 				// A cancelled task rejects too, with a RenderingCancelledException (RenderTask.cancel's own
 				// documented contract, confirmed against the installed d.ts) — the `cancelled` guard above
 				// already keeps that path from reaching here, and eviction (same cancel path) hits it just
-				// as harmlessly. Nothing else surfaces a page-level render error; the document-level error
-				// branch already covers a genuinely broken PDF, and a single bad page is rare enough not to
-				// warrant its own labeled state yet.
+				// as harmlessly. A scale change while a render is in flight cancels it the SAME way (this
+				// effect's own cleanup below, triggered by `scale` changing), so a stale-scale bitmap never
+				// finishes painting over a fresh one. Nothing else surfaces a page-level render error; the
+				// document-level error branch already covers a genuinely broken PDF, and a single bad page
+				// is rare enough not to warrant its own labeled state yet.
 			})
 
 		return () => {
 			cancelled = true
 			task.cancel()
 		}
-	}, [page, shouldRender, withinExtendedView, rendered])
+	}, [page, shouldRender, withinExtendedView, rendered, scale])
 
-	const viewport = page?.getViewport({ scale: BASE_SCALE })
+	const viewport = page?.getViewport({ scale })
 
 	return (
 		<div
@@ -373,6 +400,7 @@ function PdfPageList({ doc, alt }: { doc: PDFDocumentProxy; alt: string }) {
 	const ratiosRef = useRef<Map<number, number>>(new Map())
 	const [renderSet, setRenderSet] = useState<ReadonlySet<number>>(() => new Set([1]))
 	const [currentPage, setCurrentPage] = useState(1)
+	const [scale, setScale] = useState(BASE_SCALE)
 
 	function handleIntersect(pageNumber: number, ratio: number, isIntersecting: boolean): void {
 		ratiosRef.current.set(pageNumber, ratio)
@@ -392,6 +420,34 @@ function PdfPageList({ doc, alt }: { doc: PDFDocumentProxy; alt: string }) {
 
 		el?.scrollIntoView({ behavior: "smooth", block: "start" })
 	}
+
+	// Ctrl/Cmd+wheel zoom — a plain React onWheel prop can never preventDefault the browser's own
+	// native pinch-zoom/page-scroll here (react-dom registers it PASSIVE at its root, see
+	// imageViewer.tsx's own identical comment on ZoomableImage's wheel listener for the verified
+	// rationale), so this needs a real, non-passive native listener too. A plain (non-modified) wheel
+	// is left untouched — this container's own overflow-y-auto scroll handles that natively.
+	useEffect(() => {
+		const container = containerRef.current
+
+		if (!container) {
+			return
+		}
+
+		const handleWheel = (event: WheelEvent): void => {
+			if (!event.ctrlKey && !event.metaKey) {
+				return
+			}
+
+			event.preventDefault()
+			setScale(prev => pdfWheelZoomScale(prev, event.deltaY))
+		}
+
+		container.addEventListener("wheel", handleWheel, { passive: false })
+
+		return () => {
+			container.removeEventListener("wheel", handleWheel)
+		}
+	}, [])
 
 	return (
 		<div className="flex size-full flex-col">
@@ -421,6 +477,35 @@ function PdfPageList({ doc, alt }: { doc: PDFDocumentProxy; alt: string }) {
 				>
 					<ChevronRightIcon />
 				</Button>
+				<span
+					aria-hidden="true"
+					className="mx-1 h-4 w-px bg-border"
+				/>
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					disabled={scale <= PDF_MIN_SCALE}
+					aria-label={t("previewPdfZoomOutAction")}
+					onClick={() => {
+						setScale(prev => pdfStepZoomScale(prev, -1))
+					}}
+				>
+					<ZoomOutIcon />
+				</Button>
+				<span className="w-10 text-center text-xs text-muted-foreground tabular-nums">
+					{t("previewPdfZoomIndicator", { percent: Math.round((scale / BASE_SCALE) * 100) })}
+				</span>
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					disabled={scale >= PDF_MAX_SCALE}
+					aria-label={t("previewPdfZoomInAction")}
+					onClick={() => {
+						setScale(prev => pdfStepZoomScale(prev, 1))
+					}}
+				>
+					<ZoomInIcon />
+				</Button>
 			</div>
 			<div
 				ref={containerRef}
@@ -435,6 +520,7 @@ function PdfPageList({ doc, alt }: { doc: PDFDocumentProxy; alt: string }) {
 							label={`${alt} — ${t("previewPdfPageIndicator", { current: pageNumber, total: numPages })}`}
 							root={containerRef}
 							shouldRender={renderSet.has(pageNumber)}
+							scale={scale}
 							onIntersect={handleIntersect}
 							wrapperRef={el => {
 								if (el) {
@@ -453,7 +539,7 @@ function PdfPageList({ doc, alt }: { doc: PDFDocumentProxy; alt: string }) {
 
 function PdfDocument({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 	const { t } = useTranslation("preview")
-	const { state, submitPassword } = usePdfDocument(bytes)
+	const { state, submitPassword, retry } = usePdfDocument(bytes)
 
 	if (state.status === "loading") {
 		return (
@@ -474,9 +560,10 @@ function PdfDocument({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 
 	if (state.status === "error") {
 		return (
-			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-				{t("previewPdfLoadFailed")}
-			</div>
+			<PreviewErrorState
+				message={t("previewPdfLoadFailed")}
+				onRetry={retry}
+			/>
 		)
 	}
 
@@ -503,9 +590,10 @@ function PdfViewer({ item, alt }: PdfViewerProps) {
 
 	if (result.status === "error") {
 		return (
-			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-				{errorLabel(result.dto)}
-			</div>
+			<PreviewErrorState
+				message={errorLabel(result.dto)}
+				onRetry={result.refetch}
+			/>
 		)
 	}
 

@@ -5,6 +5,7 @@ import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Spinner } from "@/components/ui/spinner"
+import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 
 export interface TextViewerProps {
 	item: DriveItem
@@ -42,9 +43,10 @@ function TextViewer({ item, alt, editable = false, onDirtyChange, contentRef }: 
 
 	if (result.status === "error") {
 		return (
-			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-				{errorLabel(result.dto)}
-			</div>
+			<PreviewErrorState
+				message={errorLabel(result.dto)}
+				onRetry={result.refetch}
+			/>
 		)
 	}
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
@@ -10,20 +10,18 @@ import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUr
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { type ErrorDTO } from "@/lib/sdk/errors"
 import { Spinner } from "@/components/ui/spinner"
+import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
+import { type Size, type ZoomTransform, wheelZoom, dragPan, doubleClickZoom } from "@/features/preview/components/imageViewer.logic"
 
 export interface ImageViewerProps {
 	item: DriveItem
 	alt: string
 }
 
-const MIN_SCALE = 0.25
-const MAX_SCALE = 8
-// Wheel delta -> scale factor; a typical mouse-wheel notch (~100 deltaY) nudges zoom by ~15%.
-const ZOOM_SENSITIVITY = 0.0015
-
-// <img> from an already-resolved URL (either mode below). Fit-to-screen via object-contain, plus a
-// basic uniform wheel-zoom (no pan, no lib) — identical rendering regardless of whether `url` is a
-// blob: URL or the SW's inline-preview route.
+// <img> from an already-resolved URL (either mode below). Fit-to-screen via object-contain, plus
+// pointer-drag pan while zoomed, double-click zoom toggle, and wheel-zoom-toward-cursor — all pure math
+// lives in imageViewer.logic.ts, this component only wires DOM events to it. No pan/zoom library:
+// identical rendering regardless of whether `url` is a blob: URL or the SW's inline-preview route.
 export function ZoomableImage({
 	url,
 	alt,
@@ -35,8 +33,13 @@ export function ZoomableImage({
 	// further to fall back to, so it leaves this unset and keeps the browser's own native error state.
 	onError?: () => void
 }) {
-	const [scale, setScale] = useState(1)
+	const [transform, setTransform] = useState<ZoomTransform>({ scale: 1, x: 0, y: 0 })
+	const [natural, setNatural] = useState<Size | null>(null)
 	const containerRef = useRef<HTMLDivElement | null>(null)
+	// Pointerdown-time snapshot: the transform's own x/y right then, plus the pointer's own screen
+	// position — every subsequent pointermove computes its delta against THIS, never the previous
+	// pointermove's position, so per-event float drift can never accumulate.
+	const dragOrigin = useRef<{ x: number; y: number; pointerX: number; pointerY: number } | null>(null)
 
 	// A React onWheel prop can never preventDefault a page scroll here: react-dom registers the wheel
 	// listener PASSIVE at its root for scroll performance (verified against the installed react-dom
@@ -49,9 +52,19 @@ export function ZoomableImage({
 			return
 		}
 
-		function handleWheel(event: WheelEvent): void {
+		const handleWheel = (event: WheelEvent): void => {
 			event.preventDefault()
-			setScale(prev => Math.min(MAX_SCALE, Math.max(MIN_SCALE, prev - event.deltaY * ZOOM_SENSITIVITY)))
+
+			const rect = containerRef.current?.getBoundingClientRect()
+
+			if (!rect) {
+				return
+			}
+
+			const pointerOffset = { x: event.clientX - rect.left - rect.width / 2, y: event.clientY - rect.top - rect.height / 2 }
+			const containerSize: Size = { width: rect.width, height: rect.height }
+
+			setTransform(prev => wheelZoom(prev, event.deltaY, pointerOffset, containerSize, natural))
 		}
 
 		container.addEventListener("wheel", handleWheel, { passive: false })
@@ -59,7 +72,41 @@ export function ZoomableImage({
 		return () => {
 			container.removeEventListener("wheel", handleWheel)
 		}
-	}, [])
+	}, [natural])
+
+	function handlePointerDown(event: ReactPointerEvent<HTMLImageElement>): void {
+		if (transform.scale <= 1) {
+			return
+		}
+
+		event.currentTarget.setPointerCapture(event.pointerId)
+		dragOrigin.current = { x: transform.x, y: transform.y, pointerX: event.clientX, pointerY: event.clientY }
+	}
+
+	function handlePointerMove(event: ReactPointerEvent<HTMLImageElement>): void {
+		const origin = dragOrigin.current
+		const container = containerRef.current
+
+		if (!origin || !container) {
+			return
+		}
+
+		const rect = container.getBoundingClientRect()
+		const delta = { x: event.clientX - origin.pointerX, y: event.clientY - origin.pointerY }
+
+		setTransform(prev => ({
+			...prev,
+			...dragPan({ x: origin.x, y: origin.y }, delta, prev.scale, { width: rect.width, height: rect.height }, natural)
+		}))
+	}
+
+	function handlePointerUp(event: ReactPointerEvent<HTMLImageElement>): void {
+		if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+			event.currentTarget.releasePointerCapture(event.pointerId)
+		}
+
+		dragOrigin.current = null
+	}
 
 	return (
 		<div
@@ -71,8 +118,18 @@ export function ZoomableImage({
 				alt={alt}
 				draggable={false}
 				onError={onError}
-				className="max-h-full max-w-full object-contain select-none"
-				style={{ transform: `scale(${String(scale)})` }}
+				onLoad={event => {
+					setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
+				}}
+				onDoubleClick={() => {
+					setTransform(prev => doubleClickZoom(prev))
+				}}
+				onPointerDown={handlePointerDown}
+				onPointerMove={handlePointerMove}
+				onPointerUp={handlePointerUp}
+				onPointerCancel={handlePointerUp}
+				className={`max-h-full max-w-full touch-none object-contain select-none ${transform.scale > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
+				style={{ transform: `translate(${String(transform.x)}px, ${String(transform.y)}px) scale(${String(transform.scale)})` }}
 			/>
 		</div>
 	)
@@ -122,9 +179,13 @@ function StreamedImage({
 	// the time onError can ever set `capExceeded`, so the ordering is a no-op there.
 	if (capExceeded || registrationOverCap) {
 		return (
-			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-				{t("previewStreamFailed")}
-			</div>
+			<PreviewErrorState
+				message={t("previewStreamFailed")}
+				onRetry={() => {
+					setCapExceeded(false)
+					result.refetch()
+				}}
+			/>
 		)
 	}
 
@@ -204,9 +265,10 @@ function BufferedImage({ item, alt }: { item: DriveItem; alt: string }) {
 
 	if (result.status === "error") {
 		return (
-			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-				{errorLabel(result.dto)}
-			</div>
+			<PreviewErrorState
+				message={errorLabel(result.dto)}
+				onRetry={result.refetch}
+			/>
 		)
 	}
 
@@ -230,6 +292,10 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 	const [state, setState] = useState<{ status: "pending" } | { status: "success"; url: string } | { status: "error"; dto: ErrorDTO }>({
 		status: "pending"
 	})
+	// Bumped by the error state's own Retry button — `bytes` never changes on a retry (the decoded
+	// buffer is already in hand, only the transform itself failed), so a dedicated counter is the only
+	// way to re-run the effect below against the SAME input.
+	const [retryToken, setRetryToken] = useState(0)
 
 	useEffect(() => {
 		let live = true
@@ -263,7 +329,7 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 				URL.revokeObjectURL(objectUrl)
 			}
 		}
-	}, [bytes, t])
+	}, [bytes, t, retryToken])
 
 	if (state.status === "pending") {
 		return (
@@ -275,9 +341,13 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 
 	if (state.status === "error") {
 		return (
-			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-				{errorLabel(state.dto)}
-			</div>
+			<PreviewErrorState
+				message={errorLabel(state.dto)}
+				onRetry={() => {
+					setState({ status: "pending" })
+					setRetryToken(prev => prev + 1)
+				}}
+			/>
 		)
 	}
 
@@ -305,9 +375,10 @@ function TransformedImage({ item, alt }: { item: DriveItem; alt: string }) {
 
 	if (result.status === "error") {
 		return (
-			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-				{errorLabel(result.dto)}
-			</div>
+			<PreviewErrorState
+				message={errorLabel(result.dto)}
+				onRetry={result.refetch}
+			/>
 		)
 	}
 

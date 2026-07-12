@@ -83,3 +83,34 @@ export function canvasRenderTransform(devicePixelRatio: number): [number, number
 
 	return [ratio, 0, 0, ratio, 0, 0]
 }
+
+// User-controlled zoom bounds/step, independent of BASE_SCALE (the document's own initial render
+// scale, unchanged) — PDF_PAGE_RENDER_MARGIN_PX/PDF_PAGE_EVICT_MARGIN_PX above stay absolute-pixel
+// IntersectionObserver margins that never need to change with scale: a page's own wrapper div is
+// always sized to its CURRENT scale's viewport (pdfViewer.tsx derives it fresh from `page.getViewport({
+// scale })` on every scale change), so the hysteresis gap between those two margins keeps meaning the
+// same "how many CSS pixels of scroll before render/evict" at any zoom level — only how many PAGES fit
+// in that pixel span changes, not the render/evict decision itself (pdfPageAction stays scale-blind by
+// design).
+export const PDF_MIN_SCALE = 0.5
+export const PDF_MAX_SCALE = 4
+export const PDF_ZOOM_STEP = 0.25
+// Wheel delta -> scale factor for ctrl/cmd+wheel — same sensitivity constant shape as the image
+// viewer's own wheel-zoom (imageViewer.logic.ts), tuned separately since a PDF page and an image fill
+// very different portions of the viewport.
+export const PDF_ZOOM_WHEEL_SENSITIVITY = 0.0015
+
+export function clampPdfScale(scale: number): number {
+	return Math.min(PDF_MAX_SCALE, Math.max(PDF_MIN_SCALE, scale))
+}
+
+// The +/- toolbar buttons' own step function — always lands on a PDF_ZOOM_STEP-aligned value from
+// BASE_SCALE (1.5, 1.75, ...) regardless of where ctrl/cmd+wheel last left `current`, since floating
+// zoom from the wheel path can drift off that grid.
+export function pdfStepZoomScale(current: number, direction: 1 | -1): number {
+	return clampPdfScale(current + direction * PDF_ZOOM_STEP)
+}
+
+export function pdfWheelZoomScale(current: number, deltaY: number): number {
+	return clampPdfScale(current - deltaY * PDF_ZOOM_WHEEL_SENSITIVITY)
+}

@@ -6,6 +6,7 @@ import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { isSafeLinkHref } from "@/features/preview/components/docxViewer.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Spinner } from "@/components/ui/spinner"
+import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 
 export interface DocxViewerProps {
 	item: DriveItem
@@ -52,6 +53,10 @@ function DocxRender({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 	const { t } = useTranslation("preview")
 	const containerRef = useRef<HTMLDivElement | null>(null)
 	const [status, setStatus] = useState<"pending" | "success" | "error">("pending")
+	// Bumped by the error state's own Retry button — `bytes` never changes on a retry (already the
+	// whole file, held by the caller's usePreviewBytes), so a dedicated counter re-runs this effect
+	// against the SAME buffer, mirroring imageViewer.tsx's own TransformedImageBytes retry idiom.
+	const [retryToken, setRetryToken] = useState(0)
 
 	useEffect(() => {
 		let live = true
@@ -63,6 +68,10 @@ function DocxRender({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 
 		async function render(target: HTMLDivElement): Promise<void> {
 			try {
+				// A retry re-runs renderAsync into the SAME persistent container div — clearing it first
+				// keeps a re-render from appending a second copy alongside whatever a failed prior attempt
+				// may have already painted before throwing.
+				target.replaceChildren()
 				await renderAsync(bytes, target, undefined, { renderAltChunks: false })
 				sanitizeLinks(target)
 
@@ -81,7 +90,7 @@ function DocxRender({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 		return () => {
 			live = false
 		}
-	}, [bytes])
+	}, [bytes, retryToken])
 
 	return (
 		<div className="relative size-full overflow-auto">
@@ -91,8 +100,14 @@ function DocxRender({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 				</div>
 			) : null}
 			{status === "error" ? (
-				<div className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-destructive">
-					{t("previewDocxLoadFailed")}
+				<div className="absolute inset-0">
+					<PreviewErrorState
+						message={t("previewDocxLoadFailed")}
+						onRetry={() => {
+							setStatus("pending")
+							setRetryToken(prev => prev + 1)
+						}}
+					/>
 				</div>
 			) : null}
 			<div
@@ -120,9 +135,10 @@ function DocxViewer({ item, alt }: DocxViewerProps) {
 
 	if (result.status === "error") {
 		return (
-			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-				{errorLabel(result.dto)}
-			</div>
+			<PreviewErrorState
+				message={errorLabel(result.dto)}
+				onRetry={result.refetch}
+			/>
 		)
 	}
 

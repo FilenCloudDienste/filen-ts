@@ -4,8 +4,14 @@ import {
 	canvasDimsForViewport,
 	canvasRenderTransform,
 	pdfPageAction,
+	clampPdfScale,
+	pdfStepZoomScale,
+	pdfWheelZoomScale,
 	PDF_PAGE_RENDER_MARGIN_PX,
 	PDF_PAGE_EVICT_MARGIN_PX,
+	PDF_MIN_SCALE,
+	PDF_MAX_SCALE,
+	PDF_ZOOM_STEP,
 	type PageVisibility
 } from "@/features/preview/components/pdfViewer.logic"
 
@@ -111,5 +117,85 @@ describe("pdfPageAction", () => {
 
 	it("also evicts an unrendered page outside the extended viewport (a cancelled mid-render still sized its canvas)", () => {
 		expect(pdfPageAction(false, false)).toBe("evict")
+	})
+})
+
+describe("clampPdfScale", () => {
+	it("clamps to the minimum", () => {
+		expect(clampPdfScale(0)).toBe(PDF_MIN_SCALE)
+	})
+
+	it("clamps to the maximum", () => {
+		expect(clampPdfScale(100)).toBe(PDF_MAX_SCALE)
+	})
+
+	it("passes through an in-range value", () => {
+		expect(clampPdfScale(2)).toBe(2)
+	})
+})
+
+describe("pdfStepZoomScale", () => {
+	it("steps up by PDF_ZOOM_STEP", () => {
+		expect(pdfStepZoomScale(1.5, 1)).toBeCloseTo(1.5 + PDF_ZOOM_STEP, 10)
+	})
+
+	it("steps down by PDF_ZOOM_STEP", () => {
+		expect(pdfStepZoomScale(1.5, -1)).toBeCloseTo(1.5 - PDF_ZOOM_STEP, 10)
+	})
+
+	it("clamps a step past the maximum", () => {
+		expect(pdfStepZoomScale(PDF_MAX_SCALE, 1)).toBe(PDF_MAX_SCALE)
+	})
+
+	it("clamps a step past the minimum", () => {
+		expect(pdfStepZoomScale(PDF_MIN_SCALE, -1)).toBe(PDF_MIN_SCALE)
+	})
+})
+
+describe("pdfWheelZoomScale", () => {
+	it("zooms in on a negative deltaY (wheel up)", () => {
+		expect(pdfWheelZoomScale(1.5, -100)).toBeGreaterThan(1.5)
+	})
+
+	it("zooms out on a positive deltaY (wheel down)", () => {
+		expect(pdfWheelZoomScale(1.5, 100)).toBeLessThan(1.5)
+	})
+
+	it("never exceeds the clamped bounds regardless of delta magnitude", () => {
+		expect(pdfWheelZoomScale(1.5, -1_000_000)).toBe(PDF_MAX_SCALE)
+		expect(pdfWheelZoomScale(1.5, 1_000_000)).toBe(PDF_MIN_SCALE)
+	})
+})
+
+// A page's own render-effect gate (pdfPageAction) reads only `withinExtendedView`/`rendered` — never
+// `scale` — by design: pdfViewer.tsx derives `rendered` itself as `renderedAtScale === scale`, so a
+// scale change alone (independent of any IntersectionObserver crossing) already flips that boolean to
+// false, which pdfPageAction then reads as an ordinary "not yet rendered" case. The absolute-pixel
+// render/evict margins stay meaningful at any zoom level for the same reason PDF_PAGE_EVICT_MARGIN_PX
+// must stay wider than PDF_PAGE_RENDER_MARGIN_PX above: the hysteresis is about SCROLL distance, which
+// a zoom change doesn't alter.
+// Widens a literal to plain `number` — the two scale values compared below are deliberately DIFFERENT
+// float literals, which TS would otherwise narrow to disjoint literal types and flag their `===` as an
+// impossible comparison; both are really just `number`s at runtime (one read from a `scale` prop, the
+// other from a `renderedAtScale` state value), so this mirrors that at the type level too.
+function asScale(scale: number): number {
+	return scale
+}
+
+describe("pdfPageAction — scale-change re-render (via a stale-vs-current renderedAtScale comparison)", () => {
+	it("treats a scale change as unrendered, forcing a re-render even while still within the extended viewport", () => {
+		const renderedAtScale = asScale(1.5)
+		const currentScale = asScale(1.75)
+		const rendered = renderedAtScale === currentScale
+
+		expect(pdfPageAction(true, rendered)).toBe("render")
+	})
+
+	it("stays idle when the scale hasn't changed since the last render", () => {
+		const renderedAtScale = asScale(1.5)
+		const currentScale = asScale(1.5)
+		const rendered = renderedAtScale === currentScale
+
+		expect(pdfPageAction(true, rendered)).toBe("idle")
 	})
 })

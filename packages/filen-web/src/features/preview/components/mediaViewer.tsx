@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
@@ -8,11 +8,96 @@ import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Spinner } from "@/components/ui/spinner"
+import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
+import { getVideoPlaybackState, setVideoPlaybackState } from "@/features/preview/lib/videoContinuity"
 
 export interface MediaViewerProps {
 	item: DriveItem
 	category: "video" | "audio"
 	alt: string
+}
+
+// Video-only: loops, autoplays on mount (the overlay's own open is itself a user gesture, so audible
+// autoplay is generally permitted — a rejected play() promise is swallowed, leaving the element in its
+// normal paused state with no error UI, never an unhandled rejection), and restores/persists playback
+// position across a pager remount via videoContinuity.ts. `positionKey` (the drive item's own uuid) is
+// undefined only for the external preview arm (previewOverlay.tsx's ExternalPreviewBody — no drive
+// item exists there to key a persisted position against); loop/autoplay still apply either way since
+// both arms render inside the SAME full-screen preview surface — only the raw, un-chromed <video> the
+// chat thread's own inline mini-player renders directly (filenLinkCard.tsx, bypassing this component
+// entirely) is deliberately excluded, per the mobile-parity decision that loop/autoplay belong to the
+// full preview experience, not a glanceable inline embed.
+function VideoElement({ url, alt, onError, positionKey }: { url: string; alt: string; onError?: () => void; positionKey?: string }) {
+	const videoRef = useRef<HTMLVideoElement | null>(null)
+
+	useEffect(() => {
+		const video = videoRef.current
+
+		if (!video) {
+			return
+		}
+
+		function restoreAndPlay(): void {
+			if (!video) {
+				return
+			}
+
+			const saved = positionKey !== undefined ? getVideoPlaybackState(positionKey) : undefined
+
+			if (saved !== undefined) {
+				video.currentTime = saved.currentTime
+			}
+
+			// A rejected promise here means the browser blocked autoplay (e.g. no prior user gesture on
+			// this exact document, or a restrictive autoplay policy) — the element is already left in its
+			// default paused state by the browser itself, so there is nothing further to do: no error UI,
+			// no toast, just a swallowed rejection.
+			void video.play().catch(() => {
+				// Autoplay blocked — see the comment above.
+			})
+		}
+
+		// readyState >= 1 (HAVE_METADATA) means metadata already loaded before this effect ran (e.g. a
+		// cached response) — waiting for a "loadedmetadata" event that already fired would hang forever.
+		if (video.readyState >= 1) {
+			restoreAndPlay()
+		} else {
+			video.addEventListener("loadedmetadata", restoreAndPlay, { once: true })
+		}
+
+		function handlePause(): void {
+			if (positionKey !== undefined && video) {
+				setVideoPlaybackState(positionKey, { currentTime: video.currentTime, wasPlaying: false })
+			}
+		}
+
+		video.addEventListener("pause", handlePause)
+
+		return () => {
+			video.removeEventListener("loadedmetadata", restoreAndPlay)
+			video.removeEventListener("pause", handlePause)
+
+			// Covers stepping away WHILE still playing — the "pause" listener above only fires for an
+			// explicit pause, never for an unmount, so this is the only place that captures a mid-playback
+			// step-away's own position.
+			if (positionKey !== undefined) {
+				setVideoPlaybackState(positionKey, { currentTime: video.currentTime, wasPlaying: !video.paused })
+			}
+		}
+	}, [positionKey])
+
+	return (
+		<video
+			ref={videoRef}
+			controls
+			loop
+			preload="metadata"
+			src={url}
+			aria-label={alt}
+			onError={onError}
+			className="max-h-full max-w-full"
+		/>
+	)
 }
 
 // The actual <video>/<audio> element, rendered once a src URL is known (either mode below) — Media
@@ -24,7 +109,8 @@ export function MediaElement({
 	category,
 	url,
 	alt,
-	onError
+	onError,
+	positionKey
 }: {
 	category: "video" | "audio"
 	url: string
@@ -32,17 +118,19 @@ export function MediaElement({
 	// Only ever wired by the streamed path (StreamedMedia below) — the buffered blob path has nowhere
 	// further to fall back to, so it leaves this unset and keeps the browser's own native error state.
 	onError?: () => void
+	// Video-only continuity key (the drive item's own uuid) — see VideoElement's own doc comment.
+	// Ignored for category "audio" (mobile's own "3 warm players" precedent is video-specific, and the
+	// gap report itemizes it as a video-only capability).
+	positionKey?: string
 }) {
 	if (category === "video") {
 		return (
 			<div className="flex size-full items-center justify-center overflow-hidden p-4">
-				<video
-					controls
-					preload="metadata"
-					src={url}
-					aria-label={alt}
-					onError={onError}
-					className="max-h-full max-w-full"
+				<VideoElement
+					url={url}
+					alt={alt}
+					{...(onError !== undefined ? { onError } : {})}
+					{...(positionKey !== undefined ? { positionKey } : {})}
 				/>
 			</div>
 		)
@@ -108,9 +196,13 @@ function StreamedMedia({
 	// the time onError can ever set `capExceeded`, so the ordering is a no-op there.
 	if (capExceeded || registrationOverCap) {
 		return (
-			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-				{t("previewStreamFailed")}
-			</div>
+			<PreviewErrorState
+				message={t("previewStreamFailed")}
+				onRetry={() => {
+					setCapExceeded(false)
+					result.refetch()
+				}}
+			/>
 		)
 	}
 
@@ -127,6 +219,7 @@ function StreamedMedia({
 			category={category}
 			url={result.url}
 			alt={alt}
+			positionKey={item.data.uuid}
 			onError={() => {
 				// A mid-consumption failure (network drop mid-seek, an SW-side decrypt abort, a lifecycle
 				// hiccup) — unlike the registration-failure effect above, retrying buffered here would
@@ -145,12 +238,14 @@ function BufferedMediaBytes({
 	category,
 	bytes,
 	mime,
-	alt
+	alt,
+	positionKey
 }: {
 	category: "video" | "audio"
 	bytes: Uint8Array
 	mime: string | undefined
 	alt: string
+	positionKey: string
 }) {
 	const [url, setUrl] = useState<string | null>(null)
 
@@ -176,6 +271,7 @@ function BufferedMediaBytes({
 			category={category}
 			url={url}
 			alt={alt}
+			positionKey={positionKey}
 		/>
 	)
 }
@@ -196,9 +292,10 @@ function BufferedMedia({ item, category, alt }: { item: DriveItem; category: "vi
 
 	if (result.status === "error") {
 		return (
-			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-				{errorLabel(result.dto)}
-			</div>
+			<PreviewErrorState
+				message={errorLabel(result.dto)}
+				onRetry={result.refetch}
+			/>
 		)
 	}
 
@@ -211,6 +308,7 @@ function BufferedMedia({ item, category, alt }: { item: DriveItem; category: "vi
 			bytes={result.bytes}
 			mime={mime}
 			alt={alt}
+			positionKey={item.data.uuid}
 		/>
 	)
 }

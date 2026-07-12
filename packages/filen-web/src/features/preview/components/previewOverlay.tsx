@@ -22,6 +22,7 @@ import { ImageViewer, ZoomableImage } from "@/features/preview/components/imageV
 import { MediaViewer, MediaElement } from "@/features/preview/components/mediaViewer"
 import { isTextEditingTarget, previewMenuVisible, PREVIEW_MENU_HIDDEN_ACTION_IDS } from "@/features/preview/components/previewOverlay.logic"
 import { type PreviewSource, previewSourceKey, previewSourceName } from "@/features/preview/lib/previewSource"
+import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
@@ -455,6 +456,17 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 			popupRef.current.focus()
 		}
 	}, [index])
+
+	// videoContinuity.ts's position map is scoped to exactly one overlay SESSION — this component itself
+	// only ever mounts while a preview is open (useDriveDialogHost's conditional render), so its own
+	// unmount is precisely "the overlay closed"; clearing here (rather than in onClose, which the header
+	// item-menu's own Trash/Unshare success paths also call, all funneling through the SAME close) keeps
+	// this a single, unconditional cleanup with no risk of missing a dismissal route.
+	useEffect(() => {
+		return () => {
+			clearVideoPlaybackStates()
+		}
+	}, [])
 
 	// The one write path: encode -> upload -> patch listing -> re-key onto the rotated uuid (success), or
 	// a LABEL-FIRST toast (failure) — read-only lockdown is reserved for the ONE failure class retrying
