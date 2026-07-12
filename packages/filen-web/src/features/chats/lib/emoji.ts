@@ -338,7 +338,11 @@ export const CUSTOM_EMOJIS: readonly CustomEmoji[] = [
 	{ name: "pogu", imageUrl: poguUrl },
 	{ name: "poggies", imageUrl: poggiesUrl },
 	{ name: "letsgo", imageUrl: letsgoUrl },
-	{ name: "clap", imageUrl: clapUrl },
+	// Named "clapping", not "clap" — the standard-unicode table above already owns the "clap" shortcode
+	// (👏), and a same-named custom entry would be permanently unreachable: messageContent.tsx and the `:`
+	// autocomplete both resolve standard shortcodes first, so the custom image could never render or be
+	// told apart from the glyph suggestion in the picker.
+	{ name: "clapping", imageUrl: clapUrl },
 	{ name: "gigachad", imageUrl: gigachadUrl },
 	{ name: "catjam", imageUrl: catjamUrl },
 	{ name: "sadge", imageUrl: sadgeUrl },

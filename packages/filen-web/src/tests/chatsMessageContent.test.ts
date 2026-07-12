@@ -25,7 +25,7 @@ function mockChat(overrides: Partial<Chat> = {}): Chat {
 	}
 }
 
-// M13 — the bundled custom-emoji pack subset renders as its image, and a message that's entirely emoji
+// The bundled custom-emoji pack subset renders as its image, and a message that's entirely emoji
 // shortcodes renders "jumbo" (larger), mirroring mobile's emojiSize 32/20 split (regexed.logic.ts's
 // isEmojiOnly, wired through messageContent.tsx).
 describe("MessageContent — custom emoji pack + jumbo sizing", () => {

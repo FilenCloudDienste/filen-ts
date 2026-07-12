@@ -96,7 +96,7 @@ describe("filterChats", () => {
 		expect(filterChats([undecryptable], "anything", SELF)).toEqual([])
 	})
 
-	// P8 — search also matches the conversation's last-message text (name/email/nickname already covered
+	// Search also matches the conversation's last-message text (name/email/nickname already covered
 	// above), same as mobile's list search.
 	it("matches on the last-message text", () => {
 		const chat = mockChat("a", { name: "Untitled", lastMessage: mockMessage({ message: "let's meet at noon" }) })
@@ -105,7 +105,7 @@ describe("filterChats", () => {
 		expect(filterChats([chat, other], "meet at noon", SELF).map(c => c.uuid)).toEqual([chat.uuid])
 	})
 
-	// L11 — a chat the viewer merely joined (not owned) and that has never had a message is hidden from
+	// A chat the viewer merely joined (not owned) and that has never had a message is hidden from
 	// the list entirely; an owned-but-empty chat, or any chat with at least one message regardless of
 	// ownership, still shows. Applies to both the empty-search and term-search paths.
 	describe("owned-or-has-a-message visibility", () => {
