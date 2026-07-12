@@ -261,10 +261,15 @@ export function streamFailureAction(item: DriveItem): "buffer" | "error" {
 	return asDirectoryOrFile(item).data.size <= PREVIEW_MAX_BYTES ? "buffer" : "error"
 }
 
-// The pager's candidate list — every previewable item in a listing, in the listing's own sorted order
-// (no re-sort of its own; the caller's array is already in display order).
+// The pager's candidate list — every previewable item in a listing EXCEPT audio, in the listing's own
+// sorted order (no re-sort of its own; the caller's array is already in display order). Audio is
+// deliberately excluded: a drive-hosted audio file hands off to the persistent player instead of the
+// preview overlay (see directoryListing's open handler), so the overlay never renders or pages to it —
+// stepping through a mixed folder skips audio and the pager's count reflects that. The external/embed
+// audio arm (ExternalPreviewBody) and the public-link page keep their own audio surfaces, neither of
+// which routes through this helper.
 export function previewableSiblings(items: DriveItem[], variant: DriveVariant): DriveItem[] {
-	return items.filter(item => canPreview(item, variant))
+	return items.filter(item => canPreview(item, variant) && previewType(item) !== "audio")
 }
 
 // Resolves the sibling one step (no wrap) from whichever sibling currently carries `currentUuid` — a

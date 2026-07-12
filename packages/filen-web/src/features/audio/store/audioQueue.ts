@@ -214,6 +214,50 @@ export function replaceQueueAtIndex(
 	return { queue: tracks, currentIndex, shuffleOrder }
 }
 
+// The outcome of removing one track from the queue (a now-playing-panel per-row remove). Besides the
+// new queue/current-index/shuffle-order, `currentRemoved` tells the engine whether the track that was
+// PLAYING got dropped (so it must load whatever now occupies the slot) versus a background track being
+// removed (playback continues untouched, only the index label shifts).
+export interface QueueMutation {
+	queue: QueueTrack[]
+	currentIndex: number
+	shuffleOrder: number[]
+	currentRemoved: boolean
+}
+
+// Removes the track at `removeIndex`, keeping the current track playing whenever it itself wasn't the
+// one removed: a removal BEFORE the current index shifts the current down by one (same track, new
+// position); a removal AFTER it leaves the index untouched; removing the current track keeps the index
+// pointing at the slot the following track now fills (clamped to the new end). An out-of-range index is
+// a no-op that still returns a consistent shuffle order. When shuffle is on the order is rebuilt
+// anchored at the resulting current index rather than surgically spliced — simpler and always
+// self-consistent, at the cost of reshuffling the remaining lap (acceptable on an explicit edit).
+export function removeFromQueue(
+	queue: QueueTrack[],
+	currentIndex: number,
+	shuffleEnabled: boolean,
+	shuffleOrder: number[],
+	removeIndex: number,
+	random: () => number = Math.random
+): QueueMutation {
+	if (removeIndex < 0 || removeIndex >= queue.length) {
+		return { queue, currentIndex, shuffleOrder, currentRemoved: false }
+	}
+
+	const next = queue.slice(0, removeIndex).concat(queue.slice(removeIndex + 1))
+
+	if (next.length === 0) {
+		return { queue: [], currentIndex: 0, shuffleOrder: [], currentRemoved: removeIndex === currentIndex }
+	}
+
+	const currentRemoved = removeIndex === currentIndex
+	const newCurrent =
+		removeIndex < currentIndex ? currentIndex - 1 : removeIndex > currentIndex ? currentIndex : Math.min(currentIndex, next.length - 1)
+	const order = shuffleEnabled ? buildShuffleOrder(next.length, newCurrent, random) : []
+
+	return { queue: next, currentIndex: newCurrent, shuffleOrder: order, currentRemoved }
+}
+
 // Bounds the failed-track auto-skip to a single pass over the queue: the engine increments a guard on
 // every consecutive skip (reset to 0 on any successful play) and settles once this returns false, so a
 // queue where every remaining track is broken can never spin forever. `queueLength` skips are allowed

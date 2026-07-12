@@ -28,6 +28,12 @@ interface AudioStore {
 	shuffleEnabled: boolean
 	loopMode: LoopMode
 	shuffleOrder: number[]
+	// Output-device settings the engine owns; mirrored here purely so the player bar's volume slider /
+	// mute toggle render and update reactively (the engine stays the source of truth — it writes these
+	// on every setVolume/setMuted and after hydrating the persisted prefs). Not persisted through the
+	// store; the engine persists them via its own kv blob.
+	volume: number
+	muted: boolean
 	// LABEL-FIRST error surface: the last playback failure as a structured DTO (errorLabel(dto) renders
 	// it). Cleared on the next successful play. Never a spinner-forever state — a failure that exhausts
 	// the auto-skip budget settles the status AND leaves this set.
@@ -37,6 +43,12 @@ interface AudioStore {
 	loadQueue: (queue: QueueTrack[], currentIndex: number, shuffleOrder: number[]) => void
 	// Move to another already-queued track (next/previous/skip). Resets position/duration.
 	setCurrent: (currentIndex: number, shuffleOrder: number[]) => void
+	// In-place queue edit (a now-playing-panel remove) that must NOT disturb playback — sets the queue,
+	// current index and shuffle order while leaving position/duration/status/error exactly as they are,
+	// unlike loadQueue/setCurrent which reset them.
+	setQueueState: (queue: QueueTrack[], currentIndex: number, shuffleOrder: number[]) => void
+	// Mirrors the engine's output prefs into the store for the bar's reactive controls.
+	setOutput: (volume: number, muted: boolean) => void
 	setStatus: (status: AudioPlaybackStatus) => void
 	setPosition: (positionMs: number) => void
 	setDuration: (durationMs: number) => void
@@ -58,12 +70,20 @@ export const useAudioStore = create<AudioStore>(set => ({
 	shuffleEnabled: false,
 	loopMode: "off",
 	shuffleOrder: [],
+	volume: 1,
+	muted: false,
 	lastError: null,
 	loadQueue: (queue, currentIndex, shuffleOrder) => {
 		set({ queue, currentIndex, shuffleOrder, positionMs: 0, durationMs: 0, lastError: null })
 	},
 	setCurrent: (currentIndex, shuffleOrder) => {
 		set({ currentIndex, shuffleOrder, positionMs: 0, durationMs: 0 })
+	},
+	setQueueState: (queue, currentIndex, shuffleOrder) => {
+		set({ queue, currentIndex, shuffleOrder })
+	},
+	setOutput: (volume, muted) => {
+		set({ volume, muted })
 	},
 	setStatus: status => {
 		set({ status })
@@ -158,4 +178,31 @@ export function useAudioQueueControls(): { shuffleEnabled: boolean; loopMode: Lo
 			hasQueue: state.queue.length > 0
 		}))
 	)
+}
+
+// The full queue + current index for the now-playing panel's track list. The queue array's identity is
+// stable across playback-only updates (position/status writes never touch it), so this re-renders the
+// panel only on real queue edits or track changes.
+export function useAudioQueue(): { queue: QueueTrack[]; currentIndex: number } {
+	return useAudioStore(
+		useShallow(state => ({
+			queue: state.queue,
+			currentIndex: state.currentIndex
+		}))
+	)
+}
+
+// Volume + mute for the bar's output controls, mirrored from the engine.
+export function useAudioOutput(): { volume: number; muted: boolean } {
+	return useAudioStore(
+		useShallow(state => ({
+			volume: state.volume,
+			muted: state.muted
+		}))
+	)
+}
+
+// The last playback failure DTO, for the bar's LABEL-FIRST inline error.
+export function useAudioError(): ErrorDTO | null {
+	return useAudioStore(state => state.lastError)
 }

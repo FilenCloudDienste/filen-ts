@@ -5,6 +5,7 @@ import {
 	computeNext,
 	computePrevious,
 	reconcileVisibility,
+	removeFromQueue,
 	replaceQueueAtIndex,
 	smartPrevious,
 	withinSkipBudget,
@@ -223,6 +224,68 @@ describe("reconcileVisibility", () => {
 
 		expect(result.positionMs).toBe(0)
 		expect(result.durationMs).toBe(0)
+	})
+})
+
+describe("removeFromQueue", () => {
+	const queue = [track("a"), track("b"), track("c"), track("d")]
+
+	it("removes a track after the current index without shifting the current index", () => {
+		const result = removeFromQueue(queue, 1, false, [], 2)
+
+		expect(result.queue.map(t => t.uuid)).toEqual(["a", "b", "d"])
+		expect(result.currentIndex).toBe(1)
+		expect(result.currentRemoved).toBe(false)
+	})
+
+	it("shifts the current index down when a track before it is removed (same track keeps playing)", () => {
+		const result = removeFromQueue(queue, 2, false, [], 0)
+
+		expect(result.queue.map(t => t.uuid)).toEqual(["b", "c", "d"])
+		expect(result.currentIndex).toBe(1)
+		expect(result.currentRemoved).toBe(false)
+	})
+
+	it("signals currentRemoved and keeps the index pointing at the following track", () => {
+		const result = removeFromQueue(queue, 1, false, [], 1)
+
+		expect(result.queue.map(t => t.uuid)).toEqual(["a", "c", "d"])
+		expect(result.currentIndex).toBe(1)
+		expect(result.currentRemoved).toBe(true)
+	})
+
+	it("clamps the index to the new end when the current (last) track is removed", () => {
+		const result = removeFromQueue(queue, 3, false, [], 3)
+
+		expect(result.queue.map(t => t.uuid)).toEqual(["a", "b", "c"])
+		expect(result.currentIndex).toBe(2)
+		expect(result.currentRemoved).toBe(true)
+	})
+
+	it("empties the queue when the last remaining track is removed", () => {
+		const result = removeFromQueue([track("only")], 0, false, [], 0)
+
+		expect(result.queue).toEqual([])
+		expect(result.currentIndex).toBe(0)
+		expect(result.currentRemoved).toBe(true)
+	})
+
+	it("no-ops on an out-of-range index, preserving the passed shuffle order", () => {
+		const result = removeFromQueue(queue, 1, true, [1, 0, 2, 3], 9)
+
+		expect(result.queue.map(t => t.uuid)).toEqual(["a", "b", "c", "d"])
+		expect(result.currentIndex).toBe(1)
+		expect(result.shuffleOrder).toEqual([1, 0, 2, 3])
+		expect(result.currentRemoved).toBe(false)
+	})
+
+	it("rebuilds the shuffle order anchored at the resulting current index when shuffle is on", () => {
+		const result = removeFromQueue(queue, 2, true, [2, 0, 1, 3], 0, zeroRandom)
+
+		// One track dropped -> a length-3 order re-anchored at the shifted current index (2 -> 1).
+		expect(result.shuffleOrder).toHaveLength(3)
+		expect(result.shuffleOrder[0]).toBe(1)
+		expect([...result.shuffleOrder].sort((a, b) => a - b)).toEqual([0, 1, 2])
 	})
 })
 

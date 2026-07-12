@@ -346,6 +346,27 @@ describe("previewableSiblings", () => {
 
 		expect(previewableSiblings([a, b], "drive")).toEqual([a, b])
 	})
+
+	// Audio is deliberately excluded from the pager: a drive-hosted audio file hands off to the
+	// persistent player, so the overlay never renders or pages to it. Stepping through a mixed folder
+	// skips audio and the pager count reflects only the non-audio previewables.
+	it("excludes audio files even though they are otherwise previewable", () => {
+		const image = fileNamed("a.jpg")
+		const song = fileNamed("track.mp3", { mime: "audio/mpeg" })
+		const pdf = fileNamed("doc.pdf")
+
+		const siblings = previewableSiblings([image, song, pdf], "drive")
+
+		expect(siblings).toEqual([image, pdf])
+		expect(siblings).toHaveLength(2)
+	})
+
+	it("returns an empty pager for an audio-only folder", () => {
+		const one = fileNamed("one.mp3", { mime: "audio/mpeg" })
+		const two = fileNamed("two.flac", { mime: "audio/flac" })
+
+		expect(previewableSiblings([one, two], "drive")).toEqual([])
+	})
 })
 
 describe("stepPreviewIndex", () => {

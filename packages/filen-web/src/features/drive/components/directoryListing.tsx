@@ -24,6 +24,8 @@ import { asDirectoryOrFile } from "@/features/drive/lib/item"
 import { canPreview, previewableSiblings } from "@/features/drive/lib/preview.logic"
 import { selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
 import { drivePreviewSources } from "@/features/preview/lib/previewSource"
+import { deriveAudioHandoff, isAudioItem } from "@/features/audio/lib/handoff"
+import { audioEngine } from "@/features/audio/lib/audioEngine"
 import { startDownloads } from "@/features/drive/lib/download"
 import { useDirectoryListingQuery, useSortPreferencesQuery, useViewModePreferencesQuery } from "@/features/drive/queries/drive"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
@@ -249,6 +251,22 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		// resolveDriveNavigationTarget already returns null for every file arm — see its own comment).
 		// A directory falls through to the unchanged navigation path below.
 		if (asDirectoryOrFile(item).type === "file") {
+			// Drive-hosted audio hands off to the persistent player instead of the preview overlay: opening
+			// one audio file enqueues the folder's audio siblings (in this listing's current sort order,
+			// positioned at the opened track) and starts playback. deriveAudioHandoff returns null for a
+			// trash listing and for an undecryptable audio file — a trashed/undecryptable track stays
+			// non-playable, like mobile — in which case the open is simply inert (audio never opens the
+			// overlay, whose pager already excludes it via previewableSiblings).
+			if (isAudioItem(item)) {
+				const handoff = deriveAudioHandoff(sortedItems, item.data.uuid, variant === "trash")
+
+				if (handoff) {
+					void audioEngine.enqueueAndPlay(handoff.tracks, handoff.startIndex)
+				}
+
+				return
+			}
+
 			if (!canPreview(item, variant)) {
 				return
 			}

@@ -10,6 +10,7 @@ import { AccountReminders } from "@/features/shell/components/accountReminders"
 import { SyncHost } from "@/features/notes/components/syncHost"
 import { ChatsSyncHost } from "@/features/chats/components/syncHost"
 import { SocketHost } from "@/features/shell/components/socketHost"
+import { AudioPlayerBar } from "@/features/audio/components/audioPlayerBar"
 
 // Padded canvas holding the three shell zones: a bare icon rail sitting directly on the canvas, then
 // two floating rounded panels — the contextual module sidebar and the content card. Nothing touches a
@@ -61,6 +62,11 @@ export function AppShell() {
 					<Outlet />
 				</main>
 			</div>
+			{/* Persistent audio player — docked at the bottom of the authed shell, below the module row, the
+			    same shell-level docking the transfers rail established. Renders null until a queue exists;
+			    since AppShell is the authed layout (public-link routes have their own tree), the player is
+			    inherently authed-only. */}
+			<AudioPlayerBar />
 		</div>
 	)
 }

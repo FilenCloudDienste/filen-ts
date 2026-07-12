@@ -7,6 +7,7 @@ import {
 	buildShuffleOrder,
 	computeNext,
 	reconcileVisibility,
+	removeFromQueue,
 	replaceQueueAtIndex,
 	smartPrevious,
 	withinSkipBudget,
@@ -16,6 +17,7 @@ import {
 	type QueueNav,
 	type QueueTrack
 } from "@/features/audio/store/audioQueue"
+import type { MediaSessionPublisher } from "@/features/audio/lib/mediaSession"
 
 // The module-level playback engine — a singleton lib (constructed in audioEngine.ts with the real DOM
 // adapter + SW/blob source resolver), NOT a React component, mirroring sdkApi and the mobile Audio
@@ -71,6 +73,10 @@ export interface AudioEngineDeps {
 	revokeObjectUrl?: (url: string) => void
 	// Injectable clock for the position throttle, so a test can drive it deterministically.
 	now?: () => number
+	// The OS Media Session bridge (engine → lock-screen/media-key metadata + playback state). Absent in
+	// tests and wherever Media Session is unsupported; every call site guards on it, so a missing bridge
+	// simply means no OS integration.
+	mediaSession?: MediaSessionPublisher
 }
 
 function defaultRevoke(url: string): void {
@@ -167,7 +173,11 @@ export class AudioEngine {
 		}
 
 		this.lastPositionWriteAt = now
-		useAudioStore.getState().setPosition(Math.max(0, this.element.sample().currentTimeMs))
+
+		const sample = this.element.sample()
+
+		useAudioStore.getState().setPosition(Math.max(0, sample.currentTimeMs))
+		this.deps.mediaSession?.setPositionState(sample)
 	}
 
 	private onDurationChange(): void {
@@ -192,6 +202,9 @@ export class AudioEngine {
 			return
 		}
 
+		// Publish OS metadata as soon as the track is known (before bytes resolve) so the lock-screen /
+		// media-key surface names the loading track rather than lagging a beat behind.
+		this.deps.mediaSession?.setMetadata(track)
 		useAudioStore.getState().setStatus("loading")
 
 		let source: TrackSource
@@ -241,6 +254,8 @@ export class AudioEngine {
 		this.lastPositionWriteAt = 0
 		useAudioStore.getState().setError(null)
 		useAudioStore.getState().setStatus("playing")
+		this.deps.mediaSession?.setPlaybackState("playing")
+		this.deps.mediaSession?.setPositionState(element.sample())
 	}
 
 	// Revoke the outgoing blob URL when it is being replaced, and remember the new one (or null for a
@@ -295,6 +310,7 @@ export class AudioEngine {
 
 		state.setStatus(state.queue.length === 0 ? "idle" : "paused")
 		state.setPosition(0)
+		this.deps.mediaSession?.setPlaybackState(state.queue.length === 0 ? "none" : "paused")
 	}
 
 	// The `ended` handler. Loop "one" restarts the current track; otherwise advance, and if there is
@@ -361,6 +377,7 @@ export class AudioEngine {
 		}
 
 		useAudioStore.getState().setStatus("playing")
+		this.deps.mediaSession?.setPlaybackState("playing")
 		void this.element.play().catch((error: unknown) => {
 			this.onPlaybackFailure(asErrorDTO(error))
 		})
@@ -369,6 +386,7 @@ export class AudioEngine {
 	public pause(): void {
 		this.element?.pause()
 		useAudioStore.getState().setStatus("paused")
+		this.deps.mediaSession?.setPlaybackState("paused")
 	}
 
 	public toggle(): void {
@@ -382,6 +400,10 @@ export class AudioEngine {
 	public seek(seconds: number): void {
 		this.element?.seek(seconds)
 		useAudioStore.getState().setPosition(Math.max(0, seconds * 1000))
+
+		if (this.element) {
+			this.deps.mediaSession?.setPositionState(this.element.sample())
+		}
 	}
 
 	public async skipNext(): Promise<void> {
@@ -411,6 +433,65 @@ export class AudioEngine {
 		await this.loadAndPlay(result.index)
 	}
 
+	// Jump straight to a queued track (a now-playing-panel click-to-jump). Re-anchors the shuffle order at
+	// the target so shuffle-next continues from there, then loads and plays it.
+	public async playIndex(index: number): Promise<void> {
+		const state = useAudioStore.getState()
+
+		if (index < 0 || index >= state.queue.length) {
+			return
+		}
+
+		const order = state.shuffleEnabled ? buildShuffleOrder(state.queue.length, index) : []
+
+		state.setCurrent(index, order)
+		await this.loadAndPlay(index)
+	}
+
+	// Remove one track from the queue (a per-row remove). A background track leaves playback untouched
+	// (only the index label shifts); removing the CURRENT track loads whatever now fills its slot, or
+	// clears everything when it was the last track.
+	public async removeAt(index: number): Promise<void> {
+		const state = useAudioStore.getState()
+		const mutation = removeFromQueue(state.queue, state.currentIndex, state.shuffleEnabled, state.shuffleOrder, index)
+
+		if (mutation.queue.length === 0) {
+			this.clearQueue()
+
+			return
+		}
+
+		if (mutation.currentRemoved) {
+			this.loadGeneration++
+			useAudioStore.getState().loadQueue(mutation.queue, mutation.currentIndex, mutation.shuffleOrder)
+			await this.loadAndPlay(mutation.currentIndex)
+
+			return
+		}
+
+		useAudioStore.getState().setQueueState(mutation.queue, mutation.currentIndex, mutation.shuffleOrder)
+	}
+
+	// Empty the queue and stop — the mini-player disappears (the shell renders it only for a non-empty
+	// queue). Supersedes any in-flight load, revokes the live blob URL, and clears the OS metadata; the
+	// persisted shuffle/loop/output prefs survive (store.reset keeps them).
+	public clearQueue(): void {
+		this.loadGeneration++
+		this.element?.pause()
+		this.element?.clear()
+
+		if (this.currentBlobUrl !== null) {
+			this.revoke(this.currentBlobUrl)
+			this.currentBlobUrl = null
+		}
+
+		this.skipGuard = 0
+		this.lastPositionWriteAt = 0
+		useAudioStore.getState().reset()
+		this.deps.mediaSession?.setMetadata(null)
+		this.deps.mediaSession?.setPlaybackState("none")
+	}
+
 	public setShuffleEnabled(enabled: boolean): void {
 		const state = useAudioStore.getState()
 		const order = enabled && state.queue.length > 0 ? buildShuffleOrder(state.queue.length, state.currentIndex) : []
@@ -425,13 +506,19 @@ export class AudioEngine {
 	public setVolume(volume: number): void {
 		this.volume = clampVolume(volume)
 		this.element?.setVolume(this.volume)
+		useAudioStore.getState().setOutput(this.volume, this.muted)
 		void this.persistOutputPrefs()
 	}
 
 	public setMuted(muted: boolean): void {
 		this.muted = muted
 		this.element?.setMuted(muted)
+		useAudioStore.getState().setOutput(this.volume, this.muted)
 		void this.persistOutputPrefs()
+	}
+
+	public toggleMuted(): void {
+		this.setMuted(!this.muted)
 	}
 
 	// Load-once persisted volume/muted, memoized per engine instance. Swallowed on failure — output
@@ -447,6 +534,7 @@ export class AudioEngine {
 				this.muted = loaded.muted
 				this.element?.setVolume(this.volume)
 				this.element?.setMuted(this.muted)
+				useAudioStore.getState().setOutput(this.volume, this.muted)
 			})
 			.catch((error: unknown) => {
 				log.warn("audio", "failed to load persisted audio output prefs", error)
@@ -526,5 +614,7 @@ export class AudioEngine {
 		this.skipGuard = 0
 		this.lastPositionWriteAt = 0
 		useAudioStore.getState().reset()
+		this.deps.mediaSession?.setMetadata(null)
+		this.deps.mediaSession?.setPlaybackState("none")
 	}
 }
