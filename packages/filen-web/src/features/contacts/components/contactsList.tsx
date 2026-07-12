@@ -73,6 +73,11 @@ type ActiveContactDialog =
 export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	const { t } = useTranslation(["contacts", "common"])
 	const isOnline = useIsOnline()
+	// Every per-row/bulk action below is disabled SOLELY by `!isOnline` (no other reason ever
+	// disables them), so this single string doubles as both the "why" and the disabled condition's own
+	// explanation — computed once rather than re-deriving `t("common:offlineActionDisabled")` at each
+	// of the 6 call sites below.
+	const offlineTitle = !isOnline ? t("common:offlineActionDisabled") : undefined
 	const [search, setSearch] = useState("")
 	const [selectMode, setSelectMode] = useState(false)
 	const [selection, setSelection] = useState<ContactSelection>(EMPTY_CONTACT_SELECTION)
@@ -409,6 +414,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 							<IncomingRequestActions
 								request={request}
 								disabled={!isOnline}
+								title={offlineTitle}
 								onAccept={item => {
 									void handleAccept(item)
 								}}
@@ -437,6 +443,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 							<OutgoingRequestActions
 								request={request}
 								disabled={!isOnline}
+								title={offlineTitle}
 								onCancel={item => {
 									setActiveDialog({ kind: "cancel", bulk: false, items: [item] })
 								}}
@@ -462,6 +469,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 							<ContactActions
 								contact={contact}
 								disabled={!isOnline}
+								title={offlineTitle}
 								onRemove={item => {
 									setActiveDialog({ kind: "remove", bulk: false, items: [item] })
 								}}
@@ -490,6 +498,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 							<BlockedActions
 								contact={blocked}
 								disabled={!isOnline}
+								title={offlineTitle}
 								onUnblock={item => {
 									setActiveDialog({ kind: "unblock", bulk: false, items: [item] })
 								}}
@@ -516,6 +525,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 						blocked={blockedData}
 						selection={selection}
 						disabled={!isOnline}
+						title={offlineTitle}
 						onClear={exitSelectMode}
 						onAccept={items => {
 							void handleBulkAccept(items)

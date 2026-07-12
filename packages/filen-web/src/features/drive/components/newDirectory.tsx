@@ -37,10 +37,14 @@ export interface NewDirectoryProps {
 	// drive.selectAll/clearSelection/toggleView/rename/trash/download siblings guard themselves in
 	// directoryListing.tsx.
 	dialogOpen: boolean
+	// True only when `disabled` is caused specifically by the app being offline (a subset of
+	// `disabled`'s own broader gate) — swaps the tooltip's copy from the action label to the offline
+	// explanation so a proactively-disabled control still tells the user why.
+	offline?: boolean
 }
 
-export function NewDirectory({ parentUuid, disabled = false, dialogOpen }: NewDirectoryProps) {
-	const { t } = useTranslation("drive")
+export function NewDirectory({ parentUuid, disabled = false, dialogOpen, offline = false }: NewDirectoryProps) {
+	const { t } = useTranslation(["drive", "common"])
 	const [open, setOpen] = useState(false)
 	const [pending, setPending] = useState(false)
 
@@ -98,7 +102,7 @@ export function NewDirectory({ parentUuid, disabled = false, dialogOpen }: NewDi
 					}
 				/>
 				<TooltipContent>
-					{t("driveNewDirectoryTitle")}
+					{offline && disabled ? t("common:offlineActionDisabled") : t("driveNewDirectoryTitle")}
 					<Kbd action="drive.newDirectory" />
 				</TooltipContent>
 			</Tooltip>

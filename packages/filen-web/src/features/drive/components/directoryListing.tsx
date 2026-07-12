@@ -603,17 +603,20 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							<EmptyTrashButton
 								onClick={handleEmptyTrash}
 								disabled={!isOnline}
+								offlineTitle={!isOnline ? t("common:offlineActionDisabled") : undefined}
 							/>
 						) : null}
 						<NewDirectory
 							parentUuid={uuid}
 							disabled={writeDisabled}
 							dialogOpen={isDialogOpen}
+							offline={!isOnline}
 						/>
 						<UploadMenu
 							parentUuid={uuid}
 							disabled={writeDisabled}
 							openPreview={openPreview}
+							offline={!isOnline}
 						/>
 					</div>
 				</div>

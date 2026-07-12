@@ -162,6 +162,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 						<EmptyContent>
 							<Button
 								disabled={pending || !isOnline}
+								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 								onClick={() => {
 									void handleCreate()
 								}}
@@ -186,6 +187,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 								id="link-downloadable"
 								checked={form.downloadEnabled}
 								disabled={pending || !isOnline}
+								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 								onCheckedChange={checked => {
 									void handleUpdate(current, { downloadEnabled: checked })
 								}}
@@ -207,7 +209,10 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 									}
 								}}
 							>
-								<SelectTrigger id="link-expiration">
+								<SelectTrigger
+									id="link-expiration"
+									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+								>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -242,6 +247,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 									<Button
 										size="sm"
 										disabled={pending || !isOnline || passwordDraft.trim().length === 0}
+										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 										onClick={() => {
 											void handleSavePassword(current)
 										}}
@@ -253,6 +259,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 										size="sm"
 										variant="ghost"
 										disabled={pending || !isOnline}
+										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 										onClick={() => {
 											setPasswordEditing(false)
 											setPasswordDraft("")
@@ -270,6 +277,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 										size="sm"
 										variant="outline"
 										disabled={pending || !isOnline}
+										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 										onClick={() => {
 											setPasswordEditing(true)
 										}}
@@ -281,6 +289,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 											size="sm"
 											variant="ghost"
 											disabled={pending || !isOnline}
+											title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 											onClick={() => {
 												void handleUpdate(current, { password: { kind: "cleared" } })
 											}}
@@ -323,6 +332,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 						<Button
 							variant="destructive"
 							disabled={pending || !isOnline}
+							title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 							onClick={() => {
 								void handleDisable(current)
 							}}

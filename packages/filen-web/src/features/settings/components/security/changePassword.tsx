@@ -26,7 +26,7 @@ interface ChangePasswordCardProps {
 // (changePassword.logic.ts), which owns the fingerprint re-sync law: it persists the
 // RETURNED, post-mutation session blob before this component does anything else with the result.
 function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
-	const { t } = useTranslation("auth")
+	const { t } = useTranslation(["auth", "common"])
 	const isOnline = useIsOnline()
 	const [currentPassword, setCurrentPassword] = useState("")
 	const [newPassword, setNewPassword] = useState("")
@@ -146,6 +146,7 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 					type="submit"
 					form="change-password-form"
 					disabled={!canSubmit || pending}
+					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 				>
 					{pending && <Spinner data-icon="inline-start" />}
 					{t("changePasswordSubmit")}

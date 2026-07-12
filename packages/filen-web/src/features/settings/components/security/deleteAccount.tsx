@@ -74,6 +74,7 @@ function DeleteAccountCard({ accountQuery }: DeleteAccountCardProps) {
 					type="button"
 					variant="destructive"
 					disabled={!isOnline}
+					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 					onClick={() => {
 						setChainStage("stage1")
 					}}

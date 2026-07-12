@@ -201,6 +201,7 @@ function TwoFactorCard({ accountQuery }: TwoFactorCardProps) {
 						type="button"
 						variant="destructive"
 						disabled={!isOnline}
+						title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 						onClick={() => {
 							setDisableConfirmOpen(true)
 						}}
@@ -211,6 +212,7 @@ function TwoFactorCard({ accountQuery }: TwoFactorCardProps) {
 					<Button
 						type="button"
 						disabled={twoFactorKey === undefined || twoFactorKey.length === 0 || !isOnline}
+						title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 						onClick={() => {
 							setEnableCodeOpen(true)
 						}}

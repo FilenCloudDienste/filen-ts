@@ -74,7 +74,7 @@ export function Composer({
 	// Fired after an own send is enqueued so the thread can jump to the bottom (mobile parity).
 	onSent: () => void
 }) {
-	const { t } = useTranslation("chats")
+	const { t } = useTranslation(["chats", "common"])
 	const isOnline = useIsOnline()
 	const chatUuid = chat.uuid
 	const entry = useChatComposerEntry(chatUuid)
@@ -572,6 +572,7 @@ export function Composer({
 								// which stays enabled offline by design (its outbox queues and flushes later).
 								disabled={isAttachDisabled(uploadingCount, isOnline)}
 								aria-label={t("chatComposerAttach")}
+								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 							>
 								<PaperclipIcon />
 							</Button>

@@ -56,6 +56,28 @@ describe("useIsOnline", () => {
 		expect(result.current).toBe(true)
 	})
 
+	it("seeds onlineManager from navigator.onLine on module load, even when the tab starts offline", async () => {
+		// The module under test seeds onlineManager exactly once, as an import-time side effect —
+		// re-triggering that seed requires a fresh module instance (mirrors heicCodec.test.ts's own
+		// vi.resetModules() + dynamic re-import pattern). Both "@tanstack/react-query" and
+		// "@/lib/useIsOnline" must be re-imported from the SAME post-reset registry so the freshly
+		// seeded onlineManager singleton this test reads back is the exact instance the hook module
+		// seeded, not the suite's original static-import instance.
+		const onLineDescriptor = Object.getOwnPropertyDescriptor(navigator, "onLine")
+		Object.defineProperty(navigator, "onLine", { value: false, configurable: true })
+
+		vi.resetModules()
+		const [{ onlineManager: freshOnlineManager }] = await Promise.all([import("@tanstack/react-query")])
+		await import("@/lib/useIsOnline")
+
+		expect(freshOnlineManager.isOnline()).toBe(false)
+
+		if (onLineDescriptor) {
+			Object.defineProperty(navigator, "onLine", onLineDescriptor)
+		}
+		vi.resetModules()
+	})
+
 	it("unsubscribes from onlineManager on unmount", () => {
 		// Spy on onlineManager.subscribe to capture the unsubscribe fn useSyncExternalStore stores as
 		// its cleanup, then assert it runs on unmount — reading result.current after unmount can't

@@ -39,7 +39,7 @@ const SWATCHES: Swatch[] = [
 // there's no trigger element left to anchor a popover to by the time this opens (the context menu it
 // was dispatched from is already closed), so this renders as a modal like its sibling dialogs.
 export function ColorDialog({ directory, onClose }: ColorDialogProps) {
-	const { t } = useTranslation("drive")
+	const { t } = useTranslation(["drive", "common"])
 	const isOnline = useIsOnline()
 	const [pending, setPending] = useState(false)
 
@@ -89,6 +89,7 @@ export function ColorDialog({ directory, onClose }: ColorDialogProps) {
 								disabled={pending || !isOnline}
 								aria-pressed={selected}
 								aria-label={t(swatch.labelKey)}
+								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 								onClick={() => {
 									void handleSelect(swatch.color)
 								}}

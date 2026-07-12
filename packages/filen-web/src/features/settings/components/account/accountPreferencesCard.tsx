@@ -18,10 +18,15 @@ interface PreferenceRowProps {
 	description: string
 	checked: boolean
 	pending: boolean
+	// Distinct from `pending` (which also covers "toggle in flight") — only true while the row is
+	// disabled specifically because the app is offline, so the offline title is never shown for an
+	// in-flight toggle that would clear on its own a moment later.
+	offlineDisabled: boolean
+	offlineTitle: string
 	onCheckedChange: (checked: boolean) => void
 }
 
-function PreferenceRow({ title, description, checked, pending, onCheckedChange }: PreferenceRowProps) {
+function PreferenceRow({ title, description, checked, pending, offlineDisabled, offlineTitle, onCheckedChange }: PreferenceRowProps) {
 	return (
 		<div className="flex items-center justify-between gap-4 py-2 first:pt-0 last:pb-0">
 			<div className="flex flex-col gap-0.5">
@@ -32,6 +37,7 @@ function PreferenceRow({ title, description, checked, pending, onCheckedChange }
 				checked={checked}
 				disabled={pending}
 				aria-label={title}
+				title={offlineDisabled ? offlineTitle : undefined}
 				onCheckedChange={onCheckedChange}
 			/>
 		</div>
@@ -43,7 +49,7 @@ function PreferenceRow({ title, description, checked, pending, onCheckedChange }
 // straight from the account query, never local optimistic state: a failed mutation is a no-op visually
 // once `refetch` resolves back to the pre-toggle server value (accountPreferences.logic.ts).
 function AccountPreferencesCard({ accountQuery }: AccountPreferencesCardProps) {
-	const { t } = useTranslation("settings")
+	const { t } = useTranslation(["settings", "common"])
 	const isOnline = useIsOnline()
 	const { versioningEnabled, loginAlertsEnabled } = accountQuery.data
 	const [versioningPending, setVersioningPending] = useState(false)
@@ -85,6 +91,8 @@ function AccountPreferencesCard({ accountQuery }: AccountPreferencesCardProps) {
 					description={t("settingsVersioningDescription")}
 					checked={versioningEnabled}
 					pending={isPreferenceRowDisabled(versioningPending, isOnline)}
+					offlineDisabled={!isOnline}
+					offlineTitle={t("common:offlineActionDisabled")}
 					onCheckedChange={next => {
 						void handleVersioningChange(next)
 					}}
@@ -94,6 +102,8 @@ function AccountPreferencesCard({ accountQuery }: AccountPreferencesCardProps) {
 					description={t("settingsLoginAlertsDescription")}
 					checked={loginAlertsEnabled}
 					pending={isPreferenceRowDisabled(loginAlertsPending, isOnline)}
+					offlineDisabled={!isOnline}
+					offlineTitle={t("common:offlineActionDisabled")}
 					onCheckedChange={next => {
 						void handleLoginAlertsChange(next)
 					}}

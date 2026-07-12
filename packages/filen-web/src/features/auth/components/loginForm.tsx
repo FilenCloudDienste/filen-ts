@@ -28,7 +28,7 @@ function ForgotPasswordDialog({
 	initialEmail: string
 	onOpenChange: (open: boolean) => void
 }) {
-	const { t } = useTranslation("auth")
+	const { t } = useTranslation(["auth", "common"])
 	const isOnline = useIsOnline()
 	const [pending, setPending] = useState(false)
 	// Re-seed on the open TRANSITION only, adjusting state during render (React's documented pattern
@@ -91,6 +91,7 @@ function ForgotPasswordDialog({
 						<Button
 							type="submit"
 							disabled={pending || !isValidEmail(email) || !isOnline}
+							title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 						>
 							{pending && <Spinner data-icon="inline-start" />}
 							{t("forgotPasswordSubmit")}
@@ -103,7 +104,7 @@ function ForgotPasswordDialog({
 }
 
 function LoginForm() {
-	const { t } = useTranslation("auth")
+	const { t } = useTranslation(["auth", "common"])
 	const isOnline = useIsOnline()
 	const navigate = useNavigate()
 	const [email, setEmail] = useState("")
@@ -219,6 +220,7 @@ function LoginForm() {
 					type="submit"
 					className="w-full"
 					disabled={!canSubmit || pending}
+					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 				>
 					{pending && <Spinner data-icon="inline-start" />}
 					{t("loginSubmit")}

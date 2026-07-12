@@ -660,6 +660,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 								size="icon-sm"
 								disabled={!isOnline}
 								aria-label={t("previewDownloadAction")}
+								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 								onClick={() => {
 									void startDownloads([currentSource.item])
 								}}

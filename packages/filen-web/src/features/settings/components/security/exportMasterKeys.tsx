@@ -63,6 +63,7 @@ function ExportMasterKeysCard({ accountQuery }: ExportMasterKeysCardProps) {
 					type="button"
 					variant={didExportMasterKeys ? "outline" : "default"}
 					disabled={!isOnline}
+					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 					onClick={() => {
 						setConfirmOpen(true)
 					}}

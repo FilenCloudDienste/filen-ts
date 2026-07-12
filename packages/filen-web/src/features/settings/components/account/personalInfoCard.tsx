@@ -45,7 +45,7 @@ const FIELD_LABEL_KEYS: Record<keyof PersonalFormState, SettingsKey> = {
 // a plain text field: no country-list dependency exists in this package yet (mobile's exported
 // `countries[]` has no web equivalent), so this stays a simplification rather than inventing one.
 function PersonalInfoCard({ accountQuery }: PersonalInfoCardProps) {
-	const { t } = useTranslation("settings")
+	const { t } = useTranslation(["settings", "common"])
 	const isOnline = useIsOnline()
 	const [expanded, setExpanded] = useState(false)
 	const [form, setForm] = useState<PersonalFormState>(() => personalToFormState(accountQuery.data.personal))
@@ -107,6 +107,7 @@ function PersonalInfoCard({ accountQuery }: PersonalInfoCardProps) {
 						<Button
 							type="button"
 							disabled={pending || !isOnline}
+							title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 							onClick={() => {
 								void handleSave()
 							}}

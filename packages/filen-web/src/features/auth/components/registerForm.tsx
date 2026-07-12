@@ -45,7 +45,7 @@ function EligibilityBanner() {
 }
 
 function RegisterForm() {
-	const { t } = useTranslation("auth")
+	const { t } = useTranslation(["auth", "common"])
 	const isOnline = useIsOnline()
 	const [email, setEmail] = useState("")
 	const [password, setPassword] = useState("")
@@ -173,6 +173,7 @@ function RegisterForm() {
 					type="submit"
 					className="w-full"
 					disabled={!canSubmit || pending}
+					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 				>
 					{pending && <Spinner data-icon="inline-start" />}
 					{t("registerSubmit")}

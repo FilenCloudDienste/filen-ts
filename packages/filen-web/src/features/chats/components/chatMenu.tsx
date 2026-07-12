@@ -37,7 +37,7 @@ const SEPARATOR_BEFORE = new Set<ChatActionDescriptor["id"]>(["delete", "leave"]
 // thread header's ⋮ trigger — one descriptor list (chatMenuActions), one mapping from descriptor to
 // menu row, mirrors notes' NoteMenuEntries exactly.
 function ChatMenuEntries({ chat, currentUserId, onAction, family }: ChatMenuContentProps & { family: MenuFamily }) {
-	const { t } = useTranslation("chats")
+	const { t } = useTranslation(["chats", "common"])
 	const isOnline = useIsOnline()
 	const unread = chatHasUnread(chat, currentUserId)
 	const descriptors = applyOfflineGate(chatMenuActions(chat, currentUserId, unread), isOnline)
@@ -75,6 +75,7 @@ function ChatMenuEntries({ chat, currentUserId, onAction, family }: ChatMenuCont
 				<Item
 					variant={descriptor.destructive ? "destructive" : "default"}
 					disabled={descriptor.enabled === false}
+					title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
 					onClick={event => {
 						// Stop propagation — the portaled popup's synthetic events still bubble through the
 						// REACT tree even though the DOM node lives elsewhere (same rationale as noteMenu.tsx),

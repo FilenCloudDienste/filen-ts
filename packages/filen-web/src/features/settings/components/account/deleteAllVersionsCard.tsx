@@ -60,6 +60,7 @@ function DeleteAllVersionsCard({ accountQuery }: DeleteAllVersionsCardProps) {
 					type="button"
 					variant="destructive"
 					disabled={!isOnline}
+					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 					onClick={() => {
 						setOpen(true)
 					}}

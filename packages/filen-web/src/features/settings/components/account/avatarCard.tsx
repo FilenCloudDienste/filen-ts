@@ -24,7 +24,7 @@ interface AvatarCardProps {
 // that same old-web precedent (avatarCard.logic.ts) rather than mobile's native transcode pipeline,
 // which has no browser equivalent this codebase needs.
 function AvatarCard({ accountQuery }: AvatarCardProps) {
-	const { t } = useTranslation("settings")
+	const { t } = useTranslation(["settings", "common"])
 	const isOnline = useIsOnline()
 	const { avatarUrl, nickName, email } = accountQuery.data
 	const inputRef = useRef<HTMLInputElement>(null)
@@ -80,6 +80,7 @@ function AvatarCard({ accountQuery }: AvatarCardProps) {
 						type="button"
 						variant="outline"
 						disabled={pending || !isOnline}
+						title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 						onClick={() => {
 							inputRef.current?.click()
 						}}

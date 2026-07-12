@@ -42,7 +42,7 @@ function SidebarNotice({ icon, title, description }: { icon: ReactNode; title: s
 // "New chat" button opening the contact picker (createChatDialog.tsx via useChatDialogHost), and per-row
 // menus (chatRow.tsx's own context/dropdown menu).
 export function ChatsSidebar() {
-	const { t } = useTranslation("chats")
+	const { t } = useTranslation(["chats", "common"])
 	const isOnline = useIsOnline()
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const selectedUuid = selectedUuidFromPath(pathname)
@@ -146,6 +146,7 @@ export function ChatsSidebar() {
 						size="icon-sm"
 						disabled={!isOnline}
 						aria-label={t("chatsSidebarNewChat")}
+						title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 						className="app-region-no-drag"
 						onClick={() => {
 							dialogHost.openCreateChatDialog()

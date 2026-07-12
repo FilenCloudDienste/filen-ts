@@ -11,6 +11,9 @@ export interface ContactMenuContentProps {
 	onRemove: (contact: Contact) => void
 	onBlock: (contact: Contact) => void
 	disabled?: boolean | undefined
+	// Set only when `disabled` is caused specifically by the app being offline — surfaced as each
+	// item's native title.
+	title?: string | undefined
 }
 
 // The contact-row ⋯ menu — always rendered as a MenuPrimitive.Popup inside a DropdownMenu Root/
@@ -18,7 +21,7 @@ export interface ContactMenuContentProps {
 // drive's DriveDropdownMenuContent exactly. Remove then Block, both destructive-styled (the locale
 // catalog's own doc comments: "Only Remove and Block render as destructive"), Block LAST as the more
 // severe of the two — it also prevents the other person from re-requesting, Remove alone does not.
-export function ContactMenuContent({ contact, onRemove, onBlock, disabled }: ContactMenuContentProps) {
+export function ContactMenuContent({ contact, onRemove, onBlock, disabled, title }: ContactMenuContentProps) {
 	const { t } = useTranslation("contacts")
 
 	return (
@@ -26,6 +29,7 @@ export function ContactMenuContent({ contact, onRemove, onBlock, disabled }: Con
 			<DropdownMenuItem
 				variant="destructive"
 				disabled={disabled}
+				title={title}
 				onClick={() => {
 					onRemove(contact)
 				}}
@@ -36,6 +40,7 @@ export function ContactMenuContent({ contact, onRemove, onBlock, disabled }: Con
 			<DropdownMenuItem
 				variant="destructive"
 				disabled={disabled}
+				title={title}
 				onClick={() => {
 					onBlock(contact)
 				}}

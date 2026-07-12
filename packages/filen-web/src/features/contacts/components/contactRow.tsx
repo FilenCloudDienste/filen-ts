@@ -158,9 +158,12 @@ export interface IncomingRequestActionsProps {
 	onAccept: (request: ContactRequestIn) => void
 	onDeny: (request: ContactRequestIn) => void
 	disabled?: boolean
+	// Set only when `disabled` is caused specifically by the app being offline — surfaced as each
+	// button's native title.
+	title?: string | undefined
 }
 
-export function IncomingRequestActions({ request, onAccept, onDeny, disabled }: IncomingRequestActionsProps) {
+export function IncomingRequestActions({ request, onAccept, onDeny, disabled, title }: IncomingRequestActionsProps) {
 	const { t } = useTranslation("contacts")
 
 	return (
@@ -170,6 +173,7 @@ export function IncomingRequestActions({ request, onAccept, onDeny, disabled }: 
 				size="icon-sm"
 				disabled={disabled}
 				aria-label={t("contactsActionAccept")}
+				title={title}
 				onClick={() => {
 					onAccept(request)
 				}}
@@ -181,6 +185,7 @@ export function IncomingRequestActions({ request, onAccept, onDeny, disabled }: 
 				size="icon-sm"
 				disabled={disabled}
 				aria-label={t("contactsActionDeny")}
+				title={title}
 				onClick={() => {
 					onDeny(request)
 				}}
@@ -195,9 +200,10 @@ export interface OutgoingRequestActionsProps {
 	request: ContactRequestOut
 	onCancel: (request: ContactRequestOut) => void
 	disabled?: boolean
+	title?: string | undefined
 }
 
-export function OutgoingRequestActions({ request, onCancel, disabled }: OutgoingRequestActionsProps) {
+export function OutgoingRequestActions({ request, onCancel, disabled, title }: OutgoingRequestActionsProps) {
 	const { t } = useTranslation("contacts")
 
 	return (
@@ -206,6 +212,7 @@ export function OutgoingRequestActions({ request, onCancel, disabled }: Outgoing
 			size="icon-sm"
 			disabled={disabled}
 			aria-label={t("contactsActionCancelRequest")}
+			title={title}
 			onClick={() => {
 				onCancel(request)
 			}}
@@ -220,12 +227,15 @@ export interface ContactActionsProps {
 	onRemove: (contact: Contact) => void
 	onBlock: (contact: Contact) => void
 	disabled?: boolean
+	// Set only when `disabled` is caused specifically by the app being offline — threaded to
+	// ContactMenuContent's own items (the trigger itself always opens the menu, never disabled).
+	title?: string | undefined
 }
 
 // DropdownMenu Root > Trigger + Content, mirroring driveRow.tsx's exact nesting for its own ⋯
 // dropdown: Trigger is a render-prop'd Button (not a child), Content (ContactMenuContent, which
 // already wraps Portal>Positioner>Popup) is the Root's other direct child.
-export function ContactActions({ contact, onRemove, onBlock, disabled }: ContactActionsProps) {
+export function ContactActions({ contact, onRemove, onBlock, disabled, title }: ContactActionsProps) {
 	const { t } = useTranslation("contacts")
 
 	return (
@@ -246,6 +256,7 @@ export function ContactActions({ contact, onRemove, onBlock, disabled }: Contact
 				onRemove={onRemove}
 				onBlock={onBlock}
 				disabled={disabled}
+				title={title}
 			/>
 		</DropdownMenu>
 	)
@@ -255,9 +266,10 @@ export interface BlockedActionsProps {
 	contact: BlockedContact
 	onUnblock: (contact: BlockedContact) => void
 	disabled?: boolean
+	title?: string | undefined
 }
 
-export function BlockedActions({ contact, onUnblock, disabled }: BlockedActionsProps) {
+export function BlockedActions({ contact, onUnblock, disabled, title }: BlockedActionsProps) {
 	const { t } = useTranslation("contacts")
 
 	return (
@@ -265,6 +277,7 @@ export function BlockedActions({ contact, onUnblock, disabled }: BlockedActionsP
 			variant="outline"
 			size="sm"
 			disabled={disabled}
+			title={title}
 			onClick={() => {
 				onUnblock(contact)
 			}}

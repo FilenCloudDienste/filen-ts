@@ -14,7 +14,7 @@ import { InputDialog } from "@/components/dialogs/inputDialog"
 // contactsList.tsx's per-row confirm-dialog host). The dialog itself IS the confirm — sending a
 // request needs no separate ConfirmDialog, matching every other "type a value, submit" flow.
 export function AddContactDialog() {
-	const { t } = useTranslation("contacts")
+	const { t } = useTranslation(["contacts", "common"])
 	const isOnline = useIsOnline()
 	const [open, setOpen] = useState(false)
 	const [pending, setPending] = useState(false)
@@ -40,6 +40,7 @@ export function AddContactDialog() {
 				variant="outline"
 				size="sm"
 				disabled={!isOnline}
+				title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 				onClick={() => {
 					setOpen(true)
 				}}

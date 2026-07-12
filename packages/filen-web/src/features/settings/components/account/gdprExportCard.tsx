@@ -16,7 +16,7 @@ import { Spinner } from "@/components/ui/spinner"
 // convention as notes export and the security cards' text exports. No dialog, no confirmation —
 // this never mutates account state.
 function GdprExportCard() {
-	const { t } = useTranslation("settings")
+	const { t } = useTranslation(["settings", "common"])
 	const isOnline = useIsOnline()
 	const [pending, setPending] = useState(false)
 
@@ -44,6 +44,7 @@ function GdprExportCard() {
 					type="button"
 					variant="outline"
 					disabled={pending || !isOnline}
+					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 					onClick={() => {
 						void handleExport()
 					}}

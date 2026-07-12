@@ -185,6 +185,7 @@ function ResetForm({ token }: ResetFormProps) {
 					type="submit"
 					className="w-full"
 					disabled={!canSubmit || pending}
+					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 				>
 					{pending && <Spinner data-icon="inline-start" />}
 					{t("resetSubmit")}

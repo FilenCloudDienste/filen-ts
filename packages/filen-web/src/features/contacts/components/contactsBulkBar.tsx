@@ -27,6 +27,9 @@ export interface ContactsBulkBarProps {
 	onBlock: (items: Contact[]) => void
 	onUnblock: (items: BlockedContact[]) => void
 	disabled?: boolean
+	// Set only when `disabled` is caused specifically by the app being offline — surfaced as each
+	// action button's native title.
+	title?: string | undefined
 }
 
 // Replaces the toolbar's search region while bulk-selection mode is active (mounted by
@@ -46,7 +49,8 @@ export function ContactsBulkBar({
 	onRemove,
 	onBlock,
 	onUnblock,
-	disabled
+	disabled,
+	title
 }: ContactsBulkBarProps) {
 	const { t } = useTranslation("contacts")
 
@@ -106,6 +110,7 @@ export function ContactsBulkBar({
 						variant={descriptor.destructive ? "destructive" : "outline"}
 						size="sm"
 						disabled={disabled}
+						title={title}
 						onClick={() => {
 							run(descriptor.kind)
 						}}

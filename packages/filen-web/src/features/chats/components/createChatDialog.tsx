@@ -180,6 +180,7 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 					</Button>
 					<Button
 						disabled={!canSubmit}
+						title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 						onClick={() => {
 							void handleCreate()
 						}}

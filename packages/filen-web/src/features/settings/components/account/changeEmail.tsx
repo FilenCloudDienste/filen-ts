@@ -25,7 +25,7 @@ interface ChangeEmailCardProps {
 // result. SESSION-INVALIDATING (changes the login identity the harvested e2e session authenticates
 // as) — never live-exercised in e2e, unit/render only.
 function ChangeEmailCard({ accountQuery }: ChangeEmailCardProps) {
-	const { t } = useTranslation("settings")
+	const { t } = useTranslation(["settings", "common"])
 	const isOnline = useIsOnline()
 	const [newEmail, setNewEmail] = useState("")
 	const [confirmEmail, setConfirmEmail] = useState("")
@@ -150,6 +150,7 @@ function ChangeEmailCard({ accountQuery }: ChangeEmailCardProps) {
 					type="submit"
 					form="change-email-form"
 					disabled={!canSubmit || pending}
+					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 				>
 					{pending && <Spinner data-icon="inline-start" />}
 					{t("settingsChangeEmailAction")}

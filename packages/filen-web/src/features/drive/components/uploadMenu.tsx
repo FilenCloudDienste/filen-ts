@@ -25,6 +25,9 @@ export interface UploadMenuProps {
 	// editor immediately (mobile parity: useDriveUpload.ts's createTextFile does the same once its own
 	// upload settles).
 	openPreview: (sources: PreviewSource[], index: number) => void
+	// True only when `disabled` is caused specifically by the app being offline — surfaced as the
+	// trigger's native title, mirroring newDirectory.tsx's own offline/disabled split.
+	offline?: boolean
 }
 
 // Toolbar entry point for starting an upload. A DropdownMenu (not a bare button) holds "Upload
@@ -37,8 +40,8 @@ export interface UploadMenuProps {
 // masterKeysFileField.tsx) — its value is reset after every pick so choosing the exact same
 // file(s)/directory again still fires change. "New text file" instead opens a name dialog (reusing
 // the shared InputDialog primitive, same validation convention as newDirectory.tsx).
-export function UploadMenu({ parentUuid, disabled = false, openPreview }: UploadMenuProps) {
-	const { t } = useTranslation("drive")
+export function UploadMenu({ parentUuid, disabled = false, openPreview, offline = false }: UploadMenuProps) {
+	const { t } = useTranslation(["drive", "common"])
 	const inputRef = useRef<HTMLInputElement>(null)
 	const directoryInputRef = useRef<HTMLInputElement>(null)
 	const [textFileDialogOpen, setTextFileDialogOpen] = useState(false)
@@ -119,6 +122,7 @@ export function UploadMenu({ parentUuid, disabled = false, openPreview }: Upload
 						<Button
 							size="sm"
 							disabled={disabled}
+							title={offline && disabled ? t("common:offlineActionDisabled") : undefined}
 						>
 							<UploadIcon />
 							{t("driveUploadMenuTrigger")}

@@ -62,7 +62,7 @@ function ItemMenuEntries({
 	hiddenActionIds,
 	family
 }: ItemMenuContentProps & { family: MenuItemFamily }) {
-	const { t } = useTranslation("drive")
+	const { t } = useTranslation(["drive", "common"])
 	const isOnline = useIsOnline()
 	const descriptors = applyOfflineGate(driveItemActions(item, variant), isOnline).filter(
 		descriptor => !hiddenActionIds?.has(descriptor.id)
@@ -121,6 +121,7 @@ function ItemMenuEntries({
 					<Item
 						variant={descriptor.destructive ? "destructive" : "default"}
 						disabled={descriptor.enabled === false}
+						title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
 						onClick={event => {
 							// The ⋯ dropdown is mounted as a React descendant of the row's own clickable div
 							// (needed so the trigger button sits visually inside the row) — Base UI's MenuItem

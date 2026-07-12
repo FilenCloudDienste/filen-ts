@@ -52,6 +52,7 @@ function DeleteAllItemsCard({ accountQuery }: DeleteAllItemsCardProps) {
 					type="button"
 					variant="destructive"
 					disabled={!isOnline}
+					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 					onClick={() => {
 						setOpen(true)
 					}}

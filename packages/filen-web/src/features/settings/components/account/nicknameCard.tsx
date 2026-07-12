@@ -22,7 +22,7 @@ interface NicknameCardProps {
 // trimmed value actually differs from the server's current nickName. An empty trimmed value clears
 // the nickname (`setNickname(null)`) — mirrors old-web's dialog (`allowEmptyValue`, 0..32 chars).
 function NicknameCard({ accountQuery }: NicknameCardProps) {
-	const { t } = useTranslation("settings")
+	const { t } = useTranslation(["settings", "common"])
 	const isOnline = useIsOnline()
 	const { nickName } = accountQuery.data
 	const [value, setValue] = useState(nickName ?? "")
@@ -73,6 +73,7 @@ function NicknameCard({ accountQuery }: NicknameCardProps) {
 							type="button"
 							variant="outline"
 							disabled={!dirty || pending || !isOnline}
+							title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 							onClick={() => {
 								void handleSave()
 							}}

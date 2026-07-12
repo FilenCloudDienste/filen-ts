@@ -152,6 +152,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 									size="icon-sm"
 									disabled={rowPending || !isOnline}
 									aria-label={t("chatParticipantRemoveAction", { email: participant.email })}
+									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 									onClick={() => {
 										setRemoving(participant)
 									}}
@@ -289,6 +290,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 								<Button
 									variant="outline"
 									disabled={dialogPending || !isOnline}
+									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 									onClick={() => {
 										setMode("add")
 									}}
@@ -318,6 +320,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 							</Button>
 							<Button
 								disabled={selected.size === 0 || addPending || !isOnline}
+								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 								onClick={() => {
 									void handleAddSelected()
 								}}
