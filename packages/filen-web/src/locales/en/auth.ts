@@ -103,6 +103,8 @@ export const auth = {
 	passwordStrengthBest: "Very strong",
 	/** Helper line under the strength meter (register and reset forms) when the entered password is below the minimum strength required to submit; never names a specific tier */
 	passwordStrengthTooWeak: "Choose a stronger password to continue",
+	/** Inline helper text shown once both password fields are non-empty and don't match — register, reset, and change-password forms */
+	passwordsDoNotMatch: "Passwords do not match",
 
 	// ── Free-storage eligibility banner (register screen) ───────────────────────
 	/** Register screen — eligibility banner shown when the region/IP IS eligible for the free-storage signup bonus */

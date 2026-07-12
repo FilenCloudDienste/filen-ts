@@ -11,15 +11,22 @@ const STRENGTH_STEP: Record<PasswordStrengthTier, number> = {
 	best: 4
 }
 
-// This theme is grayscale-plus-destructive only (see index.css) — no green/amber tokens exist to
-// borrow, so the fill stays within that palette: destructive flags the weak tier (consistent with
-// how destructive already marks invalid state everywhere else in this app), the rest step through
-// foreground opacity.
+// Four distinct hues, one per tier — destructive flags weak (consistent with how destructive
+// already marks invalid state everywhere else in this app), the rest borrow the same default
+// Tailwind palette entries already used for non-semantic accents elsewhere in this app (e.g.
+// driveRow.tsx's amber-500 favorite star, logsCard.tsx's yellow-500 warn level).
 const STRENGTH_FILL_CLASS: Record<PasswordStrengthTier, string> = {
 	weak: "bg-destructive",
-	normal: "bg-muted-foreground",
-	strong: "bg-foreground/70",
-	best: "bg-foreground"
+	normal: "bg-yellow-500",
+	strong: "bg-blue-500",
+	best: "bg-green-500"
+}
+
+const STRENGTH_TEXT_CLASS: Record<PasswordStrengthTier, string> = {
+	weak: "text-destructive",
+	normal: "text-yellow-500",
+	strong: "text-blue-500",
+	best: "text-green-500"
 }
 
 const STRENGTH_LABEL_KEY = {
@@ -45,7 +52,7 @@ function StrengthMeter({ tier }: { tier: PasswordStrengthTier }) {
 					style={{ width: `${String((STRENGTH_STEP[tier] / 4) * 100)}%` }}
 				/>
 			</div>
-			<p className={cn("text-xs", tier === "weak" ? "text-destructive" : "text-muted-foreground")}>{t(STRENGTH_LABEL_KEY[tier])}</p>
+			<p className={cn("text-xs font-medium", STRENGTH_TEXT_CLASS[tier])}>{t(STRENGTH_LABEL_KEY[tier])}</p>
 			{tier === "weak" && <p className="text-xs text-destructive">{t("passwordStrengthTooWeak")}</p>}
 		</div>
 	)

@@ -11,7 +11,7 @@ import { runChangePasswordAttempt } from "@/features/settings/components/securit
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -35,6 +35,9 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 
 	const passwordStrength = newPassword.length > 0 ? ratePasswordStrength(newPassword) : null
 	const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword
+	// Inline, non-blocking feedback for why the submit button below is disabled — gated on the
+	// confirm field actually having content so an untouched empty form never shows red text.
+	const passwordsMismatched = confirmPassword.length > 0 && !passwordsMatch
 	const canSubmit = currentPassword.length > 0 && passwordsMatch && isPasswordStrongEnough(passwordStrength) && isOnline
 
 	async function handleSubmit(e: SubmitEvent): Promise<void> {
@@ -131,12 +134,14 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 								id="confirm-new-password"
 								type="password"
 								autoComplete="new-password"
+								aria-invalid={passwordsMismatched}
 								value={confirmPassword}
 								disabled={pending}
 								onChange={e => {
 									setConfirmPassword(e.target.value)
 								}}
 							/>
+							{passwordsMismatched && <FieldError>{t("passwordsDoNotMatch")}</FieldError>}
 						</Field>
 					</FieldGroup>
 				</form>

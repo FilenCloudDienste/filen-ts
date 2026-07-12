@@ -11,7 +11,7 @@ import { isValidEmail, isPasswordStrongEnough } from "@/lib/validate"
 import { runResetAttempt } from "@/features/auth/lib/resetAttempt"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
@@ -45,6 +45,9 @@ function ResetForm({ token }: ResetFormProps) {
 	const trimmedEmail = email.trim()
 	const passwordStrength = password.length > 0 ? ratePasswordStrength(password) : null
 	const passwordsMatch = password.length > 0 && password === confirmPassword
+	// Inline, non-blocking feedback for why the submit button below is disabled — gated on the
+	// confirm field actually having content so an untouched empty form never shows red text.
+	const passwordsMismatched = confirmPassword.length > 0 && !passwordsMatch
 	// Minimum-strength gate, shared with the register form via isPasswordStrongEnough (weak is the
 	// only blocked tier — the meter's weak state explains why).
 	const canSubmit = isValidEmail(email) && passwordsMatch && isPasswordStrongEnough(passwordStrength) && isOnline
@@ -170,11 +173,13 @@ function ResetForm({ token }: ResetFormProps) {
 							id="reset-confirm-password"
 							type="password"
 							autoComplete="new-password"
+							aria-invalid={passwordsMismatched}
 							value={confirmPassword}
 							onChange={e => {
 								setConfirmPassword(e.target.value)
 							}}
 						/>
+						{passwordsMismatched && <FieldError>{t("passwordsDoNotMatch")}</FieldError>}
 					</Field>
 					<MasterKeysFileField
 						disabled={pending}

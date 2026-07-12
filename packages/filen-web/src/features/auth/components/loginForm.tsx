@@ -198,6 +198,7 @@ function LoginForm() {
 							autoComplete="email"
 							placeholder={t("loginEmailPlaceholder")}
 							value={email}
+							disabled={pending}
 							onChange={e => {
 								setEmail(e.target.value)
 							}}
@@ -210,6 +211,7 @@ function LoginForm() {
 							type="password"
 							autoComplete="current-password"
 							value={password}
+							disabled={pending}
 							onChange={e => {
 								setPassword(e.target.value)
 							}}

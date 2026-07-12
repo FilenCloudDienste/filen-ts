@@ -10,7 +10,7 @@ import { getReferral } from "@/features/auth/lib/referral"
 import { useRegisterCheckQuery } from "@/features/auth/queries/registerCheck"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { StrengthMeter } from "@/features/auth/components/strengthMeter"
@@ -57,6 +57,9 @@ function RegisterForm() {
 	const emailValid = isValidEmail(email)
 	const passwordStrength = password.length > 0 ? ratePasswordStrength(password) : null
 	const passwordsMatch = password.length > 0 && password === confirmPassword
+	// Inline, non-blocking feedback for why the submit button below is disabled — gated on the
+	// confirm field actually having content so an untouched empty form never shows red text.
+	const passwordsMismatched = confirmPassword.length > 0 && !passwordsMatch
 	// Minimum-strength gate, shared with the reset form via isPasswordStrongEnough (weak is the only
 	// blocked tier — the meter's weak state explains why). isOnline proactively disables the button
 	// rather than leaving a real network failure to surface only as the SDK's own error toast.
@@ -138,6 +141,7 @@ function RegisterForm() {
 							autoComplete="email"
 							placeholder={t("registerEmailPlaceholder")}
 							value={email}
+							disabled={pending}
 							onChange={e => {
 								setEmail(e.target.value)
 							}}
@@ -150,6 +154,7 @@ function RegisterForm() {
 							type="password"
 							autoComplete="new-password"
 							value={password}
+							disabled={pending}
 							onChange={e => {
 								setPassword(e.target.value)
 							}}
@@ -162,11 +167,14 @@ function RegisterForm() {
 							id="register-confirm-password"
 							type="password"
 							autoComplete="new-password"
+							aria-invalid={passwordsMismatched}
 							value={confirmPassword}
+							disabled={pending}
 							onChange={e => {
 								setConfirmPassword(e.target.value)
 							}}
 						/>
+						{passwordsMismatched && <FieldError>{t("passwordsDoNotMatch")}</FieldError>}
 					</Field>
 				</FieldGroup>
 				<Button
