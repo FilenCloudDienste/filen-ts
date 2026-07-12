@@ -22,7 +22,9 @@ export function isAudioItem(item: DriveItem): boolean {
 // of the SDK File union member, so it is assignable to AnyFile with no adapter (identical reasoning to
 // features/drive/lib/download's narrowToAnyFile — replicated locally to keep this module worker-free).
 // Only ever called on audio items, which are files; a directory arm is a contract violation and throws.
-function buildQueueTrack(item: DriveItem): QueueTrack {
+// Exported: the playlists module reuses this exact projection for a track it rebuilds from a stored
+// PlaylistFile (via narrowItem), so a queued track's shape never diverges between the two entry points.
+export function buildQueueTrack(item: DriveItem): QueueTrack {
 	const base = asDirectoryOrFile(item)
 
 	if (base.type !== "file") {

@@ -67,5 +67,80 @@ export const audio = {
 	/** Toast when a folder/selection is enqueued but some tracks couldn't be decrypted and were skipped, plural */
 	droppedUndecryptable_other: "{{count}} tracks couldn't be decrypted and were skipped",
 	/** Generic playback-failure label surfaced when a track can't be played and the queue settles */
-	playbackFailed: "Couldn't play this track"
+	playbackFailed: "Couldn't play this track",
+
+	// ── Now-playing panel tabs ──────────────────────────────────────────────
+	/** Accessible label for the Queue/Playlists tab list */
+	nowPlayingTabsLabel: "Now playing panel sections",
+
+	// ── Playlists ────────────────────────────────────────────────────────────
+	/** Playlists tab label / panel heading */
+	playlists: "Playlists",
+	/** Sub-count under the playlists panel heading, singular */
+	playlistsCount_one: "{{count}} playlist",
+	/** Sub-count under the playlists panel heading, plural */
+	playlistsCount_other: "{{count}} playlists",
+	/** New-playlist button */
+	newPlaylist: "New playlist",
+	/** New-playlist dialog title */
+	newPlaylistTitle: "New playlist",
+	/** New-playlist dialog body */
+	newPlaylistBody: "Give your playlist a name.",
+	/** Rename-playlist dialog title */
+	renamePlaylistTitle: "Rename playlist",
+	/** Rename-playlist dialog body */
+	renamePlaylistBody: "Choose a new name for this playlist.",
+	/** Playlist-name field label, shared by the create/rename dialogs */
+	playlistNameLabel: "Name",
+	/** Playlist-name field placeholder, shared by the create/rename dialogs */
+	playlistNamePlaceholder: "My playlist",
+	/** Delete-playlist confirm dialog title */
+	deletePlaylistTitle: "Delete playlist",
+	/** Delete-playlist confirm dialog body */
+	deletePlaylistBody: 'Are you sure you want to delete "{{name}}"? This cannot be undone.',
+	/** Generic create submit label */
+	create: "Create",
+	/** Generic rename submit label */
+	rename: "Rename",
+	/** Generic delete submit label */
+	delete: "Delete",
+	/** Generic cancel label for the playlist dialogs */
+	cancel: "Cancel",
+	/** Empty-state heading when no playlists exist yet */
+	playlistsEmptyTitle: "No playlists yet",
+	/** Empty-state body when no playlists exist yet */
+	playlistsEmptyBody: "Create a playlist to start organizing your tracks.",
+	/** A playlist row whose file failed to download/parse — isolated, shown degraded rather than
+	 *  dropping the whole list */
+	playlistDegraded: "Couldn't load",
+	/** Per-row track count, singular */
+	playlistTrackCount_one: "{{count}} track",
+	/** Per-row track count, plural */
+	playlistTrackCount_other: "{{count}} tracks",
+	/** Accessible label for a playlist row's ⋯ menu trigger */
+	playlistItemMenuTrigger: "Playlist options",
+	/** Play the whole queue/playlist from the top */
+	shufflePlay: "Shuffle play",
+	/** Add-tracks button on a playlist's detail dialog */
+	addTracks: "Add tracks",
+	/** Empty-state heading inside an empty playlist's track list */
+	playlistTracksEmptyTitle: "No tracks yet",
+	/** Empty-state body inside an empty playlist's track list */
+	playlistTracksEmptyBody: "Add tracks from your drive to get started.",
+	/** Per-row action removing one track from a playlist */
+	removeFromPlaylist: "Remove from playlist",
+	/** Add-tracks picker dialog title */
+	addTracksDialogTitle: "Add tracks",
+	/** Add-tracks picker filter placeholder */
+	addTracksFilterPlaceholder: "Filter",
+	/** Shown next to a row already present in the target playlist */
+	alreadyInPlaylist: "Already added",
+	/** Add-tracks picker submit button, singular */
+	addTracksSubmit_one: "Add {{count}} track",
+	/** Add-tracks picker submit button, plural */
+	addTracksSubmit_other: "Add {{count}} tracks",
+	/** Toast after successfully adding tracks, singular */
+	tracksAddedToast_one: "Added {{count}} track",
+	/** Toast after successfully adding tracks, plural */
+	tracksAddedToast_other: "Added {{count}} tracks"
 } as const

@@ -574,6 +574,11 @@ const api = {
 	getDirectory(uuid: string): Promise<Dir | undefined> {
 		return requireClient().getDirOptional(uuid)
 	},
+	// Thin getFileOptional pass-through — the audio module's dead-track existence check (a playlist
+	// entry's drive file may have been trashed/deleted from elsewhere; `undefined` means gone).
+	getFile(uuid: string): Promise<File | undefined> {
+		return requireClient().getFileOptional(uuid)
+	},
 	// ── Upload ───────────────────────────────────────────────────────────────
 	// The one seam a browser File and its stream cross into this worker. Parent resolves worker-side
 	// (mirror createDirectory); file.stream() is called HERE, not on the main thread — a real Blob
