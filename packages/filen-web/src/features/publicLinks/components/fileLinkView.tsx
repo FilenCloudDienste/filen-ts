@@ -4,7 +4,7 @@ import { usePublicFile } from "@/features/publicLinks/queries/publicLink"
 import { fileAccessState } from "@/features/publicLinks/lib/password.logic"
 import { PasswordGate } from "@/features/publicLinks/components/passwordGate"
 import { FileHero } from "@/features/publicLinks/components/fileHero"
-import { PublicLinkLoading, PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
+import { PublicLinkLoading, PublicLinkInvalid, PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
 
 // The /f/ route body. Resolves a LinkedFile against the anon worker surface, driving the password gate
 // off the resolve outcome (a protected file throws until the password matches — there is no up-front
@@ -19,6 +19,10 @@ export function FileLinkView({ uuid, linkKey }: { uuid: string; linkKey: string 
 
 	if (access === "loading") {
 		return <PublicLinkLoading />
+	}
+
+	if (access === "invalid") {
+		return <PublicLinkInvalid />
 	}
 
 	if (access === "error") {

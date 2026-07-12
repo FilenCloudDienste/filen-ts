@@ -5,7 +5,7 @@ import { usePublicDirInfo } from "@/features/publicLinks/queries/publicLink"
 import { dirAccessState, linkForBrowsing } from "@/features/publicLinks/lib/password.logic"
 import { PasswordGate } from "@/features/publicLinks/components/passwordGate"
 import { DirectoryBrowser } from "@/features/publicLinks/components/directoryBrowser"
-import { PublicLinkLoading, PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
+import { PublicLinkLoading, PublicLinkInvalid, PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
 
 // The /d/ route body. Resolves the directory info (root + link handle + hasPassword) up front; a
 // protected link is validated by LISTING the root with the typed password set — success accepts it,
@@ -20,6 +20,7 @@ export function DirectoryLinkView({ uuid, linkKey }: { uuid: string; linkKey: st
 
 	const access = dirAccessState({
 		infoStatus: info.status,
+		infoError: info.error,
 		hasPassword: info.data?.hasPassword ?? false,
 		accepted: accepted !== undefined,
 		verifying,
@@ -50,6 +51,10 @@ export function DirectoryLinkView({ uuid, linkKey }: { uuid: string; linkKey: st
 
 	if (access === "loading") {
 		return <PublicLinkLoading />
+	}
+
+	if (access === "invalid") {
+		return <PublicLinkInvalid />
 	}
 
 	if (access === "error") {

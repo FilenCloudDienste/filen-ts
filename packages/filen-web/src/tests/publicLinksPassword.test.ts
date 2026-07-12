@@ -4,6 +4,9 @@ import { fileAccessState, dirAccessState, linkForBrowsing } from "@/features/pub
 
 const passwordError = { kind: "wrongPassword", label: "Wrong password", message: "" }
 const deadLinkError = { kind: "notFound", label: "not found", message: "" }
+// An SDK error whose kind is one of the shared network-class kinds (wire/transport failure the SDK
+// already exhausted its own retries on) — the only class that earns the retryable surface.
+const transientError = { species: "sdk", kind: "Reqwest", label: "network error", message: "" }
 
 describe("fileAccessState", () => {
 	it("is loading on the first pending resolve, before any submit", () => {
@@ -22,9 +25,13 @@ describe("fileAccessState", () => {
 		expect(fileAccessState({ status: "error", error: passwordError, submitted: true })).toBe("wrong")
 	})
 
-	it("routes a non-password error to the invalid surface", () => {
-		expect(fileAccessState({ status: "error", error: deadLinkError, submitted: false })).toBe("error")
-		expect(fileAccessState({ status: "error", error: deadLinkError, submitted: true })).toBe("error")
+	it("collapses a dead/not-found link into the terminal invalid surface, never a retry loop", () => {
+		expect(fileAccessState({ status: "error", error: deadLinkError, submitted: false })).toBe("invalid")
+		expect(fileAccessState({ status: "error", error: deadLinkError, submitted: true })).toBe("invalid")
+	})
+
+	it("reserves the retryable surface for a genuinely transient wire failure", () => {
+		expect(fileAccessState({ status: "error", error: transientError, submitted: false })).toBe("error")
 	})
 
 	it("is ready on success", () => {
@@ -34,39 +41,107 @@ describe("fileAccessState", () => {
 
 describe("dirAccessState", () => {
 	it("is loading while info resolves", () => {
-		expect(dirAccessState({ infoStatus: "pending", hasPassword: false, accepted: false, verifying: false, failed: false })).toBe(
-			"loading"
-		)
+		expect(
+			dirAccessState({
+				infoStatus: "pending",
+				infoError: undefined,
+				hasPassword: false,
+				accepted: false,
+				verifying: false,
+				failed: false
+			})
+		).toBe("loading")
 	})
 
-	it("routes an info error to the invalid surface", () => {
-		expect(dirAccessState({ infoStatus: "error", hasPassword: false, accepted: false, verifying: false, failed: false })).toBe("error")
+	it("collapses a dead/not-found info error into the terminal invalid surface", () => {
+		expect(
+			dirAccessState({
+				infoStatus: "error",
+				infoError: deadLinkError,
+				hasPassword: false,
+				accepted: false,
+				verifying: false,
+				failed: false
+			})
+		).toBe("invalid")
+	})
+
+	it("reserves the retryable surface for a transient info error", () => {
+		expect(
+			dirAccessState({
+				infoStatus: "error",
+				infoError: transientError,
+				hasPassword: false,
+				accepted: false,
+				verifying: false,
+				failed: false
+			})
+		).toBe("error")
 	})
 
 	it("is ready immediately for an unprotected link", () => {
-		expect(dirAccessState({ infoStatus: "success", hasPassword: false, accepted: false, verifying: false, failed: false })).toBe(
-			"ready"
-		)
+		expect(
+			dirAccessState({
+				infoStatus: "success",
+				infoError: undefined,
+				hasPassword: false,
+				accepted: false,
+				verifying: false,
+				failed: false
+			})
+		).toBe("ready")
 	})
 
 	it("prompts for a protected link before acceptance", () => {
-		expect(dirAccessState({ infoStatus: "success", hasPassword: true, accepted: false, verifying: false, failed: false })).toBe(
-			"prompt"
-		)
+		expect(
+			dirAccessState({
+				infoStatus: "success",
+				infoError: undefined,
+				hasPassword: true,
+				accepted: false,
+				verifying: false,
+				failed: false
+			})
+		).toBe("prompt")
 	})
 
 	it("is checking while a candidate password verifies", () => {
-		expect(dirAccessState({ infoStatus: "success", hasPassword: true, accepted: false, verifying: true, failed: false })).toBe(
-			"checking"
-		)
+		expect(
+			dirAccessState({
+				infoStatus: "success",
+				infoError: undefined,
+				hasPassword: true,
+				accepted: false,
+				verifying: true,
+				failed: false
+			})
+		).toBe("checking")
 	})
 
 	it("reports wrong after a failed verification", () => {
-		expect(dirAccessState({ infoStatus: "success", hasPassword: true, accepted: false, verifying: false, failed: true })).toBe("wrong")
+		expect(
+			dirAccessState({
+				infoStatus: "success",
+				infoError: undefined,
+				hasPassword: true,
+				accepted: false,
+				verifying: false,
+				failed: true
+			})
+		).toBe("wrong")
 	})
 
 	it("is ready once the password is accepted, never re-prompting", () => {
-		expect(dirAccessState({ infoStatus: "success", hasPassword: true, accepted: true, verifying: false, failed: false })).toBe("ready")
+		expect(
+			dirAccessState({
+				infoStatus: "success",
+				infoError: undefined,
+				hasPassword: true,
+				accepted: true,
+				verifying: false,
+				failed: false
+			})
+		).toBe("ready")
 	})
 })
 

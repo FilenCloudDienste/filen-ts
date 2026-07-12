@@ -1,37 +1,11 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import type { LinkedFile, DirPublicInfo, LinkedDirsAndFiles, AnyLinkedDir, DirPublicLink, DirSizeResponse } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
+import { publicLinkQueryKey, secretFingerprint } from "@/features/publicLinks/lib/queryKey.logic"
 
-// ★ SECURITY: the decryption key AND any visitor-typed password MUST NOT appear in a react-query key.
-// The default key hasher JSON-stringifies the whole key into `queryHash`, which the global queryCache
-// `onError` LOGS (queries/client.ts) and the persister uses as its on-disk row name — either would
-// leak the secret. So every secret travels ONLY through the queryFn closure below; the query key
-// instead carries a NON-SECRET djb2 fingerprint of it, purely so the query re-runs when the fragment
-// key or password changes.
-//
-// djb2 → base36. One-way-ish (a 32-bit digest of a ~32-char secret is not reversible to it) and,
-// unlike the secret, safe to log/persist. A collision only risks serving one wrong secret's cached
-// error for another of the same uuid — a manual reload corrects it, never a data-exposure path.
-function secretFingerprint(...parts: (string | undefined)[]): string {
-	let h = 5381
-
-	for (const part of parts) {
-		const value = part ?? ""
-
-		// A per-part separator so ("ab","c") and ("a","bc") never digest identically.
-		h = (Math.imul(h, 33) + 0x1f) | 0
-
-		for (let i = 0; i < value.length; i++) {
-			h = (Math.imul(h, 33) + value.charCodeAt(i)) | 0
-		}
-	}
-
-	return (h >>> 0).toString(36)
-}
-
-export function publicLinkQueryKey(scope: string, uuid: string, secret: string) {
-	return ["publicLinks", scope, { uuid, k: secret }] as const
-}
+// ★ SECURITY: the decryption key AND any visitor-typed password MUST NOT appear in a react-query key —
+// every secret travels ONLY through the queryFn closures below; the key carries a non-secret djb2
+// fingerprint of it (queryKey.logic.ts) so a query re-runs when the fragment key or password changes.
 
 // `MaybeEncrypted<string>` narrow (mirrors chatMessageLinks.ts's decryptedName) — a still-encrypted
 // name degrades to the uuid rather than throwing, so an undecryptable-but-resolvable link still

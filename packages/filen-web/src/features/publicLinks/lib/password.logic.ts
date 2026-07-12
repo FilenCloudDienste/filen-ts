@@ -1,5 +1,6 @@
 import type { DirPublicInfo, DirPublicLink } from "@filen/sdk-rs"
 import { isPasswordError } from "@/features/publicLinks/lib/state.logic"
+import { isNetworkClassError } from "@/lib/sdk/retry"
 
 // Pure state machines for the two password flows — file and directory — so the gate, the invalid
 // fallback, and the "checking/wrong" transitions are decided by directly-testable functions rather
@@ -10,12 +11,23 @@ import { isPasswordError } from "@/features/publicLinks/lib/state.logic"
 // construction (there is no persistence path for it to survive). These functions see only booleans
 // and a react-query status.
 
-export type LinkAccessState = "loading" | "prompt" | "checking" | "wrong" | "ready" | "error"
+export type LinkAccessState = "loading" | "prompt" | "checking" | "wrong" | "ready" | "invalid" | "error"
+
+// A resolution failure that is NOT a password prompt splits two ways. A wire/transport failure the SDK
+// already exhausted its own retries on (isNetworkClassError) is genuinely transient — the visitor gets
+// the retryable surface. Anything else (a not-found/expired/deleted link, a bad key, a server
+// rejection) is terminal: the link is gone, so it collapses into the shared invalid surface with the
+// way-home link, never a retry loop that can never succeed. Matches old-web: a dead link does not
+// distinguish "doesn't exist" from "expired" and offers no retry.
+function deadLinkState(error: unknown): "error" | "invalid" {
+	return isNetworkClassError(error) ? "error" : "invalid"
+}
 
 // FILE links carry no up-front password flag: a protected file simply throws on getLinkedFile without
 // the password, so the gate is driven entirely by the resolve outcome. Before any submit a password
-// error means "prompt"; after a submit it means "wrong". A non-password error is a genuinely dead link
-// → the shared invalid surface. `submitted` flips true the first time the visitor sends a password.
+// error means "prompt"; after a submit it means "wrong". A non-password error routes through
+// deadLinkState (terminal invalid vs transient retry). `submitted` flips true the first time the
+// visitor sends a password.
 export function fileAccessState(input: { status: "pending" | "error" | "success"; error: unknown; submitted: boolean }): LinkAccessState {
 	if (input.status === "pending") {
 		return input.submitted ? "checking" : "loading"
@@ -26,7 +38,7 @@ export function fileAccessState(input: { status: "pending" | "error" | "success"
 	}
 
 	if (!isPasswordError(input.error)) {
-		return "error"
+		return deadLinkState(input.error)
 	}
 
 	return input.submitted ? "wrong" : "prompt"
@@ -39,6 +51,7 @@ export function fileAccessState(input: { status: "pending" | "error" | "success"
 // once it resolves. An unprotected link (or an already-accepted one) is immediately ready.
 export function dirAccessState(input: {
 	infoStatus: "pending" | "error" | "success"
+	infoError: unknown
 	hasPassword: boolean
 	accepted: boolean
 	verifying: boolean
@@ -49,7 +62,7 @@ export function dirAccessState(input: {
 	}
 
 	if (input.infoStatus === "error") {
-		return "error"
+		return deadLinkState(input.infoError)
 	}
 
 	if (!input.hasPassword || input.accepted) {

@@ -52,6 +52,43 @@ test.describe("public links (unauthenticated)", () => {
 		}
 	})
 
+	test("renders the marketing-light chrome for a logged-out visitor — no login redirect", async ({ page }) => {
+		await page.goto(`/f/${RANDOM_UUID}#${HEX_KEY}`)
+
+		// The shared shell wraps every state, so the chrome is present the moment the route renders —
+		// independent of whether the anonymous worker round trip has completed (so this holds even on
+		// Playwright-Firefox, whose COI worker fetch hangs past boot). Never bounced to /login.
+		await expect(page).toHaveURL(new RegExp(`/f/${RANDOM_UUID}`))
+
+		const brand = page.getByRole("link", { name: "Filen home" })
+		await expect(brand).toBeVisible({ timeout: 30_000 })
+		await expect(brand).toHaveAttribute("href", "https://filen.io")
+
+		// One quiet sign-in link plus one tasteful "Get Filen" CTA — the old-web upsell sidebar is dropped.
+		await expect(page.getByRole("link", { name: "Sign in", exact: true })).toBeVisible()
+		const cta = page.getByRole("link", { name: "Get Filen" })
+		await expect(cta).toBeVisible()
+		await expect(cta).toHaveAttribute("href", "https://filen.io")
+
+		// A one-line footer: the e2e tagline plus a minimal report-abuse affordance (a mailto, no API).
+		await expect(page.getByText("Shared securely with end-to-end encryption")).toBeVisible()
+		await expect(page.getByRole("link", { name: "Report abuse" })).toHaveAttribute("href", "mailto:abuse@filen.io")
+	})
+
+	test("the reachable surfaces do not overflow a narrow phone viewport", async ({ page }) => {
+		// Public links get opened on phones. On the reachable states (the chrome plus, on non-Firefox, the
+		// terminal invalid card) the body must never scroll horizontally at a 360px width. A protected
+		// link's password gate is not reachable without a live premium link, so its overflow is covered by
+		// the unit suite rendering the same primitives, not here.
+		await page.setViewportSize({ width: 360, height: 780 })
+		await page.goto(`/f/${RANDOM_UUID}#${HEX_KEY}`)
+
+		await expect(page.getByRole("link", { name: "Get Filen" })).toBeVisible({ timeout: 30_000 })
+
+		const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+		expect(overflow).toBeLessThanOrEqual(0)
+	})
+
 	test("a legacy hash-format link redirects to the new swapped path with the fragment key intact", async ({ page }) => {
 		// Legacy hash-router shape: everything after the first '#' is a client-side fragment the server
 		// never sees. Legacy /f/ meant a DIRECTORY, so it must land on the NEW /d/ route (letters
