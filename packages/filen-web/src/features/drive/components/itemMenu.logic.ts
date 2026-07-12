@@ -2,7 +2,7 @@ import { type LucideIcon } from "lucide-react"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { canMoveVariant, type DriveVariant } from "@/features/drive/lib/preferences"
-import { canShareVariant, isSharedVariant } from "@/features/drive/lib/share/gating"
+import { canShareVariant, isReadOnlySharedVariant } from "@/features/drive/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
 import { startDownloads } from "@/features/drive/lib/download"
 
@@ -130,10 +130,10 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 	const isSharedRoot = item.type === "sharedRootDirectory" || item.type === "sharedRootFile"
 
 	// Every owner-mutating push below (rename/move/favorite/color/versions/publicLink/copyLink/trash)
-	// is gated on ownerMutable, false for sharedIn/sharedOut — see isSharedVariant's own doc comment
-	// for why both surfaces are excluded. What's left for those two: INFO always, SHARE when
-	// canShareVariant allows it (sharedOut only), UNSHARE when isSharedRoot allows it (either surface).
-	const ownerMutable = !isSharedVariant(variant)
+	// is gated on ownerMutable, false ONLY for sharedIn — see isReadOnlySharedVariant's own doc comment
+	// for why sharedOut is excluded from this gate (those items are the caller's own). What's left for
+	// sharedIn: INFO always, IMPORT (below), UNSHARE when isSharedRoot allows it.
+	const ownerMutable = !isReadOnlySharedVariant(variant)
 
 	// Download is excluded here (unlike the general branch below): an undecryptable item's meta is the
 	// ciphertext arm with no content key, so downloadFileToWriter can never decrypt it — a guaranteed

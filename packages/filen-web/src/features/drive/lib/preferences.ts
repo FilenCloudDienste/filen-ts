@@ -37,9 +37,20 @@ export function isSortableVariant(variant: DriveVariant): boolean {
 // aggregation of every owned item that carries a public link (a "move" would silently reparent an
 // item the user is viewing purely for its link). Gates MOVE out of both the per-item menu and the
 // bulk bar for that variant alone; every other variant's move disposition is decided elsewhere
-// (isSharedVariant/trash), so this only ever subtracts links.
+// (isReadOnlySharedVariant/trash), so this only ever subtracts links.
 export function canMoveVariant(variant: DriveVariant): boolean {
 	return variant !== "links"
+}
+
+// Whether the currently-browsed location accepts create/upload/drag-drop. "drive" always (My Drive's
+// own navigable tree). A nested sharedOut directory (uuid !== null) too — the caller owns that
+// directory, since sharedOut only ever lists items THEY shared out, so it's writable exactly like the
+// identical directory reached via My Drive (see itemMenu.logic.ts's own ownerMutable gate for the
+// matching per-item rationale). The sharedOut ROOT (uuid === null) is excluded: it's the virtual
+// "everything I've shared out" aggregation, not a real directory with a parent to create into. Every
+// other variant (recents/favorites/trash/links/sharedIn) has no owned/navigable parent to write into.
+export function canWriteVariant(variant: DriveVariant, uuid: string | null): boolean {
+	return variant === "drive" || (variant === "sharedOut" && uuid !== null)
 }
 
 const SORT_PREFERENCES_KV_KEY = "drive.sortPreferences.v1"

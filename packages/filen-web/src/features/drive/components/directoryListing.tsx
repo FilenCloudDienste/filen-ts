@@ -11,6 +11,7 @@ import {
 	setSortPreferences,
 	setViewModePreferences,
 	isSortableVariant,
+	canWriteVariant,
 	DEFAULT_SORT_PREFERENCES,
 	DEFAULT_VIEW_MODE_PREFERENCES,
 	type DriveVariant,
@@ -151,12 +152,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const sortPrefsQuery = useSortPreferencesQuery()
 	const viewModePrefsQuery = useViewModePreferencesQuery()
 	const isOnline = useIsOnline()
-	// New directory / upload only make sense in the navigable "drive" variant, once the listing has
-	// loaded — recents/favorites/trash/shared have no directory to write into, and a still-loading
-	// listing has no confirmed uuid to target yet. Shared by NewDirectory, UploadMenu and
-	// UploadDropzone below (all three write into the same `uuid`). Offline folds in here too: all
-	// three write to the SDK, which has nothing to reach while offline.
-	const writeDisabled = variant !== "drive" || listingQuery.status !== "success" || !isOnline
+	// New directory / upload make sense in the navigable "drive" variant AND inside an owned nested
+	// sharedOut directory (canWriteVariant) — recents/favorites/trash/links/sharedIn/the sharedOut ROOT
+	// have no directory to write into, and a still-loading listing has no confirmed uuid to target yet.
+	// Shared by NewDirectory, UploadMenu and UploadDropzone below (all three write into the same
+	// `uuid`). Offline folds in here too: all three write to the SDK, which has nothing to reach while
+	// offline.
+	const writeDisabled = !canWriteVariant(variant, uuid) || listingQuery.status !== "success" || !isOnline
 	// Gates the underlying contacts/blocked fetch itself (see useBlockedUsers.ts) — only sharedIn
 	// filters by it, so the other 5 variants skip the getContacts/getBlockedContacts worker round trip
 	// on every mount and window refocus.

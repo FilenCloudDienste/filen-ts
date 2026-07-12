@@ -11,13 +11,14 @@ export function canShareVariant(variant: DriveVariant): boolean {
 	return variant === "drive" || variant === "recents" || variant === "favorites" || variant === "sharedOut"
 }
 
-// Either shared surface — sharedIn (owned by someone else) or sharedOut (owned by the caller but
-// shared out). Gates every owner-mutating action (rename/move/trash/color/versions/favorite/
-// publicLink/copyLink) off both in the item/bulk-action builders: on sharedIn the caller doesn't own
-// the item (the SDK rejects the mutation); on sharedOut the mutation would succeed but its cache patch
-// downgrades the shared row to a base arm (losing the "Shared with…" badge/Unshare until refetch) and
-// move/link assume base arms — a safe-subset choice pending a dedicated fix, not this one. Only
-// INFO (read-only) and the sharing-scoped SHARE/UNSHARE survive on these two surfaces.
-export function isSharedVariant(variant: DriveVariant): boolean {
-	return variant === "sharedIn" || variant === "sharedOut"
+// The one shared surface the caller does NOT own: sharedIn lists items someone else shared TO them,
+// so every owner-mutating action (rename/move/trash/color/versions/favorite/publicLink/copyLink) is
+// gated off it in the item/bulk-action builders — the SDK rejects a mutation against an item you
+// don't own. sharedOut is deliberately excluded here: those items are the caller's OWN, merely shared
+// OUT to someone else, so the full owner toolbar applies there exactly as it would in My Drive (see
+// the item/bulk-action builders' own `ownerMutable = !isReadOnlySharedVariant(variant)` gate). Only
+// IMPORT (copying a not-owned item into your own drive) and the sharing-scoped SHARE/UNSHARE
+// distinguish the two surfaces beyond this.
+export function isReadOnlySharedVariant(variant: DriveVariant): boolean {
+	return variant === "sharedIn"
 }

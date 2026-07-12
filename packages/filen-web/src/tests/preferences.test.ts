@@ -20,6 +20,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 import {
 	DEFAULT_SORT_PREFERENCES,
 	DEFAULT_VIEW_MODE_PREFERENCES,
+	canWriteVariant,
 	getPerDirectoryKey,
 	getSortPreferences,
 	getViewModePreferences,
@@ -52,6 +53,33 @@ describe("isSortableVariant", () => {
 		expect(isSortableVariant("drive")).toBe(true)
 		expect(isSortableVariant("favorites")).toBe(true)
 		expect(isSortableVariant("trash")).toBe(true)
+	})
+})
+
+describe("canWriteVariant", () => {
+	it("is writable in the drive variant, at the root and any nested directory", () => {
+		expect(canWriteVariant("drive", null)).toBe(true)
+		expect(canWriteVariant("drive", "some-uuid")).toBe(true)
+	})
+
+	it("is writable inside a NESTED sharedOut directory — the caller owns it", () => {
+		expect(canWriteVariant("sharedOut", "owned-dir-uuid")).toBe(true)
+	})
+
+	it("is NOT writable at the sharedOut ROOT (uuid null) — the virtual shared-out listing has no parent to create into", () => {
+		expect(canWriteVariant("sharedOut", null)).toBe(false)
+	})
+
+	it("is never writable on sharedIn, root or nested — the caller doesn't own those items", () => {
+		expect(canWriteVariant("sharedIn", null)).toBe(false)
+		expect(canWriteVariant("sharedIn", "some-uuid")).toBe(false)
+	})
+
+	it("is never writable on recents/favorites/trash/links regardless of uuid", () => {
+		for (const variant of ["recents", "favorites", "trash", "links"] as const) {
+			expect(canWriteVariant(variant, null)).toBe(false)
+			expect(canWriteVariant(variant, "some-uuid")).toBe(false)
+		}
 	})
 })
 

@@ -2,7 +2,7 @@ import { type LucideIcon } from "lucide-react"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { canMoveVariant, type DriveVariant } from "@/features/drive/lib/preferences"
 import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
-import { canShareVariant, isSharedVariant } from "@/features/drive/lib/share/gating"
+import { canShareVariant, isReadOnlySharedVariant } from "@/features/drive/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { startDownloads } from "@/features/drive/lib/download"
@@ -43,11 +43,11 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 
 	const descriptors: BulkActionDescriptor[] = []
 
-	// Favorite/move/trash are owner-mutating — gated off sharedIn/sharedOut entirely (isSharedVariant;
-	// see itemMenu.logic.ts's driveItemActions for the full per-surface rationale, mirrored here).
-	// What's left for those two surfaces: SHARE (still undecryptable-gated below, sharedOut only via
-	// canShareVariant) and UNSHARE (everySharedRoot, either surface).
-	const ownerMutable = !isSharedVariant(variant)
+	// Favorite/move/trash are owner-mutating — gated off sharedIn alone (isReadOnlySharedVariant; see
+	// itemMenu.logic.ts's driveItemActions for the full per-surface rationale, mirrored here). sharedOut
+	// keeps them: those items are the caller's own. What's left for sharedIn: SHARE stays excluded
+	// there too (canShareVariant) and UNSHARE (everySharedRoot, either surface).
+	const ownerMutable = !isReadOnlySharedVariant(variant)
 
 	// Favorite/Unfavorite first — mirrors mobile's buildBulkActionMenu ordering (the most-tapped bulk
 	// action leads). Gated by includesUndecryptable: both need decrypted metadata (favorite touches

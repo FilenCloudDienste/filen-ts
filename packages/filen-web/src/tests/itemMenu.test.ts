@@ -338,7 +338,7 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 		expect(ids(fileItem(), "trash")).not.toContain("unshare")
 	})
 
-	it("keeps unshare (and info) for an undecryptable shared-root item — pure-uuid disposition, no decrypted metadata needed", () => {
+	it("keeps unshare AND trash (and info) for an undecryptable shared-root item — pure-uuid dispositions, no decrypted metadata needed", () => {
 		const undecryptableRootDir = narrowItem(
 			mockSharedRootDir({
 				inner: {
@@ -350,10 +350,10 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 			})
 		)
 
-		// No trash: sharedOut is a shared surface (isSharedVariant), so the owner-mutating trash push
-		// never runs — see the "shared-surface safe subset" describe block below. Download is absent too:
-		// an undecryptable item's meta carries no content key, so it can never decrypt.
-		expect(ids(undecryptableRootDir, "sharedOut")).toEqual(["info", "unshare"])
+		// Trash IS offered: sharedOut is owner-mutable (H9 — the item is the caller's own), so the
+		// ownerMutable push runs same as any owned surface. Download stays absent regardless: an
+		// undecryptable item's meta carries no content key, so it can never decrypt.
+		expect(ids(undecryptableRootDir, "sharedOut")).toEqual(["info", "trash", "unshare"])
 	})
 
 	it("unshare dispatches its own confirm dialog kind and is destructive-styled", () => {
@@ -425,13 +425,11 @@ describe("driveItemActions — import gating (sharedIn only, mobile Download > I
 	})
 })
 
-// sharedIn/sharedOut expose only sharing-scoped + read-only actions — every owner-mutating
-// action (rename/move/favorite/color/versions/publicLink/copyLink/trash) is gated off both surfaces
-// regardless of root/nested item type. sharedIn because the caller doesn't own the item (the SDK would
-// reject the mutation); sharedOut as a deliberate safe-subset even though the caller DOES own those
-// items — the mutation would succeed but its cache patch downgrades the shared row (losing the
-// "Shared with…" badge/Unshare until refetch) and move/link assume base arms. See isSharedVariant.
-describe("driveItemActions — shared-surface safe subset (sharedIn/sharedOut)", () => {
+// sharedIn is the one shared surface exposing only sharing-scoped + read-only actions — every
+// owner-mutating action (rename/move/favorite/color/versions/publicLink/copyLink/trash) is gated off
+// it regardless of root/nested item type, since the caller doesn't own the item (the SDK would reject
+// the mutation). See isReadOnlySharedVariant.
+describe("driveItemActions — sharedIn safe subset (read-only surface)", () => {
 	const OWNER_ONLY_IDS = ["rename", "move", "favorite", "color", "versions", "publicLink", "copyLink", "trash"]
 
 	it("sharedIn root: exactly info + download + import + unshare", () => {
@@ -444,24 +442,87 @@ describe("driveItemActions — shared-surface safe subset (sharedIn/sharedOut)",
 		expect(ids(sharedFileItem(), "sharedIn")).toEqual(["info", "download", "import"])
 	})
 
-	it("sharedOut root: exactly info + download + share + unshare", () => {
-		expect(ids(sharedRootDirItem(), "sharedOut")).toEqual(["info", "download", "share", "unshare"])
-		expect(ids(sharedRootFileItem(), "sharedOut")).toEqual(["info", "download", "share", "unshare"])
-	})
-
-	it("sharedOut nested: exactly info + download + share (unshare stays root-only)", () => {
-		expect(ids(sharedDirItem(), "sharedOut")).toEqual(["info", "download", "share"])
-		expect(ids(sharedFileItem(), "sharedOut")).toEqual(["info", "download", "share"])
-	})
-
-	it("neither shared surface ever offers an owner-mutating action, root or nested", () => {
+	it("never offers an owner-mutating action, root or nested", () => {
 		const sharedItems = [sharedRootDirItem(), sharedRootFileItem(), sharedDirItem(), sharedFileItem()]
 
-		for (const variant of ["sharedIn", "sharedOut"] as const) {
-			for (const item of sharedItems) {
-				expect(ids(item, variant).filter(id => OWNER_ONLY_IDS.includes(id))).toEqual([])
-			}
+		for (const item of sharedItems) {
+			expect(ids(item, "sharedIn").filter(id => OWNER_ONLY_IDS.includes(id))).toEqual([])
 		}
+	})
+})
+
+// H9 — sharedOut items are the caller's OWN, merely shared out to someone else, so the FULL owner
+// toolbar applies exactly as it does in My Drive (rename/move/favorite/color|versions/publicLink/
+// copyLink/trash), plus the sharing-scoped SHARE and the root-only UNSHARE. Mirrors
+// itemMenu.logic.ts's own `ownerMutable = !isReadOnlySharedVariant(variant)` gate.
+describe("driveItemActions — sharedOut full owner toolbar (owned surface)", () => {
+	it("sharedOut root, directory: full owner set + share + unshare, in order", () => {
+		expect(ids(sharedRootDirItem(), "sharedOut")).toEqual([
+			"rename",
+			"move",
+			"favorite",
+			"color",
+			"info",
+			"download",
+			"share",
+			"publicLink",
+			"copyLink",
+			"trash",
+			"unshare"
+		])
+	})
+
+	it("sharedOut root, file: versions instead of color, otherwise identical", () => {
+		expect(ids(sharedRootFileItem(), "sharedOut")).toEqual([
+			"rename",
+			"move",
+			"favorite",
+			"versions",
+			"info",
+			"download",
+			"share",
+			"publicLink",
+			"copyLink",
+			"trash",
+			"unshare"
+		])
+	})
+
+	it("sharedOut nested, directory: same owner set minus unshare (root-only)", () => {
+		expect(ids(sharedDirItem(), "sharedOut")).toEqual([
+			"rename",
+			"move",
+			"favorite",
+			"color",
+			"info",
+			"download",
+			"share",
+			"publicLink",
+			"copyLink",
+			"trash"
+		])
+	})
+
+	it("sharedOut nested, file: versions instead of color, otherwise identical", () => {
+		expect(ids(sharedFileItem(), "sharedOut")).toEqual([
+			"rename",
+			"move",
+			"favorite",
+			"versions",
+			"info",
+			"download",
+			"share",
+			"publicLink",
+			"copyLink",
+			"trash"
+		])
+	})
+
+	it("never offers import, root or nested — the caller already owns these items", () => {
+		expect(ids(sharedRootDirItem(), "sharedOut")).not.toContain("import")
+		expect(ids(sharedRootFileItem(), "sharedOut")).not.toContain("import")
+		expect(ids(sharedDirItem(), "sharedOut")).not.toContain("import")
+		expect(ids(sharedFileItem(), "sharedOut")).not.toContain("import")
 	})
 })
 

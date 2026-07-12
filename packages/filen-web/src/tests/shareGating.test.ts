@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { canShareVariant, isSharedVariant } from "@/features/drive/lib/share/gating"
+import { canShareVariant, isReadOnlySharedVariant } from "@/features/drive/lib/share/gating"
 
 describe("canShareVariant", () => {
 	it("allows every owned surface (drive, recents, favorites, shared-with-others)", () => {
@@ -15,16 +15,22 @@ describe("canShareVariant", () => {
 	})
 })
 
-describe("isSharedVariant", () => {
-	it("is true for both shared surfaces", () => {
-		expect(isSharedVariant("sharedIn")).toBe(true)
-		expect(isSharedVariant("sharedOut")).toBe(true)
+describe("isReadOnlySharedVariant", () => {
+	it("is true only for sharedIn — items owned by someone else", () => {
+		expect(isReadOnlySharedVariant("sharedIn")).toBe(true)
 	})
 
-	it("is false for every owned/trash variant", () => {
-		expect(isSharedVariant("drive")).toBe(false)
-		expect(isSharedVariant("recents")).toBe(false)
-		expect(isSharedVariant("favorites")).toBe(false)
-		expect(isSharedVariant("trash")).toBe(false)
+	// sharedOut items are the caller's OWN, merely shared out to someone else — the owner toolbar
+	// (rename/move/favorite/color/versions/publicLink/trash) applies exactly as it does in My Drive.
+	it("is false for sharedOut — those items are the caller's own", () => {
+		expect(isReadOnlySharedVariant("sharedOut")).toBe(false)
+	})
+
+	it("is false for every other owned/trash variant", () => {
+		expect(isReadOnlySharedVariant("drive")).toBe(false)
+		expect(isReadOnlySharedVariant("recents")).toBe(false)
+		expect(isReadOnlySharedVariant("favorites")).toBe(false)
+		expect(isReadOnlySharedVariant("trash")).toBe(false)
+		expect(isReadOnlySharedVariant("links")).toBe(false)
 	})
 })

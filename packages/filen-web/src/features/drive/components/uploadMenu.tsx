@@ -16,9 +16,9 @@ import { InputDialog } from "@/components/dialogs/inputDialog"
 export interface UploadMenuProps {
 	// The directory uploaded files land in — the current listing's own uuid (null at My Drive's root).
 	parentUuid: string | null
-	// True outside the "drive" variant (recents/favorites/trash/shared have no navigable directory to
-	// upload into) or while the listing hasn't loaded yet — mirrors NewDirectory's disabled-not-hidden
-	// convention so the toolbar's layout stays stable across variant switches.
+	// True outside a writable location (canWriteVariant — the "drive" variant, or an owned nested
+	// sharedOut directory) or while the listing hasn't loaded yet — mirrors NewDirectory's
+	// disabled-not-hidden convention so the toolbar's layout stays stable across variant switches.
 	disabled?: boolean
 	// Opens the full-screen preview overlay on a frozen single-item snapshot — directoryListing.tsx's
 	// own useDriveDialogHost().openPreview, threaded in so the newly created text file opens its

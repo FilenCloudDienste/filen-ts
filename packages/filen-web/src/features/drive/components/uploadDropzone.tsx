@@ -9,8 +9,8 @@ import { enterDragDepth, leaveDragDepth } from "@/features/drive/components/uplo
 export interface UploadDropzoneProps {
 	// The directory dropped files land in — the current listing's own uuid (null at My Drive's root).
 	parentUuid: string | null
-	// True outside the "drive" variant (recents/favorites/trash/shared have no navigable directory to
-	// upload into) or while the listing hasn't loaded yet — mirrors NewDirectory/UploadMenu's
+	// True outside a writable location (canWriteVariant — the "drive" variant, or an owned nested
+	// sharedOut directory) or while the listing hasn't loaded yet — mirrors NewDirectory/UploadMenu's
 	// disabled-not-hidden convention. The zone never highlights or starts an upload while disabled —
 	// defense-in-depth alongside the mount-point gate in directoryListing.tsx.
 	disabled?: boolean
