@@ -61,6 +61,40 @@ describe("serializeChecklist — multi-run consecutive-state grouping", () => {
 	})
 })
 
+describe("serializeChecklist / parseChecklistSeed — tag-like text losslessness", () => {
+	// serialize → (persist) → parse must return the exact user text, even when it contains markup
+	// characters. Without escaping, checklistParser.stringify writes the text raw into `<li>` and its
+	// parser then strips or splits it: "Fix <Header>" collapses to "Fix", and a literal `</li><li>`
+	// splits one row into two. Each case here serializes a row, feeds the HTML back through the parser
+	// (the reopen path), and asserts the content survives byte-for-byte.
+	function roundTrip(content: string): string[] {
+		const serialized = serializeChecklist([{ id: "1", checked: false, content }])
+		const parsed = parseChecklistSeed(serialized, () => "unused")
+
+		return parsed.map(row => row.content)
+	}
+
+	it("preserves a tag-like token instead of stripping it ('Fix <Header>' → 'Fix')", () => {
+		expect(roundTrip("Fix <Header>")).toEqual(["Fix <Header>"])
+	})
+
+	it("preserves inline markup instead of unwrapping it ('<b>bold</b>' → 'bold')", () => {
+		expect(roundTrip("<b>bold</b>")).toEqual(["<b>bold</b>"])
+	})
+
+	it("keeps a literal </li><li> payload as ONE row instead of splitting into two", () => {
+		expect(roundTrip("a</li><li>b")).toEqual(["a</li><li>b"])
+	})
+
+	it("preserves a literally typed entity (a typed &lt; survives as &lt;, not decoded to <)", () => {
+		expect(roundTrip("&lt;")).toEqual(["&lt;"])
+	})
+
+	it("preserves a bare ampersand", () => {
+		expect(roundTrip("Tom & Jerry")).toEqual(["Tom & Jerry"])
+	})
+})
+
 describe("addChecklistLine", () => {
 	it("appends a fresh empty row after a non-empty one and focuses it", () => {
 		const rows: Checklist = [{ id: "1", checked: false, content: "hello" }]

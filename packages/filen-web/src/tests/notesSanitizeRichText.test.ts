@@ -97,6 +97,40 @@ describe("sanitizeRichTextHtml — XSS fixture", () => {
 	})
 })
 
+describe("sanitizeRichTextHtml — clickjacking-overlay neutralization", () => {
+	it("strips position/z-index/viewport-sizing from a full-viewport overlay div", () => {
+		const out = sanitizeRichTextHtml(
+			'<div style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:99999;background:rgba(0,0,0,0.9)">overlay</div>'
+		)
+
+		expect(out).not.toMatch(/position\s*:/i)
+		expect(out).not.toMatch(/z-index\s*:/i)
+		expect(out).not.toMatch(/100vw/i)
+		expect(out).not.toMatch(/100vh/i)
+		expect(out).not.toMatch(/\btop\s*:/i)
+		expect(out).not.toMatch(/\bleft\s*:/i)
+		// The element and its harmless declarations still render — only the redress vector is removed.
+		expect(out).toContain("overlay")
+		expect(out).toContain("background")
+	})
+
+	it("strips positioning even when the overlay is wrapped in a link", () => {
+		const out = sanitizeRichTextHtml('<a href="https://evil.example" style="position:absolute;inset:0;z-index:9999">sink</a>')
+
+		expect(out).not.toMatch(/position\s*:/i)
+		expect(out).not.toMatch(/z-index\s*:/i)
+		expect(out).not.toMatch(/inset\s*:/i)
+	})
+
+	it("preserves benign inline styles rich formatting relies on", () => {
+		const out = sanitizeRichTextHtml('<p style="text-align:center;color:red">centered</p>')
+
+		expect(out).toMatch(/text-align\s*:\s*center/i)
+		expect(out).toMatch(/color\s*:\s*red/i)
+		expect(out).toContain("centered")
+	})
+})
+
 describe("sanitizeRichTextHtml — afterSanitizeAttributes link-hardening hook", () => {
 	it("forces target=_blank and rel=noopener noreferrer onto a surviving <a href>", () => {
 		const out = sanitizeRichTextHtml('<a href="https://example.com">link</a>')
