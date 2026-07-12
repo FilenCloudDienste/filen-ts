@@ -20,6 +20,10 @@ export const notes = {
 	notesExportAllAction: "Export all",
 	/** Notes sidebar bulk-ops menu — the downloaded archive's own file name */
 	notesExportAllFilename: "Notes.zip",
+	/** Notes sidebar bulk-ops menu — opens the file picker to import a note from a text/markdown/code/html file */
+	notesImportAction: "Import note",
+	/** importNoteFromFile — the picked file's extension doesn't match any recognized note type */
+	noteImportUnsupportedType: "This file type isn't supported for import.",
 
 	// ── View toggle ────────────────────────────────────────────────────────────
 	/** Notes sidebar — toggle option showing the flat note list */
@@ -71,6 +75,20 @@ export const notes = {
 	notesTagCount_other: "{{count}} notes",
 	/** Tag group row — accessible label on the favorite (starred) tag indicator */
 	notesTagFavorite: "Favorite tag",
+
+	// ── Tags-view sort control ──────────────────────────────────────────────────
+	/** Tags-view sort menu — trigger button's accessible label and the field group's own heading */
+	notesTagsSortMenuLabel: "Sort tags",
+	/** Tags-view sort menu — sort by each tag's most recently edited note */
+	notesTagsSortLastActivity: "Last activity",
+	/** Tags-view sort menu — sort by tag name */
+	notesTagsSortName: "Name",
+	/** Tags-view sort menu — sort by how many notes carry the tag */
+	notesTagsSortNotesCount: "Note count",
+	/** Tags-view sort menu — ascending direction option */
+	notesTagsSortAscending: "Ascending",
+	/** Tags-view sort menu — descending direction option */
+	notesTagsSortDescending: "Descending",
 
 	// ── Empty states ───────────────────────────────────────────────────────────
 	/** Notes view — empty-state title when the account has no notes at all */
@@ -163,6 +181,10 @@ export const notes = {
 	noteActionCopyId: "Copy ID",
 	/** Note menu — copyId's clipboard-write confirmation toast */
 	noteCopyIdToast: "Note ID copied to clipboard",
+	/** Note menu — copies the note's decrypted content to the clipboard */
+	noteActionCopyContent: "Copy content",
+	/** Note menu — copyContent's clipboard-write confirmation toast */
+	noteCopyContentToast: "Note content copied to clipboard",
 	/** Note menu — pins the note to the top of the list */
 	noteActionPin: "Pin",
 	/** Note menu — unpins an already-pinned note */
@@ -191,6 +213,8 @@ export const notes = {
 	noteActionDeletePermanently: "Delete permanently",
 	/** Note menu — a non-owner participant removes themselves from a shared note (opens noteLeaveDialog) */
 	noteActionLeave: "Leave",
+	/** Note menu (editor header only) — checklist notes only: filters checked rows out of the render */
+	noteActionHideCompletedChecklist: "Hide completed items",
 
 	// ── Type submenu ───────────────────────────────────────────────────────────
 	/** Type submenu — the "text" note type */
@@ -205,6 +229,8 @@ export const notes = {
 	noteTypeChecklist: "Checklist",
 
 	// ── Tag row menu (tagMenuActions) ──────────────────────────────────────────
+	/** Tag row menu — creates a new note, auto-tagged with this tag, and opens it */
+	noteTagActionCreateNote: "Create note",
 	/** Tag row menu — renames the tag (opens noteTagRenameDialog) */
 	noteTagActionRename: "Rename",
 	/** Tag row menu — favorites the tag */
@@ -290,6 +316,12 @@ export const notes = {
 	noteParticipantsCanEditLabel: "{{email}} can edit",
 	/** Participants dialog — accessible label on a row's remove button; {{email}} = the participant's email */
 	noteParticipantsRemoveAction: "Remove {{email}}",
+	/** Participants dialog — accessible label on a row's block button; {{email}} = the participant's email */
+	noteParticipantsBlockAction: "Block {{email}}",
+	/** Participants dialog — accessible label on a row's unblock button; {{email}} = the participant's email */
+	noteParticipantsUnblockAction: "Unblock {{email}}",
+	/** Participants dialog — the blocked-contact record moved (e.g. unblocked in another tab) between render and click */
+	noteParticipantBlockStale: "This contact's block status just changed. Please try again.",
 	/** Participants dialog — empty state when the note has no participants besides the current user */
 	noteParticipantsEmpty: "No other participants yet",
 	/** Participants dialog — remove confirm dialog title */

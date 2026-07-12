@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { CheckIcon, CrownIcon, SearchXIcon, UsersIcon, XIcon } from "lucide-react"
+import { CheckIcon, CrownIcon, SearchXIcon, UserCheckIcon, UsersIcon, UserXIcon, XIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { Note, NoteParticipant } from "@filen/sdk-rs"
 import { isNoteOwner } from "@/features/notes/lib/actions"
@@ -10,6 +10,8 @@ import { participantRows, contactsAvailableToAdd } from "@/features/notes/compon
 import { useNotes } from "@/features/notes/queries/notes"
 import { useAccountQuery } from "@/queries/account"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
+import { blockContactByEmail, unblockContact } from "@/features/contacts/lib/actions"
+import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
 import { contactDisplayName, contactInitials, filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
 // Pure selection helpers, not the drive-specific parts of the module — same generic Set<uuid> shape
 // this dialog's own add-picker needs, reused rather than re-implemented (feedback: no duplicated data
@@ -59,7 +61,12 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 	const [addPending, setAddPending] = useState(false)
 	const [filter, setFilter] = useState("")
 
-	const contactsQuery = useContactsQuery({ enabled: mode === "add" })
+	// Always enabled (not mode-gated like the "add" picker's own lazy fetch below): the list
+	// mode's own rows need the blocked set up front to render each row's Block/Unblock control and its
+	// live "blocked" state, so the eager fetch is load-bearing here, not just a convenience. Shares one
+	// query key with the picker's own read, so entering "add" mode reads warm cache instead of refetching.
+	const contactsQuery = useContactsQuery({ enabled: true })
+	const blockedUsers = deriveBlockedUsers(contactsQuery.data?.blocked ?? [])
 
 	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
 		if (!shouldForwardOpenChange(next, pendingUserId !== null || addPending)) {
@@ -93,6 +100,47 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 		}
 	}
 
+	// Block/unblock a participant, regardless of ownership (mobile parity: this is never gated on
+	// canManage). Unblock needs the BLOCKED CONTACT's own uuid (unblockContact is uuid-keyed, unlike
+	// block itself which is email-keyed) — resolved from the same warm contacts cache the row's own
+	// `blocked` flag was derived from; a cache miss (the block list moved since the last render, e.g.
+	// another tab unblocked them first) surfaces as an error rather than guessing a uuid.
+	async function handleToggleBlock(participant: NoteParticipant, isBlockedNow: boolean): Promise<void> {
+		if (isBlockedNow) {
+			const blockedUuid = contactsQuery.data?.blocked.find(c => c.userId === participant.userId)?.uuid
+
+			if (blockedUuid === undefined) {
+				toast.error(
+					errorLabel({ species: "plain", message: t("noteParticipantBlockStale"), label: t("noteParticipantBlockStale") })
+				)
+				return
+			}
+
+			setPendingUserId(participant.userId)
+			const outcome = await unblockContact(blockedUuid)
+			setPendingUserId(null)
+
+			if (outcome.status === "error") {
+				toast.error(errorLabel(outcome.dto))
+			}
+
+			return
+		}
+
+		setPendingUserId(participant.userId)
+		const outcome = await blockContactByEmail({
+			email: participant.email,
+			userId: participant.userId,
+			nickName: participant.nickName,
+			...(participant.avatar !== undefined ? { avatar: participant.avatar } : {})
+		})
+		setPendingUserId(null)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+		}
+	}
+
 	async function handleAddSelected(): Promise<void> {
 		const chosen = resolveSelectedContacts(contactsQuery.data?.contacts ?? [], selected)
 
@@ -117,7 +165,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 	}
 
 	function renderListBody() {
-		const rows = participantRows(note, currentUserId, owner)
+		const rows = participantRows(note, currentUserId, owner, blockedUsers)
 
 		if (rows.length === 0) {
 			return (
@@ -134,7 +182,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 
 		return (
 			<ul className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
-				{rows.map(({ participant, canManage }) => {
+				{rows.map(({ participant, canManage, blocked }) => {
 					const displayName = contactDisplayName(participant)
 					const rowPending = pendingUserId === participant.userId
 
@@ -159,29 +207,45 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 								</div>
 								<p className="truncate text-xs text-muted-foreground">{participant.email}</p>
 							</div>
-							{canManage ? (
-								<div className="flex shrink-0 items-center gap-2">
-									<Switch
-										checked={participant.permissionsWrite}
-										disabled={rowPending}
-										aria-label={t("noteParticipantsCanEditLabel", { email: participant.email })}
-										onCheckedChange={checked => {
-											void handleTogglePermission(participant, checked)
-										}}
-									/>
-									<Button
-										variant="ghost"
-										size="icon-sm"
-										disabled={rowPending}
-										aria-label={t("noteParticipantsRemoveAction", { email: participant.email })}
-										onClick={() => {
-											setRemoving(participant)
-										}}
-									>
-										{rowPending ? <Spinner /> : <XIcon aria-hidden="true" />}
-									</Button>
-								</div>
-							) : null}
+							<div className="flex shrink-0 items-center gap-2">
+								{canManage ? (
+									<>
+										<Switch
+											checked={participant.permissionsWrite}
+											disabled={rowPending}
+											aria-label={t("noteParticipantsCanEditLabel", { email: participant.email })}
+											onCheckedChange={checked => {
+												void handleTogglePermission(participant, checked)
+											}}
+										/>
+										<Button
+											variant="ghost"
+											size="icon-sm"
+											disabled={rowPending}
+											aria-label={t("noteParticipantsRemoveAction", { email: participant.email })}
+											onClick={() => {
+												setRemoving(participant)
+											}}
+										>
+											{rowPending ? <Spinner /> : <XIcon aria-hidden="true" />}
+										</Button>
+									</>
+								) : null}
+								{/* Block/unblock, always available regardless of ownership (mobile parity). */}
+								<Button
+									variant="ghost"
+									size="icon-sm"
+									disabled={rowPending}
+									aria-label={t(blocked ? "noteParticipantsUnblockAction" : "noteParticipantsBlockAction", {
+										email: participant.email
+									})}
+									onClick={() => {
+										void handleToggleBlock(participant, blocked)
+									}}
+								>
+									{blocked ? <UserCheckIcon aria-hidden="true" /> : <UserXIcon aria-hidden="true" />}
+								</Button>
+							</div>
 						</li>
 					)
 				})}

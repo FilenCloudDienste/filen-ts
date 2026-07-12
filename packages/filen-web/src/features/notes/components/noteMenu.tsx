@@ -12,7 +12,9 @@ import {
 	archiveNote,
 	restoreNote,
 	trashNote,
-	setNoteType
+	setNoteType,
+	resolveNoteContent,
+	createNote
 } from "@/features/notes/lib/actions"
 import { exportNote } from "@/features/notes/lib/export"
 import { addTagToNote, removeTagFromNote, setNoteTagFavorited } from "@/features/notes/lib/tags"
@@ -57,6 +59,11 @@ export interface NoteMenuContentProps {
 	// (which duplicates the note it's currently showing) does the same. Optional: a caller with no
 	// reason to navigate (none exists yet) simply omits it.
 	onDuplicated?: ((duplicated: Note) => void) | undefined
+	// Present ONLY when the mounting surface wants the "Hide completed items" toggle rendered (the
+	// editor header's own ⋯ menu, checklist notes only); the list row's menu never passes this, so the
+	// toggle is editor-origin only, matching mobile (a view-local preference has no reason to clutter the
+	// row menu, which never even renders the checklist body).
+	hideCompletedChecklist?: { checked: boolean; onToggle: () => void } | undefined
 }
 
 interface MenuFamily {
@@ -75,7 +82,15 @@ const SEPARATOR_BEFORE = new Set<NoteActionId>(["archive", "restore", "trash", "
 // Shared per-note action list, rendered by BOTH the sidebar row's right-click menu and the editor
 // header's ⋯ trigger (see NoteContextMenuContent/NoteDropdownMenuContent below) — one descriptor list
 // (noteMenuActions), one mapping from descriptor to menu row, mirrors drive's ItemMenuEntries exactly.
-function NoteMenuEntries({ note, allTags, currentUserId, onAction, onDuplicated, family }: NoteMenuContentProps & { family: MenuFamily }) {
+function NoteMenuEntries({
+	note,
+	allTags,
+	currentUserId,
+	onAction,
+	onDuplicated,
+	hideCompletedChecklist,
+	family
+}: NoteMenuContentProps & { family: MenuFamily }) {
 	const { t } = useTranslation("notes")
 	const descriptors = noteMenuActions(note, currentUserId)
 	const { Item, Separator, Sub, SubTrigger, SubContent, CheckboxItem } = family
@@ -106,6 +121,17 @@ function NoteMenuEntries({ note, allTags, currentUserId, onAction, onDuplicated,
 				try {
 					await navigator.clipboard.writeText(note.uuid)
 					toast.success(t("noteCopyIdToast"))
+				} catch (e) {
+					toast.error(errorLabel(asErrorDTO(e)))
+				}
+
+				return
+			}
+			case "copyContent": {
+				try {
+					const content = await resolveNoteContent(note)
+					await navigator.clipboard.writeText(content)
+					toast.success(t("noteCopyContentToast"))
 				} catch (e) {
 					toast.error(errorLabel(asErrorDTO(e)))
 				}
@@ -279,7 +305,24 @@ function NoteMenuEntries({ note, allTags, currentUserId, onAction, onDuplicated,
 		)
 	}
 
-	return <>{descriptors.map((descriptor, index) => renderDescriptor(descriptor, index))}</>
+	return (
+		<>
+			{descriptors.map((descriptor, index) => renderDescriptor(descriptor, index))}
+			{hideCompletedChecklist ? (
+				<>
+					<Separator />
+					<CheckboxItem
+						checked={hideCompletedChecklist.checked}
+						onCheckedChange={() => {
+							hideCompletedChecklist.onToggle()
+						}}
+					>
+						{t("noteActionHideCompletedChecklist")}
+					</CheckboxItem>
+				</>
+			) : null}
+		</>
+	)
 }
 
 // Right-click surface — rendered inside a per-row <ContextMenu> (notesSidebar.tsx's row wrapper).
@@ -307,12 +350,15 @@ export interface TagMenuContentProps {
 	// (useNoteDialogHost.openTagDialog) turns this into an open dialog. The favorite toggle resolves in
 	// place below, same split as NoteMenuEntries' own direct-vs-dialog rule.
 	onTagAction: (kind: NoteTagDialogKind, tag: NoteTag) => void
+	// Fires once the newly created, auto-tagged note is ready; the sidebar navigates to it (same shape
+	// as NoteMenuContentProps.onDuplicated).
+	onCreateNoteInTag: (created: Note) => void
 }
 
-// Right-click surface for a tags-view group row (notesSidebar.tsx's TagGroupRow) — rename/favorite/
-// delete only. Context-menu family only: tag rows keep no hover ⋯ trigger (the count badge owns that
-// slot), mirroring old-web where tag management was right-click-only too.
-export function TagContextMenuContent({ tag, onTagAction }: TagMenuContentProps) {
+// Right-click surface for a tags-view group row (notesSidebar.tsx's TagGroupRow) — create-note/rename/
+// favorite/delete only. Context-menu family only: tag rows keep no hover ⋯ trigger (the count badge
+// owns that slot), mirroring old-web where tag management was right-click-only too.
+export function TagContextMenuContent({ tag, onTagAction, onCreateNoteInTag }: TagMenuContentProps) {
 	const { t } = useTranslation("notes")
 	const descriptors = tagMenuActions(tag)
 
@@ -322,6 +368,27 @@ export function TagContextMenuContent({ tag, onTagAction }: TagMenuContentProps)
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
 		}
+	}
+
+	// Untitled, default-type note (mirrors the sidebar header's own "New note" — no type/title prompt),
+	// tagged with THIS tag before the caller navigates to it. addTagToNote failing after a successful
+	// create still leaves a real (untagged) note behind, so both outcomes get their own toast.
+	async function handleCreateNoteInTag(): Promise<void> {
+		const created = await createNote()
+
+		if (created.status === "error") {
+			toast.error(errorLabel(created.dto))
+			return
+		}
+
+		const tagged = await addTagToNote(created.item, tag)
+
+		if (tagged.status === "error") {
+			toast.error(errorLabel(tagged.dto))
+			return
+		}
+
+		onCreateNoteInTag(tagged.item)
 	}
 
 	return (
@@ -336,6 +403,11 @@ export function TagContextMenuContent({ tag, onTagAction }: TagMenuContentProps)
 						event.stopPropagation()
 
 						if (descriptor.run === "direct") {
+							if (descriptor.id === "tagCreateNote") {
+								void handleCreateNoteInTag()
+								return
+							}
+
 							void handleFavoriteToggle()
 							return
 						}

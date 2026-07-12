@@ -5,6 +5,7 @@ import {
 	CopyIcon,
 	DownloadIcon,
 	HashIcon,
+	ClipboardCopyIcon,
 	PinIcon,
 	PinOffIcon,
 	HeartIcon,
@@ -16,7 +17,8 @@ import {
 	ArchiveIcon,
 	ArchiveRestoreIcon,
 	Trash2Icon,
-	LogOutIcon
+	LogOutIcon,
+	PlusIcon
 } from "lucide-react"
 import type { Note, NoteTag, UuidStr } from "@filen/sdk-rs"
 
@@ -99,12 +101,13 @@ function facts(note: Note, userId: bigint | undefined): { id: string; labelKey: 
 }
 
 describe("noteMenuActions — owner, normal (not trashed/archived) note", () => {
-	it("rename/duplicate/export/copyId/pin/favorite/tags/type/participants/history/archive/trash, in that order", () => {
+	it("rename/duplicate/export/copyId/copyContent/pin/favorite/tags/type/participants/history/archive/trash, in that order", () => {
 		expect(ids(mockNote({ ownerId: 1n }), 1n)).toEqual([
 			"rename",
 			"duplicate",
 			"export",
 			"copyId",
+			"copyContent",
 			"pin",
 			"favorite",
 			"tags",
@@ -124,6 +127,7 @@ describe("noteMenuActions — non-owner (participant), normal note", () => {
 			"duplicate",
 			"export",
 			"copyId",
+			"copyContent",
 			"pin",
 			"favorite",
 			"tags",
@@ -182,6 +186,7 @@ describe("noteMenuActions — archived (not trashed) note", () => {
 			"duplicate",
 			"export",
 			"copyId",
+			"copyContent",
 			"pin",
 			"favorite",
 			"tags",
@@ -199,6 +204,7 @@ describe("noteMenuActions — archived (not trashed) note", () => {
 			"duplicate",
 			"export",
 			"copyId",
+			"copyContent",
 			"pin",
 			"favorite",
 			"tags",
@@ -250,9 +256,18 @@ describe("noteMenuActions — run kinds", () => {
 		expect(noteMenuActions(note, 1n).find(d => d.id === "type")).toMatchObject({ run: "submenu", submenu: "type" })
 	})
 
-	it("pin/favorite/duplicate/export/copyId/archive/restore/trash run directly (no dialog)", () => {
+	it("pin/favorite/duplicate/export/copyId/copyContent/archive/restore/trash run directly (no dialog)", () => {
 		const note = mockNote({ ownerId: 1n })
-		const directIds: NoteActionDescriptor["id"][] = ["pin", "favorite", "duplicate", "export", "copyId", "archive", "trash"]
+		const directIds: NoteActionDescriptor["id"][] = [
+			"pin",
+			"favorite",
+			"duplicate",
+			"export",
+			"copyId",
+			"copyContent",
+			"archive",
+			"trash"
+		]
 
 		for (const id of directIds) {
 			expect(noteMenuActions(note, 1n).find(d => d.id === id)).toMatchObject({ run: "direct" })
@@ -277,6 +292,7 @@ describe("noteMenuActions — descriptor label/icon facts (NOTE_ACTION_DEFS drif
 			{ id: "duplicate", labelKey: "noteActionDuplicate", icon: CopyIcon },
 			{ id: "export", labelKey: "noteActionExport", icon: DownloadIcon },
 			{ id: "copyId", labelKey: "noteActionCopyId", icon: HashIcon },
+			{ id: "copyContent", labelKey: "noteActionCopyContent", icon: ClipboardCopyIcon },
 			{ id: "pin", labelKey: "noteActionPin", icon: PinIcon },
 			{ id: "favorite", labelKey: "noteActionFavorite", icon: HeartIcon },
 			{ id: "tags", labelKey: "noteActionTags", icon: TagIcon },
@@ -347,32 +363,39 @@ describe("NOTE_TYPE_SUBMENU", () => {
 })
 
 describe("tagMenuActions — the tags-view row menu", () => {
-	it("lists rename, favorite, delete in that order for an unfavorited tag", () => {
+	it("lists createNote, rename, favorite, delete in that order for an unfavorited tag", () => {
 		expect(tagMenuActions(mockTag()).map(d => ({ id: d.id, labelKey: d.labelKey, run: d.run }))).toEqual([
+			{ id: "tagCreateNote", labelKey: "noteTagActionCreateNote", run: "direct" },
 			{ id: "tagRename", labelKey: "noteTagActionRename", run: "dialog" },
 			{ id: "tagFavorite", labelKey: "noteTagActionFavorite", run: "direct" },
 			{ id: "tagDelete", labelKey: "noteTagActionDelete", run: "dialog" }
 		])
 	})
 
+	it("createNote carries its own icon fact, distinct from favorite's", () => {
+		const descriptors = tagMenuActions(mockTag())
+
+		expect(descriptors[0]).toMatchObject({ id: "tagCreateNote", icon: PlusIcon, run: "direct" })
+	})
+
 	it("flips the favorite entry's label for an already-favorited tag, keeping order stable", () => {
 		const descriptors = tagMenuActions(mockTag({ favorite: true }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["tagRename", "tagFavorite", "tagDelete"])
-		expect(descriptors[1]?.labelKey).toBe("noteTagActionUnfavorite")
+		expect(descriptors.map(d => d.id)).toEqual(["tagCreateNote", "tagRename", "tagFavorite", "tagDelete"])
+		expect(descriptors[2]?.labelKey).toBe("noteTagActionUnfavorite")
 	})
 
 	it("routes rename and delete to their disjoint tag dialog kinds, delete destructive", () => {
 		const descriptors = tagMenuActions(mockTag())
-		const rename = descriptors[0]
-		const del = descriptors[2]
+		const rename = descriptors[1]
+		const del = descriptors[3]
 
 		expect(rename?.run === "dialog" && rename.dialogKind).toBe("renameTag")
 		expect(del?.run === "dialog" && del.dialogKind).toBe("deleteTag")
 		expect(del?.run === "dialog" && del.destructive).toBe(true)
 	})
 
-	it("an undecryptable tag (no name) reduces to delete alone — rename/favorite need decrypted metadata", () => {
+	it("an undecryptable tag (no name) reduces to delete alone — rename/favorite/createNote need decrypted metadata", () => {
 		const descriptors = tagMenuActions(undecryptableTag())
 
 		expect(descriptors.map(d => d.id)).toEqual(["tagDelete"])

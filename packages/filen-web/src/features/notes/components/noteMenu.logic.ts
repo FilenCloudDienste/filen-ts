@@ -18,6 +18,7 @@ export type NoteActionId =
 	| "duplicate"
 	| "export"
 	| "copyId"
+	| "copyContent"
 	| "pin"
 	| "favorite"
 	| "tags"
@@ -51,6 +52,9 @@ const DUPLICATE: NoteActionDescriptor = { id: "duplicate", ...NOTE_ACTION_DEFS.d
 // available regardless of ownership (unlike participants/archive below).
 const EXPORT: NoteActionDescriptor = { id: "export", ...NOTE_ACTION_DEFS.export, run: "direct" }
 const COPY_ID: NoteActionDescriptor = { id: "copyId", ...NOTE_ACTION_DEFS.copyId, run: "direct" }
+// Decrypts and copies the note's raw content, grouped right next to copyId (both are read-only
+// clipboard utilities, neither mutates the note).
+const COPY_CONTENT: NoteActionDescriptor = { id: "copyContent", ...NOTE_ACTION_DEFS.copyContent, run: "direct" }
 const TAGS: NoteActionDescriptor = { id: "tags", ...NOTE_ACTION_DEFS.tags, run: "submenu", submenu: "tags" }
 const TYPE: NoteActionDescriptor = { id: "type", ...NOTE_ACTION_DEFS.type, run: "submenu", submenu: "type" }
 const PARTICIPANTS: NoteActionDescriptor = {
@@ -102,7 +106,17 @@ export function noteMenuActions(note: Note, currentUserId: bigint | undefined): 
 		return owner ? [TRASH] : [LEAVE]
 	}
 
-	const actions: NoteActionDescriptor[] = [RENAME, DUPLICATE, EXPORT, COPY_ID, pinDescriptor(note), favoriteDescriptor(note), TAGS, TYPE]
+	const actions: NoteActionDescriptor[] = [
+		RENAME,
+		DUPLICATE,
+		EXPORT,
+		COPY_ID,
+		COPY_CONTENT,
+		pinDescriptor(note),
+		favoriteDescriptor(note),
+		TAGS,
+		TYPE
+	]
 
 	// Participants management is owner-only, matching both mobile and old-web — a participant sees no
 	// entry for a dialog they could never act on. History stays open to any participant (mobile parity —
@@ -142,14 +156,15 @@ export type TagActionDescriptor =
 			run: "dialog"
 			dialogKind: NoteTagDialogKind
 	  }
-	| { id: "tagFavorite"; labelKey: NotesKey; icon: LucideIcon; run: "direct" }
+	| { id: "tagFavorite" | "tagCreateNote"; labelKey: NotesKey; icon: LucideIcon; run: "direct" }
 
 export function tagMenuActions(tag: NoteTag): TagActionDescriptor[] {
 	const del: TagActionDescriptor = { id: "tagDelete", ...NOTE_ACTION_DEFS.tagDelete, run: "dialog", dialogKind: "deleteTag" }
 
-	// Undecryptable tag: its name never decrypted, so rename (needs a decrypted starting value) and
-	// favorite (a metadata mutation) make no sense — only the pure-uuid delete survives (mobile parity,
-	// tag/menu.tsx's own `tag.undecryptable` branch offers delete alone).
+	// Undecryptable tag: its name never decrypted, so rename (needs a decrypted starting value),
+	// favorite (a metadata mutation), and create-note-in-tag (would attach a tag reference whose own
+	// name can't be shown back to the user) all make no sense — only the pure-uuid delete survives
+	// (mobile parity, tag/menu.tsx's own `tag.undecryptable` branch offers delete alone).
 	if (isTagUndecryptable(tag)) {
 		return [del]
 	}
@@ -158,7 +173,11 @@ export function tagMenuActions(tag: NoteTag): TagActionDescriptor[] {
 		? { id: "tagFavorite", ...NOTE_ACTION_DEFS.tagUnfavorite, run: "direct" }
 		: { id: "tagFavorite", ...NOTE_ACTION_DEFS.tagFavorite, run: "direct" }
 
-	return [{ id: "tagRename", ...NOTE_ACTION_DEFS.tagRename, run: "dialog", dialogKind: "renameTag" }, favorite, del]
+	// "Create note (in this tag)", first (mobile's own tag menu order): a note created from here is
+	// auto-tagged with THIS tag before opening, saving the create-then-tag-manually round trip.
+	const createNote: TagActionDescriptor = { id: "tagCreateNote", ...NOTE_ACTION_DEFS.tagCreateNote, run: "direct" }
+
+	return [createNote, { id: "tagRename", ...NOTE_ACTION_DEFS.tagRename, run: "dialog", dialogKind: "renameTag" }, favorite, del]
 }
 
 export interface NoteTagSubmenuEntry {

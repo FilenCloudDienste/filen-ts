@@ -7,12 +7,14 @@ import {
 	buildNotesByTag,
 	buildTagsViewRows,
 	filterTagsForView,
+	filterNotesByBlockedOwner,
 	sidebarRowKey,
 	selectableNotesFromRows,
 	selectableRowIndexByKey,
 	type NotesSidebarRow
 } from "@/features/notes/components/notesSidebar.logic"
 import { DEFAULT_NOTE_TAGS_SORT_BY } from "@/features/notes/lib/sort"
+import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@/features/contacts/lib/blocking"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes — pad a short label, same as notesSort.test.ts.
 function testUuid(label: string): UuidStr {
@@ -428,5 +430,34 @@ describe("notesSidebar.logic — selectableRowIndexByKey (click target resolutio
 		expect(selectableNotesFromRows(rows)[indexByKey.get(sidebarRowKey({ kind: "note", note: noteB, tagUuid: tag.uuid })) ?? -1]).toBe(
 			noteB
 		)
+	})
+})
+
+describe("filterNotesByBlockedOwner", () => {
+	it("hides a note whose ownerId is in the blocked set", () => {
+		const blockedOwnerNote = mockNote({ uuid: testUuid("a"), ownerId: 2n })
+		const okNote = mockNote({ uuid: testUuid("b"), ownerId: 3n })
+		const blocked = deriveBlockedUsers([{ uuid: testUuid("bc"), userId: 2n, email: "owner@x.io", nickName: "", timestamp: 0n }])
+
+		expect(filterNotesByBlockedOwner([blockedOwnerNote, okNote], blocked)).toEqual([okNote])
+	})
+
+	it("owner-based only: a blocked PARTICIPANT (not the owner) never hides the note", () => {
+		// Mirrors mobile's filterNotesByBlockedOwner exactly — only note.ownerId is checked, a blocked
+		// co-participant on a note owned by someone else (or by you) has no bearing on this filter.
+		const note = mockNote({
+			uuid: testUuid("a"),
+			ownerId: 3n,
+			participants: [{ userId: 2n, isOwner: false, email: "p@x.io", nickName: "", permissionsWrite: true, addedTimestamp: 0n }]
+		})
+		const blocked = deriveBlockedUsers([{ uuid: testUuid("bc"), userId: 2n, email: "p@x.io", nickName: "", timestamp: 0n }])
+
+		expect(filterNotesByBlockedOwner([note], blocked)).toEqual([note])
+	})
+
+	it("is a no-op (same notes, unfiltered) when the blocked set is empty", () => {
+		const notes = [mockNote({ uuid: testUuid("a") }), mockNote({ uuid: testUuid("b"), ownerId: 2n })]
+
+		expect(filterNotesByBlockedOwner(notes, EMPTY_BLOCKED_USERS)).toEqual(notes)
 	})
 })

@@ -12,6 +12,8 @@ import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
 import { useNoteInflight } from "@/features/notes/store/useNotesInflight"
 import { sync } from "@/features/notes/lib/sync"
+import { useHideCompletedChecklistQuery } from "@/features/notes/queries/preferences"
+import { setHideCompletedChecklist } from "@/features/notes/lib/preferences"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { useAccountQuery } from "@/queries/account"
@@ -61,6 +63,11 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 	// header sync spinner + menu suppression, mirroring mobile's header (screens/noteEditor.tsx) and
 	// note-menu (components/note/menu.tsx) inflight gating.
 	const isInflight = useNoteInflight(note?.uuid ?? "")
+	// The checklist "hide completed items" view preference, keyed by uuid so switching notes never
+	// carries the previous note's toggle state over. Query-disabled (and this menu toggle absent) for
+	// every non-checklist note — see the hideCompletedChecklist prop passed below.
+	const hideCompletedQuery = useHideCompletedChecklistQuery(note?.uuid ?? "")
+	const hideCompleted = hideCompletedQuery.data ?? false
 
 	// Registered before the early return (hook order). Dialog-guarded like every other action: a Cmd+S
 	// with a note-action dialog open returns before preventDefault so the browser default runs, never
@@ -109,6 +116,19 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 		await navigate({ to: "/notes/$uuid", params: { uuid: duplicated.uuid } })
 	}
 
+	// An arrow function (not a function declaration) so TS keeps `note`'s post-guard narrowing inside
+	// its body — a hoisted function declaration referencing the outer `note` closure loses that
+	// narrowing even though this one can only ever run after the guard above.
+	const handleToggleHideCompleted = async (): Promise<void> => {
+		await setHideCompletedChecklist(note.uuid, !hideCompleted)
+		await hideCompletedQuery.refetch()
+	}
+
+	// The "hide completed items" menu toggle and the checklist filter itself are both checklist-only and
+	// editor-origin only: an undecryptable checklist never reaches this branch (its content can't be
+	// parsed anyway), and every other note type simply never sees the prop.
+	const showHideCompletedToggle = !undecryptable && note.noteType === "checklist"
+
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<header className="flex shrink-0 items-center gap-2.5 px-5 py-4">
@@ -145,6 +165,16 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 						onDuplicated={duplicated => {
 							void handleDuplicated(duplicated)
 						}}
+						hideCompletedChecklist={
+							showHideCompletedToggle
+								? {
+										checked: hideCompleted,
+										onToggle: () => {
+											void handleToggleHideCompleted()
+										}
+									}
+								: undefined
+						}
 					/>
 				</DropdownMenu>
 			</header>
@@ -161,6 +191,7 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 				<NoteContentBody
 					key={note.uuid}
 					note={note}
+					hideCompletedChecklist={showHideCompletedToggle && hideCompleted}
 				/>
 			)}
 			{dialogHost.renderActiveDialog()}

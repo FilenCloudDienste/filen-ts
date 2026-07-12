@@ -6,6 +6,7 @@ import {
 	tagDisplayName,
 	type NoteTagsSortBy
 } from "@/features/notes/lib/sort"
+import { isBlocked, type BlockedUsers } from "@/features/contacts/lib/blocking"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 
 // Pure view-model builders for the two-view sidebar. No React, no cache — the
@@ -14,6 +15,20 @@ import type { Note, NoteTag } from "@filen/sdk-rs"
 
 function normalizeSearch(search: string): string {
 	return search.trim().toLowerCase()
+}
+
+// A note whose OWNER is a blocked contact is silently hidden from both views, even though the
+// note itself isn't deleted (mirrors filen-mobile's filterNotesByBlockedOwner: owner-based only, so a
+// note you own is never hidden just because one of ITS participants happens to be blocked). The caller
+// (notesSidebar.tsx) applies this to the raw notes list before either view builds its rows, so a
+// blocked note also drops out of any active selection for free (the selection is re-derived from the
+// same filtered set every render, the same ghost-purge mechanism the live notes query already drives).
+export function filterNotesByBlockedOwner(notes: readonly Note[], blocked: BlockedUsers): Note[] {
+	if (blocked.userIds.size === 0) {
+		return notes as Note[]
+	}
+
+	return notes.filter(note => !isBlocked({ userId: note.ownerId }, blocked))
 }
 
 // ── View 1 (notes) ──────────────────────────────────────────────────────────

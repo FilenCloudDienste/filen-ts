@@ -72,6 +72,7 @@ import {
 	isNoteOwner,
 	createNote as createNoteAction,
 	duplicateNote,
+	resolveNoteContent,
 	togglePinned,
 	toggleFavorited,
 	archiveNote,
@@ -206,6 +207,42 @@ describe("duplicateNote", () => {
 		const outcome = await duplicateNote(mockNote())
 
 		expect(outcome.status).toBe("error")
+	})
+})
+
+describe("resolveNoteContent — copy content", () => {
+	it("returns cached content without ever calling the SDK", async () => {
+		const note = mockNote()
+		testQueryClient.setQueryData(noteContentQueryKey(note.uuid), "cached body")
+
+		const content = await resolveNoteContent(note)
+
+		expect(content).toBe("cached body")
+		expect(getNoteContent).not.toHaveBeenCalled()
+	})
+
+	it("fetches from the SDK when the cache is cold", async () => {
+		const note = mockNote()
+		getNoteContent.mockResolvedValueOnce("fetched body")
+
+		const content = await resolveNoteContent(note)
+
+		expect(getNoteContent).toHaveBeenCalledExactlyOnceWith(note)
+		expect(content).toBe("fetched body")
+	})
+
+	it("resolves to an empty string, never undefined, when the SDK returns no content", async () => {
+		const note = mockNote()
+		getNoteContent.mockResolvedValueOnce(undefined)
+
+		await expect(resolveNoteContent(note)).resolves.toBe("")
+	})
+
+	it("propagates a fetch failure so the caller's own try/catch can surface an error toast", async () => {
+		const note = mockNote()
+		getNoteContent.mockRejectedValueOnce(new Error("network"))
+
+		await expect(resolveNoteContent(note)).rejects.toBeDefined()
 	})
 })
 

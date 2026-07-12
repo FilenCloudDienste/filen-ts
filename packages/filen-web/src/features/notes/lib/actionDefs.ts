@@ -3,6 +3,7 @@ import {
 	CopyIcon,
 	DownloadIcon,
 	HashIcon,
+	ClipboardCopyIcon,
 	PinIcon,
 	PinOffIcon,
 	HeartIcon,
@@ -36,6 +37,7 @@ export const NOTE_ACTION_DEFS = {
 	duplicate: { labelKey: "noteActionDuplicate", icon: CopyIcon },
 	export: { labelKey: "noteActionExport", icon: DownloadIcon },
 	copyId: { labelKey: "noteActionCopyId", icon: HashIcon },
+	copyContent: { labelKey: "noteActionCopyContent", icon: ClipboardCopyIcon },
 	pin: { labelKey: "noteActionPin", icon: PinIcon },
 	unpin: { labelKey: "noteActionUnpin", icon: PinOffIcon },
 	favorite: { labelKey: "noteActionFavorite", icon: HeartIcon },
@@ -52,6 +54,7 @@ export const NOTE_ACTION_DEFS = {
 	leave: { labelKey: "noteActionLeave", icon: LogOutIcon, destructive: true },
 	// Tag-row menu (tagMenuActions) — Star, not Heart: matches the tag row's own favorite indicator
 	// (notesSidebar.tsx renders a StarIcon on favorited tags; notes use hearts, tags use stars).
+	tagCreateNote: { labelKey: "noteTagActionCreateNote", icon: PlusIcon },
 	tagRename: { labelKey: "noteTagActionRename", icon: PencilIcon },
 	tagFavorite: { labelKey: "noteTagActionFavorite", icon: StarIcon },
 	tagUnfavorite: { labelKey: "noteTagActionUnfavorite", icon: StarOffIcon },

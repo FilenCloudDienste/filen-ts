@@ -20,17 +20,22 @@ import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 
 // Discriminates on `kind` alone — NoteActionDialogKind/NoteTagDialogKind/NoteBulkDialogActionKind are
 // three disjoint string unions (noteMenu.logic.ts / notesBulkActionBar.logic.ts), so each arm carries
-// exactly the payload its own kinds need without a separate discriminant field.
+// exactly the payload its own kinds need without a separate discriminant field. "createStandaloneTag"
+// is its own fourth kind, disjoint from the note-scoped "createTag" above: it carries no note at all —
+// a user with zero notes can still reach it (the sidebar header's "..." menu and the tags empty-state
+// button, neither of which has a note to tag along the way).
 type ActiveNoteDialog =
 	| { kind: NoteActionDialogKind; note: Note }
 	| { kind: NoteTagDialogKind; tag: NoteTag }
 	| { kind: NoteBulkDialogActionKind; notes: Note[] }
+	| { kind: "createStandaloneTag" }
 
 export interface NoteDialogHost {
 	isDialogOpen: boolean
 	openNoteDialog: (kind: NoteActionDialogKind, note: Note) => void
 	openTagDialog: (kind: NoteTagDialogKind, tag: NoteTag) => void
 	openBulkDialog: (kind: NoteBulkDialogActionKind, notes: Note[]) => void
+	openCreateTagDialog: () => void
 	renderActiveDialog: () => ReactNode
 }
 
@@ -63,6 +68,10 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 
 	function openBulkDialog(kind: NoteBulkDialogActionKind, notes: Note[]): void {
 		setActiveDialog({ kind, notes })
+	}
+
+	function openCreateTagDialog(): void {
+		setActiveDialog({ kind: "createStandaloneTag" })
 	}
 
 	function navigateAwayIfCurrent(note: Note): void {
@@ -194,6 +203,21 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 		closeActiveDialog()
 	}
 
+	// Standalone tag creation: unlike handleCreateTagSubmit above, there is no note to attach the
+	// new tag to (the whole point — this is reachable with zero notes in the account).
+	async function handleCreateStandaloneTagSubmit(name: string): Promise<void> {
+		setDialogPending(true)
+		const outcome = await createNoteTag(name)
+		setDialogPending(false)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+			return
+		}
+
+		closeActiveDialog()
+	}
+
 	function renderActiveDialog(): ReactNode {
 		if (!activeDialog) {
 			return null
@@ -279,6 +303,27 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 						}}
 						onSubmit={value => {
 							void handleCreateTagSubmit(activeDialog.note, value)
+						}}
+					/>
+				)
+			case "createStandaloneTag":
+				return (
+					<InputDialog
+						open
+						pending={dialogPending}
+						title={t("noteCreateTagDialogTitle")}
+						body={t("noteCreateTagDialogBody")}
+						label={t("noteCreateTagDialogLabel")}
+						placeholder={t("noteCreateTagDialogPlaceholder")}
+						submitLabel={t("noteCreateTagDialogSubmit")}
+						validate={value => value.trim().length > 0}
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onSubmit={value => {
+							void handleCreateStandaloneTagSubmit(value)
 						}}
 					/>
 				)
@@ -400,5 +445,5 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 		}
 	}
 
-	return { isDialogOpen, openNoteDialog, openTagDialog, openBulkDialog, renderActiveDialog }
+	return { isDialogOpen, openNoteDialog, openTagDialog, openBulkDialog, openCreateTagDialog, renderActiveDialog }
 }

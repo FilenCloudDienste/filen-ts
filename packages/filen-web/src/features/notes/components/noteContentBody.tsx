@@ -15,7 +15,15 @@ import { Spinner } from "@/components/ui/spinner"
 // rich, the custom widget for checklist); a trashed / non-writable note (deriveEditorReadOnly) stays on
 // its read-only reader. Each branch is keyed on remountKey so a real reseed remounts the editor/reader
 // fresh — the EDITOR INVARIANT the seed-at-mount surfaces rely on.
-function BodyByType({ note, controller }: { note: Note; controller: NoteEditorController }) {
+function BodyByType({
+	note,
+	controller,
+	hideCompletedChecklist
+}: {
+	note: Note
+	controller: NoteEditorController
+	hideCompletedChecklist: boolean
+}) {
 	if (controller.readOnly) {
 		return (
 			<NoteReaderByType
@@ -56,6 +64,7 @@ function BodyByType({ note, controller }: { note: Note; controller: NoteEditorCo
 				<ChecklistEditor
 					key={controller.remountKey}
 					controller={controller}
+					hideCompleted={hideCompletedChecklist}
 				/>
 			)
 	}
@@ -65,7 +74,15 @@ function BodyByType({ note, controller }: { note: Note; controller: NoteEditorCo
 // loading/error states derived by useNoteEditor (which itself decouples them from the deliberately
 // disabled-while-inflight content query) and, once ready, dispatches to the matching editor/reader.
 // Keyed by the caller on `note.uuid` (noteEditorPane.tsx) so switching notes rebuilds the controller.
-export function NoteContentBody({ note }: { note: Note }) {
+export function NoteContentBody({
+	note,
+	hideCompletedChecklist = false
+}: {
+	note: Note
+	// The editor header's persisted per-note "hide completed items" preference (noteEditorPane.tsx),
+	// threaded down to the checklist branch only; every other type ignores it.
+	hideCompletedChecklist?: boolean
+}) {
 	const { t } = useTranslation("notes")
 	const controller = useNoteEditor(note)
 
@@ -102,6 +119,7 @@ export function NoteContentBody({ note }: { note: Note }) {
 			<BodyByType
 				note={note}
 				controller={controller}
+				hideCompletedChecklist={hideCompletedChecklist}
 			/>
 		</div>
 	)

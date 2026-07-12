@@ -4,7 +4,7 @@ import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { notesQueryUpsert, notesQueryRemove } from "@/features/notes/queries/notes"
-import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
+import { noteContentQueryKey, fetchNoteContent } from "@/features/notes/queries/noteContent"
 import { getDefaultNoteType, DEFAULT_NOTE_TYPE } from "@/features/notes/lib/preferences"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
@@ -58,6 +58,25 @@ export async function createNote(title?: string): Promise<ActionOutcome<Note>> {
 	notesQueryUpsert(note)
 
 	return { status: "success", item: note }
+}
+
+// ── Copy content ─────────────────────────────────────────────────────────
+
+// Cache-first-then-fetch, same rule duplicateNote already applies to the note it's copying FROM: an
+// already-open note's content is almost certainly warm, so this only round-trips to the SDK when it
+// genuinely isn't. A fetch failure propagates as a thrown ErrorDTO (runOp) — the caller's own try/catch
+// (noteMenu.tsx's copyContent handler, same shape as its copyId sibling) surfaces it as an error toast
+// instead of silently copying an empty string.
+export async function resolveNoteContent(note: Note): Promise<string> {
+	const cached = queryClient.getQueryData<string | undefined>(noteContentQueryKey(note.uuid))
+
+	if (cached !== undefined) {
+		return cached
+	}
+
+	const content = await runOp(fetchNoteContent(note))
+
+	return content ?? ""
 }
 
 // ── Duplicate ────────────────────────────────────────────────────────────

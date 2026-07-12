@@ -1,6 +1,7 @@
 import { type, type Type } from "arktype"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import type { NoteType } from "@filen/sdk-rs"
+import { NOTE_TAGS_SORT_OPTIONS, DEFAULT_NOTE_TAGS_SORT_BY, type NoteTagsSortBy } from "@/features/notes/lib/sort"
 
 // The sidebar's two-view toggle, persisted with the same kv-backed convention drive's view mode uses
 // (features/drive/lib/preferences.ts): a single global value, arktype-validated on read, self-healing
@@ -66,4 +67,39 @@ export async function getDefaultNoteType(): Promise<NoteType> {
 
 export async function setDefaultNoteType(next: NoteType): Promise<void> {
 	await kvSetJson(DEFAULT_NOTE_TYPE_KV_KEY, next)
+}
+
+// The tags-view sort order — sortNoteTags (sort.ts) has always been ported+tested, but the view
+// hardcoded DEFAULT_NOTE_TAGS_SORT_BY with no control; this is the persisted preference an actual
+// sort-menu control reads/writes. Same single-global-value kv shape as the view mode above.
+const TAGS_SORT_BY_KV_KEY = "notes.tagsSortBy.v1"
+
+const tagsSortBySchema: Type<NoteTagsSortBy> = type.enumerated(...NOTE_TAGS_SORT_OPTIONS)
+
+export async function getNoteTagsSortBy(): Promise<NoteTagsSortBy> {
+	return (await kvGetJson(TAGS_SORT_BY_KV_KEY, tagsSortBySchema)) ?? DEFAULT_NOTE_TAGS_SORT_BY
+}
+
+export async function setNoteTagsSortBy(next: NoteTagsSortBy): Promise<void> {
+	await kvSetJson(TAGS_SORT_BY_KV_KEY, next)
+}
+
+// Per-note "hide completed checklist items" view preference — Record<noteUuid, boolean>, absent
+// entry defaults to false (show everything). Purely a rendering filter (checklistEditor.tsx never edits
+// the underlying content because of it); persisted globally under one kv key, same Record-keyed-by-uuid
+// shape mobile's own secure-store entry uses.
+const HIDE_COMPLETED_CHECKLIST_KV_KEY = "notes.hideCompletedChecklist.v1"
+
+const hideCompletedChecklistSchema: Type<Record<string, boolean>> = type({ "[string]": "boolean" })
+
+export async function getHideCompletedChecklist(noteUuid: string): Promise<boolean> {
+	const record = await kvGetJson(HIDE_COMPLETED_CHECKLIST_KV_KEY, hideCompletedChecklistSchema)
+
+	return record?.[noteUuid] ?? false
+}
+
+export async function setHideCompletedChecklist(noteUuid: string, hide: boolean): Promise<void> {
+	const record = (await kvGetJson(HIDE_COMPLETED_CHECKLIST_KV_KEY, hideCompletedChecklistSchema)) ?? {}
+
+	await kvSetJson(HIDE_COMPLETED_CHECKLIST_KV_KEY, { ...record, [noteUuid]: hide })
 }

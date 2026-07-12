@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from "react"
+import { Fragment, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
@@ -19,20 +19,24 @@ import {
 	CalendarIcon,
 	ArchiveIcon,
 	Trash2Icon,
+	UploadIcon,
+	ArrowDownNarrowWideIcon,
 	type LucideIcon
 } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
 import { useNotes } from "@/features/notes/queries/notes"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
-import { useNotesViewModeQuery } from "@/features/notes/queries/preferences"
+import { useNotesViewModeQuery, useNoteTagsSortByQuery } from "@/features/notes/queries/preferences"
 import { useAccountQuery } from "@/queries/account"
-import { setNotesViewMode, DEFAULT_NOTES_VIEW_MODE, type NotesViewMode } from "@/features/notes/lib/preferences"
-import { DEFAULT_NOTE_TAGS_SORT_BY, tagDisplayName } from "@/features/notes/lib/sort"
+import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
+import { setNotesViewMode, DEFAULT_NOTES_VIEW_MODE, setNoteTagsSortBy, type NotesViewMode } from "@/features/notes/lib/preferences"
+import { DEFAULT_NOTE_TAGS_SORT_BY, tagDisplayName, type NoteTagsSortBy } from "@/features/notes/lib/sort"
 import {
 	buildNotesGroupedRows,
 	buildNotesByTag,
 	buildTagsViewRows,
+	filterNotesByBlockedOwner,
 	sidebarRowKey,
 	selectableNotesFromRows,
 	selectableRowIndexByKey,
@@ -41,6 +45,8 @@ import {
 } from "@/features/notes/components/notesSidebar.logic"
 import { createNote } from "@/features/notes/lib/actions"
 import { exportAllNotes } from "@/features/notes/lib/export"
+import { importNoteFromFile } from "@/features/notes/lib/import"
+import { importAcceptAttribute } from "@/features/notes/lib/import.logic"
 import { selectableNotesForSelectAll } from "@/features/notes/lib/selectionFlags"
 import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelectionStore"
 import { useNotesListSelection } from "@/features/notes/hooks/useNotesListSelection"
@@ -59,7 +65,16 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu"
 
 // Module scope, not inside the component — mirrors drive's "drive.newDirectory" registration
 // (newDirectory.tsx): runs once per module evaluation, which registerAction's duplicate-id guard
@@ -118,12 +133,13 @@ function selectedUuidFromPath(pathname: string): string {
 }
 
 // Compact centered empty/error state, sized for the narrow sidebar (not the full-page Empty primitive).
-function SidebarNotice({ icon, title, description }: { icon: ReactNode; title: string; description?: string }) {
+function SidebarNotice({ icon, title, description, action }: { icon: ReactNode; title: string; description?: string; action?: ReactNode }) {
 	return (
 		<div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center">
 			<div className="text-muted-foreground [&_svg]:size-6">{icon}</div>
 			<p className="text-sm font-medium">{title}</p>
 			{description !== undefined ? <p className="text-xs text-muted-foreground">{description}</p> : null}
+			{action}
 		</div>
 	)
 }
@@ -138,11 +154,13 @@ function segmentClass(active: boolean): string {
 function TagGroupRow({
 	row,
 	onToggle,
-	onTagAction
+	onTagAction,
+	onCreateNoteInTag
 }: {
 	row: Extract<NotesSidebarRow, { kind: "tag" }>
 	onToggle: () => void
 	onTagAction: (kind: NoteTagDialogKind, tag: NoteTag) => void
+	onCreateNoteInTag: (created: Note) => void
 }) {
 	const { t } = useTranslation("notes")
 	const name = tagDisplayName(row.tag)
@@ -183,8 +201,86 @@ function TagGroupRow({
 			<TagContextMenuContent
 				tag={row.tag}
 				onTagAction={onTagAction}
+				onCreateNoteInTag={onCreateNoteInTag}
 			/>
 		</ContextMenu>
+	)
+}
+
+// Tags-view sort control: 3 field/direction radio-group pairs, same shape as drive's own SortMenu but
+// icon-only (the narrow sidebar has no room for a labeled "Sort by" button). Shown next to the
+// notes/tags view toggle, tags view only.
+type TagsSortField = "lastActivity" | "name" | "notesCount"
+type TagsSortDirection = "asc" | "desc"
+
+const TAGS_SORT_PARTS: Record<NoteTagsSortBy, { field: TagsSortField; direction: TagsSortDirection }> = {
+	lastActivityDesc: { field: "lastActivity", direction: "desc" },
+	lastActivityAsc: { field: "lastActivity", direction: "asc" },
+	nameAsc: { field: "name", direction: "asc" },
+	nameDesc: { field: "name", direction: "desc" },
+	notesCountDesc: { field: "notesCount", direction: "desc" },
+	notesCountAsc: { field: "notesCount", direction: "asc" }
+}
+
+const TAGS_SORT_FROM_PARTS: Record<TagsSortField, Record<TagsSortDirection, NoteTagsSortBy>> = {
+	lastActivity: { desc: "lastActivityDesc", asc: "lastActivityAsc" },
+	name: { asc: "nameAsc", desc: "nameDesc" },
+	notesCount: { desc: "notesCountDesc", asc: "notesCountAsc" }
+}
+
+function TagsSortMenu({ value, onChange }: { value: NoteTagsSortBy; onChange: (next: NoteTagsSortBy) => void }) {
+	const { t } = useTranslation("notes")
+	const { field, direction } = TAGS_SORT_PARTS[value]
+
+	const fields: { field: TagsSortField; label: string }[] = [
+		{ field: "lastActivity", label: t("notesTagsSortLastActivity") },
+		{ field: "name", label: t("notesTagsSortName") },
+		{ field: "notesCount", label: t("notesTagsSortNotesCount") }
+	]
+
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				render={
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						aria-label={t("notesTagsSortMenuLabel")}
+						className="app-region-no-drag"
+					>
+						<ArrowDownNarrowWideIcon />
+					</Button>
+				}
+			/>
+			<DropdownMenuContent align="end">
+				<DropdownMenuRadioGroup
+					value={field}
+					onValueChange={(next: TagsSortField) => {
+						onChange(TAGS_SORT_FROM_PARTS[next][direction])
+					}}
+				>
+					<DropdownMenuLabel>{t("notesTagsSortMenuLabel")}</DropdownMenuLabel>
+					{fields.map(row => (
+						<DropdownMenuRadioItem
+							key={row.field}
+							value={row.field}
+						>
+							{row.label}
+						</DropdownMenuRadioItem>
+					))}
+				</DropdownMenuRadioGroup>
+				<DropdownMenuSeparator />
+				<DropdownMenuRadioGroup
+					value={direction}
+					onValueChange={(next: TagsSortDirection) => {
+						onChange(TAGS_SORT_FROM_PARTS[field][next])
+					}}
+				>
+					<DropdownMenuRadioItem value="asc">{t("notesTagsSortAscending")}</DropdownMenuRadioItem>
+					<DropdownMenuRadioItem value="desc">{t("notesTagsSortDescending")}</DropdownMenuRadioItem>
+				</DropdownMenuRadioGroup>
+			</DropdownMenuContent>
+		</DropdownMenu>
 	)
 }
 
@@ -199,15 +295,25 @@ export function NotesSidebar() {
 	const tagsQuery = useNoteTags()
 	const viewModeQuery = useNotesViewModeQuery()
 	const viewMode = viewModeQuery.data ?? DEFAULT_NOTES_VIEW_MODE
+	const tagsSortByQuery = useNoteTagsSortByQuery()
+	const tagsSortBy = tagsSortByQuery.data ?? DEFAULT_NOTE_TAGS_SORT_BY
 	const accountQuery = useAccountQuery()
 	const currentUserId = accountQuery.data?.id
+	// Always warm (unlike drive's sharedIn-only gate): every note in this single flat list could be owned
+	// by anyone, not just a sharedIn subtree, so the blocked cross-reference applies unconditionally.
+	const blocked = useBlockedUsers(true)
 
 	const [search, setSearch] = useState("")
 	// Collapse state is in-memory only — a tag uuid present here is expanded.
 	const [expandedTags, setExpandedTags] = useState<ReadonlySet<string>>(() => new Set())
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+	const importInputRef = useRef<HTMLInputElement | null>(null)
 
-	const allNotes = notesQuery.data ?? []
+	// This filter is applied BEFORE either view builds its rows, so a blocked note's uuid is simply absent
+	// from every downstream derivation (rows, selectableNotes, the live-selection re-derivation below) —
+	// the same "just don't include it" mechanism the selection ghost-purge already relies on, no separate
+	// purge step needed.
+	const allNotes = filterNotesByBlockedOwner(notesQuery.data ?? [], blocked)
 	const allTags = tagsQuery.data ?? []
 	// Eager, opt-in full-body fetch feeding the filters below; see useNoteSearchBodies.ts's own
 	// doc comment for why this never fires a single request outside an active search.
@@ -229,7 +335,7 @@ export function NotesSidebar() {
 					notesByTag: buildNotesByTag(allNotes),
 					expandedTagUuids: expandedTags,
 					search,
-					sortBy: DEFAULT_NOTE_TAGS_SORT_BY,
+					sortBy: tagsSortBy,
 					bodies: searchBodies
 				})
 
@@ -309,12 +415,38 @@ export function NotesSidebar() {
 		await navigate({ to: "/notes/$uuid", params: { uuid: duplicated.uuid } })
 	}
 
+	// Same "navigate to the freshly created note" tail as handleDuplicated/handleNewNote, fired once the
+	// tag-menu's own create-then-tag round trip (noteMenu.tsx) resolves.
+	async function handleCreateNoteInTag(created: Note): Promise<void> {
+		await navigate({ to: "/notes/$uuid", params: { uuid: created.uuid } })
+	}
+
 	async function handleExportAll(): Promise<void> {
 		const outcome = await exportAllNotes(allNotes)
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
 		}
+	}
+
+	// The hidden file input's onChange: detect+sanitize+create all happen inside importNoteFromFile
+	// (lib/import.ts); this only resolves the outcome and navigates, same shape as handleNewNote. Resets
+	// the input's value after every pick (success or failure) so choosing the SAME file twice in a row
+	// still fires a change event.
+	async function handleImportFile(file: File): Promise<void> {
+		const outcome = await importNoteFromFile(file)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+			return
+		}
+
+		await navigate({ to: "/notes/$uuid", params: { uuid: outcome.item.uuid } })
+	}
+
+	async function handleTagsSortChange(next: NoteTagsSortBy): Promise<void> {
+		await setNoteTagsSortBy(next)
+		await tagsSortByQuery.refetch()
 	}
 
 	// Registered at module scope above; guards on dialogHost.isDialogOpen so "n" never fires a second
@@ -409,6 +541,22 @@ export function NotesSidebar() {
 					icon={<TagIcon />}
 					title={t("notesTagsEmptyTitle")}
 					description={t("notesTagsEmptyDescription")}
+					action={
+						// The empty-state's own create-tag entry point: reachable even when the account
+						// has zero notes (the tags-view "no tags" state is agnostic to note count), unlike the
+						// note-scoped createTag dialog this reuses instead (openCreateTagDialog carries no note).
+						<Button
+							variant="outline"
+							size="sm"
+							className="mt-1 app-region-no-drag"
+							onClick={() => {
+								dialogHost.openCreateTagDialog()
+							}}
+						>
+							<PlusIcon />
+							{t("noteActionCreateTag")}
+						</Button>
+					}
 				/>
 			)
 		}
@@ -444,6 +592,9 @@ export function NotesSidebar() {
 										toggleTag(row.tag.uuid)
 									}}
 									onTagAction={dialogHost.openTagDialog}
+									onCreateNoteInTag={created => {
+										void handleCreateNoteInTag(created)
+									}}
 								/>
 							) : (
 								<NoteRow
@@ -495,9 +646,9 @@ export function NotesSidebar() {
 							>
 								<PlusIcon />
 							</Button>
-							{/* Single-entry bulk-ops menu — a natural home for future additions (import, print, ...)
-						next to the new-note button. Disabled while the list query is still loading or
-						resolves empty: nothing to zip either way. */}
+							{/* Bulk-ops menu — export/import/new-tag. The TRIGGER itself stays always-enabled: a
+						zero-note account must still be able to reach "New tag" here; only the export item,
+						which genuinely needs notes to zip, carries its own disabled state. */}
 							<DropdownMenu>
 								<DropdownMenuTrigger
 									render={
@@ -505,7 +656,6 @@ export function NotesSidebar() {
 											variant="ghost"
 											size="icon-sm"
 											aria-label={t("notesSidebarMoreActions")}
-											disabled={notesQuery.isPending || allNotes.length === 0}
 											className="app-region-no-drag"
 										>
 											<MoreHorizontalIcon />
@@ -514,14 +664,49 @@ export function NotesSidebar() {
 								/>
 								<DropdownMenuContent align="end">
 									<DropdownMenuItem
+										disabled={notesQuery.isPending || allNotes.length === 0}
 										onClick={() => {
 											void handleExportAll()
 										}}
 									>
 										{t("notesExportAllAction")}
 									</DropdownMenuItem>
+									<DropdownMenuItem
+										onClick={() => {
+											importInputRef.current?.click()
+										}}
+									>
+										<UploadIcon />
+										{t("notesImportAction")}
+									</DropdownMenuItem>
+									<DropdownMenuSeparator />
+									<DropdownMenuItem
+										onClick={() => {
+											dialogHost.openCreateTagDialog()
+										}}
+									>
+										<PlusIcon />
+										{t("noteActionCreateTag")}
+									</DropdownMenuItem>
 								</DropdownMenuContent>
 							</DropdownMenu>
+							{/* The actual file picker: hidden, triggered by the menu item above. Its `accept` is
+						the widened import union (import.logic.ts), and the value resets after every pick so
+						re-selecting the same file still fires a change event. */}
+							<input
+								ref={importInputRef}
+								type="file"
+								accept={importAcceptAttribute()}
+								className="hidden"
+								onChange={event => {
+									const file = event.target.files?.[0]
+									event.target.value = ""
+
+									if (file) {
+										void handleImportFile(file)
+									}
+								}}
+							/>
 						</div>
 					</div>
 
@@ -561,31 +746,43 @@ export function NotesSidebar() {
 						) : null}
 					</div>
 
-					<div
-						role="group"
-						aria-label={t("notesViewToggleLabel")}
-						className="flex gap-0.5 rounded-lg bg-muted p-0.5 app-region-no-drag"
-					>
-						<button
-							type="button"
-							aria-pressed={viewMode === "notes"}
-							onClick={() => {
-								void handleViewModeChange("notes")
-							}}
-							className={segmentClass(viewMode === "notes")}
+					<div className="flex items-center gap-1.5">
+						<div
+							role="group"
+							aria-label={t("notesViewToggleLabel")}
+							className="flex flex-1 gap-0.5 rounded-lg bg-muted p-0.5 app-region-no-drag"
 						>
-							{t("notesViewNotes")}
-						</button>
-						<button
-							type="button"
-							aria-pressed={viewMode === "tags"}
-							onClick={() => {
-								void handleViewModeChange("tags")
-							}}
-							className={segmentClass(viewMode === "tags")}
-						>
-							{t("notesViewTags")}
-						</button>
+							<button
+								type="button"
+								aria-pressed={viewMode === "notes"}
+								onClick={() => {
+									void handleViewModeChange("notes")
+								}}
+								className={segmentClass(viewMode === "notes")}
+							>
+								{t("notesViewNotes")}
+							</button>
+							<button
+								type="button"
+								aria-pressed={viewMode === "tags"}
+								onClick={() => {
+									void handleViewModeChange("tags")
+								}}
+								className={segmentClass(viewMode === "tags")}
+							>
+								{t("notesViewTags")}
+							</button>
+						</div>
+						{/* Tags-view sort control, shown only in the view it applies to (the notes view has its
+					own date-grouping instead, no sort control of its own). */}
+						{viewMode === "tags" ? (
+							<TagsSortMenu
+								value={tagsSortBy}
+								onChange={next => {
+									void handleTagsSortChange(next)
+								}}
+							/>
+						) : null}
 					</div>
 				</div>
 

@@ -10,7 +10,8 @@ import {
 	addChecklistLine,
 	removeChecklistItem,
 	toggleChecklistItem,
-	setChecklistItemContent
+	setChecklistItemContent,
+	visibleChecklistRows
 } from "@/features/notes/components/editor/checklistEditor.logic"
 
 // Custom checklist editor (mirrors mobile's content/checklist screen): one text input per row with a
@@ -23,7 +24,15 @@ import {
 // No didType gate is needed here (unlike mobile): the row state is seeded synchronously in the useState
 // initializer, never via a hydration effect that writes-then-propagates, so every onChange call
 // originates from a genuine user event and none is spurious.
-export function ChecklistEditor({ controller }: { controller: NoteEditorController }) {
+export function ChecklistEditor({
+	controller,
+	hideCompleted = false
+}: {
+	controller: NoteEditorController
+	// "Hide completed items" filters checked rows out of the RENDER only; the underlying `rows` state
+	// (and every edit handler below, which all look up by id against the full array) is untouched by this.
+	hideCompleted?: boolean
+}) {
 	const { t } = useTranslation("notes")
 	const [rows, setRows] = useState<Checklist>(() => parseChecklistSeed(controller.seed, () => crypto.randomUUID()))
 	// Live input elements by row id, for focus moves after add/remove. A ref (instance state), not
@@ -127,9 +136,11 @@ export function ChecklistEditor({ controller }: { controller: NoteEditorControll
 		}
 	}
 
+	const visibleRows = visibleChecklistRows(rows, hideCompleted)
+
 	return (
 		<div className="flex size-full flex-col gap-0.5 overflow-auto p-4">
-			{rows.map(item => (
+			{visibleRows.map(item => (
 				<div
 					key={item.id}
 					className="flex items-start gap-2.5 rounded-md px-2 py-1.5"

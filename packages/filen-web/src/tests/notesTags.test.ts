@@ -104,6 +104,21 @@ describe("createNoteTag — reserved-name rejection", () => {
 
 		expect(outcome.status).toBe("error")
 	})
+
+	it("succeeds with a completely empty notes list (no note argument, none needed)", async () => {
+		testQueryClient.setQueryData(NOTES_QUERY_KEY, [])
+		const tag = mockTag({ name: "solo" })
+		createNoteTagOp.mockResolvedValueOnce(tag)
+
+		const outcome = await createNoteTag("solo")
+
+		expect(outcome).toEqual({ status: "success", item: tag })
+		expect(noteTagsQueryGet()).toEqual([tag])
+		// The standalone path never touches the notes list — unlike the note-scoped "createTag" dialog
+		// flow (useNoteDialogHost's handleCreateTagSubmit), which also calls addTagToNote.
+		expect(notesQueryGet()).toEqual([])
+		expect(addTagToNoteOp).not.toHaveBeenCalled()
+	})
 })
 
 describe("renameNoteTag", () => {

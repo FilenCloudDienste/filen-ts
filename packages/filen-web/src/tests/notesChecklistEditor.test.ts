@@ -6,7 +6,8 @@ import {
 	addChecklistLine,
 	removeChecklistItem,
 	toggleChecklistItem,
-	setChecklistItemContent
+	setChecklistItemContent,
+	visibleChecklistRows
 } from "@/features/notes/components/editor/checklistEditor.logic"
 
 describe("parseChecklistSeed", () => {
@@ -174,5 +175,28 @@ describe("toggleChecklistItem / setChecklistItemContent", () => {
 
 		expect(next[0]?.content).toBe("new")
 		expect(rows[0]?.content).toBe("old")
+	})
+})
+
+describe("visibleChecklistRows — hide-completed render filter", () => {
+	const rows: Checklist = [
+		{ id: "1", checked: false, content: "A" },
+		{ id: "2", checked: true, content: "B" },
+		{ id: "3", checked: false, content: "C" },
+		{ id: "4", checked: true, content: "D" }
+	]
+
+	it("returns the SAME array reference when hideCompleted is off (no filtering)", () => {
+		expect(visibleChecklistRows(rows, false)).toBe(rows)
+	})
+
+	it("drops checked rows, preserving the order of what remains, when hideCompleted is on", () => {
+		expect(visibleChecklistRows(rows, true).map(r => r.id)).toEqual(["1", "3"])
+	})
+
+	it("never mutates the input list either way", () => {
+		visibleChecklistRows(rows, true)
+
+		expect(rows.map(r => r.checked)).toEqual([false, true, false, true])
 	})
 })

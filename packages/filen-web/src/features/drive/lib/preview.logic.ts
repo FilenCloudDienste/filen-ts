@@ -352,3 +352,10 @@ const CODE_LANGUAGE_MAP: Readonly<Record<string, string>> = {
 export function codeMirrorLanguageFor(ext: string): string {
 	return CODE_LANGUAGE_MAP[ext] ?? ""
 }
+
+// Every extension codeMirrorLanguageFor recognizes — the notes import feature builds its file input's
+// `accept` union from this list, so a future CODE_LANGUAGE_MAP addition is picked up there automatically
+// instead of drifting out of sync with a hand-maintained second list.
+export function codeMirrorSupportedExtensions(): readonly string[] {
+	return Object.keys(CODE_LANGUAGE_MAP)
+}

@@ -26,6 +26,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { NOTES_QUERY_KEY, notesQueryGet } from "@/features/notes/queries/notes"
 import { addNoteParticipants, removeNoteParticipant, setNoteParticipantPermission } from "@/features/notes/lib/participants"
 import { participantRows, contactsAvailableToAdd } from "@/features/notes/components/participantsDialog.logic"
+import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -232,6 +233,32 @@ describe("participantRows — self-exclusion, ordering, and owner/participant vi
 		const rows = participantRows(note, 3n, false)
 
 		expect(rows.find(r => r.participant.userId === 1n)?.canManage).toBe(false)
+	})
+
+	it("blocked defaults to false when no blocked-users set is passed (callers predating this field are unaffected)", () => {
+		const rows = participantRows(note, 1n, true)
+
+		expect(rows.every(r => !r.blocked)).toBe(true)
+	})
+})
+
+describe("participantRows — blocked cross-reference", () => {
+	const owner = mockParticipant({ userId: 1n, isOwner: true })
+	const blockedParticipant = mockParticipant({ userId: 2n, isOwner: false, email: "blocked@x.io" })
+	const regularParticipant = mockParticipant({ userId: 3n, isOwner: false, email: "regular@x.io" })
+	const note = mockNote({ ownerId: 1n, participants: [owner, blockedParticipant, regularParticipant] })
+
+	it("flags only the row whose identity is in the blocked set — NOT gated by canManage/ownership", () => {
+		const blocked = deriveBlockedUsers([
+			{ uuid: testUuid("blocked-contact"), userId: 2n, email: "blocked@x.io", nickName: "", timestamp: 0n }
+		])
+
+		// Non-owner viewer (canManage is false on every row here) still sees the correct blocked flags —
+		// mobile parity: block/unblock is never gated on ownership.
+		const rows = participantRows(note, 3n, false, blocked)
+
+		expect(rows.find(r => r.participant.userId === 2n)?.blocked).toBe(true)
+		expect(rows.find(r => r.participant.userId === 1n)?.blocked).toBe(false)
 	})
 })
 
