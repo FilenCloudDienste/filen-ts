@@ -23,6 +23,7 @@ import { type notes } from "@/locales/en/notes"
 import { type chats } from "@/locales/en/chats"
 import { type settings } from "@/locales/en/settings"
 import { type publicLinks } from "@/locales/en/publicLinks"
+import { type audio } from "@/locales/en/audio"
 
 declare module "i18next" {
 	interface CustomTypeOptions {
@@ -40,6 +41,7 @@ declare module "i18next" {
 			chats: typeof chats
 			settings: typeof settings
 			publicLinks: typeof publicLinks
+			audio: typeof audio
 		}
 	}
 }

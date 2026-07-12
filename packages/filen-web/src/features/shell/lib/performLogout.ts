@@ -7,6 +7,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { wipeSwClient } from "@/features/drive/lib/saveDownload"
 import { clearSession, broadcastAuth } from "@/lib/sdk/session"
 import { kvClear } from "@/lib/storage/adapter"
+import { disposeAudioEngine } from "@/features/audio/lib/audioEngine"
 import { queryClient } from "@/queries/client"
 
 // The single unified sign-out both surfaces drive through: the account menu (user-initiated) and the
@@ -21,6 +22,9 @@ export async function performLogout(): Promise<void> {
 	chatsSync.cancel()
 	// Stop every typing watchdog + wipe the typing store so no timer fires into the cleared session.
 	clearAllTyping()
+	// Stop playback, revoke the live blob URL, tear down the media element and clear the queue so no
+	// audio from this account survives into the next session.
+	disposeAudioEngine()
 	// Tear the realtime socket down before the client is released — unsubscribeFromSocket needs the live
 	// client. Fire-and-forget: the worker also frees the listener in releaseClient as a backstop.
 	void socketBridge.stop()

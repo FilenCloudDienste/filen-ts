@@ -10,7 +10,7 @@ import type { CommonKey, DriveKey, PreviewKey, NotesKey, ChatsKey } from "@/lib/
 // consumer three things for free: one source of truth for "what does this shortcut do" (a future
 // settings UI reads `actions`' defs), a user-remappable combo (`setUserCombo`), and a live
 // indicator (`<Kbd action>`) that always reflects the combo actually in effect.
-export type ActionScope = "global" | "drive" | "editor" | "notes" | "chats"
+export type ActionScope = "global" | "drive" | "editor" | "notes" | "chats" | "audio"
 
 export interface ActionDef {
 	id: string
