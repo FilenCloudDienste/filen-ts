@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { enterScratchDirectory, trashScratchDirectory, waitForListingSettled } from "./helpers/listing"
+import { descendInto, enterScratchDirectory, trashScratchDirectory, waitForListingSettled } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -125,9 +125,11 @@ async function uploadLargeTestFile(page: Page, name: string, sizeBytes: number):
 // file or several were just uploaded. The rail entry NAVIGATES to /transfers now (P3 -- no more
 // popover overlaying the drive listing in place), so this returns to wherever the caller was before
 // clearing, restoring the exact drive scratch-directory view every caller here relies on afterwards.
-async function clearFinishedTransfers(page: Page): Promise<void> {
-	const previousUrl = page.url()
-
+// Returns there the same way drive-actions.spec.ts's own trash-then-back round trip does -- an in-app
+// sidebar Link click plus a re-descent, never page.goto(): goto is a hard reload that re-runs the whole
+// boot/re-auth sequence, tearing down and rebooting the wasm SDK/OPFS session every caller here relies
+// on staying alive across this round trip.
+async function clearFinishedTransfers(page: Page, listbox: ReturnType<Page["getByRole"]>, scratchName: string): Promise<void> {
 	await page
 		.getByRole("link", { name: /Transfers/i })
 		.first()
@@ -136,8 +138,9 @@ async function clearFinishedTransfers(page: Page): Promise<void> {
 
 	await page.getByRole("button", { name: "Clear finished", exact: true }).click()
 
-	await page.goto(previousUrl)
+	await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
 	await waitForListingSettled(page)
+	await descendInto(page, listbox, scratchName)
 }
 
 test.describe("downloads", () => {
@@ -165,7 +168,7 @@ test.describe("downloads", () => {
 			const row = listbox.getByRole("option", { name: fileName })
 			await expect(row).toBeVisible({ timeout: 20_000 })
 
-			await clearFinishedTransfers(page)
+			await clearFinishedTransfers(page, listbox, scratchName)
 
 			await row.click()
 			await page.getByRole("button", { name: "Download", exact: true }).click()
@@ -218,7 +221,7 @@ test.describe("downloads", () => {
 			await expect(rowA).toBeVisible({ timeout: 20_000 })
 			await expect(rowB).toBeVisible({ timeout: 20_000 })
 
-			await clearFinishedTransfers(page)
+			await clearFinishedTransfers(page, listbox, scratchName)
 
 			// Click, then modifier-click to add to the selection -- the same mechanism drive-actions.spec.ts's
 			// own bulk tests use.
@@ -277,7 +280,7 @@ test.describe("downloads", () => {
 			const row = listbox.getByRole("option", { name: fileName })
 			await expect(row).toBeVisible({ timeout: 20_000 })
 
-			await clearFinishedTransfers(page)
+			await clearFinishedTransfers(page, listbox, scratchName)
 
 			await row.click()
 
@@ -335,19 +338,18 @@ test.describe("downloads", () => {
 			const row = listbox.getByRole("option", { name: fileName })
 			await expect(row).toBeVisible({ timeout: 20_000 })
 
-			await clearFinishedTransfers(page)
+			await clearFinishedTransfers(page, listbox, scratchName)
 
 			await row.click()
 			await page.getByRole("button", { name: "Download", exact: true }).click()
 
-			// Snapshot the scratch directory's own option count, and the drive URL to return to, before
-			// leaving for the /transfers screen (P3 -- the rail entry navigates there now, rather than
-			// overlaying a popover on this same page) -- race-free here, unlike the identical
-			// snapshot-then-assert shape in drive.spec.ts's own "selection" test: the scratch directory is
-			// this test's private space, so nothing else ever concurrently creates/trashes inside it the way
-			// concurrent specs do at /drive's shared root.
+			// Snapshot the scratch directory's own option count before leaving for the /transfers screen
+			// (P3 -- the rail entry navigates there now, rather than overlaying a popover on this same
+			// page) -- race-free here, unlike the identical snapshot-then-assert shape in drive.spec.ts's
+			// own "selection" test: the scratch directory is this test's private space, so nothing else
+			// ever concurrently creates/trashes inside it the way concurrent specs do at /drive's shared
+			// root.
 			const optionCountBeforeCancel = await listbox.getByRole("option").count()
-			const scratchUrl = page.url()
 
 			await page
 				.getByRole("link", { name: /Transfers/i })
@@ -376,8 +378,11 @@ test.describe("downloads", () => {
 			await expect(progressbar).toHaveCount(0)
 			await expect(page.getByText(/failed/i)).toHaveCount(0)
 
-			await page.goto(scratchUrl)
+			// Same in-app round trip as clearFinishedTransfers above, not page.goto() -- a hard reload here
+			// would reboot the wasm SDK/OPFS session mid-test instead of just changing the client-side route.
+			await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
 			await waitForListingSettled(page)
+			await descendInto(page, listbox, scratchName)
 
 			// The source item itself is untouched -- cancelling aborts the in-flight transfer, never the
 			// underlying file, and the listing was never patched by a download in the first place. The
