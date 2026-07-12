@@ -46,7 +46,10 @@ const Dom = ({
 				renderFootnotes: true,
 				useBase64URL: true,
 				renderEndnotes: true,
-				renderAltChunks: true,
+				// Alt-chunks embed foreign HTML/RTF sub-documents carried inside the file itself. They're
+				// rare in real documents and already disabled on the web and desktop clients — keep mobile
+				// consistent and don't render embedded content from the document.
+				renderAltChunks: false,
 				renderChanges: true,
 				renderComments: true,
 				hideWrapperOnPrint: false
