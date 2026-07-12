@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AnyFile, ZipItem } from "@filen/sdk-rs"
 import { type SwSaveTarget } from "@/features/drive/lib/saveDownload"
-import { SW_DOWNLOAD_PREFIX, SW_MSG_INIT_CLIENT, SW_MSG_REGISTER_DOWNLOAD, SW_MSG_REGISTER_ZIP_DOWNLOAD } from "@/lib/sw/protocol"
+import {
+	SW_DOWNLOAD_PREFIX,
+	SW_MSG_INIT_CLIENT,
+	SW_MSG_LOGOUT,
+	SW_MSG_REGISTER_DOWNLOAD,
+	SW_MSG_REGISTER_ZIP_DOWNLOAD
+} from "@/lib/sw/protocol"
 
 // saveDownload.ts keeps its SW-client-ready state in a module-level `let` (mirrors
 // lib/sw/register.ts) — every test that touches the sw path needs its own module instance, so
@@ -54,7 +60,14 @@ function fakeServiceWorker(reply: (type: string, payload: Record<string, unknown
 }
 
 function stubServiceWorkerReady(active: ReturnType<typeof fakeServiceWorker> | null): void {
-	vi.stubGlobal("navigator", { serviceWorker: { ready: Promise.resolve({ active }) } })
+	vi.stubGlobal("navigator", { serviceWorker: { ready: Promise.resolve({ active }), controller: active } })
+}
+
+// wipeSwClient targets navigator.serviceWorker.controller directly (never `.ready`, which would block
+// forever with no worker) — this stubs that surface, plus `.ready` so a follow-up saveDownload can
+// still re-init after the wipe cleared the memo.
+function stubServiceWorkerController(controller: ReturnType<typeof fakeServiceWorker> | null): void {
+	vi.stubGlobal("navigator", { serviceWorker: { controller, ready: Promise.resolve({ active: controller }) } })
 }
 
 function stubWindow(overrides: Record<string, unknown> = {}): { href: string } {
@@ -260,6 +273,44 @@ describe("triggerSwDownload", () => {
 
 		await expect(triggerSwDownload(testFile(), save)).rejects.toThrow("no room")
 		expect(location.href).toBe("")
+	})
+})
+
+describe("wipeSwClient", () => {
+	it("posts SW_MSG_LOGOUT to the controlling worker so no key material survives sign-out", async () => {
+		stubWindow()
+		const sw = fakeServiceWorker(() => ({ ok: true }))
+		stubServiceWorkerController(sw)
+
+		const { wipeSwClient } = await freshModule()
+		await wipeSwClient()
+
+		expect(sw.calls).toEqual([{ type: SW_MSG_LOGOUT, payload: {} }])
+	})
+
+	it("is a no-op when no worker controls the page (never blocks logout)", async () => {
+		stubWindow()
+		stubServiceWorkerController(null)
+
+		const { wipeSwClient } = await freshModule()
+
+		await expect(wipeSwClient()).resolves.toBeUndefined()
+	})
+
+	it("clears the client-ready memo so the next sign-in re-inits a fresh sw client", async () => {
+		stubWindow()
+		const sw = fakeServiceWorker(() => ({ ok: true }))
+		stubServiceWorkerController(sw)
+
+		const { saveDownload, wipeSwClient } = await freshModule()
+
+		await saveDownload("a.txt")
+		expect(toStringified).toHaveBeenCalledTimes(1)
+
+		await wipeSwClient()
+
+		await saveDownload("b.txt")
+		expect(toStringified).toHaveBeenCalledTimes(2)
 	})
 })
 

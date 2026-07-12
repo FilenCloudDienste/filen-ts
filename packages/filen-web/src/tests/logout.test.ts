@@ -28,6 +28,10 @@ function makeHarness() {
 		calls.push("kvClear")
 		return Promise.resolve()
 	})
+	const wipeServiceWorker = vi.fn<() => Promise<void>>().mockImplementation(() => {
+		calls.push("wipeServiceWorker")
+		return Promise.resolve()
+	})
 	const broadcast = vi.fn<() => void>().mockImplementation(() => {
 		calls.push("broadcast")
 	})
@@ -35,9 +39,9 @@ function makeHarness() {
 		calls.push("reload")
 	})
 
-	const deps: LogoutDeps = { cancelQueries, clearQueryCache, sdkLogout, clearSession, kvClear, broadcast, reload }
+	const deps: LogoutDeps = { cancelQueries, clearQueryCache, sdkLogout, clearSession, kvClear, wipeServiceWorker, broadcast, reload }
 
-	return { deps, calls, cancelQueries, clearQueryCache, sdkLogout, clearSession, kvClear, broadcast, reload }
+	return { deps, calls, cancelQueries, clearQueryCache, sdkLogout, clearSession, kvClear, wipeServiceWorker, broadcast, reload }
 }
 
 beforeEach(() => {
@@ -50,7 +54,40 @@ describe("runLogout (injected deps, no worker)", () => {
 
 		await runLogout(h.deps)
 
-		expect(h.calls).toEqual(["cancelQueries", "clearQueryCache", "sdkLogout", "clearSession", "kvClear", "broadcast", "reload"])
+		expect(h.calls).toEqual([
+			"cancelQueries",
+			"clearQueryCache",
+			"sdkLogout",
+			"clearSession",
+			"kvClear",
+			"wipeServiceWorker",
+			"broadcast",
+			"reload"
+		])
+	})
+
+	it("wipes the service worker AFTER the local store wipe and BEFORE the broadcast+reload", async () => {
+		const h = makeHarness()
+
+		await runLogout(h.deps)
+
+		const wipeSw = h.calls.indexOf("wipeServiceWorker")
+
+		expect(wipeSw).toBeGreaterThan(h.calls.indexOf("kvClear"))
+		expect(wipeSw).toBeLessThan(h.calls.indexOf("broadcast"))
+		expect(wipeSw).toBeLessThan(h.calls.indexOf("reload"))
+	})
+
+	it("a failing service-worker wipe is isolated and never blocks broadcast+reload", async () => {
+		const errorSpy = vi.spyOn(log, "error").mockImplementation(() => undefined)
+		const h = makeHarness()
+		h.wipeServiceWorker.mockRejectedValue(new Error("worker unreachable"))
+
+		await runLogout(h.deps)
+
+		expect(h.broadcast).toHaveBeenCalledTimes(1)
+		expect(h.reload).toHaveBeenCalledTimes(1)
+		expect(errorSpy).toHaveBeenCalledWith("logout", expect.stringContaining("wipe-service-worker"), expect.anything())
 	})
 
 	it("an async-rejecting phase is logged and never blocks a later phase", async () => {
@@ -90,11 +127,12 @@ describe("runLogout (injected deps, no worker)", () => {
 		h.sdkLogout.mockRejectedValue(new Error("c"))
 		h.clearSession.mockRejectedValue(new Error("d"))
 		h.kvClear.mockRejectedValue(new Error("e"))
+		h.wipeServiceWorker.mockRejectedValue(new Error("f"))
 		h.broadcast.mockImplementation(() => {
-			throw new Error("f")
+			throw new Error("g")
 		})
 		h.reload.mockImplementation(() => {
-			throw new Error("g")
+			throw new Error("h")
 		})
 
 		await expect(runLogout(h.deps)).resolves.toBeUndefined()
@@ -104,6 +142,7 @@ describe("runLogout (injected deps, no worker)", () => {
 		expect(h.sdkLogout).toHaveBeenCalledTimes(1)
 		expect(h.clearSession).toHaveBeenCalledTimes(1)
 		expect(h.kvClear).toHaveBeenCalledTimes(1)
+		expect(h.wipeServiceWorker).toHaveBeenCalledTimes(1)
 		expect(h.broadcast).toHaveBeenCalledTimes(1)
 		expect(h.reload).toHaveBeenCalledTimes(1)
 	})

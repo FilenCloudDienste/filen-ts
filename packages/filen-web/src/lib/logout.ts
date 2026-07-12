@@ -14,6 +14,7 @@ export interface LogoutDeps {
 	sdkLogout: () => Promise<void>
 	clearSession: () => Promise<void>
 	kvClear: () => Promise<void>
+	wipeServiceWorker: () => Promise<void>
 	broadcast: () => void
 	reload: () => void
 }
@@ -48,6 +49,10 @@ export async function runLogout(deps: LogoutDeps): Promise<void> {
 	// included: logout is a full local wipe by design, matching the confirm dialog's copy.
 	await phase("clear-session", deps.clearSession)
 	await phase("kv-clear", deps.kvClear)
+	// The service worker keeps its own reconstructed Client (decrypted key material) that no store wipe
+	// above reaches — signal it to drop that + any pending downloads before the reload, so no secret
+	// survives sign-out inside the worker.
+	await phase("wipe-service-worker", deps.wipeServiceWorker)
 	// Other tabs reload only once the wipe has landed, per the race above.
 	await phase("broadcast", deps.broadcast)
 	// Fresh boot lands on /login. No retry loop — a reload failure leaves a torn-but-unauthed state

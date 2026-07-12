@@ -2,7 +2,7 @@
 // `/__sw/version` (bump on any change to sw.ts's runtime behavior, never on app/feature versioning)
 // and the message types + route prefixes it understands. Imported by both sw.ts and register.ts;
 // that import is the only edge between them.
-export const SW_PROTOCOL_VERSION = 5
+export const SW_PROTOCOL_VERSION = 6
 
 // Shared so the page side (register.ts's applyUpdate) can't drift from sw.ts's message listener with
 // a typo'd literal.
@@ -32,6 +32,10 @@ export const SW_MSG_REGISTER_PREVIEW = "FILEN_SW_REGISTER_PREVIEW"
 // page ↔ SW keepalive heartbeat — Firefox kills an idle SW at ~30 s mid-stream, so the page pings
 // every ~10-15 s for the duration of any active download and the SW pongs.
 export const SW_MSG_PING = "FILEN_SW_PING"
+// page → SW logout signal: nulls the reconstructed Client and clears the pending-downloads map so no
+// decrypted key material survives sign-out inside the worker. Sent (and acked) from runLogout before
+// the page reload.
+export const SW_MSG_LOGOUT = "FILEN_SW_LOGOUT"
 
 // ── Inline-preview Content-Type allowlist ───────────────────────────────────────────────────────
 // The SW's inline route (SW_MSG_REGISTER_PREVIEW) only ever serves a Content-Type on this list —

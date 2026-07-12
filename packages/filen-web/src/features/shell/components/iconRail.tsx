@@ -23,6 +23,7 @@ import { clearAllTyping } from "@/features/chats/lib/typing"
 import { useChatsUnread } from "@/features/chats/queries/chatsUnread"
 import { socketBridge } from "@/lib/sdk/socket"
 import { sdkApi } from "@/lib/sdk/client"
+import { wipeSwClient } from "@/features/drive/lib/saveDownload"
 import { clearSession, broadcastAuth } from "@/lib/sdk/session"
 import { kvClear } from "@/lib/storage/adapter"
 import { queryClient } from "@/queries/client"
@@ -141,6 +142,7 @@ function AccountMenu() {
 				sdkLogout: () => sdkApi.logout(),
 				clearSession,
 				kvClear,
+				wipeServiceWorker: wipeSwClient,
 				broadcast: () => {
 					broadcastAuth("logout")
 				},

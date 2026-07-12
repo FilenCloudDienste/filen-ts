@@ -1,7 +1,13 @@
 import type { AnyFile, ZipItem } from "@filen/sdk-rs"
 import { isAbortError } from "@filen/utils"
 import { sdkApi } from "@/lib/sdk/client"
-import { SW_DOWNLOAD_PREFIX, SW_MSG_INIT_CLIENT, SW_MSG_REGISTER_DOWNLOAD, SW_MSG_REGISTER_ZIP_DOWNLOAD } from "@/lib/sw/protocol"
+import {
+	SW_DOWNLOAD_PREFIX,
+	SW_MSG_INIT_CLIENT,
+	SW_MSG_LOGOUT,
+	SW_MSG_REGISTER_DOWNLOAD,
+	SW_MSG_REGISTER_ZIP_DOWNLOAD
+} from "@/lib/sw/protocol"
 
 // The disk mechanism a download writes to, picked once per saveDownload() call by capability —
 // callers (features/drive/lib/download.ts) branch on `kind`, never on the browser directly. FSA carries a
@@ -100,6 +106,33 @@ export function ensureSwClientReady(): Promise<void> {
 	})
 
 	return swClientReady
+}
+
+// Tells the controlling service worker to drop this session's decrypted key material (its
+// reconstructed Client + every pending download) at logout, and forgets the tab-lifetime handoff memo
+// so a later sign-in re-inits a fresh client. Targets `controller` (never `navigator.serviceWorker.ready`,
+// which blocks forever when no worker controls the page — e.g. dev, or before the first activation)
+// and never lets a dead-but-registered worker's missing ack wedge sign-out: the imminent reload tears
+// the worker down regardless, so a lost ack is not fatal.
+export async function wipeSwClient(): Promise<void> {
+	swClientReady = null
+
+	if (!("serviceWorker" in navigator)) {
+		return
+	}
+
+	const target = navigator.serviceWorker.controller
+
+	if (target === null) {
+		return
+	}
+
+	await Promise.race([
+		sendToSw(target, SW_MSG_LOGOUT, {}),
+		new Promise<void>(resolve => {
+			setTimeout(resolve, 1000)
+		})
+	])
 }
 
 async function prepareSwTarget(suggestedName: string): Promise<SwSaveTarget> {

@@ -17,9 +17,10 @@ import {
 	SW_MSG_REGISTER_ZIP_DOWNLOAD,
 	SW_MSG_REGISTER_PREVIEW,
 	SW_MSG_PING,
+	SW_MSG_LOGOUT,
 	isAllowedInlineContentType
 } from "@/lib/sw/protocol"
-import { sanitizeFilename } from "@/lib/filename"
+import { contentDispositionAttachment } from "@/lib/filename"
 
 // ── SW-hosted trimmed SDK (single-threaded — no COI, no rayon pool) ─────────────────────────────
 // Lazy: only fetch+compile the 2 MB wasm and reconstruct the Client when a session is handed over, so
@@ -125,6 +126,20 @@ function parseRange(header: string, total: number): { start: number; end: number
 // either). Otherwise mirrors the file branch's streaming/failure contract exactly.
 function handleZipDownload(pending: PendingZipDownload, client: SwClient): Response {
 	const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
+
+	// Build the Response BEFORE incrementing activeStreams: constructing it validates every header value
+	// as a ByteString and can throw synchronously — counting the stream first would leave activeStreams
+	// stuck above zero (the pump below never runs its finally), permanently gating SKIP_WAITING so the SW
+	// could never activate an update.
+	const response = new Response(readable, {
+		status: 200,
+		headers: {
+			"Content-Type": "application/zip",
+			"Content-Disposition": contentDispositionAttachment(pending.name),
+			"X-Content-Type-Options": "nosniff"
+		}
+	})
+
 	activeStreams++
 	// On failure, abort the writable so the Response readable ERRORS (never hangs) — same contract as
 	// the file branch. progress is a no-op: the page has already navigated away by the time this runs,
@@ -139,14 +154,7 @@ function handleZipDownload(pending: PendingZipDownload, client: SwClient): Respo
 		}
 	})()
 
-	return new Response(readable, {
-		status: 200,
-		headers: {
-			"Content-Type": "application/zip",
-			"Content-Disposition": `attachment; filename="${sanitizeFilename(pending.name)}"`,
-			"X-Content-Type-Options": "nosniff"
-		}
-	})
+	return response
 }
 
 // Shared by the "file" (forced attachment) and "preview" (inline) kinds below — both are single-file,
@@ -178,6 +186,33 @@ function streamFileRange(
 	const length = end - start + 1
 
 	const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
+
+	const responseHeaders: Record<string, string> = {
+		"Content-Type": headers.contentType,
+		"X-Content-Type-Options": "nosniff"
+	}
+	if (headers.disposition !== null) {
+		responseHeaders["Content-Disposition"] = headers.disposition
+	}
+	if (headers.sandbox === true) {
+		responseHeaders["Content-Security-Policy"] = "sandbox"
+	}
+
+	// Build the Response BEFORE incrementing activeStreams and starting the pump: header-value
+	// validation (a Content-Disposition that isn't a legal ByteString) throws synchronously here, and
+	// counting the stream first would leave activeStreams stuck above zero (the pump's finally never
+	// runs because nothing consumes the readable), permanently gating SKIP_WAITING.
+	let response: Response
+	if (range !== null) {
+		responseHeaders["Content-Range"] = `bytes ${String(start)}-${String(end)}/${String(total)}`
+		responseHeaders["Content-Length"] = String(length)
+		response = new Response(readable, { status: 206, headers: responseHeaders })
+	} else {
+		responseHeaders["Content-Length"] = String(total)
+		responseHeaders["Accept-Ranges"] = "bytes"
+		response = new Response(readable, { status: 200, headers: responseHeaders })
+	}
+
 	activeStreams++
 	// Stream the decrypted bytes straight into the Response body's writable end. `end` is EXCLUSIVE on
 	// the SDK's `{start,end}` (Rust range convention) — an HTTP inclusive `bytes=0-99` maps to
@@ -203,30 +238,13 @@ function streamFileRange(
 		}
 	})()
 
-	const responseHeaders: Record<string, string> = {
-		"Content-Type": headers.contentType,
-		"X-Content-Type-Options": "nosniff"
-	}
-	if (headers.disposition !== null) {
-		responseHeaders["Content-Disposition"] = headers.disposition
-	}
-	if (headers.sandbox === true) {
-		responseHeaders["Content-Security-Policy"] = "sandbox"
-	}
-	if (range !== null) {
-		responseHeaders["Content-Range"] = `bytes ${String(start)}-${String(end)}/${String(total)}`
-		responseHeaders["Content-Length"] = String(length)
-		return new Response(readable, { status: 206, headers: responseHeaders })
-	}
-	responseHeaders["Content-Length"] = String(total)
-	responseHeaders["Accept-Ranges"] = "bytes"
-	return new Response(readable, { status: 200, headers: responseHeaders })
+	return response
 }
 
 // A forced-attachment octet-stream response — the "file" kind's own contract, and the fallback a
 // "preview" kind takes when its contentType fails the SW's own re-validation.
 function attachmentHeaders(name: string): { contentType: string; disposition: string } {
-	return { contentType: "application/octet-stream", disposition: `attachment; filename="${sanitizeFilename(name)}"` }
+	return { contentType: "application/octet-stream", disposition: contentDispositionAttachment(name) }
 }
 
 function handleDownload(request: Request, url: URL): Response {
@@ -304,6 +322,18 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 			size: msg.size,
 			contentType: msg.contentType
 		})
+		port?.postMessage({ ok: true })
+		return
+	}
+
+	if (type === SW_MSG_LOGOUT) {
+		// Logout must leave no decrypted key material resident in the worker: free the reconstructed
+		// Client and drop every pending download (each holds a decrypted AnyFile/ZipItem). The page sends
+		// this before its reload; the SW keeps running independently of that navigation, so the wipe
+		// lands regardless of reload timing.
+		swClient?.free()
+		swClient = null
+		downloads.clear()
 		port?.postMessage({ ok: true })
 		return
 	}
