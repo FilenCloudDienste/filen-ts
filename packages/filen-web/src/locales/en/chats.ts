@@ -31,6 +31,10 @@ export const chats = {
 	chatMuted: "Muted",
 	/** Conversation row — accessible label on the per-row unread indicator */
 	chatUnread: "Unread",
+	/** Conversation row — accessible label on the numeric unread badge (singular) */
+	chatUnreadCount_one: "{{count}} unread message",
+	/** Conversation row — accessible label on the numeric unread badge (plural) */
+	chatUnreadCount_other: "{{count}} unread messages",
 	/** Conversation row — display fallback for a conversation whose key didn't decrypt */
 	chatUndecryptable: "Encrypted conversation",
 
@@ -43,6 +47,8 @@ export const chats = {
 	chatsLoadingThread: "Loading conversation…",
 	/** Thread — shown when the message list query fails */
 	chatThreadLoadError: "Couldn't load messages",
+	/** Chat surface — banner pinned above the conversation while the realtime socket is reconnecting */
+	chatReconnecting: "Reconnecting…",
 	/** Thread — shown when a resolved conversation has no messages yet */
 	chatThreadEmpty: "No messages in this conversation yet.",
 	/** Thread — accessible label on the older-messages loading spinner at the top of the list */
@@ -189,8 +195,12 @@ export const chats = {
 	chatMessageActionRemove: "Remove",
 	/** Message menu — sender-only, only shown on a message with an active embed; turns it back into a plain link */
 	chatMessageActionDisableEmbed: "Disable embed",
+	/** Message menu — blocks the sender of another person's message (hidden on your own and already-blocked senders) */
+	chatMessageActionBlock: "Block user",
 	/** Toast shown after a successful message-text copy */
 	chatMessageCopyToast: "Copied to clipboard",
+	/** Toast shown after successfully blocking a message sender */
+	chatMessageBlockedToast: "User blocked",
 	/** Message delete confirm — heading */
 	chatMessageDeleteDialogTitle: "Delete message?",
 	/** Message delete confirm — body copy */

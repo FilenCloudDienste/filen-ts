@@ -4,7 +4,7 @@ import { VolumeOffIcon, MoreHorizontalIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
 import { chatDisplayName, isChatUndecryptable, chatMessagePreview } from "@/features/chats/lib/sort"
-import { chatHasUnread } from "@/features/chats/lib/unread.logic"
+import { useChatUnreadCount } from "@/features/chats/hooks/useChatUnreadCount"
 import { useChatTypingLabel } from "@/features/chats/hooks/useChatTyping"
 import { formatListTimestamp } from "@/features/chats/lib/time"
 import { ChatContextMenuContent, ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
@@ -53,7 +53,11 @@ export function ChatRow({ chat, selected, currentUserId, onAction }: ChatRowProp
 	const typingLabel = useChatTypingLabel(chat.uuid, currentUserId)
 	const preview = typingLabel ?? chatMessagePreview(chat) ?? t("chatNoMessages")
 	const avatarUrl = resolveAvatarUrl(chat, currentUserId)
-	const unread = chatHasUnread(chat, currentUserId)
+	// Client-derived numeric unread (P7) — the count of this chat's messages newer than lastFocus, from a
+	// blocked sender excluded, off the passive message cache (never a per-chat SDK round trip). A
+	// still-unresolved cache reads as 0 until the shell's bulk refetch fills it.
+	const unreadCount = useChatUnreadCount(chat, currentUserId)
+	const unread = unreadCount > 0
 	const timestamp = chat.lastMessage?.sentTimestamp
 
 	return (
@@ -107,9 +111,11 @@ export function ChatRow({ chat, selected, currentUserId, onAction }: ChatRowProp
 									</span>
 									{unread ? (
 										<span
-											aria-label={t("chatUnread")}
-											className="size-2 shrink-0 rounded-full bg-primary"
-										/>
+											aria-label={t("chatUnreadCount", { count: unreadCount })}
+											className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground tabular-nums"
+										>
+											{unreadCount}
+										</span>
 									) : null}
 								</div>
 							</div>

@@ -10,14 +10,13 @@ function testUuid(label: string): UuidStr {
 
 // Mock boundary matching notesQueries.test.ts: the real sdk client module imports a Vite
 // `?worker`, unresolvable under node vitest.
-const { listChats, listMessagesBefore, getAllChatsUnreadCount } = vi.hoisted(() => ({
+const { listChats, listMessagesBefore } = vi.hoisted(() => ({
 	listChats: vi.fn<() => Promise<Chat[]>>(),
-	listMessagesBefore: vi.fn<(chat: Chat, before: bigint) => Promise<ChatMessage[]>>(),
-	getAllChatsUnreadCount: vi.fn<() => Promise<bigint>>()
+	listMessagesBefore: vi.fn<(chat: Chat, before: bigint) => Promise<ChatMessage[]>>()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { listChats, listMessagesBefore, getAllChatsUnreadCount }
+	sdkApi: { listChats, listMessagesBefore }
 }))
 
 // Same rationale as notesQueries.test.ts's useQuery intercept: only the `enabled`/`queryFn` wiring
@@ -52,16 +51,10 @@ import {
 	chatMessagesQueryUpdate,
 	chatMessagesQueryUpsert,
 	fetchChatMessages,
+	fetchMessagesForChat,
 	loadOlderChatMessages,
 	useChatMessages
 } from "@/features/chats/queries/chatMessages"
-import {
-	CHATS_UNREAD_QUERY_KEY,
-	chatsUnreadQueryGet,
-	chatsUnreadQuerySet,
-	fetchChatsUnread,
-	useChatsUnread
-} from "@/features/chats/queries/chatsUnread"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -133,7 +126,15 @@ describe("useChats", () => {
 
 		useChats()
 
-		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ queryKey: CHATS_QUERY_KEY }))
+		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ queryKey: CHATS_QUERY_KEY, enabled: true }))
+	})
+
+	it("respects an enabled:false override (passive cache subscription, no fetch)", () => {
+		useQuery.mockReturnValue({ status: "pending" })
+
+		useChats({ enabled: false })
+
+		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ enabled: false }))
 	})
 })
 
@@ -278,6 +279,26 @@ describe("useChatMessages", () => {
 
 		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ enabled: true, queryKey: chatMessagesQueryKey("abc") }))
 	})
+
+	it("stays disabled under an enabled:false override even with a non-empty uuid (passive read)", () => {
+		useQuery.mockReturnValue({ status: "pending" })
+
+		useChatMessages("abc", { enabled: false })
+
+		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ enabled: false }))
+	})
+})
+
+describe("fetchMessagesForChat", () => {
+	it("fetches the newest page for a Chat object directly (no cache resolution) and sorts ascending", async () => {
+		const chat = mockChat()
+		const older = mockMessage({ uuid: testUuid("older"), sentTimestamp: 1n })
+		const newer = mockMessage({ uuid: testUuid("newer"), sentTimestamp: 9n })
+		listMessagesBefore.mockResolvedValueOnce([newer, older])
+
+		await expect(fetchMessagesForChat(chat)).resolves.toEqual([older, newer])
+		expect(listMessagesBefore).toHaveBeenCalledExactlyOnceWith(chat, expect.any(BigInt))
+	})
 })
 
 describe("chatMessagesQueryUpdate / chatMessagesQueryGet", () => {
@@ -384,31 +405,5 @@ describe("loadOlderChatMessages — prepend + uuid-dedupe", () => {
 		await loadOlderChatMessages(chat, 10n)
 
 		expect(existingArray).toEqual([existing])
-	})
-})
-
-describe("fetchChatsUnread", () => {
-	it("passes through sdkApi.getAllChatsUnreadCount unchanged", async () => {
-		getAllChatsUnreadCount.mockResolvedValueOnce(3n)
-
-		await expect(fetchChatsUnread()).resolves.toBe(3n)
-	})
-})
-
-describe("useChatsUnread", () => {
-	it("queries under the [chats, unread] key", () => {
-		useQuery.mockReturnValue({ status: "pending" })
-
-		useChatsUnread()
-
-		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ queryKey: CHATS_UNREAD_QUERY_KEY }))
-	})
-})
-
-describe("chatsUnreadQuerySet / chatsUnreadQueryGet", () => {
-	it("round-trips a bigint count through the cache", () => {
-		chatsUnreadQuerySet(7n)
-
-		expect(chatsUnreadQueryGet()).toBe(7n)
 	})
 })

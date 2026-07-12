@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import { CornerUpLeftIcon, CopyIcon, PencilIcon, Trash2Icon } from "lucide-react"
+import { CornerUpLeftIcon, CopyIcon, PencilIcon, Trash2Icon, UserXIcon } from "lucide-react"
 import type { Chat, ChatMessage, UuidStr } from "@filen/sdk-rs"
+import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -75,10 +76,10 @@ function mockChat(overrides: Partial<Chat> = {}): Chat {
 }
 
 describe("messageMenuActions", () => {
-	it("reply + copy, for a confirmed decryptable message from someone else", () => {
+	it("reply + copy + block, for a confirmed decryptable message from someone else", () => {
 		const message = mockMessage({ senderId: 5 })
 
-		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["reply", "copy"])
+		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["reply", "copy", "block"])
 	})
 
 	it("reply + copy + edit + delete, for a confirmed decryptable own message (sender-only edit/delete)", () => {
@@ -99,10 +100,10 @@ describe("messageMenuActions", () => {
 		])
 	})
 
-	it("omits disableEmbed for someone else's message even when hasEmbeds is true (sender-only)", () => {
+	it("omits disableEmbed for someone else's message even when hasEmbeds is true (sender-only), still offers block", () => {
 		const message = mockMessage({ senderId: 5 })
 
-		expect(messageMenuActions(message, 1n, "confirmed", true).map(d => d.id)).toEqual(["reply", "copy"])
+		expect(messageMenuActions(message, 1n, "confirmed", true).map(d => d.id)).toEqual(["reply", "copy", "block"])
 	})
 
 	it("omits disableEmbed by default (hasEmbeds defaults to false)", () => {
@@ -143,18 +144,52 @@ describe("messageMenuActions", () => {
 		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["delete"])
 	})
 
-	it("an undecryptable message from someone else offers nothing", () => {
+	it("an undecryptable message from someone else offers only block (you block a person, not content)", () => {
 		const message = mockUndecryptableMessage({ senderId: 5 })
 
-		expect(messageMenuActions(message, 1n)).toEqual([])
+		expect(messageMenuActions(message, 1n).map(d => d.id)).toEqual(["block"])
 	})
 
-	it("with an unresolved currentUserId a confirmed decryptable message still offers reply + copy", () => {
+	it("with an unresolved currentUserId a confirmed decryptable message offers reply + copy but NEVER block (can't tell whose message it is)", () => {
 		const decryptable = mockMessage({ senderId: 1 })
 		const undecryptable = mockUndecryptableMessage({ senderId: 1 })
 
 		expect(messageMenuActions(decryptable, undefined).map(d => d.id)).toEqual(["reply", "copy"])
 		expect(messageMenuActions(undecryptable, undefined)).toEqual([])
+	})
+
+	it("never offers block on your own message", () => {
+		const own = mockMessage({ senderId: 1 })
+
+		expect(messageMenuActions(own, 1n).map(d => d.id)).not.toContain("block")
+	})
+
+	it("omits block when the sender is already blocked (cross-referenced against the blocked set)", () => {
+		const message = mockMessage({ senderId: 5, senderEmail: "peer@x.io" })
+		const blocked = deriveBlockedUsers([{ uuid: testUuid("b"), userId: 5n, email: "peer@x.io", nickName: "Peer", timestamp: 0n }])
+
+		expect(messageMenuActions(message, 1n, "confirmed", false, blocked).map(d => d.id)).toEqual(["reply", "copy"])
+	})
+
+	it("block matches a blocked sender by EMAIL even when the userId differs (email fallback)", () => {
+		const message = mockMessage({ senderId: 5, senderEmail: "peer@x.io" })
+		const blocked = deriveBlockedUsers([{ uuid: testUuid("b"), userId: 999n, email: "peer@x.io", nickName: "Peer", timestamp: 0n }])
+
+		expect(messageMenuActions(message, 1n, "confirmed", false, blocked).map(d => d.id)).not.toContain("block")
+	})
+
+	it("omits block for a pending/failed send (sendState-gated to confirmed)", () => {
+		const message = mockMessage({ senderId: 5 })
+
+		expect(messageMenuActions(message, 1n, "pending").map(d => d.id)).not.toContain("block")
+		expect(messageMenuActions(message, 1n, "failed").map(d => d.id)).not.toContain("block")
+	})
+
+	it("block descriptor carries its expected label and icon (destructive, direct)", () => {
+		const message = mockMessage({ senderId: 5 })
+		const block = messageMenuActions(message, 1n).find(d => d.id === "block")
+
+		expect(block).toEqual({ id: "block", labelKey: "chatMessageActionBlock", icon: UserXIcon, run: "direct", destructive: true })
 	})
 
 	it("descriptor facts: reply/copy/edit/delete carry their expected label and icon", () => {

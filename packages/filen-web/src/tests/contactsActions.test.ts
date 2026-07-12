@@ -52,6 +52,7 @@ import { CONTACTS_QUERY_KEY, CONTACT_REQUESTS_QUERY_KEY } from "@/features/conta
 import {
 	acceptRequest,
 	blockContact as blockContactAction,
+	blockContactByEmail,
 	cancelRequest,
 	denyRequest,
 	removeContact,
@@ -333,6 +334,60 @@ describe("blockContact", () => {
 		expect(outcome).toEqual({ status: "error", dto })
 		const data = testQueryClient.getQueryData<{ contacts: Contact[]; blocked: BlockedContact[] }>(CONTACTS_QUERY_KEY)
 		expect(data?.contacts).toEqual([contact])
+		expect(data?.blocked).toEqual([])
+	})
+})
+
+describe("blockContactByEmail (block from a chat message sender — no full Contact in hand)", () => {
+	it("blocks by email and synthesizes a BlockedContact from the identity, defaulting timestamp to now", async () => {
+		seedContacts({ contacts: [], blocked: [] })
+		blockContact.mockResolvedValueOnce(testUuid("new-blocked"))
+
+		const outcome = await blockContactByEmail({ email: "peer@x.io", userId: 7n, nickName: "Peer", avatar: "https://x/a.png" })
+
+		expect(outcome).toEqual({ status: "success" })
+		expect(blockContact).toHaveBeenCalledExactlyOnceWith("peer@x.io")
+		const data = testQueryClient.getQueryData<{ blocked: BlockedContact[] }>(CONTACTS_QUERY_KEY)
+		const entry = data?.blocked[0]
+		expect(entry?.uuid).toBe(testUuid("new-blocked"))
+		expect(entry?.userId).toBe(7n)
+		expect(entry?.email).toBe("peer@x.io")
+		expect(entry?.nickName).toBe("Peer")
+		expect(entry?.avatar).toBe("https://x/a.png")
+		expect(typeof entry?.timestamp).toBe("bigint")
+	})
+
+	it("synthesizes an empty-string nickName and omits an absent avatar key", async () => {
+		seedContacts({ contacts: [], blocked: [] })
+		blockContact.mockResolvedValueOnce(testUuid("new-blocked"))
+
+		await blockContactByEmail({ email: "peer@x.io", userId: 7n })
+
+		const data = testQueryClient.getQueryData<{ blocked: BlockedContact[] }>(CONTACTS_QUERY_KEY)
+		expect(data?.blocked[0]?.nickName).toBe("")
+		expect(Object.hasOwn(data?.blocked[0] ?? {}, "avatar")).toBe(false)
+	})
+
+	it("also drops any contact sharing the blocked email, by email", async () => {
+		const sameEmail = mockContact({ email: "peer@x.io" })
+		seedContacts({ contacts: [sameEmail], blocked: [] })
+		blockContact.mockResolvedValueOnce(testUuid("new-blocked"))
+
+		await blockContactByEmail({ email: "peer@x.io", userId: 7n })
+
+		const data = testQueryClient.getQueryData<{ contacts: Contact[] }>(CONTACTS_QUERY_KEY)
+		expect(data?.contacts).toEqual([])
+	})
+
+	it("returns an error outcome (no cache write) on rejection", async () => {
+		seedContacts({ contacts: [], blocked: [] })
+		const dto = sdkDto("Forbidden")
+		blockContact.mockRejectedValueOnce(dto)
+
+		const outcome = await blockContactByEmail({ email: "peer@x.io", userId: 7n })
+
+		expect(outcome).toEqual({ status: "error", dto })
+		const data = testQueryClient.getQueryData<{ blocked: BlockedContact[] }>(CONTACTS_QUERY_KEY)
 		expect(data?.blocked).toEqual([])
 	})
 })

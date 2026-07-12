@@ -81,38 +81,63 @@ export async function cancelRequest(uuid: string): Promise<VoidActionOutcome> {
 	return { status: "success" }
 }
 
-export async function blockContact(contact: Contact): Promise<VoidActionOutcome> {
+// Block identity — the minimal fields any surface can supply to block someone. A contact carries all of
+// them; a chat message sender (block-from-message, no full Contact in hand) carries every field except a
+// creation timestamp, which is synthesized. userId is needed so the local blocked-set cross-reference
+// (blocking.ts) matches by id, not only email.
+export interface BlockIdentity {
+	email: string
+	userId: bigint
+	nickName?: string
+	avatar?: string
+	timestamp?: bigint
+}
+
+// Block by identity — the SDK op is email-keyed (unlike every other contact mutation, which takes a
+// uuid), so any caller holding the target's email can block them, contact or not (a group-chat message
+// sender need not be in your contacts). The optimistic BlockedContact is synthesized from the identity
+// rather than refetched; `timestamp` defaults to now (a block time, not a contact-creation time) and
+// self-heals on the next contacts refetch anyway.
+export async function blockContactByEmail(identity: BlockIdentity): Promise<VoidActionOutcome> {
 	let blockedUuid: string
 	try {
-		// Email-keyed — unlike every other contact mutation, which takes a uuid.
-		blockedUuid = await runOp(sdkApi.blockContact(contact.email))
+		blockedUuid = await runOp(sdkApi.blockContact(identity.email))
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
 
 	// The op's return is a bare uuid string, not a UuidStr — the SDK's own declared return type here
 	// is `Promise<string>` (unlike every read op, which hands back a fully-typed record), so the brand
-	// is asserted rather than inferred. The rest of the record is synthesized from the contact being
-	// blocked itself (every field a BlockedContact needs is already held), avoiding a refetch.
+	// is asserted rather than inferred.
 	const blocked: BlockedContact = {
 		uuid: blockedUuid as UuidStr,
-		userId: contact.userId,
-		email: contact.email,
+		userId: identity.userId,
+		email: identity.email,
 		// BlockedContact.nickName is non-optional, unlike Contact.nickName.
-		nickName: contact.nickName ?? "",
-		timestamp: contact.timestamp,
-		...(contact.avatar !== undefined ? { avatar: contact.avatar } : {})
+		nickName: identity.nickName ?? "",
+		timestamp: identity.timestamp ?? BigInt(Date.now()),
+		...(identity.avatar !== undefined ? { avatar: identity.avatar } : {})
 	}
 
 	contactsQueryUpdate(prev => ({
 		...prev,
 		// Block is email-keyed server-side, so the source-list filter is too (a uuid filter would miss a
 		// stale duplicate row sharing this email under a different uuid).
-		contacts: prev.contacts.filter(c => c.email !== contact.email),
-		blocked: [...prev.blocked.filter(c => c.email !== contact.email), blocked]
+		contacts: prev.contacts.filter(c => c.email !== identity.email),
+		blocked: [...prev.blocked.filter(c => c.email !== identity.email), blocked]
 	}))
 
 	return { status: "success" }
+}
+
+export async function blockContact(contact: Contact): Promise<VoidActionOutcome> {
+	return blockContactByEmail({
+		email: contact.email,
+		userId: contact.userId,
+		nickName: contact.nickName ?? "",
+		timestamp: contact.timestamp,
+		...(contact.avatar !== undefined ? { avatar: contact.avatar } : {})
+	})
 }
 
 export async function unblockContact(uuid: string): Promise<VoidActionOutcome> {

@@ -7,6 +7,8 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { messageMenuActions, type MessageActionDescriptor } from "@/features/chats/components/thread/messageMenu.logic"
 import { retryInflightMessage, removeInflightMessage } from "@/features/chats/lib/inflight"
 import { disableMessageEmbed } from "@/features/chats/lib/messageActions"
+import { blockContactByEmail } from "@/features/contacts/lib/actions"
+import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import type { ChatSendState } from "@/features/chats/store/useChatsInflight"
 import { ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu"
@@ -43,7 +45,11 @@ export function MessageContextMenuContent({
 	const { t } = useTranslation("chats")
 	const beginReply = useChatComposerStore(state => state.beginReply)
 	const beginEdit = useChatComposerStore(state => state.beginEdit)
-	const descriptors = messageMenuActions(message, currentUserId, sendState, hasEmbeds)
+	// Warm the blocked set here (this menu only opens on a deliberate right-click) so the "Block" entry
+	// correctly hides an already-blocked sender; the read is cache-deduped, so the whole chat surface's
+	// unread cross-reference benefits from it too.
+	const blocked = useBlockedUsers(true)
+	const descriptors = messageMenuActions(message, currentUserId, sendState, hasEmbeds, blocked)
 
 	async function handleCopy(): Promise<void> {
 		if (message.message === undefined) {
@@ -66,6 +72,25 @@ export function MessageContextMenuContent({
 		}
 	}
 
+	async function handleBlock(): Promise<void> {
+		const outcome = await blockContactByEmail({
+			email: message.senderEmail,
+			// senderId is `number` on the wasm surface — coerce so the local blocked-set cross-reference
+			// matches by id, not only email.
+			userId: BigInt(message.senderId),
+			...(message.senderNickName !== undefined ? { nickName: message.senderNickName } : {}),
+			...(message.senderAvatar !== undefined ? { avatar: message.senderAvatar } : {})
+		})
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+
+			return
+		}
+
+		toast.success(t("chatMessageBlockedToast"))
+	}
+
 	function handleClick(descriptor: MessageActionDescriptor): void {
 		if (descriptor.id === "reply") {
 			beginReply(chat.uuid, { kind: "reply", message })
@@ -75,6 +100,12 @@ export function MessageContextMenuContent({
 
 		if (descriptor.id === "disableEmbed") {
 			void handleDisableEmbed()
+
+			return
+		}
+
+		if (descriptor.id === "block") {
+			void handleBlock()
 
 			return
 		}
@@ -116,7 +147,9 @@ export function MessageContextMenuContent({
 			{descriptors.map(descriptor => (
 				<ContextMenuItem
 					key={descriptor.id}
-					variant={descriptor.id === "delete" || descriptor.id === "remove" ? "destructive" : "default"}
+					variant={
+						descriptor.id === "delete" || descriptor.id === "remove" || descriptor.id === "block" ? "destructive" : "default"
+					}
 					onClick={event => {
 						// Same propagation stop as chatMenu.tsx — without it the click would also bubble into
 						// the (portaled) row's own click handling underneath.

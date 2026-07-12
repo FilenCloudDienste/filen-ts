@@ -3,9 +3,10 @@ import { registerSocketHandler, decryptedOrSkip } from "@/lib/sdk/socket"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { log } from "@/lib/log"
-import { CHATS_QUERY_KEY, chatsQueryUpdate, chatsQueryUpsert, chatsQueryGet } from "@/features/chats/queries/chats"
-import { chatMessagesQueryUpdate, chatMessagesQueryGet, chatMessagesQueryKey } from "@/features/chats/queries/chatMessages"
-import { CHATS_UNREAD_QUERY_KEY } from "@/features/chats/queries/chatsUnread"
+import { chatsQueryUpdate, chatsQueryUpsert, chatsQueryGet } from "@/features/chats/queries/chats"
+import { chatMessagesQueryUpdate, chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
+import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
+import { useSocketStatusStore } from "@/features/chats/store/useSocketStatus"
 import { purgeChatInflightState } from "@/features/chats/lib/inflight"
 import { applyTypingSignal, clearTypingForSender } from "@/features/chats/lib/typing"
 import { useChatTypingStore, type ChatTypingUser } from "@/features/chats/store/useChatTyping"
@@ -278,12 +279,9 @@ function handleMessageNew(msg: ChatMessage): void {
 					})
 				)
 
-				// A foreign message landing in a chat the user is NOT currently looking at is a genuine
-				// unread arrival — invalidate the rail badge's scalar so it refetches instead of staying dark
-				// until the next blur/reconnect (that scalar has no per-event patch path of its own).
-				if (!isOwn && !focused) {
-					void queryClient.invalidateQueries({ queryKey: CHATS_UNREAD_QUERY_KEY })
-				}
+				// No separate unread-badge write is needed: the message landing in the cache above is what
+				// the client-derived count re-reads on its next render — a foreign message in a non-focused
+				// chat now satisfies isMessageUnread on its own, with no scalar to invalidate.
 			}, 1)
 		},
 		isOwn ? OWN_MESSAGE_RECONCILE_DELAY_MS : FOREIGN_MESSAGE_DELAY_MS
@@ -332,14 +330,20 @@ export async function handleConversationDeleted(uuid: string): Promise<void> {
 
 // ── Reconnect full-reconcile ──────────────────────────────────────────────
 // The SDK owns the socket's own reconnect and surfaces it through this same event stream as a
-// "reconnecting" then (on success) an "authSuccess". We reconcile ONLY on the authSuccess that FOLLOWS a
-// reconnecting — never the initial post-login authSuccess (the list/thread are already fetching then) — by
-// invalidating the open thread + the conversation list + the unread count so missed events can't leave
-// stale state. Exported for the unit tests' reconnect assertions.
+// "reconnecting" then (on success) an "authSuccess". Reconciling happens ONLY on the authSuccess that
+// FOLLOWS a reconnecting — never the initial post-login authSuccess (the list/thread are already fetching
+// then). The reconnect drives two things: the chat disconnect indicator (the status store, flipped to
+// "reconnecting" the moment the socket drops and back to "connected" on the recovering authSuccess), and
+// a full authoritative resync — refetchChatsAndMessages pulls the list AND every chat's messages, which
+// is both the missed-events reconcile and the self-heal that keeps the client-derived unread count
+// correct without depending on a flaky per-count endpoint. Exported for the unit tests' reconnect
+// assertions.
 let sawReconnecting = false
 
 export function handleReconnecting(): void {
 	sawReconnecting = true
+
+	useSocketStatusStore.getState().setStatus("reconnecting")
 }
 
 export function handleAuthSuccess(): void {
@@ -349,14 +353,9 @@ export function handleAuthSuccess(): void {
 
 	sawReconnecting = false
 
-	void queryClient.invalidateQueries({ queryKey: CHATS_QUERY_KEY })
-	void queryClient.invalidateQueries({ queryKey: CHATS_UNREAD_QUERY_KEY })
+	useSocketStatusStore.getState().setStatus("connected")
 
-	const focused = getFocusedChat()
-
-	if (focused !== null) {
-		void queryClient.invalidateQueries({ queryKey: chatMessagesQueryKey(focused) })
-	}
+	void refetchChatsAndMessages()
 }
 
 // Registers the chat handlers on the generic bridge; returns the combined unregister fn. Called once by

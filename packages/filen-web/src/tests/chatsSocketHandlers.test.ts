@@ -26,13 +26,19 @@ const { logWarn, logError } = vi.hoisted(() => ({ logWarn: vi.fn(), logError: vi
 
 vi.mock("@/lib/log", () => ({ log: { warn: logWarn, error: logError, info: vi.fn(), debug: vi.fn() } }))
 
+// The reconnect handler fires the bulk chat+messages refetch; mock it so the reconnect assertions observe
+// the trigger without pulling the real fetch fan-out (and its sdkApi round trips) into node.
+const { refetchChatsAndMessages } = vi.hoisted(() => ({ refetchChatsAndMessages: vi.fn<() => Promise<void>>(() => Promise.resolve()) }))
+
+vi.mock("@/features/chats/lib/refetchChatsAndMessages", () => ({ refetchChatsAndMessages }))
+
 import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { CHATS_QUERY_KEY, chatsQueryGet } from "@/features/chats/queries/chats"
-import { CHATS_UNREAD_QUERY_KEY } from "@/features/chats/queries/chatsUnread"
 import { chatMessagesQueryKey, chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
 import { useChatTypingStore } from "@/features/chats/store/useChatTyping"
+import { useSocketStatusStore } from "@/features/chats/store/useSocketStatus"
 import { setFocusedChat, getFocusedChat } from "@/features/chats/lib/focusedChat"
 import { signalTyping, signalStopped, TYPING_EXPIRY_MS, clearAllTyping } from "@/features/chats/lib/typing"
 import { handleChatEvent, handleConversationDeleted, handleReconnecting, handleAuthSuccess } from "@/features/chats/lib/socketHandlers"
@@ -198,7 +204,7 @@ describe("chat socket handlers — messages", () => {
 		expect(chat !== undefined ? chatHasUnread(chat, 1n) : false).toBe(true)
 	})
 
-	it("badge staleness: a FOREIGN message in a NON-focused chat invalidates the rail badge's unread scalar", () => {
+	it("a FOREIGN message in a NON-focused chat writes NO badge invalidation — the message landing in cache re-derives the count", () => {
 		vi.useFakeTimers()
 		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 1n })
 		seedChats([makeChat("c1", { lastFocus: 50n })])
@@ -212,37 +218,10 @@ describe("chat socket handlers — messages", () => {
 		})
 		vi.runAllTimers()
 
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: CHATS_UNREAD_QUERY_KEY })
-	})
-
-	it("badge staleness: a FOREIGN message in the FOCUSED chat does NOT invalidate the unread scalar (not a genuine unread arrival)", () => {
-		vi.useFakeTimers()
-		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 1n })
-		seedChats([makeChat("c1", { lastFocus: 50n })])
-		seedMessages("c1", [])
-		setFocusedChat(testUuid("c1"))
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
-
-		handleChatEvent({
-			inner: { type: "messageNew", msg: makeMessage("m1", "c1", { senderId: 2, sentTimestamp: 200n }) },
-			chatMessageId: 0n
-		})
-		vi.runAllTimers()
-
-		expect(invalidate).not.toHaveBeenCalledWith({ queryKey: CHATS_UNREAD_QUERY_KEY })
-	})
-
-	it("badge staleness: an OWN message never invalidates the unread scalar", () => {
-		vi.useFakeTimers()
-		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 2n })
-		seedChats([makeChat("c1")])
-		seedMessages("c1", [])
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
-
-		handleChatEvent({ inner: { type: "messageNew", msg: makeMessage("m1", "c1", { senderId: 2 }) }, chatMessageId: 0n })
-		vi.runAllTimers()
-
-		expect(invalidate).not.toHaveBeenCalledWith({ queryKey: CHATS_UNREAD_QUERY_KEY })
+		// The message is resident in the chat's cache (the derived count reads it directly), and no scalar
+		// query is invalidated — the whole point of the client-derived rework.
+		expect(getMessages("c1").some(m => m.uuid === testUuid("m1"))).toBe(true)
+		expect(invalidate).not.toHaveBeenCalled()
 	})
 
 	it("messageEdited patches content + stamps edited from the Decrypted arm", () => {
@@ -451,28 +430,33 @@ describe("chat socket handlers — typing", () => {
 })
 
 describe("chat socket handlers — reconnect", () => {
-	it("authSuccess alone (no prior reconnecting) does NOT reconcile", () => {
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+	it("authSuccess alone (no prior reconnecting) does NOT resync or touch the status indicator", () => {
+		useSocketStatusStore.getState().setStatus("connected")
 
 		handleAuthSuccess()
 
-		expect(invalidate).not.toHaveBeenCalled()
+		expect(refetchChatsAndMessages).not.toHaveBeenCalled()
+		expect(useSocketStatusStore.getState().status).toBe("connected")
 	})
 
-	it("a reconnecting → authSuccess pair refetches the list, unread, and the open thread", () => {
-		setFocusedChat(testUuid("open"))
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+	it("reconnecting flips the disconnect indicator to reconnecting", () => {
+		useSocketStatusStore.getState().setStatus("connected")
 
+		handleReconnecting()
+
+		expect(useSocketStatusStore.getState().status).toBe("reconnecting")
+	})
+
+	it("a reconnecting → authSuccess pair fires the bulk resync and restores the connected indicator", () => {
 		handleReconnecting()
 		handleAuthSuccess()
 
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: CHATS_QUERY_KEY })
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: CHATS_UNREAD_QUERY_KEY })
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: chatMessagesQueryKey(testUuid("open")) })
+		expect(refetchChatsAndMessages).toHaveBeenCalledOnce()
+		expect(useSocketStatusStore.getState().status).toBe("connected")
 
 		// The flag resets — a second authSuccess without a new reconnecting is a no-op.
-		invalidate.mockClear()
+		refetchChatsAndMessages.mockClear()
 		handleAuthSuccess()
-		expect(invalidate).not.toHaveBeenCalled()
+		expect(refetchChatsAndMessages).not.toHaveBeenCalled()
 	})
 })

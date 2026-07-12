@@ -5,7 +5,6 @@ import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { chatsQueryUpsert, chatsQueryRemove } from "@/features/chats/queries/chats"
 import { chatMessagesQueryKey } from "@/features/chats/queries/chatMessages"
-import { CHATS_UNREAD_QUERY_KEY } from "@/features/chats/queries/chatsUnread"
 import { purgeChatInflightState } from "@/features/chats/lib/inflight"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
@@ -177,13 +176,11 @@ export async function markChatRead(chat: Chat): Promise<VoidActionOutcome> {
 	const refreshed = updatedChats[0]
 
 	if (refreshed) {
+		// The refreshed chat carries the advanced lastFocus; the client-derived unread count (both the
+		// per-row badge and the rail total) re-derives to zero for this chat on the next render off that
+		// alone — no separate unread-side cache write is needed.
 		chatsQueryUpsert(refreshed)
 	}
-
-	// The global unread scalar has no per-chat breakdown to subtract from locally (a chat can carry more
-	// than one unread message) — invalidate so the rail badge picks up the server's authoritative recount
-	// instead of drifting from a guessed decrement.
-	void queryClient.invalidateQueries({ queryKey: CHATS_UNREAD_QUERY_KEY })
 
 	return { status: "success" }
 }

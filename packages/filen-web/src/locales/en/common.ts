@@ -39,8 +39,16 @@ export const common = {
 	moduleNotes: "Notes",
 	/** Chats module — icon rail tooltip/accessible label (not available yet) */
 	moduleChats: "Chats",
+	/** Chats module — icon rail accessible label when there are unread messages (singular) */
+	chatsUnreadBadge_one: "Chats, {{count}} unread message",
+	/** Chats module — icon rail accessible label when there are unread messages (plural) */
+	chatsUnreadBadge_other: "Chats, {{count}} unread messages",
 	/** Contacts module — icon rail tooltip/accessible label (not available yet) */
 	moduleContacts: "Contacts",
+	/** Contacts module — icon rail accessible label when there are pending incoming requests (singular) */
+	contactRequestsBadge_one: "Contacts, {{count}} pending request",
+	/** Contacts module — icon rail accessible label when there are pending incoming requests (plural) */
+	contactRequestsBadge_other: "Contacts, {{count}} pending requests",
 	/** Transfers module — icon rail tooltip/accessible label (not available yet) */
 	moduleTransfers: "Transfers",
 	// Account menu

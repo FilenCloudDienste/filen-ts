@@ -17,7 +17,8 @@ import {
 import { cn } from "@/lib/utils"
 import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/contactsList.logic"
 import { performLogout } from "@/features/shell/lib/performLogout"
-import { useChatsUnread } from "@/features/chats/queries/chatsUnread"
+import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
+import { useContactRequestsQuery } from "@/features/contacts/queries/contacts"
 import { useAccountQuery } from "@/queries/account"
 import { useTransfersAggregate } from "@/features/transfers/store/useTransfersStore"
 import { TransfersPanel } from "@/features/transfers/components/transfersPanel"
@@ -284,11 +285,17 @@ export function IconRail() {
 	// Chats mirrors Notes: a two-route module (/chats index + /chats/$uuid selection), so its active state
 	// covers the nested thread path too.
 	const chatsActive = pathname === "/chats" || pathname.startsWith("/chats/")
-	// In-app unread signal: a subtle rail dot driven by the global unread count. Always mounted with
-	// the authed shell, so the badge reflects unread regardless of which module is open. A background
-	// pending state simply shows no dot.
-	const chatsUnreadQuery = useChatsUnread()
-	const hasUnreadChats = (chatsUnreadQuery.data ?? 0n) > 0n
+	// In-app unread signal: a numeric rail badge driven by the CLIENT-DERIVED global unread count (summed
+	// per-message across every chat, not a server scalar). Always mounted with the authed shell, so this
+	// hook is also the mount-once trigger for the bulk chat+messages refetch that makes the count possible
+	// (useChatsUnreadCount) — the badge reflects unread regardless of which module is open.
+	const currentUserId = useAccountQuery().data?.id
+	const unreadChatsCount = useChatsUnreadCount(currentUserId)
+	// Incoming contact-request count for the Contacts nav badge — mounting the already-batched requests
+	// query here (rather than only on /contacts) keeps it warm at launch and surfaces the count app-wide,
+	// mirroring how the transfers/unread badges are always-present.
+	const contactRequestsQuery = useContactRequestsQuery()
+	const incomingRequestCount = contactRequestsQuery.status === "success" ? contactRequestsQuery.data.incoming.length : 0
 
 	// Registered above at module scope (default unassigned) — this only wires the LIVE combo, which
 	// starts as "" (react-hotkeys-hook's parser treats it as "never matches") and works the instant a
@@ -364,10 +371,23 @@ export function IconRail() {
 							to="/contacts"
 							search={{ section: DEFAULT_CONTACTS_SECTION_FILTER }}
 							aria-current={contactsActive ? "page" : undefined}
-							aria-label={t("moduleContacts")}
-							className={railItemClass(contactsActive)}
+							aria-label={
+								incomingRequestCount > 0 ? t("contactRequestsBadge", { count: incomingRequestCount }) : t("moduleContacts")
+							}
+							className={cn(railItemClass(contactsActive), "relative")}
 						>
 							<UsersIcon />
+							{incomingRequestCount > 0 ? (
+								// aria-hidden: the count is folded into the Link's own aria-label above (a labelled
+								// element ignores descendant content for its accessible name), so this badge is a
+								// visual cue only — mirrors TransfersEntry's badge.
+								<Badge
+									aria-hidden="true"
+									className="absolute -top-1 -right-1 h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
+								>
+									{incomingRequestCount}
+								</Badge>
+							) : null}
 						</Link>
 					}
 				/>
@@ -398,17 +418,19 @@ export function IconRail() {
 						<Link
 							to="/chats"
 							aria-current={chatsActive ? "page" : undefined}
-							aria-label={t("moduleChats")}
+							aria-label={unreadChatsCount > 0 ? t("chatsUnreadBadge", { count: unreadChatsCount }) : t("moduleChats")}
 							className={cn(railItemClass(chatsActive), "relative")}
 						>
 							<MessagesSquareIcon />
-							{hasUnreadChats ? (
-								// aria-hidden: the rail entry's own aria-label already names the module; the dot is a
-								// decorative unread cue, not a second announcement (mirrors TransfersEntry's badge).
-								<span
+							{unreadChatsCount > 0 ? (
+								// aria-hidden: the count is folded into the Link's own aria-label below; the badge is a
+								// visual cue only (mirrors TransfersEntry's badge).
+								<Badge
 									aria-hidden="true"
-									className="absolute top-1 right-1 size-2 rounded-full bg-primary ring-2 ring-canvas"
-								/>
+									className="absolute -top-1 -right-1 h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
+								>
+									{unreadChatsCount}
+								</Badge>
 							) : null}
 						</Link>
 					}

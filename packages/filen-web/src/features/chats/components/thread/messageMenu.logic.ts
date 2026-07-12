@@ -1,9 +1,20 @@
-import { CopyIcon, Trash2Icon, RefreshCwIcon, XIcon, CornerUpLeftIcon, PencilIcon, ImageOffIcon, type LucideIcon } from "lucide-react"
+import {
+	CopyIcon,
+	Trash2Icon,
+	RefreshCwIcon,
+	XIcon,
+	CornerUpLeftIcon,
+	PencilIcon,
+	ImageOffIcon,
+	UserXIcon,
+	type LucideIcon
+} from "lucide-react"
 import type { ChatMessage } from "@filen/sdk-rs"
 import type { ChatsKey } from "@/lib/i18n"
 import type { ChatSendState } from "@/features/chats/store/useChatsInflight"
+import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@/features/contacts/lib/blocking"
 
-export type MessageActionId = "reply" | "copy" | "edit" | "delete" | "retry" | "remove" | "disableEmbed"
+export type MessageActionId = "reply" | "copy" | "edit" | "delete" | "retry" | "remove" | "disableEmbed" | "block"
 
 // "direct" (reply/copy/edit/retry/remove/disableEmbed — no confirm) vs "dialog" (delete — confirm
 // first). reply/edit set composer state; retry/remove act on a failed optimistic entry; delete acts on
@@ -17,6 +28,7 @@ export type MessageActionDescriptor =
 	| { id: "retry"; labelKey: ChatsKey; icon: LucideIcon; run: "direct" }
 	| { id: "remove"; labelKey: ChatsKey; icon: LucideIcon; run: "direct"; destructive: true }
 	| { id: "disableEmbed"; labelKey: ChatsKey; icon: LucideIcon; run: "direct" }
+	| { id: "block"; labelKey: ChatsKey; icon: LucideIcon; run: "direct"; destructive: true }
 
 const REPLY: MessageActionDescriptor = { id: "reply", labelKey: "chatMessageActionReply", icon: CornerUpLeftIcon, run: "direct" }
 const COPY: MessageActionDescriptor = { id: "copy", labelKey: "chatMessageActionCopy", icon: CopyIcon, run: "direct" }
@@ -42,6 +54,13 @@ const DISABLE_EMBED: MessageActionDescriptor = {
 	icon: ImageOffIcon,
 	run: "direct"
 }
+const BLOCK: MessageActionDescriptor = {
+	id: "block",
+	labelKey: "chatMessageActionBlock",
+	icon: UserXIcon,
+	run: "direct",
+	destructive: true
+}
 
 // Pure per-message menu builder (mobile parity: features/chats/.../message/menu.tsx). Entries depend on
 // the message's SEND STATE and whether the reader is its sender (the MESSAGE sender, `senderId ===
@@ -63,7 +82,8 @@ export function messageMenuActions(
 	message: ChatMessage,
 	currentUserId: bigint | undefined,
 	sendState: ChatSendState = "confirmed",
-	hasEmbeds = false
+	hasEmbeds = false,
+	blocked: BlockedUsers = EMPTY_BLOCKED_USERS
 ): MessageActionDescriptor[] {
 	const actions: MessageActionDescriptor[] = []
 	const hasText = message.message !== undefined
@@ -78,7 +98,8 @@ export function messageMenuActions(
 		return actions
 	}
 
-	const isSender = currentUserId !== undefined && BigInt(message.senderId) === currentUserId
+	const senderId = BigInt(message.senderId)
+	const isSender = currentUserId !== undefined && senderId === currentUserId
 
 	// Reply/edit target a committed server uuid — confirmed only (a pending send carries its inflightId
 	// as its uuid, which the server doesn't know).
@@ -100,6 +121,19 @@ export function messageMenuActions(
 		}
 
 		actions.push(DELETE_MESSAGE)
+	}
+
+	// Block the sender (M10, chat side) — a committed message from someone OTHER than us who is not
+	// already blocked. Gated on a known current user (never offer "block" when we can't tell whose message
+	// it is) so we never surface it on our own bubble. A blocked sender's messages drop out of the unread
+	// count immediately (isMessageUnread cross-references the same blocked set).
+	if (
+		sendState === "confirmed" &&
+		currentUserId !== undefined &&
+		!isSender &&
+		!isBlocked({ userId: senderId, email: message.senderEmail }, blocked)
+	) {
+		actions.push(BLOCK)
 	}
 
 	return actions

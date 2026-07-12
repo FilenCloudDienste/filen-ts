@@ -32,6 +32,15 @@ function resolveChat(chatUuid: string): Chat | undefined {
 	return chatsQueryGet()?.find(c => c.uuid === chatUuid)
 }
 
+// Fetches a chat's initial (newest) message page from a Chat object directly — no cache resolution,
+// so the bulk refetch (refetchChatsAndMessages.ts) can pull messages for a freshly-listed chat before
+// that list has been written back to the chats cache. Sorted ascending, same as the query below.
+export async function fetchMessagesForChat(chat: Chat): Promise<ChatMessage[]> {
+	const messages = await sdkApi.listMessagesBefore(chat, BigInt(Date.now() + INITIAL_CURSOR_OFFSET_MS))
+
+	return sortAscending(messages)
+}
+
 // Exported bare, same rationale as fetchNoteContent: node-environment tests exercise this against
 // a mocked sdkApi without a React render. Resolves the Chat from the chats list cache — a
 // socket-delivered chat is seeded into that same cache by socketHandlers.ts's own conversationsNew
@@ -46,16 +55,19 @@ export async function fetchChatMessages(chatUuid: string): Promise<ChatMessage[]
 		return chatMessagesQueryGet(chatUuid) ?? []
 	}
 
-	const messages = await sdkApi.listMessagesBefore(chat, BigInt(Date.now() + INITIAL_CURSOR_OFFSET_MS))
-
-	return sortAscending(messages)
+	return fetchMessagesForChat(chat)
 }
 
-export function useChatMessages(chatUuid: string): UseQueryResult<ChatMessage[]> {
+// `enabled` lets a caller subscribe to a chat's message cache WITHOUT triggering its own fetch (react-
+// query keeps updating the observer from cache writes even while disabled) — the per-chat unread-count
+// hook reads the cache the bulk refetch populates, rather than each rendered row firing its own
+// listMessagesBefore. Defaults to true so the open-thread route's own bare call is unaffected; a
+// disabled query still respects the empty-uuid guard.
+export function useChatMessages(chatUuid: string, options?: { enabled?: boolean }): UseQueryResult<ChatMessage[]> {
 	return useQuery({
 		queryKey: chatMessagesQueryKey(chatUuid),
 		queryFn: () => fetchChatMessages(chatUuid),
-		enabled: chatUuid.length > 0
+		enabled: (options?.enabled ?? true) && chatUuid.length > 0
 	})
 }
 

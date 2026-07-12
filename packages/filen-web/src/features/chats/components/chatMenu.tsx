@@ -5,6 +5,7 @@ import type { Chat } from "@filen/sdk-rs"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { setChatMuted, markChatRead } from "@/features/chats/lib/actions"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
+import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import {
 	applyOfflineGate,
 	chatMenuActions,
@@ -39,7 +40,8 @@ const SEPARATOR_BEFORE = new Set<ChatActionDescriptor["id"]>(["delete", "leave"]
 function ChatMenuEntries({ chat, currentUserId, onAction, family }: ChatMenuContentProps & { family: MenuFamily }) {
 	const { t } = useTranslation(["chats", "common"])
 	const isOnline = useIsOnline()
-	const unread = chatHasUnread(chat, currentUserId)
+	const blocked = useBlockedUsers(false)
+	const unread = chatHasUnread(chat, currentUserId, blocked)
 	const descriptors = applyOfflineGate(chatMenuActions(chat, currentUserId, unread), isOnline)
 	const { Item, Separator } = family
 

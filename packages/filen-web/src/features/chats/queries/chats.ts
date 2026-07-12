@@ -15,10 +15,15 @@ export async function fetchChats(): Promise<Chat[]> {
 	return sdkApi.listChats()
 }
 
-export function useChats(): UseQueryResult<Chat[]> {
+// `enabled` lets a caller subscribe to the chat-list cache WITHOUT firing its own listChats (react-
+// query still feeds the observer from cache writes while disabled) — the global unread-count hook reads
+// the list this way, deriving off whatever the bulk refetch has populated instead of paying a second
+// list fetch of its own. Defaults to true so the sidebar's own bare call is unaffected.
+export function useChats(options?: { enabled?: boolean }): UseQueryResult<Chat[]> {
 	return useQuery({
 		queryKey: CHATS_QUERY_KEY,
-		queryFn: fetchChats
+		queryFn: fetchChats,
+		enabled: options?.enabled ?? true
 	})
 }
 
