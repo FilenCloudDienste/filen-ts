@@ -1,166 +1,63 @@
-import { createElement } from "react"
+import { createElement, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
-import type { Chat, ChatMessage } from "@filen/sdk-rs"
-import { errorLabel } from "@/lib/i18n/errorLabel"
-import { asErrorDTO } from "@/lib/sdk/errors"
-import { messageMenuActions, type MessageActionDescriptor } from "@/features/chats/components/thread/messageMenu.logic"
-import { retryInflightMessage, removeInflightMessage } from "@/features/chats/lib/inflight"
-import { disableMessageEmbed } from "@/features/chats/lib/messageActions"
-import { blockContactByEmail } from "@/features/contacts/lib/actions"
-import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
-import { useChatComposerStore } from "@/features/chats/store/useChatComposer"
-import type { ChatSendState } from "@/features/chats/store/useChatsInflight"
+import type { TFunction } from "i18next"
+import { useMessageActions, type UseMessageActionsArgs } from "@/features/chats/components/thread/useMessageActions"
+import type { MessageActionDescriptor } from "@/features/chats/components/thread/messageMenu.logic"
 import { ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu"
+import { DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
 
-export interface MessageMenuContentProps {
-	chat: Chat
-	message: ChatMessage
-	currentUserId: bigint | undefined
-	// Send state drives which entries appear: failed → retry/remove; confirmed → delete (sender-only).
-	sendState: ChatSendState
-	// Pure embeds.logic.ts classification, computed once in messageRow.tsx (network-free) — gates the
-	// "Disable embed" entry without this menu re-deriving link segments itself.
-	hasEmbeds: boolean
-	// Delete needs a confirm step; the confirm dialog itself lives with the mounting row (messageRow.tsx)
-	// so it survives past the menu's own close — this content-only component just requests it.
-	onRequestDelete: () => void
+export type MessageMenuContentProps = Omit<UseMessageActionsArgs, "warmBlocked">
+
+// One descriptor → one menu row, shared by the right-click context menu and the ⋯-overflow dropdown. The
+// `Item` param is typed against DropdownMenuItem but ContextMenuItem is structurally assignable to it
+// (same trick as chatMenu.tsx's MenuFamily) — so both families render the identical rows without any
+// per-family duplication. Same propagation stop as chatMenu.tsx (the portaled popup's synthetic click
+// still bubbles through the React tree into the row underneath without it).
+function renderMenuItems(
+	descriptors: MessageActionDescriptor[],
+	runAction: (descriptor: MessageActionDescriptor) => void,
+	Item: typeof DropdownMenuItem,
+	t: TFunction<"chats">
+): ReactNode[] {
+	return descriptors.map(descriptor => (
+		<Item
+			key={descriptor.id}
+			variant={descriptor.id === "delete" || descriptor.id === "remove" || descriptor.id === "block" ? "destructive" : "default"}
+			onClick={event => {
+				event.stopPropagation()
+				runAction(descriptor)
+			}}
+		>
+			{createElement(descriptor.icon, { "aria-hidden": true })}
+			{t(descriptor.labelKey)}
+		</Item>
+	))
 }
 
-// Right-click surface for one message row. copy/delete for a confirmed message; retry/remove for a
-// FAILED optimistic send (the durable send outbox's actionable failed bubble). Copy is self-contained
-// (clipboard + toast); retry/remove call the silent inflight helpers directly (the optimistic copy's
-// uuid IS its inflightId, so the ChatMessageWithInflightId they need is reconstructed here); delete only
-// ever dispatches the confirm request; disableEmbed is confirm-free (online-only, best-effort, same
-// posture as edit/delete — see messageActions.ts) and patches the cache straight from its own click
-// handler, no dialog to defer to.
-export function MessageContextMenuContent({
-	chat,
-	message,
-	currentUserId,
-	sendState,
-	hasEmbeds,
-	onRequestDelete
-}: MessageMenuContentProps) {
+// Right-click surface for one message row — rendered inside a per-row <ContextMenu> (messageRow.tsx).
+// Warms the blocked set (a right-click is a deliberate interaction) so the "Block" entry correctly hides
+// an already-blocked sender. Returns null (no popup) when the message has no applicable actions.
+export function MessageContextMenuContent(props: MessageMenuContentProps) {
 	const { t } = useTranslation("chats")
-	const beginReply = useChatComposerStore(state => state.beginReply)
-	const beginEdit = useChatComposerStore(state => state.beginEdit)
-	// Warm the blocked set here (this menu only opens on a deliberate right-click) so the "Block" entry
-	// correctly hides an already-blocked sender; the read is cache-deduped, so the whole chat surface's
-	// unread cross-reference benefits from it too.
-	const blocked = useBlockedUsers(true)
-	const descriptors = messageMenuActions(message, currentUserId, sendState, hasEmbeds, blocked)
-
-	async function handleCopy(): Promise<void> {
-		if (message.message === undefined) {
-			return
-		}
-
-		try {
-			await navigator.clipboard.writeText(message.message)
-			toast.success(t("chatMessageCopyToast"))
-		} catch (e) {
-			toast.error(errorLabel(asErrorDTO(e)))
-		}
-	}
-
-	async function handleDisableEmbed(): Promise<void> {
-		const outcome = await disableMessageEmbed(message)
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-		}
-	}
-
-	async function handleBlock(): Promise<void> {
-		const outcome = await blockContactByEmail({
-			email: message.senderEmail,
-			// senderId is `number` on the wasm surface — coerce so the local blocked-set cross-reference
-			// matches by id, not only email.
-			userId: BigInt(message.senderId),
-			...(message.senderNickName !== undefined ? { nickName: message.senderNickName } : {}),
-			...(message.senderAvatar !== undefined ? { avatar: message.senderAvatar } : {})
-		})
-
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-
-			return
-		}
-
-		toast.success(t("chatMessageBlockedToast"))
-	}
-
-	function handleClick(descriptor: MessageActionDescriptor): void {
-		if (descriptor.id === "reply") {
-			beginReply(chat.uuid, { kind: "reply", message })
-
-			return
-		}
-
-		if (descriptor.id === "disableEmbed") {
-			void handleDisableEmbed()
-
-			return
-		}
-
-		if (descriptor.id === "block") {
-			void handleBlock()
-
-			return
-		}
-
-		if (descriptor.id === "edit") {
-			// Load the message body into the draft and pin edit mode in one write (mobile parity).
-			beginEdit(chat.uuid, { kind: "edit", message }, message.message ?? "")
-
-			return
-		}
-
-		if (descriptor.id === "copy") {
-			void handleCopy()
-
-			return
-		}
-
-		if (descriptor.id === "retry") {
-			void retryInflightMessage({ chat, message: { ...message, inflightId: message.uuid } })
-
-			return
-		}
-
-		if (descriptor.id === "remove") {
-			void removeInflightMessage({ chat, message: { ...message, inflightId: message.uuid } })
-
-			return
-		}
-
-		onRequestDelete()
-	}
+	const { descriptors, runAction } = useMessageActions({ ...props, warmBlocked: true })
 
 	if (descriptors.length === 0) {
 		return null
 	}
 
-	return (
-		<ContextMenuContent>
-			{descriptors.map(descriptor => (
-				<ContextMenuItem
-					key={descriptor.id}
-					variant={
-						descriptor.id === "delete" || descriptor.id === "remove" || descriptor.id === "block" ? "destructive" : "default"
-					}
-					onClick={event => {
-						// Same propagation stop as chatMenu.tsx — without it the click would also bubble into
-						// the (portaled) row's own click handling underneath.
-						event.stopPropagation()
-						handleClick(descriptor)
-					}}
-				>
-					{createElement(descriptor.icon, { "aria-hidden": true })}
-					{t(descriptor.labelKey)}
-				</ContextMenuItem>
-			))}
-		</ContextMenuContent>
-	)
+	return <ContextMenuContent>{renderMenuItems(descriptors, runAction, ContextMenuItem, t)}</ContextMenuContent>
+}
+
+// ⋯-overflow surface — rendered inside a <DropdownMenu> mounted by the hover action bar's overflow
+// trigger (messageActionBar.tsx). Left-click-opened, so it uses the dropdown family; the descriptor list
+// + dispatch are the SAME useMessageActions as the right-click menu above (zero duplication).
+export function MessageDropdownMenuContent(props: MessageMenuContentProps) {
+	const { t } = useTranslation("chats")
+	const { descriptors, runAction } = useMessageActions({ ...props, warmBlocked: true })
+
+	if (descriptors.length === 0) {
+		return null
+	}
+
+	return <DropdownMenuContent align="end">{renderMenuItems(descriptors, runAction, DropdownMenuItem, t)}</DropdownMenuContent>
 }

@@ -18,13 +18,14 @@ import { Composer } from "@/features/chats/components/thread/composer"
 import { TypingIndicator } from "@/features/chats/components/thread/typingIndicator"
 import { setFocusedChat } from "@/features/chats/lib/focusedChat"
 import { dayKind, formatFullDate } from "@/features/chats/lib/time"
-import { chatDisplayName, isChatUndecryptable } from "@/features/chats/lib/sort"
+import { chatDisplayName, isChatUndecryptable, chatAvatarUrl } from "@/features/chats/lib/sort"
 import { markChatRead } from "@/features/chats/lib/actions"
 import { MessageRow } from "@/features/chats/components/thread/messageRow"
 import { ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
 import { useAccountQuery } from "@/queries/account"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -400,10 +401,15 @@ export function MessageThread({ chat }: { chat: Chat }) {
 		: currentUserId !== undefined
 			? chatDisplayName(chat, currentUserId)
 			: chat.uuid
+	const headerAvatarUrl = chatAvatarUrl(chat, currentUserId)
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<header className="flex shrink-0 items-center gap-2.5 px-5 py-4">
+				<Avatar className="size-8 shrink-0">
+					{headerAvatarUrl !== undefined ? <AvatarImage src={headerAvatarUrl} /> : null}
+					<AvatarFallback>{headerTitle.trim().charAt(0).toUpperCase() || "?"}</AvatarFallback>
+				</Avatar>
 				<h1 className="min-w-0 flex-1 truncate text-base font-semibold">{headerTitle}</h1>
 				<DropdownMenu>
 					<DropdownMenuTrigger

@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { VolumeOffIcon, MoreHorizontalIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
-import { chatDisplayName, isChatUndecryptable, chatMessagePreview } from "@/features/chats/lib/sort"
+import { chatDisplayName, isChatUndecryptable, chatMessagePreview, chatAvatarUrl } from "@/features/chats/lib/sort"
 import { useChatUnreadCount } from "@/features/chats/hooks/useChatUnreadCount"
 import { useChatTypingLabel } from "@/features/chats/hooks/useChatTyping"
 import { formatRelativeTime } from "@/lib/relativeTime"
@@ -23,21 +23,6 @@ export interface ChatRowProps {
 	onAction: (kind: ChatActionDialogKind, chat: Chat) => void
 }
 
-// Participant-derived avatar (mobile's own rule, list/chat/index.tsx): the other participants sans self,
-// keeping only real http avatar URLs. A 1:1 uses the other person's image; anything else falls back to the
-// display name's initial. No composite group avatar — a single representative image or initial.
-function resolveAvatarUrl(chat: Chat, currentUserId: bigint | undefined): string | undefined {
-	const others = chat.participants.filter(p => p.userId !== currentUserId)
-
-	if (others.length !== 1) {
-		return undefined
-	}
-
-	const avatar = others[0]?.avatar
-
-	return avatar?.startsWith("http") === true ? avatar : undefined
-}
-
 // One conversation row: avatar, display name, last-message preview, relative time, a per-row unread badge
 // (derived client-side), and a muted affordance. Most of the row is a Link to /chats/$uuid — the uuid
 // is a selection key, not a path hierarchy (mirrors NoteRow) — with the ⋯ trigger button as its sibling,
@@ -53,7 +38,7 @@ export function ChatRow({ chat, selected, currentUserId, onAction }: ChatRowProp
 	// chatMessagePreview (lib/sort.ts) itself does not cover. Falls back to the message preview when nobody is typing.
 	const typingLabel = useChatTypingLabel(chat.uuid, currentUserId)
 	const preview = typingLabel ?? chatMessagePreview(chat) ?? t("chatNoMessages")
-	const avatarUrl = resolveAvatarUrl(chat, currentUserId)
+	const avatarUrl = chatAvatarUrl(chat, currentUserId)
 	// Client-derived numeric unread (P7) — the count of this chat's messages newer than lastFocus, from a
 	// blocked sender excluded, off the passive message cache (never a per-chat SDK round trip). A
 	// still-unresolved cache reads as 0 until the shell's bulk refetch fills it.

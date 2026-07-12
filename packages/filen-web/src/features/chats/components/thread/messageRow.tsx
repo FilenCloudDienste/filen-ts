@@ -5,8 +5,10 @@ import { CornerUpRightIcon, ClockIcon, AlertCircleIcon } from "lucide-react"
 import type { Chat, ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
 import { formatClockTime } from "@/features/chats/lib/time"
+import { senderNameColor } from "@/features/chats/lib/nameColor"
 import { deleteMessage } from "@/features/chats/lib/messageActions"
 import { MessageContextMenuContent } from "@/features/chats/components/thread/messageMenu"
+import { MessageActionBar } from "@/features/chats/components/thread/messageActionBar"
 import { MessageContent } from "@/features/chats/components/thread/messageContent"
 import { MessageEmbeds } from "@/features/chats/components/thread/messageEmbeds"
 import { extractMessageLinks, embedCandidatesForLinks } from "@/features/chats/lib/embeds.logic"
@@ -48,19 +50,23 @@ export interface MessageRowProps {
 	currentUserId: bigint | undefined
 }
 
-// One message row (dense grouped flat rows). A burst opener renders the avatar gutter + a header line
-// (name + time); a continuation renders the body only, indented under the gutter. There is no deleted
+// One message row (Discord-style flat author-grouped runs). A burst opener renders the avatar gutter + a
+// header line (colored name + time); a continuation renders the body only, flush under the text column,
+// its avatar gutter empty at rest but revealing this line's own small timestamp on hover. Every row tints
+// on hover and floats a top-right action bar (MessageActionBar) on hover/focus. There is no deleted
 // tombstone: the wasm ChatMessage has no deleted flag — deletions remove the message outright
-// (socketHandlers.ts's messageDelete handler drops it from the cache), so the only special body state here is undecryptable
-// (message === undefined → placeholder). Carries its own right-click menu (copy/delete — messageMenu.tsx),
-// the minimal set that needs no composer; the delete confirm dialog is owned HERE (not the menu content)
-// so it survives past the menu's own close.
+// (socketHandlers.ts's messageDelete handler drops it from the cache), so the only special body state here
+// is undecryptable (message === undefined → placeholder). Carries its own right-click menu; the delete
+// confirm dialog is owned HERE (not the menu content) so it survives past the menu's own close.
 export function MessageRow({ chat, message, showHeader, currentUserId }: MessageRowProps) {
 	const { t } = useTranslation(["chats", "common"])
 	const undecryptable = message.message === undefined
 	const senderAvatar = message.senderAvatar
 	const avatarUrl = senderAvatar?.startsWith("http") === true ? senderAvatar : undefined
 	const name = senderName(message)
+	// Name coloring is a group-chat signal only — inert (undefined → default foreground) in a 1:1 (a chat
+	// with at most two participants). Seeded by the stable numeric senderId, not the mutable nickname.
+	const nameColor = senderNameColor(String(message.senderId), chat.participants.length <= 2)
 	// The optimistic copy's uuid IS its inflightId, so this read resolves an in-flight/failed own message
 	// to "pending"/"failed" and every confirmed (real-uuid) message to "confirmed".
 	const sendState = useChatSendState(message.uuid)
@@ -70,6 +76,10 @@ export function MessageRow({ chat, message, showHeader, currentUserId }: Message
 
 	const [confirmingDelete, setConfirmingDelete] = useState(false)
 	const [deletePending, setDeletePending] = useState(false)
+
+	function requestDelete(): void {
+		setConfirmingDelete(true)
+	}
 
 	async function handleDeleteConfirmed(): Promise<void> {
 		setDeletePending(true)
@@ -87,19 +97,36 @@ export function MessageRow({ chat, message, showHeader, currentUserId }: Message
 			<ContextMenu>
 				<ContextMenuTrigger
 					render={
-						<div className={cn("flex w-full gap-2.5 px-4", showHeader ? "pt-3" : "pt-0.5")}>
-							<div className="w-9 shrink-0">
+						<div
+							className={cn(
+								"group relative flex w-full gap-2.5 px-4 transition-colors hover:bg-accent/40",
+								showHeader ? "pt-[17px] pb-0.5" : "py-0.5"
+							)}
+						>
+							<div className="flex w-9 shrink-0 justify-center">
 								{showHeader ? (
 									<Avatar>
 										{avatarUrl !== undefined ? <AvatarImage src={avatarUrl} /> : null}
 										<AvatarFallback>{name.trim().charAt(0).toUpperCase() || "?"}</AvatarFallback>
 									</Avatar>
-								) : null}
+								) : (
+									// Continuation rows keep the avatar gutter empty at rest, revealing this exact line's
+									// own timestamp only on hover — a precise time is always a hover away without adding
+									// noise to the dense run (mirrors the row menus' own opacity-0/group-hover idiom).
+									<span className="mt-0.5 text-[10px] leading-5 text-muted-foreground tabular-nums opacity-0 transition-opacity group-hover:opacity-100">
+										{formatClockTime(message.sentTimestamp)}
+									</span>
+								)}
 							</div>
 							<div className="flex min-w-0 flex-1 flex-col">
 								{showHeader ? (
 									<div className="flex items-baseline gap-2">
-										<span className="truncate text-sm font-semibold">{name}</span>
+										<span
+											className="truncate text-sm font-semibold"
+											style={nameColor !== undefined ? { color: nameColor } : undefined}
+										>
+											{name}
+										</span>
 										<span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
 											{formatClockTime(message.sentTimestamp)}
 										</span>
@@ -136,6 +163,14 @@ export function MessageRow({ chat, message, showHeader, currentUserId }: Message
 									</span>
 								) : null}
 							</div>
+							<MessageActionBar
+								chat={chat}
+								message={message}
+								currentUserId={currentUserId}
+								sendState={sendState}
+								hasEmbeds={hasEmbeds}
+								onRequestDelete={requestDelete}
+							/>
 						</div>
 					}
 				/>
@@ -145,9 +180,7 @@ export function MessageRow({ chat, message, showHeader, currentUserId }: Message
 					currentUserId={currentUserId}
 					sendState={sendState}
 					hasEmbeds={hasEmbeds}
-					onRequestDelete={() => {
-						setConfirmingDelete(true)
-					}}
+					onRequestDelete={requestDelete}
 				/>
 			</ContextMenu>
 			<ConfirmDialog

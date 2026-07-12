@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react"
+import { Fragment, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useRouterState } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
@@ -8,6 +8,8 @@ import { useAccountQuery } from "@/queries/account"
 import { filterChats } from "@/features/chats/components/chatsSidebar.logic"
 import { ChatRow } from "@/features/chats/components/chatRow"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
+import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
+import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -44,6 +46,7 @@ function SidebarNotice({ icon, title, description }: { icon: ReactNode; title: s
 export function ChatsSidebar() {
 	const { t } = useTranslation(["chats", "common"])
 	const isOnline = useIsOnline()
+	const resize = useResizableSidebar("chats")
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const selectedUuid = selectedUuidFromPath(pathname)
 
@@ -133,72 +136,83 @@ export function ChatsSidebar() {
 	}
 
 	return (
-		<aside
-			// Geometry identical to DriveSidebar/NotesSidebar — the shell's contextual panel slot. Drag region
-			// is Electron plumbing, inert in a plain browser; interactive descendants opt back out.
-			className="hidden w-52 shrink-0 flex-col rounded-xl bg-sidebar app-region-drag md:flex"
-		>
-			<div className="flex flex-col gap-2 p-3">
-				<div className="flex items-center justify-between gap-2">
-					<h2 className="truncate px-1 text-[15px] font-semibold">{t("chatsSidebarTitle")}</h2>
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						disabled={!isOnline}
-						aria-label={t("chatsSidebarNewChat")}
-						title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-						className="app-region-no-drag"
-						onClick={() => {
-							dialogHost.openCreateChatDialog()
-						}}
-					>
-						<PlusIcon />
-					</Button>
-				</div>
-
-				<div className="relative app-region-no-drag">
-					<SearchIcon
-						aria-hidden="true"
-						className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-					/>
-					<Input
-						type="search"
-						aria-label={t("chatsSearch")}
-						placeholder={t("chatsSearch")}
-						value={search}
-						onChange={event => {
-							setSearch(event.target.value)
-						}}
-						onKeyDown={event => {
-							if (event.key === "Escape" && search.length > 0) {
-								event.preventDefault()
-								setSearch("")
-							}
-						}}
-						className="h-8 pr-8 pl-8"
-					/>
-					{search.length > 0 ? (
-						<button
-							type="button"
-							aria-label={t("chatsSearchClear")}
-							onClick={() => {
-								setSearch("")
-							}}
-							className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/30 [&_svg]:size-3.5"
-						>
-							<XIcon />
-						</button>
-					) : null}
-				</div>
-			</div>
-
-			<div
-				ref={setScrollElement}
-				className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3"
+		<Fragment>
+			<aside
+				// Geometry mirrors DriveSidebar/NotesSidebar (rounded-xl, borderless) — the shell's contextual
+				// panel slot. Width is user-resizable (useResizableSidebar) — the inline style replaces the old
+				// static w-52 utility, and a trailing drag-handle sibling (below) commits the new width. Drag
+				// region is Electron plumbing, inert in a plain browser; interactive descendants opt back out.
+				className="hidden shrink-0 flex-col rounded-xl bg-sidebar app-region-drag md:flex"
+				style={{ width: resize.width }}
 			>
-				{renderBody()}
-			</div>
-			{dialogHost.renderActiveDialog()}
-		</aside>
+				<div className="flex flex-col gap-2 p-3">
+					<div className="flex items-center justify-between gap-2">
+						<h2 className="truncate px-1 text-[15px] font-semibold">{t("chatsSidebarTitle")}</h2>
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							disabled={!isOnline}
+							aria-label={t("chatsSidebarNewChat")}
+							title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+							className="app-region-no-drag"
+							onClick={() => {
+								dialogHost.openCreateChatDialog()
+							}}
+						>
+							<PlusIcon />
+						</Button>
+					</div>
+
+					<div className="relative app-region-no-drag">
+						<SearchIcon
+							aria-hidden="true"
+							className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+						/>
+						<Input
+							type="search"
+							aria-label={t("chatsSearch")}
+							placeholder={t("chatsSearch")}
+							value={search}
+							onChange={event => {
+								setSearch(event.target.value)
+							}}
+							onKeyDown={event => {
+								if (event.key === "Escape" && search.length > 0) {
+									event.preventDefault()
+									setSearch("")
+								}
+							}}
+							className="h-8 pr-8 pl-8"
+						/>
+						{search.length > 0 ? (
+							<button
+								type="button"
+								aria-label={t("chatsSearchClear")}
+								onClick={() => {
+									setSearch("")
+								}}
+								className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/30 [&_svg]:size-3.5"
+							>
+								<XIcon />
+							</button>
+						) : null}
+					</div>
+				</div>
+
+				<div
+					ref={setScrollElement}
+					className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3"
+				>
+					{renderBody()}
+				</div>
+				{dialogHost.renderActiveDialog()}
+			</aside>
+			<SidebarResizeHandle
+				ariaLabel={t("chatsSidebarResize")}
+				onPointerDown={resize.onPointerDown}
+				onPointerMove={resize.onPointerMove}
+				onPointerUp={resize.onPointerUp}
+			/>
+		</Fragment>
 	)
 }

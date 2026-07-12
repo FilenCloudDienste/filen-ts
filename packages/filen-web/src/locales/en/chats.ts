@@ -9,6 +9,8 @@ export const chats = {
 	// ── Sidebar ─────────────────────────────────────────────────────────────────
 	/** Chats sidebar — header title over the conversation list column */
 	chatsSidebarTitle: "Chats",
+	/** Chats sidebar — accessible label on the trailing-edge drag handle that resizes the sidebar */
+	chatsSidebarResize: "Resize sidebar",
 	/** Chats sidebar — search box placeholder and accessible label (filters by name/participant) */
 	chatsSearch: "Search conversations",
 	/** Chats sidebar — clears the search box */
@@ -181,6 +183,10 @@ export const chats = {
 	chatParticipantsAddEmpty: "No contacts available to add",
 
 	// ── Message menu ─────────────────────────────────────────────────────────────
+	/** Hover action bar — accessible label on the floating per-message toolbar */
+	chatMessageActionsLabel: "Message actions",
+	/** Hover action bar — the ⋯ overflow trigger that opens the full message menu */
+	chatMessageMoreActions: "More actions",
 	/** Message menu — quotes the message in the composer as a reply target */
 	chatMessageActionReply: "Reply",
 	/** Message menu — loads an own message's text into the composer for an in-place edit (sender-only) */

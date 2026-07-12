@@ -74,6 +74,22 @@ export function chatDisplayName(chat: Chat, currentUserId: bigint): string {
 	return [...displayNames].sort(fastLocaleCompare).join(", ")
 }
 
+// Participant-derived avatar image (mobile's own rule, list/chat/index.tsx): the other participants sans
+// self, keeping only a real http avatar URL. A 1:1 uses the other person's image; anything else has no
+// single representative image and falls back to undefined (the caller renders the display-name initial).
+// Shared by the sidebar row (chatRow.tsx) and the thread header (messageThread.tsx).
+export function chatAvatarUrl(chat: Chat, currentUserId: bigint | undefined): string | undefined {
+	const others = chat.participants.filter(p => p.userId !== currentUserId)
+
+	if (others.length !== 1) {
+		return undefined
+	}
+
+	const avatar = others[0]?.avatar
+
+	return avatar?.startsWith("http") === true ? avatar : undefined
+}
+
 // lastMessage preview-line derivation — the "last-message" tier ONLY of mobile's full precedence
 // (`typing > blocked > last-message > "no messages yet"`, list/chat/index.tsx). The typing tier is
 // layered on top by the caller (chatRow.tsx's useChatTypingLabel, fed by the socket-driven typing

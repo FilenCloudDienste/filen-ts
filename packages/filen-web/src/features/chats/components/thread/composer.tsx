@@ -522,115 +522,120 @@ export function Composer({
 				</div>
 			) : null}
 
-			{mode.kind === "reply" ? (
-				<div className="mb-1.5 flex items-center gap-2 rounded-lg bg-muted px-3 py-1.5 text-sm">
-					<CornerUpLeftIcon className="size-3.5 shrink-0 text-muted-foreground" />
-					<span className="shrink-0 font-medium">{t("chatReplyingTo", { name: senderName(mode.message) })}</span>
-					{mode.message.message !== undefined && mode.message.message.length > 0 ? (
-						<span className="min-w-0 flex-1 truncate text-muted-foreground">{mode.message.message}</span>
-					) : (
-						<span className="flex-1" />
-					)}
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						className="size-6 shrink-0"
-						aria-label={t("chatComposerCancelReply")}
-						onClick={cancelMode}
-					>
-						<XIcon />
-					</Button>
-				</div>
-			) : null}
+			{/* Reply/edit banner + input field are one visually-joined docked unit — a single rounded,
+			softly-bordered field (Discord's own composer treatment, lighter than the surrounding thread)
+			with the active reply/edit strip flush atop the textarea, separated only by a thin rule. */}
+			<div className="rounded-2xl border border-input bg-background transition-colors focus-within:border-ring/60">
+				{mode.kind === "reply" ? (
+					<div className="flex items-center gap-2 border-b border-input px-3 py-1.5 text-sm">
+						<CornerUpLeftIcon className="size-3.5 shrink-0 text-muted-foreground" />
+						<span className="shrink-0 font-medium">{t("chatReplyingTo", { name: senderName(mode.message) })}</span>
+						{mode.message.message !== undefined && mode.message.message.length > 0 ? (
+							<span className="min-w-0 flex-1 truncate text-muted-foreground">{mode.message.message}</span>
+						) : (
+							<span className="flex-1" />
+						)}
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							className="size-6 shrink-0"
+							aria-label={t("chatComposerCancelReply")}
+							onClick={cancelMode}
+						>
+							<XIcon />
+						</Button>
+					</div>
+				) : null}
 
-			{mode.kind === "edit" ? (
-				<div className="mb-1.5 flex items-center gap-2 rounded-lg bg-muted px-3 py-1.5 text-sm">
-					<PencilIcon className="size-3.5 shrink-0 text-muted-foreground" />
-					<span className="flex-1 font-medium">{t("chatComposerEditing")}</span>
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						className="size-6 shrink-0"
-						aria-label={t("chatComposerCancelEdit")}
-						onClick={cancelMode}
-					>
-						<XIcon />
-					</Button>
-				</div>
-			) : null}
+				{mode.kind === "edit" ? (
+					<div className="flex items-center gap-2 border-b border-input px-3 py-1.5 text-sm">
+						<PencilIcon className="size-3.5 shrink-0 text-muted-foreground" />
+						<span className="flex-1 font-medium">{t("chatComposerEditing")}</span>
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							className="size-6 shrink-0"
+							aria-label={t("chatComposerCancelEdit")}
+							onClick={cancelMode}
+						>
+							<XIcon />
+						</Button>
+					</div>
+				) : null}
 
-			<div className="flex items-end gap-2 rounded-xl bg-muted px-3 py-2">
-				<DropdownMenu>
-					<DropdownMenuTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								className="size-8 shrink-0 self-end rounded-full"
-								// Attach-menu pre-gate — both entries need network right away (an upload/
-								// drive-attach start, not a durably-queued send), unlike the send button below,
-								// which stays enabled offline by design (its outbox queues and flushes later).
-								disabled={isAttachDisabled(uploadingCount, isOnline)}
-								aria-label={t("chatComposerAttach")}
-								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+				<div className="flex items-end gap-2 px-3 py-2">
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							render={
+								<Button
+									variant="ghost"
+									size="icon-sm"
+									className="size-8 shrink-0 self-end rounded-full"
+									// Attach-menu pre-gate — both entries need network right away (an upload/
+									// drive-attach start, not a durably-queued send), unlike the send button below,
+									// which stays enabled offline by design (its outbox queues and flushes later).
+									disabled={isAttachDisabled(uploadingCount, isOnline)}
+									aria-label={t("chatComposerAttach")}
+									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+								>
+									<PaperclipIcon />
+								</Button>
+							}
+						/>
+						<DropdownMenuContent align="start">
+							<DropdownMenuItem
+								onClick={() => {
+									fileInputRef.current?.click()
+								}}
 							>
-								<PaperclipIcon />
-							</Button>
-						}
-					/>
-					<DropdownMenuContent align="start">
-						<DropdownMenuItem
-							onClick={() => {
-								fileInputRef.current?.click()
-							}}
-						>
-							<UploadIcon aria-hidden="true" />
-							{t("chatComposerAttachUpload")}
-						</DropdownMenuItem>
-						<DropdownMenuItem
-							onClick={() => {
-								setAttachDriveOpen(true)
-							}}
-						>
-							<HardDriveIcon aria-hidden="true" />
-							{t("chatComposerAttachFromDrive")}
-						</DropdownMenuItem>
-					</DropdownMenuContent>
-				</DropdownMenu>
-				<textarea
-					ref={textareaRef}
-					value={draft}
-					onChange={onChange}
-					onKeyDown={onKeyDown}
-					onKeyUp={syncCaret}
-					onClick={syncCaret}
-					onSelect={syncCaret}
-					onBlur={() => {
-						// Leaving the input ends the typing burst (mobile fires "up" onBlur).
-						signalStopped(chat)
-					}}
-					rows={1}
-					aria-label={t("chatComposerPlaceholder")}
-					placeholder={t("chatComposerPlaceholder")}
-					className="max-h-[200px] min-h-6 flex-1 resize-none bg-transparent text-sm leading-6 outline-none placeholder:text-muted-foreground"
-				/>
-				<div className="flex shrink-0 items-center gap-2">
-					{shouldShowCounter(draft) ? (
-						<span className={cn("text-xs tabular-nums", overLimit ? "text-destructive" : "text-muted-foreground")}>
-							{remainingChars(draft)}
-						</span>
-					) : null}
-					<Button
-						size="icon-sm"
-						className="size-8 rounded-full"
-						disabled={!canSend(draft)}
-						aria-label={mode.kind === "edit" ? t("chatComposerSaveEdit") : t("chatComposerSend")}
-						onClick={() => {
-							void submit()
+								<UploadIcon aria-hidden="true" />
+								{t("chatComposerAttachUpload")}
+							</DropdownMenuItem>
+							<DropdownMenuItem
+								onClick={() => {
+									setAttachDriveOpen(true)
+								}}
+							>
+								<HardDriveIcon aria-hidden="true" />
+								{t("chatComposerAttachFromDrive")}
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
+					<textarea
+						ref={textareaRef}
+						value={draft}
+						onChange={onChange}
+						onKeyDown={onKeyDown}
+						onKeyUp={syncCaret}
+						onClick={syncCaret}
+						onSelect={syncCaret}
+						onBlur={() => {
+							// Leaving the input ends the typing burst (mobile fires "up" onBlur).
+							signalStopped(chat)
 						}}
-					>
-						<ArrowUpIcon />
-					</Button>
+						rows={1}
+						aria-label={t("chatComposerPlaceholder")}
+						placeholder={t("chatComposerPlaceholder")}
+						className="max-h-[200px] min-h-6 flex-1 resize-none bg-transparent text-sm leading-6 outline-none placeholder:text-muted-foreground"
+					/>
+					<div className="flex shrink-0 items-center gap-2">
+						{shouldShowCounter(draft) ? (
+							<span className={cn("text-xs tabular-nums", overLimit ? "text-destructive" : "text-muted-foreground")}>
+								{remainingChars(draft)}
+							</span>
+						) : null}
+						<Button
+							size="icon-sm"
+							className="size-8 rounded-full"
+							disabled={!canSend(draft)}
+							aria-label={mode.kind === "edit" ? t("chatComposerSaveEdit") : t("chatComposerSend")}
+							onClick={() => {
+								void submit()
+							}}
+						>
+							<ArrowUpIcon />
+						</Button>
+					</div>
 				</div>
 			</div>
 
