@@ -5,7 +5,6 @@ import { type TFunction } from "i18next"
 import { type PreviewType } from "@/lib/previewType"
 import { type OfflineParent } from "@/features/offline/offlineHelpers"
 import alerts from "@/lib/alerts"
-import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { run } from "@filen/utils"
 import * as FileSystem from "expo-file-system"
 import transfers from "@/features/transfers/transfers"
@@ -142,7 +141,10 @@ export function buildDownloadSubButtons({
 					return
 				}
 
-				const result = await runWithLoading(async defer => {
+				// Non-blocking: the download's progress + speed surface in the floating transfer bar
+				// (and the Android notification); a full-screen blocking loader would freeze the app on
+				// large media and hide that better progress UI. Mirrors "Download to device" / Export.
+				const result = await run(async defer => {
 					if (!item.data.decryptedMeta) {
 						throw new Error("Missing decrypted metadata")
 					}

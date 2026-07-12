@@ -278,6 +278,7 @@ export function buildBulkActionMenu({
 			onPress: async () => {
 				await runBulk({
 					items: selectedDriveItems,
+					background: true,
 					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 					op: async item => {
 						const result = await downloadDriveItemToDevice({ item })
@@ -325,6 +326,7 @@ export function buildBulkActionMenu({
 
 				await runBulk({
 					items: selectedDriveItems,
+					background: true,
 					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 					op: async item => {
 						const decryptedMeta = item.data.decryptedMeta

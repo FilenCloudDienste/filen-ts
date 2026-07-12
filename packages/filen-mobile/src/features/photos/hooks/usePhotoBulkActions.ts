@@ -92,6 +92,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 
 				await runBulk({
 					items: selectedItems,
+					background: true,
 					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 					op: async item => {
 						const meta = item.data.decryptedMeta
@@ -147,6 +148,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 		onPress: async () => {
 			await runBulk({
 				items: selectedItems,
+				background: true,
 				clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 				op: async item => {
 					const result = await downloadDriveItemToDevice({ item })
