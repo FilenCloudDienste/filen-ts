@@ -314,6 +314,12 @@ export const drive = {
 	/** Bulk disable-link confirm dialog — body for multiple selected items; {{count}} = items being disabled */
 	driveLinkDisableSelectedConfirmBody_other: "Are you sure you want to disable the public links for these {{count}} items?",
 
+	// ── Single-link disable confirm (public-link dialog's own Disable button) ─
+	/** Public-link dialog — disable-confirm title, guarding the dialog's own Disable button */
+	driveLinkDisableConfirmTitle: "Disable this public link?",
+	/** Public-link dialog — disable-confirm body: destructive framing (the URL stops working immediately) */
+	driveLinkDisableConfirmBody: "The link will stop working immediately, and anyone who has it will lose access to this item.",
+
 	// ── Move dialog ──────────────────────────────────────────────────────────
 	/** Move dialog — title of the destination-directory picker */
 	driveMoveDialogTitle: "Select destination",
@@ -486,6 +492,14 @@ export const drive = {
 	driveLinkNoLinkTitle: "No public link",
 	/** Public-link dialog — empty-state description under driveLinkNoLinkTitle */
 	driveLinkNoLinkDescription: "Anyone with the link can access this item.",
+	/** Public-link dialog — premium-gate title shown to a non-subscribed account instead of the link form */
+	driveLinkPremiumRequiredTitle: "Feature requires a subscription",
+	/** Public-link dialog — premium-gate description under driveLinkPremiumRequiredTitle */
+	driveLinkPremiumRequiredDescription: "Public links are available on a paid plan. Upgrade your account to share this item with a link.",
+	/** Public-link dialog — premium-gate button linking to the billing settings page */
+	driveLinkUpgradeAction: "Upgrade",
+	/** Public-link dialog — item-hero size/type line for a file; {{size}} = formatted byte size (e.g. "1.2 MB") */
+	driveLinkHeroFileMeta: "File · {{size}}",
 	/** Public-link dialog — toast shown after the link URL is copied to the clipboard */
 	driveLinkUrlCopiedToast: "Link copied to clipboard",
 	/** Public-link dialog — status text shown next to the password field when a password is already set (the field itself never shows the plaintext) */

@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest"
 import { canShareVariant, isReadOnlySharedVariant } from "@/features/drive/lib/share/gating"
 
 describe("canShareVariant", () => {
-	it("allows every owned surface (drive, recents, favorites, shared-with-others)", () => {
+	it("allows every owned surface (drive, recents, favorites, shared-with-others, links)", () => {
 		expect(canShareVariant("drive")).toBe(true)
 		expect(canShareVariant("recents")).toBe(true)
 		expect(canShareVariant("favorites")).toBe(true)
 		expect(canShareVariant("sharedOut")).toBe(true)
+		expect(canShareVariant("links")).toBe(true)
 	})
 
 	it("blocks trash (disposed items) and shared-with-me (items owned by someone else)", () => {

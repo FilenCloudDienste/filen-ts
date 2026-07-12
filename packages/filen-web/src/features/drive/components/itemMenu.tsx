@@ -4,13 +4,17 @@ import { toast } from "sonner"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { toggleFavorite, restoreItems } from "@/features/drive/lib/actions"
+import { driveItemLinkStatusQueryKey, fetchDriveItemLinkStatus } from "@/features/drive/queries/drive"
+import { queryClient } from "@/queries/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { asErrorDTO } from "@/lib/sdk/errors"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useIsOnline } from "@/lib/useIsOnline"
 import {
 	applyOfflineGate,
 	driveItemActions,
+	resolveCopyLinkAction,
 	startItemDownload,
 	type ItemActionDescriptor,
 	type ItemActionDialogKind,
@@ -113,6 +117,34 @@ function ItemMenuEntries({
 		}
 	}
 
+	// Copy-link's own dispatch — intercepted here, BEFORE the run==="dialog" branch below, since its
+	// real behavior (copy straight to the clipboard when a link already exists) depends on data this
+	// synchronous click handler doesn't have yet. `ensureQueryData` reuses the link dialog's own cache
+	// entry (same query key) rather than always re-fetching — opening the dialog moments earlier for
+	// this same item already primed it. A free-tier account can never have an existing link (public
+	// links are premium-only), so `status` naturally resolves null there too — no separate premium
+	// check needed, it degrades to `onItemAction("link", item)` exactly like an item with no link at
+	// all, which is where the dialog's own subscription gate lives (see linkDialog.tsx).
+	async function runCopyLink(): Promise<void> {
+		const status = await queryClient.ensureQueryData({
+			queryKey: driveItemLinkStatusQueryKey(item.data.uuid),
+			queryFn: () => fetchDriveItemLinkStatus(item)
+		})
+		const outcome = await resolveCopyLinkAction(item, status, url => navigator.clipboard.writeText(url))
+
+		if (outcome.action === "copied") {
+			toast.success(t("driveLinkUrlCopiedToast"))
+			return
+		}
+
+		if (outcome.action === "clipboardError") {
+			toast.error(errorLabel(asErrorDTO(outcome.error)))
+			return
+		}
+
+		onItemAction("link", item)
+	}
+
 	return (
 		<>
 			{descriptors.map((descriptor, index) => (
@@ -129,6 +161,11 @@ function ItemMenuEntries({
 							// bubble through the REACT tree (not the DOM tree), so without this an item click
 							// would also fire the row's onClick and reselect it.
 							event.stopPropagation()
+
+							if (descriptor.id === "copyLink") {
+								void runCopyLink()
+								return
+							}
 
 							if (descriptor.run === "direct") {
 								void runDirect(descriptor)

@@ -175,10 +175,10 @@ describe("driveBulkActions", () => {
 		}
 	)
 
-	it("links variant, decryptable selection, none favorited: favorite, download, trash, disableLink — move dropped (canMoveVariant), no share", () => {
+	it("links variant, decryptable selection, none favorited: favorite, share, download, trash, disableLink — move dropped (canMoveVariant)", () => {
 		const descriptors = driveBulkActions("links", flags({ includesFavorited: false, includesUndecryptable: false }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["favorite", "download", "trash", "disableLink"])
+		expect(descriptors.map(d => d.id)).toEqual(["favorite", "share", "download", "trash", "disableLink"])
 	})
 
 	// L4 — the one bulk action unique to the links (root) surface: revokes every selected item's
@@ -204,9 +204,10 @@ describe("driveBulkActions", () => {
 	})
 
 	// Bulk share gates like single-item share: the owned surfaces only (drive/recents/favorites/
-	// sharedOut), never shared-with-me, and never when the selection includes an undecryptable item.
-	it("share is present on sharedOut bulk but absent on sharedIn bulk (owned surfaces only)", () => {
+	// sharedOut/links), never shared-with-me, and never when the selection includes an undecryptable item.
+	it("share is present on sharedOut and links bulk but absent on sharedIn bulk (owned surfaces only)", () => {
 		expect(driveBulkActions("sharedOut", flags({ includesUndecryptable: false })).map(d => d.id)).toContain("share")
+		expect(driveBulkActions("links", flags({ includesUndecryptable: false })).map(d => d.id)).toContain("share")
 		expect(driveBulkActions("sharedIn", flags({ includesUndecryptable: false })).map(d => d.id)).not.toContain("share")
 	})
 

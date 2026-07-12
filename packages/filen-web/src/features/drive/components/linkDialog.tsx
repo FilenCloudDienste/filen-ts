@@ -1,18 +1,33 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { CopyIcon, LinkIcon } from "lucide-react"
+import { Link } from "@tanstack/react-router"
+import { CopyIcon, LinkIcon, CreditCardIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { PublicLinkExpiration } from "@filen/sdk-rs"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { createLink, disableLink, updateLink } from "@/features/drive/lib/actions"
 import { useDriveItemLinkStatusQuery, type DriveItemLinkStatus } from "@/features/drive/queries/drive"
-import { buildLinkUpdate, buildPublicLinkUrl, readLinkForm, type LinkFormEdits } from "@/features/drive/components/linkDialog.logic"
+import { useAccountQuery } from "@/queries/account"
+import {
+	buildLinkUpdate,
+	buildPublicLinkUrl,
+	readLinkForm,
+	resolveLinkHeroInfo,
+	resolvePremiumGateState,
+	type LinkFormEdits
+} from "@/features/drive/components/linkDialog.logic"
+import { ItemIcon } from "@/features/drive/components/itemIcon"
+import { dirColorHex } from "@/features/drive/lib/dirColor"
+import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
+import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { DriveKey } from "@/lib/i18n"
+import { cn } from "@/lib/utils"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldContent, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -21,6 +36,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 
 export interface LinkDialogProps {
 	item: DriveItem
@@ -40,6 +56,58 @@ const EXPIRATION_OPTIONS: { value: PublicLinkExpiration; labelKey: DriveKey }[] 
 	{ value: "30d", labelKey: "driveLinkExpirationThirtyDays" }
 ]
 
+// Compact item-hero header — a smaller sibling of infoDialog.tsx's own centered hero tile (same
+// thumbnail/fallback-icon/directory-color-tint machinery, laid out horizontally instead of stacked so
+// it reads as a header strip above the form rather than competing with it for vertical space). Local
+// thumbFailed state mirrors infoDialog's own: never resets once tripped, this mount already gave up on
+// this uuid's cached thumbnail.
+function LinkItemHero({ item }: { item: DriveItem }) {
+	const { t } = useTranslation("drive")
+	const thumbUrl = useThumbnail(item)
+	const [thumbFailed, setThumbFailed] = useState(false)
+	const hero = resolveLinkHeroInfo(item)
+	const isDirectory = hero.typeLabelKey === "driveItemTypeDirectory"
+	const dirHex = dirColorHex(item.type === "directory" ? item.data.color : "default")
+	const showThumb = !isDirectory && thumbUrl !== null && !thumbFailed
+
+	return (
+		<div className="flex min-w-0 items-center gap-3 rounded-xl bg-muted/40 p-3">
+			<div
+				className={cn(
+					"relative flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl ring-1 ring-foreground/5",
+					!isDirectory && "bg-muted"
+				)}
+				style={isDirectory ? { backgroundColor: `color-mix(in srgb, ${dirHex} 16%, transparent)` } : undefined}
+			>
+				{showThumb ? (
+					<img
+						src={thumbUrl}
+						alt=""
+						draggable={false}
+						decoding="async"
+						className="size-full object-cover"
+						onError={() => {
+							invalidateThumbnail(item.data.uuid)
+							setThumbFailed(true)
+						}}
+					/>
+				) : (
+					<ItemIcon
+						item={item}
+						className="size-6"
+					/>
+				)}
+			</div>
+			<div className="flex min-w-0 flex-col">
+				<span className="truncate text-sm font-medium select-text">{hero.name}</span>
+				<span className="truncate text-xs text-muted-foreground">
+					{hero.sizeLabel !== null ? t("driveLinkHeroFileMeta", { size: hero.sizeLabel }) : t(hero.typeLabelKey)}
+				</span>
+			</div>
+		</div>
+	)
+}
+
 // Public-link management panel — mounted-when-active by the listing's dialog host. Handles BOTH item
 // types in one component (unlike color/versions, which are type-specific): status-check first
 // (no link yet vs. an existing one to configure), each field edit applies immediately (no batched
@@ -47,15 +115,21 @@ const EXPIRATION_OPTIONS: { value: PublicLinkExpiration; labelKey: DriveKey }[] 
 // staged-edit-then-header-checkmark one — this is a modal, not a full screen with its own header
 // action slot). A single shared `pending` flag gates the whole form during any in-flight write,
 // rather than one per field: two concurrent updates would both read the same stale status and the
-// second to resolve would silently clobber the first's change.
+// second to resolve would silently clobber the first's change. Public links are a premium capability
+// (mobile parity) — a non-premium account sees a subscription empty-state instead of any of the above,
+// gated by the account query's own tri-state (resolvePremiumGateState) so a still-loading account never
+// flashes the gate before settling into "allowed".
 export function LinkDialog({ item, onClose }: LinkDialogProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const linkStatusQuery = useDriveItemLinkStatusQuery(item)
+	const accountQuery = useAccountQuery()
+	const premiumGate = resolvePremiumGateState(accountQuery.data?.isPremium)
 	const isOnline = useIsOnline()
 	const [pending, setPending] = useState(false)
 	const [createProgress, setCreateProgress] = useState<{ downloaded: number; total: number | undefined } | null>(null)
 	const [passwordEditing, setPasswordEditing] = useState(false)
 	const [passwordDraft, setPasswordDraft] = useState("")
+	const [confirmDisableOpen, setConfirmDisableOpen] = useState(false)
 
 	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
 		if (!shouldForwardOpenChange(next, pending)) {
@@ -108,10 +182,16 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 		setPasswordDraft("")
 	}
 
+	// Reached only through the confirm dialog below (destructive — see driveLinkDisableConfirmBody) —
+	// the footer's own Disable button never calls this directly. Closes the confirm dialog
+	// unconditionally once the write settles (same shared-tail shape as useDriveDialogHost's own
+	// runBulkDialogAction): an error still surfaces via toast, but the confirm prompt itself has
+	// nothing further to add once the attempt has been made.
 	async function handleDisable(current: DriveItemLinkStatus): Promise<void> {
 		setPending(true)
 		const outcome = await disableLink(item, current)
 		setPending(false)
+		setConfirmDisableOpen(false)
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
@@ -136,213 +216,272 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 			: null
 
 	return (
-		<Dialog
-			open
-			onOpenChange={handleOpenChange}
-		>
-			<DialogContent closeButtonDisabled={pending}>
-				<DialogHeader>
-					<DialogTitle>{t("driveLinkDialogTitle")}</DialogTitle>
-				</DialogHeader>
-				{linkStatusQuery.status === "pending" ? (
-					<div className="flex justify-center py-8">
-						<Spinner />
-					</div>
-				) : linkStatusQuery.status === "error" ? (
-					<p className="text-sm text-destructive">{errorLabel(asErrorDTO(linkStatusQuery.error))}</p>
-				) : current === null ? (
-					<Empty className="p-6">
-						<EmptyHeader>
-							<EmptyMedia variant="icon">
-								<LinkIcon />
-							</EmptyMedia>
-							<EmptyTitle>{t("driveLinkNoLinkTitle")}</EmptyTitle>
-							<EmptyDescription>{t("driveLinkNoLinkDescription")}</EmptyDescription>
-						</EmptyHeader>
-						<EmptyContent>
-							<Button
-								disabled={pending || !isOnline}
-								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-								onClick={() => {
-									void handleCreate()
-								}}
-							>
-								{pending && <Spinner data-icon="inline-start" />}
-								{t("driveLinkEnableAction")}
-							</Button>
-							{createProgressPercent !== null ? (
-								<p className="text-xs text-muted-foreground">
-									{t("driveLinkCreatingProgress", { percent: createProgressPercent })}
-								</p>
-							) : null}
-						</EmptyContent>
-					</Empty>
-				) : current && form ? (
-					<FieldGroup>
-						<Field orientation="horizontal">
-							<FieldContent>
-								<FieldLabel htmlFor="link-downloadable">{t("driveLinkDownloadableLabel")}</FieldLabel>
-							</FieldContent>
-							<Switch
-								id="link-downloadable"
-								checked={form.downloadEnabled}
-								disabled={pending || !isOnline}
-								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-								onCheckedChange={checked => {
-									void handleUpdate(current, { downloadEnabled: checked })
-								}}
-							/>
-						</Field>
-						<Field>
-							<FieldLabel htmlFor="link-expiration">{t("driveLinkExpirationLabel")}</FieldLabel>
-							<Select
-								items={EXPIRATION_OPTIONS.map(option => ({ value: option.value, label: t(option.labelKey) }))}
-								value={form.expiration}
-								disabled={pending || !isOnline}
-								onValueChange={value => {
-									// The select is never rendered with a null/placeholder entry (EXPIRATION_OPTIONS
-									// covers every PublicLinkExpiration value), so a null callback value can't occur
-									// in practice — the check exists only to satisfy Select's general-purpose type,
-									// which allows "no selection" for the cases that do use a placeholder.
-									if (value !== null) {
-										void handleUpdate(current, { expiration: value })
+		<>
+			<Dialog
+				open
+				onOpenChange={handleOpenChange}
+			>
+				<DialogContent closeButtonDisabled={pending}>
+					<DialogHeader>
+						<DialogTitle>{t("driveLinkDialogTitle")}</DialogTitle>
+					</DialogHeader>
+					{premiumGate === "loading" ? (
+						<div className="flex justify-center py-8">
+							<Spinner />
+						</div>
+					) : premiumGate === "gated" ? (
+						<Empty className="p-6">
+							<EmptyHeader>
+								<EmptyMedia variant="icon">
+									<CreditCardIcon />
+								</EmptyMedia>
+								<EmptyTitle>{t("driveLinkPremiumRequiredTitle")}</EmptyTitle>
+								<EmptyDescription>{t("driveLinkPremiumRequiredDescription")}</EmptyDescription>
+							</EmptyHeader>
+							<EmptyContent>
+								<Button
+									variant="outline"
+									render={
+										<Link
+											to="/settings/billing"
+											onClick={onClose}
+										/>
 									}
-								}}
-							>
-								<SelectTrigger
-									id="link-expiration"
-									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 								>
-									<SelectValue />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectGroup>
-										{EXPIRATION_OPTIONS.map(option => (
-											<SelectItem
-												key={option.value}
-												value={option.value}
-											>
-												{t(option.labelKey)}
-											</SelectItem>
-										))}
-									</SelectGroup>
-								</SelectContent>
-							</Select>
-						</Field>
-						<Field>
-							<FieldLabel>{t("driveLinkPasswordLabel")}</FieldLabel>
-							{passwordEditing ? (
-								<div className="flex items-center gap-2">
-									<Input
-										type="password"
-										autoFocus
-										value={passwordDraft}
-										disabled={pending || !isOnline}
-										placeholder={t("driveLinkPasswordPlaceholder")}
-										className="flex-1"
-										onChange={e => {
-											setPasswordDraft(e.target.value)
-										}}
-									/>
-									<Button
-										size="sm"
-										disabled={pending || !isOnline || passwordDraft.trim().length === 0}
-										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-										onClick={() => {
-											void handleSavePassword(current)
-										}}
-									>
-										{pending && <Spinner data-icon="inline-start" />}
-										{t("driveLinkPasswordSaveAction")}
-									</Button>
-									<Button
-										size="sm"
-										variant="ghost"
-										disabled={pending || !isOnline}
-										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-										onClick={() => {
-											setPasswordEditing(false)
-											setPasswordDraft("")
-										}}
-									>
-										{t("common:cancel")}
-									</Button>
+									{t("driveLinkUpgradeAction")}
+								</Button>
+							</EmptyContent>
+						</Empty>
+					) : (
+						<>
+							<LinkItemHero item={item} />
+							{linkStatusQuery.status === "pending" ? (
+								<div className="flex justify-center py-8">
+									<Spinner />
 								</div>
-							) : (
-								<div className="flex items-center gap-2">
-									<span className="text-sm text-muted-foreground">
-										{form.passwordSet ? t("driveLinkPasswordSetStatus") : t("driveLinkPasswordPlaceholder")}
-									</span>
-									<Button
-										size="sm"
-										variant="outline"
-										disabled={pending || !isOnline}
-										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-										onClick={() => {
-											setPasswordEditing(true)
-										}}
-									>
-										{form.passwordSet ? t("driveLinkPasswordChangeAction") : t("driveLinkPasswordSetAction")}
-									</Button>
-									{form.passwordSet ? (
+							) : linkStatusQuery.status === "error" ? (
+								<PreviewErrorState
+									message={errorLabel(asErrorDTO(linkStatusQuery.error))}
+									onRetry={() => {
+										void linkStatusQuery.refetch()
+									}}
+								/>
+							) : current === null ? (
+								<Empty className="p-6">
+									<EmptyHeader>
+										<EmptyMedia variant="icon">
+											<LinkIcon />
+										</EmptyMedia>
+										<EmptyTitle>{t("driveLinkNoLinkTitle")}</EmptyTitle>
+										<EmptyDescription>{t("driveLinkNoLinkDescription")}</EmptyDescription>
+									</EmptyHeader>
+									<EmptyContent>
 										<Button
-											size="sm"
-											variant="ghost"
 											disabled={pending || !isOnline}
 											title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 											onClick={() => {
-												void handleUpdate(current, { password: { kind: "cleared" } })
+												void handleCreate()
 											}}
 										>
-											{t("driveLinkPasswordRemoveAction")}
+											{pending && <Spinner data-icon="inline-start" />}
+											{t("driveLinkEnableAction")}
 										</Button>
-									) : null}
-								</div>
-							)}
-						</Field>
-						<Field>
-							<FieldLabel htmlFor="link-url">{t("driveLinkUrlLabel")}</FieldLabel>
-							<div className="flex items-center gap-2">
-								<Input
-									id="link-url"
-									readOnly
-									value={url ?? ""}
-									className="flex-1"
-								/>
-								<Button
-									type="button"
-									variant="outline"
-									size="icon"
-									disabled={url === null}
-									aria-label={t("driveActionCopyLink")}
-									onClick={() => {
-										if (url !== null) {
-											void handleCopy(url)
-										}
-									}}
-								>
-									<CopyIcon />
-								</Button>
-							</div>
-						</Field>
-					</FieldGroup>
-				) : null}
-				{current ? (
-					<DialogFooter>
-						<Button
-							variant="destructive"
-							disabled={pending || !isOnline}
-							title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-							onClick={() => {
-								void handleDisable(current)
-							}}
-						>
-							{pending && <Spinner data-icon="inline-start" />}
-							{t("driveLinkDisableAction")}
-						</Button>
-					</DialogFooter>
-				) : null}
-			</DialogContent>
-		</Dialog>
+										{createProgressPercent !== null ? (
+											<p className="text-xs text-muted-foreground">
+												{t("driveLinkCreatingProgress", { percent: createProgressPercent })}
+											</p>
+										) : null}
+									</EmptyContent>
+								</Empty>
+							) : current && form ? (
+								<FieldGroup>
+									<Field orientation="horizontal">
+										<FieldContent>
+											<FieldLabel htmlFor="link-downloadable">{t("driveLinkDownloadableLabel")}</FieldLabel>
+										</FieldContent>
+										<Switch
+											id="link-downloadable"
+											checked={form.downloadEnabled}
+											disabled={pending || !isOnline}
+											title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+											onCheckedChange={checked => {
+												void handleUpdate(current, { downloadEnabled: checked })
+											}}
+										/>
+									</Field>
+									<Field>
+										<FieldLabel htmlFor="link-expiration">{t("driveLinkExpirationLabel")}</FieldLabel>
+										<Select
+											items={EXPIRATION_OPTIONS.map(option => ({ value: option.value, label: t(option.labelKey) }))}
+											value={form.expiration}
+											disabled={pending || !isOnline}
+											onValueChange={value => {
+												// The select is never rendered with a null/placeholder entry (EXPIRATION_OPTIONS
+												// covers every PublicLinkExpiration value), so a null callback value can't occur
+												// in practice — the check exists only to satisfy Select's general-purpose type,
+												// which allows "no selection" for the cases that do use a placeholder.
+												if (value !== null) {
+													void handleUpdate(current, { expiration: value })
+												}
+											}}
+										>
+											<SelectTrigger
+												id="link-expiration"
+												title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+											>
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												<SelectGroup>
+													{EXPIRATION_OPTIONS.map(option => (
+														<SelectItem
+															key={option.value}
+															value={option.value}
+														>
+															{t(option.labelKey)}
+														</SelectItem>
+													))}
+												</SelectGroup>
+											</SelectContent>
+										</Select>
+									</Field>
+									<Field>
+										<FieldLabel>{t("driveLinkPasswordLabel")}</FieldLabel>
+										{passwordEditing ? (
+											<div className="flex items-center gap-2">
+												<Input
+													type="password"
+													autoFocus
+													value={passwordDraft}
+													disabled={pending || !isOnline}
+													placeholder={t("driveLinkPasswordPlaceholder")}
+													className="flex-1"
+													onChange={e => {
+														setPasswordDraft(e.target.value)
+													}}
+												/>
+												<Button
+													size="sm"
+													disabled={pending || !isOnline || passwordDraft.trim().length === 0}
+													title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+													onClick={() => {
+														void handleSavePassword(current)
+													}}
+												>
+													{pending && <Spinner data-icon="inline-start" />}
+													{t("driveLinkPasswordSaveAction")}
+												</Button>
+												<Button
+													size="sm"
+													variant="ghost"
+													disabled={pending || !isOnline}
+													title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+													onClick={() => {
+														setPasswordEditing(false)
+														setPasswordDraft("")
+													}}
+												>
+													{t("common:cancel")}
+												</Button>
+											</div>
+										) : (
+											<div className="flex items-center gap-2">
+												<span className="text-sm text-muted-foreground">
+													{form.passwordSet ? t("driveLinkPasswordSetStatus") : t("driveLinkPasswordPlaceholder")}
+												</span>
+												<Button
+													size="sm"
+													variant="outline"
+													disabled={pending || !isOnline}
+													title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+													onClick={() => {
+														setPasswordEditing(true)
+													}}
+												>
+													{form.passwordSet
+														? t("driveLinkPasswordChangeAction")
+														: t("driveLinkPasswordSetAction")}
+												</Button>
+												{form.passwordSet ? (
+													<Button
+														size="sm"
+														variant="ghost"
+														disabled={pending || !isOnline}
+														title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+														onClick={() => {
+															void handleUpdate(current, { password: { kind: "cleared" } })
+														}}
+													>
+														{t("driveLinkPasswordRemoveAction")}
+													</Button>
+												) : null}
+											</div>
+										)}
+									</Field>
+									<Field>
+										<FieldLabel htmlFor="link-url">{t("driveLinkUrlLabel")}</FieldLabel>
+										<div className="flex items-center gap-2">
+											<Input
+												id="link-url"
+												readOnly
+												value={url ?? ""}
+												className="flex-1"
+											/>
+											<Button
+												type="button"
+												variant="outline"
+												size="icon"
+												disabled={url === null}
+												aria-label={t("driveActionCopyLink")}
+												onClick={() => {
+													if (url !== null) {
+														void handleCopy(url)
+													}
+												}}
+											>
+												<CopyIcon />
+											</Button>
+										</div>
+									</Field>
+								</FieldGroup>
+							) : null}
+						</>
+					)}
+					{premiumGate === "allowed" && current ? (
+						<DialogFooter>
+							<Button
+								variant="destructive"
+								disabled={pending || !isOnline}
+								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+								onClick={() => {
+									setConfirmDisableOpen(true)
+								}}
+							>
+								{t("driveLinkDisableAction")}
+							</Button>
+						</DialogFooter>
+					) : null}
+				</DialogContent>
+			</Dialog>
+			{current ? (
+				<ConfirmDialog
+					open={confirmDisableOpen}
+					pending={pending}
+					title={t("driveLinkDisableConfirmTitle")}
+					body={t("driveLinkDisableConfirmBody")}
+					confirmLabel={t("driveLinkDisableAction")}
+					cancelLabel={t("common:cancel")}
+					destructive
+					onOpenChange={open => {
+						if (!open) {
+							setConfirmDisableOpen(false)
+						}
+					}}
+					onConfirm={() => {
+						void handleDisable(current)
+					}}
+				/>
+			) : null}
+		</>
 	)
 }

@@ -129,7 +129,7 @@ describe("previewMenuActions (preview header item-menu derivation)", () => {
 
 	it("otherwise matches driveItemActions' own variant gating exactly (download aside)", () => {
 		expect(menuIds(dirItem(), "trash")).toEqual(["restore", "deletePermanently", "info"])
-		expect(menuIds(fileItem(), "links")).toEqual(["rename", "favorite", "versions", "info", "publicLink", "copyLink", "trash"])
+		expect(menuIds(fileItem(), "links")).toEqual(["rename", "favorite", "versions", "info", "share", "publicLink", "copyLink", "trash"])
 		expect(menuIds(fileItem(), "sharedIn")).toEqual(["info", "import"])
 	})
 

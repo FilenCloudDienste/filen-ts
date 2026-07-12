@@ -99,7 +99,10 @@ test.describe("context menus", () => {
 		try {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
 
-			await page.getByRole("button", { name: "New directory", exact: true }).click()
+			// .first(): the freshly entered scratch root is still empty at this point, so its own
+			// empty-state "+ Add" affordance renders a second identical "New directory" button (same
+			// ambiguity enterScratchDirectory's own helper already guards against — see its comment).
+			await page.getByRole("button", { name: "New directory", exact: true }).first().click()
 			const dirDialog = page.getByRole("dialog")
 			await expect(dirDialog).toBeVisible()
 			await page.getByLabel("Name", { exact: true }).fill(dirName)
@@ -132,6 +135,24 @@ test.describe("context menus", () => {
 			// descriptor list a unit test already trusts.
 			await assertRowContextMenu(page, listbox, dirName, DIRECTORY_MENU_IDS)
 			await assertRowContextMenu(page, listbox, fileName, FILE_MENU_IDS)
+
+			// 1b. This e2e account is free-tier (public links are a paid feature) — a REAL, live proof
+			// that the link dialog's premium gate renders instead of the link form (link CREATION itself
+			// is not provable on this account; the gate state is). Opened from the item menu's own
+			// "Public link" entry, same reachable path a real user takes.
+			await fileRow.click({ button: "right" })
+			const linkMenu = page.getByRole("menu")
+			await expect(linkMenu).toBeVisible()
+			await linkMenu.getByRole("menuitem", { name: labelFor("publicLink"), exact: true }).click()
+
+			const linkDialog = page.getByRole("dialog")
+			await expect(linkDialog).toBeVisible()
+			await expect(linkDialog.getByText(driveDict.driveLinkPremiumRequiredTitle, { exact: true })).toBeVisible()
+			// The Upgrade action is a Button rendered polymorphically as a router Link (an <a> under the
+			// hood, not a real <button>) — its accessible role is "link", carrying the billing-settings href.
+			await expect(linkDialog.getByRole("link", { name: driveDict.driveLinkUpgradeAction, exact: true })).toBeVisible()
+			await page.keyboard.press("Escape")
+			await expect(linkDialog).toHaveCount(0)
 
 			// 2. Bulk-selection bar: order asserted by on-screen x-position (left-to-right = render
 			// order) rather than a container selector, since the bar exposes no stable role/label of

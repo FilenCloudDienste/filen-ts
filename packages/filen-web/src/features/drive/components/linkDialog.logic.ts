@@ -1,7 +1,9 @@
 import type { DirPublicLinkRW, FilePublicLink, PasswordState, PublicLinkExpiration } from "@filen/sdk-rs"
 import { buildPublicLinkUrl as buildPublicLinkUrlString } from "@/features/publicLinks/lib/format.logic"
-import type { DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { formatItemSize } from "@/features/drive/lib/format"
 import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
+import type { DriveKey } from "@/lib/i18n"
 
 // Normalized shape the dialog's form reads from — collapses the dir/file field-name asymmetry
 // (`enableDownload` vs `downloadable`) into one internal name.
@@ -118,4 +120,41 @@ export function buildPublicLinkUrl(item: DriveItem, status: DriveItemLinkStatus)
 	}
 
 	return null
+}
+
+// Public links require a subscription (mobile parity — filen-mobile/src/features/publicLink/screen.tsx's
+// own `userIsSubbed` gate) — a tri-state rather than a plain boolean so "the account query hasn't
+// resolved yet" is a distinct, explicit state from "resolved and not premium": the two render
+// completely differently (a loading skeleton vs. the subscription empty-state), and collapsing them
+// would flash the gate at every account-query cold start. `isPremium` is `undefined` for BOTH the
+// pending and the error case (an error never overwrites previously-cached data, and there is none on a
+// cold start) — the caller passes `accountQuery.data?.isPremium` directly, never a bespoke status check.
+export type PremiumGateState = "loading" | "gated" | "allowed"
+
+export function resolvePremiumGateState(isPremium: boolean | undefined): PremiumGateState {
+	if (isPremium === undefined) {
+		return "loading"
+	}
+
+	return isPremium ? "allowed" : "gated"
+}
+
+// The dialog's item-hero header — name, type label, and (files only) a size line. A directory's true
+// size needs the same remote getItemInfo call infoDialog.tsx pays for its own hero; this panel skips
+// that fetch (nothing else here needs it) and just omits the size line for a directory, same degrade
+// infoDialog uses while its own size row hasn't resolved yet.
+export interface LinkHeroInfo {
+	name: string
+	typeLabelKey: DriveKey
+	sizeLabel: string | null
+}
+
+export function resolveLinkHeroInfo(item: DriveItem): LinkHeroInfo {
+	const isDirectory = asDirectoryOrFile(item).type === "directory"
+
+	return {
+		name: item.data.decryptedMeta?.name ?? item.data.uuid,
+		typeLabelKey: isDirectory ? "driveItemTypeDirectory" : "driveItemTypeFile",
+		sizeLabel: isDirectory ? null : formatItemSize(item)
+	}
 }

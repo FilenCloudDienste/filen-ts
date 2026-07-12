@@ -17,8 +17,9 @@ import {
 	DownloadIcon,
 	ImportIcon
 } from "lucide-react"
-import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
+import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
 
 // itemMenu.logic.ts imports features/drive/lib/download.ts (for startDownloads) which in turn touches the
 // worker client and query client — unresolvable/unwanted under node vitest, mirrors
@@ -47,7 +48,7 @@ vi.mock("@/features/drive/lib/saveDownload", async importOriginal => {
 	return { ...actual, isFsaAvailable: isFsaAvailableMock }
 })
 
-import { applyOfflineGate, driveItemActions, startItemDownload } from "@/features/drive/components/itemMenu.logic"
+import { applyOfflineGate, driveItemActions, resolveCopyLinkAction, startItemDownload } from "@/features/drive/components/itemMenu.logic"
 
 beforeEach(() => {
 	isFsaAvailableMock.mockReturnValue(false)
@@ -201,13 +202,14 @@ describe("driveItemActions (item menu gating)", () => {
 		expect(ids(dirItem(), "favorites")).toEqual(ids(dirItem(), "drive"))
 	})
 
-	// Share is offered on the owned surfaces (drive/recents/favorites/sharedOut) but never on
+	// Share is offered on the owned surfaces (drive/recents/favorites/sharedOut/links) but never on
 	// shared-with-me (you can't grant access to an item you don't own) — mirrors mobile's gating.
 	it("share is present on every owned variant and absent on sharedIn", () => {
 		expect(ids(fileItem(), "drive")).toContain("share")
 		expect(ids(fileItem(), "recents")).toContain("share")
 		expect(ids(fileItem(), "favorites")).toContain("share")
 		expect(ids(fileItem(), "sharedOut")).toContain("share")
+		expect(ids(fileItem(), "links")).toContain("share")
 		expect(ids(fileItem(), "sharedIn")).not.toContain("share")
 	})
 
@@ -283,15 +285,35 @@ describe("driveItemActions (item menu gating)", () => {
 // links lists owned items that carry a public link (listLinkedItems) — an owned surface, so it keeps
 // the full owner-mutating set EXCEPT move (canMoveVariant): a "move" in this cross-tree aggregation
 // would silently reparent an item the user is viewing for its link. Link management (publicLink/
-// copyLink) and download/info behave as on every other owned surface. Share is absent: canShareVariant
-// doesn't include links.
+// copyLink), share, and download/info all behave as on every other owned surface — canShareVariant
+// includes links (the top-level row is the user's own item, same share-with-contact flow as My Drive).
 describe("driveItemActions — links variant gating", () => {
-	it("directory: rename/favorite/color/info/download/publicLink/copyLink/trash, in that order (no move, no share)", () => {
-		expect(ids(dirItem(), "links")).toEqual(["rename", "favorite", "color", "info", "download", "publicLink", "copyLink", "trash"])
+	it("directory: rename/favorite/color/info/download/share/publicLink/copyLink/trash, in that order (no move)", () => {
+		expect(ids(dirItem(), "links")).toEqual([
+			"rename",
+			"favorite",
+			"color",
+			"info",
+			"download",
+			"share",
+			"publicLink",
+			"copyLink",
+			"trash"
+		])
 	})
 
-	it("file: rename/favorite/versions/info/download/publicLink/copyLink/trash, in that order (no move, no share)", () => {
-		expect(ids(fileItem(), "links")).toEqual(["rename", "favorite", "versions", "info", "download", "publicLink", "copyLink", "trash"])
+	it("file: rename/favorite/versions/info/download/share/publicLink/copyLink/trash, in that order (no move)", () => {
+		expect(ids(fileItem(), "links")).toEqual([
+			"rename",
+			"favorite",
+			"versions",
+			"info",
+			"download",
+			"share",
+			"publicLink",
+			"copyLink",
+			"trash"
+		])
 	})
 
 	it("never offers move (the one action dropped versus drive/recents/favorites)", () => {
@@ -666,5 +688,67 @@ describe("startItemDownload", () => {
 		startItemDownload(item)
 
 		expect(startDownloadsMock).toHaveBeenCalledWith([item])
+	})
+})
+
+// Copy-link's dispatch matrix — the item menu's real one-tap behavior, tested at this pure seam
+// instead of itemMenu.tsx's onClick (DOM-dependent, same limitation startItemDownload's own doc
+// comment notes).
+describe("resolveCopyLinkAction", () => {
+	function fileLinkStatus(linkUuid = "55555555-5555-5555-5555-555555555555"): DriveItemLinkStatus {
+		return {
+			type: "file",
+			status: {
+				linkUuid: linkUuid as UuidStr,
+				password: { type: "none" },
+				expiration: "never",
+				downloadable: true,
+				salt: "salt"
+			}
+		}
+	}
+
+	it("no link yet (status null): opens the dialog, never touches the clipboard", async () => {
+		const writeClipboard = vi.fn((_url: string) => Promise.resolve())
+
+		const outcome = await resolveCopyLinkAction(fileItem(), null, writeClipboard)
+
+		expect(outcome).toEqual({ action: "openDialog" })
+		expect(writeClipboard).not.toHaveBeenCalled()
+	})
+
+	it("a link exists and its URL builds: copies the URL to the clipboard", async () => {
+		const writeClipboard = vi.fn((_url: string) => Promise.resolve())
+		const item = fileItem({
+			meta: { type: "decoded", data: { name: "report.pdf", mime: "application/pdf", modified: 1n, size: 1n, key: "abc", version: 2 } }
+		})
+
+		const outcome = await resolveCopyLinkAction(item, fileLinkStatus(), writeClipboard)
+
+		expect(outcome).toEqual({ action: "copied" })
+		expect(writeClipboard).toHaveBeenCalledTimes(1)
+		expect(writeClipboard.mock.calls[0]?.[0]).toContain("55555555-5555-5555-5555-555555555555")
+	})
+
+	it("a link exists but its URL can't be built (undecrypted key): opens the dialog instead of copying", async () => {
+		const writeClipboard = vi.fn((_url: string) => Promise.resolve())
+		const item = fileItem({ meta: { type: "encrypted", data: "ciphertext" } })
+
+		const outcome = await resolveCopyLinkAction(item, fileLinkStatus(), writeClipboard)
+
+		expect(outcome).toEqual({ action: "openDialog" })
+		expect(writeClipboard).not.toHaveBeenCalled()
+	})
+
+	it("a link exists but the clipboard write rejects: surfaces the rejection, doesn't fall back to the dialog", async () => {
+		const clipboardError = new Error("clipboard denied")
+		const writeClipboard = vi.fn((_url: string): Promise<void> => Promise.reject(clipboardError))
+		const item = fileItem({
+			meta: { type: "decoded", data: { name: "report.pdf", mime: "application/pdf", modified: 1n, size: 1n, key: "abc", version: 2 } }
+		})
+
+		const outcome = await resolveCopyLinkAction(item, fileLinkStatus(), writeClipboard)
+
+		expect(outcome).toEqual({ action: "clipboardError", error: clipboardError })
 	})
 })

@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest"
 import type { Dir, DirPublicLinkRW, File, FilePublicLink, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
-import { buildLinkUpdate, buildPublicLinkUrl, readLinkForm } from "@/features/drive/components/linkDialog.logic"
+import {
+	buildLinkUpdate,
+	buildPublicLinkUrl,
+	readLinkForm,
+	resolveLinkHeroInfo,
+	resolvePremiumGateState
+} from "@/features/drive/components/linkDialog.logic"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
 // readable test label into a shape that satisfies it, mirroring versionsDialog.test.ts's own fixture.
@@ -258,5 +264,53 @@ describe("buildPublicLinkUrl", () => {
 		const mismatchedStatus = fileStatus()
 
 		expect(buildPublicLinkUrl(item, mismatchedStatus)).toBeNull()
+	})
+})
+
+describe("resolvePremiumGateState", () => {
+	it("is 'loading' when isPremium is undefined (the account query hasn't resolved yet)", () => {
+		expect(resolvePremiumGateState(undefined)).toBe("loading")
+	})
+
+	it("is 'gated' for a resolved, non-premium account", () => {
+		expect(resolvePremiumGateState(false)).toBe("gated")
+	})
+
+	it("is 'allowed' for a resolved, premium account", () => {
+		expect(resolvePremiumGateState(true)).toBe("allowed")
+	})
+})
+
+describe("resolveLinkHeroInfo", () => {
+	it("directory: type label is driveItemTypeDirectory and there is no size line", () => {
+		const item = dirItem({ meta: { type: "decoded", data: { name: "Documents" } } })
+
+		const hero = resolveLinkHeroInfo(item)
+
+		expect(hero.name).toBe("Documents")
+		expect(hero.typeLabelKey).toBe("driveItemTypeDirectory")
+		expect(hero.sizeLabel).toBeNull()
+	})
+
+	it("file: type label is driveItemTypeFile and the size line is the formatted byte size", () => {
+		const item = fileItem({
+			size: 2048n,
+			meta: {
+				type: "decoded",
+				data: { name: "report.pdf", mime: "application/pdf", modified: 1n, size: 2048n, key: "k", version: 2 }
+			}
+		})
+
+		const hero = resolveLinkHeroInfo(item)
+
+		expect(hero.name).toBe("report.pdf")
+		expect(hero.typeLabelKey).toBe("driveItemTypeFile")
+		expect(hero.sizeLabel).not.toBeNull()
+	})
+
+	it("falls back to the raw uuid when the name hasn't decrypted", () => {
+		const item = dirItem({ uuid: testUuid("undecrypted"), meta: { type: "encrypted", data: "ciphertext" } })
+
+		expect(resolveLinkHeroInfo(item).name).toBe(testUuid("undecrypted"))
 	})
 })

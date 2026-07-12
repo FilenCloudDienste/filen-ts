@@ -3,6 +3,8 @@ import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { canMoveVariant, type DriveVariant } from "@/features/drive/lib/preferences"
 import { canShareVariant, isReadOnlySharedVariant } from "@/features/drive/lib/share/gating"
+import { buildPublicLinkUrl } from "@/features/drive/components/linkDialog.logic"
+import { type DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import { type DriveKey } from "@/lib/i18n"
 import { startDownloads } from "@/features/drive/lib/download"
 
@@ -53,10 +55,12 @@ const MOVE: ItemActionDescriptor = { id: "move", ...ACTION_DEFS.move, run: "dial
 const COLOR: ItemActionDescriptor = { id: "color", ...ACTION_DEFS.color, run: "dialog", dialogKind: "color" }
 const VERSIONS: ItemActionDescriptor = { id: "versions", ...ACTION_DEFS.versions, run: "dialog", dialogKind: "versions" }
 const INFO: ItemActionDescriptor = { id: "info", ...ACTION_DEFS.info, run: "dialog", dialogKind: "info" }
-// Copy-link's real behavior (read existing link status, write the URL to the clipboard) needs
-// link-status data this menu doesn't have — it deliberately dispatches the same dialog kind as
-// Public link rather than duplicating that fetch here; the dialog's own Copy button IS copy-link's
-// implementation.
+// Public link and Copy link share one dialog kind — both open the same link-management panel as a
+// FALLBACK. Copy link's real one-tap behavior (read existing link status, copy the URL straight to
+// the clipboard when a link is already enabled) is a dispatch-time decision itemMenu.tsx's onClick
+// makes by id (see resolveCopyLinkAction below) BEFORE falling through to this "dialog" descriptor —
+// this dialogKind only fires when there's no link yet (or its URL can't be built), the same case
+// Public link's own click always opens the dialog for.
 const PUBLIC_LINK: ItemActionDescriptor = { id: "publicLink", ...ACTION_DEFS.publicLink, run: "dialog", dialogKind: "link" }
 const COPY_LINK: ItemActionDescriptor = { id: "copyLink", ...ACTION_DEFS.copyLink, run: "dialog", dialogKind: "link" }
 // Share the item with a Filen contact (opens the contact picker) — distinct from a public link (a
@@ -218,4 +222,38 @@ export function applyOfflineGate(actions: ItemActionDescriptor[], isOnline: bool
 	}
 
 	return actions.map(action => (OFFLINE_GATED_IDS.has(action.id) ? { ...action, enabled: false } : action))
+}
+
+// Copy-link's dispatch outcome: "copied" (a link already existed and its URL made it to the
+// clipboard), "clipboardError" (a link existed but the write itself failed — `error` is whatever
+// `writeClipboard` threw, for the caller's own LABEL-FIRST toast), or "openDialog" (no link yet, or
+// its URL can't be built — e.g. an item whose metadata key hasn't decrypted — degrading to the same
+// explicit create-a-link flow Public link's own click always opens).
+export type CopyLinkOutcome = { action: "copied" } | { action: "clipboardError"; error: unknown } | { action: "openDialog" }
+
+// Pure dispatch for the item menu's Copy-link entry — takes the item's CURRENT link status (the
+// caller reads/fetches it from the shared link-status query cache, driveItemLinkStatusQueryKey, before
+// calling this) rather than fetching it itself, so the whole matrix is testable without a query client
+// or a DOM clipboard: `writeClipboard` is injected, never `navigator.clipboard` directly.
+export async function resolveCopyLinkAction(
+	item: DriveItem,
+	status: DriveItemLinkStatus | null,
+	writeClipboard: (text: string) => Promise<void>
+): Promise<CopyLinkOutcome> {
+	if (status === null) {
+		return { action: "openDialog" }
+	}
+
+	const url = buildPublicLinkUrl(item, status)
+
+	if (url === null) {
+		return { action: "openDialog" }
+	}
+
+	try {
+		await writeClipboard(url)
+		return { action: "copied" }
+	} catch (e) {
+		return { action: "clipboardError", error: e }
+	}
 }
