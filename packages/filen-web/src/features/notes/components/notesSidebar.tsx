@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
+import { useShallow } from "zustand/shallow"
 import { toast } from "sonner"
 import { PlusIcon, SearchIcon, XIcon, ChevronRightIcon, StarIcon, StickyNoteIcon, TagIcon, MoreHorizontalIcon } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
@@ -17,16 +18,21 @@ import {
 	buildNotesByTag,
 	buildTagsViewRows,
 	sidebarRowKey,
+	selectableNotesFromRows,
 	type NotesSidebarRow
 } from "@/features/notes/components/notesSidebar.logic"
 import { createNote } from "@/features/notes/lib/actions"
 import { exportAllNotes } from "@/features/notes/lib/export"
+import { selectableNotesForSelectAll } from "@/features/notes/lib/selectionFlags"
+import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelectionStore"
+import { useNotesListSelection } from "@/features/notes/hooks/useNotesListSelection"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
 import { useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { NoteRow } from "@/features/notes/components/noteRow"
+import { NotesBulkActionBar } from "@/features/notes/components/notesBulkActionBar"
 import { TagContextMenuContent } from "@/features/notes/components/noteMenu"
 import { type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { Button } from "@/components/ui/button"
@@ -40,6 +46,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 // assumes. Same default combo ("n") as drive's own new-item command — the two never coexist (only one
 // of NotesSidebar/NewDirectory is ever mounted at a time, since they live on mutually exclusive routes).
 registerAction({ id: "notes.newNote", defaultCombo: "n", scope: "notes", descriptionKey: "notesNewNote" })
+// Multi-select commands — mirrors drive.selectAll/drive.clearSelection (directoryListing.tsx) exactly:
+// mod+a selects every currently-visible (search-filtered) decryptable note, Escape clears the
+// selection. Both fire through react-hotkeys-hook's default ignore-list, which already skips real
+// form-tag targets (the search `<Input>`), so these never fight that box's own local
+// Escape-clears-search handling below.
+registerAction({ id: "notes.selectAll", defaultCombo: "mod+a", scope: "notes", descriptionKey: "notesCommandSelectAll" })
+registerAction({ id: "notes.clearSelection", defaultCombo: "escape", scope: "notes", descriptionKey: "notesCommandClearSelection" })
 
 // Fixed row heights so the single virtualizer needs no measureElement pass — both row kinds render at a
 // known, constant height (the wrapper pins it), so estimateSize is exact and rows never overlap. Note
@@ -183,6 +196,28 @@ export function NotesSidebar() {
 		}
 	})
 
+	// The ordered, currently-visible note set click-selection ranges walk (search-filtered, spans both
+	// views). A view switch (viewMode) resets the selection/anchor, mirroring how a fresh directory
+	// resets drive's own selection on navigation.
+	const selectableNotes = selectableNotesFromRows(rows)
+	const selection = useNotesListSelection({ notes: selectableNotes, resetKey: viewMode })
+	const selectableIndexByUuid = new Map(selectableNotes.map((note, index) => [note.uuid, index]))
+
+	const rawSelectedNotes = useNotesSelectionStore(useShallow(state => state.selectedNotes))
+	// LIVE (ghost-purged) selection: re-derived from the current notes query every render, so a note
+	// removed from the account (elsewhere, or by another tab) between selection and dispatch is never
+	// targeted or counted towards the bulk bar's "2+ selected" threshold.
+	const notesByUuid = new Map(allNotes.map(note => [note.uuid, note]))
+	const liveSelectedNotes: Note[] = []
+	for (const selected of rawSelectedNotes) {
+		const live = notesByUuid.get(selected.uuid)
+
+		if (live) {
+			liveSelectedNotes.push(live)
+		}
+	}
+	const liveSelectedUuids = new Set(liveSelectedNotes.map(note => note.uuid))
+
 	async function handleViewModeChange(next: NotesViewMode): Promise<void> {
 		if (next === viewMode) {
 			return
@@ -238,6 +273,41 @@ export function NotesSidebar() {
 			if (!dialogHost.isDialogOpen) {
 				void handleNewNote()
 			}
+		},
+		undefined,
+		[dialogHost.isDialogOpen]
+	)
+
+	// Registered at module scope above. Browser default for mod+a is "select all page text" — must
+	// preventDefault or the native selection would visibly compete with the note-row selection.
+	// Guarded on dialogHost.isDialogOpen so a background Cmd+A can't select notes behind an open
+	// dialog. Targets `selectableNotes` (already search-filtered) minus undecryptable ones — mirrors
+	// drive.selectAll exactly.
+	useAction(
+		"notes.selectAll",
+		event => {
+			if (dialogHost.isDialogOpen) {
+				return
+			}
+
+			event.preventDefault()
+			useNotesSelectionStore.getState().setSelectedNotes(selectableNotesForSelectAll(selectableNotes))
+		},
+		undefined,
+		[dialogHost.isDialogOpen, selectableNotes]
+	)
+
+	// Registered at module scope above. No preventDefault — bare Escape has no disruptive browser
+	// default. Guarded on dialogHost.isDialogOpen so Escape closes the dialog (its own onOpenChange
+	// handling) without also clearing the background selection.
+	useAction(
+		"notes.clearSelection",
+		() => {
+			if (dialogHost.isDialogOpen) {
+				return
+			}
+
+			useNotesSelectionStore.getState().clearSelectedNotes()
 		},
 		undefined,
 		[dialogHost.isDialogOpen]
@@ -323,12 +393,16 @@ export function NotesSidebar() {
 								<NoteRow
 									note={row.note}
 									selected={row.note.uuid === selectedUuid}
+									multiSelected={liveSelectedUuids.has(row.note.uuid)}
 									nested={viewMode === "tags"}
 									allTags={allTags}
 									currentUserId={currentUserId}
 									onAction={dialogHost.openNoteDialog}
 									onDuplicated={duplicated => {
 										void handleDuplicated(duplicated)
+									}}
+									onPointerSelect={event => {
+										selection.handlePointerSelect(selectableIndexByUuid.get(row.note.uuid) ?? -1, event)
 									}}
 								/>
 							)}
@@ -455,11 +529,26 @@ export function NotesSidebar() {
 				</div>
 			</div>
 
-			<div
-				ref={setScrollElement}
-				className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3"
-			>
-				{renderBody()}
+			<div className="relative flex min-h-0 flex-1 flex-col">
+				<div
+					ref={setScrollElement}
+					className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3"
+				>
+					{renderBody()}
+				</div>
+				{/* Bottom-anchored floating selection bar — overlays the scroll container, replacing
+				    nothing in the header. Mirrors directoryListing.tsx's own BulkActionBar placement. Shown
+				    at 2+ selected only — a single selection is just normal browsing. */}
+				{liveSelectedNotes.length > 1 ? (
+					<div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-center">
+						<NotesBulkActionBar
+							selectedNotes={liveSelectedNotes}
+							allTags={allTags}
+							currentUserId={currentUserId}
+							onDialogAction={dialogHost.openBulkDialog}
+						/>
+					</div>
+				) : null}
 			</div>
 			{dialogHost.renderActiveDialog()}
 		</aside>

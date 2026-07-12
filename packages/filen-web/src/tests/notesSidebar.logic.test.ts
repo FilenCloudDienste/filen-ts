@@ -6,6 +6,7 @@ import {
 	buildTagsViewRows,
 	filterTagsForView,
 	sidebarRowKey,
+	selectableNotesFromRows,
 	type NotesSidebarRow
 } from "@/features/notes/components/notesSidebar.logic"
 import { DEFAULT_NOTE_TAGS_SORT_BY } from "@/features/notes/lib/sort"
@@ -222,5 +223,38 @@ describe("notesSidebar.logic — sidebarRowKey", () => {
 
 		expect(keyA).not.toBe(keyB)
 		expect(sidebarRowKey({ kind: "tag", tag: tagA, noteCount: 0, expanded: false })).toBe(`tag:${tagA.uuid}`)
+	})
+})
+
+describe("notesSidebar.logic — selectableNotesFromRows (click-selection range)", () => {
+	it("extracts only note-kind rows, in order, tag headers excluded", () => {
+		const tag = mockTag({ uuid: testUuid("t") })
+		const noteA = mockNote({ uuid: testUuid("a") })
+		const noteB = mockNote({ uuid: testUuid("b") })
+		const rows: NotesSidebarRow[] = [
+			{ kind: "tag", tag, noteCount: 2, expanded: true },
+			{ kind: "note", note: noteA, tagUuid: tag.uuid },
+			{ kind: "note", note: noteB, tagUuid: tag.uuid }
+		]
+
+		expect(selectableNotesFromRows(rows)).toEqual([noteA, noteB])
+	})
+
+	it("returns an empty array when every row is a tag header", () => {
+		const tag = mockTag()
+
+		expect(selectableNotesFromRows([{ kind: "tag", tag, noteCount: 0, expanded: false }])).toEqual([])
+	})
+
+	it("includes the same note once per tag group it appears under (notes view has one row per note)", () => {
+		const tagA = mockTag({ uuid: testUuid("ta") })
+		const tagB = mockTag({ uuid: testUuid("tb") })
+		const note = mockNote({ uuid: testUuid("n") })
+		const rows: NotesSidebarRow[] = [
+			{ kind: "note", note, tagUuid: tagA.uuid },
+			{ kind: "note", note, tagUuid: tagB.uuid }
+		]
+
+		expect(selectableNotesFromRows(rows)).toEqual([note, note])
 	})
 })

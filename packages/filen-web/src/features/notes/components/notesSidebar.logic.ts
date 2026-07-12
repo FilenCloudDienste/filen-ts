@@ -131,3 +131,19 @@ export function buildTagsViewRows({ tags, notesByTag, expandedTagUuids, search, 
 export function sidebarRowKey(row: NotesSidebarRow): string {
 	return row.kind === "tag" ? `tag:${row.tag.uuid}` : `note:${row.tagUuid}:${row.note.uuid}`
 }
+
+// The ordered, currently-rendered note set BOTH views' rows walk for click-selection — every
+// "note"-kind row across whichever view is active, in render order, tag headers excluded (multi-select
+// only applies to notes here, not tags). A note appearing under multiple expanded tag groups appears
+// once per group, matching what the user actually sees and can shift-click a range across.
+export function selectableNotesFromRows(rows: readonly NotesSidebarRow[]): Note[] {
+	const notes: Note[] = []
+
+	for (const row of rows) {
+		if (row.kind === "note") {
+			notes.push(row.note)
+		}
+	}
+
+	return notes
+}

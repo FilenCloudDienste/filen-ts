@@ -1,3 +1,4 @@
+import { type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { PinIcon, HeartIcon, MoreHorizontalIcon } from "lucide-react"
@@ -13,6 +14,11 @@ import { Button } from "@/components/ui/button"
 export interface NoteRowProps {
 	note: Note
 	selected: boolean
+	// True iff this note is part of the active multi-selection — a distinct visual state from
+	// `selected` above (the currently ROUTED note), since a multi-selection and the open note are
+	// independent: clicking a different note while others stay Ctrl-selected opens it without
+	// touching the selection.
+	multiSelected: boolean
 	// Rendered indented under a tag group in the tags view; flat (no indent) in the notes view.
 	nested?: boolean
 	allTags: readonly NoteTag[]
@@ -22,6 +28,11 @@ export interface NoteRowProps {
 	// this row.
 	onAction: (kind: NoteActionDialogKind, note: Note) => void
 	onDuplicated: (duplicated: Note) => void
+	// Modifier-click selection — mirrors driveRow.tsx's onPointerSelect. Fired from the Link's own
+	// onClick: a plain click lets navigation proceed (see the Link below); Ctrl/Cmd/Shift+click call
+	// preventDefault first (blocking both the SPA navigate AND the browser's native "open in new tab"
+	// on a modified click) and only ever change the selection.
+	onPointerSelect: (event: MouseEvent<HTMLAnchorElement>) => void
 }
 
 // One note row, shared by both sidebar views (the notes list and a tag group's expanded members). Most
@@ -30,7 +41,17 @@ export interface NoteRowProps {
 // Pinned/favorited stay subtle muted marks rather than loud badges. Carries its own row-level
 // context menu (right-click) and ⋯ trigger (hover-revealed), both rendering the SAME shared descriptor
 // list (noteMenu.logic.ts) the editor header's own menu uses.
-export function NoteRow({ note, selected, nested = false, allTags, currentUserId, onAction, onDuplicated }: NoteRowProps) {
+export function NoteRow({
+	note,
+	selected,
+	multiSelected,
+	nested = false,
+	allTags,
+	currentUserId,
+	onAction,
+	onDuplicated,
+	onPointerSelect
+}: NoteRowProps) {
 	const { t } = useTranslation("notes")
 	const { icon: Icon, colorClass } = noteIcon(note)
 	const title = note.title !== undefined && note.title.length > 0 ? note.title : t("noteUntitled")
@@ -51,13 +72,29 @@ export function NoteRow({ note, selected, nested = false, allTags, currentUserId
 						className={cn(
 							"group flex h-full w-full items-center gap-2.5 rounded-xl px-2.5 transition-colors app-region-no-drag",
 							nested && "pl-8",
-							selected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/60"
+							selected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/60",
+							multiSelected && "ring-2 ring-primary/60 ring-inset"
 						)}
 					>
 						<Link
 							to="/notes/$uuid"
 							params={{ uuid: note.uuid }}
 							aria-current={selected ? "page" : undefined}
+							aria-selected={multiSelected}
+							onClick={event => {
+								// Ctrl/Cmd/Shift held: this is a selection gesture, not a navigation intent —
+								// preventDefault blocks BOTH the router's own SPA navigate (which already skips
+								// itself on a modified click, see @tanstack/react-router's isCtrlEvent) AND the
+								// browser's native "open in new tab" default a real anchor would otherwise still
+								// run. A plain click falls through unprevented so navigation proceeds exactly as
+								// before, alongside collapsing the selection to just this note (drive's own
+								// plain-click-selects-one semantics).
+								if (event.metaKey || event.ctrlKey || event.shiftKey) {
+									event.preventDefault()
+								}
+
+								onPointerSelect(event)
+							}}
 							className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
 						>
 							<Icon className={cn("size-4 shrink-0", colorClass)} />

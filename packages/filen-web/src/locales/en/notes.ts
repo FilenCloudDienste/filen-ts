@@ -306,5 +306,41 @@ export const notes = {
 	/** History dialog — restore confirm dialog title */
 	noteHistoryRestoreDialogTitle: "Restore this version?",
 	/** History dialog — restore confirm dialog body */
-	noteHistoryRestoreDialogBody: "The note's current content will be replaced with this version. This cannot be undone."
+	noteHistoryRestoreDialogBody: "The note's current content will be replaced with this version. This cannot be undone.",
+
+	// ── Multi-select + bulk-action bar ──────────────────────────────────────────
+	/** Keymap — description for the Cmd/Ctrl+A action that selects every currently-visible note */
+	notesCommandSelectAll: "Select all notes",
+	/** Keymap — description for the Escape action that clears the notes selection; also the bulk bar's clear button */
+	notesCommandClearSelection: "Clear selection",
+	/** Bulk-action bar — selection-count label; singular */
+	notesSelectionCount_one: "{{count}} selected",
+	/** Bulk-action bar — selection-count label; plural */
+	notesSelectionCount_other: "{{count}} selected",
+	/** Bulk-action bar — every action's outcome toast when every selected note succeeded; singular */
+	notesBulkActionComplete_one: "{{count}} note updated",
+	/** Bulk-action bar — every action's outcome toast when every selected note succeeded; plural */
+	notesBulkActionComplete_other: "{{count}} notes updated",
+	/** Bulk-action bar — outcome toast when some selected notes failed; singular */
+	notesBulkActionCompleteWithFailures_one: "{{count}} note updated, {{failed}} failed",
+	/** Bulk-action bar — outcome toast when some selected notes failed; plural */
+	notesBulkActionCompleteWithFailures_other: "{{count}} notes updated, {{failed}} failed",
+	/** Bulk trash confirm dialog — title; the confirm button reuses noteActionTrash */
+	notesTrashSelectedConfirmTitle: "Move to trash?",
+	/** Bulk trash confirm dialog — body; singular */
+	notesTrashSelectedConfirmBody_one: "Are you sure you want to move this note to the trash? You can restore it later.",
+	/** Bulk trash confirm dialog — body; plural */
+	notesTrashSelectedConfirmBody_other: "Are you sure you want to move these {{count}} notes to the trash? You can restore them later.",
+	/** Bulk delete-permanently confirm dialog — title; the confirm button reuses noteActionDeletePermanently */
+	notesDeleteSelectedConfirmTitle: "Delete permanently?",
+	/** Bulk delete-permanently confirm dialog — body; singular */
+	notesDeleteSelectedConfirmBody_one: "Are you sure you want to permanently delete this note? This cannot be undone.",
+	/** Bulk delete-permanently confirm dialog — body; plural */
+	notesDeleteSelectedConfirmBody_other: "Are you sure you want to permanently delete these {{count}} notes? This cannot be undone.",
+	/** Bulk leave confirm dialog — title; the confirm button reuses noteActionLeave */
+	notesLeaveSelectedConfirmTitle: "Leave notes?",
+	/** Bulk leave confirm dialog — body; singular */
+	notesLeaveSelectedConfirmBody_one: "Are you sure you want to leave this note? You will lose access to it.",
+	/** Bulk leave confirm dialog — body; plural */
+	notesLeaveSelectedConfirmBody_other: "Are you sure you want to leave these {{count}} notes? You will lose access to them."
 } as const

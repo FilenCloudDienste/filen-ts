@@ -91,11 +91,41 @@ export async function duplicateNote(note: Note): Promise<ActionOutcome<Note>> {
 
 // ── Pin / favorite ───────────────────────────────────────────────────────
 
-export async function togglePinned(note: Note): Promise<ActionOutcome<Note>> {
+// Explicit-target variants (as opposed to togglePinned/toggleFavorited's "flip my own flag" shape)
+// — the bulk selection bar needs every selected note driven to the SAME target value, not each
+// note's own opposite (see features/notes/lib/bulk.ts's setPinnedNotes/setFavoritedNotes). No-op
+// on an already-matching note, same idempotency rule as archiveNote/restoreNote/trashNote below.
+export async function setNotePinned(note: Note, pinned: boolean): Promise<ActionOutcome<Note>> {
+	if (note.pinned === pinned) {
+		return { status: "success", item: note }
+	}
+
 	let updated: Note
 
 	try {
-		updated = await runOp(sdkApi.setNotePinned(note, !note.pinned))
+		updated = await runOp(sdkApi.setNotePinned(note, pinned))
+	} catch (e) {
+		return { status: "error", dto: asErrorDTO(e) }
+	}
+
+	notesQueryUpsert(updated)
+
+	return { status: "success", item: updated }
+}
+
+export async function togglePinned(note: Note): Promise<ActionOutcome<Note>> {
+	return setNotePinned(note, !note.pinned)
+}
+
+export async function setNoteFavorited(note: Note, favorited: boolean): Promise<ActionOutcome<Note>> {
+	if (note.favorite === favorited) {
+		return { status: "success", item: note }
+	}
+
+	let updated: Note
+
+	try {
+		updated = await runOp(sdkApi.setNoteFavorited(note, favorited))
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
@@ -106,17 +136,7 @@ export async function togglePinned(note: Note): Promise<ActionOutcome<Note>> {
 }
 
 export async function toggleFavorited(note: Note): Promise<ActionOutcome<Note>> {
-	let updated: Note
-
-	try {
-		updated = await runOp(sdkApi.setNoteFavorited(note, !note.favorite))
-	} catch (e) {
-		return { status: "error", dto: asErrorDTO(e) }
-	}
-
-	notesQueryUpsert(updated)
-
-	return { status: "success", item: updated }
+	return setNoteFavorited(note, !note.favorite)
 }
 
 // ── Lifecycle: archive / restore / trash / delete ───────────────────────

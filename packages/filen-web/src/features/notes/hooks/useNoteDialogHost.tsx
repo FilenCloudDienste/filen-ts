@@ -6,22 +6,31 @@ import type { Note, NoteTag } from "@filen/sdk-rs"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { setNoteTitle, deleteNote, leaveNote } from "@/features/notes/lib/actions"
 import { createNoteTag, addTagToNote, renameNoteTag, deleteNoteTag } from "@/features/notes/lib/tags"
+import { trashNotes, deleteNotesPermanently, leaveNotes } from "@/features/notes/lib/bulk"
+import { type BulkOutcome } from "@/features/drive/lib/bulk"
+import { toastNotesBulkOutcome } from "@/features/notes/lib/bulkToast"
+import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelectionStore"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { type NoteActionDialogKind, type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
+import { type NoteBulkDialogActionKind } from "@/features/notes/components/notesBulkActionBar.logic"
 import { ParticipantsDialog } from "@/features/notes/components/participantsDialog"
 import { HistoryDialog } from "@/features/notes/components/historyDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 
-// Discriminates on `kind` alone — NoteActionDialogKind and NoteTagDialogKind are disjoint string
-// unions (noteMenu.logic.ts), so the note arm carries a Note and the tag arm a NoteTag without a
-// separate discriminant field.
-type ActiveNoteDialog = { kind: NoteActionDialogKind; note: Note } | { kind: NoteTagDialogKind; tag: NoteTag }
+// Discriminates on `kind` alone — NoteActionDialogKind/NoteTagDialogKind/NoteBulkDialogActionKind are
+// three disjoint string unions (noteMenu.logic.ts / notesBulkActionBar.logic.ts), so each arm carries
+// exactly the payload its own kinds need without a separate discriminant field.
+type ActiveNoteDialog =
+	| { kind: NoteActionDialogKind; note: Note }
+	| { kind: NoteTagDialogKind; tag: NoteTag }
+	| { kind: NoteBulkDialogActionKind; notes: Note[] }
 
 export interface NoteDialogHost {
 	isDialogOpen: boolean
 	openNoteDialog: (kind: NoteActionDialogKind, note: Note) => void
 	openTagDialog: (kind: NoteTagDialogKind, tag: NoteTag) => void
+	openBulkDialog: (kind: NoteBulkDialogActionKind, notes: Note[]) => void
 	renderActiveDialog: () => ReactNode
 }
 
@@ -34,9 +43,10 @@ export interface UseNoteDialogHostParams {
 	currentUuid: string
 }
 
-// One instance of whichever dialog `NoteActionDialogKind` names is rendered at a time — the note-menu
-// counterpart to drive's useDriveDialogHost, sized down to the three kinds noteMenu.tsx ever dispatches
-// (rename/delete/leave) plus the tags submenu's inline "new tag" entry (createTag).
+// One instance of whichever dialog is active at a time — the note-menu counterpart to drive's
+// useDriveDialogHost, covering the single-note kinds noteMenu.tsx dispatches (rename/delete/leave),
+// the tags submenu's inline "new tag" entry (createTag), the tag-row menu's own kinds, and the notes
+// bulk-action bar's confirm dialogs (trashSelected/deleteSelected/leaveSelected).
 export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): NoteDialogHost {
 	const { t } = useTranslation(["notes", "common"])
 	const navigate = useNavigate()
@@ -49,6 +59,10 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 
 	function openTagDialog(kind: NoteTagDialogKind, tag: NoteTag): void {
 		setActiveDialog({ kind, tag })
+	}
+
+	function openBulkDialog(kind: NoteBulkDialogActionKind, notes: Note[]): void {
+		setActiveDialog({ kind, notes })
 	}
 
 	function navigateAwayIfCurrent(note: Note): void {
@@ -102,6 +116,31 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 		}
 
 		closeActiveDialog()
+	}
+
+	// Shared tail for every bulk-dialog confirm (trashSelected/deleteSelected/leaveSelected): runs
+	// `op` against `notes`, tracks the shared dialogPending flag, closes the dialog, toasts the
+	// outcome, and prunes succeeded notes from the selection — a failed one stays selected so the
+	// user can retry without re-selecting. Mirrors useDriveDialogHost's own runBulkDialogAction.
+	async function runBulkDialogAction(notes: Note[], op: (notes: Note[]) => Promise<BulkOutcome<Note>>): Promise<void> {
+		setDialogPending(true)
+		const outcome = await op(notes)
+		setDialogPending(false)
+		closeActiveDialog()
+		toastNotesBulkOutcome(outcome)
+		useNotesSelectionStore.getState().removeFromSelection(outcome.succeeded.map(note => note.uuid))
+	}
+
+	async function handleTrashSelectedConfirm(notes: Note[]): Promise<void> {
+		await runBulkDialogAction(notes, trashNotes)
+	}
+
+	async function handleDeleteSelectedConfirm(notes: Note[]): Promise<void> {
+		await runBulkDialogAction(notes, targetNotes => deleteNotesPermanently(targetNotes, { beforeCacheRemoval: navigateAwayIfCurrent }))
+	}
+
+	async function handleLeaveSelectedConfirm(notes: Note[]): Promise<void> {
+		await runBulkDialogAction(notes, targetNotes => leaveNotes(targetNotes, { beforeCacheRemoval: navigateAwayIfCurrent }))
 	}
 
 	async function handleRenameTagSubmit(tag: NoteTag, value: string): Promise<void> {
@@ -298,8 +337,67 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 						onClose={closeActiveDialog}
 					/>
 				)
+			case "trashSelected":
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("notesTrashSelectedConfirmTitle")}
+						body={t("notesTrashSelectedConfirmBody", { count: activeDialog.notes.length })}
+						confirmLabel={t("noteActionTrash")}
+						cancelLabel={t("common:cancel")}
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleTrashSelectedConfirm(activeDialog.notes)
+						}}
+					/>
+				)
+			case "deleteSelected":
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("notesDeleteSelectedConfirmTitle")}
+						body={t("notesDeleteSelectedConfirmBody", { count: activeDialog.notes.length })}
+						confirmLabel={t("noteActionDeletePermanently")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleDeleteSelectedConfirm(activeDialog.notes)
+						}}
+					/>
+				)
+			case "leaveSelected":
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("notesLeaveSelectedConfirmTitle")}
+						body={t("notesLeaveSelectedConfirmBody", { count: activeDialog.notes.length })}
+						confirmLabel={t("noteActionLeave")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleLeaveSelectedConfirm(activeDialog.notes)
+						}}
+					/>
+				)
 		}
 	}
 
-	return { isDialogOpen, openNoteDialog, openTagDialog, renderActiveDialog }
+	return { isDialogOpen, openNoteDialog, openTagDialog, openBulkDialog, renderActiveDialog }
 }
