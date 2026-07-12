@@ -27,8 +27,10 @@ test.describe("boot", () => {
 		// itself proof the session authenticated the router (`hasClient()` gated the redirect).
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 		// The drive listing itself (not the old placeholder shell) is now the authed landing surface —
-		// its toolbar is a stable, always-rendered proof the route mounted past the shell chrome.
-		await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeVisible()
+		// its toolbar is a stable, always-rendered proof the route mounted past the shell chrome. .first():
+		// an empty writable root also renders a second identical button in its empty-state "+ Add"; the
+		// toolbar's copy is always first in DOM order.
+		await expect(page.getByRole("button", { name: "New directory", exact: true }).first()).toBeVisible()
 
 		// The desktop system strip (Electron plumbing) is runtime-detected off window.desktop, which a
 		// plain browser never defines - proves the strip has zero footprint here, not merely that it

@@ -79,7 +79,11 @@ export async function enterScratchDirectory(
 
 	const { listbox } = await waitForListingSettled(page)
 
-	await page.getByRole("button", { name: "New directory", exact: true }).click()
+	// .first(): an EMPTY writable listing renders a second identical "New directory" button inside its
+	// empty-state "+ Add" affordance (it deliberately reuses the toolbar's own controls), so when the
+	// scratch root happens to be empty this name matches two buttons. The toolbar's is always first in
+	// DOM order (the card header precedes the listing body), so .first() is the toolbar button either way.
+	await page.getByRole("button", { name: "New directory", exact: true }).first().click()
 	const dialog = page.getByRole("dialog")
 	await expect(dialog).toBeVisible()
 	await page.getByLabel("Name", { exact: true }).fill(name)
