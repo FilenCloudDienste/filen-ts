@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import type { Note, NoteTag, UuidStr } from "@filen/sdk-rs"
 import {
 	buildNotesView,
+	buildNotesGroupedRows,
+	groupNotesForView,
 	buildNotesByTag,
 	buildTagsViewRows,
 	filterTagsForView,
@@ -165,7 +167,7 @@ describe("notesSidebar.logic — buildTagsViewRows flattening", () => {
 		})
 
 		// tag(work) → note(b, edited 5n) → note(a, edited 2n) → tag(home) collapsed.
-		expect(rows.map(r => (r.kind === "tag" ? `T:${r.tag.uuid}` : `N:${r.note.uuid}`))).toStrictEqual([
+		expect(rows.map(r => (r.kind === "tag" ? `T:${r.tag.uuid}` : r.kind === "note" ? `N:${r.note.uuid}` : `H:${r.id}`))).toStrictEqual([
 			`T:${work.uuid}`,
 			`N:${b.uuid}`,
 			`N:${a.uuid}`,
@@ -257,6 +259,133 @@ describe("notesSidebar.logic — selectableNotesFromRows (click-selection range)
 		]
 
 		expect(selectableNotesFromRows(rows)).toEqual([note, note])
+	})
+})
+
+// ── Notes-view date grouping ──────────────────────────────────────────────────
+
+// A fixed "now" so bucket thresholds are deterministic. Timestamps below stay comfortably inside each
+// bucket window (never near a day/month boundary) so the result is stable regardless of the runner's
+// local timezone.
+const GROUP_NOW = new Date("2026-07-12T12:00:00.000Z").getTime()
+const GROUP_DAY = 24 * 60 * 60 * 1000
+
+function headerIds(rows: NotesSidebarRow[]): string[] {
+	return rows.filter((row): row is Extract<NotesSidebarRow, { kind: "header" }> => row.kind === "header").map(row => row.id)
+}
+
+function groupedNoteUuids(rows: NotesSidebarRow[]): string[] {
+	return rows.filter((row): row is Extract<NotesSidebarRow, { kind: "note" }> => row.kind === "note").map(row => row.note.uuid)
+}
+
+describe("notesSidebar.logic — groupNotesForView (date grouping)", () => {
+	it("emits every bucket in the mobile order, one header per distinct year (desc)", () => {
+		const notes = [
+			mockNote({ uuid: testUuid("pin"), pinned: true, editedTimestamp: BigInt(GROUP_NOW) }),
+			mockNote({ uuid: testUuid("fav"), favorite: true, editedTimestamp: BigInt(GROUP_NOW) }),
+			mockNote({ uuid: testUuid("today"), editedTimestamp: BigInt(GROUP_NOW - 60 * 60 * 1000) }),
+			mockNote({ uuid: testUuid("d7"), editedTimestamp: BigInt(GROUP_NOW - 3 * GROUP_DAY) }),
+			mockNote({ uuid: testUuid("d30"), editedTimestamp: BigInt(GROUP_NOW - 15 * GROUP_DAY) }),
+			mockNote({ uuid: testUuid("month"), editedTimestamp: BigInt(GROUP_NOW - 45 * GROUP_DAY) }),
+			mockNote({ uuid: testUuid("y2025"), editedTimestamp: BigInt(new Date("2025-06-15T12:00:00.000Z").getTime()) }),
+			mockNote({ uuid: testUuid("y2024"), editedTimestamp: BigInt(new Date("2024-06-15T12:00:00.000Z").getTime()) }),
+			mockNote({ uuid: testUuid("arch"), archive: true, editedTimestamp: BigInt(GROUP_NOW) }),
+			mockNote({ uuid: testUuid("trash"), trash: true, editedTimestamp: BigInt(GROUP_NOW) })
+		]
+
+		expect(headerIds(groupNotesForView(notes, GROUP_NOW))).toStrictEqual([
+			"pinned",
+			"favorited",
+			"today",
+			"previous7Days",
+			"previous30Days",
+			"month",
+			"year-2025",
+			"year-2024",
+			"archived",
+			"trashed"
+		])
+	})
+
+	it("pins/favorites/archives/trashes remove a note from its date bucket (first-match-wins)", () => {
+		// A pinned note whose edited time is 'today' shows ONLY under Pinned — never also under Today.
+		expect(headerIds(groupNotesForView([mockNote({ pinned: true, editedTimestamp: BigInt(GROUP_NOW) })], GROUP_NOW))).toStrictEqual([
+			"pinned"
+		])
+		expect(headerIds(groupNotesForView([mockNote({ favorite: true, editedTimestamp: BigInt(GROUP_NOW) })], GROUP_NOW))).toStrictEqual([
+			"favorited"
+		])
+	})
+
+	it("ranks trash/archive above pin/favorite for membership (a trashed pinned note is Trashed)", () => {
+		const notes = [
+			mockNote({ uuid: testUuid("tp"), trash: true, pinned: true, editedTimestamp: BigInt(GROUP_NOW) }),
+			mockNote({ uuid: testUuid("ap"), archive: true, pinned: true, editedTimestamp: BigInt(GROUP_NOW) })
+		]
+
+		// Neither shows under Pinned; archived emits before trashed.
+		expect(headerIds(groupNotesForView(notes, GROUP_NOW))).toStrictEqual(["archived", "trashed"])
+	})
+
+	it("never renders an empty section", () => {
+		expect(headerIds(groupNotesForView([mockNote({ editedTimestamp: BigInt(GROUP_NOW - 60 * 60 * 1000) })], GROUP_NOW))).toStrictEqual([
+			"today"
+		])
+	})
+
+	it("buckets on editedTimestamp, not createdTimestamp (an old note edited today is 'Today')", () => {
+		const note = mockNote({
+			createdTimestamp: BigInt(new Date("2020-01-01T00:00:00.000Z").getTime()),
+			editedTimestamp: BigInt(GROUP_NOW)
+		})
+
+		expect(headerIds(groupNotesForView([note], GROUP_NOW))).toStrictEqual(["today"])
+	})
+
+	it("orders notes newest-first within a bucket, uuid as the equal-timestamp tiebreak", () => {
+		const older = mockNote({ uuid: testUuid("older"), editedTimestamp: BigInt(GROUP_NOW - 2 * 60 * 60 * 1000) })
+		const newer = mockNote({ uuid: testUuid("newer"), editedTimestamp: BigInt(GROUP_NOW - 1 * 60 * 60 * 1000) })
+		const tieA = mockNote({ uuid: testUuid("a-tie"), editedTimestamp: BigInt(GROUP_NOW - 3 * 60 * 60 * 1000) })
+		const tieB = mockNote({ uuid: testUuid("b-tie"), editedTimestamp: BigInt(GROUP_NOW - 3 * 60 * 60 * 1000) })
+
+		const rows = groupNotesForView([older, tieB, newer, tieA], GROUP_NOW)
+
+		// newer → older → (equal ts) a-tie before b-tie by uuid.
+		expect(groupedNoteUuids(rows)).toStrictEqual([newer.uuid, older.uuid, tieA.uuid, tieB.uuid])
+	})
+
+	it("gives the previous-month header a computed literal label, not a catalog key", () => {
+		const rows = groupNotesForView([mockNote({ editedTimestamp: BigInt(GROUP_NOW - 45 * GROUP_DAY) })], GROUP_NOW)
+		const header = rows.find((row): row is Extract<NotesSidebarRow, { kind: "header" }> => row.kind === "header")
+
+		expect(header?.label.kind).toBe("literal")
+	})
+})
+
+describe("notesSidebar.logic — buildNotesGroupedRows (search then group)", () => {
+	it("filters by search before grouping", () => {
+		// Distinct previews so a title-only search ("alpha") can't accidentally match beta's preview.
+		const alpha = mockNote({ uuid: testUuid("alpha"), title: "alpha", preview: "one", editedTimestamp: BigInt(GROUP_NOW) })
+		const beta = mockNote({ uuid: testUuid("beta"), title: "beta", preview: "two", editedTimestamp: BigInt(GROUP_NOW) })
+
+		const rows = buildNotesGroupedRows([alpha, beta], "alpha", GROUP_NOW)
+
+		expect(groupedNoteUuids(rows)).toStrictEqual([alpha.uuid])
+		expect(headerIds(rows)).toStrictEqual(["today"])
+	})
+
+	it("returns an empty row model (no headers) when nothing matches", () => {
+		const note = mockNote({ title: "gamma", preview: "delta" })
+
+		expect(buildNotesGroupedRows([note], "nomatch", GROUP_NOW)).toStrictEqual([])
+	})
+})
+
+describe("notesSidebar.logic — sidebarRowKey (header rows)", () => {
+	it("keys a header row by its id", () => {
+		expect(sidebarRowKey({ kind: "header", id: "today", label: { kind: "key", key: "notesGroupToday" }, icon: "today" })).toBe(
+			"header:today"
+		)
 	})
 })
 

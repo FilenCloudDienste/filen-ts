@@ -1,10 +1,26 @@
-import { useState, type ReactNode } from "react"
+import { Fragment, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useShallow } from "zustand/shallow"
 import { toast } from "sonner"
-import { PlusIcon, SearchIcon, XIcon, ChevronRightIcon, StarIcon, StickyNoteIcon, TagIcon, MoreHorizontalIcon } from "lucide-react"
+import {
+	PlusIcon,
+	SearchIcon,
+	XIcon,
+	ChevronRightIcon,
+	StarIcon,
+	StickyNoteIcon,
+	TagIcon,
+	MoreHorizontalIcon,
+	PinIcon,
+	HeartIcon,
+	CalendarDaysIcon,
+	CalendarIcon,
+	ArchiveIcon,
+	Trash2Icon,
+	type LucideIcon
+} from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
 import { useNotes } from "@/features/notes/queries/notes"
@@ -14,13 +30,14 @@ import { useAccountQuery } from "@/queries/account"
 import { setNotesViewMode, DEFAULT_NOTES_VIEW_MODE, type NotesViewMode } from "@/features/notes/lib/preferences"
 import { DEFAULT_NOTE_TAGS_SORT_BY, tagDisplayName } from "@/features/notes/lib/sort"
 import {
-	buildNotesView,
+	buildNotesGroupedRows,
 	buildNotesByTag,
 	buildTagsViewRows,
 	sidebarRowKey,
 	selectableNotesFromRows,
 	selectableRowIndexByKey,
-	type NotesSidebarRow
+	type NotesSidebarRow,
+	type NotesGroupIcon
 } from "@/features/notes/components/notesSidebar.logic"
 import { createNote } from "@/features/notes/lib/actions"
 import { exportAllNotes } from "@/features/notes/lib/export"
@@ -32,6 +49,8 @@ import { useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
+import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
+import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
 import { NoteRow } from "@/features/notes/components/noteRow"
 import { NotesBulkActionBar } from "@/features/notes/components/notesBulkActionBar"
 import { TagContextMenuContent } from "@/features/notes/components/noteMenu"
@@ -55,11 +74,39 @@ registerAction({ id: "notes.newNote", defaultCombo: "n", scope: "notes", descrip
 registerAction({ id: "notes.selectAll", defaultCombo: "mod+a", scope: "notes", descriptionKey: "notesCommandSelectAll" })
 registerAction({ id: "notes.clearSelection", defaultCombo: "escape", scope: "notes", descriptionKey: "notesCommandClearSelection" })
 
-// Fixed row heights so the single virtualizer needs no measureElement pass — both row kinds render at a
-// known, constant height (the wrapper pins it), so estimateSize is exact and rows never overlap. Note
-// rows are taller (title + preview lines); tag headers are one line.
-const NOTE_ROW_HEIGHT = 56
-const TAG_ROW_HEIGHT = 40
+// First-pass size estimates only — note rows now vary in height (optional preview / shared-by /
+// avatar / tag lines), and the notes view interleaves section headers, so real heights come from the
+// virtualizer's measureElement pass after mount (same shape as messageThread.tsx's mixed message/day
+// rows). Tag headers are still one line; the estimates just seed the initial layout.
+const NOTE_ROW_ESTIMATE = 76
+const TAG_ROW_ESTIMATE = 40
+const HEADER_ROW_ESTIMATE = 40
+
+// Section-header icon kind → concrete lucide icon (the logic layer stays React-free and only names the
+// kind). Today gets a distinct calendar glyph; the remaining date buckets share the plain calendar.
+const GROUP_ICON: Record<NotesGroupIcon, LucideIcon> = {
+	pinned: PinIcon,
+	favorited: HeartIcon,
+	today: CalendarDaysIcon,
+	calendar: CalendarIcon,
+	archived: ArchiveIcon,
+	trashed: Trash2Icon
+}
+
+// A notes-view date-group section header — a leading icon + the bucket label. Sticky-free (the
+// virtualizer positions it absolutely like every other row).
+function NotesGroupHeader({ row }: { row: Extract<NotesSidebarRow, { kind: "header" }> }) {
+	const { t } = useTranslation("notes")
+	const Icon = GROUP_ICON[row.icon]
+	const label = row.label.kind === "key" ? t(row.label.key) : row.label.text
+
+	return (
+		<div className="flex items-center gap-2 px-2.5 pt-4 pb-1.5">
+			<Icon className="size-4 shrink-0 text-muted-foreground" />
+			<span className="truncate text-sm font-semibold text-muted-foreground">{label}</span>
+		</div>
+	)
+}
 
 // The URL owns the selected note: /notes/<uuid> is a selection key, not a path hierarchy. The
 // sidebar renders in the app shell (outside the notes route match), so it reads the raw pathname rather
@@ -111,7 +158,7 @@ function TagGroupRow({
 						aria-expanded={row.expanded}
 						aria-label={t(row.expanded ? "notesTagCollapse" : "notesTagExpand", { name })}
 						onClick={onToggle}
-						className="group flex h-full w-full items-center gap-1.5 rounded-xl px-2.5 text-left transition-colors outline-none app-region-no-drag hover:bg-sidebar-accent/60 focus-visible:ring-3 focus-visible:ring-ring/30"
+						className="group flex w-full items-center gap-1.5 rounded-xl px-2.5 py-2 text-left transition-colors outline-none app-region-no-drag hover:bg-sidebar-accent/60 focus-visible:ring-3 focus-visible:ring-ring/30"
 					>
 						<ChevronRightIcon
 							className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", row.expanded && "rotate-90")}
@@ -147,6 +194,7 @@ export function NotesSidebar() {
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const selectedUuid = selectedUuidFromPath(pathname)
 
+	const resize = useResizableSidebar("notes")
 	const notesQuery = useNotes()
 	const tagsQuery = useNoteTags()
 	const viewModeQuery = useNotesViewModeQuery()
@@ -175,7 +223,7 @@ export function NotesSidebar() {
 	// member notes interleaved.
 	const rows: NotesSidebarRow[] =
 		viewMode === "notes"
-			? buildNotesView(allNotes, search, searchBodies).map(note => ({ kind: "note", note, tagUuid: "" }))
+			? buildNotesGroupedRows(allNotes, search, Date.now(), searchBodies)
 			: buildTagsViewRows({
 					tags: allTags,
 					notesByTag: buildNotesByTag(allNotes),
@@ -188,7 +236,11 @@ export function NotesSidebar() {
 	const virtualizer = useVirtualizer({
 		count: rows.length,
 		getScrollElement: () => scrollElement,
-		estimateSize: index => (rows[index]?.kind === "tag" ? TAG_ROW_HEIGHT : NOTE_ROW_HEIGHT),
+		estimateSize: index => {
+			const kind = rows[index]?.kind
+
+			return kind === "tag" ? TAG_ROW_ESTIMATE : kind === "header" ? HEADER_ROW_ESTIMATE : NOTE_ROW_ESTIMATE
+		},
 		overscan: 10,
 		getItemKey: index => {
 			const row = rows[index]
@@ -376,13 +428,16 @@ export function NotesSidebar() {
 					return (
 						<div
 							key={virtualRow.key}
-							className="absolute top-0 left-0 w-full"
-							style={{
-								height: row.kind === "tag" ? TAG_ROW_HEIGHT : NOTE_ROW_HEIGHT,
-								transform: `translateY(${String(virtualRow.start)}px)`
+							data-index={virtualRow.index}
+							ref={element => {
+								virtualizer.measureElement(element)
 							}}
+							className="absolute top-0 left-0 w-full"
+							style={{ transform: `translateY(${String(virtualRow.start)}px)` }}
 						>
-							{row.kind === "tag" ? (
+							{row.kind === "header" ? (
+								<NotesGroupHeader row={row} />
+							) : row.kind === "tag" ? (
 								<TagGroupRow
 									row={row}
 									onToggle={() => {
@@ -415,143 +470,154 @@ export function NotesSidebar() {
 	}
 
 	return (
-		<aside
-			// Geometry identical to DriveSidebar (w-52, rounded-xl, borderless) — the shell's contextual
-			// panel slot. Drag region is Electron plumbing, inert in a plain browser; interactive
-			// descendants opt back out with app-region-no-drag.
-			className="hidden w-52 shrink-0 flex-col rounded-xl bg-sidebar app-region-drag md:flex"
-		>
-			<div className="flex flex-col gap-2 p-3">
-				<div className="flex items-center justify-between gap-2">
-					<h2 className="truncate px-1 text-[15px] font-semibold">{t("notesSidebarTitle")}</h2>
-					<div className="flex items-center gap-0.5">
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={t("notesNewNote")}
-							className="app-region-no-drag"
-							onClick={() => {
-								void handleNewNote()
-							}}
-						>
-							<PlusIcon />
-						</Button>
-						{/* Single-entry bulk-ops menu — a natural home for future additions (import, print, ...)
+		<Fragment>
+			<aside
+				// Geometry mirrors DriveSidebar (rounded-xl, borderless) — the shell's contextual panel slot.
+				// Width is user-resizable (useResizableSidebar) — the inline style replaces the old static
+				// w-52 utility, and a trailing drag-handle sibling (below) commits the new width. Drag region
+				// is Electron plumbing, inert in a plain browser; interactive descendants opt back out with
+				// app-region-no-drag.
+				className="hidden shrink-0 flex-col rounded-xl bg-sidebar app-region-drag md:flex"
+				style={{ width: resize.width }}
+			>
+				<div className="flex flex-col gap-2 p-3">
+					<div className="flex items-center justify-between gap-2">
+						<h2 className="truncate px-1 text-[15px] font-semibold">{t("notesSidebarTitle")}</h2>
+						<div className="flex items-center gap-0.5">
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								aria-label={t("notesNewNote")}
+								className="app-region-no-drag"
+								onClick={() => {
+									void handleNewNote()
+								}}
+							>
+								<PlusIcon />
+							</Button>
+							{/* Single-entry bulk-ops menu — a natural home for future additions (import, print, ...)
 						next to the new-note button. Disabled while the list query is still loading or
 						resolves empty: nothing to zip either way. */}
-						<DropdownMenu>
-							<DropdownMenuTrigger
-								render={
-									<Button
-										variant="ghost"
-										size="icon-sm"
-										aria-label={t("notesSidebarMoreActions")}
-										disabled={notesQuery.isPending || allNotes.length === 0}
-										className="app-region-no-drag"
+							<DropdownMenu>
+								<DropdownMenuTrigger
+									render={
+										<Button
+											variant="ghost"
+											size="icon-sm"
+											aria-label={t("notesSidebarMoreActions")}
+											disabled={notesQuery.isPending || allNotes.length === 0}
+											className="app-region-no-drag"
+										>
+											<MoreHorizontalIcon />
+										</Button>
+									}
+								/>
+								<DropdownMenuContent align="end">
+									<DropdownMenuItem
+										onClick={() => {
+											void handleExportAll()
+										}}
 									>
-										<MoreHorizontalIcon />
-									</Button>
+										{t("notesExportAllAction")}
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+						</div>
+					</div>
+
+					<div className="relative app-region-no-drag">
+						<SearchIcon
+							aria-hidden="true"
+							className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+						/>
+						<Input
+							type="search"
+							aria-label={t("notesSearch")}
+							placeholder={t("notesSearch")}
+							value={search}
+							onChange={event => {
+								setSearch(event.target.value)
+							}}
+							onKeyDown={event => {
+								if (event.key === "Escape" && search.length > 0) {
+									event.preventDefault()
+									setSearch("")
 								}
-							/>
-							<DropdownMenuContent align="end">
-								<DropdownMenuItem
-									onClick={() => {
-										void handleExportAll()
-									}}
-								>
-									{t("notesExportAllAction")}
-								</DropdownMenuItem>
-							</DropdownMenuContent>
-						</DropdownMenu>
+							}}
+							className="h-8 pr-8 pl-8"
+						/>
+						{search.length > 0 ? (
+							<Button
+								variant="ghost"
+								size="icon-xs"
+								aria-label={t("notesSearchClear")}
+								className="absolute top-1/2 right-1.5 -translate-y-1/2"
+								onClick={() => {
+									setSearch("")
+								}}
+							>
+								<XIcon />
+							</Button>
+						) : null}
+					</div>
+
+					<div
+						role="group"
+						aria-label={t("notesViewToggleLabel")}
+						className="flex gap-0.5 rounded-lg bg-muted p-0.5 app-region-no-drag"
+					>
+						<button
+							type="button"
+							aria-pressed={viewMode === "notes"}
+							onClick={() => {
+								void handleViewModeChange("notes")
+							}}
+							className={segmentClass(viewMode === "notes")}
+						>
+							{t("notesViewNotes")}
+						</button>
+						<button
+							type="button"
+							aria-pressed={viewMode === "tags"}
+							onClick={() => {
+								void handleViewModeChange("tags")
+							}}
+							className={segmentClass(viewMode === "tags")}
+						>
+							{t("notesViewTags")}
+						</button>
 					</div>
 				</div>
 
-				<div className="relative app-region-no-drag">
-					<SearchIcon
-						aria-hidden="true"
-						className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-					/>
-					<Input
-						type="search"
-						aria-label={t("notesSearch")}
-						placeholder={t("notesSearch")}
-						value={search}
-						onChange={event => {
-							setSearch(event.target.value)
-						}}
-						onKeyDown={event => {
-							if (event.key === "Escape" && search.length > 0) {
-								event.preventDefault()
-								setSearch("")
-							}
-						}}
-						className="h-8 pr-8 pl-8"
-					/>
-					{search.length > 0 ? (
-						<Button
-							variant="ghost"
-							size="icon-xs"
-							aria-label={t("notesSearchClear")}
-							className="absolute top-1/2 right-1.5 -translate-y-1/2"
-							onClick={() => {
-								setSearch("")
-							}}
-						>
-							<XIcon />
-						</Button>
-					) : null}
-				</div>
-
-				<div
-					role="group"
-					aria-label={t("notesViewToggleLabel")}
-					className="flex gap-0.5 rounded-lg bg-muted p-0.5 app-region-no-drag"
-				>
-					<button
-						type="button"
-						aria-pressed={viewMode === "notes"}
-						onClick={() => {
-							void handleViewModeChange("notes")
-						}}
-						className={segmentClass(viewMode === "notes")}
+				<div className="relative flex min-h-0 flex-1 flex-col">
+					<div
+						ref={setScrollElement}
+						className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3"
 					>
-						{t("notesViewNotes")}
-					</button>
-					<button
-						type="button"
-						aria-pressed={viewMode === "tags"}
-						onClick={() => {
-							void handleViewModeChange("tags")
-						}}
-						className={segmentClass(viewMode === "tags")}
-					>
-						{t("notesViewTags")}
-					</button>
-				</div>
-			</div>
-
-			<div className="relative flex min-h-0 flex-1 flex-col">
-				<div
-					ref={setScrollElement}
-					className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3"
-				>
-					{renderBody()}
-				</div>
-				{/* Bottom-anchored floating selection bar — overlays the scroll container, replacing
+						{renderBody()}
+					</div>
+					{/* Bottom-anchored floating selection bar — overlays the scroll container, replacing
 				    nothing in the header. Mirrors directoryListing.tsx's own BulkActionBar placement. Shown
 				    at 2+ selected only — a single selection is just normal browsing. */}
-				{liveSelectedNotes.length > 1 ? (
-					<div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-center">
-						<NotesBulkActionBar
-							selectedNotes={liveSelectedNotes}
-							allTags={allTags}
-							currentUserId={currentUserId}
-							onDialogAction={dialogHost.openBulkDialog}
-						/>
-					</div>
-				) : null}
-			</div>
-			{dialogHost.renderActiveDialog()}
-		</aside>
+					{liveSelectedNotes.length > 1 ? (
+						<div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-center">
+							<NotesBulkActionBar
+								selectedNotes={liveSelectedNotes}
+								allTags={allTags}
+								currentUserId={currentUserId}
+								onDialogAction={dialogHost.openBulkDialog}
+							/>
+						</div>
+					) : null}
+				</div>
+				{dialogHost.renderActiveDialog()}
+			</aside>
+			<SidebarResizeHandle
+				ariaLabel={t("notesSidebarResize")}
+				onPointerDown={resize.onPointerDown}
+				onPointerMove={resize.onPointerMove}
+				onPointerUp={resize.onPointerUp}
+			/>
+		</Fragment>
 	)
 }

@@ -36,6 +36,29 @@ export const notes = {
 	noteFavorite: "Favorite",
 	/** Note row — fallback title for a note that has no title yet */
 	noteUntitled: "Untitled note",
+	/** Note row — metadata line shown on a note shared TO you; {{email}} = the owning participant's email */
+	noteSharedByEmail: "Shared by {{email}}",
+
+	// ── Notes-view date grouping (section headers) ─────────────────────────────
+	// First-match-wins partition, notes view only (the tags view stays ungrouped). Empty sections
+	// never render. Pinned/Favorited remove a note from its date bucket. Month and year headers use a
+	// computed label (Intl month name / the year), not a key.
+	/** Group header — pinned notes */
+	notesGroupPinned: "Pinned",
+	/** Group header — favorited notes */
+	notesGroupFavorited: "Favorited",
+	/** Group header — edited within the last 24 hours */
+	notesGroupToday: "Today",
+	/** Group header — edited within the last 7 days */
+	notesGroupPrevious7Days: "Previous 7 days",
+	/** Group header — edited within the last 30 days */
+	notesGroupPrevious30Days: "Previous 30 days",
+	/** Group header — archived notes */
+	notesGroupArchived: "Archived",
+	/** Group header — trashed notes */
+	notesGroupTrashed: "Trashed",
+	/** Notes sidebar — accessible label on the trailing-edge drag handle that resizes the sidebar */
+	notesSidebarResize: "Resize sidebar",
 
 	// ── Tag row ────────────────────────────────────────────────────────────────
 	/** Tag group row — accessible label to expand the group and reveal its notes; {{name}} = tag name */

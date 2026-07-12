@@ -106,5 +106,22 @@ export const common = {
 	/** Update toast — title raised when a new version has been installed and is waiting */
 	updateReadyTitle: "Update ready",
 	/** Update toast — body; the toast's action button reloads the page to apply the update */
-	updateReadyBody: "A new version of Filen has been downloaded. Reload to use it."
+	updateReadyBody: "A new version of Filen has been downloaded. Reload to use it.",
+
+	// Relative timestamps — the shared lib/relativeTime.ts helper (note rows today; chat/events rows
+	// later). Plural via i18next's own _one/_other pipeline.
+	/** Relative time — a timestamp under a minute old */
+	relativeJustNow: "Just now",
+	/** Relative time — minutes ago; singular */
+	relativeMinutesAgo_one: "{{count}} minute ago",
+	/** Relative time — minutes ago; plural */
+	relativeMinutesAgo_other: "{{count}} minutes ago",
+	/** Relative time — hours ago; singular */
+	relativeHoursAgo_one: "{{count}} hour ago",
+	/** Relative time — hours ago; plural */
+	relativeHoursAgo_other: "{{count}} hours ago",
+	/** Relative time — days ago; singular */
+	relativeDaysAgo_one: "{{count}} day ago",
+	/** Relative time — days ago; plural */
+	relativeDaysAgo_other: "{{count}} days ago"
 } as const

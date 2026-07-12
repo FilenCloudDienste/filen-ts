@@ -1,14 +1,24 @@
-import { type MouseEvent } from "react"
+import { type MouseEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { PinIcon, HeartIcon, MoreHorizontalIcon } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
+import { formatRelativeTime } from "@/lib/relativeTime"
 import { noteIcon } from "@/features/notes/lib/icon.logic"
+import {
+	noteRowPreview,
+	noteRowSharedByEmail,
+	noteRowTags,
+	noteRowParticipants,
+	participantAvatarSource
+} from "@/features/notes/lib/noteRow.logic"
+import { contactDisplayName, contactInitials } from "@/features/contacts/components/contactsList.logic"
 import { NoteContextMenuContent, NoteDropdownMenuContent } from "@/features/notes/components/noteMenu"
 import { type NoteActionDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 
 export interface NoteRowProps {
@@ -35,12 +45,19 @@ export interface NoteRowProps {
 	onPointerSelect: (event: MouseEvent<HTMLAnchorElement>) => void
 }
 
+// A left-column circular badge — the type icon, then (stacked below, only when set) pin and favorite —
+// mirroring mobile's badge stack. size-8 circle with a size-4 mark.
+function RowBadge({ children }: { children: ReactNode }) {
+	return <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted [&_svg]:size-4">{children}</div>
+}
+
 // One note row, shared by both sidebar views (the notes list and a tag group's expanded members). Most
 // of the row is a Link to /notes/$uuid — the uuid is a selection key, not a path hierarchy — with
 // the ⋯ trigger button as its sibling, not its descendant (see the ContextMenuTrigger comment below).
-// Pinned/favorited stay subtle muted marks rather than loud badges. Carries its own row-level
-// context menu (right-click) and ⋯ trigger (hover-revealed), both rendering the SAME shared descriptor
-// list (noteMenu.logic.ts) the editor header's own menu uses.
+// A rich mobile-parity row: a circular badge column (type + pin + favorite) beside a text column with
+// title, optional preview, relative edited-time, an optional "Shared by <email>" line, a participant
+// avatar strip, and a tag-chip strip. Carries its own row-level context menu (right-click) and ⋯
+// trigger (hover-revealed), both rendering the SAME shared descriptor list (noteMenu.logic.ts).
 export function NoteRow({
 	note,
 	selected,
@@ -53,11 +70,15 @@ export function NoteRow({
 	onPointerSelect
 }: NoteRowProps) {
 	const { t } = useTranslation("notes")
+	// The relative-time + shared-by wording live in the shared "common"/"notes" catalogs; the row's
+	// own namespace is "notes", so the relative label uses a common-bound t.
+	const { t: tCommon } = useTranslation("common")
 	const { icon: Icon, colorClass } = noteIcon(note)
 	const title = note.title !== undefined && note.title.length > 0 ? note.title : t("noteUntitled")
-	// Preview snippet: the SDK's own short summary, falling back to the title so the second line is never
-	// blank for a note whose content preview is empty.
-	const preview = note.preview !== undefined && note.preview.length > 0 ? note.preview : title
+	const preview = noteRowPreview(note)
+	const sharedByEmail = noteRowSharedByEmail(note, currentUserId)
+	const tags = noteRowTags(note)
+	const participants = noteRowParticipants(note, currentUserId)
 
 	return (
 		<ContextMenu>
@@ -70,7 +91,7 @@ export function NoteRow({
 				render={
 					<div
 						className={cn(
-							"group flex h-full w-full items-center gap-2.5 rounded-xl px-2.5 transition-colors app-region-no-drag",
+							"group flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2 transition-colors app-region-no-drag",
 							nested && "pl-8",
 							selected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/60",
 							multiSelected && "ring-2 ring-primary/60 ring-inset"
@@ -95,26 +116,78 @@ export function NoteRow({
 
 								onPointerSelect(event)
 							}}
-							className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+							className="flex min-w-0 flex-1 items-start gap-2.5 rounded-lg text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
 						>
-							<Icon className={cn("size-4 shrink-0", colorClass)} />
-							<div className="flex min-w-0 flex-1 flex-col">
-								<div className="flex min-w-0 items-center gap-1.5">
-									{note.pinned ? (
+							<div className="flex shrink-0 flex-col items-center gap-1.5">
+								<RowBadge>
+									<Icon className={colorClass} />
+								</RowBadge>
+								{note.pinned ? (
+									<RowBadge>
 										<PinIcon
 											aria-label={t("notePinned")}
-											className="size-3 shrink-0 text-muted-foreground"
+											className="text-muted-foreground"
 										/>
-									) : null}
-									{note.favorite ? (
+									</RowBadge>
+								) : null}
+								{note.favorite ? (
+									<RowBadge>
 										<HeartIcon
 											aria-label={t("noteFavorite")}
-											className="size-3 shrink-0 text-muted-foreground"
+											className="text-red-500"
 										/>
-									) : null}
-									<span className="truncate text-sm font-medium">{title}</span>
-								</div>
-								<span className="truncate text-xs text-muted-foreground">{preview}</span>
+									</RowBadge>
+								) : null}
+							</div>
+							<div className="flex min-w-0 flex-1 flex-col gap-1 pt-0.5">
+								<span className="truncate text-sm font-medium">{title}</span>
+								{preview !== undefined ? (
+									<span className="line-clamp-2 text-xs text-muted-foreground">{preview}</span>
+								) : null}
+								<span className="truncate text-xs text-muted-foreground">
+									{formatRelativeTime(Number(note.editedTimestamp), tCommon)}
+								</span>
+								{sharedByEmail !== null ? (
+									<span className="truncate text-xs text-muted-foreground">
+										{t("noteSharedByEmail", { email: sharedByEmail })}
+									</span>
+								) : null}
+								{participants.length > 0 ? (
+									<div className="flex flex-wrap gap-1.5 pt-0.5">
+										{participants.map(participant => {
+											const displayName = contactDisplayName(participant)
+											const source = participantAvatarSource(participant)
+
+											return (
+												<Avatar
+													key={participant.userId.toString()}
+													size="sm"
+												>
+													{source !== undefined ? (
+														<AvatarImage
+															src={source}
+															alt={displayName}
+														/>
+													) : null}
+													<AvatarFallback>{contactInitials(displayName)}</AvatarFallback>
+												</Avatar>
+											)
+										})}
+									</div>
+								) : null}
+								{tags.length > 0 ? (
+									<div className="flex flex-wrap gap-1.5 pt-0.5">
+										{tags.map(tag => (
+											<span
+												key={tag.uuid}
+												className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted px-2 py-0.5"
+											>
+												{tag.favorite ? <HeartIcon className="size-3 shrink-0 text-red-500" /> : null}
+												<span className="truncate text-xs text-muted-foreground">{tag.name ?? tag.uuid}</span>
+											</span>
+										))}
+									</div>
+								) : null}
 							</div>
 						</Link>
 						<DropdownMenu>

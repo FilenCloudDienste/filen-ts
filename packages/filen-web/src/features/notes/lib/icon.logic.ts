@@ -28,7 +28,7 @@ export function noteIcon(note: Note): NoteIcon {
 	}
 
 	if (note.archive) {
-		return { icon: ArchiveIcon, colorClass: "text-amber-500" }
+		return { icon: ArchiveIcon, colorClass: "text-yellow-500" }
 	}
 
 	return NOTE_TYPE_ICON[note.noteType]

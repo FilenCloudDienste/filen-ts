@@ -25,6 +25,150 @@ export function buildNotesView(notes: readonly Note[], search: string, bodies?: 
 	return sortAndFilterNotes(notes, search, bodies)
 }
 
+// ── Notes-view date grouping ──────────────────────────────────────────────────
+// Ports filen-mobile's notesSorter.group (lib/sort.ts) onto the wasm Note shape, notes view only.
+// First-match-wins partition per note: Trashed → Archived → Pinned → Favorited → Today (24h) →
+// Previous 7 days → Previous 30 days → previous-month (Intl month name) → year buckets (desc) —
+// where Pinned/Favorited/Archived/Trashed REMOVE the note from its date bucket. Emitted in this
+// order: Pinned → Favorited → Today → Previous 7 days → Previous 30 days → month → year(s) desc →
+// Archived → Trashed. Every bucket is sorted newest-first (editedTimestamp desc, uuid tiebreak) and an
+// empty bucket emits no header at all — there is never a blank section. Bucketing reads
+// editedTimestamp unconditionally (the wasm field is a non-optional bigint, so mobile's
+// createdTimestamp fallback is dead code here).
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// Newest-first within a bucket — editedTimestamp desc with a uuid tiebreak so equal-timestamp notes
+// keep a stable order across refetches (input order is not itself stable). Bigint-safe: never Number()s
+// the comparison. Mirrors compareNotes' own tiebreak, minus its cross-bucket tier (within one date
+// bucket every note already shares that tier).
+function compareByEditedDesc(a: Note, b: Note): number {
+	if (a.editedTimestamp !== b.editedTimestamp) {
+		return a.editedTimestamp > b.editedTimestamp ? -1 : 1
+	}
+
+	return a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0
+}
+
+// The previous-month header label — the calendar month name of the bucket's lower bound (mobile names
+// this `twoMonthsAgo` but it labels the single "one month back" window). `undefined` locale defers to
+// the runtime's own, same posture as lib/relativeTime.ts's absolute fallback.
+function monthLabel(timestamp: number): string {
+	return new Intl.DateTimeFormat(undefined, { month: "long" }).format(new Date(timestamp))
+}
+
+// Partition + emit. `now` is injected (not read from Date.now inside) so the bucket thresholds are
+// deterministic under test.
+export function groupNotesForView(notes: readonly Note[], now: number): NotesSidebarRow[] {
+	const todayAgo = now - DAY_MS
+	const sevenDaysAgo = now - 7 * DAY_MS
+	const thirtyDaysAgo = now - 30 * DAY_MS
+	const nowDate = new Date(now)
+	const twoMonthsAgo = new Date(nowDate.getFullYear(), nowDate.getMonth() - 2, nowDate.getDate()).getTime()
+
+	const pinned: Note[] = []
+	const favorited: Note[] = []
+	const today: Note[] = []
+	const last7Days: Note[] = []
+	const last30Days: Note[] = []
+	const previousMonth: Note[] = []
+	const archived: Note[] = []
+	const trashed: Note[] = []
+	const yearBuckets = new Map<number, Note[]>()
+
+	for (const note of notes) {
+		if (note.trash) {
+			trashed.push(note)
+			continue
+		}
+
+		if (note.archive) {
+			archived.push(note)
+			continue
+		}
+
+		if (note.pinned) {
+			pinned.push(note)
+			continue
+		}
+
+		if (note.favorite) {
+			favorited.push(note)
+			continue
+		}
+
+		const ts = Number(note.editedTimestamp)
+
+		if (ts >= todayAgo) {
+			today.push(note)
+		} else if (ts >= sevenDaysAgo) {
+			last7Days.push(note)
+		} else if (ts >= thirtyDaysAgo) {
+			last30Days.push(note)
+		} else if (ts >= twoMonthsAgo) {
+			previousMonth.push(note)
+		} else {
+			const year = new Date(ts).getFullYear()
+			const bucket = yearBuckets.get(year)
+
+			if (bucket !== undefined) {
+				bucket.push(note)
+			} else {
+				yearBuckets.set(year, [note])
+			}
+		}
+	}
+
+	const rows: NotesSidebarRow[] = []
+
+	const emit = (bucket: Note[], header: Extract<NotesSidebarRow, { kind: "header" }>): void => {
+		if (bucket.length === 0) {
+			return
+		}
+
+		bucket.sort(compareByEditedDesc)
+		rows.push(header)
+
+		for (const note of bucket) {
+			rows.push({ kind: "note", note, tagUuid: "" })
+		}
+	}
+
+	emit(pinned, { kind: "header", id: "pinned", label: { kind: "key", key: "notesGroupPinned" }, icon: "pinned" })
+	emit(favorited, { kind: "header", id: "favorited", label: { kind: "key", key: "notesGroupFavorited" }, icon: "favorited" })
+	emit(today, { kind: "header", id: "today", label: { kind: "key", key: "notesGroupToday" }, icon: "today" })
+	emit(last7Days, { kind: "header", id: "previous7Days", label: { kind: "key", key: "notesGroupPrevious7Days" }, icon: "calendar" })
+	emit(last30Days, { kind: "header", id: "previous30Days", label: { kind: "key", key: "notesGroupPrevious30Days" }, icon: "calendar" })
+	emit(previousMonth, { kind: "header", id: "month", label: { kind: "literal", text: monthLabel(twoMonthsAgo) }, icon: "calendar" })
+
+	const years = [...yearBuckets.keys()].sort((a, b) => b - a)
+
+	for (const year of years) {
+		emit(yearBuckets.get(year) ?? [], {
+			kind: "header",
+			id: `year-${String(year)}`,
+			label: { kind: "literal", text: String(year) },
+			icon: "calendar"
+		})
+	}
+
+	emit(archived, { kind: "header", id: "archived", label: { kind: "key", key: "notesGroupArchived" }, icon: "archived" })
+	emit(trashed, { kind: "header", id: "trashed", label: { kind: "key", key: "notesGroupTrashed" }, icon: "trashed" })
+
+	return rows
+}
+
+// The notes view's full row model: search-filter first (narrowing the set grouping then walks), then
+// partition into the interleaved header + note rows. `now` is injected for deterministic bucketing.
+export function buildNotesGroupedRows(
+	notes: readonly Note[],
+	search: string,
+	now: number,
+	bodies?: ReadonlyMap<string, string | undefined>
+): NotesSidebarRow[] {
+	return groupNotesForView(filterNotesBySearch(notes, search, bodies), now)
+}
+
 // ── View 2 (tags) ─────────────────────────────────────────────────────────────
 
 // tag uuid → the notes carrying that tag, from each note's own inline `tags` array (the wasm Note
@@ -91,11 +235,34 @@ function notesForExpandedTag(
 	return sortNotes(filterNotesBySearch(notes, search, bodies))
 }
 
-// One flattened row model — tag headers and their expanded member notes interleaved — so a SINGLE
-// virtualizer covers the whole tags view (never a nested virtualizer per tag). A tag's `noteCount` is
-// its TOTAL membership (not the search-narrowed count), the number the collapsed row displays.
+// A notes-view section header's label: either a static catalog key (Pinned/Favorited/Today/…) or a
+// computed literal (the previous-month name via Intl, or a bare year) that has no fixed key.
+export type NotesGroupLabel =
+	| {
+			kind: "key"
+			key:
+				| "notesGroupPinned"
+				| "notesGroupFavorited"
+				| "notesGroupToday"
+				| "notesGroupPrevious7Days"
+				| "notesGroupPrevious30Days"
+				| "notesGroupArchived"
+				| "notesGroupTrashed"
+	  }
+	| { kind: "literal"; text: string }
+
+// The header row's leading icon, resolved to a concrete lucide icon in the component (the logic layer
+// stays React-free).
+export type NotesGroupIcon = "pinned" | "favorited" | "today" | "calendar" | "archived" | "trashed"
+
+// One flattened row model — tag headers and their expanded member notes interleaved, OR (notes view)
+// date-group section headers interleaved with note rows — so a SINGLE virtualizer covers either view
+// (never a nested virtualizer). A tag's `noteCount` is its TOTAL membership (not the search-narrowed
+// count), the number the collapsed row displays.
 export type NotesSidebarRow =
-	{ kind: "tag"; tag: NoteTag; noteCount: number; expanded: boolean } | { kind: "note"; note: Note; tagUuid: string }
+	| { kind: "tag"; tag: NoteTag; noteCount: number; expanded: boolean }
+	| { kind: "note"; note: Note; tagUuid: string }
+	| { kind: "header"; id: string; label: NotesGroupLabel; icon: NotesGroupIcon }
 
 export interface TagsViewParams {
 	tags: readonly NoteTag[]
@@ -127,9 +294,18 @@ export function buildTagsViewRows({ tags, notesByTag, expandedTagUuids, search, 
 }
 
 // Stable virtualizer key per flattened row. A note can appear under multiple tags, so its key is
-// scoped by the owning tag uuid — a bare note uuid would collide across groups.
+// scoped by the owning tag uuid — a bare note uuid would collide across groups. Section-header ids are
+// already unique within a build (one per bucket / distinct year).
 export function sidebarRowKey(row: NotesSidebarRow): string {
-	return row.kind === "tag" ? `tag:${row.tag.uuid}` : `note:${row.tagUuid}:${row.note.uuid}`
+	if (row.kind === "tag") {
+		return `tag:${row.tag.uuid}`
+	}
+
+	if (row.kind === "header") {
+		return `header:${row.id}`
+	}
+
+	return `note:${row.tagUuid}:${row.note.uuid}`
 }
 
 // The ordered, currently-rendered note set BOTH views' rows walk for click-selection — every
