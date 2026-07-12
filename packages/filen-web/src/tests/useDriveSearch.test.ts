@@ -40,19 +40,19 @@ function mockFile(overrides: Partial<File> = {}): File {
 }
 
 describe("resolveSearchTransition", () => {
-	it("does nothing while staying inactive", () => {
-		expect(resolveSearchTransition(false, false)).toBe("none")
+	it("stays idle for a blank query before the engine has ever been engaged", () => {
+		expect(resolveSearchTransition(false, false)).toBe("idle")
 	})
 
-	it("opens on the first non-empty input", () => {
+	it("opens on the first non-empty input, when never engaged before", () => {
 		expect(resolveSearchTransition(false, true)).toBe("open")
 	})
 
-	it("closes once the input empties back out", () => {
-		expect(resolveSearchTransition(true, false)).toBe("close")
+	it("stays idle once the input empties back out — P23: never closes an engaged engine on blank", () => {
+		expect(resolveSearchTransition(true, false)).toBe("idle")
 	})
 
-	it("retunes on a further change while already active", () => {
+	it("retunes on a further change while already active and engaged", () => {
 		expect(resolveSearchTransition(true, true)).toBe("retune")
 	})
 })

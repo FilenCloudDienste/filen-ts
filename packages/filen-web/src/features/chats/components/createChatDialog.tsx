@@ -1,13 +1,15 @@
 import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { CheckIcon, UsersIcon } from "lucide-react"
+import { CheckIcon, SearchXIcon, UsersIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { Chat } from "@filen/sdk-rs"
 import { createChat } from "@/features/chats/lib/actions"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { togglePickerContact, resolveSelectedContacts } from "@/features/drive/components/contactPickerDialog.logic"
+import { filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
 import { ContactRow } from "@/features/contacts/components/contactRow"
+import { ListFilterInput } from "@/components/listFilterInput"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -40,8 +42,10 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 	const contactsQuery = useContactsQuery()
 	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
 	const [pending, setPending] = useState(false)
+	const [filter, setFilter] = useState("")
 
 	const contacts = contactsQuery.data?.contacts ?? []
+	const filteredContacts = filterContactsBySearch(contacts, filter)
 
 	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
 		if (!shouldForwardOpenChange(next, pending)) {
@@ -120,6 +124,20 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 			)
 		}
 
+		// H7/M22: a non-matching filter gets its own "no results" state.
+		if (filteredContacts.length === 0) {
+			return (
+				<Empty>
+					<EmptyHeader>
+						<EmptyMedia variant="icon">
+							<SearchXIcon />
+						</EmptyMedia>
+						<EmptyTitle>{t("contacts:contactsSearchNoResultsTitle")}</EmptyTitle>
+					</EmptyHeader>
+				</Empty>
+			)
+		}
+
 		return (
 			<div
 				role="listbox"
@@ -127,7 +145,7 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 				aria-label={t("contacts:contactsSectionContacts")}
 				className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2"
 			>
-				{contacts.map(contact => {
+				{filteredContacts.map(contact => {
 					const isSelected = selected.has(contact.uuid)
 
 					return (
@@ -167,6 +185,14 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 					<DialogTitle>{t("chatCreateDialogTitle")}</DialogTitle>
 					<DialogDescription>{t("chatCreateDialogBody")}</DialogDescription>
 				</DialogHeader>
+				{contacts.length > 0 ? (
+					<ListFilterInput
+						value={filter}
+						onChange={setFilter}
+						placeholder={t("contacts:contactsSearchPlaceholder")}
+						ariaLabel={t("contacts:contactsSearchPlaceholder")}
+					/>
+				) : null}
 				<div className="flex h-72 flex-col overflow-hidden rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
 					{renderBody()}
 				</div>

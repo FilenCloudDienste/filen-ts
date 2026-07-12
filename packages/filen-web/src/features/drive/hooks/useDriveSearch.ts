@@ -68,6 +68,11 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 	// later, after further renders may have closed or superseded it.
 	const generationRef = useRef(0)
 	const activeRef = useRef(false)
+	// True once the current root's engine has been opened at least once — cleared only on a real
+	// teardown (closeSearchEngine), never on a mere blank-query edit. resolveSearchTransition reads this
+	// (not activeRef) to decide open-vs-retune, which is what keeps the engine warm across a clear —
+	// see useDriveSearch.logic.ts's own doc comment (P23).
+	const engagedRef = useRef(false)
 	const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const watchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const retuneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -177,6 +182,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 				return
 			}
 
+			engagedRef.current = true
 			setPushState(prev => ({ ...prev, hits: snapshot.hits, total: snapshot.total, live: snapshot.live, hasSnapshot: true }))
 			armGrace()
 			armWatchdog(snapshot.hits.length > 0)
@@ -221,6 +227,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 
 	function closeSearchEngine(): void {
 		generationRef.current++
+		engagedRef.current = false
 		clearTimers()
 		setPushState(INITIAL_PUSH_STATE)
 		setGraceElapsed(false)
@@ -232,7 +239,6 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 	}
 
 	function setInput(value: string): void {
-		const wasActive = activeRef.current
 		const isActive = value.trim() !== ""
 
 		setInputValue(value)
@@ -242,7 +248,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 			return
 		}
 
-		const transition = resolveSearchTransition(wasActive, isActive)
+		const transition = resolveSearchTransition(engagedRef.current, isActive)
 
 		if (transition === "open") {
 			void openSearch(value)
@@ -250,21 +256,22 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 			return
 		}
 
-		if (transition === "close") {
-			closeSearchEngine()
-
-			return
-		}
-
 		if (transition === "retune") {
 			scheduleRetune(value)
 		}
+
+		// "idle" (a blank query): deliberately a no-op — see useDriveSearch.logic.ts's own doc comment.
+		// The engine stays open and warm; only `active` (derived from `input` below) flips, which is all
+		// the UI needs to stop rendering results.
 	}
 
+	// Blanks the box without tearing the engine down — same "idle" no-op setInput("") would take,
+	// pulled out only because the X-button/Escape callers have no keystroke event to route through
+	// setInput itself. Mirrors P23: the engine stays warm so the next keystroke retunes instead of
+	// reopening. Real teardown only ever happens via closeSearchEngine (root/enabled change, unmount).
 	function clear(): void {
 		setInputValue("")
 		activeRef.current = false
-		closeSearchEngine()
 	}
 
 	// Root/enabled change or unmount: close whatever's active and blank the box — mirrors

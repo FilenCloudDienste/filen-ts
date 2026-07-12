@@ -63,11 +63,21 @@ export function sortNoteHistory(history: readonly NoteHistory[]): NoteHistory[] 
 	})
 }
 
-// Search filter over title + preview (mobile's filterNoteListItemsBySearchQuery matches title +
-// eagerly-fetched content; this web port has no eager per-note content fetch — see noteContent.ts
-// — so `preview`, the SDK's own short summary of that content, stands in). Empty/whitespace query
-// returns the list unchanged, same as mobile.
-export function filterNotesBySearch(notes: readonly Note[], search: string): Note[] {
+// Title-only half of the search match — exported so useNoteSearchBodies.ts can skip fetching a note's
+// body when its title already qualifies (a title hit never needs its body checked too), keeping M4's
+// eager content fetch scoped to only the notes that actually need it.
+export function noteTitleMatchesSearch(note: Note, normalizedSearch: string): boolean {
+	return noteDisplayTitle(note).toLowerCase().includes(normalizedSearch)
+}
+
+// Search filter over title + full decrypted body (M4 — mobile's filterNoteListItemsBySearchQuery
+// parity: matches title + eagerly-fetched content, not just a short summary). `bodies` is the
+// uuid-keyed map useNoteSearchBodies.ts eagerly fetches ONLY while a search is active (opt-in, per its
+// own doc comment) — a note absent from the map (fetch still in flight, or the caller never wired
+// bodies through at all) falls back to `preview`, the SDK's own short summary of the same content, so a
+// body-only match briefly reads as "not found" rather than crashing or matching everything. Empty/
+// whitespace query returns the list unchanged, same as mobile.
+export function filterNotesBySearch(notes: readonly Note[], search: string, bodies?: ReadonlyMap<string, string | undefined>): Note[] {
 	const normalized = search.trim().toLowerCase()
 
 	if (normalized.length === 0) {
@@ -75,19 +85,22 @@ export function filterNotesBySearch(notes: readonly Note[], search: string): Not
 	}
 
 	return notes.filter(note => {
-		if (noteDisplayTitle(note).toLowerCase().includes(normalized)) {
+		if (noteTitleMatchesSearch(note, normalized)) {
 			return true
 		}
 
-		return note.preview?.toLowerCase().includes(normalized) ?? false
+		const body = bodies?.get(note.uuid)
+		const bodyText = body ?? note.preview
+
+		return bodyText?.toLowerCase().includes(normalized) ?? false
 	})
 }
 
 // The sidebar's one entry point: filter first (search narrows the set the sort then walks), sort
 // second. Filtering before sorting is also strictly cheaper — the bucket/timestamp comparator runs
 // over the narrowed set, not the full list.
-export function sortAndFilterNotes(notes: readonly Note[], search = ""): Note[] {
-	return sortNotes(filterNotesBySearch(notes, search))
+export function sortAndFilterNotes(notes: readonly Note[], search = "", bodies?: ReadonlyMap<string, string | undefined>): Note[] {
+	return sortNotes(filterNotesBySearch(notes, search, bodies))
 }
 
 export function filterNoteTagsBySearch(tags: readonly NoteTag[], search: string): NoteTag[] {

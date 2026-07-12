@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { CheckIcon, CrownIcon, UsersIcon, XIcon } from "lucide-react"
+import { CheckIcon, CrownIcon, SearchXIcon, UsersIcon, XIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 import { isChatOwner } from "@/features/chats/lib/actions"
@@ -10,7 +10,7 @@ import { chatParticipantRows, contactsAvailableToAddToChat } from "@/features/ch
 import { useChats } from "@/features/chats/queries/chats"
 import { useAccountQuery } from "@/queries/account"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
-import { contactDisplayName, contactInitials } from "@/features/contacts/components/contactsList.logic"
+import { contactDisplayName, contactInitials, filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
 // Same generic Set<uuid> picker helpers notes' own participantsDialog.tsx reuses — not re-implemented
 // here either (feedback: no duplicated selection/data layer across features for a picker this
 // codebase already has one working copy of).
@@ -20,6 +20,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
+import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -58,6 +59,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 	const [removing, setRemoving] = useState<ChatParticipant | null>(null)
 	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
 	const [addPending, setAddPending] = useState(false)
+	const [filter, setFilter] = useState("")
 
 	const contactsQuery = useContactsQuery({ enabled: mode === "add" })
 
@@ -100,6 +102,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 		}
 
 		setSelected(new Set())
+		setFilter("")
 		setMode("list")
 	}
 
@@ -210,6 +213,23 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 			)
 		}
 
+		const filteredAvailable = filterContactsBySearch(available, filter)
+
+		// H7/M22: a non-matching filter gets its own "no results" state, distinct from the "everyone's
+		// already a participant" branch above.
+		if (filteredAvailable.length === 0) {
+			return (
+				<Empty>
+					<EmptyHeader>
+						<EmptyMedia variant="icon">
+							<SearchXIcon />
+						</EmptyMedia>
+						<EmptyTitle>{t("contacts:contactsSearchNoResultsTitle")}</EmptyTitle>
+					</EmptyHeader>
+				</Empty>
+			)
+		}
+
 		return (
 			<div
 				role="listbox"
@@ -217,7 +237,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 				aria-label={t("chatParticipantsAddDialogTitle")}
 				className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2"
 			>
-				{available.map(contact => {
+				{filteredAvailable.map(contact => {
 					const isSelected = selected.has(contact.uuid)
 					const displayName = contactDisplayName(contact)
 
@@ -279,9 +299,17 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 				{mode === "list" ? (
 					renderListBody()
 				) : (
-					<div className="flex h-72 flex-col overflow-hidden rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
-						{renderAddBody()}
-					</div>
+					<>
+						<ListFilterInput
+							value={filter}
+							onChange={setFilter}
+							placeholder={t("contacts:contactsSearchPlaceholder")}
+							ariaLabel={t("contacts:contactsSearchPlaceholder")}
+						/>
+						<div className="flex h-72 flex-col overflow-hidden rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
+							{renderAddBody()}
+						</div>
+					</>
 				)}
 				<DialogFooter>
 					{mode === "list" ? (
@@ -313,6 +341,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 								disabled={addPending}
 								onClick={() => {
 									setSelected(new Set())
+									setFilter("")
 									setMode("list")
 								}}
 							>

@@ -22,6 +22,7 @@ import {
 import { createNote } from "@/features/notes/lib/actions"
 import { exportAllNotes } from "@/features/notes/lib/export"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
+import { useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
@@ -146,6 +147,9 @@ export function NotesSidebar() {
 
 	const allNotes = notesQuery.data ?? []
 	const allTags = tagsQuery.data ?? []
+	// M4 — eager, opt-in full-body fetch feeding the filters below; see useNoteSearchBodies.ts's own
+	// doc comment for why this never fires a single request outside an active search.
+	const searchBodies = useNoteSearchBodies(allNotes, search)
 
 	// One host for every row's menu (noteRow.tsx never opens a dialog itself — it only calls onAction).
 	// currentUuid drives the delete/leave nav-away guard: a row-triggered delete of the currently-open
@@ -157,13 +161,14 @@ export function NotesSidebar() {
 	// member notes interleaved.
 	const rows: NotesSidebarRow[] =
 		viewMode === "notes"
-			? buildNotesView(allNotes, search).map(note => ({ kind: "note", note, tagUuid: "" }))
+			? buildNotesView(allNotes, search, searchBodies).map(note => ({ kind: "note", note, tagUuid: "" }))
 			: buildTagsViewRows({
 					tags: allTags,
 					notesByTag: buildNotesByTag(allNotes),
 					expandedTagUuids: expandedTags,
 					search,
-					sortBy: DEFAULT_NOTE_TAGS_SORT_BY
+					sortBy: DEFAULT_NOTE_TAGS_SORT_BY,
+					bodies: searchBodies
 				})
 
 	const virtualizer = useVirtualizer({

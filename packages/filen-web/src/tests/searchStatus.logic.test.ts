@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { deriveSearchStatus } from "@/features/drive/lib/searchStatus.logic"
+import { deriveSearchStatus, isSearchConverging } from "@/features/drive/lib/searchStatus.logic"
 
 // Baseline: an engaged, live search with one snapshot delivered (zero hits, grace not yet elapsed)
 // and every timer flag down. Each test overrides only the inputs it exercises — mirrors the
@@ -101,5 +101,31 @@ describe("deriveSearchStatus", () => {
 
 	it("is NOT terminal on a watchdog trip once results already exist", () => {
 		expect(deriveSearchStatus(base({ watchdogTripped: true, resultCount: 5, resyncing: false }))).toBe("settled")
+	})
+})
+
+describe("isSearchConverging", () => {
+	it("is converging while warming", () => {
+		expect(isSearchConverging("warming")).toBe(true)
+	})
+
+	it("is converging while searching-empty", () => {
+		expect(isSearchConverging("searching-empty")).toBe(true)
+	})
+
+	it("is converging while resyncing in the background with results already on screen", () => {
+		expect(isSearchConverging("background")).toBe(true)
+	})
+
+	it("is NOT converging once settled — select-all is offered here", () => {
+		expect(isSearchConverging("settled")).toBe(false)
+	})
+
+	it("is NOT converging in a terminal (failed) search", () => {
+		expect(isSearchConverging("terminal")).toBe(false)
+	})
+
+	it("is NOT converging while idle (no query)", () => {
+		expect(isSearchConverging("idle")).toBe(false)
 	})
 })

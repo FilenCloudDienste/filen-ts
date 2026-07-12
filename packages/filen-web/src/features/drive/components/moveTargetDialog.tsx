@@ -1,6 +1,6 @@
 import { Fragment, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { ChevronRightIcon } from "lucide-react"
+import { ChevronRightIcon, SearchXIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { moveItems } from "@/features/drive/lib/actions"
@@ -12,12 +12,15 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { cn } from "@/lib/utils"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { isMoveConfirmDisabled, isMoveRowDisabled } from "@/features/drive/components/moveTargetDialog.logic"
+import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
 import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import { EmptyState } from "@/features/drive/components/emptyState"
 import { ListingSkeleton } from "@/features/drive/components/listingSkeleton"
+import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 export interface MoveTargetDialogProps {
 	items: DriveItem[]
@@ -39,11 +42,26 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 	const { t } = useTranslation("drive")
 	const [pathStack, setPathStack] = useState<string[]>([])
 	const [pending, setPending] = useState(false)
+	const [filter, setFilter] = useState("")
 	const targetUuid = pathStack.at(-1) ?? null
 
 	const listingQuery = useDirectoryListingQuery("drive", targetUuid)
 	const namesQuery = useDirectoryNamesQuery(pathStack)
 	const directories = (listingQuery.data ?? []).filter(item => item.type === "directory")
+	// H7: same instant local name filter the non-"drive" listing variants use — this picker is a pure
+	// breadcrumb browser (never wired to the cache-backed engine), so a filtered folder tree is the only
+	// way to search it. Resets on every descend/breadcrumb-jump (pathStack change) — a query scoped to
+	// one folder should never silently carry over and hide everything in the next. Reset IN RENDER
+	// (react.dev's "adjusting state when a prop changes" pattern), not a useEffect — see
+	// directoryListing.tsx's identical listingKey comment for why.
+	const filteredDirectories = filterDriveItemsByLocalSearch(directories, filter)
+	const pathKey = pathStack.join("/")
+	const [filterPathKey, setFilterPathKey] = useState(pathKey)
+
+	if (pathKey !== filterPathKey) {
+		setFilterPathKey(pathKey)
+		setFilter("")
+	}
 
 	function descend(uuid: string): void {
 		setPathStack(prev => [...prev, uuid])
@@ -137,6 +155,14 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 						)
 					})}
 				</nav>
+				{directories.length > 0 ? (
+					<ListFilterInput
+						value={filter}
+						onChange={setFilter}
+						placeholder={t("driveMoveDialogFilterPlaceholder")}
+						ariaLabel={t("driveMoveDialogFilterPlaceholder")}
+					/>
+				) : null}
 				<div className="h-72 overflow-y-auto rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
 					{listingQuery.status === "pending" ? (
 						<ListingSkeleton viewMode="list" />
@@ -148,11 +174,22 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 								void listingQuery.refetch()
 							}}
 						/>
-					) : directories.length === 0 ? (
-						<EmptyState variant="empty" />
+					) : filteredDirectories.length === 0 ? (
+						filter.trim().length > 0 ? (
+							<Empty>
+								<EmptyHeader>
+									<EmptyMedia variant="icon">
+										<SearchXIcon />
+									</EmptyMedia>
+									<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>
+								</EmptyHeader>
+							</Empty>
+						) : (
+							<EmptyState variant="empty" />
+						)
 					) : (
 						<ul className="flex flex-col gap-0.5 p-2">
-							{directories.map(directory => {
+							{filteredDirectories.map(directory => {
 								const disabled = isMoveRowDisabled(directory, pathStack, items)
 
 								return (

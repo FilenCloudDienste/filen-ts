@@ -62,6 +62,20 @@ function matchesSearch(item: ContactLike, searchNormalized: string): boolean {
 	return item.email.toLowerCase().includes(searchNormalized) || contactDisplayName(item).toLowerCase().includes(searchNormalized)
 }
 
+// H7's shared contact-list filter — exported (unlike the section-builder below, which stays this
+// page's own concern) so every picker dialog that lists plain Contact rows (the drive share-recipient
+// picker, the new-chat/add-chat-participant pickers, the add-note-participant picker) can filter on the
+// exact same email-or-display-name substring rule this page's own search box uses, rather than each
+// dialog growing its own copy (feedback: no duplicated selection/data layer across features for a
+// picker this codebase already has one working rule for). Generic over ContactLike so it works whether
+// the caller is filtering plain Contact[] or the narrower "available to add" list a participant dialog
+// already pre-filtered by membership.
+export function filterContactsBySearch<T extends ContactLike>(items: readonly T[], search: string): T[] {
+	const normalized = search.trim().toLowerCase()
+
+	return items.filter(item => matchesSearch(item, normalized))
+}
+
 function sortByEmail<T extends { email: string }>(items: T[]): T[] {
 	return [...items].sort((a, b) => fastLocaleCompare(a.email, b.email))
 }

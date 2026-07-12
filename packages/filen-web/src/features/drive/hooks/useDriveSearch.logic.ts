@@ -6,24 +6,24 @@ import { type SearchHitDTO } from "@/workers/searchEngine"
 // Pure bits pulled out of useDriveSearch.ts's async/timer-driven wiring so they're table-testable
 // without a worker, Comlink, or React.
 
-// Which async action a change in the toolbar's active/inactive state should trigger — "active" is
-// input.trim() !== "". No timers or Comlink calls here; the hook owns those.
-export type SearchTransition = "none" | "open" | "close" | "retune"
+// Which async action a keystroke should trigger against the search engine — "active" is
+// input.trim() !== ""; "engaged" is whether the engine has already been opened at least once for the
+// current root (set the instant an open call succeeds, cleared only when the engine is actually torn
+// down — see useDriveSearch.ts's engagedRef). No timers or Comlink calls here; the hook owns those.
+//
+// A blank query NEVER closes an already-engaged engine (mobile parity — map-search.md #7's
+// "searchEngaged" latch): clearing the box back to blank only stops the UI from rendering results
+// (`active` itself goes false), it does not tear the underlying search down, so the very next
+// keystroke is an instant in-engine "retune" rather than a cold "open". The engine is only ever
+// actually closed by root/enabled change or unmount (useDriveSearch.ts's own effect), never by typing.
+export type SearchTransition = "idle" | "open" | "retune"
 
-export function resolveSearchTransition(wasActive: boolean, isActive: boolean): SearchTransition {
-	if (!wasActive && isActive) {
-		return "open"
+export function resolveSearchTransition(engaged: boolean, isActive: boolean): SearchTransition {
+	if (!isActive) {
+		return "idle"
 	}
 
-	if (wasActive && !isActive) {
-		return "close"
-	}
-
-	if (wasActive && isActive) {
-		return "retune"
-	}
-
-	return "none"
+	return engaged ? "retune" : "open"
 }
 
 export interface SearchResults {

@@ -612,17 +612,25 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 						</Empty>
 					</div>
 				) : sections.length === 0 ? (
-					// searchedSections is search-filtered but NOT section-filtered — empty here means
-					// genuinely nothing matches anywhere (the generic empty state); non-empty means the
-					// account has data, just none in the currently selected section (the narrower "nothing
-					// HERE" copy, no add-contact CTA — that action isn't relevant to e.g. an empty Blocked view).
+					// M22: a non-matching SEARCH query always gets its own "no results" state, checked
+					// first — searchedSections/sections both collapse to zero the moment a query matches
+					// nothing, which previously fell through to the "genuinely no contacts" branch below and
+					// showed the add-a-contact onboarding copy even on an account that has plenty of
+					// contacts, just none matching. searchedSections is search-filtered but NOT
+					// section-filtered, so (with no search active) empty here means genuinely nothing
+					// matches anywhere (the generic empty state); non-empty means the account has data, just
+					// none in the currently selected section (the narrower "nothing HERE" copy, no
+					// add-contact CTA — that action isn't relevant to e.g. an empty Blocked view).
 					<div className="flex flex-1 overflow-y-auto">
 						<Empty>
 							<EmptyHeader>
-								<EmptyMedia variant="icon">
-									<UsersIcon />
-								</EmptyMedia>
-								{searchedSections.length === 0 ? (
+								<EmptyMedia variant="icon">{search.trim().length > 0 ? <SearchIcon /> : <UsersIcon />}</EmptyMedia>
+								{search.trim().length > 0 ? (
+									<>
+										<EmptyTitle>{t("contactsSearchNoResultsTitle")}</EmptyTitle>
+										<EmptyDescription>{t("contactsSearchNoResultsBody")}</EmptyDescription>
+									</>
+								) : searchedSections.length === 0 ? (
 									<>
 										<EmptyTitle>{t("contactsEmptyTitle")}</EmptyTitle>
 										<EmptyDescription>{t("contactsEmptyBody")}</EmptyDescription>

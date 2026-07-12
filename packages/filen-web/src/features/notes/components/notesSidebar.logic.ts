@@ -19,9 +19,10 @@ function normalizeSearch(search: string): string {
 // ── View 1 (notes) ──────────────────────────────────────────────────────────
 
 // The flat note list: filter by search, then the pinned → bucket → editedTimestamp sort. Straight
-// reuse of the foundation's sortAndFilterNotes so both views share one search/sort semantics.
-export function buildNotesView(notes: readonly Note[], search: string): Note[] {
-	return sortAndFilterNotes(notes, search)
+// reuse of the foundation's sortAndFilterNotes so both views share one search/sort semantics. `bodies`
+// is M4's eager-fetched full-body map (useNoteSearchBodies.ts) — undefined outside an active search.
+export function buildNotesView(notes: readonly Note[], search: string, bodies?: ReadonlyMap<string, string | undefined>): Note[] {
+	return sortAndFilterNotes(notes, search, bodies)
 }
 
 // ── View 2 (tags) ─────────────────────────────────────────────────────────────
@@ -47,9 +48,15 @@ function tagNameMatches(tag: NoteTag, normalized: string): boolean {
 	return tagDisplayName(tag).toLowerCase().includes(normalized)
 }
 
-// A tag is shown in the tags view when the search matches its NAME or any of its member notes.
-// Empty search shows all.
-export function filterTagsForView(tags: readonly NoteTag[], notesByTag: Record<string, readonly Note[]>, search: string): NoteTag[] {
+// A tag is shown in the tags view when the search matches its NAME or any of its member notes
+// (title or full body — `bodies` is M4's eager-fetched map, see buildNotesView's own comment). Empty
+// search shows all.
+export function filterTagsForView(
+	tags: readonly NoteTag[],
+	notesByTag: Record<string, readonly Note[]>,
+	search: string,
+	bodies?: ReadonlyMap<string, string | undefined>
+): NoteTag[] {
 	const normalized = normalizeSearch(search)
 
 	if (normalized.length === 0) {
@@ -61,14 +68,19 @@ export function filterTagsForView(tags: readonly NoteTag[], notesByTag: Record<s
 			return true
 		}
 
-		return filterNotesBySearch(notesByTag[tag.uuid] ?? [], search).length > 0
+		return filterNotesBySearch(notesByTag[tag.uuid] ?? [], search, bodies).length > 0
 	})
 }
 
 // The notes shown inside an expanded tag group: all of them (sorted) when the search is empty or the
 // tag NAME itself matched — a name match reveals the whole group — otherwise only the members that
 // match the search. Always sorted by the shared note sort.
-function notesForExpandedTag(tag: NoteTag, notesByTag: Record<string, readonly Note[]>, search: string): Note[] {
+function notesForExpandedTag(
+	tag: NoteTag,
+	notesByTag: Record<string, readonly Note[]>,
+	search: string,
+	bodies?: ReadonlyMap<string, string | undefined>
+): Note[] {
 	const notes = notesByTag[tag.uuid] ?? []
 	const normalized = normalizeSearch(search)
 
@@ -76,7 +88,7 @@ function notesForExpandedTag(tag: NoteTag, notesByTag: Record<string, readonly N
 		return sortNotes(notes)
 	}
 
-	return sortNotes(filterNotesBySearch(notes, search))
+	return sortNotes(filterNotesBySearch(notes, search, bodies))
 }
 
 // One flattened row model — tag headers and their expanded member notes interleaved — so a SINGLE
@@ -91,10 +103,12 @@ export interface TagsViewParams {
 	expandedTagUuids: ReadonlySet<string>
 	search: string
 	sortBy: NoteTagsSortBy
+	// M4 — eager-fetched full-body map, undefined outside an active search (see buildNotesView).
+	bodies?: ReadonlyMap<string, string | undefined>
 }
 
-export function buildTagsViewRows({ tags, notesByTag, expandedTagUuids, search, sortBy }: TagsViewParams): NotesSidebarRow[] {
-	const visible = sortNoteTags(filterTagsForView(tags, notesByTag, search), sortBy, notesByTag)
+export function buildTagsViewRows({ tags, notesByTag, expandedTagUuids, search, sortBy, bodies }: TagsViewParams): NotesSidebarRow[] {
+	const visible = sortNoteTags(filterTagsForView(tags, notesByTag, search, bodies), sortBy, notesByTag)
 	const rows: NotesSidebarRow[] = []
 
 	for (const tag of visible) {
@@ -103,7 +117,7 @@ export function buildTagsViewRows({ tags, notesByTag, expandedTagUuids, search, 
 		rows.push({ kind: "tag", tag, noteCount: (notesByTag[tag.uuid] ?? []).length, expanded })
 
 		if (expanded) {
-			for (const note of notesForExpandedTag(tag, notesByTag, search)) {
+			for (const note of notesForExpandedTag(tag, notesByTag, search, bodies)) {
 				rows.push({ kind: "note", note, tagUuid: tag.uuid })
 			}
 		}

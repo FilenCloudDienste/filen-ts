@@ -70,6 +70,14 @@ describe("notesSidebar.logic — notes view", () => {
 		expect(buildNotesView([recent, older, pinned], "beta").map(n => n.uuid)).toStrictEqual([recent.uuid])
 		expect(buildNotesView([recent, older, pinned], "preview")).toHaveLength(3)
 	})
+
+	it("M4: narrows by full body via the bodies map when neither title nor preview matches", () => {
+		const note = mockNote({ uuid: testUuid("body-only"), title: "gamma", preview: "preview" })
+		const bodies = new Map([[note.uuid, "a term buried deep in the note body"]])
+
+		expect(buildNotesView([note], "buried", bodies).map(n => n.uuid)).toStrictEqual([note.uuid])
+		expect(buildNotesView([note], "buried")).toHaveLength(0)
+	})
 })
 
 describe("notesSidebar.logic — buildNotesByTag count math", () => {
@@ -111,6 +119,15 @@ describe("notesSidebar.logic — tags view filtering", () => {
 
 	it("empty search keeps every tag", () => {
 		expect(filterTagsForView([work, home], notesByTag, "")).toHaveLength(2)
+	})
+
+	// M4: a member note's full body (not just its title/preview) can also qualify its tag.
+	it("keeps a tag when a MEMBER note's full body matches, via the bodies map", () => {
+		const bodies = new Map([[standup.uuid, "quarterly roadmap review"]])
+
+		const kept = filterTagsForView([work, home], notesByTag, "roadmap", bodies)
+
+		expect(kept.map(t => t.uuid)).toStrictEqual([work.uuid])
 	})
 })
 
@@ -175,6 +192,22 @@ describe("notesSidebar.logic — buildTagsViewRows flattening", () => {
 		})
 		expect(tagRowUuids(memberMatched)).toStrictEqual([work.uuid])
 		expect(noteRowUuids(memberMatched)).toStrictEqual([a.uuid])
+	})
+
+	it("M4: the bodies map threads through to a member-matched tag's own expansion", () => {
+		const bodies = new Map([[a.uuid, "a rare term nowhere in the title"]])
+
+		const rows = buildTagsViewRows({
+			tags: [work, home],
+			notesByTag,
+			expandedTagUuids: new Set([work.uuid, home.uuid]),
+			search: "rare term",
+			sortBy: DEFAULT_NOTE_TAGS_SORT_BY,
+			bodies
+		})
+
+		expect(tagRowUuids(rows)).toStrictEqual([work.uuid])
+		expect(noteRowUuids(rows)).toStrictEqual([a.uuid])
 	})
 })
 

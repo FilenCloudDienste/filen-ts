@@ -5,6 +5,7 @@ import {
 	filterNotesBySearch,
 	filterNoteTagsBySearch,
 	noteDisplayTitle,
+	noteTitleMatchesSearch,
 	sortAndFilterNotes,
 	sortNotes,
 	sortNoteHistory,
@@ -213,6 +214,46 @@ describe("filterNotesBySearch", () => {
 
 	it("excludes notes matching neither title nor preview", () => {
 		expect(filterNotesBySearch(notes, "nonexistent")).toEqual([])
+	})
+
+	// M4: full-body search — a `bodies` map, when supplied, wins over the SDK preview snippet.
+	it("matches against the eagerly-fetched full body when supplied, even when it differs from the preview", () => {
+		const bodies = new Map([[testUuid("c"), "the quarterly plan mentions a deep-dive on onboarding metrics"]])
+
+		expect(filterNotesBySearch(notes, "onboarding metrics", bodies).map(n => n.title)).toEqual(["Work notes"])
+	})
+
+	it("falls back to the preview for a note absent from the bodies map (still in flight)", () => {
+		const bodies = new Map([[testUuid("a"), "unrelated body text"]])
+
+		expect(filterNotesBySearch(notes, "quarterly", bodies).map(n => n.title)).toEqual(["Work notes"])
+	})
+
+	it("never checks the body at all for a note whose title already matches", () => {
+		const bodies = new Map([[testUuid("a"), "this body text never gets read"]])
+
+		expect(filterNotesBySearch(notes, "groceries", bodies).map(n => n.title)).toEqual(["Groceries"])
+	})
+})
+
+describe("noteTitleMatchesSearch", () => {
+	it("matches case-insensitively", () => {
+		const note = mockNote({ title: "Quarterly Report" })
+
+		expect(noteTitleMatchesSearch(note, "quarterly")).toBe(true)
+	})
+
+	it("does not match a substring absent from the title", () => {
+		const note = mockNote({ title: "Quarterly Report" })
+
+		expect(noteTitleMatchesSearch(note, "zzz")).toBe(false)
+	})
+
+	it("falls back to matching the uuid text for a title-less (undecryptable) note", () => {
+		const uuid = testUuid("titleless-match")
+		const note = mockNoteWithoutTitle({ uuid })
+
+		expect(noteTitleMatchesSearch(note, "titleless-match")).toBe(true)
 	})
 })
 

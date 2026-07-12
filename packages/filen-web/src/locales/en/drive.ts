@@ -16,8 +16,11 @@ export const drive = {
 	// ── Toolbar ──────────────────────────────────────────────────────────────
 	/** Drive toolbar — button opening the new/upload menu */
 	driveNew: "New",
-	/** Drive toolbar — search input placeholder, scoped to the directory being viewed */
-	driveSearch: "Search this directory",
+	/** Drive toolbar — search input placeholder/aria-label, shared by every listing variant (H7): the
+	 * cache-backed recursive search on "drive" itself, and the local name filter on every other variant
+	 * (favorites/recents/trash/sharedIn/sharedOut/links) — kept variant-neutral rather than "Search this
+	 * directory" so it still reads correctly on a flat listing that has no "directory" of its own. */
+	driveSearch: "Search",
 	/** Drive toolbar — accessible label on the list-view toggle button */
 	driveViewList: "List view",
 	/** Drive toolbar — accessible label on the grid-view toggle button */
@@ -273,6 +276,8 @@ export const drive = {
 	driveMoveDialogTitle: "Select destination",
 	/** Move dialog — confirm button moving the selection into the currently open directory */
 	driveMoveHereAction: "Move here",
+	/** Move/import dialog — filter box placeholder and aria-label over the currently listed directories (shared with the import dialog below, same picker component) */
+	driveMoveDialogFilterPlaceholder: "Filter directories",
 
 	// ── Import dialog (reuses the move dialog's destination picker, see moveTargetDialog.tsx's mode prop) ──
 	/** Import dialog — title of the destination-directory picker (driveActionImport) */

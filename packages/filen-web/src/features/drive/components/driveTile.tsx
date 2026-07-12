@@ -172,7 +172,15 @@ export function DriveTile({
 							</DropdownMenu>
 						</div>
 						<span className="line-clamp-2 w-full text-xs break-words">{name}</span>
-						{shared ? (
+						{/* P21: a cross-directory search hit gets the same visible sub-line list view already
+						renders (driveRow.tsx), not just a hover tooltip (the title attr below stays too, for
+						the full untruncated path on hover) — a tile has less room than a row, so this and the
+						shared-identity badge below are mutually exclusive rather than stacked (search only ever
+						runs in the "drive" variant, where `shared` is never set, so this never actually collides
+						in practice). */}
+						{searchParentPath !== undefined && searchParentPath.length > 0 ? (
+							<span className="w-full truncate text-[0.7rem] text-muted-foreground">{searchParentPath}</span>
+						) : shared ? (
 							<span className="w-full truncate text-[0.7rem] text-muted-foreground">
 								{t(shared.labelKey, { name: shared.name })}
 							</span>

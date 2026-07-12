@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { CheckIcon, UsersIcon } from "lucide-react"
+import { CheckIcon, SearchXIcon, UsersIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { shareItems } from "@/features/drive/lib/share/actions"
@@ -11,7 +11,9 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { resolveSelectedContacts, togglePickerContact } from "@/features/drive/components/contactPickerDialog.logic"
+import { filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
 import { ContactRow } from "@/features/contacts/components/contactRow"
+import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -36,8 +38,13 @@ export function ContactPickerDialog({ items, onClose }: ContactPickerDialogProps
 	const contactsQuery = useContactsQuery()
 	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
 	const [pending, setPending] = useState(false)
+	const [filter, setFilter] = useState("")
 
 	const contacts = contactsQuery.data?.contacts ?? []
+	// H7's filter box over the picker's own contact list — a selection made before typing stays selected
+	// even once its row scrolls out of the filtered view (only `selected` uuids drive submission, see
+	// handleShare below), matching every other picker dialog's own filter-doesn't-touch-selection rule.
+	const filteredContacts = filterContactsBySearch(contacts, filter)
 
 	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
 		if (!shouldForwardOpenChange(next, pending)) {
@@ -122,6 +129,21 @@ export function ContactPickerDialog({ items, onClose }: ContactPickerDialogProps
 			)
 		}
 
+		// H7/M22: a non-matching filter gets its own "no results" state, distinct from the genuine
+		// no-contacts-at-all branch above.
+		if (filteredContacts.length === 0) {
+			return (
+				<Empty>
+					<EmptyHeader>
+						<EmptyMedia variant="icon">
+							<SearchXIcon />
+						</EmptyMedia>
+						<EmptyTitle>{t("contacts:contactsSearchNoResultsTitle")}</EmptyTitle>
+					</EmptyHeader>
+				</Empty>
+			)
+		}
+
 		return (
 			<div
 				role="listbox"
@@ -129,7 +151,7 @@ export function ContactPickerDialog({ items, onClose }: ContactPickerDialogProps
 				aria-label={t("contacts:contactsSectionContacts")}
 				className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2"
 			>
-				{contacts.map(contact => {
+				{filteredContacts.map(contact => {
 					const isSelected = selected.has(contact.uuid)
 
 					return (
@@ -169,6 +191,14 @@ export function ContactPickerDialog({ items, onClose }: ContactPickerDialogProps
 					<DialogTitle>{t("driveShareDialogTitle")}</DialogTitle>
 					<DialogDescription>{t("driveShareDialogBody", { count: items.length })}</DialogDescription>
 				</DialogHeader>
+				{contacts.length > 0 ? (
+					<ListFilterInput
+						value={filter}
+						onChange={setFilter}
+						placeholder={t("contacts:contactsSearchPlaceholder")}
+						ariaLabel={t("contacts:contactsSearchPlaceholder")}
+					/>
+				) : null}
 				<div className="flex h-72 flex-col overflow-hidden rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
 					{renderBody()}
 				</div>

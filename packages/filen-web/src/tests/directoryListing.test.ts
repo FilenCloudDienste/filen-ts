@@ -3,9 +3,11 @@ import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole, Uuid
 import { narrowItem } from "@/features/drive/lib/item"
 import { deriveBlockedUsers, type BlockedUsers } from "@/features/contacts/lib/blocking"
 import {
+	filterDriveItemsByLocalSearch,
 	filterSharedInByBlocked,
 	isEmptyTrashTriggerVisible,
 	isVisibleSharedInItem,
+	reconcileSelectedItems,
 	resolveSearchDisplayItems,
 	staleBlockedSelectionUuids,
 	staleSelectionUuids
@@ -287,5 +289,66 @@ describe("resolveSearchDisplayItems", () => {
 
 	it("returns an empty array unchanged regardless of total", () => {
 		expect(resolveSearchDisplayItems([], 0n, "nameAsc")).toEqual([])
+	})
+})
+
+describe("filterDriveItemsByLocalSearch", () => {
+	it("returns every item unchanged for a blank query", () => {
+		const a = narrowItem(mockDir({ uuid: testUuid("local-a"), meta: { type: "decoded", data: { name: "Reports" } } }))
+		const b = narrowItem(mockFile({ uuid: testUuid("local-b") }))
+
+		expect(filterDriveItemsByLocalSearch([a, b], "   ")).toEqual([a, b])
+	})
+
+	it("matches a case-insensitive substring of the display name", () => {
+		const match = narrowItem(mockDir({ uuid: testUuid("local-match"), meta: { type: "decoded", data: { name: "Vacation Photos" } } }))
+		const skip = narrowItem(mockDir({ uuid: testUuid("local-skip"), meta: { type: "decoded", data: { name: "Taxes" } } }))
+
+		expect(filterDriveItemsByLocalSearch([match, skip], "VACATION")).toEqual([match])
+	})
+
+	it("falls back to matching the uuid text for an undecryptable item (no name to match against)", () => {
+		const undecryptable = narrowItem(
+			mockDir({ uuid: testUuid("local-undecryptable"), meta: { type: "encrypted", data: "ciphertext" } })
+		)
+
+		expect(filterDriveItemsByLocalSearch([undecryptable], "local-undecryptable")).toEqual([undecryptable])
+	})
+
+	it("excludes items whose name doesn't contain the query anywhere", () => {
+		const item = narrowItem(mockDir({ uuid: testUuid("local-none"), meta: { type: "decoded", data: { name: "Documents" } } }))
+
+		expect(filterDriveItemsByLocalSearch([item], "zzz")).toEqual([])
+	})
+})
+
+describe("reconcileSelectedItems", () => {
+	it("swaps a selected item for its freshest live counterpart by uuid", () => {
+		const stale = narrowItem(mockDir({ uuid: testUuid("reconcile-a"), favorited: false }))
+		const fresh = narrowItem(mockDir({ uuid: testUuid("reconcile-a"), favorited: true }))
+
+		const result = reconcileSelectedItems([stale], [fresh])
+
+		expect(result).toEqual([fresh])
+	})
+
+	it("passes a selected item through unchanged when it has dropped out of the live set", () => {
+		const stale = narrowItem(mockDir({ uuid: testUuid("reconcile-gone") }))
+
+		const result = reconcileSelectedItems([stale], [])
+
+		expect(result).toEqual([stale])
+	})
+
+	it("preserves selection order and length regardless of the live set's own order", () => {
+		const a = narrowItem(mockDir({ uuid: testUuid("reconcile-order-a") }))
+		const b = narrowItem(mockDir({ uuid: testUuid("reconcile-order-b") }))
+		const freshA = narrowItem(mockDir({ uuid: testUuid("reconcile-order-a"), favorited: true }))
+		const freshB = narrowItem(mockDir({ uuid: testUuid("reconcile-order-b"), favorited: true }))
+
+		const result = reconcileSelectedItems([a, b], [freshB, freshA])
+
+		expect(result.map(item => item.data.uuid)).toEqual([a.data.uuid, b.data.uuid])
+		expect(result.every(item => item.data.favorited)).toBe(true)
 	})
 })

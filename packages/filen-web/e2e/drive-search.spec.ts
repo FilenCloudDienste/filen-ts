@@ -80,7 +80,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		const { listbox: rootListboxAgain } = await waitForListingSettled(page)
 		await descendInto(page, rootListboxAgain, scratchName)
 
-		const searchInput = page.getByLabel("Search this directory", { exact: true })
+		const searchInput = page.getByLabel("Search", { exact: true })
 		await expect(searchInput).not.toBeFocused()
 		await page.keyboard.press(`${modKey}+f`)
 		await expect(searchInput).toBeFocused()

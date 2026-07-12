@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { useShallow } from "zustand/shallow"
@@ -34,8 +34,10 @@ import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { driveItemActions } from "@/features/drive/components/itemMenu.logic"
 import { isBulkDownloadEnabled } from "@/features/drive/components/bulkActionBar.logic"
 import {
+	filterDriveItemsByLocalSearch,
 	filterSharedInByBlocked,
 	isEmptyTrashTriggerVisible,
+	reconcileSelectedItems,
 	resolveSearchDisplayItems,
 	staleBlockedSelectionUuids,
 	staleSelectionUuids
@@ -55,6 +57,7 @@ import { DriveTile } from "@/features/drive/components/driveTile"
 import { SearchInput } from "@/features/drive/components/searchInput"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
 import { searchHitNavigationTarget } from "@/features/drive/hooks/useDriveSearch.logic"
+import { isSearchConverging } from "@/features/drive/lib/searchStatus.logic"
 import { useDriveVirtualizer } from "@/features/drive/hooks/useDriveVirtualizer"
 import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
 import { useDriveListboxNav } from "@/features/drive/hooks/useDriveListboxNav"
@@ -179,6 +182,26 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// swapping its one source here is what makes every one of them inherited for free.
 	const search = useDriveSearch(uuid, variant === "drive")
 
+	// H7's local-substring fallback for every non-"drive" variant (favorites/recents/trash/sharedIn/
+	// sharedOut/links) — those have no navigable subtree of their own for the cache-backed engine above,
+	// so they get an instant, already-loaded-only name filter instead (filterDriveItemsByLocalSearch's
+	// own doc comment). Reset whenever the listing itself changes (variant or the current directory) —
+	// mirrors useDriveSearch's own root/enabled reset, so a stale query never survives a navigation into
+	// a sibling sharedIn/sharedOut folder. Reset IN RENDER (react.dev's "adjusting state when a prop
+	// changes" pattern), not a useEffect — a synchronous setState inside an effect body is a React
+	// Compiler lint error (cascading-render risk) here, and this needs no external system either way.
+	const listingKey = `${variant}:${uuid ?? ""}`
+	const [localFilter, setLocalFilter] = useState("")
+	const [localFilterListingKey, setLocalFilterListingKey] = useState(listingKey)
+
+	if (listingKey !== localFilterListingKey) {
+		setLocalFilterListingKey(listingKey)
+		setLocalFilter("")
+	}
+
+	const localSearchActive = variant !== "drive" && localFilter.trim().length > 0
+	const locallyFilteredItems = variant === "drive" ? visibleItems : filterDriveItemsByLocalSearch(visibleItems, localFilter)
+
 	// Threaded ONCE here (not per-row — see driveRow.tsx's own comment) and read down into every row's
 	// size column AND the size sort below. Fed the PRE-sort item set (uuid-keyed, order-independent —
 	// see useDriveDirectorySizes.logic.ts), not sortedItems: sortedItems below depends on this map, so
@@ -186,13 +209,19 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// (mirrors filen-mobile's grid item, which never mounts a size query either), so prefetching while
 	// the grid is showing would pay for recursive server-side size walks nothing on screen reads.
 	const directorySizes =
-		useDriveDirectorySizes({ items: search.active ? search.results : visibleItems, enabled: effectiveViewMode === "list" }) ??
+		useDriveDirectorySizes({ items: search.active ? search.results : locallyFilteredItems, enabled: effectiveViewMode === "list" }) ??
 		EMPTY_DIRECTORY_SIZES
 	const sortedItems = search.active
 		? resolveSearchDisplayItems(search.results, search.total, effectiveSort, directorySizes)
-		: sortDriveItems(visibleItems, effectiveSort, directorySizes)
+		: sortDriveItems(locallyFilteredItems, effectiveSort, directorySizes)
 
 	const selectedItems = useDriveStore(useShallow(state => state.selectedItems))
+	// P22: bulk consumers (the dialog host + the floating bulk bar below) always read the freshest
+	// metadata for a still-selected SEARCH hit, not the possibly-stale object captured at select time —
+	// see reconcileSelectedItems' own doc comment. Scoped to the cache-backed engine only: the local
+	// filter above has no live push stream to reconcile against (its source is the same listingQuery
+	// data `selectedItems` was already drawn from).
+	const reconciledSelectedItems = search.active ? reconcileSelectedItems(selectedItems, search.results) : selectedItems
 	// Derived once per render so each row/tile's membership check is an O(1) `.has()` instead of an
 	// O(selected) `.some()` — select-all in a large directory would otherwise make every render
 	// O(visible * selected).
@@ -201,7 +230,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const { isDialogOpen, handleItemAction, handleBulkDialogAction, handleEmptyTrash, openPreview, renderActiveDialog } =
 		useDriveDialogHost({
 			variant,
-			selectedItems
+			selectedItems: reconciledSelectedItems
 		})
 
 	const { setScrollElement, scrollElement, columns, listVirtualizer, gridVirtualizer, activeVirtualizer, registerRef, itemRefs } =
@@ -331,6 +360,10 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// preventDefault or the native selection would visibly compete with the drive-item selection.
 	// Guarded on isDialogOpen (see its own comment) so a background Cmd+A can't select items behind
 	// an open dialog — returns before preventDefault, so the browser default runs instead in that case.
+	// L28: withheld (preventDefault still runs, so the browser default stays suppressed either way)
+	// while the cache-backed search is still converging (warming/searching-empty/background) — only
+	// offered once the result set has settled, so the user can't "select all" a partial/still-growing
+	// window (mirrors mobile's own gate, searchStatus.logic.ts's isSearchConverging).
 	useAction(
 		"drive.selectAll",
 		keyboardEvent => {
@@ -339,10 +372,15 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			}
 
 			keyboardEvent.preventDefault()
+
+			if (search.active && isSearchConverging(search.status)) {
+				return
+			}
+
 			useDriveStore.getState().setSelectedItems(sortedItems)
 		},
 		undefined,
-		[isDialogOpen, sortedItems]
+		[isDialogOpen, sortedItems, search.active, search.status]
 	)
 
 	// Registered above at module scope. No preventDefault — bare Escape has no disruptive browser
@@ -414,6 +452,9 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			handleBulkDialogAction("trash")
 		},
 		undefined,
+		// length-only gate — reconciliation never changes selection COUNT (reconcileSelectedItems only
+		// ever refreshes fields, see its own doc comment), so the raw store array is fine here; the
+		// dialog host itself already closes over the reconciled items for the actual trash call.
 		[selectedItems, isDialogOpen, variant, isOnline]
 	)
 
@@ -435,16 +476,16 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				isDialogOpen ||
 				variant === "trash" ||
 				!isOnline ||
-				!isBulkDownloadEnabled(selectedItems) ||
-				selectedItems.some(item => item.data.undecryptable)
+				!isBulkDownloadEnabled(reconciledSelectedItems) ||
+				reconciledSelectedItems.some(item => item.data.undecryptable)
 			) {
 				return
 			}
 
-			void startDownloads(selectedItems)
+			void startDownloads(reconciledSelectedItems)
 		},
 		undefined,
-		[selectedItems, isDialogOpen, variant, isOnline]
+		[reconciledSelectedItems, isDialogOpen, variant, isOnline]
 	)
 
 	// The column header + virtualized listbox — identical shape whether sortedItems is the normal
@@ -641,14 +682,22 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							}}
 						/>
 					</div>
-					{variant === "drive" ? (
-						<SearchInput
-							value={search.input}
-							onChange={search.setInput}
-							onClear={search.clear}
-							dialogOpen={isDialogOpen}
-						/>
-					) : null}
+					{/* H7: every variant gets a filter box — "drive" drives the cache-backed recursive engine
+					above, every other variant drives the instant local name filter (localFilter) instead.
+					Same component either way (mod+f focuses it, Escape/the X button clears it) — only which
+					state it's bound to differs. */}
+					<SearchInput
+						value={variant === "drive" ? search.input : localFilter}
+						onChange={variant === "drive" ? search.setInput : setLocalFilter}
+						onClear={
+							variant === "drive"
+								? search.clear
+								: () => {
+										setLocalFilter("")
+									}
+						}
+						dialogOpen={isDialogOpen}
+					/>
 				</div>
 			</div>
 			<UploadDropzone
@@ -713,7 +762,21 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							</div>
 						) : sortedItems.length === 0 ? (
 							<div className="flex flex-1 overflow-y-auto">
-								<EmptyState variant="empty" />
+								{localSearchActive ? (
+									// H7's local-filter empty state — a non-matching query on a non-empty listing
+									// reads as "no matches", never the generic "nothing here yet" onboarding copy
+									// (same distinction M22 makes for contacts).
+									<Empty>
+										<EmptyHeader>
+											<EmptyMedia variant="icon">
+												<SearchXIcon />
+											</EmptyMedia>
+											<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>
+										</EmptyHeader>
+									</Empty>
+								) : (
+									<EmptyState variant="empty" />
+								)}
 							</div>
 						) : (
 							renderListboxContent()
@@ -725,7 +788,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						<div className="pointer-events-none absolute inset-x-6 bottom-10 z-10 flex justify-center">
 							<BulkActionBar
 								variant={variant}
-								selectedItems={selectedItems}
+								selectedItems={reconciledSelectedItems}
 								onDialogAction={handleBulkDialogAction}
 							/>
 						</div>

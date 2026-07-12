@@ -6,6 +6,7 @@ import {
 	contactInitials,
 	isContactOnline,
 	filterContactSections,
+	filterContactsBySearch,
 	isContactsSectionFilter,
 	CONTACTS_SECTION_FILTERS,
 	CONTACTS_SECTION_HEADER_KEY,
@@ -247,5 +248,38 @@ describe("filterContactSections", () => {
 describe("CONTACTS_SECTION_HEADER_KEY", () => {
 	it("has one entry per real ContactSection key, no more, no less", () => {
 		expect(Object.keys(CONTACTS_SECTION_HEADER_KEY).sort()).toEqual(["blocked", "contacts", "pending", "requests"])
+	})
+})
+
+describe("filterContactsBySearch", () => {
+	it("returns every item unchanged for a blank query", () => {
+		const alice = mockContact({ email: "alice@filen.io", nickName: "Alice" })
+		const bob = mockContact({ email: "bob@filen.io", nickName: "Bob" })
+
+		expect(filterContactsBySearch([alice, bob], "  ")).toEqual([alice, bob])
+	})
+
+	it("matches a case-insensitive substring of the email", () => {
+		const alice = mockContact({ email: "alice@filen.io", nickName: "Alice" })
+
+		expect(filterContactsBySearch([alice], "ALICE@FILEN")).toEqual([alice])
+	})
+
+	it("matches a case-insensitive substring of the display name", () => {
+		const alice = mockContact({ email: "alice@filen.io", nickName: "Alice" })
+
+		expect(filterContactsBySearch([alice], "lic")).toEqual([alice])
+	})
+
+	it("excludes a contact matching neither email nor display name", () => {
+		const bob = mockContact({ email: "bob@filen.io", nickName: "Bob" })
+
+		expect(filterContactsBySearch([bob], "zzz")).toEqual([])
+	})
+
+	it("falls back to the email when nickName is unset — a picker's own ContactLike shape", () => {
+		const noNick = { email: "carol@filen.io" }
+
+		expect(filterContactsBySearch([noNick], "carol")).toEqual([noNick])
 	})
 })
