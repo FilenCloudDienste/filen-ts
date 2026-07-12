@@ -1,4 +1,15 @@
-import { useEffect, useRef, useState, lazy, Suspense, Component, type KeyboardEvent, type ReactNode, type RefObject } from "react"
+import {
+	useEffect,
+	useRef,
+	useState,
+	lazy,
+	Suspense,
+	Component,
+	type KeyboardEvent,
+	type MouseEvent as ReactMouseEvent,
+	type ReactNode,
+	type RefObject
+} from "react"
 import { useTranslation } from "react-i18next"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { XIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, SaveIcon, MoreHorizontalIcon } from "lucide-react"
@@ -18,9 +29,17 @@ import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { cn } from "@/lib/utils"
 import { ImageViewer, ZoomableImage } from "@/features/preview/components/imageViewer"
 import { MediaViewer, MediaElement } from "@/features/preview/components/mediaViewer"
-import { isTextEditingTarget, previewMenuVisible, PREVIEW_MENU_HIDDEN_ACTION_IDS } from "@/features/preview/components/previewOverlay.logic"
+import {
+	isTextEditingTarget,
+	previewMenuVisible,
+	PREVIEW_MENU_HIDDEN_ACTION_IDS,
+	hasClosest,
+	isVideoControlsBandClick,
+	shouldToggleChrome
+} from "@/features/preview/components/previewOverlay.logic"
 import { type PreviewSource, previewSourceKey, previewSourceName } from "@/features/preview/lib/previewSource"
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
@@ -176,6 +195,22 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 	// opening this overlay in the first place.
 	const [menuDialogKind, setMenuDialogKind] = useState<ItemActionDialogKind | null>(null)
 	const [menuPending, setMenuPending] = useState(false)
+	// P20c click-to-hide-chrome: clicking the media surface itself (not a button/scrubber/pager control,
+	// see shouldToggleChrome) toggles the header — the pager's prev/next buttons live inside it too, so
+	// there is no separate floating control to hide. Reset to visible on every pager step (below) and on
+	// any close/dismiss attempt (handleOpenChange), never left hidden across either.
+	const [chromeVisible, setChromeVisible] = useState(true)
+	// "Adjusting state during render" (React's own documented alternative to an effect for this exact
+	// shape, react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes) —
+	// react-hooks/set-state-in-effect forbids the more obvious `useEffect(() => setChromeVisible(true),
+	// [index])` (a synchronous setState in an effect body), and this form also avoids that extra
+	// render+effect round trip: the reset lands in the SAME render that already picked up the new index.
+	const [chromeResetForIndex, setChromeResetForIndex] = useState(index)
+
+	if (chromeResetForIndex !== index) {
+		setChromeResetForIndex(index)
+		setChromeVisible(true)
+	}
 
 	// Applies the per-slot save override (drive arm only) — for the external arm there is nothing to
 	// override, so it passes straight through untouched.
@@ -558,7 +593,35 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 
 	function handleOpenChange(next: boolean): void {
 		if (!next) {
+			// Chrome always returns on the Escape/backdrop/X close path (P20c) — unconditionally, even if
+			// requestOrRun below ends up only opening the unsaved-changes prompt rather than actually
+			// closing: that prompt needs the header visible to read the dialog's own title, and there is no
+			// dedicated "close attempted but blocked" branch to hang this off separately.
+			setChromeVisible(true)
 			requestOrRun("close", onClose)
+		}
+	}
+
+	// Click-to-hide-chrome (P20c): toggles the header (which also carries the pager's prev/next buttons)
+	// when the click lands on the media surface itself, never on a button/scrubber/pager control — see
+	// shouldToggleChrome's own doc comment for the full decision table and the video-controls-band
+	// heuristic that makes a native <video> scrubber click distinguishable from a click on its picture
+	// area at all.
+	function handleBodyClick(event: ReactMouseEvent<HTMLDivElement>): void {
+		const target = event.target
+		const isInteractive =
+			hasClosest(target) && target.closest("button, a, [role='button'], .cm-editor, input, select, textarea") !== null
+		const isMedia = isMediaTarget(target)
+		let mediaControlsBandHit = false
+
+		if (isMedia && target instanceof HTMLMediaElement) {
+			const rect = target.getBoundingClientRect()
+
+			mediaControlsBandHit = isVideoControlsBandClick(rect.height, event.clientY - rect.top)
+		}
+
+		if (shouldToggleChrome({ isInteractive, isMedia, mediaControlsBandHit })) {
+			setChromeVisible(prev => !prev)
 		}
 	}
 
@@ -625,7 +688,19 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 					onKeyDown={handleKeyDown}
 					className="fixed inset-0 z-50 flex flex-col bg-background duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
 				>
-					<header className="flex h-14 shrink-0 items-center gap-1 px-4">
+					<header
+						className={cn(
+							"flex h-14 shrink-0 items-center gap-1 px-4 transition-opacity duration-150",
+							// Hidden chrome (P20c) stays in the DOM and tab-reachable — never display:none, which
+							// would drop it from the tab order entirely and could strand focus — just visually
+							// faded with pointer-events suppressed, and restored the instant anything inside it
+							// receives focus (a Tab press landing on Close, say) so keyboard/AT use is never
+							// blocked by an invisible-but-still-focusable control.
+							chromeVisible
+								? "opacity-100"
+								: "pointer-events-none opacity-0 focus-within:pointer-events-auto focus-within:opacity-100"
+						)}
+					>
 						<PreviewName name={name} />
 						{editable && dirty ? (
 							<Button
@@ -723,7 +798,10 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 							<XIcon />
 						</DialogPrimitive.Close>
 					</header>
-					<div className="min-h-0 flex-1">
+					<div
+						className="min-h-0 flex-1"
+						onClick={handleBodyClick}
+					>
 						<PreviewErrorBoundary key={previewSourceKey(currentSource)}>
 							<PreviewBody
 								source={currentSource}

@@ -1,6 +1,6 @@
 import { useState, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
-import { MoreHorizontalIcon, StarIcon } from "lucide-react"
+import { CheckIcon, MoreHorizontalIcon, PlayIcon, StarIcon } from "lucide-react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
@@ -11,6 +11,7 @@ import { canDragVariant } from "@/features/drive/lib/dnd.logic"
 import { buildDragSourceProps } from "@/features/drive/lib/dnd"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
+import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
 import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { cn } from "@/lib/utils"
@@ -129,7 +130,23 @@ export function DriveTile({
 									/>
 								</div>
 							)}
-							{item.data.favorited ? (
+							{selected ? (
+								// Explicit selection badge (P20b, mobile parity: a filled checkmark over a
+								// dimmed thumbnail) IN ADDITION to the aria-selected ring above, not instead of it —
+								// same top-left corner the favorite star below uses, since a selected tile's own
+								// dim overlay already covers that star visually; showing both at once would be
+								// redundant clutter, not added information.
+								<>
+									<div className="absolute inset-0 rounded-xl bg-background/30" />
+									<div className="absolute top-1 left-1 flex size-6 items-center justify-center rounded-full bg-primary shadow-sm">
+										<CheckIcon
+											aria-hidden="true"
+											className="size-3.5 text-primary-foreground"
+										/>
+										<span className="sr-only">{t("driveItemSelected")}</span>
+									</div>
+								</>
+							) : item.data.favorited ? (
 								// Opposite corner from the menu trigger (top-right) so the two never overlap;
 								// the ring in the aria-selected case sits at the face's own edge, outside this
 								// inset badge. Tonal backdrop keeps it legible over busy thumbnails.
@@ -139,6 +156,18 @@ export function DriveTile({
 										className="size-3.5 fill-amber-500 text-amber-500"
 									/>
 									<span className="sr-only">{t("driveFavorited")}</span>
+								</div>
+							) : null}
+							{showVideoBadge(item) ? (
+								// Bottom-right, opposite the top corners both other badges (and the menu trigger)
+								// occupy — mobile's own play-triangle badge marks a video tile the same way; a
+								// duration label isn't available (P20a explicitly scopes this to the glyph only).
+								<div className="absolute right-1 bottom-1 flex size-6 items-center justify-center rounded-full bg-background/80 shadow-sm">
+									<PlayIcon
+										aria-hidden="true"
+										className="size-3 fill-foreground text-foreground"
+									/>
+									<span className="sr-only">{t("driveVideoItem")}</span>
 								</div>
 							) : null}
 							<DropdownMenu>

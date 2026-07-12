@@ -17,7 +17,15 @@ vi.mock("@/features/drive/lib/download", async importOriginal => {
 	return { ...actual, startDownloads: startDownloadsMock }
 })
 
-import { isTextEditingTarget, previewMenuActions, previewMenuVisible } from "@/features/preview/components/previewOverlay.logic"
+import {
+	isTextEditingTarget,
+	previewMenuActions,
+	previewMenuVisible,
+	hasClosest,
+	isVideoControlsBandClick,
+	shouldToggleChrome,
+	VIDEO_CONTROLS_BAND_PX
+} from "@/features/preview/components/previewOverlay.logic"
 
 // Minimal duck-typed stand-in for a DOM EventTarget — no jsdom/happy-dom in this project
 // (vitest.config.ts: environment "node"), mirroring lib/auth/referral.test.ts's own stubbed `document`
@@ -156,5 +164,61 @@ describe("previewMenuVisible (drive-sourced items only)", () => {
 		})
 
 		expect(previewMenuVisible({ type: "drive", item: linkedItem })).toBe(false)
+	})
+})
+
+describe("hasClosest", () => {
+	it("is false for a null target", () => {
+		expect(hasClosest(null)).toBe(false)
+	})
+
+	it("is false for a target with no closest method", () => {
+		expect(hasClosest({} as unknown as EventTarget)).toBe(false)
+	})
+
+	it("is true for a target shaped like a real Element", () => {
+		expect(hasClosest(fakeTarget(null))).toBe(true)
+	})
+})
+
+describe("isVideoControlsBandClick", () => {
+	it("is true for a click within the bottom controls band", () => {
+		expect(isVideoControlsBandClick(300, 290, VIDEO_CONTROLS_BAND_PX)).toBe(true)
+	})
+
+	it("is true for a click exactly at the band's own top edge", () => {
+		expect(isVideoControlsBandClick(300, 300 - VIDEO_CONTROLS_BAND_PX, VIDEO_CONTROLS_BAND_PX)).toBe(true)
+	})
+
+	it("is false for a click just above the band", () => {
+		expect(isVideoControlsBandClick(300, 300 - VIDEO_CONTROLS_BAND_PX - 1, VIDEO_CONTROLS_BAND_PX)).toBe(false)
+	})
+
+	it("is false for a click near the top of a tall element", () => {
+		expect(isVideoControlsBandClick(300, 10, VIDEO_CONTROLS_BAND_PX)).toBe(false)
+	})
+
+	it("defaults to VIDEO_CONTROLS_BAND_PX when no band is given", () => {
+		expect(isVideoControlsBandClick(300, 290)).toBe(true)
+		expect(isVideoControlsBandClick(300, 10)).toBe(false)
+	})
+})
+
+describe("shouldToggleChrome", () => {
+	it("toggles for a plain click on a non-interactive, non-media surface (e.g. the image itself)", () => {
+		expect(shouldToggleChrome({ isInteractive: false, isMedia: false, mediaControlsBandHit: false })).toBe(true)
+	})
+
+	it("never toggles for a click on an interactive control (a viewer's own toolbar button, CodeMirror, ...)", () => {
+		expect(shouldToggleChrome({ isInteractive: true, isMedia: false, mediaControlsBandHit: false })).toBe(false)
+		expect(shouldToggleChrome({ isInteractive: true, isMedia: true, mediaControlsBandHit: true })).toBe(false)
+	})
+
+	it("toggles for a click on the video's own picture area (media, but outside the controls band)", () => {
+		expect(shouldToggleChrome({ isInteractive: false, isMedia: true, mediaControlsBandHit: false })).toBe(true)
+	})
+
+	it("never toggles for a click within the video's native controls band", () => {
+		expect(shouldToggleChrome({ isInteractive: false, isMedia: true, mediaControlsBandHit: true })).toBe(false)
 	})
 })
