@@ -303,3 +303,82 @@ describe("runBulk", () => {
 		expect(callOrder).toEqual(["called:1", "called:2", "resolved:1", "resolved:2"])
 	})
 })
+
+describe("runBulk — background mode (#60)", () => {
+	beforeEach(() => {
+		mockRunWithLoading.mockReset()
+		mockAlertsError.mockReset()
+		mockPromptsAlert.mockReset()
+	})
+
+	it("skips the blocking overlay, clears selection up front, dispatches every op, returns true", async () => {
+		const op = vi.fn(async () => undefined)
+		const clearSelection = vi.fn()
+
+		const result = await runBulk({ items: [item1, item2], op, clearSelection, background: true })
+
+		expect(result).toBe(true)
+		// The whole point of #60: no full-screen loading overlay in background mode.
+		expect(mockRunWithLoading).not.toHaveBeenCalled()
+		expect(clearSelection).toHaveBeenCalledTimes(1)
+		expect(op).toHaveBeenCalledTimes(2)
+		expect(op).toHaveBeenNthCalledWith(1, item1)
+		expect(op).toHaveBeenNthCalledWith(2, item2)
+	})
+
+	it("returns and clears selection BEFORE the ops finish (fire-and-forget)", async () => {
+		// Ops that never resolve — runBulk must still return true and clear immediately,
+		// proving the app is never blocked waiting on the downloads.
+		const op = vi.fn(() => new Promise<void>(() => {}))
+		const clearSelection = vi.fn()
+
+		const result = await runBulk({ items: [item1, item2], op, clearSelection, background: true })
+
+		expect(result).toBe(true)
+		expect(clearSelection).toHaveBeenCalledTimes(1)
+		expect(op).toHaveBeenCalledTimes(2)
+		expect(mockRunWithLoading).not.toHaveBeenCalled()
+	})
+
+	it("surfaces a failing op via alerts without blocking the others or throwing", async () => {
+		const opError = new Error("offline store failed")
+		const op = vi
+			.fn()
+			.mockRejectedValueOnce(opError) // item1 fails
+			.mockResolvedValueOnce(undefined) // item2 succeeds
+		const clearSelection = vi.fn()
+
+		const result = await runBulk({ items: [item1, item2], op, clearSelection, background: true })
+
+		// Dispatched immediately, selection cleared, no throw despite the rejection.
+		expect(result).toBe(true)
+		expect(clearSelection).toHaveBeenCalledTimes(1)
+		expect(op).toHaveBeenCalledTimes(2)
+
+		// Let the per-item run()/.then() error surfacing settle.
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(mockAlertsError).toHaveBeenCalledTimes(1)
+		expect(mockAlertsError).toHaveBeenCalledWith(opError)
+	})
+
+	it("still honors a cancelled confirm — no dispatch, no clear", async () => {
+		mockPromptsAlert.mockResolvedValueOnce({ cancelled: true })
+
+		const op = vi.fn()
+		const clearSelection = vi.fn()
+
+		const result = await runBulk({
+			items: [item1],
+			op,
+			clearSelection,
+			background: true,
+			confirm: { title: "T", message: "M", okText: "OK" }
+		})
+
+		expect(result).toBe(false)
+		expect(op).not.toHaveBeenCalled()
+		expect(clearSelection).not.toHaveBeenCalled()
+		expect(mockRunWithLoading).not.toHaveBeenCalled()
+	})
+})

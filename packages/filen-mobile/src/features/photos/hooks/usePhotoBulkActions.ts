@@ -167,6 +167,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 		onPress: async () => {
 			await runBulk({
 				items: selectedItems,
+				background: true,
 				clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 				op: async item => {
 					const parent = getRealDriveItemParent({ item, drivePath })

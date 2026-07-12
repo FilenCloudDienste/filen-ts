@@ -452,6 +452,7 @@ export function buildBulkActionMenu({
 			onPress: async () => {
 				await runBulk({
 					items: selectedDriveItems,
+					background: true,
 					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 					op: async item => {
 						const parent = getRealDriveItemParent({ item, drivePath })
