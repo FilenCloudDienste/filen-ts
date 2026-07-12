@@ -14,6 +14,7 @@ import {
 	UserIcon,
 	CircleHelpIcon
 } from "lucide-react"
+import { formatBytes } from "@filen/utils"
 import { cn } from "@/lib/utils"
 import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/contactsList.logic"
 import { performLogout } from "@/features/shell/lib/performLogout"
@@ -21,12 +22,11 @@ import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
 import { useContactRequestsQuery } from "@/features/contacts/queries/contacts"
 import { useAccountQuery } from "@/queries/account"
 import { useTransfersAggregate } from "@/features/transfers/store/useTransfersStore"
-import { TransfersPanel } from "@/features/transfers/components/transfersPanel"
+import { shouldShowTransfersAggregate } from "@/features/transfers/screens/transfers.logic"
 import { Logo } from "@/features/shell/components/logo"
 import { useTheme } from "@/providers/themeProvider"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -212,39 +212,35 @@ function AccountMenu() {
 	)
 }
 
-// The one MODULES entry promoted out of the inert loop above: a real Popover trigger (still a
-// Popover, not a Link — it stays the quick glance; the panel's own "See all" footer is the Link to
-// the full /transfers screen) showing the rail's live active-upload count. No Tooltip wrapper, unlike
-// every Link-driven entry above — mirrors AccountMenu just above (the rail's other overlay-opening
-// trigger), which also skips one; nesting a hover Tooltip and a click Popover on the same trigger is
-// an untested composition in this codebase, not worth risking here. Open state is lifted and
-// controlled (rather than the uncontrolled default every other Popover.Root usage would default to)
-// solely so the panel's "See all" link can close it on navigate — see TransfersPanelProps.onClose.
-function TransfersEntry() {
+// P3 — this used to be a Popover trigger showing a quick-glance panel, with a "See all" footer link
+// to the real screen; Jan disliked the extra click/indirection, so it is now a plain nav Link like
+// every other rail entry above, straight to /transfers. M1 — also renders the aggregate {percent,
+// speed} computeTransfersAggregate already computes (previously only activeCount was read anywhere):
+// a slim progress sliver along the icon's own bottom edge for `percent`, and the live rolling-window
+// `speed` folded into the tooltip text — mirrors mobile's floating pill's own speed+progress readout,
+// condensed to fit this narrow rail slot instead of a separate persistent surface.
+function TransfersEntry({ active }: { active: boolean }) {
 	const { t } = useTranslation(["common", "transfers"])
-	const { activeCount } = useTransfersAggregate()
-	const [open, setOpen] = useState(false)
+	const { activeCount, percent, speed } = useTransfersAggregate()
+	const showAggregate = shouldShowTransfersAggregate(activeCount)
 
 	return (
-		<Popover
-			open={open}
-			onOpenChange={setOpen}
-		>
-			<PopoverTrigger
+		<Tooltip>
+			<TooltipTrigger
 				render={
-					<button
-						type="button"
+					<Link
+						to="/transfers"
+						aria-current={active ? "page" : undefined}
 						aria-label={
 							activeCount > 0 ? t("transfers:transfersActiveBadge", { count: activeCount }) : t("common:moduleTransfers")
 						}
-						className={cn(railItemClass(open), "relative")}
+						className={cn(railItemClass(active), "relative")}
 					>
 						<ArrowDownUpIcon />
 						{activeCount > 0 ? (
-							// aria-hidden: the count is already folded into the button's own aria-label above —
-							// a button with an explicit aria-label ignores descendant content (including any
-							// aria-label on this badge) when computing its accessible name, so a label here would
-							// be dead weight, not a second announcement.
+							// aria-hidden: the count is already folded into the Link's own aria-label above — a
+							// labelled element ignores descendant content for its accessible name, so a label
+							// here would be dead weight, not a second announcement.
 							<Badge
 								aria-hidden="true"
 								className="absolute -top-1 -right-1 h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
@@ -252,21 +248,27 @@ function TransfersEntry() {
 								{activeCount}
 							</Badge>
 						) : null}
-					</button>
+						{showAggregate ? (
+							<span
+								aria-hidden="true"
+								className="absolute inset-x-1.5 bottom-1 h-0.5 overflow-hidden rounded-full bg-foreground/15"
+							>
+								<span
+									className="block h-full rounded-full bg-primary transition-[width]"
+									style={{ width: `${String(percent)}%` }}
+								/>
+							</span>
+						) : null}
+					</Link>
 				}
 			/>
-			<PopoverContent
-				side="right"
-				align="end"
-				className="w-80"
-			>
-				<TransfersPanel
-					onClose={() => {
-						setOpen(false)
-					}}
-				/>
-			</PopoverContent>
-		</Popover>
+			<TooltipContent side="right">
+				{t("common:moduleTransfers")}
+				{showAggregate ? (
+					<span className="text-background/60"> · {t("transfers:transfersAggregateSpeed", { speed: formatBytes(speed) })}</span>
+				) : null}
+			</TooltipContent>
+		</Tooltip>
 	)
 }
 
@@ -285,6 +287,8 @@ export function IconRail() {
 	// Chats mirrors Notes: a two-route module (/chats index + /chats/$uuid selection), so its active state
 	// covers the nested thread path too.
 	const chatsActive = pathname === "/chats" || pathname.startsWith("/chats/")
+	// Transfers is a flat page, no splat — an exact match is enough (mirrors contactsActive).
+	const transfersActive = pathname === "/transfers"
 	// In-app unread signal: a numeric rail badge driven by the CLIENT-DERIVED global unread count (summed
 	// per-message across every chat, not a server scalar). Always mounted with the authed shell, so this
 	// hook is also the mount-once trigger for the bulk chat+messages refetch that makes the count possible
@@ -410,7 +414,7 @@ export function IconRail() {
 				<TooltipContent side="right">{t("moduleNotes")}</TooltipContent>
 			</Tooltip>
 
-			<TransfersEntry />
+			<TransfersEntry active={transfersActive} />
 
 			<Tooltip>
 				<TooltipTrigger

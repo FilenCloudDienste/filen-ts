@@ -1,5 +1,6 @@
-// English source catalog — "transfers" namespace: the icon-rail Transfers trigger, its popover panel,
-// and the full /transfers screen (features/transfers/components/*) tracking in-flight and finished
+// English source catalog — "transfers" namespace: the icon-rail Transfers trigger (a direct nav link
+// to the /transfers screen — it no longer opens its own popover) and the full /transfers screen
+// (features/transfers/components/*, features/transfers/screens/*) tracking in-flight and finished
 // uploads AND downloads, plus the upload/download-summary toasts startUploads (features/drive/lib/upload.ts) /
 // startDownloads (features/drive/lib/download.ts) fire once a batch finishes. Same typed-catalog rules as
 // common/errors/auth/drive/contacts: flat `as const` object, camelCase keys, no literal '.' or ':'
@@ -18,20 +19,25 @@ export const transfers = {
 	/** Icon-rail Transfers trigger — accessible label while at least one upload is active; replaces the plain moduleTransfers label so the count is announced, not just shown in the visual badge; plural */
 	transfersActiveBadge_other: "Transfers, {{count}} active",
 
+	// ── Aggregate speed/progress (M1) ──────────────────────────────────────
+	// Shared by the icon-rail Transfers entry's tooltip and the /transfers screen header — both render
+	// the same live rolling-window {percent, speed} useTransfersAggregate computes, gated on
+	// shouldShowTransfersAggregate (transfers.logic.ts).
+	/** Live aggregate transfer speed readout — {{speed}} is a pre-formatted byte-rate string (e.g. "3.2 MB"); appends the per-second unit */
+	transfersAggregateSpeed: "{{speed}}/s",
+	/** Accessible label on the aggregate progress bar (icon-rail tooltip context + the /transfers screen header) */
+	transfersAggregateProgressLabel: "Overall transfer progress",
+
 	// ── Panel ────────────────────────────────────────────────────────────────
-	/** Transfers panel — heading */
-	transfersPanelTitle: "Transfers",
-	/** Transfers panel — empty-state title shown when there are no transfers */
+	/** Empty-state title shown when there are no transfers (rail entry's accessible summary + the /transfers screen) */
 	transfersEmptyTitle: "No transfers",
-	/** Transfers panel — empty-state body under transfersEmptyTitle */
+	/** Empty-state body under transfersEmptyTitle, used where there's no room to mention both directions */
 	transfersEmptyBody: "Files you upload will appear here.",
-	/** Transfers panel — button clearing every finished (done/error) transfer from the list; active uploads are unaffected */
+	/** Button clearing every finished (done/error) transfer from the list; active uploads are unaffected */
 	transfersClearFinished: "Clear finished",
-	/** Transfers panel — footer link navigating to the full /transfers screen; closes the popover */
-	transfersPanelSeeAll: "See all",
 
 	// ── Screen ───────────────────────────────────────────────────────────────
-	/** Transfers screen — empty-state body under transfersEmptyTitle (the screen reuses the panel's title; this body mentions both directions since the full page has room to) */
+	/** Transfers screen — empty-state body under transfersEmptyTitle (this body mentions both directions since the full page has room to) */
 	transfersScreenEmptyBody: "Uploads and downloads will appear here.",
 	/** Transfers screen — heading above the section listing in-flight (uploading/downloading) transfers */
 	transfersScreenSectionActive: "Active",
@@ -41,8 +47,16 @@ export const transfers = {
 	transfersScreenPauseAll: "Pause all",
 	/** Transfers screen — header button resuming every active, paused transfer; disabled when none qualify */
 	transfersScreenResumeAll: "Resume all",
-	/** Transfers screen — header button cancelling every active transfer, paused or not; disabled when none qualify */
+	/** Transfers screen — header button opening the Cancel-all confirm dialog; disabled when no transfer is active. Also reused as the confirm dialog's own destructive confirm button label */
 	transfersScreenCancelAll: "Cancel all",
+	/** Cancel-all confirm dialog (M5) — title */
+	transfersScreenCancelAllConfirmTitle: "Cancel all transfers?",
+	/** Cancel-all confirm dialog — body; {{count}} = active transfers that will stop; singular */
+	transfersScreenCancelAllConfirmBody_one: "{{count}} active transfer will stop. This can't be undone.",
+	/** Cancel-all confirm dialog — body; {{count}} = active transfers that will stop; plural */
+	transfersScreenCancelAllConfirmBody_other: "{{count}} active transfers will stop. This can't be undone.",
+	/** Shared dismiss-button label for both the single-row and Cancel-all confirm dialogs — keeps the transfer running */
+	transfersCancelDialogDismiss: "Keep transferring",
 
 	// ── Row ──────────────────────────────────────────────────────────────────
 	/** Transfer row — status label while a file is uploading */
@@ -57,12 +71,20 @@ export const transfers = {
 	transfersStatusPaused: "Paused",
 	/** Transfer row — accessible label on the button removing a single finished (done/error) transfer from the list */
 	transfersRowRemove: "Remove",
-	/** Transfer row — accessible label on the button cancelling a single active (uploading/downloading) transfer */
+	/** Transfer row — accessible label on the button opening the single-transfer Cancel confirm dialog (M5); also reused as the confirm dialog's own destructive confirm button label */
 	transfersRowCancel: "Cancel",
+	/** Single-transfer Cancel confirm dialog (M5) — title */
+	transfersRowCancelConfirmTitle: "Cancel transfer?",
+	/** Single-transfer Cancel confirm dialog — body; {{name}} = the transferring file's own name */
+	transfersRowCancelConfirmBody: "“{{name}}” is still transferring. This can't be undone.",
 	/** Transfer row — accessible label on the toggle button pausing a single active, not-yet-paused transfer */
 	transfersRowPause: "Pause",
 	/** Transfer row — accessible label on the toggle button resuming a single active, paused transfer */
 	transfersRowResume: "Resume",
+
+	// ── Directory upload scan phase (P2) ───────────────────────────────────────
+	/** Loading toast shown the instant a directory upload/drop starts, for the JS tree-walk scan phase before any transfer row exists yet (uploadDirectory.ts's collectDirectoryUploads) */
+	transfersScanningDirectory: "Scanning directory…",
 
 	// ── Upload summary toast (startUploads) ──────────────────────────────────
 	/** Upload summary toast — every uploaded file in the batch succeeded; singular */

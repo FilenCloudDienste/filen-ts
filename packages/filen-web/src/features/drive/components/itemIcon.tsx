@@ -75,8 +75,11 @@ export function DirectoryGlyph({ color, className }: { color: DirColor; classNam
 }
 
 // A file's concrete type-icon asset (decorative — alt="" and aria-hidden). object-contain preserves the
-// glyph's own aspect within whatever square `className` sizes.
-function FileTypeIcon({ iconKey, className }: { iconKey: FileIconKey; className?: string | undefined }) {
+// glyph's own aspect within whatever square `className` sizes. Exported (not ItemIcon-only-internal)
+// so a caller with just a file NAME — no full DriveItem to hand ItemIcon below — can still render the
+// exact same glyph set; transferRow.tsx's leading type-icon (a transfer row has no DriveItem, only the
+// name/size the store carries) is the first such caller.
+export function FileTypeIcon({ iconKey, className }: { iconKey: FileIconKey; className?: string | undefined }) {
 	return (
 		<img
 			src={FILE_ICON_URL[iconKey]}

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { enterScratchDirectory, trashScratchDirectory, waitForListingSettled } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -120,17 +120,24 @@ async function uploadLargeTestFile(page: Page, name: string, sizeBytes: number):
 // accessible name is just its bare file name regardless of direction (transferRow.tsx's own
 // `<Progress aria-label={transfer.name} />`), so an upload and a later download of the SAME file
 // collide on every getByRole("progressbar", { name: fileName })/getByText("Done") locator below unless
-// the upload's own row is cleared first. The panel's "Clear finished" button (transfersPanel.tsx)
-// clears every finished row in one click, so this works the same whether one file or several were just
-// uploaded.
+// the upload's own row is cleared first. The screen's "Clear finished" button
+// (screens/transfers.tsx) clears every finished row in one click, so this works the same whether one
+// file or several were just uploaded. The rail entry NAVIGATES to /transfers now (P3 -- no more
+// popover overlaying the drive listing in place), so this returns to wherever the caller was before
+// clearing, restoring the exact drive scratch-directory view every caller here relies on afterwards.
 async function clearFinishedTransfers(page: Page): Promise<void> {
+	const previousUrl = page.url()
+
 	await page
-		.getByRole("button", { name: /Transfers/i })
+		.getByRole("link", { name: /Transfers/i })
 		.first()
 		.click()
+	await page.waitForURL(/\/transfers$/)
 
 	await page.getByRole("button", { name: "Clear finished", exact: true }).click()
-	await page.keyboard.press("Escape")
+
+	await page.goto(previousUrl)
+	await waitForListingSettled(page)
 }
 
 test.describe("downloads", () => {
@@ -164,12 +171,13 @@ test.describe("downloads", () => {
 			await page.getByRole("button", { name: "Download", exact: true }).click()
 
 			await page
-				.getByRole("button", { name: /Transfers/i })
+				.getByRole("link", { name: /Transfers/i })
 				.first()
 				.click()
+			await page.waitForURL(/\/transfers$/)
 
 			// The transfer row's accessible name lives on its progressbar, not the row's outer container --
-			// the Pause/Cancel buttons are exact-named siblings (vs. the separate /transfers screen's own
+			// the Pause/Cancel buttons are exact-named siblings (vs. the screen's own header
 			// "Pause all"/"Cancel all"), located independently below since only one row is ever active here.
 			await expect(page.getByRole("progressbar", { name: fileName })).toBeVisible()
 			await expect(page.getByText("Done")).toBeVisible({ timeout: 20_000 })
@@ -221,9 +229,10 @@ test.describe("downloads", () => {
 			await page.getByRole("button", { name: "Download", exact: true }).click()
 
 			await page
-				.getByRole("button", { name: /Transfers/i })
+				.getByRole("link", { name: /Transfers/i })
 				.first()
 				.click()
+			await page.waitForURL(/\/transfers$/)
 
 			// A mixed multi-item selection has no single source name to derive from, so the zip falls back to
 			// the shared generic archive name (downloadZip.ts's resolveSuggestedZipName). exact: true guards
@@ -286,9 +295,10 @@ test.describe("downloads", () => {
 			// still reaches Done for a file this size, so that is what this asserts, not an invented
 			// intermediate state.
 			await page
-				.getByRole("button", { name: /Transfers/i })
+				.getByRole("link", { name: /Transfers/i })
 				.first()
 				.click()
+			await page.waitForURL(/\/transfers$/)
 			await expect(page.getByRole("progressbar", { name: fileName })).toBeVisible()
 			await expect(page.getByText("Done")).toBeVisible({ timeout: 20_000 })
 		} finally {
@@ -330,26 +340,44 @@ test.describe("downloads", () => {
 			await row.click()
 			await page.getByRole("button", { name: "Download", exact: true }).click()
 
+			// Snapshot the scratch directory's own option count, and the drive URL to return to, before
+			// leaving for the /transfers screen (P3 -- the rail entry navigates there now, rather than
+			// overlaying a popover on this same page) -- race-free here, unlike the identical
+			// snapshot-then-assert shape in drive.spec.ts's own "selection" test: the scratch directory is
+			// this test's private space, so nothing else ever concurrently creates/trashes inside it the way
+			// concurrent specs do at /drive's shared root.
+			const optionCountBeforeCancel = await listbox.getByRole("option").count()
+			const scratchUrl = page.url()
+
 			await page
-				.getByRole("button", { name: /Transfers/i })
+				.getByRole("link", { name: /Transfers/i })
 				.first()
 				.click()
+			await page.waitForURL(/\/transfers$/)
 
 			const progressbar = page.getByRole("progressbar", { name: fileName })
 			await expect(progressbar).toBeVisible()
 
-			// Snapshot the scratch directory's own option count just before cancelling -- race-free here,
-			// unlike the identical snapshot-then-assert shape in drive.spec.ts's own "selection" test: the
-			// scratch directory is this test's private space, so nothing else ever concurrently
-			// creates/trashes inside it the way concurrent specs do at /drive's shared root.
-			const optionCountBeforeCancel = await listbox.getByRole("option").count()
-
 			await page.getByRole("button", { name: "Cancel", exact: true }).click()
+
+			// M5 -- Cancel now gates behind a destructive confirm (it used to fire immediately): the
+			// dialog appears rather than the transfer cancelling on this click alone. Scoped by title, not
+			// just role, since the shared account's own async master-keys reminder can independently pop
+			// up mid-test and also renders as an alertdialog. Not re-asserting the background progressbar
+			// here -- Base UI's modal AlertDialog hides the rest of the page from the accessibility tree
+			// while open (aria-hide-others), so it's intentionally unqueryable, not a sign anything
+			// cancelled yet.
+			const confirmDialog = page.getByRole("alertdialog", { name: "Cancel transfer?" })
+			await expect(confirmDialog).toBeVisible()
+			await confirmDialog.getByRole("button", { name: "Cancel", exact: true }).click()
 
 			// Cancelled transfers keep no history (download.ts's runDownload Cancelled branch settles then
 			// immediately removes the row) -- unlike a finished row, there is no separate Dismiss step.
 			await expect(progressbar).toHaveCount(0)
 			await expect(page.getByText(/failed/i)).toHaveCount(0)
+
+			await page.goto(scratchUrl)
+			await waitForListingSettled(page)
 
 			// The source item itself is untouched -- cancelling aborts the in-flight transfer, never the
 			// underlying file, and the listing was never patched by a download in the first place. The

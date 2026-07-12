@@ -1,10 +1,13 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { type Transfer } from "@/features/transfers/store/useTransfersStore"
 import {
 	buildTransfersDisplayList,
 	cancellableTransferIds,
+	confirmCancelAllTransfers,
+	hasFinishedTransfers,
 	pausableTransferIds,
-	resumableTransferIds
+	resumableTransferIds,
+	shouldShowTransfersAggregate
 } from "@/features/transfers/screens/transfers.logic"
 
 function transfer(overrides: Partial<Transfer> = {}): Transfer {
@@ -126,5 +129,78 @@ describe("resumableTransferIds", () => {
 
 	it("empty when nothing is active", () => {
 		expect(resumableTransferIds([transfer({ status: "done", paused: true })])).toEqual([])
+	})
+})
+
+describe("hasFinishedTransfers", () => {
+	it("false when every row is still uploading", () => {
+		expect(hasFinishedTransfers([transfer({ status: "uploading" }), transfer({ status: "uploading" })])).toBe(false)
+	})
+
+	it("false for an empty list", () => {
+		expect(hasFinishedTransfers([])).toBe(false)
+	})
+
+	it("true when at least one row is done", () => {
+		expect(hasFinishedTransfers([transfer({ status: "uploading" }), transfer({ status: "done" })])).toBe(true)
+	})
+
+	it("true when at least one row is error", () => {
+		expect(hasFinishedTransfers([transfer({ status: "error" })])).toBe(true)
+	})
+
+	it("false when a row is downloading (active, not finished)", () => {
+		expect(hasFinishedTransfers([transfer({ direction: "download", status: "downloading" })])).toBe(false)
+	})
+
+	it("true when a download row is done", () => {
+		expect(hasFinishedTransfers([transfer({ direction: "download", status: "done" })])).toBe(true)
+	})
+})
+
+// M5 — the header Cancel-all confirm's actual action, once the AlertDialog gating it has been
+// confirmed. The gate itself (nothing cancels until the dialog's onConfirm fires) is UI wiring
+// exercised via e2e/manual QA, not this pure DI'd action — see transfers.spec.ts.
+describe("confirmCancelAllTransfers", () => {
+	it("cancels every active transfer, paused or not, and nothing else", () => {
+		const cancel = vi.fn<(id: string) => void>()
+		const transfers = [
+			transfer({ id: "a", status: "uploading", paused: false }),
+			transfer({ id: "b", status: "downloading", paused: true }),
+			transfer({ id: "c", status: "done" }),
+			transfer({ id: "d", status: "error" })
+		]
+
+		confirmCancelAllTransfers(transfers, cancel)
+
+		expect(cancel).toHaveBeenCalledTimes(2)
+		expect(cancel.mock.calls.map(call => call[0]).sort()).toEqual(["a", "b"])
+	})
+
+	it("calls the injected cancel fn zero times when nothing is active", () => {
+		const cancel = vi.fn<(id: string) => void>()
+
+		confirmCancelAllTransfers([transfer({ status: "done" }), transfer({ status: "error" })], cancel)
+
+		expect(cancel).not.toHaveBeenCalled()
+	})
+
+	it("is a no-op for an empty list", () => {
+		const cancel = vi.fn<(id: string) => void>()
+
+		confirmCancelAllTransfers([], cancel)
+
+		expect(cancel).not.toHaveBeenCalled()
+	})
+})
+
+describe("shouldShowTransfersAggregate", () => {
+	it("false when nothing is active", () => {
+		expect(shouldShowTransfersAggregate(0)).toBe(false)
+	})
+
+	it("true once at least one transfer is active", () => {
+		expect(shouldShowTransfersAggregate(1)).toBe(true)
+		expect(shouldShowTransfersAggregate(5)).toBe(true)
 	})
 })

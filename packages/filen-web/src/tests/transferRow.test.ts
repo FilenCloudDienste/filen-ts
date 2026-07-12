@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { type Transfer } from "@/features/transfers/store/useTransfersStore"
-import { transferProgress, activeStatusLabelKey } from "@/features/transfers/components/transferRow.logic"
+import { transferProgress, activeStatusLabelKey, transferIconKey } from "@/features/transfers/components/transferRow.logic"
 
 function transfer(overrides: Partial<Transfer> = {}): Transfer {
 	return {
@@ -63,5 +63,31 @@ describe("activeStatusLabelKey", () => {
 
 	it("unpaused (explicit false) behaves the same as the default", () => {
 		expect(activeStatusLabelKey("upload", false)).toBe("transfersStatusUploading")
+	})
+})
+
+describe("transferIconKey", () => {
+	it("routes an image upload to the image glyph", () => {
+		expect(transferIconKey(transfer({ name: "photo.png", direction: "upload" }))).toBe("image")
+	})
+
+	it("routes a pdf download to the pdf glyph, same as an upload of the identical name", () => {
+		expect(transferIconKey(transfer({ name: "invoice.pdf", direction: "download" }))).toBe("pdf")
+	})
+
+	it("routes a zip (a multi-item/directory download's own suggested name) to the archive glyph", () => {
+		expect(transferIconKey(transfer({ name: "Filen.zip", direction: "download" }))).toBe("archive")
+	})
+
+	it("falls back to the generic glyph for an unrecognized extension", () => {
+		expect(transferIconKey(transfer({ name: "data.xyz123" }))).toBe("other")
+	})
+
+	it("is direction-agnostic — only the file name decides the icon", () => {
+		const upload = transferIconKey(transfer({ name: "clip.mp4", direction: "upload" }))
+		const download = transferIconKey(transfer({ name: "clip.mp4", direction: "download" }))
+
+		expect(upload).toBe("video")
+		expect(download).toBe("video")
 	})
 })

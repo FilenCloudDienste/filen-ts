@@ -299,7 +299,16 @@ const defaultDirectoryUploadDeps: RunDirectoryUploadDeps = {
 	upload: defaultUploadDeps
 }
 
+// P2 — both call sites (uploadMenu.tsx's directory picker, uploadDropzone.tsx's DnD drop) fire this
+// off with `void`, and the tree walk below (collectDirectoryUploads) can run for a while on a large
+// local directory with nothing else on screen changing — no transfer row exists yet, since none of the
+// files/dirs it discovers are known until the walk finishes. A loading toast is the spinner/indicator
+// for that gap: shown the instant the walk starts, replaced by the real error toast in place (same
+// `id`, so it's a swap, not a second toast) if the walk itself fails, or dismissed once it resolves and
+// the (now known) tree starts actually uploading — runDirectoryUpload's own success/failure summary
+// toast takes over from there.
 export async function startDirectoryUpload(input: DirectoryUploadInput, rootParentUuid: string | null): Promise<void> {
+	const scanningToastId = toast.loading(i18n.t("transfers:transfersScanningDirectory"))
 	let collected: CollectedDirectoryUpload
 
 	try {
@@ -307,10 +316,12 @@ export async function startDirectoryUpload(input: DirectoryUploadInput, rootPare
 	} catch (e) {
 		// A hard walk failure (the browser couldn't even enumerate the dropped/picked tree) — nothing
 		// partial to report here, unlike runDirectoryUpload's own per-item failures above.
-		toast.error(errorLabel(asErrorDTO(e)))
+		toast.error(errorLabel(asErrorDTO(e)), { id: scanningToastId })
 
 		return
 	}
+
+	toast.dismiss(scanningToastId)
 
 	await runDirectoryUpload(defaultDirectoryUploadDeps, { rootParentUuid, ...collected })
 }

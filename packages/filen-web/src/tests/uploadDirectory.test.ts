@@ -20,9 +20,17 @@ const { createDirectory, uploadFile } = vi.hoisted(() => ({
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { createDirectory, uploadFile } }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
-const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), toastError: vi.fn() }))
+// toastLoading returns a fixed id — startDirectoryUpload's own scanning-toast id (P2) — so assertions
+// below can check it's the exact id later reused to dismiss/replace it, same as the real sonner
+// contract (toast.loading returns the id you pass back into toast.dismiss/toast.error's own options).
+const { toastSuccess, toastError, toastLoading, toastDismiss } = vi.hoisted(() => ({
+	toastSuccess: vi.fn(),
+	toastError: vi.fn(),
+	toastLoading: vi.fn(() => "scan-toast-id"),
+	toastDismiss: vi.fn()
+}))
 
-vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
+vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError, loading: toastLoading, dismiss: toastDismiss } }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { driveListingQueryKey } from "@/features/drive/queries/drive"
@@ -492,6 +500,11 @@ describe("startDirectoryUpload (real wiring)", () => {
 		expect(uploadFile).toHaveBeenCalledTimes(2)
 		expect(toastSuccess).toHaveBeenCalledWith(expect.any(String))
 
+		// P2 — the scanning toast shows for the tree-walk phase, then is dismissed (not left hanging)
+		// once the walk resolves and the real per-item upload/summary toasts take over.
+		expect(toastLoading).toHaveBeenCalledWith(expect.any(String))
+		expect(toastDismiss).toHaveBeenCalledWith("scan-toast-id")
+
 		const transfers = useTransfersStore.getState().transfers
 		expect(transfers).toHaveLength(2)
 		expect(transfers.every(transfer => transfer.status === "done")).toBe(true)
@@ -509,7 +522,23 @@ describe("startDirectoryUpload (real wiring)", () => {
 
 		expect(createDirectory).not.toHaveBeenCalled()
 		expect(uploadFile).not.toHaveBeenCalled()
-		expect(toastError).toHaveBeenCalledWith(expect.any(String))
+		// P2 — the error toast replaces the scanning toast in place (same id) rather than popping a
+		// second, separate toast, and the scanning toast is never separately dismissed on this path.
+		expect(toastError).toHaveBeenCalledWith(expect.any(String), { id: "scan-toast-id" })
+		expect(toastDismiss).not.toHaveBeenCalled()
 		expect(toastSuccess).not.toHaveBeenCalled()
+	})
+
+	// P2 — a scanning spinner/indicator at the fire-and-forget call sites (uploadMenu.tsx/
+	// uploadDropzone.tsx both just `void startDirectoryUpload(...)`, with no transfer row yet to show
+	// progress on): a loading toast fires the instant the walk starts, before the tree walk even
+	// resolves.
+	it("shows a scanning toast immediately", async () => {
+		const badDir = mockDirEntry("bad", mockFailingReader())
+
+		await startDirectoryUpload({ kind: "entries", entries: [badDir] }, null)
+
+		expect(toastLoading).toHaveBeenCalledTimes(1)
+		expect(toastLoading).toHaveBeenCalledWith(expect.any(String))
 	})
 })

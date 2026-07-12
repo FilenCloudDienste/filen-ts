@@ -1,4 +1,5 @@
 import { type Transfer } from "@/features/transfers/store/useTransfersStore"
+import { fileIconKey, type FileIconKey } from "@/features/drive/lib/icon.logic"
 
 // Per-row value fed straight into <Progress value={...}> (Base UI's 0-max range, max defaults to
 // 100 — see ui/progress.tsx), scaled 0-100 same as useTransfersAggregate's own percent.
@@ -37,4 +38,14 @@ export function activeStatusLabelKey(
 	}
 
 	return direction === "upload" ? "transfersStatusUploading" : "transfersStatusDownloading"
+}
+
+// The row's leading type-icon key, resolved straight from the transfer's own file name — reuses
+// drive's exact fileIconKey routing (icon.logic.ts) so a transfer row's glyph matches the one the same
+// file shows once it lands in the listing. A transfer row carries no DriveItem (only name/size — see
+// useTransfersStore.ts's Transfer shape), so there is no directory/file discriminant to branch on
+// here: every row (upload or download) is file-shaped, including a zip download, whose suggested name
+// always ends ".zip" and so already routes to the "archive" glyph rather than a generic one.
+export function transferIconKey(transfer: Transfer): FileIconKey {
+	return fileIconKey(transfer.name)
 }

@@ -37,15 +37,16 @@ test.describe("uploads", () => {
 			const row = listbox.getByRole("option", { name: fileName })
 			await expect(row).toBeVisible({ timeout: 45_000 }) // cold boot + a real upload round trip
 
-			// The rail Transfers popover reflects this same just-finished transfer — runUpload settles the
-			// store to "done" before it patches the listing (features/drive/lib/upload.ts), so the row above already
-			// being visible guarantees the store side already settled too.
+			// The rail Transfers entry navigates straight to the /transfers screen (P3 — no more popover)
+			// and reflects this same just-finished transfer — runUpload settles the store to "done" before
+			// it patches the listing (features/drive/lib/upload.ts), so the row above already being visible
+			// guarantees the store side already settled too.
 			await page
-				.getByRole("button", { name: /Transfers/i })
+				.getByRole("link", { name: /Transfers/i })
 				.first()
 				.click()
+			await page.waitForURL(/\/transfers$/)
 			await expect(page.getByText("Done")).toBeVisible()
-			await page.keyboard.press("Escape")
 		} finally {
 			await trashScratchDirectory(page, scratchName)
 		}

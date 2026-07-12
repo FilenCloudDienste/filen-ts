@@ -12,8 +12,9 @@ import {
 } from "lucide-react"
 import { formatBytes } from "@filen/utils"
 import { isActiveTransfer, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
-import { transferProgress, activeStatusLabelKey } from "@/features/transfers/components/transferRow.logic"
-import { cancelTransfer, pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
+import { transferProgress, activeStatusLabelKey, transferIconKey } from "@/features/transfers/components/transferRow.logic"
+import { pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
+import { FileTypeIcon } from "@/features/drive/components/itemIcon"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -22,6 +23,15 @@ import { Spinner } from "@/components/ui/spinner"
 
 export interface TransferRowProps {
 	transfer: Transfer
+	// M5 — Cancel's own confirm dialog is owned by the SCREEN (screens/transfers.tsx), not this row:
+	// buildTransfersDisplayList renders active/finished transfers in two SEPARATE sections, so a row
+	// moving from active to finished (settling mid-confirm) unmounts this component and remounts a new
+	// one in the other section — a dialog-open flag kept in local row state would silently vanish right
+	// under the user's cursor the instant that happens. The screen instead tracks a stable id (immune
+	// to this component ever remounting) and re-resolves the target transfer by id on every render, so
+	// a transfer that settles naturally while its confirm is open closes the dialog gracefully instead
+	// of losing it. This callback is only ever wired to the active-row branch below.
+	onRequestCancel: () => void
 }
 
 // Leading status icon — aria-hidden in the "done"/"error" branches since the row's own trailing text
@@ -96,17 +106,17 @@ function TransferDirectionIcon({ direction }: { direction: Transfer["direction"]
 	)
 }
 
-// One row: name + live progress bar, mirroring DriveRow's icon+truncate+trailing idiom (drive/
-// driveRow.tsx) scaled down for the panel's narrower surface. Active (uploading/downloading) rows get
-// a pause/resume toggle plus a Cancel button (X glyph), wired to features/transfers/lib/control.ts's
-// pauseTransfer/resumeTransfer/cancelTransfer — the in-flight runUpload/runDownload catch does the
-// actual store settle+remove once a cancelled worker call rejects with "Cancelled"; pause/resume never
-// reject, so the toggle flips the store's `paused` flag itself (see pauseTransfer/resumeTransfer). A
-// finished row (isActiveTransfer false — done/error/completedWithErrors) gets a Remove button instead
-// (trash glyph, deliberately distinct from Cancel's X — a finished transfer can't be "cancelled", only
-// dismissed from the list), wired straight to the store — a finished transfer is already done, so
-// removing just clears its row, no confirm needed.
-export function TransferRow({ transfer }: TransferRowProps) {
+// One row: type icon + name + live progress bar, mirroring DriveRow's icon+truncate+trailing idiom
+// (drive/driveRow.tsx) scaled down for this narrower surface. Active (uploading/downloading) rows get
+// a pause/resume toggle wired straight to features/transfers/lib/control.ts's pauseTransfer/
+// resumeTransfer (pause/resume never reject, so the toggle flips the store's `paused` flag itself)
+// plus a Cancel button (X glyph) that only REQUESTS a cancel via onRequestCancel — the screen owns the
+// actual confirm dialog and the cancelTransfer call (M5; see onRequestCancel's own doc comment for
+// why). A finished row (isActiveTransfer false — done/error/completedWithErrors) gets a Remove button
+// instead (trash glyph, deliberately distinct from Cancel's X — a finished transfer can't be
+// "cancelled", only dismissed from the list), wired straight to the store with no confirm — a finished
+// transfer is already done, so removing just clears its row.
+export function TransferRow({ transfer, onRequestCancel }: TransferRowProps) {
 	const { t, i18n } = useTranslation("transfers")
 	const progress = transferProgress(transfer)
 	const finished = !isActiveTransfer(transfer.status)
@@ -146,6 +156,16 @@ export function TransferRow({ transfer }: TransferRowProps) {
 	return (
 		<div className="flex flex-col gap-1.5 rounded-xl px-1 py-1.5 hover:bg-accent/50">
 			<div className="flex items-center gap-2">
+				{/* P1 — the row used to show only the generic direction arrow below; this is the item's
+				actual type glyph (itemIcon.tsx's own FileTypeIcon/fileIconKey, reused verbatim so a
+				transfer row's icon matches the one the same file shows once it lands in the listing). A
+				transfer row carries no DriveItem to derive a directory glyph or a real download thumbnail
+				from (see transferIconKey's own comment) — every row here is file-shaped, including a zip
+				download, whose name already routes to the "archive" glyph. */}
+				<FileTypeIcon
+					iconKey={transferIconKey(transfer)}
+					className="size-4 shrink-0"
+				/>
 				<TransferStatusIcon
 					status={transfer.status}
 					direction={transfer.direction}
@@ -185,9 +205,7 @@ export function TransferRow({ transfer }: TransferRowProps) {
 							variant="ghost"
 							size="icon-xs"
 							aria-label={t("transfersRowCancel")}
-							onClick={() => {
-								cancelTransfer(transfer.id)
-							}}
+							onClick={onRequestCancel}
 						>
 							<XIcon />
 						</Button>
