@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { clampListboxIndex, listboxRange } from "@/features/drive/lib/listbox"
+import { clampListboxIndex, listboxRange, resolveCursorIndex } from "@/features/drive/lib/listbox"
 
 describe("clampListboxIndex", () => {
 	it("passes through an index already in range", () => {
@@ -39,5 +39,36 @@ describe("listboxRange", () => {
 
 	it("handles adjacent indices", () => {
 		expect(listboxRange(4, 5)).toEqual([4, 5])
+	})
+})
+
+describe("resolveCursorIndex", () => {
+	// The bug this closes: a positional index alone drifts under a background reorder (sort-by-size
+	// backfilling sizes, a live socket/optimistic patch) with no navigation. Tracking by uuid and
+	// re-mapping to the current index keeps a held cursor on the SAME item across the reorder.
+	it("re-maps to the tracked uuid's new position after a reorder", () => {
+		const before = ["a", "b", "c"]
+		const after = ["c", "a", "b"]
+
+		const index = resolveCursorIndex("c", before, 2)
+		expect(index).toBe(2)
+
+		// Same uuid, reordered list — cursor follows the item, not the slot.
+		expect(resolveCursorIndex("c", after, index)).toBe(0)
+	})
+
+	it("returns the fallback index (clamped) when the tracked uuid is not yet set", () => {
+		expect(resolveCursorIndex(null, ["a", "b", "c"], 1)).toBe(1)
+		expect(resolveCursorIndex(null, ["a", "b", "c"], 99)).toBe(2)
+	})
+
+	it("clamps to a neighbor when the tracked uuid has vanished from the list", () => {
+		// "b" was at index 1 and is now gone (deleted/filtered/moved) — falls back to the last known
+		// position, clamped into the new (shorter) bounds, instead of crashing or snapping to 0.
+		expect(resolveCursorIndex("b", ["a", "c"], 1)).toBe(1)
+	})
+
+	it("clamps the fallback into an empty list without throwing", () => {
+		expect(resolveCursorIndex("gone", [], 4)).toBe(0)
 	})
 })

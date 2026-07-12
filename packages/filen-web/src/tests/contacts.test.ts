@@ -217,6 +217,26 @@ describe("contactsQueryUpdate", () => {
 
 		expect(testQueryClient.getQueryData(CONTACT_REQUESTS_QUERY_KEY)).toEqual({ incoming: [], outgoing: [] })
 	})
+
+	// Guards the bug this cancel-before-patch closes: staleTime 0 + refetchOnWindowFocus/Reconnect
+	// means a refetch can be snapshotted before an optimistic block/unblock/remove write and resolve
+	// after it. Asserting cancelQueries fires on every cached patch is what proves that stale refetch
+	// response can never land and revert the patch — same shape as notesQueryUpdate's own coverage.
+	it("cancels an in-flight fetch only when the query already holds cached data", () => {
+		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
+
+		// No cached data yet — the initial-fetch carve-out must NOT cancel.
+		contactsQueryUpdate(prev => prev)
+		expect(cancelSpy).not.toHaveBeenCalled()
+
+		testQueryClient.setQueryData(CONTACTS_QUERY_KEY, { contacts: [mockContact()], blocked: [] })
+		cancelSpy.mockClear()
+
+		// Cached data exists now — a patch (e.g. block/unblock/remove) must abort any in-flight
+		// refetch first, so a concurrent refetch resolving after this write cannot revert it.
+		contactsQueryUpdate(prev => prev)
+		expect(cancelSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: CONTACTS_QUERY_KEY })
+	})
 })
 
 describe("contactsQueryGet", () => {
@@ -261,5 +281,20 @@ describe("contactRequestsQueryUpdate", () => {
 		contactRequestsQueryUpdate(prev => ({ ...prev, incoming: [mockIncoming()] }))
 
 		expect(testQueryClient.getQueryData(CONTACTS_QUERY_KEY)).toEqual({ contacts: [], blocked: [] })
+	})
+
+	it("cancels an in-flight fetch only when the query already holds cached data", () => {
+		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
+
+		// No cached data yet — the initial-fetch carve-out must NOT cancel.
+		contactRequestsQueryUpdate(prev => prev)
+		expect(cancelSpy).not.toHaveBeenCalled()
+
+		testQueryClient.setQueryData(CONTACT_REQUESTS_QUERY_KEY, { incoming: [mockIncoming()], outgoing: [] })
+		cancelSpy.mockClear()
+
+		// Cached data exists now — a patch must abort any in-flight refetch first.
+		contactRequestsQueryUpdate(prev => prev)
+		expect(cancelSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: CONTACT_REQUESTS_QUERY_KEY })
 	})
 })

@@ -41,10 +41,22 @@ export function useContactsQuery(options?: { enabled?: boolean }): UseQueryResul
 	})
 }
 
+// Cancel-before-patch WITH the initial-fetch carve-out (driveListingQueryUpdate's own rule, drive.ts):
+// a refetch snapshotted on the server BEFORE this write would land after the patch and silently
+// overwrite it — abort anything in flight first, but only when cached data already exists. Cancelling
+// a query's INITIAL fetch would strand it on its loading state with nothing to show until the next
+// mount/focus trigger, and the overwrite hazard only applies to data a patch can lose.
+function cancelInFlightIfCached(): void {
+	if (queryClient.getQueryData(CONTACTS_QUERY_KEY) !== undefined) {
+		void queryClient.cancelQueries({ queryKey: CONTACTS_QUERY_KEY })
+	}
+}
+
 // Confirm-then-patch (queries/client.ts's zero-useMutation convention). A cache miss (nobody has
 // mounted the contacts page yet) defaults to empty arrays so the patch still lands for whenever it
 // first mounts, same rule as driveListingQueryUpdate.
 export function contactsQueryUpdate(updater: (prev: ContactsQueryData) => ContactsQueryData): void {
+	cancelInFlightIfCached()
 	queryClient.setQueryData<ContactsQueryData>(CONTACTS_QUERY_KEY, prev => updater(prev ?? { contacts: [], blocked: [] }))
 }
 
@@ -75,6 +87,14 @@ export function useContactRequestsQuery(): UseQueryResult<ContactRequestsQueryDa
 	})
 }
 
+// Same cancel-before-patch carve-out as cancelInFlightIfCached above, scoped to the requests key.
+function cancelRequestsInFlightIfCached(): void {
+	if (queryClient.getQueryData(CONTACT_REQUESTS_QUERY_KEY) !== undefined) {
+		void queryClient.cancelQueries({ queryKey: CONTACT_REQUESTS_QUERY_KEY })
+	}
+}
+
 export function contactRequestsQueryUpdate(updater: (prev: ContactRequestsQueryData) => ContactRequestsQueryData): void {
+	cancelRequestsInFlightIfCached()
 	queryClient.setQueryData<ContactRequestsQueryData>(CONTACT_REQUESTS_QUERY_KEY, prev => updater(prev ?? { incoming: [], outgoing: [] }))
 }

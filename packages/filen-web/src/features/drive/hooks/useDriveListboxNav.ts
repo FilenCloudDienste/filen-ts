@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react"
-import { clampListboxIndex, listboxRange } from "@/features/drive/lib/listbox"
+import { clampListboxIndex, listboxRange, resolveCursorIndex } from "@/features/drive/lib/listbox"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant, type DriveViewMode } from "@/features/drive/lib/preferences"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
@@ -46,11 +46,34 @@ export function useDriveListboxNav({
 	splat,
 	onOpen
 }: UseDriveListboxNavParams): DriveListboxNav {
-	const [activeIndex, setActiveIndex] = useState(0)
-	const [anchorIndex, setAnchorIndex] = useState(0)
-	const safeActiveIndex = clampListboxIndex(activeIndex, items.length)
-	const safeAnchorIndex = clampListboxIndex(anchorIndex, items.length)
+	// Tracked by item identity (uuid), not position — a positional index alone drifts under a
+	// background reorder (sort-by-size backfilling sizes, a live socket/optimistic patch) with no
+	// navigation, silently retargeting Enter/Shift+Arrow onto the wrong item. `null` means "no move
+	// has happened yet in this directory/variant", which resolveCursorIndex falls back to the fallback
+	// index below (0 initially), same as the plain positional default this replaces.
+	const [activeUuid, setActiveUuid] = useState<string | null>(null)
+	const [anchorUuid, setAnchorUuid] = useState<string | null>(null)
+	// The last position each cursor actually resolved to — what resolveCursorIndex falls back to once
+	// its uuid is no longer present in `items` (deleted/filtered/moved out from under the cursor), so
+	// a vanished target lands on its nearest surviving neighbor instead of snapping back to index 0.
+	// Kept as state (not a ref) and adjusted synchronously during render — React's documented pattern
+	// for deriving state from a changed input without an extra effect round trip (see "Adjusting state
+	// when a prop changes" in the React docs); a ref cannot be read during render under React Compiler.
+	const [activeFallback, setActiveFallback] = useState(0)
+	const [anchorFallback, setAnchorFallback] = useState(0)
 	const focusRequestRef = useRef(0)
+
+	const uuids = items.map(item => item.data.uuid)
+	const safeActiveIndex = clampListboxIndex(resolveCursorIndex(activeUuid, uuids, activeFallback), items.length)
+	const safeAnchorIndex = clampListboxIndex(resolveCursorIndex(anchorUuid, uuids, anchorFallback), items.length)
+
+	if (activeFallback !== safeActiveIndex) {
+		setActiveFallback(safeActiveIndex)
+	}
+
+	if (anchorFallback !== safeAnchorIndex) {
+		setAnchorFallback(safeAnchorIndex)
+	}
 
 	// A fresh directory/variant must never inherit the previous one's selection or cursor. Routes
 	// that only change `splat` (deeper nav within the same drive.$.tsx route) re-render this
@@ -62,8 +85,10 @@ export function useDriveListboxNav({
 	useEffect(() => {
 		useDriveStore.getState().clearSelectedItems()
 		// eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate navigation reset, see above
-		setActiveIndex(0)
-		setAnchorIndex(0)
+		setActiveUuid(null)
+		setAnchorUuid(null)
+		setActiveFallback(0)
+		setAnchorFallback(0)
 	}, [variant, splat])
 
 	// Focus is imperative by nature here: the target index may be scrolled fully out of the mounted
@@ -76,7 +101,7 @@ export function useDriveListboxNav({
 		const next = clampListboxIndex(nextIndexRaw, items.length)
 		const rowIndex = viewMode === "grid" ? Math.floor(next / columns) : next
 
-		setActiveIndex(next)
+		setActiveUuid(items[next]?.data.uuid ?? null)
 		virtualizer.scrollToIndex(rowIndex, { align: "auto" })
 		focusRequestRef.current = next
 
@@ -134,22 +159,22 @@ export function useDriveListboxNav({
 
 		if (event.shiftKey) {
 			selectRange(safeAnchorIndex, index)
-			setActiveIndex(index)
+			setActiveUuid(item.data.uuid)
 
 			return
 		}
 
 		if (event.metaKey || event.ctrlKey) {
 			useDriveStore.getState().toggleSelectedItem(item)
-			setActiveIndex(index)
-			setAnchorIndex(index)
+			setActiveUuid(item.data.uuid)
+			setAnchorUuid(item.data.uuid)
 
 			return
 		}
 
 		useDriveStore.getState().setSelectedItems([item])
-		setActiveIndex(index)
-		setAnchorIndex(index)
+		setActiveUuid(item.data.uuid)
+		setAnchorUuid(item.data.uuid)
 	}
 
 	// ARIA listbox cursor semantics (roving tabindex): plain Arrow/Home/End move the cursor only —
@@ -170,7 +195,7 @@ export function useDriveListboxNav({
 
 			if (item) {
 				useDriveStore.getState().toggleSelectedItem(item)
-				setAnchorIndex(safeActiveIndex)
+				setAnchorUuid(item.data.uuid)
 			}
 
 			return
@@ -211,15 +236,16 @@ export function useDriveListboxNav({
 		if (event.shiftKey) {
 			selectRange(safeAnchorIndex, next)
 		} else {
-			setAnchorIndex(next)
+			setAnchorUuid(items[next]?.data.uuid ?? null)
 		}
 	}
 
 	function setCursor(index: number) {
 		const clamped = clampListboxIndex(index, items.length)
+		const uuid = items[clamped]?.data.uuid ?? null
 
-		setActiveIndex(clamped)
-		setAnchorIndex(clamped)
+		setActiveUuid(uuid)
+		setAnchorUuid(uuid)
 	}
 
 	return { safeActiveIndex, handleKeyDown, handlePointerSelect, setCursor }

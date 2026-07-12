@@ -25,3 +25,21 @@ export function listboxRange(anchor: number, active: number): number[] {
 
 	return range
 }
+
+// Re-maps a roving cursor/anchor tracked by item identity back onto the CURRENT item-set's index —
+// a positional index alone drifts under a background reorder (e.g. sort-by-size backfilling sizes,
+// or a live socket/optimistic patch) with no navigation, silently retargeting Enter/Shift+Arrow onto
+// the wrong item. `fallbackIndex` is the last position the tracked uuid resolved to (or the initial
+// position before any move): used only when the uuid is no longer present in `uuids` (item deleted/
+// moved/filtered out from under the cursor), clamped into the current bounds as the nearest neighbor.
+export function resolveCursorIndex(targetUuid: string | null, uuids: readonly string[], fallbackIndex: number): number {
+	if (targetUuid !== null) {
+		const index = uuids.indexOf(targetUuid)
+
+		if (index !== -1) {
+			return index
+		}
+	}
+
+	return clampListboxIndex(fallbackIndex, uuids.length)
+}
