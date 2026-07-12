@@ -5,7 +5,7 @@ import { useDialogHost } from "@/lib/useDialogHost"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { type PreviewSource, previewSourceKey, stepPreviewSourceIndex } from "@/features/preview/lib/previewSource"
-import { renameItem, trashItems, restoreItems, deleteItemsPermanently, emptyTrash } from "@/features/drive/lib/actions"
+import { renameItem, trashItems, restoreItems, deleteItemsPermanently, disableLinks, emptyTrash } from "@/features/drive/lib/actions"
 import { unshareItems } from "@/features/drive/lib/share/actions"
 import { type BulkOutcome } from "@/features/drive/lib/bulk"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
@@ -29,7 +29,7 @@ import { InputDialog } from "@/components/dialogs/inputDialog"
 // with two listing-level kinds neither dispatched by a per-item menu, so neither has a place in that
 // narrower, per-item-scoped union: "emptyTrash" (the trash toolbar) and "restoreSelected" (the bulk
 // bar's confirm — a single-item restore stays direct/unconfirmed, see itemMenu.logic.ts's RESTORE).
-type ActiveDialogKind = ItemActionDialogKind | "emptyTrash" | "restoreSelected" | "preview"
+type ActiveDialogKind = ItemActionDialogKind | "emptyTrash" | "restoreSelected" | "disableLink" | "preview"
 
 interface ActiveDialog {
 	kind: ActiveDialogKind
@@ -194,6 +194,12 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 	// lives inside unshareItems itself, keyed off the CURRENT variant (this listing's own).
 	async function handleUnshareConfirm(items: DriveItem[]): Promise<void> {
 		await runBulkDialogAction(items, targetItems => unshareItems(targetItems, variant))
+	}
+
+	// Links-root only (see bulkActionBar.logic.ts's own variant gate) — revokes every selected item's
+	// public link; disableLinks itself drops each succeeded item from the links listing.
+	async function handleDisableLinkConfirm(items: DriveItem[]): Promise<void> {
+		await runBulkDialogAction(items, disableLinks)
 	}
 
 	// Routes a bulk-action-bar click to the dialog host, dispatching against the CURRENT selection —
@@ -448,6 +454,26 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 						}}
 						onConfirm={() => {
 							void handleUnshareConfirm(activeDialog.items)
+						}}
+					/>
+				)
+			case "disableLink":
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("driveLinkDisableSelectedConfirmTitle")}
+						body={t("driveLinkDisableSelectedConfirmBody", { count: activeDialog.items.length })}
+						confirmLabel={t("driveLinkDisableAction")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							void handleDisableLinkConfirm(activeDialog.items)
 						}}
 					/>
 				)

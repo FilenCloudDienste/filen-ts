@@ -41,6 +41,16 @@ export function staleSelectionUuids(selectedItems: readonly DriveItem[], liveIte
 	return selectedItems.filter(item => !liveUuids.has(item.data.uuid)).map(item => item.data.uuid)
 }
 
+// A background refetch failure must never blank a listing that still has cached items on screen —
+// query-core leaves `state.data` untouched on a refetch failure and separately tracks `isRefetchError`
+// for exactly this case (an error with retained data from an earlier successful fetch). Only a query
+// with NO retained data (the very first fetch failing, or a refetch after the cache entry was evicted)
+// should fall through to the blocking error empty-state; directoryListing.tsx's error branch checks
+// this before rendering it.
+export function isBlockingListingError(isRefetchError: boolean, hasData: boolean): boolean {
+	return !(isRefetchError && hasData)
+}
+
 // Trash toolbar's own Empty trash trigger — present only in the trash variant, and only once the
 // listing actually holds something to empty. An already-empty trash has nothing for the confirm
 // dialog to act on, so hiding the trigger avoids a guaranteed no-op (mirrors

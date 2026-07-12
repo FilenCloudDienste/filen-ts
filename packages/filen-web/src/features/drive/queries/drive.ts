@@ -15,6 +15,7 @@ import {
 	type DriveViewMode
 } from "@/features/drive/lib/preferences"
 import { type DriveSortBy } from "@/features/drive/lib/sort"
+import { getHeicUploadConvertPreference } from "@/features/drive/lib/heicUpload"
 
 // Query key taxonomy per client.ts ([domain, entity, params?]): `uuid` is null for every flat
 // listing (recents/favorites/trash) and for My Drive's own root, so a fast nav between two
@@ -330,6 +331,15 @@ export function useViewModePreferencesQuery(): UseQueryResult<DrivePreferences<D
 	return useQuery({
 		queryKey: ["drive", "viewModePreferences"] as const,
 		queryFn: getViewModePreferences
+	})
+}
+
+// Same kv-backed-preference-as-a-query convention as the two above — the HEIC/HEIF-to-JPG
+// convert-on-upload toggle (features/drive/lib/heicUpload.ts), surfaced from the upload menu.
+export function useHeicUploadConvertPreferenceQuery(): UseQueryResult<boolean> {
+	return useQuery({
+		queryKey: ["drive", "heicUploadConvertPreference"] as const,
+		queryFn: getHeicUploadConvertPreference
 	})
 }
 

@@ -9,6 +9,7 @@ import {
 	driveListingQueryUpdate,
 	driveListingQueryUpdateGlobal,
 	driveItemLinkStatusQueryUpdate,
+	fetchDriveItemLinkStatus,
 	normalizeParentUuid,
 	type DriveItemLinkStatus
 } from "@/features/drive/queries/drive"
@@ -259,6 +260,22 @@ export async function deleteVersion(file: FileItem, version: FileVersion): Promi
 	return { status: "success" }
 }
 
+// Bulk delete — the versions panel's own multi-select "Delete selected" and "Delete all" actions.
+// Runs deleteVersion per version (its own live-blob guard applies here too, defense-in-depth even
+// though the panel's selection UI never lets the live version be selected in the first place), one
+// failure never aborting the rest — same partial-success shape as every other bulk helper in this
+// file.
+export function deleteVersions(file: FileItem, versions: FileVersion[]): Promise<BulkOutcome<FileVersion>> {
+	return runBulk(versions, async version => {
+		const outcome = await deleteVersion(file, version)
+
+		if (outcome.status === "error") {
+			// eslint-disable-next-line @typescript-eslint/only-throw-error -- runBulk's per-item catch expects a plain ErrorDTO, mirrors import.ts's own convention
+			throw outcome.dto
+		}
+	})
+}
+
 // ── Public link ──────────────────────────────────────────────────────────
 // A link never changes the item's listing presence (no listing-cache patch below, unlike every write
 // above) — only the link-status query itself needs patching, so a reopened panel reflects the change
@@ -316,8 +333,13 @@ export async function updateLink(item: DriveItem, next: DriveItemLinkStatus): Pr
 
 // Asymmetric args (verified against the installed .d.ts, see sdk.worker.ts's own comment on this):
 // removing a directory's link only needs the directory; removing a file's link also needs the live
-// link object, so the caller's already-fetched status is threaded through as `current`.
-export async function disableLink(item: DriveItem, current: DriveItemLinkStatus): Promise<VoidActionOutcome> {
+// link object, so the caller's already-fetched status is threaded through as `current`. Shared by the
+// single-item panel (disableLink below) and the links-root bulk action (disableLinks) so the two paths
+// can never drift on what "disabled" does to the cache: the item's own status query clears, AND — a
+// disabled link no longer belongs in the links-root aggregation — it's dropped from that listing too
+// (the single-item panel used to skip this half; a disabled link left a stale row behind until the
+// listing's next refetch).
+async function disableLinkForItem(item: DriveItem, current: DriveItemLinkStatus): Promise<VoidActionOutcome> {
 	const base = asDirectoryOrFile(item)
 
 	try {
@@ -333,6 +355,39 @@ export async function disableLink(item: DriveItem, current: DriveItemLinkStatus)
 	}
 
 	driveItemLinkStatusQueryUpdate(item.data.uuid, null)
+	queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "links", uuid: null }), prev =>
+		prev?.filter(existing => existing.data.uuid !== item.data.uuid)
+	)
 
 	return { status: "success" }
+}
+
+export async function disableLink(item: DriveItem, current: DriveItemLinkStatus): Promise<VoidActionOutcome> {
+	return disableLinkForItem(item, current)
+}
+
+// Bulk disable — the links-root multi-select's own "Disable public link" (mobile parity,
+// headerMenuBuilders.ts's disableLinkSelected). A links-root row carries no cached link status of its
+// own (that's a separate uuid-keyed query — see fetchDriveItemLinkStatus), so each item's current
+// status is fetched fresh before disabling it; an item that's already lost its link (e.g. disabled
+// from another tab/device moments earlier) is treated as already-succeeded rather than a failure —
+// there is nothing left to disable, and the listing patch above still drops it either way.
+export function disableLinks(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> {
+	return runBulk(items, async item => {
+		const current = await fetchDriveItemLinkStatus(item)
+
+		if (current === null) {
+			queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "links", uuid: null }), prev =>
+				prev?.filter(existing => existing.data.uuid !== item.data.uuid)
+			)
+			return
+		}
+
+		const outcome = await disableLinkForItem(item, current)
+
+		if (outcome.status === "error") {
+			// eslint-disable-next-line @typescript-eslint/only-throw-error -- runBulk's per-item catch expects a plain ErrorDTO, mirrors import.ts's own convention
+			throw outcome.dto
+		}
+	})
 }

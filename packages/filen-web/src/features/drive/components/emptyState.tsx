@@ -1,26 +1,38 @@
+import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { FolderClosedIcon } from "lucide-react"
 import { type ErrorDTO } from "@/lib/sdk/errors"
+import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { driveEmptyStateCopy } from "@/features/drive/components/emptyState.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 // Discriminated on variant so an "error" render can never be constructed without its error/retry —
-// the same two branches directoryListing.tsx's placeholder rendered inline, now shared with the
-// real listing.
-export type EmptyStateProps = { variant: "empty" } | { variant: "error"; error: ErrorDTO; onRetry: () => void }
+// the same two branches directoryListing.tsx's placeholder rendered inline, now shared with the real
+// listing. "empty" additionally carries the listing surface its bespoke icon/copy is drawn from
+// (driveEmptyStateCopy) plus an optional contextual action (directoryListing.tsx's inline "+ Add" for
+// a writable, currently-empty location) — moveTargetDialog.tsx's own empty picker branch passes
+// driveVariant="drive" (it only ever browses the owned directory tree) and no action (the picker is
+// read-only browsing, never a write surface).
+export type EmptyStateProps =
+	{ variant: "empty"; driveVariant: DriveVariant; action?: ReactNode } | { variant: "error"; error: ErrorDTO; onRetry: () => void }
 
 export function EmptyState(props: EmptyStateProps) {
 	const { t } = useTranslation(["drive", "common"])
+	const copy = props.variant === "empty" ? driveEmptyStateCopy(props.driveVariant) : null
+	const Icon = copy?.icon ?? FolderClosedIcon
 
 	return (
 		<Empty>
 			<EmptyHeader>
 				<EmptyMedia variant="icon">
-					<FolderClosedIcon />
+					<Icon />
 				</EmptyMedia>
-				<EmptyTitle>{props.variant === "error" ? t("driveLoadError") : t("driveEmptyTitle")}</EmptyTitle>
-				<EmptyDescription>{props.variant === "error" ? errorLabel(props.error) : t("driveEmptyBody")}</EmptyDescription>
+				<EmptyTitle>{props.variant === "error" ? t("driveLoadError") : t(copy?.titleKey ?? "driveEmptyTitle")}</EmptyTitle>
+				<EmptyDescription>
+					{props.variant === "error" ? errorLabel(props.error) : t(copy?.bodyKey ?? "driveEmptyBody")}
+				</EmptyDescription>
 			</EmptyHeader>
 			{props.variant === "error" ? (
 				<EmptyContent>
@@ -30,6 +42,10 @@ export function EmptyState(props: EmptyStateProps) {
 					>
 						{t("common:tryAgain")}
 					</Button>
+				</EmptyContent>
+			) : props.action ? (
+				<EmptyContent>
+					<div className="flex items-center gap-2">{props.action}</div>
 				</EmptyContent>
 			) : null}
 		</Empty>

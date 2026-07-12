@@ -8,6 +8,12 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { narrowItem, upsertDriveItem } from "@/features/drive/lib/item"
 import { driveListingQueryUpdate, invalidateDirectorySize } from "@/features/drive/queries/drive"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
+import {
+	defaultHeicUploadConvertDeps,
+	getHeicUploadConvertPreference,
+	isHeicUploadCandidate,
+	maybeConvertHeicUpload
+} from "@/features/drive/lib/heicUpload"
 
 // Leading+trailing throttle, written locally rather than pulling a dependency — no throttle/debounce
 // util exists in src/lib yet. The leading edge invokes immediately so the first progress
@@ -159,7 +165,15 @@ export async function startUploads(files: File[], parentUuid: string | null): Pr
 		return
 	}
 
-	const outcomes = await Promise.all(files.map(file => runUpload(defaultUploadDeps, { parentUuid, file })))
+	// The KV preference read only happens when the batch actually contains a HEIC/HEIF candidate —
+	// every other batch (the overwhelming majority) skips the async storage round-trip entirely, and
+	// this project's own unit tests (non-HEIC fixture names) never touch storage/adapter as a result.
+	const convertHeic = files.some(isHeicUploadCandidate) ? await getHeicUploadConvertPreference() : false
+	const prepared = convertHeic
+		? await Promise.all(files.map(file => maybeConvertHeicUpload(defaultHeicUploadConvertDeps, file, true)))
+		: files
+
+	const outcomes = await Promise.all(prepared.map(file => runUpload(defaultUploadDeps, { parentUuid, file })))
 	const succeeded = outcomes.filter(outcome => outcome.status === "success").length
 	const failed = outcomes.length - succeeded
 

@@ -5,6 +5,7 @@ import {
 	HistoryIcon,
 	ImportIcon,
 	InfoIcon,
+	Link2OffIcon,
 	LinkIcon,
 	PaletteIcon,
 	PencilIcon,
@@ -47,5 +48,6 @@ export const ACTION_DEFS = {
 	trash: { labelKey: "driveActionTrash", icon: Trash2Icon },
 	restore: { labelKey: "driveActionRestore", icon: RotateCcwIcon },
 	deletePermanently: { labelKey: "driveActionDeletePermanently", icon: Trash2Icon, destructive: true },
-	emptyTrash: { labelKey: "driveActionEmptyTrash", icon: Trash2Icon, destructive: true }
+	emptyTrash: { labelKey: "driveActionEmptyTrash", icon: Trash2Icon, destructive: true },
+	disableLink: { labelKey: "driveLinkDisableAction", icon: Link2OffIcon, destructive: true }
 } satisfies Record<string, ActionDef>

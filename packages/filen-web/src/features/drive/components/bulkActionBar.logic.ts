@@ -12,10 +12,10 @@ import { startDownloads } from "@/features/drive/lib/download"
 // link — can never be bulk-dispatched, so they have no place here). "share"/"unshare" are both
 // bulk-dispatchable (the contact picker / unshare confirm each take the whole selection), unlike the
 // other link/access kinds.
-export type BulkDialogActionKind = "move" | "share" | "unshare" | "trash" | "delete" | "restoreSelected"
+export type BulkDialogActionKind = "move" | "share" | "unshare" | "trash" | "delete" | "restoreSelected" | "disableLink"
 
 interface BulkActionDescriptorShared {
-	id: "favorite" | "move" | "share" | "unshare" | "trash" | "restoreSelected" | "delete" | "download"
+	id: "favorite" | "move" | "share" | "unshare" | "trash" | "restoreSelected" | "delete" | "download" | "disableLink"
 	labelKey: DriveKey
 	icon: LucideIcon
 	destructive?: boolean
@@ -99,6 +99,14 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 	// removeShare/stopSharing menu entries.
 	if (flags.everySharedRoot) {
 		descriptors.push({ id: "unshare", ...ACTION_DEFS.unshare, run: "dialog", dialogKind: "unshare" })
+	}
+
+	// Links (root) only — mobile parity (headerMenuBuilders.ts's disableLinkSelected): revokes every
+	// selected item's public link. Independent of includesUndecryptable above — a link's status is a
+	// separate query keyed by uuid, not the item's own decrypted metadata, so an undecryptable item can
+	// still have its link disabled.
+	if (variant === "links") {
+		descriptors.push({ id: "disableLink", ...ACTION_DEFS.disableLink, run: "dialog", dialogKind: "disableLink" })
 	}
 
 	return descriptors

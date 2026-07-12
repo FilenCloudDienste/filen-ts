@@ -5,6 +5,7 @@ import { deriveBlockedUsers, type BlockedUsers } from "@/features/contacts/lib/b
 import {
 	filterDriveItemsByLocalSearch,
 	filterSharedInByBlocked,
+	isBlockingListingError,
 	isEmptyTrashTriggerVisible,
 	isVisibleSharedInItem,
 	reconcileSelectedItems,
@@ -240,6 +241,25 @@ describe("staleSelectionUuids", () => {
 		const b = narrowItem(mockFile({ uuid: testUuid("now-gone-b") }))
 
 		expect(staleSelectionUuids([a, b], [])).toEqual([a.data.uuid, b.data.uuid])
+	})
+})
+
+describe("isBlockingListingError", () => {
+	// M19 — a background refetch failure with cached items retained must never blank the listing.
+	it("is false (non-blocking) for a refetch error with retained data", () => {
+		expect(isBlockingListingError(true, true)).toBe(false)
+	})
+
+	it("is true (blocking) for a first-load failure — no data to fall back on", () => {
+		expect(isBlockingListingError(false, false)).toBe(true)
+	})
+
+	it("is true (blocking) for a refetch error that somehow has no retained data (defensive)", () => {
+		expect(isBlockingListingError(true, false)).toBe(true)
+	})
+
+	it('is true (blocking) for a non-refetch error even with data present (defensive — status:"error" implies no success data in practice)', () => {
+		expect(isBlockingListingError(false, true)).toBe(true)
 	})
 })
 

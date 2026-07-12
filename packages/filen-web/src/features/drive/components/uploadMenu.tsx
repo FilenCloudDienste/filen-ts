@@ -5,12 +5,20 @@ import { UploadIcon } from "lucide-react"
 import { startUploads } from "@/features/drive/lib/upload"
 import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
 import { normalizeTextFileName, runCreateTextFile } from "@/features/drive/lib/createTextFile"
-import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
+import { setHeicUploadConvertPreference } from "@/features/drive/lib/heicUpload"
+import { driveListingQueryUpdate, useHeicUploadConvertPreferenceQuery } from "@/features/drive/queries/drive"
 import { type PreviewSource, drivePreviewSources } from "@/features/preview/lib/previewSource"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Button } from "@/components/ui/button"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import {
+	DropdownMenu,
+	DropdownMenuCheckboxItem,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 
 export interface UploadMenuProps {
@@ -46,6 +54,7 @@ export function UploadMenu({ parentUuid, disabled = false, openPreview, offline 
 	const directoryInputRef = useRef<HTMLInputElement>(null)
 	const [textFileDialogOpen, setTextFileDialogOpen] = useState(false)
 	const [textFilePending, setTextFilePending] = useState(false)
+	const heicConvertQuery = useHeicUploadConvertPreferenceQuery()
 
 	// `webkitdirectory` has no slot in React's InputHTMLAttributes (it IS a real HTMLInputElement
 	// property — lib.dom.d.ts declares it — just not one React's JSX typings expose), so it's set
@@ -68,6 +77,11 @@ export function UploadMenu({ parentUuid, disabled = false, openPreview, offline 
 		const files = Array.from(e.target.files ?? [])
 		void startDirectoryUpload({ kind: "files", files }, parentUuid)
 		e.target.value = ""
+	}
+
+	async function handleToggleHeicConvert(next: boolean): Promise<void> {
+		await setHeicUploadConvertPreference(next)
+		await heicConvertQuery.refetch()
 	}
 
 	async function handleTextFileSubmit(name: string): Promise<void> {
@@ -151,6 +165,19 @@ export function UploadMenu({ parentUuid, disabled = false, openPreview, offline 
 					>
 						{t("driveNewTextFile")}
 					</DropdownMenuItem>
+					<DropdownMenuSeparator />
+					{/* L7 — off by default (mobile parity: DEFAULT_CONVERT_HEIC_TO_JPG_ENABLED), applied by
+					startUploads to every HEIC/HEIF file in a picked/dropped batch. Read as a query rather than
+					local state so a change here is reflected immediately in a concurrently-open second upload
+					menu instance too (same convention as every other kv-backed preference in this app). */}
+					<DropdownMenuCheckboxItem
+						checked={heicConvertQuery.data ?? false}
+						onCheckedChange={checked => {
+							void handleToggleHeicConvert(checked)
+						}}
+					>
+						{t("driveConvertHeicToJpg")}
+					</DropdownMenuCheckboxItem>
 				</DropdownMenuContent>
 			</DropdownMenu>
 			<InputDialog

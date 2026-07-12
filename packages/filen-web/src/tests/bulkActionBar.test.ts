@@ -175,10 +175,32 @@ describe("driveBulkActions", () => {
 		}
 	)
 
-	it("links variant, decryptable selection, none favorited: favorite, download, trash — move dropped (canMoveVariant), no share", () => {
+	it("links variant, decryptable selection, none favorited: favorite, download, trash, disableLink — move dropped (canMoveVariant), no share", () => {
 		const descriptors = driveBulkActions("links", flags({ includesFavorited: false, includesUndecryptable: false }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["favorite", "download", "trash"])
+		expect(descriptors.map(d => d.id)).toEqual(["favorite", "download", "trash", "disableLink"])
+	})
+
+	// L4 — the one bulk action unique to the links (root) surface: revokes every selected item's
+	// public link, dialog-routed to a confirm (destructive, mirrors unshare's own styling).
+	describe("driveBulkActions — links disableLink gating", () => {
+		it("is absent from every non-links variant", () => {
+			for (const variant of ["drive", "recents", "favorites", "sharedIn", "sharedOut", "trash"] as const) {
+				expect(driveBulkActions(variant, flags()).map(d => d.id)).not.toContain("disableLink")
+			}
+		})
+
+		it("survives includesUndecryptable — link status is a separate uuid-keyed query, not the item's own metadata", () => {
+			const descriptors = driveBulkActions("links", flags({ includesUndecryptable: true }))
+
+			expect(descriptors.map(d => d.id)).toContain("disableLink")
+		})
+
+		it("dispatches the disableLink confirm dialog kind and is destructive-styled", () => {
+			const disableLink = driveBulkActions("links", flags()).find(d => d.id === "disableLink")
+
+			expect(disableLink).toMatchObject({ run: "dialog", dialogKind: "disableLink", destructive: true })
+		})
 	})
 
 	// Bulk share gates like single-item share: the owned surfaces only (drive/recents/favorites/

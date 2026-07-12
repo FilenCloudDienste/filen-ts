@@ -1,13 +1,17 @@
 import { Fragment, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { ChevronRightIcon, SearchXIcon } from "lucide-react"
+import { toast } from "sonner"
+import { ChevronRightIcon, FolderPlusIcon, SearchXIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { moveItems } from "@/features/drive/lib/actions"
 import { importItems } from "@/features/drive/lib/import"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
+import { runCreateDirectory } from "@/features/drive/lib/createDirectory"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
-import { useDirectoryListingQuery, useDirectoryNamesQuery } from "@/features/drive/queries/drive"
+import { useDirectoryListingQuery, useDirectoryNamesQuery, driveListingQueryUpdate } from "@/features/drive/queries/drive"
+import { sdkApi } from "@/lib/sdk/client"
+import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { cn } from "@/lib/utils"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
@@ -21,6 +25,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { InputDialog } from "@/components/dialogs/inputDialog"
 
 export interface MoveTargetDialogProps {
 	items: DriveItem[]
@@ -43,6 +48,8 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 	const [pathStack, setPathStack] = useState<string[]>([])
 	const [pending, setPending] = useState(false)
 	const [filter, setFilter] = useState("")
+	const [newFolderOpen, setNewFolderOpen] = useState(false)
+	const [newFolderPending, setNewFolderPending] = useState(false)
 	const targetUuid = pathStack.at(-1) ?? null
 
 	const listingQuery = useDirectoryListingQuery("drive", targetUuid)
@@ -65,6 +72,29 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 
 	function descend(uuid: string): void {
 		setPathStack(prev => [...prev, uuid])
+	}
+
+	// Creates a destination directory in place, right inside whichever directory the picker is
+	// currently browsing (targetUuid) — the same helper newDirectory.tsx's own toolbar trigger uses,
+	// patching this picker's own listing query (variant "drive", the only variant this picker ever
+	// browses) so the new row appears with no refetch and can be descended into or picked immediately.
+	async function handleCreateFolder(name: string): Promise<void> {
+		setNewFolderPending(true)
+		const outcome = await runCreateDirectory(
+			{ createDirectory: (parent, next) => sdkApi.createDirectory(parent, next), patchListing: driveListingQueryUpdate },
+			targetUuid,
+			name.trim()
+		)
+		setNewFolderPending(false)
+
+		if (outcome.status === "error") {
+			// Dialog stays open on error (e.g. a name clash) so the user can fix the name and retry —
+			// mirrors newDirectory.tsx's identical convention.
+			toast.error(errorLabel(outcome.dto))
+			return
+		}
+
+		setNewFolderOpen(false)
 	}
 
 	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
@@ -155,14 +185,35 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 						)
 					})}
 				</nav>
-				{directories.length > 0 ? (
-					<ListFilterInput
-						value={filter}
-						onChange={setFilter}
-						placeholder={t("driveMoveDialogFilterPlaceholder")}
-						ariaLabel={t("driveMoveDialogFilterPlaceholder")}
-					/>
-				) : null}
+				<div className="flex items-center gap-2">
+					<div className="min-w-0 flex-1">
+						{directories.length > 0 ? (
+							<ListFilterInput
+								value={filter}
+								onChange={setFilter}
+								placeholder={t("driveMoveDialogFilterPlaceholder")}
+								ariaLabel={t("driveMoveDialogFilterPlaceholder")}
+							/>
+						) : null}
+					</div>
+					{/* Create-folder-in-place — lands inside whichever directory is currently open (targetUuid),
+					so the new destination is immediately browsable/pickable without leaving the picker (mobile
+					parity: driveSelectToolbar.tsx's own in-picker create). Gated only on `pending` (the
+					move/import confirm's own in-flight flag), same as every other control in this dialog —
+					this picker has no offline gate of its own yet to mirror. */}
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						disabled={pending}
+						onClick={() => {
+							setNewFolderOpen(true)
+						}}
+					>
+						<FolderPlusIcon />
+						{t("driveMoveDialogNewFolder")}
+					</Button>
+				</div>
 				<div className="h-72 overflow-y-auto rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
 					{listingQuery.status === "pending" ? (
 						<ListingSkeleton viewMode="list" />
@@ -185,7 +236,10 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 								</EmptyHeader>
 							</Empty>
 						) : (
-							<EmptyState variant="empty" />
+							<EmptyState
+								variant="empty"
+								driveVariant="drive"
+							/>
 						)
 					) : (
 						<ul className="flex flex-col gap-0.5 p-2">
@@ -238,6 +292,23 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 					</Button>
 				</DialogFooter>
 			</DialogContent>
+			{/* Nested inside the outer Dialog (Base UI's own "Nested dialogs" support — same pattern as
+			versionsDialog.tsx's nested ConfirmDialog) rather than a sibling, for the stacked focus-trap/
+			backdrop behavior. */}
+			<InputDialog
+				open={newFolderOpen}
+				pending={newFolderPending}
+				title={t("driveNewDirectoryTitle")}
+				body={t("driveNewDirectoryBody")}
+				label={t("driveNewDirectoryLabel")}
+				placeholder={t("driveNewDirectoryPlaceholder")}
+				submitLabel={t("driveNewDirectorySubmit")}
+				validate={name => name.trim().length > 0}
+				onOpenChange={setNewFolderOpen}
+				onSubmit={value => {
+					void handleCreateFolder(value)
+				}}
+			/>
 		</Dialog>
 	)
 }

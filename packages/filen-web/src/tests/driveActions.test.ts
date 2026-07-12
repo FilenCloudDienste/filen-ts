@@ -27,7 +27,9 @@ const {
 	updateDirectoryLink,
 	updateFileLink,
 	removeDirectoryLink,
-	removeFileLink
+	removeFileLink,
+	getDirectoryLinkStatus,
+	getFileLinkStatus
 } = vi.hoisted(() => ({
 	renameDirectory: vi.fn(),
 	renameFile: vi.fn(),
@@ -49,7 +51,9 @@ const {
 	updateDirectoryLink: vi.fn(),
 	updateFileLink: vi.fn(),
 	removeDirectoryLink: vi.fn(),
-	removeFileLink: vi.fn()
+	removeFileLink: vi.fn(),
+	getDirectoryLinkStatus: vi.fn(),
+	getFileLinkStatus: vi.fn()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({
@@ -74,7 +78,9 @@ vi.mock("@/lib/sdk/client", () => ({
 		updateDirectoryLink,
 		updateFileLink,
 		removeDirectoryLink,
-		removeFileLink
+		removeFileLink,
+		getDirectoryLinkStatus,
+		getFileLinkStatus
 	}
 }))
 
@@ -90,7 +96,9 @@ import {
 	createLink,
 	deleteItemsPermanently,
 	deleteVersion,
+	deleteVersions,
 	disableLink,
+	disableLinks,
 	emptyTrash,
 	moveItems,
 	renameItem,
@@ -226,6 +234,10 @@ function trashListing() {
 
 function favoritesListing() {
 	return driveListingQueryKey({ variant: "favorites", uuid: null })
+}
+
+function linksListing() {
+	return driveListingQueryKey({ variant: "links", uuid: null })
 }
 
 describe("renameItem", () => {
@@ -913,6 +925,49 @@ describe("deleteVersion", () => {
 	})
 })
 
+describe("deleteVersions (bulk)", () => {
+	it("deletes every version independently, succeeding for all of them", async () => {
+		const file = fileItem({ uuid: testUuid("f") })
+		const a = mockVersion({ uuid: testUuid("a") })
+		const b = mockVersion({ uuid: testUuid("b") })
+		deleteFileVersionOp.mockResolvedValue(undefined)
+
+		const outcome = await deleteVersions(file, [a, b])
+
+		expect(outcome.succeeded.map(v => v.uuid)).toEqual([testUuid("a"), testUuid("b")])
+		expect(outcome.failed).toEqual([])
+		expect(deleteFileVersionOp).toHaveBeenCalledTimes(2)
+	})
+
+	it("keeps one version's failure from aborting the rest — partial success", async () => {
+		const file = fileItem({ uuid: testUuid("f") })
+		const a = mockVersion({ uuid: testUuid("a") })
+		const b = mockVersion({ uuid: testUuid("b") })
+		deleteFileVersionOp.mockRejectedValueOnce(sdkDto("NotFound")).mockResolvedValueOnce(undefined)
+
+		const outcome = await deleteVersions(file, [a, b])
+
+		expect(outcome.succeeded.map(v => v.uuid)).toEqual([testUuid("b")])
+		expect(outcome.failed.map(f => f.item.uuid)).toEqual([testUuid("a")])
+	})
+
+	// Defense-in-depth (mirrors deleteVersion's own guard): the file's own live version can never be
+	// bulk-deleted either, even if a caller somehow includes it — the versions panel's selection UI
+	// already keeps it out of `candidates`, but this proves the library boundary refuses it too.
+	it("refuses the file's own live version within a bulk batch, without calling the worker for it", async () => {
+		const file = fileItem({ uuid: testUuid("live") })
+		const liveVersion = mockVersion({ uuid: testUuid("live") })
+		const older = mockVersion({ uuid: testUuid("older") })
+		deleteFileVersionOp.mockResolvedValueOnce(undefined)
+
+		const outcome = await deleteVersions(file, [liveVersion, older])
+
+		expect(outcome.succeeded.map(v => v.uuid)).toEqual([testUuid("older")])
+		expect(outcome.failed.map(f => f.item.uuid)).toEqual([testUuid("live")])
+		expect(deleteFileVersionOp).toHaveBeenCalledExactlyOnceWith(older)
+	})
+})
+
 describe("createLink", () => {
 	it("directory: calls createDirectoryLink with a Comlink-proxied callback and patches the link-status cache", async () => {
 		const dir = dirItem({ uuid: testUuid("a") })
@@ -1060,6 +1115,73 @@ describe("disableLink", () => {
 
 		expect(outcome).toEqual({ status: "error", dto })
 		expect(testQueryClient.getQueryData(driveItemLinkStatusQueryKey(testUuid("a")))).toBeUndefined()
+	})
+
+	// L4 — a disabled link no longer belongs in the links-root aggregation; the single-item panel used
+	// to leave a stale row behind until the listing's next refetch.
+	it("drops the item from the links-root listing cache on success", async () => {
+		const dir = dirItem({ uuid: testUuid("a") })
+		testQueryClient.setQueryData(linksListing(), [dir, dirItem({ uuid: testUuid("keep") })])
+		removeDirectoryLink.mockResolvedValueOnce(undefined)
+
+		await disableLink(dir, { type: "directory", status: mockDirLink() })
+
+		const remaining = testQueryClient.getQueryData<DriveItem[]>(linksListing())
+		expect(remaining?.map(item => item.data.uuid)).toEqual([testUuid("keep")])
+	})
+
+	it("leaves the links-root listing untouched on rejection", async () => {
+		const dir = dirItem({ uuid: testUuid("a") })
+		testQueryClient.setQueryData(linksListing(), [dir])
+		removeDirectoryLink.mockRejectedValueOnce(sdkDto("Forbidden"))
+
+		await disableLink(dir, { type: "directory", status: mockDirLink() })
+
+		expect(testQueryClient.getQueryData<DriveItem[]>(linksListing())?.map(item => item.data.uuid)).toEqual([testUuid("a")])
+	})
+})
+
+describe("disableLinks (bulk)", () => {
+	it("fetches each item's live status then disables it, succeeding for every item", async () => {
+		const dir = dirItem({ uuid: testUuid("a") })
+		const file = fileItem({ uuid: testUuid("f") })
+		testQueryClient.setQueryData(linksListing(), [dir, file])
+		getDirectoryLinkStatus.mockResolvedValueOnce(mockDirLink())
+		getFileLinkStatus.mockResolvedValueOnce(mockFileLink())
+		removeDirectoryLink.mockResolvedValueOnce(undefined)
+		removeFileLink.mockResolvedValueOnce(undefined)
+
+		const outcome = await disableLinks([dir, file])
+
+		expect(outcome.succeeded.map(item => item.data.uuid)).toEqual([testUuid("a"), testUuid("f")])
+		expect(outcome.failed).toEqual([])
+		expect(testQueryClient.getQueryData<DriveItem[]>(linksListing())).toEqual([])
+	})
+
+	it("treats an item that already lost its link (fetch returns no status) as succeeded, without calling either remove op", async () => {
+		const dir = dirItem({ uuid: testUuid("a") })
+		testQueryClient.setQueryData(linksListing(), [dir])
+		getDirectoryLinkStatus.mockResolvedValueOnce(null)
+
+		const outcome = await disableLinks([dir])
+
+		expect(outcome.succeeded).toEqual([dir])
+		expect(removeDirectoryLink).not.toHaveBeenCalled()
+		expect(testQueryClient.getQueryData<DriveItem[]>(linksListing())).toEqual([])
+	})
+
+	it("keeps one item's failure from aborting the rest — partial success", async () => {
+		const dir = dirItem({ uuid: testUuid("a") })
+		const file = fileItem({ uuid: testUuid("f") })
+		getDirectoryLinkStatus.mockResolvedValueOnce(mockDirLink())
+		getFileLinkStatus.mockResolvedValueOnce(mockFileLink())
+		removeDirectoryLink.mockRejectedValueOnce(sdkDto("Forbidden"))
+		removeFileLink.mockResolvedValueOnce(undefined)
+
+		const outcome = await disableLinks([dir, file])
+
+		expect(outcome.succeeded.map(item => item.data.uuid)).toEqual([testUuid("f")])
+		expect(outcome.failed.map(failure => failure.item.data.uuid)).toEqual([testUuid("a")])
 	})
 })
 

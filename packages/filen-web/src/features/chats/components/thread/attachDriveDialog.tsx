@@ -145,7 +145,10 @@ export function AttachDriveDialog({ onClose, onAttached }: AttachDriveDialogProp
 							}}
 						/>
 					) : rows.length === 0 ? (
-						<EmptyState variant="empty" />
+						<EmptyState
+							variant="empty"
+							driveVariant="drive"
+						/>
 					) : (
 						<ul className="flex flex-col gap-0.5 p-2">
 							{rows.map(item => {

@@ -35,6 +35,8 @@ export const drive = {
 	driveUploadDirectory: "Upload directory",
 	/** Upload menu — entry opening the new-text-file name dialog */
 	driveNewTextFile: "New text file",
+	/** Upload menu — checkbox toggling automatic HEIC/HEIF -> JPG conversion for picked/dropped uploads; off by default */
+	driveConvertHeicToJpg: "Convert HEIC/HEIF to JPG",
 
 	// ── Upload ───────────────────────────────────────────────────────────────
 	/** Drive toolbar — trigger button opening the standalone upload menu (Upload files, later Upload directory) */
@@ -69,10 +71,37 @@ export const drive = {
 	driveSidebarResize: "Resize sidebar",
 
 	// ── Empty state ──────────────────────────────────────────────────────────
-	/** Drive page — empty-state title for a directory with no content */
+	// One bespoke icon+title+body pair per listing surface (mobile parity — filen-mobile's own
+	// DRIVE_EMPTY_STATE_ICON/TITLE_KEY/DESCRIPTION_KEY tables) rather than one generic pair reused
+	// everywhere; emptyState.logic.ts's driveEmptyStateCopy is the lookup table these back.
+	/** Drive page — empty-state title for a directory (or the move/import picker) with no content */
 	driveEmptyTitle: "Nothing here yet",
-	/** Drive page — empty-state body under the title */
+	/** Drive page — empty-state body under the title, for a directory (or the move/import picker) */
 	driveEmptyBody: "Files and directories you add will appear here.",
+	/** Trash — empty-state title when nothing is trashed */
+	driveEmptyTrashTitle: "Trash is empty",
+	/** Trash — empty-state body under the title */
+	driveEmptyTrashBody: "Items you move to the trash will appear here.",
+	/** Favorites — empty-state title when nothing is favorited */
+	driveEmptyFavoritesTitle: "No favorites yet",
+	/** Favorites — empty-state body under the title */
+	driveEmptyFavoritesBody: "Files and directories you favorite will appear here.",
+	/** Recents — empty-state title when nothing has been uploaded recently */
+	driveEmptyRecentsTitle: "No recent files",
+	/** Recents — empty-state body under the title */
+	driveEmptyRecentsBody: "Files you upload will show up here.",
+	/** Shared-with-me — empty-state title when nobody has shared anything with the user */
+	driveEmptySharedInTitle: "Nothing shared with you",
+	/** Shared-with-me — empty-state body under the title */
+	driveEmptySharedInBody: "Items other users share with you will appear here.",
+	/** Shared-with-others — empty-state title when the user hasn't shared anything */
+	driveEmptySharedOutTitle: "Nothing shared with others",
+	/** Shared-with-others — empty-state body under the title */
+	driveEmptySharedOutBody: "Items you share with other users will appear here.",
+	/** Links — empty-state title when the user has no active public links */
+	driveEmptyLinksTitle: "No public links",
+	/** Links — empty-state body under the title */
+	driveEmptyLinksBody: "Items you enable a public link for will appear here.",
 
 	// ── Sort menu ────────────────────────────────────────────────────────────
 	/** Drive toolbar — sort menu trigger label */
@@ -273,6 +302,14 @@ export const drive = {
 	/** Unshare confirm dialog — body for multiple items; {{count}} = items being unshared */
 	driveUnshareConfirmBody_other: "Are you sure you want to stop sharing these {{count}} items?",
 
+	// ── Bulk disable-link confirm (links root only) ──────────────────────────
+	/** Bulk disable-link confirm dialog — title; the confirm button reuses driveLinkDisableAction */
+	driveLinkDisableSelectedConfirmTitle: "Disable public links?",
+	/** Bulk disable-link confirm dialog — body for a single selected item */
+	driveLinkDisableSelectedConfirmBody_one: "Are you sure you want to disable the public link for this item?",
+	/** Bulk disable-link confirm dialog — body for multiple selected items; {{count}} = items being disabled */
+	driveLinkDisableSelectedConfirmBody_other: "Are you sure you want to disable the public links for these {{count}} items?",
+
 	// ── Move dialog ──────────────────────────────────────────────────────────
 	/** Move dialog — title of the destination-directory picker */
 	driveMoveDialogTitle: "Select destination",
@@ -280,6 +317,8 @@ export const drive = {
 	driveMoveHereAction: "Move here",
 	/** Move/import dialog — filter box placeholder and aria-label over the currently listed directories (shared with the import dialog below, same picker component) */
 	driveMoveDialogFilterPlaceholder: "Filter directories",
+	/** Move/import dialog — button creating a new destination directory in place, right inside the directory currently open in the picker */
+	driveMoveDialogNewFolder: "New folder",
 
 	// ── Import dialog (reuses the move dialog's destination picker, see moveTargetDialog.tsx's mode prop) ──
 	/** Import dialog — title of the destination-directory picker (driveActionImport) */
@@ -315,6 +354,10 @@ export const drive = {
 	driveColorRed: "Red",
 	/** Directory color swatch */
 	driveColorGray: "Gray",
+	/** Color dialog — label on the custom color swatch/field pair (the native browser color picker plus its accompanying hex input) */
+	driveColorCustomLabel: "Custom color",
+	/** Color dialog — button applying the currently entered custom hex to the directory */
+	driveColorCustomApply: "Apply",
 
 	// ── Versions panel ───────────────────────────────────────────────────────
 	/** Versions panel — heading (opened via driveActionVersions) */
@@ -339,6 +382,38 @@ export const drive = {
 	driveVersionsDeleteConfirmTitle: "Delete this version?",
 	/** Version delete confirm dialog — body; the confirm button reuses driveVersionsDeleteAction */
 	driveVersionsDeleteConfirmBody: "Are you sure you want to permanently delete this version? This cannot be undone.",
+
+	// ── Versions panel — bulk selection ──────────────────────────────────────
+	/** Versions panel — button entering multi-select mode */
+	driveVersionsSelectAction: "Select",
+	/** Versions panel — button leaving multi-select mode, clearing the current selection */
+	driveVersionsCancelSelectAction: "Cancel",
+	/** Versions panel (select mode) — toggle selecting/deselecting every selectable (non-current) version */
+	driveVersionsSelectAllAction: "Select all",
+	/** Versions panel (select mode) — count of currently selected versions, shown next to the bulk actions; singular */
+	driveVersionsSelectedCount_one: "{{count}} selected",
+	/** Versions panel (select mode) — count of currently selected versions; plural */
+	driveVersionsSelectedCount_other: "{{count}} selected",
+	/** Versions panel (select mode) — deletes every currently selected version */
+	driveVersionsDeleteSelectedAction: "Delete selected",
+	/** Versions panel — deletes every non-current version in one action; hidden when there are none */
+	driveVersionsDeleteAllAction: "Delete all",
+
+	// ── Versions bulk-delete confirm ──────────────────────────────────────────
+	/** Bulk version-delete confirm dialog — title (both "delete selected" and "delete all"); the confirm button reuses driveVersionsDeleteSelectedAction/driveVersionsDeleteAllAction */
+	driveVersionsBulkDeleteConfirmTitle: "Delete these versions?",
+	/** Bulk version-delete confirm dialog — body; {{count}} = versions being deleted */
+	driveVersionsBulkDeleteConfirmBody: "Are you sure you want to permanently delete {{count}} versions? This cannot be undone.",
+
+	// ── Versions bulk-delete result toast ──────────────────────────────────────
+	/** Bulk version-delete result toast — every selected version succeeded; {{count}} = versions deleted */
+	driveVersionsBulkDeleteComplete_one: "{{count}} version deleted",
+	/** Bulk version-delete result toast — every selected version succeeded (plural); {{count}} = versions deleted */
+	driveVersionsBulkDeleteComplete_other: "{{count}} versions deleted",
+	/** Bulk version-delete result toast — at least one selected version failed; {{count}} = versions deleted, {{failed}} = versions that failed */
+	driveVersionsBulkDeleteCompleteWithFailures_one: "{{count}} version deleted, {{failed}} failed",
+	/** Bulk version-delete result toast — at least one selected version failed (plural); {{count}} = versions deleted, {{failed}} = versions that failed */
+	driveVersionsBulkDeleteCompleteWithFailures_other: "{{count}} versions deleted, {{failed}} failed",
 
 	// ── Version delete guard ─────────────────────────────────────────────────
 	/** File-versions defense-in-depth guard — surfaced only if a caller reaches the delete-version action helper directly on the file's own live version (its uuid IS the file's current content, so deleting it would destroy the file, not just history); the panel's own per-row disabled state already keeps the UI from reaching this, so this message is a last-resort backstop */

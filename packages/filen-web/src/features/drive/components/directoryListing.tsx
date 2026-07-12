@@ -37,6 +37,7 @@ import { isBulkDownloadEnabled } from "@/features/drive/components/bulkActionBar
 import {
 	filterDriveItemsByLocalSearch,
 	filterSharedInByBlocked,
+	isBlockingListingError,
 	isEmptyTrashTriggerVisible,
 	reconcileSelectedItems,
 	resolveSearchDisplayItems,
@@ -763,7 +764,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							<div className="flex-1 overflow-y-auto">
 								<ListingSkeleton viewMode={effectiveViewMode} />
 							</div>
-						) : listingQuery.status === "error" ? (
+						) : listingQuery.status === "error" &&
+						  isBlockingListingError(listingQuery.isRefetchError, listingQuery.data !== undefined) ? (
 							<div className="flex flex-1 overflow-y-auto">
 								<EmptyState
 									variant="error"
@@ -788,7 +790,30 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 										</EmptyHeader>
 									</Empty>
 								) : (
-									<EmptyState variant="empty" />
+									<EmptyState
+										variant="empty"
+										driveVariant={variant}
+										// Inline "+ Add" affordance for an empty, writable location — reuses the exact
+										// same New-directory/Upload controls the toolbar above already renders (not a
+										// third create/upload implementation), so this can never drift from what the
+										// toolbar itself offers. Hidden wherever the toolbar's own two buttons are too
+										// (writeDisabled already covers non-writable variants, a still-loading listing
+										// and offline — see its own doc comment above).
+										action={
+											writeDisabled ? undefined : (
+												<>
+													<NewDirectory
+														parentUuid={uuid}
+														dialogOpen={isDialogOpen}
+													/>
+													<UploadMenu
+														parentUuid={uuid}
+														openPreview={openPreview}
+													/>
+												</>
+											)
+										}
+									/>
 								)}
 							</div>
 						) : (
