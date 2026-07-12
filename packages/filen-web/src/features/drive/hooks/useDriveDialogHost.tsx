@@ -1,4 +1,4 @@
-import { type ReactNode } from "react"
+import { useEffect, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { useDialogHost } from "@/lib/useDialogHost"
@@ -20,6 +20,7 @@ import { VersionsDialog } from "@/features/drive/components/versionsDialog"
 import { InfoDialog } from "@/features/drive/components/infoDialog"
 import { LinkDialog } from "@/features/drive/components/linkDialog"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
+import { reconcilePreviewSources, subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
@@ -65,6 +66,31 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 	const { t } = useTranslation(["drive", "common"])
 	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, isDialogOpen, closeActiveDialog } =
 		useDialogHost<ActiveDialog>()
+
+	// Keeps an OPEN preview in sync with realtime drive mutations from ANOTHER device. The pager steps a
+	// frozen previewSources snapshot the socket handler's listing-cache patch can't reach, so the drive
+	// handler emits a reconcile signal instead: a remote trash/move/delete advances the pager (or closes it
+	// once the last slot goes), a version restore reseeds the slot, and a rename re-derives the header
+	// title — the remote-event twin of removeCurrentPreviewItem's same-client sync. A no-op while no
+	// preview is open (the updater short-circuits on any non-preview dialog). setActiveDialog is a stable
+	// setState, so the subscription is set up once.
+	useEffect(() => {
+		return subscribePreviewReconcile(event => {
+			setActiveDialog(prev => {
+				if (prev?.kind !== "preview" || prev.index === undefined || prev.previewSources === undefined) {
+					return prev
+				}
+
+				const next = reconcilePreviewSources({ sources: prev.previewSources, index: prev.index }, event)
+
+				if (next === null) {
+					return null
+				}
+
+				return { ...prev, previewSources: next.sources, index: next.index }
+			})
+		})
+	}, [setActiveDialog])
 
 	// Steps the open preview by one sibling (no wrap) — the single implementation behind PreviewOverlay's
 	// onStep prop, which both the header's prev/next buttons AND its own local in-dialog arrow-key

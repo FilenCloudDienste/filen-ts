@@ -11,6 +11,12 @@ import {
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { currentRootUuid } from "@/features/drive/lib/actions"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import {
+	emitPreviewFileMetaChanged,
+	emitPreviewFolderMetaChanged,
+	emitPreviewItemRemoved,
+	emitPreviewItemReplaced
+} from "@/features/preview/lib/previewReconcile"
 
 // The realtime DRIVE event handlers — a faithful port of filen-mobile's drive socketHandlers.ts
 // SEMANTICS onto the wasm surface (flat discriminated `event.inner.type`), registered on the generic
@@ -20,6 +26,11 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 // currently-instantiated listing at once via driveListingQueryUpdateGlobal (the same fan-out actions.ts
 // uses), which reaches whichever listing holds the row without a parent lookup. No invalidate-storm — every
 // path is a targeted setQueryData with the queries' own cancel-before-patch discipline.
+//
+// Alongside the listing-cache patch, an event that removes / rotates / renames an item also emits a
+// previewReconcile signal so an OPEN preview pager (which steps a frozen snapshot the cache patch can't
+// reach) advances/closes on removal, reseeds on a uuid rotation, and re-titles on a rename — the same
+// same-client preview sync previewOverlay already runs after a local action, now driven by remote events.
 
 type DriveSocketEvent = Extract<SocketEvent, { type: "drive" }>
 
@@ -75,6 +86,8 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// the just-restored row right back out.
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
 			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			// The item left the trash listing — a trash preview open on it advances to a neighbour or closes.
+			emitPreviewItemRemoved(item.data.uuid)
 
 			break
 		}
@@ -86,6 +99,8 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// and the superseded current uuid, then splice the fresh file into its parent.
 			driveListingQueryUpdateGlobal(prev => removeByUuid(removeByUuid(prev, item.data.uuid), inner.currentUuid))
 			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			// A preview open on the superseded uuid reseeds with the restored file (same slot, fresh content).
+			emitPreviewItemReplaced(inner.currentUuid, item)
 
 			break
 		}
@@ -101,6 +116,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
 			driveListingQueryUpdate(normalizeParentUuid(inner.dir.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			emitPreviewItemRemoved(item.data.uuid)
 
 			break
 		}
@@ -112,6 +128,8 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// remove clears the stale copy from wherever it was before splicing into the destination.
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
 			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			// The item left this listing for another directory — a preview open on it advances or closes.
+			emitPreviewItemRemoved(item.data.uuid)
 
 			break
 		}
@@ -121,6 +139,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
 			driveListingQueryUpdate(normalizeParentUuid(inner.dir.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			emitPreviewItemRemoved(item.data.uuid)
 
 			break
 		}
@@ -132,6 +151,8 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// bulk ops never target a ghost.
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, inner.uuid))
+			// A preview open on the trashed item advances to a neighbour or closes.
+			emitPreviewItemRemoved(inner.uuid)
 
 			break
 		}
@@ -143,6 +164,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// moves the file into its version history; the listing removal is the same either way.)
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, inner.uuid))
+			emitPreviewItemRemoved(inner.uuid)
 
 			break
 		}
@@ -155,6 +177,8 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 					row.data.uuid === inner.uuid && row.type === "file" ? narrowItem({ ...row.data, meta: inner.metadata }) : row
 				)
 			)
+			// A preview open on this file re-derives its header title from the fresh meta (rename).
+			emitPreviewFileMetaChanged(inner.uuid, inner.metadata)
 
 			break
 		}
@@ -165,6 +189,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 					row.data.uuid === inner.uuid && row.type === "directory" ? narrowItem({ ...row.data, meta: inner.meta }) : row
 				)
 			)
+			emitPreviewFolderMetaChanged(inner.uuid, inner.meta)
 
 			break
 		}

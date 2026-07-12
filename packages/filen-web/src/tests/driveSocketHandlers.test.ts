@@ -19,6 +19,7 @@ import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
+import { subscribePreviewReconcile, type PreviewReconcileEvent } from "@/features/preview/lib/previewReconcile"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -240,5 +241,74 @@ describe("drive socket handlers — trash-empty + unhandled", () => {
 
 		expect(getListing(PARENT_A).length).toBe(1)
 		expect(logWarn).toHaveBeenCalled()
+	})
+})
+
+describe("drive socket handlers — open-preview reconcile signals", () => {
+	// Dispatches one drive event with a preview-reconcile subscriber attached and returns whatever signals
+	// it emitted (empty when the event has no open-preview relevance).
+	function captureReconcile(inner: Extract<SocketEvent, { type: "drive" }>["inner"]): PreviewReconcileEvent[] {
+		const events: PreviewReconcileEvent[] = []
+		const unsubscribe = subscribePreviewReconcile(event => events.push(event))
+
+		try {
+			handleDriveEvent(driveEvt(inner))
+		} finally {
+			unsubscribe()
+		}
+
+		return events
+	}
+
+	it("fileTrash emits a removed signal for the trashed uuid", () => {
+		expect(captureReconcile({ type: "fileTrash", uuid: testUuid("file") })).toEqual([{ type: "removed", uuid: testUuid("file") }])
+	})
+
+	it("fileMove emits a removed signal so a preview open on it advances or closes", () => {
+		expect(captureReconcile({ type: "fileMove", file: mockFile({ parent: PARENT_B }) })).toEqual([
+			{ type: "removed", uuid: testUuid("file") }
+		])
+	})
+
+	it("fileDeletedPermanent emits a removed signal", () => {
+		expect(captureReconcile({ type: "fileDeletedPermanent", uuid: testUuid("file") })).toEqual([
+			{ type: "removed", uuid: testUuid("file") }
+		])
+	})
+
+	it("fileRestore emits a removed signal (the item leaves the trash preview)", () => {
+		expect(captureReconcile({ type: "fileRestore", file: mockFile() })).toEqual([{ type: "removed", uuid: testUuid("file") }])
+	})
+
+	it("fileArchiveRestored emits a replaced signal keyed by the superseded uuid", () => {
+		const events = captureReconcile({ type: "fileArchiveRestored", currentUuid: testUuid("old-current"), file: mockFile() })
+
+		expect(events.length).toBe(1)
+		const event = events[0]
+
+		expect(event?.type).toBe("replaced")
+		expect(event?.type === "replaced" ? event.previousUuid : "").toBe(testUuid("old-current"))
+		expect(event?.type === "replaced" ? event.item.data.uuid : "").toBe(testUuid("file"))
+	})
+
+	it("fileMetadataChanged emits a fileMeta signal carrying the fresh meta (rename title)", () => {
+		const metadata: FileMeta = {
+			type: "decoded",
+			data: { name: "renamed.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "k", version: 2 }
+		}
+
+		expect(captureReconcile({ type: "fileMetadataChanged", uuid: testUuid("file"), metadata })).toEqual([
+			{ type: "fileMeta", uuid: testUuid("file"), meta: metadata }
+		])
+	})
+
+	it("folderMetadataChanged emits a folderMeta signal", () => {
+		expect(
+			captureReconcile({ type: "folderMetadataChanged", uuid: testUuid("dir"), meta: { type: "decoded", data: { name: "Renamed" } } })
+		).toEqual([{ type: "folderMeta", uuid: testUuid("dir"), meta: { type: "decoded", data: { name: "Renamed" } } }])
+	})
+
+	it("an attribute-only change (itemFavorite) emits no preview signal", () => {
+		expect(captureReconcile({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: true }) } })).toEqual([])
 	})
 })
