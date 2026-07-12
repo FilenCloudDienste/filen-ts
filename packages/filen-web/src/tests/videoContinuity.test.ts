@@ -11,31 +11,31 @@ describe("videoContinuity — write/apply lifecycle", () => {
 	})
 
 	it("returns exactly what was written for a uuid", () => {
-		setVideoPlaybackState("aaaaaaaa-0000-0000-0000-000000000000", { currentTime: 12.5, wasPlaying: true })
+		setVideoPlaybackState("aaaaaaaa-0000-0000-0000-000000000000", { currentTime: 12.5 })
 
-		expect(getVideoPlaybackState("aaaaaaaa-0000-0000-0000-000000000000")).toEqual({ currentTime: 12.5, wasPlaying: true })
+		expect(getVideoPlaybackState("aaaaaaaa-0000-0000-0000-000000000000")).toEqual({ currentTime: 12.5 })
 	})
 
 	it("keeps distinct uuids independent", () => {
-		setVideoPlaybackState("a", { currentTime: 1, wasPlaying: true })
-		setVideoPlaybackState("b", { currentTime: 2, wasPlaying: false })
+		setVideoPlaybackState("a", { currentTime: 1 })
+		setVideoPlaybackState("b", { currentTime: 2 })
 
-		expect(getVideoPlaybackState("a")).toEqual({ currentTime: 1, wasPlaying: true })
-		expect(getVideoPlaybackState("b")).toEqual({ currentTime: 2, wasPlaying: false })
+		expect(getVideoPlaybackState("a")).toEqual({ currentTime: 1 })
+		expect(getVideoPlaybackState("b")).toEqual({ currentTime: 2 })
 	})
 
 	it("overwrites a previous write for the same uuid rather than accumulating", () => {
-		setVideoPlaybackState("a", { currentTime: 1, wasPlaying: true })
-		setVideoPlaybackState("a", { currentTime: 99, wasPlaying: false })
+		setVideoPlaybackState("a", { currentTime: 1 })
+		setVideoPlaybackState("a", { currentTime: 99 })
 
-		expect(getVideoPlaybackState("a")).toEqual({ currentTime: 99, wasPlaying: false })
+		expect(getVideoPlaybackState("a")).toEqual({ currentTime: 99 })
 	})
 })
 
 describe("videoContinuity — clear (overlay-session boundary)", () => {
 	it("drops every stored position", () => {
-		setVideoPlaybackState("a", { currentTime: 1, wasPlaying: true })
-		setVideoPlaybackState("b", { currentTime: 2, wasPlaying: false })
+		setVideoPlaybackState("a", { currentTime: 1 })
+		setVideoPlaybackState("b", { currentTime: 2 })
 
 		clearVideoPlaybackStates()
 

@@ -195,7 +195,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 	// opening this overlay in the first place.
 	const [menuDialogKind, setMenuDialogKind] = useState<ItemActionDialogKind | null>(null)
 	const [menuPending, setMenuPending] = useState(false)
-	// P20c click-to-hide-chrome: clicking the media surface itself (not a button/scrubber/pager control,
+	// Click-to-hide-chrome: clicking the media surface itself (not a button/scrubber/pager control,
 	// see shouldToggleChrome) toggles the header — the pager's prev/next buttons live inside it too, so
 	// there is no separate floating control to hide. Reset to visible on every pager step (below) and on
 	// any close/dismiss attempt (handleOpenChange), never left hidden across either.
@@ -593,7 +593,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 
 	function handleOpenChange(next: boolean): void {
 		if (!next) {
-			// Chrome always returns on the Escape/backdrop/X close path (P20c) — unconditionally, even if
+			// Chrome always returns on the Escape/backdrop/X close path — unconditionally, even if
 			// requestOrRun below ends up only opening the unsaved-changes prompt rather than actually
 			// closing: that prompt needs the header visible to read the dialog's own title, and there is no
 			// dedicated "close attempted but blocked" branch to hang this off separately.
@@ -602,7 +602,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 		}
 	}
 
-	// Click-to-hide-chrome (P20c): toggles the header (which also carries the pager's prev/next buttons)
+	// Click-to-hide-chrome: toggles the header (which also carries the pager's prev/next buttons)
 	// when the click lands on the media surface itself, never on a button/scrubber/pager control — see
 	// shouldToggleChrome's own doc comment for the full decision table and the video-controls-band
 	// heuristic that makes a native <video> scrubber click distinguishable from a click on its picture
@@ -691,7 +691,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 					<header
 						className={cn(
 							"flex h-14 shrink-0 items-center gap-1 px-4 transition-opacity duration-150",
-							// Hidden chrome (P20c) stays in the DOM and tab-reachable — never display:none, which
+							// Hidden chrome stays in the DOM and tab-reachable — never display:none, which
 							// would drop it from the tab order entirely and could strand focus — just visually
 							// faded with pointer-events suppressed, and restored the instant anything inside it
 							// receives focus (a Tab press landing on Close, say) so keyboard/AT use is never

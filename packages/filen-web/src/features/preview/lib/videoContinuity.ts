@@ -9,9 +9,12 @@
 // Scoped to one overlay SESSION only — previewOverlay.tsx clears this on its own unmount (the overlay
 // closing), so a later, unrelated preview session never inherits a stale position for a uuid it
 // happens to reopen.
+//
+// currentTime only: the viewer always autoplays a fresh mount regardless of how playback last left
+// off, so a remembered "was it playing" bit would have nothing to condition on and stayed write-only
+// dead state — this module only needs to answer "where", never "whether".
 export interface VideoPlaybackState {
 	currentTime: number
-	wasPlaying: boolean
 }
 
 const positions = new Map<string, VideoPlaybackState>()

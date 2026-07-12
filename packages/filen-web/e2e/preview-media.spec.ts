@@ -110,15 +110,42 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 		await page.keyboard.press("Escape")
 		await expect(img).toHaveCount(0)
 
-		// ---- video leg: <video> plays; a mid-file seek gets a FRESH 206/Content-Range; inline, never
-		// attachment. beforeSeek slices the shared response log so the assertion below is tied to the
-		// seek itself, not whatever the initial metadata-only load already fetched. ----
+		// ---- video leg: <video> plays; the SW route answers an explicit mid-file Range with a matching
+		// 206/Content-Range; inline, never attachment. The viewer autoplays on mount, and this fixture is
+		// small enough that autoplay's own forward readahead can fully buffer the clip before the test
+		// ever gets a turn — at that point ANY currentTime the test picks is already resident in the
+		// element's own buffered ranges, so a currentTime-driven seek proves nothing about the network
+		// layer (no request happens either way). A direct fetch() against the exact URL the <video> is
+		// already using, with an explicit Range header, proves the SW route's Range/206 support
+		// deterministically instead — same registration (the SW keeps a download registration alive
+		// across multiple GETs, sw.ts's own registerPendingDownload comment: "the id must also survive
+		// every GET"), so this is a realistic concurrent read against the same stream the element uses,
+		// not a side channel. ----
 		await rowVideo.dblclick()
 		const video = page.locator("video")
 		await expect(video).toBeVisible({ timeout: 30_000 })
 		await expect.poll(() => video.evaluate(el => (el as HTMLVideoElement).duration || 0), { timeout: 30_000 }).toBeGreaterThan(0)
 
-		const beforeSeek = swResponses.length
+		// currentSrc resolves to an absolute URL (unlike the image leg's raw src attribute above), so this
+		// checks containment rather than an anchored prefix.
+		const videoSrc = await video.evaluate(el => (el as HTMLVideoElement).currentSrc)
+		expect(videoSrc).toContain(SW_DOWNLOAD_PREFIX)
+
+		const rangeProbe = await page.evaluate(async url => {
+			const res = await fetch(url, { headers: { Range: "bytes=65536-" } })
+
+			return {
+				status: res.status,
+				contentRange: res.headers.get("content-range"),
+				contentType: res.headers.get("content-type"),
+				disposition: res.headers.get("content-disposition")
+			}
+		}, videoSrc)
+
+		expect(rangeProbe.status).toBe(206)
+		expect(rangeProbe.contentRange).toMatch(/^bytes 65536-/)
+		expect(rangeProbe.disposition).toBeNull()
+		expect(rangeProbe.contentType).toBe("video/mp4")
 
 		await video.evaluate(el => {
 			const videoEl = el as HTMLVideoElement
@@ -126,15 +153,6 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 			videoEl.muted = true
 			videoEl.currentTime = Math.max(1, (videoEl.duration || 2) / 2)
 		})
-
-		await expect
-			.poll(() => swResponses.slice(beforeSeek).some(r => r.status === 206 && r.contentRange !== null), { timeout: 20_000 })
-			.toBe(true)
-
-		const seekResponse = swResponses.slice(beforeSeek).find(r => r.status === 206 && r.contentRange !== null)
-		expect(seekResponse?.disposition).toBeNull()
-		expect(seekResponse?.contentType).toBe("video/mp4")
-
 		await video.evaluate(el => (el as HTMLVideoElement).play())
 		await expect.poll(() => video.evaluate(el => !(el as HTMLVideoElement).paused), { timeout: 15_000 }).toBe(true)
 

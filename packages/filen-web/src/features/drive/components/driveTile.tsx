@@ -131,7 +131,7 @@ export function DriveTile({
 								</div>
 							)}
 							{selected ? (
-								// Explicit selection badge (P20b, mobile parity: a filled checkmark over a
+								// Explicit selection badge (mobile parity: a filled checkmark over a
 								// dimmed thumbnail) IN ADDITION to the aria-selected ring above, not instead of it —
 								// same top-left corner the favorite star below uses, since a selected tile's own
 								// dim overlay already covers that star visually; showing both at once would be
@@ -161,7 +161,7 @@ export function DriveTile({
 							{showVideoBadge(item) ? (
 								// Bottom-right, opposite the top corners both other badges (and the menu trigger)
 								// occupy — mobile's own play-triangle badge marks a video tile the same way; a
-								// duration label isn't available (P20a explicitly scopes this to the glyph only).
+								// duration label isn't available, so this deliberately scopes to the glyph only.
 								<div className="absolute right-1 bottom-1 flex size-6 items-center justify-center rounded-full bg-background/80 shadow-sm">
 									<PlayIcon
 										aria-hidden="true"

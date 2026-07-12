@@ -67,7 +67,7 @@ function VideoElement({ url, alt, onError, positionKey }: { url: string; alt: st
 
 		function handlePause(): void {
 			if (positionKey !== undefined && video) {
-				setVideoPlaybackState(positionKey, { currentTime: video.currentTime, wasPlaying: false })
+				setVideoPlaybackState(positionKey, { currentTime: video.currentTime })
 			}
 		}
 
@@ -81,7 +81,7 @@ function VideoElement({ url, alt, onError, positionKey }: { url: string; alt: st
 			// explicit pause, never for an unmount, so this is the only place that captures a mid-playback
 			// step-away's own position.
 			if (positionKey !== undefined) {
-				setVideoPlaybackState(positionKey, { currentTime: video.currentTime, wasPlaying: !video.paused })
+				setVideoPlaybackState(positionKey, { currentTime: video.currentTime })
 			}
 		}
 	}, [positionKey])

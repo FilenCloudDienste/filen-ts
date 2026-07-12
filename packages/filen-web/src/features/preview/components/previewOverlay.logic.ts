@@ -69,7 +69,7 @@ export function isVideoControlsBandClick(elementHeight: number, clickOffsetY: nu
 	return clickOffsetY >= elementHeight - bandPx
 }
 
-// The click-to-hide-chrome decision (P20c): clicking the media surface itself toggles the preview
+// The click-to-hide-chrome decision: clicking the media surface itself toggles the preview
 // overlay's header (which also carries the pager's prev/next buttons — there is no separate floating
 // pager control to hide) — but a click on any interactive control (a viewer's own toolbar button, a
 // CodeMirror surface, ...) or on a video/audio element's own native controls band must never toggle it,
