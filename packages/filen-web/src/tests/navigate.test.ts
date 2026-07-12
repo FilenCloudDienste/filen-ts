@@ -25,6 +25,21 @@ function directoryItem(uuid: UuidStr): DriveItem {
 	return narrowItem(dir)
 }
 
+// An undecryptable directory — its meta never decoded (the SDK's ciphertext arm), so narrowItem sets
+// `undecryptable: true`. Descending into one would list rows that can't decrypt either, so navigation
+// is gated out (L5 parity).
+function undecryptableDirectoryItem(uuid: UuidStr): DriveItem {
+	const dir: Dir = {
+		uuid,
+		parent: testUuid("parent"),
+		color: "default",
+		timestamp: 1_700_000_000_000n,
+		favorited: false,
+		meta: { type: "encrypted", data: "ciphertext" }
+	}
+	return narrowItem(dir)
+}
+
 function fileItem(uuid: UuidStr): DriveItem {
 	const file: File = {
 		uuid,
@@ -181,6 +196,11 @@ describe("resolveDriveNavigationTarget", () => {
 			})
 		}
 	)
+
+	it.each(NAVIGABLE_VARIANTS)("an undecryptable directory returns null in the %s variant — it is inert (L5 parity)", variant => {
+		expect(resolveDriveNavigationTarget(undecryptableDirectoryItem(testUuid("enc-dir")), variant, "")).toBeNull()
+		expect(resolveDriveNavigationTarget(undecryptableDirectoryItem(testUuid("enc-dir")), variant, testUuid("some-parent"))).toBeNull()
+	})
 
 	it("a directory in the trash variant returns null regardless of the current splat — mirrors mobile's rule (trashed directories are never browsable)", () => {
 		expect(resolveDriveNavigationTarget(directoryItem(testUuid("dir-1")), "trash", "")).toBeNull()

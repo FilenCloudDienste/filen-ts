@@ -46,6 +46,13 @@ export function resolveDriveNavigationTarget(item: DriveItem, variant: DriveVari
 		return null
 	}
 
+	// An undecryptable directory is inert — its metadata (name + the keys its children decrypt with)
+	// never decrypted for this account, so its listing would be unreadable. Library-layer gate paired
+	// with the listing's own (directoryListing.tsx handleOpen) so no open path descends into one.
+	if (item.data.undecryptable) {
+		return null
+	}
+
 	if (variant === "trash") {
 		return null
 	}

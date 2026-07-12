@@ -47,6 +47,7 @@ function mockNote(overrides: Partial<Note> = {}): Note {
 		pinned: false,
 		tags: [],
 		noteType: "text",
+		encryptionKey: "note-key",
 		title: "note title",
 		preview: "note preview",
 		trash: false,
@@ -67,6 +68,26 @@ function mockTag(overrides: Partial<NoteTag> = {}): NoteTag {
 		createdTimestamp: 1_700_000_000_000n,
 		...overrides
 	}
+}
+
+// Undecryptable note/tag builders — the SDK leaves encryptionKey/title (note) and name (tag) absent,
+// which exactOptionalPropertyTypes models as the property being missing (never `= undefined`), so these
+// delete rather than assign undefined.
+function undecryptableNote(overrides: Partial<Note> = {}): Note {
+	const note: Note = { ...mockNote(overrides) }
+
+	delete note.encryptionKey
+	delete note.title
+
+	return note
+}
+
+function undecryptableTag(overrides: Partial<NoteTag> = {}): NoteTag {
+	const tag: NoteTag = { ...mockTag(overrides) }
+
+	delete tag.name
+
+	return tag
 }
 
 function ids(note: Note, userId: bigint | undefined): string[] {
@@ -130,6 +151,27 @@ describe("noteMenuActions — trashed note", () => {
 		const trashedAndArchived = mockNote({ trash: true, archive: true, ownerId: 1n })
 
 		expect(ids(trashedAndArchived, 1n)).toEqual(["restore", "deletePermanently"])
+	})
+})
+
+describe("noteMenuActions — undecryptable note (no encryptionKey)", () => {
+	it("owner: reduces to trash alone — every decrypted-data action is dropped", () => {
+		expect(ids(undecryptableNote({ ownerId: 1n }), 1n)).toEqual(["trash"])
+	})
+
+	it("non-owner (participant): reduces to leave alone", () => {
+		expect(ids(undecryptableNote({ ownerId: 1n }), 2n)).toEqual(["leave"])
+	})
+
+	it("an unresolved current user is treated as non-owner (leave)", () => {
+		expect(ids(undecryptableNote({ ownerId: 1n }), undefined)).toEqual(["leave"])
+	})
+
+	it("trashed wins even when undecryptable — recovery + permanent delete stay by uuid alone", () => {
+		const trashed = undecryptableNote({ trash: true, ownerId: 1n })
+
+		expect(ids(trashed, 1n)).toEqual(["restore", "deletePermanently"])
+		expect(ids(trashed, 2n)).toEqual(["restore", "deletePermanently"])
 	})
 })
 
@@ -328,5 +370,12 @@ describe("tagMenuActions — the tags-view row menu", () => {
 		expect(rename?.run === "dialog" && rename.dialogKind).toBe("renameTag")
 		expect(del?.run === "dialog" && del.dialogKind).toBe("deleteTag")
 		expect(del?.run === "dialog" && del.destructive).toBe(true)
+	})
+
+	it("an undecryptable tag (no name) reduces to delete alone — rename/favorite need decrypted metadata", () => {
+		const descriptors = tagMenuActions(undecryptableTag())
+
+		expect(descriptors.map(d => d.id)).toEqual(["tagDelete"])
+		expect(descriptors[0]?.run === "dialog" && descriptors[0].dialogKind).toBe("deleteTag")
 	})
 })

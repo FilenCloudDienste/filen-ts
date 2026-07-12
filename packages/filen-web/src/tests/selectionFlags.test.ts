@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
+import { aggregateDriveSelectionFlags, selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes — mirrors item.test.ts's own fixture.
 function testUuid(label: string): UuidStr {
@@ -241,5 +241,25 @@ describe("aggregateDriveSelectionFlags — everySharedRoot", () => {
 		const flags = aggregateDriveSelectionFlags([dirItem({ uuid: testUuid("a") }), fileItem({ uuid: testUuid("b") })])
 
 		expect(flags.everySharedRoot).toBe(false)
+	})
+})
+
+describe("selectableForSelectAll — the select-all set (L6)", () => {
+	it("drops undecryptable items, keeping every decryptable one in order", () => {
+		const a = dirItem({ uuid: testUuid("a") })
+		const enc = undecryptableFile({ uuid: testUuid("enc") })
+		const b = fileItem({ uuid: testUuid("b") })
+
+		expect(selectableForSelectAll([a, enc, b])).toEqual([a, b])
+	})
+
+	it("returns an empty array when every item is undecryptable", () => {
+		expect(selectableForSelectAll([undecryptableFile({ uuid: testUuid("x") }), undecryptableFile({ uuid: testUuid("y") })])).toEqual([])
+	})
+
+	it("passes a fully-decryptable selection through unchanged", () => {
+		const items = [dirItem({ uuid: testUuid("a") }), fileItem({ uuid: testUuid("b") })]
+
+		expect(selectableForSelectAll(items)).toEqual(items)
 	})
 })

@@ -94,6 +94,12 @@ export const common = {
 	windowHide: "Hide",
 	/** System strip — close-window button accessible label */
 	windowClose: "Close window",
+	// Undecryptable-item explainer — shown in place of the normal content wherever an item whose
+	// metadata never decrypted can still be reached (note editor pane, drive info dialog)
+	/** Cannot-decrypt explainer — heading */
+	cannotDecryptTitle: "Cannot decrypt",
+	/** Cannot-decrypt explainer — reason line */
+	cannotDecryptBody: "This item could not be decrypted. It may have been created with a different account or key.",
 	// Service worker update prompt
 	/** Update toast — title raised when a new version has been installed and is waiting */
 	updateReadyTitle: "Update ready",

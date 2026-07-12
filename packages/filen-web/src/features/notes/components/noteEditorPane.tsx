@@ -3,7 +3,9 @@ import { useNavigate } from "@tanstack/react-router"
 import { StickyNoteIcon, MoreHorizontalIcon } from "lucide-react"
 import type { Note } from "@filen/sdk-rs"
 import { noteIcon } from "@/features/notes/lib/icon.logic"
+import { isNoteUndecryptable } from "@/features/notes/lib/sort"
 import { NoteContentBody } from "@/features/notes/components/noteContentBody"
+import { CannotDecryptState } from "@/components/cannotDecryptState"
 import { NoteRemoteEditBanner } from "@/features/notes/components/noteRemoteEditBanner"
 import { NoteDropdownMenuContent } from "@/features/notes/components/noteMenu"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
@@ -45,7 +47,9 @@ export interface NoteEditorPaneProps {
 // plus the per-type content body (NoteContentBody) — live CodeMirror editors for text/code/md, wired to
 // the fault-tolerant outbox; read-only readers for trashed/rich/checklist.
 export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
-	const { t } = useTranslation("notes")
+	// ["notes", "common"] so the header can reach the shared cannot-decrypt label; notes stays the
+	// default namespace, so every bare t("notes…") key below is unaffected.
+	const { t } = useTranslation(["notes", "common"])
 	const navigate = useNavigate()
 	const tagsQuery = useNoteTags()
 	const accountQuery = useAccountQuery()
@@ -90,7 +94,16 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 	}
 
 	const { icon: Icon, colorClass } = noteIcon(note)
-	const title = note.title !== undefined && note.title.length > 0 ? note.title : t("noteUntitled")
+	// An undecryptable note has no readable title/body — its metadata stayed ciphertext (no key for
+	// this account). The header shows a "cannot decrypt" label (never the misleading "Untitled note"),
+	// the ⋮ menu is already reduced to its uuid-only actions (noteMenuActions), and the body is the
+	// shared explainer instead of an editor that could only fail to load.
+	const undecryptable = isNoteUndecryptable(note)
+	const title = undecryptable
+		? t("common:cannotDecryptTitle")
+		: note.title !== undefined && note.title.length > 0
+			? note.title
+			: t("noteUntitled")
 
 	async function handleDuplicated(duplicated: Note): Promise<void> {
 		await navigate({ to: "/notes/$uuid", params: { uuid: duplicated.uuid } })
@@ -139,11 +152,17 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 			{/* Realtime reload-vs-keep prompt — shown only when this note is dirty AND the server's content
 			    moved (a clean note refetches silently). Sits above the editor, never blocks it. */}
 			<NoteRemoteEditBanner note={note} />
-			{/* Keyed by uuid so switching the selected note rebuilds the content controller fresh. */}
-			<NoteContentBody
-				key={note.uuid}
-				note={note}
-			/>
+			{/* An undecryptable note never mounts the editor (NoteContentBody would only fetch a body it
+			    can't decrypt); the shared explainer stands in its place. Otherwise the per-type editor,
+			    keyed by uuid so switching the selected note rebuilds the content controller fresh. */}
+			{undecryptable ? (
+				<CannotDecryptState className="min-h-0 flex-1" />
+			) : (
+				<NoteContentBody
+					key={note.uuid}
+					note={note}
+				/>
+			)}
 			{dialogHost.renderActiveDialog()}
 		</div>
 	)

@@ -1,6 +1,7 @@
 import { type LucideIcon } from "lucide-react"
 import { NOTE_ACTION_DEFS } from "@/features/notes/lib/actionDefs"
 import { isNoteOwner } from "@/features/notes/lib/actions"
+import { isNoteUndecryptable, isTagUndecryptable } from "@/features/notes/lib/sort"
 import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import type { NotesKey } from "@/lib/i18n"
 
@@ -92,6 +93,15 @@ export function noteMenuActions(note: Note, currentUserId: bigint | undefined): 
 		return [RESTORE, DELETE_PERMANENTLY]
 	}
 
+	// Undecryptable: the note key never unwrapped for this account, so its metadata + content stay
+	// ciphertext — every action that needs decrypted data (rename/duplicate/export/copyId/pin/favorite/
+	// tags/type/participants/history/archive) is impossible. Only the pure-uuid dispositions survive:
+	// the owner can trash it, a participant can leave it. Mirrors drive + chats, where an undecryptable
+	// item is likewise reduced to its uuid-only actions (driveItemActions / chatMenuActions).
+	if (isNoteUndecryptable(note)) {
+		return owner ? [TRASH] : [LEAVE]
+	}
+
 	const actions: NoteActionDescriptor[] = [RENAME, DUPLICATE, EXPORT, COPY_ID, pinDescriptor(note), favoriteDescriptor(note), TAGS, TYPE]
 
 	// Participants management is owner-only, matching both mobile and old-web — a participant sees no
@@ -135,15 +145,20 @@ export type TagActionDescriptor =
 	| { id: "tagFavorite"; labelKey: NotesKey; icon: LucideIcon; run: "direct" }
 
 export function tagMenuActions(tag: NoteTag): TagActionDescriptor[] {
+	const del: TagActionDescriptor = { id: "tagDelete", ...NOTE_ACTION_DEFS.tagDelete, run: "dialog", dialogKind: "deleteTag" }
+
+	// Undecryptable tag: its name never decrypted, so rename (needs a decrypted starting value) and
+	// favorite (a metadata mutation) make no sense — only the pure-uuid delete survives (mobile parity,
+	// tag/menu.tsx's own `tag.undecryptable` branch offers delete alone).
+	if (isTagUndecryptable(tag)) {
+		return [del]
+	}
+
 	const favorite: TagActionDescriptor = tag.favorite
 		? { id: "tagFavorite", ...NOTE_ACTION_DEFS.tagUnfavorite, run: "direct" }
 		: { id: "tagFavorite", ...NOTE_ACTION_DEFS.tagFavorite, run: "direct" }
 
-	return [
-		{ id: "tagRename", ...NOTE_ACTION_DEFS.tagRename, run: "dialog", dialogKind: "renameTag" },
-		favorite,
-		{ id: "tagDelete", ...NOTE_ACTION_DEFS.tagDelete, run: "dialog", dialogKind: "deleteTag" }
-	]
+	return [{ id: "tagRename", ...NOTE_ACTION_DEFS.tagRename, run: "dialog", dialogKind: "renameTag" }, favorite, del]
 }
 
 export interface NoteTagSubmenuEntry {

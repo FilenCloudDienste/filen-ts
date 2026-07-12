@@ -17,6 +17,7 @@ import { useItemInfoQuery } from "@/features/drive/queries/drive"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { cn } from "@/lib/utils"
+import { CannotDecryptState } from "@/components/cannotDecryptState"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -65,12 +66,22 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
 // grouped rows follow in filen-mobile's order. The Location row is a deliberate desktop addition — its
 // value is a link that navigates to the item's parent directory and closes the dialog.
 export function InfoDialog({ item, remoteInfoEnabled, onClose }: InfoDialogProps) {
-	const { t } = useTranslation("drive")
+	// ["drive", "common"] so the undecryptable branch can reach the shared cannot-decrypt label; drive
+	// stays the default namespace, so every bare t("drive…") key below is unaffected.
+	const { t } = useTranslation(["drive", "common"])
 	const dirContext = safeDirContext(item)
+	// An undecryptable item's metadata never decrypted for this account, so every synchronous row below
+	// would fall back to the raw uuid and the remote getItemInfo call would resolve nothing useful — the
+	// dialog stands down to the shared explainer instead (see the early return below). Computed here so
+	// it can also switch the remote fetch off.
+	const undecryptable = item.data.undecryptable
 	// Rules-of-hooks: called unconditionally regardless of variant — remoteInfoEnabled controls
 	// fetching through `enabled`, never whether the hook itself runs. dirContext is spread in only
 	// when built (exactOptionalPropertyTypes rejects an explicit `dirContext: undefined`).
-	const infoQuery = useItemInfoQuery(item.data, { enabled: remoteInfoEnabled, ...(dirContext !== undefined ? { dirContext } : {}) })
+	const infoQuery = useItemInfoQuery(item.data, {
+		enabled: remoteInfoEnabled && !undecryptable,
+		...(dirContext !== undefined ? { dirContext } : {})
+	})
 	const thumbUrl = useThumbnail(item)
 	// Downgrades a torn/corrupt cache entry back to the icon without waiting for a remount — see the
 	// img's own onError below. Never reset back to false: this mount already gave up on this uuid.
@@ -100,6 +111,27 @@ export function InfoDialog({ item, remoteInfoEnabled, onClose }: InfoDialogProps
 	// label rather than a blank value; a trailing slash (get_item_path ends every directory segment
 	// with one) is trimmed for display only, never from the uuid-based navigation target.
 	const pathLabel = path === "" ? t("driveMyDrive") : (path?.replace(/\/$/, "") ?? "")
+
+	// Undecryptable: no readable name or metadata to show — the whole info sheet degrades to the shared
+	// "cannot decrypt" explainer (mobile parity, driveItemInfo.tsx's own undecryptable guard). The
+	// DialogTitle is kept for the dialog's accessible name (visually the explainer owns its own heading).
+	if (undecryptable) {
+		return (
+			<Dialog
+				open
+				onOpenChange={next => {
+					if (!next) {
+						onClose()
+					}
+				}}
+			>
+				<DialogContent>
+					<DialogTitle className="sr-only">{t("common:cannotDecryptTitle")}</DialogTitle>
+					<CannotDecryptState />
+				</DialogContent>
+			</Dialog>
+		)
+	}
 
 	return (
 		<Dialog

@@ -22,6 +22,7 @@ import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
 import { resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
 import { asDirectoryOrFile } from "@/features/drive/lib/item"
 import { canPreview, previewableSiblings } from "@/features/drive/lib/preview.logic"
+import { selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
 import { drivePreviewSources } from "@/features/preview/lib/previewSource"
 import { startDownloads } from "@/features/drive/lib/download"
 import { useDirectoryListingQuery, useSortPreferencesQuery, useViewModePreferencesQuery } from "@/features/drive/queries/drive"
@@ -259,6 +260,14 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			return
 		}
 
+		// An undecryptable directory is inert — its metadata (name, and the keys its children decrypt
+		// with) never decrypted for this account, so descending into it would only list rows that can't
+		// decrypt either. Gate navigation the same way the file branch above gates preview on canPreview,
+		// mirroring drive's own menu reduction (driveItemActions omits every mutating action here too).
+		if (item.data.undecryptable) {
+			return
+		}
+
 		// A search hit is found via a subtree search rooted at the CURRENT directory, but the hit itself
 		// can be anywhere under it — searchHitNavigationTarget rebuilds a fresh, root-relative target
 		// from the hit's own uuid (never appended to `splat`); the in-place open below stays unchanged
@@ -377,7 +386,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				return
 			}
 
-			useDriveStore.getState().setSelectedItems(sortedItems)
+			// Undecryptable items are excluded from the selection set itself (not just gated out of bulk
+			// actions later): every bulk action needs decrypted metadata, so an undecryptable row could
+			// never be acted on — mirrors mobile's select-all, which builds its set from decryptable items
+			// only (selectableForSelectAll).
+			useDriveStore.getState().setSelectedItems(selectableForSelectAll(sortedItems))
 		},
 		undefined,
 		[isDialogOpen, sortedItems, search.active, search.status]

@@ -49,6 +49,20 @@ export function tagDisplayName(tag: NoteTag): string {
 	return tag.name ?? tag.uuid
 }
 
+// A note whose metadata never decrypted for this account — the SDK leaves `encryptionKey` undefined
+// when the note key can't be unwrapped, so title/preview/content stay ciphertext. Mirrors mobile's
+// isNoteUndecryptable; the drive + chats surfaces expose the same signal (item.data.undecryptable /
+// isChatUndecryptable) so every surface can reduce an undecryptable item to its pure-uuid actions.
+export function isNoteUndecryptable(note: Note): boolean {
+	return note.encryptionKey === undefined
+}
+
+// A tag whose name never decrypted (same key-unwrap failure as a note) — the SDK leaves `name`
+// undefined. Mirrors mobile's isTagUndecryptable.
+export function isTagUndecryptable(tag: NoteTag): boolean {
+	return tag.name === undefined
+}
+
 // History dialog's own sort — newest first by editedTimestamp (mobile's sortNoteHistoryNewestFirst),
 // bigint-safe throughout like compareNotes above. `id` (also bigint) is the deterministic tiebreak for
 // two entries sharing a timestamp — history ids are server-assigned and monotonically increasing, so

@@ -34,6 +34,15 @@ const EMPTY_DRIVE_SELECTION_FLAGS: DriveSelectionFlags = Object.freeze({
 	everySharedRoot: false
 })
 
+// The set a "select all" builds — every item except the undecryptable ones. Bulk actions gate
+// undecryptable items out anyway (aggregateDriveSelectionFlags.includesUndecryptable), but an
+// undecryptable row could never be acted on, so it never belongs in the selection to begin with;
+// excluding it here keeps the selection count honest and mirrors mobile's select-all. An explicit
+// gesture (marquee, shift-range, click) can still select one — this is only the select-ALL set.
+export function selectableForSelectAll(items: readonly DriveItem[]): DriveItem[] {
+	return items.filter(item => !item.data.undecryptable)
+}
+
 export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): DriveSelectionFlags {
 	if (items.length === 0) {
 		return EMPTY_DRIVE_SELECTION_FLAGS

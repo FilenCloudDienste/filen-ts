@@ -4,6 +4,8 @@ import {
 	DEFAULT_NOTE_TAGS_SORT_BY,
 	filterNotesBySearch,
 	filterNoteTagsBySearch,
+	isNoteUndecryptable,
+	isTagUndecryptable,
 	noteDisplayTitle,
 	noteTitleMatchesSearch,
 	sortAndFilterNotes,
@@ -184,6 +186,18 @@ describe("noteDisplayTitle / tagDisplayName", () => {
 	it("falls back to uuid when tag name is undefined", () => {
 		const uuid = testUuid("fallback")
 		expect(tagDisplayName(mockNoteTagWithoutName({ uuid }))).toBe(uuid)
+	})
+})
+
+describe("isNoteUndecryptable / isTagUndecryptable", () => {
+	it("a note is undecryptable exactly when it carries no encryptionKey", () => {
+		expect(isNoteUndecryptable(mockNote({ encryptionKey: "note-key" }))).toBe(false)
+		expect(isNoteUndecryptable(mockNoteWithoutTitle())).toBe(true)
+	})
+
+	it("a tag is undecryptable exactly when it carries no name", () => {
+		expect(isTagUndecryptable(mockNoteTag())).toBe(false)
+		expect(isTagUndecryptable(mockNoteTagWithoutName())).toBe(true)
 	})
 })
 
