@@ -4,6 +4,7 @@ import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 
 // `refetch` is merged onto every variant (rather than living beside the union as a sibling return
 // field) so every call site's existing `result.status`-narrowing keeps working unchanged — only the
@@ -30,6 +31,12 @@ export type UsePreviewBytesResult =
 // without needing a remount — an item change already gets a fresh load via `item` itself changing, so
 // `reloadToken` only ever needs to move on an explicit user retry.
 export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
+	// ★ The single byte-source seam: an "anon" ambient mode (the public-link routes) routes the whole
+	// buffer through the UNAUTHENTICATED linked-file worker method instead of the authed one, so a
+	// logged-out visitor never reaches requireClient. The authed app leaves this at "authed" and its
+	// path is byte-for-byte unchanged. Both methods share the same previewAborts token registry, so the
+	// cancel-on-unmount below reaches an anon read with no change of its own.
+	const accessMode = usePreviewAccessMode()
 	const [result, setResult] = useState<
 		{ status: "pending" } | { status: "success"; bytes: Uint8Array } | { status: "error"; dto: ErrorDTO }
 	>({
@@ -44,7 +51,9 @@ export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
 		async function load(): Promise<void> {
 			try {
 				const file = narrowToAnyFile(item)
-				const bytes = await runOp(sdkApi.downloadFileBytes(file, token))
+				const bytes = await runOp(
+					accessMode === "anon" ? sdkApi.downloadLinkedFileBytesAnon(file, token) : sdkApi.downloadFileBytes(file, token)
+				)
 
 				if (live) {
 					setResult({ status: "success", bytes })
@@ -62,7 +71,7 @@ export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
 			live = false
 			void sdkApi.cancelPreviewDownload(token)
 		}
-	}, [item, reloadToken])
+	}, [item, reloadToken, accessMode])
 
 	function refetch(): void {
 		setResult({ status: "pending" })

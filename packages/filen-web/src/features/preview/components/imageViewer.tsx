@@ -7,6 +7,7 @@ import { streamFailureAction, needsImageTransform } from "@/features/drive/lib/p
 import { transformHeicBytes } from "@/features/preview/lib/heicTransform"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
+import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { type ErrorDTO } from "@/lib/sdk/errors"
 import { Spinner } from "@/components/ui/spinner"
@@ -397,7 +398,10 @@ function TransformedImage({ item, alt }: { item: DriveItem; alt: string }) {
 // is also where an item the allowlist rejects outright (e.g. an unrecognized mime) always lands.
 function StreamableImage({ item, alt }: { item: DriveItem; alt: string }) {
 	const contentType = allowedMediaContentType(item)
-	const streamable = contentType !== null && isMediaStreamAvailable()
+	// An "anon" ambient mode (a public link) can never stream: the service worker's wasm bundle has no
+	// UnauthClient, so the buffered path is the only one that serves a logged-out visitor.
+	const accessMode = usePreviewAccessMode()
+	const streamable = contentType !== null && isMediaStreamAvailable() && accessMode === "authed"
 	const [useBuffered, setUseBuffered] = useState(!streamable)
 
 	if (!useBuffered && contentType !== null) {

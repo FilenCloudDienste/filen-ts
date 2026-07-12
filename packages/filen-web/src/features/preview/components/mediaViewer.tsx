@@ -6,6 +6,7 @@ import { isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
 import { streamFailureAction } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
+import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Spinner } from "@/components/ui/spinner"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
@@ -320,7 +321,10 @@ function BufferedMedia({ item, category, alt }: { item: DriveItem; category: "vi
 // for the single capability flip point.
 export function MediaViewer({ item, category, alt }: MediaViewerProps) {
 	const contentType = allowedMediaContentType(item)
-	const streamable = contentType !== null && isMediaStreamAvailable()
+	// An "anon" ambient mode (a public link) can never stream: the service worker's wasm bundle has no
+	// UnauthClient, so the buffered path is the only one that serves a logged-out visitor.
+	const accessMode = usePreviewAccessMode()
+	const streamable = contentType !== null && isMediaStreamAvailable() && accessMode === "authed"
 	const [useBuffered, setUseBuffered] = useState(!streamable)
 
 	if (!useBuffered && contentType !== null) {
