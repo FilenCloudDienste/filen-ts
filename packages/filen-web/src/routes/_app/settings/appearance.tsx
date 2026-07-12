@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { SunMoonIcon } from "lucide-react"
 import { ThemeCard } from "@/features/settings/components/appearance/themeCard"
 import { DriveMemoryCard } from "@/features/settings/components/appearance/driveMemoryCard"
+import { StartScreenCard } from "@/features/settings/components/appearance/startScreenCard"
 
 export const Route = createFileRoute("/_app/settings/appearance")({ component: AppearancePage })
 
@@ -20,6 +21,7 @@ function AppearancePage() {
 			<div className="flex flex-1 flex-col overflow-y-auto p-6">
 				<div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
 					<ThemeCard />
+					<StartScreenCard />
 					<DriveMemoryCard />
 				</div>
 			</div>

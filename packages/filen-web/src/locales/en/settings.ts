@@ -16,6 +16,8 @@ export const settings = {
 	settingsSectionEvents: "Events",
 	/** Settings sidebar — Billing section nav label and that section's page heading */
 	settingsSectionBilling: "Billing",
+	/** Settings sidebar — Advanced section nav label and that section's page heading */
+	settingsSectionAdvanced: "Advanced",
 	/** Account page — error-state title, mirrors "auth:securityLoadError" for its own section */
 	settingsAccountLoadError: "Couldn't load your account",
 
@@ -67,6 +69,8 @@ export const settings = {
 	settingsPersonalCity: "City",
 	settingsPersonalPostalCode: "Postal code",
 	settingsPersonalCountry: "Country",
+	/** Personal-info country select — the sentinel item that clears the field, and the trigger's own placeholder */
+	settingsPersonalCountryUnset: "Not set",
 	settingsPersonalSave: "Save",
 	settingsPersonalSuccess: "Your personal information has been updated.",
 
@@ -106,6 +110,14 @@ export const settings = {
 	settingsResetViewDescription: "Reset the global view mode and clear every saved per-directory override",
 	settingsResetViewConfirmBody: "This resets the global view mode and clears every saved per-directory override. This cannot be undone.",
 	settingsResetViewSuccess: "View mode has been reset.",
+
+	// ── Appearance: start screen ──────────────────────────────────────────────
+	settingsStartScreenTitle: "Start screen",
+	settingsStartScreenDescription: "Choose which section Filen opens to when it starts",
+	settingsStartScreenDrive: "Cloud Drive",
+	settingsStartScreenNotes: "Notes",
+	settingsStartScreenChats: "Chats",
+	settingsStartScreenContacts: "Contacts",
 
 	// ── Account: preferences (versioning / login alerts) ────────────────────
 	settingsPreferencesTitle: "Preferences",
@@ -228,5 +240,37 @@ export const settings = {
 	/** {{earned}} is a pre-formatted byte size, {{count}} the number of people referred */
 	settingsBillingReferralEarned: "{{earned}} earned from {{count}} referral(s)",
 	settingsBillingReferralCopy: "Copy link",
-	settingsBillingReferralCopied: "Referral link copied to clipboard."
+	settingsBillingReferralCopied: "Referral link copied to clipboard.",
+
+	// ── Advanced: web transfer limits ────────────────────────────────────────
+	/** Advanced card — scoped explicitly to THIS browser tab's own uploads/downloads, since the same
+	 *  app also serves as the Electron desktop frontend, whose future file-sync/network-drive engine
+	 *  will carry its own separate bandwidth/concurrency settings */
+	settingsAdvancedTransferTitle: "Web transfer limits",
+	settingsAdvancedTransferDescription:
+		"Limit bandwidth and performance for uploads and downloads made from this browser tab. The Electron desktop app's file sync and network drive have their own separate settings.",
+	settingsAdvancedUploadLimit: "Upload limit",
+	settingsAdvancedDownloadLimit: "Download limit",
+	settingsAdvancedTransferPreset: "Transfer performance",
+	settingsAdvancedPresetBatterySaver: "Battery saver",
+	settingsAdvancedPresetBalanced: "Balanced",
+	settingsAdvancedPresetPerformance: "Performance",
+	settingsAdvancedPresetMaximum: "Maximum",
+	settingsAdvancedUnlimited: "Unlimited",
+	/** Shown after any bandwidth/preset change — the wasm client only reads these at startup, there is no live setter */
+	settingsAdvancedRestartRequired: "This takes effect the next time Filen loads in this browser tab.",
+
+	// ── Advanced: diagnostic logs ─────────────────────────────────────────────
+	settingsLogsTitle: "Diagnostic logs",
+	/** {{count}} is the ring buffer's max size (500) */
+	settingsLogsDescription: "The last {{count}} log entries from this browser tab, kept in memory for troubleshooting",
+	settingsLogsEmpty: "No log entries yet.",
+	settingsLogsRefresh: "Refresh",
+	settingsLogsExport: "Export logs",
+	settingsLogsExportSuccess: "Your logs have started downloading.",
+
+	// ── Advanced: about / legal ────────────────────────────────────────────────
+	settingsAboutTitle: "About",
+	settingsAboutTermsOfService: "Terms of Service",
+	settingsAboutPrivacyPolicy: "Privacy Policy"
 } as const

@@ -39,7 +39,7 @@ test.describe("settings", () => {
 
 		await gotoSettings(page)
 
-		for (const label of ["Account", "Security", "Appearance", "Events", "Billing"]) {
+		for (const label of ["Account", "Security", "Appearance", "Events", "Billing", "Advanced"]) {
 			await expect(page.getByRole("link", { name: label, exact: true })).toBeVisible()
 		}
 
@@ -161,7 +161,9 @@ test.describe("settings", () => {
 		await page.getByRole("link", { name: "Appearance", exact: true }).click()
 		await page.waitForURL(/\/settings\/appearance$/)
 
-		const trigger = page.getByRole("combobox")
+		// Disambiguated (not a bare getByRole("combobox")): the Appearance page also has the Start
+		// Screen select now.
+		const trigger = page.getByRole("combobox", { name: "Theme" })
 
 		async function pickTheme(label: string): Promise<void> {
 			await trigger.click()
@@ -215,7 +217,8 @@ test.describe("settings", () => {
 			{ label: "Security", heading: "Security", path: "/settings/security" },
 			{ label: "Appearance", heading: "Appearance", path: "/settings/appearance" },
 			{ label: "Events", heading: "Events", path: "/settings/events" },
-			{ label: "Billing", heading: "Billing", path: "/settings/billing" }
+			{ label: "Billing", heading: "Billing", path: "/settings/billing" },
+			{ label: "Advanced", heading: "Advanced", path: "/settings/advanced" }
 		]
 
 		for (const section of sections) {

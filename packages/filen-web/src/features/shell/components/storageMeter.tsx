@@ -1,8 +1,22 @@
 import { useTranslation } from "react-i18next"
 import { formatBytes } from "@filen/utils"
 import { useAccountQuery } from "@/queries/account"
+import { storageUsageLevel, type StorageUsageLevel } from "@/features/settings/lib/storageBreakdown"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
+
+// ui/progress.tsx (registry-verbatim, never edited) renders one fixed indicator with no per-instance
+// color prop — this arbitrary-descendant selector on the shared `data-slot` reaches through it from
+// the outside, same idiom this app already uses for icon sizing (`[&_svg]:size-4`).
+// Trailing `!` (Tailwind v4 important-modifier syntax, already used elsewhere in this codebase —
+// see ui/select.tsx's `animate-none!`) so the override reliably beats ProgressIndicator's own
+// `bg-primary`, which shares the same (0,1,0) class specificity and would otherwise depend on
+// Tailwind's internal layer ordering instead of this component's actual intent.
+const LEVEL_INDICATOR_CLASS: Record<StorageUsageLevel, string> = {
+	ok: "",
+	warn: "[&_[data-slot=progress-indicator]]:bg-yellow-500!",
+	critical: "[&_[data-slot=progress-indicator]]:bg-destructive!"
+}
 
 // Fixed block height so the pending skeleton, the error omission, and the resolved meter all occupy
 // the same vertical space — the sidebar's bottom block never jumps as the account query settles.
@@ -48,6 +62,7 @@ function StorageRow({ used, max }: { used: number; max: number }) {
 			<Progress
 				value={percent}
 				aria-label={t("storage")}
+				className={LEVEL_INDICATOR_CLASS[storageUsageLevel(percent)]}
 			/>
 			<p className="mt-2 truncate text-xs text-sidebar-foreground/70">
 				{t("storageUsage", { used: formatBytes(used), total: formatBytes(max) })}

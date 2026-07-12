@@ -51,7 +51,8 @@ import init, {
 	type UserPersonalUpdateInfo,
 	type GdprInfo,
 	type UserEvent,
-	type UserEventResult
+	type UserEventResult,
+	type JsClientConfig
 } from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
 import { toErrorDTO, PARENT_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
@@ -85,6 +86,16 @@ export type BootResult =
 	{ ok: true; threads: number } | { ok: false; reason: "artifacts" | "coi" | "pool" | "async-runtime" | "opfs"; detail: string }
 
 let client: Client | null = null
+
+// Concurrency/bandwidth/I-O-memory-budget knobs the wasm surface only accepts at UnauthClient
+// construction time (verified against the generated .d.ts — Client exposes no live bandwidth
+// setter, unlike the RN uniffi client mobile builds against). Every UnauthClient this worker ever
+// creates (withUnauth, probeAsync, injectClient) reads this one module-level value, so a single
+// setClientConfig call before boot's first login/session-resume is enough to make the persisted
+// Advanced-settings preference (features/settings/lib/transferConfig.ts, read on the main thread
+// since it needs kv access) apply for the whole worker lifetime. A change made while already signed
+// in only takes effect on the next full reload — there is no live setter to call instead.
+let clientConfig: JsClientConfig = {}
 
 // Single instance for this worker's lifetime — the cache-backed search's own handle registry, token
 // supersession, and configure-once guard (searchEngine.ts).
@@ -221,7 +232,7 @@ function releaseClient(): void {
 // the op settles; unwraps the Result so the Comlink boundary sees a thrown ErrorDTO, not a Result.
 async function withUnauth<T>(fn: (unauth: UnauthClient) => Promise<T>): Promise<T> {
 	const r = await run<T>(async defer => {
-		const unauth = UnauthClient.from_config({})
+		const unauth = UnauthClient.from_config(clientConfig)
 		defer(() => {
 			unauth.free()
 		})
@@ -325,7 +336,7 @@ const api = {
 	// Async-runtime health check: an unauth network op that MUST settle (either way).
 	async probeAsync(): Promise<void> {
 		const r = await runTimeout(async defer => {
-			const unauth = UnauthClient.from_config({})
+			const unauth = UnauthClient.from_config(clientConfig)
 			defer(() => {
 				unauth.free()
 			}) // defer() releases the wasm handle (LIFO)
@@ -379,7 +390,7 @@ const api = {
 	injectClient(blob: StringifiedClient): void {
 		const r = runEffect(
 			defer => {
-				const unauth = UnauthClient.from_config({})
+				const unauth = UnauthClient.from_config(clientConfig)
 				defer(() => {
 					unauth.free()
 				})
@@ -1210,6 +1221,14 @@ const api = {
 	},
 	hasClient(): boolean {
 		return client !== null
+	},
+	// Called once by boot.ts (after storage() resolves, before resumeSession()) with the persisted
+	// Advanced-settings transfer config, and again whenever the settings page writes a new
+	// preference — the latter only affects the NEXT UnauthClient this worker constructs (see
+	// `clientConfig`'s own comment), so a value changed while signed in needs a reload to take
+	// effect. Synchronous and side-effect-free otherwise: never touches the live `client`.
+	setClientConfig(config: JsClientConfig): void {
+		clientConfig = config
 	}
 }
 export type SdkWorkerApi = typeof api

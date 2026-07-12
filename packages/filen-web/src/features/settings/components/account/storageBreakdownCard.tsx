@@ -1,8 +1,17 @@
 import { useTranslation } from "react-i18next"
 import { formatBytes } from "@filen/utils"
-import { deriveStorageBreakdown, storagePercent } from "@/features/settings/lib/storageBreakdown"
+import { deriveStorageBreakdown, storagePercent, storageUsageLevel, type StorageUsageLevel } from "@/features/settings/lib/storageBreakdown"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+
+// The "files" segment (never "versioned", which stays a fixed neutral color, or "free") warns/alerts
+// by overall usage — mirrors mobile's segmented storage bar, where only the used-space fill changes
+// color near quota.
+const FILES_SEGMENT_CLASS: Record<StorageUsageLevel, string> = {
+	ok: "bg-chart-1",
+	warn: "bg-yellow-500",
+	critical: "bg-destructive"
+}
 
 interface StorageBreakdownCardProps {
 	accountQuery: AccountQuerySuccess
@@ -34,6 +43,10 @@ function StorageBreakdownCard({ accountQuery }: StorageBreakdownCardProps) {
 	const breakdown = deriveStorageBreakdown(storageUsed, maxStorage, versionedStorage)
 	const filesPercent = storagePercent(breakdown.filesBytes, breakdown.maxBytes)
 	const versionedPercent = storagePercent(breakdown.versionedBytes, breakdown.maxBytes)
+	// Warning tier is by TOTAL usage (used/max), not the files segment's own share of the bar — a
+	// mostly-versioned-storage account nearing quota must still warn even though its files slice alone
+	// looks small.
+	const level = storageUsageLevel(storagePercent(breakdown.usedBytes, breakdown.maxBytes))
 
 	return (
 		<Card>
@@ -49,7 +62,7 @@ function StorageBreakdownCard({ accountQuery }: StorageBreakdownCardProps) {
 			<CardContent className="flex flex-col gap-4">
 				<div className="flex h-2 w-full overflow-hidden rounded-2xl bg-muted">
 					<div
-						className="h-full bg-chart-1"
+						className={`h-full ${FILES_SEGMENT_CLASS[level]}`}
 						style={{ width: `${String(filesPercent)}%` }}
 					/>
 					<div
@@ -59,7 +72,7 @@ function StorageBreakdownCard({ accountQuery }: StorageBreakdownCardProps) {
 				</div>
 				<div className="flex flex-col gap-1.5">
 					<LegendRow
-						swatchClassName="bg-chart-1"
+						swatchClassName={FILES_SEGMENT_CLASS[level]}
 						label={t("settingsStorageFiles")}
 						bytes={breakdown.filesBytes}
 					/>

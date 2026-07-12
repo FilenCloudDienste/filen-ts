@@ -3,6 +3,7 @@ import type { Personal } from "@filen/sdk-rs"
 import {
 	personalToFormState,
 	formStateToUpdateInfo,
+	isPersonalFormDirty,
 	PERSONAL_FIELD_ORDER
 } from "@/features/settings/components/account/personalInfoCard.logic"
 
@@ -82,5 +83,28 @@ describe("PERSONAL_FIELD_ORDER", () => {
 	it("lists all 9 UserPersonalUpdateInfo fields, no duplicates", () => {
 		expect(PERSONAL_FIELD_ORDER).toHaveLength(9)
 		expect(new Set(PERSONAL_FIELD_ORDER).size).toBe(9)
+	})
+})
+
+describe("isPersonalFormDirty", () => {
+	it("is false when the form is identical to the initial snapshot", () => {
+		const form = personalToFormState(emptyPersonal())
+
+		expect(isPersonalFormDirty(form, form)).toBe(false)
+		expect(isPersonalFormDirty({ ...form }, { ...form })).toBe(false)
+	})
+
+	it("is true when any single field differs", () => {
+		const initial = personalToFormState(emptyPersonal())
+		const form = { ...initial, city: "Berlin" }
+
+		expect(isPersonalFormDirty(form, initial)).toBe(true)
+	})
+
+	it("is true for a country change alone", () => {
+		const initial = personalToFormState({ ...emptyPersonal(), country: "Germany" })
+		const form = { ...initial, country: "France" }
+
+		expect(isPersonalFormDirty(form, initial)).toBe(true)
 	})
 })

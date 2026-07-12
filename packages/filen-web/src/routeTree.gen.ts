@@ -34,6 +34,7 @@ import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/
 import { Route as AppSettingsEventsRouteImport } from './routes/_app/settings/events'
 import { Route as AppSettingsBillingRouteImport } from './routes/_app/settings/billing'
 import { Route as AppSettingsAppearanceRouteImport } from './routes/_app/settings/appearance'
+import { Route as AppSettingsAdvancedRouteImport } from './routes/_app/settings/advanced'
 import { Route as AppSettingsAccountRouteImport } from './routes/_app/settings/account'
 import { Route as AppNotesUuidRouteImport } from './routes/_app/notes.$uuid'
 import { Route as AppDriveSplatRouteImport } from './routes/_app/drive.$'
@@ -163,6 +164,11 @@ const AppSettingsAppearanceRoute = AppSettingsAppearanceRouteImport.update({
   path: '/appearance',
   getParentRoute: () => AppSettingsRouteRoute,
 } as any)
+const AppSettingsAdvancedRoute = AppSettingsAdvancedRouteImport.update({
+  id: '/advanced',
+  path: '/advanced',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
 const AppSettingsAccountRoute = AppSettingsAccountRouteImport.update({
   id: '/account',
   path: '/account',
@@ -204,6 +210,7 @@ export interface FileRoutesByFullPath {
   '/drive/$': typeof AppDriveSplatRoute
   '/notes/$uuid': typeof AppNotesUuidRoute
   '/settings/account': typeof AppSettingsAccountRoute
+  '/settings/advanced': typeof AppSettingsAdvancedRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
   '/settings/billing': typeof AppSettingsBillingRoute
   '/settings/events': typeof AppSettingsEventsRoute
@@ -231,6 +238,7 @@ export interface FileRoutesByTo {
   '/drive/$': typeof AppDriveSplatRoute
   '/notes/$uuid': typeof AppNotesUuidRoute
   '/settings/account': typeof AppSettingsAccountRoute
+  '/settings/advanced': typeof AppSettingsAdvancedRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
   '/settings/billing': typeof AppSettingsBillingRoute
   '/settings/events': typeof AppSettingsEventsRoute
@@ -263,6 +271,7 @@ export interface FileRoutesById {
   '/_app/drive/$': typeof AppDriveSplatRoute
   '/_app/notes/$uuid': typeof AppNotesUuidRoute
   '/_app/settings/account': typeof AppSettingsAccountRoute
+  '/_app/settings/advanced': typeof AppSettingsAdvancedRoute
   '/_app/settings/appearance': typeof AppSettingsAppearanceRoute
   '/_app/settings/billing': typeof AppSettingsBillingRoute
   '/_app/settings/events': typeof AppSettingsEventsRoute
@@ -295,6 +304,7 @@ export interface FileRouteTypes {
     | '/drive/$'
     | '/notes/$uuid'
     | '/settings/account'
+    | '/settings/advanced'
     | '/settings/appearance'
     | '/settings/billing'
     | '/settings/events'
@@ -322,6 +332,7 @@ export interface FileRouteTypes {
     | '/drive/$'
     | '/notes/$uuid'
     | '/settings/account'
+    | '/settings/advanced'
     | '/settings/appearance'
     | '/settings/billing'
     | '/settings/events'
@@ -353,6 +364,7 @@ export interface FileRouteTypes {
     | '/_app/drive/$'
     | '/_app/notes/$uuid'
     | '/_app/settings/account'
+    | '/_app/settings/advanced'
     | '/_app/settings/appearance'
     | '/_app/settings/billing'
     | '/_app/settings/events'
@@ -551,6 +563,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsAppearanceRouteImport
       parentRoute: typeof AppSettingsRouteRoute
     }
+    '/_app/settings/advanced': {
+      id: '/_app/settings/advanced'
+      path: '/advanced'
+      fullPath: '/settings/advanced'
+      preLoaderRoute: typeof AppSettingsAdvancedRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
     '/_app/settings/account': {
       id: '/_app/settings/account'
       path: '/account'
@@ -584,6 +603,7 @@ declare module '@tanstack/react-router' {
 
 interface AppSettingsRouteRouteChildren {
   AppSettingsAccountRoute: typeof AppSettingsAccountRoute
+  AppSettingsAdvancedRoute: typeof AppSettingsAdvancedRoute
   AppSettingsAppearanceRoute: typeof AppSettingsAppearanceRoute
   AppSettingsBillingRoute: typeof AppSettingsBillingRoute
   AppSettingsEventsRoute: typeof AppSettingsEventsRoute
@@ -593,6 +613,7 @@ interface AppSettingsRouteRouteChildren {
 
 const AppSettingsRouteRouteChildren: AppSettingsRouteRouteChildren = {
   AppSettingsAccountRoute: AppSettingsAccountRoute,
+  AppSettingsAdvancedRoute: AppSettingsAdvancedRoute,
   AppSettingsAppearanceRoute: AppSettingsAppearanceRoute,
   AppSettingsBillingRoute: AppSettingsBillingRoute,
   AppSettingsEventsRoute: AppSettingsEventsRoute,

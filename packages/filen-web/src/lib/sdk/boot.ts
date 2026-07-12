@@ -8,6 +8,7 @@ import { useBootStore } from "@/stores/boot"
 import { queryClient } from "@/queries/client"
 import { restorePersistedQueries, purgePersistedQueries } from "@/queries/persist"
 import { log } from "@/lib/log"
+import { getTransferPreferences, buildJsClientConfig } from "@/features/settings/lib/transferConfig"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
 // guards await this before reading hasClient(): the boot kick runs before the router mounts, but
@@ -70,6 +71,17 @@ export async function bootSdk(): Promise<void> {
 			setError("opfs", asErrorDTO(e))
 			log.error("boot", "opfs unavailable", e)
 			return
+		}
+		// Apply the persisted Advanced-settings transfer config (bandwidth caps + performance preset)
+		// BEFORE the worker ever builds a client: the wasm surface only accepts concurrency/bandwidth/
+		// fileIoMemoryBudget at UnauthClient construction time (no live setter — see sdk.worker.ts's
+		// `clientConfig`), so this must land before resumeSession/login's first UnauthClient. Never
+		// blocks boot on failure — an unreadable preference just leaves the worker on wasm's own
+		// defaults, same as today.
+		try {
+			await sdkApi.setClientConfig(buildJsClientConfig(await getTransferPreferences()))
+		} catch (e) {
+			log.warn("boot", "failed to apply transfer config; using defaults", e)
 		}
 		// Resume a persisted session into the worker BEFORE the gate flips to ready: guards observe
 		// readiness via whenBootReady() and then read hasClient(), so the client must already be

@@ -33,6 +33,15 @@ export function personalToFormState(personal: Personal): PersonalFormState {
 	}
 }
 
+// The dirty-gate P15 needed: true when ANY field differs from the snapshot taken when the card's
+// form state was frozen (see personalInfoCard.tsx's own comment on the freeze-on-mount invariant).
+// Mirrors nicknameCard's single-field `trimmed !== (nickName ?? "")` check, generalized to every
+// PERSONAL_FIELD_ORDER key — raw (untrimmed) comparison on purpose: trailing whitespace the user just
+// typed should still enable Save even though formStateToUpdateInfo will trim it away on submit.
+export function isPersonalFormDirty(form: PersonalFormState, initial: PersonalFormState): boolean {
+	return PERSONAL_FIELD_ORDER.some(key => form[key] !== initial[key])
+}
+
 // Trims every field and folds a blank result to `undefined` (never an empty string) — matches
 // wasm's own "absent means not set" convention for every other optional string field on this
 // worker (see setNickname's `?: string | null`).
