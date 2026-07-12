@@ -16,10 +16,10 @@ function event(timestamp: bigint): UserEvent {
 	return { id: 1n, timestamp, uuid: "11111111-1111-1111-1111-111111111111", kind: { type: "login", ip: "1.2.3.4", userAgent: "ua" } }
 }
 
-// P18 — the row used to render an absolute `toLocaleString` timestamp; it now goes through the same
+// The row used to render an absolute `toLocaleString` timestamp; it now goes through the same
 // shared lib/relativeTime.ts helper as the note/chat rows, so a recent event reads as a relative
 // label instead of a fixed date/time.
-describe("EventRow — relative timestamp (P18)", () => {
+describe("EventRow — relative timestamp", () => {
 	it("renders a relative label for a recent event, not an absolute date/time", () => {
 		vi.useFakeTimers()
 		vi.setSystemTime(1_700_000_000_000)
