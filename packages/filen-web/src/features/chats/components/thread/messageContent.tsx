@@ -2,8 +2,8 @@ import { Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import type { Chat } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
-import { segmentMessage } from "@/features/chats/lib/regexed.logic"
-import { emojiForShortcode } from "@/features/chats/lib/emoji"
+import { segmentMessage, isEmojiOnly } from "@/features/chats/lib/regexed.logic"
+import { emojiForShortcode, customEmojiImageForShortcode } from "@/features/chats/lib/emoji"
 import { parseFilenPublicLink } from "@/features/chats/lib/embeds.logic"
 import { TrustedExternalLink } from "@/features/chats/components/thread/trustedExternalLink"
 import { contactDisplayName } from "@/features/contacts/components/contactsList.logic"
@@ -15,11 +15,14 @@ import { contactDisplayName } from "@/features/contacts/components/contactsList.
 // public-link format) additionally routes through TrustedExternalLink — a one-time-per-domain trust
 // confirmation before it's ever opened; a Filen link stays a plain anchor (same domain, resolved
 // through the authenticated in-app client either way, never gated). Emoji shortcodes resolve to
-// standard unicode glyphs (emoji.ts); an unknown shortcode (a custom-pack name from a mobile/old-web
-// peer) stays literal.
+// standard unicode glyphs first, then the bundled custom-pack image subset (emoji.ts); a shortcode that
+// resolves to neither stays literal. A message whose entire (trimmed) body is emoji shortcodes renders
+// them "jumbo" — larger glyphs/images and no surrounding text sizing — mirroring mobile's emojiSize
+// heuristic (regexed.logic.ts's isEmojiOnly).
 export function MessageContent({ chat, text }: { chat: Chat; text: string | undefined }) {
 	const { t } = useTranslation("chats")
 	const segments = segmentMessage(text)
+	const jumbo = isEmojiOnly(text)
 
 	if (segments.length === 0) {
 		return null
@@ -94,15 +97,36 @@ export function MessageContent({ chat, text }: { chat: Chat; text: string | unde
 					}
 
 					case "emoji": {
-						// Resolve `:shortcode:` to a standard unicode glyph (emoji.ts); an unknown shortcode
-						// (e.g. a custom-pack name a peer sent) falls back to its literal text.
+						// Resolve `:shortcode:` to a standard unicode glyph first, then the bundled custom-pack
+						// image subset; a shortcode outside both (e.g. a custom-pack name outside the bundled
+						// subset, or a peer's genuinely unknown one) falls back to its literal text.
 						const glyph = emojiForShortcode(segment.shortcode)
 
-						return glyph !== undefined ? (
-							<Fragment key={index}>{glyph}</Fragment>
-						) : (
-							<Fragment key={index}>:{segment.shortcode}:</Fragment>
-						)
+						if (glyph !== undefined) {
+							return (
+								<span
+									key={index}
+									className={jumbo ? "text-3xl leading-none" : undefined}
+								>
+									{glyph}
+								</span>
+							)
+						}
+
+						const customImageUrl = customEmojiImageForShortcode(segment.shortcode)
+
+						if (customImageUrl !== undefined) {
+							return (
+								<img
+									key={index}
+									src={customImageUrl}
+									alt={`:${segment.shortcode}:`}
+									className={cn("inline-block object-contain align-text-bottom", jumbo ? "size-8" : "size-5")}
+								/>
+							)
+						}
+
+						return <Fragment key={index}>:{segment.shortcode}:</Fragment>
 					}
 
 					default:

@@ -247,7 +247,12 @@ export function Composer({
 	}
 
 	function selectEmoji(suggestion: EmojiSuggestion, query: TriggerQuery): void {
-		applyReplacement(applyEmoji(draft, query, suggestion.char))
+		// Standard completes to its unicode glyph; a custom (image-backed, non-unicode) shortcode has no
+		// glyph to insert, so it completes to the literal `:name:` token instead — the same text the
+		// message-render pipeline resolves back to the bundled image (emoji.ts / messageContent.tsx).
+		const replacement = suggestion.kind === "standard" ? suggestion.char : `:${suggestion.name}:`
+
+		applyReplacement(applyEmoji(draft, query, replacement))
 	}
 
 	function selectActive(): void {
@@ -507,7 +512,7 @@ export function Composer({
 							})
 						: emojiItems.map((suggestion, index) => (
 								<button
-									key={suggestion.name}
+									key={`${suggestion.kind}-${suggestion.name}`}
 									type="button"
 									className={cn(
 										"flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left",
@@ -521,7 +526,15 @@ export function Composer({
 										}
 									}}
 								>
-									<span className="w-7 shrink-0 text-center text-lg">{suggestion.char}</span>
+									{suggestion.kind === "custom" ? (
+										<img
+											src={suggestion.imageUrl}
+											alt=""
+											className="size-7 shrink-0 object-contain"
+										/>
+									) : (
+										<span className="w-7 shrink-0 text-center text-lg">{suggestion.char}</span>
+									)}
 									<span className="truncate text-sm text-muted-foreground">:{suggestion.name}:</span>
 								</button>
 							))}

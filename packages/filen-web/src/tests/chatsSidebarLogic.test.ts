@@ -95,6 +95,50 @@ describe("filterChats", () => {
 		expect(filterChats([undecryptable], "", SELF).map(c => c.uuid)).toEqual([undecryptable.uuid])
 		expect(filterChats([undecryptable], "anything", SELF)).toEqual([])
 	})
+
+	// P8 — search also matches the conversation's last-message text (name/email/nickname already covered
+	// above), same as mobile's list search.
+	it("matches on the last-message text", () => {
+		const chat = mockChat("a", { name: "Untitled", lastMessage: mockMessage({ message: "let's meet at noon" }) })
+		const other = mockChat("b", { name: "Other", lastMessage: mockMessage({ message: "unrelated" }) })
+
+		expect(filterChats([chat, other], "meet at noon", SELF).map(c => c.uuid)).toEqual([chat.uuid])
+	})
+
+	// L11 — a chat the viewer merely joined (not owned) and that has never had a message is hidden from
+	// the list entirely; an owned-but-empty chat, or any chat with at least one message regardless of
+	// ownership, still shows. Applies to both the empty-search and term-search paths.
+	describe("owned-or-has-a-message visibility", () => {
+		it("hides a chat with no messages that the viewer does not own", () => {
+			const invitedEmpty = mockChat("a", { ownerId: 2n })
+
+			expect(filterChats([invitedEmpty], "", SELF)).toEqual([])
+		})
+
+		it("keeps an owned chat even with no messages yet", () => {
+			const ownedEmpty = mockChat("a", { ownerId: SELF })
+
+			expect(filterChats([ownedEmpty], "", SELF).map(c => c.uuid)).toEqual([ownedEmpty.uuid])
+		})
+
+		it("keeps a non-owned chat once it has at least one message", () => {
+			const invitedWithMessage = mockChat("a", { ownerId: 2n, lastMessage: mockMessage() })
+
+			expect(filterChats([invitedWithMessage], "", SELF).map(c => c.uuid)).toEqual([invitedWithMessage.uuid])
+		})
+
+		it("hides an unowned, message-less chat from a term search too, not just the empty-search list", () => {
+			const invitedEmpty = mockChat("a", { ownerId: 2n, name: "Weekend Plans" })
+
+			expect(filterChats([invitedEmpty], "weekend", SELF)).toEqual([])
+		})
+
+		it("treats an unresolved current-user id as not-owner, hiding message-less chats", () => {
+			const chat = mockChat("a", { ownerId: 1n })
+
+			expect(filterChats([chat], "", undefined)).toEqual([])
+		})
+	})
 })
 
 describe("chatHasUnread (derived, D4)", () => {

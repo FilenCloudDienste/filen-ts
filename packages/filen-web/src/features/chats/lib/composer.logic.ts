@@ -208,10 +208,12 @@ export function applyMention(value: string, mention: TriggerQuery, participant: 
 	return applyReplacement(value, mention.start, mention.start + 1 + mention.query.length, `@${participant.email} `)
 }
 
-// Emoji completes to the native unicode glyph (+ a trailing space), NOT a `:shortcode:` — the web renders
-// unicode, so it stores unicode (see emoji.ts header). A trailing space keeps typing flowing.
-export function applyEmoji(value: string, emoji: TriggerQuery, glyph: string): Replacement {
-	return applyReplacement(value, emoji.start, emoji.start + 1 + emoji.query.length, `${glyph} `)
+// Replaces the in-progress `:token` with the given completion text (+ a trailing space to keep typing
+// flowing). A standard emoji completes to its native unicode glyph; a custom (image-backed) one has no
+// glyph, so the caller passes the literal `:name:` shortcode instead — composer.tsx's selectEmoji picks
+// which.
+export function applyEmoji(value: string, emoji: TriggerQuery, replacement: string): Replacement {
+	return applyReplacement(value, emoji.start, emoji.start + 1 + emoji.query.length, `${replacement} `)
 }
 
 // The last CONFIRMED own message eligible for an ArrowUp edit: newest-first own, decryptable, committed

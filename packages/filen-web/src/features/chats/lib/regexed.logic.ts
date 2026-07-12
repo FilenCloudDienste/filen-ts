@@ -142,10 +142,9 @@ export function segmentMessage(text: string | undefined): MessageSegment[] {
 }
 
 // A message is "emoji-only" (jumbo sizing candidate) when it contains at least one emoji shortcode and,
-// once every shortcode is removed, only whitespace remains — mirrors mobile's emojiSize heuristic. The
-// jumbo IMAGE render itself is not wired to any component yet (it needs the shared custom-emoji pack,
-// which this web build does not ship — see emoji.ts); this predicate is exported now so
-// the sizing decision has a tested home.
+// once every shortcode is removed, only whitespace remains — mirrors mobile's emojiSize heuristic. Wired
+// into messageContent.tsx: an emoji-only message renders its glyphs/images larger (32px-equivalent vs the
+// normal 20px-equivalent), matching mobile's emojiSize 32/20 split exactly.
 export function isEmojiOnly(text: string | undefined): boolean {
 	if (text === undefined || text.length === 0) {
 		return false

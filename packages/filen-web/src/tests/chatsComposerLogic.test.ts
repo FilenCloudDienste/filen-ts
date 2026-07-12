@@ -19,7 +19,7 @@ import {
 	lastEditableOwnMessage,
 	appendAttachmentUrl
 } from "@/features/chats/lib/composer.logic"
-import { emojiForShortcode } from "@/features/chats/lib/emoji"
+import { emojiForShortcode, customEmojiImageForShortcode } from "@/features/chats/lib/emoji"
 
 // Pure composer core — no React/store/IO. Uuid-shaped fields are the SDK's branded UuidStr; literal
 // strings with 3+ dashes satisfy that template type directly.
@@ -198,6 +198,25 @@ describe("activeEmojiQuery + emoji application", () => {
 	it("resolves a shortcode to unicode and leaves an unknown one undefined", () => {
 		expect(emojiForShortcode("fire")).toBe("🔥")
 		expect(emojiForShortcode("definitely_not_a_real_emoji")).toBeUndefined()
+	})
+
+	it("sources the bundled custom emoji pack into the suggestion list alongside standard shortcodes", () => {
+		const items = filterEmojiSuggestions("kekw", 8)
+
+		expect(items).toEqual([{ kind: "custom", name: "kekw", imageUrl: expect.any(String) as string }])
+	})
+
+	it("completes a custom-pack suggestion to its literal shortcode text, not a glyph", () => {
+		// composer.tsx's selectEmoji: a "custom" suggestion has no unicode glyph, so it completes to
+		// `:name:` — the same text messageContent.tsx resolves back to the bundled image.
+		const result = applyEmoji("say :kekw", { start: 4, query: "kekw" }, ":kekw:")
+
+		expect(result.value).toBe("say :kekw: ")
+	})
+
+	it("resolves a bundled custom-pack shortcode to its image url and leaves an unknown one undefined", () => {
+		expect(customEmojiImageForShortcode("kekw")).toEqual(expect.any(String))
+		expect(customEmojiImageForShortcode("definitely_not_a_real_custom_emoji")).toBeUndefined()
 	})
 })
 
