@@ -8,7 +8,8 @@ import type {
 	SharedFile,
 	SharingRole,
 	ShareInfo,
-	AnyDirWithContext
+	AnyDirWithContext,
+	LinkedFile
 } from "@filen/sdk-rs"
 
 // Extra fields every DriveItem carries beyond its raw wasm shape (mirrors filen-mobile's
@@ -204,6 +205,60 @@ function narrowDir(raw: NarrowableDirInput): DriveItem {
 			shareSource: raw
 		}
 	}
+}
+
+// Wraps a resolved Filen file-link (a `LinkedFile` — not a tree member, no real parent directory) into
+// a synthetic, self-parented DriveItem, so a chat/note file-link embed can feed the SAME preview
+// machinery (previewType, PreviewOverlay's "drive" arm, download) every owned file already uses — no
+// second, external-only viewer path. Mirrors filen-mobile's lib/sdkUnwrap.ts::linkedFileIntoDriveItem
+// field-for-field (decoded FileMeta built from the linked file's own name/mime/size/timestamp/key,
+// self-parented, canMakeThumbnail false), but routes the fabricated wasm `File` through narrowItem —
+// the SAME narrowing every owned file already goes through — rather than hand-building the DriveItem
+// union arm a second time. The wasm SDK's AnyFile union is `LinkedFile | SharedFile | File`, so every
+// downstream consumer that narrows this item back to an AnyFile (narrowToAnyFile, previewStreamUrl,
+// downloadFile) already accepts the fabricated shape with zero SDK/worker/service-worker change.
+// name/mime resolve to a safe fallback (the uuid / a generic octet-stream) when the link's own
+// metadata arrives still-Encrypted — mirrors resolveFilenLinkData's identical decryptedName narrow.
+export function linkedFileIntoDriveItem(file: LinkedFile): DriveItem {
+	const name = "Decrypted" in file.name ? file.name.Decrypted : file.uuid
+	const mime = "Decrypted" in file.mime ? file.mime.Decrypted : "application/octet-stream"
+
+	return narrowItem({
+		uuid: file.uuid,
+		meta: {
+			type: "decoded",
+			data: {
+				name,
+				mime,
+				size: file.size,
+				version: file.version,
+				key: file.fileKey,
+				created: file.timestamp,
+				modified: file.timestamp
+			}
+		},
+		parent: file.uuid,
+		size: file.size,
+		favorited: false,
+		region: file.region,
+		bucket: file.bucket,
+		timestamp: file.timestamp,
+		chunks: file.chunks,
+		canMakeThumbnail: false
+	})
+}
+
+// True only for a `linkedFileIntoDriveItem` fabrication: a plain "file" arm whose `parent` equals its
+// OWN uuid. A genuine owned file's parent is always a real, distinct directory (or the account root);
+// the two DriveItem arms that legitimately self-parent for their own reasons (sharedRootFile,
+// sharedRootDirectory — see narrowFile/narrowDir's own comments) tag as a DIFFERENT `.type`, so this
+// stays unique to the chat/note-embed adapter's own output. Gates destructive drive actions (rename/
+// move/trash/share/versions — previewOverlay.logic.ts's previewMenuVisible) out of a preview opened
+// from an embed: the item is neither owned nor a real tree member, so a mutation attempted against it
+// would at best error against the backend and at worst act on a same-uuid file the viewer happens to
+// also own — never a case this app should surface UI for.
+export function isLinkedEmbedItem(item: DriveItem): boolean {
+	return item.type === "file" && item.data.parent === item.data.uuid
 }
 
 // Collapses any of the six arms onto the base directory|file projection: the base arms pass through

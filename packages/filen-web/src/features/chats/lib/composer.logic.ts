@@ -34,9 +34,12 @@ export function canSend(value: string): boolean {
 // Attach-menu pre-gate — UNLIKE send above, attach genuinely needs network right now (it starts an
 // upload / opens the drive picker, neither of which queues), so this one DOES gate on connectivity.
 // Kept alongside canSend precisely so the asymmetry between them reads as deliberate, not an
-// oversight — see composer.tsx's own header comment.
-export function isAttachDisabled(uploadingCount: number, isOnline: boolean): boolean {
-	return uploadingCount > 0 || !isOnline
+// oversight — see composer.tsx's own header comment. Also pre-gated on the account's own Pro status —
+// createFileLink/createDirectoryLink (attachments.ts's own tail) reject on a free account server-side
+// either way, but surfacing that AFTER an upload has already run is a wasted round trip and a late,
+// confusing rejection; disabling the trigger up front is the proactive version of the same gate.
+export function isAttachDisabled(uploadingCount: number, isOnline: boolean, isPremium: boolean): boolean {
+	return uploadingCount > 0 || !isOnline || !isPremium
 }
 
 // Inserts a just-created attachment public-link url at the END of the current draft — mobile/old-web

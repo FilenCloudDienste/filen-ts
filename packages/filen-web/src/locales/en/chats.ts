@@ -262,16 +262,20 @@ export const chats = {
 	chatMessageDeleteDialogBody: "Are you sure you want to delete this message? This cannot be undone.",
 
 	// ── Embeds ───────────────────────────────────────────────────────────────────
-	/** Filen-link embed card — subtitle under the name for a directory link */
+	/** Filen-link embed card — subtitle under the name for a directory link before it resolves (or on resolution failure) */
 	chatEmbedFilenDirectory: "Filen directory",
-	/** Filen-link embed card — subtitle under the name for a file link */
+	/** Filen-link embed card — subtitle under the name for a file link before it resolves (or on resolution failure) */
 	chatEmbedFilenFile: "Filen file",
 	/** Media embed — accessible label on the loading skeleton while the content-type probe is in flight */
 	chatEmbedLoading: "Loading preview…",
-	/** Media embed — accessible label on the click-to-open-preview image button */
+	/** Media embed / Filen-link previewable-card — accessible label on the click-to-open-preview control */
 	chatEmbedOpenPreview: "Open preview of {{name}}",
+	/** Filen-link card — accessible label for a non-previewable file / directory link's new-tab open control */
+	chatEmbedOpenNewTab: "Open {{name}} in a new tab",
 	/** Composer attach menu — trigger button accessible label */
 	chatComposerAttach: "Attach",
+	/** Composer attach menu — trigger tooltip when disabled for a non-Pro account (pre-gated) */
+	chatComposerAttachPremiumRequired: "Attachments require a Pro subscription",
 	/** Composer attach menu — uploads a local file */
 	chatComposerAttachUpload: "Upload a file",
 	/** Composer attach menu — opens the Drive picker */
@@ -280,6 +284,12 @@ export const chats = {
 	chatAttachDriveDialogTitle: "Attach from Drive",
 	/** Drive-attach picker — confirm/select hint shown under a selectable file row (not a button, click-to-attach) */
 	chatAttachDriveDialogHint: "Click a file to attach it",
+	/** External-link trust confirmation — dialog title, shown once per not-yet-trusted domain */
+	chatLinkTrustTitle: "Open external link?",
+	/** External-link trust confirmation — body, {{domain}} is the link's own hostname */
+	chatLinkTrustBody: "This link leads to {{domain}}, outside Filen. You won't be asked again for this domain.",
+	/** External-link trust confirmation — confirm button (opens the link in a new tab and remembers the domain) */
+	chatLinkTrustConfirm: "Open link",
 
 	// ── Typing indicators ────────────────────────────────────────────────────────
 	/** Typing indicator — a single remote user is typing (thread footer + sidebar row preview) */

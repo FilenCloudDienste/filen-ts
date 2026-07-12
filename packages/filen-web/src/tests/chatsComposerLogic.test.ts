@@ -95,13 +95,21 @@ describe("character-limit gating", () => {
 	})
 
 	it("isAttachDisabled disables the attach menu while offline", () => {
-		expect(isAttachDisabled(0, false)).toBe(true)
-		expect(isAttachDisabled(0, true)).toBe(false)
+		expect(isAttachDisabled(0, false, true)).toBe(true)
+		expect(isAttachDisabled(0, true, true)).toBe(false)
 	})
 
 	it("isAttachDisabled disables the attach menu while an upload is already in flight, online or not", () => {
-		expect(isAttachDisabled(1, true)).toBe(true)
-		expect(isAttachDisabled(1, false)).toBe(true)
+		expect(isAttachDisabled(1, true, true)).toBe(true)
+		expect(isAttachDisabled(1, false, true)).toBe(true)
+	})
+
+	it("isAttachDisabled pre-gates a non-Pro account — even idle and online", () => {
+		expect(isAttachDisabled(0, true, false)).toBe(true)
+	})
+
+	it("isAttachDisabled is enabled only when idle, online, AND Pro", () => {
+		expect(isAttachDisabled(0, true, true)).toBe(false)
 	})
 })
 

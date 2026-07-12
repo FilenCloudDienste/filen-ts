@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, UuidStr, SharedDir, SharedRootDir, SharedFile, SharingRole } from "@filen/sdk-rs"
+import type { Dir, File, UuidStr, SharedDir, SharedRootDir, SharedFile, SharingRole, LinkedFile } from "@filen/sdk-rs"
 import {
 	asDirectoryOrFile,
 	getSharerIdentity,
+	isLinkedEmbedItem,
 	keepAgainstIncomingDriveItem,
+	linkedFileIntoDriveItem,
 	narrowItem,
 	upsertDriveItem,
 	type DriveItem
@@ -132,6 +134,101 @@ function namedDir(uuidLabel: string, name: string, overrides: Partial<Dir> = {})
 function undecryptableDir(uuidLabel: string): DriveItem {
 	return narrowItem(mockDir({ uuid: testUuid(uuidLabel), meta: { type: "encrypted", data: "ciphertext" } }))
 }
+
+function mockLinkedFile(overrides: Partial<LinkedFile> = {}): LinkedFile {
+	return {
+		uuid: "55555555-5555-5555-5555-555555555555",
+		name: { Decrypted: "vacation.jpg" },
+		mime: { Decrypted: "image/jpeg" },
+		size: 4_096n,
+		chunks: 2n,
+		region: "de-1",
+		bucket: "filen-1",
+		version: 2,
+		timestamp: 1_700_000_000_000n,
+		fileKey: "the-file-key",
+		linkedTag: true,
+		...overrides
+	}
+}
+
+describe("linkedFileIntoDriveItem", () => {
+	it("fabricates a decoded, self-parented file item from a resolved LinkedFile's own fields", () => {
+		const item = linkedFileIntoDriveItem(mockLinkedFile())
+
+		if (item.type !== "file") {
+			throw new Error("expected a file arm")
+		}
+
+		expect(item.data.uuid).toBe("55555555-5555-5555-5555-555555555555")
+		expect(item.data.parent).toBe("55555555-5555-5555-5555-555555555555") // self-parented — not a real tree member
+		expect(item.data.size).toBe(4_096n)
+		expect(item.data.region).toBe("de-1")
+		expect(item.data.bucket).toBe("filen-1")
+		expect(item.data.chunks).toBe(2n)
+		expect(item.data.canMakeThumbnail).toBe(false)
+		expect(item.data.favorited).toBe(false)
+		expect(item.data.undecryptable).toBe(false)
+		expect(item.data.decryptedMeta).toEqual({
+			name: "vacation.jpg",
+			mime: "image/jpeg",
+			size: 4_096n,
+			key: "the-file-key",
+			version: 2,
+			created: 1_700_000_000_000n,
+			modified: 1_700_000_000_000n
+		})
+	})
+
+	it("falls back to the uuid/a generic mime when the link's own name/mime arrive still-Encrypted", () => {
+		const item = linkedFileIntoDriveItem(mockLinkedFile({ name: { Encrypted: "cipher-name" }, mime: { Encrypted: "cipher-mime" } }))
+
+		if (item.type !== "file") {
+			throw new Error("expected a file arm")
+		}
+
+		// decryptedMeta is still populated (the fabricated meta is always "decoded") — only its name/mime
+		// values are the safe fallback, never the raw ciphertext.
+		expect(item.data.undecryptable).toBe(false)
+		expect(item.data.decryptedMeta?.name).toBe("55555555-5555-5555-5555-555555555555")
+		expect(item.data.decryptedMeta?.mime).toBe("application/octet-stream")
+	})
+
+	it("preserves bigint fields exactly, including magnitudes beyond Number.MAX_SAFE_INTEGER", () => {
+		const hugeSize = 9_007_199_254_740_993n
+		const item = linkedFileIntoDriveItem(mockLinkedFile({ size: hugeSize }))
+
+		if (item.type !== "file") {
+			throw new Error("expected a file arm")
+		}
+
+		expect(item.data.size).toBe(hugeSize)
+		expect(item.data.decryptedMeta?.size).toBe(hugeSize)
+	})
+})
+
+describe("isLinkedEmbedItem", () => {
+	it("is true for a linkedFileIntoDriveItem fabrication", () => {
+		expect(isLinkedEmbedItem(linkedFileIntoDriveItem(mockLinkedFile()))).toBe(true)
+	})
+
+	it("is false for a genuine owned file (real, distinct parent)", () => {
+		expect(isLinkedEmbedItem(narrowItem(mockFile()))).toBe(false)
+	})
+
+	it("is false for a directory arm", () => {
+		expect(isLinkedEmbedItem(narrowItem(mockDir()))).toBe(false)
+	})
+
+	it("is false for a sharedRootFile — a DIFFERENT arm that also self-parents for its own reasons", () => {
+		// mockSharedFile (defined below, hoisted) has no `favorited` field, so narrowItem routes it to
+		// the sharedRootFile arm — the ONE other case that self-parents (see narrowFile's own comment).
+		const item = narrowItem(mockSharedFile())
+
+		expect(item.type).toBe("sharedRootFile")
+		expect(isLinkedEmbedItem(item)).toBe(false)
+	})
+})
 
 describe("keepAgainstIncomingDriveItem", () => {
 	it("drops the existing row when its uuid matches the incoming item", () => {

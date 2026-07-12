@@ -37,6 +37,7 @@ import { useChatComposerEntry, useChatComposerStore } from "@/features/chats/sto
 import { loadDraft, saveDraftDebounced } from "@/features/chats/lib/drafts"
 import { AttachDriveDialog } from "@/features/chats/components/thread/attachDriveDialog"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { useAccountQuery } from "@/queries/account"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
@@ -76,6 +77,11 @@ export function Composer({
 }) {
 	const { t } = useTranslation(["chats", "common"])
 	const isOnline = useIsOnline()
+	// Pre-gates the attach menu for a free-tier account, proactively rather than after an upload
+	// already ran into the server's own createFileLink/createDirectoryLink rejection (attachments.ts's
+	// own header comment). Undefined (still loading) treats as non-Pro — the safe default while the
+	// account query is in flight, same posture as gating on `isOnline` before its first paint.
+	const isPremium = useAccountQuery().data?.isPremium === true
 	const chatUuid = chat.uuid
 	const entry = useChatComposerEntry(chatUuid)
 	const draft = entry.draft
@@ -574,9 +580,17 @@ export function Composer({
 									// Attach-menu pre-gate — both entries need network right away (an upload/
 									// drive-attach start, not a durably-queued send), unlike the send button below,
 									// which stays enabled offline by design (its outbox queues and flushes later).
-									disabled={isAttachDisabled(uploadingCount, isOnline)}
+									// Also pre-gated on Pro status — offline wins the tooltip when both apply, since
+									// reconnecting alone can't fix a non-Pro rejection but going online can.
+									disabled={isAttachDisabled(uploadingCount, isOnline, isPremium)}
 									aria-label={t("chatComposerAttach")}
-									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+									title={
+										!isOnline
+											? t("common:offlineActionDisabled")
+											: !isPremium
+												? t("chatComposerAttachPremiumRequired")
+												: undefined
+									}
 								>
 									<PaperclipIcon />
 								</Button>

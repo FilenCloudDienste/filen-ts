@@ -1,5 +1,8 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
+import type { LinkedFile } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
+import { linkedFileIntoDriveItem } from "@/features/drive/lib/item"
+import { previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 import {
 	embedCandidatesForLinks,
 	contentTypeMatchesCategory,
@@ -35,7 +38,20 @@ export type ChatLinkResolution =
 			kind: "filenLink"
 			link: FilenPublicLink
 			success: true
-			data: { type: "file"; name: string | null; size: bigint } | { type: "directory"; name: string | null }
+			data:
+				| {
+						type: "file"
+						name: string | null
+						size: bigint
+						// The resolved LinkedFile itself, plus the FULL previewType category it maps to via
+						// linkedFileIntoDriveItem (item.ts) — the renderer feeds the SAME fabricated item into
+						// PreviewOverlay's drive arm to actually preview it, so this resolves the category from
+						// that identical adapter output (a strict superset of the name-only previewCategoryForName:
+						// extension-first, mime-fallback) rather than a second, possibly-diverging classification.
+						previewCategory: PreviewCategory
+						linkedFile: LinkedFile
+				  }
+				| { type: "directory"; name: string | null; timestamp: bigint }
 	  }
 	| { url: string; kind: "media"; category: DirectMediaCategory; success: false }
 	| { url: string; kind: "media"; category: DirectMediaCategory; success: true; contentType: string }
@@ -79,20 +95,32 @@ function decryptedName(name: { Decrypted: string } | { Encrypted: unknown }): st
 	return "Decrypted" in name ? name.Decrypted : null
 }
 
-async function resolveFilenLinkData(
-	link: FilenPublicLink
-): Promise<{ type: "file"; name: string | null; size: bigint } | { type: "directory"; name: string | null } | null> {
+type ResolvedFilenLinkData = Extract<Extract<ChatLinkResolution, { success: true }>, { kind: "filenLink" }>["data"]
+
+async function resolveFilenLinkData(link: FilenPublicLink): Promise<ResolvedFilenLinkData | null> {
 	try {
 		if (link.kind === "file") {
 			const file = await sdkApi.getLinkedFile(link.linkUuid, link.key)
 
-			return { type: "file", name: decryptedName(file.name), size: file.size }
+			return {
+				type: "file",
+				name: decryptedName(file.name),
+				size: file.size,
+				previewCategory: previewType(linkedFileIntoDriveItem(file)),
+				linkedFile: file
+			}
 		}
 
 		const info = await sdkApi.getDirPublicLinkInfo(link.linkUuid, link.key)
 		const meta = info.root.inner.meta
 
-		return { type: "directory", name: meta.type === "decoded" ? meta.data.name : null }
+		return {
+			type: "directory",
+			name: meta.type === "decoded" ? meta.data.name : null,
+			// A decoded dir's own optional `created` wins; otherwise the root's raw upload timestamp —
+			// mirrors formatCreatedDate's identical created-or-timestamp fallback (drive/lib/format.ts).
+			timestamp: (meta.type === "decoded" ? meta.data.created : undefined) ?? info.root.inner.timestamp
+		}
 	} catch {
 		return null
 	}

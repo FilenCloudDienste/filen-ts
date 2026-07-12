@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File } from "@filen/sdk-rs"
-import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { narrowItem, linkedFileIntoDriveItem, type DriveItem } from "@/features/drive/lib/item"
 
 // previewOverlay.logic.ts's previewMenuActions pulls in itemMenu.logic.ts, which imports
 // features/drive/lib/download.ts (startDownloads) — unresolvable/unwanted under node vitest, same
@@ -138,5 +138,23 @@ describe("previewMenuVisible (drive-sourced items only)", () => {
 
 	it("is false for the external arm — no DriveItem for driveItemActions to gate against", () => {
 		expect(previewMenuVisible({ type: "external", url: "https://example.com/a.png", name: "a.png" })).toBe(false)
+	})
+
+	it("is false for a chat/note embed's fabricated linked-file item — neither owned nor a real tree member", () => {
+		const linkedItem = linkedFileIntoDriveItem({
+			uuid: "44444444-4444-4444-4444-444444444444",
+			name: { Decrypted: "shared.pdf" },
+			mime: { Decrypted: "application/pdf" },
+			size: 2_048n,
+			chunks: 1n,
+			region: "de-1",
+			bucket: "filen-1",
+			version: 2,
+			timestamp: 1_700_000_000_000n,
+			fileKey: "key",
+			linkedTag: true
+		})
+
+		expect(previewMenuVisible({ type: "drive", item: linkedItem })).toBe(false)
 	})
 })

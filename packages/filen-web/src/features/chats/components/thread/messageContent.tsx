@@ -4,13 +4,19 @@ import type { Chat } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
 import { segmentMessage } from "@/features/chats/lib/regexed.logic"
 import { emojiForShortcode } from "@/features/chats/lib/emoji"
+import { parseFilenPublicLink } from "@/features/chats/lib/embeds.logic"
+import { TrustedExternalLink } from "@/features/chats/components/thread/trustedExternalLink"
 import { contactDisplayName } from "@/features/contacts/components/contactsList.logic"
 
 // Renders one message body from the pure segment list. Every branch emits a React text node or element —
 // never parsed HTML, never dangerouslySetInnerHTML — so injection is structurally impossible.
 // Links are hardened at the segment layer (regexed.logic.hardenLinkHref) AND rendered with
-// rel="noopener noreferrer nofollow" + target="_blank". Emoji shortcodes resolve to standard unicode
-// glyphs (emoji.ts); an unknown shortcode (a custom-pack name from a mobile/old-web peer) stays literal.
+// rel="noopener noreferrer nofollow" + target="_blank". A genuinely EXTERNAL link (not this app's own
+// public-link format) additionally routes through TrustedExternalLink — a one-time-per-domain trust
+// confirmation before it's ever opened; a Filen link stays a plain anchor (same domain, resolved
+// through the authenticated in-app client either way, never gated). Emoji shortcodes resolve to
+// standard unicode glyphs (emoji.ts); an unknown shortcode (a custom-pack name from a mobile/old-web
+// peer) stays literal.
 export function MessageContent({ chat, text }: { chat: Chat; text: string | undefined }) {
 	const { t } = useTranslation("chats")
 	const segments = segmentMessage(text)
@@ -39,18 +45,33 @@ export function MessageContent({ chat, text }: { chat: Chat; text: string | unde
 							</code>
 						)
 
-					case "link":
+					case "link": {
+						const linkClassName = "text-primary underline underline-offset-2 hover:no-underline"
+
+						// A Filen public link is this app's own domain — no external-navigation trust gate,
+						// same posture as the embed card below it (filenLinkCard.tsx) opens with.
+						if (parseFilenPublicLink(segment.href) !== null) {
+							return (
+								<a
+									key={index}
+									href={segment.href}
+									target="_blank"
+									rel="noopener noreferrer nofollow"
+									className={linkClassName}
+								>
+									{segment.href}
+								</a>
+							)
+						}
+
 						return (
-							<a
+							<TrustedExternalLink
 								key={index}
 								href={segment.href}
-								target="_blank"
-								rel="noopener noreferrer nofollow"
-								className="text-primary underline underline-offset-2 hover:no-underline"
-							>
-								{segment.href}
-							</a>
+								className={linkClassName}
+							/>
 						)
+					}
 
 					case "mention": {
 						const label = segment.everyone
