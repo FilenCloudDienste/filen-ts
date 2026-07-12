@@ -5,7 +5,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
-import { type OutboxChannelTransport } from "@/lib/storage/outboxChannel"
+import { type OutboxChannelTransport, type OutboxRole } from "@/lib/storage/outboxChannel"
 import { chatsQueryUpsert, chatsQueryGet, chatsQueryReplaceAll, fetchChats } from "@/features/chats/queries/chats"
 import { chatMessagesQueryUpdate } from "@/features/chats/queries/chatMessages"
 import useChatsInflightStore, { type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
@@ -13,6 +13,7 @@ import {
 	mergeChatInflight,
 	reconcileChatFollower,
 	buildOptimisticMessage,
+	CommittedIdLedger,
 	inflightChatMessagesSchema,
 	isNetworkClassError,
 	isRetryableAuthError,
@@ -64,14 +65,23 @@ export class Sync {
 	// gates the LOOP: it stops new sends from starting and suppresses any post-abort disk write, so a
 	// logout wipe is never resurrected by a late flush.
 	private abortController: AbortController = new AbortController()
-	// Multi-tab state. `role` defaults to "leader" so a lone tab and every unit test are the unchanged
-	// single-tab path. `transport` is null until the coordinator wires a channel (single-tab: stays null,
-	// every broadcast/forward is a no-op). `unacked` is FOLLOWER-only: the sends this tab has applied
-	// optimistically + forwarded but the leader has not yet confirmed via a state broadcast — they win the
-	// follower's union (so the optimistic bubble is never lost) and are re-sent on takeover.
-	private role: "leader" | "follower" = "leader"
+	// Multi-tab state as a role state machine: unresolved -> leader|follower -> shutdown. A tab starts
+	// "unresolved" — leadership is not yet decided (the coordinator wires the channel BEFORE `await storage()`
+	// resolves the real role), so leader-branch ingestion MUST no-op until start()/startAsFollower()/
+	// promoteToLeader() resolves it, or a forward arriving in that window would paint a phantom optimistic
+	// copy. start() resolves to "leader" (the single-tab default: a lone tab and every unit test call it),
+	// startAsFollower() to "follower", and a terminal cancel() (logout) flips to "shutdown". `transport` is
+	// null until the coordinator wires a channel (single-tab: stays null, every broadcast/forward is a no-op).
+	// `unacked` is FOLLOWER-only: the sends this tab has applied optimistically + forwarded but the leader has
+	// not yet confirmed via a state broadcast — they win the follower's union (so the optimistic bubble is
+	// never lost) and are re-sent on takeover.
+	private role: OutboxRole = "unresolved"
 	private transport: ChatOutboxTransport | null = null
 	private unacked: InflightChatMessages = {}
+	// Recently-committed inflightIds (leader-only). A late re-forward on a takeover whose id the leader already
+	// committed + dequeued is dropped here instead of re-sent — chat sends carry no client id, so a second push
+	// is a peer-visible duplicate. Bounded (FIFO past capacity), so it never grows without limit.
+	private readonly committedIds: CommittedIdLedger = new CommittedIdLedger()
 
 	public constructor() {
 		this.initPromise = new Promise(resolve => {
@@ -81,7 +91,7 @@ export class Sync {
 
 	// The coordinator reads this to route incoming channel messages by CURRENT role (role flips live on
 	// promotion), so a single dispatcher stays correct across a takeover.
-	public get outboxRole(): "leader" | "follower" {
+	public get outboxRole(): OutboxRole {
 		return this.role
 	}
 
@@ -91,8 +101,14 @@ export class Sync {
 		this.transport = transport
 	}
 
-	// Replay-on-launch. Mounted once in the authed shell (syncHost), never per route.
+	// Replay-on-launch. Mounted once in the authed shell (syncHost), never per route. Resolves the role to
+	// "leader" and re-arms a fresh, non-aborted signal: a terminal cancel() deliberately leaves the signal
+	// aborted (so no post-wipe flush resurrects the queue), so re-entering the shell without a reload must
+	// re-arm here or the loop would stay permanently gated.
 	public start(): void {
+		this.role = "leader"
+		this.abortController = new AbortController()
+
 		void this.restoreFromDisk()
 	}
 
@@ -133,10 +149,23 @@ export class Sync {
 	}
 
 	// LEADER: ingest a send a follower forwarded. Union it into the queue by inflightId (idempotent — a
-	// re-forward on takeover collapses), paint the leader's own message cache, persist and broadcast once
-	// durable, then kick a pass — exactly the leader-side of a local send.
+	// re-forward on takeover of a STILL-QUEUED id collapses), paint the leader's own message cache, persist and
+	// broadcast once durable, then kick a pass — exactly the leader-side of a local send. No-ops unless resolved
+	// to leader (an "unresolved" tab must not paint a phantom before its role is decided).
 	public ingestRemoteEnqueue(msg: RemoteChatEnqueue): void {
 		if (this.role !== "leader") {
+			return
+		}
+
+		// A terminal shutdown aborts the loop then wipes kv; ingesting after that would re-queue + re-persist a
+		// send onto a wiping tab. Never ingest once aborted.
+		if (isAborted(this.abortController.signal)) {
+			return
+		}
+
+		// Drop a re-forward of an already-committed id: past dequeue there is nothing to collapse into, so
+		// applying it would re-queue a phantom and push a duplicate (no server dedup token for chat sends).
+		if (this.committedIds.has(msg.message.inflightId)) {
 			return
 		}
 
@@ -267,11 +296,16 @@ export class Sync {
 		return Promise.resolve(true)
 	}
 
-	// Wired into the logout path BEFORE the local wipe: abort the loop and suppress further disk writes.
-	// A fresh controller is installed so a later start() in the same tab is not permanently aborted.
+	// TERMINAL shutdown — wired into the logout path BEFORE the local wipe. Three moves, all load-bearing for
+	// the "no plaintext queue survives logout" invariant: flip out of leader ("shutdown") so no forwarded send
+	// is ingested; abort the loop so no in-flight pass flushes after the wipe; close the cross-tab channel so no
+	// late peer message can reach this tearing-down tab. Deliberately NO fresh controller (unlike a pass-cancel)
+	// — the signal must STAY aborted so a straggler flush can never re-write the queue after kv-clear lands;
+	// start() re-arms a fresh signal if the tab ever re-enters the authed shell without a reload.
 	public cancel(): void {
+		this.role = "shutdown"
 		this.abortController.abort()
-		this.abortController = new AbortController()
+		this.transport?.close()
 	}
 
 	// Reports persistence failure as `false` instead of throwing (it never throws). Sync-internal
@@ -286,6 +320,13 @@ export class Sync {
 		// the leader's own copy of that event flushes the real disk state.
 		if (this.role === "follower") {
 			return true
+		}
+
+		// A terminal shutdown (logout) aborts the loop then wipes kv; a flush landing after the wipe would
+		// re-write this account's plaintext queue onto disk. Refuse to persist once aborted — the callers'
+		// own abort guards are the first line, this is the defense-in-depth backstop at the disk boundary.
+		if (isAborted(this.abortController.signal)) {
+			return false
 		}
 
 		await this.initPromise
@@ -420,6 +461,10 @@ export class Sync {
 		const updatedChat = await sdkApi.sendChatMessage(chat, message.message ?? "", message.replyTo)
 
 		// ── Past the commit boundary: never re-throw below this line. ──
+		// Record the committed id so a late re-forward of it on a takeover is dropped by ingestRemoteEnqueue
+		// rather than pushed a second time (the queue entry itself is dequeued below, losing the collapse key).
+		this.committedIds.record(inflightId)
+
 		const lastMessage = updatedChat.lastMessage
 
 		// Reconcile the query caches off the committed chat: refresh the conversation row (new

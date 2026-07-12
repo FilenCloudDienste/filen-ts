@@ -86,8 +86,22 @@ export async function kvHas(key: string): Promise<boolean> {
 // so nothing new needs registering in STORAGE_METHODS.
 export async function kvClear(): Promise<void> {
 	const { api } = await storage()
-	const keys = await api.kvKeys("")
-	// allSettled, not all: on a follower each delete is an independent RPC with its own timeout;
-	// one slow delete must not abort the rest of the wipe.
-	await Promise.allSettled(keys.map(key => api.kvDelete(key)))
+
+	// Sweep TWICE. A single snapshot-then-delete leaves a hole: a write that lands AFTER the key
+	// enumeration but before its delete completes — e.g. an outbox flush already past its own abort gate,
+	// or any other in-flight persist racing logout — is never revisited and survives the "full wipe" as a
+	// decrypted row that replays on the next boot. A second sweep after the first drained catches that
+	// straggler. Bounded at two passes: the outbox channel is closed before logout reaches here, so no NEW
+	// write can originate; only an already-in-flight one remains, and it completes within the first pass.
+	for (let pass = 0; pass < 2; pass++) {
+		const keys = await api.kvKeys("")
+
+		if (keys.length === 0) {
+			return
+		}
+
+		// allSettled, not all: on a follower each delete is an independent RPC with its own timeout;
+		// one slow delete must not abort the rest of the wipe.
+		await Promise.allSettled(keys.map(key => api.kvDelete(key)))
+	}
 }

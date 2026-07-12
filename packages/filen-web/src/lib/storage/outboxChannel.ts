@@ -31,6 +31,9 @@ export interface OutboxChannelTransport<E, S> {
 	// leader → followers
 	broadcastState: (state: S) => void
 	broadcastLeaderHello: () => void
+	// Terminal teardown (logout/shutdown): detach the handler and close the channel so no late cross-tab
+	// message can reach an outbox that is tearing down — the invariant that gates the plaintext-queue wipe.
+	close: () => void
 }
 
 // Bind a channel to the transport surface — the identical mechanical mapping both features used inline:
@@ -55,8 +58,18 @@ export function makeOutboxChannelTransport<E, S>(channel: BroadcastChannel): Out
 		},
 		broadcastLeaderHello: () => {
 			post({ kind: "leaderHello" })
+		},
+		close: () => {
+			closeOutbox(channel)
 		}
 	}
+}
+
+// Tear a channel down: drop its handler first (so an in-flight dispatch cannot re-enter after close) then
+// close it. Called on the terminal outbox shutdown (logout) so no forwarded send can land on a wiping tab.
+export function closeOutbox(channel: BroadcastChannel): void {
+	channel.onmessage = null
+	channel.close()
 }
 
 // Decode + validate an envelope-encoded payload; a corrupt message is dropped (never thrown up into the
@@ -83,10 +96,16 @@ export function decodeOutboxPayload<T>(payload: string, schema: Type<T>, context
 	return out as T
 }
 
+// The outbox lifecycle as an explicit state machine: a tab starts "unresolved" (leadership not yet decided —
+// leader-branch ingestion MUST no-op so a forward arriving before the role resolves cannot paint a phantom),
+// resolves to "leader" or "follower", and a terminal cancel flips it to "shutdown" (logout — no further
+// ingest, no disk write). A Sync that only ever reports "leader"/"follower" is still a valid target.
+export type OutboxRole = "unresolved" | "leader" | "follower" | "shutdown"
+
 // The role-lifecycle a Sync class exposes to the coordinator — a live role read plus the three transitions
 // the leadership signal drives.
 export interface OutboxLeadershipTarget {
-	readonly outboxRole: "leader" | "follower"
+	readonly outboxRole: OutboxRole
 	start: () => void
 	startAsFollower: () => void
 	promoteToLeader: () => void

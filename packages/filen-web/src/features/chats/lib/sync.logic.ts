@@ -197,6 +197,50 @@ export const remoteChatEnqueueSchema = type({
 	}
 }).as<RemoteChatEnqueue>()
 
+// A bounded ledger of recently-committed inflightIds. On a leadership takeover the new leader clears its
+// unacked and announces itself; a surviving follower then re-forwards its own unacked, which can carry an id
+// the promoted leader has ALREADY committed + dequeued. That id is no longer in the queue, so the union-by-id
+// collapse in ingestRemoteEnqueue finds nothing to fold into — without this ledger the re-forward would be
+// applied as a brand-new send and pushed a SECOND time (chat sends carry no client id, so a duplicate is
+// peer-visible). The leader records every committed id here and drops a re-forward whose id is present.
+// Bounded by design: insertion-ordered with FIFO eviction past `capacity`, so a long-lived leader session can
+// never grow it without limit — the window only needs to outlast a takeover-resend round trip.
+export class CommittedIdLedger {
+	private readonly ids: Set<string> = new Set<string>()
+	private readonly capacity: number
+
+	public constructor(capacity = 512) {
+		this.capacity = Math.max(1, capacity)
+	}
+
+	public record(inflightId: string): void {
+		// Re-record moves an id to the most-recent slot so a repeatedly-seen id is not evicted prematurely.
+		if (this.ids.has(inflightId)) {
+			this.ids.delete(inflightId)
+		}
+
+		this.ids.add(inflightId)
+
+		while (this.ids.size > this.capacity) {
+			const oldest = this.ids.values().next().value
+
+			if (oldest === undefined) {
+				break
+			}
+
+			this.ids.delete(oldest)
+		}
+	}
+
+	public has(inflightId: string): boolean {
+		return this.ids.has(inflightId)
+	}
+
+	public get size(): number {
+		return this.ids.size
+	}
+}
+
 // Rebuild a follower's displayed store + its still-outstanding unacked queue from the leader's authoritative
 // broadcast. A forwarded send is CONFIRMED (dropped from unacked) once the leader's state carries its
 // inflightId — proof the leader received it; the store then mirrors the leader for that chat, so a later drain

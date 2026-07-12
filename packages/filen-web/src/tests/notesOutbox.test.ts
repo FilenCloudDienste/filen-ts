@@ -74,7 +74,8 @@ function mockTransport() {
 		sendExecuteNow: vi.fn<() => void>(),
 		requestState: vi.fn<() => void>(),
 		broadcastState: vi.fn<(state: InflightContent) => void>(),
-		broadcastLeaderHello: vi.fn<() => void>()
+		broadcastLeaderHello: vi.fn<() => void>(),
+		close: vi.fn<() => void>()
 	}
 }
 

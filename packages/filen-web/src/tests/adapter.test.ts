@@ -76,6 +76,34 @@ describe("storage adapter (Map-backed fake StorageApi)", () => {
 		expect(fakeStore.size).toBe(0)
 	})
 
+	it("kvClear leaves no row behind when a straggler write lands mid-wipe (logout resurrection guard)", async () => {
+		await kvSetJson("session", { n: 1n })
+
+		// Model a write that races the wipe: the first key enumeration snapshots ["session"], then — as that
+		// pass deletes — an in-flight persist (e.g. an outbox flush already past its own abort gate) re-adds a
+		// decrypted row the already-snapshotted delete list would never revisit. A single snapshot-then-delete
+		// leaves that row on disk to replay next boot; the second sweep must catch it. The one-shot delete hook
+		// injects exactly that post-snapshot straggler.
+		let injected = false
+		const origDelete = fakeStore.delete.bind(fakeStore)
+
+		vi.spyOn(fakeStore, "delete").mockImplementation((key: string) => {
+			const result = origDelete(key)
+
+			if (!injected) {
+				injected = true
+				fakeStore.set("inflightChatMessages", "straggler")
+			}
+
+			return result
+		})
+
+		await kvClear()
+
+		expect(fakeStore.has("inflightChatMessages")).toBe(false)
+		expect(fakeStore.size).toBe(0)
+	})
+
 	it("kvHas reports existence independent of schema — even a mismatched value counts as present", async () => {
 		await expect(kvHas("k4")).resolves.toBe(false)
 
