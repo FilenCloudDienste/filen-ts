@@ -518,6 +518,53 @@ describe("time", () => {
 		})
 	})
 
+	describe("sv-SE locale (24-hour, YMD, dash separator) — in SUPPORTED_LANGUAGES", () => {
+		// sv is in SUPPORTED_LANGUAGES; Sweden is the canonical ISO 8601 country (YYYY-MM-DD).
+		// Without the startsWith("sv") check it would silently fall through to DMY and display
+		// the wrong date order — mirrors the hu-HU regression guard above.
+		let simpleDate: typeof import("@/lib/time").simpleDate
+		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
+		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
+
+		beforeEach(async () => {
+			vi.resetModules()
+
+			vi.doMock("expo-localization", () => ({
+				getLocales: () => [{ languageTag: "sv-SE" }]
+			}))
+
+			const mod = await import("@/lib/time")
+
+			simpleDate = mod.simpleDate
+			simpleDateNoTime = mod.simpleDateNoTime
+			simpleDateNoDate = mod.simpleDateNoDate
+		})
+
+		it("formats as YMD with dash separator (not DMY)", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDate(d)
+
+			expect(result).toContain("2025-01-15")
+			// Explicitly guard against the DMY fallback that would occur if "sv" prefix were missing
+			expect(result).not.toContain("15/01/2025")
+			expect(result).not.toContain("15.01.2025")
+		})
+
+		it("simpleDateNoTime returns YMD date only", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDateNoTime(d)
+
+			expect(result).toBe("2025-01-15")
+		})
+
+		it("24-hour time in time-only output", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDateNoDate(d)
+
+			expect(result).toBe("14:30:45")
+		})
+	})
+
 	describe("fa-IR locale (24-hour, YMD, dash separator)", () => {
 		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
 

@@ -66,7 +66,8 @@ function detectLocaleInfo() {
 		lang.startsWith("fa") ||
 		lang.startsWith("hu") ||
 		lang.startsWith("lt") ||
-		lang.startsWith("mn")
+		lang.startsWith("mn") ||
+		lang.startsWith("sv")
 	) {
 		dateFormat = "YMD"
 		dateSeparator = "-"
