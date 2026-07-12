@@ -115,6 +115,21 @@ export function withSortSelection(
 	return { ...prefs, global: next }
 }
 
+// Pure mode flip — the caller persists the result via setSortPreferences. Turning perDirectory OFF
+// deliberately leaves any existing perDirectory entries in place (only the "Reset sort" action below
+// wipes them) so re-enabling the toggle later restores what the user had before, rather than
+// silently discarding it on every off/on cycle.
+export function withSortModeToggle(prefs: DrivePreferences<DriveSortBy>, perDirectory: boolean): DrivePreferences<DriveSortBy> {
+	return { ...prefs, mode: perDirectory ? "perDirectory" : "global" }
+}
+
+// Pure reset — wipes the global order back to the app default AND every per-directory override,
+// matching mobile's "Reset sort" action (screens/appearance.tsx): resets the global order and clears
+// all saved per-directory overrides in one action, regardless of which mode is currently active.
+export function resetSortPreferences(prefs: DrivePreferences<DriveSortBy>): DrivePreferences<DriveSortBy> {
+	return { ...prefs, global: DEFAULT_SORT_PREFERENCES.global, perDirectory: {} }
+}
+
 export type DriveViewMode = "list" | "grid"
 
 const VIEW_MODE_PREFERENCES_KV_KEY = "drive.viewModePreferences.v1"
@@ -161,4 +176,14 @@ export function withViewModeSelection(
 	}
 
 	return { ...prefs, global: next }
+}
+
+// Same mode-flip/reset pair as the sort preferences above, mirroring mobile's "Remember view mode per
+// directory" toggle + "Reset view" action (screens/appearance.tsx).
+export function withViewModeModeToggle(prefs: DrivePreferences<DriveViewMode>, perDirectory: boolean): DrivePreferences<DriveViewMode> {
+	return { ...prefs, mode: perDirectory ? "perDirectory" : "global" }
+}
+
+export function resetViewModePreferences(prefs: DrivePreferences<DriveViewMode>): DrivePreferences<DriveViewMode> {
+	return { ...prefs, global: DEFAULT_VIEW_MODE_PREFERENCES.global, perDirectory: {} }
 }

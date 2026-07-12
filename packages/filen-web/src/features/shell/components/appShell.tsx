@@ -22,8 +22,9 @@ import { SocketHost } from "@/features/shell/components/socketHost"
 export function AppShell() {
 	// The sidebar panel is contextual: /chats* gets the ChatsSidebar, /notes* the NotesSidebar,
 	// /settings* the SettingsSidebar, /contacts the ContactsSidebar, everything else the DriveSidebar.
-	// All five share the same panel geometry (w-52, rounded-xl, borderless), so the switch is invisible
-	// to the surrounding layout.
+	// All five share the same panel styling (rounded-xl, borderless); DriveSidebar alone is
+	// user-resizable today (useResizableSidebar) and renders its own trailing drag-handle sibling
+	// inline in this row — settings/contacts stay fixed at w-52.
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const onNotes = pathname === "/notes" || pathname.startsWith("/notes/")
 	const onChats = pathname === "/chats" || pathname.startsWith("/chats/")

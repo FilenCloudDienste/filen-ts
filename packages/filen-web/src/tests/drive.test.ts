@@ -90,6 +90,7 @@ import {
 	driveListingQueryUpdateGlobal,
 	driveNamesQueryKey,
 	fetchDirectoryListing,
+	fetchDirectoryTreeChildren,
 	fetchDirectoryNames,
 	fetchDirectorySize,
 	fetchDriveItemLinkStatus,
@@ -226,6 +227,50 @@ describe("fetchDirectoryListing", () => {
 		listDirectory.mockRejectedValueOnce(error)
 
 		await expect(fetchDirectoryListing("drive", null)).rejects.toBe(error)
+	})
+})
+
+describe("fetchDirectoryTreeChildren", () => {
+	it("filters out files, keeping only directories", async () => {
+		const dirA = mockDir({ uuid: testUuid("dir-a"), meta: { type: "decoded", data: { name: "Alpha" } } })
+		const fileA = mockFile({ uuid: testUuid("file-a") })
+		listDirectory.mockResolvedValueOnce({ dirs: [dirA], files: [fileA] })
+
+		const children = await fetchDirectoryTreeChildren(null)
+
+		expect(children).toHaveLength(1)
+		expect(children[0]?.uuid).toBe(testUuid("dir-a"))
+	})
+
+	it("sorts children by name, case-insensitively (nameAsc, independent of any listing sort preference)", async () => {
+		const dirZebra = mockDir({ uuid: testUuid("dir-z"), meta: { type: "decoded", data: { name: "zebra" } } })
+		const dirApple = mockDir({ uuid: testUuid("dir-a"), meta: { type: "decoded", data: { name: "Apple" } } })
+		const dirMango = mockDir({ uuid: testUuid("dir-m"), meta: { type: "decoded", data: { name: "mango" } } })
+		listDirectory.mockResolvedValueOnce({ dirs: [dirZebra, dirApple, dirMango], files: [] })
+
+		const children = await fetchDirectoryTreeChildren(null)
+
+		expect(children.map(child => child.name)).toEqual(["Apple", "mango", "zebra"])
+	})
+
+	it("sorts numeric suffixes naturally (Photos 2 before Photos 10), not lexicographically", async () => {
+		const photos10 = mockDir({ uuid: testUuid("dir-10"), meta: { type: "decoded", data: { name: "Photos 10" } } })
+		const photos2 = mockDir({ uuid: testUuid("dir-2"), meta: { type: "decoded", data: { name: "Photos 2" } } })
+		listDirectory.mockResolvedValueOnce({ dirs: [photos10, photos2], files: [] })
+
+		const children = await fetchDirectoryTreeChildren(null)
+
+		expect(children.map(child => child.name)).toEqual(["Photos 2", "Photos 10"])
+	})
+
+	it("targets root for a null uuid and the given uuid otherwise", async () => {
+		listDirectory.mockResolvedValueOnce({ dirs: [], files: [] })
+		await fetchDirectoryTreeChildren(null)
+		expect(listDirectory).toHaveBeenCalledWith({ kind: "root" })
+
+		listDirectory.mockResolvedValueOnce({ dirs: [], files: [] })
+		await fetchDirectoryTreeChildren("some-uuid")
+		expect(listDirectory).toHaveBeenCalledWith({ kind: "uuid", uuid: "some-uuid" })
 	})
 })
 

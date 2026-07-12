@@ -91,6 +91,22 @@ export const settings = {
 	settingsThemeDark: "Dark",
 	settingsThemeSystem: "System",
 
+	// ── Appearance: drive sort/view memory ───────────────────────────────────
+	settingsDriveMemoryTitle: "Cloud Drive organization",
+	settingsDriveMemoryDescription: "Control how sort order and view mode are remembered across directories",
+	settingsRememberSortPerDirectory: "Remember sort per directory",
+	settingsRememberSortPerDirectoryDescription: "Keep a separate sort order for each directory, instead of one order everywhere",
+	settingsResetSort: "Reset sort",
+	settingsResetSortDescription: "Reset the global sort order and clear every saved per-directory override",
+	settingsResetSortConfirmBody: "This resets the global sort order and clears every saved per-directory override. This cannot be undone.",
+	settingsResetSortSuccess: "Sort order has been reset.",
+	settingsRememberViewPerDirectory: "Remember view mode per directory",
+	settingsRememberViewPerDirectoryDescription: "Keep a separate list/grid view for each directory, instead of one view everywhere",
+	settingsResetView: "Reset view",
+	settingsResetViewDescription: "Reset the global view mode and clear every saved per-directory override",
+	settingsResetViewConfirmBody: "This resets the global view mode and clears every saved per-directory override. This cannot be undone.",
+	settingsResetViewSuccess: "View mode has been reset.",
+
 	// ── Account: preferences (versioning / login alerts) ────────────────────
 	settingsPreferencesTitle: "Preferences",
 	settingsPreferencesDescription: "Safe, reversible account settings",

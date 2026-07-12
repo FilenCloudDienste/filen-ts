@@ -33,6 +33,10 @@ import {
 	viewModePreferencesSchema,
 	withSortSelection,
 	withViewModeSelection,
+	withSortModeToggle,
+	withViewModeModeToggle,
+	resetSortPreferences,
+	resetViewModePreferences,
 	type DriveLocation,
 	type DrivePreferences,
 	type DriveViewMode
@@ -225,6 +229,49 @@ describe("withSortSelection", () => {
 	})
 })
 
+describe("withSortModeToggle", () => {
+	it("flips mode to perDirectory, leaving global and perDirectory untouched", () => {
+		const prefs: DrivePreferences<DriveSortBy> = { mode: "global", global: "nameAsc", perDirectory: { "drive:abc": "sizeAsc" } }
+
+		expect(withSortModeToggle(prefs, true)).toEqual({
+			mode: "perDirectory",
+			global: "nameAsc",
+			perDirectory: { "drive:abc": "sizeAsc" }
+		})
+	})
+
+	it("flips mode back to global WITHOUT wiping existing perDirectory entries (only reset does that)", () => {
+		const prefs: DrivePreferences<DriveSortBy> = { mode: "perDirectory", global: "nameAsc", perDirectory: { "drive:abc": "sizeAsc" } }
+
+		expect(withSortModeToggle(prefs, false)).toEqual({ mode: "global", global: "nameAsc", perDirectory: { "drive:abc": "sizeAsc" } })
+	})
+
+	it("round-trips: toggling on then off restores the exact original perDirectory map", () => {
+		const original: DrivePreferences<DriveSortBy> = {
+			mode: "global",
+			global: "nameAsc",
+			perDirectory: { "drive:abc": "sizeAsc", "drive:xyz": "typeDesc" }
+		}
+
+		const toggledOn = withSortModeToggle(original, true)
+		const toggledOff = withSortModeToggle(toggledOn, false)
+
+		expect(toggledOff).toEqual(original)
+	})
+})
+
+describe("resetSortPreferences", () => {
+	it("resets global to the default and clears every perDirectory entry, regardless of current mode", () => {
+		const prefs: DrivePreferences<DriveSortBy> = {
+			mode: "perDirectory",
+			global: "sizeDesc",
+			perDirectory: { "drive:abc": "typeAsc", "drive:xyz": "lastModifiedDesc" }
+		}
+
+		expect(resetSortPreferences(prefs)).toEqual({ mode: "perDirectory", global: DEFAULT_SORT_PREFERENCES.global, perDirectory: {} })
+	})
+})
+
 describe("view-mode preferences: get/set", () => {
 	it("returns the default when nothing is persisted", async () => {
 		await expect(getViewModePreferences()).resolves.toEqual(DEFAULT_VIEW_MODE_PREFERENCES)
@@ -297,5 +344,42 @@ describe("withViewModeSelection", () => {
 		const prefs: DrivePreferences<DriveViewMode> = { mode: "global", global: "list", perDirectory: {} }
 
 		expect(withViewModeSelection(prefs, location("recents"), "grid")).toEqual({ mode: "global", global: "grid", perDirectory: {} })
+	})
+})
+
+describe("withViewModeModeToggle", () => {
+	it("flips mode to perDirectory, leaving global and perDirectory untouched", () => {
+		const prefs: DrivePreferences<DriveViewMode> = { mode: "global", global: "list", perDirectory: { "drive:abc": "grid" } }
+
+		expect(withViewModeModeToggle(prefs, true)).toEqual({ mode: "perDirectory", global: "list", perDirectory: { "drive:abc": "grid" } })
+	})
+
+	it("round-trips: toggling on then off restores the exact original perDirectory map", () => {
+		const original: DrivePreferences<DriveViewMode> = {
+			mode: "global",
+			global: "list",
+			perDirectory: { "drive:abc": "grid", "drive:xyz": "list" }
+		}
+
+		const toggledOn = withViewModeModeToggle(original, true)
+		const toggledOff = withViewModeModeToggle(toggledOn, false)
+
+		expect(toggledOff).toEqual(original)
+	})
+})
+
+describe("resetViewModePreferences", () => {
+	it("resets global to the default and clears every perDirectory entry, regardless of current mode", () => {
+		const prefs: DrivePreferences<DriveViewMode> = {
+			mode: "perDirectory",
+			global: "grid",
+			perDirectory: { "drive:abc": "grid", "drive:xyz": "list" }
+		}
+
+		expect(resetViewModePreferences(prefs)).toEqual({
+			mode: "perDirectory",
+			global: DEFAULT_VIEW_MODE_PREFERENCES.global,
+			perDirectory: {}
+		})
 	})
 })

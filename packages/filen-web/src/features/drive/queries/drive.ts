@@ -5,6 +5,7 @@ import { queryClient } from "@/queries/client"
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
 import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink, AnyDirWithContext, DirColor, DirSizeResponse } from "@filen/sdk-rs"
+import { fastLocaleCompare } from "@filen/utils"
 import { narrowItem, asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
 import {
 	getSortPreferences,
@@ -93,14 +94,16 @@ export function directoryTreeQueryKey(uuid: string | null) {
 // node-environment unit tests can exercise it against a mocked sdkApi, same as fetchDirectoryListing.
 export async function fetchDirectoryTreeChildren(uuid: string | null): Promise<DirectoryTreeChild[]> {
 	const { dirs } = await sdkApi.listDirectory(uuid === null ? { kind: "root" } : { kind: "uuid", uuid })
-	return dirs.map(dir => {
-		const item = narrowItem(dir)
-		return {
-			uuid: item.data.uuid,
-			name: item.data.decryptedMeta?.name ?? item.data.uuid,
-			color: item.type === "directory" ? item.data.color : "default"
-		}
-	})
+	return dirs
+		.map(dir => {
+			const item = narrowItem(dir)
+			return {
+				uuid: item.data.uuid,
+				name: item.data.decryptedMeta?.name ?? item.data.uuid,
+				color: item.type === "directory" ? item.data.color : "default"
+			}
+		})
+		.sort((a, b) => fastLocaleCompare(a.name, b.name))
 }
 
 // One query per tree node, lazily fetched: a node's children are only requested once its own subtree

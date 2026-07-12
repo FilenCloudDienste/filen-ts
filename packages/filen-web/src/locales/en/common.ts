@@ -16,6 +16,8 @@ export const common = {
 	close: "Close",
 	/** Generic dialog cancel button — shared by every ConfirmDialog/TypedConfirmDialog consumer (e.g. the reset page's skip-master-keys ceremony) */
 	cancel: "Cancel",
+	/** Generic confirm button for a "reset to defaults" ConfirmDialog (e.g. the drive appearance settings' reset-sort/reset-view actions) */
+	reset: "Reset",
 	/** Generic retry button for a failed data load (e.g. the security settings page's account query) — shared by any future error-state view */
 	tryAgain: "Try again",
 	/** /no-coi error page — title shown when the page loaded without the required cross-origin isolation */

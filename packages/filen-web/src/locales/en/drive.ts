@@ -65,6 +65,8 @@ export const drive = {
 	driveTreeExpandNode: "Expand {{name}}",
 	/** Drive sidebar tree — accessible label on the chevron that collapses a directory node; {{name}} = directory name */
 	driveTreeCollapseNode: "Collapse {{name}}",
+	/** Drive sidebar — accessible label on the trailing-edge drag handle that resizes the sidebar */
+	driveSidebarResize: "Resize sidebar",
 
 	// ── Empty state ──────────────────────────────────────────────────────────
 	/** Drive page — empty-state title for a directory with no content */

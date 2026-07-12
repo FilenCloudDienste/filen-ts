@@ -1,4 +1,4 @@
-import type { ComponentType } from "react"
+import { Fragment, type ComponentType } from "react"
 import { useTranslation } from "react-i18next"
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { ChevronRightIcon, FolderClosedIcon, ClockIcon, StarIcon, Trash2Icon, UsersIcon, Share2Icon, Link2Icon } from "lucide-react"
@@ -9,6 +9,8 @@ import { useDirectoryTreeStore } from "@/features/drive/store/useDirectoryTreeSt
 import { DirectoryTree, type DirectoryTreeContext } from "@/features/drive/components/directoryTree"
 import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { StorageMeter } from "@/features/shell/components/storageMeter"
+import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
+import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
 import { Separator } from "@/components/ui/separator"
 
 type IconType = ComponentType<{ className?: string }>
@@ -146,6 +148,8 @@ export function DriveSidebar() {
 	const onDrive = pathname === "/drive" || pathname.startsWith("/drive/")
 	const activePath = onDrive ? splatToUuids(pathname.replace(/^\/drive\/?/, "")) : []
 
+	const resize = useResizableSidebar("drive")
+
 	const openMap = useDirectoryTreeStore(state => state.open)
 	const toggle = useDirectoryTreeStore(state => state.toggle)
 	// Default expanded so the tree reads as present; a persisted `false` still collapses it.
@@ -196,33 +200,44 @@ export function DriveSidebar() {
 	}
 
 	return (
-		<aside
-			// Drag region (Electron plumbing): inert in a plain browser (-webkit-app-region is ignored
-			// outside Chromium/Electron). Interactive descendants opt back out with app-region-no-drag.
-			className="hidden w-52 shrink-0 flex-col rounded-xl bg-sidebar app-region-drag md:flex"
-		>
-			<div className="flex flex-1 flex-col overflow-y-auto p-3">
-				<h2 className="truncate px-2.5 pt-1 pb-2.5 text-[15px] font-semibold">{t("driveMyDrive")}</h2>
-				<div className="flex flex-col gap-0.5">
-					<CloudDriveRoot
-						label={t("driveMyDrive")}
-						open={rootOpen}
-						onToggle={() => {
-							toggle(ROOT_KEY)
-						}}
-					/>
-					{rootOpen ? <DirectoryTree tree={tree} /> : null}
+		<Fragment>
+			<aside
+				// Drag region (Electron plumbing): inert in a plain browser (-webkit-app-region is ignored
+				// outside Chromium/Electron). Interactive descendants opt back out with app-region-no-drag.
+				// Width is user-resizable (see useResizableSidebar) — the inline style replaces what used
+				// to be a static w-52 utility class.
+				className="hidden shrink-0 flex-col rounded-xl bg-sidebar app-region-drag md:flex"
+				style={{ width: resize.width }}
+			>
+				<div className="flex flex-1 flex-col overflow-y-auto p-3">
+					<h2 className="truncate px-2.5 pt-1 pb-2.5 text-[15px] font-semibold">{t("driveMyDrive")}</h2>
+					<div className="flex flex-col gap-0.5">
+						<CloudDriveRoot
+							label={t("driveMyDrive")}
+							open={rootOpen}
+							onToggle={() => {
+								toggle(ROOT_KEY)
+							}}
+						/>
+						{rootOpen ? <DirectoryTree tree={tree} /> : null}
+					</div>
+					<p className={GROUP_HEADER_CLASS}>{t("driveGroupOther")}</p>
+					<div className="flex flex-col gap-0.5">{otherItems.map(renderItem)}</div>
+					<p className={GROUP_HEADER_CLASS}>{t("driveGroupShared")}</p>
+					<div className="flex flex-col gap-0.5">{sharedItems.map(renderItem)}</div>
 				</div>
-				<p className={GROUP_HEADER_CLASS}>{t("driveGroupOther")}</p>
-				<div className="flex flex-col gap-0.5">{otherItems.map(renderItem)}</div>
-				<p className={GROUP_HEADER_CLASS}>{t("driveGroupShared")}</p>
-				<div className="flex flex-col gap-0.5">{sharedItems.map(renderItem)}</div>
-			</div>
-			{/* Bottom block: storage-usage meter above a tonal-only separator (no hard rule). */}
-			<div className="shrink-0 px-3 pb-3">
-				<Separator className="mb-3 bg-border/50" />
-				<StorageMeter />
-			</div>
-		</aside>
+				{/* Bottom block: storage-usage meter above a tonal-only separator (no hard rule). */}
+				<div className="shrink-0 px-3 pb-3">
+					<Separator className="mb-3 bg-border/50" />
+					<StorageMeter />
+				</div>
+			</aside>
+			<SidebarResizeHandle
+				ariaLabel={t("driveSidebarResize")}
+				onPointerDown={resize.onPointerDown}
+				onPointerMove={resize.onPointerMove}
+				onPointerUp={resize.onPointerUp}
+			/>
+		</Fragment>
 	)
 }
