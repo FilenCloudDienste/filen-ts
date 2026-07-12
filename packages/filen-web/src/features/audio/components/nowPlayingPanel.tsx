@@ -24,7 +24,7 @@ export function NowPlayingPanel() {
 	const LoopIcon = loopMode === "one" ? Repeat1 : Repeat
 
 	return (
-		<div className="flex max-h-[min(60vh,28rem)] flex-col">
+		<div className="flex max-h-[min(60vh,28rem)] flex-col overflow-hidden">
 			<div
 				role="tablist"
 				aria-label={t("nowPlayingTabsLabel")}

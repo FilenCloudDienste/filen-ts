@@ -33,6 +33,7 @@ import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/
 // shell slot for a feature this narrow.
 export function PlaylistsPanel() {
 	const { t } = useTranslation("audio")
+	const { t: tCommon } = useTranslation("common")
 	const isOnline = useIsOnline()
 	const playlistsQuery = usePlaylistsQuery()
 	const [createOpen, setCreateOpen] = useState(false)
@@ -104,8 +105,12 @@ export function PlaylistsPanel() {
 		})
 	}
 
+	// No own root wrapper: this panel is only ever rendered nested inside nowPlayingPanel's
+	// max-height/flex-col/overflow-hidden box (the queue tab's markup follows the same rule), so a
+	// duplicate wrapper here would just add an unconstrained flex child that can't shrink to fit —
+	// exactly the kind of box a nested max-height alone doesn't clip without its own overflow.
 	return (
-		<div className="flex max-h-[min(60vh,28rem)] flex-col">
+		<>
 			<div className="flex items-center justify-between gap-2 px-1 pb-2">
 				<div className="min-w-0">
 					<p className="text-base font-medium">{t("playlists")}</p>
@@ -171,7 +176,7 @@ export function PlaylistsPanel() {
 				body={t("newPlaylistBody")}
 				label={t("playlistNameLabel")}
 				placeholder={t("playlistNamePlaceholder")}
-				submitLabel={t("create")}
+				submitLabel={t("newPlaylistSubmit")}
 				validate={value => value.trim().length > 0}
 				onOpenChange={setCreateOpen}
 				onSubmit={value => {
@@ -186,7 +191,7 @@ export function PlaylistsPanel() {
 				label={t("playlistNameLabel")}
 				placeholder={t("playlistNamePlaceholder")}
 				initialValue={renameTarget?.name ?? ""}
-				submitLabel={t("rename")}
+				submitLabel={t("playlistActionRename")}
 				validate={value => value.trim().length > 0}
 				onOpenChange={open => {
 					if (!open) {
@@ -202,8 +207,8 @@ export function PlaylistsPanel() {
 				pending={deletePending}
 				title={t("deletePlaylistTitle")}
 				body={t("deletePlaylistBody", { name: deleteTarget?.name ?? "" })}
-				confirmLabel={t("delete")}
-				cancelLabel={t("cancel")}
+				confirmLabel={t("playlistActionDelete")}
+				cancelLabel={tCommon("cancel")}
 				destructive
 				onOpenChange={open => {
 					if (!open) {
@@ -222,7 +227,7 @@ export function PlaylistsPanel() {
 					}}
 				/>
 			) : null}
-		</div>
+		</>
 	)
 }
 
@@ -317,7 +322,7 @@ function PlaylistRow({ entry, isOnline, onOpen, onPlay, onShufflePlay, onRename,
 						}}
 					>
 						<PencilIcon />
-						{t("rename")}
+						{t("playlistActionRename")}
 					</DropdownMenuItem>
 					<DropdownMenuItem
 						variant="destructive"
@@ -327,7 +332,7 @@ function PlaylistRow({ entry, isOnline, onOpen, onPlay, onShufflePlay, onRename,
 						}}
 					>
 						<Trash2Icon />
-						{t("delete")}
+						{t("playlistActionDelete")}
 					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>

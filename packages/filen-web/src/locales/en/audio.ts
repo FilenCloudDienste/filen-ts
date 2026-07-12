@@ -98,14 +98,12 @@ export const audio = {
 	deletePlaylistTitle: "Delete playlist",
 	/** Delete-playlist confirm dialog body */
 	deletePlaylistBody: 'Are you sure you want to delete "{{name}}"? This cannot be undone.',
-	/** Generic create submit label */
-	create: "Create",
-	/** Generic rename submit label */
-	rename: "Rename",
-	/** Generic delete submit label */
-	delete: "Delete",
-	/** Generic cancel label for the playlist dialogs */
-	cancel: "Cancel",
+	/** New-playlist dialog submit button */
+	newPlaylistSubmit: "Create",
+	/** Rename-playlist row menu item; doubles as the rename dialog's submit button */
+	playlistActionRename: "Rename",
+	/** Delete-playlist row menu item; doubles as the delete confirm dialog's confirm button */
+	playlistActionDelete: "Delete",
 	/** Empty-state heading when no playlists exist yet */
 	playlistsEmptyTitle: "No playlists yet",
 	/** Empty-state body when no playlists exist yet */
