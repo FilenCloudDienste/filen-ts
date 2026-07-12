@@ -10,6 +10,7 @@ import { preview } from "@/locales/en/preview"
 import { notes } from "@/locales/en/notes"
 import { chats } from "@/locales/en/chats"
 import { settings } from "@/locales/en/settings"
+import { publicLinks } from "@/locales/en/publicLinks"
 
 // Consumed by `ActionDef.descriptionKey` (keymap registry) — a compile-time-checked subset
 // of the "common" namespace's own key set, derived straight from the catalog so it can never
@@ -82,7 +83,8 @@ void i18n.use(initReactI18next).init({
 			preview,
 			notes,
 			chats,
-			settings
+			settings,
+			publicLinks
 		}
 	},
 	lng: "en",

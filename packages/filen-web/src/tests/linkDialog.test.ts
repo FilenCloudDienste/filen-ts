@@ -219,7 +219,7 @@ describe("buildLinkUpdate — passthrough fields", () => {
 })
 
 describe("buildPublicLinkUrl", () => {
-	it("file: uses the item's own decrypted metadata key (hex-encoded), the /d/ prefix, and the link's uuid", () => {
+	it("file: uses the item's own decrypted metadata key (hex-encoded), the NEW /f/ prefix, a literal-# fragment, and the link's uuid", () => {
 		const item = fileItem({
 			meta: { type: "decoded", data: { name: "f", mime: "x", modified: 1n, size: 1n, key: "abc", version: 2 } }
 		})
@@ -227,16 +227,16 @@ describe("buildPublicLinkUrl", () => {
 
 		const url = buildPublicLinkUrl(item, status)
 
-		expect(url).toBe(`https://app.filen.io/#/d/${testUuid("link")}%23616263`)
+		expect(url).toBe(`https://app.filen.io/f/${testUuid("link")}#616263`)
 	})
 
-	it("directory: uses the link's own linkKey (hex-encoded), the /f/ prefix, and the link's uuid", () => {
+	it("directory: uses the link's own linkKey (hex-encoded), the NEW /d/ prefix, a literal-# fragment, and the link's uuid", () => {
 		const item = dirItem()
 		const status = dirStatus({ linkUuid: testUuid("link"), linkKey: "abc" })
 
 		const url = buildPublicLinkUrl(item, status)
 
-		expect(url).toBe(`https://app.filen.io/#/f/${testUuid("link")}%23616263`)
+		expect(url).toBe(`https://app.filen.io/d/${testUuid("link")}#616263`)
 	})
 
 	it("directory: returns null when the link has no linkKey yet", () => {

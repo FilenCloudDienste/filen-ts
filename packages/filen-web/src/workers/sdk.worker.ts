@@ -48,6 +48,10 @@ import init, {
 	type ChatTypingType,
 	type LinkedFile,
 	type DirPublicInfo,
+	type AnyLinkedDir,
+	type AnyLinkedDirWithContext,
+	type DirPublicLink,
+	type LinkedDirsAndFiles,
 	type UserPersonalUpdateInfo,
 	type GdprInfo,
 	type UserEvent,
@@ -233,6 +237,27 @@ function releaseClient(): void {
 async function withUnauth<T>(fn: (unauth: UnauthClient) => Promise<T>): Promise<T> {
 	const r = await run<T>(async defer => {
 		const unauth = UnauthClient.from_config(clientConfig)
+		defer(() => {
+			unauth.free()
+		})
+		return fn(unauth)
+	})
+	if (!r.success) {
+		throw r.error
+	}
+	return r.data
+}
+
+// The anon sibling of withUnauth for the public-link (linked-item) surface: runs an op against an
+// UnauthClient, but PREFERS the live authed session's getUnauthed() when a visitor happens to be
+// signed in — so an already-authed visitor opening someone else's link reuses their own client
+// instead of spinning up a second wasm client — and falls back to a throwaway from_config otherwise.
+// Both branches yield a distinct UnauthClient handle that is freed on every exit (LIFO defer), the
+// same handle discipline withUnauth uses; getUnauthed() returns its own handle to free and doing so
+// does not touch the parent client. Result is unwrapped so the Comlink boundary sees a thrown DTO.
+async function withLinkedUnauth<T>(fn: (unauth: UnauthClient) => Promise<T>): Promise<T> {
+	const r = await run<T>(async defer => {
+		const unauth = client !== null ? client.getUnauthed() : UnauthClient.from_config(clientConfig)
 		defer(() => {
 			unauth.free()
 		})
@@ -876,6 +901,108 @@ const api = {
 	},
 	getDirPublicLinkInfo(linkUuid: string, linkKey: string): Promise<DirPublicInfo> {
 		return requireClient().getDirPublicLinkInfo(linkUuid, linkKey)
+	},
+	// ── Public-link viewer (UNAUTHENTICATED) ─────────────────────────────────
+	// The anon-capable surface behind the /f/ /d/ routes, which must work with NO session. Every method
+	// routes through withLinkedUnauth (getUnauthed() for a signed-in visitor, else a throwaway
+	// UnauthClient) — NONE touch requireClient, so a logged-out tab reaches them. Deliberately kept
+	// SEPARATE from the authed getLinkedFile/getDirPublicLinkInfo above (chat embeds still use those):
+	// pointing chat-embed resolution at these too is a later dedup call, not made here. `password` is
+	// passed through for a protected file link (the dir side verifies a password by re-listing with the
+	// password set on its own DirPublicLink — a later step's concern).
+	getLinkedFileAnon(linkUuid: string, fileKey: string, password?: string): Promise<LinkedFile> {
+		return withLinkedUnauth(unauth => unauth.getLinkedFile(linkUuid, fileKey, password ?? null))
+	},
+	getDirPublicLinkInfoAnon(linkUuid: string, linkKey: string): Promise<DirPublicInfo> {
+		return withLinkedUnauth(unauth => unauth.getDirPublicLinkInfo(linkUuid, linkKey))
+	},
+	// The callback the wasm listing wants is a plain progress reporter (download of the encrypted
+	// listing itself); the viewer needs no progress here, so a no-op is passed — the method resolves
+	// with the decrypted dirs+files in one shot.
+	listLinkedDirAnon(dir: AnyLinkedDir, link: DirPublicLink): Promise<LinkedDirsAndFiles> {
+		return withLinkedUnauth(unauth =>
+			unauth.listLinkedDir(dir, link, () => {
+				// no progress surface for a listing
+			})
+		)
+	},
+	listLinkedDirRecursiveAnon(dir: AnyLinkedDir, link: DirPublicLink): Promise<LinkedDirsAndFiles> {
+		return withLinkedUnauth(unauth =>
+			unauth.listLinkedDirRecursive(dir, link, () => {
+				// no progress surface for a listing
+			})
+		)
+	},
+	getLinkedDirSizeAnon(dir: AnyLinkedDirWithContext): Promise<DirSizeResponse> {
+		return withLinkedUnauth(unauth => unauth.getDirSize(dir))
+	},
+	// Whole-buffer fetch for the unauth preview overlay — the anon mirror of downloadFileBytes above,
+	// same previewAborts registry keyed by the same token so cancelDownload/preview-cancel reach it
+	// unchanged. The buffered path (not the SW stream) is the unauth ceiling by design: the service
+	// worker's own wasm bundle has no UnauthClient, so range-seek streaming can't serve a logged-out
+	// visitor — this whole-buffer read is the degraded-but-working fallback.
+	async downloadLinkedFileBytesAnon(file: AnyFile, previewToken: string): Promise<Uint8Array> {
+		return withLinkedUnauth(async unauth => {
+			const controller = new AbortController()
+			previewAborts.set(previewToken, controller)
+			try {
+				const bytes = await unauth.downloadFile(file, { abortSignal: controller.signal })
+				return Comlink.transfer(bytes, [bytes.buffer])
+			} finally {
+				previewAborts.delete(previewToken)
+			}
+		})
+	},
+	// Anon single-file save — the streaming mirror of downloadFileToWriter, same downloadAborts/
+	// downloadPauses maps + transferId convention so cancelDownload/pauseDownload/resumeDownload reach
+	// an anon transfer with no changes of their own. The WritableStream sink arrives via Comlink.transfer;
+	// progress is a plain-fn-wrapped proxy (a raw proxy is serde-rejected — same as the authed path).
+	async downloadLinkedFileToWriterAnon(
+		file: AnyFile,
+		transferId: string,
+		writer: WritableStream<Uint8Array>,
+		onProgress: (bytes: bigint) => void
+	): Promise<void> {
+		await withLinkedUnauth(async unauth => {
+			const controller = new AbortController()
+			downloadAborts.set(transferId, controller)
+
+			await withPauseSignal(downloadPauses, downloadAborts, transferId, async pause => {
+				await unauth.downloadFileToWriter({
+					file,
+					writer,
+					progress: bytes => {
+						onProgress(bytes)
+					},
+					managedFuture: { abortSignal: controller.signal, pauseSignal: pause }
+				})
+			})
+		})
+	},
+	// Anon directory zip — the SDK recurses + frames the zip in this one call. Mirrors
+	// downloadItemsToZip's plumbing, but takes a linked directory (dir + its DirPublicLink) rather than
+	// a ZipItem list, and the wasm signature makes managed_future a required 4th positional arg.
+	async downloadLinkedDirToZipAnon(
+		dir: AnyLinkedDirWithContext,
+		transferId: string,
+		writer: WritableStream<Uint8Array>,
+		onProgress: (bytesWritten: bigint, totalBytes: bigint, itemsProcessed: bigint, totalItems: bigint) => void
+	): Promise<void> {
+		await withLinkedUnauth(async unauth => {
+			const controller = new AbortController()
+			downloadAborts.set(transferId, controller)
+
+			await withPauseSignal(downloadPauses, downloadAborts, transferId, async pause => {
+				await unauth.downloadLinkedDirToZip(
+					dir,
+					writer,
+					(bytesWritten, totalBytes, itemsProcessed, totalItems) => {
+						onProgress(bytesWritten, totalBytes, itemsProcessed, totalItems)
+					},
+					{ abortSignal: controller.signal, pauseSignal: pause }
+				)
+			})
+		})
 	},
 	// Breadcrumb primitive: the "/drive/$" splat carries the full ancestor-uuid path in the URL
 	// already (see features/drive/lib/navigate.ts), so this only resolves DISPLAY NAMES for a batch of

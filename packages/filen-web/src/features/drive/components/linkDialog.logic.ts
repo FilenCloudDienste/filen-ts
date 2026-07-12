@@ -1,17 +1,7 @@
-import { Buffer } from "buffer"
 import type { DirPublicLinkRW, FilePublicLink, PasswordState, PublicLinkExpiration } from "@filen/sdk-rs"
+import { buildPublicLinkUrl as buildPublicLinkUrlString } from "@/features/publicLinks/lib/format.logic"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
-
-// Mirrors filen-mobile's FILE_PUBLIC_LINK_URL_PREFIX/DIRECTORY_PUBLIC_LINK_URL_PREFIX (src/constants.ts)
-// and its makeDriveItemPublicLink (src/lib/sdkUnwrap.ts) exactly — cross-checked against
-// @filen/utils' parseFilenPublicLink (the parser these URLs round-trip through on open): a `d`/`f`
-// path segment, the link's uuid, a literal or percent-encoded "#", then the key — hex-encoded so it
-// round-trips through that parser's 64-hex-char branch. Exported: chats' embeds.logic.ts recognizes a
-// pasted link against these SAME two prefixes rather than re-declaring the URL shape — one source of
-// truth for what a Filen public link built by THIS app looks like.
-export const FILE_PUBLIC_LINK_URL_PREFIX = "https://app.filen.io/#/d/"
-export const DIRECTORY_PUBLIC_LINK_URL_PREFIX = "https://app.filen.io/#/f/"
 
 // Normalized shape the dialog's form reads from — collapses the dir/file field-name asymmetry
 // (`enableDownload` vs `downloadable`) into one internal name.
@@ -97,13 +87,15 @@ export function buildLinkUpdate(current: DriveItemLinkStatus, edits: LinkFormEdi
 	}
 }
 
-// Mirrors mobile's makeDriveItemPublicLink exactly: a file link's key is the ITEM's own decrypted
-// metadata key (FilePublicLink itself carries no key field); a directory link's key is the LINK's
-// own linkKey (absent until the link finishes provisioning). Returns null rather than throwing when
-// the needed key isn't available — the caller degrades the URL field/copy action, not the whole
-// panel. `item.type`/`status.type` are checked together (not `item.type === status.type` as a single
-// boolean) so each independently narrows its own variable — a mismatch between the two falls through
-// to the null case rather than reading a field that doesn't exist on the other arm.
+// A file link's key is the ITEM's own decrypted metadata key (FilePublicLink itself carries no key
+// field); a directory link's key is the LINK's own linkKey (absent until the link finishes
+// provisioning). Returns null rather than throwing when the needed key isn't available — the caller
+// degrades the URL field/copy action, not the whole panel. `item.type`/`status.type` are checked
+// together (not `item.type === status.type` as a single boolean) so each independently narrows its own
+// variable — a mismatch between the two falls through to the null case rather than reading a field
+// that doesn't exist on the other arm. The URL shape itself (NEW path-based format, key hex-encoded in
+// the fragment) is owned by features/publicLinks/lib/format.logic.ts — the same module the /f/ /d/
+// route and the chat recognizer parse with, so a built link always round-trips.
 export function buildPublicLinkUrl(item: DriveItem, status: DriveItemLinkStatus): string | null {
 	if (item.type === "file" && status.type === "file") {
 		const key = item.data.decryptedMeta?.key
@@ -112,7 +104,7 @@ export function buildPublicLinkUrl(item: DriveItem, status: DriveItemLinkStatus)
 			return null
 		}
 
-		return `${FILE_PUBLIC_LINK_URL_PREFIX}${status.status.linkUuid}${encodeURIComponent("#")}${Buffer.from(key, "utf-8").toString("hex")}`
+		return buildPublicLinkUrlString("file", status.status.linkUuid, key)
 	}
 
 	if (item.type === "directory" && status.type === "directory") {
@@ -122,7 +114,7 @@ export function buildPublicLinkUrl(item: DriveItem, status: DriveItemLinkStatus)
 			return null
 		}
 
-		return `${DIRECTORY_PUBLIC_LINK_URL_PREFIX}${status.status.linkUuid}${encodeURIComponent("#")}${Buffer.from(linkKey, "utf-8").toString("hex")}`
+		return buildPublicLinkUrlString("directory", status.status.linkUuid, linkKey)
 	}
 
 	return null

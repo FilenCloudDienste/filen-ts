@@ -245,10 +245,11 @@ function FilenInlineMedia({
 // for every resolved category: a previewable image/video/audio gets an inline thumbnail/mini-player, a
 // previewable-but-not-inline-rendered file (pdf/docx/text/code/markdown) gets a rich click-to-preview
 // card showing its real size, and a non-previewable file OR any directory link opens a new tab
-// (target=_blank to the raw link url — a dedicated unauthenticated public-link page isn't shipped yet,
-// so this is a deliberate, temporary degrade to today's plain-external-link behavior; only the
-// DESTINATION changes once that page ships, not this dispatch). Resolution itself is unchanged — the
-// authenticated in-app client, same as the reference mobile client.
+// (target=_blank to the raw link url, which now lands on the unauthenticated public-link viewer at the
+// /f/ /d/ routes — new-format links directly, legacy-format links via the index route's redirect). The
+// dispatch here is unchanged by that viewer shipping; the richer inline-preview dispatch is its own
+// step. Resolution itself is unchanged — the authenticated in-app client, same as the reference mobile
+// client.
 //
 // `resolution` is undefined while the metadata read is in flight, or when the caller never queried
 // (e.g. a test rendering the card in isolation) — either way the card degrades to the bare uuid, never

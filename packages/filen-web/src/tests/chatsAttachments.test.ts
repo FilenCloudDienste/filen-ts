@@ -134,7 +134,7 @@ describe("uploadAttachment", () => {
 		expect(uploadFile.mock.calls[0]?.[0]).toBe(testUuid("chat-uploads"))
 		expect(createFileLink).toHaveBeenCalledOnce()
 		expect(outcome.status).toBe("success")
-		expect(outcome.status === "success" && outcome.url.startsWith("https://app.filen.io/#/d/")).toBe(true)
+		expect(outcome.status === "success" && outcome.url.startsWith("https://app.filen.io/f/")).toBe(true)
 	})
 
 	it("reuses an EXISTING link rather than creating a second one, when the just-uploaded item already has one", async () => {
@@ -199,7 +199,7 @@ describe("attachExistingDriveItem", () => {
 		expect(outcome.status).toBe("success")
 	})
 
-	it("builds a DIRECTORY-shaped (/#/f/) url for a directory item, via createDirectoryLink", async () => {
+	it("builds a DIRECTORY-shaped (/d/) url for a directory item, via createDirectoryLink", async () => {
 		const item = narrowItem(mockDir("shared-dir"))
 		getDirectoryLinkStatus.mockResolvedValueOnce(undefined)
 		createDirectoryLink.mockResolvedValueOnce(mockDirPublicLinkRW())
@@ -208,6 +208,6 @@ describe("attachExistingDriveItem", () => {
 
 		expect(createDirectoryLink).toHaveBeenCalledOnce()
 		expect(outcome.status).toBe("success")
-		expect(outcome.status === "success" && outcome.url.startsWith("https://app.filen.io/#/f/")).toBe(true)
+		expect(outcome.status === "success" && outcome.url.startsWith("https://app.filen.io/d/")).toBe(true)
 	})
 })

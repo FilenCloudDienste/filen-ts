@@ -1,5 +1,4 @@
-import { Buffer } from "buffer"
-import { FILE_PUBLIC_LINK_URL_PREFIX, DIRECTORY_PUBLIC_LINK_URL_PREFIX } from "@/features/drive/components/linkDialog.logic"
+import { parsePublicLink } from "@/features/publicLinks/lib/format.logic"
 import { previewCategoryForName, HEIC_EXTENSIONS, extensionOf } from "@/features/drive/lib/preview.logic"
 import { isAllowedInlineContentType } from "@/lib/sw/protocol"
 import { segmentMessage } from "@/features/chats/lib/regexed.logic"
@@ -19,11 +18,12 @@ export function extractMessageLinks(text: string | undefined): string[] {
 // content-type probe) live in queries/chatMessageLinks.ts, which calls back into these classifiers.
 
 // ── Filen public-link recognition ───────────────────────────────────────────────────────────────
-// Matches the EXACT shape drive/components/linkDialog.logic.ts's buildPublicLinkUrl produces — the
-// single source of truth for what a link built by this app looks like (imported, not re-declared):
-// `${PREFIX}${linkUuid}${"#"|"%23"}${hexEncodedKey}`. A plain prefix match (not a URL/hash re-parse)
-// is deliberate: the prefix already pins scheme+host+route exactly, and the key segment can contain
-// characters (`%23`) a naive `new URL().hash` re-split would need to re-decode anyway.
+// Thin adapter over the shared recognizer (features/publicLinks/lib/format.logic.ts — the ONE place
+// both the link builder and every parser agree on the URL shape). That recognizer classifies BOTH
+// the NEW path-based format this app now emits AND the LEGACY hash-router format (letters swapped
+// between eras), so a link pasted in chat under either era renders as a rich card rather than falling
+// through to the generic external-link path. This shape (`linkUuid`, not `uuid`) is kept for the chat
+// consumers that already read it (chatMessageLinks.ts, filenLinkCard.tsx).
 export interface FilenPublicLink {
 	kind: "file" | "directory"
 	linkUuid: string
@@ -32,55 +32,10 @@ export interface FilenPublicLink {
 	key: string
 }
 
-const LINK_PREFIXES: readonly { prefix: string; kind: FilenPublicLink["kind"] }[] = [
-	{ prefix: FILE_PUBLIC_LINK_URL_PREFIX, kind: "file" },
-	{ prefix: DIRECTORY_PUBLIC_LINK_URL_PREFIX, kind: "directory" }
-]
-
-function hexDecode(hex: string): string | null {
-	if (hex.length === 0 || hex.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(hex)) {
-		return null
-	}
-
-	try {
-		return Buffer.from(hex, "hex").toString("utf-8")
-	} catch {
-		return null
-	}
-}
-
 export function parseFilenPublicLink(raw: string): FilenPublicLink | null {
-	for (const { prefix, kind } of LINK_PREFIXES) {
-		if (!raw.startsWith(prefix)) {
-			continue
-		}
+	const target = parsePublicLink(raw)
 
-		const rest = raw.slice(prefix.length)
-		// The uuid never contains "#"/"%23" — the first occurrence of either is the separator the
-		// builder inserted (encodeURIComponent("#") for a fresh link; a literal "#" for one built
-		// before that encoding, or one re-typed by hand — accept both, mirrors the mobile parser's
-		// own leniency, see this file's header comment).
-		const literalIndex = rest.indexOf("#")
-		const encodedIndex = rest.indexOf("%23")
-		const sepIndex = literalIndex === -1 ? encodedIndex : encodedIndex === -1 ? literalIndex : Math.min(literalIndex, encodedIndex)
-
-		if (sepIndex <= 0) {
-			return null
-		}
-
-		const linkUuid = rest.slice(0, sepIndex)
-		const sepLength = rest.startsWith("%23", sepIndex) ? 3 : 1
-		const hexKey = rest.slice(sepIndex + sepLength)
-		const key = hexDecode(hexKey)
-
-		if (key === null) {
-			return null
-		}
-
-		return { kind, linkUuid, key }
-	}
-
-	return null
+	return target === null ? null : { kind: target.kind, linkUuid: target.uuid, key: target.key }
 }
 
 // ── Direct media URL classification ─────────────────────────────────────────────────────────────

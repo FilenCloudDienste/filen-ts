@@ -16,6 +16,8 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteRouteImport } from './routes/_app/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ResetTokenRouteImport } from './routes/reset.$token'
+import { Route as FUuidRouteImport } from './routes/f.$uuid'
+import { Route as DUuidRouteImport } from './routes/d.$uuid'
 import { Route as AppTrashRouteImport } from './routes/_app/trash'
 import { Route as AppTransfersRouteImport } from './routes/_app/transfers'
 import { Route as AppRecentsRouteImport } from './routes/_app/recents'
@@ -72,6 +74,16 @@ const IndexRoute = IndexRouteImport.update({
 const ResetTokenRoute = ResetTokenRouteImport.update({
   id: '/reset/$token',
   path: '/reset/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FUuidRoute = FUuidRouteImport.update({
+  id: '/f/$uuid',
+  path: '/f/$uuid',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DUuidRoute = DUuidRouteImport.update({
+  id: '/d/$uuid',
+  path: '/d/$uuid',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppTrashRoute = AppTrashRouteImport.update({
@@ -205,6 +217,8 @@ export interface FileRoutesByFullPath {
   '/recents': typeof AppRecentsRoute
   '/transfers': typeof AppTransfersRoute
   '/trash': typeof AppTrashRoute
+  '/d/$uuid': typeof DUuidRoute
+  '/f/$uuid': typeof FUuidRoute
   '/reset/$token': typeof ResetTokenRoute
   '/chats/$uuid': typeof AppChatsUuidRoute
   '/drive/$': typeof AppDriveSplatRoute
@@ -233,6 +247,8 @@ export interface FileRoutesByTo {
   '/recents': typeof AppRecentsRoute
   '/transfers': typeof AppTransfersRoute
   '/trash': typeof AppTrashRoute
+  '/d/$uuid': typeof DUuidRoute
+  '/f/$uuid': typeof FUuidRoute
   '/reset/$token': typeof ResetTokenRoute
   '/chats/$uuid': typeof AppChatsUuidRoute
   '/drive/$': typeof AppDriveSplatRoute
@@ -266,6 +282,8 @@ export interface FileRoutesById {
   '/_app/recents': typeof AppRecentsRoute
   '/_app/transfers': typeof AppTransfersRoute
   '/_app/trash': typeof AppTrashRoute
+  '/d/$uuid': typeof DUuidRoute
+  '/f/$uuid': typeof FUuidRoute
   '/reset/$token': typeof ResetTokenRoute
   '/_app/chats/$uuid': typeof AppChatsUuidRoute
   '/_app/drive/$': typeof AppDriveSplatRoute
@@ -299,6 +317,8 @@ export interface FileRouteTypes {
     | '/recents'
     | '/transfers'
     | '/trash'
+    | '/d/$uuid'
+    | '/f/$uuid'
     | '/reset/$token'
     | '/chats/$uuid'
     | '/drive/$'
@@ -327,6 +347,8 @@ export interface FileRouteTypes {
     | '/recents'
     | '/transfers'
     | '/trash'
+    | '/d/$uuid'
+    | '/f/$uuid'
     | '/reset/$token'
     | '/chats/$uuid'
     | '/drive/$'
@@ -359,6 +381,8 @@ export interface FileRouteTypes {
     | '/_app/recents'
     | '/_app/transfers'
     | '/_app/trash'
+    | '/d/$uuid'
+    | '/f/$uuid'
     | '/reset/$token'
     | '/_app/chats/$uuid'
     | '/_app/drive/$'
@@ -383,6 +407,8 @@ export interface RootRouteChildren {
   NoCoiRoute: typeof NoCoiRoute
   NoOpfsRoute: typeof NoOpfsRoute
   RegisterRoute: typeof RegisterRoute
+  DUuidRoute: typeof DUuidRoute
+  FUuidRoute: typeof FUuidRoute
   ResetTokenRoute: typeof ResetTokenRoute
 }
 
@@ -435,6 +461,20 @@ declare module '@tanstack/react-router' {
       path: '/reset/$token'
       fullPath: '/reset/$token'
       preLoaderRoute: typeof ResetTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/f/$uuid': {
+      id: '/f/$uuid'
+      path: '/f/$uuid'
+      fullPath: '/f/$uuid'
+      preLoaderRoute: typeof FUuidRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/d/$uuid': {
+      id: '/d/$uuid'
+      path: '/d/$uuid'
+      fullPath: '/d/$uuid'
+      preLoaderRoute: typeof DUuidRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/trash': {
@@ -693,6 +733,8 @@ const rootRouteChildren: RootRouteChildren = {
   NoCoiRoute: NoCoiRoute,
   NoOpfsRoute: NoOpfsRoute,
   RegisterRoute: RegisterRoute,
+  DUuidRoute: DUuidRoute,
+  FUuidRoute: FUuidRoute,
   ResetTokenRoute: ResetTokenRoute,
 }
 export const routeTree = rootRouteImport

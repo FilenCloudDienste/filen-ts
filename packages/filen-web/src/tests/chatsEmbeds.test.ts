@@ -23,17 +23,43 @@ function dirLinkUrl(separator: "#" | "%23" = "%23"): string {
 	return `https://app.filen.io/#/f/${UUID}${separator}${KEY_HEX}`
 }
 
+// NEW path-based format the app now BUILDS: /f/ = file, /d/ = directory (swapped from legacy), key in
+// a literal-# fragment.
+function newFileLinkUrl(): string {
+	return `https://app.filen.io/f/${UUID}#${KEY_HEX}`
+}
+
+function newDirLinkUrl(): string {
+	return `https://app.filen.io/d/${UUID}#${KEY_HEX}`
+}
+
 describe("parseFilenPublicLink", () => {
-	it("parses a file link built with the app's own %23-encoded separator (buildPublicLinkUrl's shape)", () => {
+	it("parses the NEW path format for a file (/f/ = file)", () => {
+		expect(parseFilenPublicLink(newFileLinkUrl())).toEqual({ kind: "file", linkUuid: UUID, key: KEY_PLAINTEXT })
+	})
+
+	it("parses the NEW path format for a directory (/d/ = directory)", () => {
+		expect(parseFilenPublicLink(newDirLinkUrl())).toEqual({ kind: "directory", linkUuid: UUID, key: KEY_PLAINTEXT })
+	})
+
+	it("still parses a LEGACY file link built with the old %23-encoded separator (backwards compat, /d/ = file)", () => {
 		expect(parseFilenPublicLink(fileLinkUrl("%23"))).toEqual({ kind: "file", linkUuid: UUID, key: KEY_PLAINTEXT })
 	})
 
-	it("parses a directory link the same way", () => {
+	it("still parses a LEGACY directory link the same way (/f/ = directory)", () => {
 		expect(parseFilenPublicLink(dirLinkUrl("%23"))).toEqual({ kind: "directory", linkUuid: UUID, key: KEY_PLAINTEXT })
 	})
 
-	it("also accepts a literal '#' separator (leniency, mirrors the mobile parser)", () => {
+	it("also accepts a legacy literal '#' separator (leniency, mirrors the mobile parser)", () => {
 		expect(parseFilenPublicLink(fileLinkUrl("#"))).toEqual({ kind: "file", linkUuid: UUID, key: KEY_PLAINTEXT })
+	})
+
+	it("accepts the legacy drive.filen.io host as well as app.filen.io", () => {
+		expect(parseFilenPublicLink(`https://drive.filen.io/#/d/${UUID}%23${KEY_HEX}`)).toEqual({
+			kind: "file",
+			linkUuid: UUID,
+			key: KEY_PLAINTEXT
+		})
 	})
 
 	it("rejects a non-Filen host even with an otherwise-identical path shape", () => {
