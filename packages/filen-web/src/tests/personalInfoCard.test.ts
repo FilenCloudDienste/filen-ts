@@ -37,9 +37,15 @@ describe("personalToFormState", () => {
 	})
 
 	it("passes populated fields through verbatim", () => {
-		const personal: Personal = { ...emptyPersonal(), firstName: "Jane", country: "DE" }
+		const personal: Personal = { ...emptyPersonal(), firstName: "Jane", country: "Germany" }
 
-		expect(personalToFormState(personal)).toMatchObject({ firstName: "Jane", country: "DE" })
+		expect(personalToFormState(personal)).toMatchObject({ firstName: "Jane", country: "Germany" })
+	})
+
+	it("folds a country outside the closed list (legacy free-text data) to unset", () => {
+		const personal: Personal = { ...emptyPersonal(), country: "DE" }
+
+		expect(personalToFormState(personal)).toMatchObject({ country: "" })
 	})
 })
 
@@ -62,7 +68,7 @@ describe("formStateToUpdateInfo", () => {
 			streetNumber: "1",
 			city: "Berlin",
 			postalCode: "10115",
-			country: "DE"
+			country: "Germany"
 		})
 
 		expect(formStateToUpdateInfo(form)).toEqual({
@@ -74,7 +80,7 @@ describe("formStateToUpdateInfo", () => {
 			streetNumber: "1",
 			city: "Berlin",
 			postalCode: "10115",
-			country: "DE"
+			country: "Germany"
 		})
 	})
 })

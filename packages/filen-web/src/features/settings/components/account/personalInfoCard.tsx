@@ -45,7 +45,7 @@ const FIELD_LABEL_KEYS: Record<keyof PersonalFormState, SettingsKey> = {
 // in on day one. Form state is FROZEN at mount from the account query's `personal` snapshot (the
 // same editor invariant this app's other freeze-on-mount forms use) — a background refetch from
 // another card's save (avatar/nickname/email) must never clobber in-progress edits here. `initial`
-// captures that SAME frozen snapshot a second time (P15's dirty-gate baseline) and is advanced to
+// captures that SAME frozen snapshot a second time (the dirty-gate's baseline) and is advanced to
 // the just-saved `form` on a successful save — never re-derived from a refetch, which would violate
 // the freeze invariant above.
 function PersonalInfoCard({ accountQuery }: PersonalInfoCardProps) {

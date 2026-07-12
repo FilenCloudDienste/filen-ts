@@ -13,9 +13,10 @@ const START_SCREEN_LABEL_KEYS: Record<StartScreen, SettingsKey> = {
 	contacts: "settingsStartScreenContacts"
 }
 
-// L19: which top-level module the app redirects to once boot resolves an authed session
-// (routes/index.tsx). Just the preference + its effect — no full picker screen, mirroring mobile's
-// Appearance → Start screen row but as a plain inline select like this page's own ThemeCard.
+// Which top-level module the app redirects to once boot resolves an authed session
+// (routes/index.tsx, via rootRedirect.ts). Just the preference + its effect — no full picker screen,
+// mirroring mobile's Appearance → Start screen row but as a plain inline select like this page's own
+// ThemeCard.
 function StartScreenCard() {
 	const { t } = useTranslation("settings")
 	const query = useStartScreenQuery()

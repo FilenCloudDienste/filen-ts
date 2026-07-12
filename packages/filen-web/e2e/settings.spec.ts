@@ -247,4 +247,32 @@ test.describe("settings", () => {
 		const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))
 		expect(parsed).toMatchObject({ user: expect.any(Object), events: expect.any(Object) })
 	})
+
+	test("the Advanced section renders working Terms of Service and Privacy Policy links", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await gotoSettings(page)
+
+		await page.getByRole("link", { name: "Advanced", exact: true }).click()
+		await page.waitForURL(/\/settings\/advanced$/)
+
+		// Asserted, never clicked — a real click would leave the app on an external filen.io page,
+		// which the on-load-into-"/" injection hook (see gotoSettings's own doc comment) can't undo.
+		const tos = page.getByRole("link", { name: "Terms of Service", exact: true })
+		await expect(tos).toBeVisible()
+		await expect(tos).toHaveAttribute("href", "https://filen.io/terms")
+		await expect(tos).toHaveAttribute("target", "_blank")
+		await expect(tos).toHaveAttribute("rel", "noopener noreferrer")
+
+		const privacy = page.getByRole("link", { name: "Privacy Policy", exact: true })
+		await expect(privacy).toBeVisible()
+		await expect(privacy).toHaveAttribute("href", "https://filen.io/privacy")
+		await expect(privacy).toHaveAttribute("target", "_blank")
+		await expect(privacy).toHaveAttribute("rel", "noopener noreferrer")
+	})
 })

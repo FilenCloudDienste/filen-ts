@@ -49,7 +49,9 @@ export default defineConfig([
 	{
 		// The shared unauthed-page guard throws the router's `redirect()` — the same framework
 		// control-flow idiom the route files use, extracted so /login and /register share one guard.
-		files: ["src/features/auth/lib/guard.ts"],
+		// rootRedirect.ts is the same shape for "/": its beforeLoad body is split out so the redirect
+		// switch itself is unit-testable without a router instance (see rootRedirect.test.ts).
+		files: ["src/features/auth/lib/guard.ts", "src/features/shell/lib/rootRedirect.ts"],
 		rules: {
 			"@typescript-eslint/only-throw-error": "off"
 		}

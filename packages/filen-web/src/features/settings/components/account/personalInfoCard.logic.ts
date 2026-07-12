@@ -1,4 +1,5 @@
 import type { Personal, UserPersonalUpdateInfo } from "@filen/sdk-rs"
+import { isValidCountry } from "@/features/settings/lib/countries"
 
 // Pure form <-> wasm-shape mapping, split out of the component (react-refresh requires a component
 // file to export components only) so it is unit-testable without a DOM. `Personal` and
@@ -20,6 +21,12 @@ export const PERSONAL_FIELD_ORDER: (keyof UserPersonalUpdateInfo)[] = [
 ]
 
 export function personalToFormState(personal: Personal): PersonalFormState {
+	// The account's `country` is free text on the wire — it may predate this closed-list dropdown, or
+	// have been written by another client that still accepts arbitrary strings. Folding an unrecognized
+	// value to "" (unset) here, rather than passing it straight into the Select's `value`, keeps the
+	// form state within the same closed list the dropdown itself can ever emit through onValueChange.
+	const country = personal.country ?? ""
+
 	return {
 		firstName: personal.firstName ?? "",
 		lastName: personal.lastName ?? "",
@@ -29,13 +36,13 @@ export function personalToFormState(personal: Personal): PersonalFormState {
 		streetNumber: personal.streetNumber ?? "",
 		city: personal.city ?? "",
 		postalCode: personal.postalCode ?? "",
-		country: personal.country ?? ""
+		country: isValidCountry(country) ? country : ""
 	}
 }
 
-// The dirty-gate P15 needed: true when ANY field differs from the snapshot taken when the card's
-// form state was frozen (see personalInfoCard.tsx's own comment on the freeze-on-mount invariant).
-// Mirrors nicknameCard's single-field `trimmed !== (nickName ?? "")` check, generalized to every
+// The dirty-gate: true when ANY field differs from the snapshot taken when the card's form state was
+// frozen (see personalInfoCard.tsx's own comment on the freeze-on-mount invariant). Mirrors
+// nicknameCard's single-field `trimmed !== (nickName ?? "")` check, generalized to every
 // PERSONAL_FIELD_ORDER key — raw (untrimmed) comparison on purpose: trailing whitespace the user just
 // typed should still enable Save even though formStateToUpdateInfo will trim it away on submit.
 export function isPersonalFormDirty(form: PersonalFormState, initial: PersonalFormState): boolean {
