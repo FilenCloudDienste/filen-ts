@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut, UuidStr } from "@filen/sdk-rs"
+import type { BlockedContact, Chat, Contact, ContactRequestIn, ContactRequestOut, UuidStr } from "@filen/sdk-rs"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it down
@@ -14,7 +14,8 @@ const {
 	blockContact,
 	unblockContact,
 	getContacts,
-	deleteContact
+	deleteContact,
+	createChatOp
 } = vi.hoisted(() => ({
 	sendContactRequest: vi.fn(),
 	listOutgoingContactRequests: vi.fn(),
@@ -24,7 +25,9 @@ const {
 	blockContact: vi.fn(),
 	unblockContact: vi.fn(),
 	getContacts: vi.fn(),
-	deleteContact: vi.fn()
+	deleteContact: vi.fn(),
+	// messageContact delegates to chats/lib/actions.ts's own createChat, which calls this same op.
+	createChatOp: vi.fn()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({
@@ -37,7 +40,8 @@ vi.mock("@/lib/sdk/client", () => ({
 		blockContact,
 		unblockContact,
 		getContacts,
-		deleteContact
+		deleteContact,
+		createChat: createChatOp
 	}
 }))
 
@@ -55,6 +59,7 @@ import {
 	blockContactByEmail,
 	cancelRequest,
 	denyRequest,
+	messageContact,
 	removeContact,
 	runContactsBulk,
 	sendContactRequest as sendContactRequestAction,
@@ -111,6 +116,19 @@ function mockOutgoing(overrides: Partial<ContactRequestOut> = {}): ContactReques
 		uuid: testUuid("dave-out"),
 		email: "dave@filen.io",
 		nickName: "Dave",
+		...overrides
+	}
+}
+
+function mockChat(overrides: Partial<Chat> = {}): Chat {
+	return {
+		uuid: testUuid("chat"),
+		ownerId: 1n,
+		key: "chat-key",
+		participants: [],
+		muted: false,
+		created: 0n,
+		lastFocus: 0n,
 		...overrides
 	}
 }
@@ -463,6 +481,40 @@ describe("removeContact", () => {
 
 		expect(outcome).toEqual({ status: "error", dto })
 		expect(testQueryClient.getQueryData<{ contacts: Contact[] }>(CONTACTS_QUERY_KEY)?.contacts).toEqual([target])
+	})
+})
+
+describe("messageContact", () => {
+	it("creates a chat with just the target contact and reports it ready via onChatReady", async () => {
+		const contact = mockContact()
+		const chat = mockChat()
+		createChatOp.mockResolvedValueOnce(chat)
+		const onChatReady = vi.fn()
+
+		const outcome = await messageContact(contact, { onChatReady })
+
+		expect(outcome).toEqual({ status: "success" })
+		expect(createChatOp).toHaveBeenCalledExactlyOnceWith([contact])
+		expect(onChatReady).toHaveBeenCalledExactlyOnceWith(chat)
+	})
+
+	it("never calls onChatReady when the create op rejects, and returns the error outcome", async () => {
+		const contact = mockContact()
+		const dto = sdkDto("Forbidden")
+		createChatOp.mockRejectedValueOnce(dto)
+		const onChatReady = vi.fn()
+
+		const outcome = await messageContact(contact, { onChatReady })
+
+		expect(outcome).toEqual({ status: "error", dto })
+		expect(onChatReady).not.toHaveBeenCalled()
+	})
+
+	it("works with no options passed at all (onChatReady is optional)", async () => {
+		const contact = mockContact()
+		createChatOp.mockResolvedValueOnce(mockChat())
+
+		await expect(messageContact(contact)).resolves.toEqual({ status: "success" })
 	})
 })
 

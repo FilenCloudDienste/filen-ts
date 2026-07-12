@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
+import { useNavigate } from "@tanstack/react-router"
 import { SearchIcon, UsersIcon, ListChecksIcon } from "lucide-react"
 import { toast } from "sonner"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
@@ -11,6 +12,7 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import {
 	buildContactSections,
 	filterContactSections,
+	contactsStatsCounts,
 	CONTACTS_SECTION_HEADER_KEY,
 	type ContactSection,
 	type ContactsSectionFilter
@@ -22,6 +24,7 @@ import {
 	removeContact,
 	blockContact,
 	unblockContact,
+	messageContact,
 	runContactsBulk,
 	type VoidActionOutcome
 } from "@/features/contacts/lib/actions"
@@ -52,6 +55,17 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 
 const SKELETON_ROW_COUNT = 6
 
+// One stat tile in the summary strip above the list — count + label, no drill-down (see the strip's
+// own render-site doc comment below for why a lightweight strip beats an invented detail pane).
+function ContactsStatTile({ count, label }: { count: number; label: string }) {
+	return (
+		<div className="flex flex-col items-center gap-0.5 rounded-xl bg-muted/50 py-3 ring-1 ring-foreground/5 dark:ring-foreground/10">
+			<span className="text-lg font-semibold tabular-nums">{count}</span>
+			<span className="text-xs text-muted-foreground">{label}</span>
+		</div>
+	)
+}
+
 // The per-kind dialog payload threaded through useDialogHost, widened with a `bulk` flag: every kind
 // here can be reached either from a single row's own action (bulk: false, a 1-length items array) or
 // from the bulk bar (bulk: true, the whole gated section selection) — same dialog, same title/body
@@ -72,6 +86,7 @@ type ActiveContactDialog =
 // parent/child, so the URL is their one shared source of truth for which section is active.
 export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	const { t } = useTranslation(["contacts", "common"])
+	const navigate = useNavigate()
 	const isOnline = useIsOnline()
 	// Every per-row/bulk action below is disabled SOLELY by `!isOnline` (no other reason ever
 	// disables them), so this single string doubles as both the "why" and the disabled condition's own
@@ -97,6 +112,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	const blockedData = contactsQuery.data?.blocked ?? []
 	const incomingData = requestsQuery.data?.incoming ?? []
 	const outgoingData = requestsQuery.data?.outgoing ?? []
+	const stats = contactsStatsCounts({ contacts: contactsData, incoming: incomingData, blocked: blockedData })
 
 	// search-filtered, every section — the base every the sidebar's "all" view renders, and also what
 	// tells the empty branch below whether the account genuinely has nothing (searchedSections empty
@@ -137,6 +153,21 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	// other singular contact action's convention (see runSingleDialogAction below).
 	async function handleAccept(request: ContactRequestIn): Promise<void> {
 		const outcome = await acceptRequest(request.uuid)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+		}
+	}
+
+	// Row menu "Message" (new#… quick action): creates-or-opens a 1:1 chat with the contact, then
+	// navigates straight into it — no confirm (mirrors mobile's own one-click contactRow.tsx handler),
+	// LABEL-FIRST toast on failure, matching every other singular contact action's convention.
+	async function handleMessage(contact: Contact): Promise<void> {
+		const outcome = await messageContact(contact, {
+			onChatReady: chat => {
+				void navigate({ to: "/chats/$uuid", params: { uuid: chat.uuid } })
+			}
+		})
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
@@ -470,6 +501,9 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 								contact={contact}
 								disabled={!isOnline}
 								title={offlineTitle}
+								onMessage={item => {
+									void handleMessage(item)
+								}}
 								onRemove={item => {
 									setActiveDialog({ kind: "remove", bulk: false, items: [item] })
 								}}
@@ -516,151 +550,176 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 					{section === "all" ? t("common:moduleContacts") : t(CONTACTS_SECTION_HEADER_KEY[section])}
 				</h1>
 			</header>
-			<div className="flex h-12 shrink-0 items-center justify-between gap-4 px-4">
-				{selectMode ? (
-					<ContactsBulkBar
-						requests={incomingData}
-						pending={outgoingData}
-						contacts={contactsData}
-						blocked={blockedData}
-						selection={selection}
-						disabled={!isOnline}
-						title={offlineTitle}
-						onClear={exitSelectMode}
-						onAccept={items => {
-							void handleBulkAccept(items)
-						}}
-						onDeny={items => {
-							setActiveDialog({ kind: "deny", bulk: true, items })
-						}}
-						onCancel={items => {
-							setActiveDialog({ kind: "cancel", bulk: true, items })
-						}}
-						onRemove={items => {
-							setActiveDialog({ kind: "remove", bulk: true, items })
-						}}
-						onBlock={items => {
-							setActiveDialog({ kind: "block", bulk: true, items })
-						}}
-						onUnblock={items => {
-							setActiveDialog({ kind: "unblock", bulk: true, items })
-						}}
-					/>
-				) : (
-					<>
-						<div className="relative max-w-xs flex-1">
-							<SearchIcon
-								aria-hidden="true"
-								className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-							/>
-							<Input
-								type="search"
-								aria-label={t("contactsSearchPlaceholder")}
-								placeholder={t("contactsSearchPlaceholder")}
-								value={search}
-								onChange={event => {
-									setSearch(event.target.value)
-								}}
-								className="pl-8"
-							/>
-						</div>
-						<div className="flex shrink-0 items-center gap-2">
-							<AddContactDialog />
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={isPending || queryError !== null || sections.length === 0}
-								onClick={() => {
-									setSelectMode(true)
-								}}
-							>
-								<ListChecksIcon aria-hidden="true" />
-								{t("contactsActionSelect")}
-							</Button>
-						</div>
-					</>
-				)}
-			</div>
-			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-				{isPending ? (
-					<div className="flex flex-1 flex-col gap-1 overflow-y-auto p-4">
-						{Array.from({ length: SKELETON_ROW_COUNT }, (_, index) => (
-							<Skeleton
-								key={index}
-								className="h-14 w-full rounded-xl"
-							/>
-						))}
+			{/* Centers the whole card at a comfortable reading width (mirrors EventsList's own max-w-2xl
+			mx-auto treatment) — a short contact list reads as an intentional, room-to-grow card instead
+			of a full-bleed panel stranded in blank space. Web-only polish, no mobile equivalent. */}
+			<div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col">
+				{!isPending && queryError === null ? (
+					<div
+						role="group"
+						aria-label={t("contactsStatsSummaryLabel")}
+						className="grid shrink-0 grid-cols-3 gap-2 px-4 pt-3"
+					>
+						<ContactsStatTile
+							count={stats.contacts}
+							label={t(CONTACTS_SECTION_HEADER_KEY.contacts)}
+						/>
+						<ContactsStatTile
+							count={stats.requests}
+							label={t(CONTACTS_SECTION_HEADER_KEY.requests)}
+						/>
+						<ContactsStatTile
+							count={stats.blocked}
+							label={t(CONTACTS_SECTION_HEADER_KEY.blocked)}
+						/>
 					</div>
-				) : queryError !== null ? (
-					<div className="flex flex-1 overflow-y-auto">
-						<Empty>
-							<EmptyHeader>
-								<EmptyMedia variant="icon">
-									<UsersIcon />
-								</EmptyMedia>
-								<EmptyTitle>{t("contactsLoadError")}</EmptyTitle>
-								<EmptyDescription>{errorLabel(asErrorDTO(queryError))}</EmptyDescription>
-							</EmptyHeader>
-							<EmptyContent>
+				) : null}
+				<div className="flex h-12 shrink-0 items-center justify-between gap-4 px-4">
+					{selectMode ? (
+						<ContactsBulkBar
+							requests={incomingData}
+							pending={outgoingData}
+							contacts={contactsData}
+							blocked={blockedData}
+							selection={selection}
+							disabled={!isOnline}
+							title={offlineTitle}
+							onClear={exitSelectMode}
+							onAccept={items => {
+								void handleBulkAccept(items)
+							}}
+							onDeny={items => {
+								setActiveDialog({ kind: "deny", bulk: true, items })
+							}}
+							onCancel={items => {
+								setActiveDialog({ kind: "cancel", bulk: true, items })
+							}}
+							onRemove={items => {
+								setActiveDialog({ kind: "remove", bulk: true, items })
+							}}
+							onBlock={items => {
+								setActiveDialog({ kind: "block", bulk: true, items })
+							}}
+							onUnblock={items => {
+								setActiveDialog({ kind: "unblock", bulk: true, items })
+							}}
+						/>
+					) : (
+						<>
+							<div className="relative max-w-xs flex-1">
+								<SearchIcon
+									aria-hidden="true"
+									className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+								/>
+								<Input
+									type="search"
+									aria-label={t("contactsSearchPlaceholder")}
+									placeholder={t("contactsSearchPlaceholder")}
+									value={search}
+									onChange={event => {
+										setSearch(event.target.value)
+									}}
+									className="pl-8"
+								/>
+							</div>
+							<div className="flex shrink-0 items-center gap-2">
+								<AddContactDialog />
 								<Button
 									variant="outline"
-									onClick={handleRetry}
+									size="sm"
+									disabled={isPending || queryError !== null || sections.length === 0}
+									onClick={() => {
+										setSelectMode(true)
+									}}
 								>
-									{t("common:tryAgain")}
+									<ListChecksIcon aria-hidden="true" />
+									{t("contactsActionSelect")}
 								</Button>
-							</EmptyContent>
-						</Empty>
-					</div>
-				) : sections.length === 0 ? (
-					// A non-matching SEARCH query always gets its own "no results" state, checked
-					// first — searchedSections/sections both collapse to zero the moment a query matches
-					// nothing, which previously fell through to the "genuinely no contacts" branch below and
-					// showed the add-a-contact onboarding copy even on an account that has plenty of
-					// contacts, just none matching. searchedSections is search-filtered but NOT
-					// section-filtered, so (with no search active) empty here means genuinely nothing
-					// matches anywhere (the generic empty state); non-empty means the account has data, just
-					// none in the currently selected section (the narrower "nothing HERE" copy, no
-					// add-contact CTA — that action isn't relevant to e.g. an empty Blocked view).
-					<div className="flex flex-1 overflow-y-auto">
-						<Empty>
-							<EmptyHeader>
-								<EmptyMedia variant="icon">{search.trim().length > 0 ? <SearchIcon /> : <UsersIcon />}</EmptyMedia>
-								{search.trim().length > 0 ? (
-									<>
-										<EmptyTitle>{t("contactsSearchNoResultsTitle")}</EmptyTitle>
-										<EmptyDescription>{t("contactsSearchNoResultsBody")}</EmptyDescription>
-									</>
-								) : searchedSections.length === 0 ? (
-									<>
-										<EmptyTitle>{t("contactsEmptyTitle")}</EmptyTitle>
-										<EmptyDescription>{t("contactsEmptyBody")}</EmptyDescription>
-									</>
-								) : (
-									<>
-										<EmptyTitle>{t("contactsEmptySectionTitle")}</EmptyTitle>
-										<EmptyDescription>{t("contactsEmptySectionBody")}</EmptyDescription>
-									</>
-								)}
-							</EmptyHeader>
-						</Empty>
-					</div>
-				) : (
-					<div className="flex-1 overflow-y-auto p-2">
-						{sections.map(contactSection => (
-							<section key={contactSection.key}>
-								{/* Only "all" stacks more than one section at once — a single filtered section
+							</div>
+						</>
+					)}
+				</div>
+				<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+					{isPending ? (
+						<div className="flex flex-1 flex-col gap-1 overflow-y-auto p-4">
+							{Array.from({ length: SKELETON_ROW_COUNT }, (_, index) => (
+								<Skeleton
+									key={index}
+									className="h-14 w-full rounded-xl"
+								/>
+							))}
+						</div>
+					) : queryError !== null ? (
+						<div className="flex flex-1 overflow-y-auto">
+							<Empty>
+								<EmptyHeader>
+									<EmptyMedia variant="icon">
+										<UsersIcon />
+									</EmptyMedia>
+									<EmptyTitle>{t("contactsLoadError")}</EmptyTitle>
+									<EmptyDescription>{errorLabel(asErrorDTO(queryError))}</EmptyDescription>
+								</EmptyHeader>
+								<EmptyContent>
+									<Button
+										variant="outline"
+										onClick={handleRetry}
+									>
+										{t("common:tryAgain")}
+									</Button>
+								</EmptyContent>
+							</Empty>
+						</div>
+					) : sections.length === 0 ? (
+						// A non-matching SEARCH query always gets its own "no results" state, checked
+						// first — searchedSections/sections both collapse to zero the moment a query matches
+						// nothing, which previously fell through to the "genuinely no contacts" branch below and
+						// showed the add-a-contact onboarding copy even on an account that has plenty of
+						// contacts, just none matching. searchedSections is search-filtered but NOT
+						// section-filtered, so (with no search active) empty here means genuinely nothing
+						// matches anywhere (the generic empty state); non-empty means the account has data, just
+						// none in the currently selected section (the narrower "nothing HERE" copy, no
+						// add-contact CTA — that action isn't relevant to e.g. an empty Blocked view).
+						<div className="flex flex-1 overflow-y-auto">
+							<Empty>
+								<EmptyHeader>
+									<EmptyMedia variant="icon">{search.trim().length > 0 ? <SearchIcon /> : <UsersIcon />}</EmptyMedia>
+									{search.trim().length > 0 ? (
+										<>
+											<EmptyTitle>{t("contactsSearchNoResultsTitle")}</EmptyTitle>
+											<EmptyDescription>{t("contactsSearchNoResultsBody")}</EmptyDescription>
+										</>
+									) : searchedSections.length === 0 ? (
+										<>
+											<EmptyTitle>{t("contactsEmptyTitle")}</EmptyTitle>
+											<EmptyDescription>{t("contactsEmptyBody")}</EmptyDescription>
+										</>
+									) : (
+										<>
+											<EmptyTitle>{t("contactsEmptySectionTitle")}</EmptyTitle>
+											<EmptyDescription>{t("contactsEmptySectionBody")}</EmptyDescription>
+										</>
+									)}
+								</EmptyHeader>
+							</Empty>
+						</div>
+					) : (
+						<div className="flex-1 overflow-y-auto p-2">
+							{sections.map(contactSection => (
+								<section key={contactSection.key}>
+									{/* Only "all" stacks more than one section at once — a single filtered section
 								already names itself via the page's own <h1> above, so its inline header would be
 								pure redundancy. */}
-								{section === "all" ? (
-									<h2 className="px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground">
-										{t(CONTACTS_SECTION_HEADER_KEY[contactSection.key])}
-									</h2>
-								) : null}
-								<div className="flex flex-col gap-0.5">{renderSectionItems(contactSection)}</div>
-							</section>
-						))}
-					</div>
-				)}
+									{section === "all" ? (
+										<h2 className="px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground">
+											{t(CONTACTS_SECTION_HEADER_KEY[contactSection.key])}
+										</h2>
+									) : null}
+									<div className="flex flex-col gap-0.5">{renderSectionItems(contactSection)}</div>
+								</section>
+							))}
+						</div>
+					)}
+				</div>
 			</div>
 			{renderActiveDialog()}
 		</>

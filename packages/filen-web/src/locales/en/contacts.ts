@@ -55,9 +55,14 @@ export const contacts = {
 	/** Bulk-selection toolbar — total selected row count across every section, plural */
 	contactsSelectionCount_other: "{{count}} selected",
 
-	// ── Presence ─────────────────────────────────────────────────────────────
-	/** Contact row — visually-hidden label announcing a contact's online-presence indicator */
-	contactsPresenceOnline: "Online",
+	// ── Stats strip ──────────────────────────────────────────────────────────
+	// Web-only summary row pinned above the section list (contacts/requests/blocked counts) — no
+	// mobile equivalent, see contactsList.tsx's own doc comment. The three counts reuse
+	// contactsSectionContacts/contactsSectionRequests/contactsSectionBlocked below rather than a
+	// separate set of labels, so the strip and the section headers can never drift out of sync on
+	// wording.
+	/** Stats strip — accessible group label for the contacts/requests/blocked count tiles */
+	contactsStatsSummaryLabel: "Contacts summary",
 
 	// ── Add-contact dialog ───────────────────────────────────────────────────
 	// contactsActionAdd doubles as the triggering action label (header/menu button) AND the
@@ -82,6 +87,8 @@ export const contacts = {
 	// and Block render as destructive (contactsRemoveConfirmTitle/contactsBlockConfirmTitle below);
 	// Deny/Cancel/Unblock do not, despite filen-mobile flagging deny/cancel destructive too — Unblock
 	// lifts a restriction (never destructive on either platform).
+	/** Row menu action — creates or opens a 1:1 chat with the contact and navigates into it; no confirm dialog */
+	contactsActionMessage: "Message",
 	/** Row/bulk action — accept an incoming contact request; no confirm dialog (mirrors mobile) */
 	contactsActionAccept: "Accept",
 	/** Row/bulk action — deny an incoming contact request; also the deny-confirm dialog's confirm button */

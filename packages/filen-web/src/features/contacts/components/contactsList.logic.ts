@@ -2,6 +2,24 @@ import { fastLocaleCompare } from "@filen/utils"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import { type ContactsKey } from "@/lib/i18n"
 
+// Web-only stats-strip counts pinned above the section list (see contactsList.tsx) — a small honest
+// polish surface, not a mobile port (mobile has no equivalent). `requests` is INCOMING requests only,
+// matching the icon-rail nav badge's own count (shell/iconRail.tsx's incomingRequestCount) so the two
+// surfaces never disagree on what "requests" means for this account.
+export interface ContactsStats {
+	contacts: number
+	requests: number
+	blocked: number
+}
+
+export function contactsStatsCounts(input: {
+	contacts: Contact[]
+	incoming: ContactRequestIn[]
+	blocked: BlockedContact[]
+}): ContactsStats {
+	return { contacts: input.contacts.length, requests: input.incoming.length, blocked: input.blocked.length }
+}
+
 // Minimal shape every contact-like record satisfies (Contact/BlockedContact/ContactRequestIn/
 // ContactRequestOut) — nickName's shape differs only in optionality across those four, never in
 // type: a record with a required `nickName: string` still structurally satisfies an optional
@@ -23,15 +41,6 @@ export function contactDisplayName(contact: ContactLike): string {
 export function contactInitials(displayName: string): string {
 	const trimmed = displayName.trim()
 	return trimmed.length > 0 ? trimmed.charAt(0).toUpperCase() : "?"
-}
-
-// 5-minute presence window, mirrors mobile's ui/avatar.tsx lastActive check. The Number() narrow is
-// safe: lastActive is a millisecond server timestamp, always far inside f64's safe-integer range,
-// and this value is display-only (never fed back into a bigint-typed call).
-const PRESENCE_WINDOW_MS = 300_000
-
-export function isContactOnline(lastActive: bigint): boolean {
-	return Number(lastActive) > Date.now() - PRESENCE_WINDOW_MS
 }
 
 // One section per row-kind the contacts page renders — `items` is concretely typed per key so a

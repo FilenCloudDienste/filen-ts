@@ -2,9 +2,9 @@ import { type KeyboardEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon, XIcon, MoreHorizontalIcon, RotateCcwIcon } from "lucide-react"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
-import { contactDisplayName, contactInitials, isContactOnline } from "@/features/contacts/components/contactsList.logic"
+import { contactDisplayName, contactInitials } from "@/features/contacts/components/contactsList.logic"
 import { ContactMenuContent } from "@/features/contacts/components/contactMenu"
-import { Avatar, AvatarBadge, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
@@ -13,7 +13,6 @@ interface ContactRowShellProps {
 	avatar?: string | undefined
 	displayName: string
 	email: string
-	online?: boolean
 	// Present only while the listing is in bulk-selection mode — its presence (not its value) is what
 	// turns the row into a clickable, selectable listbox option; `selected` is meaningless without it.
 	// Mirrors DriveRow's role="option"/aria-selected treatment (drive/driveRow.tsx), no separate
@@ -26,14 +25,10 @@ interface ContactRowShellProps {
 	children?: ReactNode
 }
 
-// Every row variant below renders through this shell — only the source record and its presence
-// differ per variant. AvatarImage/AvatarFallback/AvatarBadge are all direct children of Avatar (its
-// Base UI Root): Fallback only renders itself while no image has loaded (Base UI's own
-// imageLoadingStatus gate), and AvatarBadge's absolute positioning is anchored to Root's own
-// `relative` container — nesting the badge inside Fallback instead would make it disappear the
-// moment a contact's avatar image finishes loading.
-function ContactRowShell({ avatar, displayName, email, online = false, selected, onToggleSelect, children }: ContactRowShellProps) {
-	const { t } = useTranslation("contacts")
+// Every row variant below renders through this shell — only the source record differs per variant.
+// AvatarImage/AvatarFallback are direct children of Avatar (its Base UI Root): Fallback only renders
+// itself while no image has loaded (Base UI's own imageLoadingStatus gate).
+function ContactRowShell({ avatar, displayName, email, selected, onToggleSelect, children }: ContactRowShellProps) {
 	const selectable = onToggleSelect !== undefined
 
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
@@ -62,11 +57,6 @@ function ContactRowShell({ avatar, displayName, email, online = false, selected,
 			<Avatar>
 				{avatar !== undefined ? <AvatarImage src={avatar} /> : null}
 				<AvatarFallback>{contactInitials(displayName)}</AvatarFallback>
-				{online ? (
-					<AvatarBadge>
-						<span className="sr-only">{t("contactsPresenceOnline")}</span>
-					</AvatarBadge>
-				) : null}
 			</Avatar>
 			<div className="min-w-0 flex-1">
 				<p className="truncate font-medium">{displayName}</p>
@@ -84,15 +74,12 @@ export interface ContactRowProps {
 	children?: ReactNode
 }
 
-// An established contact — the only row kind that ever shows the presence dot (only Contact carries
-// lastActive; requests and blocked contacts don't track it).
 export function ContactRow({ contact, selected, onToggleSelect, children }: ContactRowProps) {
 	return (
 		<ContactRowShell
 			avatar={contact.avatar}
 			displayName={contactDisplayName(contact)}
 			email={contact.email}
-			online={isContactOnline(contact.lastActive)}
 			selected={selected}
 			onToggleSelect={onToggleSelect}
 		>
@@ -224,6 +211,7 @@ export function OutgoingRequestActions({ request, onCancel, disabled, title }: O
 
 export interface ContactActionsProps {
 	contact: Contact
+	onMessage: (contact: Contact) => void
 	onRemove: (contact: Contact) => void
 	onBlock: (contact: Contact) => void
 	disabled?: boolean
@@ -235,7 +223,7 @@ export interface ContactActionsProps {
 // DropdownMenu Root > Trigger + Content, mirroring driveRow.tsx's exact nesting for its own ⋯
 // dropdown: Trigger is a render-prop'd Button (not a child), Content (ContactMenuContent, which
 // already wraps Portal>Positioner>Popup) is the Root's other direct child.
-export function ContactActions({ contact, onRemove, onBlock, disabled, title }: ContactActionsProps) {
+export function ContactActions({ contact, onMessage, onRemove, onBlock, disabled, title }: ContactActionsProps) {
 	const { t } = useTranslation("contacts")
 
 	return (
@@ -253,6 +241,7 @@ export function ContactActions({ contact, onRemove, onBlock, disabled, title }: 
 			/>
 			<ContactMenuContent
 				contact={contact}
+				onMessage={onMessage}
 				onRemove={onRemove}
 				onBlock={onBlock}
 				disabled={disabled}

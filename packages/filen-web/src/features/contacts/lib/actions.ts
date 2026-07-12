@@ -1,4 +1,4 @@
-import type { BlockedContact, Contact, ContactRequestOut, UuidStr } from "@filen/sdk-rs"
+import type { BlockedContact, Chat, Contact, ContactRequestOut, UuidStr } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 import {
@@ -10,6 +10,7 @@ import {
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { runBulk, type BulkOutcome } from "@/features/drive/lib/bulk"
+import { createChat } from "@/features/chats/lib/actions"
 
 export type { VoidActionOutcome }
 
@@ -77,6 +78,31 @@ export async function cancelRequest(uuid: string): Promise<VoidActionOutcome> {
 	}
 
 	contactRequestsQueryUpdate(prev => ({ ...prev, outgoing: prev.outgoing.filter(r => r.uuid !== uuid) }))
+
+	return { status: "success" }
+}
+
+// ── Message (row menu "Message" — new#… quick action) ────────────────────
+
+export interface MessageContactOptions {
+	// Fired once the chat exists (freshly created, or an existing 1:1 the SDK's own create op reused)
+	// — the caller's chance to navigate straight into it. Mirrors chats/lib/actions.ts's own
+	// beforeCacheRemoval callback shape (leaveChat/deleteChat): the mutation layer never navigates
+	// itself, it just reports readiness.
+	onChatReady?: (chat: Chat) => void
+}
+
+// Reuses the exact same chats/lib/actions.ts create path CreateChatDialog already calls (a single-
+// contact array), rather than a parallel "start a chat" implementation living in contacts — there is
+// only ever one way this app creates a chat.
+export async function messageContact(contact: Contact, opts?: MessageContactOptions): Promise<VoidActionOutcome> {
+	const outcome = await createChat([contact])
+
+	if (outcome.status === "error") {
+		return { status: "error", dto: outcome.dto }
+	}
+
+	opts?.onChatReady?.(outcome.item)
 
 	return { status: "success" }
 }

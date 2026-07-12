@@ -4,7 +4,7 @@ import {
 	buildContactSections,
 	contactDisplayName,
 	contactInitials,
-	isContactOnline,
+	contactsStatsCounts,
 	filterContactSections,
 	filterContactsBySearch,
 	isContactsSectionFilter,
@@ -88,17 +88,29 @@ describe("contactInitials", () => {
 	})
 })
 
-describe("isContactOnline", () => {
-	it("is true for a lastActive well inside the 5-minute presence window", () => {
-		expect(isContactOnline(BigInt(Date.now() - 60_000))).toBe(true)
+describe("contactsStatsCounts", () => {
+	it("counts each category by its own array length", () => {
+		const stats = contactsStatsCounts({
+			contacts: [mockContact(), mockContact({ uuid: "55555555-5555-5555-5555-555555555555" })],
+			incoming: [mockIncoming()],
+			blocked: []
+		})
+
+		expect(stats).toEqual({ contacts: 2, requests: 1, blocked: 0 })
 	})
 
-	it("is false for a lastActive well outside the 5-minute presence window", () => {
-		expect(isContactOnline(BigInt(Date.now() - 600_000))).toBe(false)
+	it("counts only INCOMING requests, never outgoing — outgoing has no `incoming` field to read from", () => {
+		const stats = contactsStatsCounts({
+			contacts: [],
+			incoming: [mockIncoming(), mockIncoming({ uuid: "66666666-6666-6666-6666-666666666666" })],
+			blocked: []
+		})
+
+		expect(stats.requests).toBe(2)
 	})
 
-	it("is true for a lastActive in the future (clock skew tolerance)", () => {
-		expect(isContactOnline(BigInt(Date.now() + 60_000))).toBe(true)
+	it("returns all zeros for an account with nothing in any category", () => {
+		expect(contactsStatsCounts({ contacts: [], incoming: [], blocked: [] })).toEqual({ contacts: 0, requests: 0, blocked: 0 })
 	})
 })
 

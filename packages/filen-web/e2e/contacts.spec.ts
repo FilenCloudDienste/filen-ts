@@ -68,6 +68,14 @@ test.describe("contacts", () => {
 		await waitForContactsSettled(page)
 		await expect(page.getByText("Couldn't load contacts", { exact: true })).toHaveCount(0)
 
+		// The stats strip (new, web-only — see contactsList.tsx) renders three count tiles once the
+		// queries settle; a render/count-visibility check only, the live counts are unknown ahead of time.
+		const statsStrip = page.getByRole("group", { name: "Contacts summary" })
+		await expect(statsStrip).toBeVisible()
+		await expect(statsStrip.getByText("Contacts", { exact: true })).toBeVisible()
+		await expect(statsStrip.getByText("Requests", { exact: true })).toBeVisible()
+		await expect(statsStrip.getByText("Blocked", { exact: true })).toBeVisible()
+
 		// Scoped to the rail's own "Filen" nav landmark — the contacts sidebar's own "Contacts" section
 		// filter link (see the sidebar test below) shares this exact accessible name, so an unscoped
 		// lookup here would be a strict-mode violation (two matches) now that the sidebar exists.
@@ -203,6 +211,11 @@ test.describe("contacts", () => {
 		await moreActions.click()
 		const menu = page.getByRole("menu")
 		await expect(menu).toBeVisible()
+
+		// M16 — Message is now the row menu's first (non-destructive) entry, ahead of Remove/Block.
+		// Render-only: clicking it would create a real chat with this live contact (outward-facing, same
+		// as Remove/Block below), so this suite only confirms it's offered, never activates it.
+		await expect(menu.getByRole("menuitem", { name: "Message", exact: true })).toBeVisible()
 
 		await menu.getByRole("menuitem", { name: "Remove", exact: true }).click()
 

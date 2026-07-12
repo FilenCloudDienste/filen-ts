@@ -1,13 +1,14 @@
 import { useTranslation } from "react-i18next"
-import { Trash2Icon, BanIcon } from "lucide-react"
+import { Trash2Icon, BanIcon, MessagesSquareIcon } from "lucide-react"
 import type { Contact } from "@filen/sdk-rs"
 import { DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
 
 export interface ContactMenuContentProps {
 	contact: Contact
-	// Both only signal intent upward — the listing-level dialog host (contactsList.tsx) owns the
-	// confirm and the actual mutation, mirroring drive's itemMenu.tsx: this component is presentation
-	// only.
+	// All three only signal intent upward — the listing-level dialog host (contactsList.tsx) owns any
+	// confirm + the actual mutation/navigation, mirroring drive's itemMenu.tsx: this component is
+	// presentation only.
+	onMessage: (contact: Contact) => void
 	onRemove: (contact: Contact) => void
 	onBlock: (contact: Contact) => void
 	disabled?: boolean | undefined
@@ -18,14 +19,25 @@ export interface ContactMenuContentProps {
 
 // The contact-row ⋯ menu — always rendered as a MenuPrimitive.Popup inside a DropdownMenu Root/
 // Trigger/Portal/Positioner (see contactRow.tsx's ContactActions, which owns that nesting), mirrors
-// drive's DriveDropdownMenuContent exactly. Remove then Block, both destructive-styled (the locale
-// catalog's own doc comments: "Only Remove and Block render as destructive"), Block LAST as the more
-// severe of the two — it also prevents the other person from re-requesting, Remove alone does not.
-export function ContactMenuContent({ contact, onRemove, onBlock, disabled, title }: ContactMenuContentProps) {
+// drive's DriveDropdownMenuContent exactly. Message first (non-destructive, the most common action),
+// then Remove then Block, both destructive-styled (the locale catalog's own doc comments: "Only
+// Remove and Block render as destructive"), Block LAST as the more severe of the two — it also
+// prevents the other person from re-requesting, Remove alone does not.
+export function ContactMenuContent({ contact, onMessage, onRemove, onBlock, disabled, title }: ContactMenuContentProps) {
 	const { t } = useTranslation("contacts")
 
 	return (
 		<DropdownMenuContent align="end">
+			<DropdownMenuItem
+				disabled={disabled}
+				title={title}
+				onClick={() => {
+					onMessage(contact)
+				}}
+			>
+				<MessagesSquareIcon aria-hidden="true" />
+				{t("contactsActionMessage")}
+			</DropdownMenuItem>
 			<DropdownMenuItem
 				variant="destructive"
 				disabled={disabled}
