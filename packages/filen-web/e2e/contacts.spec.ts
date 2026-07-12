@@ -212,9 +212,9 @@ test.describe("contacts", () => {
 		const menu = page.getByRole("menu")
 		await expect(menu).toBeVisible()
 
-		// M16 — Message is now the row menu's first (non-destructive) entry, ahead of Remove/Block.
-		// Render-only: clicking it would create a real chat with this live contact (outward-facing, same
-		// as Remove/Block below), so this suite only confirms it's offered, never activates it.
+		// Message is the row menu's first (non-destructive) entry, ahead of Remove/Block. Render-only:
+		// clicking it would create a real chat with this live contact (outward-facing, same as Remove/Block
+		// below), so this suite only confirms it's offered, never activates it.
 		await expect(menu.getByRole("menuitem", { name: "Message", exact: true })).toBeVisible()
 
 		await menu.getByRole("menuitem", { name: "Remove", exact: true }).click()

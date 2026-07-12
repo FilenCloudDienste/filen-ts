@@ -24,8 +24,8 @@ function mockContact(overrides: Partial<Contact> = {}): Contact {
 	}
 }
 
-// new#10 — the contact-avatar presence badge was removed; a contact row must never render one,
-// regardless of how recent lastActive is (the badge used to key off exactly this field).
+// The contact-avatar presence badge was removed; a contact row must never render one, regardless
+// of how recent lastActive is (the badge used to key off exactly this field).
 describe("ContactRow — presence badge removed", () => {
 	it("renders no avatar-badge element even for a lastActive well inside the old 5-minute presence window", () => {
 		const { container } = render(createElement(ContactRow, { contact: mockContact() }))
@@ -34,7 +34,7 @@ describe("ContactRow — presence badge removed", () => {
 	})
 })
 
-// M16 — the row menu now offers a "Message" action ahead of Remove/Block; this asserts only the
+// The row menu now offers a "Message" action ahead of Remove/Block; this asserts only the
 // UI-level wiring (the click reports the contact upward), not the create-chat + navigate orchestration
 // itself (covered by contactsActions.test.ts's messageContact tests).
 describe("ContactActions — Message menu item", () => {

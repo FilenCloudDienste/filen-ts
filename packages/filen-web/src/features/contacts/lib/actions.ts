@@ -82,7 +82,7 @@ export async function cancelRequest(uuid: string): Promise<VoidActionOutcome> {
 	return { status: "success" }
 }
 
-// ── Message (row menu "Message" — new#… quick action) ────────────────────
+// ── Message (starts or opens a 1:1 chat with the contact) ────────────────
 
 export interface MessageContactOptions {
 	// Fired once the chat exists (freshly created, or an existing 1:1 the SDK's own create op reused)

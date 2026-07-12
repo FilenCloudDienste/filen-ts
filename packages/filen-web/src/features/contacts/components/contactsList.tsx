@@ -159,9 +159,9 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		}
 	}
 
-	// Row menu "Message" (new#… quick action): creates-or-opens a 1:1 chat with the contact, then
-	// navigates straight into it — no confirm (mirrors mobile's own one-click contactRow.tsx handler),
-	// LABEL-FIRST toast on failure, matching every other singular contact action's convention.
+	// Row menu "Message": creates-or-opens a 1:1 chat with the contact, then navigates straight into
+	// it — no confirm (mirrors mobile's own one-click row handler), LABEL-FIRST toast on failure,
+	// matching every other singular contact action's convention.
 	async function handleMessage(contact: Contact): Promise<void> {
 		const outcome = await messageContact(contact, {
 			onChatReady: chat => {
