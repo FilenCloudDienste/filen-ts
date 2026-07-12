@@ -10,7 +10,8 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // `npm run build && npm run preview` (playwright.config.ts's webServer). Proves, against the real SW
 // route: an <img> is served by it (not the buffered blob: fallback), a <video> plays AND a mid-file
 // seek gets answered with a fresh 206/Content-Range (proving Range/seek actually works, not just an
-// initial full-file GET), an <audio> plays, every one of those responses is INLINE (no
+// initial full-file GET), a drive <audio> file hands off to the persistent player and streams over
+// that same route, every one of those responses is INLINE (no
 // Content-Disposition: attachment — this is a preview, never a download), and the whole run produces
 // zero CSP console violations (media-src's own acceptance check). The mp4 fixture is a real,
 // faststart-muxed H.264 clip large enough (moov ends ~3 KB in, ~110 KB of mdat follows) that an
@@ -191,28 +192,36 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 		await page.keyboard.press("Escape")
 		await expect(video).toHaveCount(0)
 
-		// ---- audio leg: <audio> plays over the same inline route (no seek requirement — MP3 has no
-		// upfront container metadata the way faststart mp4 does, so a Range-on-seek proof isn't a
-		// reliable signal there; play() + an inline, non-attachment response is). ----
+		// ---- audio leg: a drive audio double-click no longer opens the overlay — it hands off to the
+		// persistent player, whose engine streams the file over the SAME SW inline route the overlay used.
+		// That engine's <audio> element lives detached from the document (created in JS, never mounted in
+		// JSX), so the proof shifts off the element and onto the docked player bar plus the SW response
+		// itself: no dialog opens, the bar reaches a real playing state, and the route still serves
+		// audio/mpeg INLINE (no attachment), exactly as the retired overlay arm did. ----
+		const bar = page.getByRole("region", { name: "Audio player" })
+		await expect(bar).toHaveCount(0)
+
 		await rowAudio.dblclick()
-		const audio = page.locator("audio")
-		await expect(audio).toBeVisible({ timeout: 30_000 })
-		await expect.poll(() => audio.evaluate(el => (el as HTMLAudioElement).duration || 0), { timeout: 30_000 }).toBeGreaterThan(0)
+		await expect(bar).toBeVisible({ timeout: 30_000 })
+		await expect(page.getByRole("dialog")).toHaveCount(0)
+		await expect(bar.getByText(nameAudio)).toBeVisible()
 
-		await audio.evaluate(el => {
-			const audioEl = el as HTMLAudioElement
-
-			audioEl.muted = true
-
-			return audioEl.play()
-		})
-		await expect.poll(() => audio.evaluate(el => !(el as HTMLAudioElement).paused), { timeout: 15_000 }).toBe(true)
+		// A real playing state over the SW stream: the transport shows Pause and the seek slider advances as
+		// the decoded file plays (dblclick is a user gesture, so play() is permitted — MP3 has no upfront
+		// container metadata the way faststart mp4 does, so a playhead advance, not a Range-on-seek, is the
+		// reliable playback signal here).
+		await expect(bar.getByRole("button", { name: "Pause" })).toBeVisible({ timeout: 30_000 })
+		const audioSeek = bar.getByRole("slider", { name: "Seek" })
+		const audioStart = Number(await audioSeek.inputValue())
+		await expect.poll(async () => Number(await audioSeek.inputValue()), { timeout: 15_000 }).toBeGreaterThan(audioStart)
 
 		const audioResponse = swResponses.find(r => r.contentType === "audio/mpeg")
 		expect(audioResponse?.disposition).toBeNull()
 
-		await page.keyboard.press("Escape")
-		await expect(audio).toHaveCount(0)
+		// Clearing the queue retires the bar — the shell renders it only for a non-empty queue.
+		await bar.getByRole("button", { name: "Show queue" }).click()
+		await page.getByRole("button", { name: "Clear queue", exact: true }).click()
+		await expect(bar).toHaveCount(0, { timeout: 15_000 })
 
 		expect(cspViolations).toEqual([])
 	} finally {
