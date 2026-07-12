@@ -129,6 +129,14 @@ describe("messageMenuActions", () => {
 		expect(messageMenuActions(message, 1n, "failed").map(d => d.id)).toEqual(["copy", "retry", "remove"])
 	})
 
+	it("a SENDING message offers copy only — retry/remove stay hidden even for an id that also carries a stale error record", () => {
+		// "sending" (the push loop's send call is actually outstanding, unrecallable) must gate identically
+		// to "pending", never falling into the "failed" branch that offers retry/remove.
+		const message = mockMessage({ senderId: 1 })
+
+		expect(messageMenuActions(message, 1n, "sending").map(d => d.id)).toEqual(["copy"])
+	})
+
 	it("an undecryptable own message offers delete only (no reply/copy/edit — no text)", () => {
 		const message = mockUndecryptableMessage({ senderId: 1 })
 

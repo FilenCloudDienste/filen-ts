@@ -65,6 +65,46 @@ function bySentTimestampAsc(a: ChatMessage, b: ChatMessage): number {
 	return a.sentTimestamp === b.sentTimestamp ? 0 : a.sentTimestamp < b.sentTimestamp ? -1 : 1
 }
 
+// Own-message reconcile patches (see OWN_MESSAGE_RECONCILE_DELAY_MS) sit in a plain setTimeout for up to
+// 3s — long enough for a same-chat conversationDeleted to land first. Track the pending timer per chat so
+// the deletion handler can cancel it before it fires and recreates the message-cache slice being purged.
+const pendingOwnMessageTimeouts = new Map<string, Set<ReturnType<typeof setTimeout>>>()
+
+function trackOwnMessageTimeout(chatUuid: string, id: ReturnType<typeof setTimeout>): void {
+	const pending = pendingOwnMessageTimeouts.get(chatUuid) ?? new Set()
+
+	pending.add(id)
+	pendingOwnMessageTimeouts.set(chatUuid, pending)
+}
+
+function untrackOwnMessageTimeout(chatUuid: string, id: ReturnType<typeof setTimeout>): void {
+	const pending = pendingOwnMessageTimeouts.get(chatUuid)
+
+	if (pending === undefined) {
+		return
+	}
+
+	pending.delete(id)
+
+	if (pending.size === 0) {
+		pendingOwnMessageTimeouts.delete(chatUuid)
+	}
+}
+
+function clearPendingOwnMessageTimeouts(chatUuid: string): void {
+	const pending = pendingOwnMessageTimeouts.get(chatUuid)
+
+	if (pending === undefined) {
+		return
+	}
+
+	for (const id of pending) {
+		clearTimeout(id)
+	}
+
+	pendingOwnMessageTimeouts.delete(chatUuid)
+}
+
 // Resolve the chat that currently holds `messageUuid` in its message cache — MessageDelete /
 // MessageEmbedDisabled carry only the message uuid (no chat), so mobile searches every cached thread.
 function findChatUuidForMessage(messageUuid: string): string | undefined {
@@ -209,8 +249,12 @@ function handleMessageNew(msg: ChatMessage): void {
 	// A new message from this sender supersedes their typing indicator.
 	clearTypingForSender(msg.chat, senderId)
 
-	setTimeout(
+	const timeoutId = setTimeout(
 		() => {
+			if (isOwn) {
+				untrackOwnMessageTimeout(msg.chat, timeoutId)
+			}
+
 			// Dedup by SERVER uuid against the thread cache AND the reconciled outbox: if the message is
 			// already present (our own send's commit reconciled the optimistic copy, or a prior echo landed),
 			// leave it untouched instead of re-appending a duplicate.
@@ -233,15 +277,30 @@ function handleMessageNew(msg: ChatMessage): void {
 						return { ...c, lastMessage: msg, ...(advanceFocus ? { lastFocus: msg.sentTimestamp } : {}) }
 					})
 				)
+
+				// A foreign message landing in a chat the user is NOT currently looking at is a genuine
+				// unread arrival — invalidate the rail badge's scalar so it refetches instead of staying dark
+				// until the next blur/reconnect (that scalar has no per-event patch path of its own).
+				if (!isOwn && !focused) {
+					void queryClient.invalidateQueries({ queryKey: CHATS_UNREAD_QUERY_KEY })
+				}
 			}, 1)
 		},
 		isOwn ? OWN_MESSAGE_RECONCILE_DELAY_MS : FOREIGN_MESSAGE_DELAY_MS
 	)
+
+	if (isOwn) {
+		trackOwnMessageTimeout(msg.chat, timeoutId)
+	}
 }
 
 // Exported for the unit tests' purge-order assertion — awaited directly there since handleChatEvent fires
 // it and returns synchronously.
 export async function handleConversationDeleted(uuid: string): Promise<void> {
+	// Cancel first: an own-message reconcile patch still pending for this chat would otherwise fire after
+	// the purge below and recreate the message-cache slice it just emptied.
+	clearPendingOwnMessageTimeouts(uuid)
+
 	// Purge-first: drop the deleted chat's queued unsent messages, send errors and input draft
 	// BEFORE the cache removal so a concurrent send loop never resolves + retries into a gone chat. Best-
 	// effort (never throws).

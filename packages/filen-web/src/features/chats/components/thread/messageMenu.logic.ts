@@ -49,7 +49,11 @@ const DISABLE_EMBED: MessageActionDescriptor = {
 // compare):
 //   - "failed"    → copy (if text) + retry + remove — an optimistic send that ran out of its retry
 //                   budget; reply/edit/delete would target a uuid the server never learned.
-//   - "pending"   → copy only (a queued/in-flight send; no server uuid to reply to/edit yet).
+//   - "pending"   → copy only (queued, not yet dispatched; no server uuid to reply to/edit yet).
+//   - "sending"   → copy only, SAME as "pending" — the send call is actually outstanding and
+//                   unrecallable, so retry/remove (which would act on a snapshot that delivers
+//                   regardless) must stay hidden even if a stale error record from an earlier
+//                   attempt would otherwise have offered them.
 //   - "confirmed" → reply + copy (any decryptable message) + edit + delete (sender-only) +
 //                   disableEmbed (sender-only, only when the message actually has an active embed to
 //                   disable — `hasEmbeds` is the caller's own embeds.logic.ts classification, computed

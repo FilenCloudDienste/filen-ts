@@ -41,6 +41,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { CHATS_QUERY_KEY, chatsQueryGet } from "@/features/chats/queries/chats"
+import { CHATS_UNREAD_QUERY_KEY } from "@/features/chats/queries/chatsUnread"
 import { chatMessagesQueryKey } from "@/features/chats/queries/chatMessages"
 import {
 	isChatOwner,
@@ -305,6 +306,17 @@ describe("markChatRead", () => {
 		expect(markChatReadOp).toHaveBeenCalledExactlyOnceWith(chat)
 		expect(outcome).toEqual({ status: "success" })
 		expect(chatsQueryGet()).toEqual([refreshed])
+	})
+
+	it("decrements the rail badge by invalidating the unread scalar so it refetches the server's recount", async () => {
+		const chat = mockChat({ lastFocus: 0n })
+		updateLastChatFocusTimesNowOp.mockResolvedValueOnce([chat])
+		markChatReadOp.mockResolvedValueOnce(undefined)
+		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+
+		await markChatRead(chat)
+
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: CHATS_UNREAD_QUERY_KEY })
 	})
 
 	it("returns an error outcome when either call rejects", async () => {

@@ -43,13 +43,22 @@ export type InflightChatMessageErrors = Record<string, InflightChatMessageError>
 export interface ChatsInflightStore {
 	inflightMessages: InflightChatMessages
 	inflightErrors: InflightChatMessageErrors
+	// inflightIds currently INSIDE the push loop's unrecallable window (the sendChatMessage call has been
+	// issued and has not yet resolved/rejected) — a plain presence map, mirroring inflightErrors' own
+	// keyed-by-inflightId shape. A message can carry BOTH a stale error record (from a prior transient
+	// rejection that left it queued for retry) and a live entry here at once, e.g. an automatic retry pass
+	// picks it back up before the user's own Retry click — this map is what lets useChatSendState tell that
+	// apart from a merely-queued or genuinely-dead send.
+	sendingInflightIds: Record<string, true>
 	setInflightMessages: (fn: InflightChatMessages | ((prev: InflightChatMessages) => InflightChatMessages)) => void
 	setInflightErrors: (fn: InflightChatMessageErrors | ((prev: InflightChatMessageErrors) => InflightChatMessageErrors)) => void
+	setSendingInflightIds: (fn: Record<string, true> | ((prev: Record<string, true>) => Record<string, true>)) => void
 }
 
 export const useChatsInflightStore = create<ChatsInflightStore>(set => ({
 	inflightMessages: {},
 	inflightErrors: {},
+	sendingInflightIds: {},
 	setInflightMessages(fn) {
 		set(state => ({
 			inflightMessages: typeof fn === "function" ? fn(state.inflightMessages) : fn
@@ -59,16 +68,27 @@ export const useChatsInflightStore = create<ChatsInflightStore>(set => ({
 		set(state => ({
 			inflightErrors: typeof fn === "function" ? fn(state.inflightErrors) : fn
 		}))
+	},
+	setSendingInflightIds(fn) {
+		set(state => ({
+			sendingInflightIds: typeof fn === "function" ? fn(state.sendingInflightIds) : fn
+		}))
 	}
 }))
 
-// Reactive per-message send-state for the thread: "failed" (an error record exists — a red bubble with
-// retry/remove) wins over "pending" (queued, no error yet — a muted clock bubble); everything else is
+// Reactive per-message send-state for the thread: "sending" (the push loop's sendChatMessage call is
+// actually outstanding — unrecallable, the captured snapshot delivers regardless of any later
+// remove/retry) wins over "failed" (an error record exists — a red bubble with retry/remove), which wins
+// over "pending" (queued, not currently being pushed — a muted clock bubble); everything else is
 // "confirmed". Keyed by the message's own `uuid`, which for an optimistic entry IS its inflightId.
-export type ChatSendState = "confirmed" | "pending" | "failed"
+export type ChatSendState = "confirmed" | "pending" | "sending" | "failed"
 
 export function useChatSendState(messageUuid: string): ChatSendState {
 	return useChatsInflightStore(state => {
+		if (state.sendingInflightIds[messageUuid] === true) {
+			return "sending"
+		}
+
 		if (state.inflightErrors[messageUuid] !== undefined) {
 			return "failed"
 		}

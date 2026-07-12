@@ -109,7 +109,7 @@ export function MessageRow({ chat, message, showHeader, currentUserId }: Message
 								{undecryptable ? (
 									<span className="text-sm text-muted-foreground italic">{t("chatMessageUndecryptable")}</span>
 								) : (
-									<span className={cn("min-w-0", sendState === "pending" && "opacity-60")}>
+									<span className={cn("min-w-0", (sendState === "pending" || sendState === "sending") && "opacity-60")}>
 										<MessageContent
 											chat={chat}
 											text={message.message}
@@ -123,7 +123,7 @@ export function MessageRow({ chat, message, showHeader, currentUserId }: Message
 										/>
 									</span>
 								)}
-								{sendState === "pending" ? (
+								{sendState === "pending" || sendState === "sending" ? (
 									<span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
 										<ClockIcon className="size-3 shrink-0" />
 										{t("chatMessageSending")}

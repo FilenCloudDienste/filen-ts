@@ -198,6 +198,53 @@ describe("chat socket handlers — messages", () => {
 		expect(chat !== undefined ? chatHasUnread(chat, 1n) : false).toBe(true)
 	})
 
+	it("badge staleness: a FOREIGN message in a NON-focused chat invalidates the rail badge's unread scalar", () => {
+		vi.useFakeTimers()
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 1n })
+		seedChats([makeChat("c1", { lastFocus: 50n })])
+		seedMessages("c1", [])
+		setFocusedChat(testUuid("other"))
+		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+
+		handleChatEvent({
+			inner: { type: "messageNew", msg: makeMessage("m1", "c1", { senderId: 2, sentTimestamp: 200n }) },
+			chatMessageId: 0n
+		})
+		vi.runAllTimers()
+
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: CHATS_UNREAD_QUERY_KEY })
+	})
+
+	it("badge staleness: a FOREIGN message in the FOCUSED chat does NOT invalidate the unread scalar (not a genuine unread arrival)", () => {
+		vi.useFakeTimers()
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 1n })
+		seedChats([makeChat("c1", { lastFocus: 50n })])
+		seedMessages("c1", [])
+		setFocusedChat(testUuid("c1"))
+		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+
+		handleChatEvent({
+			inner: { type: "messageNew", msg: makeMessage("m1", "c1", { senderId: 2, sentTimestamp: 200n }) },
+			chatMessageId: 0n
+		})
+		vi.runAllTimers()
+
+		expect(invalidate).not.toHaveBeenCalledWith({ queryKey: CHATS_UNREAD_QUERY_KEY })
+	})
+
+	it("badge staleness: an OWN message never invalidates the unread scalar", () => {
+		vi.useFakeTimers()
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 2n })
+		seedChats([makeChat("c1")])
+		seedMessages("c1", [])
+		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+
+		handleChatEvent({ inner: { type: "messageNew", msg: makeMessage("m1", "c1", { senderId: 2 }) }, chatMessageId: 0n })
+		vi.runAllTimers()
+
+		expect(invalidate).not.toHaveBeenCalledWith({ queryKey: CHATS_UNREAD_QUERY_KEY })
+	})
+
 	it("messageEdited patches content + stamps edited from the Decrypted arm", () => {
 		seedMessages("c1", [makeMessage("m1", "c1", { message: "old" })])
 
@@ -319,6 +366,25 @@ describe("chat socket handlers — conversations", () => {
 		expect(getChats().map(c => c.uuid)).toEqual([testUuid("c2")])
 		expect(useChatTypingStore.getState().typing[testUuid("c1")]).toBeUndefined()
 		expect(getFocusedChat()).toBeNull()
+	})
+
+	it("conversationDeleted cancels a still-pending own-message reconcile timeout — no ghost message-cache slice", async () => {
+		vi.useFakeTimers()
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 2n })
+		seedChats([makeChat("c1")])
+		seedMessages("c1", [])
+
+		// Own send: the reconcile patch is parked for OWN_MESSAGE_RECONCILE_DELAY_MS (3s).
+		handleChatEvent({ inner: { type: "messageNew", msg: makeMessage("m1", "c1", { senderId: 2 }) }, chatMessageId: 0n })
+
+		// The chat is deleted well inside that window, before the parked patch has fired.
+		vi.advanceTimersByTime(100)
+		await handleConversationDeleted(testUuid("c1"))
+
+		// Advance well past the reconcile delay — a cancelled timeout must never recreate the purged slice.
+		vi.advanceTimersByTime(5_000)
+
+		expect(getMessages("c1")).toEqual([])
 	})
 })
 

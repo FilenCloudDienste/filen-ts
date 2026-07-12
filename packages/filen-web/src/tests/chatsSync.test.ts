@@ -112,7 +112,7 @@ beforeEach(async () => {
 	testQueryClient.clear()
 	vi.clearAllMocks()
 	onlineManager.setOnline(true)
-	useChatsInflightStore.setState({ inflightMessages: {}, inflightErrors: {} })
+	useChatsInflightStore.setState({ inflightMessages: {}, inflightErrors: {}, sendingInflightIds: {} })
 	sendChatMessage.mockImplementation((chat: Chat) => Promise.resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid, "srv-1-1-1") }))
 	sync.start()
 	await tick()
@@ -219,6 +219,73 @@ describe("commit boundary — the post-commit tail never re-throws (no duplicate
 		expect(sendChatMessage).toHaveBeenCalledTimes(1)
 		expect(queue()["chat-a-a-a"]).toBeUndefined()
 		expect(useChatsInflightStore.getState().inflightErrors).toEqual({})
+	})
+})
+
+describe("unrecallable in-flight marker — sendingInflightIds spans the outstanding sendChatMessage call", () => {
+	it("marks the inflightId sending only while the network call is outstanding, clearing on commit", async () => {
+		let releaseSend: (() => void) | undefined
+		sendChatMessage.mockImplementation(
+			(chat: Chat) =>
+				new Promise(resolve => {
+					releaseSend = () => {
+						resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid, "srv-1-1-1") })
+					}
+				})
+		)
+
+		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+
+		sync.syncNow()
+		await tick()
+
+		expect(useChatsInflightStore.getState().sendingInflightIds["inf-1-1-1"]).toBe(true)
+
+		releaseSend?.()
+		await tick()
+		await tick()
+
+		expect(useChatsInflightStore.getState().sendingInflightIds["inf-1-1-1"]).toBeUndefined()
+		expect(queue()["chat-a-a-a"]).toBeUndefined()
+	})
+
+	it("stays marked sending across an AUTOMATIC retry pass, even though a stale error record from an earlier transient rejection is still present — the exact race that let Remove/Retry target an unrecallable send", async () => {
+		// First pass: a network-class rejection keeps the message queued WITH an error record (the "failed"
+		// bubble a user could otherwise act on).
+		sendChatMessage.mockRejectedValueOnce(sdkError("Reqwest"))
+		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+
+		sync.syncNow()
+		await tick()
+		await tick()
+
+		expect(useChatsInflightStore.getState().inflightErrors["inf-1-1-1"]).toBeDefined()
+		expect(queue()["chat-a-a-a"]?.messages).toHaveLength(1)
+
+		// Second pass — an automatic trigger (reconnect/interval), NOT a user Retry click — resends the same
+		// still-queued message. sendingInflightIds must be true for its whole outstanding window despite the
+		// stale error record above.
+		let releaseSend: (() => void) | undefined
+		sendChatMessage.mockImplementation(
+			(chat: Chat) =>
+				new Promise(resolve => {
+					releaseSend = () => {
+						resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid, "srv-1-1-1") })
+					}
+				})
+		)
+
+		sync.syncNow()
+		await tick()
+
+		expect(useChatsInflightStore.getState().sendingInflightIds["inf-1-1-1"]).toBe(true)
+		expect(useChatsInflightStore.getState().inflightErrors["inf-1-1-1"]).toBeDefined()
+
+		releaseSend?.()
+		await tick()
+		await tick()
+
+		expect(useChatsInflightStore.getState().sendingInflightIds["inf-1-1-1"]).toBeUndefined()
 	})
 })
 

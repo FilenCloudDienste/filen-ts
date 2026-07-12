@@ -111,9 +111,14 @@ export function mergeChatInflight(current: InflightChatMessages, fromDisk: Infli
 // (the server doesn't know a pending send yet, so a refetch would otherwise drop it). Dedup is first-
 // wins by server uuid, then by inflightId: a query message already carrying an optimistic entry (its
 // uuid === the inflightId) suppresses re-adding that store entry. Confirmed messages have a real server
-// uuid that never equals an inflightId, so they never collide. Returned ASCENDING by sentTimestamp
-// (oldest first) — the web's non-inverted dense-row order, the inverse of mobile's inverted-list
-// DESC — so pending/failed entries (newest) naturally land AFTER confirmed ones.
+// uuid that never equals an inflightId, so they never collide.
+//
+// Sort key is (confirmed-before-pending, sentTimestamp ascending) — pending/failed entries always sort
+// AFTER every confirmed one regardless of raw timestamp, so a local clock running behind the server's
+// can never float an uncommitted bubble above a just-arrived confirmed message. `pendingUuids` is
+// collected from the inflight/failed arrays directly (not from byUuid's dedup winner) so a message the
+// leader ALSO belt-and-braces-paints straight into the query cache (applyLeaderOptimistic, sync.ts)
+// still classifies as pending here.
 export function composeMessageList({
 	queryMessages,
 	inflightMessages,
@@ -129,7 +134,11 @@ export function composeMessageList({
 		byUuid.set(message.uuid, message)
 	}
 
+	const pendingUuids = new Set<string>()
+
 	for (const message of [...inflightMessages, ...failedMessages]) {
+		pendingUuids.add(message.uuid)
+
 		// The optimistic copy's uuid IS its inflightId, so a single uuid check catches both "already in
 		// the query cache" and "same inflight entry seen twice (queued + failed)".
 		if (byUuid.has(message.uuid)) {
@@ -139,7 +148,16 @@ export function composeMessageList({
 		byUuid.set(message.uuid, message)
 	}
 
-	return [...byUuid.values()].sort((a, b) => (a.sentTimestamp === b.sentTimestamp ? 0 : a.sentTimestamp < b.sentTimestamp ? -1 : 1))
+	return [...byUuid.values()].sort((a, b) => {
+		const aPending = pendingUuids.has(a.uuid)
+		const bPending = pendingUuids.has(b.uuid)
+
+		if (aPending !== bPending) {
+			return aPending ? 1 : -1
+		}
+
+		return a.sentTimestamp === b.sentTimestamp ? 0 : a.sentTimestamp < b.sentTimestamp ? -1 : 1
+	})
 }
 
 // arktype schema for the DURABLE outbox's read path (invalid/corrupt → dropped, the kv

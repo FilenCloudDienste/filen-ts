@@ -541,6 +541,12 @@ export class Sync {
 							continue
 						}
 
+						// Mark this inflightId as actually in flight for the whole unrecallable window (the
+						// send call is issued below and cannot be cancelled once started) — cleared in
+						// `finally` regardless of outcome, so a message that stays queued for a later retry
+						// reverts to "pending"/"failed" and one that commits reverts to "confirmed" via dequeue.
+						this.setSending(message.inflightId, true)
+
 						try {
 							await this.pushMessage(chat, message)
 
@@ -601,6 +607,8 @@ export class Sync {
 							// Keep-for-retry (or transient below the bound): leave the entry queued. Stop
 							// this chat's sequential pass so ordering is preserved — a later trigger retries.
 							return
+						} finally {
+							this.setSending(message.inflightId, false)
 						}
 
 						// Committed: remove from the queue (drop the chat key when empty).
@@ -661,6 +669,27 @@ export class Sync {
 					messages: remaining
 				}
 			}
+
+			return updated
+		})
+	}
+
+	// Toggles the store's unrecallable-send marker for one inflightId (useChatSendState's "sending" tier —
+	// see useChatsInflight.ts). A no-op setState when the flag is already at the target value, matching
+	// every other store-patch helper's own cheap-bail convention.
+	private setSending(inflightId: string, sending: boolean): void {
+		useChatsInflightStore.getState().setSendingInflightIds(prev => {
+			if (sending) {
+				return prev[inflightId] === true ? prev : { ...prev, [inflightId]: true }
+			}
+
+			if (prev[inflightId] === undefined) {
+				return prev
+			}
+
+			const updated = { ...prev }
+
+			Reflect.deleteProperty(updated, inflightId)
 
 			return updated
 		})

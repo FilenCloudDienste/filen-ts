@@ -101,6 +101,43 @@ describe("composeMessageList", () => {
 		expect(list).toHaveLength(1)
 		expect(list[0]?.uuid).toBe("inf-6-6-6")
 	})
+
+	it("pins a pending entry to the BOTTOM even when its timestamp is EARLIER than a confirmed message (client-behind-server clock skew)", () => {
+		// A local clock running behind the server's stamps the just-enqueued optimistic bubble with a
+		// sentTimestamp smaller than a peer's already-committed message — a raw-timestamp sort would float
+		// the pending bubble above it; the confirmed-before-pending tie-break must not.
+		const list = composeMessageList({
+			queryMessages: [confirmed("srv-1-1-1", 1_000n)],
+			inflightMessages: [optimistic("inf-2-2-2", 500n)],
+			failedMessages: []
+		})
+
+		expect(list.map(m => m.uuid)).toEqual(["srv-1-1-1", "inf-2-2-2"])
+	})
+
+	it("pins a failed entry to the BOTTOM under the same clock-skew condition", () => {
+		const list = composeMessageList({
+			queryMessages: [confirmed("srv-1-1-1", 1_000n)],
+			inflightMessages: [],
+			failedMessages: [optimistic("inf-3-3-3", 500n)]
+		})
+
+		expect(list.map(m => m.uuid)).toEqual(["srv-1-1-1", "inf-3-3-3"])
+	})
+
+	it("still classifies a belt-and-braces query-cache copy of an optimistic entry as pending (bottom-pinned), not confirmed", () => {
+		// applyLeaderOptimistic (sync.ts) paints the optimistic bubble straight into the query cache too —
+		// the dedup winner for THAT uuid comes from queryMessages, but it must still sort as pending.
+		const opt = optimistic("inf-4-4-4", 10n)
+
+		const list = composeMessageList({
+			queryMessages: [opt, confirmed("srv-9-9-9", 2_000n)],
+			inflightMessages: [opt],
+			failedMessages: []
+		})
+
+		expect(list.map(m => m.uuid)).toEqual(["srv-9-9-9", "inf-4-4-4"])
+	})
 })
 
 describe("mergeChatInflight — union-by-inflightId, live-wins (the divergence from notes' overwrite merge)", () => {
