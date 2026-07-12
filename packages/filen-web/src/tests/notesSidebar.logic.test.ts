@@ -7,6 +7,7 @@ import {
 	filterTagsForView,
 	sidebarRowKey,
 	selectableNotesFromRows,
+	selectableRowIndexByKey,
 	type NotesSidebarRow
 } from "@/features/notes/components/notesSidebar.logic"
 import { DEFAULT_NOTE_TAGS_SORT_BY } from "@/features/notes/lib/sort"
@@ -256,5 +257,47 @@ describe("notesSidebar.logic — selectableNotesFromRows (click-selection range)
 		]
 
 		expect(selectableNotesFromRows(rows)).toEqual([note, note])
+	})
+})
+
+describe("notesSidebar.logic — selectableRowIndexByKey (click target resolution)", () => {
+	it("maps each note row to its own position, even across duplicate rows for the same note", () => {
+		// A uuid-keyed map would collapse both rows for `note` onto whichever is built last (index 2),
+		// so clicking the FIRST occurrence would be misresolved onto the SECOND row's position.
+		// Row-identity keys (sidebarRowKey) keep them distinct.
+		const tagA = mockTag({ uuid: testUuid("ta") })
+		const tagB = mockTag({ uuid: testUuid("tb") })
+		const note = mockNote({ uuid: testUuid("n") })
+		const other = mockNote({ uuid: testUuid("o") })
+		const rows: NotesSidebarRow[] = [
+			{ kind: "note", note, tagUuid: tagA.uuid },
+			{ kind: "note", note: other, tagUuid: tagA.uuid },
+			{ kind: "note", note, tagUuid: tagB.uuid }
+		]
+
+		const indexByKey = selectableRowIndexByKey(rows)
+
+		expect(indexByKey.get(sidebarRowKey({ kind: "note", note, tagUuid: tagA.uuid }))).toBe(0)
+		expect(indexByKey.get(sidebarRowKey({ kind: "note", note: other, tagUuid: tagA.uuid }))).toBe(1)
+		expect(indexByKey.get(sidebarRowKey({ kind: "note", note, tagUuid: tagB.uuid }))).toBe(2)
+	})
+
+	it("skips tag header rows when assigning positions, matching selectableNotesFromRows' own indices", () => {
+		const tag = mockTag({ uuid: testUuid("t") })
+		const noteA = mockNote({ uuid: testUuid("a") })
+		const noteB = mockNote({ uuid: testUuid("b") })
+		const rows: NotesSidebarRow[] = [
+			{ kind: "tag", tag, noteCount: 2, expanded: true },
+			{ kind: "note", note: noteA, tagUuid: tag.uuid },
+			{ kind: "note", note: noteB, tagUuid: tag.uuid }
+		]
+
+		const indexByKey = selectableRowIndexByKey(rows)
+
+		expect(indexByKey.get(sidebarRowKey({ kind: "note", note: noteA, tagUuid: tag.uuid }))).toBe(0)
+		expect(indexByKey.get(sidebarRowKey({ kind: "note", note: noteB, tagUuid: tag.uuid }))).toBe(1)
+		expect(selectableNotesFromRows(rows)[indexByKey.get(sidebarRowKey({ kind: "note", note: noteB, tagUuid: tag.uuid })) ?? -1]).toBe(
+			noteB
+		)
 	})
 })

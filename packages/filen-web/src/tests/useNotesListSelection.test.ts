@@ -152,6 +152,23 @@ describe("useNotesListSelection — Shift+click range", () => {
 
 		expect(useNotesSelectionStore.getState().selectedNotes).toEqual(notes)
 	})
+
+	it("a range spanning two rows for the SAME note (tags view: one note under two expanded tags) selects it once", () => {
+		// Mirrors what notesSidebar.tsx actually feeds this hook in the tags view — selectableNotesFromRows
+		// gives a note its own row (and so its own index) under every expanded tag it belongs to, so the
+		// row array can carry the same Note object at two different positions.
+		const notesWithDuplicateRow = [noteA, noteB, noteA]
+		const { result } = renderHook(() => useNotesListSelection({ notes: notesWithDuplicateRow, resetKey: "notes" }))
+
+		act(() => {
+			result.current.handlePointerSelect(0, clickEvent())
+		})
+		act(() => {
+			result.current.handlePointerSelect(2, clickEvent({ shiftKey: true }))
+		})
+
+		expect(useNotesSelectionStore.getState().selectedNotes).toEqual([noteA, noteB])
+	})
 })
 
 describe("useNotesListSelection — resetKey change clears the selection", () => {

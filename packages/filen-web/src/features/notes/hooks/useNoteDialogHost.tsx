@@ -346,6 +346,7 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 						body={t("notesTrashSelectedConfirmBody", { count: activeDialog.notes.length })}
 						confirmLabel={t("noteActionTrash")}
 						cancelLabel={t("common:cancel")}
+						destructive
 						onOpenChange={open => {
 							if (!open) {
 								closeActiveDialog()

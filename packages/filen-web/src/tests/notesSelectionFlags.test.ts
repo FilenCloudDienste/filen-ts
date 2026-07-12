@@ -229,4 +229,11 @@ describe("selectableNotesForSelectAll", () => {
 
 		expect(selectableNotesForSelectAll(notes)).toEqual(notes)
 	})
+
+	it("collapses a note that appears twice (once per expanded tag group in the tags view) to a single entry", () => {
+		const note = mockNote({ uuid: testUuid("a") })
+		const other = mockNote({ uuid: testUuid("b") })
+
+		expect(selectableNotesForSelectAll([note, other, note])).toEqual([note, other])
+	})
 })

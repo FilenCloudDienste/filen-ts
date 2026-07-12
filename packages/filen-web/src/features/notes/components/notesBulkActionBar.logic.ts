@@ -75,9 +75,19 @@ export function noteBulkActions(flags: NoteSelectionFlags): NoteBulkActionDescri
 		}
 
 		// Trash: none of the selection may already be trashed. Survives includesUndecryptable — a
-		// pure-uuid disposition, same as the per-note TRASH descriptor.
+		// pure-uuid disposition, same as the per-note TRASH descriptor. Unlike the single-note menu's
+		// own (non-destructive) Trash entry, the bulk button IS destructive-styled — the confirm dialog
+		// this "dialog" run kind opens makes it a deliberate, confirmed disposition on every selected
+		// note at once, so it gets the same red treatment as bulk Delete/Leave rather than inheriting
+		// NOTE_ACTION_DEFS.trash's single-note styling.
 		if (!flags.includesTrashed) {
-			descriptors.push({ id: "trash", ...NOTE_ACTION_DEFS.trash, run: "dialog", dialogKind: "trashSelected" })
+			descriptors.push({
+				id: "trash",
+				...NOTE_ACTION_DEFS.trash,
+				destructive: true,
+				run: "dialog",
+				dialogKind: "trashSelected"
+			})
 		}
 
 		// Delete permanently: every note must already be trashed.

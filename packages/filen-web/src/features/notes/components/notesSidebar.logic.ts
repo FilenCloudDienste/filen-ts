@@ -147,3 +147,21 @@ export function selectableNotesFromRows(rows: readonly NotesSidebarRow[]): Note[
 
 	return notes
 }
+
+// Maps each note row's unique identity (sidebarRowKey, scoped by owning tag) to its position in
+// selectableNotesFromRows' output. Deliberately keyed by row identity rather than by note uuid — a
+// note that appears under two expanded tag groups occupies two distinct rows with the SAME uuid, and
+// a uuid-keyed lookup would collapse them onto whichever row happens to be built last, misdirecting a
+// click on the earlier occurrence onto the later row's position. Range/anchor math (useNotesListSelection)
+// needs the row the user actually clicked, not an arbitrary same-uuid stand-in.
+export function selectableRowIndexByKey(rows: readonly NotesSidebarRow[]): Map<string, number> {
+	const indexByKey = new Map<string, number>()
+
+	for (const row of rows) {
+		if (row.kind === "note") {
+			indexByKey.set(sidebarRowKey(row), indexByKey.size)
+		}
+	}
+
+	return indexByKey
+}

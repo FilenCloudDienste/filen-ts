@@ -156,11 +156,10 @@ describe("noteBulkActions — owner-gated lifecycle (archive/restore/trash/delet
 		expect(ids(undecryptableEligible)).toContain("trash")
 	})
 
-	it("trash dispatches the trashSelected dialog kind and is never destructive-styled (recoverable)", () => {
+	it("trash dispatches the trashSelected dialog kind and is destructive-styled, like bulk delete/leave", () => {
 		const trash = noteBulkActions(flags({ everyOwned: true })).find(d => d.id === "trash")
 
-		expect(trash).toMatchObject({ run: "dialog", dialogKind: "trashSelected", icon: Trash2Icon })
-		expect(trash?.destructive).toBeFalsy()
+		expect(trash).toMatchObject({ run: "dialog", dialogKind: "trashSelected", icon: Trash2Icon, destructive: true })
 	})
 
 	it("delete requires everyOwned and everyTrashed, dispatches deleteSelected, destructive-styled", () => {

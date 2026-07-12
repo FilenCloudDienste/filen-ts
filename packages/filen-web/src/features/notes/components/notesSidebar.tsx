@@ -19,6 +19,7 @@ import {
 	buildTagsViewRows,
 	sidebarRowKey,
 	selectableNotesFromRows,
+	selectableRowIndexByKey,
 	type NotesSidebarRow
 } from "@/features/notes/components/notesSidebar.logic"
 import { createNote } from "@/features/notes/lib/actions"
@@ -201,7 +202,7 @@ export function NotesSidebar() {
 	// resets drive's own selection on navigation.
 	const selectableNotes = selectableNotesFromRows(rows)
 	const selection = useNotesListSelection({ notes: selectableNotes, resetKey: viewMode })
-	const selectableIndexByUuid = new Map(selectableNotes.map((note, index) => [note.uuid, index]))
+	const selectableIndexByRowKey = selectableRowIndexByKey(rows)
 
 	const rawSelectedNotes = useNotesSelectionStore(useShallow(state => state.selectedNotes))
 	// LIVE (ghost-purged) selection: re-derived from the current notes query every render, so a note
@@ -402,7 +403,7 @@ export function NotesSidebar() {
 										void handleDuplicated(duplicated)
 									}}
 									onPointerSelect={event => {
-										selection.handlePointerSelect(selectableIndexByUuid.get(row.note.uuid) ?? -1, event)
+										selection.handlePointerSelect(selectableIndexByRowKey.get(sidebarRowKey(row)) ?? -1, event)
 									}}
 								/>
 							)}

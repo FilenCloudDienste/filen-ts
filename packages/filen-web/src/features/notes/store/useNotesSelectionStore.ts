@@ -16,6 +16,25 @@ function toggleInArray<T>(items: T[], item: T, getId: (item: T) => string): T[] 
 
 const noteId = (note: Note): string => note.uuid
 
+// The notes sidebar can render the SAME note more than once — the tags view gives a note its own row
+// under every expanded tag it carries, so a select-all or a shift-click range spanning two of those
+// rows walks the same note twice. Collapsing here (the single place every multi-note write funnels
+// through) keeps the selection count and every downstream bulk dispatch honest, no matter which
+// caller handed in the duplicate.
+function dedupeByUuid(notes: Note[]): Note[] {
+	const seen = new Set<string>()
+	const deduped: Note[] = []
+
+	for (const note of notes) {
+		if (!seen.has(note.uuid)) {
+			seen.add(note.uuid)
+			deduped.push(note)
+		}
+	}
+
+	return deduped
+}
+
 interface NotesSelectionState {
 	selectedNotes: Note[]
 	setSelectedNotes: (next: Note[] | ((prev: Note[]) => Note[])) => void
@@ -33,7 +52,7 @@ export const useNotesSelectionStore = create<NotesSelectionState>(set => ({
 	selectedNotes: [],
 	setSelectedNotes: next => {
 		set(state => ({
-			selectedNotes: typeof next === "function" ? next(state.selectedNotes) : next
+			selectedNotes: dedupeByUuid(typeof next === "function" ? next(state.selectedNotes) : next)
 		}))
 	},
 	toggleSelectedNote: note => {

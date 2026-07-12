@@ -93,6 +93,28 @@ describe("setSelectedNotes", () => {
 
 		expect(useNotesSelectionStore.getState().selectedNotes).toEqual([noteA, noteB])
 	})
+
+	it("collapses a uuid that appears more than once in the given array to a single entry", () => {
+		// The tags view renders the same note once per expanded tag group it belongs to, so a
+		// select-all or a shift-click range spanning two of those rows can hand this in with the same
+		// note object twice — the store must not let that inflate the selection count or double-dispatch
+		// a bulk action against the same note.
+		const noteA = mockNote(testUuid("a"))
+		const noteB = mockNote(testUuid("b"))
+
+		useNotesSelectionStore.getState().setSelectedNotes([noteA, noteB, noteA])
+
+		expect(useNotesSelectionStore.getState().selectedNotes).toEqual([noteA, noteB])
+	})
+
+	it("also dedupes when the duplicate arrives through the updater-function form", () => {
+		const noteA = mockNote(testUuid("a"))
+
+		useNotesSelectionStore.setState({ selectedNotes: [noteA] })
+		useNotesSelectionStore.getState().setSelectedNotes(prev => [...prev, noteA])
+
+		expect(useNotesSelectionStore.getState().selectedNotes).toEqual([noteA])
+	})
 })
 
 describe("removeFromSelection", () => {
