@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import { chatDisplayName, isChatUndecryptable, chatMessagePreview } from "@/features/chats/lib/sort"
 import { useChatUnreadCount } from "@/features/chats/hooks/useChatUnreadCount"
 import { useChatTypingLabel } from "@/features/chats/hooks/useChatTyping"
-import { formatListTimestamp } from "@/features/chats/lib/time"
+import { formatRelativeTime } from "@/lib/relativeTime"
 import { ChatContextMenuContent, ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
 import { type ChatActionDialogKind } from "@/features/chats/components/chatMenu.logic"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -46,6 +46,7 @@ function resolveAvatarUrl(chat: Chat, currentUserId: bigint | undefined): string
 // rendering the SAME shared descriptor list (chatMenu.logic.ts) the thread header's own menu uses.
 export function ChatRow({ chat, selected, currentUserId, onAction }: ChatRowProps) {
 	const { t } = useTranslation("chats")
+	const { t: tCommon } = useTranslation("common")
 	const undecryptable = isChatUndecryptable(chat)
 	const name = undecryptable ? t("chatUndecryptable") : currentUserId !== undefined ? chatDisplayName(chat, currentUserId) : chat.uuid
 	// Typing beats the last-message preview while any remote user is actively typing — the tier
@@ -96,7 +97,7 @@ export function ChatRow({ chat, selected, currentUserId, onAction }: ChatRowProp
 									</span>
 									{timestamp !== undefined ? (
 										<span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
-											{formatListTimestamp(timestamp)}
+											{formatRelativeTime(Number(timestamp), tCommon)}
 										</span>
 									) : null}
 								</div>

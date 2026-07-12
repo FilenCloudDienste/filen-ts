@@ -25,8 +25,8 @@ describe("buildEventDetailRows", () => {
 		const rows = buildEventDetailRows(event({ type: "login", ip: "1.2.3.4", userAgent: "ua" }), t)
 
 		expect(rows).toEqual([
-			{ title: "settingsEventDetailIp", value: "1.2.3.4" },
-			{ title: "settingsEventDetailUserAgent", value: "ua" }
+			{ title: "settingsEventDetailIp", value: "1.2.3.4", opaque: true },
+			{ title: "settingsEventDetailUserAgent", value: "ua", opaque: true }
 		])
 	})
 
@@ -119,5 +119,27 @@ describe("buildEventDetailRows", () => {
 		expect(rows).toContainEqual({ title: "settingsEventDetailEmail", value: "current@example.com" })
 		expect(rows).toContainEqual({ title: "settingsEventDetailOldEmail", value: "old@example.com" })
 		expect(rows).toContainEqual({ title: "settingsEventDetailNewEmail", value: "new@example.com" })
+	})
+
+	it("folderLinkEdited marks the link uuid row opaque, for middle-ellipsis rendering", () => {
+		const rows = buildEventDetailRows(
+			event({ type: "folderLinkEdited", ip: "1.2.3.4", userAgent: "ua", linkUuid: "22222222-2222-2222-2222-222222222222" }),
+			t
+		)
+
+		expect(rows).toContainEqual({
+			title: "settingsEventDetailLinkUuid",
+			value: "22222222-2222-2222-2222-222222222222",
+			opaque: true
+		})
+	})
+
+	it("a non-opaque row (a resolved name) carries no opaque flag", () => {
+		const rows = buildEventDetailRows(
+			event({ type: "fileUploaded", ip: "1.2.3.4", userAgent: "ua", metadata: decodedFileMeta("report.pdf") }),
+			t
+		)
+
+		expect(rows).toContainEqual({ title: "settingsEventDetailName", value: "report.pdf" })
 	})
 })

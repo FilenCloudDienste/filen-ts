@@ -1,4 +1,5 @@
 import type { UserEventResult } from "@filen/sdk-rs"
+import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 
 export type OkEventResult = Extract<UserEventResult, { type: "ok" }>
 
@@ -24,4 +25,23 @@ export function computeNextEventsPage(
 // "no more pages" by a fetch that never ran.
 export function shouldSkipEventsScroll(state: { inflight: boolean; hasMore: boolean; queryReady: boolean; isOnline: boolean }): boolean {
 	return state.inflight || !state.hasMore || !state.queryReady || !state.isOnline
+}
+
+export type EventsPageFetchResult = { status: "ok"; terminate: boolean } | { status: "error"; dto: ErrorDTO }
+
+// Wraps one loadOlderEvents call so a fetch failure becomes a typed result instead of an unhandled
+// rejection the caller's own try/finally never caught (the bug this closes over) — the previous
+// eventsList.tsx had no catch at all, so a pagination failure both silently swallowed the error AND
+// left `hasMore` true, meaning the very next near-bottom scroll would just retry into the same
+// silent failure forever, with no on-screen signal to the user. `hasMore` is deliberately left for
+// the CALLER to decide: on error this returns without an opinion on it, so a transient failure never
+// permanently marks the log "fully loaded" the way a `terminate` page legitimately does.
+export async function fetchEventsPageSafely(fetchPage: () => Promise<{ terminate: boolean }>): Promise<EventsPageFetchResult> {
+	try {
+		const { terminate } = await fetchPage()
+
+		return { status: "ok", terminate }
+	} catch (e) {
+		return { status: "error", dto: asErrorDTO(e) }
+	}
 }

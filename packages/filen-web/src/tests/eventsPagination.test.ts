@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { UserEventResult } from "@filen/sdk-rs"
-import { computeNextEventsPage, shouldSkipEventsScroll } from "@/features/settings/lib/eventsPagination"
+import { computeNextEventsPage, shouldSkipEventsScroll, fetchEventsPageSafely } from "@/features/settings/lib/eventsPagination"
 
 function ok(id: bigint): UserEventResult {
 	return {
@@ -64,5 +64,26 @@ describe("shouldSkipEventsScroll", () => {
 
 	it("skips while the events query hasn't succeeded yet", () => {
 		expect(shouldSkipEventsScroll({ ...READY_STATE, queryReady: false })).toBe(true)
+	})
+})
+
+describe("fetchEventsPageSafely", () => {
+	it("passes a successful, non-terminating page straight through", async () => {
+		const result = await fetchEventsPageSafely(() => Promise.resolve({ terminate: false }))
+
+		expect(result).toEqual({ status: "ok", terminate: false })
+	})
+
+	it("passes a successful, terminating page straight through", async () => {
+		const result = await fetchEventsPageSafely(() => Promise.resolve({ terminate: true }))
+
+		expect(result).toEqual({ status: "ok", terminate: true })
+	})
+
+	it("catches a rejected fetch instead of letting it become an unhandled rejection, normalizing it to an ErrorDTO", async () => {
+		const result = await fetchEventsPageSafely(() => Promise.reject(new Error("network down")))
+
+		expect(result.status).toBe("error")
+		expect(result.status === "error" && result.dto.message).toBe("network down")
 	})
 })

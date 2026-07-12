@@ -34,12 +34,3 @@ export function formatClockTime(timestamp: bigint): string {
 export function formatFullDate(timestamp: bigint): string {
 	return new Date(Number(timestamp)).toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" })
 }
-
-// Compact conversation-row timestamp: the clock time for a message sent today, otherwise a short date.
-export function formatListTimestamp(timestamp: bigint, now: number = Date.now()): string {
-	if (dayKind(timestamp, now) === "today") {
-		return formatClockTime(timestamp)
-	}
-
-	return new Date(Number(timestamp)).toLocaleDateString(undefined, { month: "short", day: "numeric" })
-}

@@ -3,6 +3,7 @@ import type { UserEvent } from "@filen/sdk-rs"
 import { eventKindMeta } from "@/features/settings/lib/eventKind"
 import { buildEventDetailRows } from "@/features/settings/lib/eventDetail"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { MiddleEllipsis } from "@/components/middleEllipsis"
 
 export interface EventDetailDialogProps {
 	event: UserEvent | null
@@ -43,7 +44,14 @@ export function EventDetailDialog({ event, onOpenChange }: EventDetailDialogProp
 							className="flex items-start justify-between gap-4 border-b border-border/60 pb-2 last:border-b-0 last:pb-0"
 						>
 							<span className="shrink-0 text-muted-foreground">{row.title}</span>
-							<span className="min-w-0 truncate text-right break-all">{row.value}</span>
+							{row.opaque === true ? (
+								<MiddleEllipsis
+									value={row.value}
+									className="min-w-0 text-right break-all"
+								/>
+							) : (
+								<span className="min-w-0 truncate text-right break-all">{row.value}</span>
+							)}
 						</div>
 					))}
 				</div>

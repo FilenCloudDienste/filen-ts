@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next"
 import type { UserEvent } from "@filen/sdk-rs"
+import { formatRelativeTime } from "@/lib/relativeTime"
 import { eventKindMeta } from "@/features/settings/lib/eventKind"
 
 export interface EventRowProps {
@@ -7,11 +8,14 @@ export interface EventRowProps {
 	onOpen: (event: UserEvent) => void
 }
 
-// One virtualized row: icon + human-readable label (eventKindMeta) + absolute timestamp. The whole row
-// opens the compact detail dialog (EventDetailDialog) — there is no per-row menu, matching how thin
-// this row is on mobile (a plain ListRow → alert).
+// One virtualized row: icon + human-readable label (eventKindMeta) + relative timestamp (shared
+// lib/relativeTime.ts, same helper the note/chat rows use). The whole row opens the compact detail
+// dialog (EventDetailDialog) — there is no per-row menu, matching how thin this row is on mobile (a
+// plain ListRow → alert). The dialog's own header stays absolute — this row is the "at a glance" list,
+// not the show-everything surface.
 export function EventRow({ event, onOpen }: EventRowProps) {
 	const { t } = useTranslation("settings")
+	const { t: tCommon } = useTranslation("common")
 	const { labelKey, icon: Icon } = eventKindMeta(event.kind.type)
 	const label = labelKey === "settingsEventUnknown" ? t(labelKey, { type: event.kind.type }) : t(labelKey)
 
@@ -28,7 +32,7 @@ export function EventRow({ event, onOpen }: EventRowProps) {
 			</span>
 			<span className="min-w-0 flex-1 truncate text-sm">{label}</span>
 			<span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-				{new Date(Number(event.timestamp)).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+				{formatRelativeTime(Number(event.timestamp), tCommon)}
 			</span>
 		</button>
 	)

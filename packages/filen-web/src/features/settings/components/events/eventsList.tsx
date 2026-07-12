@@ -2,10 +2,13 @@ import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { HistoryIcon } from "lucide-react"
+import { toast } from "sonner"
 import type { UserEvent } from "@filen/sdk-rs"
 import { useEventsQuery, loadOlderEvents } from "@/features/settings/queries/events"
-import { shouldSkipEventsScroll } from "@/features/settings/lib/eventsPagination"
+import { shouldSkipEventsScroll, fetchEventsPageSafely } from "@/features/settings/lib/eventsPagination"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { log } from "@/lib/log"
+import { errorLabel } from "@/lib/i18n/errorLabel"
 import { EventRow } from "@/features/settings/components/events/eventRow"
 import { EventDetailDialog } from "@/features/settings/components/events/eventDetailDialog"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -82,15 +85,20 @@ export function EventsList() {
 
 		inflightRef.current = true
 		setLoadingMore(true)
-		try {
-			const { terminate } = await loadOlderEvents(oldest.timestamp)
+		const result = await fetchEventsPageSafely(() => loadOlderEvents(oldest.timestamp))
+		inflightRef.current = false
+		setLoadingMore(false)
 
-			if (terminate) {
-				setHasMore(false)
-			}
-		} finally {
-			inflightRef.current = false
-			setLoadingMore(false)
+		if (result.status === "error") {
+			// hasMore is deliberately left untouched — a transient fetch failure should not
+			// permanently mark the log "fully loaded"; the very next near-bottom scroll retries.
+			log.error("settings-events", "pagination fetch failed", oldest.timestamp.toString(), result.dto)
+			toast.error(errorLabel(result.dto))
+			return
+		}
+
+		if (result.terminate) {
+			setHasMore(false)
 		}
 	}
 

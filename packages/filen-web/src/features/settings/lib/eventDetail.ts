@@ -4,6 +4,10 @@ import type { UserEvent, FileMeta, DirMeta } from "@filen/sdk-rs"
 export interface EventDetailRow {
 	title: string
 	value: string
+	// Opaque values (ip / userAgent / a link uuid) carry no readable structure to truncate FROM one
+	// end — the distinguishing part is as likely to be the tail as the head. The dialog renders these
+	// with MiddleEllipsis instead of the plain end-truncating row.
+	opaque?: boolean
 }
 
 // Mirrors filen-mobile's eventDetails.ts extractFileMetaName, adapted to the wasm shape's lowercase
@@ -41,8 +45,8 @@ function extractDirMetaName(meta: DirMeta, t: TFunction<"settings">): string {
 // would add.
 export function buildEventDetailRows(event: UserEvent, t: TFunction<"settings">): EventDetailRow[] {
 	const rows: EventDetailRow[] = [
-		{ title: t("settingsEventDetailIp"), value: event.kind.ip },
-		{ title: t("settingsEventDetailUserAgent"), value: event.kind.userAgent }
+		{ title: t("settingsEventDetailIp"), value: event.kind.ip, opaque: true },
+		{ title: t("settingsEventDetailUserAgent"), value: event.kind.userAgent, opaque: true }
 	]
 
 	const kind = event.kind
@@ -93,7 +97,7 @@ export function buildEventDetailRows(event: UserEvent, t: TFunction<"settings">)
 			break
 
 		case "folderLinkEdited":
-			rows.push({ title: t("settingsEventDetailLinkUuid"), value: kind.linkUuid })
+			rows.push({ title: t("settingsEventDetailLinkUuid"), value: kind.linkUuid, opaque: true })
 			break
 
 		case "codeRedeemed":
