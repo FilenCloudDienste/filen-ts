@@ -1,3 +1,4 @@
+import { type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { VolumeOffIcon, MoreHorizontalIcon } from "lucide-react"
@@ -17,10 +18,18 @@ import { Button } from "@/components/ui/button"
 export interface ChatRowProps {
 	chat: Chat
 	selected: boolean
+	// True while this chat is part of a Ctrl/Cmd/Shift-click multi-selection (useChatsListSelection) —
+	// distinct from `selected` (the currently-ROUTED conversation): a multi-selection can include chats
+	// that are not the open thread at all, mirrors noteRow.tsx's own selected/multiSelected split.
+	multiSelected: boolean
 	currentUserId: bigint | undefined
 	// Threaded straight through to the row's own menu (chatMenu.tsx's onAction) — the sidebar's ONE
 	// dialog host (useChatDialogHost) is the actual dialog-opening implementation, not this row.
 	onAction: (kind: ChatActionDialogKind, chat: Chat) => void
+	// Modifier-click selection — mirrors noteRow.tsx's own onPointerSelect. Fired from the Link's own
+	// onClick: a plain click lets navigation proceed; Ctrl/Cmd/Shift+click call preventDefault first
+	// (see the Link below) and never navigate.
+	onPointerSelect: (event: MouseEvent<HTMLAnchorElement>) => void
 }
 
 // One conversation row: avatar, display name, last-message preview, relative time, a per-row unread badge
@@ -29,7 +38,7 @@ export interface ChatRowProps {
 // not its descendant (a <button> nested inside an <a> is invalid content model — same rationale as
 // noteRow.tsx). Carries its own row-level context menu (right-click) and ⋯ trigger (hover-revealed), both
 // rendering the SAME shared descriptor list (chatMenu.logic.ts) the thread header's own menu uses.
-export function ChatRow({ chat, selected, currentUserId, onAction }: ChatRowProps) {
+export function ChatRow({ chat, selected, multiSelected, currentUserId, onAction, onPointerSelect }: ChatRowProps) {
 	const { t } = useTranslation("chats")
 	const { t: tCommon } = useTranslation("common")
 	const undecryptable = isChatUndecryptable(chat)
@@ -56,13 +65,28 @@ export function ChatRow({ chat, selected, currentUserId, onAction }: ChatRowProp
 					<div
 						className={cn(
 							"group flex h-full w-full items-center gap-2.5 rounded-xl px-2.5 transition-colors app-region-no-drag",
-							selected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/60"
+							selected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/60",
+							multiSelected && "ring-2 ring-primary/60 ring-inset"
 						)}
 					>
 						<Link
 							to="/chats/$uuid"
 							params={{ uuid: chat.uuid }}
 							aria-current={selected ? "page" : undefined}
+							aria-selected={multiSelected}
+							onClick={event => {
+								// Ctrl/Cmd/Shift held: this is a selection gesture, not a navigation intent —
+								// preventDefault blocks BOTH the router's own SPA navigate (which already skips
+								// itself on a modified click) AND the browser's native "open in new tab" default
+								// a real anchor would otherwise still run. A plain click falls through unprevented
+								// so navigation proceeds exactly as before, alongside collapsing the selection to
+								// just this chat (drive/notes' own plain-click-selects-one semantics).
+								if (event.metaKey || event.ctrlKey || event.shiftKey) {
+									event.preventDefault()
+								}
+
+								onPointerSelect(event)
+							}}
 							className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
 						>
 							<Avatar>

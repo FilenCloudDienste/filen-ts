@@ -35,3 +35,14 @@ export function filterChats(chats: readonly Chat[], search: string, currentUserI
 		})
 	})
 }
+
+// Uuids of currently-selected chats no longer present in a live chat set — chatsSidebar.tsx's own
+// stale-selection purge uses this to drop a selection ghost the instant a conversationDeleted/
+// conversationParticipantLeft socket event (or another tab's delete/leave) removes a chat out from
+// under an active multi-selection. Mirrors drive's directoryListing.logic.ts staleSelectionUuids
+// exactly, generalized the same way (generic over its second argument, keyed purely on uuid presence).
+export function staleChatSelectionUuids(selectedChats: readonly Chat[], liveChats: readonly Chat[]): string[] {
+	const liveUuids = new Set(liveChats.map(chat => chat.uuid))
+
+	return selectedChats.filter(chat => !liveUuids.has(chat.uuid)).map(chat => chat.uuid)
+}

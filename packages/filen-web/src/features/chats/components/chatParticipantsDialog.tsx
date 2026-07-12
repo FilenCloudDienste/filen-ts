@@ -4,16 +4,24 @@ import { toast } from "sonner"
 import { CheckIcon, CrownIcon, SearchXIcon, UsersIcon, XIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
+import { cn } from "@/lib/utils"
 import { isChatOwner } from "@/features/chats/lib/actions"
-import { addChatParticipants, removeChatParticipant } from "@/features/chats/lib/participants"
-import { chatParticipantRows, contactsAvailableToAddToChat } from "@/features/chats/components/chatParticipantsDialog.logic"
+import { addChatParticipants, removeChatParticipant, removeChatParticipants } from "@/features/chats/lib/participants"
+import {
+	chatParticipantRows,
+	contactsAvailableToAddToChat,
+	selectedParticipantsForRemoval
+} from "@/features/chats/components/chatParticipantsDialog.logic"
+import { toastChatParticipantsBulkRemoveOutcome } from "@/features/chats/lib/bulkToast"
 import { useChats } from "@/features/chats/queries/chats"
 import { useAccountQuery } from "@/queries/account"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { contactDisplayName, contactInitials, filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
 // Same generic Set<uuid> picker helpers notes' own participantsDialog.tsx reuses — not re-implemented
 // here either (feedback: no duplicated selection/data layer across features for a picker this
-// codebase already has one working copy of).
+// codebase already has one working copy of). Reused for BOTH modes now: `selected` holds contact uuids
+// in "add" mode and participant userId strings in "list" mode — the two are mutually exclusive (never
+// active at once) and every mode transition below resets the Set, so the two id spaces never collide.
 import { togglePickerContact, resolveSelectedContacts } from "@/features/drive/components/contactPickerDialog.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -60,11 +68,17 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
 	const [addPending, setAddPending] = useState(false)
 	const [filter, setFilter] = useState("")
+	const [bulkRemovePending, setBulkRemovePending] = useState(false)
+	const [confirmingBulkRemove, setConfirmingBulkRemove] = useState(false)
 
 	const contactsQuery = useContactsQuery({ enabled: mode === "add" })
+	// Computed once at the top level (not just inside renderListBody) — the footer's bulk-remove button
+	// and its confirm dialog both need to resolve `selected` back to concrete participants too.
+	const rows = chatParticipantRows(chat, currentUserId, owner)
+	const selectedForRemoval = selectedParticipantsForRemoval(rows, selected)
 
 	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
-		if (!shouldForwardOpenChange(next, pendingUserId !== null || addPending)) {
+		if (!shouldForwardOpenChange(next, pendingUserId !== null || addPending || bulkRemovePending)) {
 			details.cancel()
 			return
 		}
@@ -83,6 +97,33 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
 		}
+	}
+
+	async function handleBulkRemoveConfirmed(): Promise<void> {
+		if (selectedForRemoval.length === 0) {
+			setConfirmingBulkRemove(false)
+			return
+		}
+
+		setBulkRemovePending(true)
+		const { outcome } = await removeChatParticipants(chat, selectedForRemoval)
+		setBulkRemovePending(false)
+		setConfirmingBulkRemove(false)
+
+		toastChatParticipantsBulkRemoveOutcome(outcome)
+
+		// Mirrors the notes/chats bulk-bar convention: a succeeded participant is pruned from the
+		// selection, a failed one stays selected so the user can retry without re-picking it.
+		const removedIds = new Set(outcome.succeeded.map(p => p.userId.toString()))
+		setSelected(prev => {
+			const next = new Set(prev)
+
+			for (const id of removedIds) {
+				next.delete(id)
+			}
+
+			return next
+		})
 	}
 
 	async function handleAddSelected(): Promise<void> {
@@ -107,8 +148,6 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 	}
 
 	function renderListBody() {
-		const rows = chatParticipantRows(chat, currentUserId, owner)
-
 		if (rows.length === 0) {
 			return (
 				<Empty className="p-6">
@@ -123,15 +162,54 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 		}
 
 		return (
-			<ul className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
+			<ul
+				role="listbox"
+				aria-multiselectable="true"
+				aria-label={t("chatParticipantsDialogTitle")}
+				className="flex max-h-80 flex-col gap-0.5 overflow-y-auto"
+			>
 				{rows.map(({ participant, canManage, isOwner: rowIsOwner }) => {
 					const displayName = contactDisplayName(participant)
 					const rowPending = pendingUserId === participant.userId
+					const participantKey = participant.userId.toString()
+					// Row-click multi-select (reuses the add-picker's own `selected` Set/id-toggle idiom, see
+					// the import comment above) — owner-only, since only a manageable row can ever be bulk
+					// removed. A non-manageable row (participant viewer, or the owner's own excluded row)
+					// stays a static, unclickable list item.
+					const isSelected = canManage && selected.has(participantKey)
+
+					function toggleRowSelected(): void {
+						if (!canManage) {
+							return
+						}
+
+						setSelected(prev => togglePickerContact(prev, participantKey))
+					}
 
 					return (
 						<li
-							key={participant.userId.toString()}
-							className="flex items-center gap-3 rounded-xl px-2 py-2 text-sm"
+							key={participantKey}
+							role={canManage ? "option" : undefined}
+							aria-selected={canManage ? isSelected : undefined}
+							tabIndex={canManage ? 0 : undefined}
+							onClick={canManage ? toggleRowSelected : undefined}
+							onKeyDown={
+								canManage
+									? event => {
+											if (event.key !== "Enter" && event.key !== " ") {
+												return
+											}
+
+											event.preventDefault()
+											toggleRowSelected()
+										}
+									: undefined
+							}
+							className={cn(
+								"flex items-center gap-3 rounded-xl px-2 py-2 text-sm outline-none",
+								canManage && "cursor-pointer select-none focus-visible:ring-2 focus-visible:ring-ring/50",
+								isSelected && "bg-accent text-accent-foreground"
+							)}
 						>
 							<Avatar>
 								{participant.avatar !== undefined ? <AvatarImage src={participant.avatar} /> : null}
@@ -149,14 +227,22 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 								</div>
 								<p className="truncate text-xs text-muted-foreground">{participant.email}</p>
 							</div>
-							{canManage ? (
+							{isSelected ? (
+								<CheckIcon
+									aria-hidden="true"
+									className="size-4 shrink-0 text-primary"
+								/>
+							) : canManage ? (
 								<Button
 									variant="ghost"
 									size="icon-sm"
 									disabled={rowPending || !isOnline}
 									aria-label={t("chatParticipantRemoveAction", { email: participant.email })}
 									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-									onClick={() => {
+									onClick={event => {
+										// Stop the toggle-select handler on the row itself from also firing —
+										// this button dispatches the single-item quick-remove flow instead.
+										event.stopPropagation()
 										setRemoving(participant)
 									}}
 								>
@@ -281,7 +367,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 		)
 	}
 
-	const dialogPending = pendingUserId !== null || addPending
+	const dialogPending = pendingUserId !== null || addPending || bulkRemovePending
 
 	return (
 		<Dialog
@@ -314,12 +400,29 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 				<DialogFooter>
 					{mode === "list" ? (
 						<>
+							{owner && selectedForRemoval.length > 0 ? (
+								<Button
+									variant="destructive"
+									disabled={dialogPending || !isOnline}
+									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+									onClick={() => {
+										setConfirmingBulkRemove(true)
+									}}
+								>
+									{bulkRemovePending && <Spinner data-icon="inline-start" />}
+									{t("chatParticipantsRemoveSelectedAction", { count: selectedForRemoval.length })}
+								</Button>
+							) : null}
 							{owner ? (
 								<Button
 									variant="outline"
 									disabled={dialogPending || !isOnline}
 									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 									onClick={() => {
+										// A stale list-mode selection (participant userId strings) must never leak
+										// into the add-picker below, which reuses the same `selected` Set for
+										// contact uuids — see the shared-Set rationale in the import comment above.
+										setSelected(new Set())
 										setMode("add")
 									}}
 								>
@@ -380,6 +483,25 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 					if (removing) {
 						void handleRemoveConfirmed(removing)
 					}
+				}}
+			/>
+			{/* Second nested confirm — same "must stay a child of the outer Dialog" rule, the bulk
+			counterpart of the single-row confirm above. */}
+			<ConfirmDialog
+				open={confirmingBulkRemove}
+				pending={bulkRemovePending}
+				title={t("chatParticipantRemoveSelectedDialogTitle")}
+				body={t("chatParticipantRemoveSelectedDialogBody", { count: selectedForRemoval.length })}
+				confirmLabel={t("chatParticipantRemoveDialogConfirm")}
+				cancelLabel={t("common:cancel")}
+				destructive
+				onOpenChange={open => {
+					if (!open) {
+						setConfirmingBulkRemove(false)
+					}
+				}}
+				onConfirm={() => {
+					void handleBulkRemoveConfirmed()
 				}}
 			/>
 		</Dialog>

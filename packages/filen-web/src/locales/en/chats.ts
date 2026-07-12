@@ -156,6 +156,37 @@ export const chats = {
 	/** Leave dialog — body copy */
 	chatLeaveDialogBody: "Are you sure you want to leave this conversation? You will lose access to it.",
 
+	// ── Multi-select / bulk actions ────────────────────────────────────────────
+	/** Keymap — mod+a: selects every currently-visible conversation */
+	chatsCommandSelectAll: "Select all conversations",
+	/** Keymap — Escape: clears the active multi-selection */
+	chatsCommandClearSelection: "Clear selection",
+	/** Bulk-action bar — accessible label on the clear-selection (X) button */
+	chatsSelectionCount_one: "{{count}} selected",
+	/** Bulk-action bar — accessible label on the clear-selection (X) button (plural) */
+	chatsSelectionCount_other: "{{count}} selected",
+	/** Bulk-action toast — every targeted conversation succeeded */
+	chatsBulkActionComplete_one: "{{count}} conversation updated",
+	/** Bulk-action toast — every targeted conversation succeeded (plural) */
+	chatsBulkActionComplete_other: "{{count}} conversations updated",
+	/** Bulk-action toast — a partial failure */
+	chatsBulkActionCompleteWithFailures_one: "{{count}} conversation updated, {{failed}} failed",
+	/** Bulk-action toast — a partial failure (plural) */
+	chatsBulkActionCompleteWithFailures_other: "{{count}} conversations updated, {{failed}} failed",
+	/** Bulk delete confirm — heading */
+	chatsDeleteSelectedConfirmTitle: "Delete conversations?",
+	/** Bulk delete confirm — body copy */
+	chatsDeleteSelectedConfirmBody_one: "Are you sure you want to permanently delete this conversation? This cannot be undone.",
+	/** Bulk delete confirm — body copy (plural) */
+	chatsDeleteSelectedConfirmBody_other:
+		"Are you sure you want to permanently delete these {{count}} conversations? This cannot be undone.",
+	/** Bulk leave confirm — heading */
+	chatsLeaveSelectedConfirmTitle: "Leave conversations?",
+	/** Bulk leave confirm — body copy */
+	chatsLeaveSelectedConfirmBody_one: "Are you sure you want to leave this conversation? You will lose access to it.",
+	/** Bulk leave confirm — body copy (plural) */
+	chatsLeaveSelectedConfirmBody_other: "Are you sure you want to leave these {{count}} conversations? You will lose access to them.",
+
 	// ── Participants dialog ──────────────────────────────────────────────────────
 	/** Participants dialog — heading (list mode) */
 	chatParticipantsDialogTitle: "Participants",
@@ -181,6 +212,24 @@ export const chats = {
 	chatParticipantsAddSubmit: "Add",
 	/** Add-participants dialog — shown when every contact is already a participant */
 	chatParticipantsAddEmpty: "No contacts available to add",
+	/** Participants dialog — owner-only bulk-remove footer button (list mode, 1+ rows selected) */
+	chatParticipantsRemoveSelectedAction_one: "Remove {{count}} participant",
+	/** Participants dialog — owner-only bulk-remove footer button (plural) */
+	chatParticipantsRemoveSelectedAction_other: "Remove {{count}} participants",
+	/** Bulk remove-participants confirm — heading */
+	chatParticipantRemoveSelectedDialogTitle: "Remove participants?",
+	/** Bulk remove-participants confirm — body copy */
+	chatParticipantRemoveSelectedDialogBody_one: "{{count}} participant will lose access to this conversation.",
+	/** Bulk remove-participants confirm — body copy (plural) */
+	chatParticipantRemoveSelectedDialogBody_other: "{{count}} participants will lose access to this conversation.",
+	/** Bulk remove-participants toast — every targeted participant succeeded */
+	chatParticipantsBulkRemoveComplete_one: "{{count}} participant removed",
+	/** Bulk remove-participants toast — every targeted participant succeeded (plural) */
+	chatParticipantsBulkRemoveComplete_other: "{{count}} participants removed",
+	/** Bulk remove-participants toast — a partial failure */
+	chatParticipantsBulkRemoveCompleteWithFailures_one: "{{count}} participant removed, {{failed}} failed",
+	/** Bulk remove-participants toast — a partial failure (plural) */
+	chatParticipantsBulkRemoveCompleteWithFailures_other: "{{count}} participants removed, {{failed}} failed",
 
 	// ── Message menu ─────────────────────────────────────────────────────────────
 	/** Hover action bar — accessible label on the floating per-message toolbar */

@@ -22,8 +22,12 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { CHATS_QUERY_KEY, chatsQueryGet } from "@/features/chats/queries/chats"
-import { addChatParticipants, removeChatParticipant } from "@/features/chats/lib/participants"
-import { chatParticipantRows, contactsAvailableToAddToChat } from "@/features/chats/components/chatParticipantsDialog.logic"
+import { addChatParticipants, removeChatParticipant, removeChatParticipants } from "@/features/chats/lib/participants"
+import {
+	chatParticipantRows,
+	contactsAvailableToAddToChat,
+	selectedParticipantsForRemoval
+} from "@/features/chats/components/chatParticipantsDialog.logic"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -217,5 +221,85 @@ describe("contactsAvailableToAddToChat", () => {
 		const contacts = [mockContact({ userId: 1n }), mockContact({ userId: 2n })]
 
 		expect(contactsAvailableToAddToChat(contacts, chat)).toEqual(contacts)
+	})
+})
+
+describe("removeChatParticipants — sequential bulk remove", () => {
+	it("removes every targeted participant, threading each call's returned chat into the next", async () => {
+		const participantA = mockParticipant({ userId: 5n })
+		const participantB = mockParticipant({ userId: 6n })
+		const chat = mockChat({ participants: [participantA, participantB] })
+		const afterA = mockChat({ participants: [participantB] })
+		const afterB = mockChat({ participants: [] })
+
+		removeChatParticipantOp.mockResolvedValueOnce(afterA)
+		removeChatParticipantOp.mockResolvedValueOnce(afterB)
+
+		const { chat: finalChat, outcome } = await removeChatParticipants(chat, [participantA, participantB])
+
+		// Call 1: the ORIGINAL chat. Call 2: call 1's OWN result, not the original — the same
+		// stale-snapshot hazard addChatParticipants' own sequential threading guards against.
+		expect(removeChatParticipantOp).toHaveBeenNthCalledWith(1, chat, 5n)
+		expect(removeChatParticipantOp).toHaveBeenNthCalledWith(2, afterA, 6n)
+		expect(finalChat).toEqual(afterB)
+		expect(outcome.succeeded).toEqual([participantA, participantB])
+		expect(outcome.failed).toHaveLength(0)
+		expect(chatsQueryGet()).toEqual([afterB])
+	})
+
+	it("a rejected removal lands in `failed`, later removals still proceed against the last successful chat", async () => {
+		const participantA = mockParticipant({ userId: 5n })
+		const participantB = mockParticipant({ userId: 6n })
+		const chat = mockChat({ participants: [participantA, participantB] })
+		const afterB = mockChat({ participants: [participantA] })
+
+		removeChatParticipantOp.mockRejectedValueOnce(new Error("network"))
+		removeChatParticipantOp.mockResolvedValueOnce(afterB)
+
+		const { chat: finalChat, outcome } = await removeChatParticipants(chat, [participantA, participantB])
+
+		expect(outcome.succeeded).toEqual([participantB])
+		expect(outcome.failed).toHaveLength(1)
+		expect(outcome.failed[0]?.item).toBe(participantA)
+		// The failed removal's attempt used the ORIGINAL chat; the next (successful) one still ran
+		// against it too since the failed call never advanced `current`.
+		expect(removeChatParticipantOp).toHaveBeenNthCalledWith(2, chat, 6n)
+		expect(finalChat).toEqual(afterB)
+	})
+})
+
+describe("selectedParticipantsForRemoval", () => {
+	const owner = mockParticipant({ userId: 1n })
+	const participantA = mockParticipant({ userId: 2n })
+	const participantB = mockParticipant({ userId: 3n })
+	const chat = mockChat({ ownerId: 1n, participants: [participantA, owner, participantB] })
+
+	it("resolves selected userId strings back to the concrete ChatParticipant records, owner view", () => {
+		const rows = chatParticipantRows(chat, 1n, true)
+		const selected = new Set([participantA.userId.toString(), participantB.userId.toString()])
+
+		expect(selectedParticipantsForRemoval(rows, selected)).toEqual([participantA, participantB])
+	})
+
+	it("drops a selected id whose row is not manageable (defense-in-depth against a stale selection)", () => {
+		// A non-owner viewer's rows all have canManage: false — nothing should resolve even if the Set
+		// somehow carries a userId that matches a row.
+		const rows = chatParticipantRows(chat, 2n, false)
+		const selected = new Set([owner.userId.toString(), participantB.userId.toString()])
+
+		expect(selectedParticipantsForRemoval(rows, selected)).toEqual([])
+	})
+
+	it("ignores a selected id that matches nothing in `rows`", () => {
+		const rows = chatParticipantRows(chat, 1n, true)
+		const selected = new Set(["9999"])
+
+		expect(selectedParticipantsForRemoval(rows, selected)).toEqual([])
+	})
+
+	it("returns an empty array for an empty selection", () => {
+		const rows = chatParticipantRows(chat, 1n, true)
+
+		expect(selectedParticipantsForRemoval(rows, new Set())).toEqual([])
 	})
 })

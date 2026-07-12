@@ -39,3 +39,13 @@ export function contactsAvailableToAddToChat(contacts: readonly Contact[], chat:
 
 	return contacts.filter(contact => !existingUserIds.has(contact.userId))
 }
+
+// Resolves the list-mode `selected` Set (reused wholesale from the add-picker above — the two modes
+// are mutually exclusive, never active at once) back to the concrete ChatParticipant records the bulk
+// remove action needs. `canManage` is re-checked here (not just trusted from the Set) as a
+// defense-in-depth gate: a row that stopped being manageable between selection and dispatch (e.g. an
+// ownership change landing via a live socket patch while the dialog is open) is silently dropped
+// rather than removed. Mirrors drive/contactPickerDialog.logic.ts's resolveSelectedContacts.
+export function selectedParticipantsForRemoval(rows: readonly ChatParticipantRowModel[], selected: ReadonlySet<string>): ChatParticipant[] {
+	return rows.filter(row => row.canManage && selected.has(row.participant.userId.toString())).map(row => row.participant)
+}

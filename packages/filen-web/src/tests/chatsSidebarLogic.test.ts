@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Chat, ChatMessage, ChatParticipant, UuidStr } from "@filen/sdk-rs"
-import { filterChats } from "@/features/chats/components/chatsSidebar.logic"
+import { filterChats, staleChatSelectionUuids } from "@/features/chats/components/chatsSidebar.logic"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
 
 function testUuid(label: string): UuidStr {
@@ -124,5 +124,34 @@ describe("chatHasUnread (derived, D4)", () => {
 		expect(chatHasUnread(muted, SELF)).toBe(false)
 		expect(chatHasUnread(noMessage, SELF)).toBe(false)
 		expect(chatHasUnread(withUnread, undefined)).toBe(false)
+	})
+})
+
+describe("staleChatSelectionUuids", () => {
+	it("returns the uuids of selected chats no longer present in the live set", () => {
+		const chatA = mockChat("a")
+		const chatB = mockChat("b")
+
+		// chatB was deleted/left elsewhere (a conversationDeleted socket event, or another tab) — it's
+		// still in the selection but no longer in the live chats query result.
+		expect(staleChatSelectionUuids([chatA, chatB], [chatA])).toEqual([chatB.uuid])
+	})
+
+	it("returns an empty array when every selected chat is still live", () => {
+		const chatA = mockChat("a")
+		const chatB = mockChat("b")
+
+		expect(staleChatSelectionUuids([chatA, chatB], [chatA, chatB])).toEqual([])
+	})
+
+	it("returns an empty array for an empty selection", () => {
+		expect(staleChatSelectionUuids([], [mockChat("a")])).toEqual([])
+	})
+
+	it("treats every selected chat as stale when the live set is empty", () => {
+		const chatA = mockChat("a")
+		const chatB = mockChat("b")
+
+		expect(staleChatSelectionUuids([chatA, chatB], [])).toEqual([chatA.uuid, chatB.uuid])
 	})
 })

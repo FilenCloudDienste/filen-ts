@@ -2,7 +2,7 @@ import { type } from "arktype"
 import { create } from "zustand"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { log } from "@/lib/log"
-import type { CommonKey, DriveKey, PreviewKey, NotesKey } from "@/lib/i18n"
+import type { CommonKey, DriveKey, PreviewKey, NotesKey, ChatsKey } from "@/lib/i18n"
 
 // Keyboard-first from day one — every keyboard-controllable action in the app registers
 // here instead of wiring its own `window.addEventListener("keydown", …)`. A Map-backed registry
@@ -10,13 +10,13 @@ import type { CommonKey, DriveKey, PreviewKey, NotesKey } from "@/lib/i18n"
 // consumer three things for free: one source of truth for "what does this shortcut do" (a future
 // settings UI reads `actions`' defs), a user-remappable combo (`setUserCombo`), and a live
 // indicator (`<Kbd action>`) that always reflects the combo actually in effect.
-export type ActionScope = "global" | "drive" | "editor" | "notes"
+export type ActionScope = "global" | "drive" | "editor" | "notes" | "chats"
 
 export interface ActionDef {
 	id: string
 	defaultCombo: string
 	scope: ActionScope
-	descriptionKey: CommonKey | DriveKey | PreviewKey | NotesKey
+	descriptionKey: CommonKey | DriveKey | PreviewKey | NotesKey | ChatsKey
 }
 
 const OVERRIDES_KV_KEY = "keymap.v1.overrides"

@@ -3,6 +3,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { chatsQueryUpsert } from "@/features/chats/queries/chats"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
+import { type BulkFailure, type BulkOutcome } from "@/features/drive/lib/bulk"
 
 export type { ActionOutcome }
 
@@ -58,4 +59,35 @@ export async function removeChatParticipant(chat: Chat, participant: ChatPartici
 	chatsQueryUpsert(updated)
 
 	return { status: "success", item: updated }
+}
+
+// Bulk counterpart of removeChatParticipant, for the owner-only multi-select in chatParticipantsDialog.
+// Deliberately SEQUENTIAL, unlike drive's generic runBulk (parallel, independent items): every removal
+// mutates the SAME chat's participants list, so a parallel Promise.all would have each call compute
+// "current chat minus its own participant" off the same stale snapshot and the last write to resolve
+// would silently restore whichever participants an earlier call already removed — the exact hazard
+// addChatParticipants' own doc comment above describes for adds. One rejected removal does not abort
+// the rest (partial-success, like every other bulk surface in this app) — it just carries the chat
+// state from the last successful step forward into the next attempt.
+export async function removeChatParticipants(
+	chat: Chat,
+	participants: readonly ChatParticipant[]
+): Promise<{ chat: Chat; outcome: BulkOutcome<ChatParticipant> }> {
+	let current = chat
+	const succeeded: ChatParticipant[] = []
+	const failed: BulkFailure<ChatParticipant>[] = []
+
+	for (const participant of participants) {
+		const outcome = await removeChatParticipant(current, participant)
+
+		if (outcome.status === "error") {
+			failed.push({ item: participant, error: outcome.dto })
+			continue
+		}
+
+		current = outcome.item
+		succeeded.push(participant)
+	}
+
+	return { chat: current, outcome: { succeeded, failed } }
 }
