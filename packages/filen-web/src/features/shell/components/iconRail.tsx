@@ -16,17 +16,8 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/contactsList.logic"
-import { runLogout } from "@/lib/logout"
-import { sync as notesSync } from "@/features/notes/lib/sync"
-import { sync as chatsSync } from "@/features/chats/lib/sync"
-import { clearAllTyping } from "@/features/chats/lib/typing"
+import { performLogout } from "@/features/shell/lib/performLogout"
 import { useChatsUnread } from "@/features/chats/queries/chatsUnread"
-import { socketBridge } from "@/lib/sdk/socket"
-import { sdkApi } from "@/lib/sdk/client"
-import { wipeSwClient } from "@/features/drive/lib/saveDownload"
-import { clearSession, broadcastAuth } from "@/lib/sdk/session"
-import { kvClear } from "@/lib/storage/adapter"
-import { queryClient } from "@/queries/client"
 import { useAccountQuery } from "@/queries/account"
 import { useTransfersAggregate } from "@/features/transfers/store/useTransfersStore"
 import { TransfersPanel } from "@/features/transfers/components/transfersPanel"
@@ -124,34 +115,10 @@ function AccountMenu() {
 
 	async function handleSignOut(): Promise<void> {
 		setPending(true)
-		// Notes + chats sync cancel BEFORE the wipe: abort each outbox loop and suppress any further disk
-		// write so a late flush can never resurrect this account's plaintext queue after kv-clear lands.
-		notesSync.cancel()
-		chatsSync.cancel()
-		// Stop every typing watchdog + wipe the typing store so no timer fires into the cleared session.
-		clearAllTyping()
-		// Tear the realtime socket down before the client is released — unsubscribeFromSocket needs the
-		// live client. Fire-and-forget: the worker also frees the listener in releaseClient as a backstop.
-		void socketBridge.stop()
 		try {
-			await runLogout({
-				cancelQueries: () => queryClient.cancelQueries(),
-				clearQueryCache: () => {
-					queryClient.clear()
-				},
-				sdkLogout: () => sdkApi.logout(),
-				clearSession,
-				kvClear,
-				wipeServiceWorker: wipeSwClient,
-				broadcast: () => {
-					broadcastAuth("logout")
-				},
-				reload: () => {
-					location.reload()
-				}
-			})
+			await performLogout()
 		} finally {
-			// runLogout isolates every phase internally (log-and-continue) and never rejects; this
+			// performLogout isolates every phase internally (log-and-continue) and never rejects; this
 			// mirrors login-form's unconditional reset — harmless even though a successful sign-out
 			// reloads the page shortly after.
 			setPending(false)
