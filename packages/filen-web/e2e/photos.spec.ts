@@ -4,10 +4,10 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // The one live proof of the whole photos arc: root selection, the media-only grid over a mixed
 // upload, the viewer wired to the shared preview overlay, a favorite toggled FROM INSIDE that overlay
-// reflecting back into the grid without a reload (the one patch step3 actually adds — trash/rename
-// already converge for free via the drive socket echo's photos-invalidation set), the change-directory
-// affordance, and the root-gone reset once the chosen directory is trashed. Net-zero via the same
-// scratch-directory convention as every other upload spec.
+// reflecting back into the grid without a reload (trash/rename already converge for free via the
+// drive socket echo's photos-invalidation set — favorite needs its own patch since it has no such
+// echo), the change-directory affordance, and the root-gone reset once the chosen directory is
+// trashed. Net-zero via the same scratch-directory convention as every other upload spec.
 
 // A real 1x1 transparent PNG — duplicated from preview-media.spec.ts (no cross-spec e2e helpers module).
 const PNG_BYTES = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64")

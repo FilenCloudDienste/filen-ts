@@ -17,7 +17,13 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { narrowItem } from "@/features/drive/lib/item"
 import { toggleFavorite, trashItems } from "@/features/drive/lib/actions"
 import { photosListingQueryKey } from "@/features/photos/queries/photos"
-import { toggleFavoritePhoto, setFavoritedPhotos, trashPhotos, renamePhotoItem } from "@/features/photos/lib/actions"
+import {
+	toggleFavoritePhoto,
+	setFavoritedPhotos,
+	trashPhotos,
+	renamePhotoItem,
+	patchPhotoFavoriteFromPreview
+} from "@/features/photos/lib/actions"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 
 function testUuid(label: string): UuidStr {
@@ -163,6 +169,32 @@ describe("trashPhotos", () => {
 		await trashPhotos(ROOT_UUID, [a])
 
 		expect(getPhotosListing()).toHaveLength(1)
+	})
+})
+
+// The overlay's own header menu runs drive's raw toggleFavorite (not toggleFavoritePhoto above), so
+// this is the ONE local patch keeping the grid's heart badge in sync — a synchronous, network-free
+// write straight from the overlay's returned item, unlike every other wrapper here which awaits its
+// own mutation.
+describe("patchPhotoFavoriteFromPreview", () => {
+	it("patches the photos listing's favorited flag from the overlay's returned item", () => {
+		const item = photoItem()
+		seedPhotosListing([item])
+
+		patchPhotoFavoriteFromPreview(ROOT_UUID, { ...item, data: { ...item.data, favorited: true } })
+
+		expect(getPhotosListing()?.[0]?.data.favorited).toBe(true)
+	})
+
+	it("leaves the photos listing untouched when the item's uuid is not present", () => {
+		const item = photoItem()
+		seedPhotosListing([item])
+		const other = photoItem({ uuid: testUuid("other"), favorited: true })
+
+		patchPhotoFavoriteFromPreview(ROOT_UUID, other)
+
+		expect(getPhotosListing()).toHaveLength(1)
+		expect(getPhotosListing()?.[0]?.data.favorited).toBe(false)
 	})
 })
 
