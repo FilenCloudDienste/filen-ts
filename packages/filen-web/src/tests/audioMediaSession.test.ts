@@ -103,7 +103,7 @@ describe("createMediaSessionPublisher — feature detection", () => {
 		}).not.toThrow()
 	})
 
-	it("builds a MediaMetadata with an artwork entry when a cover is supplied, none when it isn't", () => {
+	it("builds a MediaMetadata with a sized artwork entry when a cover is supplied, the bundled fallback icon when it isn't", () => {
 		class FakeMediaMetadata {
 			public title: string
 			public artist: string
@@ -133,11 +133,13 @@ describe("createMediaSessionPublisher — feature detection", () => {
 			)
 
 			expect(session.metadata).toBeInstanceOf(FakeMediaMetadata)
-			expect((session.metadata as FakeMediaMetadata).artwork).toEqual([{ src: "blob:cover", type: "image/jpeg" }])
+			expect((session.metadata as FakeMediaMetadata).artwork).toEqual([{ src: "blob:cover", sizes: "512x512", type: "image/jpeg" }])
 
 			publisher.setMetadata(track("song.mp3"), { title: "Real Title", artist: "Real Artist", album: "Real Album" })
 
-			expect((session.metadata as FakeMediaMetadata).artwork).toBeUndefined()
+			expect((session.metadata as FakeMediaMetadata).artwork).toEqual([
+				{ src: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }
+			])
 		} finally {
 			globalThis.MediaMetadata = originalMediaMetadata
 		}

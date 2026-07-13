@@ -159,16 +159,27 @@ function resolveMediaSession(explicit?: MediaSessionLike | null): MediaSessionLi
 	return null
 }
 
+// The OS artwork surface (lock-screen, media-key overlay) falls back to this bundled icon whenever a
+// track carries no embedded cover — same asset as the PWA's home-screen icon, so the glyph the OS shows
+// during playback stays consistent with the rest of the app's iconography instead of going blank.
+const FALLBACK_ARTWORK_URL = "/apple-touch-icon.png"
+const FALLBACK_ARTWORK_SIZES = "180x180"
+
 // Constructs a MediaMetadata when the global is available, else returns undefined so the publisher
-// assigns nothing (never throws under a partial implementation). `sizes` is deliberately omitted from
-// the artwork entry — the real pixel dimensions of an embedded picture are unknown without decoding it,
-// and the field is optional in the MediaImage contract; browsers render fine without it.
+// assigns nothing (never throws under a partial implementation). An embedded cover is declared at a
+// nominal "512x512" — the real pixel dimensions are unknown without decoding it, and browsers don't
+// strictly validate `sizes` against the actual decoded image, so a nominal square is exactly as usable
+// as an accurate one for this optional MediaImage hint.
 function makeMetadata(fields: { title: string; artist: string; album: string }, artwork: TrackArtwork | null): unknown {
 	if (typeof MediaMetadata === "undefined") {
 		return undefined
 	}
 
-	return new MediaMetadata(artwork ? { ...fields, artwork: [{ src: artwork.url, type: artwork.type }] } : fields)
+	const entry = artwork
+		? { src: artwork.url, sizes: "512x512", type: artwork.type }
+		: { src: FALLBACK_ARTWORK_URL, sizes: FALLBACK_ARTWORK_SIZES, type: "image/png" }
+
+	return new MediaMetadata({ ...fields, artwork: [entry] })
 }
 
 // The browser publisher (engine → OS). Every method no-ops when Media Session is unsupported. Position

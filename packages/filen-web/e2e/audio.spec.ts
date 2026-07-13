@@ -76,12 +76,12 @@ test("drive audio double-click hands off to the persistent player and transport 
 
 		await expect(bar).toBeVisible({ timeout: 30_000 })
 		await expect(page.getByRole("dialog")).toHaveCount(0) // no preview overlay for audio
-		await expect(bar.getByText(nameA)).toBeVisible()
 
-		// These WAV fixtures carry no ID3/tag metadata, so the metadata step's extraction degrades
-		// silently to filename-only: the title element's exact `title` attribute (MiddleEllipsis renders
-		// the raw value there even where the visible text is CSS-truncated) is the untouched filename, not
-		// truncated/mangled/blanked by a failed tag read.
+		// The bar's title element renders through MiddleEllipsis, which JS-truncates the visible text for
+		// long names — so assert on its untouched `title` attribute rather than a substring match against
+		// the (possibly truncated) rendered text. These WAV fixtures also carry no ID3/tag metadata, so
+		// this doubles as proof the metadata step's extraction degrades silently to filename-only rather
+		// than truncating/mangling/blanking the name on a failed tag read.
 		await expect(bar.locator(`[title="${nameA}"]`)).toBeVisible()
 
 		// Reaches a real playing state: the toggle shows Pause, and the seek position advances as the
@@ -97,11 +97,11 @@ test("drive audio double-click hands off to the persistent player and transport 
 
 		// Next switches to the second track.
 		await bar.getByRole("button", { name: "Next track" }).click()
-		await expect(bar.getByText(nameB)).toBeVisible({ timeout: 30_000 })
+		await expect(bar.locator(`[title="${nameB}"]`)).toBeVisible({ timeout: 30_000 })
 
 		// Previous (early in the track, before the smart-previous restart threshold) steps back to the first.
 		await bar.getByRole("button", { name: "Previous track" }).click()
-		await expect(bar.getByText(nameA)).toBeVisible({ timeout: 30_000 })
+		await expect(bar.locator(`[title="${nameA}"]`)).toBeVisible({ timeout: 30_000 })
 
 		// Scrubber seek: pause for a stable readout, then nudge the slider forward one step and confirm the
 		// position jumps to the seeked point.
@@ -217,7 +217,7 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		// can't see it until the dialog closes. Close it first, then assert on the bar.
 		await page.keyboard.press("Escape")
 		await expect(detailDialog).toHaveCount(0)
-		await expect(bar.getByText(nameB)).toBeVisible({ timeout: 30_000 })
+		await expect(bar.locator(`[title="${nameB}"]`)).toBeVisible({ timeout: 30_000 })
 
 		await playlistRow.getByRole("button", { name: "Playlist options" }).click()
 		await page.getByRole("menuitem", { name: "Delete" }).click()

@@ -268,6 +268,31 @@ describe("prefetch — teardown on jump / rebuild", () => {
 
 		expect(h.prefetchFakes[0]?.calls.dispose).toBe(1)
 	})
+
+	it("tears down a stale cross-queue prefetch instead of promoting it into an unrelated track", async () => {
+		const h = makeHarness()
+
+		// Arm a prefetch at raw index 1 ("b") off the first queue.
+		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
+		await flush()
+		expect(h.prefetchFakes).toHaveLength(1)
+		expect(h.prefetchFakes[0]?.calls.load).toEqual(["blob:b"])
+
+		// A completely different queue, started at the SAME raw index the stale prefetch happens to be
+		// warmed at — loadAndPlay must not mistake this coincidence for "already warm".
+		await h.engine.enqueueAndPlay([track("x"), track("y"), track("z")], 1)
+		await flush()
+
+		// The stale "b" element from the old queue is retired, never promoted into playback.
+		expect(h.prefetchFakes[0]?.calls.dispose).toBe(1)
+		expect(h.prefetchFakes[0]?.calls.play).toBe(0)
+
+		// The new current track "y" is genuinely resolved, loaded, and played.
+		const state = useAudioStore.getState()
+
+		expect(state.queue[state.currentIndex]?.uuid).toBe("y")
+		expect(h.mainFakes.some(fake => fake.calls.load.includes("blob:y") && fake.calls.play > 0)).toBe(true)
+	})
 })
 
 describe("prefetch — warm-up failure", () => {

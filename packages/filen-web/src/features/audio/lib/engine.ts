@@ -597,11 +597,14 @@ export class AudioEngine {
 	}
 
 	// Replace the whole queue positioned at a track and start playing — the folder-open / playlist-play
-	// entry point. Supersedes the outgoing track's end-handling before swapping the queue.
+	// entry point. Supersedes the outgoing track's end-handling before swapping the queue. The old queue's
+	// warmed prefetch (if any) is keyed to an index into an array that no longer exists after this swap —
+	// torn down unconditionally so loadAndPlay never mistakes it for warm by raw index coincidence.
 	public async enqueueAndPlay(tracks: QueueTrack[], startIndex: number): Promise<void> {
 		const load = replaceQueueAtIndex(tracks, startIndex, useAudioStore.getState().shuffleEnabled)
 
 		this.loadGeneration++
+		this.teardownPrefetch()
 		useAudioStore.getState().loadQueue(load.queue, load.currentIndex, load.shuffleOrder)
 
 		if (load.queue.length === 0) {
