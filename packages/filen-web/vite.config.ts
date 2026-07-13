@@ -33,7 +33,10 @@ const CSP = [
 	"worker-src 'self' blob:",
 	"style-src 'self' 'unsafe-inline'",
 	"font-src 'self'",
-	"img-src 'self' blob: data:",
+	// cdn.filen.io hosts the custom emoji pack (emoji.ts); the egest.filen.* family (same .net-N
+	// failover set connect-src already carries) hosts avatar pictures (account/contacts/chat rows'
+	// avatarURL) — both are sanctioned first-party hosts, not attacker-reachable third parties.
+	"img-src 'self' blob: data: https://cdn.filen.io https://egest.filen.io https://egest.filen.net https://egest.filen-1.net https://egest.filen-2.net https://egest.filen-3.net https://egest.filen-4.net https://egest.filen-5.net https://egest.filen-6.net",
 	// <video>/<audio> element sources — 'self' for the SW's inline-preview route (same-origin, never a
 	// cross-origin media host), blob: for the buffered-fallback object URL (dev / SW absent / a failed
 	// stream registration). Was absent from the CSP entirely until the preview feature needed it —

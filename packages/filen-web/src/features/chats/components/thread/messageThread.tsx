@@ -407,7 +407,14 @@ export function MessageThread({ chat }: { chat: Chat }) {
 		<div className="flex min-h-0 flex-1 flex-col">
 			<header className="flex shrink-0 items-center gap-2.5 px-5 py-4">
 				<Avatar className="size-8 shrink-0">
-					{headerAvatarUrl !== undefined ? <AvatarImage src={headerAvatarUrl} /> : null}
+					{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin egest
+					    url (see avatarCard.tsx's matching comment). */}
+					{headerAvatarUrl !== undefined ? (
+						<AvatarImage
+							src={headerAvatarUrl}
+							crossOrigin="anonymous"
+						/>
+					) : null}
 					<AvatarFallback>{headerTitle.trim().charAt(0).toUpperCase() || "?"}</AvatarFallback>
 				</Avatar>
 				<h1 className="min-w-0 flex-1 truncate text-base font-semibold">{headerTitle}</h1>

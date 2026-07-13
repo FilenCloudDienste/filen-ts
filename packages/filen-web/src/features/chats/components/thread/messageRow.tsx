@@ -106,7 +106,14 @@ export function MessageRow({ chat, message, showHeader, currentUserId }: Message
 							<div className="flex w-9 shrink-0 justify-center">
 								{showHeader ? (
 									<Avatar>
-										{avatarUrl !== undefined ? <AvatarImage src={avatarUrl} /> : null}
+										{/* crossOrigin: require-corp COEP needs a CORS-mode request for this
+										    cross-origin egest url (see avatarCard.tsx's matching comment). */}
+										{avatarUrl !== undefined ? (
+											<AvatarImage
+												src={avatarUrl}
+												crossOrigin="anonymous"
+											/>
+										) : null}
 										<AvatarFallback>{name.trim().charAt(0).toUpperCase() || "?"}</AvatarFallback>
 									</Avatar>
 								) : (

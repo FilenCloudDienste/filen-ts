@@ -212,7 +212,14 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 							)}
 						>
 							<Avatar>
-								{participant.avatar !== undefined ? <AvatarImage src={participant.avatar} /> : null}
+								{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin
+								    egest url (see settings/account/avatarCard.tsx's matching comment). */}
+								{participant.avatar !== undefined ? (
+									<AvatarImage
+										src={participant.avatar}
+										crossOrigin="anonymous"
+									/>
+								) : null}
 								<AvatarFallback>{contactInitials(displayName)}</AvatarFallback>
 							</Avatar>
 							<div className="min-w-0 flex-1">
@@ -347,7 +354,14 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 							className="flex h-14 cursor-pointer items-center gap-3 rounded-xl px-2 text-sm outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
 						>
 							<Avatar>
-								{contact.avatar !== undefined ? <AvatarImage src={contact.avatar} /> : null}
+								{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin
+								    egest url (see settings/account/avatarCard.tsx's matching comment). */}
+								{contact.avatar !== undefined ? (
+									<AvatarImage
+										src={contact.avatar}
+										crossOrigin="anonymous"
+									/>
+								) : null}
 								<AvatarFallback>{contactInitials(displayName)}</AvatarFallback>
 							</Avatar>
 							<div className="min-w-0 flex-1">

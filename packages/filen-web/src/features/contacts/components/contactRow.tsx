@@ -55,7 +55,14 @@ function ContactRowShell({ avatar, displayName, email, selected, onToggleSelect,
 			)}
 		>
 			<Avatar>
-				{avatar !== undefined ? <AvatarImage src={avatar} /> : null}
+				{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin egest
+				    url (see settings/account/avatarCard.tsx's matching comment for the verified detail). */}
+				{avatar !== undefined ? (
+					<AvatarImage
+						src={avatar}
+						crossOrigin="anonymous"
+					/>
+				) : null}
 				<AvatarFallback>{contactInitials(displayName)}</AvatarFallback>
 			</Avatar>
 			<div className="min-w-0 flex-1">

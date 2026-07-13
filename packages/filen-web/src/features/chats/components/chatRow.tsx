@@ -90,7 +90,14 @@ export function ChatRow({ chat, selected, multiSelected, currentUserId, onAction
 							className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
 						>
 							<Avatar>
-								{avatarUrl !== undefined ? <AvatarImage src={avatarUrl} /> : null}
+								{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin
+								    egest url (see avatarCard.tsx's matching comment for the verified detail). */}
+								{avatarUrl !== undefined ? (
+									<AvatarImage
+										src={avatarUrl}
+										crossOrigin="anonymous"
+									/>
+								) : null}
 								<AvatarFallback>{name.trim().charAt(0).toUpperCase() || "?"}</AvatarFallback>
 							</Avatar>
 							<div className="flex min-w-0 flex-1 flex-col">

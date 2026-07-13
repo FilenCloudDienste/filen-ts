@@ -167,6 +167,9 @@ export function NoteRow({
 														<AvatarImage
 															src={source}
 															alt={displayName}
+															// crossOrigin: require-corp COEP needs a CORS-mode request for this
+															// cross-origin egest url (see avatarCard.tsx's matching comment).
+															crossOrigin="anonymous"
 														/>
 													) : null}
 													<AvatarFallback>{contactInitials(displayName)}</AvatarFallback>

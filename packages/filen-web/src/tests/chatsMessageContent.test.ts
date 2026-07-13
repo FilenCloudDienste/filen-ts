@@ -59,9 +59,26 @@ describe("MessageContent — custom emoji pack + jumbo sizing", () => {
 	})
 
 	it("renders a standard unicode shortcode at jumbo text size when the message is emoji-only", () => {
-		const { container } = render(createElement(MessageContent, { chat: mockChat(), text: ":fire:" }))
+		const { container } = render(createElement(MessageContent, { chat: mockChat(), text: ":joy:" }))
 
 		const jumboSpan = container.querySelector(".text-3xl")
-		expect(jumboSpan?.textContent).toBe("🔥")
+		expect(jumboSpan?.textContent).toBe("😂")
+	})
+
+	// "clap" exists in both the standard table (👏) and the custom CDN pack — mobile-parity precedence
+	// (emoji.ts's emojiForShortcode) means the custom pack wins, so this renders the image, not the glyph.
+	it("renders the custom-pack image, not the standard glyph, for a colliding shortcode like clap", () => {
+		const { container } = render(createElement(MessageContent, { chat: mockChat(), text: ":clap:" }))
+
+		const img = container.querySelector("img")
+		expect(img).not.toBeNull()
+		expect(img?.getAttribute("src")).toBe(customEmojiImageForShortcode("clap"))
+		expect(container.textContent).not.toContain("👏")
+	})
+
+	it("loads a custom-pack emoji image lazily", () => {
+		const { container } = render(createElement(MessageContent, { chat: mockChat(), text: ":kekw:" }))
+
+		expect(container.querySelector("img")?.getAttribute("loading")).toBe("lazy")
 	})
 })

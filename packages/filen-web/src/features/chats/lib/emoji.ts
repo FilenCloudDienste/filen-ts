@@ -1,31 +1,12 @@
-// Standard-unicode emoji shortcode table + lookup, PLUS a bundled subset of Filen's custom (non-unicode)
-// emoji pack — see the "Custom emoji pack" section below for why it's a subset rather than the full set.
+// Standard-unicode emoji shortcode table + lookup, PLUS Filen's full custom (non-unicode) emoji pack —
+// see the "Custom emoji pack" section below for how the two are sourced and reconciled.
 //
 // The web completes / renders standard shortcodes against a curated STANDARD-unicode shortcode table (a
 // subset of the gemoji/emoji-mart short-name convention): `:name:` completes to and renders as the native
-// unicode glyph, self-contained and asset-free. An unknown shortcode (neither this table nor the bundled
-// custom pack below) stays literal `:shortcode:` text.
+// unicode glyph, self-contained and asset-free. An unknown shortcode (neither this table nor the custom
+// pack below) stays literal `:shortcode:` text.
 
-import kekwUrl from "@/assets/customEmojis/kekw.webp"
-import pogUrl from "@/assets/customEmojis/pog.webp"
-import poguUrl from "@/assets/customEmojis/pogu.webp"
-import poggiesUrl from "@/assets/customEmojis/poggies.webp"
-import letsgoUrl from "@/assets/customEmojis/letsgo.webp"
-import clapUrl from "@/assets/customEmojis/clap.webp"
-import gigachadUrl from "@/assets/customEmojis/gigachad.webp"
-import catjamUrl from "@/assets/customEmojis/catjam.webp"
-import sadgeUrl from "@/assets/customEmojis/sadge.webp"
-import copiumUrl from "@/assets/customEmojis/copium.webp"
-import praygeUrl from "@/assets/customEmojis/prayge.webp"
-import hmmUrl from "@/assets/customEmojis/hmm.webp"
-import monkawUrl from "@/assets/customEmojis/monkaw.webp"
-import popcatUrl from "@/assets/customEmojis/popcat.webp"
-import pepelaughUrl from "@/assets/customEmojis/pepelaugh.webp"
-import noddersUrl from "@/assets/customEmojis/nodders.webp"
-import awareUrl from "@/assets/customEmojis/aware.webp"
-import savedUrl from "@/assets/customEmojis/saved.webp"
-import yepUrl from "@/assets/customEmojis/yep.webp"
-import meowUrl from "@/assets/customEmojis/meow.webp"
+import customEmojiPackData from "@/assets/customEmojis.json"
 
 // shortcode (without the surrounding colons) → unicode glyph. Curated common set; extend as needed.
 export const EMOJI_SHORTCODES: Readonly<Record<string, string>> = {
@@ -303,71 +284,73 @@ export const EMOJI_SHORTCODES: Readonly<Record<string, string>> = {
 	melting_face: "🫠"
 }
 
-// Longest-name-first isn't needed — shortcodes are looked up whole. Returns the glyph or undefined.
-export function emojiForShortcode(shortcode: string): string | undefined {
-	return EMOJI_SHORTCODES[shortcode.toLowerCase()]
-}
-
 // ── Custom emoji pack (non-unicode, image-backed) ───────────────────────────────────────────────────
 // Filen's shared custom emoji pack is a large (thousand-plus-entry) set of image-backed shortcodes —
 // Twitch/BTTV-style reaction emotes, not unicode glyphs — that mobile and old-web both source from a
-// CDN-hosted manifest (each entry's image is a remote https://cdn.filen.io/... url). This app's
-// Content-Security-Policy restricts img-src to 'self' plus blob:/data: — no external image host is
-// allowlisted — so those CDN urls cannot be rendered here as-is, and the CSP is not something a single
-// chat feature should widen for its own convenience.
-//
-// This ships a SMALL, hand-picked SUBSET of the pack instead, as genuine same-origin assets: each image
-// is a real file bundled under this app (resolved to a hashed, same-origin URL by the bundler, the exact
-// pattern the drive file-type icon set already uses under assets/file-icons) — self-contained, no runtime
-// fetch, CSP-compliant by construction. It proves out the full lookup + autocomplete + jumbo-render path
-// end to end. Hosting the REMAINING ~1000+ entries is a deliberate follow-up that needs one of: (a)
-// checking that many binary images into this repo (this 20-emoji subset alone is ~650KB — the full pack
-// would run tens of megabytes of git history forever), or (b) standing up a sanctioned first-party asset
-// host (e.g. a static bucket under a filen.io subdomain) and widening img-src to it. Both are
-// product/infra decisions outside a single feature change's scope — flagged here rather than silently
-// left incomplete.
-export interface CustomEmoji {
-	// The shortcode without surrounding colons, e.g. "kekw" for `:kekw:`. Lowercase, no spaces.
+// CDN-hosted manifest (each entry's image is a remote https://cdn.filen.io/... url). The pack's DATA
+// (id/name/keywords/image url per entry) is canonical and shared across apps — mobile's copy lives at
+// filen-mobile/src/assets/customEmojis.json; this is that same file, copied verbatim rather than
+// regenerated, so both apps stay in lockstep on ids and CDN paths. The image urls are only renderable
+// here because the app's Content-Security-Policy allowlists cdn.filen.io under img-src.
+interface CustomEmojiPackEntry {
+	id: string
 	name: string
-	imageUrl: string
+	keywords: string[]
+	skins: { src: string }[]
 }
 
-export const CUSTOM_EMOJIS: readonly CustomEmoji[] = [
-	{ name: "kekw", imageUrl: kekwUrl },
-	{ name: "pog", imageUrl: pogUrl },
-	{ name: "pogu", imageUrl: poguUrl },
-	{ name: "poggies", imageUrl: poggiesUrl },
-	{ name: "letsgo", imageUrl: letsgoUrl },
-	// Named "clapping", not "clap" — the standard-unicode table above already owns the "clap" shortcode
-	// (👏), and a same-named custom entry would be permanently unreachable: messageContent.tsx and the `:`
-	// autocomplete both resolve standard shortcodes first, so the custom image could never render or be
-	// told apart from the glyph suggestion in the picker.
-	{ name: "clapping", imageUrl: clapUrl },
-	{ name: "gigachad", imageUrl: gigachadUrl },
-	{ name: "catjam", imageUrl: catjamUrl },
-	{ name: "sadge", imageUrl: sadgeUrl },
-	{ name: "copium", imageUrl: copiumUrl },
-	{ name: "prayge", imageUrl: praygeUrl },
-	{ name: "hmm", imageUrl: hmmUrl },
-	{ name: "monkaw", imageUrl: monkawUrl },
-	{ name: "popcat", imageUrl: popcatUrl },
-	{ name: "pepelaugh", imageUrl: pepelaughUrl },
-	{ name: "nodders", imageUrl: noddersUrl },
-	{ name: "aware", imageUrl: awareUrl },
-	{ name: "saved", imageUrl: savedUrl },
-	{ name: "yep", imageUrl: yepUrl },
-	{ name: "meow", imageUrl: meowUrl }
-]
+// Vite/TS resolve the JSON import structurally against this interface (resolveJsonModule) — no runtime
+// parsing or cast needed.
+const CUSTOM_EMOJI_PACK: readonly CustomEmojiPackEntry[] = customEmojiPackData
+
+export interface CustomEmoji {
+	// The shortcode without surrounding colons, e.g. "kekw" for `:kekw:` — the pack entry's own `id`.
+	name: string
+	imageUrl: string
+	// Extra search terms (beyond `name`) the `:` autocomplete also matches against.
+	keywords: readonly string[]
+}
+
+// Built once at module load from the pack data — searchEmoji below filters this array per keystroke,
+// it never rebuilds it, so autocomplete stays a cheap linear scan over ~1100 prebuilt entries.
+export const CUSTOM_EMOJIS: readonly CustomEmoji[] = CUSTOM_EMOJI_PACK.flatMap(entry => {
+	const skin = entry.skins[0]
+
+	// Every entry in the shipped pack has a skin (verified against all 1107); still guarded rather than
+	// asserted non-null, since this is externally sourced data copied from another package.
+	if (skin === undefined) {
+		return []
+	}
+
+	return [{ name: entry.id.toLowerCase(), imageUrl: skin.src, keywords: entry.keywords }]
+})
 
 const CUSTOM_EMOJI_MAP: ReadonlyMap<string, string> = new Map(CUSTOM_EMOJIS.map(emoji => [emoji.name, emoji.imageUrl]))
 
-// Returns the bundled image url for a custom-pack shortcode, or undefined (unknown / outside the bundled
-// subset — falls back to literal `:shortcode:` text at the render layer, same as an unknown standard one).
+// Returns the CDN image url for a custom-pack shortcode, or undefined (outside the pack — falls back to
+// literal `:shortcode:` text at the render layer, same as an unknown standard one).
 export function customEmojiImageForShortcode(shortcode: string): string | undefined {
 	return CUSTOM_EMOJI_MAP.get(shortcode.toLowerCase())
 }
 
-// A suggestion is either a standard unicode glyph or a bundled custom-pack image — the composer's `:`
+// A handful of the pack's ~1100 ids collide with the curated standard-unicode table above (e.g. "clap",
+// "fire", "ok" — the pack owns the id independently of this web-only table). Mobile has no textual
+// standard-shortcode lookup at all: its regexed.tsx only ever resolves `:id:` against the custom pack
+// (standard unicode emoji reach a message as literal glyph characters typed via the OS keyboard, never
+// as `:name:` text), so for any id the custom pack defines, the custom pack is mobile's ONLY answer —
+// there is nothing else for it to lose to. Matching that on web means the custom pack wins every
+// collision: a colliding shortcode resolves to its CDN image, never the unicode glyph.
+export function emojiForShortcode(shortcode: string): string | undefined {
+	const normalized = shortcode.toLowerCase()
+
+	if (CUSTOM_EMOJI_MAP.has(normalized)) {
+		return undefined
+	}
+
+	return EMOJI_SHORTCODES[normalized]
+}
+
+// A suggestion is either a standard unicode glyph or a custom-pack image — the composer's `:`
 // autocomplete sources both into one merged, ranked list (see searchEmoji below); the render/insertion
 // layers switch on `kind` to pick a unicode-glyph vs. an image-shortcode replacement.
 export type EmojiSuggestion = { name: string } & ({ kind: "standard"; char: string } | { kind: "custom"; imageUrl: string })
@@ -375,7 +358,9 @@ export type EmojiSuggestion = { name: string } & ({ kind: "standard"; char: stri
 // Suggestion list for the composer's `:` autocomplete. Prefix matches rank above substring matches
 // (both alphabetically inside their tier), so `:sm` surfaces `smile`/`smiley` before `kissing_heart`
 // never would — it just keeps the obvious completions on top. Capped to `limit` (mobile caps at 10).
-// Sources BOTH the standard shortcode table and the bundled custom-pack subset into one ranked list.
+// Sources BOTH the standard shortcode table and the custom pack into one ranked list, matching custom
+// entries by id OR keyword. A standard name the custom pack also owns is skipped here — same
+// custom-wins precedence as emojiForShortcode, so the picker never shows two entries for one id.
 export function searchEmoji(query: string, limit: number): EmojiSuggestion[] {
 	const q = query.toLowerCase()
 
@@ -387,6 +372,10 @@ export function searchEmoji(query: string, limit: number): EmojiSuggestion[] {
 	const contains: EmojiSuggestion[] = []
 
 	for (const name of Object.keys(EMOJI_SHORTCODES)) {
+		if (CUSTOM_EMOJI_MAP.has(name)) {
+			continue
+		}
+
 		const char = EMOJI_SHORTCODES[name]
 
 		if (char === undefined) {
@@ -404,10 +393,11 @@ export function searchEmoji(query: string, limit: number): EmojiSuggestion[] {
 
 	for (const emoji of CUSTOM_EMOJIS) {
 		const item: EmojiSuggestion = { kind: "custom", name: emoji.name, imageUrl: emoji.imageUrl }
+		const matches = emoji.name.startsWith(q) || emoji.keywords.some(keyword => keyword.toLowerCase().startsWith(q))
 
-		if (emoji.name.startsWith(q)) {
+		if (matches) {
 			prefix.push(item)
-		} else if (emoji.name.includes(q)) {
+		} else if (emoji.name.includes(q) || emoji.keywords.some(keyword => keyword.toLowerCase().includes(q))) {
 			contains.push(item)
 		}
 	}

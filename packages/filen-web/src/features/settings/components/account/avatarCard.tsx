@@ -73,7 +73,16 @@ function AvatarCard({ accountQuery }: AvatarCardProps) {
 						size="lg"
 						className="size-16"
 					>
-						{avatarUrl !== undefined ? <AvatarImage src={avatarUrl} /> : null}
+						{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin egest
+						    url — a plain no-cors <img> would need a Cross-Origin-Resource-Policy response header
+						    the CDN doesn't send (verified live against the sibling cdn.filen.io emoji host, which
+						    shares the same Access-Control-Allow-Origin: * pattern). */}
+						{avatarUrl !== undefined ? (
+							<AvatarImage
+								src={avatarUrl}
+								crossOrigin="anonymous"
+							/>
+						) : null}
 						<AvatarFallback className="text-lg">{contactInitials(nickName ?? email)}</AvatarFallback>
 					</Avatar>
 					<Button

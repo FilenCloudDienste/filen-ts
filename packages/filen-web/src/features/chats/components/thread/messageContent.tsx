@@ -14,10 +14,11 @@ import { contactDisplayName } from "@/features/contacts/components/contactsList.
 // rel="noopener noreferrer nofollow" + target="_blank". A genuinely EXTERNAL link (not this app's own
 // public-link format) additionally routes through TrustedExternalLink — a one-time-per-domain trust
 // confirmation before it's ever opened; a Filen link stays a plain anchor (same domain, resolved
-// through the authenticated in-app client either way, never gated). Emoji shortcodes resolve to
-// standard unicode glyphs first, then the bundled custom-pack image subset (emoji.ts); a shortcode that
-// resolves to neither stays literal. A message whose entire (trimmed) body is emoji shortcodes renders
-// them "jumbo" — larger glyphs/images and no surrounding text sizing — mirroring mobile's emojiSize
+// through the authenticated in-app client either way, never gated). Emoji shortcodes resolve to the
+// custom (CDN-image) pack first, then standard unicode glyphs (emoji.ts's emojiForShortcode already
+// yields to the custom pack on a colliding id — see its own comment); a shortcode that resolves to
+// neither stays literal. A message whose entire (trimmed) body is emoji shortcodes renders them
+// "jumbo" — larger glyphs/images and no surrounding text sizing — mirroring mobile's emojiSize
 // heuristic (regexed.logic.ts's isEmojiOnly).
 export function MessageContent({ chat, text }: { chat: Chat; text: string | undefined }) {
 	const { t } = useTranslation("chats")
@@ -97,9 +98,10 @@ export function MessageContent({ chat, text }: { chat: Chat; text: string | unde
 					}
 
 					case "emoji": {
-						// Resolve `:shortcode:` to a standard unicode glyph first, then the bundled custom-pack
-						// image subset; a shortcode outside both (e.g. a custom-pack name outside the bundled
-						// subset, or a peer's genuinely unknown one) falls back to its literal text.
+						// Resolve `:shortcode:` to a standard unicode glyph first, then the custom (CDN-image) pack;
+						// emojiForShortcode itself already returns undefined for an id the custom pack owns, so a
+						// colliding shortcode falls through to the image below — a shortcode outside both stays
+						// literal.
 						const glyph = emojiForShortcode(segment.shortcode)
 
 						if (glyph !== undefined) {
@@ -121,6 +123,13 @@ export function MessageContent({ chat, text }: { chat: Chat; text: string | unde
 									key={index}
 									src={customImageUrl}
 									alt={`:${segment.shortcode}:`}
+									loading="lazy"
+									// The app's Cross-Origin-Embedder-Policy is require-corp: a plain cross-origin <img>
+									// (no-cors mode) needs a Cross-Origin-Resource-Policy response header the CDN does
+									// not send, so it would otherwise be silently network-blocked despite the CSP
+									// allowlist. crossOrigin makes this a CORS-mode request instead, which the CDN's
+									// Access-Control-Allow-Origin: * already satisfies (verified against a live response).
+									crossOrigin="anonymous"
 									className={cn("inline-block object-contain align-text-bottom", jumbo ? "size-8" : "size-5")}
 								/>
 							)

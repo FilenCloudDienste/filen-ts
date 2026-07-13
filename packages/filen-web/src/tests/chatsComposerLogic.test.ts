@@ -184,26 +184,40 @@ describe("activeEmojiQuery + emoji application", () => {
 	})
 
 	it("filters known shortcodes and inserts the unicode glyph", () => {
-		const items = filterEmojiSuggestions("smile", 8)
+		const items = filterEmojiSuggestions("joy", 8)
 
 		expect(items.length).toBeGreaterThan(0)
-		expect(items[0]?.name).toBe("smile")
+		expect(items[0]?.name).toBe("joy")
 
-		const result = applyEmoji("say :smile", { start: 4, query: "smile" }, "😄")
+		const result = applyEmoji("say :joy", { start: 4, query: "joy" }, "😂")
 
-		expect(result.value).toBe("say 😄 ")
+		expect(result.value).toBe("say 😂 ")
 		expect(result.caret).toBe(result.value.length)
 	})
 
 	it("resolves a shortcode to unicode and leaves an unknown one undefined", () => {
-		expect(emojiForShortcode("fire")).toBe("🔥")
+		expect(emojiForShortcode("joy")).toBe("😂")
 		expect(emojiForShortcode("definitely_not_a_real_emoji")).toBeUndefined()
 	})
 
-	it("sources the bundled custom emoji pack into the suggestion list alongside standard shortcodes", () => {
+	// "smile" exists in both the standard table and the custom CDN pack — mobile-parity precedence means
+	// the custom pack wins, so the `:` autocomplete surfaces it as a "custom" suggestion, not "standard".
+	it("surfaces a colliding shortcode as its custom-pack suggestion, not the standard glyph", () => {
+		const items = filterEmojiSuggestions("smile", 8)
+		const smileMatches = items.filter(item => item.name === "smile")
+
+		expect(smileMatches).toHaveLength(1)
+		expect(smileMatches[0]?.kind).toBe("custom")
+	})
+
+	it("sources the custom emoji pack into the suggestion list alongside standard shortcodes", () => {
 		const items = filterEmojiSuggestions("kekw", 8)
 
-		expect(items).toEqual([{ kind: "custom", name: "kekw", imageUrl: expect.any(String) as string }])
+		// The full pack has several "kekw*" prefix siblings (kekwaddle, kekwait, ...) — exact-match "kekw"
+		// still ranks first (prefix-tier alphabetical), which is what selectEmoji actually keys off.
+		expect(items.length).toBeGreaterThan(0)
+		expect(items[0]).toEqual({ kind: "custom", name: "kekw", imageUrl: expect.any(String) as string })
+		expect(items.every(item => item.kind === "custom")).toBe(true)
 	})
 
 	it("completes a custom-pack suggestion to its literal shortcode text, not a glyph", () => {

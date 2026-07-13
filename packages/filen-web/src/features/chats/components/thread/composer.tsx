@@ -500,7 +500,14 @@ export function Composer({
 										}}
 									>
 										<Avatar className="size-7 shrink-0">
-											{avatarUrl !== undefined ? <AvatarImage src={avatarUrl} /> : null}
+											{/* crossOrigin: require-corp COEP needs a CORS-mode request for this
+											    cross-origin egest url (see avatarCard.tsx's matching comment). */}
+											{avatarUrl !== undefined ? (
+												<AvatarImage
+													src={avatarUrl}
+													crossOrigin="anonymous"
+												/>
+											) : null}
 											<AvatarFallback>{contactInitials(name)}</AvatarFallback>
 										</Avatar>
 										<span className="flex min-w-0 flex-col">
@@ -530,6 +537,11 @@ export function Composer({
 										<img
 											src={suggestion.imageUrl}
 											alt=""
+											loading="lazy"
+											// require-corp COEP needs a CORS-mode request for a cross-origin image (the CDN
+											// sends Access-Control-Allow-Origin: * but no Cross-Origin-Resource-Policy) —
+											// see messageContent.tsx's matching comment for the verified detail.
+											crossOrigin="anonymous"
 											className="size-7 shrink-0 object-contain"
 										/>
 									) : (
