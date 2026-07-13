@@ -25,11 +25,11 @@ function mockChat(overrides: Partial<Chat> = {}): Chat {
 	}
 }
 
-// The bundled custom-emoji pack subset renders as its image, and a message that's entirely emoji
+// A custom-pack shortcode renders as its image, and a message that's entirely emoji
 // shortcodes renders "jumbo" (larger), mirroring mobile's emojiSize 32/20 split (regexed.logic.ts's
 // isEmojiOnly, wired through messageContent.tsx).
 describe("MessageContent — custom emoji pack + jumbo sizing", () => {
-	it("renders a bundled custom-pack shortcode as its image, at the normal (non-jumbo) size", () => {
+	it("renders a custom-pack shortcode as its image, at the normal (non-jumbo) size", () => {
 		const { container } = render(createElement(MessageContent, { chat: mockChat(), text: "check this out :kekw: nice" }))
 
 		const img = container.querySelector("img")
@@ -51,7 +51,7 @@ describe("MessageContent — custom emoji pack + jumbo sizing", () => {
 		}
 	})
 
-	it("falls back to literal `:shortcode:` text for a shortcode outside both the standard table and the bundled custom subset", () => {
+	it("falls back to literal `:shortcode:` text for a shortcode outside both the standard table and the custom pack", () => {
 		const { container } = render(createElement(MessageContent, { chat: mockChat(), text: "hello :definitely_not_a_real_emoji:" }))
 
 		expect(container.textContent).toContain(":definitely_not_a_real_emoji:")

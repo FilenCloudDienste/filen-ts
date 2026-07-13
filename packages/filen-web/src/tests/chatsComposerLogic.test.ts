@@ -228,7 +228,7 @@ describe("activeEmojiQuery + emoji application", () => {
 		expect(result.value).toBe("say :kekw: ")
 	})
 
-	it("resolves a bundled custom-pack shortcode to its image url and leaves an unknown one undefined", () => {
+	it("resolves a custom-pack shortcode to its image url and leaves an unknown one undefined", () => {
 		expect(customEmojiImageForShortcode("kekw")).toEqual(expect.any(String))
 		expect(customEmojiImageForShortcode("definitely_not_a_real_custom_emoji")).toBeUndefined()
 	})
