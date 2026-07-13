@@ -26,7 +26,12 @@ export default defineConfig({
 	// forces retries: 0). Retries only cover transient infra flakiness of the SDK-free specs on CI.
 	retries: process.env["CI"] ? 1 : 0,
 	reporter: [["html", { open: "never" }], ["list"]],
-	timeout: 90_000,
+	// One generous per-test budget for every environment (no CI/local split, no per-spec overrides):
+	// the suite runs against a live account through a real wasm SDK, and the same test that takes 40s
+	// on a warm dev machine has been observed timing out on slower CI runners. Five minutes is a
+	// ceiling for diagnosing a hang, not a target — expect polls and toPass envelopes still bound the
+	// individual waits inside a test.
+	timeout: 300_000,
 	expect: { timeout: 15_000 },
 	// The session blob is secret-equivalent; a trace would capture it as an addInitScript / evaluate
 	// argument, so tracing stays off. Failure screenshots are an acceptable residual: the password
@@ -40,9 +45,10 @@ export default defineConfig({
 		// Bounded, not Playwright's unlimited default: an action whose target silently detaches
 		// mid-interaction (a menu closed by a concurrent re-render) must FAIL with a diagnosable
 		// actionability error, not absorb the whole test budget — a menu click once hung a 240s test
-		// this way. 30s is triple the expect timeout; nothing legitimately waits longer to become
-		// actionable (slow STATE changes belong in expect polls / toPass envelopes, not action waits).
-		actionTimeout: 30_000
+		// this way. Sized well below the per-test ceiling so a dead action fails fast enough to leave
+		// a readable error, while still absorbing a slow runner's worst single-interaction stall
+		// (slow STATE changes belong in expect polls / toPass envelopes, not action waits).
+		actionTimeout: 60_000
 	},
 	projects: [
 		{ name: "auth-setup", testMatch: /auth\.setup\.ts/ },
@@ -50,9 +56,9 @@ export default defineConfig({
 		// any spec project starts (see setup/cleanup.setup.ts). Depends on auth-setup rather than
 		// duplicating its login, and every spec project below depends on THIS instead of auth-setup
 		// directly — Playwright resolves the chain, so auth-setup still always runs first.
-		// Generous timeout: a debris-heavy root sweeps one item per round (see cleanup.setup.ts), and a
-		// backlog run has genuinely needed more than the suite's default 90s.
-		{ name: "cleanup-setup", testMatch: /cleanup\.setup\.ts/, dependencies: ["auth-setup"], timeout: 300_000 },
+		// Generous timeout above even the suite default: a debris-heavy root sweeps one item per round
+		// (see cleanup.setup.ts), and a backlog run has genuinely needed several minutes on its own.
+		{ name: "cleanup-setup", testMatch: /cleanup\.setup\.ts/, dependencies: ["auth-setup"], timeout: 600_000 },
 		{
 			name: "chromium",
 			use: { ...devices["Desktop Chrome"] },
@@ -87,7 +93,9 @@ export default defineConfig({
 		command: "npm run build && npm run preview",
 		url: BASE_URL,
 		reuseExistingServer: !process.env["CI"],
-		timeout: 300_000,
+		// The command builds the app from scratch when no server is reused (always on CI) — a slow
+		// runner needs real headroom for typecheck + vite build + preview boot before the first test.
+		timeout: 600_000,
 		env: {
 			VITE_E2E: "1",
 			NODE_OPTIONS: "--max-old-space-size=8192"

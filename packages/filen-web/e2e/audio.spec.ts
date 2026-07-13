@@ -41,7 +41,6 @@ const WAV_B = makeSilentWav(3)
 
 test("drive audio double-click hands off to the persistent player and transport works", async ({ page, injectedSession, browserName }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
-	test.setTimeout(120_000)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const cspViolations = trackCspViolations(page)
@@ -137,7 +136,6 @@ test("drive audio double-click hands off to the persistent player and transport 
 // infrastructure (mirrors mobile leaving it too).
 test("playlists: create, add tracks via the picker, reorder, play, and delete", async ({ page, injectedSession, browserName }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
-	test.setTimeout(120_000)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const cspViolations = trackCspViolations(page)

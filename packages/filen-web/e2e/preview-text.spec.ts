@@ -54,7 +54,6 @@ const MARKDOWN_BYTES = Buffer.from("# Hello Markdown\n\nThis is **bold** text an
 // path is never actually reached, not just an assumption from reading the source.
 test("docx preview renders document content and closes, no CSP console errors", async ({ page, injectedSession, browserName }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
-	test.setTimeout(120_000)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()
@@ -99,7 +98,6 @@ test("docx preview renders document content and closes, no CSP console errors", 
 // none of that is provable without one.
 test("text preview decodes and renders read-only content, no CSP console errors", async ({ page, injectedSession, browserName }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
-	test.setTimeout(120_000)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()
@@ -138,7 +136,6 @@ test("text preview decodes and renders read-only content, no CSP console errors"
 // text): a highlighted line wraps its tokens in <span>s, a plain one (the text leg above) doesn't.
 test("code preview renders with syntax highlighting, no CSP console errors", async ({ page, injectedSession, browserName }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
-	test.setTimeout(120_000)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()
@@ -181,7 +178,6 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 	browserName
 }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
-	test.setTimeout(120_000)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()

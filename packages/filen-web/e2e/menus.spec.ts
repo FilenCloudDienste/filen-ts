@@ -85,7 +85,6 @@ test.describe("context menus", () => {
 		browserName
 	}) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
-		test.setTimeout(120_000)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const runId = crypto.randomUUID()

@@ -31,7 +31,6 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 	browserName
 }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
-	test.setTimeout(240_000)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()

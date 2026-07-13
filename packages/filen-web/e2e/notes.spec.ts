@@ -198,7 +198,6 @@ test.describe("notes", () => {
 		// internal rate-limit backoff (CLAUDE.md: retry/backoff is the SDK's job, never re-implemented
 		// here). Live-measured a full run landing right at 180s under real backoff. The per-step toPass
 		// envelopes (runMenuAction) keep any single wedged interaction from consuming this budget whole.
-		test.setTimeout(240_000)
 
 		await gotoNotes(page)
 
@@ -627,7 +626,6 @@ test.describe("notes: live editors", () => {
 	}) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
-		test.setTimeout(120_000)
 
 		const marker = `killpath-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 		const { uuid, title } = await createEmptyNoteAndOpen(page, "text", "e2e killpath")
@@ -666,7 +664,6 @@ test.describe("notes: live editors", () => {
 	test("md edit persists through the debounce and both panes reflect it after reload", async ({ page, injectedSession, browserName }) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
-		test.setTimeout(120_000)
 
 		const headingText = `ReloadHeading-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 		const typed = `# ${headingText}`
@@ -706,7 +703,6 @@ test.describe("notes: rich and checklist editors", () => {
 	test("rich toolbar formatting survives an immediate reload and reaches the server", async ({ page, injectedSession, browserName }) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
-		test.setTimeout(120_000)
 
 		const marker = `RichBold${String(Date.now())}${String(Math.floor(Math.random() * 100_000))}`
 		const { uuid, title } = await createEmptyNoteAndOpen(page, "rich", "e2e rich-edit")
@@ -786,7 +782,6 @@ test.describe("notes: rich and checklist editors", () => {
 	test("checklist rows added and toggled survive an immediate reload", async ({ page, injectedSession, browserName }) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
-		test.setTimeout(120_000)
 
 		const first = `Chk1-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 		const second = `Chk2-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
@@ -874,7 +869,6 @@ test.describe("notes: realtime", () => {
 	test("a rename on a second page lands live on the editor header and sidebar row", async ({ page, injectedSession, browserName }) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
-		test.setTimeout(120_000)
 
 		const { uuid, title } = await createEmptyNoteAndOpen(page, "text", "e2e realtime-meta")
 		const newTitle = `e2e renamed ${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
@@ -919,7 +913,6 @@ test.describe("notes: realtime", () => {
 	}) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
-		test.setTimeout(120_000)
 
 		const initialContent = `initial-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 		const remoteContent = `remote-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
@@ -983,7 +976,6 @@ test.describe("notes: participants and history dialogs", () => {
 	}) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
-		test.setTimeout(120_000)
 
 		const v1 = `HistV1-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 		const v2 = `HistV2-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
@@ -1056,7 +1048,6 @@ test.describe("notes: participants and history dialogs", () => {
 	test("participants dialog renders the owner management surface", async ({ page, injectedSession, browserName }) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
-		test.setTimeout(90_000)
 
 		const { uuid } = await createEmptyNoteAndOpen(page, "text", "e2e participants")
 		const main = page.getByRole("main")
@@ -1112,7 +1103,6 @@ test.describe("notes: multi-tab outbox", () => {
 	}) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
-		test.setTimeout(180_000)
 
 		const stamp = `${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 		const markerX = `leaderX-${stamp}`

@@ -26,7 +26,6 @@ test("png and bmp images render real thumbnails in both listing views, text/svg 
 	browserName
 }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
-	test.setTimeout(120_000)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()

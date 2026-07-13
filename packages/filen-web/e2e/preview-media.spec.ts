@@ -51,7 +51,6 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 	browserName
 }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
-	test.setTimeout(120_000)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()

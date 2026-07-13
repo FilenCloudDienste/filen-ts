@@ -61,7 +61,6 @@ test("image preview opens, pages with the button and the arrow key, and closes w
 	browserName
 }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
-	test.setTimeout(120_000)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()
@@ -119,7 +118,6 @@ test("HEIC preview transforms client-side and renders via the buffered path, nev
 	browserName
 }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
-	test.setTimeout(120_000)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()
@@ -172,7 +170,6 @@ test("PDF preview renders multi-page content, pages via its own toolbar with a r
 	browserName
 }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
-	test.setTimeout(120_000)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()
@@ -232,7 +229,6 @@ test("PDF preview prompts for a password, retries after a wrong one, and renders
 	browserName
 }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
-	test.setTimeout(120_000)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()
