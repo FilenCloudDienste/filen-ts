@@ -73,6 +73,17 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 	// (not activeRef) to decide open-vs-retune, which is what keeps the engine warm across a clear —
 	// see useDriveSearch.logic.ts's own doc comment.
 	const engagedRef = useRef(false)
+	// Serializes engine opens: while one openSearch round-trip is in flight, later keystrokes PARK their
+	// query here instead of firing another open. Without this, every keystroke typed before the FIRST
+	// open resolves reads engagedRef=false and fires a fresh open — and each reopen supersedes the
+	// previous one inside the worker, freeing its just-created search handle and killing the convergence
+	// resync that handle had started (observed live as one aborted lock acquisition per keystroke). On a
+	// cache that already believes this root is covered, the killed revalidation never re-runs — the
+	// surviving open takes the zero-resync path over the stale cache and search wedges on empty/stale
+	// results until the site data is cleared. One serialized open lets that first resync COMPLETE; the
+	// parked (latest) query then retunes the installed handle, which is the cheap refilter path.
+	const pendingQueryRef = useRef<string | null>(null)
+	const openInFlightRef = useRef(false)
 	const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const watchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const retuneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -164,6 +175,8 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 	}
 
 	async function openSearch(name: string): Promise<void> {
+		openInFlightRef.current = true
+
 		const generation = ++generationRef.current
 
 		setPushState(INITIAL_PUSH_STATE)
@@ -193,6 +206,21 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 
 			log.warn("drive-search", "searchOpen failed", e)
 			setPushState(prev => ({ ...prev, live: false }))
+		} finally {
+			// Settle-then-drain, superseded or not: whatever the user typed while this open was in
+			// flight was parked rather than fired (see pendingQueryRef's doc comment). A successful open
+			// installed a live handle, so the parked query retunes it (cheap refilter); a failed one
+			// left no handle, so the retune's setName-returns-false path performs the single clean
+			// reopen. Guarded on activeRef so a query cleared/closed mid-flight drains to nothing.
+			openInFlightRef.current = false
+
+			const parked = pendingQueryRef.current
+
+			pendingQueryRef.current = null
+
+			if (parked !== null && parked !== name && activeRef.current) {
+				scheduleRetune(parked)
+			}
 		}
 	}
 
@@ -215,8 +243,14 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 				.searchSetName(name)
 				.then(ok => {
 					// The user may have cleared/closed search (or navigated away) while this was in flight.
+					// The no-live-handle reopen parks like any other request when an open is already mid-
+					// flight — this fallback must never be a second concurrent opener.
 					if (activeRef.current && !ok) {
-						void openSearch(name)
+						if (openInFlightRef.current) {
+							pendingQueryRef.current = name
+						} else {
+							void openSearch(name)
+						}
 					}
 				})
 				.catch((e: unknown) => {
@@ -228,6 +262,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 	function closeSearchEngine(): void {
 		generationRef.current++
 		engagedRef.current = false
+		pendingQueryRef.current = null
 		clearTimers()
 		setPushState(INITIAL_PUSH_STATE)
 		setGraceElapsed(false)
@@ -245,6 +280,17 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 		activeRef.current = isActive
 
 		if (!enabled) {
+			return
+		}
+
+		// An open is mid-flight: park the keystroke (latest wins) instead of routing it — an "open"
+		// transition here would supersede-and-kill the in-flight open's convergence resync (see
+		// pendingQueryRef's doc comment), and a "retune" would race a handle that isn't installed yet.
+		// The open's own settle drains the park. A blanked query drops any parked one instead: blank is
+		// the idle no-op by design, and draining a stale query would resurrect what the user deleted.
+		if (openInFlightRef.current) {
+			pendingQueryRef.current = isActive ? value : null
+
 			return
 		}
 

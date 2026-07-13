@@ -86,7 +86,11 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		await page.keyboard.press(`${modKey}+f`)
 		await expect(searchInput).toBeFocused()
 
-		await searchInput.fill(runId)
+		// Typed per keystroke, not fill(): fill dispatches ONE input event with the whole value, which
+		// structurally cannot exercise the keystrokes-during-open-round-trip path a real user always
+		// takes — the exact path where an unserialized reopen once killed the engine's convergence
+		// resync per keystroke (useDriveSearch.ts's pendingQueryRef doc comment tells that story).
+		await searchInput.pressSequentially(runId, { delay: 40 })
 
 		// Cold convergence for a fresh search root (not yet covered by an active sync) is observed at
 		// 4.9-6.6s against a scratch directory this size in this same account — a generous ceiling covers
