@@ -14,11 +14,11 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
-// Wave-1 shell: root selection + persistence + unset/ready/gone states, reachable from the icon
-// rail's own /photos entry (iconRail.tsx). The media grid itself is Wave 2 — READY renders a
-// listing-agnostic placeholder body wired to usePhotosListingQuery's own key/status, so that wave
-// only ever needs to swap this file's placeholder body for the real grid, never the root/query
-// plumbing around it.
+// Root selection + persistence + unset/ready/gone states, reachable from the icon rail's own
+// /photos entry (iconRail.tsx). The media grid itself is a later addition — READY renders a
+// listing-agnostic placeholder body wired to usePhotosListingQuery's own key/status, so that
+// addition only ever needs to swap this file's placeholder body for the real grid, never the
+// root/query plumbing around it.
 export function PhotosScreen() {
 	const { t } = useTranslation(["photos", "common"])
 	const isOnline = useIsOnline()

@@ -5,7 +5,8 @@ import type { DriveItem } from "@/features/drive/lib/item"
 // drive.test.ts — this file only proves photos' placeholder queryFn delegates to it unchanged with
 // the "drive" variant (the piece that makes a gone root surface the exact
 // DIRECTORY_NOT_FOUND_PREFIX message photosRoot.test.ts's isRootGoneError keys off), and that the
-// query key is stable ahead of Wave 2 swapping this function's body for the real recursive op.
+// query key is stable ahead of a later addition swapping this function's body for the real
+// recursive op.
 const { fetchDirectoryListing } = vi.hoisted(() => ({ fetchDirectoryListing: vi.fn<(variant: string, uuid: string | null) => unknown>() }))
 
 vi.mock("@/features/drive/queries/drive", () => ({ fetchDirectoryListing }))
