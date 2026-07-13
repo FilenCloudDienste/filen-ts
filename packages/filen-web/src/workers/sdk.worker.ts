@@ -59,7 +59,7 @@ import init, {
 	type JsClientConfig
 } from "@filen/sdk-rs"
 import { run, runEffect, runTimeout } from "@filen/utils"
-import { toErrorDTO, PARENT_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
+import { toErrorDTO, PARENT_NOT_FOUND_PREFIX, DIRECTORY_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 import {
 	cacheDirs,
@@ -544,7 +544,7 @@ const api = {
 					// the branded UuidStr AnyNormalDir needs.
 					const dir = getCachedDir(target.uuid) ?? (await c.getDirOptional(target.uuid))
 					if (dir === undefined) {
-						throw new Error(`directory not found: ${target.uuid}`)
+						throw new Error(`${DIRECTORY_NOT_FOUND_PREFIX}${target.uuid}`)
 					}
 					return c.listDir(dir)
 				}

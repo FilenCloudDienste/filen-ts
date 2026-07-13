@@ -97,3 +97,9 @@ export function asErrorDTO(e: unknown): ErrorDTO {
 // previewSave.logic.ts's own isUnresolvableParentError, today's only consumer). Not a general
 // error-kind taxonomy entry: a plain Error has no `kind`, only this literal `message` prefix to match.
 export const PARENT_NOT_FOUND_PREFIX = "parent directory not found: "
+
+// listDirectory's own thrown message (sdk.worker.ts, `kind: "uuid"` branch) when the uuid a caller
+// asked to browse into no longer resolves — the signal photos' root-gone detection keys off of (a
+// saved root directory that was trashed/deleted elsewhere), same message-prefix convention as
+// PARENT_NOT_FOUND_PREFIX right above.
+export const DIRECTORY_NOT_FOUND_PREFIX = "directory not found: "

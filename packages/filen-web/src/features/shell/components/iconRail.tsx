@@ -8,6 +8,7 @@ import {
 	UsersIcon,
 	ArrowDownUpIcon,
 	ListMusicIcon,
+	ImagesIcon,
 	SunIcon,
 	MoonIcon,
 	SettingsIcon,
@@ -74,6 +75,15 @@ registerAction({
 	defaultCombo: "",
 	scope: "global",
 	descriptionKey: "modulePlaylists"
+})
+
+// Mirrors app.openPlaylists directly above — same unassigned-by-default route-nav shape, wired the
+// same way in IconRail below for the new /photos rail entry.
+registerAction({
+	id: "app.openPhotos",
+	defaultCombo: "",
+	scope: "global",
+	descriptionKey: "modulePhotos"
 })
 
 // Rail section slot: the active section rides a white chip (soft shadow); inactive glyphs are plain
@@ -309,6 +319,32 @@ function PlaylistsEntry({ active }: { active: boolean }) {
 	)
 }
 
+// Photos' own dedicated entry, straight to /photos — same plain-nav shape as PlaylistsEntry right
+// above. Placed next to the Drive entry (below) rather than beside Transfers/Playlists/Chats:
+// photos is a derived VIEW over a directory the user picks from their own drive, not an independent
+// module with its own storage the way playlists/transfers are.
+function PhotosEntry({ active }: { active: boolean }) {
+	const { t } = useTranslation("common")
+
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<Link
+						to="/photos"
+						aria-current={active ? "page" : undefined}
+						aria-label={t("modulePhotos")}
+						className={railItemClass(active)}
+					>
+						<ImagesIcon />
+					</Link>
+				}
+			/>
+			<TooltipContent side="right">{t("modulePhotos")}</TooltipContent>
+		</Tooltip>
+	)
+}
+
 export function IconRail() {
 	const { t } = useTranslation()
 	const navigate = useNavigate()
@@ -328,6 +364,8 @@ export function IconRail() {
 	const transfersActive = pathname === "/transfers"
 	// Playlists mirrors Transfers: a flat page, no splat.
 	const playlistsActive = pathname === "/playlists"
+	// Photos mirrors Transfers/Playlists: a flat page, no splat.
+	const photosActive = pathname === "/photos"
 	// In-app unread signal: a numeric rail badge driven by the CLIENT-DERIVED global unread count (summed
 	// per-message across every chat, not a server scalar). Always mounted with the authed shell, so this
 	// hook is also the mount-once trigger for the bulk chat+messages refetch that makes the count possible
@@ -387,6 +425,20 @@ export function IconRail() {
 		[navigate]
 	)
 
+	// Mirrors the app.openPlaylists wiring directly above.
+	useAction(
+		"app.openPhotos",
+		() => {
+			if (isAnyDialogOpen()) {
+				return
+			}
+
+			void navigate({ to: "/photos" })
+		},
+		undefined,
+		[navigate]
+	)
+
 	return (
 		<nav
 			aria-label={t("appName")}
@@ -420,6 +472,8 @@ export function IconRail() {
 				/>
 				<TooltipContent side="right">{t("moduleDrive")}</TooltipContent>
 			</Tooltip>
+
+			<PhotosEntry active={photosActive} />
 
 			<Tooltip>
 				<TooltipTrigger

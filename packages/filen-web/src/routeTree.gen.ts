@@ -22,6 +22,7 @@ import { Route as AppTrashRouteImport } from './routes/_app/trash'
 import { Route as AppTransfersRouteImport } from './routes/_app/transfers'
 import { Route as AppRecentsRouteImport } from './routes/_app/recents'
 import { Route as AppPlaylistsRouteImport } from './routes/_app/playlists'
+import { Route as AppPhotosRouteImport } from './routes/_app/photos'
 import { Route as AppNotesRouteImport } from './routes/_app/notes'
 import { Route as AppLinksRouteImport } from './routes/_app/links'
 import { Route as AppFavoritesRouteImport } from './routes/_app/favorites'
@@ -105,6 +106,11 @@ const AppRecentsRoute = AppRecentsRouteImport.update({
 const AppPlaylistsRoute = AppPlaylistsRouteImport.update({
   id: '/playlists',
   path: '/playlists',
+  getParentRoute: () => AppRouteRoute,
+} as any)
+const AppPhotosRoute = AppPhotosRouteImport.update({
+  id: '/photos',
+  path: '/photos',
   getParentRoute: () => AppRouteRoute,
 } as any)
 const AppNotesRoute = AppNotesRouteImport.update({
@@ -220,6 +226,7 @@ export interface FileRoutesByFullPath {
   '/favorites': typeof AppFavoritesRoute
   '/links': typeof AppLinksRoute
   '/notes': typeof AppNotesRouteWithChildren
+  '/photos': typeof AppPhotosRoute
   '/playlists': typeof AppPlaylistsRoute
   '/recents': typeof AppRecentsRoute
   '/transfers': typeof AppTransfersRoute
@@ -251,6 +258,7 @@ export interface FileRoutesByTo {
   '/contacts': typeof AppContactsRoute
   '/favorites': typeof AppFavoritesRoute
   '/links': typeof AppLinksRoute
+  '/photos': typeof AppPhotosRoute
   '/playlists': typeof AppPlaylistsRoute
   '/recents': typeof AppRecentsRoute
   '/transfers': typeof AppTransfersRoute
@@ -287,6 +295,7 @@ export interface FileRoutesById {
   '/_app/favorites': typeof AppFavoritesRoute
   '/_app/links': typeof AppLinksRoute
   '/_app/notes': typeof AppNotesRouteWithChildren
+  '/_app/photos': typeof AppPhotosRoute
   '/_app/playlists': typeof AppPlaylistsRoute
   '/_app/recents': typeof AppRecentsRoute
   '/_app/transfers': typeof AppTransfersRoute
@@ -323,6 +332,7 @@ export interface FileRouteTypes {
     | '/favorites'
     | '/links'
     | '/notes'
+    | '/photos'
     | '/playlists'
     | '/recents'
     | '/transfers'
@@ -354,6 +364,7 @@ export interface FileRouteTypes {
     | '/contacts'
     | '/favorites'
     | '/links'
+    | '/photos'
     | '/playlists'
     | '/recents'
     | '/transfers'
@@ -389,6 +400,7 @@ export interface FileRouteTypes {
     | '/_app/favorites'
     | '/_app/links'
     | '/_app/notes'
+    | '/_app/photos'
     | '/_app/playlists'
     | '/_app/recents'
     | '/_app/transfers'
@@ -515,6 +527,13 @@ declare module '@tanstack/react-router' {
       path: '/playlists'
       fullPath: '/playlists'
       preLoaderRoute: typeof AppPlaylistsRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
+    '/_app/photos': {
+      id: '/_app/photos'
+      path: '/photos'
+      fullPath: '/photos'
+      preLoaderRoute: typeof AppPhotosRouteImport
       parentRoute: typeof AppRouteRoute
     }
     '/_app/notes': {
@@ -718,6 +737,7 @@ interface AppRouteRouteChildren {
   AppFavoritesRoute: typeof AppFavoritesRoute
   AppLinksRoute: typeof AppLinksRoute
   AppNotesRoute: typeof AppNotesRouteWithChildren
+  AppPhotosRoute: typeof AppPhotosRoute
   AppPlaylistsRoute: typeof AppPlaylistsRoute
   AppRecentsRoute: typeof AppRecentsRoute
   AppTransfersRoute: typeof AppTransfersRoute
@@ -734,6 +754,7 @@ const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppFavoritesRoute: AppFavoritesRoute,
   AppLinksRoute: AppLinksRoute,
   AppNotesRoute: AppNotesRouteWithChildren,
+  AppPhotosRoute: AppPhotosRoute,
   AppPlaylistsRoute: AppPlaylistsRoute,
   AppRecentsRoute: AppRecentsRoute,
   AppTransfersRoute: AppTransfersRoute,

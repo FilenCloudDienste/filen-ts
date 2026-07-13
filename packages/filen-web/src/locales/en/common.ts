@@ -55,6 +55,8 @@ export const common = {
 	moduleTransfers: "Transfers",
 	/** Playlists module — icon rail tooltip/accessible label, and the /playlists screen's own heading */
 	modulePlaylists: "Playlists",
+	/** Photos module — icon rail tooltip/accessible label, and the /photos screen's own heading once a root is chosen */
+	modulePhotos: "Photos",
 	// Account menu
 	/** Account menu — trigger's accessible label and the dropdown's heading */
 	account: "Account",

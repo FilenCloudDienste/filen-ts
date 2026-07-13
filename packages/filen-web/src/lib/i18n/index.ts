@@ -12,6 +12,7 @@ import { chats } from "@/locales/en/chats"
 import { settings } from "@/locales/en/settings"
 import { publicLinks } from "@/locales/en/publicLinks"
 import { audio } from "@/locales/en/audio"
+import { photos } from "@/locales/en/photos"
 
 // Consumed by `ActionDef.descriptionKey` (keymap registry) — a compile-time-checked subset
 // of the "common" namespace's own key set, derived straight from the catalog so it can never
@@ -66,6 +67,12 @@ export type SettingsKey = Extract<keyof typeof settings, string>
 // registry.
 export type AudioKey = Extract<keyof typeof audio, string>
 
+// Same derivation for the "photos" namespace, exported ahead of need — no photos action registers a
+// keymap command yet (app.openPhotos, iconRail.tsx, describes itself with the "common" modulePhotos
+// key, mirroring app.openPlaylists/modulePlaylists), but a later photos-scoped command can extend
+// ActionDef.descriptionKey's union with this type without this file needing an edit then.
+export type PhotosKey = Extract<keyof typeof photos, string>
+
 // `Intl.PluralRules` gate: i18next's plural-key resolution (`_one`/
 // `_other` suffixes, unused by rev 1's catalogs but load-bearing the moment a count-based key
 // lands) needs it. Unlike React Native/Hermes — which mobile polyfills via `intl-pluralrules` —
@@ -92,7 +99,8 @@ void i18n.use(initReactI18next).init({
 			chats,
 			settings,
 			publicLinks,
-			audio
+			audio,
+			photos
 		}
 	},
 	lng: "en",
