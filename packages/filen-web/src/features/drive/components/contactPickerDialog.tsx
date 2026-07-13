@@ -23,6 +23,10 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 export interface ContactPickerDialogProps {
 	items: DriveItem[]
 	onClose: () => void
+	// Post-success selection cleanup, overridable so a non-drive caller (features/photos) can prune ITS
+	// OWN selection store instead of drive's — defaults to the drive listing's own useDriveStore call
+	// below, unchanged for every existing caller.
+	onShared?: (succeededUuids: string[]) => void
 }
 
 const SKELETON_ROW_COUNT = 5
@@ -33,7 +37,7 @@ const SKELETON_ROW_COUNT = 5
 // every chosen item with every chosen contact via shareItems. No confirm step — picking contacts and
 // pressing Share IS the confirmation (mobile parity). Design polish is deferred to a later pass; this
 // is a clean functional picker built from existing primitives.
-export function ContactPickerDialog({ items, onClose }: ContactPickerDialogProps) {
+export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerDialogProps) {
 	const { t } = useTranslation(["drive", "contacts", "common"])
 	const contactsQuery = useContactsQuery()
 	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
@@ -82,7 +86,13 @@ export function ContactPickerDialog({ items, onClose }: ContactPickerDialogProps
 		// clear-selection-on-share; a failed item stays selected for the retry.
 		if (outcome.succeeded.length > 0) {
 			onClose()
-			useDriveStore.getState().removeFromSelection(outcome.succeeded.map(succeededItem => succeededItem.data.uuid))
+			const succeededUuids = outcome.succeeded.map(succeededItem => succeededItem.data.uuid)
+
+			if (onShared) {
+				onShared(succeededUuids)
+			} else {
+				useDriveStore.getState().removeFromSelection(succeededUuids)
+			}
 		}
 	}
 

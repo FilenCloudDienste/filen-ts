@@ -20,6 +20,7 @@ import init, {
 	type FileVersion,
 	type DirColor,
 	type NonRootNormalItemTagged,
+	type NonRootDirTagged,
 	type DirPublicLinkRW,
 	type FilePublicLink,
 	type DirSizeResponse,
@@ -557,6 +558,35 @@ const api = {
 		// exactly like one reached from a normal listing).
 		cacheDirs(result.dirs)
 		return result
+	},
+	// Photos' recursive listing op — there is no flat-listing equivalent on the wasm surface for OWN
+	// drive (only listLinkedDirRecursiveAnon, anon-links-only), so this wraps listDirRecursive
+	// directly. SIGNATURE CAVEAT: unlike listDirectory's uuid case above, this takes no AbortSignal at
+	// all — the wasm arm's only params are the dir and a progress callback — so a stale walk from a
+	// fast root change is discarded purely by react-query's own key-change semantics (same rationale
+	// as listDirectory's own no-signal note), never a worker-side cancel. `dir` is passed as the plain
+	// resolved `Dir` (AnyDirWithContext's owned-arm member, AnyNormalDir, is `Dir | Root` — a bare
+	// union, not a tagged wrapper — so no context wrapper is built here, unlike a shared/linked walk).
+	async listPhotosRecursive(rootUuid: string): Promise<NormalDirsAndFiles> {
+		const c = requireClient()
+		const dir = getCachedDir(rootUuid) ?? (await c.getDirOptional(rootUuid))
+
+		if (dir === undefined) {
+			throw new Error(`${DIRECTORY_NOT_FOUND_PREFIX}${rootUuid}`)
+		}
+
+		const { dirs, files } = await c.listDirRecursive(dir, () => undefined)
+		// Mobile parity (useDriveItems.query.ts's own recursive case): a walk seeded from an owned Dir
+		// only ever surfaces owned dirs in practice, but the wasm return type is still the
+		// cross-context NonRootDirTagged union (the same shape a shared/linked walk would also return
+		// through this call), so this narrows defensively rather than trusting that by construction.
+		// The narrowed arm is structurally a `Dir` (the `type` tag is additive), assignable straight
+		// through to NormalDirsAndFiles without stripping it.
+		const normalDirs = dirs.filter((d): d is Extract<NonRootDirTagged, { type: "normal" }> => d.type === "normal")
+
+		cacheDirs(normalDirs)
+
+		return { dirs: normalDirs, files }
 	},
 	// Backend directory create is idempotent and case-insensitive: an existing directory with this
 	// name under this parent returns ITS uuid rather than erroring (a name clash with a FILE still

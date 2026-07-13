@@ -50,23 +50,26 @@ interface ItemActionDescriptorShared {
 export type ItemActionDescriptor =
 	(ItemActionDescriptorShared & { run: "direct" }) | (ItemActionDescriptorShared & { run: "dialog"; dialogKind: ItemActionDialogKind })
 
-const RENAME: ItemActionDescriptor = { id: "rename", ...ACTION_DEFS.rename, run: "dialog", dialogKind: "rename" }
+// Exported (alongside favoriteDescriptor/downloadDescriptor below): features/photos/lib/itemActions.ts
+// reuses these SAME descriptor objects for its own, smaller photos-surface menu rather than
+// reconstructing them — one ACTION_DEFS-backed source per action, whichever surface offers it.
+export const RENAME: ItemActionDescriptor = { id: "rename", ...ACTION_DEFS.rename, run: "dialog", dialogKind: "rename" }
 const MOVE: ItemActionDescriptor = { id: "move", ...ACTION_DEFS.move, run: "dialog", dialogKind: "move" }
 const COLOR: ItemActionDescriptor = { id: "color", ...ACTION_DEFS.color, run: "dialog", dialogKind: "color" }
-const VERSIONS: ItemActionDescriptor = { id: "versions", ...ACTION_DEFS.versions, run: "dialog", dialogKind: "versions" }
-const INFO: ItemActionDescriptor = { id: "info", ...ACTION_DEFS.info, run: "dialog", dialogKind: "info" }
+export const VERSIONS: ItemActionDescriptor = { id: "versions", ...ACTION_DEFS.versions, run: "dialog", dialogKind: "versions" }
+export const INFO: ItemActionDescriptor = { id: "info", ...ACTION_DEFS.info, run: "dialog", dialogKind: "info" }
 // Public link and Copy link share one dialog kind — both open the same link-management panel as a
 // FALLBACK. Copy link's real one-tap behavior (read existing link status, copy the URL straight to
 // the clipboard when a link is already enabled) is a dispatch-time decision itemMenu.tsx's onClick
 // makes by id (see resolveCopyLinkAction below) BEFORE falling through to this "dialog" descriptor —
 // this dialogKind only fires when there's no link yet (or its URL can't be built), the same case
 // Public link's own click always opens the dialog for.
-const PUBLIC_LINK: ItemActionDescriptor = { id: "publicLink", ...ACTION_DEFS.publicLink, run: "dialog", dialogKind: "link" }
-const COPY_LINK: ItemActionDescriptor = { id: "copyLink", ...ACTION_DEFS.copyLink, run: "dialog", dialogKind: "link" }
+export const PUBLIC_LINK: ItemActionDescriptor = { id: "publicLink", ...ACTION_DEFS.publicLink, run: "dialog", dialogKind: "link" }
+export const COPY_LINK: ItemActionDescriptor = { id: "copyLink", ...ACTION_DEFS.copyLink, run: "dialog", dialogKind: "link" }
 // Share the item with a Filen contact (opens the contact picker) — distinct from a public link (a
 // URL anyone can open): this grants a specific existing contact access. Variant-gated (see
 // canShareVariant / driveItemActions).
-const SHARE: ItemActionDescriptor = { id: "share", ...ACTION_DEFS.share, run: "dialog", dialogKind: "share" }
+export const SHARE: ItemActionDescriptor = { id: "share", ...ACTION_DEFS.share, run: "dialog", dialogKind: "share" }
 // Stop sharing a shared-root item (removeSharedItem) — root-only: gated below to the
 // sharedRootDirectory/sharedRootFile arms alone, the only two whose shareSource is a SharedRootItem
 // (see item.ts's shareSource retention) — removeSharedItem's own wasm signature. Destructive-styled
@@ -74,7 +77,7 @@ const SHARE: ItemActionDescriptor = { id: "share", ...ACTION_DEFS.share, run: "d
 // destructive there too) — the other party loses access immediately.
 const UNSHARE: ItemActionDescriptor = { id: "unshare", ...ACTION_DEFS.unshare, run: "dialog", dialogKind: "unshare" }
 // Recoverable — not destructive-styled, matching the trash-confirm dialog it opens.
-const TRASH: ItemActionDescriptor = { id: "trash", ...ACTION_DEFS.trash, run: "dialog", dialogKind: "trash" }
+export const TRASH: ItemActionDescriptor = { id: "trash", ...ACTION_DEFS.trash, run: "dialog", dialogKind: "trash" }
 // A single item restores directly, no confirm (mobile parity — see driveRestoreSelectedConfirmTitle's
 // own doc comment: that confirm is bulk-selection only).
 const RESTORE: ItemActionDescriptor = { id: "restore", ...ACTION_DEFS.restore, run: "direct" }
@@ -91,7 +94,7 @@ const DELETE_PERMANENTLY: ItemActionDescriptor = {
 // separate dialog.
 const IMPORT: ItemActionDescriptor = { id: "import", ...ACTION_DEFS.import, run: "dialog", dialogKind: "import" }
 
-function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
+export function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
 	return item.data.favorited
 		? { id: "favorite", ...ACTION_DEFS.unfavorite, run: "direct" }
 		: { id: "favorite", ...ACTION_DEFS.favorite, run: "direct" }
@@ -101,7 +104,7 @@ function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
 // zip path means a dir/multi selection downloads on every browser now, not just Chromium's File System
 // Access API. PRESENCE is still gated elsewhere (trash/undecryptable never reach this call site at
 // all) — kept as an explicit field rather than omitted, mirroring the shared field's own doc comment.
-function downloadDescriptor(): ItemActionDescriptor {
+export function downloadDescriptor(): ItemActionDescriptor {
 	return { id: "download", ...ACTION_DEFS.download, run: "direct", enabled: true }
 }
 

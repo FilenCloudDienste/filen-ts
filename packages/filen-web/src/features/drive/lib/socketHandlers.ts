@@ -10,6 +10,7 @@ import {
 } from "@/features/drive/queries/drive"
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { currentRootUuid } from "@/features/drive/lib/actions"
+import { invalidatePhotosListing } from "@/features/photos/queries/photos"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	emitPreviewFileMetaChanged,
@@ -65,9 +66,36 @@ function narrowFavoriteItem(item: NonRootItemTagged): DriveItem | undefined {
 	}
 }
 
+// Coarse, cheap photos-query invalidation (see photos/queries/photos.ts's invalidatePhotosListing
+// doc comment for why this is a whole-listing refetch rather than a splice-patch): every drive event
+// that adds, removes, or renames a file or directory anywhere invalidates the entire photos recursive
+// listing, since a single-item socket payload has no cheap way to prove whether its uuid even falls
+// under the current photos root's subtree. A no-op when no photos query is mounted. Full recursive
+// splice-patching (mirroring this file's own per-parent precision for drive listings) is a later
+// optimization, not required for v1.
+const PHOTOS_INVALIDATING_EVENT_TYPES: ReadonlySet<DriveSocketEvent["inner"]["type"]> = new Set([
+	"fileNew",
+	"fileMove",
+	"folderMove",
+	"fileTrash",
+	"folderTrash",
+	"fileRestore",
+	"folderRestore",
+	"fileArchived",
+	"fileArchiveRestored",
+	"fileDeletedPermanent",
+	"folderDeletedPermanent",
+	"fileMetadataChanged",
+	"folderMetadataChanged"
+])
+
 export function handleDriveEvent(event: DriveSocketEvent): void {
 	const inner = event.inner
 	const rootUuid = currentRootUuid()
+
+	if (PHOTOS_INVALIDATING_EVENT_TYPES.has(inner.type)) {
+		invalidatePhotosListing()
+	}
 
 	switch (inner.type) {
 		case "fileNew": {

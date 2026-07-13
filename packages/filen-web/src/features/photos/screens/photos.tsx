@@ -9,6 +9,7 @@ import { usePhotosRootQuery, invalidatePhotosRoot } from "@/features/photos/quer
 import { usePhotosListingQuery } from "@/features/photos/queries/photos"
 import { clearPhotosRoot, setPhotosRoot, shouldResetRootOnError } from "@/features/photos/lib/root"
 import { DirectoryChooserDialog } from "@/features/photos/components/directoryChooserDialog"
+import { PhotoGrid } from "@/features/photos/components/photoGrid"
 import { EmptyState } from "@/features/drive/components/emptyState"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -144,17 +145,23 @@ export function PhotosScreen() {
 							void listingQuery.refetch()
 						}}
 					/>
-				) : (
+				) : listingQuery.data.length === 0 ? (
 					<div className="flex flex-1 overflow-y-auto">
 						<Empty>
 							<EmptyHeader>
 								<EmptyMedia variant="icon">
 									<ImagesIcon />
 								</EmptyMedia>
-								<EmptyTitle>{t("photosGridPlaceholderTitle")}</EmptyTitle>
+								<EmptyTitle>{t("photosEmptyTitle")}</EmptyTitle>
+								<EmptyDescription>{t("photosEmptyBody")}</EmptyDescription>
 							</EmptyHeader>
 						</Empty>
 					</div>
+				) : (
+					<PhotoGrid
+						rootUuid={rootUuid}
+						items={listingQuery.data}
+					/>
 				)}
 			</div>
 			{chooserOpen ? (

@@ -35,7 +35,10 @@ export function currentRootUuid(): string {
 	return queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY)?.rootDirUuid ?? ""
 }
 
-function removeByUuid(items: DriveItem[], uuid: string): DriveItem[] {
+// Exported: features/photos/lib/actions.ts reuses both helpers verbatim for its own single-key
+// photos-listing patch (photosListingQueryUpdate) after delegating the actual mutation to this
+// file's own action helpers below — same list-splice rules, no reason to re-implement them.
+export function removeByUuid(items: DriveItem[], uuid: string): DriveItem[] {
 	return items.filter(item => item.data.uuid !== uuid)
 }
 
@@ -43,7 +46,7 @@ function removeByUuid(items: DriveItem[], uuid: string): DriveItem[] {
 // existing row in place, never appends. Deliberately not upsertDriveItem: patched globally, an
 // upsert would wrongly ADD the item to every currently-cached listing that never held it (trash,
 // favorites, a sibling directory) instead of leaving an absent row absent.
-function replaceIfPresent(items: DriveItem[], updated: DriveItem): DriveItem[] {
+export function replaceIfPresent(items: DriveItem[], updated: DriveItem): DriveItem[] {
 	return items.map(item => (item.data.uuid === updated.data.uuid ? updated : item))
 }
 
