@@ -158,7 +158,7 @@ describe("hasFinishedTransfers", () => {
 	})
 })
 
-// M5 — the header Cancel-all confirm's actual action, once the AlertDialog gating it has been
+// The header Cancel-all confirm's actual action, once the AlertDialog gating it has been
 // confirmed. The gate itself (nothing cancels until the dialog's onConfirm fires) is UI wiring
 // exercised via e2e/manual QA, not this pure DI'd action — see transfers.spec.ts.
 describe("confirmCancelAllTransfers", () => {

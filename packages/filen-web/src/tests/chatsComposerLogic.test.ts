@@ -86,7 +86,7 @@ describe("character-limit gating", () => {
 		expect(shouldShowCounter("x".repeat(MAX_CHAT_MESSAGE_LENGTH - 10))).toBe(true)
 	})
 
-	// H8/L15: send and attach deliberately DISAGREE on offline behavior — send queues through the
+	// Send and attach deliberately DISAGREE on offline behavior — send queues through the
 	// durable outbox and must never gate on connectivity; attach starts a network op right now and
 	// must. Both assertions live together so a future edit that accidentally aligns them regresses
 	// visibly here instead of silently in composer.tsx.

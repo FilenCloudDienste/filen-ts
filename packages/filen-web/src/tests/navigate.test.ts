@@ -27,7 +27,7 @@ function directoryItem(uuid: UuidStr): DriveItem {
 
 // An undecryptable directory — its meta never decoded (the SDK's ciphertext arm), so narrowItem sets
 // `undecryptable: true`. Descending into one would list rows that can't decrypt either, so navigation
-// is gated out (L5 parity).
+// is gated out (mobile parity).
 function undecryptableDirectoryItem(uuid: UuidStr): DriveItem {
 	const dir: Dir = {
 		uuid,
@@ -197,7 +197,7 @@ describe("resolveDriveNavigationTarget", () => {
 		}
 	)
 
-	it.each(NAVIGABLE_VARIANTS)("an undecryptable directory returns null in the %s variant — it is inert (L5 parity)", variant => {
+	it.each(NAVIGABLE_VARIANTS)("an undecryptable directory returns null in the %s variant — it is inert (mobile parity)", variant => {
 		expect(resolveDriveNavigationTarget(undecryptableDirectoryItem(testUuid("enc-dir")), variant, "")).toBeNull()
 		expect(resolveDriveNavigationTarget(undecryptableDirectoryItem(testUuid("enc-dir")), variant, testUuid("some-parent"))).toBeNull()
 	})

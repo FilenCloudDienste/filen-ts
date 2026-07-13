@@ -244,7 +244,7 @@ describe("aggregateDriveSelectionFlags — everySharedRoot", () => {
 	})
 })
 
-describe("selectableForSelectAll — the select-all set (L6)", () => {
+describe("selectableForSelectAll — the select-all set", () => {
 	it("drops undecryptable items, keeping every decryptable one in order", () => {
 		const a = dirItem({ uuid: testUuid("a") })
 		const enc = undecryptableFile({ uuid: testUuid("enc") })

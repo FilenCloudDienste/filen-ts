@@ -139,7 +139,7 @@ afterEach(() => {
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
 
-describe("buildInflightEntries — monotonic timestamps (M1 NTP-backstep guard)", () => {
+describe("buildInflightEntries — monotonic timestamps (NTP-backstep guard)", () => {
 	const note = makeNote("a")
 
 	it("stamps `now` for a fresh session", () => {

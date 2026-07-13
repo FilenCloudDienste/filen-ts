@@ -122,7 +122,7 @@ async function uploadLargeTestFile(page: Page, name: string, sizeBytes: number):
 // collide on every getByRole("progressbar", { name: fileName })/getByText("Done") locator below unless
 // the upload's own row is cleared first. The screen's "Clear finished" button
 // (screens/transfers.tsx) clears every finished row in one click, so this works the same whether one
-// file or several were just uploaded. The rail entry NAVIGATES to /transfers now (P3 -- no more
+// file or several were just uploaded. The rail entry NAVIGATES to /transfers now (no more
 // popover overlaying the drive listing in place), so this returns to wherever the caller was before
 // clearing, restoring the exact drive scratch-directory view every caller here relies on afterwards.
 // Returns there the same way drive-actions.spec.ts's own trash-then-back round trip does -- an in-app
@@ -344,7 +344,7 @@ test.describe("downloads", () => {
 			await page.getByRole("button", { name: "Download", exact: true }).click()
 
 			// Snapshot the scratch directory's own option count before leaving for the /transfers screen
-			// (P3 -- the rail entry navigates there now, rather than overlaying a popover on this same
+			// (the rail entry navigates there now, rather than overlaying a popover on this same
 			// page) -- race-free here, unlike the identical snapshot-then-assert shape in drive.spec.ts's
 			// own "selection" test: the scratch directory is this test's private space, so nothing else
 			// ever concurrently creates/trashes inside it the way concurrent specs do at /drive's shared
@@ -362,7 +362,7 @@ test.describe("downloads", () => {
 
 			await page.getByRole("button", { name: "Cancel", exact: true }).click()
 
-			// M5 -- Cancel now gates behind a destructive confirm (it used to fire immediately): the
+			// Cancel now gates behind a destructive confirm (it used to fire immediately): the
 			// dialog appears rather than the transfer cancelling on this click alone. Scoped by title, not
 			// just role, since the shared account's own async master-keys reminder can independently pop
 			// up mid-test and also renders as an alertdialog. Not re-asserting the background progressbar

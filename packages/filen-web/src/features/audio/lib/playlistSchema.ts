@@ -53,8 +53,8 @@ function isPlaylistFile(value: unknown): value is PlaylistFile {
 
 // Structurally validates a parsed JSON value against the Playlist contract. A single malformed FILE
 // entry fails the whole playlist (returns null) rather than being silently dropped — mirrors mobile's
-// arktype validation, which is deep and all-or-nothing; the ISOLATION this campaign requires happens
-// one level up, at the per-playlist-file read (a corrupt playlist is skipped, not repaired in place).
+// arktype validation, which is deep and all-or-nothing; the required ISOLATION happens one level
+// up, at the per-playlist-file read (a corrupt playlist is skipped, not repaired in place).
 // Unknown top-level or per-file properties are ignored, never rejected — forward compat.
 export function parsePlaylist(value: unknown): Playlist | null {
 	if (!isPlainObject(value)) {

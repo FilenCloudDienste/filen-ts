@@ -19,7 +19,7 @@ export const transfers = {
 	/** Icon-rail Transfers trigger — accessible label while at least one upload is active; replaces the plain moduleTransfers label so the count is announced, not just shown in the visual badge; plural */
 	transfersActiveBadge_other: "Transfers, {{count}} active",
 
-	// ── Aggregate speed/progress (M1) ──────────────────────────────────────
+	// ── Aggregate speed/progress ──────────────────────────────────────
 	// Shared by the icon-rail Transfers entry's tooltip and the /transfers screen header — both render
 	// the same live rolling-window {percent, speed} useTransfersAggregate computes, gated on
 	// shouldShowTransfersAggregate (transfers.logic.ts).
@@ -49,7 +49,7 @@ export const transfers = {
 	transfersScreenResumeAll: "Resume all",
 	/** Transfers screen — header button opening the Cancel-all confirm dialog; disabled when no transfer is active. Also reused as the confirm dialog's own destructive confirm button label */
 	transfersScreenCancelAll: "Cancel all",
-	/** Cancel-all confirm dialog (M5) — title */
+	/** Cancel-all confirm dialog — title */
 	transfersScreenCancelAllConfirmTitle: "Cancel all transfers?",
 	/** Cancel-all confirm dialog — body; {{count}} = active transfers that will stop; singular */
 	transfersScreenCancelAllConfirmBody_one: "{{count}} active transfer will stop. This can't be undone.",
@@ -71,9 +71,9 @@ export const transfers = {
 	transfersStatusPaused: "Paused",
 	/** Transfer row — accessible label on the button removing a single finished (done/error) transfer from the list */
 	transfersRowRemove: "Remove",
-	/** Transfer row — accessible label on the button opening the single-transfer Cancel confirm dialog (M5); also reused as the confirm dialog's own destructive confirm button label */
+	/** Transfer row — accessible label on the button opening the single-transfer Cancel confirm dialog; also reused as the confirm dialog's own destructive confirm button label */
 	transfersRowCancel: "Cancel",
-	/** Single-transfer Cancel confirm dialog (M5) — title */
+	/** Single-transfer Cancel confirm dialog — title */
 	transfersRowCancelConfirmTitle: "Cancel transfer?",
 	/** Single-transfer Cancel confirm dialog — body; {{name}} = the transferring file's own name */
 	transfersRowCancelConfirmBody: "“{{name}}” is still transferring. This can't be undone.",
@@ -82,7 +82,7 @@ export const transfers = {
 	/** Transfer row — accessible label on the toggle button resuming a single active, paused transfer */
 	transfersRowResume: "Resume",
 
-	// ── Directory upload scan phase (P2) ───────────────────────────────────────
+	// ── Directory upload scan phase ───────────────────────────────────────
 	/** Loading toast shown the instant a directory upload/drop starts, for the JS tree-walk scan phase before any transfer row exists yet (uploadDirectory.ts's collectDirectoryUploads) */
 	transfersScanningDirectory: "Scanning directory…",
 

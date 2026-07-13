@@ -123,7 +123,7 @@ export function messageMenuActions(
 		actions.push(DELETE_MESSAGE)
 	}
 
-	// Block the sender (M10, chat side) — a committed message from someone OTHER than us who is not
+	// Block the sender (chat side) — a committed message from someone OTHER than us who is not
 	// already blocked. Gated on a known current user (never offer "block" when we can't tell whose message
 	// it is) so we never surface it on our own bubble. A blocked sender's messages drop out of the unread
 	// count immediately (isMessageUnread cross-references the same blocked set).

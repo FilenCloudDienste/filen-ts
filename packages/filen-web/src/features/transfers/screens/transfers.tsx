@@ -21,7 +21,7 @@ import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 
 // Full-page transfers surface (header+actionbar+content shell mirrors ContactsList) — the rail entry
-// (iconRail.tsx's TransfersEntry) navigates straight here now (P3 dropped its popover). TransferRow is
+// (iconRail.tsx's TransfersEntry) navigates straight here now (its popover was dropped). TransferRow is
 // the exact same component the rail entry's own tooltip/badge summary is built alongside, so a row
 // looks and behaves identically wherever it appears; only the surrounding chrome (sections, bulk
 // header actions) differs.
@@ -35,12 +35,12 @@ export function TransfersScreen() {
 	const resumable = resumableTransferIds(transfers)
 	const clearable = hasFinishedTransfers(transfers)
 	const showAggregate = shouldShowTransfersAggregate(activeCount)
-	// M5 — Cancel all fires immediately with no confirmation; gate it behind the shared AlertDialog
+	// Cancel all fires immediately with no confirmation; gate it behind the shared AlertDialog
 	// wrapper (ConfirmDialog), same primitive AccountMenu's sign-out already uses. cancelTransfer is
 	// synchronous/fire-and-forget (control.ts), so there is nothing to await — `pending` stays a
 	// constant false, unlike a real async confirm flow.
 	const [cancelAllConfirmOpen, setCancelAllConfirmOpen] = useState(false)
-	// M5 (single row) — a stable id, not a per-row boolean: this screen owns the confirm (rather than
+	// Single-row cancel — a stable id, not a per-row boolean: this screen owns the confirm (rather than
 	// each TransferRow owning its own), because buildTransfersDisplayList renders active/finished
 	// transfers in two separate sections — a row settling mid-confirm unmounts in one section and
 	// remounts in the other, which would silently drop any dialog-open state the ROW itself held. Kept
@@ -71,7 +71,7 @@ export function TransfersScreen() {
 			<header className="flex h-14 shrink-0 items-center justify-between gap-3 px-4">
 				<h1 className="text-sm font-medium">{t("common:moduleTransfers")}</h1>
 				{showAggregate ? (
-					// M1 — the aggregate {percent, speed} computeTransfersAggregate already produces, finally
+					// The aggregate {percent, speed} computeTransfersAggregate already produces, finally
 					// rendered: mirrors mobile's floating pill's own live rolling-window speed + progress bar,
 					// condensed into this header row.
 					<div className="flex min-w-0 flex-1 items-center justify-end gap-2">
@@ -201,7 +201,7 @@ export function TransfersScreen() {
 					setCancelAllConfirmOpen(false)
 				}}
 			/>
-			{/* M5 (single row) — one shared dialog for whichever row's Cancel button was last clicked
+			{/* Single-row cancel — one shared dialog for whichever row's Cancel button was last clicked
 			(see cancelTargetId's own comment above for why this lives here, not inside TransferRow). Body
 			text reads `cancelTarget?.name` defensively (exactOptionalPropertyTypes-safe fallback to "") —
 			it's never actually shown with an empty name in practice, since `open` is only ever true while

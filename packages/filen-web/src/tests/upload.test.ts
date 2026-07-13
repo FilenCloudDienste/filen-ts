@@ -422,7 +422,7 @@ describe("startUploads (real runUpload + defaultUploadDeps, mocked sdk client/qu
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// startUploads — HEIC/HEIF convert-on-upload wiring (L7). The conversion logic itself is unit-tested
+// startUploads — HEIC/HEIF convert-on-upload wiring. The conversion logic itself is unit-tested
 // in heicUpload.test.ts; this only proves startUploads' own gating (skip the kv read entirely for an
 // all-non-HEIC batch) and that it threads the fetched preference through to every file.
 // ---------------------------------------------------------------------------

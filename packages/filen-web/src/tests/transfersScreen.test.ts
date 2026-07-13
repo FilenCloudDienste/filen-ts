@@ -46,11 +46,11 @@ afterEach(() => {
 	vi.useRealTimers()
 })
 
-// M1 — computeTransfersAggregate/computeTransfersSpeed were already unit-tested as pure functions
+// computeTransfersAggregate/computeTransfersSpeed were already unit-tested as pure functions
 // (transfers.test.ts's shouldShowTransfersAggregate describe block), but nothing asserted the JSX
 // itself actually renders their output: a refactor that stripped this header block while leaving the
 // predicate intact would pass every other persisted test.
-describe("TransfersScreen — aggregate readout (M1)", () => {
+describe("TransfersScreen — aggregate readout", () => {
 	it("renders the live speed + progress bar once at least one transfer is active", () => {
 		useTransfersStore.setState({
 			transfers: [transfer({ id: "a", status: "uploading", bytesTransferred: 50, size: 100 })],
@@ -80,11 +80,11 @@ describe("TransfersScreen — aggregate readout (M1)", () => {
 	})
 })
 
-// M5 — confirmCancelAllTransfers (the post-confirm action) was already unit-tested assuming the
+// confirmCancelAllTransfers (the post-confirm action) was already unit-tested assuming the
 // dialog already said yes (transfers.test.ts). Nothing persisted proved the UI actually GATES it
 // behind that confirm rather than firing on the header button's own click, unlike the single-row
 // Cancel gate (downloads.spec.ts's cancel-mid-flight e2e test).
-describe("TransfersScreen — Cancel all confirm gate (M5)", () => {
+describe("TransfersScreen — Cancel all confirm gate", () => {
 	it("opens the confirm dialog on click, without cancelling anything yet", () => {
 		useTransfersStore.setState({ transfers: [transfer({ id: "a", status: "uploading" }), transfer({ id: "b", status: "done" })] })
 

@@ -63,8 +63,7 @@ function toastVersionsBulkOutcome(outcome: BulkOutcome<FileVersion>): void {
 // rows — the panel stays open so several old versions can be cleared out in one sitting, matching
 // filen-mobile's version-history screen. Every delete path confirms first (mobile parity — a permanent,
 // irreversible action), and so does restore (a consequential content change, not merely a metadata
-// edit). Selection has no checkboxes (matches drive/notes/chats' own no-checkbox convention — see the
-// campaign's H3/H4 decisions): a selected row highlights instead, toggled by a plain click while in
+// edit). Selection has no checkboxes (matches drive/notes/chats' own no-checkbox convention): a selected row highlights instead, toggled by a plain click while in
 // select mode.
 export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 	const { t } = useTranslation(["drive", "common"])

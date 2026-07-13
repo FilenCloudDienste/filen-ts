@@ -264,8 +264,17 @@ test.describe("context menus", () => {
 			await page.waitForURL(urlPattern)
 			await waitForListingSettled(page)
 
-			await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeDisabled()
-			await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeDisabled()
+			// The outgoing surface's own toolbar can linger in the DOM for a frame while the route
+			// transition commits, briefly matching each name twice (an observed intermittent strict-mode
+			// failure on this exact hop) — waiting for the count to settle to exactly one pins the
+			// assertion to the destination surface before the strict single-match assertions run.
+			const newDirectory = page.getByRole("button", { name: "New directory", exact: true })
+			const upload = page.getByRole("button", { name: "Upload", exact: true })
+
+			await expect(newDirectory).toHaveCount(1)
+			await expect(upload).toHaveCount(1)
+			await expect(newDirectory).toBeDisabled()
+			await expect(upload).toBeDisabled()
 			// No Move descriptor is reachable from this page at all — neither a per-item menu (the
 			// account has nothing to open one on) nor any other surface.
 			await expect(page.getByText(labelFor("move"), { exact: true })).toHaveCount(0)

@@ -70,7 +70,7 @@ function ResetRow({ title, description, onReset }: ResetRowProps) {
 
 type ResetTarget = "sort" | "view" | null
 
-// The card giving L21's data model (drive/lib/preferences.ts's `mode: "perDirectory"` + per-target
+// The card giving the per-directory drive memory data model (drive/lib/preferences.ts's `mode: "perDirectory"` + per-target
 // reset, which already existed with no control writing them) a real UI, mirroring mobile's Appearance
 // screen: a "remember per directory" switch and a destructive "reset" action for sort and view mode
 // each. Reset mirrors mobile's own confirm-then-wipe shape (screens/appearance.tsx) via the shared

@@ -166,7 +166,7 @@ export function UploadMenu({ parentUuid, disabled = false, openPreview, offline 
 						{t("driveNewTextFile")}
 					</DropdownMenuItem>
 					<DropdownMenuSeparator />
-					{/* L7 — off by default (mobile parity: DEFAULT_CONVERT_HEIC_TO_JPG_ENABLED), applied by
+					{/* Off by default (mobile parity: DEFAULT_CONVERT_HEIC_TO_JPG_ENABLED), applied by
 					startUploads to every HEIC/HEIF file in a picked/dropped batch. Read as a query rather than
 					local state so a change here is reflected immediately in a concurrently-open second upload
 					menu instance too (same convention as every other kv-backed preference in this app). */}

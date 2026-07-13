@@ -37,7 +37,7 @@ test.describe("uploads", () => {
 			const row = listbox.getByRole("option", { name: fileName })
 			await expect(row).toBeVisible({ timeout: 45_000 }) // cold boot + a real upload round trip
 
-			// The rail Transfers entry navigates straight to the /transfers screen (P3 — no more popover)
+			// The rail Transfers entry navigates straight to the /transfers screen (no more popover)
 			// and reflects this same just-finished transfer — runUpload settles the store to "done" before
 			// it patches the listing (features/drive/lib/upload.ts), so the row above already being visible
 			// guarantees the store side already settled too.

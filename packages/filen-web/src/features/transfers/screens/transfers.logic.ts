@@ -4,7 +4,7 @@ import { isActiveTransfer, type Transfer } from "@/features/transfers/store/useT
 // (done/error/completedWithErrors). Active (uploading OR downloading) rows show no such control since
 // there is nothing to clear yet. Previously lived in the now-removed rail popover's own logic module
 // (transfersPanel.logic.ts) — the screen is this predicate's only consumer now that the popover is
-// gone (P3: the rail entry navigates straight here instead).
+// gone (the rail entry navigates straight here instead).
 export function hasFinishedTransfers(transfers: Transfer[]): boolean {
 	return transfers.some(transfer => !isActiveTransfer(transfer.status))
 }
@@ -61,7 +61,7 @@ export function resumableTransferIds(transfers: Transfer[]): string[] {
 
 // Cancel-all's real side-effecting step, extracted from the header's onClick so the "confirmed cancel
 // hits exactly the cancellable set, nothing else" contract is unit-testable without rendering the
-// AlertDialog that gates it (M5 — transfers.tsx wires this to ConfirmDialog's onConfirm; the same
+// AlertDialog that gates it (transfers.tsx wires this to ConfirmDialog's onConfirm; the same
 // cancellableTransferIds selection also drives the header button's disabled state, so what the dialog
 // confirms is always what the button showed as available). `cancel` is injected (mirrors
 // runDirectoryUpload's own DI shape) rather than importing control.ts's cancelTransfer directly, so a

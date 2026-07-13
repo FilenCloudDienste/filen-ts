@@ -23,7 +23,7 @@ import { Spinner } from "@/components/ui/spinner"
 
 export interface TransferRowProps {
 	transfer: Transfer
-	// M5 — Cancel's own confirm dialog is owned by the SCREEN (screens/transfers.tsx), not this row:
+	// Cancel's own confirm dialog is owned by the SCREEN (screens/transfers.tsx), not this row:
 	// buildTransfersDisplayList renders active/finished transfers in two SEPARATE sections, so a row
 	// moving from active to finished (settling mid-confirm) unmounts this component and remounts a new
 	// one in the other section — a dialog-open flag kept in local row state would silently vanish right
@@ -111,7 +111,7 @@ function TransferDirectionIcon({ direction }: { direction: Transfer["direction"]
 // a pause/resume toggle wired straight to features/transfers/lib/control.ts's pauseTransfer/
 // resumeTransfer (pause/resume never reject, so the toggle flips the store's `paused` flag itself)
 // plus a Cancel button (X glyph) that only REQUESTS a cancel via onRequestCancel — the screen owns the
-// actual confirm dialog and the cancelTransfer call (M5; see onRequestCancel's own doc comment for
+// actual confirm dialog and the cancelTransfer call (see onRequestCancel's own doc comment for
 // why). A finished row (isActiveTransfer false — done/error/completedWithErrors) gets a Remove button
 // instead (trash glyph, deliberately distinct from Cancel's X — a finished transfer can't be
 // "cancelled", only dismissed from the list), wired straight to the store with no confirm — a finished
@@ -156,7 +156,7 @@ export function TransferRow({ transfer, onRequestCancel }: TransferRowProps) {
 	return (
 		<div className="flex flex-col gap-1.5 rounded-xl px-1 py-1.5 hover:bg-accent/50">
 			<div className="flex items-center gap-2">
-				{/* P1 — the row used to show only the generic direction arrow below; this is the item's
+				{/* The row used to show only the generic direction arrow below; this is the item's
 				actual type glyph (itemIcon.tsx's own FileTypeIcon/fileIconKey, reused verbatim so a
 				transfer row's icon matches the one the same file shows once it lands in the listing). A
 				transfer row carries no DriveItem to derive a directory glyph or a real download thumbnail

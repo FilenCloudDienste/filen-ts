@@ -54,8 +54,9 @@ test.describe("drive drag-to-move", () => {
 		try {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
 
-			// A sibling directory to drop into.
-			await page.getByRole("button", { name: "New directory", exact: true }).click()
+			// A sibling directory to drop into. .first(): the fresh scratch directory is empty, so its
+			// empty-state "+ Add" affordance renders a second identical button; the toolbar's is first.
+			await page.getByRole("button", { name: "New directory", exact: true }).first().click()
 			const dialog = page.getByRole("dialog")
 			await expect(dialog).toBeVisible()
 			await page.getByLabel("Name", { exact: true }).fill(targetDirName)

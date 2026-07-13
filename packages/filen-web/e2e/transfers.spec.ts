@@ -8,7 +8,7 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // finally) — the transfer itself is real (the SDK worker has no fake/dry-run mode), only its target
 // directory is disposable.
 test.describe("transfers screen", () => {
-	test("the rail entry navigates straight to /transfers (P3 — no popover), and a finished row exposes Remove (not Cancel); Clear finished drops it from the list", async ({
+	test("the rail entry navigates straight to /transfers (no popover), and a finished row exposes Remove (not Cancel); Clear finished drops it from the list", async ({
 		page,
 		injectedSession,
 		browserName
@@ -32,7 +32,7 @@ test.describe("transfers screen", () => {
 
 			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible({ timeout: 45_000 })
 
-			// P3 — a plain nav link now (mirrors every other rail entry), not a popover trigger.
+			// A plain nav link now (mirrors every other rail entry), not a popover trigger.
 			await page
 				.getByRole("link", { name: /Transfers/i })
 				.first()

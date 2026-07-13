@@ -6,7 +6,9 @@ import { trackCspViolations } from "./helpers/csp"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 async function createDirectory(page: Page, listbox: ReturnType<Page["getByRole"]>, name: string): Promise<void> {
-	await page.getByRole("button", { name: "New directory", exact: true }).click()
+	// .first(): an empty writable listing renders a second identical button inside its empty-state
+	// "+ Add" affordance; the toolbar's copy is always first in DOM order (see enterScratchDirectory).
+	await page.getByRole("button", { name: "New directory", exact: true }).first().click()
 	const dialog = page.getByRole("dialog")
 	await expect(dialog).toBeVisible()
 	await page.getByLabel("Name", { exact: true }).fill(name)

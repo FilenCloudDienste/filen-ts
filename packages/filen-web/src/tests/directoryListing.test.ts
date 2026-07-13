@@ -245,7 +245,7 @@ describe("staleSelectionUuids", () => {
 })
 
 describe("isBlockingListingError", () => {
-	// M19 — a background refetch failure with cached items retained must never blank the listing.
+	// A background refetch failure with cached items retained must never blank the listing.
 	it("is false (non-blocking) for a refetch error with retained data", () => {
 		expect(isBlockingListingError(true, true)).toBe(false)
 	})

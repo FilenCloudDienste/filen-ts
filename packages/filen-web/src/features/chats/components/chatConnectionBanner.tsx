@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next"
 import { WifiOffIcon } from "lucide-react"
 import { useSocketStatusStore } from "@/features/chats/store/useSocketStatus"
 
-// The chat-surface disconnect strip (M11) — a thin banner pinned above the chat content while the
+// The chat-surface disconnect strip — a thin banner pinned above the chat content while the
 // realtime socket is reconnecting. Driven purely by the socket-status store (set from the chat socket
 // handlers' reconnecting/authSuccess events), so it reflects the live connection regardless of which
 // chat, if any, is open. Renders nothing while connected.

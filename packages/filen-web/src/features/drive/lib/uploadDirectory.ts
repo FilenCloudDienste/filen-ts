@@ -299,7 +299,7 @@ const defaultDirectoryUploadDeps: RunDirectoryUploadDeps = {
 	upload: defaultUploadDeps
 }
 
-// P2 — both call sites (uploadMenu.tsx's directory picker, uploadDropzone.tsx's DnD drop) fire this
+// Both call sites (uploadMenu.tsx's directory picker, uploadDropzone.tsx's DnD drop) fire this
 // off with `void`, and the tree walk below (collectDirectoryUploads) can run for a while on a large
 // local directory with nothing else on screen changing — no transfer row exists yet, since none of the
 // files/dirs it discovers are known until the walk finishes. A loading toast is the spinner/indicator

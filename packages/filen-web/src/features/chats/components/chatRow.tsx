@@ -48,7 +48,7 @@ export function ChatRow({ chat, selected, multiSelected, currentUserId, onAction
 	const typingLabel = useChatTypingLabel(chat.uuid, currentUserId)
 	const preview = typingLabel ?? chatMessagePreview(chat) ?? t("chatNoMessages")
 	const avatarUrl = chatAvatarUrl(chat, currentUserId)
-	// Client-derived numeric unread (P7) — the count of this chat's messages newer than lastFocus, from a
+	// Client-derived numeric unread — the count of this chat's messages newer than lastFocus, from a
 	// blocked sender excluded, off the passive message cache (never a per-chat SDK round trip). A
 	// still-unresolved cache reads as 0 until the shell's bulk refetch fills it.
 	const unreadCount = useChatUnreadCount(chat, currentUserId)

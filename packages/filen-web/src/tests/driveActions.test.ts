@@ -1117,7 +1117,7 @@ describe("disableLink", () => {
 		expect(testQueryClient.getQueryData(driveItemLinkStatusQueryKey(testUuid("a")))).toBeUndefined()
 	})
 
-	// L4 — a disabled link no longer belongs in the links-root aggregation; the single-item panel used
+	// A disabled link no longer belongs in the links-root aggregation; the single-item panel used
 	// to leave a stale row behind until the listing's next refetch.
 	it("drops the item from the links-root listing cache on success", async () => {
 		const dir = dirItem({ uuid: testUuid("a") })

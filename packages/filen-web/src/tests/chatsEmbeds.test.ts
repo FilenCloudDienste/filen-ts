@@ -146,7 +146,7 @@ describe("classifyEmbedUrl", () => {
 		expect(classifyEmbedUrl(url)).toEqual({ kind: "media", url, category: "video" })
 	})
 
-	it("D2 out-of-scope: a YouTube link classifies as none (no YT/X/OG embeds this campaign)", () => {
+	it("a YouTube link classifies as none (no YT/X/OG embeds are built)", () => {
 		expect(classifyEmbedUrl("https://youtube.com/watch?v=abc123")).toEqual({
 			kind: "none",
 			url: "https://youtube.com/watch?v=abc123"

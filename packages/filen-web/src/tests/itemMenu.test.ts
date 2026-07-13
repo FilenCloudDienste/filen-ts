@@ -372,7 +372,7 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 			})
 		)
 
-		// Trash IS offered: sharedOut is owner-mutable (H9 — the item is the caller's own), so the
+		// Trash IS offered: sharedOut is owner-mutable (the item is the caller's own), so the
 		// ownerMutable push runs same as any owned surface. Download stays absent regardless: an
 		// undecryptable item's meta carries no content key, so it can never decrypt.
 		expect(ids(undecryptableRootDir, "sharedOut")).toEqual(["info", "trash", "unshare"])
@@ -473,7 +473,7 @@ describe("driveItemActions — sharedIn safe subset (read-only surface)", () => 
 	})
 })
 
-// H9 — sharedOut items are the caller's OWN, merely shared out to someone else, so the FULL owner
+// sharedOut items are the caller's OWN, merely shared out to someone else, so the FULL owner
 // toolbar applies exactly as it does in My Drive (rename/move/favorite/color|versions/publicLink/
 // copyLink/trash), plus the sharing-scoped SHARE and the root-only UNSHARE. Mirrors
 // itemMenu.logic.ts's own `ownerMutable = !isReadOnlySharedVariant(variant)` gate.

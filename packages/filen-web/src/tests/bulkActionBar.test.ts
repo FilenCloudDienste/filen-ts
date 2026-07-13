@@ -181,7 +181,7 @@ describe("driveBulkActions", () => {
 		expect(descriptors.map(d => d.id)).toEqual(["favorite", "share", "download", "trash", "disableLink"])
 	})
 
-	// L4 — the one bulk action unique to the links (root) surface: revokes every selected item's
+	// The one bulk action unique to the links (root) surface: revokes every selected item's
 	// public link, dialog-routed to a confirm (destructive, mirrors unshare's own styling).
 	describe("driveBulkActions — links disableLink gating", () => {
 		it("is absent from every non-links variant", () => {
@@ -305,7 +305,7 @@ describe("driveBulkActions — unshare gating (everySharedRoot)", () => {
 		expect(unshare).toMatchObject({ run: "dialog", dialogKind: "unshare", destructive: true, icon: UserMinusIcon })
 	})
 
-	it("is the last descriptor when present, after favorite/move/share/download/trash — H9: sharedOut keeps bulk trash too", () => {
+	it("is the last descriptor when present, after favorite/move/share/download/trash — sharedOut keeps bulk trash too", () => {
 		const descriptors = driveBulkActions("sharedOut", flags({ everySharedRoot: true, includesUndecryptable: false }))
 
 		expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "share", "download", "trash", "unshare"])
@@ -338,7 +338,7 @@ describe("driveBulkActions — sharedIn safe subset (read-only surface)", () => 
 	})
 })
 
-// H9 — sharedOut items are the caller's OWN, merely shared out to someone else, so the bulk bar keeps
+// sharedOut items are the caller's OWN, merely shared out to someone else, so the bulk bar keeps
 // the full owner set (favorite/move/trash) exactly as it does on My Drive, plus bulk share
 // (canShareVariant) and the root-only bulk unshare (everySharedRoot). Mirrors driveBulkActions' own
 // `ownerMutable = !isReadOnlySharedVariant(variant)` gate.

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { driveEmptyStateCopy } from "@/features/drive/components/emptyState.logic"
 
-// L22 — every listing surface gets its own bespoke icon/copy pair, not one generic pair reused
+// Every listing surface gets its own bespoke icon/copy pair, not one generic pair reused
 // everywhere. Pins that every DriveVariant has a distinct title/body key from every other variant
 // (the only property this table actually needs to hold — the exact wording lives in the locale
 // catalog, verified separately by the typed-catalog compile check).
