@@ -1,11 +1,12 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Shuffle, Repeat, Repeat1, Trash2, X, ListMusic } from "lucide-react"
+import { Shuffle, Repeat, Repeat1, Trash2, X, ListMusic, AlertCircle } from "lucide-react"
 import { audioEngine } from "@/features/audio/lib/audioEngine"
-import { useAudioQueue, useAudioQueueControls } from "@/features/audio/store/useAudioStore"
+import { useAudioQueue, useAudioQueueControls, useAudioNowPlaying, useAudioError } from "@/features/audio/store/useAudioStore"
 import { nextLoopMode } from "@/features/audio/components/audioTransport.logic"
 import { PlaylistsPanel } from "@/features/audio/components/playlistsPanel"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 
 type PanelTab = "queue" | "playlists"
@@ -18,8 +19,10 @@ type PanelTab = "queue" | "playlists"
 // reactively; every queue mutation goes straight to the engine singleton, which drives the store.
 export function NowPlayingPanel() {
 	const { t } = useTranslation("audio")
-	const { queue, currentIndex } = useAudioQueue()
+	const { queue, currentIndex, coverUrlsByUuid } = useAudioQueue()
 	const { shuffleEnabled, loopMode } = useAudioQueueControls()
+	const { status } = useAudioNowPlaying()
+	const lastError = useAudioError()
 	const [tab, setTab] = useState<PanelTab>("queue")
 	const LoopIcon = loopMode === "one" ? Repeat1 : Repeat
 
@@ -122,14 +125,29 @@ export function NowPlayingPanel() {
 										void audioEngine.playIndex(index)
 									}}
 								>
-									<span
-										className={cn(
-											"w-5 shrink-0 text-right text-xs tabular-nums",
-											index === currentIndex ? "text-primary" : "text-muted-foreground"
-										)}
-									>
-										{index + 1}
-									</span>
+									{/* Leading slot: the current row shows loading/error state; any row with a cached cover
+									    shows a thumb (cached-only — never triggers a fetch); everything else is the plain
+									    track number. */}
+									{index === currentIndex && status === "loading" ? (
+										<Spinner className="size-4 shrink-0 text-primary" />
+									) : index === currentIndex && lastError !== null ? (
+										<AlertCircle className="size-4 shrink-0 text-destructive" />
+									) : coverUrlsByUuid[queueTrack.uuid] ? (
+										<img
+											src={coverUrlsByUuid[queueTrack.uuid]}
+											alt=""
+											className="size-5 shrink-0 rounded object-cover"
+										/>
+									) : (
+										<span
+											className={cn(
+												"w-5 shrink-0 text-right text-xs tabular-nums",
+												index === currentIndex ? "text-primary" : "text-muted-foreground"
+											)}
+										>
+											{index + 1}
+										</span>
+									)}
 									<span
 										title={queueTrack.name}
 										className={cn(

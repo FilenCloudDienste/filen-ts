@@ -29,17 +29,28 @@ export async function resolveTrackSource(track: QueueTrack): Promise<TrackSource
 	return { kind: "blob", url }
 }
 
-// The real <audio> adapter — created lazily by the engine on first play, never mounted in JSX, so it
-// survives every route change. `preload="metadata"` avoids eagerly streaming the whole file; both the
-// SW route (Range/206) and a blob URL (in-memory random access) still seek past that point.
-export function createDomAudioAdapter(events: AudioElementEvents): AudioElementAdapter {
+// The shared element builder. `events` is mutable (via `rebind`) rather than captured once in the
+// listener closures: the prefetch element is created with inert events while it warms silently in the
+// background, then rebound to the real playback events at the instant the engine promotes it — without
+// tearing down and recreating the underlying element, which would lose whatever the browser already
+// buffered/decoded.
+function createDomAudioAdapterWithPreload(initialEvents: AudioElementEvents, preload: "metadata" | "auto"): AudioElementAdapter {
 	const element = document.createElement("audio")
+	let events = initialEvents
 
-	element.preload = "metadata"
-	element.addEventListener("timeupdate", events.onTimeUpdate)
-	element.addEventListener("durationchange", events.onDurationChange)
-	element.addEventListener("ended", events.onEnded)
-	element.addEventListener("error", events.onError)
+	element.preload = preload
+	element.addEventListener("timeupdate", () => {
+		events.onTimeUpdate()
+	})
+	element.addEventListener("durationchange", () => {
+		events.onDurationChange()
+	})
+	element.addEventListener("ended", () => {
+		events.onEnded()
+	})
+	element.addEventListener("error", () => {
+		events.onError()
+	})
 
 	function sample(): ElementSample {
 		return {
@@ -73,13 +84,26 @@ export function createDomAudioAdapter(events: AudioElementEvents): AudioElementA
 			element.muted = muted
 		},
 		sample,
+		rebind: nextEvents => {
+			events = nextEvents
+		},
 		dispose: () => {
-			element.removeEventListener("timeupdate", events.onTimeUpdate)
-			element.removeEventListener("durationchange", events.onDurationChange)
-			element.removeEventListener("ended", events.onEnded)
-			element.removeEventListener("error", events.onError)
 			element.pause()
 			element.removeAttribute("src")
 		}
 	}
+}
+
+// The main playback element — created lazily by the engine, never mounted in JSX, so it survives every
+// route change. `preload="metadata"` avoids eagerly streaming the whole file; both the SW route
+// (Range/206) and a blob URL (in-memory random access) still seek past that point.
+export function createDomAudioAdapter(events: AudioElementEvents): AudioElementAdapter {
+	return createDomAudioAdapterWithPreload(events, "metadata")
+}
+
+// The one-track-ahead warm-up element. `preload="auto"` tells the browser to actively buffer/decode as
+// soon as a src is set — the whole point of prefetching (engine.ts's promotePrefetch rebinds this same
+// element into the main slot instead of recreating it, preserving that warm buffer).
+export function createDomPrefetchAdapter(events: AudioElementEvents): AudioElementAdapter {
+	return createDomAudioAdapterWithPreload(events, "auto")
 }

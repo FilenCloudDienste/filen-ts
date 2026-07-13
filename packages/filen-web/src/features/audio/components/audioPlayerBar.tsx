@@ -9,6 +9,7 @@ import { formatTime } from "@/features/audio/lib/format"
 import { registerAudioActions } from "@/features/audio/lib/keymap"
 import { useAction } from "@/lib/keymap/useAction"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { MiddleEllipsis } from "@/components/middleEllipsis"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
@@ -26,8 +27,8 @@ registerAudioActions()
 // singleton owns playback — every control here is a thin imperative call into it, and all displayed
 // state is read reactively from the store the engine drives.
 export function AudioPlayerBar() {
-	const { t } = useTranslation("audio")
-	const { status, positionMs, durationMs, track } = useAudioNowPlaying()
+	const { t } = useTranslation(["audio", "common"])
+	const { status, positionMs, durationMs, track, title, artist, coverUrl } = useAudioNowPlaying()
 	const { shuffleEnabled, loopMode, hasQueue } = useAudioQueueControls()
 	const { volume, muted } = useAudioOutput()
 	const lastError = useAudioError()
@@ -62,27 +63,49 @@ export function AudioPlayerBar() {
 			className="flex flex-col gap-1 border-t border-border bg-card px-3 py-2 text-foreground"
 		>
 			{lastError !== null ? (
-				<p
+				<div
 					role="alert"
-					className="truncate px-1 text-xs text-destructive"
+					className="flex items-center gap-2 px-1"
 				>
-					{errorLabel(lastError)}
-				</p>
+					<p className="min-w-0 flex-1 truncate text-xs text-destructive">{errorLabel(lastError)}</p>
+					<Button
+						variant="ghost"
+						size="sm"
+						className="h-6 shrink-0 px-2 text-xs"
+						onClick={() => {
+							void audioEngine.playCurrent()
+						}}
+					>
+						{t("common:tryAgain")}
+					</Button>
+				</div>
 			) : null}
 			<div className="flex items-center gap-3">
-				{/* Left: cover-art slot (placeholder until the metadata step) + track identity. */}
+				{/* Left: cover art (once tags resolve) + track identity. */}
 				<div className="flex min-w-0 flex-[1_1_0] items-center gap-3">
 					<div className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted text-muted-foreground">
-						<Music className="size-5" />
+						{coverUrl ? (
+							<img
+								src={coverUrl}
+								alt=""
+								className="size-full object-cover"
+							/>
+						) : (
+							<Music className="size-5" />
+						)}
 					</div>
 					<div className="min-w-0">
-						<p
-							title={track?.name ?? t("nothingPlaying")}
-							className="truncate text-sm font-medium"
-						>
-							{track?.name ?? t("nothingPlaying")}
-						</p>
-						<p className="truncate text-xs text-muted-foreground">{t("unknownArtist")}</p>
+						{track ? (
+							<MiddleEllipsis
+								value={title}
+								start={24}
+								end={10}
+								className="block truncate text-sm font-medium"
+							/>
+						) : (
+							<p className="truncate text-sm font-medium">{t("nothingPlaying")}</p>
+						)}
+						<p className="truncate text-xs text-muted-foreground">{artist ?? t("unknownArtist")}</p>
 					</div>
 				</div>
 

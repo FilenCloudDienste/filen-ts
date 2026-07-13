@@ -106,6 +106,9 @@ function makeFakeElement(): FakeElement {
 			calls.muted.push(muted)
 		},
 		sample: () => sample,
+		// This suite never supplies createPrefetchElement, so rebind is never actually exercised here —
+		// see audioPrefetch.test.ts for the promotion/rebind path.
+		rebind: () => undefined,
 		dispose: () => {
 			calls.dispose++
 		}

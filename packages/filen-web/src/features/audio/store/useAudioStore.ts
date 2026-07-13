@@ -5,6 +5,7 @@ import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { log } from "@/lib/log"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { AudioPlaybackStatus, LoopMode, QueueTrack } from "@/features/audio/store/audioQueue"
+import type { TrackTags } from "@/features/audio/lib/metadata"
 
 // The reactive surface the audio module drives its UI through — the zustand mirror of the engine
 // singleton, following useTransfersStore's conventions exactly: an in-memory-only store (the queue is
@@ -38,6 +39,15 @@ interface AudioStore {
 	// it). Cleared on the next successful play. Never a spinner-forever state — a failure that exhausts
 	// the auto-skip budget settles the status AND leaves this set.
 	lastError: ErrorDTO | null
+	// Resolved tag reads, keyed by track uuid — populated by the engine as metadata extraction resolves
+	// for the current + one-ahead prefetched track (never a bulk scan). A present-but-empty entry
+	// (EMPTY_TRACK_TAGS) still means "attempted this session", so the engine never re-parses a tag-less
+	// file every time it's revisited.
+	tagsByUuid: Record<string, TrackTags>
+	// Cover-art blob URLs, keyed by track uuid — a live mirror of the engine's CoverArtCache (the LRU
+	// itself lives in the engine; this is purely the reactive read side for the bar/panel). A missing key
+	// means "no cached cover", never triggers a fetch on read.
+	coverUrlsByUuid: Record<string, string>
 
 	// Whole-queue replacement (folder-open / playlist-play). Resets position/duration/error.
 	loadQueue: (queue: QueueTrack[], currentIndex: number, shuffleOrder: number[]) => void
@@ -57,8 +67,16 @@ interface AudioStore {
 	setShuffle: (shuffleEnabled: boolean, shuffleOrder: number[]) => void
 	// Persists (fire-and-forget).
 	setLoop: (loopMode: LoopMode) => void
+	// Merges one track's resolved tags in. Called once per track per session (memoized by the engine on
+	// this map's own presence).
+	setTrackTags: (uuid: string, tags: TrackTags) => void
+	// Replaces the whole cover-url mirror with the engine's CoverArtCache's current snapshot.
+	setCoverUrls: (coverUrlsByUuid: Record<string, string>) => void
 	// Engine dispose (logout): clears queue+playback but preserves the persisted shuffle/loop prefs.
 	reset: () => void
+	// Engine dispose (logout) only: clears the tag/cover mirrors. NOT called by a plain clearQueue — the
+	// engine's cover cache (and these mirrors) intentionally survive a manual queue clear.
+	resetMetadata: () => void
 }
 
 export const useAudioStore = create<AudioStore>(set => ({
@@ -73,6 +91,8 @@ export const useAudioStore = create<AudioStore>(set => ({
 	volume: 1,
 	muted: false,
 	lastError: null,
+	tagsByUuid: {},
+	coverUrlsByUuid: {},
 	loadQueue: (queue, currentIndex, shuffleOrder) => {
 		set({ queue, currentIndex, shuffleOrder, positionMs: 0, durationMs: 0, lastError: null })
 	},
@@ -107,8 +127,17 @@ export const useAudioStore = create<AudioStore>(set => ({
 		set({ loopMode })
 		void persistPrefs()
 	},
+	setTrackTags: (uuid, tags) => {
+		set(state => ({ tagsByUuid: { ...state.tagsByUuid, [uuid]: tags } }))
+	},
+	setCoverUrls: coverUrlsByUuid => {
+		set({ coverUrlsByUuid })
+	},
 	reset: () => {
 		set({ queue: [], currentIndex: 0, status: "idle", positionMs: 0, durationMs: 0, shuffleOrder: [], lastError: null })
+	},
+	resetMetadata: () => {
+		set({ tagsByUuid: {}, coverUrlsByUuid: {} })
 	}
 }))
 
@@ -151,21 +180,36 @@ async function persistPrefs(): Promise<void> {
 }
 
 // Now-playing selector for the mini-player / now-playing bar — a stable-identity slice of the transport
-// state plus the resolved current track. useShallow keeps the returned object's identity stable across
-// store updates that don't touch these fields (same rationale as useTransfersAggregate).
+// state plus the resolved current track's display fields. `title` falls back to the filename until tags
+// resolve (or forever, for a tag-less file); `artist`/`album`/`coverUrl` stay null until then. useShallow
+// keeps the returned object's identity stable across store updates that don't touch these fields (same
+// rationale as useTransfersAggregate).
 export function useAudioNowPlaying(): {
 	status: AudioPlaybackStatus
 	positionMs: number
 	durationMs: number
 	track: QueueTrack | null
+	title: string
+	artist: string | null
+	album: string | null
+	coverUrl: string | null
 } {
 	return useAudioStore(
-		useShallow(state => ({
-			status: state.status,
-			positionMs: state.positionMs,
-			durationMs: state.durationMs,
-			track: state.queue[state.currentIndex] ?? null
-		}))
+		useShallow(state => {
+			const track = state.queue[state.currentIndex] ?? null
+			const tags = track ? state.tagsByUuid[track.uuid] : undefined
+
+			return {
+				status: state.status,
+				positionMs: state.positionMs,
+				durationMs: state.durationMs,
+				track,
+				title: tags?.title ?? track?.name ?? "",
+				artist: tags?.artist ?? null,
+				album: tags?.album ?? null,
+				coverUrl: track ? (state.coverUrlsByUuid[track.uuid] ?? null) : null
+			}
+		})
 	)
 }
 
@@ -180,14 +224,15 @@ export function useAudioQueueControls(): { shuffleEnabled: boolean; loopMode: Lo
 	)
 }
 
-// The full queue + current index for the now-playing panel's track list. The queue array's identity is
-// stable across playback-only updates (position/status writes never touch it), so this re-renders the
-// panel only on real queue edits or track changes.
-export function useAudioQueue(): { queue: QueueTrack[]; currentIndex: number } {
+// The full queue + current index + cover-url mirror for the now-playing panel's track list. The queue
+// array's identity is stable across playback-only updates (position/status writes never touch it), so
+// this re-renders the panel only on real queue edits, track changes, or a newly-cached cover.
+export function useAudioQueue(): { queue: QueueTrack[]; currentIndex: number; coverUrlsByUuid: Record<string, string> } {
 	return useAudioStore(
 		useShallow(state => ({
 			queue: state.queue,
-			currentIndex: state.currentIndex
+			currentIndex: state.currentIndex,
+			coverUrlsByUuid: state.coverUrlsByUuid
 		}))
 	)
 }

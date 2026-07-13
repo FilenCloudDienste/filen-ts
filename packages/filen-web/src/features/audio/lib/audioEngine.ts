@@ -1,17 +1,21 @@
 import { AudioEngine } from "@/features/audio/lib/engine"
-import { createDomAudioAdapter, resolveTrackSource } from "@/features/audio/lib/bytes"
+import { createDomAudioAdapter, createDomPrefetchAdapter, resolveTrackSource } from "@/features/audio/lib/bytes"
 import { bindMediaSessionActions, createMediaSessionPublisher } from "@/features/audio/lib/mediaSession"
+import { resolveTrackTags } from "@/features/audio/lib/metadata"
 import { hydrateAudioPrefs, useAudioStore } from "@/features/audio/store/useAudioStore"
 
 // The app-lifetime audio engine singleton, wired with the real DOM element adapter + SW/blob source
-// resolver + OS Media Session bridge. One instance owns playback for the whole session — same pattern
-// as sdkApi. Import this from UI/handoff code; import the class directly from engine.ts only in tests
-// (with injected fakes). The publisher (engine → OS metadata/state) feature-detects internally, so this
-// stays a no-op wherever Media Session is unsupported.
+// resolver + OS Media Session bridge + one-track-ahead prefetch + tag/cover extraction. One instance
+// owns playback for the whole session — same pattern as sdkApi. Import this from UI/handoff code; import
+// the class directly from engine.ts only in tests (with injected fakes). The publisher (engine → OS
+// metadata/state) feature-detects internally, so this stays a no-op wherever Media Session is
+// unsupported.
 export const audioEngine = new AudioEngine({
 	createElement: createDomAudioAdapter,
+	createPrefetchElement: createDomPrefetchAdapter,
 	resolveSource: resolveTrackSource,
-	mediaSession: createMediaSessionPublisher()
+	mediaSession: createMediaSessionPublisher(),
+	extractMetadata: (track, source) => resolveTrackTags(track, source, Number(track.file.size))
 })
 
 // Restore persisted prefs and bind the foreground-reconcile lifecycle once, at first import. All

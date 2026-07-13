@@ -8,10 +8,27 @@ import type { ElementSample, QueueTrack } from "@/features/audio/store/audioQueu
 // MediaSessionPublisher (engine → OS), and the action binder is handed a plain action target
 // (OS → engine); both are injected from audioEngine.ts, so the two modules never import each other.
 
+// Resolved title/artist/album for the OS metadata surface — a structural subset of metadata.ts's
+// TrackTags (this module deliberately has no import from metadata.ts; the engine passes a TrackTags
+// value in directly, which satisfies this shape without conversion).
+export interface TrackDisplayTags {
+	title: string | null
+	artist: string | null
+	album: string | null
+}
+
+// A resolved cover-art blob URL plus its real mime type (from the embedded picture), so the OS artwork
+// entry carries an accurate `type` hint.
+export interface TrackArtwork {
+	url: string
+	type: string
+}
+
 // What the engine pushes OUT to the OS. A no-op implementation is a valid one (no Media Session
-// support), so every caller invokes these unconditionally.
+// support), so every caller invokes these unconditionally. `tags`/`artwork` are omitted for the
+// as-soon-as-known publish (before metadata resolves) and supplied once extraction finishes.
 export interface MediaSessionPublisher {
-	setMetadata: (track: QueueTrack | null) => void
+	setMetadata: (track: QueueTrack | null, tags?: TrackDisplayTags | null, artwork?: TrackArtwork | null) => void
 	setPlaybackState: (state: MediaSessionPlaybackState) => void
 	setPositionState: (sample: ElementSample) => void
 }
@@ -102,15 +119,20 @@ export function buildMediaSessionActionHandlers(
 	]
 }
 
-// Pure metadata projection for the current track. Title is the track name; artist/album are left empty
-// until the later metadata step reads real tags (the OS shows the title alone until then). null for no
-// current track (the binder clears the OS metadata).
-export function mediaSessionMetadataFor(track: QueueTrack | null): { title: string; artist: string; album: string } | null {
+// Pure metadata projection for the current track. `tags` is the resolved (or not-yet-resolved) tag
+// read: a resolved title wins over the filename (a tag read that came back with no title at all is
+// `null`, not an empty string — see metadata.ts's tagsFromParsed); artist/album fall back to empty
+// strings (the OS surface has no concept of "unknown", only absent). null for no current track (the
+// binder clears the OS metadata).
+export function mediaSessionMetadataFor(
+	track: QueueTrack | null,
+	tags?: TrackDisplayTags | null
+): { title: string; artist: string; album: string } | null {
 	if (!track) {
 		return null
 	}
 
-	return { title: track.name, artist: "", album: "" }
+	return { title: tags?.title ?? track.name, artist: tags?.artist ?? "", album: tags?.album ?? "" }
 }
 
 // The subset of navigator.mediaSession this module touches — declared structurally so a test can pass a
@@ -138,13 +160,15 @@ function resolveMediaSession(explicit?: MediaSessionLike | null): MediaSessionLi
 }
 
 // Constructs a MediaMetadata when the global is available, else returns undefined so the publisher
-// assigns nothing (never throws under a partial implementation).
-function makeMetadata(fields: { title: string; artist: string; album: string }): unknown {
+// assigns nothing (never throws under a partial implementation). `sizes` is deliberately omitted from
+// the artwork entry — the real pixel dimensions of an embedded picture are unknown without decoding it,
+// and the field is optional in the MediaImage contract; browsers render fine without it.
+function makeMetadata(fields: { title: string; artist: string; album: string }, artwork: TrackArtwork | null): unknown {
 	if (typeof MediaMetadata === "undefined") {
 		return undefined
 	}
 
-	return new MediaMetadata(fields)
+	return new MediaMetadata(artwork ? { ...fields, artwork: [{ src: artwork.url, type: artwork.type }] } : fields)
 }
 
 // The browser publisher (engine → OS). Every method no-ops when Media Session is unsupported. Position
@@ -162,10 +186,10 @@ export function createMediaSessionPublisher(explicit?: MediaSessionLike | null):
 	}
 
 	return {
-		setMetadata: track => {
-			const fields = mediaSessionMetadataFor(track)
+		setMetadata: (track, tags, artwork) => {
+			const fields = mediaSessionMetadataFor(track, tags)
 
-			session.metadata = fields ? (makeMetadata(fields) ?? null) : null
+			session.metadata = fields ? (makeMetadata(fields, artwork ?? null) ?? null) : null
 		},
 		setPlaybackState: state => {
 			session.playbackState = state

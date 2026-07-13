@@ -32,12 +32,28 @@ function fakeTarget(): { target: MediaSessionActionTarget; calls: string[]; seek
 }
 
 describe("mediaSessionMetadataFor", () => {
-	it("projects the track name as title with empty artist/album (until the metadata step)", () => {
+	it("projects the track name as title with empty artist/album when no tags are supplied", () => {
 		expect(mediaSessionMetadataFor(track("song.mp3"))).toEqual({ title: "song.mp3", artist: "", album: "" })
 	})
 
 	it("is null when nothing is playing", () => {
 		expect(mediaSessionMetadataFor(null)).toBeNull()
+	})
+
+	it("prefers a resolved tag title over the filename, and carries artist/album through", () => {
+		expect(mediaSessionMetadataFor(track("song.mp3"), { title: "Real Title", artist: "Real Artist", album: "Real Album" })).toEqual({
+			title: "Real Title",
+			artist: "Real Artist",
+			album: "Real Album"
+		})
+	})
+
+	it("falls back to the filename when tags resolved but the title is empty/null", () => {
+		expect(mediaSessionMetadataFor(track("song.mp3"), { title: null, artist: "Real Artist", album: null })).toEqual({
+			title: "song.mp3",
+			artist: "Real Artist",
+			album: ""
+		})
 	})
 })
 
@@ -85,6 +101,46 @@ describe("createMediaSessionPublisher — feature detection", () => {
 			publisher.setPlaybackState("playing")
 			publisher.setPositionState({ currentTimeMs: 1000, durationMs: 5000, paused: false, ended: false })
 		}).not.toThrow()
+	})
+
+	it("builds a MediaMetadata with an artwork entry when a cover is supplied, none when it isn't", () => {
+		class FakeMediaMetadata {
+			public title: string
+			public artist: string
+			public album: string
+			public artwork: unknown
+
+			public constructor(init: { title: string; artist: string; album: string; artwork?: unknown }) {
+				this.title = init.title
+				this.artist = init.artist
+				this.album = init.album
+				this.artwork = init.artwork
+			}
+		}
+
+		const originalMediaMetadata = globalThis.MediaMetadata
+
+		globalThis.MediaMetadata = FakeMediaMetadata as unknown as typeof MediaMetadata
+
+		try {
+			const session = { metadata: null as unknown, playbackState: "none", setActionHandler: vi.fn() }
+			const publisher = createMediaSessionPublisher(session)
+
+			publisher.setMetadata(
+				track("song.mp3"),
+				{ title: "Real Title", artist: "Real Artist", album: "Real Album" },
+				{ url: "blob:cover", type: "image/jpeg" }
+			)
+
+			expect(session.metadata).toBeInstanceOf(FakeMediaMetadata)
+			expect((session.metadata as FakeMediaMetadata).artwork).toEqual([{ src: "blob:cover", type: "image/jpeg" }])
+
+			publisher.setMetadata(track("song.mp3"), { title: "Real Title", artist: "Real Artist", album: "Real Album" })
+
+			expect((session.metadata as FakeMediaMetadata).artwork).toBeUndefined()
+		} finally {
+			globalThis.MediaMetadata = originalMediaMetadata
+		}
 	})
 
 	it("writes playbackState and position onto a supported session, guarding bad durations", () => {

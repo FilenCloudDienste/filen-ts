@@ -78,6 +78,12 @@ test("drive audio double-click hands off to the persistent player and transport 
 		await expect(page.getByRole("dialog")).toHaveCount(0) // no preview overlay for audio
 		await expect(bar.getByText(nameA)).toBeVisible()
 
+		// These WAV fixtures carry no ID3/tag metadata, so the metadata step's extraction degrades
+		// silently to filename-only: the title element's exact `title` attribute (MiddleEllipsis renders
+		// the raw value there even where the visible text is CSS-truncated) is the untouched filename, not
+		// truncated/mangled/blanked by a failed tag read.
+		await expect(bar.locator(`[title="${nameA}"]`)).toBeVisible()
+
 		// Reaches a real playing state: the toggle shows Pause, and the seek position advances as the
 		// decoded file plays (proving genuine playback, not just a mounted control).
 		const pauseButton = bar.getByRole("button", { name: "Pause" })
