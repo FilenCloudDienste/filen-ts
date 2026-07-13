@@ -223,7 +223,7 @@ function AccountMenu() {
 }
 
 // This used to be a Popover trigger showing a quick-glance panel, with a "See all" footer link
-// to the real screen; Jan disliked the extra click/indirection, so it is now a plain nav Link like
+// to the real screen; the extra click/indirection was not worth it, so it is now a plain nav Link like
 // every other rail entry above, straight to /transfers. Also renders the aggregate {percent,
 // speed} computeTransfersAggregate already computes (previously only activeCount was read anywhere):
 // a slim progress sliver along the icon's own bottom edge for `percent`, and the live rolling-window

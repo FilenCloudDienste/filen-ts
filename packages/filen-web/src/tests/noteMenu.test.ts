@@ -351,7 +351,7 @@ describe("noteTagSubmenuEntries", () => {
 })
 
 describe("NOTE_TYPE_SUBMENU", () => {
-	it("lists all five note types in the fixed D1 order, each with its own label key", () => {
+	it("lists all five note types in the fixed catalog order, each with its own label key", () => {
 		expect(NOTE_TYPE_SUBMENU).toEqual([
 			{ noteType: "text", labelKey: "noteTypeText" },
 			{ noteType: "md", labelKey: "noteTypeMd" },

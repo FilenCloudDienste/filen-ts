@@ -130,8 +130,8 @@ test("drive audio double-click hands off to the persistent player and transport 
 
 // Playlist CRUD end to end: create, add the 2 scratch tracks via the drive picker, drag-reorder, play
 // (the bar shows the reordered first track), then delete through the UI. Reaches playlists through the
-// rail's dedicated /playlists entry (no queue-seeding preamble needed — that reachability gap is exactly
-// what the founder decision fixed, see iconRail.tsx/nowPlayingPanel.tsx). Net-zero on the shared account:
+// rail's dedicated /playlists entry (no queue-seeding preamble needed — the dedicated entry exists exactly
+// so playlists are reachable without a playing queue, see iconRail.tsx/nowPlayingPanel.tsx). Net-zero on the shared account:
 // everything created here (the two audio files, the playlist itself) is removed by the end — the
 // `.filen/Playlists` directory the app lazily creates is left behind, which is acceptable app
 // infrastructure (mirrors mobile leaving it too).

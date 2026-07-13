@@ -222,7 +222,7 @@ describe("fetchChatMessageLinks — direct media probe (browser CORS-gated HEAD)
 })
 
 describe("fetchChatMessageLinks — classification passthrough", () => {
-	it("returns [] for a message with no in-scope links (D2 out-of-scope urls never reach the network)", async () => {
+	it("returns [] for a message with no in-scope links (out-of-scope urls never reach the network)", async () => {
 		const results = await fetchChatMessageLinks(["https://youtube.com/watch?v=x"])
 
 		expect(results).toEqual([])

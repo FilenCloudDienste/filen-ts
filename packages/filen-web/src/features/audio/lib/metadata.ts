@@ -45,8 +45,8 @@ function tagsFromParsed(parsed: IAudioMetadata, selectCover: (pictures?: IPictur
 	}
 }
 
-// Ranged extraction over the SW's Range/206-capable inline stream route — the founder-decided primary
-// path (Q5 of the study). Tried unconditionally for every stream-sourced track, no container allowlist:
+// Ranged extraction over the SW's Range/206-capable inline stream route — the primary
+// path. Tried unconditionally for every stream-sourced track, no container allowlist:
 // a container that places its tags at the end (M4A `moov`, some FLAC/APE trailers) simply costs a
 // couple of extra Range round trips here instead of a whole-file download; one that genuinely has none
 // just resolves with empty common tags, handled the same as any other "no tags" result.

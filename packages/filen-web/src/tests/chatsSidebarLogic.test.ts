@@ -141,7 +141,7 @@ describe("filterChats", () => {
 	})
 })
 
-describe("chatHasUnread (derived, D4)", () => {
+describe("chatHasUnread (client-derived)", () => {
 	it("is true when the last message is from another sender and newer than lastFocus", () => {
 		const chat = mockChat("a", { lastFocus: 500n, lastMessage: mockMessage({ senderId: 2, sentTimestamp: 900n }) })
 

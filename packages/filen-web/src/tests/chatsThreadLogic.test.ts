@@ -47,7 +47,7 @@ function messageHeaderFlags(rows: ThreadRow[]): { key: string; showHeader: boole
 		.map(r => ({ key: r.key, showHeader: r.showHeader }))
 }
 
-describe("buildThreadRows — burst grouping (D3 dense grouped flat rows)", () => {
+describe("buildThreadRows — burst grouping (dense grouped flat rows)", () => {
 	it("emits a leading day separator + a header row for a single message", () => {
 		const m = mockMessage()
 		const rows = buildThreadRows([m])

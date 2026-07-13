@@ -120,8 +120,8 @@ export function MediaElement({
 	// further to fall back to, so it leaves this unset and keeps the browser's own native error state.
 	onError?: () => void
 	// Video-only continuity key (the drive item's own uuid) — see VideoElement's own doc comment.
-	// Ignored for category "audio" (mobile's own "3 warm players" precedent is video-specific, and the
-	// gap report itemizes it as a video-only capability).
+	// Ignored for category "audio" (mobile's own "3 warm players" precedent is video-specific — audio
+	// continuity belongs to the persistent player, not the preview).
 	positionKey?: string
 }) {
 	if (category === "video") {

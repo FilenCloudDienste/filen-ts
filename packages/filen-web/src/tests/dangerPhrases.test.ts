@@ -7,7 +7,7 @@ import { DELETE_ALL_VERSIONS_PHRASE, DELETE_ALL_ITEMS_PHRASE } from "@/features/
 // cards' OWN phrase constants behave correctly under that gate and can never collide with each other
 // or with drive's own "EMPTY TRASH" phrase, which would let a copy-pasted dialog accidentally arm the
 // wrong destructive op if the two cards were ever composed onto the same screen.
-describe("D2 destructive bulk-delete typed-confirm phrases", () => {
+describe("destructive bulk-delete typed-confirm phrases", () => {
 	it("DELETE_ALL_VERSIONS_PHRASE only arms on an exact match", () => {
 		expect(isArmed("delete versions", DELETE_ALL_VERSIONS_PHRASE)).toBe(false)
 		expect(isArmed(`${DELETE_ALL_VERSIONS_PHRASE} `, DELETE_ALL_VERSIONS_PHRASE)).toBe(false)

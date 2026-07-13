@@ -170,7 +170,7 @@ describe("embedCandidatesForLinks", () => {
 		expect(candidates).toHaveLength(1)
 	})
 
-	it("drops D2 out-of-scope urls entirely (no 'none' entries ever reach the caller)", () => {
+	it("drops out-of-scope urls entirely (no 'none' entries ever reach the caller)", () => {
 		expect(embedCandidatesForLinks(["https://example.com/page", "https://youtube.com/watch?v=x"])).toEqual([])
 	})
 

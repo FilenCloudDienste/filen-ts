@@ -8,7 +8,7 @@ const FILEN_HOME_URL = "https://filen.io"
 const REPORT_ABUSE_MAILTO = "mailto:abuse@filen.io"
 
 // The shared shell for BOTH public-link routes — a slim, marketing-light chrome around whatever surface
-// the link resolves to (invalid / password / file / directory). The founder brief deliberately drops
+// the link resolves to (invalid / password / file / directory). This page deliberately drops
 // old-web's upsell sidebar: just a brand mark, a quiet sign-in link, one tasteful "Get Filen" CTA, and
 // a one-line footer with the e2e tagline and a minimal report-abuse affordance. Fully responsive and
 // theme-aware via the app's existing tokens (the ambient ThemeProvider resolves system default for an

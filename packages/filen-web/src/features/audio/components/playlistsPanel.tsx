@@ -30,7 +30,7 @@ import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/
 // header; this component owns everything below it). Opening a row's track list goes through
 // PlaylistDetailDialog — a full Dialog, since track management (add/remove/reorder) needs more room than
 // a row affords. Previously lived inside the now-playing popover's Playlists tab (unreachable without a
-// playing queue); the founder decision moved it to a dedicated rail entry instead — see iconRail.tsx's
+// playing queue); it moved to a dedicated rail entry instead — see iconRail.tsx's
 // new entry and nowPlayingPanel.tsx's own comment for the popover-side half of that change.
 export function PlaylistsPanel() {
 	const { t } = useTranslation("audio")

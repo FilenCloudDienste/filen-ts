@@ -53,7 +53,7 @@ export function PublicLinkInvalid() {
 	)
 }
 
-// A retryable failure — the F6a retry affordance carried onto the public routes: the same "something
+// A retryable failure — the preview surfaces' retry affordance carried onto the public routes: the same "something
 // broke, try again" recovery the authed preview/listing surfaces offer, wired to the query's refetch.
 export function PublicLinkError({ onRetry }: { onRetry: () => void }) {
 	const { t } = useTranslation("publicLinks")

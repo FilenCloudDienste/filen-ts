@@ -35,7 +35,7 @@ afterEach(() => {
 	useAudioStore.setState({ queue: [], currentIndex: 0, status: "idle", lastError: null, coverUrlsByUuid: {} })
 })
 
-// The founder decision dropped the popover's Queue/Playlists tab bar entirely (playlists moved to their
+// The popover's Queue/Playlists tab bar is gone entirely (playlists moved to their
 // own /playlists screen, see iconRail.tsx + features/audio/screens/playlists.tsx) — this only ever
 // renders the live queue now.
 describe("NowPlayingPanel — queue-only popover", () => {
