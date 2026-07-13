@@ -94,6 +94,9 @@ export const getFileProviderInfoContent = (appName: string, appIdentifier: strin
 		CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)",
 		NSExtension: {
 			NSExtensionFileProviderSupportsEnumeration: true,
+			// matches filen-ios-file-provider 99f4a72 — without this the extension is
+			// greyed out in other apps' folder pickers (e.g. Cryptomator vault location)
+			NSExtensionFileProviderSupportsPickingFolders: true,
 			NSExtensionFileProviderDocumentGroup: getAppGroup(appIdentifier, parameters),
 			NSExtensionPointIdentifier: "com.apple.fileprovider-nonui",
 			NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).FileProviderExtension"
