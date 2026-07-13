@@ -204,7 +204,9 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 		await rowAudio.dblclick()
 		await expect(bar).toBeVisible({ timeout: 30_000 })
 		await expect(page.getByRole("dialog")).toHaveCount(0)
-		await expect(bar.getByText(nameAudio)).toBeVisible()
+		// [title=…]: the bar renders the track name middle-ellipsized into split spans, so the full
+		// name is only reliably present on the title-attribute tooltip, never as one text node.
+		await expect(bar.locator(`[title="${nameAudio}"]`)).toBeVisible()
 
 		// A real playing state over the SW stream: the transport shows Pause and the seek slider advances as
 		// the decoded file plays (dblclick is a user gesture, so play() is permitted — MP3 has no upfront

@@ -123,7 +123,10 @@ export function UploadMenu({ parentUuid, disabled = false, openPreview, offline 
 				onChange={handleFilesChosen}
 			/>
 			<input
-				id="drive-upload-directory-input"
+				// A testid, deliberately NOT an id: this menu mounts twice on an empty listing (toolbar +
+				// the empty state's own add affordance), and a fixed id would be an invalid duplicate.
+				// Only tests address this input directly — the menu items click it through the ref.
+				data-testid="drive-upload-directory-input"
 				ref={directoryInputRef}
 				type="file"
 				disabled={disabled}

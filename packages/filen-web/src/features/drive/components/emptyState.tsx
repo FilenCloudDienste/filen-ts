@@ -24,7 +24,11 @@ export function EmptyState(props: EmptyStateProps) {
 	const Icon = copy?.icon ?? FolderClosedIcon
 
 	return (
-		<Empty>
+		// The testid is the stable "this listing settled empty" hook for tests: every variant renders
+		// its own bespoke title/body copy here, so copy-based detection breaks on any surface but the
+		// default one (and again on every future copy edit); the error variant is deliberately a
+		// DIFFERENT id — an errored listing is not a settled-empty one.
+		<Empty data-testid={props.variant === "empty" ? "listing-empty" : "listing-error"}>
 			<EmptyHeader>
 				<EmptyMedia variant="icon">
 					<Icon />

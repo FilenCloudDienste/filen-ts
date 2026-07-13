@@ -74,13 +74,14 @@ test.describe("uploads", () => {
 		try {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
 
-			// `#drive-upload-directory-input` carries `webkitdirectory` (set imperatively — uploadMenu.tsx).
-			// Playwright walks the given directory itself and stamps each File's own webkitRelativePath
-			// rooted at the directory's own basename (rootName), exactly like a real OS directory pick —
-			// and targets whatever directory the app is currently navigated into (directoryListing.tsx
-			// passes it the current listing's own uuid), which is this scratch directory since the picker
-			// mounts fresh on every navigation.
-			await page.locator("#drive-upload-directory-input").setInputFiles(rootPath)
+			// The directory input carries `webkitdirectory` (set imperatively — uploadMenu.tsx). Playwright
+			// walks the given directory itself and stamps each File's own webkitRelativePath rooted at the
+			// directory's own basename (rootName), exactly like a real OS directory pick — and targets
+			// whatever directory the app is currently navigated into (directoryListing.tsx passes it the
+			// current listing's own uuid), which is this scratch directory since the picker mounts fresh on
+			// every navigation. .first(): the empty scratch listing mounts the upload menu (and its hidden
+			// inputs) twice — toolbar + the empty state's add affordance; the toolbar's is first in DOM.
+			await page.getByTestId("drive-upload-directory-input").first().setInputFiles(rootPath)
 
 			const row = listbox.getByRole("option", { name: rootName })
 			await expect(row).toBeVisible({ timeout: 60_000 }) // cold boot + a tree walk + two file uploads

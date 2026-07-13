@@ -152,7 +152,9 @@ test.describe("drive bulk actions", () => {
 		const nameB = `e2e-bulk-actions-${suffix}-b`
 
 		async function createDirectory(name: string): Promise<void> {
-			await page.getByRole("button", { name: "New directory", exact: true }).click()
+			// .first(): the fresh scratch directory starts empty, so its empty-state "+ Add" affordance
+			// renders a second identical button; the toolbar's is always first in DOM order.
+			await page.getByRole("button", { name: "New directory", exact: true }).first().click()
 			const dialog = page.getByRole("dialog")
 			await expect(dialog).toBeVisible()
 			await page.getByLabel("Name", { exact: true }).fill(name)

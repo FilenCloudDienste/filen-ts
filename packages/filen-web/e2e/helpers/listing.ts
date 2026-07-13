@@ -43,14 +43,17 @@ export async function dismissStartupReminders(page: Page): Promise<void> {
 }
 
 // Resolves once the listing has settled to one of its two terminal render states for the CURRENT
-// directory — there is no third: a query error would leave neither locator visible, which is a real,
-// actionable failure like any other timeout here. Returns the listbox locator and whether it actually
-// has content, so callers can gate content-dependent assertions on real, live account state.
+// directory — there is no third: a query error would leave neither locator visible (the error state
+// carries its own distinct testid), which is a real, actionable failure like any other timeout here.
+// The empty state is matched by its stable testid, NOT its copy: every listing variant renders its
+// own bespoke empty title ("Nothing here yet" is only the drive variant's), so a copy-based match
+// can never settle an empty shared-in/links/trash surface. Returns the listbox locator and whether
+// it actually has content, so callers can gate content-dependent assertions on real account state.
 export async function waitForListingSettled(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
 	await dismissStartupReminders(page)
 
 	const listbox = page.getByRole("listbox", { name: "Directory contents" })
-	const empty = page.getByText("Nothing here yet")
+	const empty = page.getByTestId("listing-empty")
 
 	await expect(listbox.or(empty)).toBeVisible()
 
