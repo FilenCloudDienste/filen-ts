@@ -293,6 +293,51 @@ describe("prefetch — teardown on jump / rebuild", () => {
 		expect(state.queue[state.currentIndex]?.uuid).toBe("y")
 		expect(h.mainFakes.some(fake => fake.calls.load.includes("blob:y") && fake.calls.play > 0)).toBe(true)
 	})
+
+	it("a queue replace invalidates a warm-up still awaiting its source, not just an already-warm one", async () => {
+		const h = makeHarness()
+		const deferred = new Map<string, (s: TrackSource) => void>()
+
+		// "b" (the old queue's one-ahead target) and "y" (the new queue's current track) resolve only
+		// when released; everything else resolves immediately.
+		h.resolveSource.mockImplementation(t => {
+			if (t.uuid === "b" || t.uuid === "y") {
+				return new Promise<TrackSource>(resolve => {
+					deferred.set(t.uuid, resolve)
+				})
+			}
+
+			return Promise.resolve({ kind: "blob", url: `blob:${t.uuid}` })
+		})
+
+		// Old queue: "a" plays instantly; its warm-up for "b" is left IN FLIGHT (no element created yet —
+		// the element only exists once the source resolves).
+		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
+		await flush()
+		expect(deferred.has("b")).toBe(true)
+		expect(h.prefetchFakes).toHaveLength(0)
+
+		// Replace the queue while that warm-up is still pending. The new current track "y" is also held
+		// pending, so the new queue has NOT scheduled its own warm-up yet — the teardown inside
+		// enqueueAndPlay is the ONLY thing standing between the stale continuation and the slot.
+		const second = h.engine.enqueueAndPlay([track("x"), track("y"), track("z")], 1)
+
+		await flush()
+		deferred.get("b")?.({ kind: "blob", url: "blob:b" })
+		await flush()
+
+		// The superseded continuation must bail at the staleness guard instead of resurrecting the slot
+		// with the OLD queue's bytes at a raw index that now belongs to a different track.
+		expect(h.prefetchFakes.flatMap(fake => fake.calls.load)).not.toContain("blob:b")
+
+		// Releasing the new track lets playback and the new queue's own warm-up proceed normally.
+		deferred.get("y")?.({ kind: "blob", url: "blob:y" })
+		await second
+		await flush()
+
+		expect(h.mainFakes.some(fake => fake.calls.load.includes("blob:y") && fake.calls.play > 0)).toBe(true)
+		expect(h.prefetchFakes.flatMap(fake => fake.calls.load)).toContain("blob:z")
+	})
 })
 
 describe("prefetch — warm-up failure", () => {

@@ -60,10 +60,10 @@ export type ChatsKey = Extract<keyof typeof chats, string>
 // with this type without this file needing a matching edit then.
 export type SettingsKey = Extract<keyof typeof settings, string>
 
-// Same derivation for the "audio" namespace — the audio module's transport shortcuts (scope "audio",
-// registered in step 2) describe themselves with audio-namespace copy. Exported ahead of the first
-// registration so ActionDef.descriptionKey's union can extend to it without this file needing an edit
-// then; the "audio" ActionScope itself already exists in the keymap registry.
+// Same derivation for the "audio" namespace — the audio module's transport shortcuts (scope "audio")
+// describe themselves with audio-namespace copy. Exported so ActionDef.descriptionKey's union can
+// extend to it without this file needing an edit; the "audio" ActionScope itself lives in the keymap
+// registry.
 export type AudioKey = Extract<keyof typeof audio, string>
 
 // `Intl.PluralRules` gate: i18next's plural-key resolution (`_one`/

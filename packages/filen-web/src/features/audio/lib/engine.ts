@@ -212,8 +212,13 @@ export class AudioEngine {
 
 	// Tears down whatever is currently warmed (element paused/cleared/disposed, its blob URL revoked) and
 	// forgets which index it held. Safe to call when nothing is warmed. Called before every reschedule —
-	// this module keeps at most ONE element ahead, never more.
+	// this module keeps at most ONE element ahead, never more. Also bumps the generation counter so a
+	// schedulePrefetch continuation still awaiting resolveSource when the teardown ran can never
+	// repopulate the slot afterwards: without the bump, a warm-up left in flight by a superseded queue
+	// would survive the teardown, resurrect a dead element, and a later promotion by raw-index
+	// coincidence would play the wrong track's bytes.
 	private teardownPrefetch(): void {
+		this.prefetchGeneration++
 		this.prefetchElement?.pause()
 		this.prefetchElement?.clear()
 		this.prefetchElement?.dispose()
@@ -237,7 +242,6 @@ export class AudioEngine {
 		}
 
 		const advance = computeNext(this.nav())
-		const generation = ++this.prefetchGeneration
 
 		if (advance === null) {
 			this.teardownPrefetch()
@@ -250,6 +254,11 @@ export class AudioEngine {
 		}
 
 		this.teardownPrefetch()
+
+		// Snapshot AFTER the teardown's own bump: any teardown that runs while resolveSource below is
+		// in flight (queue replace, jump, shuffle rebuild, dispose) moves the counter past this value,
+		// so the continuation bails at the staleness guard instead of resurrecting a torn-down slot.
+		const generation = this.prefetchGeneration
 
 		const track = useAudioStore.getState().queue[advance.index]
 

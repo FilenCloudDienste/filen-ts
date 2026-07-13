@@ -329,7 +329,7 @@ function driveItemFromPlaylistFile(entry: PlaylistFile): DriveItem {
 	return narrowItem(raw)
 }
 
-// Play integration entry point (Q4/step 3): builds the queue directly from the stored PlaylistFile
+// Play integration entry point: builds the queue directly from the stored PlaylistFile
 // entries, with no drive re-list — the whole point of storing bucket/region/key/version/chunks inline.
 // Deliberately does NOT import the audioEngine singleton (see playlistPlayback.ts for the thin glue
 // that does): that module boots real playback/media-session/kv-prefs side effects at import time,
