@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
 import { MinusIcon, PlusIcon } from "lucide-react"
@@ -10,6 +10,7 @@ import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { usePhotosSelection } from "@/features/photos/hooks/usePhotosSelection"
 import { usePhotosDialogHost } from "@/features/photos/hooks/usePhotosDialogHost"
+import { resolveTileClickIntent, previewOpenTarget } from "@/features/photos/components/photoGrid.logic"
 import { usePhotosGridDensityQuery } from "@/features/photos/queries/preferences"
 import { setPhotosGridDensity } from "@/features/photos/lib/gridDensity"
 import {
@@ -53,7 +54,31 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 
 	const selectedItems = usePhotosStore(useShallow(state => state.selectedItems))
 	const { handlePointerSelect } = usePhotosSelection(items, anchorUuid, setAnchorUuid)
-	const { isDialogOpen, handleItemAction, handleBulkDialogAction, renderActiveDialog } = usePhotosDialogHost({ rootUuid, selectedItems })
+	const { isDialogOpen, handleItemAction, handleBulkDialogAction, openPreview, renderActiveDialog } = usePhotosDialogHost({
+		rootUuid,
+		selectedItems
+	})
+
+	// Plain click opens the viewer (browsing is the grid's whole point); once a selection is active a
+	// plain click instead falls through to handlePointerSelect's own replace-with-just-this-item branch,
+	// exactly matching drive's plain-click convention on an already-selected tile. A modifier click
+	// always builds/extends the selection regardless of selection state — see photoGrid.logic.ts's own
+	// doc comment on resolveTileClickIntent for the full decision table.
+	function handleTileClick(index: number, event: MouseEvent<HTMLDivElement>): void {
+		const intent = resolveTileClickIntent(event, selectedItems.length > 0)
+
+		if (intent.kind === "open") {
+			const target = previewOpenTarget(items, index)
+
+			if (target) {
+				openPreview(target.sources, target.index)
+			}
+
+			return
+		}
+
+		handlePointerSelect(index, event)
+	}
 
 	// A fresh root must never inherit a previous root's selection/anchor — mirrors drive's own
 	// [variant, splat]-keyed reset effect (useDriveListboxNav.ts), keyed here on rootUuid alone since
@@ -210,7 +235,7 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 										index={itemIndex}
 										selected={selectedItems.some(selected => selected.data.uuid === item.data.uuid)}
 										size={tileSize}
-										onPointerSelect={handlePointerSelect}
+										onTileClick={handleTileClick}
 										onItemAction={handleItemAction}
 									/>
 								)

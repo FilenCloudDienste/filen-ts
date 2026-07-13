@@ -571,7 +571,15 @@ const api = {
 		const c = requireClient()
 		const dir = getCachedDir(rootUuid) ?? (await c.getDirOptional(rootUuid))
 
-		if (dir === undefined) {
+		// A cached dir survives its own trashing — trashDirectory re-caches the SDK's returned Dir
+		// rather than evicting it (cache.ts's own cacheDirs doc comment) — so a root this same session
+		// just trashed (or already had cached from browsing it in the chooser) resolves here as a
+		// stale-but-truthy Dir whose `parent` the trash move rewrote to the sentinel "trash" ParentUuid.
+		// Treat that exactly like a genuinely unresolvable uuid: a trashed root is just as unreachable
+		// to a recursive walk as a deleted one, and letting it fall through to listDirRecursive instead
+		// throws the SDK's own "folder is inside the trash" species:"sdk" error, which root.ts's
+		// isRootGoneError (a plain-Error message-prefix check) has no way to recognize.
+		if (dir === undefined || dir.parent === "trash") {
 			throw new Error(`${DIRECTORY_NOT_FOUND_PREFIX}${rootUuid}`)
 		}
 

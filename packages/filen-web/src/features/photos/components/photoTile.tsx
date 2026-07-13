@@ -19,7 +19,11 @@ export interface PhotoTileProps {
 	index: number
 	selected: boolean
 	size: number
-	onPointerSelect: (index: number, event: MouseEvent<HTMLDivElement>) => void
+	// Fires for every plain/modifier click on the tile's face — photoGrid.tsx's own handleTileClick
+	// decides open-vs-select (photoGrid.logic.ts's resolveTileClickIntent) before this ever runs, so by
+	// the time it's called the caller has already committed to one outcome; the tile itself stays a
+	// dumb dispatcher with no click-intent logic of its own.
+	onTileClick: (index: number, event: MouseEvent<HTMLDivElement>) => void
 	onItemAction: (kind: ItemActionDialogKind, item: PhotoItem) => void
 }
 
@@ -29,7 +33,7 @@ export interface PhotoTileProps {
 // bottom-left, offline top-right (no web equivalent), video bottom-right) instead of driveTile's own
 // top-left placement, and no offline badge at all (web has no make-offline concept — see the study's
 // own honest enumeration).
-export function PhotoTile({ rootUuid, item, index, selected, size, onPointerSelect, onItemAction }: PhotoTileProps) {
+export function PhotoTile({ rootUuid, item, index, selected, size, onTileClick, onItemAction }: PhotoTileProps) {
 	const { t } = useTranslation(["drive", "photos"])
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
 	const thumbUrl = useThumbnail(item)
@@ -46,7 +50,7 @@ export function PhotoTile({ rootUuid, item, index, selected, size, onPointerSele
 						style={{ width: size }}
 						className="group/tile relative flex shrink-0 flex-col gap-1 outline-none select-none"
 						onClick={event => {
-							onPointerSelect(index, event)
+							onTileClick(index, event)
 						}}
 					>
 						<div

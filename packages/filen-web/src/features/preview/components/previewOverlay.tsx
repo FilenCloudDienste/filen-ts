@@ -101,6 +101,16 @@ export interface PreviewOverlayProps {
 	// Unshare uses the plain `onClose` above instead — new mobile dismisses the whole preview immediately
 	// for that one rather than stepping to a neighbour (menuActions.ts's dismissOnSuccess: isPreview).
 	onItemRemoved: (frozenUuid: string) => void
+	// Optional host-level extension point for the header menu's favorite toggle, ON TOP OF this
+	// component's own per-slot `saved` override (which only keeps the OPEN pager's title/menu-label in
+	// sync, never any listing cache). The drive host omits this: toggleFavorite already patches every
+	// `["drive", "listing", …]` key itself (features/drive/lib/actions.ts's applyFavoritePatch), so a
+	// drive-opened overlay needs nothing further. A photos-opened overlay does: the photos listing lives
+	// under its own `["photos", …]` key that patch never reaches, and the realtime `itemFavorite` socket
+	// event is deliberately excluded from the photos-invalidating event set (an attribute flip, not a
+	// membership change — see socketHandlers.ts's own PHOTOS_INVALIDATING_EVENT_TYPES comment), so
+	// nothing else would ever reflect the toggle back into the grid without a reload.
+	onFavoriteToggled?: (item: DriveItem) => void
 }
 
 // True while focus sits on (or inside) a <video>/<audio> element — its own native controls own
@@ -162,7 +172,7 @@ function PreviewRenderError() {
 // state in exactly one case now: an editable text/code buffer with unsaved edits (see requestOrRun) —
 // every other viewer's own data load stays a read-only, ephemeral fetch never worth protecting an
 // interrupted close against.
-export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemRemoved }: PreviewOverlayProps) {
+export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemRemoved, onFavoriteToggled }: PreviewOverlayProps) {
 	const { t } = useTranslation(["preview", "common", "drive"])
 	const isOnline = useIsOnline()
 	const rawSource = items[index]
@@ -313,13 +323,16 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 	}
 
 	// "favorite" descriptor's onFavoriteToggled — see itemMenu.tsx's own doc comment on why this extension
-	// point exists only for the preview.
+	// point exists only for the preview. Fans out to the optional host-level callback too — see
+	// PreviewOverlayProps' own doc comment on onFavoriteToggled for why a photos-opened overlay needs it
+	// and a drive-opened one doesn't.
 	function handleMenuFavoriteToggled(item: DriveItem): void {
 		if (rawDriveItem === undefined) {
 			return
 		}
 
 		setSaved(prev => new Map(prev).set(rawDriveItem.data.uuid, item))
+		onFavoriteToggled?.(item)
 	}
 
 	// "restore" descriptor's onRestored (trash variant only) — a restored item leaves the trash listing
