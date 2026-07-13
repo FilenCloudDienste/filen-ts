@@ -151,6 +151,13 @@ export async function buildRustForAndroid(props: AndroidRustBuildPluginProps, co
 		getDocumentsProviderFilePath(config.modRequest.projectRoot, "FilenDocumentsProvider.kt"),
 		path.join(androidProjectDir, "FilenDocumentsProvider.kt")
 	)
+
+	// AuthKeystore.kt provides the provider's DEK unwrap (auth.json decryption key). Shares the
+	// Keystore alias + wrapped-DEK contract with the modules/filen-auth-key native module.
+	await fs.promises.copyFile(
+		getDocumentsProviderFilePath(config.modRequest.projectRoot, "AuthKeystore.kt"),
+		path.join(androidProjectDir, "AuthKeystore.kt")
+	)
 }
 
 export default withAndroidRustBuild

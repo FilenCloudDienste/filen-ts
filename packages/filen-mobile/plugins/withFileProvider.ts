@@ -65,7 +65,15 @@ export const getPrivacyInfoFilePath = (platformProjectRoot: string, parameters: 
 // Content generators
 export const getFileProviderEntitlements = (appIdentifier: string, parameters: FileProviderPluginProps) => {
 	return {
-		"com.apple.security.application-groups": [getAppGroup(appIdentifier, parameters)]
+		"com.apple.security.application-groups": [getAppGroup(appIdentifier, parameters)],
+		// Shared keychain access group so the extension can read the auth.json DEK the app wrote via
+		// expo-secure-store. Team-prefixed literal when the team id is known; otherwise the build-time
+		// $(AppIdentifierPrefix) form that Xcode expands at signing.
+		"keychain-access-groups": [
+			parameters.developmentTeamId
+				? `${parameters.developmentTeamId}.io.filen.sharedkeys`
+				: "$(AppIdentifierPrefix)io.filen.sharedkeys"
+		]
 	}
 }
 

@@ -6,6 +6,7 @@ import { restoreQueries } from "@/queries/client"
 import sqlite from "@/lib/sqlite"
 import foregroundService from "@/features/transfers/foregroundService"
 import driveSearch from "@/features/drive/driveSearch"
+import fileProvider from "@/features/settings/fileProvider"
 import { startReconnectListener } from "@/lib/reconnect"
 import { initI18n } from "@/lib/i18n"
 import { initTheme } from "@/lib/theme"
@@ -126,6 +127,10 @@ const setup = {
 				// fire-and-forget and cheap. Gated like foregroundService: never in a headless
 				// background run (no search worker there), and only when authed.
 				driveSearch.init().catch(e => { logger.error("setup", "driveSearch.init failed", { error: e }) })
+
+				// One-time (per launch) beta migration: re-encrypt a legacy plaintext auth.json if the
+				// provider is enabled. No-op once auth.json is already encrypted or the provider is off.
+				fileProvider.ensureEncrypted().catch(e => { logger.error("setup", "fileProvider.ensureEncrypted failed", { error: e }) })
 			}
 
 			const duration = performance.now() - now

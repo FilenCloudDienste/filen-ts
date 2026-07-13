@@ -5,6 +5,7 @@ import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import auth from "@/lib/auth"
 import secureStore from "@/lib/secureStore"
 import logger from "@/lib/logger"
+import { getOrCreateAuthDek, purgeAuthDek, sealAuthFile, openAuthFile } from "@/features/settings/authFileKey"
 
 // Safety floor for cache budgets. Below this the extension would thrash —
 // thumbnails alone need ~32 MiB to be useful.
@@ -68,9 +69,14 @@ class FileProvider {
 		}
 
 		try {
-			return JSON.parse(await AUTH_FILE.text()) as AuthFileSchema
+			// auth.json is encrypted at rest — decrypt with the DEK before parsing. A legacy plaintext
+			// file (or a lost DEK) fails openAuthFile and returns null, which ensureEncrypted() heals.
+			const dek = await getOrCreateAuthDek()
+			const json = openAuthFile(AUTH_FILE.bytesSync(), dek)
+
+			return JSON.parse(json) as AuthFileSchema
 		} catch (e) {
-			logger.error("file-provider", "auth.json parse failed — file corrupt or truncated", { path: AUTH_FILE.uri, error: e })
+			logger.error("file-provider", "auth.json read/decrypt failed", { path: AUTH_FILE.uri, error: e })
 
 			return null
 		}
@@ -149,6 +155,9 @@ class FileProvider {
 			const current = await this.read()
 			const { authedSdkClient } = await auth.getSdkClients()
 			const sdkConfig = authedSdkClient.toSdkConfig()
+			// Provision the DEK before writing. If no secure hardware is available this throws and we
+			// fail closed — the provider stays off and no plaintext auth.json is ever written.
+			const dek = await getOrCreateAuthDek()
 
 			this.writeUnlocked({
 				...(current ? current : {}),
@@ -171,7 +180,7 @@ class FileProvider {
 					tmpPath: sdkConfig.tmpPath,
 					connectToSocket: sdkConfig.connectToSocket
 				}
-			} satisfies AuthFileSchema)
+			} satisfies AuthFileSchema, dek)
 		} finally {
 			this.writeMutex.release()
 		}
@@ -179,29 +188,63 @@ class FileProvider {
 		await secureStore.set(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, true)
 	}
 
+	// Purges the auth.json DEK from the platform key store. Called on logout (after disable() deletes
+	// auth.json) so no key material outlives the session.
+	public async purgeKey(): Promise<void> {
+		try {
+			await purgeAuthDek()
+		} catch (e) {
+			logger.warn("file-provider", "auth DEK purge failed", { error: e })
+		}
+	}
+
+	// One-time beta migration: if the provider is enabled but auth.json isn't a readable encrypted file
+	// (legacy plaintext from before encryption, or a lost DEK), re-provision by re-running enable(),
+	// which writes a fresh encrypted auth.json. Safe to call on every launch — no-ops when auth.json is
+	// absent or already decryptable.
+	public async ensureEncrypted(): Promise<void> {
+		if (!AUTH_FILE.exists) {
+			return
+		}
+
+		if ((await this.read()) !== null) {
+			return
+		}
+
+		try {
+			await this.enable()
+
+			logger.info("file-provider", "auth.json migrated to encrypted format")
+		} catch (e) {
+			logger.warn("file-provider", "auth.json encryption migration failed — will retry next launch", { error: e })
+		}
+	}
+
 	private async write(data: AuthFileSchema): Promise<void> {
 		await this.writeMutex.acquire()
 
 		try {
-			this.writeUnlocked(data)
+			const dek = await getOrCreateAuthDek()
+
+			this.writeUnlocked(data, dek)
 		} finally {
 			this.writeMutex.release()
 		}
 	}
 
-	// Performs the actual auth.json replace. Callers MUST already hold writeMutex —
-	// this never acquires it, so it can be reused inside a longer locked transaction
+	// Performs the actual auth.json replace, encrypting the payload with the DEK. Callers MUST already
+	// hold writeMutex — this never acquires it, so it can be reused inside a longer locked transaction
 	// (e.g. enable()) without deadlocking the single-permit Semaphore.
-	private writeUnlocked(data: AuthFileSchema): void {
+	private writeUnlocked(data: AuthFileSchema, dek: Uint8Array): void {
 		if (AUTH_FILE.exists) {
 			AUTH_FILE.delete()
 		}
 
 		AUTH_FILE.create()
 
-		AUTH_FILE.write(JSON.stringify(data, null, 4))
+		AUTH_FILE.write(sealAuthFile(JSON.stringify(data, null, 4), dek))
 
-		logger.info("file-provider", "auth.json written", { providerEnabled: data.providerEnabled, hasSdkConfig: data.sdkConfig !== null, maxCacheFilesBudget: data.maxCacheFilesBudget ?? null, maxThumbnailFilesBudget: data.maxThumbnailFilesBudget ?? null })
+		logger.info("file-provider", "auth.json written (encrypted)", { providerEnabled: data.providerEnabled, hasSdkConfig: data.sdkConfig !== null, maxCacheFilesBudget: data.maxCacheFilesBudget ?? null, maxThumbnailFilesBudget: data.maxThumbnailFilesBudget ?? null })
 	}
 }
 

@@ -55,6 +55,16 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
+// authFileKey pulls in native modules (expo-secure-store, the Android Keystore module) + quick-crypto.
+// Passthrough seal/open so the test file holds plaintext JSON and the content assertions still hold;
+// the real AES-256-GCM round-trip is covered by authFileKey.test.ts + the Rust decrypt unit tests.
+vi.mock("@/features/settings/authFileKey", () => ({
+	getOrCreateAuthDek: vi.fn(async () => new Uint8Array(32)),
+	purgeAuthDek: vi.fn(async () => {}),
+	sealAuthFile: (plaintext: string) => new TextEncoder().encode(plaintext),
+	openAuthFile: (sealed: Uint8Array) => new TextDecoder().decode(sealed)
+}))
+
 import fileProvider, { AUTH_FILE, FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/features/settings/fileProvider"
 import { fs } from "@/tests/mocks/expoFileSystem"
 import auth from "@/lib/auth"

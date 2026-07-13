@@ -351,7 +351,13 @@ class Auth {
 		logger.info("auth", "logout started")
 
 		// Phase 1 — stop background producers. allSettled so one failure never aborts the wipe.
-		const phase1 = await Promise.allSettled([unregisterBackgroundSync(), audio.stop(), fileProvider.disable()])
+		const phase1 = await Promise.allSettled([
+			unregisterBackgroundSync(),
+			audio.stop(),
+			// Disable the provider (deletes auth.json), then purge its DEK so no key material outlives
+			// the session.
+			fileProvider.disable().finally(() => fileProvider.purgeKey())
+		])
 
 		for (const result of phase1) {
 			if (result.status === "rejected") {

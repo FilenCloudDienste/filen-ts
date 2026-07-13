@@ -35,6 +35,10 @@ export default defineConfig({
 	],
 	resolve: {
 		alias: {
+			// Local Expo modules live under ./modules (not ./src). Must precede the "@" alias so
+			// "@/modules/*" resolves there rather than "./src/modules/*". Mirrors the app's babel/metro
+			// "@/modules/" → "modules/" alias.
+			"@/modules": path.resolve(__dirname, "./modules"),
 			"@": path.resolve(__dirname, "./src"),
 			"react-native": path.resolve(__dirname, "./src/tests/mocks/reactNative.ts"),
 			// uniffi-bindgen-react-native ships CJS under "type": "module" → unloadable in Node. The

@@ -61,7 +61,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		usesIcloudStorage: true,
 		appleTeamId: APPLE_TEAM_ID,
 		entitlements: {
-			"com.apple.security.application-groups": [IOS_APP_GROUP_ID]
+			"com.apple.security.application-groups": [IOS_APP_GROUP_ID],
+			// Dedicated team-prefixed keychain access group shared with the File Provider extension so
+			// both can read the auth.json DEK. On iOS the app group alone does NOT grant keychain sharing;
+			// a keychain-access-groups entry is required on both the app and the extension.
+			"keychain-access-groups": [`${APPLE_TEAM_ID}.io.filen.sharedkeys`]
 		},
 		config: {
 			usesNonExemptEncryption: false

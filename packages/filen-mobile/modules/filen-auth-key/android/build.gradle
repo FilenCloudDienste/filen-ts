@@ -1,0 +1,11 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'io.filen.authkey'
+version = '0.1.0'
+
+android {
+  namespace "io.filen.authkey"
+}
