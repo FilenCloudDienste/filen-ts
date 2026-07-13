@@ -25,12 +25,13 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 
-// The now-playing panel's Playlists tab: the CRUD surface for `.filen/Playlists` (list, create,
-// rename, delete, play, shuffle-play). Opening a row's track list goes through PlaylistDetailDialog —
-// a full Dialog rather than a nested popover, since track management (add/remove/reorder) needs more
-// room than the narrow queue popover this panel itself lives inside. No dedicated rail module: the
-// founder spec keeps playlists inside the audio feature's existing surface rather than inventing a new
-// shell slot for a feature this narrow.
+// The playlists CRUD surface for `.filen/Playlists` (list, create, rename, delete, play, shuffle-play) —
+// the body of the /playlists screen (features/audio/screens/playlists.tsx supplies the screen's own
+// header; this component owns everything below it). Opening a row's track list goes through
+// PlaylistDetailDialog — a full Dialog, since track management (add/remove/reorder) needs more room than
+// a row affords. Previously lived inside the now-playing popover's Playlists tab (unreachable without a
+// playing queue); the founder decision moved it to a dedicated rail entry instead — see iconRail.tsx's
+// new entry and nowPlayingPanel.tsx's own comment for the popover-side half of that change.
 export function PlaylistsPanel() {
 	const { t } = useTranslation("audio")
 	const { t: tCommon } = useTranslation("common")
@@ -105,68 +106,66 @@ export function PlaylistsPanel() {
 		})
 	}
 
-	// No own root wrapper: this panel is only ever rendered nested inside nowPlayingPanel's
-	// max-height/flex-col/overflow-hidden box (the queue tab's markup follows the same rule), so a
-	// duplicate wrapper here would just add an unconstrained flex child that can't shrink to fit —
-	// exactly the kind of box a nested max-height alone doesn't clip without its own overflow.
+	// Screen-shaped, not popover-shaped: an action row (count + New playlist) mirroring TransfersScreen's
+	// own header/action-row split, then a centered max-width scrollable column (EventsList/settings'
+	// shared reading-width idiom) so the list doesn't stretch edge-to-edge on a wide window.
 	return (
 		<>
-			<div className="flex items-center justify-between gap-2 px-1 pb-2">
-				<div className="min-w-0">
-					<p className="text-base font-medium">{t("playlists")}</p>
-					<p className="text-xs text-muted-foreground">{t("playlistsCount", { count: entries.length })}</p>
-				</div>
+			<div className="mx-auto flex w-full max-w-2xl shrink-0 items-center justify-between gap-2 px-4 pb-3">
+				<p className="text-xs text-muted-foreground">{t("playlistsCount", { count: entries.length })}</p>
 				<Button
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("newPlaylist")}
+					variant="outline"
+					size="sm"
 					disabled={!isOnline}
 					onClick={() => {
 						setCreateOpen(true)
 					}}
 				>
-					<PlusIcon />
+					<PlusIcon aria-hidden="true" />
+					{t("newPlaylist")}
 				</Button>
 			</div>
-			<div className="-mx-1 min-h-0 flex-1 overflow-y-auto">
-				{playlistsQuery.status === "pending" ? (
-					<div className="flex justify-center py-6">
-						<Spinner className="size-5" />
-					</div>
-				) : playlistsQuery.status === "error" ? (
-					<p className="px-2 py-4 text-center text-xs text-destructive">{errorLabel(asErrorDTO(playlistsQuery.error))}</p>
-				) : entries.length === 0 ? (
-					<Empty className="border-none p-6">
-						<EmptyHeader>
-							<EmptyMedia variant="icon">
-								<ListMusicIcon />
-							</EmptyMedia>
-							<EmptyTitle>{t("playlistsEmptyTitle")}</EmptyTitle>
-							<EmptyDescription>{t("playlistsEmptyBody")}</EmptyDescription>
-						</EmptyHeader>
-					</Empty>
-				) : (
-					<ul className="flex flex-col gap-0.5">
-						{entries.map(entry => (
-							<PlaylistRow
-								key={entry.status === "ok" ? entry.playlist.uuid : entry.fileUuid}
-								entry={entry}
-								isOnline={isOnline}
-								onOpen={playlist => {
-									setDetailTarget(playlist)
-								}}
-								onPlay={handlePlay}
-								onShufflePlay={handleShufflePlay}
-								onRename={playlist => {
-									setRenameTarget(playlist)
-								}}
-								onDelete={playlist => {
-									setDeleteTarget(playlist)
-								}}
-							/>
-						))}
-					</ul>
-				)}
+			<div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+				<div className="mx-auto flex w-full max-w-2xl flex-col">
+					{playlistsQuery.status === "pending" ? (
+						<div className="flex justify-center py-6">
+							<Spinner className="size-5" />
+						</div>
+					) : playlistsQuery.status === "error" ? (
+						<p className="px-2 py-4 text-center text-sm text-destructive">{errorLabel(asErrorDTO(playlistsQuery.error))}</p>
+					) : entries.length === 0 ? (
+						<Empty className="border-none p-10">
+							<EmptyHeader>
+								<EmptyMedia variant="icon">
+									<ListMusicIcon />
+								</EmptyMedia>
+								<EmptyTitle>{t("playlistsEmptyTitle")}</EmptyTitle>
+								<EmptyDescription>{t("playlistsEmptyBody")}</EmptyDescription>
+							</EmptyHeader>
+						</Empty>
+					) : (
+						<ul className="flex flex-col gap-1">
+							{entries.map(entry => (
+								<PlaylistRow
+									key={entry.status === "ok" ? entry.playlist.uuid : entry.fileUuid}
+									entry={entry}
+									isOnline={isOnline}
+									onOpen={playlist => {
+										setDetailTarget(playlist)
+									}}
+									onPlay={handlePlay}
+									onShufflePlay={handleShufflePlay}
+									onRename={playlist => {
+										setRenameTarget(playlist)
+									}}
+									onDelete={playlist => {
+										setDeleteTarget(playlist)
+									}}
+								/>
+							))}
+						</ul>
+					)}
+				</div>
 			</div>
 
 			<InputDialog
@@ -249,9 +248,9 @@ function PlaylistRow({ entry, isOnline, onOpen, onPlay, onShufflePlay, onRename,
 		return (
 			<li
 				key={entry.fileUuid}
-				className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-muted-foreground"
+				className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-muted-foreground"
 			>
-				<ListMusicIcon className="size-4 shrink-0" />
+				<ListMusicIcon className="size-5 shrink-0" />
 				<span className="min-w-0 flex-1 truncate text-sm">{entry.name}</span>
 				<span className="shrink-0 text-xs">{t("playlistDegraded")}</span>
 			</li>
@@ -261,15 +260,15 @@ function PlaylistRow({ entry, isOnline, onOpen, onPlay, onShufflePlay, onRename,
 	const { playlist } = entry
 
 	return (
-		<li className={cn("group/prow flex items-center gap-2 rounded-lg px-1 pr-1.5")}>
+		<li className={cn("group/prow flex items-center gap-2 rounded-xl px-1 pr-2")}>
 			<button
 				type="button"
-				className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+				className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
 				onClick={() => {
 					onOpen(playlist)
 				}}
 			>
-				<ListMusicIcon className="size-4 shrink-0 text-muted-foreground" />
+				<ListMusicIcon className="size-5 shrink-0 text-muted-foreground" />
 				<span className="min-w-0 flex-1">
 					<span
 						title={playlist.name}
@@ -287,7 +286,7 @@ function PlaylistRow({ entry, isOnline, onOpen, onPlay, onShufflePlay, onRename,
 					render={
 						<Button
 							variant="ghost"
-							size="icon-xs"
+							size="icon-sm"
 							aria-label={t("playlistItemMenuTrigger")}
 							className="shrink-0 opacity-0 transition-opacity group-hover/prow:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
 						>

@@ -113,8 +113,12 @@ test("drive audio double-click hands off to the persistent player and transport 
 		await seek.press("ArrowRight")
 		await expect.poll(async () => Number(await seek.inputValue()), { timeout: 10_000 }).toBeGreaterThan(beforeSeek)
 
-		// Clearing the queue from the now-playing panel hides the bar.
+		// Clearing the queue from the now-playing panel hides the bar. The panel is queue-only now
+		// (playlists moved to their own /playlists screen — see the playlist test below), so opening it
+		// here doubles as proof no tab bar survived: no tablist role, no Playlists tab.
 		await bar.getByRole("button", { name: "Show queue" }).click()
+		await expect(page.getByRole("tablist")).toHaveCount(0)
+		await expect(page.getByRole("tab", { name: "Playlists" })).toHaveCount(0)
 		await page.getByRole("button", { name: "Clear queue", exact: true }).click()
 		await expect(bar).toHaveCount(0, { timeout: 15_000 })
 
@@ -125,9 +129,11 @@ test("drive audio double-click hands off to the persistent player and transport 
 })
 
 // Playlist CRUD end to end: create, add the 2 scratch tracks via the drive picker, drag-reorder, play
-// (the bar shows the reordered first track), then delete through the UI. Net-zero on the shared
-// account: everything created here (the two audio files, the playlist itself) is removed by the end —
-// the `.filen/Playlists` directory the app lazily creates is left behind, which is acceptable app
+// (the bar shows the reordered first track), then delete through the UI. Reaches playlists through the
+// rail's dedicated /playlists entry (no queue-seeding preamble needed — that reachability gap is exactly
+// what the founder decision fixed, see iconRail.tsx/nowPlayingPanel.tsx). Net-zero on the shared account:
+// everything created here (the two audio files, the playlist itself) is removed by the end — the
+// `.filen/Playlists` directory the app lazily creates is left behind, which is acceptable app
 // infrastructure (mirrors mobile leaving it too).
 test("playlists: create, add tracks via the picker, reorder, play, and delete", async ({ page, injectedSession, browserName }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
@@ -160,18 +166,12 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		await expect(rowA).toBeVisible({ timeout: 60_000 })
 		await expect(rowB).toBeVisible({ timeout: 60_000 })
 
-		// The now-playing panel (and its Playlists tab) is only reachable through the player bar, which
-		// only renders once a queue exists — open a track first, purely to surface it.
-		await rowA.dblclick()
+		// The rail's dedicated Playlists entry — no queue needed first, unlike the old popover-tab route.
+		await page.getByRole("link", { name: "Playlists", exact: true }).click()
+		await expect(page.getByRole("heading", { name: "Playlists", exact: true })).toBeVisible()
 
+		// Not visible until the "Play" click below actually starts a queue.
 		const bar = page.getByRole("region", { name: "Audio player" })
-		await expect(bar).toBeVisible({ timeout: 30_000 })
-
-		// The now-playing panel is a Popover, itself `role="dialog"` (Base UI's PopoverPopup) — every
-		// dialog locator below is scoped by its own DialogTitle-derived accessible NAME so it can never
-		// resolve to the still-open popover instead of the intended nested Dialog.
-		await bar.getByRole("button", { name: "Show queue" }).click()
-		await page.getByRole("tab", { name: "Playlists" }).click()
 
 		await page.getByRole("button", { name: "New playlist" }).click()
 		const createDialog = page.getByRole("dialog", { name: "New playlist" })
@@ -224,10 +224,8 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		await page.getByRole("alertdialog", { name: "Delete playlist" }).getByRole("button", { name: "Delete", exact: true }).click()
 		await expect(playlistRow).toHaveCount(0, { timeout: 15_000 })
 
-		await page.getByRole("tab", { name: "Queue" }).click()
-		await page.getByRole("button", { name: "Clear queue", exact: true }).click()
-		await expect(bar).toHaveCount(0, { timeout: 15_000 })
-
+		// Queue playback is client-only (never persisted server-side, useAudioStore.ts), so leaving it
+		// playing here carries no net-zero cost — nothing left behind to clean up.
 		expect(cspViolations, `CSP violations: ${JSON.stringify(cspViolations)}`).toHaveLength(0)
 	} finally {
 		await trashScratchDirectory(page, scratchName)

@@ -7,6 +7,7 @@ import {
 	MessagesSquareIcon,
 	UsersIcon,
 	ArrowDownUpIcon,
+	ListMusicIcon,
 	SunIcon,
 	MoonIcon,
 	SettingsIcon,
@@ -64,6 +65,15 @@ registerAction({
 	defaultCombo: "",
 	scope: "global",
 	descriptionKey: "moduleTransfers"
+})
+
+// Mirrors app.openTransfers directly above — same unassigned-by-default route-nav shape, wired the
+// same way in IconRail below for the new /playlists rail entry.
+registerAction({
+	id: "app.openPlaylists",
+	defaultCombo: "",
+	scope: "global",
+	descriptionKey: "modulePlaylists"
 })
 
 // Rail section slot: the active section rides a white chip (soft shadow); inactive glyphs are plain
@@ -272,6 +282,33 @@ function TransfersEntry({ active }: { active: boolean }) {
 	)
 }
 
+// Playlists' own dedicated entry, straight to /playlists — a plain nav Link like Notes/Contacts above,
+// following TransfersEntry's own precedent (the newest plain-nav rail entry) for a destination this
+// simple: no badge/aggregate readout to carry, unlike Transfers' active-count/speed sliver. Previously
+// playlists only lived inside the now-playing popover's Playlists tab, unreachable without a playing
+// queue — this rail entry (plus nowPlayingPanel.tsx dropping that tab) fixes that reachability gap.
+function PlaylistsEntry({ active }: { active: boolean }) {
+	const { t } = useTranslation("common")
+
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<Link
+						to="/playlists"
+						aria-current={active ? "page" : undefined}
+						aria-label={t("modulePlaylists")}
+						className={railItemClass(active)}
+					>
+						<ListMusicIcon />
+					</Link>
+				}
+			/>
+			<TooltipContent side="right">{t("modulePlaylists")}</TooltipContent>
+		</Tooltip>
+	)
+}
+
 export function IconRail() {
 	const { t } = useTranslation()
 	const navigate = useNavigate()
@@ -289,6 +326,8 @@ export function IconRail() {
 	const chatsActive = pathname === "/chats" || pathname.startsWith("/chats/")
 	// Transfers is a flat page, no splat — an exact match is enough (mirrors contactsActive).
 	const transfersActive = pathname === "/transfers"
+	// Playlists mirrors Transfers: a flat page, no splat.
+	const playlistsActive = pathname === "/playlists"
 	// In-app unread signal: a numeric rail badge driven by the CLIENT-DERIVED global unread count (summed
 	// per-message across every chat, not a server scalar). Always mounted with the authed shell, so this
 	// hook is also the mount-once trigger for the bulk chat+messages refetch that makes the count possible
@@ -329,6 +368,20 @@ export function IconRail() {
 			}
 
 			void navigate({ to: "/transfers" })
+		},
+		undefined,
+		[navigate]
+	)
+
+	// Mirrors the app.openTransfers wiring directly above.
+	useAction(
+		"app.openPlaylists",
+		() => {
+			if (isAnyDialogOpen()) {
+				return
+			}
+
+			void navigate({ to: "/playlists" })
 		},
 		undefined,
 		[navigate]
@@ -415,6 +468,8 @@ export function IconRail() {
 			</Tooltip>
 
 			<TransfersEntry active={transfersActive} />
+
+			<PlaylistsEntry active={playlistsActive} />
 
 			<Tooltip>
 				<TooltipTrigger

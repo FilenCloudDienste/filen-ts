@@ -53,6 +53,8 @@ export const common = {
 	contactRequestsBadge_other: "Contacts, {{count}} pending requests",
 	/** Transfers module — icon rail tooltip/accessible label (not available yet) */
 	moduleTransfers: "Transfers",
+	/** Playlists module — icon rail tooltip/accessible label, and the /playlists screen's own heading */
+	modulePlaylists: "Playlists",
 	// Account menu
 	/** Account menu — trigger's accessible label and the dropdown's heading */
 	account: "Account",

@@ -69,13 +69,7 @@ export const audio = {
 	/** Generic playback-failure label surfaced when a track can't be played and the queue settles */
 	playbackFailed: "Couldn't play this track",
 
-	// ── Now-playing panel tabs ──────────────────────────────────────────────
-	/** Accessible label for the Queue/Playlists tab list */
-	nowPlayingTabsLabel: "Now playing panel sections",
-
 	// ── Playlists ────────────────────────────────────────────────────────────
-	/** Playlists tab label / panel heading */
-	playlists: "Playlists",
 	/** Sub-count under the playlists panel heading, singular */
 	playlistsCount_one: "{{count}} playlist",
 	/** Sub-count under the playlists panel heading, plural */
