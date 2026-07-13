@@ -94,10 +94,13 @@ export interface PreviewOverlayProps {
 	// Trash/delete-permanently/restore-from-trash on the CURRENTLY VIEWED item, run from the header's own
 	// item menu below — the host owns the frozen pager list, so it (not this component) drops the slot
 	// and either steps to a neighbour or closes outright once none remain (useDriveDialogHost's
-	// removeCurrentPreviewItem, mirroring new mobile's driveItemRemoved gallery subscriber). Unshare uses
-	// the plain `onClose` above instead — new mobile dismisses the whole preview immediately for that one
-	// rather than stepping to a neighbour (menuActions.ts's own dismissOnSuccess: isPreview === true).
-	onItemRemoved: () => void
+	// removeCurrentPreviewItem, mirroring new mobile's driveItemRemoved gallery subscriber). Carries the
+	// slot's FROZEN uuid so the host removes by identity, never by index: the socket echo of this same
+	// mutation also removes the slot (uuid-keyed), and whichever arrives second must no-op — an
+	// index-keyed removal racing the echo would drop the NEIGHBOUR instead and collapse the pager.
+	// Unshare uses the plain `onClose` above instead — new mobile dismisses the whole preview immediately
+	// for that one rather than stepping to a neighbour (menuActions.ts's dismissOnSuccess: isPreview).
+	onItemRemoved: (frozenUuid: string) => void
 }
 
 // True while focus sits on (or inside) a <video>/<audio> element — its own native controls own
@@ -258,7 +261,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 	}
 
 	async function handleMenuTrash(): Promise<void> {
-		if (driveItem === undefined) {
+		if (driveItem === undefined || rawDriveItem === undefined) {
 			return
 		}
 
@@ -269,12 +272,12 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 		toastBulkOutcome(outcome)
 
 		if (outcome.succeeded.length > 0) {
-			onItemRemoved()
+			onItemRemoved(rawDriveItem.data.uuid)
 		}
 	}
 
 	async function handleMenuDelete(): Promise<void> {
-		if (driveItem === undefined) {
+		if (driveItem === undefined || rawDriveItem === undefined) {
 			return
 		}
 
@@ -285,7 +288,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 		toastBulkOutcome(outcome)
 
 		if (outcome.succeeded.length > 0) {
-			onItemRemoved()
+			onItemRemoved(rawDriveItem.data.uuid)
 		}
 	}
 
@@ -322,7 +325,11 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 	// "restore" descriptor's onRestored (trash variant only) — a restored item leaves the trash listing
 	// entirely, the same "gap in the pager" shape as trash/delete above.
 	function handleMenuRestored(): void {
-		onItemRemoved()
+		if (rawDriveItem === undefined) {
+			return
+		}
+
+		onItemRemoved(rawDriveItem.data.uuid)
 	}
 
 	// The header item-menu's secondary dialog, if any — nested inside the outer DialogPrimitive.Root

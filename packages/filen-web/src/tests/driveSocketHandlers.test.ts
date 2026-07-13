@@ -276,6 +276,14 @@ describe("drive socket handlers — open-preview reconcile signals", () => {
 		])
 	})
 
+	it("fileArchived emits NO reconcile signal — the file lives on under its version-rotated successor", () => {
+		// A save on an OPEN preview archives the old uuid (its successor arrives as fileNew). Emitting a
+		// removal here would yank the just-saved file's slot out of the frozen pager the instant the
+		// socket echoed the user's own save — the exact regression this pin guards: the editor keeps
+		// serving fresh bytes through its saved-uuid aliases, so the open slot must survive the archive.
+		expect(captureReconcile({ type: "fileArchived", uuid: testUuid("file") })).toEqual([])
+	})
+
 	it("fileRestore emits a removed signal (the item leaves the trash preview)", () => {
 		expect(captureReconcile({ type: "fileRestore", file: mockFile() })).toEqual([{ type: "removed", uuid: testUuid("file") }])
 	})

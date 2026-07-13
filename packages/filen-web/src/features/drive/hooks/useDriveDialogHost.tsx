@@ -118,26 +118,28 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 		setActiveDialog({ kind: "preview", items: [], index, previewSources: sources })
 	}
 
-	// Drops the currently-viewed slot out of the frozen pager snapshot — the preview header's own item
-	// menu (previewOverlay.tsx) calls this after a successful trash/delete-permanently/restore-from-trash
-	// on the previewed item, mirroring new mobile's driveItemRemoved gallery subscriber: stay on the same
+	// Drops the acted-on slot out of the frozen pager snapshot — the preview header's own item menu
+	// (previewOverlay.tsx) calls this after a successful trash/delete-permanently/restore-from-trash on
+	// the previewed item, mirroring new mobile's driveItemRemoved gallery subscriber: stay on the same
 	// visual position (which now shows the next sibling, clamped to the new last slot), or close outright
-	// once the removed slot was the only one left. Unlike unshare (see previewOverlay.tsx's own direct
-	// onClose call) this never closes the whole preview while a sibling remains — the pager just steps
-	// past the gap in place.
-	function removeCurrentPreviewItem(): void {
+	// once the removed slot was the only one left. Routed through the SAME uuid-keyed reducer the socket
+	// reconcile subscription uses ON PURPOSE: the server echoes this very mutation back over the socket,
+	// and the echo can land before OR after this local call — remove-by-uuid makes the two arms converge
+	// (whichever runs second finds nothing and no-ops), where the previous remove-by-index would race the
+	// echo and drop the NEIGHBOUR's slot instead, collapsing a two-sibling pager to a spurious close.
+	function removeCurrentPreviewItem(frozenUuid: string): void {
 		setActiveDialog(prev => {
 			if (prev?.kind !== "preview" || prev.index === undefined || prev.previewSources === undefined) {
 				return prev
 			}
 
-			const remaining = prev.previewSources.filter((_, sourceIndex) => sourceIndex !== prev.index)
+			const next = reconcilePreviewSources({ sources: prev.previewSources, index: prev.index }, { type: "removed", uuid: frozenUuid })
 
-			if (remaining.length === 0) {
+			if (next === null) {
 				return null
 			}
 
-			return { ...prev, previewSources: remaining, index: Math.min(prev.index, remaining.length - 1) }
+			return { ...prev, previewSources: next.sources, index: next.index }
 		})
 	}
 

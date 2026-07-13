@@ -86,6 +86,29 @@ describe("reconcilePreviewSources — removed", () => {
 
 		expect(next).toBe(state)
 	})
+
+	it("a repeated removal of the same uuid no-ops — the overlay's local removal and the socket echo of the same mutation converge", () => {
+		// Trashing the open item from the preview's own menu removes its slot twice in the real app: once
+		// from the local success handler and once from the server's socket echo, in EITHER order. The
+		// second application must find nothing and return the state untouched — an index-keyed removal
+		// here once dropped the surviving NEIGHBOUR on the second pass and collapsed a two-sibling pager
+		// into a spurious close.
+		const first = reconcilePreviewSources(
+			{ sources: [fileSourceAt("a"), fileSourceAt("b")], index: 0 },
+			{ type: "removed", uuid: testUuid("a") }
+		)
+
+		expect(first).not.toBeNull()
+		expect(first?.sources.map(s => (s.type === "drive" ? s.item.data.uuid : ""))).toEqual([testUuid("b")])
+
+		if (first === null) {
+			throw new Error("unreachable")
+		}
+
+		const second = reconcilePreviewSources(first, { type: "removed", uuid: testUuid("a") })
+
+		expect(second).toBe(first)
+	})
 })
 
 describe("reconcilePreviewSources — replaced", () => {

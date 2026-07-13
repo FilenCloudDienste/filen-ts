@@ -157,11 +157,24 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			break
 		}
 
-		case "fileArchived":
+		case "fileArchived": {
+			// A content save rotates the file's uuid: the OLD uuid is archived into version history and the
+			// successor arrives as its own fileNew. The file itself lives on, so an open preview KEEPS its
+			// frozen slot — a same-device save already resolves fresh bytes through the editor's saved-uuid
+			// aliases (removing the slot here would yank the just-saved file out from under the user and
+			// collapse the pager), and a cross-device edit merely leaves the frozen snapshot's
+			// stale-but-still-downloadable version on screen (a preview is a static snapshot, never a live
+			// mirror). Only the LISTING drops the superseded row; its fileNew replacement splices in beside it.
+			useDriveStore.getState().removeFromSelection([inner.uuid])
+			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, inner.uuid))
+
+			break
+		}
+
 		case "fileDeletedPermanent":
 		case "folderDeletedPermanent": {
-			// The item left the current listing — purge selection, then strip it from every listing. (fileArchived
-			// moves the file into its version history; the listing removal is the same either way.)
+			// The item is gone for good — purge selection, strip it from every listing, and drop it from an
+			// open preview (advance to a neighbour, or close once it was the only slot).
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, inner.uuid))
 			emitPreviewItemRemoved(inner.uuid)
