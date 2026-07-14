@@ -68,6 +68,7 @@ const Drive = () => {
 	const blocked = useBlockedUsers()
 	const parent = getDriveParent(drivePath)
 	const upload = useDriveUpload({ parent, drivePath, t })
+	const textForegroundColor = useResolveClassNames("text-foreground").color as string
 	const primaryColor = useResolveClassNames("bg-primary").backgroundColor as string
 	const driveCreateButtons = canShowDriveCreateMenu({ drivePath, parent, selectionMode: false })
 		? buildDriveCreateMenuButtons({ t, parent, upload })
@@ -197,194 +198,193 @@ const Drive = () => {
 					onLayout={onLayout}
 					className="flex-1 bg-transparent"
 				>
-				<LazyWrapper>
-					<VirtualList
-						key={isGridActive ? `grid-${columns}` : "list"}
-						className={cn(
-							"flex-1",
-							driveScreenUsesBaseBackground(drivePath) ? "bg-background" : "bg-background-secondary"
-						)}
-						contentInsetAdjustmentBehavior="automatic"
-						contentContainerClassName={cn("pb-80", Platform.OS === "android" && "pb-96", isGridActive && "px-2")}
-						keyExtractor={(item: DriveItem) => {
-							return item.data.uuid
-						}}
-						data={items}
-						// Offline VIRTUAL ROOT only (nested offline dirs have a uuid): surfaces
-						// the last sync pass's error count as a pressable row above the listing.
-						// The row hides itself while there are no errors.
-						headerComponent={drivePath.type === "offline" && !drivePath.uuid ? () => <SyncErrorsHeaderRow /> : undefined}
-						grid={isGridActive}
-						itemWidth={isGridActive ? gridItemWidth : undefined}
-						itemHeight={isGridActive ? gridItemHeight : undefined}
-						itemsPerRow={isGridActive ? columns : undefined}
-						renderItem={(info: ListRenderItemInfo<DriveItem>) => {
-							if (isGridActive) {
+					<LazyWrapper>
+						<VirtualList
+							key={isGridActive ? `grid-${columns}` : "list"}
+							className={cn("flex-1", driveScreenUsesBaseBackground(drivePath) ? "bg-background" : "bg-background-secondary")}
+							contentInsetAdjustmentBehavior="automatic"
+							contentContainerClassName={cn("pb-80", Platform.OS === "android" && "pb-96", isGridActive && "px-2")}
+							keyExtractor={(item: DriveItem) => {
+								return item.data.uuid
+							}}
+							data={items}
+							// Offline VIRTUAL ROOT only (nested offline dirs have a uuid): surfaces
+							// the last sync pass's error count as a pressable row above the listing.
+							// The row hides itself while there are no errors.
+							headerComponent={drivePath.type === "offline" && !drivePath.uuid ? () => <SyncErrorsHeaderRow /> : undefined}
+							grid={isGridActive}
+							itemWidth={isGridActive ? gridItemWidth : undefined}
+							itemHeight={isGridActive ? gridItemHeight : undefined}
+							itemsPerRow={isGridActive ? columns : undefined}
+							renderItem={(info: ListRenderItemInfo<DriveItem>) => {
+								if (isGridActive) {
+									return (
+										<GridItem
+											info={info}
+											drivePath={drivePath}
+											getListItems={() => items}
+											itemWidth={gridItemWidth}
+										/>
+									)
+								}
+
 								return (
-									<GridItem
+									<Item
 										info={info}
 										drivePath={drivePath}
 										getListItems={() => items}
-										itemWidth={gridItemWidth}
+										searchParentPath={isCacheSearch ? searchResultPaths.get(info.item.data.uuid) : undefined}
 									/>
 								)
+							}}
+							// Cache search is live (no manual refetch): suppress pull-to-refresh while it's
+							// the source. Every non-cache-search context keeps the existing refresh.
+							onRefresh={
+								isCacheSearch
+									? undefined
+									: async () => {
+											// The offline cache listing reads purely from local storage
+											// (the query is networkMode: "always"), so pull-to-refresh must
+											// work while offline. Every other variant hits the network.
+											if (!onlineManager.isOnline() && drivePath.type !== "offline") {
+												return
+											}
+
+											// Manual offline-cache sync on pull-to-refresh — fire-and-forget
+											// so the gesture resolves with the local listing refetch;
+											// offlineSync gates connectivity/Wi-Fi-only internally.
+											if (drivePath.type === "offline") {
+												offlineSync
+													.sync({ manual: true })
+													.catch(e => logger.warn("drive", "offline sync failed", { error: e }))
+											}
+
+											const result = await run(async () => {
+												return await driveItemsQuery.refetch()
+											})
+
+											if (!result.success) {
+												logger.error("drive", "drive list refresh failed", { error: result.error })
+												alerts.error(result.error)
+											}
+										}
 							}
-
-							return (
-								<Item
-									info={info}
-									drivePath={drivePath}
-									getListItems={() => items}
-									searchParentPath={isCacheSearch ? searchResultPaths.get(info.item.data.uuid) : undefined}
-								/>
-							)
-						}}
-						// Cache search is live (no manual refetch): suppress pull-to-refresh while it's
-						// the source. Every non-cache-search context keeps the existing refresh.
-						onRefresh={
-							isCacheSearch
-								? undefined
-								: async () => {
-										// The offline cache listing reads purely from local storage
-										// (the query is networkMode: "always"), so pull-to-refresh must
-										// work while offline. Every other variant hits the network.
-										if (!onlineManager.isOnline() && drivePath.type !== "offline") {
-											return
-										}
-
-										// Manual offline-cache sync on pull-to-refresh — fire-and-forget
-										// so the gesture resolves with the local listing refetch;
-										// offlineSync gates connectivity/Wi-Fi-only internally.
-										if (drivePath.type === "offline") {
-											offlineSync.sync({ manual: true }).catch(e => logger.warn("drive", "offline sync failed", { error: e }))
-										}
-
-										const result = await run(async () => {
-											return await driveItemsQuery.refetch()
-										})
-
-										if (!result.success) {
-											logger.error("drive", "drive list refresh failed", { error: result.error })
-											alerts.error(result.error)
-										}
+							loading={driveItemsQuery.status === "pending" || (isCacheSearch && status === "warming")}
+							footerComponent={
+								isCacheSearch
+									? () => (
+											<DriveSearchFooter
+												status={status}
+												totalCount={totalCount}
+												resultCount={items.length}
+											/>
+										)
+									: undefined
+							}
+							emptyComponent={() => {
+								// Plain-drive cache search: its own terminal / no-results states. The
+								// directory listing query is NOT the source here, so its error/empty
+								// states don't apply (`warming` never reaches this — `loading` suppresses
+								// emptyComponent). `searching-empty` (empty so far, resync still converging)
+								// surfaces a "still searching" hint; a bare empty result is genuinely
+								// settled/terminal.
+								if (isCacheSearch) {
+									if (status === "terminal") {
+										return (
+											<ListEmpty
+												icon="alert-circle-outline"
+												title={t("search_unavailable")}
+												description={t("search_unavailable_description")}
+											/>
+										)
 									}
-						}
-						loading={driveItemsQuery.status === "pending" || (isCacheSearch && status === "warming")}
-						footerComponent={
-							isCacheSearch
-								? () => (
-										<DriveSearchFooter
-											status={status}
-											totalCount={totalCount}
-											resultCount={items.length}
-										/>
-									)
-								: undefined
-						}
-						emptyComponent={() => {
-							// Plain-drive cache search: its own terminal / no-results states. The
-							// directory listing query is NOT the source here, so its error/empty
-							// states don't apply (`warming` never reaches this — `loading` suppresses
-							// emptyComponent). `searching-empty` (empty so far, resync still converging)
-							// surfaces a "still searching" hint; a bare empty result is genuinely
-							// settled/terminal.
-							if (isCacheSearch) {
-								if (status === "terminal") {
-									return (
-										<ListEmpty
-											icon="alert-circle-outline"
-											title={t("search_unavailable")}
-											description={t("search_unavailable_description")}
-										/>
-									)
-								}
 
-								// Empty so far while the convergence resync is still streaming the
-								// subtree in: an explicit "no results yet, still searching" with a
-								// spinner instead of a premature "no results" or a bare full-screen loader.
-								if (status === "searching-empty") {
+									// Empty so far while the convergence resync is still streaming the
+									// subtree in: an explicit "no results yet, still searching" with a
+									// spinner instead of a premature "no results" or a bare full-screen loader.
+									if (status === "searching-empty") {
+										return (
+											<ListEmpty
+												icon="search-outline"
+												title={t("no_results_yet")}
+												description={t("still_searching_description")}
+												action={
+													<ActivityIndicator
+														size="small"
+														color={textForegroundColor}
+													/>
+												}
+											/>
+										)
+									}
+
 									return (
 										<ListEmpty
 											icon="search-outline"
-											title={t("no_results_yet")}
-											description={t("still_searching_description")}
-											action={
-												<ActivityIndicator
-													size="small"
-													color={primaryColor}
-												/>
-											}
+											title={t("no_results")}
+											description={t("no_results_description")}
+										/>
+									)
+								}
+
+								// #26 — distinguish a query error with no retained data (show
+								// error + retry) from a genuinely empty directory (existing empty
+								// state). When data was retained through the error, items.length
+								// will be > 0 and this component is not rendered at all.
+								if (driveItemsQuery.status === "error") {
+									return (
+										<ListEmpty
+											icon="alert-circle-outline"
+											title={t("could_not_load_directory")}
+											description={t("please_check_connection")}
+											action={<Button onPress={() => void driveItemsQuery.refetch()}>{t("try_again")}</Button>}
+										/>
+									)
+								}
+
+								// Local-filter search (favorites/trash/recents/select/…) with no matches.
+								if (searchActive) {
+									return (
+										<ListEmpty
+											icon="search-outline"
+											title={t("no_results")}
+											description={t("no_results_description")}
 										/>
 									)
 								}
 
 								return (
 									<ListEmpty
-										icon="search-outline"
-										title={t("no_results")}
-										description={t("no_results_description")}
+										icon={getDriveEmptyStateIcon(drivePath.type)}
+										title={t(getDriveEmptyStateTitleKey(drivePath.type))}
+										description={t(getDriveEmptyStateDescriptionKey(drivePath.type))}
+										action={
+											driveCreateButtons.length > 0 ? (
+												<Menu
+													type="dropdown"
+													buttons={driveCreateButtons}
+												>
+													<PressableScale className="flex-row items-center gap-1.5 px-4 py-2">
+														<Ionicons
+															name="add"
+															size={20}
+															color={primaryColor}
+														/>
+														<Text
+															style={{ color: primaryColor }}
+															className="text-base font-medium"
+														>
+															{t("add")}
+														</Text>
+													</PressableScale>
+												</Menu>
+											) : undefined
+										}
 									/>
 								)
-							}
-
-							// #26 — distinguish a query error with no retained data (show
-							// error + retry) from a genuinely empty directory (existing empty
-							// state). When data was retained through the error, items.length
-							// will be > 0 and this component is not rendered at all.
-							if (driveItemsQuery.status === "error") {
-								return (
-									<ListEmpty
-										icon="alert-circle-outline"
-										title={t("could_not_load_directory")}
-										description={t("please_check_connection")}
-										action={<Button onPress={() => void driveItemsQuery.refetch()}>{t("try_again")}</Button>}
-									/>
-								)
-							}
-
-							// Local-filter search (favorites/trash/recents/select/…) with no matches.
-							if (searchActive) {
-								return (
-									<ListEmpty
-										icon="search-outline"
-										title={t("no_results")}
-										description={t("no_results_description")}
-									/>
-								)
-							}
-
-							return (
-								<ListEmpty
-									icon={getDriveEmptyStateIcon(drivePath.type)}
-									title={t(getDriveEmptyStateTitleKey(drivePath.type))}
-									description={t(getDriveEmptyStateDescriptionKey(drivePath.type))}
-									action={
-										driveCreateButtons.length > 0 ? (
-											<Menu
-												type="dropdown"
-												buttons={driveCreateButtons}
-											>
-												<PressableScale className="flex-row items-center gap-1.5 px-4 py-2">
-													<Ionicons
-														name="add"
-														size={20}
-														color={primaryColor}
-													/>
-													<Text
-														style={{ color: primaryColor }}
-														className="text-base font-medium"
-													>
-														{t("add")}
-													</Text>
-												</PressableScale>
-											</Menu>
-										) : undefined
-									}
-								/>
-							)
-						}}
-					/>
-				</LazyWrapper>
+							}}
+						/>
+					</LazyWrapper>
 				</View>
 			</SafeAreaView>
 		</Fragment>
