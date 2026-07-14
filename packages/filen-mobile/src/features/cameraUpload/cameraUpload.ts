@@ -706,6 +706,10 @@ class CameraUpload {
 
 			cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid, normalDir)
 			cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Normal(normalDir))
+
+			if (unwrappedDir.meta?.name) {
+				cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
+			}
 		}
 
 		const tree: RemoteTree = {}

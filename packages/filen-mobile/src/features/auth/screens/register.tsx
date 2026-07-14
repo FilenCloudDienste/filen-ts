@@ -232,7 +232,10 @@ const Register = () => {
 								autoCapitalize="none"
 								autoComplete="email"
 								autoCorrect={false}
-								textContentType="emailAddress"
+								// "username", not "emailAddress": pairs with the newPassword fields below so
+								// Password AutoFill saves the generated credential under this account name.
+								textContentType="username"
+								importantForAutofill="yes"
 								returnKeyType="next"
 								value={email}
 								onChangeText={setEmail}
@@ -254,6 +257,7 @@ const Register = () => {
 								autoComplete="new-password"
 								autoCorrect={false}
 								textContentType="newPassword"
+								importantForAutofill="yes"
 								returnKeyType="next"
 								value={password}
 								onChangeText={setPassword}
@@ -275,6 +279,7 @@ const Register = () => {
 								autoComplete="new-password"
 								autoCorrect={false}
 								textContentType="newPassword"
+								importantForAutofill="yes"
 								returnKeyType="go"
 								value={confirmPassword}
 								onChangeText={setConfirmPassword}

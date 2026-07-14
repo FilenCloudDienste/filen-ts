@@ -60,6 +60,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		requireFullScreen: true,
 		usesIcloudStorage: true,
 		appleTeamId: APPLE_TEAM_ID,
+		// Password AutoFill: associates the app with credentials saved for the Filen web
+		// domains so iOS and third-party password managers offer them on the login screen.
+		// Each listed domain must serve
+		// https://<domain>/.well-known/apple-app-site-association with
+		// "webcredentials": { "apps": ["<team>.<bundle>"] }. The Associated Domains App ID
+		// capability is enabled automatically by CI's cloud signing (-allowProvisioningUpdates).
+		associatedDomains: ["webcredentials:filen.io", "webcredentials:drive.filen.io", "webcredentials:app.filen.io"],
 		entitlements: {
 			"com.apple.security.application-groups": [IOS_APP_GROUP_ID],
 			// Dedicated team-prefixed keychain access group shared with the File Provider extension so

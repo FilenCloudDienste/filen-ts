@@ -255,7 +255,11 @@ const Login = () => {
 							autoCapitalize="none"
 							autoComplete="email"
 							autoCorrect={false}
-							textContentType="emailAddress"
+							// "username", not "emailAddress": Password AutoFill only pairs a credential
+							// (and shows the QuickType suggestion) for username+password fields — an
+							// emailAddress field gets contact-email suggestions instead.
+							textContentType="username"
+							importantForAutofill="yes"
 							returnKeyType="next"
 							value={email}
 							onChangeText={setEmail}
@@ -270,6 +274,7 @@ const Login = () => {
 							autoComplete="current-password"
 							autoCorrect={false}
 							textContentType="password"
+							importantForAutofill="yes"
 							returnKeyType="go"
 							value={password}
 							onChangeText={setPassword}
