@@ -18,6 +18,15 @@ const IncomingShareHandler = () => {
 			return
 		}
 
+		// Wait for the app to settle onto its start route before pushing. On a cold-boot share the app is
+		// briefly on the transient index route ("/"), which immediately redirects to the start screen — a
+		// push issued during that window is discarded by the redirect (and latching isProcessingRef here
+		// would then permanently skip the real, post-settle push). This effect re-runs when pathname
+		// updates, so we push once we're on a real route — where the modal also has a stack to close to.
+		if (pathname === "/") {
+			return
+		}
+
 		if (pathname.startsWith("/incomingShare") || navigationId?.startsWith("/incomingShare")) {
 			return
 		}
