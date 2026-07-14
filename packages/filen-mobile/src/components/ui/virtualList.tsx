@@ -89,6 +89,30 @@ export function validateVirtualListProps({
 	}
 }
 
+/**
+ * Pure helper: whether the FlashList's scroll view should be scrollable.
+ * Exported for unit-testing only.
+ *
+ * A non-scrollable list can't be pulled, so pull-to-refresh REQUIRES this to be true. Rules: locked
+ * while loading; otherwise enabled when there is data OR an onRefresh handler is set — so an EMPTY
+ * list still pulls to refresh. An empty list with no onRefresh stays locked (nothing to scroll or pull).
+ */
+export function resolveScrollEnabled({
+	loading,
+	dataLength,
+	hasOnRefresh
+}: {
+	loading?: boolean
+	dataLength: number
+	hasOnRefresh: boolean
+}): boolean {
+	if (loading) {
+		return false
+	}
+
+	return dataLength > 0 || hasOnRefresh
+}
+
 const VirtualListInner = (<T,>(props: FlashListProps<T> & React.RefAttributes<ListRef<T>> & VirtualListExtraProps) => {
 	const viewRef = useRef<RNView>(null)
 	const { layout, onLayout } = useViewLayout(viewRef)
@@ -189,7 +213,11 @@ const VirtualListInner = (<T,>(props: FlashListProps<T> & React.RefAttributes<Li
 					}}
 					showsHorizontalScrollIndicator={!props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
 					showsVerticalScrollIndicator={props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
-					scrollEnabled={!props.loading && !isEmpty && ((props.data ?? []).length > 0 || Boolean(props.onRefresh))}
+					scrollEnabled={resolveScrollEnabled({
+						loading: props.loading,
+						dataLength: (props.data ?? []).length,
+						hasOnRefresh: Boolean(props.onRefresh)
+					})}
 					ListEmptyComponent={emptyComponent}
 					ListFooterComponent={props.footerComponent}
 					ListHeaderComponent={props.headerComponent}

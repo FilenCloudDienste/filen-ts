@@ -39,7 +39,7 @@ vi.mock("@/hooks/useViewLayout", () => ({
 
 // ─── Actual imports ──────────────────────────────────────────────────────────
 
-import { resolveItemsPerRow, validateVirtualListProps } from "@/components/ui/virtualList"
+import { resolveItemsPerRow, resolveScrollEnabled, validateVirtualListProps } from "@/components/ui/virtualList"
 
 // ─── resolveItemsPerRow ───────────────────────────────────────────────────────
 
@@ -293,5 +293,31 @@ describe("validateVirtualListProps", () => {
 				})
 			).not.toThrow()
 		})
+	})
+})
+
+// ─── resolveScrollEnabled ─────────────────────────────────────────────────────
+
+describe("resolveScrollEnabled", () => {
+	it("enables scroll for an EMPTY list when onRefresh is set (pull-to-refresh must work)", () => {
+		expect(resolveScrollEnabled({ loading: false, dataLength: 0, hasOnRefresh: true })).toBe(true)
+	})
+
+	it("locks an empty list with no onRefresh (nothing to scroll or pull)", () => {
+		expect(resolveScrollEnabled({ loading: false, dataLength: 0, hasOnRefresh: false })).toBe(false)
+	})
+
+	it("enables scroll when there is data (with or without onRefresh)", () => {
+		expect(resolveScrollEnabled({ loading: false, dataLength: 5, hasOnRefresh: false })).toBe(true)
+		expect(resolveScrollEnabled({ loading: false, dataLength: 5, hasOnRefresh: true })).toBe(true)
+	})
+
+	it("locks the list while loading regardless of data or onRefresh", () => {
+		expect(resolveScrollEnabled({ loading: true, dataLength: 5, hasOnRefresh: true })).toBe(false)
+		expect(resolveScrollEnabled({ loading: true, dataLength: 0, hasOnRefresh: true })).toBe(false)
+	})
+
+	it("treats an undefined loading flag as not-loading", () => {
+		expect(resolveScrollEnabled({ dataLength: 0, hasOnRefresh: true })).toBe(true)
 	})
 })
