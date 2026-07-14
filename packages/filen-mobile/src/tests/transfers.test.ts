@@ -261,7 +261,9 @@ vi.mock("@/features/transfers/store/useTransfers.store", () => ({
 
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
-	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdate
+	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdate,
+	driveItemsQueryUpdateForPhotos: vi.fn(),
+	driveItemsQueryUpdateForRecents: vi.fn()
 }))
 
 vi.mock("@/lib/cache", () => ({

@@ -25,7 +25,7 @@ import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid } from "@/lib/sdkUnwrap
 import { driveItemDisplayName } from "@/lib/decryption"
 import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
 import { wrapAbortSignalForSdk, disposeSdkAbortSignal, PauseSignal, createCompositeAbortSignal, createCompositePauseSignal } from "@/lib/signals"
-import { driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"
+import { driveItemsQueryUpdateForNormalParent, driveItemsQueryUpdateForPhotos, driveItemsQueryUpdateForRecents } from "@/features/drive/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
@@ -837,6 +837,20 @@ export async function uploadCore(
 				),
 				driveItem
 			]
+		})
+
+		// Surface the new file in the two virtual-root queries it can belong to — both SEPARATE from the
+		// parent's `drive` listing. Photos: the recursive camera-upload-root grid, gated by parentUuid so an
+		// upload OUTSIDE that subtree is never wrongly inserted (it would linger until the grid refetches).
+		// Recents: any new file is recent, so it always qualifies. Dedupe by uuid (the flat/recursive lists
+		// can hold the same name twice).
+		driveItemsQueryUpdateForPhotos({
+			parentUuid: parent.inner[0].uuid,
+			updater: prev => [...prev.filter(item => item.data.uuid !== result.data.uuid), driveItem]
+		})
+
+		driveItemsQueryUpdateForRecents({
+			updater: prev => [...prev.filter(item => item.data.uuid !== result.data.uuid), driveItem]
 		})
 	}
 

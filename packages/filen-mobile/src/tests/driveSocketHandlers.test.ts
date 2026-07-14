@@ -46,7 +46,9 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdateGlobal: mockDriveItemsQueryUpdateGlobal,
 	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
-	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdateForNormalParent
+	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdateForNormalParent,
+	driveItemsQueryUpdateForPhotos: vi.fn(),
+	driveItemsQueryUpdateForRecents: vi.fn()
 }))
 
 vi.mock("@/lib/cache", () => ({

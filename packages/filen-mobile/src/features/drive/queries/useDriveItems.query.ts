@@ -9,6 +9,7 @@ import {
 	type SharedDir,
 	SharingRole,
 	AnyNormalDir,
+	AnyNormalDir_Tags,
 	AnySharedDir,
 	AnySharedDirWithContext,
 	AnyDirWithContext,
@@ -22,7 +23,7 @@ import {
 	AnyLinkedDirWithContext
 } from "@filen/sdk-rs"
 import { type DrivePath, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
-import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
+import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import type { DriveItem } from "@/types"
 import offline from "@/features/offline/offline"
@@ -773,6 +774,62 @@ export function driveItemsQueryUpdateGlobal({
 		})
 	}
 
+	driveItemsQueryUpdateForPhotos({ updater })
+}
+
+// Walks the cached directory tree up from `parentUuid`, reporting whether it is the camera-upload root
+// or a descendant of it. Gates the APPEND into the recursive photos query so a file uploaded OUTSIDE
+// the camera-upload subtree is never wrongly inserted there (it would otherwise linger until the query
+// next refetches). Bails to false on an uncached ancestor — a miss (the item just shows on the next
+// fetch) is acceptable; a false insert is not.
+function isUnderCameraUploadRoot(parentUuid: string, rootUuid: string): boolean {
+	let current: string | null = parentUuid
+	let guard = 0
+
+	while (current && guard++ < 64) {
+		if (current === rootUuid) {
+			return true
+		}
+
+		const anyDir = cache.directoryUuidToAnyNormalDir.get(current)
+
+		if (!anyDir || anyDir.tag !== AnyNormalDir_Tags.Dir) {
+			return false
+		}
+
+		const next = unwrapParentUuid(anyDir.inner[0].parent)
+
+		if (!next || next === current) {
+			return false
+		}
+
+		current = next
+	}
+
+	return false
+}
+
+// Optimistically update the recursive photos-grid query. It is a SEPARATE query from any `drive`
+// listing — keyed by the camera-upload root (`{ type: "photos", uuid: <remoteDir> }`) and populated by
+// listDirRecursive over that whole subtree — so a mutation that should surface in Photos must be
+// mirrored here explicitly.
+//
+// Pass `parentUuid` when APPENDING a newly-created item: the write then only fires if that parent is
+// the camera-upload root or a descendant, so a file uploaded elsewhere is never wrongly inserted into
+// this recursive query. Omit `parentUuid` for map/filter updaters (e.g. the global updater's metadata/
+// trash passes) — those naturally no-op on items not already present in the list.
+//
+// Fire-and-forget: resolving the camera-upload config is async and a failure just means the grid
+// reconciles on its next fetch. No-ops when camera upload has no destination.
+export function driveItemsQueryUpdateForPhotos({
+	updater,
+	parentUuid
+}: {
+	updater:
+		| Awaited<ReturnType<typeof fetchData>>
+		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
+	parentUuid?: string
+}): void {
 	cameraUpload
 		.getConfig()
 		.then(config => {
@@ -780,19 +837,49 @@ export function driveItemsQueryUpdateGlobal({
 				return
 			}
 
+			const rootUuid = config.remoteDir.inner[0].uuid
+
+			if (parentUuid !== undefined && !isUnderCameraUploadRoot(parentUuid, rootUuid)) {
+				return
+			}
+
 			driveItemsQueryUpdate({
 				params: {
 					path: {
 						type: "photos",
-						uuid: config.remoteDir.inner[0].uuid
+						uuid: rootUuid
 					}
 				},
 				updater
 			})
 		})
 		.catch(err => {
-			logger.error("drive", "driveItemsQueryUpdateGlobal: failed to get camera upload config", { error: err })
+			logger.error("drive", "driveItemsQueryUpdateForPhotos: failed to get camera upload config", { error: err })
 		})
+}
+
+// Optimistically update the Recents virtual root (`{ type: "recents", uuid: null }`, backed by
+// listRecents()). A brand-new file is the most-recent item, so it belongs here alongside its parent's
+// `drive` listing — and unlike Photos, Recents is not scoped to a subtree, so ANY new file qualifies
+// (no ancestry gate). Do NOT route new files through the global updater instead: that would also append
+// them to the favorites / links / sharedIn / sharedOut virtual roots, where an un-favorited, un-shared
+// file does not belong.
+export function driveItemsQueryUpdateForRecents({
+	updater
+}: {
+	updater:
+		| Awaited<ReturnType<typeof fetchData>>
+		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
+}): void {
+	driveItemsQueryUpdate({
+		params: {
+			path: {
+				type: "recents",
+				uuid: null
+			}
+		},
+		updater
+	})
 }
 
 export function driveItemsQueryGet(params: UseDriveItemsQueryParams) {

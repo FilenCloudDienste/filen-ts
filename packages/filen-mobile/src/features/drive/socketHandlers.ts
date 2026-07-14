@@ -2,7 +2,9 @@ import { DriveEvent_Tags, NonRootItem_Tags, AnyNormalDir_Tags, SocketEvent_Tags,
 import {
 	driveItemsQueryUpdateGlobal,
 	driveItemsQueryUpdate,
-	driveItemsQueryUpdateForNormalParent
+	driveItemsQueryUpdateForNormalParent,
+	driveItemsQueryUpdateForPhotos,
+	driveItemsQueryUpdateForRecents
 } from "@/features/drive/queries/useDriveItems.query"
 import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
 import { keepAgainstIncomingDriveItem } from "@/features/drive/driveSelectors"
@@ -38,6 +40,22 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 						...prev.filter(i => keepAgainstIncomingDriveItem(i, unwrappedFileMeta.file.uuid, unwrappedFileMeta.meta?.name)),
 						driveItem
 					]
+				})
+
+				// Mirror into the recursive Photos grid too — a SEPARATE virtual-root query from the parent's
+				// `drive` listing. Gated by parentUuid so only items actually under the camera-upload root land
+				// there (an unrelated file must not be inserted into this recursive query).
+				driveItemsQueryUpdateForPhotos({
+					parentUuid: unwrappedParentUuid,
+					updater: prev => [...prev.filter(i => i.data.uuid !== unwrappedFileMeta.file.uuid), driveItem]
+				})
+			}
+
+			// Recents (`{ type: "recents", uuid: null }`) holds recently-modified files across the account, so
+			// a genuinely NEW file belongs there. A restore leaves mtime unchanged, so it is not surfaced here.
+			if (eventInner.inner.tag === DriveEvent_Tags.FileNew) {
+				driveItemsQueryUpdateForRecents({
+					updater: prev => [...prev.filter(i => i.data.uuid !== unwrappedFileMeta.file.uuid), driveItem]
 				})
 			}
 
