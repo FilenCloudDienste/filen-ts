@@ -171,6 +171,26 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 							)
 					})
 
+					// If the edited message is the chat's lastMessage, the chats-list preview reads it from the
+					// SEPARATE chats query — mirror the new content there too, or the list keeps the old text.
+					chatsQueryUpdate({
+						updater: prev =>
+							prev.map(c =>
+								c.uuid === inner.chat && c.lastMessage?.inner.uuid === inner.uuid
+									? {
+											...c,
+											lastMessage: {
+												...c.lastMessage,
+												inner: {
+													...c.lastMessage.inner,
+													message: newContent
+												}
+											}
+										}
+									: c
+							)
+					})
+
 					break
 				}
 
@@ -206,6 +226,20 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 				},
 				updater: prev => prev.filter(m => m.inner.uuid !== inner.uuid)
 			})
+
+			// If the deleted message was the chat's lastMessage, the chats-list preview (a SEPARATE query)
+			// would keep showing the deleted text — recompute it to the newest remaining message (or null).
+			if (chat.lastMessage?.inner.uuid === inner.uuid) {
+				const remaining = chatMessagesQueryGet({ uuid: chat.uuid }) ?? []
+				const newLast = remaining.reduce<(typeof remaining)[number] | null>(
+					(latest, m) => (!latest || m.sentTimestamp > latest.sentTimestamp ? m : latest),
+					null
+				)
+
+				chatsQueryUpdate({
+					updater: prev => prev.map(c => (c.uuid === chat.uuid ? { ...c, lastMessage: newLast ?? undefined } : c))
+				})
+			}
 
 			break
 		}
