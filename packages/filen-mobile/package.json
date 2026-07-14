@@ -30,8 +30,10 @@
   },
   "expo": {
     "install": {
+      "//": "react-native-worklets is held ABOVE the Expo SDK pin (0.10.0): 0.10.1+ fixes a scheduleOnRN/runOnJS use-after-free that segfaults release builds (software-mansion/react-native-reanimated#9751, fix PR #9789). Remove the exclude and the manual version once the Expo pin reaches >=0.10.1.",
       "exclude": [
-        "@shopify/flash-list"
+        "@shopify/flash-list",
+        "react-native-worklets"
       ]
     },
     "autolinking": {
@@ -120,7 +122,7 @@
     "js-xxhash": "^5.0.1",
     "jszip": "^3.10.1",
     "mime-types": "^3.0.2",
-    "music-metadata": "^11.13.0",
+    "music-metadata": "^11.14.0",
     "path-browserify": "^1.0.1",
     "pressto": "^0.7.0",
     "quill": "^2.0.3",
@@ -148,7 +150,7 @@
     "react-native-svg": "15.15.4",
     "react-native-web": "~0.21.2",
     "react-native-webview": "13.16.1",
-    "react-native-worklets": "0.10.0",
+    "react-native-worklets": "0.10.2",
     "react-qr-code": "^2.2.0",
     "readable-stream": "^4.7.0",
     "reanimated-color-picker": "^5.1.2",
