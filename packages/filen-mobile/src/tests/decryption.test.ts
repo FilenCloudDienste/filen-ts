@@ -220,9 +220,10 @@ describe("chatDisplayName", () => {
 	const ME = 1n
 	const OTHER_A = 2n
 	const OTHER_B = 3n
+	const SOLO = "Just you"
 
 	it("returns the placeholder when chat is undecryptable", () => {
-		expect(chatDisplayName(chat("c1", true), ME)).toBe("cannot_decrypt_c1")
+		expect(chatDisplayName(chat("c1", true), ME, SOLO)).toBe("cannot_decrypt_c1")
 	})
 
 	it("uses chat.name when present and non-empty", () => {
@@ -232,7 +233,8 @@ describe("chatDisplayName", () => {
 					name: "Friends",
 					participants: [participant(ME, "me@x.com"), participant(OTHER_A, "a@x.com", "Ann")]
 				}),
-				ME
+				ME,
+				SOLO
 			)
 		).toBe("Friends")
 	})
@@ -244,7 +246,8 @@ describe("chatDisplayName", () => {
 					name: "",
 					participants: [participant(ME, "me@x.com"), participant(OTHER_A, "a@x.com", "Ann")]
 				}),
-				ME
+				ME,
+				SOLO
 			)
 		).toBe("Ann")
 	})
@@ -255,7 +258,8 @@ describe("chatDisplayName", () => {
 				chat("c1", false, {
 					participants: [participant(ME, "me@x.com"), participant(OTHER_A, "a@x.com", "Ann")]
 				}),
-				ME
+				ME,
+				SOLO
 			)
 		).toBe("Ann")
 	})
@@ -266,7 +270,8 @@ describe("chatDisplayName", () => {
 				chat("c1", false, {
 					participants: [participant(ME, "me@x.com"), participant(OTHER_A, "a@x.com")]
 				}),
-				ME
+				ME,
+				SOLO
 			)
 		).toBe("a@x.com")
 	})
@@ -277,7 +282,8 @@ describe("chatDisplayName", () => {
 				chat("c1", false, {
 					participants: [participant(ME, "me@x.com"), participant(OTHER_A, "a@x.com", "")]
 				}),
-				ME
+				ME,
+				SOLO
 			)
 		).toBe("a@x.com")
 	})
@@ -288,7 +294,8 @@ describe("chatDisplayName", () => {
 				chat("c1", false, {
 					participants: [participant(ME, "me@x.com"), participant(OTHER_A, "a@x.com", "Ann"), participant(OTHER_B, "b@x.com")]
 				}),
-				ME
+				ME,
+				SOLO
 			)
 		).toBe("Ann, b@x.com")
 	})
@@ -299,7 +306,8 @@ describe("chatDisplayName", () => {
 				chat("c1", false, {
 					participants: [participant(ME, "me@x.com", "Me"), participant(OTHER_A, "a@x.com", "Ann")]
 				}),
-				ME
+				ME,
+				SOLO
 			)
 		).toBe("Ann")
 	})
@@ -310,23 +318,42 @@ describe("chatDisplayName", () => {
 				chat("c1", false, {
 					participants: [participant(ME, "me@x.com"), participant(OTHER_B, "b@x.com"), participant(OTHER_A, "a@x.com", "Ann")]
 				}),
-				ME
+				ME,
+				SOLO
 			)
 		).toBe("Ann, b@x.com")
 	})
 
-	it("returns empty string when there are no other participants", () => {
+	it("returns the solo fallback when every other participant left (only self remains)", () => {
 		expect(
 			chatDisplayName(
 				chat("c1", false, {
 					participants: [participant(ME, "me@x.com")]
 				}),
-				ME
+				ME,
+				SOLO
 			)
-		).toBe("")
+		).toBe(SOLO)
 	})
 
-	it("returns empty string when participants array is completely empty", () => {
-		expect(chatDisplayName(chat("c1", false, { participants: [] }), ME)).toBe("")
+	it("returns the solo fallback when the participants array is completely empty", () => {
+		expect(chatDisplayName(chat("c1", false, { participants: [] }), ME, SOLO)).toBe(SOLO)
+	})
+
+	it("a custom chat name wins over the solo fallback", () => {
+		expect(
+			chatDisplayName(
+				chat("c1", false, {
+					name: "Friends",
+					participants: [participant(ME, "me@x.com")]
+				}),
+				ME,
+				SOLO
+			)
+		).toBe("Friends")
+	})
+
+	it("the undecryptable placeholder wins over the solo fallback", () => {
+		expect(chatDisplayName(chat("c1", true, { participants: [] }), ME, SOLO)).toBe("cannot_decrypt_c1")
 	})
 })

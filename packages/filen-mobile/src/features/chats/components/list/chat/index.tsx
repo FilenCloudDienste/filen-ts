@@ -51,7 +51,7 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 
 	const participantsWithoutSelf = info.item.participants.filter(p => p.userId !== stringifiedClient?.userId)
 
-	const title = stringifiedClient ? chatDisplayName(info.item, stringifiedClient.userId) : ""
+	const title = stringifiedClient ? chatDisplayName(info.item, stringifiedClient.userId, t("just_you")) : ""
 
 	const participantsWithAvatars = participantsWithoutSelf
 		.filter(p => p.avatar && p.avatar.startsWith("http"))

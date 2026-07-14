@@ -1,7 +1,9 @@
 import { AnyFile, MaybeEncryptedUniffi_Tags } from "@filen/sdk-rs"
+import { type Chat, type ChatMessage } from "@/types"
 import { type LinkResult } from "@/features/chats/queries/useChatMessageLinks.query"
 import { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { linkedFileIntoDriveItem } from "@/lib/sdkUnwrap"
+import { contactDisplayName } from "@/lib/utils"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import alerts from "@/lib/alerts"
 import { t as i18nT } from "@/lib/i18n"
@@ -78,6 +80,29 @@ export function resolveReplySenderDisplayName(senderNickName: string | undefined
 	}
 
 	return fallback
+}
+
+/**
+ * Resolves the sender label rendered above a message bubble, or null when no label applies
+ * (own messages, and 1:1 chats where the counterpart needs no attribution).
+ *
+ * Labels are shown in group chats (3+ current participants) AND for any sender who is no longer
+ * in chat.participants (they left): without one, a departed sender's history is unattributable —
+ * and in a group that shrank to two, indistinguishable from the remaining participant. Departed
+ * senders resolve via the message-embedded sender fields, mirroring the reply-to fallback.
+ */
+export function messageSenderLabel(chat: Chat, message: ChatMessage, currentUserId: bigint | undefined, fallback: string): string | null {
+	if (currentUserId === undefined || message.inner.senderId === currentUserId) {
+		return null
+	}
+
+	const senderParticipant = chat.participants.find(p => p.userId === message.inner.senderId)
+
+	if (senderParticipant) {
+		return chat.participants.length > 2 ? contactDisplayName(senderParticipant) : null
+	}
+
+	return resolveReplySenderDisplayName(message.inner.senderNickName, message.inner.senderEmail, fallback)
 }
 
 // The decrypted-file/directory shape carried by a successful internal link.

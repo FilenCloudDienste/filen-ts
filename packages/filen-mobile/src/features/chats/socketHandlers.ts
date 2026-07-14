@@ -20,6 +20,52 @@ function typingTimeoutKey(chatUuid: string, senderId: bigint): string {
 	return `${chatUuid}:${senderId}`
 }
 
+// Removes every local trace of a chat this account can no longer access — shared by
+// ConversationDeleted and by ConversationParticipantLeft when the leaver is ourselves (left from
+// another device/session). Returns false when the chats query doesn't know the chat (the inflight
+// purge still runs).
+async function removeChatLocally(uuid: string): Promise<boolean> {
+	// Purge the chat's queued unsent messages, send errors and input drafts immediately (D4b/M5) —
+	// the sync must never retry into a deleted chat, and a disk-restored queue could reference a
+	// chat the query cache doesn't even know about, so this runs unconditionally before the cache
+	// lookup below. Best-effort (never throws).
+	await purgeChatInflightState(uuid)
+
+	const chats = chatsQueryGet()
+	const chat = chats?.find(c => c.uuid === uuid)
+
+	if (!chat) {
+		return false
+	}
+
+	events.emit("chatConversationDeleted", {
+		uuid
+	})
+
+	// Purge the chat from the selection immediately so the list selection state (header count,
+	// deselect-all condition, bulk ops) never targets a non-existent conversation while the user
+	// stays on the chats tab. The query cache removal below is deferred, but the selection must
+	// not lag behind.
+	useChatsStore.getState().setSelectedChats(prev => prev.filter(c => c.uuid !== uuid))
+
+	// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack if we are inside the chat when this happen.
+	// This is a bit of a band-aid solution, ideally we would have a more robust way to handle this, but it works for now and the delay is short enough that it shouldn't cause any issues.
+	setTimeout(() => {
+		chatMessagesQueryUpdate({
+			params: {
+				uuid
+			},
+			updater: () => []
+		})
+
+		chatsQueryUpdate({
+			updater: prev => (prev ?? []).filter(c => c.uuid !== uuid)
+		})
+	}, 3000)
+
+	return true
+}
+
 export async function handleChatEvent({ event, userId }: { event: ChatSocketEvent; userId: bigint }): Promise<void> {
 	const [eventInner] = event.inner
 
@@ -301,44 +347,9 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 		case ChatEvent_Tags.ConversationDeleted: {
 			const [inner] = eventInner.inner.inner
 
-			// Purge the deleted chat's queued unsent messages, send errors and input drafts
-			// immediately (D4b/M5) — the sync must never retry into a deleted conversation, and a
-			// disk-restored queue could reference a chat the query cache doesn't even know about,
-			// so this runs unconditionally before the cache lookup below. Best-effort (never throws).
-			await purgeChatInflightState(inner.uuid)
-
-			const chats = chatsQueryGet()
-			const chat = chats?.find(c => c.uuid === inner.uuid)
-
-			if (!chat) {
+			if (!(await removeChatLocally(inner.uuid))) {
 				logger.warn("chats", "ConversationDeleted: chat not in cache", { chatUuid: inner.uuid })
-
-				break
 			}
-
-			events.emit("chatConversationDeleted", {
-				uuid: inner.uuid
-			})
-
-			// Purge the deleted chat from the selection immediately so the list selection state (header count,
-			// deselect-all condition, bulk ops) never targets a non-existent conversation while the user stays
-			// on the chats tab. The query cache removal below is deferred, but the selection must not lag behind.
-			useChatsStore.getState().setSelectedChats(prev => prev.filter(c => c.uuid !== inner.uuid))
-
-			// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack if we are inside the chat when this happen.
-			// This is a bit of a band-aid solution, ideally we would have a more robust way to handle this, but it works for now and the delay is short enough that it shouldn't cause any issues.
-			setTimeout(() => {
-				chatMessagesQueryUpdate({
-					params: {
-						uuid: inner.uuid
-					},
-					updater: () => []
-				})
-
-				chatsQueryUpdate({
-					updater: prev => (prev ?? []).filter(c => c.uuid !== inner.uuid)
-				})
-			}, 3000)
 
 			break
 		}
@@ -346,6 +357,16 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 		case ChatEvent_Tags.ConversationParticipantLeft: {
 			const [inner] = eventInner.inner.inner
 
+			// The leaver is ourselves (left from another device/session): the chat is gone for
+			// this account — remove it locally like a deletion. Keeping it would render a chat
+			// whose participants no longer include us (send silently no-ops, leave/selection
+			// gating breaks).
+			if (inner.userId === userId) {
+				await removeChatLocally(inner.uuid)
+
+				break
+			}
+
 			const chats = chatsQueryGet()
 			const chat = chats?.find(c => c.uuid === inner.uuid)
 
@@ -353,16 +374,17 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 				break
 			}
 
+			const updatedChat = {
+				...chat,
+				participants: chat.participants.filter(p => p.userId !== inner.userId)
+			}
+
+			// Keep the messages-query cache map coherent with the chats query (mirrors
+			// ConversationParticipantNew below).
+			cache.chatUuidToChat.set(updatedChat.uuid, updatedChat)
+
 			chatsQueryUpdate({
-				updater: prev =>
-					prev.map(c =>
-						c.uuid === inner.uuid
-							? {
-									...c,
-									participants: c.participants.filter(p => p.userId !== inner.userId)
-								}
-							: c
-					)
+				updater: prev => prev.map(c => (c.uuid === inner.uuid ? updatedChat : c))
 			})
 
 			break

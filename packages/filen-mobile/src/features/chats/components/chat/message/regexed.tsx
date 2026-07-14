@@ -244,10 +244,12 @@ const Regexed = ({ chat, message, fromSelf }: { chat: Chat; message: ChatMessage
 
 					const foundParticipant = chat.participants.find(p => p.email === email)
 
+					// The mention text is the email itself — render it rather than "unknown" so
+					// mentions of users who since left the chat stay attributable.
 					if (!foundParticipant) {
 						return (
 							<Mention
-								name={t("unknown")}
+								name={email}
 								fromSelf={fromSelf}
 							/>
 						)

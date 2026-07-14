@@ -125,6 +125,7 @@ vi.mock("@filen/sdk-rs", () => ({
 
 import { handleChatEvent, chatTypingTimeoutsRef, type ChatSocketEvent } from "@/features/chats/socketHandlers"
 import { ChatEvent_Tags, ChatTypingType, MaybeEncryptedUniffi_Tags, SocketEvent_Tags } from "@filen/sdk-rs"
+import cache from "@/lib/cache"
 
 // ---------------------------------------------------------------------------
 // Helpers — build minimal socket-event shapes matching the handler's destructure:
@@ -229,6 +230,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		mockSetTyping.mockClear()
 		mockSetSelectedChats.mockClear()
 		mockPurgeChatInflightState.mockClear()
+		;(cache.chatUuidToChat as unknown as Map<string, unknown>).clear()
 		// Clear any pending timeouts
 		for (const key of Object.keys(chatTypingTimeoutsRef)) {
 			clearTimeout(chatTypingTimeoutsRef[key])
@@ -827,6 +829,77 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			await handleChatEvent({ event, userId: USER_ID })
 
 			expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
+		})
+
+		it("mirrors the updated chat into cache.chatUuidToChat (coherent with ConversationParticipantNew)", async () => {
+			mockChatsQueryGet.mockReturnValue([
+				{
+					uuid: "chat-1",
+					participants: [{ userId: OTHER_USER_ID }, { userId: 999n }]
+				}
+			])
+
+			const event = makeConversationParticipantLeftEvent("chat-1", OTHER_USER_ID)
+
+			await handleChatEvent({ event, userId: USER_ID })
+
+			const cached = (cache.chatUuidToChat as unknown as Map<string, { participants: Array<{ userId: bigint }> }>).get("chat-1")
+
+			expect(cached).toBeDefined()
+			expect(cached!.participants.some(p => p.userId === OTHER_USER_ID)).toBe(false)
+			expect(cached!.participants.some(p => p.userId === 999n)).toBe(true)
+		})
+
+		// The leaver is ourselves (left from another device/session) — the chat must be removed
+		// locally like a deletion, not kept as a chat whose participants no longer include us.
+		describe("leaver is the current user (self left from another device)", () => {
+			it("purges the inflight state immediately, even when the chat is not in the cache", async () => {
+				mockChatsQueryGet.mockReturnValue([{ uuid: "chat-other" }])
+
+				const event = makeConversationParticipantLeftEvent("chat-1", USER_ID)
+
+				await handleChatEvent({ event, userId: USER_ID })
+
+				expect(mockPurgeChatInflightState).toHaveBeenCalledTimes(1)
+				expect(mockPurgeChatInflightState).toHaveBeenCalledWith("chat-1")
+				expect(mockEventsEmit).not.toHaveBeenCalled()
+			})
+
+			it("emits chatConversationDeleted and purges the selection immediately", async () => {
+				mockChatsQueryGet.mockReturnValue([{ uuid: "chat-1", participants: [{ userId: USER_ID }] }])
+
+				const event = makeConversationParticipantLeftEvent("chat-1", USER_ID)
+
+				await handleChatEvent({ event, userId: USER_ID })
+
+				expect(mockEventsEmit).toHaveBeenCalledOnce()
+				expect(mockEventsEmit).toHaveBeenCalledWith("chatConversationDeleted", { uuid: "chat-1" })
+				expect(mockSetSelectedChats).toHaveBeenCalledOnce()
+			})
+
+			it("removes the chat and clears its messages after the 3s timeout instead of filtering participants", async () => {
+				mockChatsQueryGet.mockReturnValue([{ uuid: "chat-1", participants: [{ userId: USER_ID }] }])
+
+				const event = makeConversationParticipantLeftEvent("chat-1", USER_ID)
+
+				await handleChatEvent({ event, userId: USER_ID })
+
+				// No immediate participants-filter update — removal is deferred like a deletion.
+				expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
+
+				vi.advanceTimersByTime(3000)
+
+				expect(mockChatMessagesQueryUpdate).toHaveBeenCalledOnce()
+				expect(mockChatsQueryUpdate).toHaveBeenCalledOnce()
+
+				const messagesUpdater = capturedMessagesUpdaters[0]!
+				expect(messagesUpdater(["anything" as unknown])).toEqual([])
+
+				const chatsUpdater = capturedChatsUpdaters[0]!
+				const result = chatsUpdater([{ uuid: "chat-1" }, { uuid: "chat-keep" }]) as Array<{ uuid: string }>
+				expect(result).toHaveLength(1)
+				expect(result[0]!.uuid).toBe("chat-keep")
+			})
 		})
 	})
 

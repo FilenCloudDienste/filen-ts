@@ -40,6 +40,11 @@ export const chats = {
 	/** Placeholder shown in the last-message preview when a chat has no messages yet */
 	no_messages_yet: "No messages yet",
 
+	// ── Chat title fallback ──────────────────────────────────────────────────
+	/** Fallback chat title (list row, conversation header, search) for an unnamed chat where
+	 *  every other participant has left and only the current user remains */
+	just_you: "Just you",
+
 	// ── Chat list row — typing indicator ─────────────────────────────────────
 	/** Typing indicator shown in a chat row when one or more users are typing. {{names}} is the comma-joined list of display names */
 	typing_with_names: "{{names}} typing...",

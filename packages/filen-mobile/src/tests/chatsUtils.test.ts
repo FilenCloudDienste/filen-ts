@@ -23,7 +23,11 @@ vi.mock("@filen/sdk-rs", () => {
 
 // The rest are only needed so utils.ts (which also exports the effectful openAttachmentPreview)
 // loads cleanly in the node env — resolveLinkMedia itself touches none of them.
-vi.mock("@/lib/utils", () => ({}))
+// contactDisplayName mirrors the real one-liner (nickName if non-empty, else email) because
+// messageSenderLabel resolves current participants through it.
+vi.mock("@/lib/utils", () => ({
+	contactDisplayName: (p: { nickName?: string; email: string }) => (p.nickName && p.nickName.length > 0 ? p.nickName : p.email)
+}))
 
 vi.mock("@/lib/sdkUnwrap", () => ({
 	linkedFileIntoDriveItem: vi.fn()
@@ -37,8 +41,15 @@ vi.mock("@/lib/i18n", () => ({ default: { t: (k: string) => k }, t: (k: string) 
 // ─── Actual imports ─────────────────────────────────────────────────────────────
 
 import { MaybeEncryptedUniffi_Tags } from "@filen/sdk-rs"
-import { resolveLinkMedia, resolveReplySenderDisplayName, composeMessageList, type SuccessfulLink } from "@/features/chats/utils"
+import {
+	resolveLinkMedia,
+	resolveReplySenderDisplayName,
+	messageSenderLabel,
+	composeMessageList,
+	type SuccessfulLink
+} from "@/features/chats/utils"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
+import { type Chat, type ChatMessage } from "@/types"
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -211,6 +222,77 @@ describe("resolveReplySenderDisplayName", () => {
 
 	it("prefers nickName over email even when both are non-empty", () => {
 		expect(resolveReplySenderDisplayName("Bob", "bob@example.com", "Unknown")).toBe("Bob")
+	})
+})
+
+// ─── messageSenderLabel ─────────────────────────────────────────────────────────
+
+const SELF_ID = 1n
+const OTHER_ID = 2n
+const THIRD_ID = 3n
+const DEPARTED_ID = 9n
+
+function labelChat(participants: Array<{ userId: bigint; email: string; nickName?: string }>): Chat {
+	return {
+		uuid: "chat-1",
+		participants
+	} as unknown as Chat
+}
+
+function labelMessage(senderId: bigint, senderEmail = "sender@example.com", senderNickName?: string): ChatMessage {
+	return {
+		inner: {
+			uuid: "msg-1",
+			senderId,
+			senderEmail,
+			senderNickName
+		}
+	} as unknown as ChatMessage
+}
+
+describe("messageSenderLabel", () => {
+	const self = { userId: SELF_ID, email: "me@example.com" }
+	const other = { userId: OTHER_ID, email: "other@example.com", nickName: "Ann" }
+	const third = { userId: THIRD_ID, email: "third@example.com" }
+
+	it("returns null for the current user's own messages", () => {
+		expect(messageSenderLabel(labelChat([self, other, third]), labelMessage(SELF_ID), SELF_ID, "Unknown")).toBeNull()
+	})
+
+	it("returns null when the current user id is unknown", () => {
+		expect(messageSenderLabel(labelChat([self, other, third]), labelMessage(OTHER_ID), undefined, "Unknown")).toBeNull()
+	})
+
+	it("returns null in a 1:1 for the current counterpart", () => {
+		expect(messageSenderLabel(labelChat([self, other]), labelMessage(OTHER_ID), SELF_ID, "Unknown")).toBeNull()
+	})
+
+	it("labels current participants in a group chat (3+ participants), preferring nickName", () => {
+		expect(messageSenderLabel(labelChat([self, other, third]), labelMessage(OTHER_ID), SELF_ID, "Unknown")).toBe("Ann")
+	})
+
+	it("labels current participants without a nickName by email in a group chat", () => {
+		expect(messageSenderLabel(labelChat([self, other, third]), labelMessage(THIRD_ID), SELF_ID, "Unknown")).toBe("third@example.com")
+	})
+
+	it("labels a departed sender in a solo chat via the message-embedded nickName", () => {
+		expect(messageSenderLabel(labelChat([self]), labelMessage(DEPARTED_ID, "gone@example.com", "Bob"), SELF_ID, "Unknown")).toBe("Bob")
+	})
+
+	it("labels a departed sender via the message-embedded email when no nickName", () => {
+		expect(messageSenderLabel(labelChat([self]), labelMessage(DEPARTED_ID, "gone@example.com"), SELF_ID, "Unknown")).toBe(
+			"gone@example.com"
+		)
+	})
+
+	it("labels a departed sender even when the chat still has two current participants (shrunk group)", () => {
+		expect(messageSenderLabel(labelChat([self, other]), labelMessage(DEPARTED_ID, "gone@example.com"), SELF_ID, "Unknown")).toBe(
+			"gone@example.com"
+		)
+	})
+
+	it("falls back to the provided string when a departed sender carries no usable fields", () => {
+		expect(messageSenderLabel(labelChat([self]), labelMessage(DEPARTED_ID, "", undefined), SELF_ID, "Unknown")).toBe("Unknown")
 	})
 })
 

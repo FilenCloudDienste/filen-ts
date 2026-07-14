@@ -41,7 +41,7 @@ export function noteDisplayTitle(note: Note): string {
 	return note.title ?? note.uuid
 }
 
-export function chatDisplayName(chat: Chat, currentUserId: bigint): string {
+export function chatDisplayName(chat: Chat, currentUserId: bigint, soloFallback: string): string {
 	if (chat.undecryptable) {
 		return cannotDecryptPlaceholder(chat.uuid)
 	}
@@ -52,6 +52,12 @@ export function chatDisplayName(chat: Chat, currentUserId: bigint): string {
 
 	// 1:1 fallback: use the other participant's display name
 	const others = chat.participants.filter(p => p.userId !== currentUserId)
+
+	// Every other participant left (the backend keeps a chat alive with only yourself in it) —
+	// joining an empty list would render an empty title everywhere.
+	if (others.length === 0) {
+		return soloFallback
+	}
 
 	if (others.length === 1) {
 		const other = others[0]

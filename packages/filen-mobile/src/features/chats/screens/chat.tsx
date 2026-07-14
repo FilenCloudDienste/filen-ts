@@ -36,11 +36,12 @@ import { useTranslation } from "react-i18next"
 import logger from "@/lib/logger"
 
 const HeaderTitle = ({ chat }: { chat: TChat }) => {
+	const { t } = useTranslation()
 	const stringifiedClient = useStringifiedClient()
 
 	const participantsWithoutSelf = chat.participants.filter(p => p.userId !== stringifiedClient?.userId)
 
-	const title = stringifiedClient ? chatDisplayName(chat, stringifiedClient.userId) : ""
+	const title = stringifiedClient ? chatDisplayName(chat, stringifiedClient.userId, t("just_you")) : ""
 
 	const participantsWithAvatars = participantsWithoutSelf
 		.filter(p => p.avatar && p.avatar.startsWith("http"))

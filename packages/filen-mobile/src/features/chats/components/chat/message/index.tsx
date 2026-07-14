@@ -7,7 +7,7 @@ import { cn, isTimestampSameMinute } from "@filen/utils"
 import { useStringifiedClient } from "@/lib/auth"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
-import { contactDisplayName } from "@/lib/utils"
+import { messageSenderLabel } from "@/features/chats/utils"
 import { extractLinks, safeParseUrl } from "@/lib/linkParser"
 import { Fragment } from "react"
 import { formatRelativeTime } from "@/lib/time"
@@ -65,6 +65,7 @@ const Message = ({
 	const isRevealed = useRevealedBlockedMessages(state => state.revealed.has(info.item.inner.uuid))
 	const showTombstone = senderBlocked && !isRevealed
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
+	const senderLabel = senderBlocked ? null : messageSenderLabel(chat, info.item, stringifiedClient?.userId, t("unknown"))
 
 	return (
 		<View
@@ -106,15 +107,9 @@ const Message = ({
 						<View className="flex-1 bg-red-500 h-px" />
 					</View>
 				)}
-			{chat.participants.length > 2 && info.item.inner.senderId !== stringifiedClient?.userId && !senderBlocked && (
+			{senderLabel !== null && (
 				<View className="max-w-3/4 flex-row items-center px-4 pb-1 pl-6">
-					<Text className="text-xs text-muted-foreground">
-						{(() => {
-							const senderParticipant = chat.participants.find(p => p.userId === info.item.inner.senderId)
-
-							return senderParticipant ? contactDisplayName(senderParticipant) : t("unknown")
-						})()}
-					</Text>
+					<Text className="text-xs text-muted-foreground">{senderLabel}</Text>
 				</View>
 			)}
 			{showTombstone && (
