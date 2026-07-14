@@ -84,6 +84,15 @@ export async function generateVideo(
 
 		let manipulated: ImageManipulator.ImageRef | null = null
 
+		// Free the native SharedObjects (Context + rendered ImageRef) on scope exit — both wrap decoded
+		// native bitmaps Hermes GC doesn't track, so without release they pile up during bulk generation
+		// until the OS memory-kills the app. Deferred so it runs AFTER renderAsync/saveAsync settle
+		// (releasing the Context mid-render cancels its coroutine — see the binding note above).
+		defer(() => {
+			manipulated?.release()
+			context.release()
+		})
+
 		try {
 			manipulated = await context.renderAsync()
 		} catch (error) {

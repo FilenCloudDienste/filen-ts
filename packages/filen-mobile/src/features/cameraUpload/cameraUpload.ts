@@ -274,49 +274,61 @@ class CameraUpload {
 		// the native task would be cancelled and renderAsync would reject with
 		// JobCancellationException.
 		const context = ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(file.uri))
-		const manipulated = await context.renderAsync()
-		const result = await manipulated.saveAsync({
-			compress: 0.8,
-			format: ImageManipulator.SaveFormat.JPEG,
-			base64: false
-		})
 
-		const manipulatedFile = new FileSystem.File(result.uri)
+		// The Context and the rendered ImageRef both wrap decoded native bitmaps that Hermes GC does not
+		// track; a bulk camera upload compresses many files back-to-back, so release them explicitly on
+		// every exit path (finally below) or the native memory accumulates until the OS OOM-kills the app.
+		let manipulated: ImageManipulator.ImageRef | null = null
 
-		if (!manipulatedFile.exists) {
-			throw new Error(i18n.t("camera_upload_processing_failed"))
-		}
+		try {
+			manipulated = await context.renderAsync()
 
-		if (!manipulatedFile.size || !file.size || manipulatedFile.size >= file.size) {
+			const result = await manipulated.saveAsync({
+				compress: 0.8,
+				format: ImageManipulator.SaveFormat.JPEG,
+				base64: false
+			})
+
+			const manipulatedFile = new FileSystem.File(result.uri)
+
+			if (!manipulatedFile.exists) {
+				throw new Error(i18n.t("camera_upload_processing_failed"))
+			}
+
+			if (!manipulatedFile.size || !file.size || manipulatedFile.size >= file.size) {
+				if (manipulatedFile.exists) {
+					manipulatedFile.delete()
+				}
+
+				return file
+			}
+
+			// The destination is the tmp staging file, which ALWAYS exists by construction
+			// (the asset was copied into it before compress() was called). Native copy throws
+			// when the destination exists unless overwrite is requested.
+			await manipulatedFile.copy(file, {
+				overwrite: true
+			})
+
 			if (manipulatedFile.exists) {
 				manipulatedFile.delete()
 			}
 
+			// Correct the extension to .jpg since the content is now JPEG.
+			// File.move() updates the uri property in place.
+			if (extname !== ".jpg" && extname !== ".jpeg") {
+				const newFile = new FileSystem.File(file.uri.replace(/\.[^.]+$/, ".jpg"))
+
+				await file.move(newFile)
+
+				return newFile
+			}
+
 			return file
+		} finally {
+			manipulated?.release()
+			context.release()
 		}
-
-		// The destination is the tmp staging file, which ALWAYS exists by construction
-		// (the asset was copied into it before compress() was called). Native copy throws
-		// when the destination exists unless overwrite is requested.
-		await manipulatedFile.copy(file, {
-			overwrite: true
-		})
-
-		if (manipulatedFile.exists) {
-			manipulatedFile.delete()
-		}
-
-		// Correct the extension to .jpg since the content is now JPEG.
-		// File.move() updates the uri property in place.
-		if (extname !== ".jpg" && extname !== ".jpeg") {
-			const newFile = new FileSystem.File(file.uri.replace(/\.[^.]+$/, ".jpg"))
-
-			await file.move(newFile)
-
-			return newFile
-		}
-
-		return file
 	}
 
 	private async listLocal({

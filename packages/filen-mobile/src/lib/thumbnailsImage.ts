@@ -129,6 +129,17 @@ export async function generateImage(
 
 		let manipulated: ImageManipulator.ImageRef | null = null
 
+		// Free the native SharedObjects (the manipulate Context and the rendered ImageRef) when this
+		// run() scope exits. Both wrap decoded native bitmaps that Hermes GC does not track, so without
+		// an explicit release they accumulate faster than GC reclaims them during bulk thumbnail
+		// generation (a large camera upload generates one thumbnail per file via transferCore) until the
+		// OS memory-pressure-kills the app. Deferred so release runs AFTER renderAsync/saveAsync settle —
+		// releasing the Context mid-render cancels its coroutine (JobCancellationException, per above).
+		defer(() => {
+			manipulated?.release()
+			context.release()
+		})
+
 		try {
 			manipulated = await context.renderAsync()
 		} catch (error) {

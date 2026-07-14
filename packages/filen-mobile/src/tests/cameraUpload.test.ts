@@ -2347,7 +2347,7 @@ describe("CameraUpload.compress()", () => {
 		const file = new MockFile(originalUri)
 
 		const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
-		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) }
+		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync, release: vi.fn() })), release: vi.fn() }
 
 		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
 
@@ -2373,7 +2373,7 @@ describe("CameraUpload.compress()", () => {
 		const file = new MockFile(originalUri)
 
 		const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
-		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) }
+		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync, release: vi.fn() })), release: vi.fn() }
 
 		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
 
@@ -3334,7 +3334,7 @@ describe("#15 regression — compress() extension gate", () => {
 		fs.set(manipulatedUri, new Uint8Array([1, 2, 3])) // smaller than source (100 bytes)
 
 		const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
-		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) }
+		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync, release: vi.fn() })), release: vi.fn() }
 
 		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
 
@@ -3368,7 +3368,7 @@ describe("#15 regression — compress() extension gate", () => {
 		fs.set(manipulatedUri, new Uint8Array(new Array(200).fill(2))) // larger — compress returns original
 
 		const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
-		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) }
+		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync, release: vi.fn() })), release: vi.fn() }
 
 		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
 
@@ -3402,7 +3402,7 @@ describe("#15 regression — compress() extension gate", () => {
 		fs.set(manipulatedUri, new Uint8Array([1, 2, 3])) // smaller than 100 bytes
 
 		const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
-		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) }
+		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync, release: vi.fn() })), release: vi.fn() }
 
 		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
 
@@ -3534,7 +3534,7 @@ describe("#15 regression — compress-rename dedup tree-key symmetry", () => {
 
 			const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
 
-			return { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) } as any
+			return { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync, release: vi.fn() })), release: vi.fn() } as any
 		})
 
 		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["d1", "d2"] })
@@ -3782,7 +3782,7 @@ describe("B2 — collision-resolved upload names", () => {
 
 			const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
 
-			return { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) } as any
+			return { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync, release: vi.fn() })), release: vi.fn() } as any
 		})
 
 		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["c1", "c2"] })
@@ -4184,7 +4184,7 @@ describe("B1 regression — compress copy overwrites the existing staging file",
 		fs.set(manipulatedUri, new Uint8Array([9, 9, 9]))
 
 		const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
-		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) }
+		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync, release: vi.fn() })), release: vi.fn() }
 
 		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
 

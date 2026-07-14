@@ -122,7 +122,7 @@ describe("prepareAvatarFileForUpload", () => {
 		const saveAsync = vi.fn(async () => ({ uri: convertedUri }))
 
 		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce({
-			renderAsync: vi.fn(async () => ({ saveAsync }))
+			renderAsync: vi.fn(async () => ({ saveAsync, release: vi.fn() })), release: vi.fn()
 		} as unknown as ReturnType<typeof ImageManipulator.manipulate>)
 
 		const file = await prepareAvatarFileForUpload({
@@ -143,7 +143,7 @@ describe("prepareAvatarFileForUpload", () => {
 		const { ImageManipulator } = await import("expo-image-manipulator")
 
 		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce({
-			renderAsync: vi.fn(async () => ({ saveAsync: vi.fn(async () => ({ uri: "file:///tmp/missing.jpg" })) }))
+			renderAsync: vi.fn(async () => ({ saveAsync: vi.fn(async () => ({ uri: "file:///tmp/missing.jpg" })), release: vi.fn() })), release: vi.fn()
 		} as unknown as ReturnType<typeof ImageManipulator.manipulate>)
 
 		await expect(
@@ -187,7 +187,7 @@ describe("prepareAvatarFileForUpload", () => {
 		const saveAsync = vi.fn(async () => ({ uri: convertedUri }))
 
 		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce({
-			renderAsync: vi.fn(async () => ({ saveAsync }))
+			renderAsync: vi.fn(async () => ({ saveAsync, release: vi.fn() })), release: vi.fn()
 		} as unknown as ReturnType<typeof ImageManipulator.manipulate>)
 
 		const deferred: Array<() => void> = []

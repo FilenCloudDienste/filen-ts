@@ -6,6 +6,7 @@ const {
 	mockResize,
 	mockRotate,
 	mockManipulate,
+	mockRelease,
 	mockGetThumbnailAsync,
 	mockDownloadFileToPath,
 	mockGetSdkClients,
@@ -17,14 +18,16 @@ const {
 	mockIsOnline,
 	mockOnlineSubscribers
 } = vi.hoisted(() => {
+	const mockRelease = vi.fn()
 	const mockSaveAsync = vi.fn().mockResolvedValue({ uri: "file:///cache/manipulated.jpg" })
-	const mockRenderAsync = vi.fn().mockResolvedValue({ saveAsync: mockSaveAsync })
-	const mockResize = vi.fn().mockReturnValue({ renderAsync: mockRenderAsync })
+	const mockRenderAsync = vi.fn().mockResolvedValue({ saveAsync: mockSaveAsync, release: mockRelease })
+	const mockResize = vi.fn().mockReturnValue({ renderAsync: mockRenderAsync, release: mockRelease })
 	const mockRotate = vi.fn()
 	const mockManipulate = vi.fn().mockReturnValue({
 		resize: mockResize,
 		rotate: mockRotate,
-		renderAsync: mockRenderAsync
+		renderAsync: mockRenderAsync,
+		release: mockRelease
 	})
 
 	const mockGetThumbnailAsync = vi.fn().mockResolvedValue({ uri: "file:///cache/vidframe.jpg", width: 1920, height: 1080 })
@@ -60,6 +63,7 @@ const {
 		mockResize,
 		mockRotate,
 		mockManipulate,
+		mockRelease,
 		mockGetThumbnailAsync,
 		mockDownloadFileToPath,
 		mockGetSdkClients,
@@ -275,13 +279,14 @@ describe("Thumbnails", () => {
 			return { uri }
 		})
 
-		mockRenderAsync.mockResolvedValue({ saveAsync: mockSaveAsync })
-		mockResize.mockReturnValue({ renderAsync: mockRenderAsync })
+		mockRenderAsync.mockResolvedValue({ saveAsync: mockSaveAsync, release: mockRelease })
+		mockResize.mockReturnValue({ renderAsync: mockRenderAsync, release: mockRelease })
 
 		const manipulatorResult = {
 			resize: mockResize,
 			rotate: mockRotate,
-			renderAsync: mockRenderAsync
+			renderAsync: mockRenderAsync,
+			release: mockRelease
 		}
 
 		mockRotate.mockReturnValue(manipulatorResult)
@@ -323,6 +328,10 @@ describe("Thumbnails", () => {
 				format: "webp",
 				base64: false
 			})
+
+			// Regression guard: the native SharedObjects (Context + rendered ImageRef) must be released
+			// after generation, or their decoded bitmaps accumulate and OOM-kill the app on bulk uploads.
+			expect(mockRelease).toHaveBeenCalled()
 
 			expect(result).toBe(`${THUMBNAILS_DIR}/test-uuid.webp`)
 		})

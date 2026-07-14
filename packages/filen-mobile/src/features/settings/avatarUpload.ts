@@ -40,25 +40,37 @@ export async function prepareAvatarFileForUpload({ asset, defer }: { asset: Imag
 		// the native task would be cancelled and renderAsync would reject with
 		// JobCancellationException.
 		const context = ImageManipulator.ImageManipulator.manipulate(asset.uri)
-		const manipulated = await context.renderAsync()
-		const saved = await manipulated.saveAsync({
-			format: ImageManipulator.SaveFormat.JPEG,
-			base64: false
-		})
 
-		const convertedFile = new FileSystem.File(saved.uri)
+		// The Context and rendered ImageRef wrap decoded native bitmaps Hermes GC does not track;
+		// release both once the transcode is done (finally) so a picked avatar doesn't strand native
+		// memory (same SharedObject-release discipline as the thumbnail / camera-upload image paths).
+		let manipulated: ImageManipulator.ImageRef | null = null
 
-		defer(() => {
-			if (convertedFile.exists) {
-				convertedFile.delete()
+		try {
+			manipulated = await context.renderAsync()
+
+			const saved = await manipulated.saveAsync({
+				format: ImageManipulator.SaveFormat.JPEG,
+				base64: false
+			})
+
+			const convertedFile = new FileSystem.File(saved.uri)
+
+			defer(() => {
+				if (convertedFile.exists) {
+					convertedFile.delete()
+				}
+			})
+
+			if (!convertedFile.exists) {
+				throw new Error(i18n.t("avatar_upload_failed"))
 			}
-		})
 
-		if (!convertedFile.exists) {
-			throw new Error(i18n.t("avatar_upload_failed"))
+			fileToUpload = convertedFile
+		} finally {
+			manipulated?.release()
+			context.release()
 		}
-
-		fileToUpload = convertedFile
 	}
 
 	return fileToUpload

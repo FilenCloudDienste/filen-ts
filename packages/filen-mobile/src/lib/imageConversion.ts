@@ -61,30 +61,42 @@ export async function convertHeicToJpg(file: FileSystem.File): Promise<FileSyste
 		// chained intermediate ref eligible for Hermes GC during renderAsync rejects with
 		// JobCancellationException. (Same guard as cameraUpload.compress().)
 		const context = ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(file.uri))
-		const rendered = await context.renderAsync()
-		const result = await rendered.saveAsync({
-			compress: HEIC_JPG_QUALITY,
-			format: ImageManipulator.SaveFormat.JPEG,
-			base64: false
-		})
 
-		const converted = new FileSystem.File(result.uri)
+		// The Context and rendered ImageRef wrap decoded native bitmaps Hermes GC does not track; a bulk
+		// camera upload converts many HEIC files back-to-back, so release both on every exit path (finally
+		// below) or the native memory accumulates until the OS OOM-kills the app.
+		let rendered: ImageManipulator.ImageRef | null = null
 
-		if (!converted.exists) {
-			return file
+		try {
+			rendered = await context.renderAsync()
+
+			const result = await rendered.saveAsync({
+				compress: HEIC_JPG_QUALITY,
+				format: ImageManipulator.SaveFormat.JPEG,
+				base64: false
+			})
+
+			const converted = new FileSystem.File(result.uri)
+
+			if (!converted.exists) {
+				return file
+			}
+
+			// Land the result in filen-tmp under a `.jpg` name so it survives the
+			// sandbox-cache-clear action and the downstream upload-name logic sees `.jpg`.
+			const target = newTmpFile(`${randomUUID()}.jpg`)
+
+			if (target.exists) {
+				target.delete()
+			}
+
+			await converted.move(target)
+
+			return target
+		} finally {
+			rendered?.release()
+			context.release()
 		}
-
-		// Land the result in filen-tmp under a `.jpg` name so it survives the
-		// sandbox-cache-clear action and the downstream upload-name logic sees `.jpg`.
-		const target = newTmpFile(`${randomUUID()}.jpg`)
-
-		if (target.exists) {
-			target.delete()
-		}
-
-		await converted.move(target)
-
-		return target
 	} catch (e) {
 		logger.warn("cameraUpload", "HEIC to JPG conversion failed, uploading original", { uri: file.uri, error: e })
 
