@@ -2,9 +2,9 @@ import * as MediaLibrary from "expo-media-library/next"
 import * as MediaLibraryLegacy from "expo-media-library/legacy"
 import logger from "@/lib/logger"
 import auth from "@/lib/auth"
-import { type FileWithPath, AnyNormalDir, AnyNormalDir_Tags, AnyDirWithContext } from "@filen/sdk-rs"
+import { type FileWithPath, AnyNormalDir, AnyNormalDir_Tags, AnyDirWithContext, NonRootDir_Tags } from "@filen/sdk-rs"
 import { normalizeModificationTimestampForComparison } from "@/lib/utils"
-import { type UnwrapFileMetaResult, unwrapFileMeta } from "@/lib/sdkUnwrap"
+import { type UnwrapFileMetaResult, unwrapFileMeta, unwrapDirMeta } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForExpo } from "@/lib/paths"
 import { isConvertHeicToJpgEnabled, convertHeicToJpg } from "@/lib/imageConversion"
 import { PauseSignal } from "@/lib/signals"
@@ -424,7 +424,10 @@ class CameraUpload {
 					if (!config.includeVideos) {
 						query = query.within(MediaLibrary.AssetField.MEDIA_TYPE, [MediaLibrary.MediaType.IMAGE])
 					} else {
-						query = query.within(MediaLibrary.AssetField.MEDIA_TYPE, [MediaLibrary.MediaType.IMAGE, MediaLibrary.MediaType.VIDEO])
+						query = query.within(MediaLibrary.AssetField.MEDIA_TYPE, [
+							MediaLibrary.MediaType.IMAGE,
+							MediaLibrary.MediaType.VIDEO
+						])
 					}
 
 					if (config.afterActivation) {
@@ -652,7 +655,7 @@ class CameraUpload {
 		// the listing while the call still resolves Ok — collect the scan errors instead
 		// of discarding them.
 		const scanErrors: unknown[] = []
-		const { files } = await authedSdkClient.listDirRecursiveWithPaths(
+		const { files, dirs = [] } = await authedSdkClient.listDirRecursiveWithPaths(
 			new AnyDirWithContext.Normal(remoteDir),
 			{
 				onProgress() {
@@ -676,7 +679,10 @@ class CameraUpload {
 		// anything this device already uploaded; the residual risk is version churn on
 		// fresh devices, accepted and surfaced here.
 		if (scanErrors.length > 0 && !signal.aborted) {
-			logger.warn("cameraUpload", "Remote listing degraded by scan errors", { errorCount: scanErrors.length, firstError: scanErrors[0] })
+			logger.warn("cameraUpload", "Remote listing degraded by scan errors", {
+				errorCount: scanErrors.length,
+				firstError: scanErrors[0]
+			})
 
 			useCameraUploadStore.getState().setErrors(errors => [
 				...errors,
@@ -686,6 +692,20 @@ class CameraUpload {
 					error: new Error(i18n.t("camera_upload_remote_listing_incomplete"))
 				}
 			])
+		}
+
+		for (const { dir } of dirs) {
+			if (dir.tag !== NonRootDir_Tags.Normal) {
+				continue
+			}
+
+			const resultDir = dir.inner[0]
+			const unwrappedDir = unwrapDirMeta(resultDir)
+
+			const normalDir = new AnyNormalDir.Dir(resultDir)
+
+			cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid, normalDir)
+			cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Normal(normalDir))
 		}
 
 		const tree: RemoteTree = {}
@@ -966,7 +986,11 @@ class CameraUpload {
 		}
 	}
 
-	public async sync(params?: { maxUploads?: number; background?: boolean; manual?: boolean }): Promise<{ success: boolean; error?: unknown }> {
+	public async sync(params?: {
+		maxUploads?: number
+		background?: boolean
+		manual?: boolean
+	}): Promise<{ success: boolean; error?: unknown }> {
 		// Capture both signals once so that cancel() — which aborts the current
 		// controller and creates fresh instances for future syncs — reliably
 		// stops every operation in this sync via the captured references,
@@ -1072,7 +1096,9 @@ class CameraUpload {
 				})
 
 				if (destinationCheck.success && !destinationCheck.data) {
-					logger.warn("cameraUpload", "Remote destination is unusable (deleted or trashed), skipping sync", { remoteDirUuid: remoteDir.inner[0].uuid })
+					logger.warn("cameraUpload", "Remote destination is unusable (deleted or trashed), skipping sync", {
+						remoteDirUuid: remoteDir.inner[0].uuid
+					})
 
 					return
 				}
@@ -1212,7 +1238,10 @@ class CameraUpload {
 					const assetId = delta.file.info.id
 
 					if ((this.uploadFailures.get(assetId) ?? 0) >= MAX_UPLOAD_FAILURES) {
-						logger.warn("cameraUpload", "Asset skipped after max upload failures", { assetId, maxFailures: MAX_UPLOAD_FAILURES })
+						logger.warn("cameraUpload", "Asset skipped after max upload failures", {
+							assetId,
+							maxFailures: MAX_UPLOAD_FAILURES
+						})
 
 						// CU-09: surface the skipped asset (id + filename) so the user can retry it from
 						// the issues modal. The skip DECISION still keys on uploadFailures above — this is
@@ -1434,7 +1463,11 @@ class CameraUpload {
 
 						this.uploadFailures.set(assetId, (this.uploadFailures.get(assetId) ?? 0) + 1)
 
-						logger.error("cameraUpload", "Upload pipeline failed for asset", { assetId, filename: delta.file.info.filename, error: result.error })
+						logger.error("cameraUpload", "Upload pipeline failed for asset", {
+							assetId,
+							filename: delta.file.info.filename,
+							error: result.error
+						})
 
 						useCameraUploadStore.getState().setErrors(errors => [
 							...errors,
