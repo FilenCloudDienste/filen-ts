@@ -50,7 +50,7 @@ export function isChatUndecryptable(chat: Chat): boolean {
 // component that renders chat rows (chatRow.tsx's `t("chatUndecryptable")`) — same posture
 // notes/lib/sort.ts takes for noteDisplayTitle (falls back to the raw uuid, not a placeholder
 // string, at this foundation layer).
-export function chatDisplayName(chat: Chat, currentUserId: bigint): string {
+export function chatDisplayName(chat: Chat, currentUserId: bigint, soloFallback: string): string {
 	if (isChatUndecryptable(chat)) {
 		return chat.uuid
 	}
@@ -60,6 +60,12 @@ export function chatDisplayName(chat: Chat, currentUserId: bigint): string {
 	}
 
 	const others = chat.participants.filter(p => p.userId !== currentUserId)
+
+	// Every other participant left (the backend keeps a chat alive with only yourself in it) —
+	// joining an empty list would render an empty title everywhere.
+	if (others.length === 0) {
+		return soloFallback
+	}
 
 	if (others.length === 1) {
 		const other = others[0]

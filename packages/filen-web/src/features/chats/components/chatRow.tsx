@@ -42,7 +42,11 @@ export function ChatRow({ chat, selected, multiSelected, currentUserId, onAction
 	const { t } = useTranslation("chats")
 	const { t: tCommon } = useTranslation("common")
 	const undecryptable = isChatUndecryptable(chat)
-	const name = undecryptable ? t("chatUndecryptable") : currentUserId !== undefined ? chatDisplayName(chat, currentUserId) : chat.uuid
+	const name = undecryptable
+		? t("chatUndecryptable")
+		: currentUserId !== undefined
+			? chatDisplayName(chat, currentUserId, t("chatJustYou"))
+			: chat.uuid
 	// Typing beats the last-message preview while any remote user is actively typing — the tier
 	// chatMessagePreview (lib/sort.ts) itself does not cover. Falls back to the message preview when nobody is typing.
 	const typingLabel = useChatTypingLabel(chat.uuid, currentUserId)

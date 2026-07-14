@@ -399,7 +399,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	const headerTitle = isChatUndecryptable(chat)
 		? t("chatUndecryptable")
 		: currentUserId !== undefined
-			? chatDisplayName(chat, currentUserId)
+			? chatDisplayName(chat, currentUserId, t("chatJustYou"))
 			: chat.uuid
 	const headerAvatarUrl = chatAvatarUrl(chat, currentUserId)
 

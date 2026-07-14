@@ -81,10 +81,15 @@ export function MessageContent({ chat, text }: { chat: Chat; text: string | unde
 						const label = segment.everyone
 							? t("chatMentionEveryone")
 							: (() => {
-									const participant =
-										segment.email !== null ? chat.participants.find(p => p.email === segment.email) : undefined
+									if (segment.email === null) {
+										return t("chatMentionUnknown")
+									}
 
-									return participant !== undefined ? contactDisplayName(participant) : t("chatMentionUnknown")
+									const participant = chat.participants.find(p => p.email === segment.email)
+
+									// The mention text is the email itself — render it rather than "unknown"
+									// so mentions of users who since left the chat stay attributable.
+									return participant !== undefined ? contactDisplayName(participant) : segment.email
 								})()
 
 						return (

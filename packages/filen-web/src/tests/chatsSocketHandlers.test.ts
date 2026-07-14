@@ -325,6 +325,36 @@ describe("chat socket handlers — conversations", () => {
 		expect(getChats()[0]?.participants.map(p => p.userId)).toEqual([2n])
 	})
 
+	it("conversationParticipantLeft for the CURRENT user removes the chat entirely (left from another tab/device)", async () => {
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 1n })
+		seedChats([makeChat("c1", { participants: [participant(1n), participant(2n)] }), makeChat("c2")])
+		seedMessages("c1", [makeMessage("m1", "c1")])
+		setFocusedChat(testUuid("c1"))
+
+		handleChatEvent({ inner: { type: "conversationParticipantLeft", uuid: testUuid("c1"), userId: 1n }, chatMessageId: 0n })
+
+		// The self-removal runs the fire-and-forget conversationDeleted path — flush it.
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(purgeChatInflightState).toHaveBeenCalledWith(testUuid("c1"))
+		expect(getChats().map(c => c.uuid)).toEqual([testUuid("c2")])
+		expect(getMessages("c1")).toEqual([])
+		expect(getFocusedChat()).toBeNull()
+	})
+
+	it("conversationParticipantLeft for ANOTHER user only filters the participant, never removes the chat", async () => {
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 1n })
+		seedChats([makeChat("c1", { participants: [participant(1n), participant(2n)] })])
+
+		handleChatEvent({ inner: { type: "conversationParticipantLeft", uuid: testUuid("c1"), userId: 2n }, chatMessageId: 0n })
+
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		expect(purgeChatInflightState).not.toHaveBeenCalled()
+		expect(getChats().map(c => c.uuid)).toEqual([testUuid("c1")])
+		expect(getChats()[0]?.participants.map(p => p.userId)).toEqual([1n])
+	})
+
 	it("conversationDeleted purges FIRST, then removes the chat + clears typing + focus", async () => {
 		seedChats([makeChat("c1"), makeChat("c2")])
 		seedMessages("c1", [makeMessage("m1", "c1")])

@@ -73,7 +73,7 @@ export function ChatsSidebar() {
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 
 	const allChats = chatsQuery.data ?? []
-	const rows = filterChats(allChats, search, currentUserId)
+	const rows = filterChats(allChats, search, currentUserId, t("chatJustYou"))
 	const searching = search.trim().length > 0
 
 	const virtualizer = useVirtualizer({

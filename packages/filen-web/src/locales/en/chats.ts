@@ -39,6 +39,9 @@ export const chats = {
 	chatUnreadCount_other: "{{count}} unread messages",
 	/** Conversation row — display fallback for a conversation whose key didn't decrypt */
 	chatUndecryptable: "Encrypted conversation",
+	/** Conversation row / thread header — title fallback for an unnamed conversation where every
+	 *  other participant has left and only the current user remains */
+	chatJustYou: "Just you",
 
 	// ── Thread ───────────────────────────────────────────────────────────────────
 	/** Thread — prompt in the main card when no conversation is selected */

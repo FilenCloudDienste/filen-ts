@@ -82,3 +82,34 @@ describe("MessageContent — custom emoji pack + jumbo sizing", () => {
 		expect(container.querySelector("img")?.getAttribute("loading")).toBe("lazy")
 	})
 })
+
+describe("MessageContent — mentions", () => {
+	it("renders a current participant's mention as their display name", () => {
+		const chat = mockChat({
+			participants: [
+				{
+					userId: 2n,
+					email: "alice@example.com",
+					nickName: "Alice",
+					permissionsAdd: false,
+					added: 0n,
+					appearOffline: false,
+					lastActive: 0n
+				}
+			]
+		})
+
+		const { container } = render(createElement(MessageContent, { chat, text: "hey @alice@example.com nice" }))
+
+		expect(container.textContent).toContain("@Alice")
+	})
+
+	// A mention of a user who since left the chat (no participant match) must keep the email from the
+	// mention text itself — "unknown" would strip the only attribution the message still carries.
+	it("renders a mention of a departed (non-participant) user as the email itself, not 'unknown'", () => {
+		const { container } = render(createElement(MessageContent, { chat: mockChat(), text: "hey @gone@example.com nice" }))
+
+		expect(container.textContent).toContain("@gone@example.com")
+		expect(container.textContent).not.toContain("unknown")
+	})
+})

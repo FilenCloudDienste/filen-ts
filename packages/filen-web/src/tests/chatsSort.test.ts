@@ -148,46 +148,47 @@ describe("isChatUndecryptable", () => {
 
 describe("chatDisplayName — display-name derivation table", () => {
 	const self = 1n
+	const solo = "Just you"
 
 	it("falls back to the raw uuid for an undecryptable chat, ignoring name/participants", () => {
 		const uuid = testUuid("undecryptable")
 		const chat = mockUndecryptableChat({ uuid, name: "should be ignored" })
 
-		expect(chatDisplayName(chat, self)).toBe(uuid)
+		expect(chatDisplayName(chat, self, solo)).toBe(uuid)
 	})
 
 	it("uses the explicit chat name when set", () => {
 		const chat = mockChat({ name: "Team Chat", participants: [mockParticipant({ userId: self })] })
 
-		expect(chatDisplayName(chat, self)).toBe("Team Chat")
+		expect(chatDisplayName(chat, self, solo)).toBe("Team Chat")
 	})
 
 	it("ignores an empty-string name and falls through to participant derivation", () => {
 		const other = mockParticipant({ userId: 2n, email: "other@example.com" })
 		const chat = mockChat({ name: "", participants: [mockParticipant({ userId: self }), other] })
 
-		expect(chatDisplayName(chat, self)).toBe("other@example.com")
+		expect(chatDisplayName(chat, self, solo)).toBe("other@example.com")
 	})
 
 	it("1:1 — uses the other participant's nickName when present", () => {
 		const other = mockParticipant({ userId: 2n, email: "other@example.com", nickName: "Bob" })
 		const chat = mockChat({ participants: [mockParticipant({ userId: self }), other] })
 
-		expect(chatDisplayName(chat, self)).toBe("Bob")
+		expect(chatDisplayName(chat, self, solo)).toBe("Bob")
 	})
 
 	it("1:1 — falls back to email when the other participant has no nickName", () => {
 		const other = mockParticipant({ userId: 2n, email: "other@example.com", nickName: undefined })
 		const chat = mockChat({ participants: [mockParticipant({ userId: self }), other] })
 
-		expect(chatDisplayName(chat, self)).toBe("other@example.com")
+		expect(chatDisplayName(chat, self, solo)).toBe("other@example.com")
 	})
 
 	it("1:1 — treats an empty-string nickName the same as absent", () => {
 		const other = mockParticipant({ userId: 2n, email: "other@example.com", nickName: "" })
 		const chat = mockChat({ participants: [mockParticipant({ userId: self }), other] })
 
-		expect(chatDisplayName(chat, self)).toBe("other@example.com")
+		expect(chatDisplayName(chat, self, solo)).toBe("other@example.com")
 	})
 
 	it("group — joins every other participant's display name, locale-sorted", () => {
@@ -195,14 +196,32 @@ describe("chatDisplayName — display-name derivation table", () => {
 		const p2 = mockParticipant({ userId: 3n, email: "unused@example.com", nickName: "Alpha" })
 		const chat = mockChat({ participants: [mockParticipant({ userId: self }), p1, p2] })
 
-		expect(chatDisplayName(chat, self)).toBe("Alpha, zeta@example.com")
+		expect(chatDisplayName(chat, self, solo)).toBe("Alpha, zeta@example.com")
 	})
 
 	it("excludes the current user from the joined group name", () => {
 		const p1 = mockParticipant({ userId: 2n, email: "other@example.com" })
 		const chat = mockChat({ participants: [mockParticipant({ userId: self, email: "self@example.com" }), p1] })
 
-		expect(chatDisplayName(chat, self)).toBe("other@example.com")
+		expect(chatDisplayName(chat, self, solo)).toBe("other@example.com")
+	})
+
+	it("returns the solo fallback when every other participant left (only self remains)", () => {
+		const chat = mockChat({ participants: [mockParticipant({ userId: self })] })
+
+		expect(chatDisplayName(chat, self, solo)).toBe(solo)
+	})
+
+	it("returns the solo fallback when the participants array is completely empty", () => {
+		const chat = mockChat({ participants: [] })
+
+		expect(chatDisplayName(chat, self, solo)).toBe(solo)
+	})
+
+	it("a custom chat name wins over the solo fallback", () => {
+		const chat = mockChat({ name: "Team Chat", participants: [] })
+
+		expect(chatDisplayName(chat, self, solo)).toBe("Team Chat")
 	})
 })
 

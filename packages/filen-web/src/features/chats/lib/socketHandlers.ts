@@ -213,6 +213,20 @@ export function handleChatEvent(event: TypedChatSocketEvent): void {
 		}
 
 		case "conversationParticipantLeft": {
+			// The leaver is ourselves (left from another tab/device): the chat is gone for this
+			// account — run the full local removal (the conversationDeleted path) instead of keeping
+			// a chat whose participants no longer include us. Same fire-and-forget ownership as the
+			// conversationDeleted arm below.
+			const userId = currentUserId()
+
+			if (userId !== undefined && inner.userId === userId) {
+				void handleConversationDeleted(inner.uuid).catch((e: unknown) => {
+					log.error("socket", "conversationParticipantLeft self-removal threw", e)
+				})
+
+				return
+			}
+
 			chatsQueryUpdate(prev =>
 				prev.map(c => (c.uuid === inner.uuid ? { ...c, participants: c.participants.filter(p => p.userId !== inner.userId) } : c))
 			)

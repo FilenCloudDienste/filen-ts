@@ -25,7 +25,10 @@ function isListedChat(chat: Chat, currentUserId: bigint | undefined): boolean {
 //
 // The owned-or-has-a-message visibility filter (isListedChat) applies before both the empty-search and
 // term-search branches — it's a list-membership rule, not a search refinement.
-export function filterChats(chats: readonly Chat[], search: string, currentUserId: bigint | undefined): Chat[] {
+//
+// `soloFallback` is the rendered title of a chat with no other participants (chatDisplayName's own
+// fallback) — threaded through so searching matches exactly what the row displays.
+export function filterChats(chats: readonly Chat[], search: string, currentUserId: bigint | undefined, soloFallback: string): Chat[] {
 	const sorted = sortChats(chats).filter(chat => isListedChat(chat, currentUserId))
 	const term = search.trim().toLowerCase()
 
@@ -38,7 +41,7 @@ export function filterChats(chats: readonly Chat[], search: string, currentUserI
 			return false
 		}
 
-		if (currentUserId !== undefined && chatDisplayName(chat, currentUserId).toLowerCase().includes(term)) {
+		if (currentUserId !== undefined && chatDisplayName(chat, currentUserId, soloFallback).toLowerCase().includes(term)) {
 			return true
 		}
 

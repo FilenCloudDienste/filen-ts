@@ -63,6 +63,9 @@ function mockUndecryptableChat(label: string, overrides: Omit<Partial<Chat>, "ke
 }
 
 const SELF = 1n
+// The rendered title of a chat with no other participants — threaded through filterChats so search
+// matches what the row displays (chatDisplayName's soloFallback).
+const SOLO = "Just you"
 
 describe("filterChats", () => {
 	it("returns the full sorted list for an empty search term", () => {
@@ -70,14 +73,14 @@ describe("filterChats", () => {
 		const newer = mockChat("b", { lastMessage: mockMessage({ sentTimestamp: 200n }) })
 
 		// sortChats orders newest-lastMessage first, independent of input order.
-		expect(filterChats([older, newer], "", SELF).map(c => c.uuid)).toEqual([newer.uuid, older.uuid])
+		expect(filterChats([older, newer], "", SELF, SOLO).map(c => c.uuid)).toEqual([newer.uuid, older.uuid])
 	})
 
 	it("matches on the conversation display name", () => {
 		const named = mockChat("a", { name: "Weekend Plans" })
 		const other = mockChat("b", { name: "Work" })
 
-		expect(filterChats([named, other], "weekend", SELF).map(c => c.uuid)).toEqual([named.uuid])
+		expect(filterChats([named, other], "weekend", SELF, SOLO).map(c => c.uuid)).toEqual([named.uuid])
 	})
 
 	it("matches on a participant email or nickname", () => {
@@ -86,14 +89,23 @@ describe("filterChats", () => {
 			participants: [mockParticipant({ userId: 1n }), mockParticipant({ userId: 2n, email: "zoe@example.com" })]
 		})
 
-		expect(filterChats([chat], "zoe@", SELF).map(c => c.uuid)).toEqual([chat.uuid])
+		expect(filterChats([chat], "zoe@", SELF, SOLO).map(c => c.uuid)).toEqual([chat.uuid])
 	})
 
 	it("excludes undecryptable conversations from a term match but keeps them for an empty search", () => {
 		const undecryptable = mockUndecryptableChat("a")
 
-		expect(filterChats([undecryptable], "", SELF).map(c => c.uuid)).toEqual([undecryptable.uuid])
-		expect(filterChats([undecryptable], "anything", SELF)).toEqual([])
+		expect(filterChats([undecryptable], "", SELF, SOLO).map(c => c.uuid)).toEqual([undecryptable.uuid])
+		expect(filterChats([undecryptable], "anything", SELF, SOLO)).toEqual([])
+	})
+
+	// A chat with no other participants renders the solo-fallback title — searching that exact text
+	// must find it, same as any other displayed name.
+	it("matches a solo chat (every other participant left) on its rendered fallback title", () => {
+		const solo = mockChat("a", { participants: [mockParticipant({ userId: SELF })], lastMessage: mockMessage() })
+		const other = mockChat("b", { name: "Work", lastMessage: mockMessage() })
+
+		expect(filterChats([solo, other], "just you", SELF, SOLO).map(c => c.uuid)).toEqual([solo.uuid])
 	})
 
 	// Search also matches the conversation's last-message text (name/email/nickname already covered
@@ -102,7 +114,7 @@ describe("filterChats", () => {
 		const chat = mockChat("a", { name: "Untitled", lastMessage: mockMessage({ message: "let's meet at noon" }) })
 		const other = mockChat("b", { name: "Other", lastMessage: mockMessage({ message: "unrelated" }) })
 
-		expect(filterChats([chat, other], "meet at noon", SELF).map(c => c.uuid)).toEqual([chat.uuid])
+		expect(filterChats([chat, other], "meet at noon", SELF, SOLO).map(c => c.uuid)).toEqual([chat.uuid])
 	})
 
 	// A chat the viewer merely joined (not owned) and that has never had a message is hidden from
@@ -112,31 +124,31 @@ describe("filterChats", () => {
 		it("hides a chat with no messages that the viewer does not own", () => {
 			const invitedEmpty = mockChat("a", { ownerId: 2n })
 
-			expect(filterChats([invitedEmpty], "", SELF)).toEqual([])
+			expect(filterChats([invitedEmpty], "", SELF, SOLO)).toEqual([])
 		})
 
 		it("keeps an owned chat even with no messages yet", () => {
 			const ownedEmpty = mockChat("a", { ownerId: SELF })
 
-			expect(filterChats([ownedEmpty], "", SELF).map(c => c.uuid)).toEqual([ownedEmpty.uuid])
+			expect(filterChats([ownedEmpty], "", SELF, SOLO).map(c => c.uuid)).toEqual([ownedEmpty.uuid])
 		})
 
 		it("keeps a non-owned chat once it has at least one message", () => {
 			const invitedWithMessage = mockChat("a", { ownerId: 2n, lastMessage: mockMessage() })
 
-			expect(filterChats([invitedWithMessage], "", SELF).map(c => c.uuid)).toEqual([invitedWithMessage.uuid])
+			expect(filterChats([invitedWithMessage], "", SELF, SOLO).map(c => c.uuid)).toEqual([invitedWithMessage.uuid])
 		})
 
 		it("hides an unowned, message-less chat from a term search too, not just the empty-search list", () => {
 			const invitedEmpty = mockChat("a", { ownerId: 2n, name: "Weekend Plans" })
 
-			expect(filterChats([invitedEmpty], "weekend", SELF)).toEqual([])
+			expect(filterChats([invitedEmpty], "weekend", SELF, SOLO)).toEqual([])
 		})
 
 		it("treats an unresolved current-user id as not-owner, hiding message-less chats", () => {
 			const chat = mockChat("a", { ownerId: 1n })
 
-			expect(filterChats([chat], "", undefined)).toEqual([])
+			expect(filterChats([chat], "", undefined, SOLO)).toEqual([])
 		})
 	})
 })
