@@ -15,8 +15,11 @@ import logger from "@/lib/logger"
 // path has no user-owned parent directory (e.g. shared-in, trash, or an uncached directory).
 // Single source for the drive header menu AND the empty-state CTA.
 export function getDriveParent(drivePath: DrivePath): AnyNormalDir | null {
-	// At the drive root with a cached root uuid, the parent is the root directory.
-	if (drivePath.type === "drive" && drivePath.uuid === null && cache.rootUuid) {
+	// At the drive root with a cached root uuid, the parent is the root directory. The root is
+	// reached both with no uuid (native-tab nav) and with the explicit root uuid (the index
+	// redirect / start-screen href) — the root is never in directoryUuidToAnyNormalDir, so both
+	// forms must short-circuit here, mirroring the listing query's root resolution.
+	if (drivePath.type === "drive" && cache.rootUuid && (drivePath.uuid === null || drivePath.uuid === cache.rootUuid)) {
 		return new AnyNormalDir.Root({
 			uuid: cache.rootUuid
 		})
