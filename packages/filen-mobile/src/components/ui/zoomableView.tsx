@@ -210,6 +210,13 @@ type SharedValues = {
 	panTouchStartY: SharedValue<number>
 	// 1 while a pinch is active — drives the gallery pager-block + release re-align.
 	pinchActive: SharedValue<number>
+	// 0 until the pinch's first onUpdate re-captures the focal/scale baseline. The
+	// activation (onStart) event is not trustworthy on Android: PinchGestureHandler
+	// seeds its focal point with the FIRST pointer's position and the manual
+	// activation races the ScaleGestureDetector's two-finger centroid, so anchoring
+	// on onStart makes the first frame jump toward the first finger. Re-anchoring on
+	// the first CHANGED event keeps baseline and deltas in the same event stream.
+	pinchAnchored: SharedValue<number>
 	dismissCommitted: SharedValue<number>
 	focalX: SharedValue<number>
 	focalY: SharedValue<number>
@@ -408,9 +415,13 @@ function buildComposedGesture(
 			sv.savedScale.value = sv.scale.value
 			sv.savedTranslateX.value = sv.translateX.value
 			sv.savedTranslateY.value = sv.translateY.value
+			// Fallback baseline only (a pinch that ends without a single update, e.g.
+			// computePinchSettleTarget reading focalX) — the authoritative anchor is
+			// re-captured on the first onUpdate below (see SharedValues.pinchAnchored).
 			sv.pinchBaseScale.value = e.scale
 			sv.focalX.value = e.focalX
 			sv.focalY.value = e.focalY
+			sv.pinchAnchored.value = 0
 
 			if (sv.pinchActive.value === 0) {
 				sv.pinchActive.value = 1
@@ -422,6 +433,20 @@ function buildComposedGesture(
 			"worklet"
 
 			if (sv.dismissCommitted.value === 1 || e.numberOfPointers < 2) {
+				return
+			}
+
+			// First two-finger update: re-anchor the baseline from THIS event stream and
+			// apply nothing this frame. The content has not moved since onStart, so
+			// skipping one frame is invisible — while any mismatch between the activation
+			// event's focal/scale and the update stream (Android's first-pointer focal
+			// seed) would otherwise land as a jump toward the first finger.
+			if (sv.pinchAnchored.value === 0) {
+				sv.pinchAnchored.value = 1
+				sv.pinchBaseScale.value = e.scale
+				sv.focalX.value = e.focalX
+				sv.focalY.value = e.focalY
+
 				return
 			}
 
@@ -684,6 +709,7 @@ const ZoomableView = ({
 	const panTouchStartX = useSharedValue<number>(0)
 	const panTouchStartY = useSharedValue<number>(0)
 	const pinchActive = useSharedValue<number>(0)
+	const pinchAnchored = useSharedValue<number>(0)
 	const dismissCommitted = useSharedValue<number>(0)
 	const focalX = useSharedValue<number>(0)
 	const focalY = useSharedValue<number>(0)
@@ -733,6 +759,7 @@ const ZoomableView = ({
 			panTouchStartX,
 			panTouchStartY,
 			pinchActive,
+			pinchAnchored,
 			dismissCommitted,
 			focalX,
 			focalY,
