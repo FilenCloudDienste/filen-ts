@@ -643,6 +643,7 @@
 	"postal_code": "Irányítószám",
 	"preview_cache_cleared": "Előnézet-gyorsítótár törölve",
 	"preview_load_failed": "A fájlt nem sikerült betölteni",
+	"preview_not_text": "Ez a fájl nem szövegfájl, ezért nem jeleníthető meg",
 	"preview_type": "Előnézet típusa",
 	"preview_type_audio": "Hang",
 	"preview_type_code": "Kód",

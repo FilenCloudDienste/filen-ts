@@ -652,6 +652,7 @@
 	"postal_code": "PSČ",
 	"preview_cache_cleared": "Mezipaměť náhledů byla vymazána",
 	"preview_load_failed": "Tento soubor se nepodařilo načíst",
+	"preview_not_text": "Tento soubor není textový a nelze jej zobrazit",
 	"preview_type": "Typ náhledu",
 	"preview_type_audio": "Zvuk",
 	"preview_type_code": "Kód",

@@ -643,6 +643,7 @@
 	"postal_code": "Posta kodu",
 	"preview_cache_cleared": "Önizleme önbelleği temizlendi",
 	"preview_load_failed": "Bu dosya yüklenemedi",
+	"preview_not_text": "Bu dosya bir metin dosyası değil ve görüntülenemiyor",
 	"preview_type": "Önizleme türü",
 	"preview_type_audio": "Ses",
 	"preview_type_code": "Kod",

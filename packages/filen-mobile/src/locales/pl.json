@@ -661,6 +661,7 @@
 	"postal_code": "Kod pocztowy",
 	"preview_cache_cleared": "Pamięć podręczna podglądów wyczyszczona",
 	"preview_load_failed": "Nie udało się wczytać tego pliku",
+	"preview_not_text": "Ten plik nie jest plikiem tekstowym i nie można go wyświetlić",
 	"preview_type": "Typ podglądu",
 	"preview_type_audio": "Audio",
 	"preview_type_code": "Kod",

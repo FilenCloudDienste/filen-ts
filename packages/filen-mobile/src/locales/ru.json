@@ -661,6 +661,7 @@
 	"postal_code": "Почтовый индекс",
 	"preview_cache_cleared": "Кэш предпросмотра очищен",
 	"preview_load_failed": "Не удалось загрузить этот файл",
+	"preview_not_text": "Это не текстовый файл, его невозможно отобразить",
 	"preview_type": "Тип предпросмотра",
 	"preview_type_audio": "Аудио",
 	"preview_type_code": "Код",

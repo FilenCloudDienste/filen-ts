@@ -643,6 +643,7 @@
 	"postal_code": "邮政编码",
 	"preview_cache_cleared": "预览缓存已清除",
 	"preview_load_failed": "无法加载此文件",
+	"preview_not_text": "此文件不是文本文件，无法显示",
 	"preview_type": "预览类型",
 	"preview_type_audio": "音频",
 	"preview_type_code": "代码",

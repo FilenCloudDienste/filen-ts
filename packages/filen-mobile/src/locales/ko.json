@@ -643,6 +643,7 @@
 	"postal_code": "우편번호",
 	"preview_cache_cleared": "미리보기 캐시가 지워졌습니다",
 	"preview_load_failed": "이 파일을 불러올 수 없습니다",
+	"preview_not_text": "이 파일은 텍스트 파일이 아니어서 표시할 수 없습니다",
 	"preview_type": "미리보기 유형",
 	"preview_type_audio": "오디오",
 	"preview_type_code": "코드",

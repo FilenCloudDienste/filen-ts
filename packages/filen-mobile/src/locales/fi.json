@@ -643,6 +643,7 @@
 	"postal_code": "Postinumero",
 	"preview_cache_cleared": "Esikatseluvälimuisti tyhjennetty",
 	"preview_load_failed": "Tiedostoa ei voitu ladata",
+	"preview_not_text": "Tämä tiedosto ei ole tekstitiedosto, eikä sitä voi näyttää",
 	"preview_type": "Esikatselun tyyppi",
 	"preview_type_audio": "Ääni",
 	"preview_type_code": "Koodi",

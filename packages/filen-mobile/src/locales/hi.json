@@ -643,6 +643,7 @@
 	"postal_code": "पोस्टल कोड",
 	"preview_cache_cleared": "पूर्वावलोकन कैश साफ़ कर दिया गया",
 	"preview_load_failed": "यह फ़ाइल लोड नहीं हो सकी",
+	"preview_not_text": "यह फ़ाइल टेक्स्ट फ़ाइल नहीं है और इसे प्रदर्शित नहीं किया जा सकता",
 	"preview_type": "पूर्वावलोकन प्रकार",
 	"preview_type_audio": "ऑडियो",
 	"preview_type_code": "कोड",

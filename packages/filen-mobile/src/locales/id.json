@@ -643,6 +643,7 @@
 	"postal_code": "Kode pos",
 	"preview_cache_cleared": "Cache pratinjau dihapus",
 	"preview_load_failed": "Tidak dapat memuat file ini",
+	"preview_not_text": "File ini bukan file teks dan tidak dapat ditampilkan",
 	"preview_type": "Tipe pratinjau",
 	"preview_type_audio": "Audio",
 	"preview_type_code": "Kode",
