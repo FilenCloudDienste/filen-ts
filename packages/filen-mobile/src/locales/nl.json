@@ -643,6 +643,7 @@
 	"postal_code": "Postcode",
 	"preview_cache_cleared": "Voorbeeldcache gewist",
 	"preview_load_failed": "Kon dit bestand niet laden",
+	"preview_not_text": "Dit bestand is geen tekstbestand en kan niet worden weergegeven",
 	"preview_type": "Voorbeeldtype",
 	"preview_type_audio": "Audio",
 	"preview_type_code": "Code",

@@ -643,6 +643,7 @@
 	"postal_code": "Postal code",
 	"preview_cache_cleared": "Preview cache cleared",
 	"preview_load_failed": "Could not load this file",
+	"preview_not_text": "This file is not a text file and can't be displayed",
 	"preview_type": "Preview type",
 	"preview_type_audio": "Audio",
 	"preview_type_code": "Code",

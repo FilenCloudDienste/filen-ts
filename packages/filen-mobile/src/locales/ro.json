@@ -652,6 +652,7 @@
 	"postal_code": "Cod poștal",
 	"preview_cache_cleared": "Cache-ul de previzualizări a fost șters",
 	"preview_load_failed": "Acest fișier nu a putut fi încărcat",
+	"preview_not_text": "Acest fișier nu este un fișier text și nu poate fi afișat",
 	"preview_type": "Tip previzualizare",
 	"preview_type_audio": "Audio",
 	"preview_type_code": "Cod",

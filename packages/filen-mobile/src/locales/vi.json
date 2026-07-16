@@ -643,6 +643,7 @@
 	"postal_code": "Mã bưu chính",
 	"preview_cache_cleared": "Đã xóa bộ nhớ đệm xem trước",
 	"preview_load_failed": "Không thể tải tệp này",
+	"preview_not_text": "Tệp này không phải tệp văn bản và không thể hiển thị",
 	"preview_type": "Loại xem trước",
 	"preview_type_audio": "Âm thanh",
 	"preview_type_code": "Mã",

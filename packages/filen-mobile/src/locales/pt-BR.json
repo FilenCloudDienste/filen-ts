@@ -643,6 +643,7 @@
 	"postal_code": "Código postal",
 	"preview_cache_cleared": "Cache de pré-visualizações limpa",
 	"preview_load_failed": "Não foi possível carregar este ficheiro",
+	"preview_not_text": "Este arquivo não é um arquivo de texto e não pode ser exibido",
 	"preview_type": "Tipo de pré-visualização",
 	"preview_type_audio": "Áudio",
 	"preview_type_code": "Código",

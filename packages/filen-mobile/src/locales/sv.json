@@ -643,6 +643,7 @@
 	"postal_code": "Postnummer",
 	"preview_cache_cleared": "Förhandsvisningscache rensad",
 	"preview_load_failed": "Kunde inte läsa in den här filen",
+	"preview_not_text": "Den här filen är inte en textfil och kan inte visas",
 	"preview_type": "Förhandsvisningstyp",
 	"preview_type_audio": "Ljud",
 	"preview_type_code": "Kod",

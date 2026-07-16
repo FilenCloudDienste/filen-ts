@@ -643,6 +643,7 @@
 	"postal_code": "郵便番号",
 	"preview_cache_cleared": "プレビューキャッシュを消去しました",
 	"preview_load_failed": "このファイルを読み込めませんでした",
+	"preview_not_text": "このファイルはテキストファイルではないため表示できません",
 	"preview_type": "プレビュータイプ",
 	"preview_type_audio": "オーディオ",
 	"preview_type_code": "コード",
