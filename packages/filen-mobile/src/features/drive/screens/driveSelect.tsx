@@ -1,10 +1,10 @@
 import Drive from "@/features/drive/components"
-import { Fragment, useEffect, useCallback } from "react"
+import { Fragment, useEffect } from "react"
 import DriveSelectToolbar from "@/components/driveSelectToolbar"
 import auth, { useSdkClients } from "@/lib/auth"
 import events from "@/lib/events"
 import { randomUUID } from "expo-crypto"
-import { useFocusEffect } from "expo-router"
+import useEffectOnce from "@/hooks/useEffectOnce"
 import { router } from "@/lib/router"
 import useDrivePath, { type SelectOptions } from "@/hooks/useDrivePath"
 import { serialize } from "@/lib/serializer"
@@ -88,15 +88,18 @@ const DriveSelectListener = () => {
 		}
 	}, [drivePath, authedSdkClient])
 
-	useFocusEffect(
-		useCallback(() => {
-			useDriveSelectStore.getState().setSelectedItems([])
+	// Once per screen instance: seed the selection with the caller's current value (e.g.
+	// the configured camera-upload directory) so the picker opens showing it ticked;
+	// without a seed this is the plain reset it always was. selectOptions is a route
+	// param — immutable for the screen's lifetime — so the first-render closure
+	// useEffectOnce captures is exact. Reset on unmount so no selection leaks out.
+	useEffectOnce(() => {
+		useDriveSelectStore.getState().setSelectedItems(drivePath.selectOptions?.initiallySelected ?? [])
 
-			return () => {
-				useDriveSelectStore.getState().setSelectedItems([])
-			}
-		}, [])
-	)
+		return () => {
+			useDriveSelectStore.getState().setSelectedItems([])
+		}
+	})
 
 	return null
 }

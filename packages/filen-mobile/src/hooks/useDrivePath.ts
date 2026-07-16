@@ -33,6 +33,10 @@ export type SelectOptions = {
 	directories: boolean
 	intention: "move" | "select"
 	items: DriveItem[]
+	// Rows the picker opens with already ticked — the caller's current value (e.g. the
+	// configured camera-upload directory). Pure selection-store seeding; unlike `items`
+	// (which DISABLES rows in select intent), these stay fully interactive.
+	initiallySelected?: DriveItem[]
 	previewType?: PreviewType
 	id: string
 }
@@ -78,6 +82,7 @@ export default function useDrivePath(): DrivePath {
 					directories: parsed.directories,
 					intention: parsed.intention,
 					items: parsed.items,
+					initiallySelected: parsed.initiallySelected,
 					id: parsed.id,
 					previewType: parsed.previewType
 				}

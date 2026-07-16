@@ -23,6 +23,7 @@ import {
 	isDirectoryItem,
 	isDriveItemDisabled,
 	isDriveItemNavigateOnly,
+	nextDriveSelectSelection,
 	resolveDriveNavigationTarget,
 	keepAgainstIncomingDriveItem
 } from "@/features/drive/driveSelectors"
@@ -415,9 +416,7 @@ describe("isDriveItemDisabled", () => {
 			isDriveItemDisabled({
 				item: file("a"),
 				drivePath: drivePath("drive"),
-				previewType: null,
-				selectedFromDriveSelectCount: 0,
-				isSelectedFromDriveSelect: false
+				previewType: null
 			})
 		).toBe(false)
 	})
@@ -429,9 +428,7 @@ describe("isDriveItemDisabled", () => {
 			isDriveItemDisabled({
 				item: dir("a", false, true),
 				drivePath: drivePath("drive", { selectOptions: selectOptions({ intention: "move", directories: true, files: false }) }),
-				previewType: null,
-				selectedFromDriveSelectCount: 0,
-				isSelectedFromDriveSelect: false
+				previewType: null
 			})
 		).toBe(true)
 	})
@@ -445,9 +442,7 @@ describe("isDriveItemDisabled", () => {
 				drivePath: drivePath("drive", {
 					selectOptions: selectOptions({ intention: "move", directories: true, files: false, items: [target] })
 				}),
-				previewType: null,
-				selectedFromDriveSelectCount: 0,
-				isSelectedFromDriveSelect: false
+				previewType: null
 			})
 		).toBe(true)
 	})
@@ -459,9 +454,7 @@ describe("isDriveItemDisabled", () => {
 				drivePath: drivePath("drive", {
 					selectOptions: selectOptions({ intention: "move", directories: true, files: false, items: [dir("b")] })
 				}),
-				previewType: null,
-				selectedFromDriveSelectCount: 0,
-				isSelectedFromDriveSelect: false
+				previewType: null
 			})
 		).toBe(false)
 	})
@@ -473,9 +466,7 @@ describe("isDriveItemDisabled", () => {
 			isDriveItemDisabled({
 				item: file("a", false, undefined, true),
 				drivePath: drivePath("drive", { selectOptions: selectOptions({}) }),
-				previewType: null,
-				selectedFromDriveSelectCount: 0,
-				isSelectedFromDriveSelect: false
+				previewType: null
 			})
 		).toBe(true)
 	})
@@ -485,9 +476,7 @@ describe("isDriveItemDisabled", () => {
 			isDriveItemDisabled({
 				item: dir("a"),
 				drivePath: drivePath("drive", { selectOptions: selectOptions({ files: true, directories: false }) }),
-				previewType: null,
-				selectedFromDriveSelectCount: 0,
-				isSelectedFromDriveSelect: false
+				previewType: null
 			})
 		).toBe(true)
 	})
@@ -497,9 +486,7 @@ describe("isDriveItemDisabled", () => {
 			isDriveItemDisabled({
 				item: file("a"),
 				drivePath: drivePath("drive", { selectOptions: selectOptions({ files: false, directories: true }) }),
-				previewType: null,
-				selectedFromDriveSelectCount: 0,
-				isSelectedFromDriveSelect: false
+				previewType: null
 			})
 		).toBe(true)
 	})
@@ -509,9 +496,7 @@ describe("isDriveItemDisabled", () => {
 			isDriveItemDisabled({
 				item: file("a", false, "photo.jpg"),
 				drivePath: drivePath("drive", { selectOptions: selectOptions({ files: true, directories: false, previewType: "video" }) }),
-				previewType: "image",
-				selectedFromDriveSelectCount: 0,
-				isSelectedFromDriveSelect: false
+				previewType: "image"
 			})
 		).toBe(true)
 	})
@@ -521,33 +506,17 @@ describe("isDriveItemDisabled", () => {
 			isDriveItemDisabled({
 				item: file("a", false, "photo.jpg"),
 				drivePath: drivePath("drive", { selectOptions: selectOptions({ files: true, directories: false, previewType: "image" }) }),
-				previewType: "image",
-				selectedFromDriveSelectCount: 0,
-				isSelectedFromDriveSelect: false
+				previewType: "image"
 			})
 		).toBe(false)
 	})
 
-	it("select/single: another row already picked disables this (unselected) row", () => {
+	it("select/single: rows stay enabled while one is picked — a tap replaces the pick", () => {
 		expect(
 			isDriveItemDisabled({
 				item: file("a"),
 				drivePath: drivePath("drive", { selectOptions: selectOptions({ type: "single" }) }),
-				previewType: null,
-				selectedFromDriveSelectCount: 1,
-				isSelectedFromDriveSelect: false
-			})
-		).toBe(true)
-	})
-
-	it("select/single: the already-selected row itself stays enabled", () => {
-		expect(
-			isDriveItemDisabled({
-				item: file("a"),
-				drivePath: drivePath("drive", { selectOptions: selectOptions({ type: "single" }) }),
-				previewType: null,
-				selectedFromDriveSelectCount: 1,
-				isSelectedFromDriveSelect: true
+				previewType: null
 			})
 		).toBe(false)
 	})
@@ -557,11 +526,40 @@ describe("isDriveItemDisabled", () => {
 			isDriveItemDisabled({
 				item: file("a"),
 				drivePath: drivePath("drive", { selectOptions: selectOptions({ type: "multiple" }) }),
-				previewType: null,
-				selectedFromDriveSelectCount: 5,
-				isSelectedFromDriveSelect: false
+				previewType: null
 			})
 		).toBe(false)
+	})
+})
+
+describe("nextDriveSelectSelection", () => {
+	it("ticking in single mode replaces the previous pick", () => {
+		const previous = dir("current")
+		const next = dir("next")
+
+		expect(nextDriveSelectSelection({ prev: [previous], item: next, type: "single" })).toEqual([next])
+	})
+
+	it("ticking in multiple mode appends", () => {
+		const a = dir("a")
+		const b = dir("b")
+
+		expect(nextDriveSelectSelection({ prev: [a], item: b, type: "multiple" })).toEqual([a, b])
+	})
+
+	it("ticking an already-selected row unticks it in both modes", () => {
+		const a = dir("a")
+		const b = dir("b")
+
+		expect(nextDriveSelectSelection({ prev: [a], item: a, type: "single" })).toEqual([])
+		expect(nextDriveSelectSelection({ prev: [a, b], item: a, type: "multiple" })).toEqual([b])
+	})
+
+	it("matches on uuid AND type so a same-uuid file does not untick a directory", () => {
+		const directory = dir("same-uuid")
+		const sameUuidFile = file("same-uuid")
+
+		expect(nextDriveSelectSelection({ prev: [directory], item: sameUuidFile, type: "multiple" })).toEqual([directory, sameUuidFile])
 	})
 })
 

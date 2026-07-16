@@ -166,15 +166,11 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 export function isDriveItemDisabled({
 	item,
 	drivePath,
-	previewType,
-	selectedFromDriveSelectCount,
-	isSelectedFromDriveSelect
+	previewType
 }: {
 	item: DriveItem
 	drivePath: DrivePath
 	previewType: PreviewType | null
-	selectedFromDriveSelectCount: number
-	isSelectedFromDriveSelect: boolean
 }): boolean {
 	if (!drivePath.selectOptions) {
 		return false
@@ -218,17 +214,37 @@ export function isDriveItemDisabled({
 				return true
 			}
 
-			switch (drivePath.selectOptions.type) {
-				case "single": {
-					return selectedFromDriveSelectCount > 0 && !isSelectedFromDriveSelect
-				}
-
-				case "multiple": {
-					return false
-				}
-			}
+			// Single-select no longer disables the other rows once something is picked —
+			// ticking another row REPLACES the pick (nextDriveSelectSelection), which also
+			// keeps a preseeded current value (initiallySelected) changeable in one tap.
+			return false
 		}
 	}
+}
+
+// Pure reducer for a select-intention checkbox tap: untick clears the entry, ticking
+// appends for multi-select and REPLACES the previous pick for single-select. Single
+// source for the row checkbox handler so the semantics stay testable.
+export function nextDriveSelectSelection({
+	prev,
+	item,
+	type
+}: {
+	prev: DriveItem[]
+	item: DriveItem
+	type: "single" | "multiple"
+}): DriveItem[] {
+	const prevSelected = prev.some(i => i.data.uuid === item.data.uuid && i.type === item.type)
+
+	if (prevSelected) {
+		return prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+	}
+
+	if (type === "single") {
+		return [item]
+	}
+
+	return [...prev, item]
 }
 
 /**

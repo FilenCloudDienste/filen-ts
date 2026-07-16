@@ -7,7 +7,7 @@ import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
-import { isDriveItemDisabled, isDriveItemNavigateOnly, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
+import { isDriveItemDisabled, isDriveItemNavigateOnly, nextDriveSelectSelection, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
 import { router } from "@/lib/router"
 
 export default function useDriveItemInteraction({
@@ -35,7 +35,6 @@ export default function useDriveItemInteraction({
 	const isSelectedFromDriveSelect = useDriveSelectStore(
 		useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type))
 	)
-	const selectedItemsFromDriveSelectLength = useDriveSelectStore(useShallow(state => state.selectedItems.length))
 	const previewType =
 		info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile"
 			? getPreviewType(driveItemDisplayName(info.item))
@@ -44,9 +43,7 @@ export default function useDriveItemInteraction({
 	const disabled = isDriveItemDisabled({
 		item: info.item,
 		drivePath,
-		previewType,
-		selectedFromDriveSelectCount: selectedItemsFromDriveSelectLength,
-		isSelectedFromDriveSelect
+		previewType
 	})
 
 	const navigateOnly = isDriveItemNavigateOnly({
@@ -61,15 +58,15 @@ export default function useDriveItemInteraction({
 		}
 
 		if (drivePath.selectOptions && drivePath.selectOptions.intention === "select") {
-			useDriveSelectStore.getState().setSelectedItems(prev => {
-				const prevSelected = prev.some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type)
+			const selectionType = drivePath.selectOptions.type
 
-				if (prevSelected) {
-					return prev.filter(i => !(i.data.uuid === info.item.data.uuid && i.type === info.item.type))
-				}
-
-				return [...prev.filter(i => !(i.data.uuid === info.item.data.uuid && i.type === info.item.type)), info.item]
-			})
+			useDriveSelectStore.getState().setSelectedItems(prev =>
+				nextDriveSelectSelection({
+					prev,
+					item: info.item,
+					type: selectionType
+				})
+			)
 
 			return
 		}

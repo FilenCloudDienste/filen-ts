@@ -217,12 +217,23 @@ const CameraUpload = () => {
 														: (textRed500.color as string | undefined)
 											},
 											onPress: async () => {
+												// Open the picker with the currently configured directory already
+												// ticked (resolved from the item cache; a miss or the root — which
+												// isn't a listed row — just opens unseeded).
+												const currentDirUuid =
+													config.remoteDir && config.remoteDir.tag !== AnyNormalDir_Tags.Root
+														? unwrapDirMeta(config.remoteDir).uuid
+														: null
+												const currentDirItem = currentDirUuid ? cache.uuidToAnyDriveItem.get(currentDirUuid) : undefined
+
 												const result = await run(async () => {
 													return await selectDriveItems({
 														type: "single",
 														files: false,
 														directories: true,
-														items: []
+														items: [],
+														initiallySelected:
+															currentDirItem && currentDirItem.type === "directory" ? [currentDirItem] : []
 													})
 												})
 
