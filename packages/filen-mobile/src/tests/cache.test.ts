@@ -82,6 +82,7 @@ vi.mock("@filen/sdk-rs", () => {
 
 import { Cache, PersistentMap, GLOBAL_PREFIX } from "@/lib/cache"
 import { serialize, deserialize } from "@/lib/serializer"
+import { isKvRangeScanQuery, kvRangeScanRows } from "@/tests/mocks/kvExecuteRaw"
 import { type DriveItem } from "@/types"
 
 /**
@@ -174,18 +175,8 @@ function setupMockDb(): void {
 	})
 
 	const executeRawRows = async (query: string, params?: unknown[]): Promise<unknown[][]> => {
-		if (query.startsWith("SELECT key, value FROM kv WHERE key >= ?")) {
-			const gte = params![0] as string
-			const lt = params![1] as string
-			const rows: [string, string][] = []
-
-			for (const [key, value] of kvStore) {
-				if (key >= gte && key < lt) {
-					rows.push([key, value])
-				}
-			}
-
-			return rows
+		if (isKvRangeScanQuery(query)) {
+			return kvRangeScanRows(kvStore, query, params)
 		}
 
 		if (query.startsWith("SELECT key, value FROM kv WHERE") && query.includes("LIKE")) {
@@ -588,6 +579,30 @@ describe("Cache", () => {
 			expect(restored.get("key-1")).toBe("value-1")
 			expect(restored.get("key-2")).toBe("value-2")
 			expect(restored.size).toBe(2)
+		})
+
+		it("restores a map across multiple pages with full fidelity", async () => {
+			// The pager yields a real setTimeout between pages — fake timers would park it.
+			vi.useRealTimers()
+
+			// More rows than one restore page (KV_RESTORE_PAGE_SIZE = 256) so the keyset
+			// continuation path runs; every row must land exactly once.
+			const cache = createCache()
+			const { name } = getFirstMap(cache)
+
+			for (let i = 0; i < 600; i++) {
+				kvStore.set(kvKey(name, `key-${String(i).padStart(4, "0")}`), serialize(`value-${i}`))
+			}
+
+			const cache2 = createCache()
+
+			await cache2.restore()
+
+			const restored = (cache2 as unknown as Record<string, unknown>)[name] as PersistentMap<unknown>
+
+			expect(restored.size).toBe(600)
+			expect(restored.get("key-0000")).toBe("value-0")
+			expect(restored.get("key-0599")).toBe("value-599")
 		})
 
 		it("sets all maps to ready after restore", async () => {

@@ -48,20 +48,9 @@ const INIT_QUERIES: string[] = [
 	"PRAGMA optimize = 0x10002"
 ]
 
-// Exclusive upper bound for a prefix range scan over the BINARY-collated `key` column: the prefix
-// with its final character incremented by one code unit. Querying `key >= prefix AND key < upper`
-// uses the PRIMARY KEY index (a SEARCH), whereas `key LIKE 'prefix%'` cannot be index-optimized under
-// SQLite's default case_sensitive_like = OFF and degrades to a full table scan. All current callers
-// pass a non-empty prefix ending in ":".
-export function prefixUpperBound(prefix: string): string {
-	if (prefix.length === 0) {
-		return prefix
-	}
-
-	const lastIndex = prefix.length - 1
-
-	return prefix.slice(0, lastIndex) + String.fromCharCode(prefix.charCodeAt(lastIndex) + 1)
-}
+// prefixUpperBound moved to @/lib/kvScan (pure, dependency-free) together with the paged
+// restore walker; re-exported here because it is part of this module's historical surface.
+export { prefixUpperBound } from "@/lib/kvScan"
 
 class Sqlite {
 	public db: DB | null = null
@@ -170,6 +159,29 @@ class Sqlite {
 		}
 
 		await this.db.execute("PRAGMA shrink_memory")
+	}
+
+	/**
+	 * Size profile of the kv store: row count, total octets (keys + values), and the largest
+	 * value rows. Diagnostics only — storage-driven OOMs (giant persisted listings) are
+	 * invisible in a native crash trace, so boot logs this to make the magnitude readable
+	 * from a user's log export. CAST AS BLOB so lengths are bytes, not UTF-8 characters.
+	 */
+	public async kvStats(): Promise<{ rows: number; totalBytes: number; largest: { key: string; bytes: number }[] }> {
+		const db = await this.openDb()
+		const totalsRow = (await db.executeRaw("SELECT COUNT(*), COALESCE(SUM(LENGTH(CAST(key AS BLOB)) + LENGTH(CAST(value AS BLOB))), 0) FROM kv", []))
+			.rawRows[0]
+		const largestRows = (await db.executeRaw("SELECT key, LENGTH(CAST(value AS BLOB)) FROM kv ORDER BY LENGTH(CAST(value AS BLOB)) DESC LIMIT 3", []))
+			.rawRows
+
+		return {
+			rows: Number(totalsRow?.[0] ?? 0),
+			totalBytes: Number(totalsRow?.[1] ?? 0),
+			largest: largestRows.map(row => ({
+				key: String(row[0]),
+				bytes: Number(row[1] ?? 0)
+			}))
+		}
 	}
 
 	// Reclaim disk + scrub residue after a kv wipe (logout): the DELETE moves every page

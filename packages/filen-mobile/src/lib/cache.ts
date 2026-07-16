@@ -8,7 +8,8 @@ import {
 	type Dir
 } from "@filen/sdk-rs"
 import { type DriveItem, type Note, type Chat } from "@/types"
-import sqlite, { prefixUpperBound } from "@/lib/sqlite"
+import sqlite from "@/lib/sqlite"
+import { forEachKvRowByPrefix } from "@/lib/kvScan"
 import { serialize, deserialize } from "@/lib/serializer"
 import { AppState } from "react-native"
 import logger from "@/lib/logger"
@@ -641,16 +642,17 @@ export class Cache {
 			this.registry.map(async ({ key, map }) => {
 				const prefix = key + ":"
 				const prefixLength = prefix.length
-				// op-sqlite 17: executeRaw returns { rawRows, ... } — the row arrays live on .rawRows.
-				const rows = (await db.executeRaw("SELECT key, value FROM kv WHERE key >= ? AND key < ?", [prefix, prefixUpperBound(prefix)])).rawRows
 
-				for (const row of rows) {
-					const entryKey = (row[0] as string).slice(prefixLength)
+				// Paged walk (not one full-range executeRaw): the item maps hold one row per item
+				// ever seen, so a large account's scan used to materialize every row's JSON string
+				// next to its parsed entry in one burst — the boot-OOM pattern. Paging bounds
+				// raw-string residency; a deserialize throw still rejects this map's restore
+				// mid-walk exactly like the single-scan version did mid-loop.
+				const rowCount = await forEachKvRowByPrefix(db, prefix, (rowKey, value) => {
+					Map.prototype.set.call(map, rowKey.slice(prefixLength), deserialize(value))
+				})
 
-					Map.prototype.set.call(map, entryKey, deserialize(row[1] as string))
-				}
-
-				rowCounts.push(`${key}=${rows.length}`)
+				rowCounts.push(`${key}=${rowCount}`)
 			})
 		)
 

@@ -78,21 +78,13 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-vi.mock("@/lib/sqlite", () => {
+vi.mock("@/lib/sqlite", async () => {
+	const { isKvRangeScanQuery, kvRangeScanRows } = await import("@/tests/mocks/kvExecuteRaw")
+
 	const benchDb = {
 		executeRaw: async (query: string, params?: (string | Uint8Array)[]) => {
-			if (query.startsWith("SELECT key, value FROM kv WHERE key >= ?")) {
-				const gte = params?.[0] as string
-				const lt = params?.[1] as string
-				const rows: [string, string][] = []
-
-				for (const [key, value] of H.kvStore) {
-					if (key >= gte && key < lt) {
-						rows.push([key, value])
-					}
-				}
-
-				return { rawRows: rows, columnNames: [], rowsAffected: 0 }
+			if (isKvRangeScanQuery(query)) {
+				return { rawRows: kvRangeScanRows(H.kvStore, query, params), columnNames: [], rowsAffected: 0 }
 			}
 
 			return { rawRows: [], columnNames: [], rowsAffected: 0 }

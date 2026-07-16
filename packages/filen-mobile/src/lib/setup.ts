@@ -28,6 +28,40 @@ import logger from "@/lib/logger"
 // the result must track login/logout transitions within a process.
 const setupMutex = new Semaphore(1)
 
+// Storage-driven OOM triage: a giant persisted row (e.g. a whale account's photos listing)
+// is invisible in a native crash trace, and the abort itself never reaches JS — so boot
+// profiles the kv store after the restores land. Debug breadcrumb normally; past the
+// watermarks it escalates to a PERSISTED warn, leaving durable evidence in a log export
+// even from an install that OOM-loops at startup.
+const KV_STATS_WARN_TOTAL_BYTES = 32 * 1024 * 1024
+const KV_STATS_WARN_ROW_BYTES = 4 * 1024 * 1024
+
+function logKvStats(): void {
+	// Diagnostics must never take setup down — same invariant as the logger itself.
+	try {
+		sqlite
+			.kvStats()
+			.then(stats => {
+				const payload = {
+					rows: stats.rows,
+					totalMb: (stats.totalBytes / 1048576).toFixed(2),
+					largest: stats.largest.map(row => ({ key: row.key.slice(0, 120), kb: Math.round(row.bytes / 1024) }))
+				}
+
+				if (stats.totalBytes > KV_STATS_WARN_TOTAL_BYTES || (stats.largest[0]?.bytes ?? 0) > KV_STATS_WARN_ROW_BYTES) {
+					logger.warn("setup", "kv store unusually large", payload)
+				} else {
+					logger.debug("setup", "kv store size", payload)
+				}
+			})
+			.catch(e => {
+				logger.warn("setup", "kvStats failed", { error: e })
+			})
+	} catch (e) {
+		logger.warn("setup", "kvStats failed", { error: e })
+	}
+}
+
 async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
 	const start = performance.now()
 	const result = await fn()
@@ -131,6 +165,9 @@ const setup = {
 				// One-time (per launch) beta migration: re-encrypt a legacy plaintext auth.json if the
 				// provider is enabled. No-op once auth.json is already encrypted or the provider is off.
 				fileProvider.ensureEncrypted().catch(e => { logger.error("setup", "fileProvider.ensureEncrypted failed", { error: e }) })
+
+				// Fire-and-forget: reads run against a page cache the restores just warmed.
+				logKvStats()
 			}
 
 			const duration = performance.now() - now

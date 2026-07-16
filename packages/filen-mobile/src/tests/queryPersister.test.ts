@@ -110,6 +110,8 @@ import queryClient from "@/queries/client"
  * In-memory KV store that simulates sqlite.kvAsync behavior.
  * Values are stored as serialized strings just like the real SQLite KV.
  */
+import { isKvRangeScanQuery, kvRangeScanRows } from "@/tests/mocks/kvExecuteRaw"
+
 const kvStore = new Map<string, string>()
 
 function likeToPrefix(pattern: string): string {
@@ -196,18 +198,8 @@ function setupMockDb(): void {
 	})
 
 	const executeRawRows = async (query: string, params?: unknown[]): Promise<unknown[][]> => {
-		if (query.startsWith("SELECT key, value FROM kv WHERE key >= ?")) {
-			const gte = params![0] as string
-			const lt = params![1] as string
-			const rows: [string, string][] = []
-
-			for (const [key, value] of kvStore) {
-				if (key >= gte && key < lt) {
-					rows.push([key, value])
-				}
-			}
-
-			return rows
+		if (isKvRangeScanQuery(query)) {
+			return kvRangeScanRows(kvStore, query, params)
 		}
 
 		if (query.startsWith("SELECT key, value FROM kv WHERE") && query.includes("LIKE")) {
@@ -351,6 +343,26 @@ describe("QueryPersisterKv", () => {
 
 			expect(kv.keys()).toEqual([])
 			expect(kv.getItem("anything")).toBeNull()
+		})
+
+		it("restores across multiple pages with full fidelity", async () => {
+			// The pager yields a real setTimeout between pages — fake timers would park it.
+			vi.useRealTimers()
+
+			// More rows than one restore page (KV_RESTORE_PAGE_SIZE = 256) so the keyset
+			// continuation path runs; every row must land exactly once.
+			for (let i = 0; i < 600; i++) {
+				seedKvStore(`query-${String(i).padStart(4, "0")}`, { index: i })
+			}
+
+			const kv = new QueryPersisterKv()
+			await kv.restore()
+
+			expect(kv.keys().length).toBe(600)
+			expect(kv.getItem("query-0000")).toEqual({ index: 0 })
+			expect(kv.getItem("query-0599")).toEqual({ index: 599 })
+			// Paging actually happened: more than one range scan was issued.
+			expect(mockDb.executeRaw.mock.calls.length).toBeGreaterThan(1)
 		})
 
 		it("does not trigger persistence for restored data", async () => {

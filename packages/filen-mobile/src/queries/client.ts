@@ -1,6 +1,7 @@
 import { QueryClient, QueryCache, onlineManager, notifyManager, type UseQueryOptions } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
-import sqlite, { prefixUpperBound } from "@/lib/sqlite"
+import sqlite from "@/lib/sqlite"
+import { forEachKvRowByPrefix } from "@/lib/kvScan"
 import alerts from "@/lib/alerts"
 import { serialize, deserialize } from "@/lib/serializer"
 import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
@@ -115,20 +116,23 @@ export class QueryPersisterKv {
 		const now = performance.now()
 		const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
 		const db = await sqlite.openDb()
-		// op-sqlite 17: executeRaw returns { rawRows, ... } — the row arrays live on .rawRows.
-		const rows = (await db.executeRaw("SELECT key, value FROM kv WHERE key >= ? AND key < ?", [prefix, prefixUpperBound(prefix)])).rawRows
 
-		for (const row of rows) {
+		// Paged walk (not one full-range executeRaw): a large account's persisted queries can
+		// total tens of MB — loading every row's JSON string alongside its parsed object graph
+		// in one burst is what OOM'd the Hermes heap at boot. Paging bounds raw-string
+		// residency and the inter-page yield lets the GC keep up. Row set and buffer contents
+		// are identical to the single-scan version.
+		await forEachKvRowByPrefix(db, prefix, (key, value) => {
 			// Isolate each row's deserialize so a single corrupt/unparseable value
 			// (mid-write crash, storage corruption, serializer version mismatch)
 			// doesn't abort restoration of the remaining rows. Mirrors the per-row
 			// isolation in sqlite.kvAsync.getByPrefix.
 			try {
-				this.buffer.set((row[0] as string).slice(prefix.length), deserialize(row[1] as string))
+				this.buffer.set(key.slice(prefix.length), deserialize(value))
 			} catch (err) {
-				logger.warn("queries-restore", "Skipped corrupt persisted query row", { rowId: row[0], error: err })
+				logger.warn("queries-restore", "Skipped corrupt persisted query row", { rowId: key, error: err })
 			}
-		}
+		})
 
 		this.restoredOnce = true
 
