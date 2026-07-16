@@ -128,6 +128,11 @@ const Dom = ({
 				overflow: "auto",
 				paddingTop: paddingTop ? `${paddingTop}px` : undefined,
 				paddingBottom: paddingBottom ? `${paddingBottom}px` : undefined,
+				// With inWrapper: false the library's white-page rule (.docx-wrapper>section.docx)
+				// never applies, and documents without an explicit <w:background> render as black
+				// text on a transparent page — invisible over the app's dark background. Paint the
+				// paper ourselves; a document's own background color still layers on top.
+				backgroundColor: "#ffffff",
 				// Panning alone (pan-x/pan-y) suppresses browser pinch-zoom at the element
 				// level — pinch-zoom must be explicitly re-allowed alongside it.
 				touchAction: "pan-y pinch-zoom pan-x"
