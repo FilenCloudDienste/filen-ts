@@ -15,8 +15,6 @@ import Menu from "@/features/notes/components/tag/menu"
 import { cn } from "@filen/utils"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import { AnimatedView } from "@/components/ui/animated"
-import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
 
@@ -83,13 +81,9 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 						<View className="flex-1 flex-row gap-4 px-4 w-full h-auto bg-transparent items-center">
 							<View className="gap-2 shrink-0 h-auto w-auto bg-transparent flex-row items-center">
 								{areTagsSelected ? (
-									<AnimatedView
-										className="flex-row h-full items-center justify-center bg-transparent shrink-0"
-										entering={FadeIn}
-										exiting={FadeOut}
-									>
+									<View className="flex-row h-full items-center justify-center bg-transparent shrink-0">
 										<Checkbox value={isSelected} />
-									</AnimatedView>
+									</View>
 								) : (
 									<View className="bg-transparent">
 										{notesForTag.length > 0 ? (

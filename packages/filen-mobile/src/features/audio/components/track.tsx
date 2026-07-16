@@ -15,8 +15,6 @@ import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
 import usePlaylistTracksStore from "@/features/audio/store/usePlaylistTracks.store"
 import { useShallow } from "zustand/shallow"
 import { Checkbox } from "@/components/ui/checkbox"
-import { AnimatedView } from "@/components/ui/animated"
-import { FadeIn, FadeOut } from "react-native-reanimated"
 import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
 import logger from "@/lib/logger"
@@ -260,13 +258,9 @@ export function Track({ track, playlist, reorderDisabled }: { track: TrackType; 
 				}}
 			>
 				{areTracksSelected && (
-					<AnimatedView
-						className="flex-row h-full items-center justify-center bg-transparent pr-1 shrink-0"
-						entering={FadeIn}
-						exiting={FadeOut}
-					>
+					<View className="flex-row h-full items-center justify-center bg-transparent pr-1 shrink-0">
 						<Checkbox value={isSelected} />
-					</AnimatedView>
+					</View>
 				)}
 				<AudioThumbnail
 					pictureUri={audioMetadataQuery.status === "success" ? audioMetadataQuery.data?.pictureUri : null}

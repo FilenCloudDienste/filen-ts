@@ -17,8 +17,6 @@ import useChatsStore from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
-import { AnimatedView } from "@/components/ui/animated"
-import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
 import { formatRelativeTime, simpleDateNoTime } from "@/lib/time"
@@ -100,13 +98,9 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 					<View className="flex-row w-full h-auto items-center px-4 pl-2 gap-2 bg-transparent">
 						<View className={cn("size-2.5 rounded-full shrink-0", unreadCount > 0 ? "bg-blue-500" : "bg-transparent")} />
 						{areChatsSelected && (
-							<AnimatedView
-								className="flex-row h-full items-center justify-center bg-transparent px-2 shrink-0"
-								entering={FadeIn}
-								exiting={FadeOut}
-							>
+							<View className="flex-row h-full items-center justify-center bg-transparent px-2 shrink-0">
 								<Checkbox value={isSelected} />
-							</AnimatedView>
+							</View>
 						)}
 						{participantsWithAvatars.length === 0 ? (
 							<Avatar

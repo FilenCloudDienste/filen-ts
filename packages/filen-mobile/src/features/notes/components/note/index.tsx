@@ -16,8 +16,6 @@ import Menu, { NoteMenuOrigin } from "@/features/notes/components/note/menu"
 import { cn, fastLocaleCompare } from "@filen/utils"
 import { PressableScale } from "@/components/ui/pressables"
 import { Checkbox } from "@/components/ui/checkbox"
-import { AnimatedView } from "@/components/ui/animated"
-import { FadeIn, FadeOut } from "react-native-reanimated"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import Avatar from "@/components/ui/avatar"
 import { useTranslation } from "react-i18next"
@@ -180,13 +178,9 @@ const NoteRow = ({
 							)}
 						>
 							{areNotesSelected && (
-								<AnimatedView
-									className="flex-row h-full items-center justify-center bg-transparent pr-2 shrink-0"
-									entering={FadeIn}
-									exiting={FadeOut}
-								>
+								<View className="flex-row h-full items-center justify-center bg-transparent pr-2 shrink-0">
 									<Checkbox value={isSelected} />
-								</AnimatedView>
+								</View>
 							)}
 							<View className="shrink-0 h-auto w-auto bg-transparent flex-col gap-2 items-center justify-start">
 								<View className="flex-row items-center justify-center p-1 rounded-full size-8 bg-background-tertiary">

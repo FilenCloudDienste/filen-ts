@@ -3,10 +3,8 @@ import { type TextProps } from "react-native"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { Checkbox } from "@/components/ui/checkbox"
-import { AnimatedView } from "@/components/ui/animated"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import { FadeIn, FadeOut } from "react-native-reanimated"
 import { useResolveClassNames } from "uniwind"
 import { cn } from "@filen/utils"
 
@@ -91,11 +89,12 @@ export type ListRowProps = {
 	trailing?: ReactNode
 	// Selection. `selectable` reveals the leading checkbox; `selected` drives the tint + checkbox
 	// value; `onSelectedChange` makes the checkbox interactive (omit it for an inert checkbox whose
-	// selection is driven by the row's `onPress`). `animateCheckbox` fades the checkbox in/out.
+	// selection is driven by the row's `onPress`). The checkbox never mounts with a reanimated
+	// entering/exiting animation: inside recycled list rows those pin the view (and its hitbox)
+	// at stale coordinates on Android/Fabric — misplaced/overlapping selection circles.
 	selectable?: boolean
 	selected?: boolean
 	onSelectedChange?: () => void
-	animateCheckbox?: boolean
 	// Press. The tap target wraps the leading + body (not the trailing). `onLongPress` is a pure
 	// passthrough (e.g. a reorderable-list drag handle) and is never intercepted.
 	onPress?: () => void
@@ -169,18 +168,9 @@ export const ListRow = (props: ListRowProps) => {
 					innerClassName: props.innerClassName
 				})}
 			>
-				{props.selectable &&
-					(props.animateCheckbox === false ? (
-						<View className="flex-row h-full items-center justify-center bg-transparent pr-1 shrink-0">{checkbox}</View>
-					) : (
-						<AnimatedView
-							className="flex-row h-full items-center justify-center bg-transparent pr-1 shrink-0"
-							entering={FadeIn}
-							exiting={FadeOut}
-						>
-							{checkbox}
-						</AnimatedView>
-					))}
+				{props.selectable && (
+					<View className="flex-row h-full items-center justify-center bg-transparent pr-1 shrink-0">{checkbox}</View>
+				)}
 				{pressable ? (
 					<PressableScale
 						className="flex-row items-center gap-3 bg-transparent flex-1"

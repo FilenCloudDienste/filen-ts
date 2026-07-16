@@ -12,8 +12,6 @@ import ShareEmail from "@/features/drive/components/item/shareEmail"
 import { Platform } from "react-native"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { cn } from "@filen/utils"
-import { AnimatedView } from "@/components/ui/animated"
-import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useRecyclingState } from "@shopify/flash-list"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
@@ -84,31 +82,23 @@ const Item = ({
 					)}
 				>
 					{areDriveItemsSelected && !drivePath.selectOptions && (
-						<AnimatedView
-							className="flex-row h-full items-center justify-center bg-transparent shrink-0"
-							entering={FadeIn}
-							exiting={FadeOut}
-						>
+						<View className="flex-row h-full items-center justify-center bg-transparent shrink-0">
 							<Checkbox
 								value={isSelected}
 								onValueChange={onPress}
 								hitSlop={16}
 							/>
-						</AnimatedView>
+						</View>
 					)}
 					{drivePath.selectOptions && drivePath.selectOptions.intention === "select" && (
-						<AnimatedView
-							className="flex-row h-full items-center justify-center bg-transparent shrink-0"
-							entering={FadeIn}
-							exiting={FadeOut}
-						>
+						<View className="flex-row h-full items-center justify-center bg-transparent shrink-0">
 							<Checkbox
 								value={disabled ? false : isSelectedFromDriveSelect}
 								onValueChange={disabled ? undefined : onPressSelectForDriveSelect}
 								hitSlop={16}
 								color={disabled ? "transparent" : undefined}
 							/>
-						</AnimatedView>
+						</View>
 					)}
 					<PressableScale
 						className="w-full h-auto flex-row gap-4 bg-transparent"
