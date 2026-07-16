@@ -1,6 +1,6 @@
 import { onlineManager } from "@tanstack/react-query"
 import { run, cn } from "@filen/utils"
-import { Fragment, useState, useCallback, useEffect } from "react"
+import { Fragment, useState, useCallback, useEffect, useRef } from "react"
 import { Platform } from "react-native"
 import { useTranslation } from "react-i18next"
 import SafeAreaView from "@/components/ui/safeAreaView"
@@ -29,6 +29,18 @@ const Contacts = () => {
 		selectOptions
 	})
 
+	// Hold the latest selectOptions in a ref so the cancel effect below runs on unmount
+	// ONLY. Depending on selectOptions directly re-ran the cleanup on every re-render
+	// (useSelectOptions deserializes a fresh object per render), emitting a spurious
+	// `cancelled: true` milliseconds after the picker opened — selectContacts() resolved
+	// as cancelled and dropped its listener, so the later confirm emitted into the void
+	// (the silent share-with-Filen-user bug). Pattern mirrors playlists.tsx.
+	const selectOptionsRef = useRef(selectOptions)
+
+	useEffect(() => {
+		selectOptionsRef.current = selectOptions
+	})
+
 	useEffect(() => {
 		// When in picker mode, emit a cancellation on unmount so selectContacts()
 		// resolves and removes its contactsSelect listener. Without this, dismissing
@@ -36,16 +48,18 @@ const Contacts = () => {
 		// the awaiting promise pending forever and leaks the listener. A confirmed
 		// selection emits its own event + removes the listener before this fires.
 		return () => {
-			if (!selectOptions) {
+			const currentSelectOptions = selectOptionsRef.current
+
+			if (!currentSelectOptions) {
 				return
 			}
 
 			events.emit("contactsSelect", {
-				id: selectOptions.id,
+				id: currentSelectOptions.id,
 				cancelled: true
 			})
 		}
-	}, [selectOptions])
+	}, [])
 
 	const keyExtractor = (item: ContactListItemWithHeader) => {
 		switch (item.type) {

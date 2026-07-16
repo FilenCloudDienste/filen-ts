@@ -1,5 +1,5 @@
 import Drive from "@/features/drive/components"
-import { Fragment, useEffect } from "react"
+import { Fragment, useEffect, useRef } from "react"
 import DriveSelectToolbar from "@/components/driveSelectToolbar"
 import auth, { useSdkClients } from "@/lib/auth"
 import events from "@/lib/events"
@@ -73,20 +73,32 @@ const DriveSelectListener = () => {
 	const drivePath = useDrivePath()
 	const { authedSdkClient } = useSdkClients()
 
+	// Latest values in refs so the cancel effect runs on unmount ONLY — depending on them
+	// directly re-runs the cleanup on re-renders (useDrivePath returns a fresh object per
+	// render), which can emit a spurious `cancelled: true` that silently aborts the
+	// selection flow (same class as the contacts-picker share bug; mirrors playlists.tsx).
+	const cancelStateRef = useRef({ drivePath, authedSdkClient })
+
+	useEffect(() => {
+		cancelStateRef.current = { drivePath, authedSdkClient }
+	})
+
 	useEffect(() => {
 		return () => {
+			const current = cancelStateRef.current
+
 			if (
-				drivePath.selectOptions &&
-				drivePath.selectOptions.intention === "select" &&
-				authedSdkClient?.root().uuid === drivePath.uuid
+				current.drivePath.selectOptions &&
+				current.drivePath.selectOptions.intention === "select" &&
+				current.authedSdkClient?.root().uuid === current.drivePath.uuid
 			) {
 				events.emit("driveSelect", {
-					id: drivePath.selectOptions.id,
+					id: current.drivePath.selectOptions.id,
 					cancelled: true
 				})
 			}
 		}
-	}, [drivePath, authedSdkClient])
+	}, [])
 
 	// Once per screen instance: seed the selection with the caller's current value (e.g.
 	// the configured camera-upload directory) so the picker opens showing it ticked;
