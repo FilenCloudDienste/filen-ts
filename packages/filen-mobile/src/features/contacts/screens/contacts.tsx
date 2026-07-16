@@ -153,20 +153,25 @@ const Contacts = () => {
 		}
 	}, [searchQuery])
 
+	// Key the focus effect on a stable primitive, not the selectOptions object —
+	// useSelectOptions deserializes a fresh object per render, and an object dep makes
+	// useFocusEffect re-run (clearing the selection) on early param-churn re-renders.
+	const inPickerMode = !!selectOptions
+
 	useFocusEffect(
 		useCallback(() => {
 			// On focus, only keep selection if we're in bulkMode AND not in
 			// picker mode. bulkMode is a user-driven state (Select menu item)
 			// and surviving a re-focus keeps the selection alive while the
 			// user works. Picker mode always starts fresh.
-			if (selectOptions || !useContactsStore.getState().bulkMode) {
+			if (inPickerMode || !useContactsStore.getState().bulkMode) {
 				useContactsStore.getState().clearSelectedContacts()
 			}
 
 			return () => {
 				useContactsStore.getState().clearSelectedContacts()
 			}
-		}, [selectOptions])
+		}, [inPickerMode])
 	)
 
 	return (
