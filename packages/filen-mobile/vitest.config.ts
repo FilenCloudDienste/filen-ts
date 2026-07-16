@@ -35,6 +35,9 @@ export default defineConfig({
 	],
 	resolve: {
 		alias: {
+			// The native filen-exif module calls requireNativeModule() at import — unloadable in
+			// Node — so alias it to a mock globally (must precede the "@/modules" alias below).
+			"@/modules/filen-exif": path.resolve(__dirname, "./src/tests/mocks/filenExif.ts"),
 			// Local Expo modules live under ./modules (not ./src). Must precede the "@" alias so
 			// "@/modules/*" resolves there rather than "./src/modules/*". Mirrors the app's babel/metro
 			// "@/modules/" → "modules/" alias.

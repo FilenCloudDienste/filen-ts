@@ -7,6 +7,7 @@ import { normalizeModificationTimestampForComparison } from "@/lib/utils"
 import { type UnwrapFileMetaResult, unwrapFileMeta, unwrapDirMeta } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForExpo } from "@/lib/paths"
 import { isConvertHeicToJpgEnabled, convertHeicToJpg } from "@/lib/imageConversion"
+import { transplantMetadata } from "@/modules/filen-exif"
 import { PauseSignal } from "@/lib/signals"
 import transfers from "@/features/transfers/transfers"
 import * as FileSystem from "expo-file-system"
@@ -301,6 +302,17 @@ class CameraUpload {
 				}
 
 				return file
+			}
+
+			// Carry the original's EXIF/XMP into the compressed JPEG (native, no pixel re-encode,
+			// orientation neutralized) BEFORE `file` is overwritten below — `file` is still the
+			// original source here, `manipulatedFile` the compressed output. Best-effort: runs off
+			// the JS/UI thread and is background-task-safe (atomic replace + fail-open), so on any
+			// failure `manipulatedFile` stays the plain compressed file.
+			try {
+				await transplantMetadata(file.uri, manipulatedFile.uri)
+			} catch (e) {
+				logger.warn("cameraUpload", "Metadata transplant after compression failed, keeping compressed file", { error: e })
 			}
 
 			// The destination is the tmp staging file, which ALWAYS exists by construction

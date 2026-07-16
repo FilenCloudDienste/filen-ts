@@ -2384,6 +2384,125 @@ describe("CameraUpload.compress()", () => {
 		// Manipulated temp file cleaned up
 		expect(fs.has(manipulatedUri)).toBe(false)
 	})
+
+	it("transplants the source's metadata into the compressed output BEFORE overwriting the source", async () => {
+		const { File: MockFile, Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+		const { transplantMetadata } = await import("@/modules/filen-exif")
+
+		vi.mocked(transplantMetadata).mockClear()
+
+		const originalUri = `${Paths.cache.uri}/filen-tmp/photo.jpg`
+		const manipulatedUri = `${Paths.cache.uri}/filen-tmp/photo-manip.jpg`
+
+		fs.set(originalUri, new Uint8Array(new Array(10).fill(1)))
+		fs.set(manipulatedUri, new Uint8Array([1, 2, 3]))
+
+		const file = new MockFile(originalUri)
+		const fakeContext = {
+			renderAsync: vi.fn(async () => ({ saveAsync: vi.fn(async () => ({ uri: manipulatedUri })), release: vi.fn() })),
+			release: vi.fn()
+		}
+
+		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
+
+		await (cameraUpload as any).compress(file)
+
+		// source = the ORIGINAL staged file, target = the compressed manipulator output.
+		expect(vi.mocked(transplantMetadata)).toHaveBeenCalledExactlyOnceWith(originalUri, manipulatedUri)
+	})
+
+	it("reads the source BEFORE it is overwritten by the compressed bytes (byte-level order proof)", async () => {
+		const { File: MockFile, Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+		const { transplantMetadata } = await import("@/modules/filen-exif")
+
+		const originalUri = `${Paths.cache.uri}/filen-tmp/photo.jpg`
+		const manipulatedUri = `${Paths.cache.uri}/filen-tmp/photo-manip.jpg`
+		const originalBytes = new Uint8Array(new Array(10).fill(0xaa))
+
+		fs.set(originalUri, originalBytes)
+		fs.set(manipulatedUri, new Uint8Array([1, 2, 3]))
+
+		// Snapshot the source file's bytes at the moment the transplant is invoked. If the copy
+		// had already overwritten `file` with the compressed bytes, this would capture [1,2,3].
+		let sourceBytesAtCall: number[] | null = null
+
+		vi.mocked(transplantMetadata).mockImplementationOnce(async (srcUri: string) => {
+			sourceBytesAtCall = Array.from(fs.get(srcUri) as Uint8Array)
+
+			return true
+		})
+
+		const file = new MockFile(originalUri)
+		const fakeContext = {
+			renderAsync: vi.fn(async () => ({ saveAsync: vi.fn(async () => ({ uri: manipulatedUri })), release: vi.fn() })),
+			release: vi.fn()
+		}
+
+		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
+
+		await (cameraUpload as any).compress(file)
+
+		// The source still held its ORIGINAL bytes when the transplant read it.
+		expect(sourceBytesAtCall).toEqual(Array.from(originalBytes))
+	})
+
+	it("ignores the transplant's boolean result — a `false` still uploads the valid compressed file", async () => {
+		const { File: MockFile, Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+		const { transplantMetadata } = await import("@/modules/filen-exif")
+
+		vi.mocked(transplantMetadata).mockResolvedValueOnce(false)
+
+		const originalUri = `${Paths.cache.uri}/filen-tmp/photo.jpg`
+		const manipulatedUri = `${Paths.cache.uri}/filen-tmp/photo-manip.jpg`
+
+		fs.set(originalUri, new Uint8Array(new Array(10).fill(1)))
+		fs.set(manipulatedUri, new Uint8Array([5, 5, 5]))
+
+		const file = new MockFile(originalUri)
+		const fakeContext = {
+			renderAsync: vi.fn(async () => ({ saveAsync: vi.fn(async () => ({ uri: manipulatedUri })), release: vi.fn() })),
+			release: vi.fn()
+		}
+
+		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
+
+		const result = await (cameraUpload as any).compress(file)
+
+		expect(result.uri).toMatch(/\.jpg$/)
+		expect(Array.from(fs.get(result.uri) as Uint8Array)).toEqual([5, 5, 5])
+	})
+
+	it("keeps the compressed file when the transplant fails (fail-open)", async () => {
+		const { File: MockFile, Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+		const { transplantMetadata } = await import("@/modules/filen-exif")
+
+		vi.mocked(transplantMetadata).mockRejectedValueOnce(new Error("native boom"))
+
+		const originalUri = `${Paths.cache.uri}/filen-tmp/photo.jpg`
+		const manipulatedUri = `${Paths.cache.uri}/filen-tmp/photo-manip.jpg`
+
+		fs.set(originalUri, new Uint8Array(new Array(10).fill(1)))
+		fs.set(manipulatedUri, new Uint8Array([7, 7, 7]))
+
+		const file = new MockFile(originalUri)
+		const fakeContext = {
+			renderAsync: vi.fn(async () => ({ saveAsync: vi.fn(async () => ({ uri: manipulatedUri })), release: vi.fn() })),
+			release: vi.fn()
+		}
+
+		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
+
+		const result = await (cameraUpload as any).compress(file)
+
+		// The compressed bytes still landed in the returned file; the transplant failure was swallowed.
+		expect(result.uri).toMatch(/\.jpg$/)
+		expect(Array.from(fs.get(result.uri) as Uint8Array)).toEqual([7, 7, 7])
+		expect(fs.has(manipulatedUri)).toBe(false)
+	})
 })
 
 // ─── ensureParentDirectoryExistsCache TTL expiry ─────────────────────────────

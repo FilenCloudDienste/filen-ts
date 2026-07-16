@@ -1,0 +1,24 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'io.filen.exif'
+version = '0.1.0'
+
+android {
+  namespace "io.filen.exif"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // Streaming EXIF/XMP read+write, no pixel decode (saveAttributes rewrites only the APP1).
+  // 1.4.1 (not 1.3.x) is required and is what the app resolves anyway (expo-media-library pins
+  // it): HEIC XMP reading (1.4.0+), spec-correct standalone XMP APP1 placement, and precise
+  // double→rational conversion (fast shutter speeds) all depend on it. Pinning it here makes
+  // that guaranteed rather than dependent on another module's transitive version winning.
+  implementation 'androidx.exifinterface:exifinterface:1.4.1'
+}

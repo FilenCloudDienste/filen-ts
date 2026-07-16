@@ -1,0 +1,9 @@
+{
+	"platforms": ["ios", "android"],
+	"ios": {
+		"modules": ["FilenExifModule"]
+	},
+	"android": {
+		"modules": ["io.filen.exif.FilenExifModule"]
+	}
+}
