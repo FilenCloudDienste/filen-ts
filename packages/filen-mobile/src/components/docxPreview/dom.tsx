@@ -9,6 +9,14 @@ import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
 // Forward this WebView's console.* to the RN diagnostic logger (see domConsoleProxy).
 installDomConsoleProxy()
 
+// The DOM-component shell ships `user-scalable=no` in its viewport meta, which blocks
+// pinch-zoom on both engines. Relax it for THIS component only — a document preview is
+// expected to zoom like the PDF viewer does. Both WebKit and Chromium honor the runtime
+// change, and other DOM components (the note editors) keep the shell's no-zoom default.
+document
+	.querySelector("meta[name=viewport]")
+	?.setAttribute("content", "width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=5")
+
 const Dom = ({
 	base64,
 	paddingTop,
@@ -66,6 +74,33 @@ const Dom = ({
 		load()
 	})
 
+	// The browser consults touch-action for visual-viewport panning while pinch-zoomed too —
+	// with an explicit pan list, a zoomed document can pan but not always fluidly diagonally.
+	// Switch to fully unrestricted touch handling while zoomed (scale > 1) and restore the
+	// declared pan/pinch set at 1x. Gesture claims latch at touch-start, so flipping between
+	// gestures never glitches mid-pan.
+	useEffectOnce(() => {
+		const visualViewport = window.visualViewport
+
+		if (!visualViewport) {
+			return
+		}
+
+		const onResize = () => {
+			if (!container.current) {
+				return
+			}
+
+			container.current.style.touchAction = visualViewport.scale > 1.01 ? "auto" : "pan-y pan-x pinch-zoom"
+		}
+
+		visualViewport.addEventListener("resize", onResize)
+
+		return () => {
+			visualViewport.removeEventListener("resize", onResize)
+		}
+	})
+
 	if (error !== null) {
 		return (
 			<div
@@ -93,7 +128,9 @@ const Dom = ({
 				overflow: "auto",
 				paddingTop: paddingTop ? `${paddingTop}px` : undefined,
 				paddingBottom: paddingBottom ? `${paddingBottom}px` : undefined,
-				touchAction: "pan-y"
+				// Panning alone (pan-x/pan-y) suppresses browser pinch-zoom at the element
+				// level — pinch-zoom must be explicitly re-allowed alongside it.
+				touchAction: "pan-y pinch-zoom pan-x"
 			}}
 		/>
 	)

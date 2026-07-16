@@ -1,3 +1,21 @@
+diff --git a/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt b/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt
+index 125ad1d..0f32890 100644
+--- a/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt
++++ b/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt
+@@ -198,6 +198,13 @@ internal class DomWebView(context: Context, appContext: AppContext) : ExpoView(c
+       // API 30+ default disables file access; DOM bundles need it for sibling assets.
+       settings.allowFileAccess = true
+       settings.allowFileAccessFromFileURLs = true
++      // Patched (filen): builtInZoomControls defaults to false, which disables Chromium's
++      // multi-touch zoom processing entirely — no page can pinch-zoom regardless of its
++      // viewport. Enable it (with the on-screen +/- controls hidden); pages keep control
++      // via their viewport meta, and the DOM-component shell ships user-scalable=no, so
++      // only components that explicitly relax it (docxPreview) become zoomable.
++      settings.builtInZoomControls = true
++      settings.displayZoomControls = false
+       webViewClient = createWebViewClient()
+       addJavascriptInterface(rncWebViewBridge, "ReactNativeWebView")
+       addJavascriptInterface(DomWebViewBridge(this@DomWebView), "ExpoDomWebViewBridge")
 diff --git a/node_modules/@expo/dom-webview/src/DomWebView.tsx b/node_modules/@expo/dom-webview/src/DomWebView.tsx
 index 3a07ac9..f1ecde1 100644
 --- a/node_modules/@expo/dom-webview/src/DomWebView.tsx
