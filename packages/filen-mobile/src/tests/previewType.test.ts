@@ -14,7 +14,7 @@ vi.mock("@/constants", () => {
 	}
 })
 
-import { getPreviewType, getPreviewTypeFromMime } from "@/lib/previewType"
+import { getPreviewType, getPreviewTypeFromMime, isProbablyBinaryText } from "@/lib/previewType"
 
 // ---------------------------------------------------------------------------
 // getPreviewType
@@ -220,5 +220,32 @@ describe("getPreviewTypeFromMime", () => {
 
 	it("normalises mixed-case with surrounding spaces", () => {
 		expect(getPreviewTypeFromMime("  IMAGE/JPEG  ")).toBe("image")
+	})
+})
+
+describe("isProbablyBinaryText", () => {
+	it("flags content containing a NUL byte (AppleDouble sidecar magic)", () => {
+		// AppleDouble files begin 0x00 0x05 0x16 0x07 — decoded, the NUL survives.
+		expect(isProbablyBinaryText("\u0000\u0005\u0016\u0007rest-of-header")).toBe(true)
+	})
+
+	it("flags content dominated by replacement characters (undecodable bytes)", () => {
+		expect(isProbablyBinaryText("\ufffd\ufffd\ufffd\ufffdab")).toBe(true)
+	})
+
+	it("tolerates a stray replacement character inside real text", () => {
+		expect(isProbablyBinaryText(`before ${"\ufffd"} after — mostly legitimate text content`)).toBe(false)
+	})
+
+	it("accepts plain ASCII text", () => {
+		expect(isProbablyBinaryText("hello world\nsecond line")).toBe(false)
+	})
+
+	it("accepts CJK text (the reported file name's characters)", () => {
+		expect(isProbablyBinaryText("\u3010,\u3011, \u300e,\u300f")).toBe(false)
+	})
+
+	it("treats empty content as text", () => {
+		expect(isProbablyBinaryText("")).toBe(false)
 	})
 })

@@ -106,3 +106,27 @@ export function getPreviewTypeFromMime(mimeType: string): PreviewType {
 
 	return getPreviewType(`file.${extname}`)
 }
+
+// Whether lossily-decoded file content is more plausibly binary than text. Catches files
+// that only wear a text extension — e.g. macOS "._*" AppleDouble sidecars (their magic
+// starts with a NUL byte) — so the text preview can show a proper "not a text file" state
+// instead of an invisible control-character soup or a wall of replacement characters.
+export function isProbablyBinaryText(text: string): boolean {
+	if (text.length === 0) {
+		return false
+	}
+
+	if (text.includes("\u0000")) {
+		return true
+	}
+
+	let replacements = 0
+
+	for (let i = 0; i < text.length; i++) {
+		if (text.charCodeAt(i) === 0xfffd) {
+			replacements++
+		}
+	}
+
+	return replacements / text.length > 0.1
+}

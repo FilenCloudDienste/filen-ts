@@ -9,7 +9,7 @@ import {
 	unwrapDirMeta,
 	unwrappedDirIntoDriveItem
 } from "@/lib/sdkUnwrap"
-import { getPreviewType } from "@/lib/previewType"
+import { getPreviewType, isProbablyBinaryText } from "@/lib/previewType"
 import cache from "@/lib/cache"
 import auth from "@/lib/auth"
 import events from "@/lib/events"
@@ -373,6 +373,25 @@ const PreviewText = ({ item }: { item: GalleryItemTagged }) => {
 	}
 
 	if (query.status === "success") {
+		// Binary bytes behind a text extension (e.g. macOS "._*" AppleDouble sidecars)
+		// decode to NUL/replacement-character soup — don't hand that to the editor
+		// (it renders as deceptively empty and saving it would corrupt the file).
+		if (isProbablyBinaryText(query.data)) {
+			return (
+				<View
+					className="flex-1 items-center justify-center px-8"
+					style={containerStyle}
+				>
+					<Ionicons
+						name="document-outline"
+						size={48}
+						color="#9ca3af"
+					/>
+					<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">{t("preview_not_text")}</Text>
+				</View>
+			)
+		}
+
 		return (
 			<PreviewTextInner
 				previewType={previewType === "code" ? "code" : "text"}

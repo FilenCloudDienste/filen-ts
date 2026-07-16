@@ -37,6 +37,8 @@ export const drivePreview = {
 	// ── Shared preview error states (previewText.tsx / previewDocx.tsx / previewPdf.tsx) ──────
 	/** Error state body shown when a file preview failed to load */
 	preview_load_failed: "Could not load this file",
+	/** Shown instead of the text editor when a file with a text extension contains binary data */
+	preview_not_text: "This file is not a text file and can't be displayed",
 	/** Button label to retry a failed file preview load */
 	retry: "Retry",
 
