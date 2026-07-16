@@ -50,7 +50,16 @@ const GalleryHeader = ({
 		currentItem ? (currentItem.type === "drive" ? driveItemDisplayName(currentItem.data) : currentItem.data.name) : ""
 	)
 
-	const solidHeader = currentItemPreviewType === "docx" || currentItemPreviewType === "pdf" || currentItemPreviewType === "video"
+	const solidHeader = Platform.select({
+		android:
+			currentItemPreviewType === "docx" ||
+			currentItemPreviewType === "pdf" ||
+			currentItemPreviewType === "video" ||
+			currentItemPreviewType === "code" ||
+			currentItemPreviewType === "text" ||
+			currentItemPreviewType === "unknown",
+		default: currentItemPreviewType === "docx" || currentItemPreviewType === "pdf" || currentItemPreviewType === "video"
+	})
 
 	const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery(
 		{
@@ -110,7 +119,7 @@ const GalleryHeader = ({
 								<Ionicons
 									name="close-outline"
 									size={30}
-									color={solidHeader ? textForeground.color : "white"}
+									color={Platform.OS === "android" ? "white" : solidHeader ? textForeground.color : "white"}
 								/>
 							</CrossGlassContainerView>
 						)}
@@ -159,7 +168,7 @@ const GalleryHeader = ({
 											<Ionicons
 												name="ellipsis-horizontal"
 												size={24}
-												color={solidHeader ? textForeground.color : "white"}
+												color={Platform.OS === "android" ? "white" : solidHeader ? textForeground.color : "white"}
 											/>
 										</CrossGlassContainerView>
 									)}
@@ -261,7 +270,7 @@ const GalleryHeader = ({
 										<Ionicons
 											name="ellipsis-horizontal"
 											size={24}
-											color={solidHeader ? textForeground.color : "white"}
+											color={Platform.OS === "android" ? "white" : solidHeader ? textForeground.color : "white"}
 										/>
 									</CrossGlassContainerView>
 								</Menu>
