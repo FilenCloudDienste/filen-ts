@@ -1,0 +1,27 @@
+diff --git a/node_modules/@blazejkustra/react-native-alert/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt b/node_modules/@blazejkustra/react-native-alert/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt
+index ceeb405..ace9243 100644
+--- a/node_modules/@blazejkustra/react-native-alert/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt
++++ b/node_modules/@blazejkustra/react-native-alert/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt
+@@ -5,6 +5,7 @@ import android.os.Build
+ import android.text.InputFilter
+ import android.text.InputType
+ import android.view.ContextThemeWrapper
++import android.view.View
+ import android.view.ViewGroup
+ import android.view.WindowManager
+ import android.view.inputmethod.InputMethodManager
+@@ -176,6 +177,14 @@ class ReactNativeAlertModule(
+ 
+     val isLogin = type == "login-password"
+ 
++    // Plain-text and secure-text prompts use password input-type variations (to suppress
++    // keyboard suggestions), which autofill services classify as credential fields and
++    // pop a password manager on focus. Only the login-password variant is a real
++    // credential form — exclude everything else from autofill.
++    if (!isLogin) {
++      layout.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
++    }
++
+     val username = if (isLogin) EditText(ctx).apply {
+       hint = config.getStringOrNull("usernamePlaceholder") ?: "Username"
+       inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
