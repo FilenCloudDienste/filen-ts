@@ -34,26 +34,76 @@ export const NETINFO_CONFIG: NetInfoConfiguration = {
 	useNativeReachability: false
 }
 
+// What expo-image-manipulator can decode into a bitmap — gates image thumbnails, camera-upload
+// compression, and avatar upload. iOS loads local files via UIImage(data:), i.e. full ImageIO
+// (incl. TIFF/JXL/ICO); Android goes through Glide.asBitmap() on the shared app-wide registry,
+// so expo-image's bundled libavif integration makes AVIF decodable on every supported device
+// (BitmapFactory covers the rest; Android has no TIFF/JXL decoder). Decoders sniff bytes — these
+// lists are only the entry gate. Keep each platform's list a subset of
+// EXPO_IMAGE_SUPPORTED_EXTENSIONS so nothing thumbnails without also being openable.
+// Verified-working but deliberately excluded: .dng (decodes on both platforms, but this list
+// also gates camera-upload compression — full-RAW developing a large DNG inside the background
+// task risks an OOM kill; needs a size cap first), .cur/.heics (near-zero prevalence), .svg (no
+// bitmap decode path on either platform — render-only via expo-image).
 export const EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS = new Set<string>(
 	Platform.select({
-		ios: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".heic", ".heif", ".webp", ".avif"],
-		android: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".heic", ".heif"],
+		ios: [
+			".jpg",
+			".jpeg",
+			".png",
+			".gif",
+			".bmp",
+			".tiff",
+			".tif",
+			".heic",
+			".heif",
+			".hif",
+			".webp",
+			".avif",
+			".jxl",
+			".ico",
+			".apng"
+		],
+		android: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".heic", ".heif", ".hif", ".avif", ".ico", ".apng"],
 		default: [".jpg", ".jpeg", ".png", ".gif", ".bmp"]
 	}) as string[]
 )
 
+// What the native players actually play — gates video previews AND video thumbnails. iOS is
+// AVFoundation end to end (one envelope); Android playback is Media3/ExoPlayer while thumbnails
+// go through the platform MediaMetadataRetriever, so Android entries must satisfy BOTH stacks
+// (.mov qualifies: the QuickTime brand is accepted by both sniffers). The gate is
+// container-level; codec support inside still varies (an AV1 .mp4 needs an AV1-capable iPhone,
+// exotic .mkv audio tracks like AC-3/DTS are device-dependent on Android).
+// Verified-working but deliberately excluded: .qt (extinct alias of .mov).
+// Never add: .ts/.mts (collide with TypeScript — this set is checked before the code-extension
+// switch in getPreviewType — and Media3 can't parse 192-byte AVCHD streams anyway), .avi (the
+// container opens on both platforms but the dominant real-world codecs — DivX/XviD, MJPEG —
+// have no decoder), .webm/.mkv on iOS, .flv/.mpg/.wmv/.ogv (no decoders anywhere).
 export const EXPO_VIDEO_SUPPORTED_EXTENSIONS = new Set<string>(
 	Platform.select({
-		ios: [".mp4", ".mov", ".m4v", ".3gp"],
-		android: [".mp4", ".m4v", ".webm", ".3gp", ".mkv"],
+		ios: [".mp4", ".mov", ".m4v", ".3gp", ".3g2"],
+		android: [".mp4", ".mov", ".m4v", ".webm", ".3gp", ".3g2", ".mkv"],
 		default: [".mp4", ".webm"]
 	}) as string[]
 )
 
+// What the native players actually DECODE (not just open) — gates audio previews + the audio
+// player. iOS is AVPlayer, which resolves formats by extension/UTI with no content sniffing, so
+// spelling aliases matter (.aif/.aifc); Android is ExoPlayer (content-sniffed). Ogg is
+// payload-split on iOS: Opus decodes, Vorbis does not — hence .opus without .ogg/.oga there.
+// Verified-working but deliberately excluded: iOS .ac3/.ec3/.eac3 (raw Dolby bitstreams), .m4r
+// (ringtone AAC), .adts (alias of .aac), .au, .w64; Android .awb (AMR-WB), .mka/.weba (Matroska
+// audio).
+// Never add: .ogg/.oga/.amr on iOS (all three open and then fail — no Vorbis/AMR decoder in
+// AVFoundation, and AMR even reports isPlayable=true), .alac (a codec, not a container — real
+// ALAC lives in .m4a/.caf and plays there), .mid (needs AVMIDIPlayer / a Media3 extension
+// neither expo module ships), .aiff on Android (no extractor), .wma/.ape/.wv/.mpc/.dsf/.dff
+// (no decoders).
 export const EXPO_AUDIO_SUPPORTED_EXTENSIONS = new Set<string>(
 	Platform.select({
-		ios: [".mp3", ".m4a", ".aac", ".wav", ".aiff", ".caf", ".flac", ".alac"],
-		android: [".mp3", ".m4a", ".aac", ".wav", ".ogg", ".3gp", ".flac"],
+		ios: [".mp3", ".m4a", ".m4b", ".aac", ".wav", ".aiff", ".aif", ".aifc", ".caf", ".flac", ".opus"],
+		android: [".mp3", ".m4a", ".m4b", ".aac", ".wav", ".ogg", ".oga", ".opus", ".amr", ".3gp", ".flac"],
 		default: [".mp3", ".m4a", ".aac", ".wav", ".ogg"]
 	}) as string[]
 )
@@ -104,10 +154,39 @@ export const AUDIO_METADATA_MAX_PARSE_SIZE_BYTES = 100 * 1024 * 1024
 // for throughput when fetching many tracks at once.
 export const AUDIO_METADATA_MAX_CONCURRENT_PARSES = 1
 
+// What expo-image can render — gates the preview gallery and the photos tab. Both platforms
+// sniff bytes (iOS: SDWebImage falls through to an ImageIO catch-all, which is why TIFF/JXL/BMP
+// decode even though the expo-image docs table omits them; Android: Glide → BitmapFactory plus
+// bundled libavif/APNG/SVG decoders), so entries here are the UI gate, not the decoder truth.
+// .hif is HEIC bytes under the Sony/Fujifilm extension; .icns/.tiff/.tif/.jxl are iOS-only (no
+// Android decoder). Keep this a superset of EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS per
+// platform — raster formats missing here would thumbnail without being openable (the old
+// .bmp/.tiff bug); render-only extras (.svg/.icns) are fine.
+// Verified-working but deliberately excluded: .dng (both platforms decode RAW, but it would
+// drag RAW shots into the photos tab and a full-RAW decode is the heaviest there is — product
+// call), .psd/.heics on iOS (flattened PSD preview / HEIF sequences), .cur (zero prevalence).
 export const EXPO_IMAGE_SUPPORTED_EXTENSIONS = new Set<string>(
 	Platform.select({
-		ios: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif", ".svg", ".ico", ".icns"],
-		android: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif", ".svg", ".ico"],
+		ios: [
+			".jpg",
+			".jpeg",
+			".png",
+			".gif",
+			".webp",
+			".avif",
+			".heic",
+			".heif",
+			".hif",
+			".svg",
+			".ico",
+			".icns",
+			".bmp",
+			".tiff",
+			".tif",
+			".jxl",
+			".apng"
+		],
+		android: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif", ".hif", ".svg", ".ico", ".bmp", ".apng"],
 		default: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".svg", ".ico"]
 	}) as string[]
 )
