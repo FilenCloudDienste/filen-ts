@@ -3428,16 +3428,17 @@ describe("Offline", () => {
 			const fileItem = makeFileItem(uuid, "atomic-fail.txt")
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
 
-			// Patch File.prototype.move to throw for tmp files
-			const originalMove = File.prototype.move
+			// Patch File.prototype.moveSync to throw for tmp files (atomicWrite promotes the tmp
+			// file via moveSync — fsAtomic.ts).
+			const originalMoveSync = File.prototype.moveSync
 
-			File.prototype.move = function (this: InstanceType<typeof File>, dest: InstanceType<typeof File>) {
+			File.prototype.moveSync = function (this: InstanceType<typeof File>, dest: InstanceType<typeof File>) {
 				if (this.uri.includes(".tmp-")) {
 					// Simulate: original file was already deleted, now move fails
 					throw new Error("Simulated disk failure during move")
 				}
 
-				return originalMove.call(this, dest)
+				return originalMoveSync.call(this, dest)
 			}
 
 			try {
@@ -3457,7 +3458,7 @@ describe("Offline", () => {
 					expect(key).not.toContain(".tmp-")
 				}
 			} finally {
-				File.prototype.move = originalMove
+				File.prototype.moveSync = originalMoveSync
 			}
 		})
 

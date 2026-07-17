@@ -445,7 +445,9 @@ export class Logger {
 		)
 
 		try {
-			current.move(rotated, {
+			// moveSync, NOT move: move() is async since expo-file-system 56 — this catch could
+			// never observe an async rejection and rotation would proceed on a pending rename.
+			current.moveSync(rotated, {
 				overwrite: true
 			})
 		} catch {

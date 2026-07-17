@@ -859,12 +859,12 @@ describe("SecureStore", () => {
 			// of the existing store (source securestore.bin) and any restore (source .bak.)
 			// must still succeed — only the tmp -> destination promotion fails.
 			const originalMove = File.prototype.move
-			const moveSpy = vi.spyOn(File.prototype, "move").mockImplementation(function (this: File, dest) {
+			const moveSpy = vi.spyOn(File.prototype, "move").mockImplementation(async function (this: File, dest) {
 				if (this.uri.includes(".securestore.tmp.")) {
 					throw new Error("simulated I/O error during move")
 				}
 
-				originalMove.call(this, dest)
+				await originalMove.call(this, dest)
 			})
 
 			try {
@@ -916,13 +916,13 @@ describe("SecureStore", () => {
 			// First move call: move existing store to backup (allow) — this establishes backedUp=true.
 			// Second move call: promote tmp to destination (throw) — this triggers the error path.
 			// Third move call: restore backup to destination (throw) — double failure.
-			const moveSpy = vi.spyOn(File.prototype, "move").mockImplementation(function (this: File, dest) {
+			const moveSpy = vi.spyOn(File.prototype, "move").mockImplementation(async function (this: File, dest) {
 				moveCallCount++
 
 				// Allow the backup move (first call for the existing store)
 				if (this.uri.includes(".securestore.bak.")) {
 					// This is either the restore call or a backup delete — allow restore
-					originalMove.call(this, dest)
+					await originalMove.call(this, dest)
 
 					return
 				}
@@ -932,16 +932,16 @@ describe("SecureStore", () => {
 				}
 
 				// The backup creation (existing → bak) needs to succeed so backedUp=true
-				originalMove.call(this, dest)
+				await originalMove.call(this, dest)
 			})
 
 			// Make the restore-from-backup move also fail by intercepting any move to the destination
 			let backupMoveCount = 0
 
-			moveSpy.mockImplementation(function (this: File, dest) {
+			moveSpy.mockImplementation(async function (this: File, dest) {
 				// Allow the first move (existing → backup)
 				if (!this.uri.includes(".securestore.tmp.") && !this.uri.includes(".securestore.bak.")) {
-					originalMove.call(this, dest)
+					await originalMove.call(this, dest)
 
 					return
 				}
@@ -959,7 +959,7 @@ describe("SecureStore", () => {
 						throw new Error("restore also failed")
 					}
 
-					originalMove.call(this, dest)
+					await originalMove.call(this, dest)
 				}
 			})
 

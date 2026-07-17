@@ -1,9 +1,12 @@
 /**
  * In-memory mock of expo-file-system for Vitest.
  *
- * 1:1 mock of the real expo-file-system API (v55), backed by an in-memory
+ * 1:1 mock of the real expo-file-system API (v57), backed by an in-memory
  * Map<string, Uint8Array | "dir">. All methods that exist on the real
- * File, Directory, and Paths classes are implemented here.
+ * File, Directory, and Paths classes are implemented here. Fidelity note:
+ * copy()/move() are ASYNC (real since v56) and defer their work by a microtask
+ * so un-awaited callers race exactly like production; copySync()/moveSync()
+ * hold the synchronous implementations.
  *
  * Usage in test files:
  *
@@ -215,7 +218,7 @@ export class File {
 		fs.delete(this.uri)
 	}
 
-	copy(destination: File | Directory, options?: { overwrite?: boolean }): void {
+	copySync(destination: File | Directory, options?: { overwrite?: boolean }): void {
 		const entry = fs.get(this.uri)
 
 		if (!(entry instanceof Uint8Array)) {
@@ -229,23 +232,31 @@ export class File {
 		fs.set(destUri, new Uint8Array(entry))
 	}
 
-	move(destination: File | Directory, options?: { overwrite?: boolean }): void {
+	moveSync(destination: File | Directory, options?: { overwrite?: boolean }): void {
 		const destUri = destination instanceof File ? destination.uri : Paths.join(destination.uri, this.name)
 
 		applyRelocationOverwriteSemantics(destUri, options)
 
-		this.copy(destination)
+		this.copySync(destination)
 		this.delete()
 
 		this.uri = destUri
 	}
 
-	copySync(destination: File | Directory, options?: { overwrite?: boolean }): void {
-		this.copy(destination, options)
+	// Async since expo-file-system 56 (CHANGELOG: "copy() and move() ... are now asynchronous").
+	// The microtask deferral is deliberate mock fidelity: real move()/copy() dispatch to a native
+	// queue and resolve later, so an UN-AWAITED call must not have completed by the time the next
+	// synchronous statement runs — tests relying on that would pass against a lie otherwise.
+	async copy(destination: File | Directory, options?: { overwrite?: boolean }): Promise<void> {
+		await Promise.resolve()
+
+		this.copySync(destination, options)
 	}
 
-	moveSync(destination: File | Directory, options?: { overwrite?: boolean }): void {
-		this.move(destination, options)
+	async move(destination: File | Directory, options?: { overwrite?: boolean }): Promise<void> {
+		await Promise.resolve()
+
+		this.moveSync(destination, options)
 	}
 
 	rename(newName: string): void {
@@ -509,7 +520,7 @@ export class Directory {
 		return destination.exists ? Paths.join(destination.uri, this.name) : destination.uri
 	}
 
-	copy(destination: Directory | File, options?: { overwrite?: boolean }): void {
+	copySync(destination: Directory | File, options?: { overwrite?: boolean }): void {
 		const destUri = this.resolveCopyOrMoveDestination(destination)
 
 		applyRelocationOverwriteSemantics(destUri, options)
@@ -527,13 +538,13 @@ export class Directory {
 		}
 	}
 
-	move(destination: Directory | File, options?: { overwrite?: boolean }): void {
+	moveSync(destination: Directory | File, options?: { overwrite?: boolean }): void {
 		const destUri = this.resolveCopyOrMoveDestination(destination)
 
 		applyRelocationOverwriteSemantics(destUri, options)
 
 		// Inline the subtree transfer against the pre-resolved destUri (instead of delegating to
-		// copy()) so the destination resolution cannot shift after an overwrite removed it.
+		// copySync()) so the destination resolution cannot shift after an overwrite removed it.
 		const prefix = this.uri.endsWith("/") ? this.uri : `${this.uri}/`
 
 		fs.set(destUri, "dir")
@@ -551,12 +562,17 @@ export class Directory {
 		this.uri = destUri
 	}
 
-	copySync(destination: Directory | File, options?: { overwrite?: boolean }): void {
-		this.copy(destination, options)
+	// Async since expo-file-system 56 — see the File counterpart for why the deferral matters.
+	async copy(destination: Directory | File, options?: { overwrite?: boolean }): Promise<void> {
+		await Promise.resolve()
+
+		this.copySync(destination, options)
 	}
 
-	moveSync(destination: Directory | File, options?: { overwrite?: boolean }): void {
-		this.move(destination, options)
+	async move(destination: Directory | File, options?: { overwrite?: boolean }): Promise<void> {
+		await Promise.resolve()
+
+		this.moveSync(destination, options)
 	}
 
 	rename(newName: string): void {

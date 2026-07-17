@@ -4274,8 +4274,10 @@ describe("B1 regression — compress copy overwrites the existing staging file",
 		const src = new MockFile("file:///cache/src.bin")
 		const dst = new MockFile("file:///cache/dst.bin")
 
-		expect(() => src.copy(dst)).toThrow("Destination already exists")
-		expect(() => src.copy(dst, { overwrite: true })).not.toThrow()
+		// copy() is async since expo-file-system 56 (the mock mirrors that): overwrite
+		// conflicts surface as rejections, not synchronous throws.
+		await expect(src.copy(dst)).rejects.toThrow("Destination already exists")
+		await expect(src.copy(dst, { overwrite: true })).resolves.toBeUndefined()
 		expect(fs.get("file:///cache/dst.bin")).toEqual(new Uint8Array([1]))
 	})
 

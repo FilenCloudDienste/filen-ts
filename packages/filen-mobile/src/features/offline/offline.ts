@@ -1274,9 +1274,11 @@ export class Offline {
 						}
 
 						if (entry instanceof FileSystem.Directory) {
-							entry.move(new FileSystem.Directory(destinationUri))
+							// moveSync, NOT move: move() is async since expo-file-system 56 and this
+							// loop's continuation assumes the relocation already happened.
+							entry.moveSync(new FileSystem.Directory(destinationUri))
 						} else {
-							entry.move(new FileSystem.File(destinationUri))
+							entry.moveSync(new FileSystem.File(destinationUri))
 						}
 
 						continue
@@ -1641,13 +1643,14 @@ export class Offline {
 							const from = new FileSystem.Directory(liveDirUri, op.from)
 
 							if (from.exists) {
-								from.move(new FileSystem.Directory(destinationUri))
+								// moveSync — see above: the op replay depends on the move having landed.
+								from.moveSync(new FileSystem.Directory(destinationUri))
 							}
 						} else {
 							const from = new FileSystem.File(liveDirUri, op.from)
 
 							if (from.exists) {
-								from.move(new FileSystem.File(destinationUri))
+								from.moveSync(new FileSystem.File(destinationUri))
 							}
 						}
 
