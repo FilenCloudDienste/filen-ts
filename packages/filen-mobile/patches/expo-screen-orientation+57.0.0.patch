@@ -1,0 +1,22 @@
+diff --git a/node_modules/expo-screen-orientation/ios/ScreenOrientationRegistry.swift b/node_modules/expo-screen-orientation/ios/ScreenOrientationRegistry.swift
+index 9e0b369..3414eee 100644
+--- a/node_modules/expo-screen-orientation/ios/ScreenOrientationRegistry.swift
++++ b/node_modules/expo-screen-orientation/ios/ScreenOrientationRegistry.swift
+@@ -217,7 +217,7 @@ public class ScreenOrientationRegistry: NSObject, UIApplicationDelegate {
+   }
+ 
+   public func registerController(_ controller: ScreenOrientationController) {
+-    queue.sync {
++    queue.sync(flags: .barrier) {
+       self.orientationControllers.append(controller)
+     }
+   }
+@@ -225,7 +225,7 @@ public class ScreenOrientationRegistry: NSObject, UIApplicationDelegate {
+   public func unregisterController(_ controller: ScreenOrientationController) {
+     let controllerIdentifier = ObjectIdentifier(controller)
+ 
+-    queue.sync {
++    queue.sync(flags: .barrier) {
+       self.controllerInterfaceMasks.removeValue(forKey: controllerIdentifier)
+       self.orientationControllers.removeAll(where: { $0 === controller })
+     }
