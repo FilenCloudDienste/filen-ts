@@ -8,6 +8,12 @@ import { isHeicFile } from "@/lib/imageConversion"
 export type CollisionParams = {
 	iteration: number
 	path: string
+	// #15: whether the compress option is on. Under compress `asset.name` is already the
+	// extension-STRIPPED stem (collisionBaseName strips it because the uploaded extension is
+	// unpredictable), so the suffix must be appended to the WHOLE stem — re-splitting it would
+	// mis-read a dotted stem segment (e.g. "vacation.2024" → ext ".2024") and diverge from the
+	// remote key. Defaults to false (the extension-splitting path) when omitted.
+	compress?: boolean
 	asset: {
 		name: string
 		/**
@@ -76,9 +82,14 @@ export function collisionNameSuffix({ iteration, asset }: { iteration: number; a
  * Returns null for iteration >= 2 (exhausted) or when the path is invalid
  * (no parent directory / degenerate basename).
  */
-export function modifyAssetPathOnCollision({ iteration, path, asset }: CollisionParams): string | null {
-	const ext = FileSystem.Paths.extname(asset.name)
-	const basename = FileSystem.Paths.basename(asset.name, ext)
+export function modifyAssetPathOnCollision({ iteration, path, asset, compress }: CollisionParams): string | null {
+	// #15: under compress the name is ALREADY extension-stripped (collisionBaseName), so keep it
+	// whole — splitting off a trailing dotted segment as an "extension" would place the suffix
+	// mid-stem ("vacation_<T>.2024") and diverge from the remote key ("vacation.2024_<T>", derived
+	// from the uploaded `<full-stem>_<suffix>.<uploadExt>` name via dedupTreeKey). Otherwise split
+	// the real trailing extension so the suffix lands before it ("img_0001_<T>.jpg").
+	const ext = compress ? "" : FileSystem.Paths.extname(asset.name)
+	const basename = compress ? asset.name : FileSystem.Paths.basename(asset.name, ext)
 	const slashIndex = path.lastIndexOf("/")
 	const parentDir = slashIndex > 0 ? path.slice(0, slashIndex) : slashIndex === 0 ? "/" : ""
 

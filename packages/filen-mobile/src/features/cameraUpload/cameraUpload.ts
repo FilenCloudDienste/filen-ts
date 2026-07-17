@@ -587,7 +587,8 @@ class CameraUpload {
 						const resolvedPath = modifyAssetPathOnCollision({
 							iteration,
 							path,
-							asset: collisionAsset
+							asset: collisionAsset,
+							compress: config.compress
 						})
 
 						if (resolvedPath === null || resolvedPath.length === 0) {
@@ -805,7 +806,8 @@ class CameraUpload {
 						asset: {
 							name: collisionName,
 							contentHash: remoteContentHash
-						}
+						},
+						compress
 					}) ?? ""
 
 				if (path.length === 0) {

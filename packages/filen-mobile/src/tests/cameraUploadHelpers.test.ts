@@ -956,6 +956,83 @@ describe("#15 — compress-rename key symmetry through the collision suffix", ()
 	})
 })
 
+// ─── #15 — MULTI-DOT filenames must not diverge under compress ────────────────
+
+describe("#15 — compress collision key symmetry for multi-dot filenames", () => {
+	// Regression: `collisionBaseName` under compress strips only the LAST extension, leaving a
+	// still-dotted stem (e.g. "vacation.2024"). modifyAssetPathOnCollision used to re-split that
+	// stem via Paths.extname (reading ".2024" as an extension) and inserted the suffix MID-stem
+	// ("vacation_<T>.2024"), while the uploaded remote name appends the suffix to the whole stem
+	// ("vacation.2024_<T>.jpg"). The two dedup keys then diverged and the photo re-uploaded on
+	// every fresh-device / evicted-cache sync (cloud version churn). Single-dot names were already
+	// symmetric, which is why this class went unnoticed.
+	it("local collision key equals the remote uploaded file's key for a multi-dot name (iteration 0)", () => {
+		const contentHash = String(Math.floor(1700000000000 / 1000))
+		const filename = "vacation.2024.png"
+
+		// LOCAL: the base key strips the real trailing extension, then the collision loop resolves
+		// the suffix from the extension-stripped collisionBaseName.
+		const localBaseKey = dedupTreeKey({ path: `/camera roll/${filename}`, compress: true })
+		const localResolved = modifyAssetPathOnCollision({
+			iteration: 0,
+			path: localBaseKey,
+			asset: {
+				name: collisionBaseName({ name: filename, compress: true }),
+				contentHash
+			},
+			compress: true
+		})
+
+		// REMOTE: the upload composes the suffix onto the FULL stem after the .png → .jpg rewrite,
+		// writing "vacation.2024_<suffix>.jpg"; listRemote strips the .jpg for its key.
+		const suffix = collisionNameSuffix({ iteration: 0, asset: { name: collisionBaseName({ name: filename, compress: true }), contentHash } })
+		const uploadedRemoteName = `vacation.2024${suffix}.jpg`
+		const remoteKey = dedupTreeKey({ path: `/camera roll/${uploadedRemoteName}`, compress: true })
+
+		expect(localResolved).toBe(remoteKey)
+		expect(localResolved).toBe(`/camera roll/vacation.2024_${contentHash}`)
+	})
+
+	it("local collision key equals the remote uploaded file's key for a multi-dot name (iteration 1)", () => {
+		const contentHash = String(Math.floor(1700000000000 / 1000))
+		const filename = "my.photo.final.png"
+		const collisionName = collisionBaseName({ name: filename, compress: true })
+
+		const localResolved = modifyAssetPathOnCollision({
+			iteration: 1,
+			path: dedupTreeKey({ path: `/camera roll/${filename}`, compress: true }),
+			asset: {
+				name: collisionName,
+				contentHash
+			},
+			compress: true
+		})
+
+		const suffix = collisionNameSuffix({ iteration: 1, asset: { name: collisionName, contentHash } })
+		const remoteKey = dedupTreeKey({ path: `/camera roll/my.photo.final${suffix}.jpg`, compress: true })
+
+		expect(localResolved).toBe(remoteKey)
+		expect(localResolved).toBe(`/camera roll/my.photo.final${suffix}`)
+	})
+
+	it("single-dot names remain symmetric (compress path unaffected)", () => {
+		const contentHash = String(Math.floor(1700000000000 / 1000))
+		const filename = "photo.png"
+
+		const localResolved = modifyAssetPathOnCollision({
+			iteration: 0,
+			path: dedupTreeKey({ path: `/camera roll/${filename}`, compress: true }),
+			asset: {
+				name: collisionBaseName({ name: filename, compress: true }),
+				contentHash
+			},
+			compress: true
+		})
+
+		expect(localResolved).toBe(`/camera roll/photo_${contentHash}`)
+	})
+})
+
 // ─── #B7 — ONE timestamp rule keeps null-creationTime keys symmetric ──────────
 
 describe("#B7 — null-creationTime local/remote key symmetry through the upload round-trip", () => {
