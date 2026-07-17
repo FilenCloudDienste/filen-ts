@@ -113,7 +113,10 @@ export class DriveSearch {
 
 					case CacheStatusMessage_Tags.Errors: {
 						// Non-fatal — the worker keeps running. Log only (silent infra).
-						logger.error("drive-search", "cache worker reported errors", { count: message.inner.errors.length, first: String(message.inner.errors[0]) })
+						logger.error("drive-search", "cache worker reported errors", {
+							count: message.inner.errors.length,
+							first: String(message.inner.errors[0])
+						})
 
 						break
 					}

@@ -41,7 +41,7 @@ vi.mock("@/lib/storageRoots", () => ({
 		create: mocks.createFn,
 		delete: mocks.deleteDirFn
 	},
-	SDK_CACHE_PARENT_DIRECTORY: { exists: true, list: () => mocks.listHolder.items },
+	SDK_CACHE_PARENT_DIRECTORY: { uri: "file:///sdkCache", exists: true, list: () => mocks.listHolder.items },
 	SDK_CACHE_DB_FILE: { uri: "file:///sdkCache/v1/cache.db" },
 	SDK_CACHE_VERSION: 1
 }))

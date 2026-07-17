@@ -1,9 +1,8 @@
-/* eslint-disable import/no-unresolved */
+ 
 /* eslint-disable no-restricted-imports */
 
 import "ts-node/register"
 import type { ExpoConfig, ConfigContext } from "expo/config"
-import withOPSQLiteAppGroup from "./plugins/withOpSqliteAppGroup"
 import { SUPPORTED_LANGUAGES } from "./src/locales/languages"
 
 const VERSION: string = "4.0.8"
@@ -269,12 +268,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 					parentTheme: "Default",
 					enforceNavigationBarContrast: false
 				}
-			}
-		],
-		[
-			withOPSQLiteAppGroup as unknown as string,
-			{
-				appGroupId: IOS_APP_GROUP_ID
 			}
 		],
 		"./plugins/withAndroidNetworkSecurityConfig",

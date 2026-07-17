@@ -17,6 +17,30 @@ const BASE_DIRECTORY_URI = Platform.select({
 	default: FileSystem.Paths.document
 })
 
+// iOS ships user-visible file sharing (UIFileSharingEnabled + open-in-place): the Documents
+// directory is browsable in the Files app / Finder, so databases holding decrypted names must
+// not sit there either. expo-file-system exposes no Library root — derive <container>/Library
+// from the Documents URI (the container layout is fixed on iOS: <container>/Documents,
+// <container>/Library). Falls back to the input for non-iOS-shaped URIs (tests) — still a
+// private container, just not the Library flavor. Exported for tests.
+export function deriveIosLibraryDirectoryUri(documentDirectoryUri: string): string {
+	return documentDirectoryUri.replace(/\/Documents\/?$/, "/Library")
+}
+
+// Private (non-shared, non-user-visible) base for LOCK-HOLDING storage — the SQLite databases.
+// Two constraints pick this spot: (1) iOS kills a process that is suspended while holding a
+// file/SQLite lock inside the shared app-group container (RUNNINGBOARD 0xdead10cc), and a
+// WAL-mode connection holds a shared lock continuously even while idle — so not
+// BASE_DIRECTORY_URI; (2) Documents is exposed to the user via file sharing — so
+// <container>/Library instead (backed up like the old location; never OS-purged, unlike
+// Caches). Plain-file areas (offline/fileCache/audioCache/thumbnails/logs) take no locks and
+// stay on the shared base. Nothing cross-process reads these DBs — the File/Documents Provider
+// extensions consume auth.json + their own database, never these files.
+const PRIVATE_BASE_DIRECTORY_URI = Platform.select({
+	ios: deriveIosLibraryDirectoryUri(FileSystem.Paths.document.uri),
+	default: FileSystem.Paths.document.uri
+})
+
 export const OFFLINE_VERSION = 2
 export const OFFLINE_PARENT_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "offline"))
 export const OFFLINE_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(OFFLINE_PARENT_DIRECTORY.uri, `v${OFFLINE_VERSION}`))
@@ -43,8 +67,9 @@ export const THUMBNAILS_DIRECTORY = new FileSystem.Directory(
 
 export const SQLITE_VERSION = 1
 export const SQLITE_DB_FILE_NAME = "sqlite.db"
-export const SQLITE_DB_FILE_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "sqlite", `v${SQLITE_VERSION}`))
-
+export const SQLITE_DB_FILE_DIRECTORY = new FileSystem.Directory(
+	FileSystem.Paths.join(PRIVATE_BASE_DIRECTORY_URI, "sqlite", `v${SQLITE_VERSION}`)
+)
 // SDK cache (filen-sdk-rs `cache` feature) — backs the live, cache-backed drive
 // search (`Client.configureCache` + `createSearch`). A separate SQLite DB the
 // Rust worker opens directly; distinct from the app's own sqlite.db and from the
@@ -52,7 +77,7 @@ export const SQLITE_DB_FILE_DIRECTORY = new FileSystem.Directory(FileSystem.Path
 // decrypted dir/file names at rest (same posture as offline/fileCache) — wiped on
 // logout. The parent dir is swept on init so a version bump invalidates old data.
 export const SDK_CACHE_VERSION = 1
-export const SDK_CACHE_PARENT_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "sdkCache"))
+export const SDK_CACHE_PARENT_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(PRIVATE_BASE_DIRECTORY_URI, "sdkCache"))
 export const SDK_CACHE_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(SDK_CACHE_PARENT_DIRECTORY.uri, `v${SDK_CACHE_VERSION}`))
 export const SDK_CACHE_DB_FILE = new FileSystem.File(FileSystem.Paths.join(SDK_CACHE_DIRECTORY.uri, "cache.db"))
 

@@ -1,6 +1,5 @@
 import { open, type DB } from "@op-engineering/op-sqlite"
 import { Semaphore, run } from "@filen/utils"
-import { AppState } from "react-native"
 import { serialize, deserialize } from "@/lib/serializer"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import { SQLITE_VERSION, SQLITE_DB_FILE_NAME, SQLITE_DB_FILE_DIRECTORY } from "@/lib/storageRoots"
@@ -64,26 +63,14 @@ class Sqlite {
 	// `INSERT OR REPLACE` cannot re-INSERT decrypted metadata AFTER the logout Phase 6 wipe.
 	private clearGeneration = 0
 
-	public constructor() {
-		// Maintenance on app background: checkpoint WAL, reclaim free pages, run optimize with query history
-		AppState.addEventListener("change", state => {
-			if (state !== "background" || !sqlite.db) {
-				return
-			}
-
-			run(async () => {
-				const db = await sqlite.openDb()
-
-				await db.execute("PRAGMA wal_checkpoint(PASSIVE)")
-				await db.execute("PRAGMA incremental_vacuum(64)")
-				await db.execute("PRAGMA optimize")
-			}).then(result => {
-				if (!result.success) {
-					logger.warn("sqlite", "Background maintenance failed", { error: result.error })
-				}
-			})
-		})
-	}
+	// NOTE deliberately NO background-maintenance AppState hook here: running checkpoint/vacuum
+	// work right as the app backgrounds is the worst possible timing on iOS — suspension can
+	// land mid-write and a held SQLite lock at suspension is a kill (0xdead10cc; observed in
+	// production crash logs as pwrite→walWriteOneFrame at kill time). wal_autocheckpoint (set in
+	// INIT_QUERIES) keeps the WAL bounded during normal writes, `PRAGMA optimize` runs at open,
+	// and the logout wipe still performs the full vacuum + WAL truncate (reclaimAfterWipe).
+	// Accepted trade: with no periodic incremental_vacuum, freed pages are recycled internally
+	// but only returned to the OS at logout — the DB file parks at its high-water mark.
 
 	public async openDb(): Promise<DB> {
 		let attempt = 0
@@ -169,10 +156,12 @@ class Sqlite {
 	 */
 	public async kvStats(): Promise<{ rows: number; totalBytes: number; largest: { key: string; bytes: number }[] }> {
 		const db = await this.openDb()
-		const totalsRow = (await db.executeRaw("SELECT COUNT(*), COALESCE(SUM(LENGTH(CAST(key AS BLOB)) + LENGTH(CAST(value AS BLOB))), 0) FROM kv", []))
-			.rawRows[0]
-		const largestRows = (await db.executeRaw("SELECT key, LENGTH(CAST(value AS BLOB)) FROM kv ORDER BY LENGTH(CAST(value AS BLOB)) DESC LIMIT 3", []))
-			.rawRows
+		const totalsRow = (
+			await db.executeRaw("SELECT COUNT(*), COALESCE(SUM(LENGTH(CAST(key AS BLOB)) + LENGTH(CAST(value AS BLOB))), 0) FROM kv", [])
+		).rawRows[0]
+		const largestRows = (
+			await db.executeRaw("SELECT key, LENGTH(CAST(value AS BLOB)) FROM kv ORDER BY LENGTH(CAST(value AS BLOB)) DESC LIMIT 3", [])
+		).rawRows
 
 		return {
 			rows: Number(totalsRow?.[0] ?? 0),

@@ -104,6 +104,50 @@ describe("iOS appleSharedContainers fallback", () => {
 	})
 })
 
+// The SQLite databases must NOT live in the shared app-group container: iOS kills a process
+// that is suspended while holding a file/SQLite lock there (RUNNINGBOARD 0xdead10cc), and a
+// WAL connection holds a shared lock even while idle. Plain-file areas stay shared.
+describe("database roots live on the private base (0xdead10cc)", () => {
+	it("on iOS, sqlite + sdkCache are rooted at the private base, not the shared container", async () => {
+		const { SQLITE_DB_FILE_DIRECTORY, SDK_CACHE_PARENT_DIRECTORY } = await importRoots("ios")
+		const { IOS_APP_GROUP_IDENTIFIER } = await import("@/constants")
+
+		expect(SQLITE_DB_FILE_DIRECTORY.uri).not.toContain(IOS_APP_GROUP_IDENTIFIER)
+		expect(SDK_CACHE_PARENT_DIRECTORY.uri).not.toContain(IOS_APP_GROUP_IDENTIFIER)
+	})
+
+	it("plain-file areas stay on the shared container on iOS", async () => {
+		const { OFFLINE_DIRECTORY, FILE_CACHE_PARENT_DIRECTORY, THUMBNAILS_DIRECTORY, LOGS_DIRECTORY } = await importRoots("ios")
+		const { IOS_APP_GROUP_IDENTIFIER } = await import("@/constants")
+
+		for (const dir of [OFFLINE_DIRECTORY, FILE_CACHE_PARENT_DIRECTORY, THUMBNAILS_DIRECTORY, LOGS_DIRECTORY]) {
+			expect(dir.uri).toContain(IOS_APP_GROUP_IDENTIFIER)
+		}
+	})
+})
+
+describe("private-base derivation helper", () => {
+	it("deriveIosLibraryDirectoryUri maps a real iOS Documents URI to the sibling Library dir", async () => {
+		const { deriveIosLibraryDirectoryUri } = await importRoots("ios")
+
+		expect(deriveIosLibraryDirectoryUri("file:///var/mobile/Containers/Data/Application/ABC-123/Documents/")).toBe(
+			"file:///var/mobile/Containers/Data/Application/ABC-123/Library"
+		)
+		expect(deriveIosLibraryDirectoryUri("file:///var/mobile/Containers/Data/Application/ABC-123/Documents")).toBe(
+			"file:///var/mobile/Containers/Data/Application/ABC-123/Library"
+		)
+	})
+
+	it("deriveIosLibraryDirectoryUri falls back to the input when no Documents segment exists", async () => {
+		const { deriveIosLibraryDirectoryUri } = await importRoots("ios")
+
+		// The vitest mock's document root has no /Documents suffix — the fallback keeps the
+		// derivation harmless there (still a private container, just not the Library flavor).
+		expect(deriveIosLibraryDirectoryUri("file:///document")).toBe("file:///document")
+		expect(deriveIosLibraryDirectoryUri("file:///data/user/0/io.filen.app/files/")).toBe("file:///data/user/0/io.filen.app/files/")
+	})
+})
+
 function escapeRegex(str: string): string {
 	return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }

@@ -126,6 +126,9 @@ vi.mock("expo-file-system", () => ({
 		delete = vi.fn()
 	},
 	Paths: {
+		// storageRoots reads Paths.document.uri (and appleSharedContainers) at module eval.
+		document: { uri: "file:///document" },
+		cache: { uri: "file:///cache" },
 		join: (...parts: string[]) => parts.join("/"),
 		extname: (name: string) => {
 			const dot = name.lastIndexOf(".")

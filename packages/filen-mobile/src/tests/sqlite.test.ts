@@ -1,9 +1,5 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-// Capture the AppState 'change' handler the Sqlite constructor registers.
-// Must be declared before vi.mock calls so hoisting can close over it.
-let capturedAppStateHandler: ((state: string) => void) | null = null
-
 // In-memory store backing the op-sqlite mock. The real sqlite lib uses one-shot
 // db.execute / db.executeRaw (no shared prepared statements), so the mock parses
 // the handful of SQL patterns the kv layer issues and operates on this Map.
@@ -109,14 +105,12 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
-// Custom react-native mock that also captures the AppState.addEventListener handler.
+// Minimal react-native mock — storageRoots (imported transitively) reads Platform at module
+// evaluation. iOS branch keeps the shared-container base distinct from the private base, which
+// is what the relocation tests below exercise.
 vi.mock("react-native", () => ({
 	AppState: {
-		addEventListener: vi.fn((_type: string, handler: (state: string) => void) => {
-			capturedAppStateHandler = handler
-
-			return { remove: vi.fn() }
-		})
+		addEventListener: vi.fn(() => ({ remove: vi.fn() }))
 	},
 	Platform: {
 		OS: "ios" as "ios" | "android",
@@ -169,7 +163,6 @@ async function resetAll() {
 	vi.clearAllMocks()
 	mockDb._reset()
 	open.mockReturnValue(mockDb)
-	capturedAppStateHandler = null
 
 	const { expoFsModule } = await getModules()
 
@@ -694,60 +687,23 @@ describe("Sqlite", () => {
 		})
 	})
 
-	describe("AppState background maintenance", () => {
-		it("runs WAL checkpoint, incremental_vacuum, and optimize when app backgrounds", async () => {
-			// createSqlite() creates a new Sqlite instance. Its constructor registers
-			// an AppState listener, which is captured in capturedAppStateHandler.
-			// The listener's body references `sqlite` (the module-level singleton),
-			// so we must initialize the SINGLETON (mod.default) to get sqlite.db set.
-			const { sqliteModule } = await getModules()
-			const singleton = sqliteModule!.default
+	describe("private DB location (app-group container → private sandbox)", () => {
+		it("anchors the DB off the shared container on iOS", async () => {
+			const { storageRootsModule } = await getModules()
 
-			// Create a new instance to trigger the AppState.addEventListener call
-			// so capturedAppStateHandler is populated.
-			await createSqlite()
-
-			expect(capturedAppStateHandler).not.toBeNull()
-
-			// Initialize the singleton — the handler checks !sqlite.db (the singleton).
-			await singleton.init()
-
-			// Firing 'active' should not trigger maintenance.
-			await (capturedAppStateHandler as (state: string) => void)("active")
-
-			const callsBefore = mockDb.execute.mock.calls.length
-
-			// Firing 'background' triggers the three PRAGMA maintenance queries.
-			await (capturedAppStateHandler as (state: string) => void)("background")
-
-			// Allow the async run() inside the handler to settle.
-			await new Promise(resolve => setTimeout(resolve, 0))
-
-			const maintenanceCalls = mockDb.execute.mock.calls.slice(callsBefore).map(call => call[0] as string)
-
-			expect(maintenanceCalls).toContain("PRAGMA wal_checkpoint(PASSIVE)")
-			expect(maintenanceCalls).toContain("PRAGMA incremental_vacuum(64)")
-			expect(maintenanceCalls).toContain("PRAGMA optimize")
+			expect(storageRootsModule.SQLITE_DB_FILE_DIRECTORY.uri).not.toContain("shared")
 		})
 
-		it("skips maintenance when db is not yet open", async () => {
-			// Create an instance to register the AppState listener.
-			// Do NOT call init() on the singleton — db stays null.
-			const { sqliteModule } = await getModules()
-			const singleton = sqliteModule!.default
+		it("init() opens at the private location", async () => {
+			const sqlite = await createSqlite()
 
-			// Ensure singleton.db is null (it starts null; clearAllMocks won't affect it)
-			;(singleton as any).db = null
-			;(singleton as any).initDone = false
+			await sqlite.init()
 
-			await createSqlite()
+			const openCalls = open.mock.calls as unknown as { name: string; location: string }[][]
+			const openArgs = openCalls[0]![0]!
 
-			expect(capturedAppStateHandler).not.toBeNull()
-
-			await (capturedAppStateHandler as (state: string) => void)("background")
-			await new Promise(resolve => setTimeout(resolve, 0))
-
-			expect(mockDb.execute).not.toHaveBeenCalledWith("PRAGMA wal_checkpoint(PASSIVE)")
+			expect(openArgs.location).not.toContain("shared")
+			expect(openArgs.location).toContain("sqlite/v1")
 		})
 	})
 })
