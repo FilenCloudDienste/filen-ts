@@ -550,6 +550,7 @@
 	"normal": "Normal",
 	"not_playing": "No se está reproduciendo",
 	"not_set": "Sin definir",
+	"note_content_unavailable_offline": "El contenido de esta nota no está disponible sin conexión. Conéctate a internet para cargarlo.",
 	"note_edit_not_saved_to_device": "No se pudo guardar tu edición en este dispositivo. Mantén la app abierta hasta que se haya sincronizado.",
 	"note_edited": "Nota editada",
 	"note_edited_message": "Esta nota fue editada por otra persona. ¿Recargar para ver los últimos cambios? Se perderán las ediciones locales no sincronizadas.",

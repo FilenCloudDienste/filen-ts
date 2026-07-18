@@ -555,6 +555,7 @@
 	"normal": "Normal",
 	"not_playing": "Nu se redă nimic",
 	"not_set": "Nesetat",
+	"note_content_unavailable_offline": "Conținutul acestei notițe nu este disponibil offline. Conectează-te la internet pentru a-l încărca.",
 	"note_edit_not_saved_to_device": "Modificarea ta nu a putut fi salvată pe acest dispozitiv. Păstrează aplicația deschisă până când s-a sincronizat.",
 	"note_edited": "Notiță editată",
 	"note_edited_message": "Această notiță a fost editată de altcineva. Reîncarci pentru a vedea ultimele modificări? Orice modificări locale nesincronizate se vor pierde.",

@@ -550,6 +550,7 @@
 	"normal": "Normál",
 	"not_playing": "Nincs lejátszás",
 	"not_set": "Nincs beállítva",
+	"note_content_unavailable_offline": "Ennek a jegyzetnek a tartalma nem érhető el offline. Csatlakozz az internethez a betöltéséhez.",
 	"note_edit_not_saved_to_device": "A szerkesztésedet nem sikerült elmenteni ezen az eszközön. Tartsd nyitva az alkalmazást, amíg nem szinkronizálódik.",
 	"note_edited": "Jegyzet szerkesztve",
 	"note_edited_message": "Ezt a jegyzetet valaki más szerkesztette. Újratöltöd a legfrissebb módosítások megtekintéséhez? Minden nem szinkronizált helyi módosítás elveszik.",
