@@ -2,10 +2,21 @@ import * as FileSystem from "expo-file-system"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import mimeTypes from "mime-types"
 
-export type PreviewType = "image" | "video" | "unknown" | "pdf" | "text" | "code" | "audio" | "docx"
+export type PreviewType = "image" | "svg" | "video" | "unknown" | "pdf" | "text" | "code" | "audio" | "docx"
 
 export function getPreviewType(name: string): PreviewType {
 	const extname = FileSystem.Paths.extname(name.trim().toLowerCase())
+
+	// SVG is a distinct render type but image-equivalent everywhere it's classified (gallery /
+	// photos membership, icon selection, size caps, save-to-photos — gate those with
+	// isImagePreviewType, not `=== "image"`). It only diverges at the render layer, where it
+	// goes through react-native-svg (PreviewSvg) instead of expo-image: on Android expo-image
+	// decodes SVG via the unmaintained androidsvg 1.4, whose pattern rendering can recurse into
+	// an uncatchable native OOM abort (bad_alloc → SIGABRT). Split out before the image set
+	// check below (.svg is still IN that set, for eligibility).
+	if (extname === ".svg") {
+		return "svg"
+	}
 
 	if (EXPO_IMAGE_SUPPORTED_EXTENSIONS.has(extname)) {
 		return "image"
@@ -105,6 +116,17 @@ export function getPreviewTypeFromMime(mimeType: string): PreviewType {
 	}
 
 	return getPreviewType(`file.${extname}`)
+}
+
+// SVG previews render via react-native-svg but are image-equivalent for classification
+// (gallery / photos membership, icon selection, save-to-photos, size caps). Use this instead
+// of `previewType === "image"` at any eligibility site so SVGs keep behaving like images; the
+// only places that keep the literal `"image"` are the actual render sinks (which route `"svg"`
+// to PreviewSvg), and the chat inline-attachment gate (which deliberately drops `"svg"` OUT of
+// the inline-image path — internal link → file chip, external link → plain link — rather than
+// decoding an untrusted SVG inline via expo-image).
+export function isImagePreviewType(previewType: PreviewType): previewType is "image" | "svg" {
+	return previewType === "image" || previewType === "svg"
 }
 
 // Whether lossily-decoded file content is more plausibly binary than text. Catches files

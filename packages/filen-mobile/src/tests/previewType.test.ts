@@ -14,7 +14,7 @@ vi.mock("@/constants", () => {
 	}
 })
 
-import { getPreviewType, getPreviewTypeFromMime, isProbablyBinaryText } from "@/lib/previewType"
+import { getPreviewType, getPreviewTypeFromMime, isImagePreviewType, isProbablyBinaryText } from "@/lib/previewType"
 
 // ---------------------------------------------------------------------------
 // getPreviewType
@@ -44,6 +44,18 @@ describe("getPreviewType", () => {
 
 		it("normalises whitespace-padded name", () => {
 			expect(getPreviewType("  photo.png  ")).toBe("image")
+		})
+	})
+
+	describe("svg", () => {
+		// .svg must NOT classify as "image": on Android expo-image decodes SVG via androidsvg,
+		// which can abort the process natively. It renders via react-native-svg (PreviewSvg) instead.
+		it("returns 'svg' for .svg even though .svg is in the image-supported set", () => {
+			expect(getPreviewType("logo.svg")).toBe("svg")
+		})
+
+		it("normalises uppercase .SVG", () => {
+			expect(getPreviewType("LOGO.SVG")).toBe("svg")
 		})
 	})
 
@@ -168,6 +180,11 @@ describe("getPreviewTypeFromMime", () => {
 		expect(getPreviewTypeFromMime("image/png")).toBe("image")
 	})
 
+	it("returns 'svg' for image/svg+xml", () => {
+		// mime-types.extension('image/svg+xml') -> 'svg' -> .svg -> svg (not image)
+		expect(getPreviewTypeFromMime("image/svg+xml")).toBe("svg")
+	})
+
 	it("returns 'video' for video/mp4", () => {
 		// mime-types.extension('video/mp4') -> 'mp4' -> .mp4 -> video
 		expect(getPreviewTypeFromMime("video/mp4")).toBe("video")
@@ -220,6 +237,26 @@ describe("getPreviewTypeFromMime", () => {
 
 	it("normalises mixed-case with surrounding spaces", () => {
 		expect(getPreviewTypeFromMime("  IMAGE/JPEG  ")).toBe("image")
+	})
+})
+
+describe("isImagePreviewType", () => {
+	it("is true for 'image'", () => {
+		expect(isImagePreviewType("image")).toBe(true)
+	})
+
+	it("is true for 'svg' (image-equivalent for eligibility, only the renderer differs)", () => {
+		expect(isImagePreviewType("svg")).toBe(true)
+	})
+
+	it("is false for non-image types", () => {
+		expect(isImagePreviewType("video")).toBe(false)
+		expect(isImagePreviewType("audio")).toBe(false)
+		expect(isImagePreviewType("pdf")).toBe(false)
+		expect(isImagePreviewType("text")).toBe(false)
+		expect(isImagePreviewType("code")).toBe(false)
+		expect(isImagePreviewType("docx")).toBe(false)
+		expect(isImagePreviewType("unknown")).toBe(false)
 	})
 })
 

@@ -39,7 +39,8 @@ export const FileIcon = ({ name, width, height, className }: { name: string; wid
 				return FILE_ICONS.video
 			}
 
-			case "image": {
+			case "image":
+			case "svg": {
 				return FILE_ICONS.image
 			}
 

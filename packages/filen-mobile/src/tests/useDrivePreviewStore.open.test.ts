@@ -26,8 +26,15 @@ vi.mock("@/lib/previewType", async () => {
 	const actual = await import("@/tests/mocks/expoFileSystem")
 
 	return {
+		isImagePreviewType(previewType: string): boolean {
+			return previewType === "image" || previewType === "svg"
+		},
 		getPreviewType(name: string): string {
 			const ext = actual.Paths.extname(name.trim().toLowerCase())
+
+			if (ext === ".svg") {
+				return "svg"
+			}
 
 			if ([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".heic", ".heif", ".webp", ".avif"].includes(ext)) {
 				return "image"
@@ -185,6 +192,44 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 			expect(useDrivePreviewStore.getState().currentItem).toBeNull()
 			expect(useDrivePreviewStore.getState().currentIndex).toBeNull()
 			expect(mockRouterPush).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("svg inclusion (image-equivalent for gallery membership)", () => {
+		it("includes a .svg item in the gallery filter (regular drive path) and resolves it as the opened item", () => {
+			const svgItem = makeDriveGalleryItem("svg1", "logo.svg")
+			const jpgItem = makeDriveGalleryItem("jpg1", "photo.jpg")
+			const items: GalleryItemTagged[] = [svgItem, jpgItem]
+
+			useDrivePreviewStore.getState().open({
+				items,
+				initialItem: makeInitialDriveItem("svg1", "logo.svg")
+			})
+
+			const state = useDrivePreviewStore.getState()
+			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
+
+			expect(uuids).toContain("svg1")
+			// initialScrollIndex must resolve (not -1), else open() bails with a null currentItem.
+			expect((state.currentItem as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid).toBe("svg1")
+		})
+
+		it("includes a .svg item in the photos path filter", () => {
+			const photosDrivePath = makeDrivePath("photos")
+			const svgItem = makeDriveGalleryItem("svg1", "logo.svg")
+			const jpgItem = makeDriveGalleryItem("jpg1", "photo.jpg")
+			const items: GalleryItemTagged[] = [svgItem, jpgItem]
+
+			useDrivePreviewStore.getState().open({
+				items,
+				initialItem: makeInitialDriveItem("svg1", "logo.svg", photosDrivePath)
+			})
+
+			const uuids = useDrivePreviewStore
+				.getState()
+				.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
+
+			expect(uuids).toContain("svg1")
 		})
 	})
 

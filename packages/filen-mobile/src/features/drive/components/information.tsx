@@ -88,7 +88,8 @@ function useDriveItemInfoRows(
 										return t("preview_type_pdf")
 									}
 
-									case "image": {
+									case "image":
+									case "svg": {
 										return t("preview_type_image")
 									}
 

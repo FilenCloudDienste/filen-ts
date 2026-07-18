@@ -44,7 +44,7 @@ export const NETINFO_CONFIG: NetInfoConfiguration = {
 // Verified-working but deliberately excluded: .dng (decodes on both platforms, but this list
 // also gates camera-upload compression — full-RAW developing a large DNG inside the background
 // task risks an OOM kill; needs a size cap first), .cur/.heics (near-zero prevalence), .svg (no
-// bitmap decode path on either platform — render-only via expo-image).
+// bitmap decode path on either platform — render-only, via react-native-svg / PreviewSvg).
 export const EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS = new Set<string>(
 	Platform.select({
 		ios: [
@@ -161,7 +161,11 @@ export const AUDIO_METADATA_MAX_CONCURRENT_PARSES = 1
 // .hif is HEIC bytes under the Sony/Fujifilm extension; .icns/.tiff/.tif/.jxl are iOS-only (no
 // Android decoder). Keep this a superset of EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS per
 // platform — raster formats missing here would thumbnail without being openable (the old
-// .bmp/.tiff bug); render-only extras (.svg/.icns) are fine.
+// .bmp/.tiff bug); render-only extra .icns is fine. `.svg` stays in this set so it's classified
+// as an image (gallery/photos-eligible — gate with isImagePreviewType, not `=== "image"`), but
+// getPreviewType returns "svg" and the gallery renders it through react-native-svg (PreviewSvg),
+// NOT expo-image: on Android expo-image decodes SVG via the unmaintained androidsvg 1.4, whose
+// pattern rendering can recurse into an uncatchable native OOM abort on adversarial SVGs.
 // Verified-working but deliberately excluded: .dng (both platforms decode RAW, but it would
 // drag RAW shots into the photos tab and a full-RAW decode is the heaviest there is — product
 // call), .psd/.heics on iOS (flattened PSD preview / HEIF sequences), .cur (zero prevalence).

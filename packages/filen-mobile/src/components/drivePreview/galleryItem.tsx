@@ -3,6 +3,7 @@ import { getPreviewType } from "@/lib/previewType"
 import { useWindowDimensions, ActivityIndicator } from "react-native"
 import { type SharedValue } from "react-native-reanimated"
 import PreviewImage from "@/components/drivePreview/previewImage"
+import PreviewSvg from "@/components/drivePreview/previewSvg"
 import PreviewVideo from "@/components/drivePreview/previewVideo"
 import PreviewAudio from "@/components/drivePreview/previewAudio"
 import PreviewText from "@/components/drivePreview/previewText"
@@ -112,6 +113,27 @@ const GalleryItem = ({
 				>
 					<PreviewImage
 						fileUrl={fileUrl}
+						zoomScale={galleryZoomScale}
+						onPinchDismiss={goBack}
+						onZoomChange={onZoomChange}
+						onSingleTap={onSingleTap}
+						onPinchActiveChange={onPinchActiveChange}
+					/>
+				</View>
+			)
+		}
+
+		case "svg": {
+			// Rendered via react-native-svg rather than expo-image — expo-image decodes SVG
+			// through the unmaintained androidsvg 1.4 on Android, which can recurse into an
+			// uncatchable native OOM abort on adversarial/complex SVGs. See PreviewSvg.
+			return (
+				<View
+					className="bg-transparent"
+					style={itemStyle}
+				>
+					<PreviewSvg
+						item={info.item}
 						zoomScale={galleryZoomScale}
 						onPinchDismiss={goBack}
 						onZoomChange={onZoomChange}

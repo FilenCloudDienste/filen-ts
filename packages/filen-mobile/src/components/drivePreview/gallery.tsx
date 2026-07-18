@@ -6,7 +6,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { useNavigation } from "expo-router"
 import { router } from "@/lib/router"
 import { type DriveItemFileExtracted } from "@/types"
-import { getPreviewType } from "@/lib/previewType"
+import { getPreviewType, isImagePreviewType } from "@/lib/previewType"
 import { useWindowDimensions, Platform, type NativeSyntheticEvent, type NativeScrollEvent, type LayoutChangeEvent } from "react-native"
 import { SystemBars } from "react-native-edge-to-edge"
 import { GestureDetector, Gesture } from "react-native-gesture-handler"
@@ -463,7 +463,7 @@ const Gallery = () => {
 			)
 
 			return {
-				isImage: previewType === "image",
+				isImage: isImagePreviewType(previewType),
 				isVideo: previewType === "video",
 				isAudio: previewType === "audio",
 				isExternal: state.currentItem.type === "external"

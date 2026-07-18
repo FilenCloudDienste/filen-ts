@@ -27,10 +27,14 @@ export function isPhotoGridItem({
 	}
 
 	const previewType = getPreviewType(item.data.decryptedMeta.name)
+	// `svg` is image-equivalent for grid eligibility (it renders via react-native-svg, not
+	// expo-image — see PreviewSvg). Inlined rather than importing isImagePreviewType to keep this
+	// predicate free of runtime @/lib deps (getPreviewType is injected for the same reason).
+	const isImage = previewType === "image" || previewType === "svg"
 
 	return (
-		(previewType === "image" || previewType === "video") &&
-		(previewType === "image" ? supportedImageExtensions.has(extname(item.data.decryptedMeta.name).toLowerCase()) : true)
+		(isImage || previewType === "video") &&
+		(isImage ? supportedImageExtensions.has(extname(item.data.decryptedMeta.name).toLowerCase()) : true)
 	)
 }
 

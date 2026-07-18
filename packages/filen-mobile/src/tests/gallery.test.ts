@@ -108,7 +108,8 @@ vi.mock("@/stores/useDrivePreview.store", () => ({
 }))
 
 vi.mock("@/lib/previewType", () => ({
-	getPreviewType: vi.fn(() => "image")
+	getPreviewType: vi.fn(() => "image"),
+	isImagePreviewType: (previewType: string) => previewType === "image" || previewType === "svg"
 }))
 
 vi.mock("@/lib/decryption", () => ({

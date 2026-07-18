@@ -170,7 +170,13 @@ describe("filterPhotoGridItems", () => {
 function getPreviewTypeForFinding48(name: string): PreviewType {
 	const ext = extnameProduction(name).toLowerCase()
 
-	if ([".jpg", ".jpeg", ".png", ".gif", ".heic", ".heif", ".webp", ".avif", ".svg", ".ico", ".icns"].includes(ext)) {
+	// Faithful to production getPreviewType: .svg is its own type (renders via react-native-svg,
+	// not expo-image), NOT "image".
+	if (ext === ".svg") {
+		return "svg"
+	}
+
+	if ([".jpg", ".jpeg", ".png", ".gif", ".heic", ".heif", ".webp", ".avif", ".ico", ".icns"].includes(ext)) {
 		return "image"
 	}
 
@@ -192,6 +198,17 @@ describe("finding #48 — case-insensitive extension + EXPO_IMAGE_SUPPORTED_EXTE
 		expect(
 			isPhotoGridItem({
 				item: makeItem({ type: "file", name: "IMG.HEIC" }),
+				...productionDeps
+			})
+		).toBe(true)
+	})
+
+	it("keeps logo.svg — svg is image-equivalent for grid eligibility (renders via react-native-svg, not expo-image)", () => {
+		// getPreviewType → "svg"; isPhotoGridItem must treat svg like an image (in-grid), gated on
+		// the svg extension being present in EXPO_IMAGE_SUPPORTED_EXTENSIONS.
+		expect(
+			isPhotoGridItem({
+				item: makeItem({ type: "file", name: "logo.svg" }),
 				...productionDeps
 			})
 		).toBe(true)

@@ -117,7 +117,7 @@ export function buildDownloadSubButtons({
 		})
 	}
 
-	if (isFileItem(item) && (previewType === "image" || previewType === "video") && item.data.decryptedMeta) {
+	if (isFileItem(item) && (previewType === "image" || previewType === "svg" || previewType === "video") && item.data.decryptedMeta) {
 		downloadSubButtons.push({
 			id: "saveToPhotos",
 			requiresOnline: true,

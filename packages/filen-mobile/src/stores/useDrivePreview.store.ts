@@ -2,7 +2,7 @@ import { create } from "zustand"
 import type { GalleryItemTagged, InitialItem } from "@/components/drivePreview/gallery"
 import { router } from "@/lib/router"
 import type { DrivePath } from "@/hooks/useDrivePath"
-import { getPreviewType } from "@/lib/previewType"
+import { getPreviewType, isImagePreviewType } from "@/lib/previewType"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS } from "@/constants"
 import { Paths } from "expo-file-system"
 
@@ -131,8 +131,8 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 					const previewType = getPreviewType(item.data.data.decryptedMeta.name)
 
 					return (
-						(previewType === "image" || previewType === "video") &&
-						(previewType === "image"
+						(isImagePreviewType(previewType) || previewType === "video") &&
+						(isImagePreviewType(previewType)
 							? EXPO_IMAGE_SUPPORTED_EXTENSIONS.has(Paths.extname(item.data.data.decryptedMeta.name).toLowerCase())
 							: true)
 					)
@@ -150,7 +150,7 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 
 				const type = getPreviewType(item.data.data.decryptedMeta?.name ?? "")
 
-				return type === "image" || type === "video" || type === "audio"
+				return isImagePreviewType(type) || type === "video" || type === "audio"
 			})
 		})()
 
