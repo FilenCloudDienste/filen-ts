@@ -4,6 +4,7 @@ import { serialize, deserialize } from "@/lib/serializer"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import { SQLITE_VERSION, SQLITE_DB_FILE_NAME, SQLITE_DB_FILE_DIRECTORY } from "@/lib/storageRoots"
 import logger from "@/lib/logger"
+import * as FileSystem from "expo-file-system"
 
 // Critical: When changing anything related to the on-disk database file format, bump SQLITE_VERSION in storageRoots.ts to invalidate old databases and prevent potential issues from stale or incompatible data.
 export const VERSION = SQLITE_VERSION
@@ -14,15 +15,34 @@ const OPEN_DB_MAX_ATTEMPTS = 10
 const OPEN_DB_BASE_BACKOFF_MS = 100
 const OPEN_DB_MAX_BACKOFF_MS = 5000
 
-// Order matters: page_size before journal_mode, locking_mode before first WAL access.
-// page_size only takes effect on a fresh database or after VACUUM outside WAL mode.
-const INIT_QUERIES: string[] = [
+const uriToPath = (uri: string): string => {
+	if (!uri.startsWith("file://")) {
+		throw new Error(`expected file:// URI, got ${uri}`)
+	}
+
+	return decodeURIComponent(uri.slice("file://".length))
+}
+
+export const initQueries = (tmpDir: string): string[] => [
 	"PRAGMA page_size = 8192",
 	"PRAGMA journal_mode = WAL",
 	// "PRAGMA locking_mode = EXCLUSIVE",
 	"PRAGMA synchronous = NORMAL",
 	"PRAGMA busy_timeout = 15000",
-	"PRAGMA cache_size = -4000",
+
+	// ---- heap ceilings (process-wide, not per-connection) ----
+	// Advisory cap: once SQLite's total heap crosses this it releases unpinned cache /
+	// lookaside instead of growing. Queries still complete correctly.
+	"PRAGMA soft_heap_limit = 8388608",
+	// Optional hard ceiling: allocations beyond it fail with SQLITE_NOMEM — a catchable
+	// error — instead of the OS killing the process. The pragma form can only ever
+	// lower it afterwards, never raise it, so pick the number deliberately.
+	// "PRAGMA hard_heap_limit = 67108864",
+
+	// Per-connection page cache. kv point-lookups don't need more, and the boot scan is
+	// one-pass (served by mmap / OS page cache); a bigger cache just pins heap.
+	"PRAGMA cache_size = -2000",
+
 	// Memory-mapped reads cover the boot restore's full-table range scans (file-backed
 	// clean pages — evictable, not dirty RSS). INVARIANT: safe only while THIS app is
 	// the sole process opening sqlite.db — an mmap'd file truncated by ANOTHER process
@@ -30,8 +50,25 @@ const INIT_QUERIES: string[] = [
 	// readers; same-process/same-connection truncation is handled by SQLite itself. The
 	// FP extension consumes auth.json + its own rusqlite DB, never this file. Revisit
 	// before ever pointing a second process at the kv.
-	"PRAGMA mmap_size = 134217728",
-	"PRAGMA temp_store = MEMORY",
+	// 64 MiB (was 128): clean mappings don't count toward iOS phys_footprint/jetsam,
+	// but they DO inflate RSS/PSS as measured by Android tooling and some OEM killers.
+	// This is footprint hygiene, not the OOM fix — restore 128 MiB if scan perf drops.
+	// The mapping is per-connection: multiply by N if a pool is ever added.
+	"PRAGMA mmap_size = 67108864",
+
+	// FILE, not MEMORY. temp_store=MEMORY puts transient indices (ORDER BY / GROUP BY /
+	// DISTINCT without a covering index), materialized subqueries, AND the transient
+	// database built by a full VACUUM entirely on the heap — a full VACUUM briefly
+	// holds a second copy of the whole database in RAM, i.e. an OOM-on-logout.
+	// (incremental_vacuum is unaffected either way: in-file page moves only.)
+	// Requires a writable temp dir: the iOS sandbox exports TMPDIR; Android does not,
+	// and bare bundled builds fall through to /tmp (doesn't exist) → SQLITE_CANTOPEN on
+	// first spill. Hence the directory pragma below (deprecated but functional and
+	// process-global; if your build rejects it, set sqlite3_temp_directory via the
+	// wrapper's config before opening instead).
+	`PRAGMA temp_store_directory = '${uriToPath(tmpDir.replace(/'/g, "''"))}'`,
+	"PRAGMA temp_store = FILE",
+
 	"PRAGMA wal_autocheckpoint = 500",
 	"PRAGMA journal_size_limit = 16777216",
 	"PRAGMA auto_vacuum = INCREMENTAL",
@@ -46,7 +83,6 @@ const INIT_QUERIES: string[] = [
 	"CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL) WITHOUT ROWID",
 	"PRAGMA optimize = 0x10002"
 ]
-
 // prefixUpperBound moved to @/lib/kvScan (pure, dependency-free) together with the paged
 // restore walker; re-exported here because it is part of this module's historical surface.
 export { prefixUpperBound } from "@/lib/kvScan"
@@ -129,7 +165,7 @@ class Sqlite {
 				})
 			}
 
-			await this.db.execute(INIT_QUERIES.join("; "))
+			await this.db.execute(initQueries(FileSystem.Paths.cache.uri).join("; "))
 
 			this.initDone = true
 		})
