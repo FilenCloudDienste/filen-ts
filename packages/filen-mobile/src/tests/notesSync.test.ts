@@ -220,6 +220,30 @@ describe("Sync (Notes)", () => {
 	})
 
 	describe("restoreFromDisk", () => {
+		// Headless reconnect safety: setup() attaches the reconnect listener in background runs,
+		// but SyncHost (the only caller of start()) never mounts headless, so start() never runs
+		// and initPromise never resolves. A reconnect-kicked sync() must NO-OP on the started guard
+		// instead of awaiting Promise.all([mutex, initPromise]) forever (which held the mutex and
+		// wedged every future pass for the process).
+		it("sync() before start() resolves instead of hanging on initPromise (headless reconnect)", async () => {
+			const { onlineManager } = await import("@tanstack/react-query")
+			const spy = vi.spyOn(onlineManager, "isOnline").mockReturnValue(true)
+
+			try {
+				const headlessSync = new Sync()
+
+				const outcome = await Promise.race([
+					(headlessSync as unknown as { sync: () => Promise<void> }).sync().then(() => "resolved"),
+					new Promise<string>(resolve => setTimeout(() => resolve("hung"), 200))
+				])
+
+				expect(outcome).toBe("resolved")
+				expect(mockNotesSetContent).not.toHaveBeenCalled()
+			} finally {
+				spy.mockRestore()
+			}
+		})
+
 		it("loads inflight content from disk and sets store", async () => {
 			const note = mockNote("note-1")
 

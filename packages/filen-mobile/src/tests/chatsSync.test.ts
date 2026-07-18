@@ -172,6 +172,28 @@ describe("Sync (Chats)", () => {
 	})
 
 	describe("restoreFromDisk", () => {
+		// Headless reconnect safety (parallel to notes): SyncHost never mounts in a headless run,
+		// so start() never runs and initPromise never resolves. A reconnect-kicked sync() must
+		// NO-OP on the started guard instead of awaiting Promise.all([mutex, initPromise]) forever.
+		it("sync() before start() resolves instead of hanging on initPromise (headless reconnect)", async () => {
+			const { onlineManager } = await import("@tanstack/react-query")
+			const spy = vi.spyOn(onlineManager, "isOnline").mockReturnValue(true)
+
+			try {
+				const headlessSync = new Sync()
+
+				const outcome = await Promise.race([
+					(headlessSync as unknown as { sync: () => Promise<void> }).sync().then(() => "resolved"),
+					new Promise<string>(resolve => setTimeout(() => resolve("hung"), 200))
+				])
+
+				expect(outcome).toBe("resolved")
+				expect(mockSendMessage).not.toHaveBeenCalled()
+			} finally {
+				spy.mockRestore()
+			}
+		})
+
 		it("loads inflight messages from disk and merges them into the (empty) store", async () => {
 			kvStore.set(KV_KEY, {
 				"chat-1": {

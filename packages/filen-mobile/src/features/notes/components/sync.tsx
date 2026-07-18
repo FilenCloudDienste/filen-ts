@@ -74,6 +74,12 @@ export class Sync {
 	private readonly initPromise: Promise<void>
 	private resolveInit!: () => void
 	private abortController: AbortController = new AbortController()
+	// Set true by start() (called only from the SyncHost mount). A headless background run never
+	// mounts SyncHost, so start() never runs and initPromise never resolves — sync() guards on
+	// this to no-op instead of hanging forever on Promise.all([mutex, initPromise]) (which would
+	// hold the mutex and wedge every future pass). Nothing was hydrated to sync without a prior
+	// restore anyway; persisted edits flush on the next foreground open.
+	private started: boolean = false
 	// VC3: per-note count of CONSECUTIVE non-network, non-auth SDK rejections. Transient (in
 	// memory only — never persisted to disk), reset on any successful sync or when the note's
 	// inflight is dropped/drained. Bounds the #40 drop so a one-off `Server` error never loses
@@ -87,6 +93,8 @@ export class Sync {
 	}
 
 	public start(): void {
+		this.started = true
+
 		this.restoreFromDisk()
 	}
 
@@ -276,6 +284,13 @@ export class Sync {
 	}
 
 	private async sync(): Promise<void> {
+		// Headless guard: without start() (SyncHost never mounted in a background run) initPromise
+		// never resolves, so the Promise.all below would hang forever holding the mutex — wedging
+		// every future pass. Nothing was hydrated to sync anyway; no-op until the UI has started it.
+		if (!this.started) {
+			return
+		}
+
 		if (!onlineManager.isOnline()) {
 			return
 		}
