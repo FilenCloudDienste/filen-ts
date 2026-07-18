@@ -130,7 +130,7 @@ describe("registerBackgroundSync", () => {
 
 		await registerBackgroundSync()
 
-		expect(mockBackgroundTask.registerTaskAsync).toHaveBeenCalledWith("filen-camera-upload-sync", { minimumInterval: 15 })
+		expect(mockBackgroundTask.registerTaskAsync).toHaveBeenCalledWith("filen-camera-upload-sync", { minimumInterval: 180 })
 	})
 
 	it("skips registration when status is Restricted", async () => {
@@ -155,7 +155,7 @@ describe("registerBackgroundSync", () => {
 		await expect(registerBackgroundSync()).resolves.toBeUndefined()
 		// Ensures the code reached registerTaskAsync before the rejection — without this
 		// assertion the test would pass even if status-check early-returned silently.
-		expect(mockBackgroundTask.registerTaskAsync).toHaveBeenCalledWith("filen-camera-upload-sync", { minimumInterval: 15 })
+		expect(mockBackgroundTask.registerTaskAsync).toHaveBeenCalledWith("filen-camera-upload-sync", { minimumInterval: 180 })
 	})
 
 	it("calls registerTaskAsync on every invocation (no idempotency guard)", async () => {
@@ -246,12 +246,12 @@ describe("background task callback (defineTask body)", () => {
 		expect(mockCameraUpload.sync).not.toHaveBeenCalled()
 	})
 
-	it("calls cameraUpload.sync with {maxUploads:1, background:true} when authed", async () => {
+	it("calls cameraUpload.sync with {maxUploads:3, background:true} when authed", async () => {
 		mockSetup.setup.mockResolvedValue({ isAuthed: true })
 
 		await runTask()
 
-		expect(mockCameraUpload.sync).toHaveBeenCalledWith({ maxUploads: 1, background: true })
+		expect(mockCameraUpload.sync).toHaveBeenCalledWith({ maxUploads: 3, background: true })
 		expect(mockCameraUpload.sync).toHaveBeenCalledTimes(1)
 	})
 

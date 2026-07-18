@@ -109,7 +109,10 @@ TaskManager.defineTask(TASK_NAME, async () => {
 		phase = "camera"
 
 		const cameraResult = await cameraUpload.sync({
-			maxUploads: 1,
+			// Best-effort per fire: staging runs up to Semaphore(4) concurrent with per-decode
+			// release, and the run budget + expiration abort naturally cap it — a slow connection
+			// just uploads 1-2 and the rest roll to the next fire.
+			maxUploads: 3,
 			background: true
 		})
 
@@ -205,7 +208,11 @@ export async function registerBackgroundSync(): Promise<void> {
 		}
 
 		await BackgroundTask.registerTaskAsync(TASK_NAME, {
-			minimumInterval: 15
+			// Minutes. Each fire pays a full bundle eval + cache/query restore, so keep fires rare
+			// (~8/day) and let each drain up to maxUploads photos above — same daily throughput as
+			// a 1h/1-upload cadence at a third of the cost. iOS throttles background wakes far below
+			// this regardless, and the foreground drain stays the primary path.
+			minimumInterval: 180
 		})
 
 		logger.debug("cameraUpload", "Registered background sync")
