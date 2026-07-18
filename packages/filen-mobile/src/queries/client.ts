@@ -14,7 +14,16 @@ import logger from "@/lib/logger"
 // Critical: When changing anything related to query persistence, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = 1
 export const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
-export const QUERY_CLIENT_CACHE_TIME = 86400 * 365 * 1000 * 10 // 10 years, effectively infinite for our use case
+// 90 days. Drives gcTime + the persister maxAge + the boot restore-drop (an entry is evicted at
+// restore when dataUpdatedAt + this < now). dataUpdatedAt = last online view OR optimistic touch
+// (staleTime:0 + refetchOnMount:"always" restamp it every online view, and queryUpdater.set restamps
+// it on every optimistic/socket update; networkMode:"offlineFirst" freezes it while offline), so this
+// is the "neither viewed online nor touched within the window → evict at next boot" clock.
+// Sized well above a plausible offline / app-unopened gap so a long-offline user keeps their cached
+// cloud state. Offline editing of a note whose content has aged out is guarded in
+// features/notes/components/content (renders a read-only "unavailable offline" surface, never an
+// editable empty seed that a keystroke could push over the real note).
+export const QUERY_CLIENT_CACHE_TIME = 86400 * 90 * 1000
 
 const PERSIST_DEBOUNCE = 1000
 const PERSIST_CHUNK_SIZE = 100
