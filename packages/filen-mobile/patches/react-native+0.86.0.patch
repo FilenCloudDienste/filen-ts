@@ -1,17 +1,17 @@
 diff --git a/node_modules/react-native/sdks/.hermesv1version b/node_modules/react-native/sdks/.hermesv1version
-index 676ac3ce21eee398d556e9eda10b4d29d75ef837..362f53879558954ecf1c8e42cdec44124399c467 100644
+index 676ac3ce21eee398d556e9eda10b4d29d75ef837..ac501f13bf33f0960352b6c7d615a8deab5ef8da 100644
 --- a/node_modules/react-native/sdks/.hermesv1version
 +++ b/node_modules/react-native/sdks/.hermesv1version
 @@ -1 +1 @@
 -hermes-v250829098.0.14
 \ No newline at end of file
-+hermes-v250829098.0.15
++hermes-v250829098.0.16
 \ No newline at end of file
 diff --git a/node_modules/react-native/sdks/hermes-engine/version.properties b/node_modules/react-native/sdks/hermes-engine/version.properties
-index e1934540e892f21f8ec40055cd73324603358224..6b9f4b1d988e2905397810e1b116087f3a96a126 100644
+index e1934540e892f21f8ec40055cd73324603358224..42ecd7854681db772d3ef7b44ef17dceb4cd9298 100644
 --- a/node_modules/react-native/sdks/hermes-engine/version.properties
 +++ b/node_modules/react-native/sdks/hermes-engine/version.properties
 @@ -1,2 +1,2 @@
  HERMES_VERSION_NAME=0.17.0
 -HERMES_V1_VERSION_NAME=250829098.0.14
-+HERMES_V1_VERSION_NAME=250829098.0.15
++HERMES_V1_VERSION_NAME=250829098.0.16
