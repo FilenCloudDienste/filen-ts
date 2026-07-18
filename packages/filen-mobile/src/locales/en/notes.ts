@@ -92,6 +92,8 @@ export const notes = {
 	note_overwrote_newer_remote_changes: "\"{{name}}\" had newer changes — the previous version is in the note's history",
 	/** Error banner when a typed edit could not be persisted to device storage (it survives in memory only until synced) */
 	note_edit_not_saved_to_device: "Your edit could not be saved on this device. Keep the app open until it has synced.",
+	/** Shown in place of the editor when a note's content isn't cached and can't be fetched offline — read-only so an empty seed can't overwrite the real note */
+	note_content_unavailable_offline: "This note's content isn't available offline. Connect to the internet to load it.",
 
 	// ── Bulk note actions (multi-select toolbar) ──────────────────────────────
 	/** Bulk action: pin every selected note */

@@ -58,6 +58,24 @@ export function computeNoteFetchError({ history, isError }: { history: boolean; 
 	return !history && isError
 }
 
+// Fix B (data-safety): the note's content is UNAVAILABLE — never fetched, or aged out of the
+// query cache (a maxAge/gcTime TTL now evicts it), with no inflight draft — exactly when the frozen
+// editor seed is NOT a string. A genuinely empty note seeds "", not null/undefined; a history view
+// always carries its own content. Exported pure so the standalone test guards the invariant (T5),
+// and consumed at BOTH the write gate and the offline render branch: an unavailable note must never
+// render an EDITABLE EMPTY editor, because its first keystroke — or a single ungated checklist tap —
+// would push empty content over the real note on the next sync (silent data loss, especially offline
+// where the per-note query is disabled and can never resolve).
+export function isNoteContentUnavailable({
+	history,
+	initialValue
+}: {
+	history: boolean
+	initialValue: string | null | undefined
+}): boolean {
+	return !history && typeof initialValue !== "string"
+}
+
 // M1 + D3: pure builder for a note's inflight entry list after a keystroke. Exported so the
 // standalone test exercises the live derivation (T5 pattern).
 //
@@ -203,8 +221,12 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	// NON-reactively inside, freshest first (#38 semantics preserved): unsynced inflight
 	// edit wins (cold open with a restored queue must never paint stale pre-edit content)
 	// → per-note content cache (kept truthful by sync's post-push write, so a reseed after
-	// a drain paints exactly what was typed) → persisted list copy (offline fallback —
-	// the note list is in SQLite even when the disabled per-note query never resolved).
+	// a drain paints exactly what was typed). When none of these has content — never fetched,
+	// or aged out of the query cache (the 90-day maxAge now evicts it), with no inflight draft —
+	// the seed is null and the note renders read-only "unavailable offline" (isNoteContentUnavailable
+	// / contentUnavailable below) rather than an editable empty editor whose first keystroke or
+	// checklist tap could push empty over the real note. (The pre-refactor "persisted list copy"
+	// fallback is gone — the notes list query is metadata-only and carries no content.)
 	const editorSeed = (() => {
 		if (history) {
 			return history.content
@@ -238,6 +260,14 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	})()
 
 	const initialValue = editorSeed
+
+	// Fix B: true when the note's content could not be resolved (never fetched / aged out of the
+	// cache, no inflight draft) — drives the read-only "unavailable offline" render branch below and
+	// hard-gates the write path so nothing can push an empty seed over the real note.
+	const contentUnavailable = isNoteContentUnavailable({
+		history: Boolean(history),
+		initialValue
+	})
 
 	// #38 fix: decouple loading from the deliberately-disabled query. The query is
 	// disabled while offline or while inflight content exists (enabled gate below),
@@ -308,7 +338,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 		// it to sync, where notes.setContent is rejected server-side and never
 		// drains the inflight entry — permanently disabling this note's content
 		// query (enabled: !hasInflightContent) and wedging future remote edits.
-		if (history || !hasWriteAccess) {
+		if (history || !hasWriteAccess || contentUnavailable) {
 			return
 		}
 
@@ -424,6 +454,19 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 						{t("try_again")}
 					</Button>
 				}
+			/>
+		)
+	}
+
+	// Fix B: offline with unavailable content — the per-note query is disabled offline so it can
+	// never resolve, and an editable empty editor here would let a keystroke (or a single ungated
+	// checklist tap) push empty over the real note on the next sync. Render a read-only surface
+	// instead; the write gate above is the defense-in-depth backstop for any other unavailable path.
+	if (contentUnavailable && !isOnline) {
+		return (
+			<ListEmpty
+				icon="cloud-offline-outline"
+				title={t("note_content_unavailable_offline")}
 			/>
 		)
 	}

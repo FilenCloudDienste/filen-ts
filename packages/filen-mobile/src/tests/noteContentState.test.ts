@@ -103,6 +103,7 @@ vi.mock("@filen/utils", async () => ({
 import {
 	computeNoteLoading,
 	computeNoteFetchError,
+	isNoteContentUnavailable,
 	buildInflightEntries,
 	flushInflightContentWithAlert
 } from "@/features/notes/components/content"
@@ -272,5 +273,30 @@ describe("flushInflightContentWithAlert", () => {
 		await flushInflightContentWithAlert()
 
 		expect(alerts.error).not.toHaveBeenCalled()
+	})
+})
+
+// Fix B: an "unavailable" seed (null/undefined, not "") must be treated as non-editable so the
+// offline editor branch + the onValueChange write gate never let an empty seed overwrite the real
+// note when its content has aged out of the query cache (the new maxAge/gcTime TTL) offline.
+describe("isNoteContentUnavailable", () => {
+	it("a history view is always available (content comes from the history entry)", () => {
+		expect(isNoteContentUnavailable({ history: true, initialValue: null })).toBe(false)
+	})
+
+	it("a null seed (never fetched / aged out of the cache, no inflight) is UNAVAILABLE", () => {
+		expect(isNoteContentUnavailable({ history: false, initialValue: null })).toBe(true)
+	})
+
+	it("an undefined seed is UNAVAILABLE", () => {
+		expect(isNoteContentUnavailable({ history: false, initialValue: undefined })).toBe(true)
+	})
+
+	it('a genuinely empty note ("") is AVAILABLE — it must stay editable', () => {
+		expect(isNoteContentUnavailable({ history: false, initialValue: "" })).toBe(false)
+	})
+
+	it("loaded content is AVAILABLE", () => {
+		expect(isNoteContentUnavailable({ history: false, initialValue: "hello" })).toBe(false)
 	})
 })
