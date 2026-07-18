@@ -550,6 +550,7 @@
 	"normal": "正文",
 	"not_playing": "未在播放",
 	"not_set": "未设置",
+	"note_content_unavailable_offline": "此笔记内容无法离线查看。请连接网络以加载。",
 	"note_edit_not_saved_to_device": "无法在此设备上保存您的编辑。请保持应用打开，直到同步完成。",
 	"note_edited": "笔记已编辑",
 	"note_edited_message": "此笔记已被他人编辑。是否重新加载以查看最新更改？所有未同步的本地编辑都将丢失。",

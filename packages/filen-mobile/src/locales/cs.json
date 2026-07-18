@@ -555,6 +555,7 @@
 	"normal": "Normální",
 	"not_playing": "Nepřehrává se",
 	"not_set": "Nenastaveno",
+	"note_content_unavailable_offline": "Obsah této poznámky není dostupný offline. Připojte se k internetu pro jeho načtení.",
 	"note_edit_not_saved_to_device": "Vaši úpravu se nepodařilo uložit do tohoto zařízení. Ponechte aplikaci otevřenou, dokud nebude synchronizována.",
 	"note_edited": "Poznámka upravena",
 	"note_edited_message": "Tuto poznámku upravil někdo jiný. Načíst znovu a zobrazit nejnovější změny? Veškeré nesynchronizované místní úpravy budou ztraceny.",

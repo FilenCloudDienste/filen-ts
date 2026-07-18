@@ -550,6 +550,7 @@
 	"normal": "보통",
 	"not_playing": "재생 중 아님",
 	"not_set": "설정 안 됨",
+	"note_content_unavailable_offline": "이 노트의 내용은 오프라인에서 사용할 수 없습니다. 인터넷에 연결하여 불러오세요.",
 	"note_edit_not_saved_to_device": "이 기기에 편집 내용을 저장하지 못했습니다. 동기화가 완료될 때까지 앱을 열어 두세요.",
 	"note_edited": "노트 편집됨",
 	"note_edited_message": "이 노트는 다른 사람이 편집했습니다. 최신 변경 사항을 보려면 다시 불러올까요? 동기화되지 않은 로컬 편집 내용은 사라집니다.",

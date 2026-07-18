@@ -560,6 +560,7 @@
 	"normal": "Normalny",
 	"not_playing": "Nic nie jest odtwarzane",
 	"not_set": "Nie ustawiono",
+	"note_content_unavailable_offline": "Zawartość tej notatki jest niedostępna offline. Połącz się z internetem, aby ją wczytać.",
 	"note_edit_not_saved_to_device": "Nie udało się zapisać edycji na tym urządzeniu. Pozostaw aplikację otwartą, dopóki nie zostanie zsynchronizowana.",
 	"note_edited": "Notatka zmieniona",
 	"note_edited_message": "Ta notatka została zmieniona przez kogoś innego. Załadować ponownie, aby zobaczyć najnowsze zmiany? Wszelkie niezsynchronizowane lokalne zmiany zostaną utracone.",
