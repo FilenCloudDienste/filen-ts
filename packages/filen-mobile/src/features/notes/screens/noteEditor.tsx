@@ -3,7 +3,7 @@ import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader from "@/components/ui/header"
 import { useLocalSearchParams, useNavigation } from "expo-router"
 import { router } from "@/lib/router"
-import useNotesWithContentQuery from "@/features/notes/queries/useNotesWithContent.query"
+import useNotesQuery from "@/features/notes/queries/useNotesQuery"
 import { type Note as TNote, type NoteHistory } from "@/types"
 import { noteDisplayTitle } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
@@ -113,7 +113,10 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 									})
 
 									if (!result.success) {
-										logger.error("notes", "restore from history prompt failed", { error: result.error, noteUuid: note.uuid })
+										logger.error("notes", "restore from history prompt failed", {
+											error: result.error,
+											noteUuid: note.uuid
+										})
 										alerts.error(result.error)
 
 										return
@@ -131,7 +134,10 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 									})
 
 									if (!restoreResult.success) {
-										logger.error("notes", "restore from history failed", { error: restoreResult.error, noteUuid: note.uuid })
+										logger.error("notes", "restore from history failed", {
+											error: restoreResult.error,
+											noteUuid: note.uuid
+										})
 										alerts.error(restoreResult.error)
 
 										return
@@ -200,11 +206,11 @@ const Note = () => {
 		history?: string
 	}>()
 
-	const notesWithContentQuery = useNotesWithContentQuery({
+	const notesQuery = useNotesQuery({
 		enabled: false
 	})
 
-	const note = notesWithContentQuery.status === "success" ? (notesWithContentQuery.data.find(n => n.uuid === uuid) ?? null) : null
+	const note = notesQuery.status === "success" ? (notesQuery.data.find(n => n.uuid === uuid) ?? null) : null
 
 	const history = deserializeRouteParam<NoteHistory>(historySerialized)
 

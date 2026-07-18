@@ -3,7 +3,7 @@ import { type Contact } from "@filen/sdk-rs"
 import { type Note, type NoteParticipant } from "@/types"
 import { wrapSdkNote } from "@/features/notes/utils"
 import { noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
-import { notesWithContentQueryUpdate } from "@/features/notes/queries/useNotesWithContent.query"
+import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 
 export async function leave({ note, signal }: { note: Note; signal?: AbortSignal }) {
@@ -29,7 +29,7 @@ export async function leave({ note, signal }: { note: Note; signal?: AbortSignal
 
 	// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack
 	setTimeout(() => {
-		notesWithContentQueryUpdate({
+		notesQueryUpdate({
 			updater: prev => prev.filter(n => n.uuid !== note.uuid)
 		})
 
@@ -71,16 +71,8 @@ export async function removeParticipant({
 		)
 	)
 
-	notesWithContentQueryUpdate({
-		updater: prev =>
-			prev.map(n =>
-				n.uuid === note.uuid
-					? {
-							...note,
-							content: n.content
-						}
-					: n
-			)
+	notesQueryUpdate({
+		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
 	})
 
 	return note
@@ -126,16 +118,8 @@ export async function addParticipants({
 		)
 	}
 
-	notesWithContentQueryUpdate({
-		updater: prev =>
-			prev.map(n =>
-				n.uuid === note.uuid
-					? {
-							...updated,
-							content: n.content
-						}
-					: n
-			)
+	notesQueryUpdate({
+		updater: prev => prev.map(n => (n.uuid === note.uuid ? updated : n))
 	})
 
 	return updated
@@ -193,7 +177,7 @@ export async function setParticipantPermission({
 		participants: note.participants.map(p => (p.userId === participant.userId ? participant : p))
 	}
 
-	notesWithContentQueryUpdate({
+	notesQueryUpdate({
 		updater: prev =>
 			prev.map(n =>
 				n.uuid === note.uuid

@@ -3,7 +3,7 @@ import logger from "@/lib/logger"
 import { NoteType } from "@filen/sdk-rs"
 import { type Note, type NoteTag } from "@/types"
 import { wrapSdkNote } from "@/features/notes/utils"
-import { notesWithContentQueryUpdate } from "@/features/notes/queries/useNotesWithContent.query"
+import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
 import JSZip from "jszip"
 import { sanitizeFileName } from "@/lib/utils"
 import { newTmpFile } from "@/lib/tmp"
@@ -39,37 +39,20 @@ const notes = {
 
 	async duplicate({ note, signal }: { note: Note; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
-		const [sdkResult, content] = await Promise.all([
-			authedSdkClient.duplicateNote(
-				note,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			),
-			this.getContent({
-				note,
-				signal
-			})
-		])
+		const sdkResult = await authedSdkClient.duplicateNote(
+			note,
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
 
 		const original = wrapSdkNote(sdkResult.original)
 		const duplicated = wrapSdkNote(sdkResult.duplicated)
-		const safeContent = content ?? ""
 
-		notesWithContentQueryUpdate({
-			updater: prev => [
-				...prev.filter(n => n.uuid !== original.uuid && n.uuid !== duplicated.uuid),
-				{
-					...original,
-					content: safeContent
-				},
-				{
-					...duplicated,
-					content: safeContent
-				}
-			]
+		notesQueryUpdate({
+			updater: prev => [...prev.filter(n => n.uuid !== original.uuid && n.uuid !== duplicated.uuid), original, duplicated]
 		})
 
 		return {
@@ -242,14 +225,8 @@ const notes = {
 			updateQuery: true
 		})
 
-		notesWithContentQueryUpdate({
-			updater: prev => [
-				...prev.filter(n => n.uuid !== note.uuid),
-				{
-					...note,
-					content
-				}
-			]
+		notesQueryUpdate({
+			updater: prev => [...prev.filter(n => n.uuid !== note.uuid), note]
 		})
 
 		return note

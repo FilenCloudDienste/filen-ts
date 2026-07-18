@@ -28,8 +28,8 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({
-	notesWithContentQueryUpdate: mockNotesWithContentQueryUpdate
+vi.mock("@/features/notes/queries/useNotesQuery", () => ({
+	notesQueryUpdate: mockNotesWithContentQueryUpdate
 }))
 
 vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
@@ -210,7 +210,7 @@ describe("restoreFromHistory", () => {
 		expect(mockNotesWithContentQueryUpdate).toHaveBeenCalledTimes(1)
 	})
 
-	it("updater preserves n.content from the live cache entry for the matching uuid", async () => {
+	it("updater replaces the matching cache entry with the metadata note returned by the SDK", async () => {
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
@@ -226,7 +226,10 @@ describe("restoreFromHistory", () => {
 		const result = updater([cacheEntry])
 
 		expect(result).toHaveLength(1)
-		expect(result[0].content).toBe("cached-content")
+		// The list query is metadata-only now: the mapper output is the restored
+		// metadata note, which carries no content (content lives in a separate query).
+		expect(result[0].uuid).toBe("note-uuid-1")
+		expect(result[0].title).toBe("Restored Title")
 	})
 
 	it("updater spreads the updated note (returned by SDK) onto the matching cache entry", async () => {
@@ -247,7 +250,6 @@ describe("restoreFromHistory", () => {
 		const result = updater([cacheEntry])
 
 		expect(result[0].title).toBe("Restored From History")
-		expect(result[0].content).toBe("live-content")
 	})
 
 	it("updater leaves entries with non-matching uuids unchanged", async () => {
@@ -270,22 +272,22 @@ describe("restoreFromHistory", () => {
 		expect(result[0].content).toBe("other-content")
 	})
 
-	it("updater writes the restored history content when the history entry carries content", async () => {
+	it("writes the restored history content to the per-note content query when the history entry carries content", async () => {
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const note = makeNote({ uuid: "note-uuid-1" })
 		const history = makeHistory({ content: "restored-from-history" })
-		const cacheEntry = { ...note, content: "stale-cached-content" }
 
 		await restoreFromHistory({ note, history })
 
-		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
+		// Restored content now flows into the separate per-note content query,
+		// not the metadata-only list updater.
+		const callArgs = mockNoteContentQueryUpdate.mock.calls[0]
 		if (!callArgs) throw new Error("expected a call")
-		const { updater } = callArgs[0]
-		const result = updater([cacheEntry])
 
-		expect(result[0].content).toBe("restored-from-history")
+		expect(callArgs[0].params).toEqual({ uuid: "note-uuid-1" })
+		expect(callArgs[0].updater).toBe("restored-from-history")
 	})
 
 	it("writes the restored content into the per-note content query so the open editor reseeds", async () => {

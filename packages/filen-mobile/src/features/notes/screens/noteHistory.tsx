@@ -19,7 +19,7 @@ import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import { type NoteHistory as TNoteHistory, type Note } from "@/types"
 import Menu from "@/components/ui/menu"
-import useNotesWithContentQuery from "@/features/notes/queries/useNotesWithContent.query"
+import useNotesQuery from "@/features/notes/queries/useNotesQuery"
 import useNoteHistoryQuery from "@/features/notes/queries/useNoteHistory.query"
 import notes from "@/features/notes/notes"
 import { sortNoteHistoryNewestFirst } from "@/features/notes/utils"
@@ -87,7 +87,10 @@ const History = ({ history, note }: { history: TNoteHistory; note: Note }) => {
 								})
 
 								if (!promptResponse.success) {
-									logger.error("notes", "restore history prompt failed", { error: promptResponse.error, noteUuid: note.uuid })
+									logger.error("notes", "restore history prompt failed", {
+										error: promptResponse.error,
+										noteUuid: note.uuid
+									})
 									alerts.error(promptResponse.error)
 
 									return
@@ -133,14 +136,11 @@ const NoteHistory = () => {
 
 	const noteParsed = deserializeRouteParam<Note>(noteSerialized)
 
-	const notesWithContentQuery = useNotesWithContentQuery({
+	const notesQuery = useNotesQuery({
 		enabled: false
 	})
 
-	const note =
-		noteParsed && notesWithContentQuery.status === "success"
-			? (notesWithContentQuery.data.find(n => n.uuid === noteParsed.uuid) ?? null)
-			: null
+	const note = noteParsed && notesQuery.status === "success" ? (notesQuery.data.find(n => n.uuid === noteParsed.uuid) ?? null) : null
 
 	const noteHistoryQuery = useNoteHistoryQuery(
 		{

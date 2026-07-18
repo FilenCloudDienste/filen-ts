@@ -138,12 +138,13 @@ describe("filterNoteListItemsBySearchQuery", () => {
 		expect(result[0]?.type === "note" ? result[0].uuid : null).toBe("n1")
 	})
 
-	it("matches against note content", () => {
+	it("does not match against note content (list query is metadata-only)", () => {
+		// Content was dropped from the notes list query — search now matches title
+		// (and tags) only. A term that appears solely in the body must NOT match.
 		const withContent = makeListNote("n3", "Untitled", "secret recipe")
 		const result = filterNoteListItemsBySearchQuery([withContent], "recipe")
 
-		expect(result).toHaveLength(1)
-		expect(result[0]?.type === "note" ? result[0].uuid : null).toBe("n3")
+		expect(result).toHaveLength(0)
 	})
 
 	it("returns the matching subset only", () => {

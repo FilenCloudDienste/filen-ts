@@ -31,9 +31,9 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({
-	notesWithContentQueryUpdate: mockNotesWithContentQueryUpdate,
-	notesWithContentQueryGet: vi.fn().mockReturnValue([]),
+vi.mock("@/features/notes/queries/useNotesQuery", () => ({
+	notesQueryUpdate: mockNotesWithContentQueryUpdate,
+	notesQueryGet: vi.fn().mockReturnValue([]),
 	fetchData: vi.fn().mockResolvedValue([])
 }))
 
@@ -365,12 +365,11 @@ describe("notes.archive", () => {
 		expect(sdkClient.archiveNote).toHaveBeenCalledWith(note, undefined)
 	})
 
-	it("calls notesWithContentQueryUpdate with a mapper that preserves n.content for matching uuid", async () => {
+	it("calls notesWithContentQueryUpdate with a mapper that replaces the matching uuid with the metadata note", async () => {
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const note = makeNote()
-		const existingEntry = { ...note, content: "existing-content" }
 
 		await notes.archive({ note })
 
@@ -379,10 +378,11 @@ describe("notes.archive", () => {
 		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
 		if (!callArgs) throw new Error("expected a call")
 		const { updater } = callArgs[0]
-		const result = updater([existingEntry])
+		const result = updater([note])
 
 		expect(result).toHaveLength(1)
-		expect(result[0].content).toBe("existing-content")
+		expect(result[0].uuid).toBe("note-uuid-1")
+		expect(result[0].archive).toBe(true)
 	})
 
 	it("query updater mapper leaves non-matching uuids unchanged", async () => {
@@ -443,21 +443,22 @@ describe("notes.restore", () => {
 		expect(sdkClient.restoreNote).toHaveBeenCalledTimes(1)
 	})
 
-	it("query updater preserves content from cache entry for matching uuid", async () => {
+	it("query updater replaces the matching uuid with the metadata restored note", async () => {
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const note = makeNote({ trash: true })
-		const cacheEntry = { ...note, content: "cached-content" }
 
 		await notes.restore({ note })
 
 		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
 		if (!callArgs) throw new Error("expected a call")
 		const { updater } = callArgs[0]
-		const result = updater([cacheEntry])
+		const result = updater([note])
 
-		expect(result[0].content).toBe("cached-content")
+		expect(result[0].uuid).toBe("note-uuid-1")
+		expect(result[0].trash).toBe(false)
+		expect(result[0].archive).toBe(false)
 	})
 })
 
@@ -490,21 +491,21 @@ describe("notes.trash", () => {
 		expect(sdkClient.trashNote).toHaveBeenCalledTimes(1)
 	})
 
-	it("query updater preserves content from live cache entry", async () => {
+	it("query updater replaces the matching uuid with the metadata trashed note", async () => {
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const note = makeNote({ trash: false })
-		const cacheEntry = { ...note, content: "my-content" }
 
 		await notes.trash({ note })
 
 		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
 		if (!callArgs) throw new Error("expected a call")
 		const { updater } = callArgs[0]
-		const result = updater([cacheEntry])
+		const result = updater([note])
 
-		expect(result[0].content).toBe("my-content")
+		expect(result[0].uuid).toBe("note-uuid-1")
+		expect(result[0].trash).toBe(true)
 	})
 })
 
@@ -641,19 +642,19 @@ describe("notes.setTitle", () => {
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const note = makeNote({ uuid: "note-uuid-1", title: "Old" })
-		const other = { ...makeNote({ uuid: "note-uuid-2" }), content: "other-content" }
+		const other = makeNote({ uuid: "note-uuid-2" })
 
 		await notes.setTitle({ note, newTitle: "Updated" })
 
 		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
 		if (!callArgs) throw new Error("expected a call")
 		const { updater } = callArgs[0]
-		const result = updater([{ ...note, content: "my-content" }, other])
+		const result = updater([note, other])
 
 		expect(result[0].uuid).toBe("note-uuid-1")
-		expect(result[0].content).toBe("my-content")
+		expect(result[0].title).toBe("Updated")
 		expect(result[1].uuid).toBe("note-uuid-2")
-		expect(result[1].content).toBe("other-content")
+		expect(result[1]).toBe(other)
 	})
 })
 
@@ -689,22 +690,25 @@ describe("notes.addTag", () => {
 		expect(sdkClient.addTagToNote).toHaveBeenCalledTimes(1)
 	})
 
-	it("query updater spreads updated note with content from cache entry for matching uuid", async () => {
-		const sdkClient = makeMockSdkClient()
+	it("query updater replaces the matching uuid with the metadata note carrying the new tag", async () => {
+		const tag = makeTag({ uuid: "tag-uuid-99" })
+		const sdkClient = makeMockSdkClient({
+			addTagToNote: vi.fn().mockResolvedValue({ note: makeSdkNote("note-uuid-1", { tags: [tag] }), tag })
+		})
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
-		const tag = makeTag({ uuid: "tag-uuid-99" })
 		const note = makeNote({ uuid: "note-uuid-1", tags: [] })
-		const cacheEntry = { ...note, content: "cached" }
 
 		await notes.addTag({ note, tag })
 
 		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
 		if (!callArgs) throw new Error("expected a call")
 		const { updater } = callArgs[0]
-		const result = updater([cacheEntry])
+		const result = updater([note])
 
-		expect(result[0].content).toBe("cached")
+		expect(result[0].uuid).toBe("note-uuid-1")
+		expect(result[0].tags).toHaveLength(1)
+		expect(result[0].tags[0].uuid).toBe("tag-uuid-99")
 	})
 })
 
@@ -740,22 +744,22 @@ describe("notes.removeTag", () => {
 		expect(sdkClient.removeTagFromNote).toHaveBeenCalledTimes(1)
 	})
 
-	it("query updater preserves content from live cache entry", async () => {
+	it("query updater replaces the matching uuid with the metadata note (tag removed)", async () => {
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const tag = makeTag({ uuid: "tag-uuid-1" })
 		const note = makeNote({ uuid: "note-uuid-1", tags: [tag] })
-		const cacheEntry = { ...note, content: "cached-content" }
 
 		await notes.removeTag({ note, tag })
 
 		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
 		if (!callArgs) throw new Error("expected a call")
 		const { updater } = callArgs[0]
-		const result = updater([cacheEntry])
+		const result = updater([note])
 
-		expect(result[0].content).toBe("cached-content")
+		expect(result[0].uuid).toBe("note-uuid-1")
+		expect(result[0].tags).toEqual([])
 	})
 })
 
@@ -788,23 +792,22 @@ describe("notes.setType", () => {
 		expect(sdkClient.setNoteType).toHaveBeenCalledTimes(1)
 	})
 
-	it("query updater: matching uuid gets new note spread but with n.content (not replaced)", async () => {
+	it("query updater: matching uuid replaced with the metadata note (new type, no content)", async () => {
 		const sdkClient = makeMockSdkClient({
 			setNoteType: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-1", { noteType: "md" as unknown as NoteType }))
 		})
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const note = makeNote({ uuid: "note-uuid-1", noteType: "text" as unknown as NoteType })
-		const cacheEntry = { ...note, content: "existing-content" }
 
 		await notes.setType({ note, type: "md" as unknown as NoteType })
 
 		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
 		if (!callArgs) throw new Error("expected a call")
 		const { updater } = callArgs[0]
-		const result = updater([cacheEntry])
+		const result = updater([note])
 
-		expect(result[0].content).toBe("existing-content")
+		expect(result[0].uuid).toBe("note-uuid-1")
 		expect(result[0].noteType).toBe("md")
 	})
 })
@@ -847,21 +850,21 @@ describe("notes.setPinned", () => {
 		expect(sdkClient.setNotePinned).toHaveBeenCalledTimes(1)
 	})
 
-	it("query updater preserves content from live cache entry", async () => {
+	it("query updater replaces the matching uuid with the metadata pinned note", async () => {
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const note = makeNote({ pinned: false })
-		const cacheEntry = { ...note, content: "my-pinned-content" }
 
 		await notes.setPinned({ note, pinned: true })
 
 		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
 		if (!callArgs) throw new Error("expected a call")
 		const { updater } = callArgs[0]
-		const result = updater([cacheEntry])
+		const result = updater([note])
 
-		expect(result[0].content).toBe("my-pinned-content")
+		expect(result[0].uuid).toBe("note-uuid-1")
+		expect(result[0].pinned).toBe(true)
 	})
 })
 
@@ -1034,22 +1037,22 @@ describe("notes.removeParticipant", () => {
 		expect(sdkClient.removeNoteParticipant).toHaveBeenCalledWith(note, 99n, undefined)
 	})
 
-	it("query updater preserves content from live cache entry", async () => {
+	it("query updater replaces the matching uuid with the metadata note (participant removed)", async () => {
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const participant = makeParticipant({ userId: 99n })
 		const note = makeNote({ uuid: "note-uuid-1", participants: [participant] })
-		const cacheEntry = { ...note, content: "participant-content" }
 
 		await notes.removeParticipant({ note, participantUserId: 99n })
 
 		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
 		if (!callArgs) throw new Error("expected a call")
 		const { updater } = callArgs[0]
-		const result = updater([cacheEntry])
+		const result = updater([note])
 
-		expect(result[0].content).toBe("participant-content")
+		expect(result[0].uuid).toBe("note-uuid-1")
+		expect(result[0].participants).toEqual([])
 	})
 })
 
@@ -1151,10 +1154,9 @@ describe("notes.addParticipants (bulk)", () => {
 		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
 		if (!callArgs) throw new Error("expected a call")
 		const { updater } = callArgs[0]
-		const updatedEntries = updater([{ ...note, content: "keep" }])
+		const updatedEntries = updater([note])
 
 		expect(updatedEntries.find((n: Note) => n.uuid === "note-bulk")?.participants).toHaveLength(2)
-		expect(updatedEntries.find((n: Note) => n.uuid === "note-bulk")?.content).toBe("keep")
 	})
 
 	it("returns the note untouched (no SDK, no cache) when all contacts already exist", async () => {
@@ -1488,7 +1490,7 @@ describe("notes.duplicate", () => {
 		mockNotesWithContentQueryUpdate.mockReset()
 	})
 
-	it("fetches duplicateNote and getContent in parallel (both SDK methods called)", async () => {
+	it("calls duplicateNote and does NOT fetch note content", async () => {
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
@@ -1496,11 +1498,11 @@ describe("notes.duplicate", () => {
 		await notes.duplicate({ note })
 
 		expect(sdkClient.duplicateNote).toHaveBeenCalledTimes(1)
-		expect(sdkClient.getNoteContent).toHaveBeenCalledTimes(1)
+		expect(sdkClient.getNoteContent).not.toHaveBeenCalled()
 	})
 
-	it("content null/undefined is coerced to '' (safeContent = content ?? '')", async () => {
-		const sdkClient = makeMockSdkClient({ getNoteContent: vi.fn().mockResolvedValue(null) })
+	it("appends metadata original and duplicated with no content field", async () => {
+		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const note = makeNote({ uuid: "note-uuid-1" })
@@ -1512,9 +1514,9 @@ describe("notes.duplicate", () => {
 		const { updater } = callArgs[0]
 		const result = updater([])
 
-		// Both entries should have empty string content, not null
-		expect(result[0].content).toBe("")
-		expect(result[1].content).toBe("")
+		// Metadata notes carry no content field (per-note content lives in a separate query)
+		expect(result[0].content).toBeUndefined()
+		expect(result[1].content).toBeUndefined()
 	})
 
 	it("query updater removes both original.uuid and duplicated.uuid from prev before appending both", async () => {
@@ -1545,10 +1547,8 @@ describe("notes.duplicate", () => {
 		expect(duplicatesInResult).toHaveLength(1)
 	})
 
-	it("query updater appends original then duplicated with safeContent", async () => {
-		const sdkClient = makeMockSdkClient({
-			getNoteContent: vi.fn().mockResolvedValue("my content")
-		})
+	it("query updater appends metadata original then duplicated", async () => {
+		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const note = makeNote({ uuid: "note-uuid-1" })
@@ -1563,8 +1563,6 @@ describe("notes.duplicate", () => {
 		expect(result).toHaveLength(2)
 		expect(result[0].uuid).toBe("note-uuid-1")
 		expect(result[1].uuid).toBe("note-uuid-2")
-		expect(result[0].content).toBe("my content")
-		expect(result[1].content).toBe("my content")
 	})
 
 	it("returns { original, duplicated } wrapped via wrapSdkNote", async () => {
@@ -1650,14 +1648,13 @@ describe("notes.setContent", () => {
 		expect(mockNoteContentQueryUpdate).not.toHaveBeenCalled()
 	})
 
-	it("notesWithContentQueryUpdate is always called with mapper that sets content and note fields", async () => {
+	it("notesWithContentQueryUpdate is always called with mapper that sets the metadata note fields", async () => {
 		const sdkClient = makeMockSdkClient({
 			setNoteContent: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-1", { title: "Updated" }))
 		})
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const note = makeNote({ uuid: "note-uuid-1" })
-		const cacheEntry = { ...note, content: "old" }
 
 		await notes.setContent({ note, content: "fresh content" })
 
@@ -1665,9 +1662,10 @@ describe("notes.setContent", () => {
 		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
 		if (!callArgs) throw new Error("expected a call")
 		const { updater } = callArgs[0]
-		const result = updater([cacheEntry])
+		const result = updater([note])
 
-		expect(result[0].content).toBe("fresh content")
+		expect(result[0].uuid).toBe("note-uuid-1")
+		expect(result[0].title).toBe("Updated")
 	})
 })
 
@@ -1845,7 +1843,7 @@ describe("notes.create", () => {
 		expect(sdkClient.setNoteType).not.toHaveBeenCalled()
 	})
 
-	it("final notesWithContentQueryUpdate filters out existing entry with same uuid before appending", async () => {
+	it("final notesWithContentQueryUpdate filters out existing entry with same uuid before appending the metadata note", async () => {
 		const sdkClient = makeMockSdkClient({
 			createNote: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-new")),
 			setNoteType: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-new", { noteType: "md" as unknown as NoteType })),
@@ -1860,15 +1858,21 @@ describe("notes.create", () => {
 		if (!lastCall) throw new Error("expected a call")
 		const { updater } = lastCall[0]
 
-		const staleEntry = { ...makeNote({ uuid: "note-uuid-new" }), content: "stale" }
-		const unrelated = { ...makeNote({ uuid: "unrelated-uuid" }), content: "keep" }
+		const staleEntry = makeNote({ uuid: "note-uuid-new" })
+		const unrelated = makeNote({ uuid: "unrelated-uuid" })
 
 		const result = updater([staleEntry, unrelated])
 
-		const withUuid = result.filter((n: Note & { content: string }) => n.uuid === "note-uuid-new")
+		const withUuid = result.filter((n: Note) => n.uuid === "note-uuid-new")
 		expect(withUuid).toHaveLength(1)
-		expect(withUuid[0].content).toBe("hello")
-		expect(result.find((n: Note & { content: string }) => n.uuid === "unrelated-uuid")).toBeDefined()
+		expect(result.find((n: Note) => n.uuid === "unrelated-uuid")).toBeDefined()
+
+		// Content is propagated through the separate content query (setContent with updateQuery:true), not the list.
+		expect(mockNoteContentQueryUpdate).toHaveBeenCalled()
+		const contentCall = mockNoteContentQueryUpdate.mock.calls[0]
+		if (!contentCall) throw new Error("expected a content-query call")
+		expect(contentCall[0].params.uuid).toBe("note-uuid-new")
+		expect(contentCall[0].updater).toBe("hello")
 	})
 })
 

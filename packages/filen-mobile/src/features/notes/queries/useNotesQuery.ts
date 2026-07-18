@@ -4,7 +4,7 @@ import auth from "@/lib/auth"
 import cache from "@/lib/cache"
 import { type Note } from "@/types"
 
-export const BASE_QUERY_KEY = "useNotesWithContentQuery"
+export const BASE_QUERY_KEY = "useNotesQuery"
 
 export async function fetchData(params?: { signal?: AbortSignal }) {
 	const { authedSdkClient } = await auth.getSdkClients()
@@ -17,43 +17,19 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 			: undefined
 	)
 
-	const withContent: (Note & { content: string })[] = await Promise.all(
-		all.map(async (note): Promise<Note & { content: string }> => {
-			const undecryptable: boolean = note.encryptionKey === undefined
+	const notes: Note[] = all.map(n => ({
+		...n,
+		undecryptable: n.encryptionKey === undefined
+	}))
 
-			if (undecryptable) {
-				return {
-					...note,
-					undecryptable,
-					content: ""
-				}
-			}
-
-			const content = await authedSdkClient.getNoteContent(
-				note,
-				params?.signal
-					? {
-							signal: params.signal
-						}
-					: undefined
-			)
-
-			return {
-				...note,
-				undecryptable,
-				content: content ?? ""
-			}
-		})
-	)
-
-	for (const note of withContent) {
+	for (const note of notes) {
 		cache.noteUuidToNote.set(note.uuid, note)
 	}
 
-	return withContent
+	return notes
 }
 
-export function useNotesWithContentQuery(
+export function useNotesQuery(
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery({
@@ -69,7 +45,7 @@ export function useNotesWithContentQuery(
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
 }
 
-export function notesWithContentQueryUpdate({
+export function notesQueryUpdate({
 	updater
 }: {
 	updater:
@@ -81,8 +57,8 @@ export function notesWithContentQueryUpdate({
 	})
 }
 
-export function notesWithContentQueryGet() {
+export function notesQueryGet() {
 	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY])
 }
 
-export default useNotesWithContentQuery
+export default useNotesQuery

@@ -2,7 +2,7 @@ import auth from "@/lib/auth"
 import { type Note, type NoteTag } from "@/types"
 import { wrapSdkNote, wrapSdkNoteTag } from "@/features/notes/utils"
 import { notesTagsQueryUpdate } from "@/features/notes/queries/useNotesTags.query"
-import { notesWithContentQueryUpdate } from "@/features/notes/queries/useNotesWithContent.query"
+import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
 
 export async function addTag({ note, tag, signal }: { note: Note; tag: NoteTag; signal?: AbortSignal }) {
 	if (note.tags.find(t => t.uuid === tag.uuid)) {
@@ -22,16 +22,8 @@ export async function addTag({ note, tag, signal }: { note: Note; tag: NoteTag; 
 
 	const modifiedNote = wrapSdkNote(modifiedNoteSdk)
 
-	notesWithContentQueryUpdate({
-		updater: prev =>
-			prev.map(n =>
-				n.uuid === modifiedNote.uuid
-					? {
-							...modifiedNote,
-							content: n.content
-						}
-					: n
-			)
+	notesQueryUpdate({
+		updater: prev => prev.map(n => (n.uuid === modifiedNote.uuid ? modifiedNote : n))
 	})
 
 	return modifiedNote
@@ -56,16 +48,8 @@ export async function removeTag({ note, tag, signal }: { note: Note; tag: NoteTa
 		)
 	)
 
-	notesWithContentQueryUpdate({
-		updater: prev =>
-			prev.map(n =>
-				n.uuid === note.uuid
-					? {
-							...note,
-							content: n.content
-						}
-					: n
-			)
+	notesQueryUpdate({
+		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
 	})
 
 	return note
@@ -144,7 +128,7 @@ export async function deleteTag({ tag, signal }: { tag: NoteTag; signal?: AbortS
 		updater: prev => prev.filter(t => t.uuid !== tag.uuid)
 	})
 
-	notesWithContentQueryUpdate({
+	notesQueryUpdate({
 		updater: prev => stripTagFromNotes(prev, tag.uuid)
 	})
 }

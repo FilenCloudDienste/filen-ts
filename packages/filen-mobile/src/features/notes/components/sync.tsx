@@ -8,8 +8,9 @@ import i18n from "@/lib/i18n"
 import { noteDisplayTitle } from "@/lib/decryption"
 import { AppState } from "react-native"
 import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight.store"
+import { type Note } from "@/types"
 import sqlite from "@/lib/sqlite"
-import { fetchData as notesWithContentQueryFetch, notesWithContentQueryGet } from "@/features/notes/queries/useNotesWithContent.query"
+import { fetchData as notesQueryFetch, notesQueryGet } from "@/features/notes/queries/useNotesQuery"
 import { noteContentQueryUpdate, noteContentQueryDataUpdatedAt } from "@/features/notes/queries/useNoteContent.query"
 import { unwrapSdkError, isNetworkClassError, isRetryableAuthError } from "@/lib/sdkErrors"
 import logger from "@/lib/logger"
@@ -141,12 +142,42 @@ export class Sync {
 			}
 
 			const reconcile = await run(async () => {
-				const fromCloud = await notesWithContentQueryFetch()
-				const cloudByUuid = new Map<string, string>()
+				const signal = this.abortController.signal
 
-				for (const note of fromCloud) {
-					cloudByUuid.set(note.uuid, note.content)
+				// Metadata-only list: tells us which disk-seeded notes still exist in the cloud.
+				// Content is no longer carried by the list — fetch it on demand below, and ONLY
+				// for the notes that actually have disk-seeded inflight (never the whole account;
+				// the old bulk per-note getNoteContent fan-out is exactly what we removed).
+				const cloudNotes = await notesQueryFetch({ signal })
+				const cloudByUuid = new Map<string, Note>()
+
+				for (const note of cloudNotes) {
+					cloudByUuid.set(note.uuid, note)
 				}
+
+				// Per-note content, fetched only for disk-inflight notes that still exist. A
+				// failed fetch leaves the entry untouched (availability beats reconcile — the
+				// next sync pass re-pushes it) rather than being pruned or dropped.
+				const contentByUuid = new Map<string, string>()
+
+				await Promise.all(
+					Object.keys(fromDisk).map(async noteUuid => {
+						const note = cloudByUuid.get(noteUuid)
+
+						if (!note) {
+							return
+						}
+
+						try {
+							contentByUuid.set(noteUuid, (await notes.getContent({ note, signal })) ?? "")
+						} catch (e) {
+							logger.warn("notes-sync", "restore reconcile: getContent failed; keeping inflight entry", {
+								noteUuid,
+								error: e
+							})
+						}
+					})
+				)
 
 				// #4 principle applied to restore: drop a disk-seeded inflight entry
 				// only when its content EQUALS the freshly-fetched cloud content
@@ -172,7 +203,13 @@ export class Sync {
 							continue
 						}
 
-						const cloudContent = cloudByUuid.get(noteUuid) ?? ""
+						// Couldn't fetch this note's cloud content (transient) — keep its entries;
+						// the next sync pass re-pushes. Only prune against content we actually have.
+						if (!contentByUuid.has(noteUuid)) {
+							continue
+						}
+
+						const cloudContent = contentByUuid.get(noteUuid) ?? ""
 						const remaining = entries.filter(c => c.content !== cloudContent)
 
 						if (remaining.length === 0) {
@@ -189,7 +226,9 @@ export class Sync {
 			})
 
 			if (!reconcile.success) {
-				logger.warn("notes-sync", "cloud reconcile after restore failed; stale inflight entries may persist", { error: reconcile.error })
+				logger.warn("notes-sync", "cloud reconcile after restore failed; stale inflight entries may persist", {
+					error: reconcile.error
+				})
 			}
 
 			return true
@@ -296,7 +335,7 @@ export class Sync {
 					// via socket between the render-time snapshot and the debounce flush
 					// are reflected in the setContent call. Fall back to the snapshot
 					// if the note is no longer in the cache (e.g. concurrently deleted).
-					const cachedNotes = notesWithContentQueryGet()
+					const cachedNotes = notesQueryGet()
 					const liveNote = cachedNotes?.find(n => n.uuid === noteUuid) ?? mostRecentContent.note
 
 					// #4 fix: capture the LOCAL author-time of the entry we are about to
@@ -332,7 +371,10 @@ export class Sync {
 								cloudContent !== mostRecentContent.content
 						} catch (e) {
 							// Availability beats the toast — push without the check.
-							logger.warn("notes-sync", "conflict-detection peek failed; pushing without overwrite check", { noteUuid, error: e })
+							logger.warn("notes-sync", "conflict-detection peek failed; pushing without overwrite check", {
+								noteUuid,
+								error: e
+							})
 						}
 					}
 
@@ -379,7 +421,12 @@ export class Sync {
 						if (rejections < MAX_NON_RETRYABLE_REJECTIONS) {
 							this.nonRetryableRejections.set(noteUuid, rejections)
 
-							logger.warn("notes-sync", "non-retryable SDK rejection on setContent; will retry", { noteUuid, rejections, maxRejections: MAX_NON_RETRYABLE_REJECTIONS, error: e })
+							logger.warn("notes-sync", "non-retryable SDK rejection on setContent; will retry", {
+								noteUuid,
+								rejections,
+								maxRejections: MAX_NON_RETRYABLE_REJECTIONS,
+								error: e
+							})
 
 							throw e
 						}
@@ -396,7 +443,11 @@ export class Sync {
 							return updated
 						})
 
-						logger.error("notes-sync", "dropping inflight content after max non-retryable rejections; edit lost", { noteUuid, rejections, error: e })
+						logger.error("notes-sync", "dropping inflight content after max non-retryable rejections; edit lost", {
+							noteUuid,
+							rejections,
+							error: e
+						})
 
 						return
 					}

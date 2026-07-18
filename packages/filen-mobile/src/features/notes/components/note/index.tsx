@@ -20,9 +20,7 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import Avatar from "@/components/ui/avatar"
 import { useTranslation } from "react-i18next"
 
-export type Item = TNote & {
-	content?: string
-}
+export type Item = TNote
 
 export type SectionHeader = {
 	type: "header"

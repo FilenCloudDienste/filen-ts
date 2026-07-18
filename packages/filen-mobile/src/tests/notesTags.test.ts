@@ -24,8 +24,8 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({
-	notesWithContentQueryUpdate: mockNotesWithContentQueryUpdate
+vi.mock("@/features/notes/queries/useNotesQuery", () => ({
+	notesQueryUpdate: mockNotesWithContentQueryUpdate
 }))
 
 vi.mock("@/features/notes/queries/useNotesTags.query", () => ({

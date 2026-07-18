@@ -121,9 +121,9 @@ vi.mock("@/features/notes/notes", () => ({
 	}
 }))
 
-vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({
+vi.mock("@/features/notes/queries/useNotesQuery", () => ({
 	fetchData: mockFetchNotesWithContent,
-	notesWithContentQueryGet: mockNotesWithContentQueryGet
+	notesQueryGet: mockNotesWithContentQueryGet
 }))
 
 vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
@@ -228,8 +228,10 @@ describe("Sync (Notes)", () => {
 			})
 
 			// Cloud still has the OLD content, so the inflight edit must survive
-			// reconciliation (content differs).
-			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000), content: "old-cloud" }])
+			// reconciliation (content differs). The list is metadata-only now — cloud
+			// content is fetched per-note via getContent.
+			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000) }])
+			mockNotesGetContent.mockResolvedValue("old-cloud")
 
 			await createSync()
 
@@ -257,7 +259,8 @@ describe("Sync (Notes)", () => {
 				"note-1": [{ timestamp: 5000, content: "already-synced", note: mockNote("note-1") }]
 			})
 
-			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(9999), content: "already-synced" }])
+			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(9999) }])
+			mockNotesGetContent.mockResolvedValue("already-synced")
 
 			await createSync()
 
@@ -272,7 +275,8 @@ describe("Sync (Notes)", () => {
 				"note-1": [{ timestamp: 1000, content: "unsynced-local", note: mockNote("note-1") }]
 			})
 
-			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(999999), content: "different-cloud" }])
+			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(999999) }])
+			mockNotesGetContent.mockResolvedValue("different-cloud")
 
 			await createSync()
 
@@ -319,8 +323,9 @@ describe("Sync (Notes)", () => {
 					"note-1": [{ timestamp: 5000, content: "typed-during-fetch", note: mockNote("note-1") }]
 				}
 
-				return [{ uuid: "note-1", editedTimestamp: BigInt(2000), content: "from-disk" }]
+				return [{ uuid: "note-1", editedTimestamp: BigInt(2000) }]
 			})
+			mockNotesGetContent.mockResolvedValue("from-disk")
 
 			await createSync()
 
@@ -361,7 +366,8 @@ describe("Sync (Notes)", () => {
 				"note-1": [{ timestamp: 5000, content: "pending", note: mockNote("note-1") }]
 			})
 
-			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000), content: "old-cloud" }])
+			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000) }])
+			mockNotesGetContent.mockResolvedValue("old-cloud")
 			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(6000) })
 
 			await createSync()
@@ -380,7 +386,8 @@ describe("Sync (Notes)", () => {
 				]
 			})
 
-			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000), content: "synced" }])
+			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000) }])
+			mockNotesGetContent.mockResolvedValue("synced")
 
 			await createSync()
 
@@ -396,9 +403,12 @@ describe("Sync (Notes)", () => {
 			})
 
 			mockFetchNotesWithContent.mockResolvedValue([
-				{ uuid: "note-valid", editedTimestamp: BigInt(1000), content: "old-cloud" },
-				{ uuid: "note-synced", editedTimestamp: BigInt(1000), content: "synced" }
+				{ uuid: "note-valid", editedTimestamp: BigInt(1000) },
+				{ uuid: "note-synced", editedTimestamp: BigInt(1000) }
 			])
+			mockNotesGetContent.mockImplementation(async (params: { note: { uuid: string } }) =>
+				params.note.uuid === "note-valid" ? "old-cloud" : "synced"
+			)
 
 			await createSync()
 

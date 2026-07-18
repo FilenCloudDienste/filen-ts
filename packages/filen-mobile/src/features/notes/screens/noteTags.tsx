@@ -18,7 +18,7 @@ import { type Note, type NoteTag } from "@/types"
 import { tagDisplayName } from "@/lib/decryption"
 import Menu from "@/components/ui/menu"
 import { PressableScale } from "@/components/ui/pressables"
-import useNotesWithContentQuery from "@/features/notes/queries/useNotesWithContent.query"
+import useNotesQuery from "@/features/notes/queries/useNotesQuery"
 import notes from "@/features/notes/notes"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useNotesTagsQuery from "@/features/notes/queries/useNotesTags.query"
@@ -237,18 +237,18 @@ const NoteTags = () => {
 	// route params are snapshots; a tag change after this screen opens (or a
 	// note moved into trash via another client) must reflect in the tri-state
 	// without requiring a re-navigation.
-	const notesWithContentQuery = useNotesWithContentQuery({
+	const notesQuery = useNotesQuery({
 		enabled: false
 	})
 
 	const liveNotes = (() => {
-		if (!notesParsed || notesParsed.length === 0 || notesWithContentQuery.status !== "success") {
+		if (!notesParsed || notesParsed.length === 0 || notesQuery.status !== "success") {
 			return []
 		}
 
 		const wantedUuids = new Set(notesParsed.map(n => n.uuid))
 
-		return notesWithContentQuery.data.filter(n => wantedUuids.has(n.uuid))
+		return notesQuery.data.filter(n => wantedUuids.has(n.uuid))
 	})()
 
 	const notesTagsQuery = useNotesTagsQuery()

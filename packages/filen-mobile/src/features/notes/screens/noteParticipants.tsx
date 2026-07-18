@@ -12,7 +12,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import { type NoteParticipant, type Note } from "@/types"
 import { type MenuButton } from "@/components/ui/menu"
-import useNotesWithContentQuery from "@/features/notes/queries/useNotesWithContent.query"
+import useNotesQuery from "@/features/notes/queries/useNotesQuery"
 import notes from "@/features/notes/notes"
 import { contactDisplayName } from "@/lib/utils"
 import { selectContacts } from "@/features/contacts/contactsSelect"
@@ -52,14 +52,11 @@ const NoteParticipants = () => {
 
 	const noteParsed = deserializeRouteParam<Note>(noteSerialized)
 
-	const notesWithContentQuery = useNotesWithContentQuery({
+	const notesQuery = useNotesQuery({
 		enabled: false
 	})
 
-	const note =
-		noteParsed && notesWithContentQuery.status === "success"
-			? (notesWithContentQuery.data.find(n => n.uuid === noteParsed.uuid) ?? null)
-			: null
+	const note = noteParsed && notesQuery.status === "success" ? (notesQuery.data.find(n => n.uuid === noteParsed.uuid) ?? null) : null
 
 	const participants = note ? note.participants.filter(p => p.userId !== stringifiedClient?.userId) : []
 	const isOwner = note?.ownerId === stringifiedClient?.userId
@@ -111,7 +108,11 @@ const NoteParticipants = () => {
 							})
 
 							if (!result.success) {
-								logger.error("notes", "set participant permission failed", { error: result.error, noteUuid: note.uuid, userId: participant.userId })
+								logger.error("notes", "set participant permission failed", {
+									error: result.error,
+									noteUuid: note.uuid,
+									userId: participant.userId
+								})
 								alerts.error(result.error)
 
 								return
@@ -141,7 +142,11 @@ const NoteParticipants = () => {
 									})
 
 									if (!promptResponse.success) {
-										logger.error("notes", "remove participant prompt failed", { error: promptResponse.error, noteUuid: note.uuid, userId: participant.userId })
+										logger.error("notes", "remove participant prompt failed", {
+											error: promptResponse.error,
+											noteUuid: note.uuid,
+											userId: participant.userId
+										})
 										alerts.error(promptResponse.error)
 
 										return
@@ -159,7 +164,11 @@ const NoteParticipants = () => {
 									})
 
 									if (!result.success) {
-										logger.error("notes", "remove participant failed", { error: result.error, noteUuid: note.uuid, userId: participant.userId })
+										logger.error("notes", "remove participant failed", {
+											error: result.error,
+											noteUuid: note.uuid,
+											userId: participant.userId
+										})
 										alerts.error(result.error)
 
 										return

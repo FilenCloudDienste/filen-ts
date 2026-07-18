@@ -48,10 +48,10 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({
-	notesWithContentQueryUpdate: mockNotesWithContentQueryUpdate,
+vi.mock("@/features/notes/queries/useNotesQuery", () => ({
+	notesQueryUpdate: mockNotesWithContentQueryUpdate,
 	fetchData: mockFetchData,
-	notesWithContentQueryGet: mockNotesWithContentQueryGet
+	notesQueryGet: mockNotesWithContentQueryGet
 }))
 
 vi.mock("@/lib/events", () => ({

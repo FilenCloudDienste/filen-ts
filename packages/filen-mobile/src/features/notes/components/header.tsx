@@ -1,5 +1,5 @@
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
-import useNotesWithContentQuery from "@/features/notes/queries/useNotesWithContent.query"
+import useNotesQuery from "@/features/notes/queries/useNotesQuery"
 import { NoteType } from "@filen/sdk-rs"
 import { Platform } from "react-native"
 import { useLocalSearchParams } from "expo-router"
@@ -47,7 +47,7 @@ export const Header = ({
 		enabled: false
 	})
 
-	const notesQuery = useNotesWithContentQuery({
+	const notesQuery = useNotesQuery({
 		enabled: false
 	})
 

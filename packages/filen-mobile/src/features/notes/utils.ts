@@ -35,10 +35,6 @@ export function filterNoteListItemsBySearchQuery(notes: NoteListItem[], searchQu
 			return true
 		}
 
-		if (note.content && note.content.toLowerCase().includes(normalized)) {
-			return true
-		}
-
 		return false
 	})
 }

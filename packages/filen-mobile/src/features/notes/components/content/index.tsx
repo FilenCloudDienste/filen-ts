@@ -2,7 +2,6 @@ import { NoteType, type NoteContentEdited } from "@filen/sdk-rs"
 import { type Note, type NoteHistory } from "@/types"
 import View from "@/components/ui/view"
 import useNoteContentQuery, { noteContentQueryGet } from "@/features/notes/queries/useNoteContent.query"
-import { notesWithContentQueryGet } from "@/features/notes/queries/useNotesWithContent.query"
 import Checklist from "@/features/notes/components/content/checklist"
 import { noteTypeToEditorType } from "@/features/notes/utils"
 import { FadeOut } from "react-native-reanimated"
@@ -235,9 +234,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 			return cached
 		}
 
-		const fromList = notesWithContentQueryGet()?.find(n => n.uuid === note.uuid)
-
-		return fromList ? fromList.content : null
+		return null
 	})()
 
 	const initialValue = editorSeed

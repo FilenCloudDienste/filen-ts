@@ -4,7 +4,7 @@ import { type Note } from "@/types"
 import { wrapSdkNote } from "@/features/notes/utils"
 import { noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
 import { createNotePreviewFromContentText } from "@filen/utils"
-import { notesWithContentQueryUpdate } from "@/features/notes/queries/useNotesWithContent.query"
+import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
 
 export async function getContent({ note, signal }: { note: Note; signal?: AbortSignal }) {
 	const { authedSdkClient } = await auth.getSdkClients()
@@ -48,16 +48,8 @@ export async function setContent({
 		)
 	)
 
-	notesWithContentQueryUpdate({
-		updater: prev =>
-			prev.map(n =>
-				n.uuid === note.uuid
-					? {
-							...note,
-							content
-						}
-					: n
-			)
+	notesQueryUpdate({
+		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
 	})
 
 	if (updateQuery) {
@@ -102,16 +94,8 @@ export async function setType({
 		)
 	)
 
-	notesWithContentQueryUpdate({
-		updater: prev =>
-			prev.map(n =>
-				n.uuid === note.uuid
-					? {
-							...note,
-							content: n.content
-						}
-					: n
-			)
+	notesQueryUpdate({
+		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
 	})
 
 	return note
@@ -136,16 +120,8 @@ export async function setTitle({ note, newTitle, signal }: { note: Note; newTitl
 		)
 	)
 
-	notesWithContentQueryUpdate({
-		updater: prev =>
-			prev.map(n =>
-				n.uuid === note.uuid
-					? {
-							...note,
-							content: n.content
-						}
-					: n
-			)
+	notesQueryUpdate({
+		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
 	})
 
 	return note

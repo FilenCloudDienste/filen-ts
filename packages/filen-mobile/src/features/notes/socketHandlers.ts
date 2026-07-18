@@ -1,9 +1,5 @@
 import { NoteEvent_Tags, MaybeEncryptedUniffi_Tags, SocketEvent_Tags, type SocketEvent } from "@filen/sdk-rs"
-import {
-	notesWithContentQueryUpdate,
-	fetchData as notesWithContentQueryFetch,
-	notesWithContentQueryGet
-} from "@/features/notes/queries/useNotesWithContent.query"
+import { notesQueryUpdate, fetchData as notesQueryFetch, notesQueryGet } from "@/features/notes/queries/useNotesQuery"
 import events from "@/lib/events"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import logger from "@/lib/logger"
@@ -17,7 +13,7 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		case NoteEvent_Tags.Archived: {
 			const [inner] = eventInner.inner.inner
 
-			notesWithContentQueryUpdate({
+			notesQueryUpdate({
 				updater: prev =>
 					prev.map(n =>
 						n.uuid === inner.note
@@ -35,7 +31,7 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		case NoteEvent_Tags.Deleted: {
 			const [inner] = eventInner.inner.inner
 
-			notesWithContentQueryUpdate({
+			notesQueryUpdate({
 				updater: prev => prev.filter(n => n.uuid !== inner.note)
 			})
 
@@ -50,7 +46,7 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		case NoteEvent_Tags.Restored: {
 			const [inner] = eventInner.inner.inner
 
-			notesWithContentQueryUpdate({
+			notesQueryUpdate({
 				updater: prev =>
 					prev.map(n =>
 						n.uuid === inner.note
@@ -73,7 +69,7 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 				case MaybeEncryptedUniffi_Tags.Decrypted: {
 					const [newTitle] = inner.newTitle.inner
 
-					notesWithContentQueryUpdate({
+					notesQueryUpdate({
 						updater: prev =>
 							prev.map(n =>
 								n.uuid === inner.note
@@ -101,7 +97,7 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		case NoteEvent_Tags.ParticipantNew: {
 			const [inner] = eventInner.inner.inner
 
-			notesWithContentQueryUpdate({
+			notesQueryUpdate({
 				updater: prev =>
 					prev.map(n =>
 						n.uuid === inner.note
@@ -119,7 +115,7 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		case NoteEvent_Tags.ParticipantRemoved: {
 			const [inner] = eventInner.inner.inner
 
-			notesWithContentQueryUpdate({
+			notesQueryUpdate({
 				updater: prev =>
 					prev.map(n =>
 						n.uuid === inner.note
@@ -137,7 +133,7 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		case NoteEvent_Tags.ParticipantPermissions: {
 			const [inner] = eventInner.inner.inner
 
-			notesWithContentQueryUpdate({
+			notesQueryUpdate({
 				updater: prev =>
 					prev.map(n =>
 						n.uuid === inner.note
@@ -161,10 +157,10 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 
 		case NoteEvent_Tags.New: {
 			// TODO: Don't refetch the query, build from socket event once added
-			const notesWithContent = await notesWithContentQueryFetch()
+			const notes = await notesQueryFetch()
 
-			notesWithContentQueryUpdate({
-				updater: () => notesWithContent
+			notesQueryUpdate({
+				updater: () => notes
 			})
 
 			break
@@ -173,7 +169,7 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		case NoteEvent_Tags.ContentEdited: {
 			const [inner] = eventInner.inner.inner
 
-			const notes = notesWithContentQueryGet()
+			const notes = notesQueryGet()
 			const note = notes?.find(n => n.uuid === inner.note)
 
 			if (!note) {

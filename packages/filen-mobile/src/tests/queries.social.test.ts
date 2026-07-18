@@ -135,7 +135,7 @@ vi.mock("@/lib/linkParser", async () => {
 
 import { probeMedia, fetchData as fetchChatMessageLinks } from "@/features/chats/queries/useChatMessageLinks.query"
 import { fetchData as fetchChatMessages } from "@/features/chats/queries/useChatMessages.query"
-import { fetchData as fetchNotesWithContent } from "@/features/notes/queries/useNotesWithContent.query"
+import { fetchData as fetchNotes } from "@/features/notes/queries/useNotesQuery"
 import { fetchData as fetchNotesTags } from "@/features/notes/queries/useNotesTags.query"
 import { fetchData as fetchChats } from "@/features/chats/queries/useChats.query"
 
@@ -861,10 +861,10 @@ describe("fetchData (useChatMessages)", () => {
 })
 
 // ---------------------------------------------------------------------------
-// fetchData — useNotesWithContent
+// fetchData — useNotesQuery
 // ---------------------------------------------------------------------------
 
-describe("fetchData (useNotesWithContent)", () => {
+describe("fetchData (useNotesQuery)", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockAuthedSdkClient.listNotes.mockReset()
@@ -892,14 +892,14 @@ describe("fetchData (useNotesWithContent)", () => {
 			}
 		])
 
-		const result = await fetchNotesWithContent()
+		const result = await fetchNotes()
 
 		expect(result).toHaveLength(1)
-		expect(result[0]).toMatchObject({ undecryptable: true, content: "" })
+		expect(result[0]).toMatchObject({ undecryptable: true })
 		expect(mockAuthedSdkClient.getNoteContent).not.toHaveBeenCalled()
 	})
 
-	it("sets undecryptable:false and calls getNoteContent when encryptionKey is defined", async () => {
+	it("sets undecryptable:false and does not fetch content (metadata-only list)", async () => {
 		mockAuthedSdkClient.listNotes.mockResolvedValue([
 			{
 				uuid: "note-ok",
@@ -919,41 +919,11 @@ describe("fetchData (useNotesWithContent)", () => {
 			}
 		])
 
-		mockAuthedSdkClient.getNoteContent.mockResolvedValue("Note body text")
-
-		const result = await fetchNotesWithContent()
+		const result = await fetchNotes()
 
 		expect(result).toHaveLength(1)
-		expect(result[0]).toMatchObject({ undecryptable: false, content: "Note body text" })
-		expect(mockAuthedSdkClient.getNoteContent).toHaveBeenCalledTimes(1)
-	})
-
-	it("falls back to '' when getNoteContent returns null", async () => {
-		mockAuthedSdkClient.listNotes.mockResolvedValue([
-			{
-				uuid: "note-null",
-				encryptionKey: "key-exists",
-				title: "Nullable",
-				noteType: "text",
-				pinned: false,
-				favorite: false,
-				archive: false,
-				trash: false,
-				tags: [],
-				ownerId: 1n,
-				lastEditorId: 1n,
-				createdTimestamp: 0n,
-				editedTimestamp: 0n,
-				participants: []
-			}
-		])
-
-		mockAuthedSdkClient.getNoteContent.mockResolvedValue(null)
-
-		const result = await fetchNotesWithContent()
-
-		expect(result).toHaveLength(1)
-		expect(result[0]?.content).toBe("")
+		expect(result[0]).toMatchObject({ undecryptable: false })
+		expect(mockAuthedSdkClient.getNoteContent).not.toHaveBeenCalled()
 	})
 
 	it("populates cache.noteUuidToNote for every note in the batch", async () => {
@@ -994,7 +964,7 @@ describe("fetchData (useNotesWithContent)", () => {
 
 		mockAuthedSdkClient.getNoteContent.mockResolvedValue("content a")
 
-		await fetchNotesWithContent()
+		await fetchNotes()
 
 		expect(mockNoteUuidToNote.has("note-a")).toBe(true)
 		expect(mockNoteUuidToNote.has("note-b")).toBe(true)
@@ -1036,17 +1006,14 @@ describe("fetchData (useNotesWithContent)", () => {
 			}
 		])
 
-		mockAuthedSdkClient.getNoteContent.mockResolvedValue("body")
-
-		const result = await fetchNotesWithContent()
+		const result = await fetchNotes()
 
 		const d = result.find(n => n.uuid === "decryptable")
 		const u = result.find(n => n.uuid === "undecryptable")
 
 		expect(d?.undecryptable).toBe(false)
-		expect(d?.content).toBe("body")
 		expect(u?.undecryptable).toBe(true)
-		expect(u?.content).toBe("")
+		expect(mockAuthedSdkClient.getNoteContent).not.toHaveBeenCalled()
 	})
 })
 

@@ -1,7 +1,7 @@
 import { Fragment, useState, useCallback, useEffect } from "react"
 import { onlineManager } from "@tanstack/react-query"
 import SafeAreaView from "@/components/ui/safeAreaView"
-import useNotesWithContentQuery from "@/features/notes/queries/useNotesWithContent.query"
+import useNotesQuery from "@/features/notes/queries/useNotesQuery"
 import { notesSorter } from "@/lib/sort"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -29,7 +29,7 @@ import logger from "@/lib/logger"
 const Notes = () => {
 	const { t } = useTranslation()
 	const isOnline = useIsOnline()
-	const notesQuery = useNotesWithContentQuery()
+	const notesQuery = useNotesQuery()
 	const blocked = useBlockedUsers()
 	const [notesViewMode] = useSecureStore<"notes" | "tags">("notesViewMode", "notes")
 	const [tagsSortBy] = useNotesTagsSortBy()
