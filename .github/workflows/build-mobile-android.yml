@@ -2,6 +2,21 @@ name: Build Mobile Android
 
 on:
   workflow_dispatch:
+  # Also build + publish when a version tag is pushed, e.g. `filen-mobile@4.0.9`. The built
+  # version comes from app.config.ts (VERSION) via prebuild, NOT from the tag — the tag is only a
+  # trigger. The "Verify tag matches app version" step below fails fast if the tag and
+  # app.config.ts disagree, so a tag can never publish a stale version.
+  push:
+    tags:
+      # Any `filen-mobile@…` tag triggers; the "Verify tag matches app version" step is the real
+      # validator (a tag whose version != app.config.ts VERSION fails fast before building).
+      - "filen-mobile@*"
+
+concurrency:
+  # Queue (don't cancel) publish runs so a tag push and a manual dispatch can't upload to the
+  # store simultaneously; an in-flight upload is never interrupted mid-way.
+  group: build-mobile-android
+  cancel-in-progress: false
 
 env:
   NODE_ENV: production
@@ -22,6 +37,24 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
+
+      # Tag-triggered runs only: the built version comes from app.config.ts, so refuse to publish
+      # if the pushed tag disagrees with it (prevents `filen-mobile@4.0.9` shipping a stale 4.0.8).
+      # GITHUB_REF_NAME is read as an env var, never interpolated into the script.
+      - name: Verify tag matches app version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#filen-mobile@}"
+          APP_VERSION="$(grep -oE 'const VERSION: string = "[0-9]+\.[0-9]+\.[0-9]+"' app.config.ts | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+          echo "Tag: ${GITHUB_REF_NAME} (version ${TAG_VERSION}) | app.config.ts VERSION: ${APP_VERSION:-<unparsed>}"
+          if [ -z "${APP_VERSION}" ]; then
+            echo "::error::Could not parse VERSION from app.config.ts"
+            exit 1
+          fi
+          if [ "${TAG_VERSION}" != "${APP_VERSION}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match app.config.ts VERSION (${APP_VERSION}). Bump VERSION to ${TAG_VERSION} (or retag) before publishing."
+            exit 1
+          fi
 
       - name: Write fallback encryption key to .env
         run: |
