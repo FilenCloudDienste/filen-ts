@@ -43,7 +43,7 @@ const MarkdownPreviewButton = ({ id }: { id: string }) => {
 				right: 16 + insets.right
 			}}
 		>
-			<CrossGlassContainerView className="flex-row items-center justify-center rounded-full overflow-hidden border border-border size-12">
+			<CrossGlassContainerView className="flex-row items-center justify-center rounded-full overflow-hidden size-12">
 				<PressableScale
 					rippleColor="transparent"
 					onPress={onPress}
