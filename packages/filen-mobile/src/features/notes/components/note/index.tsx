@@ -104,6 +104,12 @@ const NoteRow = ({
 		isSharedToMe && info.item.type !== "header"
 			? (info.item.participants.find(participant => participant.isOwner)?.email ?? null)
 			: null
+	// A note shared TO us without write permission is view-only; surface it with an eye badge in the
+	// left column (alongside pin/favorite) so it reads as non-editable before the editor even opens.
+	const isReadOnly =
+		isSharedToMe &&
+		info.item.type !== "header" &&
+		!info.item.participants.some(participant => participant.userId === stringifiedClient?.userId && participant.permissionsWrite)
 	const tags =
 		info.item.type === "header" ? [] : [...info.item.tags].sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
 
@@ -209,6 +215,18 @@ const NoteRow = ({
 											name="heart-outline"
 											size={18}
 											color={textRed500.color}
+										/>
+									</View>
+								)}
+								{isReadOnly && (
+									<View
+										accessibilityLabel={t("note_view_only")}
+										className="flex-row items-center justify-center p-1 rounded-full size-8 bg-background-tertiary"
+									>
+										<Ionicons
+											name="eye-outline"
+											size={18}
+											color={textForeground.color}
 										/>
 									</View>
 								)}

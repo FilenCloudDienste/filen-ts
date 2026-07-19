@@ -192,6 +192,8 @@ export const notes = {
 	permission_read: "Read",
 	/** Permission option: read & write access */
 	permission_write: "Write",
+	/** Editor header chip + notes-list badge — a note shared to you without write access (view only) */
+	note_view_only: "View only",
 	// remove_participant and remove_selected live in common.ts.
 	/** Confirmation dialog message before removing a single participant from a note */
 	remove_participant_confirmation_note: "Are you sure you want to remove this participant from the note?",

@@ -29,6 +29,38 @@ import useTextEditorStore from "@/stores/useTextEditor.store"
 import { RichTextHeaderToolbar } from "@/components/textEditor/richText/toolbar"
 import { useTranslation } from "react-i18next"
 import logger from "@/lib/logger"
+import Text from "@/components/ui/text"
+import View, { CrossGlassContainerView } from "@/components/ui/view"
+import Ionicons from "@expo/vector-icons/Ionicons"
+
+// Header-middle title for a note shared to us without write access: the note title (kept for identity)
+// with a compact "View only" chip beneath it, so the reason the editor is non-editable is visible right
+// where the rich-text toolbar would otherwise sit. Read-only notes never show that toolbar, so the two
+// never collide.
+const ReadOnlyTitle = ({ title }: { title: string }) => {
+	const { t } = useTranslation()
+	const textMuted = useResolveClassNames("text-muted-foreground")
+
+	return (
+		<View className="items-center justify-center gap-px bg-transparent">
+			<Text
+				numberOfLines={1}
+				ellipsizeMode="middle"
+				className="text-[17px] font-semibold text-foreground leading-6"
+			>
+				{title}
+			</Text>
+			<CrossGlassContainerView className="flex-row items-center gap-1 px-2 py-0.5 overflow-hidden">
+				<Ionicons
+					name="eye-outline"
+					size={11}
+					color={textMuted.color}
+				/>
+				<Text className="text-xs text-muted-foreground leading-4">{t("note_view_only")}</Text>
+			</CrossGlassContainerView>
+		</View>
+	)
+}
 
 const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }) => {
 	const { t } = useTranslation()
@@ -61,7 +93,9 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 					? () => <RichTextHeaderToolbar dispatch={dispatch} />
 					: history
 						? simpleDate(Number(history.editedTimestamp))
-						: noteDisplayTitle(note)
+						: !writeAccess
+							? () => <ReadOnlyTitle title={noteDisplayTitle(note)} />
+							: noteDisplayTitle(note)
 			}
 			backVisible={true}
 			shadowVisible={false}
