@@ -8,6 +8,7 @@ import type { DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
 import useDomDomEvents from "@/hooks/useDomEvents/useDomDomEvents"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
 import { decodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
+import { quillV2ToLegacyV1 } from "@/components/textEditor/richText/quillCompat"
 import Quill from "quill"
 import DOMPurify from "dompurify"
 import QuillThemeCustomizer, { getThemeOptions } from "@/components/textEditor/richText/quillTheme"
@@ -252,7 +253,10 @@ const RichTextEditorDom = ({
 				return
 			}
 
-			onValueChange?.(quillRef.current.root.innerHTML)
+			// Persist lists and code blocks in Quill v1's on-disk form rather than
+			// Quill v2's (<ol><li data-list>). v2 markup is read by web/desktop (Quill 1.3.7) as a plain
+			// numbered list — checkboxes gone, bullets renumbered. See quillCompat for the mechanism.
+			onValueChange?.(quillV2ToLegacyV1(quillRef.current.root.innerHTML))
 		})
 
 		quillRef.current.on("selection-change", () => {
