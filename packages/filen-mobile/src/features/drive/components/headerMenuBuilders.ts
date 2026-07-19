@@ -442,7 +442,17 @@ export function buildBulkActionMenu({
 
 	if (
 		!hasUndecryptable &&
-		(drivePath.type === "drive" || drivePath.type === "favorites") &&
+		// Read-capable variants (mirrors bulkDownload). Single-item Make-offline is not variant-gated
+		// either — it shows wherever the parent resolves — so bulk must match: the parent-resolvability
+		// + not-already-stored guards below cover the edge cases (e.g. a nested sharedIn item whose
+		// containing folder wasn't browsed → parent unresolvable → button hidden, like the single-item
+		// contract). The offline lib fully supports shared items (offlineSync's listing-based flows).
+		(drivePath.type === "drive" ||
+			drivePath.type === "recents" ||
+			drivePath.type === "favorites" ||
+			drivePath.type === "sharedIn" ||
+			drivePath.type === "sharedOut" ||
+			drivePath.type === "links") &&
 		!everySelectedKnownStoredOffline &&
 		everySelectedParentResolvable
 	) {

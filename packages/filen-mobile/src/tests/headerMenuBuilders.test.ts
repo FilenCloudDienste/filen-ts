@@ -757,7 +757,10 @@ describe("buildBulkActionMenu", () => {
 		expect(ids).toContain("bulkMakeOffline")
 	})
 
-	it("type='sharedIn' → no bulkMakeOffline regardless of offline flags", () => {
+	it("type='sharedIn' → includes bulkMakeOffline (shared items are offline-capable)", () => {
+		// Bulk Make-offline must be available in Shared With You, matching single-item behavior — the
+		// offline lib fully supports shared items. getRealDriveItemParent is mocked non-null (parents
+		// resolve) and items aren't all stored, so the action shows.
 		mockIsItemStoredSync.mockReturnValue(false)
 
 		const ids = buttonIds(
@@ -770,7 +773,7 @@ describe("buildBulkActionMenu", () => {
 			})
 		)
 
-		expect(ids).not.toContain("bulkMakeOffline")
+		expect(ids).toContain("bulkMakeOffline")
 	})
 
 	// --- removeOffline gating (anySelectedTopLevelOffline) ---
