@@ -1,4 +1,4 @@
-import { Platform } from "react-native"
+import { Platform, AppState } from "react-native"
 import notifee, { AndroidImportance, AndroidForegroundServiceType, AuthorizationStatus } from "react-native-notify-kit"
 import { bpsToReadable } from "@filen/utils"
 import i18n from "@/lib/i18n"
@@ -137,6 +137,17 @@ class ForegroundService {
 		const granted = await this.requestPermission()
 
 		if (!granted || signal?.aborted) {
+			return
+		}
+
+		// The app may have backgrounded during the awaits above (isEnabled / init / requestPermission).
+		// Starting the foreground service from the background risks the UNCATCHABLE
+		// ForegroundServiceDidNotStartInTimeException — the frozen process misses the ~5s
+		// startForeground() promotion deadline and the OS kills it asynchronously (no try/catch can
+		// intercept it). Bail if we're no longer active; the host's AppState→active handler re-attempts
+		// start() on the next foreground, where promotion is safe. This is the last line of defense
+		// even if a caller forgets to gate on foreground.
+		if (AppState.currentState !== "active") {
 			return
 		}
 

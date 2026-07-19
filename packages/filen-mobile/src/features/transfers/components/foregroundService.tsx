@@ -33,7 +33,13 @@ function ForegroundService() {
 		// rejected because the app was backgrounded (Android 12+ forbids background FGS starts) can be
 		// retried by the AppState→active handler below, where the start is allowed.
 		const attemptStart = (snapshot: { count: number; progress: number; speed: number }): void => {
-			if (snapshot.count === 0 || pendingStart || foregroundService.isRunning()) {
+			// Only START from the foreground. Calling startForegroundService() while the app is
+			// backgrounded/frozen risks ForegroundServiceDidNotStartInTimeException — an UNCATCHABLE
+			// async system kill fired when the frozen process misses the ~5s startForeground()
+			// deadline. A transfer that begins while backgrounded (reconnect → camera-upload/offline
+			// sync enqueues) defers here; the AppState→active listener below re-attempts once
+			// foreground, where promotion is safe.
+			if (snapshot.count === 0 || pendingStart || foregroundService.isRunning() || AppState.currentState !== "active") {
 				return
 			}
 

@@ -2,9 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 const platformMock = vi.hoisted(() => ({ OS: "android" as "ios" | "android" }))
+const appStateMock = vi.hoisted(() => ({ currentState: "active" as string }))
 
 vi.mock("react-native", () => ({
-	Platform: platformMock
+	Platform: platformMock,
+	AppState: appStateMock
 }))
 
 const mockBpsToReadable = vi.fn((speed: number) => `${speed}B/s`)
@@ -53,6 +55,7 @@ beforeEach(() => {
 	vi.clearAllMocks()
 	vi.resetModules()
 	platformMock.OS = "android"
+	appStateMock.currentState = "active"
 	mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 2 })
 	mockNotifee.requestPermission.mockResolvedValue({ authorizationStatus: 2 })
 	mockNotifee.createChannel.mockResolvedValue(undefined)
@@ -118,6 +121,19 @@ describe("foregroundService", () => {
 
 		await expect(fgs.start({ count: 1, progress: 0, speed: 0 })).rejects.toThrow()
 
+		expect(fgs.isRunning()).toBe(false)
+	})
+
+	it("start bails without displaying when the app is not active (avoids ForegroundServiceDidNotStartInTimeException)", async () => {
+		// Backgrounded/frozen startForegroundService() can miss the ~5s startForeground() deadline and
+		// trigger an UNCATCHABLE async system kill. start() must refuse to display from the background.
+		appStateMock.currentState = "background"
+
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0.25, speed: 1024 })
+
+		expect(mockNotifee.displayNotification).not.toHaveBeenCalled()
 		expect(fgs.isRunning()).toBe(false)
 	})
 
