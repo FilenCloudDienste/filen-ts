@@ -1,5 +1,5 @@
 import type { DriveItem, DriveItemFileExtracted, DriveItemDirectoryExtracted } from "@/types"
-import type { DrivePath } from "@/hooks/useDrivePath"
+import type { DrivePath, SharedNavContext } from "@/hooks/useDrivePath"
 import type { PreviewType } from "@/lib/previewType"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { serialize } from "@/lib/serializer"
@@ -297,11 +297,23 @@ export function resolveDriveNavigationTarget({ item, drivePath }: { item: DriveI
 		}
 	}
 
+	// The destination screen re-derives the SDK share context from this payload; without it a fresh
+	// session (cold in-memory cache) can only resolve the tapped directory via that cache. Built from
+	// the tapped item — omitted when the item carries no share context (a plain dir, or a shared dir
+	// whose role never got stamped).
+	const sharedNavContext: SharedNavContext | undefined =
+		item.type === "sharedRootDirectory"
+			? { kind: "root", dir: item.data }
+			: item.type === "sharedDirectory" && item.data.sharingRole
+				? { kind: "dir", dir: item.data, role: item.data.sharingRole }
+				: undefined
+
 	if (drivePath.type === "sharedIn") {
 		return {
 			pathname: "/sharedIn/[uuid]" as const,
 			params: {
-				uuid: item.data.uuid
+				uuid: item.data.uuid,
+				...(sharedNavContext ? { shared: serialize(sharedNavContext) } : {})
 			}
 		}
 	}
@@ -310,7 +322,8 @@ export function resolveDriveNavigationTarget({ item, drivePath }: { item: DriveI
 		return {
 			pathname: "/sharedOut/[uuid]" as const,
 			params: {
-				uuid: item.data.uuid
+				uuid: item.data.uuid,
+				...(sharedNavContext ? { shared: serialize(sharedNavContext) } : {})
 			}
 		}
 	}

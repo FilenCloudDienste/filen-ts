@@ -413,9 +413,9 @@ beforeEach(() => {
 	cacheFileUuidToNormalFile.clear()
 })
 
-// ─── removeSelectOptionsFromParams (indirectly, via driveItemsQueryGet key) ────
+// ─── removeVolatileParamsForKey (indirectly, via driveItemsQueryGet key) ────
 
-describe("removeSelectOptionsFromParams (via driveItemsQueryGet)", () => {
+describe("removeVolatileParamsForKey (via driveItemsQueryGet)", () => {
 	it("strips selectOptions from path before building the query key", () => {
 		const paramsWithOptions = {
 			path: {
@@ -468,6 +468,33 @@ describe("removeSelectOptionsFromParams (via driveItemsQueryGet)", () => {
 		const keyWithout = mockQueryUpdaterGet.mock.calls.at(-1)![0]
 
 		expect(keyWith).toEqual(keyWithout)
+	})
+
+	it("strips the `shared` nav context so the key matches a context-free `{ type, uuid }` key", () => {
+		// The `shared` payload is a fetch-only hint; it must never enter the persisted key, or a
+		// shared subdirectory listing would be keyed differently from the `{ type, uuid }` keys the
+		// updaters write (and would never converge with them).
+		const withShared = {
+			path: {
+				type: "sharedIn" as const,
+				uuid: "shared-uuid",
+				shared: { kind: "root", dir: { uuid: "shared-uuid" } }
+			}
+		}
+		const withoutShared = {
+			path: { type: "sharedIn" as const, uuid: "shared-uuid" }
+		}
+
+		driveItemsQueryGet(withShared as Parameters<typeof driveItemsQueryGet>[0])
+		const keyWith = mockQueryUpdaterGet.mock.calls.at(-1)![0]
+
+		driveItemsQueryGet(withoutShared)
+		const keyWithout = mockQueryUpdaterGet.mock.calls.at(-1)![0]
+
+		expect(keyWith).toEqual(keyWithout)
+
+		const strippedPath = (keyWith as unknown[])[1] as Record<string, Record<string, unknown>>
+		expect(strippedPath["path"]).not.toHaveProperty("shared")
 	})
 })
 
@@ -1215,5 +1242,128 @@ describe("fetchData — sharedIn/sharedOut sharingRole propagation", () => {
 		await fetchData({ path: { type: "sharedOut", uuid: "sharedout-parent" } })
 
 		expect(cacheDirectoryUuidToAnyNormalDir.has("inner-sharedout-dir")).toBe(true)
+	})
+})
+
+// ─── fetchSharedDir resolution ladder (nav param → cache → cached item → not-found) ───
+
+describe("fetchData — fetchSharedDir resolution ladder", () => {
+	it("rung 1: resolves a shared subdir from the `shared` nav param with NO cache entry, and seeds the context cache", async () => {
+		const role = { Receiver: { email: "a@b.com", id: 1 } }
+		const navDir = { uuid: "nav-root-dir", sharingRole: role, inner: { uuid: "rootmeta" }, writeAccess: true }
+		const mockListSharedDir = vi.fn().mockResolvedValue({ dirs: [], files: [] })
+
+		mockGetSdkClients.mockResolvedValue({
+			authedSdkClient: { listSharedDir: mockListSharedDir }
+		})
+
+		// No cache entries for this uuid — resolution must ride the nav param alone.
+		expect(cacheDirectoryUuidToAnySharedDirWithContext.has("nav-uuid")).toBe(false)
+
+		await fetchData({
+			path: { type: "sharedIn", uuid: "nav-uuid", shared: { kind: "root", dir: navDir } }
+		} as unknown as Parameters<typeof fetchData>[0])
+
+		// listSharedDir received the rebuilt AnySharedDir.Root(navDir) + the root's own role.
+		expect(mockListSharedDir).toHaveBeenCalledTimes(1)
+		const [dirArg, shareInfoArg] = mockListSharedDir.mock.calls[0] as [{ tag: string; inner: unknown[] }, unknown]
+		expect(dirArg.tag).toBe("Root")
+		expect(dirArg.inner[0]).toBe(navDir)
+		expect(shareInfoArg).toBe(role)
+
+		// Success via rung 1 seeds the share-context cache for sibling consumers.
+		expect(cacheDirectoryUuidToAnySharedDirWithContext.has("nav-uuid")).toBe(true)
+	})
+
+	it("rung 1: rebuilds an AnySharedDir.Dir with the payload role when the nav context is kind 'dir'", async () => {
+		const role = { Sharer: { email: "o@b.com", id: 9 } }
+		const navDir = { uuid: "nav-sub-dir", inner: { uuid: "d" }, sharedTag: true }
+		const mockListSharedDir = vi.fn().mockResolvedValue({ dirs: [], files: [] })
+
+		mockGetSdkClients.mockResolvedValue({
+			authedSdkClient: { listSharedDir: mockListSharedDir }
+		})
+
+		await fetchData({
+			path: { type: "sharedIn", uuid: "nav-sub-uuid", shared: { kind: "dir", dir: navDir, role } }
+		} as unknown as Parameters<typeof fetchData>[0])
+
+		const [dirArg, shareInfoArg] = mockListSharedDir.mock.calls[0] as [{ tag: string; inner: unknown[] }, unknown]
+		expect(dirArg.tag).toBe("Dir")
+		expect(dirArg.inner[0]).toBe(navDir)
+		expect(shareInfoArg).toBe(role)
+		expect(cacheDirectoryUuidToAnySharedDirWithContext.has("nav-sub-uuid")).toBe(true)
+	})
+
+	it("rung 3: resolves + seeds from a cached sharedRootDirectory DriveItem (uuid map)", async () => {
+		const role = { Sharer: { email: "o@b.com", id: 2 } }
+		const itemData = { uuid: "item-root-dir", sharingRole: role }
+		const mockListSharedDir = vi.fn().mockResolvedValue({ dirs: [], files: [] })
+
+		// Only the uuid→item map holds it — the share-context cache is empty and there is no nav param.
+		cacheUuidToAnyDriveItem.set("item-uuid", { type: "sharedRootDirectory", data: itemData })
+
+		mockGetSdkClients.mockResolvedValue({
+			authedSdkClient: { listSharedDir: mockListSharedDir }
+		})
+
+		await fetchData({ path: { type: "sharedIn", uuid: "item-uuid" } })
+
+		const [dirArg, shareInfoArg] = mockListSharedDir.mock.calls[0] as [{ tag: string; inner: unknown[] }, unknown]
+		expect(dirArg.tag).toBe("Root")
+		expect(dirArg.inner[0]).toBe(itemData)
+		expect(shareInfoArg).toBe(role)
+		expect(cacheDirectoryUuidToAnySharedDirWithContext.has("item-uuid")).toBe(true)
+	})
+
+	it("rung 3: resolves + seeds from a cached role-stamped sharedDirectory DriveItem (uuid map)", async () => {
+		const role = { Sharer: { email: "o@b.com", id: 3 } }
+		const itemData = { uuid: "item-sub-dir", sharingRole: role, inner: { uuid: "d" }, sharedTag: true }
+		const mockListSharedDir = vi.fn().mockResolvedValue({ dirs: [], files: [] })
+
+		cacheUuidToAnyDriveItem.set("item-sub-uuid", { type: "sharedDirectory", data: itemData })
+
+		mockGetSdkClients.mockResolvedValue({
+			authedSdkClient: { listSharedDir: mockListSharedDir }
+		})
+
+		await fetchData({ path: { type: "sharedIn", uuid: "item-sub-uuid" } })
+
+		const [dirArg, shareInfoArg] = mockListSharedDir.mock.calls[0] as [{ tag: string; inner: unknown[] }, unknown]
+		expect(dirArg.tag).toBe("Dir")
+		expect(dirArg.inner[0]).toBe(itemData)
+		expect(shareInfoArg).toBe(role)
+		expect(cacheDirectoryUuidToAnySharedDirWithContext.has("item-sub-uuid")).toBe(true)
+	})
+
+	it("rung 2 wins over rung 3: a share-context cache hit is used directly and NOT re-seeded from the item map", async () => {
+		const shareInfo = { Receiver: { email: "a@b.com", id: 5 } }
+		const cachedParent = { dir: { uuid: "ctx-dir" }, shareInfo }
+		const mockListSharedDir = vi.fn().mockResolvedValue({ dirs: [], files: [] })
+
+		cacheDirectoryUuidToAnySharedDirWithContext.set("ctx-uuid", cachedParent)
+		// A different item shape in the uuid map must be ignored while the context cache has the entry.
+		cacheUuidToAnyDriveItem.set("ctx-uuid", { type: "sharedRootDirectory", data: { uuid: "ctx-uuid", sharingRole: shareInfo } })
+
+		mockGetSdkClients.mockResolvedValue({
+			authedSdkClient: { listSharedDir: mockListSharedDir }
+		})
+
+		await fetchData({ path: { type: "sharedIn", uuid: "ctx-uuid" } })
+
+		const [dirArg, shareInfoArg] = mockListSharedDir.mock.calls[0] as [unknown, unknown]
+		expect(dirArg).toBe(cachedParent.dir)
+		expect(shareInfoArg).toBe(shareInfo)
+	})
+
+	it("rung 4: a provided uuid with no nav param, no context cache and no cached item throws not-found", async () => {
+		await expect(fetchData({ path: { type: "sharedIn", uuid: "ghost-uuid" } })).rejects.toBeInstanceOf(DriveDirectoryNotFoundError)
+	})
+
+	it("rung 4: a cached sharedDirectory WITHOUT a stamped role does not resolve (throws not-found)", async () => {
+		// The share role is required to list the dir; a role-less item can't build the context.
+		cacheUuidToAnyDriveItem.set("roleless-uuid", { type: "sharedDirectory", data: { uuid: "roleless-uuid" } })
+
+		await expect(fetchData({ path: { type: "sharedIn", uuid: "roleless-uuid" } })).rejects.toBeInstanceOf(DriveDirectoryNotFoundError)
 	})
 })

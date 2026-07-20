@@ -11,6 +11,8 @@ import {
 	AnyNormalDir,
 	AnyNormalDir_Tags,
 	AnyDirWithContext,
+	AnySharedDir,
+	AnySharedDirWithContext,
 	type NormalDirsAndFiles,
 	type SharedRootDirsAndFiles,
 	NonRootDir_Tags,
@@ -19,7 +21,7 @@ import {
 	type DirPublicLink,
 	ErrorKind
 } from "@filen/sdk-rs"
-import { type DrivePath, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
+import { type DrivePath, type SharedNavContext, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
 import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import type { DriveItem } from "@/types"
@@ -88,19 +90,59 @@ async function fetchSharedDir(
 	const uuid = params.path.uuid
 	const hasUuid = Boolean(uuid && uuid.length > 0)
 
-	// No uuid → list the shared root. A provided uuid is a real shared
-	// subdirectory; resolving it requires its cached share context, so a cache
-	// miss must surface as not-found rather than silently listing the shared
-	// root under the requested directory's title.
-	const parent = (() => {
+	// No uuid → list the shared root. A provided uuid is a real shared subdirectory whose SDK share
+	// context must be recovered, via a ladder: (1) the `shared` nav payload a fresh session carries in
+	// from the parent-listing tap; (2) the in-memory share-context cache; (3) a still-cached DriveItem
+	// stamped with its share role. Exhausting all three surfaces as not-found rather than silently
+	// listing the shared root under the requested directory's title. Rungs (1) and (3) re-seed the
+	// share-context cache so this session's sibling consumers (transfers, offline helpers, dir sizes,
+	// parent resolution) resolve the browsed dir without rebuilding it.
+	const parent = ((): AnySharedDirWithContext | undefined => {
 		if (!hasUuid || !uuid) {
 			return undefined
+		}
+
+		const navContext: SharedNavContext | undefined = params.path.shared
+
+		if (navContext) {
+			const rebuilt = AnySharedDirWithContext.new({
+				dir: navContext.kind === "root" ? new AnySharedDir.Root(navContext.dir) : new AnySharedDir.Dir(navContext.dir),
+				shareInfo: navContext.kind === "root" ? navContext.dir.sharingRole : navContext.role
+			})
+
+			cache.directoryUuidToAnySharedDirWithContext.set(uuid, rebuilt)
+
+			return rebuilt
 		}
 
 		const cachedDir = cache.directoryUuidToAnySharedDirWithContext.get(uuid)
 
 		if (cachedDir) {
 			return cachedDir
+		}
+
+		const cachedItem = cache.uuidToAnyDriveItem.get(uuid)
+
+		if (cachedItem && cachedItem.type === "sharedRootDirectory") {
+			const rebuilt = AnySharedDirWithContext.new({
+				dir: new AnySharedDir.Root(cachedItem.data),
+				shareInfo: cachedItem.data.sharingRole
+			})
+
+			cache.directoryUuidToAnySharedDirWithContext.set(uuid, rebuilt)
+
+			return rebuilt
+		}
+
+		if (cachedItem && cachedItem.type === "sharedDirectory" && cachedItem.data.sharingRole) {
+			const rebuilt = AnySharedDirWithContext.new({
+				dir: new AnySharedDir.Dir(cachedItem.data),
+				shareInfo: cachedItem.data.sharingRole
+			})
+
+			cache.directoryUuidToAnySharedDirWithContext.set(uuid, rebuilt)
+
+			return rebuilt
 		}
 
 		throw new DriveDirectoryNotFoundError(uuid)
@@ -568,24 +610,29 @@ export async function fetchData(
 	return items
 }
 
-function removeSelectOptionsFromParams(params: UseDriveItemsQueryParams): UseDriveItemsQueryParams {
-	if ("selectOptions" in params.path) {
-		const { selectOptions: _, ...rest } = params.path
+// Strips every fetch-only param (selectOptions, the `shared` nav context) out of the persisted query
+// key, so keys stay context-free `{ type, uuid }` and byte-compatible with the `{ type, uuid }` keys
+// the updaters write. The stripped context still reaches fetchData through the hook's full params —
+// see useDriveItemsQuery's queryFn.
+function removeVolatileParamsForKey(params: UseDriveItemsQueryParams): UseDriveItemsQueryParams {
+	// selectOptions isn't in the param type but can ride along at runtime; `shared` is a real key.
+	const path = params.path as Omit<DrivePath, "selectOptions"> & { selectOptions?: unknown }
 
-		return {
-			path: rest
-		}
+	if (!("selectOptions" in path) && !("shared" in path)) {
+		return params
 	}
 
-	return params
+	const { selectOptions: _selectOptions, shared: _shared, ...rest } = path
+
+	return {
+		path: rest
+	}
 }
 
 export function useDriveItemsQuery(
 	params: UseDriveItemsQueryParams,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const sortedParams = removeSelectOptionsFromParams(sortParams(params))
-
 	// The offline branch of fetchData reads only from the local offline.* store
 	// and never touches the network — it must not be paused by TanStack's
 	// "offlineFirst" gating. All other path types use the global default.
@@ -595,10 +642,14 @@ export function useDriveItemsQuery(
 		...DEFAULT_QUERY_OPTIONS,
 		networkMode,
 		...options,
-		queryKey: [BASE_QUERY_KEY, sortedParams],
+		// The key must stay context-free + byte-compatible with the `{ type, uuid }` keys the updaters
+		// write, so it drops every fetch-only param; fetchData, by contrast, gets the FULL params
+		// (notably the `shared` nav context) — feeding it the stripped params would silently never
+		// deliver them, so the two intentionally diverge.
+		queryKey: [BASE_QUERY_KEY, removeVolatileParamsForKey(sortParams(params))],
 		queryFn: ({ signal }) =>
 			fetchData({
-				...sortedParams,
+				...params,
 				signal
 			})
 	})
@@ -616,7 +667,7 @@ export function driveItemsQueryUpdate({
 		| Awaited<ReturnType<typeof fetchData>>
 		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
 }): void {
-	const sortedParams = removeSelectOptionsFromParams(sortParams(params))
+	const sortedParams = removeVolatileParamsForKey(sortParams(params))
 
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY, sortedParams], prev => {
 		const currentData = prev ?? ([] satisfies Awaited<ReturnType<typeof fetchData>>)
@@ -811,7 +862,7 @@ export function driveItemsQueryUpdateForRecents({
 }
 
 export function driveItemsQueryGet(params: UseDriveItemsQueryParams) {
-	const sortedParams = removeSelectOptionsFromParams(sortParams(params))
+	const sortedParams = removeVolatileParamsForKey(sortParams(params))
 
 	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY, sortedParams])
 }

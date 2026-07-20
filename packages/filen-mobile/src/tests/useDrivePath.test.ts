@@ -2,6 +2,8 @@
 
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
+
 // ─── Hoisted mocks ────────────────────────────────────────────────────────────
 
 const mocks = vi.hoisted(() => ({
@@ -401,6 +403,63 @@ describe("useDrivePath — selectOptions/linked deserialization", () => {
 		// The fields that were supplied survive round-trip
 		expect(result.current.selectOptions?.files).toBe(true)
 		expect(result.current.selectOptions?.intention).toBe("move")
+	})
+})
+
+describe("useDrivePath — shared nav-context param", () => {
+	it("attaches a valid root `shared` payload on the sharedIn screen", () => {
+		const shared = { kind: "root", dir: { uuid: VALID_UUID, undecryptable: false } }
+
+		setNav("/sharedIn/" + VALID_UUID, { uuid: VALID_UUID, shared: serialize(shared) })
+
+		const { result } = renderHook(() => useDrivePath())
+
+		expect(result.current.type).toBe("sharedIn")
+		expect(result.current.shared).toEqual(shared)
+	})
+
+	it("attaches a valid dir `shared` payload on the sharedOut screen", () => {
+		const shared = {
+			kind: "dir",
+			dir: { uuid: VALID_UUID, undecryptable: false },
+			role: { Sharer: { email: "o@b.com", id: 2 } }
+		}
+
+		setNav("/sharedOut/" + VALID_UUID, { uuid: VALID_UUID, shared: serialize(shared) })
+
+		const { result } = renderHook(() => useDrivePath())
+
+		expect(result.current.type).toBe("sharedOut")
+		expect(result.current.shared).toEqual(shared)
+	})
+
+	it("leaves `shared` undefined when the param is absent", () => {
+		setNav("/sharedIn/" + VALID_UUID, { uuid: VALID_UUID })
+
+		const { result } = renderHook(() => useDrivePath())
+
+		expect(result.current.type).toBe("sharedIn")
+		expect(result.current.shared).toBeUndefined()
+	})
+
+	it("swallows a garbage `shared` param → shared undefined (no crash)", () => {
+		setNav("/sharedIn/" + VALID_UUID, { uuid: VALID_UUID, shared: "!!!not-valid!!!" })
+
+		const { result } = renderHook(() => useDrivePath())
+
+		expect(result.current.type).toBe("sharedIn")
+		expect(result.current.shared).toBeUndefined()
+	})
+
+	it("does not attach `shared` outside the shared variants (e.g. plain drive)", () => {
+		const shared = { kind: "root", dir: { uuid: VALID_UUID, undecryptable: false } }
+
+		setNav("/tabs/drive/" + VALID_UUID, { uuid: VALID_UUID, shared: serialize(shared) })
+
+		const { result } = renderHook(() => useDrivePath())
+
+		expect(result.current.type).toBe("drive")
+		expect(result.current.shared).toBeUndefined()
 	})
 })
 

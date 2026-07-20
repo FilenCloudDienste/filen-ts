@@ -709,17 +709,57 @@ describe("resolveDriveNavigationTarget", () => {
 
 	// --- sharedRootDirectory coverage (#134) ---
 
-	it("routes sharedRootDirectory on sharedIn path to /sharedIn/[uuid]", () => {
-		expect(resolveDriveNavigationTarget({ item: sharedRootDir("r1"), drivePath: drivePath("sharedIn") })).toEqual({
+	it("routes sharedRootDirectory on sharedIn path to /sharedIn/[uuid] carrying its share context", () => {
+		const item = sharedRootDir("r1")
+
+		expect(resolveDriveNavigationTarget({ item, drivePath: drivePath("sharedIn") })).toEqual({
 			pathname: "/sharedIn/[uuid]",
-			params: { uuid: "r1" }
+			params: {
+				uuid: "r1",
+				shared: `serialized:${JSON.stringify({ kind: "root", dir: item.data })}`
+			}
 		})
 	})
 
-	it("routes sharedRootDirectory on sharedOut path to /sharedOut/[uuid]", () => {
-		expect(resolveDriveNavigationTarget({ item: sharedRootDir("r2"), drivePath: drivePath("sharedOut") })).toEqual({
+	it("routes sharedRootDirectory on sharedOut path to /sharedOut/[uuid] carrying its share context", () => {
+		const item = sharedRootDir("r2")
+
+		expect(resolveDriveNavigationTarget({ item, drivePath: drivePath("sharedOut") })).toEqual({
 			pathname: "/sharedOut/[uuid]",
-			params: { uuid: "r2" }
+			params: {
+				uuid: "r2",
+				shared: `serialized:${JSON.stringify({ kind: "root", dir: item.data })}`
+			}
+		})
+	})
+
+	it("carries a sharedDirectory's share context (kind 'dir') on the sharedIn target when its role is stamped", () => {
+		const role = { Receiver: { email: "a@b.com", id: 1 } }
+		const item = {
+			type: "sharedDirectory",
+			data: { uuid: "sd1", undecryptable: false, sharingRole: role }
+		} as unknown as DriveItem
+
+		expect(resolveDriveNavigationTarget({ item, drivePath: drivePath("sharedIn") })).toEqual({
+			pathname: "/sharedIn/[uuid]",
+			params: {
+				uuid: "sd1",
+				shared: `serialized:${JSON.stringify({ kind: "dir", dir: item.data, role })}`
+			}
+		})
+	})
+
+	it("omits `shared` when a sharedDirectory has no stamped role (context can't be built)", () => {
+		expect(resolveDriveNavigationTarget({ item: sharedDirectory("a"), drivePath: drivePath("sharedIn") })).toEqual({
+			pathname: "/sharedIn/[uuid]",
+			params: { uuid: "a" }
+		})
+	})
+
+	it("omits `shared` for a plain directory in the sharedOut listing (no share context)", () => {
+		expect(resolveDriveNavigationTarget({ item: dir("a"), drivePath: drivePath("sharedOut") })).toEqual({
+			pathname: "/sharedOut/[uuid]",
+			params: { uuid: "a" }
 		})
 	})
 

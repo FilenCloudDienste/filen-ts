@@ -1,9 +1,10 @@
 import { useLocalSearchParams, useNavigation } from "expo-router"
 import { validateUuid } from "@/lib/uuid"
-import type { DriveItem } from "@/types"
-import { deserialize } from "@/lib/serializer"
+import type { DriveItem, DriveItemDirectorySharedRoot, DriveItemDirectorySharedNonRoot } from "@/types"
+import { deserialize, deserializeRouteParam } from "@/lib/serializer"
 import { useCameraUpload } from "@/features/cameraUpload/cameraUpload"
 import type { PreviewType } from "@/lib/previewType"
+import type { SharingRole } from "@filen/sdk-rs"
 
 export const DRIVE_PATH_TYPES = [
 	"drive",
@@ -48,18 +49,35 @@ export type Linked = {
 	password?: string
 }
 
+// SDK share context for the tapped directory, threaded through the destination screen's nav params.
+// A plain tagged payload (never an SDK wrapper instance) so it survives the route-param serializer;
+// the destination re-derives the SDK share handle from it. Without it, a fresh session with a cold
+// in-memory cache cannot resolve a shared subdirectory.
+export type SharedNavContext =
+	| {
+			kind: "root"
+			dir: DriveItemDirectorySharedRoot
+	  }
+	| {
+			kind: "dir"
+			dir: DriveItemDirectorySharedNonRoot
+			role: SharingRole
+	  }
+
 export type DrivePath =
 	| {
 			type: DrivePathType
 			uuid: string | null
 			selectOptions?: SelectOptions
 			linked?: Linked
+			shared?: SharedNavContext
 	  }
 	| {
 			type: null
 			uuid: null
 			selectOptions?: SelectOptions
 			linked?: Linked
+			shared?: SharedNavContext
 	  }
 
 export default function useDrivePath(): DrivePath {
@@ -67,6 +85,7 @@ export default function useDrivePath(): DrivePath {
 		uuid?: string
 		selectOptions?: string
 		linked?: string
+		shared?: string
 	}>()
 	const { getId: getNavigationId } = useNavigation()
 	const { config: cameraUploadConfig } = useCameraUpload()
@@ -107,6 +126,10 @@ export default function useDrivePath(): DrivePath {
 
 		return null
 	})()
+
+	// The sharedIn/sharedOut destination screens carry the tapped directory's SDK share context here;
+	// garbage/absent parses to null (deserializeRouteParam swallows its own error).
+	const shared = deserializeRouteParam<SharedNavContext>(searchParams?.shared)
 
 	const drivePath = ((): DrivePath => {
 		const navigationId = getNavigationId() ?? ""
@@ -171,7 +194,9 @@ export default function useDrivePath(): DrivePath {
 					? cameraUploadConfig.enabled && cameraUploadConfig.remoteDir
 						? cameraUploadConfig.remoteDir.inner[0].uuid
 						: null
-					: uuid
+					: uuid,
+				// Only the shared variants carry a share context; other variants resolve by uuid alone.
+				...((isSharedInScreen || isSharedOutScreen) && shared ? { shared } : {})
 			}
 		} else if (isTrashScreen) {
 			return {
