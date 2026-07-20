@@ -15,6 +15,11 @@ import QuillThemeCustomizer, { getThemeOptions } from "@/components/textEditor/r
 import type { Platform } from "react-native"
 import type { TextEditorEvents, Colors, Font } from "@/components/textEditor"
 
+// How long after a flush request (and its optional composition-committing blur) the document
+// is re-read for the divergence check — long enough for the keyboard's finalized text to land
+// through the normal event path, short enough to fit inside a screen-pop animation.
+const FLUSH_COMPOSITION_COMMIT_MS = 80
+
 // Forward this WebView's console.* to the RN diagnostic logger (see domConsoleProxy).
 installDomConsoleProxy()
 
@@ -79,10 +84,17 @@ const RichTextEditorDom = ({
 	// Mirrors the readOnly prop for the initial-seed effect, which must NOT depend on
 	// readOnly (re-running it re-pastes the mount-frozen seed over typed content).
 	const readOnlyRef = useRef(readOnly)
+	const onValueChangeRef = useRef(onValueChange)
+
+	// The last html value delivered to native — by a text-change event, a flush, or the
+	// initial seed. The flush path only emits when the live document DIFFERS from this, so
+	// on devices where change events work flushes are pure no-ops.
+	const lastReportedHtmlRef = useRef<string | null>(null)
 
 	useEffect(() => {
 		readOnlyRef.current = readOnly
-	}, [readOnly])
+		onValueChangeRef.current = onValueChange
+	}, [readOnly, onValueChange])
 
 	const postFormatUpdates = useCallback((postMessage: (message: TextEditorEvents) => void) => {
 		if (!quillRef.current) {
@@ -213,6 +225,38 @@ const RichTextEditorDom = ({
 
 				break
 			}
+
+			// #67: report the final document iff it differs from the last value change events
+			// delivered — some WebView/keyboard combos never fire change events for IME-composed
+			// text. commitComposition blurs first so the keyboard finalizes the composing region
+			// into the document through the normal event path.
+			case "flushContent": {
+				if (readOnlyRef.current) {
+					break
+				}
+
+				if (message.data.commitComposition) {
+					quillRef.current.blur()
+				}
+
+				setTimeout(() => {
+					if (!quillRef.current) {
+						return
+					}
+
+					const html = quillV2ToLegacyV1(quillRef.current.root.innerHTML)
+
+					if (html === lastReportedHtmlRef.current) {
+						return
+					}
+
+					lastReportedHtmlRef.current = html
+
+					onValueChangeRef.current?.(html)
+				}, FLUSH_COMPOSITION_COMMIT_MS)
+
+				break
+			}
 		}
 
 		postFormatUpdates(postMessage)
@@ -256,7 +300,11 @@ const RichTextEditorDom = ({
 			// Persist lists and code blocks in Quill v1's on-disk form rather than
 			// Quill v2's (<ol><li data-list>). v2 markup is read by web/desktop (Quill 1.3.7) as a plain
 			// numbered list — checkboxes gone, bullets renumbered. See quillCompat for the mechanism.
-			onValueChange?.(quillV2ToLegacyV1(quillRef.current.root.innerHTML))
+			const html = quillV2ToLegacyV1(quillRef.current.root.innerHTML)
+
+			lastReportedHtmlRef.current = html
+
+			onValueChange?.(html)
 		})
 
 		quillRef.current.on("selection-change", () => {
@@ -334,6 +382,11 @@ const RichTextEditorDom = ({
 				quillRef.current.focus()
 			}
 		}
+
+		// Baseline for the flush divergence check: the seeded (or empty) document as rendered.
+		// Without it, the first flush of an untouched note would report the initial content as
+		// an edit.
+		lastReportedHtmlRef.current = quillV2ToLegacyV1(quillRef.current.root.innerHTML)
 		// readOnly is read via a ref ON PURPOSE: re-running this effect re-pastes the
 		// (mount-frozen) initialValue, so a mid-session readOnly flip (e.g. a permission
 		// change arriving over the socket) would visually revert everything typed since

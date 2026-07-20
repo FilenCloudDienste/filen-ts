@@ -44,6 +44,11 @@ const rehypeExternalLinks: Plugin<[], Root> = () => {
 	}
 }
 
+// How long after a flush request (and its optional composition-committing blur) the document
+// is re-read for the divergence check — long enough for the keyboard's finalized text to land
+// through the normal DOM event path, short enough to fit inside a screen-pop animation.
+const FLUSH_COMPOSITION_COMMIT_MS = 80
+
 const TextEditorDOM = ({
 	ref,
 	initialValue,
@@ -81,14 +86,67 @@ const TextEditorDOM = ({
 	const [value, setValue] = useState<string>(() => decodeEditorInitialValue(initialValue ?? ""))
 	const codeMirrorRef = useRef<ReactCodeMirrorRef>(null)
 
+	// Latest-props refs for the flush handler: the imperative message handler is captured once
+	// per WebView mount ([] deps on useDOMImperativeHandle), so it must read everything through
+	// refs to stay current.
+	const onValueChangeRef = useRef(onValueChange)
+	const readOnlyRef = useRef(readOnly)
+
+	useEffect(() => {
+		onValueChangeRef.current = onValueChange
+		readOnlyRef.current = readOnly
+	})
+
+	// The last document value delivered to native — by a change event or a flush. The flush
+	// path only emits when the live document DIFFERS from this, so on devices where change
+	// events work (everywhere but #67's) flushes are pure no-ops.
+	const lastReportedValueRef = useRef(decodeEditorInitialValue(initialValue ?? ""))
+
 	// #39 fix: do NOT gate propagation on a physical keydown. `@uiw/react-codemirror`
 	// already filters out programmatic/initial `setValue` changes (it only fires
 	// onChange for real document mutations), so the old `didTypeRef` keydown gate was
 	// redundant and silently dropped paste / voice-dictation / autocomplete inserts
 	// (which emit no keydown). `setValue` keeps the controlled value in sync.
 	const onChange = (value: string) => {
+		lastReportedValueRef.current = value
+
 		onValueChange?.(value)
 		setValue(value)
+	}
+
+	// #67: some WebView/keyboard combos (seen on hardened Android WebViews) never deliver
+	// change events for IME-composed text — the document (or the composing region) diverges
+	// from what native has seen, and navigating away loses it. On request: optionally blur
+	// (forcing the keyboard to finalize the composing region into the document through the
+	// normal event path), then report the document iff it differs from the last reported
+	// value. setValue keeps the controlled prop aligned so the update can't be reverted.
+	const flushPendingContent = (commitComposition: boolean) => {
+		if (readOnlyRef.current) {
+			return
+		}
+
+		const view = codeMirrorRef.current?.view
+
+		if (!view) {
+			return
+		}
+
+		if (commitComposition) {
+			view.contentDOM.blur()
+		}
+
+		setTimeout(() => {
+			const doc = codeMirrorRef.current?.view?.state.doc.toString()
+
+			if (doc === undefined || doc === lastReportedValueRef.current) {
+				return
+			}
+
+			lastReportedValueRef.current = doc
+
+			setValue(doc)
+			onValueChangeRef.current?.(doc)
+		}, FLUSH_COMPOSITION_COMMIT_MS)
 	}
 
 	const isTextFile = type === "text" || parseExtension(fileName ?? "file.tsx") === ".txt"
@@ -168,7 +226,11 @@ const TextEditorDOM = ({
 		return [...base, lang]
 	})()
 
-	const { onNativeMessage, postMessage } = useDomDomEvents<TextEditorEvents>()
+	const { onNativeMessage, postMessage } = useDomDomEvents<TextEditorEvents>(message => {
+		if (message.type === "flushContent") {
+			flushPendingContent(message.data.commitComposition)
+		}
+	})
 	const postMessageRef = useRef(postMessage)
 	const readyEmittedRef = useRef(false)
 
@@ -274,6 +336,11 @@ const TextEditorDOM = ({
 			ref={codeMirrorRef}
 			value={value}
 			width="100dvw"
+			// Fill the page: an empty/short document otherwise leaves the editable surface only
+			// as tall as its content, and tapping the (dead) area below it neither focuses nor
+			// shows a cursor — an empty new note looked read-only (#67). With the editor at full
+			// height, a tap anywhere focuses and places the cursor at the nearest position.
+			minHeight="100dvh"
 			onChange={onChange}
 			extensions={extensions}
 			readOnly={readOnly}

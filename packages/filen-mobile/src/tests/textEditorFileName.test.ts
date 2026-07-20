@@ -12,8 +12,11 @@ import { render } from "@testing-library/react"
 
 // ─── Capture spy for the props TextEditorDOM receives ────────────────────────
 
-const { domPropsSpy } = vi.hoisted(() => ({
-	domPropsSpy: vi.fn()
+const { domPropsSpy, nativePostMessageSpy, beforeRemoveListeners, appStateListeners } = vi.hoisted(() => ({
+	domPropsSpy: vi.fn(),
+	nativePostMessageSpy: vi.fn(),
+	beforeRemoveListeners: [] as Array<() => void>,
+	appStateListeners: [] as Array<(state: string) => void>
 }))
 
 // ─── Module boundary mocks (child editors + heavy native deps render nothing) ─
@@ -24,6 +27,20 @@ vi.mock("@/components/textEditor/dom", () => ({
 
 		return null
 	}
+}))
+
+// The wrapper now subscribes to beforeRemove for the content-flush belt (#67) — stub the
+// navigator surface it needs (expo-router's source is untranspilable in vitest).
+vi.mock("expo-router", () => ({
+	useNavigation: () => ({
+		addListener: (event: string, listener: () => void) => {
+			if (event === "beforeRemove") {
+				beforeRemoveListeners.push(listener)
+			}
+
+			return () => {}
+		}
+	})
 }))
 
 vi.mock("@/components/textEditor/richText/dom", () => ({
@@ -44,7 +61,15 @@ vi.mock("@/components/ui/view", () => ({
 }))
 
 vi.mock("react-native", () => ({
-	Platform: { OS: "ios", select: (o: Record<string, unknown>) => o["ios"] ?? o["default"] }
+	Platform: { OS: "ios", select: (o: Record<string, unknown>) => o["ios"] ?? o["default"] },
+	AppState: {
+		currentState: "active",
+		addEventListener: (_type: string, listener: (state: string) => void) => {
+			appStateListeners.push(listener)
+
+			return { remove: () => {} }
+		}
+	}
 }))
 
 vi.mock("uniwind", () => ({
@@ -65,7 +90,7 @@ vi.mock("@/stores/useTextEditor.store", () => ({
 }))
 
 vi.mock("@/hooks/useDomEvents/useNativeDomEvents", () => ({
-	useNativeDomEvents: () => ({ onDomMessage: vi.fn(), postMessage: vi.fn() })
+	useNativeDomEvents: () => ({ onDomMessage: vi.fn(), postMessage: nativePostMessageSpy })
 }))
 
 vi.mock("expo-linking", () => ({
@@ -115,5 +140,64 @@ describe("TextEditor forwards fileName to TextEditorDOM", () => {
 		renderEditor({ type: "code" })
 
 		expect(domPropsSpy.mock.calls[0]?.[0]).toHaveProperty("fileName", undefined)
+	})
+})
+
+// ─── #67 flush-belt wiring: the wrapper asks the DOM side to flush pending content ───
+
+describe("TextEditor content-flush triggers (#67)", () => {
+	beforeEach(() => {
+		nativePostMessageSpy.mockClear()
+		beforeRemoveListeners.length = 0
+		appStateListeners.length = 0
+	})
+
+	it("posts a composition-committing flush when the screen starts leaving", () => {
+		renderEditor({ type: "text" })
+
+		expect(beforeRemoveListeners).toHaveLength(1)
+
+		beforeRemoveListeners[0]?.()
+
+		expect(nativePostMessageSpy).toHaveBeenCalledWith({
+			type: "flushContent",
+			data: { commitComposition: true }
+		})
+	})
+
+	it("posts a committing flush on background and a SOFT (no-blur) flush on inactive", () => {
+		renderEditor({ type: "text" })
+
+		expect(appStateListeners).toHaveLength(1)
+
+		appStateListeners[0]?.("background")
+
+		expect(nativePostMessageSpy).toHaveBeenCalledWith({
+			type: "flushContent",
+			data: { commitComposition: true }
+		})
+
+		nativePostMessageSpy.mockClear()
+		// iOS "inactive" (notification shade / app switcher): never blur — the user may keep
+		// typing right after; the soft flush still rescues a doc-committed-but-events-lost edit
+		// before a switcher swipe-kill.
+		appStateListeners[0]?.("inactive")
+
+		expect(nativePostMessageSpy).toHaveBeenCalledWith({
+			type: "flushContent",
+			data: { commitComposition: false }
+		})
+
+		nativePostMessageSpy.mockClear()
+		appStateListeners[0]?.("active")
+
+		expect(nativePostMessageSpy).not.toHaveBeenCalled()
+	})
+
+	it("subscribes nothing for a read-only editor", () => {
+		render(createElement(TextEditor, { initialValue: "x", type: "text", readOnly: true }))
+
+		expect(beforeRemoveListeners).toHaveLength(0)
+		expect(appStateListeners).toHaveLength(0)
 	})
 })

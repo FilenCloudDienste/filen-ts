@@ -4,7 +4,8 @@ import RichTextEditorDOM, { type QuillFormats, type HeaderLevel } from "@/compon
 import { encodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
 import View, { KeyboardAvoidingView } from "@/components/ui/view"
 import { useNativeDomEvents, type DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
-import { Platform } from "react-native"
+import { AppState, Platform } from "react-native"
+import { useNavigation } from "expo-router"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import useRichtextStore from "@/stores/useRichtext.store"
 import MarkdownPreviewButton from "@/components/textEditor/markdownPreviewButton"
@@ -63,6 +64,19 @@ export type TextEditorEvents =
 	  }
 	| {
 			type: "ready"
+	  }
+	| {
+			// Native → DOM: report the final document if it differs from the last value change
+			// events delivered (see #67 — some WebView/keyboard combos never fire change events
+			// for composed text). commitComposition additionally blurs the editor first so the
+			// keyboard finalizes an in-flight composing region into the document — used when
+			// the surface is going away anyway (screen pop / app background); the soft variant
+			// (false) is safe while the user may keep typing (iOS inactive: notification shade,
+			// app switcher — where a swipe-kill would never reach "background").
+			type: "flushContent"
+			data: {
+				commitComposition: boolean
+			}
 	  }
 	| {
 			type: "externalLinkClicked"
@@ -219,6 +233,48 @@ export const TextEditor = ({
 	useEffect(() => {
 		postMessageRef.current = postMessage
 	}, [postMessage])
+
+	const navigation = useNavigation()
+
+	// Belt for lost incremental change events (#67): ask the DOM side to commit any
+	// in-flight IME composition and report the final document if it diverged from what
+	// change events already delivered. Fired when the screen starts leaving (the WebView
+	// survives through the pop animation — a teardown-time round trip would be too late)
+	// and when the app backgrounds. Healthy devices emit nothing extra: the DOM side
+	// only reports when its document differs from the last reported value.
+	useEffect(() => {
+		if (readOnly) {
+			return
+		}
+
+		const unsubscribe = navigation.addListener("beforeRemove", () => {
+			postMessageRef.current({
+				type: "flushContent",
+				data: {
+					commitComposition: true
+				}
+			})
+		})
+
+		const appStateSubscription = AppState.addEventListener("change", state => {
+			if (state === "background" || state === "inactive") {
+				postMessageRef.current({
+					type: "flushContent",
+					data: {
+						// Blur (keyboard dismissal) is only acceptable when the app is actually
+						// going away — on iOS "inactive" also fires for the notification shade /
+						// control center, where the user keeps typing right after.
+						commitComposition: state === "background"
+					}
+				})
+			}
+		})
+
+		return () => {
+			unsubscribe()
+			appStateSubscription.remove()
+		}
+	}, [navigation, readOnly])
 
 	useEffect(() => {
 		if (type !== "richtext" || readOnly) {
