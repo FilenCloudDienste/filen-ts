@@ -23,11 +23,18 @@ export { atomicWrite } from "@/lib/fsAtomic"
 // "sharedInRoot" means the item lives at the top level of Shared In (no parent dir, just the shared root listing).
 export type OfflineParent = AnyDirWithContext | "sharedInRoot"
 
+// uuid-only resolution for listing paths that hold no SDK context; the on-disk index needs nothing more.
+export type OfflineUuidParent = { kind: "uuid"; uuid: string }
+
 // Produces a stable string key from the deeply-nested AnyDirWithContext tagged union.
 // Used to dedup parent listings in sync() and for the listDirectories cache.
-export function parentCacheKey(parent: OfflineParent): string {
+export function parentCacheKey(parent: OfflineParent | OfflineUuidParent): string {
 	if (typeof parent === "string") {
 		return parent
+	}
+
+	if ("kind" in parent) {
+		return `uuid:${parent.uuid}`
 	}
 
 	switch (parent.tag) {

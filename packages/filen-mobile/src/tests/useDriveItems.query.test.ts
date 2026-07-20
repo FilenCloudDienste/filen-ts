@@ -7,21 +7,18 @@ const {
 	mockGetSdkClients,
 	mockOfflineListFiles,
 	mockOfflineListDirectories,
+	mockOfflineHasIndexedDirectory,
 	mockCameraUploadGetConfig,
 	mockCacheRootUuid,
-	cacheDirectoryUuidToAnyDirWithContext,
 	cacheDirectoryUuidToAnyNormalDir,
 	cacheDirectoryUuidToAnySharedDirWithContext,
 	cacheUuidToAnyDriveItem,
-	cacheFileUuidToNormalFile,
-	cacheDirectoryUuidToName
+	cacheFileUuidToNormalFile
 } = vi.hoisted(() => {
-	const cacheDirectoryUuidToAnyDirWithContext = new Map<string, unknown>()
 	const cacheDirectoryUuidToAnyNormalDir = new Map<string, unknown>()
 	const cacheDirectoryUuidToAnySharedDirWithContext = new Map<string, unknown>()
 	const cacheUuidToAnyDriveItem = new Map<string, unknown>()
 	const cacheFileUuidToNormalFile = new Map<string, unknown>()
-	const cacheDirectoryUuidToName = new Map<string, string>()
 
 	return {
 		mockQueryUpdaterSet: vi.fn(),
@@ -54,14 +51,13 @@ const {
 		}),
 		mockOfflineListFiles: vi.fn().mockResolvedValue([]),
 		mockOfflineListDirectories: vi.fn().mockResolvedValue({ directories: [], files: [] }),
+		mockOfflineHasIndexedDirectory: vi.fn().mockResolvedValue(false),
 		mockCameraUploadGetConfig: vi.fn().mockResolvedValue({ enabled: false, remoteDir: null }),
 		mockCacheRootUuid: { value: null as string | null },
-		cacheDirectoryUuidToAnyDirWithContext,
 		cacheDirectoryUuidToAnyNormalDir,
 		cacheDirectoryUuidToAnySharedDirWithContext,
 		cacheUuidToAnyDriveItem,
-		cacheFileUuidToNormalFile,
-		cacheDirectoryUuidToName
+		cacheFileUuidToNormalFile
 	}
 })
 
@@ -107,25 +103,13 @@ vi.mock("@/lib/cache", () => {
 	}
 	const cacheNewNormalDir = (dir: { uuid: string }, driveItem: MockItem) => {
 		cacheUuidToAnyDriveItem.set(dir.uuid, driveItem)
-
-		if (driveItem.data.decryptedMeta?.name) {
-			cacheDirectoryUuidToName.set(dir.uuid, driveItem.data.decryptedMeta.name)
-		}
-
 		cacheDirectoryUuidToAnyNormalDir.set(dir.uuid, driveItem)
-		cacheDirectoryUuidToAnyDirWithContext.set(dir.uuid, driveItem)
 	}
 	const cacheNewSharedDir = (_dir: unknown, driveItem: MockItem, opts: { sharedOut: boolean }) => {
 		const uuid = driveItem.data.uuid
 
 		cacheUuidToAnyDriveItem.set(uuid, driveItem)
-
-		if (driveItem.data.decryptedMeta?.name) {
-			cacheDirectoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
-		}
-
 		cacheDirectoryUuidToAnySharedDirWithContext.set(uuid, driveItem)
-		cacheDirectoryUuidToAnyDirWithContext.set(uuid, driveItem)
 
 		if (opts.sharedOut) {
 			cacheDirectoryUuidToAnyNormalDir.set(uuid, driveItem)
@@ -135,13 +119,7 @@ vi.mock("@/lib/cache", () => {
 		const uuid = driveItem.data.uuid
 
 		cacheUuidToAnyDriveItem.set(uuid, driveItem)
-
-		if (driveItem.data.decryptedMeta?.name) {
-			cacheDirectoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
-		}
-
 		cacheDirectoryUuidToAnySharedDirWithContext.set(uuid, driveItem)
-		cacheDirectoryUuidToAnyDirWithContext.set(uuid, driveItem)
 	}
 	const cacheNewSharedFile = (file: unknown, driveItem: MockItem, opts: { sharedOut: boolean }) => {
 		const uuid = driveItem.data.uuid
@@ -152,18 +130,8 @@ vi.mock("@/lib/cache", () => {
 			cacheFileUuidToNormalFile.set(uuid, file)
 		}
 	}
-	const cacheNewLinkedDir = (_dir: unknown, driveItem: MockItem, meta: unknown) => {
-		const uuid = driveItem.data.uuid
-
-		cacheUuidToAnyDriveItem.set(uuid, driveItem)
-
-		if (driveItem.data.decryptedMeta?.name) {
-			cacheDirectoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
-		}
-
-		if (meta) {
-			cacheDirectoryUuidToAnyDirWithContext.set(uuid, driveItem)
-		}
+	const cacheNewLinkedDir = (_dir: unknown, driveItem: MockItem, _meta: unknown) => {
+		cacheUuidToAnyDriveItem.set(driveItem.data.uuid, driveItem)
 	}
 	const cacheDriveItemReference = (driveItem: MockItem) => {
 		cacheUuidToAnyDriveItem.set(driveItem.data.uuid, driveItem)
@@ -201,13 +169,11 @@ vi.mock("@/lib/cache", () => {
 			get rootUuid() {
 				return mockCacheRootUuid.value
 			},
-			directoryUuidToAnyDirWithContext: cacheDirectoryUuidToAnyDirWithContext,
 			directoryUuidToAnyNormalDir: cacheDirectoryUuidToAnyNormalDir,
 			directoryUuidToAnySharedDirWithContext: cacheDirectoryUuidToAnySharedDirWithContext,
 			directoryUuidToAnyLinkedDirWithMeta: new Map(),
 			uuidToAnyDriveItem: cacheUuidToAnyDriveItem,
 			fileUuidToNormalFile: cacheFileUuidToNormalFile,
-			directoryUuidToName: cacheDirectoryUuidToName,
 			cacheNewFile,
 			cacheNewNormalDir,
 			cacheNewSharedDir,
@@ -223,7 +189,8 @@ vi.mock("@/lib/cache", () => {
 vi.mock("@/features/offline/offline", () => ({
 	default: {
 		listFiles: mockOfflineListFiles,
-		listDirectories: mockOfflineListDirectories
+		listDirectories: mockOfflineListDirectories,
+		hasIndexedDirectory: mockOfflineHasIndexedDirectory
 	}
 }))
 
@@ -393,6 +360,8 @@ beforeEach(() => {
 	mockOfflineListFiles.mockResolvedValue([])
 	mockOfflineListDirectories.mockReset()
 	mockOfflineListDirectories.mockResolvedValue({ directories: [], files: [] })
+	mockOfflineHasIndexedDirectory.mockReset()
+	mockOfflineHasIndexedDirectory.mockResolvedValue(false)
 	mockCameraUploadGetConfig.mockReset()
 	mockCameraUploadGetConfig.mockResolvedValue({ enabled: false, remoteDir: null })
 	mockGetSdkClients.mockReset()
@@ -438,12 +407,10 @@ beforeEach(() => {
 				root: false
 			}) as unknown as UnwrapFileMetaResult
 	)
-	cacheDirectoryUuidToAnyDirWithContext.clear()
 	cacheDirectoryUuidToAnyNormalDir.clear()
 	cacheDirectoryUuidToAnySharedDirWithContext.clear()
 	cacheUuidToAnyDriveItem.clear()
 	cacheFileUuidToNormalFile.clear()
-	cacheDirectoryUuidToName.clear()
 })
 
 // ─── removeSelectOptionsFromParams (indirectly, via driveItemsQueryGet key) ────
@@ -616,10 +583,8 @@ describe("fetchData — offline branch", () => {
 		expect(result.some(i => (i as typeof fileItem).data.uuid === "f-1")).toBe(true)
 	})
 
-	it("does NOT call listFiles when parent uuid is found in cache", async () => {
-		const fakeContext = { tag: "Normal" }
-
-		cacheDirectoryUuidToAnyDirWithContext.set("parent-uuid", fakeContext)
+	it("does NOT call listFiles and passes { kind: 'uuid', uuid } to listDirectories when the uuid is indexed", async () => {
+		mockOfflineHasIndexedDirectory.mockResolvedValue(true)
 
 		const fileItem = { type: "file", data: { uuid: "f-2", size: 0n, undecryptable: false, decryptedMeta: null } }
 		const dirItem = { type: "directory", data: { uuid: "d-2", size: 0n, undecryptable: false, decryptedMeta: null } }
@@ -628,14 +593,13 @@ describe("fetchData — offline branch", () => {
 
 		await fetchData({ path: { type: "offline", uuid: "parent-uuid" } })
 
+		expect(mockOfflineHasIndexedDirectory).toHaveBeenCalledWith("parent-uuid")
 		expect(mockOfflineListFiles).not.toHaveBeenCalled()
-		expect(mockOfflineListDirectories).toHaveBeenCalledWith(fakeContext)
+		expect(mockOfflineListDirectories).toHaveBeenCalledWith({ kind: "uuid", uuid: "parent-uuid" })
 	})
 
-	it("returns files from offlineDirectories.files (not listFiles) when parent is non-null", async () => {
-		const fakeContext = { tag: "Normal" }
-
-		cacheDirectoryUuidToAnyDirWithContext.set("parent-uuid-2", fakeContext)
+	it("returns files from offlineDirectories.files (not listFiles) when the uuid is indexed", async () => {
+		mockOfflineHasIndexedDirectory.mockResolvedValue(true)
 
 		const fileItem = { type: "file", data: { uuid: "f-3", size: 0n, undecryptable: false, decryptedMeta: null } }
 
@@ -672,48 +636,46 @@ describe("fetchData — offline branch", () => {
 		expect(result).toHaveLength(3)
 	})
 
-	it("throws DriveDirectoryNotFoundError when uuid is non-empty but absent from cache (no silent root fallback)", async () => {
-		// Finding #22: a provided non-root uuid that misses the offline index must NOT
-		// silently list the offline root — it must surface as not-found.
+	it("throws DriveDirectoryNotFoundError when a provided uuid is not indexed (no silent root fallback)", async () => {
+		// A provided non-root uuid absent from the offline index must NOT silently list the
+		// offline root — it must surface as not-found.
+		mockOfflineHasIndexedDirectory.mockResolvedValue(false)
 		mockOfflineListFiles.mockResolvedValue([])
 		mockOfflineListDirectories.mockResolvedValue({ directories: [], files: [] })
-
-		// ensure no cache entry exists for this uuid
-		expect(cacheDirectoryUuidToAnyDirWithContext.has("non-existent-uuid")).toBe(false)
 
 		await expect(fetchData({ path: { type: "offline", uuid: "non-existent-uuid" } })).rejects.toBeInstanceOf(
 			DriveDirectoryNotFoundError
 		)
 
-		// The root listing must never run for a missed non-root uuid.
+		expect(mockOfflineHasIndexedDirectory).toHaveBeenCalledWith("non-existent-uuid")
+
+		// Neither the root listing nor the subdir listing runs for a not-indexed uuid.
 		expect(mockOfflineListFiles).not.toHaveBeenCalled()
+		expect(mockOfflineListDirectories).not.toHaveBeenCalled()
 	})
 
-	it("cache-hit lists the cached subdir; cache-miss throws not-found (paths are distinct)", async () => {
-		const fakeContext = { tag: "Normal" }
+	it("indexed uuid lists the subdir; not-indexed uuid throws not-found (paths are distinct)", async () => {
+		// Indexed — lists the subdir via { kind: "uuid", uuid }; listFiles (root files) must NOT run
+		mockOfflineHasIndexedDirectory.mockResolvedValue(true)
 
-		cacheDirectoryUuidToAnyDirWithContext.set("cached-uuid", fakeContext)
-
-		// With uuid in cache — lists the subdir, listFiles (root files) must NOT be called
-		await fetchData({ path: { type: "offline", uuid: "cached-uuid" } })
+		await fetchData({ path: { type: "offline", uuid: "some-uuid" } })
 
 		expect(mockOfflineListFiles).not.toHaveBeenCalled()
-		expect(mockOfflineListDirectories).toHaveBeenCalledWith(fakeContext)
+		expect(mockOfflineListDirectories).toHaveBeenCalledWith({ kind: "uuid", uuid: "some-uuid" })
 
-		// Reset for the cache-miss check
+		// Reset for the not-indexed check
 		mockOfflineListFiles.mockClear()
 		mockOfflineListDirectories.mockClear()
 		mockOfflineListFiles.mockResolvedValue([])
 		mockOfflineListDirectories.mockResolvedValue({ directories: [], files: [] })
 
-		// Same uuid but removed from cache — now throws not-found (no root fallback)
-		cacheDirectoryUuidToAnyDirWithContext.delete("cached-uuid")
+		// Same uuid but no longer indexed — now throws not-found (no root fallback)
+		mockOfflineHasIndexedDirectory.mockResolvedValue(false)
 
-		await expect(fetchData({ path: { type: "offline", uuid: "cached-uuid" } })).rejects.toBeInstanceOf(
-			DriveDirectoryNotFoundError
-		)
+		await expect(fetchData({ path: { type: "offline", uuid: "some-uuid" } })).rejects.toBeInstanceOf(DriveDirectoryNotFoundError)
 
 		expect(mockOfflineListFiles).not.toHaveBeenCalled()
+		expect(mockOfflineListDirectories).not.toHaveBeenCalled()
 	})
 })
 
@@ -922,7 +884,6 @@ describe("fetchData — post-processing: photos and recents cache dirs but exclu
 		// Dir is CACHED (unwrapped + parent-resolution maps populated)…
 		expect(vi.mocked(unwrapDirMeta)).toHaveBeenCalledWith(normalDir.inner[0])
 		expect(cacheDirectoryUuidToAnyNormalDir.has("dir-skip")).toBe(true)
-		expect(cacheDirectoryUuidToAnyDirWithContext.has("dir-skip")).toBe(true)
 
 		// …but NOT displayed (no directory item in the returned list).
 		expect(result.some(i => (i as DriveItem).data.uuid === "dir-skip")).toBe(false)
@@ -951,7 +912,6 @@ describe("fetchData — post-processing: photos and recents cache dirs but exclu
 		// Dir is CACHED…
 		expect(vi.mocked(unwrapDirMeta)).toHaveBeenCalledWith(dirResult)
 		expect(cacheDirectoryUuidToAnyNormalDir.has("recents-dir")).toBe(true)
-		expect(cacheDirectoryUuidToName.get("recents-dir")).toBe("Dir")
 
 		// …but NOT displayed.
 		expect(result.some(i => (i as DriveItem).data.uuid === "recents-dir")).toBe(false)

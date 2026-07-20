@@ -2004,6 +2004,109 @@ describe("Offline", () => {
 		})
 	})
 
+	describe("listDirectories with { kind: 'uuid' } parent", () => {
+		it("returns the same children as the context-wrapped parent for the same uuid", async () => {
+			const topUuid = "11111111-1111-1111-1111-111111111111"
+			const subDirUuid = "22222222-2222-2222-2222-222222222222"
+			const fileUuid = "33333333-3333-3333-3333-333333333333"
+
+			writeDirectoryMeta(topUuid, {
+				item: makeDirItem(topUuid, "Root"),
+				parent: makeParent("55555555-5555-5555-5555-555555555555"),
+				entries: makeEntries({
+					"/docs": makeDirItem(subDirUuid, "docs"),
+					"/readme.md": makeFileItem(fileUuid, "readme.md")
+				})
+			})
+
+			const offline = await createOffline()
+
+			// Same uuid, two parent shapes: the deserialized SDK context vs the bare-uuid reference.
+			// Distinct cache keys (dir:… vs uuid:…) so both compute independently and must agree.
+			const topParent = new AnyDirWithContext.Normal(new AnyNormalDir.Dir({ uuid: topUuid } as unknown as Dir))
+			const viaContext = await offline.listDirectories(topParent)
+			const viaUuid = await offline.listDirectories({ kind: "uuid", uuid: topUuid })
+
+			expect(viaUuid.directories.map((d: { item: DriveItem }) => d.item.data.uuid)).toEqual(
+				viaContext.directories.map((d: { item: DriveItem }) => d.item.data.uuid)
+			)
+			expect(viaUuid.files.map((f: { item: DriveItem }) => f.item.data.uuid)).toEqual(
+				viaContext.files.map((f: { item: DriveItem }) => f.item.data.uuid)
+			)
+			expect(viaUuid.directories[0].item.data.uuid).toBe(subDirUuid)
+			expect(viaUuid.files[0].item.data.uuid).toBe(fileUuid)
+		})
+
+		it("resolves a nested subdirectory by bare uuid", async () => {
+			const topUuid = "11111111-1111-1111-1111-111111111111"
+			const subDirUuid = "22222222-2222-2222-2222-222222222222"
+			const fileInSubUuid = "33333333-3333-3333-3333-333333333333"
+
+			writeDirectoryMeta(topUuid, {
+				item: makeDirItem(topUuid, "Root"),
+				parent: makeParent("55555555-5555-5555-5555-555555555555"),
+				entries: makeEntries({
+					"/sub": makeDirItem(subDirUuid, "sub"),
+					"/sub/file.txt": makeFileItem(fileInSubUuid, "file.txt")
+				})
+			})
+
+			const offline = await createOffline()
+			const result = await offline.listDirectories({ kind: "uuid", uuid: subDirUuid })
+
+			expect(result.files).toHaveLength(1)
+			expect(result.files[0].item.data.uuid).toBe(fileInSubUuid)
+			expect(result.directories).toHaveLength(0)
+		})
+
+		it("returns empty for an unknown bare uuid", async () => {
+			const offline = await createOffline()
+			const result = await offline.listDirectories({ kind: "uuid", uuid: "99999999-9999-9999-9999-999999999999" })
+
+			expect(result.files).toHaveLength(0)
+			expect(result.directories).toHaveLength(0)
+		})
+	})
+
+	describe("hasIndexedDirectory", () => {
+		it("returns true for a stored top-level directory (even when empty)", async () => {
+			const topUuid = "11111111-1111-1111-1111-111111111111"
+
+			writeDirectoryMeta(topUuid, {
+				item: makeDirItem(topUuid, "Root"),
+				parent: makeParent("55555555-5555-5555-5555-555555555555"),
+				entries: makeEntries({})
+			})
+
+			const offline = await createOffline()
+
+			expect(await offline.hasIndexedDirectory(topUuid)).toBe(true)
+		})
+
+		it("returns true for a nested stored directory", async () => {
+			const topUuid = "11111111-1111-1111-1111-111111111111"
+			const subDirUuid = "22222222-2222-2222-2222-222222222222"
+
+			writeDirectoryMeta(topUuid, {
+				item: makeDirItem(topUuid, "Root"),
+				parent: makeParent("55555555-5555-5555-5555-555555555555"),
+				entries: makeEntries({
+					"/sub": makeDirItem(subDirUuid, "sub")
+				})
+			})
+
+			const offline = await createOffline()
+
+			expect(await offline.hasIndexedDirectory(subDirUuid)).toBe(true)
+		})
+
+		it("returns false for an unknown uuid", async () => {
+			const offline = await createOffline()
+
+			expect(await offline.hasIndexedDirectory("99999999-9999-9999-9999-999999999999")).toBe(false)
+		})
+	})
+
 	describe("readDirectoryMeta error recovery", () => {
 		it("returns null when meta file is corrupted", async () => {
 			const uuid = "11111111-1111-1111-1111-111111111111"

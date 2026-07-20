@@ -339,37 +339,29 @@ export async function fetchData(
 				const uuid = params.path.uuid
 				const hasUuid = Boolean(uuid && uuid.length > 0)
 
-				// No uuid → list the offline root. A provided uuid identifies a real
-				// subdirectory; the offline index is keyed by its cached context, so a
-				// cache miss must surface as not-found rather than silently listing the
-				// whole offline root under the requested directory's title.
-				const parent = (() => {
-					if (!hasUuid || !uuid) {
-						return null
+				// Resolution rides the offline index itself (fully local), so a fresh offline
+				// session can browse nested stored directories without a cached SDK context. A
+				// provided uuid absent from the index surfaces as not-found — never the wrong root
+				// listing. No uuid → the offline root (its files + the top-level directories).
+				if (hasUuid && uuid) {
+					if (!(await offline.hasIndexedDirectory(uuid))) {
+						throw new DriveDirectoryNotFoundError(uuid)
 					}
 
-					const cachedDir = cache.directoryUuidToAnyDirWithContext.get(uuid)
+					const offlineDirectories = await offline.listDirectories({ kind: "uuid", uuid })
 
-					if (cachedDir) {
-						return cachedDir
+					return {
+						dirs: offlineDirectories.directories.map(({ item }) => item),
+						files: offlineDirectories.files.map(({ item }) => item),
+						type: "offline" as const
 					}
+				}
 
-					throw new DriveDirectoryNotFoundError(uuid)
-				})()
-
-				const [offlineFiles, offlineDirectories] = await Promise.all([
-					!parent ? offline.listFiles() : Promise.resolve([]),
-					offline.listDirectories(parent ?? undefined)
-				])
-
-				const offlineDirs: DriveItem[] = offlineDirectories.directories.map(({ item }) => item)
-				const offlineFileItems: DriveItem[] = parent
-					? offlineDirectories.files.map(({ item }) => item)
-					: offlineFiles.map(({ item }) => item)
+				const [offlineFiles, offlineDirectories] = await Promise.all([offline.listFiles(), offline.listDirectories(undefined)])
 
 				return {
-					dirs: offlineDirs,
-					files: offlineFileItems,
+					dirs: offlineDirectories.directories.map(({ item }) => item),
+					files: offlineFiles.map(({ item }) => item),
 					type: "offline" as const
 				}
 			}

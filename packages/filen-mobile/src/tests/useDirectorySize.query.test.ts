@@ -1,19 +1,24 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { mockGetSdkClients, mockGetDirSize, cacheDirectoryUuidToAnyNormalDir } = vi.hoisted(() => {
-	const cacheDirectoryUuidToAnyNormalDir = new Map<string, unknown>()
-	const mockGetDirSize = vi.fn()
+const { mockGetSdkClients, mockGetDirSize, mockOfflineItemSize, cacheDirectoryUuidToAnyNormalDir, cacheUuidToAnyDriveItem } =
+	vi.hoisted(() => {
+		const cacheDirectoryUuidToAnyNormalDir = new Map<string, unknown>()
+		const cacheUuidToAnyDriveItem = new Map<string, unknown>()
+		const mockGetDirSize = vi.fn()
+		const mockOfflineItemSize = vi.fn().mockResolvedValue({ size: 0, files: 0, dirs: 0 })
 
-	return {
-		mockGetSdkClients: vi.fn().mockResolvedValue({
-			authedSdkClient: {
-				getDirSize: mockGetDirSize
-			}
-		}),
-		mockGetDirSize,
-		cacheDirectoryUuidToAnyNormalDir
-	}
-})
+		return {
+			mockGetSdkClients: vi.fn().mockResolvedValue({
+				authedSdkClient: {
+					getDirSize: mockGetDirSize
+				}
+			}),
+			mockGetDirSize,
+			mockOfflineItemSize,
+			cacheDirectoryUuidToAnyNormalDir,
+			cacheUuidToAnyDriveItem
+		}
+	})
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
@@ -38,7 +43,7 @@ vi.mock("@/lib/cache", () => ({
 		directoryUuidToAnyNormalDir: cacheDirectoryUuidToAnyNormalDir,
 		directoryUuidToAnySharedDirWithContext: new Map(),
 		directoryUuidToAnyLinkedDirWithMeta: new Map(),
-		directoryUuidToAnyDirWithContext: new Map()
+		uuidToAnyDriveItem: cacheUuidToAnyDriveItem
 	}
 }))
 
@@ -50,8 +55,15 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@/features/offline/offline", () => ({
 	default: {
-		itemSize: vi.fn().mockResolvedValue({ size: 0, files: 0, dirs: 0 })
+		itemSize: mockOfflineItemSize
 	}
+}))
+
+// Pure discriminant guard — mirrors the real DIRECTORY_TYPES membership without pulling the module's
+// value deps (constants, serializer) into the node test env.
+vi.mock("@/features/drive/driveSelectors", () => ({
+	isDirectoryItem: (item: { type?: string }) =>
+		item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
 }))
 
 vi.mock("@/lib/utils", () => ({}))
@@ -128,7 +140,44 @@ beforeEach(() => {
 			getDirSize: mockGetDirSize
 		}
 	})
+	mockOfflineItemSize.mockReset()
+	mockOfflineItemSize.mockResolvedValue({ size: 0, files: 0, dirs: 0 })
 	cacheDirectoryUuidToAnyNormalDir.clear()
+	cacheUuidToAnyDriveItem.clear()
+})
+
+// ─── offline arm: resolves via uuidToAnyDriveItem → offline.itemSize ─────────
+
+describe("fetchData — offline arm", () => {
+	it("passes the cached DriveItem to offline.itemSize and returns its size", async () => {
+		const dirItem = { type: "directory", data: { uuid: "offline-dir" } }
+
+		cacheUuidToAnyDriveItem.set("offline-dir", dirItem)
+		mockOfflineItemSize.mockResolvedValue({ size: 4096, files: 3, dirs: 1 })
+
+		const result = await fetchData({ uuid: "offline-dir", type: "offline" })
+
+		expect(mockOfflineItemSize).toHaveBeenCalledTimes(1)
+		expect(mockOfflineItemSize).toHaveBeenCalledWith(dirItem)
+		expect(result).toEqual({ size: 4096, files: 3, dirs: 1 })
+		expect(mockGetDirSize).not.toHaveBeenCalled()
+	})
+
+	it("returns zero sizes and skips itemSize when the uuid is not in uuidToAnyDriveItem", async () => {
+		const result = await fetchData({ uuid: "missing-offline-uuid", type: "offline" })
+
+		expect(result).toEqual({ size: 0, files: 0, dirs: 0 })
+		expect(mockOfflineItemSize).not.toHaveBeenCalled()
+	})
+
+	it("returns zero sizes and skips itemSize when the cached item is not a directory", async () => {
+		cacheUuidToAnyDriveItem.set("offline-file", { type: "file", data: { uuid: "offline-file" } })
+
+		const result = await fetchData({ uuid: "offline-file", type: "offline" })
+
+		expect(result).toEqual({ size: 0, files: 0, dirs: 0 })
+		expect(mockOfflineItemSize).not.toHaveBeenCalled()
+	})
 })
 
 // ─── trash hack: ParentUuid.Trash substitution ─────────────────────────────

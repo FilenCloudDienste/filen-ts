@@ -12,7 +12,7 @@ import {
 	AnyLinkedDirWithContext
 } from "@filen/sdk-rs"
 import offline from "@/features/offline/offline"
-import { unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
+import { isDirectoryItem } from "@/features/drive/driveSelectors"
 
 export const BASE_QUERY_KEY = "useDirectorySizeQuery"
 
@@ -30,6 +30,23 @@ export async function fetchData(
 	files: number
 	dirs: number
 }> {
+	// Offline sizes resolve fully from the local index — short-circuit before the SDK-context
+	// wrapper machinery, which the offline store carries no AnyDirWithContext for. A non-directory
+	// (or missing) item falls into the same zero result the wrapper misses produce.
+	if (params.type === "offline") {
+		const item = cache.uuidToAnyDriveItem.get(params.uuid)
+
+		if (!item || !isDirectoryItem(item)) {
+			return {
+				size: 0,
+				files: 0,
+				dirs: 0
+			}
+		}
+
+		return await offline.itemSize(item)
+	}
+
 	let anyDirWithContext = (() => {
 		switch (params.type) {
 			case "normal":
@@ -68,10 +85,6 @@ export async function fetchData(
 
 				return null
 			}
-
-			case "offline": {
-				return cache.directoryUuidToAnyDirWithContext.get(params.uuid) ?? null
-			}
 		}
 	})()
 
@@ -81,10 +94,6 @@ export async function fetchData(
 			files: 0,
 			dirs: 0
 		}
-	}
-
-	if (params.type === "offline") {
-		return await offline.itemSize(unwrappedDirIntoDriveItem(unwrapDirMeta(anyDirWithContext)))
 	}
 
 	// Hack so we can get the size of items in the trash, pretty ugly but it works for now

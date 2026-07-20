@@ -22,6 +22,7 @@ import {
 	findStaleStoredOfflineEntries,
 	makeSyncError,
 	type OfflineParent,
+	type OfflineUuidParent,
 	type OfflineSyncError
 } from "@/features/offline/offlineHelpers"
 import {
@@ -2563,7 +2564,8 @@ export class Offline {
 
 	// Lists offline directories (and their files). Without parent: returns top-level stored directories.
 	// With parent: navigates into a stored directory tree and returns only the immediate children of that parent.
-	public async listDirectories(parent?: OfflineParent): Promise<{
+	// The parent may also be a bare-uuid reference from the listing path (no SDK context; index-resolved).
+	public async listDirectories(parent?: OfflineParent | OfflineUuidParent): Promise<{
 		files: {
 			item: DriveItem
 			parent: OfflineParent
@@ -2620,9 +2622,12 @@ export class Offline {
 			return noParentResult
 		}
 
-		// Use unwrapAnyDirUuid instead of unwrapDirMeta — the parent may be a deserialized
-		// tagged-union from the PersistentMap cache, not a live SDK instance.
-		const parentUuid: string | null = typeof parent === "string" ? null : unwrapAnyDirUuid(parent)
+		// Resolve the parent to a bare uuid. A string is the sharedInRoot sentinel (→ null); a
+		// { kind: "uuid" } reference comes from the listing path (no SDK context, index-resolved);
+		// otherwise unwrapAnyDirUuid handles a deserialized tagged-union from the PersistentMap cache
+		// (not a live SDK instance, so unwrapDirMeta would not apply).
+		const parentUuid: string | null =
+			typeof parent === "string" ? null : "kind" in parent ? parent.uuid : unwrapAnyDirUuid(parent)
 
 		if (!parentUuid) {
 			return {
@@ -2736,6 +2741,15 @@ export class Offline {
 		this.listDirectoriesCache.set(cacheKey, parentResult)
 
 		return parentResult
+	}
+
+	// Distinguishes "stored but empty" from "not stored" for the listing path's not-found contract.
+	// Backed by the same index listDirectories resolves against — which maps every top-level stored
+	// directory as well as its nested entries — so membership answers "will listDirectories find it".
+	public async hasIndexedDirectory(uuid: string): Promise<boolean> {
+		const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
+
+		return uuidToTopLevel.has(uuid)
 	}
 
 	// Flattens all stored directory trees into a single list of files + directories.
