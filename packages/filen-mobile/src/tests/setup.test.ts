@@ -20,7 +20,9 @@ const {
 	mockAudioCache,
 	mockInitI18n,
 	mockInitTheme,
-	mockSemaphoreRelease
+	mockSemaphoreRelease,
+	mockThumbnails,
+	mockWarmSeedDriveCaches
 } = vi.hoisted(() => {
 	const mockAuth = {
 		isAuthed: vi.fn(),
@@ -51,7 +53,9 @@ const {
 		mockAudioCache: { gc: vi.fn() },
 		mockInitI18n: vi.fn(),
 		mockInitTheme: vi.fn(),
-		mockSemaphoreRelease
+		mockSemaphoreRelease,
+		mockThumbnails: { restore: vi.fn() },
+		mockWarmSeedDriveCaches: vi.fn()
 	}
 })
 
@@ -92,6 +96,8 @@ vi.mock("@filen/utils", () => {
 vi.mock("@/lib/secureStore", () => ({ default: mockSecureStore }))
 vi.mock("@/lib/auth", () => ({ default: mockAuth }))
 vi.mock("@/lib/cache", () => ({ default: mockCache }))
+vi.mock("@/lib/thumbnails", () => ({ default: mockThumbnails }))
+vi.mock("@/features/drive/driveWarmSeed", () => ({ warmSeedDriveCaches: mockWarmSeedDriveCaches }))
 vi.mock("@/queries/client", () => ({ restoreQueries: mockRestoreQueries }))
 vi.mock("@/lib/sqlite", () => ({ default: mockSqlite }))
 vi.mock("@/features/offline/offline", () => ({ default: mockOffline }))
@@ -140,6 +146,7 @@ beforeEach(() => {
 	mockAudioCache.gc.mockResolvedValue(undefined)
 	mockInitI18n.mockResolvedValue(undefined)
 	mockInitTheme.mockResolvedValue(undefined)
+	mockWarmSeedDriveCaches.mockResolvedValue(undefined)
 })
 
 describe("setup.setup", () => {
@@ -215,6 +222,49 @@ describe("setup.setup", () => {
 		await setup.setup()
 
 		expect(mockCache.restore).not.toHaveBeenCalled()
+	})
+
+	// thumbnails.restore() rebuilds the disk-derived availability Set. It reads only filenames (uuids),
+	// so it is unconditional — every setup, regardless of auth or background mode.
+	it("calls thumbnails.restore on every setup regardless of auth or background mode", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: false })
+
+		await setup.setup()
+
+		expect(mockThumbnails.restore).toHaveBeenCalledTimes(1)
+
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
+
+		await setup.setup()
+		await setup.setup({ background: true })
+
+		expect(mockThumbnails.restore).toHaveBeenCalledTimes(3)
+	})
+
+	// The warm-seed rebuilds the session-scoped uuid indexes from the restored listing queries; it is
+	// foreground-only and authed-only (a headless run needs none of it).
+	it("warm-seeds the drive caches only when authenticated and not background", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
+
+		await setup.setup()
+
+		expect(mockWarmSeedDriveCaches).toHaveBeenCalledOnce()
+	})
+
+	it("does not warm-seed the drive caches when unauthenticated", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: false })
+
+		await setup.setup()
+
+		expect(mockWarmSeedDriveCaches).not.toHaveBeenCalled()
+	})
+
+	it("does not warm-seed the drive caches in background mode even when authenticated", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
+
+		await setup.setup({ background: true })
+
+		expect(mockWarmSeedDriveCaches).not.toHaveBeenCalled()
 	})
 
 	it("throws when the inner run callback rejects", async () => {

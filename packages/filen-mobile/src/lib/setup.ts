@@ -1,11 +1,13 @@
 import secureStore from "@/lib/secureStore"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
+import thumbnails from "@/lib/thumbnails"
 import { run, Semaphore } from "@filen/utils"
 import { restoreQueries } from "@/queries/client"
 import sqlite from "@/lib/sqlite"
 import foregroundService from "@/features/transfers/foregroundService"
 import driveSearch from "@/features/drive/driveSearch"
+import { warmSeedDriveCaches } from "@/features/drive/driveWarmSeed"
 import fileProvider from "@/features/settings/fileProvider"
 import { startReconnectListener } from "@/lib/reconnect"
 import { initI18n } from "@/lib/i18n"
@@ -118,6 +120,11 @@ const setup = {
 			// above already proved a pre-init secureStore read is safe.
 			await auth.loadTransferConfig()
 
+			// Rebuild the disk-derived thumbnail availability Set (sync, once-per-process). Unconditional:
+			// not auth-gated (filenames are uuids, no decrypted data) and safe in headless background
+			// setups — the once-flag makes the foreground re-run free, and generate paths keep it coherent.
+			thumbnails.restore()
+
 			// initI18n / initTheme only read the persisted language / theme from secureStore, which
 			// auth.isAuthed() above already initialized — so they run inside this Promise.all to overlap
 			// with the SQLite/cache restore instead of serializing after it. They stay awaited: RootLayout
@@ -129,10 +136,11 @@ const setup = {
 			// client (the restores only deserialize, and the reconnect listener attaches after the block),
 			// so the Rust client construction overlaps the restores instead of serializing before them.
 			//
-			// cache.restore() is gated on auth: the persistent caches hold decrypted-at-rest metadata, so
-			// hydrating them while logged out would re-surface a prior account's data (the logout wipe
-			// clears them; restoring unconditionally would defeat it). When unauthed the maps stay
-			// un-ready, which is correct — nothing writes the persistent caches before login.
+			// cache.restore() is gated on auth: the persisted camera-upload ledger is account-scoped, so
+			// hydrating it while logged out would re-surface a prior account's state (the logout wipe
+			// clears it; restoring unconditionally would defeat it). When unauthed the persisted maps stay
+			// un-ready, which is correct — nothing writes them before login. The session-scoped metadata
+			// maps need no restore; the warm-seed below rebuilds them from the restored queries.
 			await Promise.all([
 				stringifiedClient
 					? timed("auth.setSdkClients", async () => {
@@ -146,6 +154,13 @@ const setup = {
 				timed("initI18n", () => initI18n()),
 				initTheme()
 			])
+
+			// Rebuilds the session-scoped uuid indexes from the restored listing queries so socket patches,
+			// breadcrumbs, and shared-context resolution keep their pre-fetch coverage; foreground-only — a
+			// headless run needs none of it.
+			if (isAuthed.isAuthed && !options?.background) {
+				await timed("warmSeedDriveCaches", () => warmSeedDriveCaches())
+			}
 
 			// Wire the reconnect-replay listener after the query cache is hydrated.
 			// Idempotent — only attaches the onlineManager subscription on first call.
