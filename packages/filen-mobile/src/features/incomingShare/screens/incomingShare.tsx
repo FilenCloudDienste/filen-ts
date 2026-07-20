@@ -15,7 +15,7 @@ import { run, formatBytes } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import useIsOnline from "@/hooks/useIsOnline"
 import { selectDriveItems } from "@/features/drive/screens/driveSelect"
-import cache from "@/lib/cache"
+import { resolveSelectedDriveItemToAnyNormalDir } from "@/features/drive/driveSelectResolve"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { newTmpFile } from "@/lib/tmp"
 import { isEqual } from "es-toolkit"
@@ -151,22 +151,11 @@ function IncomingShare() {
 				return
 			}
 
-			const remoteDir = (() => {
-				if (selectedItem.type === "root") {
-					return selectedItem.data
-				}
-
-				const fromCache = cache.directoryUuidToAnyNormalDir.get(selectedItem.data.data.uuid)
-
-				if (!fromCache) {
-					return null
-				}
-
-				return fromCache
-			})()
+			const remoteDir = resolveSelectedDriveItemToAnyNormalDir(selectedItem)
 
 			if (!remoteDir) {
-				logger.warn("incomingShare", "selected directory not found in cache, upload aborted", { uuid: selectedItem.type !== "root" ? selectedItem.data.data.uuid : null })
+				// The helper already logged the uuid/type diagnostics for the unresolved pick.
+				logger.warn("incomingShare", "selected directory could not be resolved, upload aborted")
 
 				return
 			}

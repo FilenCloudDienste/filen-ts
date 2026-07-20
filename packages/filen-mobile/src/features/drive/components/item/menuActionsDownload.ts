@@ -19,8 +19,8 @@ import { withSystemPresentation } from "@/lib/systemPresentation"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import * as ReactNativeBlobUtil from "react-native-blob-util"
 import { Platform } from "react-native"
-import cache from "@/lib/cache"
 import { selectDriveItems } from "@/features/drive/screens/driveSelect"
+import { resolveSelectedDriveItemToAnyNormalDir } from "@/features/drive/driveSelectResolve"
 import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
 import { isFileItem } from "@/features/drive/driveSelectors"
 import logger from "@/lib/logger"
@@ -248,19 +248,9 @@ export function buildDownloadSubButtons({
 					return
 				}
 
-				const remoteDir = (() => {
-					if (selectedItem.type === "root") {
-						return selectedItem.data
-					}
-
-					const fromCache = cache.directoryUuidToAnyNormalDir.get(selectedItem.data.data.uuid)
-
-					if (!fromCache) {
-						return null
-					}
-
-					return fromCache
-				})()
+				// Cache-first; falls back to the by-value AnyNormalDir for an own-directory pick,
+				// and logs (uuid + type) when a pick can't resolve to a usable directory.
+				const remoteDir = resolveSelectedDriveItemToAnyNormalDir(selectedItem)
 
 				if (!remoteDir) {
 					return

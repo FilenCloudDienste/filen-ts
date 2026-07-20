@@ -163,6 +163,15 @@ vi.mock("@/features/drive/screens/driveSelect", () => ({
 	selectDriveItems: vi.fn()
 }))
 
+// The resolver imports @filen/sdk-rs for real — stub the module so loading this suite in the
+// node test env never touches the wasm bridge. The import-flow tests pick the root, so the stub
+// keeps the root passthrough and resolves everything else to null.
+vi.mock("@/features/drive/driveSelectResolve", () => ({
+	resolveSelectedDriveItemToAnyNormalDir: vi.fn((selectedItem: { type: string; data: unknown }) =>
+		selectedItem.type === "root" ? selectedItem.data : null
+	)
+}))
+
 vi.mock("@/features/drive/driveDownload", () => ({
 	downloadDriveItemToDevice: vi.fn()
 }))
