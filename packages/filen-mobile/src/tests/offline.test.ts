@@ -3398,6 +3398,114 @@ describe("Offline", () => {
 			vi.mocked(unwrapParentUuid).mockReset()
 			vi.mocked(unwrapParentUuid).mockImplementation(() => null)
 		})
+
+		it("recovers a nested sharedDirectory child's parent from the tree root's stamped role (cache miss)", async () => {
+			const topUuid = "11111111-1111-1111-1111-111111111111" // tree root: sharedRootDirectory (has role)
+			const nestedDirUuid = "22222222-2222-2222-2222-222222222222" // nested sharedDirectory (NO role)
+			const fileUuid = "33333333-3333-3333-3333-333333333333" // file under the nested dir
+			const nestedParentUuid = "44444444-4444-4444-4444-444444444444"
+			const parent = makeParent("55555555-5555-5555-5555-555555555555")
+
+			const rootRole = { tag: SharingRole_Tags.Receiver }
+
+			const rootSharedItem = {
+				type: "sharedRootDirectory",
+				data: {
+					uuid: topUuid,
+					decryptedMeta: { name: "SharedRoot", size: 0n, modified: 1000, created: 900 },
+					undecryptable: false,
+					sharingRole: rootRole
+				}
+			} as unknown as DriveItem
+
+			// The nested shared dir carries NO role of its own; its inner.parent drives unwrapParentUuid.
+			const nestedSharedDir = {
+				type: "sharedDirectory",
+				data: {
+					uuid: nestedDirUuid,
+					decryptedMeta: { name: "SharedSub", size: 0n, modified: 1000, created: 900 },
+					undecryptable: false,
+					inner: { parent: nestedParentUuid }
+				}
+			} as unknown as DriveItem
+
+			writeDirectoryMeta(topUuid, {
+				item: rootSharedItem,
+				parent,
+				entries: makeEntries({
+					"/SharedSub": nestedSharedDir,
+					"/SharedSub/data.txt": makeFileItem(fileUuid, "data.txt")
+				})
+			})
+
+			// The session share-context cache is EMPTY — the nested dir's parent is not cache-resolvable.
+			cache.directoryUuidToAnySharedDirWithContext.clear()
+
+			const { unwrapParentUuid } = await import("@/lib/sdkUnwrap")
+
+			vi.mocked(unwrapParentUuid).mockReset()
+			vi.mocked(unwrapParentUuid).mockImplementation(() => nestedParentUuid)
+
+			const offline = await createOffline()
+			const result = await offline.listDirectories({ kind: "uuid", uuid: nestedDirUuid })
+
+			// Previously the nested dir's children were dropped (parent resolution returned null). Now the
+			// file resolves, with its parent context recovered from the ROOT's sharingRole.
+			expect(result.files).toHaveLength(1)
+			expect(result.files[0].item.data.uuid).toBe(fileUuid)
+			expect(result.files[0].parent.tag).toBe("Shared")
+			// The nested dir has no role and the cache is empty, so this role can ONLY have come from the
+			// root's stamped sharingRole (structural equality — the item round-trips through serialize).
+			expect(result.files[0].parent.inner[0].shareInfo).toEqual(rootRole)
+
+			vi.mocked(unwrapParentUuid).mockReset()
+			vi.mocked(unwrapParentUuid).mockImplementation(() => null)
+		})
+
+		it("still drops a nested sharedDirectory child when the tree root is a plain normal directory (no role anywhere)", async () => {
+			const topUuid = "11111111-1111-1111-1111-111111111111" // tree root: plain "directory" (no role)
+			const nestedDirUuid = "22222222-2222-2222-2222-222222222222" // nested sharedDirectory (NO role)
+			const fileUuid = "33333333-3333-3333-3333-333333333333"
+			const nestedParentUuid = "44444444-4444-4444-4444-444444444444"
+			const parent = makeParent("55555555-5555-5555-5555-555555555555")
+
+			const rootNormalItem = makeDirItem(topUuid, "Root")
+
+			const nestedSharedDir = {
+				type: "sharedDirectory",
+				data: {
+					uuid: nestedDirUuid,
+					decryptedMeta: { name: "SharedSub", size: 0n, modified: 1000, created: 900 },
+					undecryptable: false,
+					inner: { parent: nestedParentUuid }
+				}
+			} as unknown as DriveItem
+
+			writeDirectoryMeta(topUuid, {
+				item: rootNormalItem,
+				parent,
+				entries: makeEntries({
+					"/SharedSub": nestedSharedDir,
+					"/SharedSub/data.txt": makeFileItem(fileUuid, "data.txt")
+				})
+			})
+
+			cache.directoryUuidToAnySharedDirWithContext.clear()
+
+			const { unwrapParentUuid } = await import("@/lib/sdkUnwrap")
+
+			vi.mocked(unwrapParentUuid).mockReset()
+			vi.mocked(unwrapParentUuid).mockImplementation(() => nestedParentUuid)
+
+			const offline = await createOffline()
+			const result = await offline.listDirectories({ kind: "uuid", uuid: nestedDirUuid })
+
+			// The tree root has no role, so the fallback cannot recover one — the nested child stays dropped.
+			expect(result.files).toHaveLength(0)
+
+			vi.mocked(unwrapParentUuid).mockReset()
+			vi.mocked(unwrapParentUuid).mockImplementation(() => null)
+		})
 	})
 
 	describe("concurrent store operations (test 22)", () => {

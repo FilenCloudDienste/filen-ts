@@ -5,14 +5,8 @@ import { run, Semaphore } from "@filen/utils"
 import transfers from "@/features/transfers/transfers"
 import { serialize, deserialize, serializeEquals } from "@/lib/serializer"
 import auth from "@/lib/auth"
-import { NonRootDir_Tags } from "@filen/sdk-rs"
-import {
-	unwrapFileMeta,
-	unwrapDirMeta,
-	unwrapAnyDirUuid,
-	unwrappedDirIntoDriveItem,
-	unwrappedFileIntoDriveItem
-} from "@/lib/sdkUnwrap"
+import { NonRootDir_Tags, AnyDirWithContext, AnySharedDir, AnySharedDirWithContext } from "@filen/sdk-rs"
+import { unwrapFileMeta, unwrapDirMeta, unwrapAnyDirUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import {
@@ -343,7 +337,10 @@ export class Offline {
 		})
 
 		if (!readResult.success) {
-			logger.warn("offline", "readDirectoryMeta deserialize failed — treating as corrupt", { uuid: topLevelUuid, error: readResult.error })
+			logger.warn("offline", "readDirectoryMeta deserialize failed — treating as corrupt", {
+				uuid: topLevelUuid,
+				error: readResult.error
+			})
 
 			return null
 		}
@@ -1320,7 +1317,11 @@ export class Offline {
 
 					this.invalidateCaches()
 
-					logger.error("offline", "Initial directory store failed — partial tree deleted", { uuid: topLevelUuid, fatalCount: fatal.length, firstError: fatal[0]?.message })
+					logger.error("offline", "Initial directory store failed — partial tree deleted", {
+						uuid: topLevelUuid,
+						fatalCount: fatal.length,
+						firstError: fatal[0]?.message
+					})
 
 					throw new Error(fatal[0]?.message ?? "Storing directory offline failed")
 				}
@@ -1782,10 +1783,7 @@ export class Offline {
 						let matched: (RemoteTreeEntry & { item: DriveItem }) | null = null
 
 						for (const remoteEntry of remote.values()) {
-							if (
-								downloadError.path.endsWith(remoteEntry.path) &&
-								remoteEntry.path.length > (matched?.path.length ?? -1)
-							) {
+							if (downloadError.path.endsWith(remoteEntry.path) && remoteEntry.path.length > (matched?.path.length ?? -1)) {
 								matched = remoteEntry
 							}
 						}
@@ -2559,7 +2557,33 @@ export class Offline {
 			return null
 		}
 
-		return directoryDriveItemToAnyDirWithContext(item)
+		const context = directoryDriveItemToAnyDirWithContext(item)
+
+		if (context) {
+			return context
+		}
+
+		// A nested shared entry carries no stamped role of its own (raw recursive listings expose
+		// none) and the share-context cache is session-scoped — but a share role is uniform within a
+		// stored subtree, so recover it from the tree root's stamped item instead of dropping the row.
+		if (item.type !== "sharedDirectory") {
+			return null
+		}
+
+		const root = pathToItem["/"]
+		const rootRole =
+			root && (root.type === "sharedDirectory" || root.type === "sharedRootDirectory") ? root.data.sharingRole : undefined
+
+		if (!rootRole) {
+			return null
+		}
+
+		return new AnyDirWithContext.Shared(
+			AnySharedDirWithContext.new({
+				dir: new AnySharedDir.Dir(item.data),
+				shareInfo: rootRole
+			})
+		)
 	}
 
 	// Lists offline directories (and their files). Without parent: returns top-level stored directories.
@@ -2626,8 +2650,7 @@ export class Offline {
 		// { kind: "uuid" } reference comes from the listing path (no SDK context, index-resolved);
 		// otherwise unwrapAnyDirUuid reduces a full AnyDirWithContext (which sync paths still pass)
 		// structurally by tag, so revived non-live instances resolve too.
-		const parentUuid: string | null =
-			typeof parent === "string" ? null : "kind" in parent ? parent.uuid : unwrapAnyDirUuid(parent)
+		const parentUuid: string | null = typeof parent === "string" ? null : "kind" in parent ? parent.uuid : unwrapAnyDirUuid(parent)
 
 		if (!parentUuid) {
 			return {
