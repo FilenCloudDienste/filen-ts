@@ -354,6 +354,33 @@ describe("decideQueryErrorAction", () => {
 	it("alerts for a plain JS error (no SDK inner, not network class)", () => {
 		expect(decideQueryErrorAction(new Error("plain"), baseDeps)).toBe("alert")
 	})
+
+	it("suppresses a DriveDirectoryNotFoundError even while ONLINE (query-local not-found UX owns it)", () => {
+		mockIsOnline.mockReturnValue(true)
+
+		const err = new Error("directory gone")
+		err.name = "DriveDirectoryNotFoundError"
+
+		expect(decideQueryErrorAction(err, baseDeps)).toBe("suppress")
+	})
+
+	it("suppresses a DirectorySizeUnresolvedError even while ONLINE (hidden size label owns it)", () => {
+		mockIsOnline.mockReturnValue(true)
+
+		const err = new Error("size unresolved")
+		err.name = "DirectorySizeUnresolvedError"
+
+		expect(decideQueryErrorAction(err, baseDeps)).toBe("suppress")
+	})
+
+	it("still ALERTS an ordinary error while online (the name-based suppress does not swallow real failures)", () => {
+		mockIsOnline.mockReturnValue(true)
+
+		const err = new Error("genuine failure")
+		err.name = "SomeOtherError"
+
+		expect(decideQueryErrorAction(err, baseDeps)).toBe("alert")
+	})
 })
 
 // ─── QueryCache onError sink (Bug #49: once-per-settled-error UX) ─────────────

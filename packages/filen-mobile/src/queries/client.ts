@@ -523,6 +523,13 @@ export function decideQueryErrorAction(
 		isOnline: () => boolean
 	}
 ): QueryErrorAction {
+	// Internal resolution misses (a session-scoped cache/context not yet warmed) render their own
+	// query-local error UX — stale-while-error listings, hidden size labels, the not-found screen.
+	// A banner adds only noise, and the per-uuid messages defeat the dedupe window.
+	if (err instanceof Error && (err.name === "DriveDirectoryNotFoundError" || err.name === "DirectorySizeUnresolvedError")) {
+		return "suppress"
+	}
+
 	// When offline, suppress network-class errors so the user doesn't see banner storms.
 	// The floating-bar offline slot (components/floatingBar/offlineSlot) is the canonical
 	// signal that requests can't go out.
