@@ -75,6 +75,14 @@ vi.mock("@/features/cameraUpload/cameraUpload", () => ({
 	}
 }))
 
+vi.mock("@/features/cameraUpload/cameraUploadState", () => ({
+	default: {
+		clearForLogout: vi.fn(() => {
+			callLog.push("cameraUploadState.clearForLogout")
+		})
+	}
+}))
+
 vi.mock("@/features/chats/components/sync", () => ({
 	sync: {
 		cancel: vi.fn(() => {
@@ -446,6 +454,12 @@ describe("auth.logout", () => {
 		const driveResetIdx = callLog.indexOf("drive.resetCachedRootUuid")
 
 		expect(driveResetIdx).toBeGreaterThan(cacheClearIdx)
+
+		// The account-scoped camera-upload ledger is latched in Phase 5, alongside the in-memory cache
+		// wipe, so a worker-tail write can't re-insert into the next account's shield.
+		const cameraLedgerClearIdx = callLog.indexOf("cameraUploadState.clearForLogout")
+
+		expect(cameraLedgerClearIdx).toBeGreaterThan(cacheClearIdx)
 
 		// All decrypted-at-rest stores are wiped — including the diagnostic logs (file/dir names).
 		expect(callLog).toContain("offline.clearAll")

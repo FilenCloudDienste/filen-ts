@@ -163,11 +163,54 @@ vi.mock("@/lib/events", () => ({
 	}
 }))
 
+// cameraUpload.ts still uses cache for cacheNewNormalDir; the ledger moved to cameraUploadState.
 vi.mock("@/lib/cache", () => ({
 	default: {
-		cameraUploadHashes: new Map()
+		cacheNewNormalDir: vi.fn()
 	}
 }))
+
+// Complete store passthrough — INCLUDING the aborts map. The old cache mock omitted the aborts
+// map entirely, so the source's post-upload `deleteAbort` threw a swallowed TypeError on every
+// successful upload; the full mock closes that hole.
+vi.mock("@/features/cameraUpload/cameraUploadState", () => {
+	const hashes = new Map<string, unknown>()
+	const aborts = new Map<string, number>()
+
+	return {
+		default: {
+			hashes,
+			aborts,
+			loadHashes: async () => {},
+			loadAborts: async () => {},
+			getHashSync: (key: string) => hashes.get(key),
+			getHash: async (key: string) => hashes.get(key),
+			hashKeys: () => [...hashes.keys()],
+			setHash: async (key: string, entry: unknown) => {
+				hashes.set(key, entry)
+			},
+			deleteHash: async (key: string) => {
+				hashes.delete(key)
+			},
+			getAbort: (id: string) => aborts.get(id),
+			setAbort: async (id: string, count: number) => {
+				aborts.set(id, count)
+			},
+			deleteAbort: async (id: string) => {
+				aborts.delete(id)
+			},
+			applyHashBatch: async ({ upserts, deletes }: { upserts?: [string, unknown][]; deletes?: string[] }) => {
+				for (const [key, value] of upserts ?? []) {
+					hashes.set(key, value)
+				}
+
+				for (const key of deletes ?? []) {
+					hashes.delete(key)
+				}
+			}
+		}
+	}
+})
 
 vi.mock("@/lib/i18n", () => ({
 	default: {
@@ -201,7 +244,7 @@ vi.mock("@/lib/signals", () => ({
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-import cache from "@/lib/cache"
+import cameraUploadState from "@/features/cameraUpload/cameraUploadState"
 import cameraUpload, { type Config } from "@/features/cameraUpload/cameraUpload"
 import secureStore from "@/lib/secureStore"
 import auth from "@/lib/auth"
@@ -306,7 +349,7 @@ function uploadedNamesSorted(): string[] {
 
 function resetBetweenRuns(): void {
 	cameraUpload.cancel()
-	cache.cameraUploadHashes.clear()
+	cameraUploadState.hashes.clear()
 	vi.mocked(transfers.upload).mockClear()
 }
 
@@ -391,7 +434,7 @@ beforeEach(() => {
 	vi.clearAllMocks()
 	ml.clear()
 	fs.clear()
-	cache.cameraUploadHashes.clear()
+	cameraUploadState.hashes.clear()
 	cameraUpload.cancel()
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	;(cameraUpload as any).ensureParentDirectoryExistsCache.clear()
@@ -638,6 +681,6 @@ describe("hardening — special-character filenames through the full upload pipe
 
 		// md5-cache key: the stable asset id — name-agnostic, so special characters
 		// (and the compress/convertHeic key rewrites) never touch it.
-		expect(cache.cameraUploadHashes.has("nasty")).toBe(true)
+		expect(cameraUploadState.hashes.has("nasty")).toBe(true)
 	})
 })

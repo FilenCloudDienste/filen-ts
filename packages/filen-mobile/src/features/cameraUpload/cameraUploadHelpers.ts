@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import { xxHash32 } from "js-xxhash"
 import { type Dir } from "@filen/sdk-rs"
-import { type CameraUploadHashEntry } from "@/lib/cache"
+import { type CameraUploadHashEntry } from "@/features/cameraUpload/cameraUploadState"
 import { isTrashParent } from "@/lib/sdkUnwrap"
 import { isHeicFile } from "@/lib/imageConversion"
 
@@ -240,9 +240,9 @@ export function rawRemoteTreePath(path: string): string {
 	return trimmed.startsWith("/") ? trimmed : `/${trimmed}`
 }
 
-// #B4+B6: lazy migration for `cache.cameraUploadHashes` values. Entries persisted
-// before the verified-mtime shape are bare md5 strings; treat them as "never
-// verified" (-1) so the next encounter hashes once and upgrades the entry on write.
+// #B4+B6: lazy migration for hash ledger values. Entries persisted before the
+// verified-mtime shape are bare md5 strings; treat them as "never verified" (-1) so the
+// next encounter hashes once and upgrades the entry on write.
 export function normalizeCameraUploadHashEntry(value: CameraUploadHashEntry | string | undefined): CameraUploadHashEntry | undefined {
 	if (value === undefined) {
 		return undefined

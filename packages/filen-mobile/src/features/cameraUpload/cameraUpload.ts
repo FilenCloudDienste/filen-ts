@@ -24,6 +24,7 @@ import NetInfo from "@react-native-community/netinfo"
 import * as Battery from "expo-battery"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import cache from "@/lib/cache"
+import cameraUploadState, { type CameraUploadHashEntry } from "@/features/cameraUpload/cameraUploadState"
 import i18n from "@/lib/i18n"
 import {
 	modifyAssetPathOnCollision,
@@ -115,10 +116,10 @@ export const MAX_UPLOAD_FAILURES = 3
 // upload on the next FOREGROUND sync, which has no run budget. Cleared on success.
 export const MAX_BACKGROUND_UPLOAD_ABORTS = 2
 // Critical: When changing the config type/object, increment the version to invalidate old
-// CONFIGS (the secureStore key below rotates with it). Note this does NOT touch
-// `cache.cameraUploadHashes` — that map lives under cache.ts's own versioned prefix and is
-// never rotated from here; its value-shape changes rely on in-place lazy migration instead
-// (see CameraUploadHashEntry / normalizeCameraUploadHashEntry).
+// CONFIGS (the secureStore key below rotates with it). Note this does NOT touch the camera-
+// upload hash ledger — cameraUploadState owns its own kv prefix and is never rotated from
+// here; its value-shape changes rely on in-place lazy migration instead (see
+// CameraUploadHashEntry / normalizeCameraUploadHashEntry).
 export const VERSION = 1
 
 // BG-05: min-interval coalescing for non-manual sync triggers. reconnect.ts fans out a sync on
@@ -1131,6 +1132,16 @@ class CameraUpload {
 			// the local (.heic) and remote (.jpg) dedup keys diverge and re-upload forever.
 			const convertHeic = await isConvertHeicToJpgEnabled()
 
+			// Hydrate the durable ledger before any shield read. Foreground pages the whole hash index
+			// into memory (getHashSync); background loads only the small abort ledger and reads hashes
+			// point-wise from kv (getHash) to avoid paging a 50k index per headless fire.
+			if (params?.background) {
+				await cameraUploadState.loadAborts()
+			} else {
+				await cameraUploadState.loadHashes()
+				await cameraUploadState.loadAborts()
+			}
+
 			const {
 				deltas: allDeltas,
 				localListing,
@@ -1162,7 +1173,12 @@ class CameraUpload {
 					}
 				}
 
-				for (const key of cache.cameraUploadHashes.keys()) {
+				// One batch per wave: a 50k-library re-key must not become O(n) serialized kv writes.
+				const upserts: [string, CameraUploadHashEntry | string][] = []
+				const deletes: string[] = []
+				const rekeyed = new Set<string>()
+
+				for (const key of cameraUploadState.hashKeys()) {
 					// Legacy path-keyed entry (tree paths always start with "/", asset ids never
 					// do): re-key it under the stable asset id while the path→asset mapping is
 					// still known, then drop the path key. A path entry whose file is absent from
@@ -1170,22 +1186,27 @@ class CameraUpload {
 					if (key.startsWith("/")) {
 						const file = localListing.tree[key]
 
-						if (file && !cache.cameraUploadHashes.has(file.info.id)) {
-							const entry = cache.cameraUploadHashes.get(key)
+						if (file && cameraUploadState.getHashSync(file.info.id) === undefined && !rekeyed.has(file.info.id)) {
+							const entry = cameraUploadState.getHashSync(key)
 
 							if (entry !== undefined) {
-								cache.cameraUploadHashes.set(file.info.id, entry)
+								upserts.push([file.info.id, entry])
+								rekeyed.add(file.info.id)
 							}
 						}
 
-						cache.cameraUploadHashes.delete(key)
+						deletes.push(key)
 
 						continue
 					}
 
 					if (!localAssetIds.has(key)) {
-						cache.cameraUploadHashes.delete(key)
+						deletes.push(key)
 					}
+				}
+
+				if (upserts.length > 0 || deletes.length > 0) {
+					await cameraUploadState.applyHashBatch({ upserts, deletes })
 				}
 			}
 
@@ -1197,18 +1218,28 @@ class CameraUpload {
 			// deliberate: photos deleted remotely stay deleted.
 			const reuploadDeleted = (await secureStore.get<boolean>(CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY)) === true
 
-			if (reuploadDeleted && !remoteListing.degraded) {
+			// FOREGROUND mirror mode drops the shield tree-wide (one batch). The BACKGROUND variant is
+			// scope-narrowed below: a budgeted background pass can only upload the picked deltas, so its
+			// tree-wide wave (O(local-tree) point deletes per fire) is replaced by dropping the shield
+			// ONLY for the picked deltas — unpicked remote-absent keys wait for the next foreground pass.
+			if (reuploadDeleted && !remoteListing.degraded && !params?.background) {
+				const deletes: string[] = []
+
 				for (const key in localListing.tree) {
 					if (!remoteListing.tree[key]) {
 						const file = localListing.tree[key]
 
 						if (file) {
-							cache.cameraUploadHashes.delete(file.info.id)
+							deletes.push(file.info.id)
 						}
 
 						// Legacy path-keyed entry from before the asset-id migration.
-						cache.cameraUploadHashes.delete(key)
+						deletes.push(key)
 					}
+				}
+
+				if (deletes.length > 0) {
+					await cameraUploadState.applyHashBatch({ deletes })
 				}
 			}
 
@@ -1225,7 +1256,7 @@ class CameraUpload {
 						.filter(
 							delta =>
 								!params?.background ||
-								(cache.cameraUploadBackgroundAborts.get(delta.file.info.id) ?? 0) < MAX_BACKGROUND_UPLOAD_ABORTS
+								(cameraUploadState.getAbort(delta.file.info.id) ?? 0) < MAX_BACKGROUND_UPLOAD_ABORTS
 						)
 						.sort(
 							(a, b) =>
@@ -1234,6 +1265,25 @@ class CameraUpload {
 						)
 						.slice(0, params.maxUploads)
 				: allDeltas
+
+			// BACKGROUND mirror mode: drop the shield ONLY for the picked deltas whose tree key is
+			// absent from the clean remote listing, right before the worker runs (scope-narrowing
+			// constraint — a background pass can only upload the picks; unpicked remote-absent keys
+			// are handled by the next foreground pass's tree-wide wave).
+			if (reuploadDeleted && !remoteListing.degraded && params?.background) {
+				const mirrorDeletes: string[] = []
+
+				for (const delta of deltas) {
+					if (!remoteListing.tree[delta.file.path]) {
+						mirrorDeletes.push(delta.file.info.id)
+						mirrorDeletes.push(delta.file.path)
+					}
+				}
+
+				if (mirrorDeletes.length > 0) {
+					await cameraUploadState.applyHashBatch({ deletes: mirrorDeletes })
+				}
+			}
 
 			// Per-delta pipelines run through an index-cursor worker pool instead of one
 			// async closure per delta inside Promise.allSettled: beyond the pool width,
@@ -1275,15 +1325,20 @@ class CameraUpload {
 					// immediately — no getUri() (which re-downloads iCloud-offloaded
 					// originals) and no md5 hash. -1 is the "never verified" sentinel
 					// (legacy string entries migrate through it) and never matches.
-					// Hoisted out of the run() wrapper: pure cache reads that cannot
-					// throw, so the steady-state skip pays no run/defer machinery.
+					// Read before the run() wrapper: never-throwing shield reads, so the steady-state
+					// skip pays no run/defer machinery. Foreground reads the loaded index synchronously;
+					// background awaits a point kv read (still never-throwing) before entering run().
 					// Shield entries are keyed by the STABLE asset id: tree paths are rewritten by the
 					// compress/convertHeic toggles (dedupTreeKey), so path-keyed entries were orphaned
 					// (and then pruned) on every toggle — re-uploading already-backed-up content in both
 					// toggle directions. The path lookup is the LEGACY fallback until a clean foreground
 					// pass migrates old entries to id keys (see the hygiene prune in sync()).
 					const cachedEntry = normalizeCameraUploadHashEntry(
-						cache.cameraUploadHashes.get(delta.file.info.id) ?? cache.cameraUploadHashes.get(delta.file.path)
+						params?.background
+							? ((await cameraUploadState.getHash(delta.file.info.id)) ??
+									(await cameraUploadState.getHash(delta.file.path)))
+							: (cameraUploadState.getHashSync(delta.file.info.id) ??
+									cameraUploadState.getHashSync(delta.file.path))
 					)
 					const modificationTime = delta.file.info.modificationTime
 
@@ -1326,7 +1381,7 @@ class CameraUpload {
 									// md5 was just verified against so the next pass takes the
 									// fast path above — this also upgrades legacy string entries
 									// to the object shape (and re-keys legacy path entries by id).
-									cache.cameraUploadHashes.set(delta.file.info.id, {
+									await cameraUploadState.setHash(delta.file.info.id, {
 										md5,
 										verifiedModificationTime: modificationTime ?? -1
 									})
@@ -1438,22 +1493,19 @@ class CameraUpload {
 									// count it persistently (audit B4): cancel() wipes the in-memory
 									// failure counter and the next run may be a fresh process.
 									if (params?.background && abortController.signal.aborted) {
-										cache.cameraUploadBackgroundAborts.set(
-											assetId,
-											(cache.cameraUploadBackgroundAborts.get(assetId) ?? 0) + 1
-										)
+										await cameraUploadState.setAbort(assetId, (cameraUploadState.getAbort(assetId) ?? 0) + 1)
 									}
 
 									break
 								}
 
-								cache.cameraUploadHashes.set(delta.file.info.id, {
+								await cameraUploadState.setHash(delta.file.info.id, {
 									md5,
 									verifiedModificationTime: modificationTime ?? -1
 								})
 								// Any completed upload proves the asset fits a window — forget its
 								// background-abort history (audit B4).
-								cache.cameraUploadBackgroundAborts.delete(assetId)
+								await cameraUploadState.deleteAbort(assetId)
 
 								break
 							}
@@ -1470,7 +1522,7 @@ class CameraUpload {
 							// before transfers.upload resolved null) — same persistent counting
 							// as the null-return surface above (audit B4).
 							if (params?.background) {
-								cache.cameraUploadBackgroundAborts.set(assetId, (cache.cameraUploadBackgroundAborts.get(assetId) ?? 0) + 1)
+								await cameraUploadState.setAbort(assetId, (cameraUploadState.getAbort(assetId) ?? 0) + 1)
 							}
 
 							return

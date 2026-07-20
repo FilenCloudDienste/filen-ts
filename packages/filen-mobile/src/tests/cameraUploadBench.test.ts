@@ -245,11 +245,53 @@ vi.mock("@/lib/events", () => ({
 	}
 }))
 
+// cameraUpload.ts still uses cache for cacheNewNormalDir; the ledger moved to cameraUploadState.
 vi.mock("@/lib/cache", () => ({
 	default: {
-		cameraUploadHashes: new Map()
+		cacheNewNormalDir: vi.fn()
 	}
 }))
+
+// Complete store passthrough — INCLUDING the aborts map (the old cache mock omitted it, so the
+// source's post-upload `deleteAbort` threw a swallowed TypeError on every successful upload).
+vi.mock("@/features/cameraUpload/cameraUploadState", () => {
+	const hashes = new Map<string, unknown>()
+	const aborts = new Map<string, number>()
+
+	return {
+		default: {
+			hashes,
+			aborts,
+			loadHashes: async () => {},
+			loadAborts: async () => {},
+			getHashSync: (key: string) => hashes.get(key),
+			getHash: async (key: string) => hashes.get(key),
+			hashKeys: () => [...hashes.keys()],
+			setHash: async (key: string, entry: unknown) => {
+				hashes.set(key, entry)
+			},
+			deleteHash: async (key: string) => {
+				hashes.delete(key)
+			},
+			getAbort: (id: string) => aborts.get(id),
+			setAbort: async (id: string, count: number) => {
+				aborts.set(id, count)
+			},
+			deleteAbort: async (id: string) => {
+				aborts.delete(id)
+			},
+			applyHashBatch: async ({ upserts, deletes }: { upserts?: [string, unknown][]; deletes?: string[] }) => {
+				for (const [key, value] of upserts ?? []) {
+					hashes.set(key, value)
+				}
+
+				for (const key of deletes ?? []) {
+					hashes.delete(key)
+				}
+			}
+		}
+	}
+})
 
 vi.mock("@/lib/i18n", () => ({
 	default: {
@@ -296,7 +338,7 @@ vi.mock("@/lib/signals", () => ({
 	}
 }))
 
-import cache from "@/lib/cache"
+import cameraUploadState from "@/features/cameraUpload/cameraUploadState"
 import cameraUpload, { type Config } from "@/features/cameraUpload/cameraUpload"
 import { ml, MediaType } from "@/tests/mocks/expoMediaLibrary"
 import { fs } from "@/tests/mocks/expoFileSystem"
@@ -548,7 +590,7 @@ function buildMirrorFromCapture(): RemoteFixtureFile[] {
 
 function resetSyncState(): void {
 	cameraUpload.cancel()
-	cache.cameraUploadHashes.clear()
+	cameraUploadState.hashes.clear()
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	;(cameraUpload as any).ensureParentDirectoryExistsCache.clear()
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -808,8 +850,8 @@ describe.skipIf(!BENCH)("cameraUpload benchmark", () => {
 						for (const asset of fixture) {
 							const path = `/camera roll/${asset.filename.toLowerCase()}`
 
-							if (!cache.cameraUploadHashes.has(path)) {
-								cache.cameraUploadHashes.set(path, {
+							if (!cameraUploadState.hashes.has(path)) {
+								cameraUploadState.hashes.set(path, {
 									md5: "mock-md5",
 									verifiedModificationTime: asset.modificationTime
 								})
@@ -840,7 +882,7 @@ describe.skipIf(!BENCH)("cameraUpload benchmark", () => {
 						for (const path in listing.tree) {
 							const entry = listing.tree[path]
 
-							cache.cameraUploadHashes.set(path, {
+							cameraUploadState.hashes.set(path, {
 								md5: "mock-md5",
 								verifiedModificationTime: entry.info.modificationTime
 							})

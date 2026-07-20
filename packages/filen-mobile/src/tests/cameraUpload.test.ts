@@ -156,12 +156,55 @@ vi.mock("@/lib/events", () => ({
 	default: { subscribe: vi.fn() }
 }))
 
+// cameraUpload.ts still uses cache for cacheNewNormalDir (listRemote mirrors dirs into the cache);
+// the ledger moved to cameraUploadState (mocked below).
 vi.mock("@/lib/cache", () => ({
 	default: {
-		cameraUploadHashes: new Map(),
-		cameraUploadBackgroundAborts: new Map()
+		cacheNewNormalDir: vi.fn()
 	}
 }))
+
+// Faithful passthrough over the store contract: plain Maps + fns that read/write them, so the
+// existing behavioral pins (seed via .hashes/.aborts, assert via getHashSync/setHash/applyHashBatch)
+// keep meaning. loadHashes/loadAborts/getHash are resolved passthroughs.
+vi.mock("@/features/cameraUpload/cameraUploadState", () => {
+	const hashes = new Map<string, unknown>()
+	const aborts = new Map<string, number>()
+
+	return {
+		default: {
+			hashes,
+			aborts,
+			loadHashes: async () => {},
+			loadAborts: async () => {},
+			getHashSync: (key: string) => hashes.get(key),
+			getHash: async (key: string) => hashes.get(key),
+			hashKeys: () => [...hashes.keys()],
+			setHash: async (key: string, entry: unknown) => {
+				hashes.set(key, entry)
+			},
+			deleteHash: async (key: string) => {
+				hashes.delete(key)
+			},
+			getAbort: (id: string) => aborts.get(id),
+			setAbort: async (id: string, count: number) => {
+				aborts.set(id, count)
+			},
+			deleteAbort: async (id: string) => {
+				aborts.delete(id)
+			},
+			applyHashBatch: async ({ upserts, deletes }: { upserts?: [string, unknown][]; deletes?: string[] }) => {
+				for (const [key, value] of upserts ?? []) {
+					hashes.set(key, value)
+				}
+
+				for (const key of deletes ?? []) {
+					hashes.delete(key)
+				}
+			}
+		}
+	}
+})
 
 vi.mock("@/lib/i18n", () => ({
 	default: {
@@ -227,7 +270,7 @@ vi.mock("@/lib/signals", () => ({
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-import cache from "@/lib/cache"
+import cameraUploadState from "@/features/cameraUpload/cameraUploadState"
 import cameraUpload, { type Config } from "@/features/cameraUpload/cameraUpload"
 import {
 	modifyAssetPathOnCollision,
@@ -311,8 +354,8 @@ beforeEach(() => {
 	vi.clearAllMocks()
 	ml.clear()
 	fs.clear()
-	cache.cameraUploadHashes.clear()
-	cache.cameraUploadBackgroundAborts.clear()
+	cameraUploadState.hashes.clear()
+	cameraUploadState.aborts.clear()
 	cameraUpload.cancel()
 	// The parent-directory cache lives on the singleton and survives cancel(),
 	// so clear it explicitly between tests to avoid stale dir refs from earlier
@@ -1059,7 +1102,7 @@ describe("sync flow", () => {
 		])
 
 		// a1 is newest (would win the maxUploads sort) but burned the budget twice already.
-		cache.cameraUploadBackgroundAborts.set("a1", 2)
+		cameraUploadState.aborts.set("a1", 2)
 
 		await cameraUpload.sync({ background: true, maxUploads: 1 })
 
@@ -1080,7 +1123,7 @@ describe("sync flow", () => {
 
 		await cameraUpload.sync({ background: true, maxUploads: 1 })
 
-		expect(cache.cameraUploadBackgroundAborts.get("a1")).toBe(1)
+		expect(cameraUploadState.aborts.get("a1")).toBe(1)
 	})
 
 	it("B4: a thrown abort during a background upload increments the persisted counter (throw abort surface)", async () => {
@@ -1094,7 +1137,7 @@ describe("sync flow", () => {
 
 		await cameraUpload.sync({ background: true, maxUploads: 1 })
 
-		expect(cache.cameraUploadBackgroundAborts.get("a1")).toBe(1)
+		expect(cameraUploadState.aborts.get("a1")).toBe(1)
 	})
 
 	it("B4: a foreground abort never touches the persisted counter", async () => {
@@ -1108,17 +1151,17 @@ describe("sync flow", () => {
 
 		await cameraUpload.sync()
 
-		expect(cache.cameraUploadBackgroundAborts.get("a1")).toBeUndefined()
+		expect(cameraUploadState.aborts.get("a1")).toBeUndefined()
 	})
 
 	it("B4: a successful upload clears the asset's persisted counter", async () => {
 		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
 
-		cache.cameraUploadBackgroundAborts.set("a1", 1)
+		cameraUploadState.aborts.set("a1", 1)
 
 		await cameraUpload.sync()
 
-		expect(cache.cameraUploadBackgroundAborts.get("a1")).toBeUndefined()
+		expect(cameraUploadState.aborts.get("a1")).toBeUndefined()
 	})
 
 	// ─── Audit B5 (2026-06-11): foreground pause must not bleed into background ───
@@ -1155,7 +1198,7 @@ describe("sync flow", () => {
 
 		await cameraUpload.sync()
 
-		expect(cache.cameraUploadHashes.size).toBe(0)
+		expect(cameraUploadState.hashes.size).toBe(0)
 	})
 })
 
@@ -2018,23 +2061,23 @@ describe("MD5 hash cache", () => {
 		// Legacy persisted shape: bare md5 string. It must still shield the upload
 		// (treated as verifiedModificationTime: -1 → one hash, md5 matches → skip)
 		// and be upgraded in place to the object shape carrying the verified mtime.
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", "mock-md5")
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", "mock-md5")
 
 		await cameraUpload.sync()
 
 		expect(transfers.upload).not.toHaveBeenCalled()
 		// Upgraded in place AND re-keyed from the legacy tree path to the stable asset id.
-		expect(cache.cameraUploadHashes.get("a1")).toEqual({
+		expect(cameraUploadState.hashes.get("a1")).toEqual({
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
-		expect(cache.cameraUploadHashes.has("/camera roll/photo.jpg")).toBe(false)
+		expect(cameraUploadState.hashes.has("/camera roll/photo.jpg")).toBe(false)
 	})
 
 	it("legacy string entry is hashed ONCE, then the following pass takes the verified-mtime fast path (no getUri)", async () => {
 		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
 
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", "mock-md5")
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", "mock-md5")
 
 		const { Asset } = await import("@/tests/mocks/expoMediaLibrary")
 		const getUriSpy = vi.spyOn(Asset.prototype, "getUri")
@@ -2068,7 +2111,7 @@ describe("MD5 hash cache", () => {
 		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
 
 		// First: confirm the match path really skips upload
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", "mock-md5")
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", "mock-md5")
 
 		await cameraUpload.sync()
 
@@ -2091,7 +2134,7 @@ describe("MD5 hash cache", () => {
 
 		setupLocalAssets([{ id: "a2", filename: "photo2.jpg" }])
 
-		cache.cameraUploadHashes.set("/camera roll/photo2.jpg", "old-hash-different-from-changed-md5")
+		cameraUploadState.hashes.set("/camera roll/photo2.jpg", "old-hash-different-from-changed-md5")
 
 		resetSyncInterval()
 
@@ -2121,7 +2164,7 @@ describe("MD5 hash cache", () => {
 
 		// Keyed by the stable asset id — tree paths are rewritten by the compress/
 		// convertHeic toggles, so path keys orphaned the shield on every toggle.
-		expect(cache.cameraUploadHashes.get("a1")).toEqual({
+		expect(cameraUploadState.hashes.get("a1")).toEqual({
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -2134,14 +2177,14 @@ describe("MD5 hash cache", () => {
 
 		await cameraUpload.sync()
 
-		expect(cache.cameraUploadHashes.has("a1")).toBe(false)
+		expect(cameraUploadState.hashes.has("a1")).toBe(false)
 	})
 
 	it("updates cached MD5 + verified mtime when file content changes (upload fires)", async () => {
 		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
 
 		// Stale verified mtime + different md5 → hash, mismatch → upload + fresh entry.
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", {
 			md5: "old-md5",
 			verifiedModificationTime: 999
 		})
@@ -2149,7 +2192,7 @@ describe("MD5 hash cache", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
-		expect(cache.cameraUploadHashes.get("a1")).toEqual({
+		expect(cameraUploadState.hashes.get("a1")).toEqual({
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -2178,7 +2221,7 @@ describe("B6 — verified-mtime gate", () => {
 	it("matching verified mtime skips IMMEDIATELY — no getUri, no md5 read, no upload", async () => {
 		setupAsset(2000)
 
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", {
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -2195,7 +2238,7 @@ describe("B6 — verified-mtime gate", () => {
 			expect(md5Spy).not.toHaveBeenCalled()
 			expect(transfers.upload).not.toHaveBeenCalled()
 			// The entry value is untouched (only re-keyed from the legacy path to the asset id).
-			expect(cache.cameraUploadHashes.get("a1")).toEqual({
+			expect(cameraUploadState.hashes.get("a1")).toEqual({
 				md5: "mock-md5",
 				verifiedModificationTime: 2000
 			})
@@ -2210,7 +2253,7 @@ describe("B6 — verified-mtime gate", () => {
 		// verified mtime advances; the following pass takes the fast path.
 		setupAsset(3000)
 
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", {
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -2223,7 +2266,7 @@ describe("B6 — verified-mtime gate", () => {
 
 			expect(getUriSpy).toHaveBeenCalledTimes(1)
 			expect(transfers.upload).not.toHaveBeenCalled()
-			expect(cache.cameraUploadHashes.get("a1")).toEqual({
+			expect(cameraUploadState.hashes.get("a1")).toEqual({
 				md5: "mock-md5",
 				verifiedModificationTime: 3000
 			})
@@ -2242,7 +2285,7 @@ describe("B6 — verified-mtime gate", () => {
 	it("changed content uploads and records the new md5 + verified mtime", async () => {
 		setupAsset(3000)
 
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", {
 			md5: "different-md5",
 			verifiedModificationTime: 2000
 		})
@@ -2250,7 +2293,7 @@ describe("B6 — verified-mtime gate", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
-		expect(cache.cameraUploadHashes.get("a1")).toEqual({
+		expect(cameraUploadState.hashes.get("a1")).toEqual({
 			md5: "mock-md5",
 			verifiedModificationTime: 3000
 		})
@@ -2259,7 +2302,7 @@ describe("B6 — verified-mtime gate", () => {
 	it("the -1 sentinel never fast-skips, even for a (pathological) -1 mtime", async () => {
 		setupAsset(-1)
 
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", {
 			md5: "mock-md5",
 			verifiedModificationTime: -1
 		})
@@ -2293,7 +2336,7 @@ describe("B6 — verified-mtime gate", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
-		expect(cache.cameraUploadHashes.get("a1")).toEqual({
+		expect(cameraUploadState.hashes.get("a1")).toEqual({
 			md5: "mock-md5",
 			verifiedModificationTime: -1
 		})
@@ -2562,7 +2605,7 @@ describe("ensureParentDirectoryExistsCache TTL expiry", () => {
 
 		// Clear the md5 cache so the upload is not skipped on the second sync
 		// (otherwise the md5 match would break out before ensureParentDirectoryExists is called)
-		cache.cameraUploadHashes.clear()
+		cameraUploadState.hashes.clear()
 
 		// Second sync — cache entry is expired, createDir must be called again
 		resetSyncInterval()
@@ -2789,7 +2832,7 @@ describe("sync flow — HEIC→JPG conversion dedup", () => {
 			key === CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY ? (true as any) : (ENABLED_CONFIG as any)
 		)
 
-		cache.cameraUploadHashes.set("heic-1", {
+		cameraUploadState.hashes.set("heic-1", {
 			md5: "mock-md5",
 			verifiedModificationTime: 999
 		})
@@ -2798,7 +2841,7 @@ describe("sync flow — HEIC→JPG conversion dedup", () => {
 
 		// Stale verified mtime forces one hash; the md5 matches → skip + re-verify.
 		expect(transfers.upload).not.toHaveBeenCalled()
-		expect(cache.cameraUploadHashes.get("heic-1")).toEqual({
+		expect(cameraUploadState.hashes.get("heic-1")).toEqual({
 			md5: "mock-md5",
 			verifiedModificationTime: 3000
 		})
@@ -2811,7 +2854,7 @@ describe("sync flow — HEIC→JPG conversion dedup", () => {
 		// convertHeic OFF (default mocks): local /camera roll/photo.heic has no remote match
 		// (the remote holds the converted photo.jpg), so a missing-remote delta fires — the
 		// id-keyed entry short-circuits it via the verified-mtime fast path.
-		cache.cameraUploadHashes.set("heic-1", {
+		cameraUploadState.hashes.set("heic-1", {
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -3140,7 +3183,7 @@ describe("BG-05 — min-interval coalescing for non-manual sync triggers", () =>
 
 		// Clear the md5 cache so the asset WOULD upload again if a pass actually ran — this isolates
 		// the gate as the only reason the next pass does nothing.
-		cache.cameraUploadHashes.clear()
+		cameraUploadState.hashes.clear()
 		vi.mocked(transfers.upload).mockClear()
 
 		// An AUTO trigger arriving within AUTO_SYNC_MIN_INTERVAL_MS of the completed pass is coalesced:
@@ -3162,7 +3205,7 @@ describe("BG-05 — min-interval coalescing for non-manual sync triggers", () =>
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
 
-		cache.cameraUploadHashes.clear()
+		cameraUploadState.hashes.clear()
 		vi.mocked(transfers.upload).mockClear()
 
 		// Simulate ≥60s elapsed (a separate reconnect/foreground occasion) — the auto pass runs.
@@ -3877,7 +3920,7 @@ describe("B2 — collision-resolved upload names", () => {
 		} as any)
 
 		// The member's entry under its (already-suffixed) local key — legacy string shape.
-		cache.cameraUploadHashes.set("/camera roll/img_0001_2.jpg", "mock-md5")
+		cameraUploadState.hashes.set("/camera roll/img_0001_2.jpg", "mock-md5")
 
 		await cameraUpload.sync()
 
@@ -4012,7 +4055,7 @@ describe("E2/B8 — raw dedup keys (literal %XX filenames)", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
-		expect(cache.cameraUploadHashes.get("a1")).toEqual({
+		expect(cameraUploadState.hashes.get("a1")).toEqual({
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -4064,11 +4107,11 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 	it("pruning removes entries whose local asset is gone (foreground, clean listing)", async () => {
 		setupAsset()
 
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", {
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
-		cache.cameraUploadHashes.set("/camera roll/deleted-from-device.jpg", {
+		cameraUploadState.hashes.set("/camera roll/deleted-from-device.jpg", {
 			md5: "stale",
 			verifiedModificationTime: 1
 		})
@@ -4076,9 +4119,9 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 		await cameraUpload.sync()
 
 		// The local-gone key is pruned; the live asset's legacy entry is re-keyed to its id.
-		expect(cache.cameraUploadHashes.has("/camera roll/deleted-from-device.jpg")).toBe(false)
-		expect(cache.cameraUploadHashes.has("/camera roll/photo.jpg")).toBe(false)
-		expect(cache.cameraUploadHashes.get("a1")).toEqual({
+		expect(cameraUploadState.hashes.has("/camera roll/deleted-from-device.jpg")).toBe(false)
+		expect(cameraUploadState.hashes.has("/camera roll/photo.jpg")).toBe(false)
+		expect(cameraUploadState.hashes.get("a1")).toEqual({
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -4087,14 +4130,14 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 	it("background passes do NOT prune (their tree is filtered, not authoritative)", async () => {
 		setupAsset()
 
-		cache.cameraUploadHashes.set("/camera roll/video-or-gone.mp4", {
+		cameraUploadState.hashes.set("/camera roll/video-or-gone.mp4", {
 			md5: "stale",
 			verifiedModificationTime: 1
 		})
 
 		await cameraUpload.sync({ background: true })
 
-		expect(cache.cameraUploadHashes.has("/camera roll/video-or-gone.mp4")).toBe(true)
+		expect(cameraUploadState.hashes.has("/camera roll/video-or-gone.mp4")).toBe(true)
 	})
 
 	it("a degraded LOCAL listing does NOT prune (absences are not evidence)", async () => {
@@ -4116,7 +4159,7 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 
 		// The bad album's assets are absent from the tree this pass — their cache
 		// entries must survive.
-		cache.cameraUploadHashes.set("/bad album/bad.jpg", {
+		cameraUploadState.hashes.set("/bad album/bad.jpg", {
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -4136,7 +4179,7 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 			spy.mockRestore()
 		}
 
-		expect(cache.cameraUploadHashes.has("/bad album/bad.jpg")).toBe(true)
+		expect(cameraUploadState.hashes.has("/bad album/bad.jpg")).toBe(true)
 	})
 
 	it("a legacy path-keyed entry still shields via the read fallback while migration hasn't run (degraded local pass)", async () => {
@@ -4149,7 +4192,7 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 
 		// Legacy (pre-id-keying) entry under the tree path; the degraded pass skips the
 		// prune/migration, so the delta's shield lookup must fall back to the path key.
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", {
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -4172,15 +4215,15 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 		// Shielded through the fallback; the entry stays under the path key (no migration
 		// on a degraded pass — its absences and mappings are not authoritative).
 		expect(transfers.upload).not.toHaveBeenCalled()
-		expect(cache.cameraUploadHashes.has("/camera roll/photo.jpg")).toBe(true)
-		expect(cache.cameraUploadHashes.has("a1")).toBe(false)
+		expect(cameraUploadState.hashes.has("/camera roll/photo.jpg")).toBe(true)
+		expect(cameraUploadState.hashes.has("a1")).toBe(false)
 	})
 
 	it("mirror mode OFF (default): a remote-absent entry keeps shielding — no drop, no upload", async () => {
 		setupAsset()
 		setupRemoteWith([])
 
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", {
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -4188,7 +4231,7 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).not.toHaveBeenCalled()
-		expect(cache.cameraUploadHashes.has("a1")).toBe(true)
+		expect(cameraUploadState.hashes.has("a1")).toBe(true)
 	})
 
 	it("mirror mode ON + clean listing: the remote-absent entry is dropped and the photo re-uploads", async () => {
@@ -4196,7 +4239,7 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 		setupRemoteWith([])
 		enableMirrorMode()
 
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", {
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -4205,7 +4248,7 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
 		// Re-recorded after the successful upload, under the asset id.
-		expect(cache.cameraUploadHashes.get("a1")).toEqual({
+		expect(cameraUploadState.hashes.get("a1")).toEqual({
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -4216,7 +4259,7 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 		setupRemoteWith(["/Camera Roll/photo.jpg"])
 		enableMirrorMode()
 
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", {
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -4224,7 +4267,7 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).not.toHaveBeenCalled()
-		expect(cache.cameraUploadHashes.has("a1")).toBe(true)
+		expect(cameraUploadState.hashes.has("a1")).toBe(true)
 	})
 
 	it("mirror mode ON + DEGRADED listing: nothing is dropped (absences are not evidence), no upload", async () => {
@@ -4243,7 +4286,7 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 			}
 		} as any)
 
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+		cameraUploadState.hashes.set("/camera roll/photo.jpg", {
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -4252,7 +4295,7 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 
 		// The entry survived (re-keyed by the clean LOCAL pass) and kept shielding
 		// the (still-cached) photo — the degraded REMOTE listing dropped nothing.
-		expect(cache.cameraUploadHashes.has("a1")).toBe(true)
+		expect(cameraUploadState.hashes.has("a1")).toBe(true)
 		expect(transfers.upload).not.toHaveBeenCalled()
 	})
 })

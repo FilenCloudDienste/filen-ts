@@ -4,6 +4,7 @@ import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { useEffect, useState } from "react"
 import transfers from "@/features/transfers/transfers"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
+import cameraUploadState from "@/features/cameraUpload/cameraUploadState"
 import { unregisterBackgroundSync } from "@/features/cameraUpload/backgroundTask"
 import fileProvider from "@/features/settings/fileProvider"
 import sqlite from "@/lib/sqlite"
@@ -425,6 +426,14 @@ class Auth {
 			drive.resetCachedRootUuid()
 		} catch (e) {
 			logger.error("auth", "drive root uuid reset failed during logout", { err: e })
+		}
+
+		// Camera-upload ledger is account-scoped; the locked latch stops a worker-tail write from
+		// re-inserting into the next account's shield after the wipe.
+		try {
+			cameraUploadState.clearForLogout()
+		} catch (e) {
+			logger.error("auth", "camera-upload ledger clear failed during logout", { err: e })
 		}
 
 		// Diagnostic logs hold decrypted-at-rest data (file/dir names, paths) by design — wipe them

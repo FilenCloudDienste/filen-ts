@@ -116,29 +116,6 @@ type DrainedDirty = {
 	upserts: Map<string, Set<string>>
 }
 
-/**
- * Value shape for `cameraUploadHashes`. `md5` is the hash of the asset content as it
- * was last uploaded (or last verified against the cache); `verifiedModificationTime`
- * is the asset's modificationTime at the moment that md5 was last verified, letting
- * camera upload skip re-hashing (and re-downloading iCloud-offloaded assets) when the
- * mtime is unchanged. `-1` means "never verified" and always forces one hash.
- *
- * Entries persisted before this shape existed are plain md5 strings — readers treat a
- * string value as `{ md5: <string>, verifiedModificationTime: -1 }` and upgrade it in
- * place on the next write (lazy migration; no version bump / cache wipe needed).
- *
- * Keys are the media-library ASSET ID (Android contentUri / iOS ph:// identifier) —
- * stable across the compress/convertHeic toggles that rewrite tree paths. Entries
- * persisted before this keying used the tree path (always "/"-prefixed, so the two key
- * generations are distinguishable); camera upload's hygiene prune re-keys those to the
- * asset id on the first clean foreground pass and falls back to the path key on reads
- * until then.
- */
-export type CameraUploadHashEntry = {
-	md5: string
-	verifiedModificationTime: number
-}
-
 export class Cache {
 	private readonly registry: MapEntry[] = []
 	private readonly dirtyUpserts = new Map<string, Set<string>>()
@@ -172,22 +149,7 @@ export class Cache {
 		}
 	>()
 
-	// Durable — the only maps still independently persisted to SQLite KV (the camera-upload ledger).
-	// The string arm of the union is the LEGACY persisted shape (bare md5) — see
-	// CameraUploadHashEntry. Writers must always write the object shape.
-	public readonly cameraUploadHashes: PersistentMap<CameraUploadHashEntry | string>
-	// assetId → count of BACKGROUND uploads of this asset aborted by the run budget /
-	// OS expiration (audit B4, 2026-06-11). Persisted because each background run may be
-	// a fresh headless process and cancel() clears the in-memory failure counter — without
-	// this, an asset that can never finish inside the OS window is re-picked every run
-	// forever. Background delta picks skip counts >= MAX_BACKGROUND_UPLOAD_ABORTS
-	// (cameraUpload.ts); any successful upload of the asset deletes its entry.
-	public readonly cameraUploadBackgroundAborts: PersistentMap<number>
-
 	public constructor() {
-		this.cameraUploadHashes = this.createMap<CameraUploadHashEntry | string>("cameraUploadHashes")
-		this.cameraUploadBackgroundAborts = this.createMap<number>("cameraUploadBackgroundAborts")
-
 		AppState.addEventListener("change", nextAppState => {
 			if (nextAppState === "background") {
 				// flushNow() resolves only once the batch has actually landed (it never
@@ -196,68 +158,6 @@ export class Cache {
 				void this.flushNow()
 			}
 		})
-	}
-
-	private createMap<V>(name: string): PersistentMap<V> {
-		const key = `${GLOBAL_PREFIX}:${name}`
-
-		const map = new PersistentMap<V>(mutation => {
-			switch (mutation.type) {
-				case "set": {
-					let upserts = this.dirtyUpserts.get(key)
-
-					if (!upserts) {
-						upserts = new Set()
-
-						this.dirtyUpserts.set(key, upserts)
-					}
-
-					upserts.add(mutation.entryKey)
-
-					if (this.dirtyDeletes.size !== 0) {
-						this.dirtyDeletes.get(key)?.delete(mutation.entryKey)
-					}
-
-					break
-				}
-
-				case "delete": {
-					let deletes = this.dirtyDeletes.get(key)
-
-					if (!deletes) {
-						deletes = new Set()
-
-						this.dirtyDeletes.set(key, deletes)
-					}
-
-					deletes.add(mutation.entryKey)
-
-					if (this.dirtyUpserts.size !== 0) {
-						this.dirtyUpserts.get(key)?.delete(mutation.entryKey)
-					}
-
-					break
-				}
-
-				case "clear": {
-					this.dirtyClears.add(key)
-
-					this.dirtyUpserts.delete(key)
-					this.dirtyDeletes.delete(key)
-
-					break
-				}
-			}
-
-			this.persistDirty()
-		})
-
-		this.registry.push({
-			key,
-			map: map as PersistentMap<unknown>
-		})
-
-		return map
 	}
 
 	private persisting = false
