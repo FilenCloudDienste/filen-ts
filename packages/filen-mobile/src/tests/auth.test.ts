@@ -753,6 +753,40 @@ describe("auth.setSdkClients", () => {
 		expect(internals.lastStringifiedClient).toBeNull()
 	})
 
+	it("recoverAfterFailedReload() rebuilds the clients and resolves the re-armed latch (reloadAppAsync threw)", async () => {
+		const secureStore = await import("@/lib/secureStore")
+
+		// Credentials are persisted — login committed them before the reload attempt.
+		vi.mocked(secureStore.default.get).mockResolvedValue({ apiKey: "ak-persisted" } as never)
+
+		const internals = authInternals()
+
+		internals.authedClient = { uniffiDestroy: vi.fn() }
+		internals.unauthedClient = { uniffiDestroy: vi.fn() }
+		;(auth as unknown as { prepareForReload: () => void }).prepareForReload()
+
+		// The re-armed latch parks new waiters: without recovery this hangs forever.
+		let resolved = false
+		const waiter = auth.getSdkClients().then(() => {
+			resolved = true
+		})
+
+		// Fake timers are active — flush microtasks only (the latch is promise-based).
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(resolved).toBe(false)
+
+		vi.mocked(secureStore.default.set).mockResolvedValue(undefined)
+		mockFromStringified.mockReturnValueOnce({ toStringified: vi.fn(), uniffiDestroy: vi.fn() })
+
+		await auth.recoverAfterFailedReload()
+		await waiter
+
+		expect(resolved).toBe(true)
+		expect(internals.authedClient).not.toBeNull()
+		expect(internals.unauthedClient).not.toBeNull()
+	})
+
 	it("changed input still reconstructs and destroys the prior handles", async () => {
 		const secureStore = await import("@/lib/secureStore")
 

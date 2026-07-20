@@ -1,5 +1,16 @@
-import { type JsClientInterface, type StringifiedClient, UnauthJsClient, type UnauthJsClientInterface, type JsClientConfig } from "@filen/sdk-rs"
-import { getResolvedTransferConfig, buildJsClientConfig, bandwidthKbpsToSdkArg, DEFAULT_RESOLVED_TRANSFER_CONFIG } from "@/features/settings/transferConfig"
+import {
+	type JsClientInterface,
+	type StringifiedClient,
+	UnauthJsClient,
+	type UnauthJsClientInterface,
+	type JsClientConfig
+} from "@filen/sdk-rs"
+import {
+	getResolvedTransferConfig,
+	buildJsClientConfig,
+	bandwidthKbpsToSdkArg,
+	DEFAULT_RESOLVED_TRANSFER_CONFIG
+} from "@/features/settings/transferConfig"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { useEffect, useState } from "react"
 import transfers from "@/features/transfers/transfers"
@@ -130,6 +141,22 @@ class Auth {
 		this.armClientsReady()
 	}
 
+	/**
+	 * Undo prepareForReload after reloadAppAsync itself threw: the process keeps running with
+	 * the credentials already persisted, so rebuild the destroyed clients and resolve the
+	 * re-armed clientsReady — otherwise every getSdkClients() parks on the latch forever and
+	 * the authenticated UI hangs until a manual restart.
+	 */
+	public async recoverAfterFailedReload(): Promise<void> {
+		const authed = await this.isAuthed()
+
+		if (!authed.isAuthed || !authed.stringifiedClient) {
+			return
+		}
+
+		await this.setSdkClients(authed.stringifiedClient)
+	}
+
 	public async setSdkClients(stringifiedClient: StringifiedClient): Promise<{
 		authedClient: JsClientInterface
 		unauthedClient: UnauthJsClientInterface
@@ -200,7 +227,10 @@ class Auth {
 		await this.clientsReady
 
 		if (!this.authedClient || !this.unauthedClient) {
-			logger.error("auth", "SDK clients null after clientsReady resolved — invariant violation", { hasAuthed: !!this.authedClient, hasUnauthed: !!this.unauthedClient })
+			logger.error("auth", "SDK clients null after clientsReady resolved — invariant violation", {
+				hasAuthed: !!this.authedClient,
+				hasUnauthed: !!this.unauthedClient
+			})
 
 			throw new Error("SDK clients not initialized after clientsReady resolved")
 		}

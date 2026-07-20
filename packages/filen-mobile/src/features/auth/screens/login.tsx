@@ -61,6 +61,18 @@ const Login = () => {
 
 		if (!result.success) {
 			logger.warn("auth", "app reload after login failed", { error: result.error })
+
+			// The process keeps running with persisted credentials: rebuild the clients
+			// prepareForReload tore down so the authenticated UI doesn't hang on the re-armed
+			// clientsReady latch until a manual restart.
+			const recovery = await run(async () => {
+				await auth.recoverAfterFailedReload()
+			})
+
+			if (!recovery.success) {
+				logger.error("auth", "recovery after failed reload failed", { error: recovery.error })
+			}
+
 			alerts.error(result.error)
 
 			return
