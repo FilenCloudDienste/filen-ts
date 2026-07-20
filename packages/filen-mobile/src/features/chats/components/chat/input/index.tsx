@@ -106,6 +106,7 @@ const ChatTextInput = ({
 						onPress={onSend}
 						hitSlop={15}
 						enabled={chatInputValue.trim().length > 0}
+						rippleColor="transparent"
 					>
 						<Ionicons
 							name="arrow-up-outline"

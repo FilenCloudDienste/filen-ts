@@ -8,7 +8,10 @@ const EllipsisMenuTrigger = ({ size = 20 }: { size?: number }) => {
 
 	return (
 		<CrossGlassContainerView>
-			<PressableScale className="size-9 items-center justify-center">
+			<PressableScale
+				className="size-9 items-center justify-center"
+				rippleColor="transparent"
+			>
 				<Ionicons
 					name="ellipsis-horizontal"
 					size={size}

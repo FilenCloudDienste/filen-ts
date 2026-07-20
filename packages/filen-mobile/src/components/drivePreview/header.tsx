@@ -102,6 +102,7 @@ const GalleryHeader = ({
 						className="size-11 items-center justify-center"
 						onPress={goBack}
 						hitSlop={10}
+						rippleColor="transparent"
 					>
 						{currentItemPreviewType === "audio" ? (
 							<View className="size-11 flex-row items-center justify-center bg-transparent rounded-full">

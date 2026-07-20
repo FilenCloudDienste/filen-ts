@@ -73,11 +73,7 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 		const parentUuid = unwrapParentUuid(item.data.data.parent)
 
 		// Root parent resolves without the cache; an already-cached parent needs no warm.
-		if (
-			!parentUuid ||
-			(cache.rootUuid && parentUuid === cache.rootUuid) ||
-			cache.directoryUuidToAnyNormalDir.get(parentUuid)
-		) {
+		if (!parentUuid || (cache.rootUuid && parentUuid === cache.rootUuid) || cache.directoryUuidToAnyNormalDir.get(parentUuid)) {
 			return
 		}
 
@@ -263,6 +259,7 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 						onPress={save}
 						hitSlop={10}
 						enabled={isOnline}
+						rippleColor="transparent"
 					>
 						<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
 							<Ionicons

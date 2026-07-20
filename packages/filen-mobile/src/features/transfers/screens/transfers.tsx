@@ -189,7 +189,10 @@ const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: 
 						]}
 					>
 						<CrossGlassContainerView>
-							<PressableScale className="size-9 flex-row items-center justify-center">
+							<PressableScale
+								className="size-9 flex-row items-center justify-center"
+								rippleColor="transparent"
+							>
 								<Ionicons
 									name="ellipsis-horizontal"
 									size={20}
@@ -259,7 +262,10 @@ const FinishedTransferRow = ({ finished }: { finished: TFinishedTransfer }) => {
 						]}
 					>
 						<CrossGlassContainerView>
-							<PressableScale className="size-9 flex-row items-center justify-center">
+							<PressableScale
+								className="size-9 flex-row items-center justify-center"
+								rippleColor="transparent"
+							>
 								<Ionicons
 									name="ellipsis-horizontal"
 									size={20}
