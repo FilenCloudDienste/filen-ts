@@ -404,12 +404,24 @@ const Input = ({ chat }: { chat: Chat }) => {
 		useChatsStore.getState().setInputViewLayout(inputViewLayout)
 	}, [inputViewLayout])
 
+	// Latest callback in a ref so the cleanup below runs on UNMOUNT only. Depending on
+	// sendTypingEvent directly re-ran the cleanup whenever the chat object was replaced in the
+	// query (any incoming message rewrites it), firing a spurious Typing.Up mid-typing — peers
+	// saw the indicator flicker off while the user never stopped.
+	const sendTypingEventRef = useRef(sendTypingEvent)
+
+	useEffect(() => {
+		sendTypingEventRef.current = sendTypingEvent
+	})
+
 	useEffect(() => {
 		return () => {
 			clearTimeout(typingTimeoutRef.current)
-			sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (cleanup) failed", { error: e }))
+			sendTypingEventRef
+				.current(ChatTypingType.Up)
+				.catch(e => logger.warn("chats", "sendTypingEvent Up (cleanup) failed", { error: e }))
 		}
-	}, [sendTypingEvent])
+	}, [])
 
 	return (
 		<KeyboardStickyView
