@@ -590,6 +590,14 @@ const Gallery = () => {
 				.setCurrentItem(prev => (prev && prev.type === "drive" && prev.data.data.uuid === previousUuid ? replacement : prev))
 		})
 
+		// A blocked pop (unsaved-changes guard: Cancel, or a failed save) leaves the route
+		// alive with navigateBack's one-shot latch already consumed — unwind it (and the
+		// gesture gate it set) so the close button works again.
+		const dismissBlockedSubscription = events.subscribe("drivePreviewDismissBlocked", () => {
+			didNavigateBack.value = 0
+			isDismissing.value = 0
+		})
+
 		// Removal (trash / delete / restore-out-of-trash): drop the item from the
 		// gallery list and re-render correctly — close if it was the last one, else
 		// keep a neighbour visible.
@@ -643,6 +651,7 @@ const Gallery = () => {
 
 		return () => {
 			updateSubscription.remove()
+			dismissBlockedSubscription.remove()
 			removeSubscription.remove()
 		}
 	}, [didNavigateBack, isDismissing])
@@ -650,11 +659,11 @@ const Gallery = () => {
 	return (
 		<View className="flex-1 bg-transparent">
 			{/* Always mounted with a DYNAMIC hidden value: SystemBars' entries-stack merge skips
-			  * undefined props, so popping a hidden:true entry would leave the bars hidden (the
-			  * native side is only touched by explicit values). Flipping the SAME entry to an
-			  * explicit false re-shows the bars; the unmount-while-immersive path (dismissing the
-			  * gallery in landscape) is covered by the StyleProvider's explicit hidden:false base
-			  * entry, which the pop re-applies. */}
+			 * undefined props, so popping a hidden:true entry would leave the bars hidden (the
+			 * native side is only touched by explicit values). Flipping the SAME entry to an
+			 * explicit false re-shows the bars; the unmount-while-immersive path (dismissing the
+			 * gallery in landscape) is covered by the StyleProvider's explicit hidden:false base
+			 * entry, which the pop re-applies. */}
 			<SystemBars hidden={{ statusBar: immersive, navigationBar: immersive }} />
 			<AnimatedView
 				className="absolute inset-0 bg-black"

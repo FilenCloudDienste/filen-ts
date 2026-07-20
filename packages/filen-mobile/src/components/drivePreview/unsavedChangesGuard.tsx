@@ -3,6 +3,7 @@ import { useNavigation } from "expo-router"
 import { useTranslation } from "react-i18next"
 import { run } from "@filen/utils"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
+import events from "@/lib/events"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import logger from "@/lib/logger"
@@ -43,11 +44,15 @@ const UnsavedChangesGuard = () => {
 					})
 					alerts.error(promptResult.error)
 
+					events.emit("drivePreviewDismissBlocked")
+
 					return
 				}
 
 				// Cancel (or dismissing the alert) keeps the user on the preview.
 				if (promptResult.data === "cancel") {
+					events.emit("drivePreviewDismissBlocked")
+
 					return
 				}
 
@@ -57,6 +62,8 @@ const UnsavedChangesGuard = () => {
 
 					// Could not save (e.g. offline) — keep the user put; save() already surfaced any error.
 					if (!saved) {
+						events.emit("drivePreviewDismissBlocked")
+
 						return
 					}
 				}

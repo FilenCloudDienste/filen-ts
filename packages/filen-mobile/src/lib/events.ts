@@ -33,6 +33,10 @@ export type Events = {
 	driveItemRemoved: {
 		uuid: string
 	}
+	// The drive preview's unsaved-changes guard blocked a route pop (user chose Cancel, or the
+	// save failed): the gallery must unwind its one-shot navigate-back latch so the close
+	// button works again.
+	drivePreviewDismissBlocked: void
 	noteContentEdited: {
 		noteUuid: string
 		contentEdited: NoteContentEdited
