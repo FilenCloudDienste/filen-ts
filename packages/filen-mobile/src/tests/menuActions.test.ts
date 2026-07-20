@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from "vitest"
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 import { type TFunction } from "i18next"
 
 // ---------------------------------------------------------------------------
@@ -167,6 +167,14 @@ vi.mock("@/features/drive/driveDownload", () => ({
 	downloadDriveItemToDevice: vi.fn()
 }))
 
+vi.mock("react-native-blob-util", () => ({
+	default: {
+		android: {
+			actionViewIntent: vi.fn()
+		}
+	}
+}))
+
 // @/features/drive/driveSelectors imports @/constants (Platform.select) — stub it.
 vi.mock("@/constants", () => ({
 	EXPO_IMAGE_SUPPORTED_EXTENSIONS: new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]),
@@ -187,6 +195,7 @@ import { buildUndecryptableMenuButtons } from "@/features/drive/components/item/
 import { confirmedDriveAction } from "@/features/drive/components/item/menuActionsShared"
 import { buildDownloadSubButtons, buildExportButton } from "@/features/drive/components/item/menuActionsDownload"
 import { selectDriveItems } from "@/features/drive/screens/driveSelect"
+import { Platform } from "react-native"
 import transfers from "@/features/transfers/transfers"
 import alerts from "@/lib/alerts"
 import type { DriveItem } from "@/types"
@@ -780,6 +789,60 @@ describe("buildDownloadSubButtons (#35)", () => {
 			const ids = buttons.map(b => b.id)
 
 			expect(ids).not.toContain("export")
+		})
+	})
+
+	describe("open with gating (Android only)", () => {
+		afterEach(() => {
+			Platform.OS = "ios"
+		})
+
+		it("omits openWith on iOS even for a file with decryptedMeta", () => {
+			Platform.OS = "ios"
+
+			const buttons = buildDownloadSubButtons({
+				...baseDownloadArgs,
+				item: makeFile({ name: "file.txt" })
+			})
+			const ids = buttons.map(b => b.id)
+
+			expect(ids).not.toContain("openWith")
+		})
+
+		it("includes openWith on Android for a file with decryptedMeta", () => {
+			Platform.OS = "android"
+
+			const buttons = buildDownloadSubButtons({
+				...baseDownloadArgs,
+				item: makeFile({ name: "file.txt" })
+			})
+			const ids = buttons.map(b => b.id)
+
+			expect(ids).toContain("openWith")
+		})
+
+		it("omits openWith on Android for a directory item", () => {
+			Platform.OS = "android"
+
+			const buttons = buildDownloadSubButtons({
+				...baseDownloadArgs,
+				item: makeDirectory({ name: "dir" })
+			})
+			const ids = buttons.map(b => b.id)
+
+			expect(ids).not.toContain("openWith")
+		})
+
+		it("omits openWith on Android when decryptedMeta is null", () => {
+			Platform.OS = "android"
+
+			const buttons = buildDownloadSubButtons({
+				...baseDownloadArgs,
+				item: makeFile(null)
+			})
+			const ids = buttons.map(b => b.id)
+
+			expect(ids).not.toContain("openWith")
 		})
 	})
 

@@ -277,6 +277,10 @@ export const drive = {
 	make_available_offline: "Make available offline",
 	/** Per-item context menu: save image or video to the device photo library */
 	save_to_photos: "Save to photos",
+	/** Per-item context menu (Android): download the file, then open it in a third-party app via the native chooser (read-only) */
+	open_with: "Open with…",
+	/** Error shown when no installed app can open the file's type */
+	no_app_to_open_file: "No app available to open this file type",
 	/** Per-item context menu sub-item: create a shareable public link */
 	share_public_link: "Share public link",
 	/** Per-item context menu sub-item: share item with another Filen user */

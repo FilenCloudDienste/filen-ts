@@ -15,6 +15,10 @@ import offline from "@/features/offline/offline"
 import { appendOfflineSyncErrors } from "@/features/offline/store/useOffline.store"
 import { resolveMimeType } from "@/lib/utils"
 import { shareTmpFile } from "@/lib/share"
+import { withSystemPresentation } from "@/lib/systemPresentation"
+import { normalizeFilePathForSdk } from "@/lib/paths"
+import * as ReactNativeBlobUtil from "react-native-blob-util"
+import { Platform } from "react-native"
 import cache from "@/lib/cache"
 import { selectDriveItems } from "@/features/drive/screens/driveSelect"
 import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
@@ -194,6 +198,12 @@ export function buildDownloadSubButtons({
 
 	if (exportButton) {
 		downloadSubButtons.push(exportButton)
+	}
+
+	const openWithButton = buildOpenWithButton({ item, id: "openWith", t })
+
+	if (openWithButton) {
+		downloadSubButtons.push(openWithButton)
 	}
 
 	if (
@@ -425,6 +435,121 @@ export function buildExportButton({ item, id, t }: { item: DriveItem; id: string
 			if (!shareResult.success) {
 				logger.warn("drive", "export share sheet failed", { error: shareResult.error })
 				alerts.error(shareResult.error)
+
+				return
+			}
+		}
+	}
+}
+
+// Builds the "Open with" action — Android only. Downloads the file to a temp location (surfacing the
+// normal transfer-progress UI), then hands it to the native app chooser via ACTION_VIEW. iOS omits it:
+// its share sheet (Export) already offers "Open in / Copy to app", so a second entry would be identical.
+// Read-only by design — ACTION_VIEW grants read access only; round-trip editing belongs to the Documents
+// Provider. Returns null on iOS or when the item isn't an openable file. The id is supplied by the caller
+// so the action can appear under both the Download and Share submenus (the Menu blanks itself on duplicate
+// ids), mirroring Export.
+export function buildOpenWithButton({ item, id, t }: { item: DriveItem; id: string; t: TFunction }): MenuButton | null {
+	if (Platform.OS !== "android" || !isFileItem(item) || !item.data.decryptedMeta) {
+		return null
+	}
+
+	return {
+		id,
+		requiresOnline: true,
+		title: t("open_with"),
+		icon: "openExternal",
+		onPress: async () => {
+			// Run the download non-blocking: progress + speed already surface in the floating transfer bar
+			// (and the Android notification) via transfers.download, so a full-screen blocking loader would
+			// only freeze the app on large files. The native app chooser opens once the download resolves.
+			// Mirrors Export, but hands the file to ACTION_VIEW instead of the OS share sheet.
+			const result = await run(async () => {
+				if (!item.data.decryptedMeta) {
+					throw new Error("Missing decrypted metadata")
+				}
+
+				const destination = new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
+
+				if (!destination.parentDirectory.exists) {
+					destination.parentDirectory.create({
+						intermediates: true,
+						idempotent: true
+					})
+				}
+
+				if (destination.exists) {
+					destination.delete()
+				}
+
+				const downloadResult = await transfers.download({
+					item,
+					destination
+				})
+
+				if (!downloadResult) {
+					return null
+				}
+
+				if (
+					downloadResult.files.length === 0 ||
+					downloadResult.directories.length > 0 ||
+					!downloadResult.files[0] ||
+					!destination.exists
+				) {
+					throw new Error("Downloaded item is not a file")
+				}
+
+				return destination
+			})
+
+			if (!result.success) {
+				logger.error("drive", "open with download failed", { error: result.error, uuid: item.data.uuid })
+				alerts.error(result.error)
+
+				return
+			}
+
+			if (!result.data) {
+				return
+			}
+
+			// Deliberately NOT deleted after the chooser opens: ACTION_VIEW hands the external app a content
+			// URI it reads lazily, so the staged bytes must outlive this handler. filen-tmp/ lives under the
+			// OS cache — reclaimed under cache pressure and by the Advanced "Clean up temporary files" sweep.
+			const destination = result.data
+
+			// actionViewIntent expects a raw filesystem path (it does `new File(path)` and wraps it through
+			// its own FileProvider) — normalizeFilePathForSdk, NOT normalizeFilePathForBlobUtil (which re-adds
+			// the file:// scheme). filen-tmp/ lives under the app cache dir, which blob-util's FileProvider
+			// cache-path root covers.
+			const openResult = await run(async () => {
+				// No chooserTitle argument on purpose: passing one makes blob-util wrap the intent in
+				// Intent.createChooser(), which returns a fresh ACTION_CHOOSER intent WITHOUT the
+				// FLAG_ACTIVITY_NEW_TASK that the underlying ACTION_VIEW intent carries — startActivity()
+				// from our (non-Activity) app context then throws. Omitting it keeps the flagged VIEW intent;
+				// Android still shows its own "Open with" picker when more than one app can handle the type.
+				await withSystemPresentation(() =>
+					ReactNativeBlobUtil.default.android.actionViewIntent(
+						normalizeFilePathForSdk(destination.uri),
+						resolveMimeType({ mime: item.data.decryptedMeta?.mime, name: destination.name })
+					)
+				)
+			})
+
+			if (!openResult.success) {
+				logger.warn("drive", "open with intent failed", { error: openResult.error, uuid: item.data.uuid })
+
+				// blob-util rejects with code "ENOAPP" when no installed app can handle the MIME type — the
+				// one expected, user-actionable failure. Surface a friendly message for it; anything else
+				// (unexpected) shows the raw error.
+				const noApp =
+					typeof openResult.error === "object" &&
+					openResult.error !== null &&
+					"code" in openResult.error &&
+					openResult.error.code === "ENOAPP"
+
+				alerts.error(noApp ? t("no_app_to_open_file") : openResult.error)
 
 				return
 			}

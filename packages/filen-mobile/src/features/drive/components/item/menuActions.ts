@@ -5,7 +5,7 @@ import drive from "@/features/drive/drive"
 import alerts from "@/lib/alerts"
 import { confirmedDriveAction } from "@/features/drive/components/item/menuActionsShared"
 import { buildUndecryptableMenuButtons } from "@/features/drive/components/item/menuActionsUndecryptable"
-import { buildDownloadSubButtons, buildExportButton } from "@/features/drive/components/item/menuActionsDownload"
+import { buildDownloadSubButtons, buildExportButton, buildOpenWithButton } from "@/features/drive/components/item/menuActionsDownload"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
@@ -347,6 +347,9 @@ export function createMenuButtons({
 		// Export (download → OS share sheet) belongs here too, not only under Download — exporting
 		// to another app IS a form of sharing. File-only, so null (omitted) for shared directories.
 		const shareExportButton = buildExportButton({ item, id: "shareExport", t })
+		// Open with (download → native app chooser) is likewise a share-adjacent action; Android-only,
+		// file-only (null otherwise). Mirrors the Download-submenu entry with a distinct id.
+		const shareOpenWithButton = buildOpenWithButton({ item, id: "shareOpenWith", t })
 
 		menuButtons.push({
 			id: "share",
@@ -405,7 +408,8 @@ export function createMenuButtons({
 						}
 					}
 				},
-				...(shareExportButton ? [shareExportButton] : [])
+				...(shareExportButton ? [shareExportButton] : []),
+				...(shareOpenWithButton ? [shareOpenWithButton] : [])
 			]
 		})
 	}
