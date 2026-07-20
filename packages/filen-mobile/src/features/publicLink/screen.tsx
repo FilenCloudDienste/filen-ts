@@ -101,11 +101,9 @@ function PublicLink() {
 		try {
 			const item = deserialize(itemSerialized) as DriveItem
 
-			if (cache.uuidToAnyDriveItem.has(item.data.uuid)) {
-				return cache.uuidToAnyDriveItem.get(item.data.uuid) as DriveItem
-			}
-
-			return null
+			// Prefer the cache copy (fresher — a rename that arrived over the socket lands there);
+			// the deserialized param item is a valid fallback and must never be discarded.
+			return cache.uuidToAnyDriveItem.get(item.data.uuid) ?? item
 		} catch (err) {
 			logger.error("publicLink", "failed to deserialize item from route param", { error: err, itemSerialized: typeof itemSerialized === "string" ? itemSerialized.slice(0, 80) : null })
 
@@ -115,7 +113,8 @@ function PublicLink() {
 
 	const publicLinkStatusQuery = useDriveItemPublicLinkStatusQuery(
 		{
-			uuid: itemParsed?.data.uuid ?? ""
+			uuid: itemParsed?.data.uuid ?? "",
+			item: itemParsed ?? undefined
 		},
 		{
 			enabled: !!itemParsed

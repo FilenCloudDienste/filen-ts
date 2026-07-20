@@ -55,7 +55,9 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@filen/sdk-rs", () => ({}))
 
-import { fetchData } from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
+import { fetchData, publicLinkStatusQueryKey } from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
+import logger from "@/lib/logger"
+import { type DriveItem } from "@/types"
 
 beforeEach(() => {
 	mockGetSdkClients.mockReset()
@@ -245,5 +247,65 @@ describe("fetchData — signal forwarding", () => {
 		await fetchData({ uuid: "dir-nosig-uuid" })
 
 		expect(mockGetDirLinkStatus).toHaveBeenCalledWith(fakeDriveItem.data, undefined)
+	})
+})
+
+describe("fetchData — by-value item (bypasses the cache)", () => {
+	it("resolves the by-value item and returns a status with no cache entry present", async () => {
+		const item = { type: "file", data: { uuid: "byval-file" } }
+		const fakeStatus = { enabled: true, uuid: "link-uuid" }
+
+		mockGetFileLinkStatus.mockResolvedValue(fakeStatus)
+
+		const result = await fetchData({ uuid: "byval-file", item: item as unknown as DriveItem })
+
+		// Cache was never seeded — resolution came from the by-value item.
+		expect(cacheUuidToAnyDriveItem.has("byval-file")).toBe(false)
+		expect(mockGetFileLinkStatus).toHaveBeenCalledWith(item.data, undefined)
+		expect(result).toEqual({ type: "file", status: fakeStatus })
+	})
+
+	it("prefers the by-value item over a stale cache entry for the same uuid", async () => {
+		const cachedItem = { type: "directory", data: { uuid: "byval-pref" } }
+		const byValueItem = { type: "file", data: { uuid: "byval-pref" } }
+		const fakeStatus = { enabled: true }
+
+		cacheUuidToAnyDriveItem.set("byval-pref", cachedItem)
+		mockGetFileLinkStatus.mockResolvedValue(fakeStatus)
+
+		const result = await fetchData({ uuid: "byval-pref", item: byValueItem as unknown as DriveItem })
+
+		expect(mockGetFileLinkStatus).toHaveBeenCalledWith(byValueItem.data, undefined)
+		expect(mockGetDirLinkStatus).not.toHaveBeenCalled()
+		expect(result).toEqual({ type: "file", status: fakeStatus })
+	})
+})
+
+describe("fetchData — double miss (no item, no cache)", () => {
+	it("returns null and logs a warning when neither a by-value item nor a cache entry resolves", async () => {
+		vi.mocked(logger.warn).mockClear()
+
+		const result = await fetchData({ uuid: "totally-unknown" })
+
+		expect(result).toBeNull()
+		expect(mockGetSdkClients).not.toHaveBeenCalled()
+		expect(logger.warn).toHaveBeenCalledWith(
+			"drive",
+			expect.stringContaining("item not in cache"),
+			expect.objectContaining({ uuid: "totally-unknown" })
+		)
+	})
+})
+
+describe("publicLinkStatusQueryKey — by-value item excluded from the key", () => {
+	it("produces the same key whether or not a by-value item is supplied", () => {
+		const withItem = publicLinkStatusQueryKey({
+			uuid: "u1",
+			item: { type: "file", data: { uuid: "u1" } } as unknown as DriveItem
+		})
+		const withoutItem = publicLinkStatusQueryKey({ uuid: "u1" })
+
+		expect(withItem).toEqual(withoutItem)
+		expect(withItem).toEqual({ uuid: "u1" })
 	})
 })
