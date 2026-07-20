@@ -100,16 +100,28 @@ const DriveSelectListener = () => {
 		}
 	}, [])
 
-	// Once per screen instance: seed the selection with the caller's current value (e.g.
-	// the configured camera-upload directory) so the picker opens showing it ticked;
-	// without a seed this is the plain reset it always was. selectOptions is a route
-	// param — immutable for the screen's lifetime — so the first-render closure
-	// useEffectOnce captures is exact. Reset on unmount so no selection leaks out.
+	// Seed the selection once per picker SESSION, not per screen instance: browsing into a
+	// subfolder pushes another /driveSelect screen carrying the SAME selectOptions, and a
+	// per-instance reset wiped the selection accumulated on parent screens (and again on pop,
+	// via the unmount cleanup). The session id keys the seed; only the session's ROOT screen
+	// (the one selectDriveItems pushed at the account root) ends the session on unmount, so no
+	// selection leaks into the next session. selectOptions is a route param — immutable for the
+	// screen's lifetime — so the first-render closure useEffectOnce captures is exact.
 	useEffectOnce(() => {
-		useDriveSelectStore.getState().setSelectedItems(drivePath.selectOptions?.initiallySelected ?? [])
+		const sessionId = drivePath.selectOptions?.id ?? null
+		const isSessionRoot = authedSdkClient?.root().uuid === drivePath.uuid
+
+		if (sessionId === null) {
+			// No parseable session (defensive): the plain per-instance reset it always was.
+			useDriveSelectStore.getState().setSelectedItems([])
+		} else {
+			useDriveSelectStore.getState().seedSelectSession(sessionId, drivePath.selectOptions?.initiallySelected ?? [])
+		}
 
 		return () => {
-			useDriveSelectStore.getState().setSelectedItems([])
+			if (sessionId === null || isSessionRoot) {
+				useDriveSelectStore.getState().endSelectSession()
+			}
 		}
 	})
 
