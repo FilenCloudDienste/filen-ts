@@ -1053,6 +1053,34 @@ describe("notes.removeParticipant", () => {
 		expect(result[0].uuid).toBe("note-uuid-1")
 		expect(result[0].participants).toEqual([])
 	})
+
+	it("bulk removal composes: parallel calls each filter the LIVE entry, so no removal reverts the others", async () => {
+		const sdkClient = makeMockSdkClient()
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const pA = makeParticipant({ userId: 1n })
+		const pB = makeParticipant({ userId: 2n })
+		const pC = makeParticipant({ userId: 3n })
+		const note = makeNote({ uuid: "note-uuid-1", participants: [pA, pB, pC] })
+
+		// runBulk fires every op in one Promise.all, all closing over the SAME base note.
+		await Promise.all([
+			notes.removeParticipant({ note, participantUserId: 1n }),
+			notes.removeParticipant({ note, participantUserId: 2n }),
+			notes.removeParticipant({ note, participantUserId: 3n })
+		])
+
+		// Apply the captured cache updaters in call order to a live cache list. Pre-fix each
+		// wrote "base minus its own participant" wholesale, so the last write resurrected the
+		// other two removals.
+		let live = [note] as Array<{ participants: Array<{ userId: bigint }> }>
+
+		for (const call of mockNotesWithContentQueryUpdate.mock.calls) {
+			live = call[0].updater(live)
+		}
+
+		expect(live[0]!.participants).toEqual([])
+	})
 })
 
 // ---------------------------------------------------------------------------

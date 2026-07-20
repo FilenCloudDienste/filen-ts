@@ -72,7 +72,20 @@ export async function removeParticipant({
 	)
 
 	notesQueryUpdate({
-		updater: prev => prev.map(n => (n.uuid === note.uuid ? note : n))
+		updater: prev =>
+			prev.map(n =>
+				n.uuid === note.uuid
+					? {
+							// Patch onto the LIVE cache entry `n`, not the SDK-returned copy built from
+							// the closure-captured base note: under bulk concurrency (Promise.all) every
+							// call's returned note is "base minus its own participant", so a whole-note
+							// replace made the last write revert all the other removals until the next
+							// refetch. Mirrors setParticipantPermission.
+							...n,
+							participants: n.participants.filter(p => p.userId !== participantUserId)
+						}
+					: n
+			)
 	})
 
 	return note
