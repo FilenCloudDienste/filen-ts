@@ -1,5 +1,10 @@
 import { NoteEvent_Tags, MaybeEncryptedUniffi_Tags, SocketEvent_Tags, type SocketEvent } from "@filen/sdk-rs"
-import { notesQueryUpdate, fetchData as notesQueryFetch, notesQueryGet } from "@/features/notes/queries/useNotesQuery"
+import {
+	notesQueryUpdate,
+	fetchData as notesQueryFetch,
+	notesQueryGet,
+	getNotesListGeneration
+} from "@/features/notes/queries/useNotesQuery"
 import events from "@/lib/events"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import logger from "@/lib/logger"
@@ -157,11 +162,25 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 
 		case NoteEvent_Tags.New: {
 			// TODO: Don't refetch the query, build from socket event once added
-			const notes = await notesQueryFetch()
+			//
+			// Until then, guard the blind snapshot replace: an optimistic write (pin/favorite/
+			// title/create) committing during the fetch's network latency would be reverted by
+			// the pre-write snapshot. Retry once when a write landed mid-fetch; if the cache is
+			// STILL being written to, skip — the next focus refetch reconciles.
+			for (let attempt = 0; attempt < 2; attempt++) {
+				const generationBefore = getNotesListGeneration()
+				const notes = await notesQueryFetch()
 
-			notesQueryUpdate({
-				updater: () => notes
-			})
+				if (getNotesListGeneration() !== generationBefore) {
+					continue
+				}
+
+				notesQueryUpdate({
+					updater: () => notes
+				})
+
+				break
+			}
 
 			break
 		}

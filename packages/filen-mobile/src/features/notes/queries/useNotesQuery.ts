@@ -40,6 +40,15 @@ export function useNotesQuery(
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
 }
 
+// Bumped on every list write. Snapshot-replacers (the socket New handler's fetched list) compare
+// it around their network round-trip: a write landing mid-fetch means the snapshot is stale and
+// blindly applying it would revert that optimistic write.
+let notesListGeneration = 0
+
+export function getNotesListGeneration(): number {
+	return notesListGeneration
+}
+
 export function notesQueryUpdate({
 	updater
 }: {
@@ -47,6 +56,8 @@ export function notesQueryUpdate({
 		| Awaited<ReturnType<typeof fetchData>>
 		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
 }) {
+	notesListGeneration++
+
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY], prev => {
 		return typeof updater === "function" ? updater(prev ?? []) : updater
 	})

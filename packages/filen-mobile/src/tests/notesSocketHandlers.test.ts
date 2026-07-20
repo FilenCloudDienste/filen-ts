@@ -5,23 +5,30 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 // Hoisted state — captured updater callback from the mocked query function
 // ---------------------------------------------------------------------------
 
-const { capturedUpdaters, mockNotesWithContentQueryUpdate, mockFetchData, mockNotesWithContentQueryGet, mockEventsEmit } = vi.hoisted(
-	() => {
-		const capturedUpdaters: Array<(prev: unknown[]) => unknown[]> = []
+const {
+	capturedUpdaters,
+	mockNotesWithContentQueryUpdate,
+	mockFetchData,
+	mockNotesWithContentQueryGet,
+	mockEventsEmit,
+	mockGetNotesListGeneration
+} = vi.hoisted(() => {
+	const capturedUpdaters: Array<(prev: unknown[]) => unknown[]> = []
 
-		const mockNotesWithContentQueryUpdate = vi.fn(({ updater }: { updater: (prev: unknown[]) => unknown[] }) => {
-			capturedUpdaters.push(updater)
-		})
+	const mockNotesWithContentQueryUpdate = vi.fn(({ updater }: { updater: (prev: unknown[]) => unknown[] }) => {
+		capturedUpdaters.push(updater)
+	})
 
-		return {
-			capturedUpdaters,
-			mockNotesWithContentQueryUpdate,
-			mockFetchData: vi.fn().mockResolvedValue([]),
-			mockNotesWithContentQueryGet: vi.fn().mockReturnValue([]),
-			mockEventsEmit: vi.fn()
-		}
+	return {
+		capturedUpdaters,
+		mockNotesWithContentQueryUpdate,
+		mockFetchData: vi.fn().mockResolvedValue([]),
+		mockNotesWithContentQueryGet: vi.fn().mockReturnValue([]),
+		mockEventsEmit: vi.fn(),
+		// Stable by default: the New handler's stale-snapshot guard sees no mid-fetch writes.
+		mockGetNotesListGeneration: vi.fn().mockReturnValue(0)
 	}
-)
+})
 
 // ---------------------------------------------------------------------------
 // Module mocks — must be declared before any imports that pull in the modules
@@ -32,7 +39,8 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 vi.mock("@/features/notes/queries/useNotesQuery", () => ({
 	notesQueryUpdate: mockNotesWithContentQueryUpdate,
 	fetchData: mockFetchData,
-	notesQueryGet: mockNotesWithContentQueryGet
+	notesQueryGet: mockNotesWithContentQueryGet,
+	getNotesListGeneration: mockGetNotesListGeneration
 }))
 
 vi.mock("@/lib/events", () => ({
@@ -635,6 +643,36 @@ describe("handleNoteEvent — notes socket handler", () => {
 			const result = updater(prev)
 
 			expect(result).toEqual(fetchedNotes)
+		})
+
+		it("retries the fetch once when an optimistic write lands mid-fetch (stale snapshot must not clobber it)", async () => {
+			const staleSnapshot = [{ uuid: "stale" }]
+			const freshSnapshot = [{ uuid: "fresh" }]
+
+			// Two generation reads per attempt (before + after the fetch): attempt 1 sees a write
+			// land mid-fetch (0 -> 1), attempt 2 is stable (1 -> 1).
+			mockGetNotesListGeneration.mockReturnValueOnce(0).mockReturnValueOnce(1).mockReturnValue(1)
+			mockFetchData.mockResolvedValueOnce(staleSnapshot).mockResolvedValueOnce(freshSnapshot)
+
+			await handleNoteEvent({ event: makeNewEvent() })
+
+			expect(mockFetchData).toHaveBeenCalledTimes(2)
+			expect(mockNotesWithContentQueryUpdate).toHaveBeenCalledOnce()
+
+			const updater = capturedUpdaters[0]!
+
+			expect(updater([])).toEqual(freshSnapshot)
+		})
+
+		it("gives up after two stale attempts without clobbering (the next focus refetch reconciles)", async () => {
+			// Every attempt sees a mid-fetch write: 0 -> 1, then 2 -> 3.
+			mockGetNotesListGeneration.mockReturnValueOnce(0).mockReturnValueOnce(1).mockReturnValueOnce(2).mockReturnValueOnce(3)
+			mockFetchData.mockResolvedValue([{ uuid: "snapshot" }])
+
+			await handleNoteEvent({ event: makeNewEvent() })
+
+			expect(mockFetchData).toHaveBeenCalledTimes(2)
+			expect(mockNotesWithContentQueryUpdate).not.toHaveBeenCalled()
 		})
 	})
 
