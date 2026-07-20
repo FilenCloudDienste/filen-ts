@@ -4,6 +4,7 @@ import { sortParams } from "@filen/utils"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
 import logger from "@/lib/logger"
+import { notesQueryGet } from "@/features/notes/queries/useNotesQuery"
 
 export const BASE_QUERY_KEY = "useNoteContentQuery"
 
@@ -16,7 +17,9 @@ export async function fetchData(
 		signal?: AbortSignal
 	}
 ) {
-	const note = cache.noteUuidToNote.get(params.uuid)
+	// The cache map is populated by the notes list fetch. A note present only in the restored or
+	// optimistically-updated list query must still resolve, so fall back to it before giving up.
+	const note = cache.noteUuidToNote.get(params.uuid) ?? notesQueryGet()?.find(n => n.uuid === params.uuid)
 
 	if (!note) {
 		logger.warn("notes-query", "note not in cache during content fetch; returning undefined", { uuid: params.uuid })
