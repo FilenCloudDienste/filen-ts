@@ -97,11 +97,13 @@ vi.mock("@/lib/sqlite", async () => {
 			}
 		},
 		prefixUpperBound: (prefix: string) => {
-			if (prefix.length === 0) {
-				return prefix
-			}
-
+			// Mirror the real contract: an empty or U+FFFF-terminated prefix has no valid exclusive
+			// upper bound, so the real function throws — the fake must too, or it could drift.
 			const lastIndex = prefix.length - 1
+
+			if (prefix.length === 0 || prefix.charCodeAt(lastIndex) === 0xffff) {
+				throw new Error("prefixUpperBound: prefix must be non-empty and must not end in U+FFFF")
+			}
 
 			return prefix.slice(0, lastIndex) + String.fromCharCode(prefix.charCodeAt(lastIndex) + 1)
 		}

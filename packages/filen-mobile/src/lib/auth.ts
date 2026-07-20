@@ -441,7 +441,7 @@ class Auth {
 		logger.purge()
 
 		// Phase 6 — wipe persisted + decrypted-at-rest state. secureStore (auth secret), SQLite (query
-		// cache + cache kv), and every decrypted-on-disk store. allSettled so a single failure can't
+		// cache + remaining kv rows), and every decrypted-on-disk store. allSettled so a single failure can't
 		// leave the rest of the wipe undone.
 		const wipe = await Promise.allSettled([
 			secureStore.clear(),

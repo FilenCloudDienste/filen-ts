@@ -52,7 +52,7 @@ class Thumbnails {
 	private readonly clearBarrier = new ClearBarrier()
 
 	// Disk-derived availability index: a uuid is present iff `<uuid>.webp` exists in DIRECTORY.
-	// Seeded once by restore() at boot and kept coherent by every generate/invalidate/remove/clear
+	// Seeded once by restore() at boot and kept coherent by every generate/invalidate/clear
 	// path, so "file on disk ⇒ in Set" holds for any caller (drive rows read it synchronously).
 	private readonly available = new Set<string>()
 	private restored = false
@@ -80,9 +80,9 @@ class Thumbnails {
 
 		this.restored = true
 
-		ensureDirectory()
-
 		try {
+			ensureDirectory()
+
 			for (const record of this.listThumbnailRecords()) {
 				if (record.isDirectory) {
 					continue

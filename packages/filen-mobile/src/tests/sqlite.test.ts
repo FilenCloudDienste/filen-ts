@@ -759,9 +759,10 @@ describe("prefixUpperBound", () => {
 		expect(matched.sort()).toEqual(["cache:v1:foo:", "cache:v1:foo:1", "cache:v1:foo:2"].sort())
 	})
 
-	it("returns the prefix unchanged for an empty string", async () => {
+	it("rejects prefixes that cannot form a valid exclusive upper bound", async () => {
 		const { prefixUpperBound } = await import("@/lib/sqlite")
 
-		expect(prefixUpperBound("")).toBe("")
+		expect(() => prefixUpperBound("")).toThrow()
+		expect(() => prefixUpperBound("abc\uffff")).toThrow()
 	})
 })

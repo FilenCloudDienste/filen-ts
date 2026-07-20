@@ -96,7 +96,7 @@ class Sqlite {
 
 	// Bumped by every kv wipe (clearAsync / kvAsync.clear). kv writes capture the generation
 	// when they start and silently no-op if a wipe landed before their INSERT executed —
-	// defense-in-depth (mirroring cache.ts's clearGeneration) so an aborted sync's late
+	// defense-in-depth so an aborted sync's late
 	// `INSERT OR REPLACE` cannot re-INSERT decrypted metadata AFTER the logout Phase 6 wipe.
 	private clearGeneration = 0
 

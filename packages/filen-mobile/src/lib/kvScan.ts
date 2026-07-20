@@ -10,11 +10,13 @@ import { type DB } from "@op-engineering/op-sqlite"
 // SQLite's default case_sensitive_like = OFF and degrades to a full table scan. All current callers
 // pass a non-empty prefix ending in ":".
 export function prefixUpperBound(prefix: string): string {
-	if (prefix.length === 0) {
-		return prefix
-	}
-
 	const lastIndex = prefix.length - 1
+
+	// An empty prefix or one ending in U+FFFF cannot form a valid exclusive upper bound — the
+	// increment wraps and the range silently matches nothing.
+	if (prefix.length === 0 || prefix.charCodeAt(lastIndex) === 0xffff) {
+		throw new Error("prefixUpperBound: prefix must be non-empty and must not end in U+FFFF")
+	}
 
 	return prefix.slice(0, lastIndex) + String.fromCharCode(prefix.charCodeAt(lastIndex) + 1)
 }
