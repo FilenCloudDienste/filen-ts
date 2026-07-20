@@ -58,10 +58,7 @@ export function useCameraUploadDestinationQuery(
 // cameraUpload.sync()). Only a SETTLED success renders a real usability verdict; a genuinely
 // deleted/trashed directory surfaces as success + usable:false from fetchData, so it still renders
 // as gone correctly.
-export function resolveDestinationQueryState(query: {
-	status: "pending" | "error" | "success"
-	data?: CameraUploadDestination
-}): {
+export function resolveDestinationQueryState(query: { status: "pending" | "error" | "success"; data?: CameraUploadDestination }): {
 	loading: boolean
 	usable: boolean
 	name: string | null

@@ -24,6 +24,11 @@ type KvCommand = [string, (string | Uint8Array)[]]
  * string value as `{ md5: <string>, verifiedModificationTime: -1 }` and upgrade it in
  * place on the next write (lazy migration; no version bump / cache wipe needed).
  *
+ * `paths` lists the tree paths this asset's content is known uploaded (or verified) under —
+ * one asset can belong to several selected albums and must reach EVERY album folder, so the
+ * upload-skip shield applies per path, not per asset. An entry without `paths` (legacy shape)
+ * covers all paths, preserving the pre-`paths` skip semantics.
+ *
  * Keys are the media-library ASSET ID (Android contentUri / iOS ph:// identifier) —
  * stable across the compress/convertHeic toggles that rewrite tree paths. Entries
  * persisted before this keying used the tree path (always "/"-prefixed, so the two key
@@ -34,6 +39,7 @@ type KvCommand = [string, (string | Uint8Array)[]]
 export type CameraUploadHashEntry = {
 	md5: string
 	verifiedModificationTime: number
+	paths?: string[]
 }
 
 /**

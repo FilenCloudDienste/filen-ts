@@ -58,7 +58,6 @@ TaskManager.defineTask(TASK_NAME, async () => {
 	let cameraError: unknown = undefined
 
 	const result = await run(async defer => {
-
 		// Persist-before-suspend: the storedOffline query broadcasts still debounce through
 		// QueryPersisterKv, which normally flushes on the AppState "background" transition —
 		// never fired in a headless run (the app is ALREADY backgrounded), and the OS may suspend

@@ -52,7 +52,10 @@ import {
 	isReleasedSharedObjectError,
 	withReleasedSharedObjectRetry,
 	CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY,
-	type CollisionParams
+	type CollisionParams,
+	hashEntryCoversPath,
+	mergedHashEntryPaths,
+	HASH_ENTRY_MAX_PATHS
 } from "@/features/cameraUpload/cameraUploadHelpers"
 
 // The PREVIOUS dedup-key pipeline (normalizeFilePathForSdk ∘ Paths.join), replicated
@@ -985,7 +988,10 @@ describe("#15 — compress collision key symmetry for multi-dot filenames", () =
 
 		// REMOTE: the upload composes the suffix onto the FULL stem after the .png → .jpg rewrite,
 		// writing "vacation.2024_<suffix>.jpg"; listRemote strips the .jpg for its key.
-		const suffix = collisionNameSuffix({ iteration: 0, asset: { name: collisionBaseName({ name: filename, compress: true }), contentHash } })
+		const suffix = collisionNameSuffix({
+			iteration: 0,
+			asset: { name: collisionBaseName({ name: filename, compress: true }), contentHash }
+		})
 		const uploadedRemoteName = `vacation.2024${suffix}.jpg`
 		const remoteKey = dedupTreeKey({ path: `/camera roll/${uploadedRemoteName}`, compress: true })
 
@@ -1167,5 +1173,40 @@ describe("withReleasedSharedObjectRetry", () => {
 		).rejects.toThrow("already released")
 
 		expect(calls).toBe(2)
+	})
+})
+
+describe("per-path hash shield helpers", () => {
+	it("a legacy entry (no paths) covers every path", () => {
+		const entry = { md5: "m", verifiedModificationTime: 1 }
+
+		expect(hashEntryCoversPath(entry, "/a/x.jpg")).toBe(true)
+		expect(hashEntryCoversPath(entry, "/b/y.jpg")).toBe(true)
+	})
+
+	it("a paths-carrying entry covers only its listed paths", () => {
+		const entry = { md5: "m", verifiedModificationTime: 1, paths: ["/trip/x.jpg"] }
+
+		expect(hashEntryCoversPath(entry, "/trip/x.jpg")).toBe(true)
+		expect(hashEntryCoversPath(entry, "/recents/x.jpg")).toBe(false)
+	})
+
+	it("mergedHashEntryPaths appends new paths and dedupes existing ones", () => {
+		const entry = { md5: "m", verifiedModificationTime: 1, paths: ["/a/x.jpg"] }
+
+		expect(mergedHashEntryPaths(entry, "/b/x.jpg")).toEqual(["/a/x.jpg", "/b/x.jpg"])
+		expect(mergedHashEntryPaths(entry, "/a/x.jpg")).toEqual(["/a/x.jpg"])
+		// A previous legacy entry contributes nothing — the rewrite narrows it to the concrete path.
+		expect(mergedHashEntryPaths({ md5: "m", verifiedModificationTime: 1 }, "/a/x.jpg")).toEqual(["/a/x.jpg"])
+		expect(mergedHashEntryPaths(undefined, "/a/x.jpg")).toEqual(["/a/x.jpg"])
+	})
+
+	it("caps the covered set at HASH_ENTRY_MAX_PATHS, dropping the oldest", () => {
+		const paths = Array.from({ length: HASH_ENTRY_MAX_PATHS }, (_, i) => `/p${i}/x.jpg`)
+		const merged = mergedHashEntryPaths({ md5: "m", verifiedModificationTime: 1, paths }, "/new/x.jpg")
+
+		expect(merged).toHaveLength(HASH_ENTRY_MAX_PATHS)
+		expect(merged[0]).toBe("/p1/x.jpg")
+		expect(merged[merged.length - 1]).toBe("/new/x.jpg")
 	})
 })

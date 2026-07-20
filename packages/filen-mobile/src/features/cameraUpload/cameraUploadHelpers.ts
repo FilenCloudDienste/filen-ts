@@ -258,6 +258,31 @@ export function normalizeCameraUploadHashEntry(value: CameraUploadHashEntry | st
 	return value
 }
 
+// Stale path strings (config toggles rewrite tree keys) never match again but would otherwise
+// accumulate forever — keep the most recent few instead.
+export const HASH_ENTRY_MAX_PATHS = 16
+
+/**
+ * Whether the shield entry covers a specific destination tree path. An entry without `paths`
+ * (legacy shape) covers everything; a `paths`-carrying entry covers only the listed paths, so
+ * an asset in several selected albums is still uploaded to each album folder once.
+ */
+export function hashEntryCoversPath(entry: CameraUploadHashEntry, path: string): boolean {
+	return entry.paths === undefined || entry.paths.includes(path)
+}
+
+/**
+ * Covered-path set for a REWRITTEN entry: the previous entry's paths plus the path just
+ * uploaded/verified (deduped, capped). A previous legacy entry (no `paths`) contributes
+ * nothing — the rewrite narrows it to the concrete path, which is what makes a legacy
+ * cover-all entry start tracking real destinations once content changes.
+ */
+export function mergedHashEntryPaths(previous: CameraUploadHashEntry | undefined, path: string): string[] {
+	const paths = previous?.paths ?? []
+
+	return paths.includes(path) ? paths : [...paths, path].slice(-HASH_ENTRY_MAX_PATHS)
+}
+
 // #B4: secureStore key for the "Re-upload deleted photos" setting. Boolean; absent/false →
 // current behavior (an md5-cache entry shields a remotely-deleted photo from re-upload).
 // When true, camera upload mirrors the library: an entry whose key is present locally but

@@ -1908,6 +1908,115 @@ describe("same-title album naming (merge scheme)", () => {
 	})
 })
 
+// ─── Multi-album asset coverage (per-path shield) ───────────────────────────
+
+describe("multi-album asset coverage (per-path shield)", () => {
+	function setupSharedAssetAlbums(): void {
+		const uri = "file:///media/shared-1"
+
+		ml.addAsset({
+			id: "shared-1",
+			filename: "photo.jpg",
+			uri,
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+
+		fs.set(uri, new Uint8Array([1]))
+
+		ml.addAlbum({
+			id: "album-trip",
+			title: "Trip",
+			assetIds: ["shared-1"]
+		})
+		ml.addAlbum({
+			id: "album-recents",
+			title: "Recents",
+			assetIds: ["shared-1"]
+		})
+	}
+
+	function installCreateDirSpy(): ReturnType<typeof vi.fn> {
+		const createDir = vi.fn(async () => ({ uuid: "remote-dir-uuid" }))
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({ files: [] })),
+				createDir,
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
+			}
+		} as any)
+
+		return createDir
+	}
+
+	it("an asset in two selected albums reaches BOTH album folders (id-keyed shield must not starve the second)", async () => {
+		installCreateDirSpy()
+		setupSharedAssetAlbums()
+
+		// Sync 1: only "Trip" selected — the asset uploads there and records a paths-carrying
+		// shield entry.
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-trip"]
+		})
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+
+		const entryAfterFirst = cameraUploadState.getHashSync("shared-1") as { paths?: string[] } | undefined
+
+		expect(entryAfterFirst?.paths).toHaveLength(1)
+
+		// Sync 2: both albums selected. The remote listing is empty every sync, so the Trip
+		// path is guarded purely by the shield (covered → skipped) while the Recents path is
+		// NOT covered and must upload — pre-fix the id-keyed skip starved it forever.
+		vi.mocked(transfers.upload).mockClear()
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-trip", "album-recents"]
+		})
+
+		// manual: bypass the BG-05 auto-sync coalescing gate — this is a back-to-back re-sync.
+		await cameraUpload.sync({ manual: true })
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+
+		const entryAfterSecond = cameraUploadState.getHashSync("shared-1") as { paths?: string[] } | undefined
+
+		expect(entryAfterSecond?.paths).toHaveLength(2)
+
+		// Sync 3: both paths covered — nothing further uploads (steady-state skip intact).
+		vi.mocked(transfers.upload).mockClear()
+
+		await cameraUpload.sync({ manual: true })
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("a legacy entry (no paths) still covers every path — pre-paths skip semantics preserved", async () => {
+		installCreateDirSpy()
+		setupSharedAssetAlbums()
+
+		// Seed a legacy-shaped entry: verified at the asset's mtime, no paths field.
+		cameraUploadState.hashes.set("shared-1", {
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-trip", "album-recents"]
+		})
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+})
+
 // ─── Re-entrancy and failure tracking ────────────────────────────────────────
 
 describe("re-entrancy and failure tracking", () => {
@@ -2164,7 +2273,7 @@ describe("MD5 hash cache", () => {
 
 		// Keyed by the stable asset id — tree paths are rewritten by the compress/
 		// convertHeic toggles, so path keys orphaned the shield on every toggle.
-		expect(cameraUploadState.hashes.get("a1")).toEqual({
+		expect(cameraUploadState.hashes.get("a1")).toMatchObject({
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -2192,7 +2301,7 @@ describe("MD5 hash cache", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
-		expect(cameraUploadState.hashes.get("a1")).toEqual({
+		expect(cameraUploadState.hashes.get("a1")).toMatchObject({
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -2293,7 +2402,7 @@ describe("B6 — verified-mtime gate", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
-		expect(cameraUploadState.hashes.get("a1")).toEqual({
+		expect(cameraUploadState.hashes.get("a1")).toMatchObject({
 			md5: "mock-md5",
 			verifiedModificationTime: 3000
 		})
@@ -2336,7 +2445,7 @@ describe("B6 — verified-mtime gate", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
-		expect(cameraUploadState.hashes.get("a1")).toEqual({
+		expect(cameraUploadState.hashes.get("a1")).toMatchObject({
 			md5: "mock-md5",
 			verifiedModificationTime: -1
 		})
@@ -3226,19 +3335,17 @@ describe("BG-03 — foreground sync dropped during a background pass is re-fired
 			releaseConfig = resolve
 		})
 		let configCalls = 0
-		const spy = vi
-			.spyOn(cameraUpload as unknown as { getConfig: () => Promise<Config> }, "getConfig")
-			.mockImplementation(async () => {
-				configCalls++
+		const spy = vi.spyOn(cameraUpload as unknown as { getConfig: () => Promise<Config> }, "getConfig").mockImplementation(async () => {
+			configCalls++
 
-				if (configCalls === 1) {
-					await configGate
-				}
+			if (configCalls === 1) {
+				await configGate
+			}
 
-				// A disabled config makes each pass early-return right after getConfig — enough to exercise
-				// the in-flight guard + the post-run re-fire without the full upload pipeline.
-				return { enabled: false } as unknown as Config
-			})
+			// A disabled config makes each pass early-return right after getConfig — enough to exercise
+			// the in-flight guard + the post-run re-fire without the full upload pipeline.
+			return { enabled: false } as unknown as Config
+		})
 
 		const drain = () => new Promise<void>(resolve => setTimeout(resolve, 0))
 
@@ -4055,7 +4162,7 @@ describe("E2/B8 — raw dedup keys (literal %XX filenames)", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
-		expect(cameraUploadState.hashes.get("a1")).toEqual({
+		expect(cameraUploadState.hashes.get("a1")).toMatchObject({
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
@@ -4248,7 +4355,7 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
 		// Re-recorded after the successful upload, under the asset id.
-		expect(cameraUploadState.hashes.get("a1")).toEqual({
+		expect(cameraUploadState.hashes.get("a1")).toMatchObject({
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})

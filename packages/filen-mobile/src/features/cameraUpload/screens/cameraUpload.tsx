@@ -225,7 +225,9 @@ const CameraUpload = () => {
 													config.remoteDir && config.remoteDir.tag !== AnyNormalDir_Tags.Root
 														? unwrapDirMeta(config.remoteDir).uuid
 														: null
-												const currentDirItem = currentDirUuid ? cache.uuidToAnyDriveItem.get(currentDirUuid) : undefined
+												const currentDirItem = currentDirUuid
+													? cache.uuidToAnyDriveItem.get(currentDirUuid)
+													: undefined
 
 												const result = await run(async () => {
 													return await selectDriveItems({

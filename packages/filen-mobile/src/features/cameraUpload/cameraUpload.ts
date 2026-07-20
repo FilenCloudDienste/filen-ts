@@ -36,6 +36,8 @@ import {
 	composeLocalTreePath,
 	rawRemoteTreePath,
 	normalizeCameraUploadHashEntry,
+	hashEntryCoversPath,
+	mergedHashEntryPaths,
 	isDirUsable,
 	withReleasedSharedObjectRetry,
 	CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY
@@ -1343,7 +1345,10 @@ class CameraUpload {
 						cachedEntry &&
 						modificationTime != null &&
 						cachedEntry.verifiedModificationTime !== -1 &&
-						cachedEntry.verifiedModificationTime === modificationTime
+						cachedEntry.verifiedModificationTime === modificationTime &&
+						// Per-path: an asset in several selected albums has one shield entry but
+						// several destination paths — a match for one folder must not starve another.
+						hashEntryCoversPath(cachedEntry, delta.file.path)
 					) {
 						continue
 					}
@@ -1372,15 +1377,18 @@ class CameraUpload {
 									throw new Error(i18n.t("camera_upload_processing_failed"))
 								}
 
-								if (cachedEntry && md5 === cachedEntry.md5) {
+								if (cachedEntry && md5 === cachedEntry.md5 && hashEntryCoversPath(cachedEntry, delta.file.path)) {
 									// Content unchanged (view-touched mtime bump or a remotely-
 									// deleted photo with mirror mode off). Record the mtime this
 									// md5 was just verified against so the next pass takes the
 									// fast path above — this also upgrades legacy string entries
 									// to the object shape (and re-keys legacy path entries by id).
+									// Path coverage is part of the guard: unchanged content still
+									// uploads to an album folder the entry doesn't cover yet.
 									await cameraUploadState.setHash(delta.file.info.id, {
 										md5,
-										verifiedModificationTime: modificationTime ?? -1
+										verifiedModificationTime: modificationTime ?? -1,
+										paths: cachedEntry.paths
 									})
 
 									break
@@ -1498,7 +1506,8 @@ class CameraUpload {
 
 								await cameraUploadState.setHash(delta.file.info.id, {
 									md5,
-									verifiedModificationTime: modificationTime ?? -1
+									verifiedModificationTime: modificationTime ?? -1,
+									paths: mergedHashEntryPaths(cachedEntry, delta.file.path)
 								})
 								// Any completed upload proves the asset fits a window — forget its
 								// background-abort history (audit B4).
