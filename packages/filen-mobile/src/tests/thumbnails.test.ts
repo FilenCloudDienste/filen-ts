@@ -14,7 +14,6 @@ const {
 	mockHttpStoreState,
 	mockHttpStoreSubscribers,
 	mockRandomUUID,
-	mockAvailableThumbnails,
 	mockIsOnline,
 	mockOnlineSubscribers
 } = vi.hoisted(() => {
@@ -71,7 +70,6 @@ const {
 		mockHttpStoreState,
 		mockHttpStoreSubscribers,
 		mockRandomUUID,
-		mockAvailableThumbnails: new Map<string, boolean>(),
 		mockIsOnline,
 		mockOnlineSubscribers
 	}
@@ -181,12 +179,6 @@ vi.mock("@/lib/signals", () => ({
 	disposeSdkAbortSignal: vi.fn()
 }))
 
-vi.mock("@/lib/cache", () => ({
-	default: {
-		availableThumbnails: mockAvailableThumbnails
-	}
-}))
-
 vi.mock("@/features/offline/offline", () => ({
 	default: {
 		getLocalFile: vi.fn().mockResolvedValue(null)
@@ -220,7 +212,7 @@ vi.mock("@tanstack/react-query", () => ({
 }))
 
 import thumbnails, { DEFAULT_WIDTH, DEFAULT_QUALITY, VERSION } from "@/lib/thumbnails"
-import { fs } from "@/tests/mocks/expoFileSystem"
+import { fs, Directory } from "@/tests/mocks/expoFileSystem"
 
 const THUMBNAILS_DIR = `file:///shared/group.io.filen.app/thumbnails/v${VERSION}`
 
@@ -270,8 +262,14 @@ describe("Thumbnails", () => {
 	beforeEach(() => {
 		fs.clear()
 		vi.clearAllMocks()
-		mockAvailableThumbnails.clear()
 		mockHttpStoreSubscribers.clear()
+
+		// The Thumbnails singleton persists across tests — reset its disk-derived availability Set and the
+		// once-per-process restore flag so each test starts from a clean slate.
+		const internals = thumbnails as unknown as { restored: boolean; available: Set<string> }
+
+		internals.restored = false
+		internals.available.clear()
 
 		mockSaveAsync.mockImplementation(async () => {
 			const uri = "file:///cache/manipulated.jpg"
@@ -997,13 +995,19 @@ describe("Thumbnails", () => {
 			expect(fs.has(outputPath)).toBe(false)
 		})
 
-		it("removes uuid from cache.availableThumbnails", () => {
+		it("removes uuid from the availability Set", () => {
 			const item = makeFileItem("avail-rm-uuid", "photo.jpg")
-			mockAvailableThumbnails.set("avail-rm-uuid", true)
+
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set(`${THUMBNAILS_DIR}/avail-rm-uuid.webp`, new Uint8Array([0xff, 0xd8]))
+
+			thumbnails.restore()
+
+			expect(thumbnails.hasThumbnail("avail-rm-uuid")).toBe(true)
 
 			thumbnails.remove(item)
 
-			expect(mockAvailableThumbnails.has("avail-rm-uuid")).toBe(false)
+			expect(thumbnails.hasThumbnail("avail-rm-uuid")).toBe(false)
 		})
 
 		it("no-op when file does not exist", () => {
@@ -1058,22 +1062,21 @@ describe("Thumbnails", () => {
 			expect(fs.get(THUMBNAILS_DIR)).toBe("dir")
 		})
 
-		// Post-logout the availableThumbnails map is emptied + locked, so its clear() throws by design.
-		// The directory wipe must not be skippable by that throw — otherwise decrypted thumbnails survive.
-		it("still wipes and recreates the directory when the availableThumbnails clear throws", async () => {
+		// clear() wipes the directory AND the availability Set unconditionally. The Set is a plain Set
+		// (its clear cannot throw), so there is no try/catch that could make the directory wipe skippable.
+		it("wipes the directory AND the availability Set unconditionally", async () => {
 			fs.set(THUMBNAILS_DIR, "dir")
-			fs.set(`${THUMBNAILS_DIR}/a.jpg`, new Uint8Array([1]))
+			fs.set(`${THUMBNAILS_DIR}/a.webp`, new Uint8Array([1]))
 
-			const clearSpy = vi.spyOn(mockAvailableThumbnails, "clear").mockImplementationOnce(() => {
-				throw new Error("Cache not restored yet")
-			})
+			thumbnails.restore()
 
-			await expect(thumbnails.clear()).resolves.toBeUndefined()
+			expect(thumbnails.hasThumbnail("a")).toBe(true)
 
-			expect(fs.has(`${THUMBNAILS_DIR}/a.jpg`)).toBe(false)
+			await thumbnails.clear()
+
+			expect(fs.has(`${THUMBNAILS_DIR}/a.webp`)).toBe(false)
 			expect(fs.get(THUMBNAILS_DIR)).toBe("dir")
-
-			clearSpy.mockRestore()
+			expect(thumbnails.hasThumbnail("a")).toBe(false)
 		})
 	})
 
@@ -1230,7 +1233,7 @@ describe("Thumbnails", () => {
 			expect(mockGetFileUrl).not.toHaveBeenCalled()
 		})
 
-		it("updates cache.availableThumbnails on success", async () => {
+		it("marks the availability Set on success", async () => {
 			fs.set(THUMBNAILS_DIR, "dir")
 
 			await thumbnails.generateFromLocalFile({
@@ -1239,7 +1242,7 @@ describe("Thumbnails", () => {
 				name: "photo.jpg"
 			})
 
-			expect(mockAvailableThumbnails.get("cache-uuid")).toBe(true)
+			expect(thumbnails.hasThumbnail("cache-uuid")).toBe(true)
 		})
 	})
 
@@ -1532,7 +1535,7 @@ describe("Thumbnails", () => {
 	})
 
 	// ---------------------------------------------------------------------------
-	// #33 — invalidateFile drops the on-disk artifact + availableThumbnails entry
+	// #33 — invalidateFile drops the on-disk artifact + availability-Set entry
 	// but PRESERVES this.failures, so the consumer's render-error loop stays capped.
 	// (Contrast remove(), which clears this.failures — covered above.)
 	// ---------------------------------------------------------------------------
@@ -1547,13 +1550,19 @@ describe("Thumbnails", () => {
 			expect(fs.has(outputPath)).toBe(false)
 		})
 
-		it("removes the uuid from cache.availableThumbnails", () => {
+		it("removes the uuid from the availability Set", () => {
 			const item = makeFileItem("invalidate-avail-uuid", "photo.jpg")
-			mockAvailableThumbnails.set("invalidate-avail-uuid", true)
+
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set(`${THUMBNAILS_DIR}/invalidate-avail-uuid.webp`, new Uint8Array([0xff, 0xd8]))
+
+			thumbnails.restore()
+
+			expect(thumbnails.hasThumbnail("invalidate-avail-uuid")).toBe(true)
 
 			thumbnails.invalidateFile(item)
 
-			expect(mockAvailableThumbnails.has("invalidate-avail-uuid")).toBe(false)
+			expect(thumbnails.hasThumbnail("invalidate-avail-uuid")).toBe(false)
 		})
 
 		it("does NOT reset the failure counter (unlike remove)", async () => {
@@ -1581,6 +1590,93 @@ describe("Thumbnails", () => {
 			expect(() => {
 				thumbnails.invalidateFile(item)
 			}).not.toThrow()
+		})
+	})
+
+	// ---------------------------------------------------------------------------
+	// The availability Set is disk-derived and module-owned: restore() rebuilds it once at boot from
+	// the thumbnails directory listing; every generate/invalidate/remove/clear path keeps it coherent.
+	// ---------------------------------------------------------------------------
+	describe("restore / availability Set", () => {
+		it("indexes only <uuid>.webp basenames, skipping subdirs and stray files", () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set(`${THUMBNAILS_DIR}/uuid-a.webp`, new Uint8Array([1]))
+			fs.set(`${THUMBNAILS_DIR}/uuid-b.webp`, new Uint8Array([2]))
+			// A generation-pipeline temp subdir (+ its contents) and a stray partial download must be ignored.
+			fs.set(`${THUMBNAILS_DIR}/thumb_tmp_x`, "dir")
+			fs.set(`${THUMBNAILS_DIR}/thumb_tmp_x/source.jpg`, new Uint8Array([3]))
+			fs.set(`${THUMBNAILS_DIR}/partial.filendl`, new Uint8Array([4]))
+
+			thumbnails.restore()
+
+			expect(thumbnails.hasThumbnail("uuid-a")).toBe(true)
+			expect(thumbnails.hasThumbnail("uuid-b")).toBe(true)
+			expect(thumbnails.hasThumbnail("thumb_tmp_x")).toBe(false)
+			expect(thumbnails.hasThumbnail("partial")).toBe(false)
+			expect(thumbnails.hasThumbnail("uuid-missing")).toBe(false)
+		})
+
+		it("hasThumbnail is false before restore and true after", () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set(`${THUMBNAILS_DIR}/seen-uuid.webp`, new Uint8Array([1]))
+
+			expect(thumbnails.hasThumbnail("seen-uuid")).toBe(false)
+
+			thumbnails.restore()
+
+			expect(thumbnails.hasThumbnail("seen-uuid")).toBe(true)
+		})
+
+		it("a generate() cache-hit marks the availability Set", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set(`${THUMBNAILS_DIR}/hit-uuid.webp`, new Uint8Array([0xff, 0xd8]))
+
+			expect(thumbnails.hasThumbnail("hit-uuid")).toBe(false)
+
+			await thumbnails.generate({ item: makeFileItem("hit-uuid", "photo.jpg") })
+
+			expect(thumbnails.hasThumbnail("hit-uuid")).toBe(true)
+		})
+
+		it("generateFromLocalFile marks the availability Set", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+
+			await thumbnails.generateFromLocalFile({
+				localPath: "file:///local/photo.jpg",
+				uuid: "local-mark-uuid",
+				name: "photo.jpg"
+			})
+
+			expect(thumbnails.hasThumbnail("local-mark-uuid")).toBe(true)
+		})
+
+		it("restore() is once-per-process — a second call is a no-op", () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set(`${THUMBNAILS_DIR}/first-uuid.webp`, new Uint8Array([1]))
+
+			thumbnails.restore()
+
+			expect(thumbnails.hasThumbnail("first-uuid")).toBe(true)
+
+			// A file that appears AFTER the first restore must NOT be picked up by a second restore().
+			fs.set(`${THUMBNAILS_DIR}/second-uuid.webp`, new Uint8Array([2]))
+
+			thumbnails.restore()
+
+			expect(thumbnails.hasThumbnail("second-uuid")).toBe(false)
+		})
+
+		it("leaves the Set empty when the directory listing throws (self-heals via per-item generate)", () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+
+			const listSpy = vi.spyOn(Directory.prototype, "listAsRecords").mockImplementationOnce(() => {
+				throw new Error("readdir failed")
+			})
+
+			expect(() => thumbnails.restore()).not.toThrow()
+			expect(thumbnails.hasThumbnail("anything")).toBe(false)
+
+			listSpy.mockRestore()
 		})
 	})
 })

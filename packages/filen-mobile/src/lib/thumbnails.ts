@@ -5,7 +5,6 @@ import { normalizeFilePathForExpo } from "@/lib/paths"
 import { run, Semaphore } from "@filen/utils"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { Platform } from "react-native"
-import cache from "@/lib/cache"
 import useHttpStore from "@/stores/useHttp.store"
 import { onlineManager } from "@tanstack/react-query"
 import { THUMBNAILS_VERSION, THUMBNAILS_DIRECTORY } from "@/lib/storageRoots"
@@ -52,10 +51,60 @@ class Thumbnails {
 	private readonly semaphore = new Semaphore(MAX_CONCURRENT)
 	private readonly clearBarrier = new ClearBarrier()
 
+	// Disk-derived availability index: a uuid is present iff `<uuid>.webp` exists in DIRECTORY.
+	// Seeded once by restore() at boot and kept coherent by every generate/invalidate/remove/clear
+	// path, so "file on disk ⇒ in Set" holds for any caller (drive rows read it synchronously).
+	private readonly available = new Set<string>()
+	private restored = false
+
 	public constructor() {
 		ensureDirectory()
 
 		this.subscribeRecovery()
+	}
+
+	// listAsRecords() is @internal upstream but is the cheap path: it returns plain { isDirectory, uri }
+	// records with no per-entry native objects (unlike list(), which allocates a File/Directory each).
+	// Fallback if an SDK bump removes it (dependency-pin policy): DIRECTORY.list().
+	private listThumbnailRecords(): { isDirectory: boolean; uri: string }[] {
+		return DIRECTORY.listAsRecords()
+	}
+
+	// Rebuild the availability Set from disk once per process. Safe pre-auth / headless: it reads only
+	// filenames (uuids), never decrypted data. A readdir failure logs a warn and leaves the Set empty —
+	// the per-item generate path self-heals via its own disk exists-check. Idempotent (once-flag).
+	public restore(): void {
+		if (this.restored) {
+			return
+		}
+
+		this.restored = true
+
+		ensureDirectory()
+
+		try {
+			for (const record of this.listThumbnailRecords()) {
+				if (record.isDirectory) {
+					continue
+				}
+
+				const basename = FileSystem.Paths.basename(record.uri)
+
+				// The Set holds ONLY <uuid>.webp basenames — the generation pipeline also leaves
+				// thumb_tmp_* subdirectories and transient files in DIRECTORY; those must never enter it.
+				if (!basename.endsWith(".webp")) {
+					continue
+				}
+
+				this.available.add(basename.slice(0, -".webp".length))
+			}
+		} catch (e) {
+			logger.warn("thumbnails", "restore failed to list thumbnails directory", { error: e })
+		}
+	}
+
+	public hasThumbnail(uuid: string): boolean {
+		return this.available.has(uuid)
 	}
 
 	// A provider-not-ready (ProviderUnavailableError) or transient decode failure can drive an item
@@ -128,6 +177,8 @@ class Thumbnails {
 			if (outputFile.exists) {
 				// Validate integrity — a 0-byte file is the result of a crashed/interrupted write and would loop the consumer forever.
 				if (outputFile.size > 0) {
+					this.available.add(uuid)
+
 					return normalizeFilePathForExpo(outputPath)
 				}
 
@@ -294,6 +345,8 @@ class Thumbnails {
 				throw result.error
 			}
 
+			this.available.add(params.uuid)
+
 			return result.data
 		} finally {
 			this.semaphore.release()
@@ -351,7 +404,7 @@ class Thumbnails {
 		if (outputFile.exists) {
 			// Validate integrity — a 0-byte file is the result of a crashed/interrupted write and would loop the consumer forever.
 			if (outputFile.size > 0) {
-				cache.availableThumbnails.set(params.uuid, true)
+				this.available.add(params.uuid)
 
 				return normalizeFilePathForExpo(outputPath)
 			}
@@ -397,7 +450,7 @@ class Thumbnails {
 					})
 				}
 
-				cache.availableThumbnails.set(params.uuid, true)
+				this.available.add(params.uuid)
 
 				return normalizeFilePathForExpo(outputPath)
 			} catch (error) {
@@ -479,7 +532,7 @@ class Thumbnails {
 			}
 		}
 
-		cache.availableThumbnails.delete(item.data.uuid)
+		this.available.delete(item.data.uuid)
 	}
 
 	public remove(item: DriveItem): void {
@@ -491,20 +544,13 @@ class Thumbnails {
 
 		this.failures.delete(item.data.uuid)
 
-		cache.availableThumbnails.delete(item.data.uuid)
+		this.available.delete(item.data.uuid)
 	}
 
 	public async clear(): Promise<void> {
 		await this.clearBarrier.runExclusive(() => {
 			this.failures.clear()
-
-			// Post-logout the map is already emptied and locked, so its clear() throws by design; the
-			// directory wipe below must never be skippable by cache state.
-			try {
-				cache.availableThumbnails.clear()
-			} catch (e) {
-				logger.warn("thumbnails", "availableThumbnails clear failed", { error: e })
-			}
+			this.available.clear()
 
 			if (DIRECTORY.exists) {
 				DIRECTORY.delete()

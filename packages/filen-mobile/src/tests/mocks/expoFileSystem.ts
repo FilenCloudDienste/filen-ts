@@ -603,9 +603,10 @@ export class Directory {
 		return new Directory(Paths.join(this.uri, name))
 	}
 
-	listAsRecords(): { isDirectory: string; uri: string }[] {
+	// Mirrors the real expo-file-system Directory.listAsRecords(): isDirectory is a boolean, not a string.
+	listAsRecords(): { isDirectory: boolean; uri: string }[] {
 		return this.list().map(item => ({
-			isDirectory: item instanceof Directory ? "true" : "false",
+			isDirectory: item instanceof Directory,
 			uri: item.uri
 		}))
 	}

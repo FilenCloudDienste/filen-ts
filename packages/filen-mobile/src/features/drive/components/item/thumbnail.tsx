@@ -1,6 +1,5 @@
 import { useEffect, useRef, useCallback } from "react"
 import type { DriveItem, DriveItemFileExtracted, DriveItemDirectoryExtracted } from "@/types"
-import cache from "@/lib/cache"
 import thumbnails, { DIRECTORY as THUMBNAILS_DIRECTORY } from "@/lib/thumbnails"
 import { run, runEffect } from "@filen/utils"
 import Image from "@/components/ui/image"
@@ -57,9 +56,7 @@ const FileThumbnailWithGenerate = ({
 
 	const [localPath, setLocalPath] = useRecyclingState<string | null>(
 		() => {
-			const available = cache.availableThumbnails.get(item.data.uuid)
-
-			if (!available) {
+			if (!thumbnails.hasThumbnail(item.data.uuid)) {
 				return null
 			}
 
@@ -130,8 +127,6 @@ const FileThumbnailWithGenerate = ({
 				}
 
 				if (result.success) {
-					cache.availableThumbnails.set(item.data.uuid, true)
-
 					setLocalPath(result.data)
 
 					return
@@ -143,8 +138,6 @@ const FileThumbnailWithGenerate = ({
 			}
 
 			logger.warn("drive", "thumbnail generation failed after retries", { error: lastError, uuid: item.data.uuid })
-
-			cache.availableThumbnails.delete(item.data.uuid)
 		})
 
 		if (!result.success) {
@@ -161,8 +154,6 @@ const FileThumbnailWithGenerate = ({
 	}, [generate])
 
 	const onFailure = () => {
-		cache.availableThumbnails.delete(item.data.uuid)
-
 		if (errorRetryCountRef.current >= MAX_ERROR_RETRIES) {
 			// Retry budget exhausted. Drop the corrupt on-disk artifact but PRESERVE the lib's
 			// failure counter (invalidateFile, not remove) and latch failedPermanentlyRef so no
@@ -311,9 +302,7 @@ const FileThumbnail = ({
 	target?: RenderTarget
 }) => {
 	const [localPath] = useRecyclingState<string | null>(() => {
-		const available = cache.availableThumbnails.get(item.data.uuid)
-
-		if (!available) {
+		if (!thumbnails.hasThumbnail(item.data.uuid)) {
 			return null
 		}
 
