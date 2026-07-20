@@ -983,11 +983,29 @@ export class Audio {
 	}
 
 	public resume(): void {
-		if (this.state.queue.length > 0) {
-			this.intendPlaying = true
-
-			this.player.play()
+		if (this.state.queue.length === 0) {
+			return
 		}
+
+		// A finished queue parks at the end of its last track with that load's end already
+		// consumed: plain play() would stay parked at currentTime≈duration, and any re-fired
+		// end event is deduped per generation. Reload the current track from the start instead
+		// (loadAndPlay bumps the generation, so end-detection re-arms).
+		if (this.trackEndHandledGeneration === this.loadGeneration) {
+			this.loadAndPlay(this.state.position).catch(e =>
+				logger.error("audio", "loadAndPlay failed from resume", {
+					position: this.state.position,
+					uuid: this.state.queue[this.state.position]?.item.data.uuid,
+					error: e
+				})
+			)
+
+			return
+		}
+
+		this.intendPlaying = true
+
+		this.player.play()
 	}
 
 	public async next(): Promise<void> {
@@ -1287,7 +1305,10 @@ export class Audio {
 									// AU-05: a transient getFileOptional error is NOT a definitive not-found.
 									// Keep the track (present-unknown) rather than dropping it or feeding the
 									// cleanup deletion path — only an explicit not-found (undefined) removes it.
-									logger.warn("audio", "getFileOptional failed for playlist track; keeping it", { uuid: file.uuid, error: e })
+									logger.warn("audio", "getFileOptional failed for playlist track; keeping it", {
+										uuid: file.uuid,
+										error: e
+									})
 
 									return {
 										...file,
@@ -1790,7 +1811,10 @@ export function useAudioQueue() {
 	}
 }
 
-export function useIsCurrentTrack(trackUuid: string): boolean {
+// `playlistUuid` scopes the check to one playlist: the same file can live in several
+// playlists, and only the row inside the playlist the queue was started from is "current"
+// (mirrors PlaylistRow's own playlistUuid comparison). Omitted = match by file alone.
+export function useIsCurrentTrack(trackUuid: string, playlistUuid?: string): boolean {
 	const [queue, setQueue] = useState<QueueItem[]>(audio.getQueue())
 	const [position, setPosition] = useState<number>(audio.getPosition())
 
@@ -1804,7 +1828,13 @@ export function useIsCurrentTrack(trackUuid: string): boolean {
 		}
 	}, [])
 
-	return (queue[position] ?? null)?.item.data.uuid === trackUuid
+	const current = queue[position] ?? null
+
+	if (!current || current.item.data.uuid !== trackUuid) {
+		return false
+	}
+
+	return playlistUuid === undefined || current.playlistUuid === playlistUuid
 }
 
 export default audio

@@ -524,6 +524,55 @@ describe("Audio", () => {
 
 			expect(playlist.play).not.toHaveBeenCalled()
 		})
+
+		it("reloads the current track when resuming a finished non-looping queue", async () => {
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.setLoopMode("none")
+			await audio.play()
+
+			const statusListener = getPlaylistStatusListener(playlist)
+
+			expect(statusListener).toBeDefined()
+
+			// End the only track: loopMode "none" hits the terminal branch (pause, no reload),
+			// consuming this load's end-handling.
+			statusListener?.({ didJustFinish: true })
+
+			await flushMicrotasks()
+
+			playlist.replace.mockClear()
+			playlist.play.mockClear()
+
+			// Regression: resume() on a finished queue must reload from the start (a bare
+			// player.play() stays parked at the end and the re-fired end event is deduped).
+			audio.resume()
+
+			await flushMicrotasks()
+
+			expect(playlist.replace).toHaveBeenCalled()
+			expect(playlist.play).toHaveBeenCalled()
+		})
+
+		it("resumes without reloading when merely paused mid-track", async () => {
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.play()
+
+			audio.pause()
+
+			playlist.replace.mockClear()
+			playlist.play.mockClear()
+
+			audio.resume()
+
+			await flushMicrotasks()
+
+			expect(playlist.replace).not.toHaveBeenCalled()
+			expect(playlist.play).toHaveBeenCalled()
+		})
 	})
 
 	describe("next", () => {
@@ -3467,9 +3516,7 @@ describe("Audio", () => {
 		// playlistsQueryUpdate. (Decoding the uploaded ArrayBuffer is unreliable in node: Buffer.from(str)
 		// allocates from a shared pool, so the passed `.buffer` is the whole pool, not just the JSON slice.)
 		function savedPlaylist(uuid = "pl1") {
-			return (playlistsCache.current as { uuid: string; name: string; files: { uuid: string }[] }[]).find(
-				p => p.uuid === uuid
-			)
+			return (playlistsCache.current as { uuid: string; name: string; files: { uuid: string }[] }[]).find(p => p.uuid === uuid)
 		}
 
 		it("AU-07: renamePlaylist persists the freshest file list, not the caller's stale snapshot", async () => {
