@@ -630,15 +630,13 @@ export function driveItemsQueryUpdate({
 		const currentData = prev ?? ([] satisfies Awaited<ReturnType<typeof fetchData>>)
 		const next = typeof updater === "function" ? updater(currentData) : updater
 
-		// Keep the primary uuid→item cache in sync with the optimistic listing update — the drive
-		// analog of the notes/chats/playlists seeding. Only uuidToAnyDriveItem is seeded here: it is
-		// context-free (uuid → item), so it stays correct even though driveItemsQueryUpdateGlobal fans
-		// the SAME items across every path type. The DERIVED caches (directoryUuidToAnyNormalDir /
-		// AnyDirWithContext / AnySharedDirWithContext / fileUuidToNormalFile / directoryUuidToName)
-		// depend on item TYPE and path CONTEXT, which a bare DriveItem here cannot disambiguate, so
-		// they stay seeded by fetchData + the call-site cacheNew* helpers.
+		// Keep the caches in sync with the optimistic listing update — the notes/chats pattern, but
+		// richer: a DriveItem carries its SDK type (item.data) and a type discriminator, so cacheDriveItem
+		// derives EVERY cache the item's type allows (uuid→item + the type-specific dir/file caches) in one
+		// place, shared with fetchData via the same cacheNew* helpers. Context-only extras (the sharedOut
+		// normal-view, linked meta) stay with fetchData — see cacheDriveItem.
 		for (const item of next) {
-			cache.uuidToAnyDriveItem.set(item.data.uuid, item)
+			cache.cacheDriveItem(item)
 		}
 
 		return next

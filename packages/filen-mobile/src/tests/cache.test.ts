@@ -1363,6 +1363,78 @@ describe("Cache", () => {
 		})
 	})
 
+	describe("cacheDriveItem (dispatch by item type)", () => {
+		it("dispatches a file to cacheNewFile (uuid + fileUuidToNormalFile)", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			cache.cacheDriveItem(makeFileDriveItem("cdi-file"))
+
+			expect(cache.uuidToAnyDriveItem.has("cdi-file")).toBe(true)
+			expect(cache.fileUuidToNormalFile.has("cdi-file")).toBe(true)
+		})
+
+		it("dispatches a directory to the normal caches", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			cache.cacheDriveItem(makeDirectoryDriveItem("cdi-dir", "D"))
+
+			expect(cache.directoryUuidToAnyNormalDir.has("cdi-dir")).toBe(true)
+			expect(cache.directoryUuidToAnyDirWithContext.has("cdi-dir")).toBe(true)
+			expect(cache.directoryUuidToName.get("cdi-dir")).toBe("D")
+		})
+
+		it("dispatches a sharedDirectory WITH sharingRole to the shared caches", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			cache.cacheDriveItem(makeSharedDirDriveItem("cdi-shared", "S"))
+
+			expect(cache.directoryUuidToAnySharedDirWithContext.has("cdi-shared")).toBe(true)
+			expect(cache.directoryUuidToAnyDirWithContext.has("cdi-shared")).toBe(true)
+		})
+
+		it("falls back to a uuid-only reference for a sharedDirectory WITHOUT sharingRole", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const item = makeSharedDirDriveItem("cdi-norole")
+
+			delete (item.data as { sharingRole?: unknown }).sharingRole
+
+			cache.cacheDriveItem(item)
+
+			expect(cache.uuidToAnyDriveItem.has("cdi-norole")).toBe(true)
+			expect(cache.directoryUuidToAnySharedDirWithContext.has("cdi-norole")).toBe(false)
+		})
+
+		it("dispatches a sharedRootDirectory to the shared caches", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			cache.cacheDriveItem(makeSharedRootDirDriveItem("cdi-sharedroot", "R"))
+
+			expect(cache.directoryUuidToAnySharedDirWithContext.has("cdi-sharedroot")).toBe(true)
+		})
+
+		it("references a sharedRootFile by uuid only", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			cache.cacheDriveItem(makeSharedRootFileDriveItem("cdi-srf"))
+
+			expect(cache.uuidToAnyDriveItem.has("cdi-srf")).toBe(true)
+			expect(cache.fileUuidToNormalFile.has("cdi-srf")).toBe(false)
+		})
+	})
+
 	describe("refreshCachedItem", () => {
 		it("updates uuidToAnyDriveItem for any drive item type", async () => {
 			const cache = createCache()

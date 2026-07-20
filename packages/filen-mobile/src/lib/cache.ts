@@ -860,6 +860,62 @@ export class Cache {
 	}
 
 	/**
+	 * Seed every cache that can be derived from a DriveItem ALONE, dispatching on the item's own type
+	 * discriminator (item.data IS the SDK type each helper needs). Used by the drive optimistic path so
+	 * a listing mutation reseeds the type-derived caches too, not just uuidToAnyDriveItem, without a
+	 * refetch. Context the item can't carry is handled conservatively:
+	 *   - the sharedOut refinement (a shared item ALSO getting the normal-dir/file view) is skipped —
+	 *     the item looks identical shared-in vs shared-out, and shared-out listings only ever refetch;
+	 *   - a `directory` item is always treated as normal (linked browse is read-only — never
+	 *     optimistically updated — and the linked caches need the parent link meta, not on the item);
+	 *   - a shared item whose optional sharingRole didn't survive onto the DriveItem falls back to a
+	 *     uuid-only reference instead of building a share context with a missing role.
+	 */
+	public cacheDriveItem(item: DriveItem): void {
+		switch (item.type) {
+			case "file": {
+				this.cacheNewFile(item.data, item)
+
+				break
+			}
+
+			case "directory": {
+				this.cacheNewNormalDir(item.data, item)
+
+				break
+			}
+
+			case "sharedDirectory": {
+				if (item.data.sharingRole) {
+					this.cacheNewSharedDir({ ...item.data, sharingRole: item.data.sharingRole }, item, { sharedOut: false })
+				} else {
+					this.cacheDriveItemReference(item)
+				}
+
+				break
+			}
+
+			case "sharedRootDirectory": {
+				this.cacheNewSharedRootDir(item.data, item)
+
+				break
+			}
+
+			case "sharedFile": {
+				this.cacheNewSharedFile(item.data, item, { sharedOut: false })
+
+				break
+			}
+
+			case "sharedRootFile": {
+				this.cacheDriveItemReference(item)
+
+				break
+			}
+		}
+	}
+
+	/**
 	 * Refresh the cached value for an item that already exists in the persistent
 	 * caches. Use after any in-place mutation (rename / favorite / color /
 	 * timestamps / public-link toggle / version restore / metadata-changed event).

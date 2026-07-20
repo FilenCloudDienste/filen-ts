@@ -92,101 +92,133 @@ vi.mock("@/queries/client", () => ({
 	}
 }))
 
-vi.mock("@/lib/cache", () => ({
-	default: {
-		get rootUuid() {
-			return mockCacheRootUuid.value
-		},
-		directoryUuidToAnyDirWithContext: cacheDirectoryUuidToAnyDirWithContext,
-		directoryUuidToAnyNormalDir: cacheDirectoryUuidToAnyNormalDir,
-		directoryUuidToAnySharedDirWithContext: cacheDirectoryUuidToAnySharedDirWithContext,
-		directoryUuidToAnyLinkedDirWithMeta: new Map(),
-		uuidToAnyDriveItem: cacheUuidToAnyDriveItem,
-		fileUuidToNormalFile: cacheFileUuidToNormalFile,
-		directoryUuidToName: cacheDirectoryUuidToName,
-		// The real cache.ts helpers reconstruct AnyX values via the SDK; here we only replicate WHICH
-		// maps/keys each seeds (what these fetchData tests assert), with the DriveItem as a placeholder
-		// value. The real helpers' value construction is unit-tested in cache.test.ts.
-		cacheNewFile: (file: { uuid: string }, driveItem: unknown) => {
-			cacheUuidToAnyDriveItem.set(file.uuid, driveItem)
-			cacheFileUuidToNormalFile.set(file.uuid, file)
-		},
-		cacheNewNormalDir: (dir: { uuid: string }, driveItem: { data: { decryptedMeta?: { name?: string } | null } }) => {
-			cacheUuidToAnyDriveItem.set(dir.uuid, driveItem)
+vi.mock("@/lib/cache", () => {
+	// The real cache.ts helpers reconstruct AnyX values via the SDK; here we only replicate WHICH
+	// maps/keys each seeds (what these fetchData tests assert), with the DriveItem as a placeholder
+	// value. The real helpers' value construction + dispatch are unit-tested in cache.test.ts.
+	type MockItem = {
+		type?: string
+		data: { uuid: string; sharingRole?: unknown; decryptedMeta?: { name?: string } | null }
+	}
 
-			if (driveItem.data.decryptedMeta?.name) {
-				cacheDirectoryUuidToName.set(dir.uuid, driveItem.data.decryptedMeta.name)
-			}
+	const cacheNewFile = (file: { uuid: string }, driveItem: MockItem) => {
+		cacheUuidToAnyDriveItem.set(file.uuid, driveItem)
+		cacheFileUuidToNormalFile.set(file.uuid, file)
+	}
+	const cacheNewNormalDir = (dir: { uuid: string }, driveItem: MockItem) => {
+		cacheUuidToAnyDriveItem.set(dir.uuid, driveItem)
 
-			cacheDirectoryUuidToAnyNormalDir.set(dir.uuid, driveItem)
-			cacheDirectoryUuidToAnyDirWithContext.set(dir.uuid, driveItem)
-		},
-		cacheNewSharedDir: (
-			_dir: unknown,
-			driveItem: { data: { uuid: string; decryptedMeta?: { name?: string } | null } },
-			opts: { sharedOut: boolean }
-		) => {
-			const uuid = driveItem.data.uuid
+		if (driveItem.data.decryptedMeta?.name) {
+			cacheDirectoryUuidToName.set(dir.uuid, driveItem.data.decryptedMeta.name)
+		}
 
-			cacheUuidToAnyDriveItem.set(uuid, driveItem)
+		cacheDirectoryUuidToAnyNormalDir.set(dir.uuid, driveItem)
+		cacheDirectoryUuidToAnyDirWithContext.set(dir.uuid, driveItem)
+	}
+	const cacheNewSharedDir = (_dir: unknown, driveItem: MockItem, opts: { sharedOut: boolean }) => {
+		const uuid = driveItem.data.uuid
 
-			if (driveItem.data.decryptedMeta?.name) {
-				cacheDirectoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
-			}
+		cacheUuidToAnyDriveItem.set(uuid, driveItem)
 
-			cacheDirectoryUuidToAnySharedDirWithContext.set(uuid, driveItem)
-			cacheDirectoryUuidToAnyDirWithContext.set(uuid, driveItem)
+		if (driveItem.data.decryptedMeta?.name) {
+			cacheDirectoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
+		}
 
-			if (opts.sharedOut) {
-				cacheDirectoryUuidToAnyNormalDir.set(uuid, driveItem)
-			}
-		},
-		cacheNewSharedRootDir: (
-			_dir: unknown,
-			driveItem: { data: { uuid: string; decryptedMeta?: { name?: string } | null } }
-		) => {
-			const uuid = driveItem.data.uuid
+		cacheDirectoryUuidToAnySharedDirWithContext.set(uuid, driveItem)
+		cacheDirectoryUuidToAnyDirWithContext.set(uuid, driveItem)
 
-			cacheUuidToAnyDriveItem.set(uuid, driveItem)
-
-			if (driveItem.data.decryptedMeta?.name) {
-				cacheDirectoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
-			}
-
-			cacheDirectoryUuidToAnySharedDirWithContext.set(uuid, driveItem)
-			cacheDirectoryUuidToAnyDirWithContext.set(uuid, driveItem)
-		},
-		cacheNewSharedFile: (file: unknown, driveItem: { data: { uuid: string } }, opts: { sharedOut: boolean }) => {
-			const uuid = driveItem.data.uuid
-
-			cacheUuidToAnyDriveItem.set(uuid, driveItem)
-
-			if (opts.sharedOut) {
-				cacheFileUuidToNormalFile.set(uuid, file)
-			}
-		},
-		cacheNewLinkedDir: (
-			_dir: unknown,
-			driveItem: { data: { uuid: string; decryptedMeta?: { name?: string } | null } },
-			meta: unknown
-		) => {
-			const uuid = driveItem.data.uuid
-
-			cacheUuidToAnyDriveItem.set(uuid, driveItem)
-
-			if (driveItem.data.decryptedMeta?.name) {
-				cacheDirectoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
-			}
-
-			if (meta) {
-				cacheDirectoryUuidToAnyDirWithContext.set(uuid, driveItem)
-			}
-		},
-		cacheDriveItemReference: (driveItem: { data: { uuid: string } }) => {
-			cacheUuidToAnyDriveItem.set(driveItem.data.uuid, driveItem)
+		if (opts.sharedOut) {
+			cacheDirectoryUuidToAnyNormalDir.set(uuid, driveItem)
 		}
 	}
-}))
+	const cacheNewSharedRootDir = (_dir: unknown, driveItem: MockItem) => {
+		const uuid = driveItem.data.uuid
+
+		cacheUuidToAnyDriveItem.set(uuid, driveItem)
+
+		if (driveItem.data.decryptedMeta?.name) {
+			cacheDirectoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
+		}
+
+		cacheDirectoryUuidToAnySharedDirWithContext.set(uuid, driveItem)
+		cacheDirectoryUuidToAnyDirWithContext.set(uuid, driveItem)
+	}
+	const cacheNewSharedFile = (file: unknown, driveItem: MockItem, opts: { sharedOut: boolean }) => {
+		const uuid = driveItem.data.uuid
+
+		cacheUuidToAnyDriveItem.set(uuid, driveItem)
+
+		if (opts.sharedOut) {
+			cacheFileUuidToNormalFile.set(uuid, file)
+		}
+	}
+	const cacheNewLinkedDir = (_dir: unknown, driveItem: MockItem, meta: unknown) => {
+		const uuid = driveItem.data.uuid
+
+		cacheUuidToAnyDriveItem.set(uuid, driveItem)
+
+		if (driveItem.data.decryptedMeta?.name) {
+			cacheDirectoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
+		}
+
+		if (meta) {
+			cacheDirectoryUuidToAnyDirWithContext.set(uuid, driveItem)
+		}
+	}
+	const cacheDriveItemReference = (driveItem: MockItem) => {
+		cacheUuidToAnyDriveItem.set(driveItem.data.uuid, driveItem)
+	}
+	// Mirrors the real cacheDriveItem dispatcher: pick the helper from the item's own type.
+	const cacheDriveItem = (item: MockItem) => {
+		switch (item.type) {
+			case "file":
+				cacheNewFile(item.data, item)
+				break
+			case "directory":
+				cacheNewNormalDir(item.data, item)
+				break
+			case "sharedDirectory":
+				if (item.data.sharingRole) {
+					cacheNewSharedDir(item.data, item, { sharedOut: false })
+				} else {
+					cacheDriveItemReference(item)
+				}
+				break
+			case "sharedRootDirectory":
+				cacheNewSharedRootDir(item.data, item)
+				break
+			case "sharedFile":
+				cacheNewSharedFile(item.data, item, { sharedOut: false })
+				break
+			case "sharedRootFile":
+				cacheDriveItemReference(item)
+				break
+		}
+	}
+
+	return {
+		default: {
+			get rootUuid() {
+				return mockCacheRootUuid.value
+			},
+			directoryUuidToAnyDirWithContext: cacheDirectoryUuidToAnyDirWithContext,
+			directoryUuidToAnyNormalDir: cacheDirectoryUuidToAnyNormalDir,
+			directoryUuidToAnySharedDirWithContext: cacheDirectoryUuidToAnySharedDirWithContext,
+			directoryUuidToAnyLinkedDirWithMeta: new Map(),
+			uuidToAnyDriveItem: cacheUuidToAnyDriveItem,
+			fileUuidToNormalFile: cacheFileUuidToNormalFile,
+			directoryUuidToName: cacheDirectoryUuidToName,
+			cacheNewFile,
+			cacheNewNormalDir,
+			cacheNewSharedDir,
+			cacheNewSharedRootDir,
+			cacheNewSharedFile,
+			cacheNewLinkedDir,
+			cacheDriveItemReference,
+			cacheDriveItem
+		}
+	}
+})
 
 vi.mock("@/features/offline/offline", () => ({
 	default: {
@@ -538,17 +570,19 @@ describe("driveItemsQueryUpdateForNormalParent", () => {
 	it("seeds cache.uuidToAnyDriveItem for each item in the optimistic update (notes/chats analog)", () => {
 		mockCacheRootUuid.value = null
 
-		const item = { data: { uuid: "opt-seed-1" } } as unknown as DriveItem
+		const item = { type: "file", data: { uuid: "opt-seed-1" } } as unknown as DriveItem
 
 		driveItemsQueryUpdateForNormalParent({ parentUuid: "some-parent", updater: [item] })
 
 		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
 		const inner = calls[0]![1] as (prev: unknown[]) => unknown[]
 
-		// Running the wrapper (what queryUpdater.set invokes) is what seeds the cache.
+		// Running the wrapper (what queryUpdater.set invokes) is what seeds the cache: cacheDriveItem
+		// dispatches on the item's own type, so a file also lands in fileUuidToNormalFile.
 		inner([])
 
 		expect(cacheUuidToAnyDriveItem.get("opt-seed-1")).toBe(item)
+		expect(cacheFileUuidToNormalFile.has("opt-seed-1")).toBe(true)
 	})
 })
 
