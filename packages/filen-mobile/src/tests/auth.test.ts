@@ -141,6 +141,13 @@ vi.mock("@/lib/sqlite", () => ({
 	}
 }))
 
+// sort.ts pulls the i18n/time chain (bare __DEV__ at eval) — stub the logout hook only.
+vi.mock("@/lib/sort", () => ({
+	clearSortCaches: vi.fn(() => {
+		callLog.push("clearSortCaches")
+	})
+}))
+
 vi.mock("@/lib/cache", () => ({
 	default: {
 		clear: vi.fn(() => {

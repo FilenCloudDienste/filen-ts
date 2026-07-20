@@ -24,6 +24,15 @@ const uuidCache = new Map<string, number>()
 const lowerCache = new Map<string, string>()
 const numericPartsCache = new Map<string, (string | number)[]>()
 
+// Logout hook: the memo caches key on decrypted names (and uuids), so like every other
+// session-scoped in-memory store they must not carry one account's data — or its decrypted
+// names — into the next session. Growth is otherwise bounded only by distinct names seen.
+export function clearSortCaches(): void {
+	uuidCache.clear()
+	lowerCache.clear()
+	numericPartsCache.clear()
+}
+
 function getUuidNumber(uuid: string): number {
 	let cached = uuidCache.get(uuid)
 

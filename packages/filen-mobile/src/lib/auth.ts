@@ -25,6 +25,7 @@ import offlineSync from "@/features/offline/offlineSync"
 import { sync as chatsSync } from "@/features/chats/components/sync"
 import { sync as notesSync } from "@/features/notes/components/sync"
 import cache from "@/lib/cache"
+import { clearSortCaches } from "@/lib/sort"
 import fileCache from "@/lib/fileCache"
 import audioCache from "@/features/audio/audioCache"
 import thumbnails from "@/lib/thumbnails"
@@ -456,6 +457,13 @@ class Auth {
 			drive.resetCachedRootUuid()
 		} catch (e) {
 			logger.error("auth", "drive root uuid reset failed during logout", { err: e })
+		}
+
+		// Sort memo caches key on decrypted names — same session-scoped wipe as cache.clear().
+		try {
+			clearSortCaches()
+		} catch (e) {
+			logger.error("auth", "sort cache clear failed during logout", { err: e })
 		}
 
 		// Camera-upload ledger is account-scoped; the locked latch stops a worker-tail write from

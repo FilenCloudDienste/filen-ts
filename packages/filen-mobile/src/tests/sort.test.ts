@@ -13,7 +13,7 @@ vi.mock("@/lib/time", () => ({
 	intlLanguage: "en-US"
 }))
 
-import { itemSorter, notesSorter, captureTimestamp, type SortByType } from "@/lib/sort"
+import { itemSorter, notesSorter, captureTimestamp, clearSortCaches, type SortByType } from "@/lib/sort"
 import { type DriveItem, type Note, type NoteTag } from "@/types"
 
 function makeItem(
@@ -1314,10 +1314,7 @@ describe("itemSorter — deterministic ties + directory sizes (#49)", () => {
 	})
 
 	it("non-integral or non-finite map values fall back to data.size instead of throwing", () => {
-		const items = [
-			makeItem("directory", "nan-dir", { uuid: "dir-nan" }),
-			makeItem("directory", "real-dir", { uuid: "dir-real" })
-		]
+		const items = [makeItem("directory", "nan-dir", { uuid: "dir-nan" }), makeItem("directory", "real-dir", { uuid: "dir-real" })]
 
 		const directorySizes = new Map<string, number>([
 			["dir-nan", Number.NaN],
@@ -1328,5 +1325,20 @@ describe("itemSorter — deterministic ties + directory sizes (#49)", () => {
 
 		// NaN → data.size (0n) sorts first; 123.75 truncates to 123n.
 		expect(asc.map(i => i.data.decryptedMeta?.name)).toEqual(["nan-dir", "real-dir"])
+	})
+})
+
+describe("clearSortCaches", () => {
+	it("sorting stays correct after the logout wipe (memo caches repopulate cleanly)", () => {
+		const items = [makeItem("file", "b10.txt"), makeItem("file", "b2.txt"), makeItem("file", "a.txt")]
+
+		const before = itemSorter.sortItems(items, "nameAsc").map(i => i.data.decryptedMeta?.name)
+
+		clearSortCaches()
+
+		const after = itemSorter.sortItems(items, "nameAsc").map(i => i.data.decryptedMeta?.name)
+
+		expect(after).toEqual(before)
+		expect(after).toEqual(["a.txt", "b2.txt", "b10.txt"])
 	})
 })
