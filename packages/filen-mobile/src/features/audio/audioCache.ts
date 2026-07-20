@@ -126,7 +126,9 @@ export class AudioCache {
 		audio: FileSystem.File
 		metadata: FileSystem.File
 	} {
-		const { file: dataFile } = fileCache.getFiles(item)
+		// Handle derivation only — the actual audio bytes are written by fileCache.get()
+		// (which ensures its own directory), so a metadata peek must not create one.
+		const { file: dataFile } = fileCache.getFiles(item, { ensureParentDirectory: false })
 
 		return {
 			audio: dataFile,
@@ -238,7 +240,10 @@ export class AudioCache {
 						}
 					}
 				} catch (e) {
-					logger.error("audioCache", "corrupt metadata sidecar deleted", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item), error: e })
+					logger.error("audioCache", "corrupt metadata sidecar deleted", {
+						uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item),
+						error: e
+					})
 
 					if (metadataFile.exists) {
 						metadataFile.delete()
@@ -300,7 +305,10 @@ export class AudioCache {
 								image = await Image.loadAsync(pictureFile.uri)
 								pictureBlurhash = await Image.generateBlurhashAsync(image, [4, 3])
 							} catch (e) {
-								logger.warn("audioCache", "blurhash generation failed for cover art", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item), error: e })
+								logger.warn("audioCache", "blurhash generation failed for cover art", {
+									uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item),
+									error: e
+								})
 							} finally {
 								if (image) {
 									image.release()
@@ -338,7 +346,10 @@ export class AudioCache {
 						}
 					}
 				} catch (e) {
-					logger.error("audioCache", "audio metadata parse or sidecar write failed", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item), error: e })
+					logger.error("audioCache", "audio metadata parse or sidecar write failed", {
+						uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item),
+						error: e
+					})
 
 					if (metadataFile.exists) {
 						metadataFile.delete()

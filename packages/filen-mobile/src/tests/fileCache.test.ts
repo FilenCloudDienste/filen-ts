@@ -296,6 +296,15 @@ describe("FileCache", () => {
 			expect(fs.get(`${BASE_DIR}/new-uuid`)).toBe("dir")
 		})
 
+		it("skips directory creation with ensureParentDirectory: false (read-only derivation)", async () => {
+			const cache = await createFileCache()
+			const item = wrapDrive(makeFileItem("peek-uuid", "doc.pdf"))
+
+			cache.getFiles(item, { ensureParentDirectory: false })
+
+			expect(fs.has(`${BASE_DIR}/peek-uuid`)).toBe(false)
+		})
+
 		it("returns file, metadata, and parentDirectory for an external item", async () => {
 			const cache = await createFileCache()
 			const url = "https://example.com/asset.png"
@@ -330,6 +339,18 @@ describe("FileCache", () => {
 			const result = await cache.has(item)
 
 			expect(result).toBe(false)
+		})
+
+		it("a miss leaves NO per-uuid directory behind (pure probe, no FS churn)", async () => {
+			const cache = await createFileCache()
+			const item = wrapDrive(makeFileItem("probe-uuid", "photo.jpg"))
+
+			const result = await cache.has(item)
+
+			expect(result).toBe(false)
+			// Pre-fix every has() on an uncached item materialized an empty directory that
+			// only gc reclaimed later.
+			expect(fs.has(`${BASE_DIR}/probe-uuid`)).toBe(false)
 		})
 
 		it("returns false when file doesn't exist", async () => {
@@ -1272,7 +1293,10 @@ describe("FileCache", () => {
 			fs.set(`${dir}/${uuid}`, new Uint8Array([1]))
 			// Parseable object with keys, but cachedAt is NOT a number. Pre-fix `now >= ("x" + ttlMs)` is
 			// NaN-comparison false → the entry survives forever. Post-fix it is a corrupt deletion candidate.
-			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ type: "drive", cachedAt: "not-a-number" }))))
+			fs.set(
+				`${dir}/${uuid}.filenmeta`,
+				new Uint8Array(new TextEncoder().encode(serialize({ type: "drive", cachedAt: "not-a-number" })))
+			)
 
 			await cache.gc()
 
@@ -1322,7 +1346,10 @@ describe("FileCache", () => {
 
 			fs.set(dir, "dir")
 			fs.set(`${dir}/${uuid}`, new Uint8Array([1]))
-			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ ...wrapDrive(makeFileItem(uuid, "f.txt")), cachedAt: Date.now() }))))
+			fs.set(
+				`${dir}/${uuid}.filenmeta`,
+				new Uint8Array(new TextEncoder().encode(serialize({ ...wrapDrive(makeFileItem(uuid, "f.txt")), cachedAt: Date.now() })))
+			)
 
 			// Gate gc's Phase-1 sidecar read so gc is parked mid-pass while holding the barrier.
 			let releaseRead!: () => void

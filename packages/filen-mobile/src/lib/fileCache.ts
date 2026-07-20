@@ -150,7 +150,15 @@ export class FileCache {
 		return xxHash32(item.data.url).toString(16)
 	}
 
-	public getFiles(item: CacheItem): {
+	public getFiles(
+		item: CacheItem,
+		opts?: {
+			// Default true (write paths need the directory in place). Read-only derivations —
+			// has(), audioCache's metadata peeks — pass false so a pure existence/metadata query
+			// doesn't materialize an empty per-uuid directory that only gc reclaims later.
+			ensureParentDirectory?: boolean
+		}
+	): {
 		file: FileSystem.File
 		metadata: FileSystem.File
 		parentDirectory: FileSystem.Directory
@@ -163,7 +171,7 @@ export class FileCache {
 			FileSystem.Paths.join(PARENT_DIRECTORY.uri, item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
 		)
 
-		if (!parentDirectory.exists) {
+		if ((opts?.ensureParentDirectory ?? true) && !parentDirectory.exists) {
 			parentDirectory.create({
 				idempotent: true,
 				intermediates: true
@@ -207,7 +215,8 @@ export class FileCache {
 				this.clearBarrier.leave()
 			})
 
-			const { file, metadata } = this.getFiles(item)
+			// Read-only probe: never materialize the per-uuid directory just to answer false.
+			const { file, metadata } = this.getFiles(item, { ensureParentDirectory: false })
 
 			if (!file.exists || !metadata.exists || metadata.size === 0) {
 				return false
@@ -218,7 +227,10 @@ export class FileCache {
 			try {
 				metadataContent = deserialize(await metadata.text()) as Metadata
 			} catch (e) {
-				logger.warn("fileCache", "sidecar parse failed in has", { uuid: item.type === "drive" ? item.data.data.uuid : undefined, error: e })
+				logger.warn("fileCache", "sidecar parse failed in has", {
+					uuid: item.type === "drive" ? item.data.data.uuid : undefined,
+					error: e
+				})
 
 				// Torn/unparseable sidecar (crash mid-write before sidecars became atomic,
 				// disk corruption): self-heal at access time — treat as a miss and drop the
@@ -313,7 +325,10 @@ export class FileCache {
 						return file
 					}
 				} catch (e) {
-					logger.warn("fileCache", "sidecar parse failed in get, re-downloading", { uuid: item.type === "drive" ? item.data.data.uuid : undefined, error: e })
+					logger.warn("fileCache", "sidecar parse failed in get, re-downloading", {
+						uuid: item.type === "drive" ? item.data.data.uuid : undefined,
+						error: e
+					})
 
 					if (metadataFile.exists) {
 						metadataFile.delete()
@@ -406,7 +421,13 @@ export class FileCache {
 					parentDirectory.delete()
 				}
 
-				logger.error("fileCache", "file download/cache failed", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item as Extract<CacheItem, { type: "external" }>), error: e })
+				logger.error("fileCache", "file download/cache failed", {
+					uuid:
+						item.type === "drive"
+							? item.data.data.uuid
+							: this.getExternalItemId(item as Extract<CacheItem, { type: "external" }>),
+					error: e
+				})
 
 				throw e
 			}
@@ -508,7 +529,12 @@ export class FileCache {
 						// `now >= NaN` false → it would survive forever AND its NaN cachedAt would poison the
 						// size-cap eviction sort (NaN comparators are unstable). Treat a non-numeric cachedAt
 						// as a corrupt deletion candidate (matches audioCache's parseMetadata cachedAt check).
-						if (!metadata || Object.keys(metadata).length === 0 || typeof metadata.cachedAt !== "number" || now >= metadata.cachedAt + ttlMs) {
+						if (
+							!metadata ||
+							Object.keys(metadata).length === 0 ||
+							typeof metadata.cachedAt !== "number" ||
+							now >= metadata.cachedAt + ttlMs
+						) {
 							return { kind: "delete" as const, uuid }
 						}
 
@@ -590,7 +616,12 @@ export class FileCache {
 						const recheck = await run(async () => {
 							const metadata = deserialize(await metadataFile.text()) as Metadata | null
 
-							if (!metadata || Object.keys(metadata).length === 0 || typeof metadata.cachedAt !== "number" || now >= metadata.cachedAt + ttlMs) {
+							if (
+								!metadata ||
+								Object.keys(metadata).length === 0 ||
+								typeof metadata.cachedAt !== "number" ||
+								now >= metadata.cachedAt + ttlMs
+							) {
 								return true
 							}
 
