@@ -1,10 +1,8 @@
 import {
 	AnyNormalDir,
-	AnyDirWithContext,
 	AnySharedDir,
 	AnySharedDirWithContext,
 	AnyLinkedDir,
-	AnyLinkedDirWithContext,
 	type SharedDir,
 	type SharingRole,
 	type SharedRootDirsAndFiles,
@@ -13,7 +11,7 @@ import {
 	type DirPublicLink,
 	type Dir
 } from "@filen/sdk-rs"
-import { type DriveItem, type Note, type Chat } from "@/types"
+import { type DriveItem } from "@/types"
 import sqlite from "@/lib/sqlite"
 import { forEachKvRowByPrefix } from "@/lib/kvScan"
 import { serialize, deserialize } from "@/lib/serializer"
@@ -154,14 +152,10 @@ export class Cache {
 	public readonly secureStore = new Map<string, unknown>()
 
 	// Persisted — each entry independently persisted to SQLite KV
-	public readonly directoryUuidToName: PersistentMap<string>
-	public readonly noteUuidToNote: PersistentMap<Note>
-	public readonly chatUuidToChat: PersistentMap<Chat>
 	public readonly uuidToAnyDriveItem: PersistentMap<DriveItem>
 	public readonly fileUuidToNormalFile: PersistentMap<File>
 	public readonly directoryUuidToAnySharedDirWithContext: PersistentMap<AnySharedDirWithContext>
 	public readonly directoryUuidToAnyNormalDir: PersistentMap<AnyNormalDir>
-	public readonly directoryUuidToAnyDirWithContext: PersistentMap<AnyDirWithContext>
 	public readonly availableThumbnails: PersistentMap<boolean>
 	// The string arm of the union is the LEGACY persisted shape (bare md5) — see
 	// CameraUploadHashEntry. Writers must always write the object shape.
@@ -183,14 +177,10 @@ export class Cache {
 	}>
 
 	public constructor() {
-		this.directoryUuidToName = this.createMap<string>("directoryUuidToName")
-		this.noteUuidToNote = this.createMap<Note>("noteUuidToNote")
-		this.chatUuidToChat = this.createMap<Chat>("chatUuidToChat")
 		this.uuidToAnyDriveItem = this.createMap<DriveItem>("uuidToAnyDriveItem")
 		this.fileUuidToNormalFile = this.createMap<File>("fileUuidToNormalFile")
 		this.directoryUuidToAnySharedDirWithContext = this.createMap<AnySharedDirWithContext>("directoryUuidToAnySharedDirWithContext")
 		this.directoryUuidToAnyNormalDir = this.createMap<AnyNormalDir>("directoryUuidToAnyNormalDir")
-		this.directoryUuidToAnyDirWithContext = this.createMap<AnyDirWithContext>("directoryUuidToAnyDirWithContext")
 		this.availableThumbnails = this.createMap<boolean>("availableThumbnails")
 		this.cameraUploadHashes = this.createMap<CameraUploadHashEntry | string>("cameraUploadHashes")
 		this.cameraUploadBackgroundAborts = this.createMap<number>("cameraUploadBackgroundAborts")
@@ -728,15 +718,7 @@ export class Cache {
 	 */
 	public cacheNewNormalDir(dir: Dir, driveItem: DriveItem): void {
 		this.uuidToAnyDriveItem.set(dir.uuid, driveItem)
-
-		if (driveItem.data.decryptedMeta?.name) {
-			this.directoryUuidToName.set(dir.uuid, driveItem.data.decryptedMeta.name)
-		}
-
-		const normalDir = new AnyNormalDir.Dir(dir)
-
-		this.directoryUuidToAnyNormalDir.set(dir.uuid, normalDir)
-		this.directoryUuidToAnyDirWithContext.set(dir.uuid, new AnyDirWithContext.Normal(normalDir))
+		this.directoryUuidToAnyNormalDir.set(dir.uuid, new AnyNormalDir.Dir(dir))
 	}
 
 	/**
@@ -755,17 +737,13 @@ export class Cache {
 
 		this.uuidToAnyDriveItem.set(uuid, driveItem)
 
-		if (driveItem.data.decryptedMeta?.name) {
-			this.directoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
-		}
-
-		const withContext = AnySharedDirWithContext.new({
-			dir: new AnySharedDir.Dir(dir),
-			shareInfo: dir.sharingRole
-		})
-
-		this.directoryUuidToAnySharedDirWithContext.set(uuid, withContext)
-		this.directoryUuidToAnyDirWithContext.set(uuid, new AnyDirWithContext.Shared(withContext))
+		this.directoryUuidToAnySharedDirWithContext.set(
+			uuid,
+			AnySharedDirWithContext.new({
+				dir: new AnySharedDir.Dir(dir),
+				shareInfo: dir.sharingRole
+			})
+		)
 
 		if (opts.sharedOut) {
 			this.directoryUuidToAnyNormalDir.set(uuid, new AnyNormalDir.Dir(dir.inner))
@@ -781,17 +759,13 @@ export class Cache {
 
 		this.uuidToAnyDriveItem.set(uuid, driveItem)
 
-		if (driveItem.data.decryptedMeta?.name) {
-			this.directoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
-		}
-
-		const withContext = AnySharedDirWithContext.new({
-			dir: new AnySharedDir.Root(dir),
-			shareInfo: dir.sharingRole
-		})
-
-		this.directoryUuidToAnySharedDirWithContext.set(uuid, withContext)
-		this.directoryUuidToAnyDirWithContext.set(uuid, new AnyDirWithContext.Shared(withContext))
+		this.directoryUuidToAnySharedDirWithContext.set(
+			uuid,
+			AnySharedDirWithContext.new({
+				dir: new AnySharedDir.Root(dir),
+				shareInfo: dir.sharingRole
+			})
+		)
 	}
 
 	/**
@@ -817,18 +791,14 @@ export class Cache {
 
 	/**
 	 * Mirror a newly-known LINKED directory (public-link browse) into the caches. Reference:
-	 * the "linked" branch of fetchData(). The uuid→item and name mappings are always seeded; the
-	 * linked-context caches (which need the parent link's meta, not carried on the DriveItem) are
-	 * seeded only when `meta` is known — matching fetchData, which caches those under `if (meta)`.
+	 * the "linked" branch of fetchData(). The uuid→item mapping is always seeded; the linked-meta
+	 * cache (which needs the parent link's meta, not carried on the DriveItem) is seeded only when
+	 * `meta` is known — matching fetchData, which caches those under `if (meta)`.
 	 */
 	public cacheNewLinkedDir(dir: LinkedDirsAndFiles["dirs"][number], driveItem: DriveItem, meta: DirPublicLink | null): void {
 		const uuid = driveItem.data.uuid
 
 		this.uuidToAnyDriveItem.set(uuid, driveItem)
-
-		if (driveItem.data.decryptedMeta?.name) {
-			this.directoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
-		}
 
 		if (!meta) {
 			return
@@ -838,16 +808,6 @@ export class Cache {
 			dir: new AnyLinkedDir.Dir(dir),
 			meta
 		})
-
-		this.directoryUuidToAnyDirWithContext.set(
-			uuid,
-			new AnyDirWithContext.Linked(
-				AnyLinkedDirWithContext.new({
-					dir: new AnyLinkedDir.Dir(dir),
-					link: meta
-				})
-			)
-		)
 	}
 
 	/**
@@ -916,25 +876,6 @@ export class Cache {
 	}
 
 	/**
-	 * Refresh the cached value for an item that already exists in the persistent
-	 * caches. Use after any in-place mutation (rename / favorite / color /
-	 * timestamps / public-link toggle / version restore / metadata-changed event).
-	 * For files, pass the updated raw SDK `File` if available so subsequent socket
-	 * reads of `fileUuidToNormalFile` see the new shape.
-	 */
-	public refreshCachedItem(driveItem: DriveItem, file?: File): void {
-		this.uuidToAnyDriveItem.set(driveItem.data.uuid, driveItem)
-
-		if (file && (driveItem.type === "file" || driveItem.type === "sharedFile" || driveItem.type === "sharedRootFile")) {
-			this.fileUuidToNormalFile.set(file.uuid, file)
-		}
-
-		if (driveItem.type === "directory" && driveItem.data.decryptedMeta?.name) {
-			this.directoryUuidToName.set(driveItem.data.uuid, driveItem.data.decryptedMeta.name)
-		}
-	}
-
-	/**
 	 * Forget every persistent-cache entry for a uuid. Use after a permanent
 	 * delete (FileDeletedPermanent / FolderDeletedPermanent, deletePermanently,
 	 * emptyTrash). Do NOT use for trash/archive — the item still exists, just
@@ -943,9 +884,7 @@ export class Cache {
 	public forgetItem(uuid: string): void {
 		this.uuidToAnyDriveItem.delete(uuid)
 		this.fileUuidToNormalFile.delete(uuid)
-		this.directoryUuidToName.delete(uuid)
 		this.directoryUuidToAnyNormalDir.delete(uuid)
-		this.directoryUuidToAnyDirWithContext.delete(uuid)
 		this.directoryUuidToAnySharedDirWithContext.delete(uuid)
 		this.directoryUuidToAnyLinkedDirWithMeta.delete(uuid)
 	}

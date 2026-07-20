@@ -625,7 +625,7 @@ describe.skipIf(!BENCH)("cache benchmark", () => {
 					}
 				})
 
-				// ── 09 forgetItem ×n (7 map deletes per call) ──────────────────────────
+				// ── 09 forgetItem ×n (5 map deletes per call) ──────────────────────────
 				await runScenario({
 					name: "09 forgetItem",
 					scale,
@@ -638,7 +638,7 @@ describe.skipIf(!BENCH)("cache benchmark", () => {
 							cache.uuidToAnyDriveItem.set(uuids[i] as string, freshValues[i] as DriveItem)
 
 							if (i % 2 === 0) {
-								cache.directoryUuidToName.set(uuids[i] as string, `dir-${i}`)
+								cache.cameraUploadHashes.set(uuids[i] as string, `dir-${i}`)
 							}
 						}
 

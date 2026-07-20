@@ -271,7 +271,6 @@ vi.mock("@/lib/cache", () => ({
 		directoryUuidToAnySharedDirWithContext: new Map(),
 		cacheNewFile: vi.fn(),
 		cacheNewNormalDir: vi.fn(),
-		refreshCachedItem: vi.fn(),
 		forgetItem: vi.fn()
 	}
 }))

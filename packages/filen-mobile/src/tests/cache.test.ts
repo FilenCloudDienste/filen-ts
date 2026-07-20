@@ -51,10 +51,8 @@ vi.mock("@/lib/paths", () => ({
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-// Stub SDK runtime values referenced by cache helpers. cache.ts now imports
-// AnyNormalDir + AnyDirWithContext as runtime values for the cacheNewNormalDir
-// helper — without this mock the real SDK module would load its WASM bridge,
-// which references `self` (undefined in node).
+// Stub SDK runtime values referenced by the cacheNew* helpers — without this mock the
+// real SDK module would load its WASM bridge, which references `self` (undefined in node).
 vi.mock("@filen/sdk-rs", () => {
 	// Stub SDK wrapper constructors used by the cacheNew* helpers. Each records its tag and the
 	// constructor arg(s) under `inner` so tests can assert what was wrapped, without loading the real
@@ -1171,7 +1169,7 @@ describe("Cache", () => {
 	})
 
 	describe("cacheNewNormalDir", () => {
-		it("inserts dir into uuidToAnyDriveItem, directoryUuidToAnyNormalDir, and directoryUuidToAnyDirWithContext", async () => {
+		it("inserts dir into uuidToAnyDriveItem and directoryUuidToAnyNormalDir", async () => {
 			const cache = createCache()
 
 			await cache.restore()
@@ -1184,38 +1182,9 @@ describe("Cache", () => {
 
 			expect(cache.uuidToAnyDriveItem.get(uuid)).toBe(driveItem)
 			expect(cache.directoryUuidToAnyNormalDir.has(uuid)).toBe(true)
-			expect(cache.directoryUuidToAnyDirWithContext.has(uuid)).toBe(true)
 		})
 
-		it("sets directoryUuidToName when decryptedMeta.name is present", async () => {
-			const cache = createCache()
-
-			await cache.restore()
-
-			const uuid = "dir-uuid-named"
-			const sdkDir = makeSdkDir(uuid)
-			const driveItem = makeDirectoryDriveItem(uuid, "Projects")
-
-			cache.cacheNewNormalDir(sdkDir, driveItem)
-
-			expect(cache.directoryUuidToName.get(uuid)).toBe("Projects")
-		})
-
-		it("does not set directoryUuidToName when decryptedMeta is null", async () => {
-			const cache = createCache()
-
-			await cache.restore()
-
-			const uuid = "dir-uuid-no-meta"
-			const sdkDir = makeSdkDir(uuid)
-			const driveItem = makeDirectoryDriveItem(uuid) // no name
-
-			cache.cacheNewNormalDir(sdkDir, driveItem)
-
-			expect(cache.directoryUuidToName.has(uuid)).toBe(false)
-		})
-
-		it("constructs AnyNormalDir.Dir and AnyDirWithContext.Normal wrappers around the raw dir", async () => {
+		it("constructs an AnyNormalDir.Dir wrapper around the raw dir", async () => {
 			const cache = createCache()
 
 			await cache.restore()
@@ -1227,20 +1196,15 @@ describe("Cache", () => {
 			cache.cacheNewNormalDir(sdkDir, driveItem)
 
 			const normalDir = cache.directoryUuidToAnyNormalDir.get(uuid) as any
-			const dirWithCtx = cache.directoryUuidToAnyDirWithContext.get(uuid) as any
 
 			// StubDir wraps the raw sdk dir
 			expect(normalDir.tag).toBe("Dir")
 			expect(normalDir.inner[0]).toBe(sdkDir)
-
-			// StubNormal wraps the AnyNormalDir
-			expect(dirWithCtx.tag).toBe("Normal")
-			expect(dirWithCtx.inner[0]).toBe(normalDir)
 		})
 	})
 
 	describe("cacheNewSharedDir", () => {
-		it("seeds uuidToAnyDriveItem, the shared-context caches and the name", async () => {
+		it("seeds uuidToAnyDriveItem and the shared-context cache", async () => {
 			const cache = createCache()
 
 			await cache.restore()
@@ -1251,8 +1215,6 @@ describe("Cache", () => {
 
 			expect(cache.uuidToAnyDriveItem.has(uuid)).toBe(true)
 			expect(cache.directoryUuidToAnySharedDirWithContext.has(uuid)).toBe(true)
-			expect(cache.directoryUuidToAnyDirWithContext.has(uuid)).toBe(true)
-			expect(cache.directoryUuidToName.get(uuid)).toBe("Shared")
 		})
 
 		it("does NOT seed directoryUuidToAnyNormalDir for a shared-IN dir (sharedOut: false)", async () => {
@@ -1281,7 +1243,7 @@ describe("Cache", () => {
 	})
 
 	describe("cacheNewSharedRootDir", () => {
-		it("seeds the shared-context caches and name for a shared root dir", async () => {
+		it("seeds the shared-context cache for a shared root dir", async () => {
 			const cache = createCache()
 
 			await cache.restore()
@@ -1292,8 +1254,6 @@ describe("Cache", () => {
 
 			expect(cache.uuidToAnyDriveItem.has(uuid)).toBe(true)
 			expect(cache.directoryUuidToAnySharedDirWithContext.has(uuid)).toBe(true)
-			expect(cache.directoryUuidToAnyDirWithContext.has(uuid)).toBe(true)
-			expect(cache.directoryUuidToName.get(uuid)).toBe("Root")
 		})
 	})
 
@@ -1326,7 +1286,7 @@ describe("Cache", () => {
 	})
 
 	describe("cacheNewLinkedDir", () => {
-		it("seeds the linked-context caches when meta is present", async () => {
+		it("seeds the linked-meta cache when meta is present", async () => {
 			const cache = createCache()
 
 			await cache.restore()
@@ -1336,12 +1296,10 @@ describe("Cache", () => {
 			cache.cacheNewLinkedDir(makeSdkLinkedDir(uuid), makeDirectoryDriveItem(uuid, "Linked"), makeLinkMeta())
 
 			expect(cache.uuidToAnyDriveItem.has(uuid)).toBe(true)
-			expect(cache.directoryUuidToName.get(uuid)).toBe("Linked")
 			expect(cache.directoryUuidToAnyLinkedDirWithMeta.has(uuid)).toBe(true)
-			expect(cache.directoryUuidToAnyDirWithContext.has(uuid)).toBe(true)
 		})
 
-		it("seeds only uuid + name when meta is null (no linked-context caches)", async () => {
+		it("seeds only uuid when meta is null (no linked-meta cache)", async () => {
 			const cache = createCache()
 
 			await cache.restore()
@@ -1351,7 +1309,6 @@ describe("Cache", () => {
 			cache.cacheNewLinkedDir(makeSdkLinkedDir(uuid), makeDirectoryDriveItem(uuid, "Linked"), null)
 
 			expect(cache.uuidToAnyDriveItem.has(uuid)).toBe(true)
-			expect(cache.directoryUuidToName.get(uuid)).toBe("Linked")
 			expect(cache.directoryUuidToAnyLinkedDirWithMeta.has(uuid)).toBe(false)
 		})
 	})
@@ -1369,7 +1326,6 @@ describe("Cache", () => {
 
 			expect(cache.uuidToAnyDriveItem.get(uuid)).toBe(item)
 			expect(cache.fileUuidToNormalFile.has(uuid)).toBe(false)
-			expect(cache.directoryUuidToName.has(uuid)).toBe(false)
 		})
 	})
 
@@ -1393,8 +1349,6 @@ describe("Cache", () => {
 			cache.cacheDriveItem(makeDirectoryDriveItem("cdi-dir", "D"))
 
 			expect(cache.directoryUuidToAnyNormalDir.has("cdi-dir")).toBe(true)
-			expect(cache.directoryUuidToAnyDirWithContext.has("cdi-dir")).toBe(true)
-			expect(cache.directoryUuidToName.get("cdi-dir")).toBe("D")
 		})
 
 		it("dispatches a sharedDirectory WITH sharingRole to the shared caches", async () => {
@@ -1405,7 +1359,6 @@ describe("Cache", () => {
 			cache.cacheDriveItem(makeSharedDirDriveItem("cdi-shared", "S"))
 
 			expect(cache.directoryUuidToAnySharedDirWithContext.has("cdi-shared")).toBe(true)
-			expect(cache.directoryUuidToAnyDirWithContext.has("cdi-shared")).toBe(true)
 		})
 
 		it("falls back to a uuid-only reference for a sharedDirectory WITHOUT sharingRole", async () => {
@@ -1445,124 +1398,8 @@ describe("Cache", () => {
 		})
 	})
 
-	describe("refreshCachedItem", () => {
-		it("updates uuidToAnyDriveItem for any drive item type", async () => {
-			const cache = createCache()
-
-			await cache.restore()
-
-			const uuid = "refresh-uuid-1"
-			const driveItem = makeFileDriveItem(uuid)
-
-			cache.cacheNewFile(makeSdkFile(uuid), driveItem)
-
-			const updatedItem = makeFileDriveItem(uuid)
-
-			cache.refreshCachedItem(updatedItem)
-
-			expect(cache.uuidToAnyDriveItem.get(uuid)).toBe(updatedItem)
-		})
-
-		it("updates fileUuidToNormalFile when type is file and sdk file is provided", async () => {
-			const cache = createCache()
-
-			await cache.restore()
-
-			const uuid = "refresh-file-1"
-			const original = makeSdkFile(uuid)
-			const driveItem = makeFileDriveItem(uuid)
-
-			cache.cacheNewFile(original, driveItem)
-
-			const updatedFile = { ...makeSdkFile(uuid), chunks: 5 }
-
-			cache.refreshCachedItem(driveItem, updatedFile)
-
-			expect(cache.fileUuidToNormalFile.get(uuid)).toBe(updatedFile)
-		})
-
-		it("does not update fileUuidToNormalFile when no sdk file is passed", async () => {
-			const cache = createCache()
-
-			await cache.restore()
-
-			const uuid = "refresh-file-no-sdk"
-			const original = makeSdkFile(uuid)
-			const driveItem = makeFileDriveItem(uuid)
-
-			cache.cacheNewFile(original, driveItem)
-
-			cache.refreshCachedItem(driveItem)
-
-			// Original sdk file should still be present
-			expect(cache.fileUuidToNormalFile.get(uuid)).toBe(original)
-		})
-
-		it("updates directoryUuidToName when type is directory and decryptedMeta.name is present", async () => {
-			const cache = createCache()
-
-			await cache.restore()
-
-			const uuid = "refresh-dir-1"
-			const sdkDir = makeSdkDir(uuid)
-			const driveItem = makeDirectoryDriveItem(uuid, "OldName")
-
-			cache.cacheNewNormalDir(sdkDir, driveItem)
-
-			const renamedItem = makeDirectoryDriveItem(uuid, "NewName")
-
-			cache.refreshCachedItem(renamedItem)
-
-			expect(cache.directoryUuidToName.get(uuid)).toBe("NewName")
-		})
-
-		it("does not update directoryUuidToName when directory decryptedMeta is null", async () => {
-			const cache = createCache()
-
-			await cache.restore()
-
-			const uuid = "refresh-dir-no-meta"
-			const sdkDir = makeSdkDir(uuid)
-			const driveItem = makeDirectoryDriveItem(uuid, "HasName")
-
-			cache.cacheNewNormalDir(sdkDir, driveItem)
-
-			// Now refresh with no name
-			const noMetaItem = makeDirectoryDriveItem(uuid)
-
-			cache.refreshCachedItem(noMetaItem)
-
-			// directoryUuidToName should still have the old name (no overwrite)
-			expect(cache.directoryUuidToName.get(uuid)).toBe("HasName")
-		})
-
-		it("updates fileUuidToNormalFile when type is sharedFile", async () => {
-			const cache = createCache()
-
-			await cache.restore()
-
-			const uuid = "refresh-shared-file"
-			const sdkFile = makeSdkFile(uuid)
-
-			// Pre-seed uuidToAnyDriveItem with a sharedFile item
-			const sharedDriveItem = {
-				type: "sharedFile" as const,
-				data: { uuid, size: 512n, undecryptable: false, decryptedMeta: null } as any
-			}
-
-			cache.uuidToAnyDriveItem.set(uuid, sharedDriveItem)
-			cache.fileUuidToNormalFile.set(uuid, sdkFile)
-
-			const updatedSdkFile = { ...sdkFile, chunks: 3 }
-
-			cache.refreshCachedItem(sharedDriveItem, updatedSdkFile)
-
-			expect(cache.fileUuidToNormalFile.get(uuid)).toBe(updatedSdkFile)
-		})
-	})
-
 	describe("forgetItem", () => {
-		it("removes uuid from all seven persistent per-uuid maps", async () => {
+		it("removes uuid from all five persistent per-uuid maps", async () => {
 			const cache = createCache()
 
 			await cache.restore()
@@ -1574,9 +1411,7 @@ describe("Cache", () => {
 			cache.cacheNewFile(sdkFile, driveItem)
 
 			// Manually seed the remaining maps
-			cache.directoryUuidToName.set(uuid, "SomeName")
 			cache.directoryUuidToAnyNormalDir.set(uuid, {} as any)
-			cache.directoryUuidToAnyDirWithContext.set(uuid, {} as any)
 			cache.directoryUuidToAnySharedDirWithContext.set(uuid, {} as any)
 			cache.directoryUuidToAnyLinkedDirWithMeta.set(uuid, { dir: {} as any, meta: {} as any })
 
@@ -1584,9 +1419,7 @@ describe("Cache", () => {
 
 			expect(cache.uuidToAnyDriveItem.has(uuid)).toBe(false)
 			expect(cache.fileUuidToNormalFile.has(uuid)).toBe(false)
-			expect(cache.directoryUuidToName.has(uuid)).toBe(false)
 			expect(cache.directoryUuidToAnyNormalDir.has(uuid)).toBe(false)
-			expect(cache.directoryUuidToAnyDirWithContext.has(uuid)).toBe(false)
 			expect(cache.directoryUuidToAnySharedDirWithContext.has(uuid)).toBe(false)
 			expect(cache.directoryUuidToAnyLinkedDirWithMeta.has(uuid)).toBe(false)
 		})

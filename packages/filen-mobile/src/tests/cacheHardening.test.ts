@@ -179,7 +179,7 @@ describe("hardening — trailing-debounce window extension", () => {
 
 		await cache.restore()
 
-		cache.directoryUuidToName.set("uuid-1", "first")
+		cache.cameraUploadHashes.set("uuid-1", "first")
 
 		// 600ms in: still inside the 1000ms window — nothing persisted.
 		await vi.advanceTimersByTimeAsync(600)
@@ -188,7 +188,7 @@ describe("hardening — trailing-debounce window extension", () => {
 		expect(mockDb.executeBatch).not.toHaveBeenCalled()
 
 		// Second write extends the window to t=1600.
-		cache.directoryUuidToName.set("uuid-2", "second")
+		cache.cameraUploadHashes.set("uuid-2", "second")
 
 		// t=1200: 600ms past the FIRST write's deadline but only 600ms past the second
 		// write — still nothing.
@@ -212,7 +212,7 @@ describe("hardening — post-clear session re-persists identical content", () =>
 
 		await cache.restore()
 
-		cache.directoryUuidToName.set("uuid-1", "Documents")
+		cache.cameraUploadHashes.set("uuid-1", "Documents")
 
 		await cache.flushNow()
 
@@ -233,7 +233,7 @@ describe("hardening — post-clear session re-persists identical content", () =>
 
 		// Identical content as before the wipe — MUST land in the now-empty kv. A
 		// write-skip keyed on fingerprints that survive clear() would drop this.
-		cache.directoryUuidToName.set("uuid-1", "Documents")
+		cache.cameraUploadHashes.set("uuid-1", "Documents")
 
 		await cache.flushNow()
 
@@ -282,7 +282,7 @@ describe("hardening — failed batch retries unchanged content", () => {
 
 		await cache.restore()
 
-		cache.directoryUuidToName.set("uuid-1", "Documents")
+		cache.cameraUploadHashes.set("uuid-1", "Documents")
 
 		// First flush fails at the executeBatch boundary.
 		mockDb.executeBatch.mockImplementationOnce(async () => {
