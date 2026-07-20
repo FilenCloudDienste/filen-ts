@@ -2,7 +2,6 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import queryClient, { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import auth from "@/lib/auth"
-import cache from "@/lib/cache"
 import logger from "@/lib/logger"
 import { notesQueryGet } from "@/features/notes/queries/useNotesQuery"
 
@@ -17,9 +16,9 @@ export async function fetchData(
 		signal?: AbortSignal
 	}
 ) {
-	// The cache map is populated by the notes list fetch. A note present only in the restored or
-	// optimistically-updated list query must still resolve, so fall back to it before giving up.
-	const note = cache.noteUuidToNote.get(params.uuid) ?? notesQueryGet()?.find(n => n.uuid === params.uuid)
+	// The notes list query is the sole substrate for note identity: the screens gate on it before
+	// this query runs, and every list writer commits to it synchronously.
+	const note = notesQueryGet()?.find(n => n.uuid === params.uuid)
 
 	if (!note) {
 		logger.warn("notes-query", "note not in cache during content fetch; returning undefined", { uuid: params.uuid })

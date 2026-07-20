@@ -97,12 +97,6 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 	makeDriveItemPublicLink: vi.fn()
 }))
 
-vi.mock("@/lib/cache", () => ({
-	default: {
-		chatUuidToChat: new Map<string, unknown>()
-	}
-}))
-
 // chats.ts purges the removed chat's inflight queue/errors/drafts on delete + leave (D4b/M5) —
 // the purge itself is covered by chatsInflight.test.ts; here we only assert the wiring.
 vi.mock("@/features/chats/chatsInflight", () => ({
@@ -113,7 +107,6 @@ import chats from "@/features/chats/chats"
 import type { Chat } from "@/types"
 import type { ChatParticipant, Contact } from "@filen/sdk-rs"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
-import cache from "@/lib/cache"
 
 function makeChat(overrides: Partial<Chat> = {}): Chat {
 	return {
@@ -1395,23 +1388,6 @@ describe("chats.create", () => {
 		expect(result.undecryptable).toBe(false)
 	})
 
-	// #18 — a chat created without a listChats must be seeded into the messages-query cache map,
-	// so opening it before the chats list refetches resolves the chat instead of cache-missing
-	// (which would render "No messages").
-	it("seeds cache.chatUuidToChat so the created chat resolves on open", async () => {
-		const contact = { userId: 9n, email: "seed@test.com" } as unknown as Contact
-		const sdkResult = makeChat({ uuid: "seeded-chat", key: "some-key" })
-
-		mockSdkClient.createChat.mockResolvedValueOnce(sdkResult)
-
-		cache.chatUuidToChat.delete("seeded-chat")
-
-		const result = await chats.create({ contacts: [contact] })
-
-		expect(cache.chatUuidToChat.get("seeded-chat")).toBeDefined()
-		expect(cache.chatUuidToChat.get("seeded-chat")?.uuid).toBe(result.uuid)
-	})
-
 	it("invokes chatsQueryUpdate after creating chat, prepending it if not duplicate", async () => {
 		const contact = { userId: 2n, email: "d@test.com" } as unknown as Contact
 		const newChat = makeChat({ uuid: "created-chat", key: "some-key" })
@@ -1489,6 +1465,10 @@ describe("chats.refetchChatsAndMessages", () => {
 		await chats.refetchChatsAndMessages()
 
 		expect(mockChatMessagesQueryFetch).toHaveBeenCalledTimes(2)
+		// Each fan-out fetch receives the fresh chat by value (uuid + chat), so it resolves even
+		// before the chats-list commit below — the whole point of the by-value param.
+		expect(mockChatMessagesQueryFetch).toHaveBeenCalledWith({ uuid: "rf-1", chat: chat1 })
+		expect(mockChatMessagesQueryFetch).toHaveBeenCalledWith({ uuid: "rf-2", chat: chat2 })
 		// chatMessagesQueryUpdate called once per chat
 		expect(mockChatMessagesQueryUpdate).toHaveBeenCalledTimes(2)
 		// chatsQueryUpdate called once at the end

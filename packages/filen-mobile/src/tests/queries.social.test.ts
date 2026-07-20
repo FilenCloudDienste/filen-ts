@@ -4,7 +4,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // Hoisted mock factories — must be declared before any vi.mock() calls
 // ---------------------------------------------------------------------------
 
-const { mockGetSdkClients, mockAuthedSdkClient, mockChatUuidToChat, mockNoteUuidToNote, mockParseFilenPublicLink } = vi.hoisted(() => {
+const { mockGetSdkClients, mockAuthedSdkClient, mockParseFilenPublicLink } = vi.hoisted(() => {
 	const mockAuthedSdkClient = {
 		getDirPublicLinkInfo: vi.fn(),
 		getLinkedFile: vi.fn(),
@@ -15,15 +15,9 @@ const { mockGetSdkClients, mockAuthedSdkClient, mockChatUuidToChat, mockNoteUuid
 		listChats: vi.fn()
 	}
 
-	// Plain Map — avoids the PersistentMap.assertReady() guard
-	const mockChatUuidToChat = new Map<string, unknown>()
-	const mockNoteUuidToNote = new Map<string, unknown>()
-
 	return {
 		mockGetSdkClients: vi.fn().mockResolvedValue({ authedSdkClient: mockAuthedSdkClient }),
 		mockAuthedSdkClient,
-		mockChatUuidToChat,
-		mockNoteUuidToNote,
 		mockParseFilenPublicLink: vi.fn().mockReturnValue(null)
 	}
 })
@@ -54,11 +48,10 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
+// No query under test imports @/lib/cache anymore; the mock stays only to block the real
+// cache.ts (op-sqlite / PersistentMap) from loading via any transitive path.
 vi.mock("@/lib/cache", () => ({
-	default: {
-		chatUuidToChat: mockChatUuidToChat,
-		noteUuidToNote: mockNoteUuidToNote
-	}
+	default: {}
 }))
 
 vi.mock("@/queries/client", () => ({
@@ -138,6 +131,7 @@ import { fetchData as fetchChatMessages } from "@/features/chats/queries/useChat
 import { fetchData as fetchNotes } from "@/features/notes/queries/useNotesQuery"
 import { fetchData as fetchNotesTags } from "@/features/notes/queries/useNotesTags.query"
 import { fetchData as fetchChats } from "@/features/chats/queries/useChats.query"
+import { type Chat } from "@/types"
 
 // ---------------------------------------------------------------------------
 // Helper: build a minimal Response-like object
@@ -747,10 +741,11 @@ describe("fetchData (useChatMessages)", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockAuthedSdkClient.listMessagesBefore.mockReset()
-		mockChatUuidToChat.clear()
 	})
 
-	it("returns [] when chatUuidToChat has no entry for the uuid (cache miss)", async () => {
+	it("returns [] when the chat resolves from neither the chat param nor the chats query", async () => {
+		// No by-value chat and the chats query is empty (queryUpdater.get → undefined), so fetchData
+		// hits the true-miss tail and returns [] without listing.
 		const result = await fetchChatMessages({ uuid: "nonexistent-chat" })
 
 		expect(result).toEqual([])
@@ -758,8 +753,6 @@ describe("fetchData (useChatMessages)", () => {
 	})
 
 	it("sets undecryptable:false when inner.message is a defined string", async () => {
-		mockChatUuidToChat.set("chat-abc", { uuid: "chat-abc", key: "key-abc" })
-
 		mockAuthedSdkClient.listMessagesBefore.mockResolvedValue([
 			{
 				chat: "chat-abc",
@@ -772,15 +765,13 @@ describe("fetchData (useChatMessages)", () => {
 			}
 		])
 
-		const result = await fetchChatMessages({ uuid: "chat-abc" })
+		const result = await fetchChatMessages({ uuid: "chat-abc", chat: { uuid: "chat-abc", key: "key-abc" } as unknown as Chat })
 
 		expect(result).toHaveLength(1)
 		expect(result[0]).toMatchObject({ undecryptable: false })
 	})
 
 	it("sets undecryptable:true when inner.message is undefined", async () => {
-		mockChatUuidToChat.set("chat-abc", { uuid: "chat-abc", key: "key-abc" })
-
 		mockAuthedSdkClient.listMessagesBefore.mockResolvedValue([
 			{
 				chat: "chat-abc",
@@ -793,15 +784,13 @@ describe("fetchData (useChatMessages)", () => {
 			}
 		])
 
-		const result = await fetchChatMessages({ uuid: "chat-abc" })
+		const result = await fetchChatMessages({ uuid: "chat-abc", chat: { uuid: "chat-abc", key: "key-abc" } as unknown as Chat })
 
 		expect(result).toHaveLength(1)
 		expect(result[0]).toMatchObject({ undecryptable: true })
 	})
 
 	it("always sets inflightId to '' (empty string) for every fetched message", async () => {
-		mockChatUuidToChat.set("chat-abc", { uuid: "chat-abc", key: "key-abc" })
-
 		mockAuthedSdkClient.listMessagesBefore.mockResolvedValue([
 			{
 				chat: "chat-abc",
@@ -823,16 +812,14 @@ describe("fetchData (useChatMessages)", () => {
 			}
 		])
 
-		const result = await fetchChatMessages({ uuid: "chat-abc" })
+		const result = await fetchChatMessages({ uuid: "chat-abc", chat: { uuid: "chat-abc", key: "key-abc" } as unknown as Chat })
 
 		expect(result).toHaveLength(2)
 		expect(result[0]?.inflightId).toBe("")
 		expect(result[1]?.inflightId).toBe("")
 	})
 
-	it("returns all messages when a cache hit is present", async () => {
-		mockChatUuidToChat.set("chat-xyz", { uuid: "chat-xyz", key: "key-xyz" })
-
+	it("returns all messages when the chat resolves (by-value chat)", async () => {
 		mockAuthedSdkClient.listMessagesBefore.mockResolvedValue([
 			{
 				chat: "chat-xyz",
@@ -854,7 +841,7 @@ describe("fetchData (useChatMessages)", () => {
 			}
 		])
 
-		const result = await fetchChatMessages({ uuid: "chat-xyz" })
+		const result = await fetchChatMessages({ uuid: "chat-xyz", chat: { uuid: "chat-xyz", key: "key-xyz" } as unknown as Chat })
 
 		expect(result).toHaveLength(2)
 	})
@@ -869,7 +856,6 @@ describe("fetchData (useNotesQuery)", () => {
 		mockGetSdkClients.mockClear()
 		mockAuthedSdkClient.listNotes.mockReset()
 		mockAuthedSdkClient.getNoteContent.mockReset()
-		mockNoteUuidToNote.clear()
 	})
 
 	it("sets undecryptable:true and content:'' without calling getNoteContent when encryptionKey is undefined", async () => {
@@ -924,50 +910,6 @@ describe("fetchData (useNotesQuery)", () => {
 		expect(result).toHaveLength(1)
 		expect(result[0]).toMatchObject({ undecryptable: false })
 		expect(mockAuthedSdkClient.getNoteContent).not.toHaveBeenCalled()
-	})
-
-	it("populates cache.noteUuidToNote for every note in the batch", async () => {
-		mockAuthedSdkClient.listNotes.mockResolvedValue([
-			{
-				uuid: "note-a",
-				encryptionKey: "k-a",
-				noteType: "text",
-				pinned: false,
-				favorite: false,
-				archive: false,
-				trash: false,
-				tags: [],
-				ownerId: 1n,
-				lastEditorId: 1n,
-				createdTimestamp: 0n,
-				editedTimestamp: 0n,
-				participants: [],
-				title: "A"
-			},
-			{
-				uuid: "note-b",
-				encryptionKey: undefined,
-				noteType: "text",
-				pinned: false,
-				favorite: false,
-				archive: false,
-				trash: false,
-				tags: [],
-				ownerId: 1n,
-				lastEditorId: 1n,
-				createdTimestamp: 0n,
-				editedTimestamp: 0n,
-				participants: [],
-				title: undefined
-			}
-		])
-
-		mockAuthedSdkClient.getNoteContent.mockResolvedValue("content a")
-
-		await fetchNotes()
-
-		expect(mockNoteUuidToNote.has("note-a")).toBe(true)
-		expect(mockNoteUuidToNote.has("note-b")).toBe(true)
 	})
 
 	it("handles mixed decryptable/undecryptable notes in one batch — correct flags on each", async () => {
@@ -1083,7 +1025,6 @@ describe("fetchData (useChats)", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
 		mockAuthedSdkClient.listChats.mockReset()
-		mockChatUuidToChat.clear()
 	})
 
 	it("returns [] for empty chat list", async () => {
@@ -1116,17 +1057,6 @@ describe("fetchData (useChats)", () => {
 		expect(result[0]).toMatchObject({ undecryptable: true })
 	})
 
-	it("inserts all returned chats into cache.chatUuidToChat (both decryptable and undecryptable)", async () => {
-		mockAuthedSdkClient.listChats.mockResolvedValue([
-			{ uuid: "c-a", key: "k-a", ownerId: 1n, muted: false, participants: [], created: 0n, lastFocus: 0n },
-			{ uuid: "c-b", key: undefined, ownerId: 1n, muted: false, participants: [], created: 0n, lastFocus: 0n }
-		])
-
-		await fetchChats()
-
-		expect(mockChatUuidToChat.has("c-a")).toBe(true)
-		expect(mockChatUuidToChat.has("c-b")).toBe(true)
-	})
 })
 
 // ---------------------------------------------------------------------------

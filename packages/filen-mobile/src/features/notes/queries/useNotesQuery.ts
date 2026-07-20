@@ -1,7 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
-import cache from "@/lib/cache"
 import { type Note } from "@/types"
 
 export const BASE_QUERY_KEY = "useNotesQuery"
@@ -21,10 +20,6 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 		...n,
 		undecryptable: n.encryptionKey === undefined
 	}))
-
-	for (const note of notes) {
-		cache.noteUuidToNote.set(note.uuid, note)
-	}
 
 	return notes
 }
@@ -53,18 +48,7 @@ export function notesQueryUpdate({
 		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
 }) {
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY], prev => {
-		const next = typeof updater === "function" ? updater(prev ?? []) : updater
-
-		// Keep cache.noteUuidToNote in sync with the list query. It is otherwise populated ONLY by the
-		// list query's fetchData (above), so an optimistically-added note — e.g. a just-created note we
-		// immediately navigate to — would be absent from the cache. useNoteContentQuery.fetchData resolves
-		// the note by uuid FROM this cache, and a miss there made it return undefined, which TanStack
-		// rejects ("Query data cannot be undefined") and surfaces as a query error on note open.
-		for (const note of next) {
-			cache.noteUuidToNote.set(note.uuid, note)
-		}
-
-		return next
+		return typeof updater === "function" ? updater(prev ?? []) : updater
 	})
 }
 

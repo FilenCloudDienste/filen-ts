@@ -1,7 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
-import cache from "@/lib/cache"
 import { type Chat } from "@/types"
 import { wrapChat } from "@/features/chats/chatsWrap"
 
@@ -19,10 +18,6 @@ export async function fetchData(params?: { signal?: AbortSignal }): Promise<Chat
 				: undefined
 		)
 	).map(wrapChat)
-
-	for (const chat of chats) {
-		cache.chatUuidToChat.set(chat.uuid, chat)
-	}
 
 	return chats
 }
@@ -51,17 +46,7 @@ export function chatsQueryUpdate({
 		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
 }) {
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY], prev => {
-		const next = typeof updater === "function" ? updater(prev ?? []) : updater
-
-		// Keep cache.chatUuidToChat in sync with the list query (mirrors fetchData). Otherwise a chat
-		// added optimistically (chats.create) or via socket lives only in the query data, and consumers
-		// that resolve a chat by uuid FROM this cache (useChatMessagesQuery.fetchData) miss it until the
-		// next listChats refetch.
-		for (const chat of next) {
-			cache.chatUuidToChat.set(chat.uuid, chat)
-		}
-
-		return next
+		return typeof updater === "function" ? updater(prev ?? []) : updater
 	})
 }
 

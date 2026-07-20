@@ -61,7 +61,6 @@ vi.mock("@/lib/i18n", () => ({
 
 vi.mock("@/lib/cache", () => ({
 	default: {
-		noteUuidToNote: { get: vi.fn(), set: vi.fn() },
 		dirUuidToDir: { get: vi.fn(), set: vi.fn() },
 		fileUuidToFile: { get: vi.fn(), set: vi.fn() }
 	}

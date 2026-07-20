@@ -9,7 +9,6 @@ import transfers from "@/features/transfers/transfers"
 import drive from "@/features/drive/drive"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem, makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
 import * as FileSystem from "expo-file-system"
-import cache from "@/lib/cache"
 import { purgeChatInflightState } from "@/features/chats/chatsInflight"
 import logger from "@/lib/logger"
 
@@ -394,10 +393,6 @@ class Chats {
 			)
 		)
 
-		// Seed the messages-query cache map so opening the chat before the chats-list refetches
-		// resolves the chat directly instead of cache-missing (which would render "No messages").
-		cache.chatUuidToChat.set(chat.uuid, chat)
-
 		chatsQueryUpdate({
 			updater: prev => [...prev.filter(c => c.uuid !== chat.uuid), chat]
 		})
@@ -550,8 +545,11 @@ class Chats {
 
 				await Promise.all(
 					chats.map(async chat => {
+						// Pass the fresh chat by value: the messages query keys on uuid only, so this resolves
+						// the fan-out even for chats the list query hasn't committed yet (commit is below).
 						const messages = await chatMessagesQueryFetch({
-							uuid: chat.uuid
+							uuid: chat.uuid,
+							chat
 						})
 
 						chatMessagesQueryUpdate({

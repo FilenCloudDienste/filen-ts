@@ -79,12 +79,6 @@ vi.mock("@/lib/events", () => ({
 	}
 }))
 
-vi.mock("@/lib/cache", () => ({
-	default: {
-		chatUuidToChat: new Map<string, unknown>()
-	}
-}))
-
 // The ConversationDeleted handler purges the chat's inflight queue/errors/drafts (D4b/M5) —
 // the purge itself is covered by chatsInflight.test.ts; here we only assert the wiring.
 vi.mock("@/features/chats/chatsInflight", () => ({
@@ -125,7 +119,6 @@ vi.mock("@filen/sdk-rs", () => ({
 
 import { handleChatEvent, chatTypingTimeoutsRef, type ChatSocketEvent } from "@/features/chats/socketHandlers"
 import { ChatEvent_Tags, ChatTypingType, MaybeEncryptedUniffi_Tags, SocketEvent_Tags } from "@filen/sdk-rs"
-import cache from "@/lib/cache"
 
 // ---------------------------------------------------------------------------
 // Helpers — build minimal socket-event shapes matching the handler's destructure:
@@ -230,7 +223,6 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		mockSetTyping.mockClear()
 		mockSetSelectedChats.mockClear()
 		mockPurgeChatInflightState.mockClear()
-		;(cache.chatUuidToChat as unknown as Map<string, unknown>).clear()
 		// Clear any pending timeouts
 		for (const key of Object.keys(chatTypingTimeoutsRef)) {
 			clearTimeout(chatTypingTimeoutsRef[key])
@@ -829,25 +821,6 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			await handleChatEvent({ event, userId: USER_ID })
 
 			expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
-		})
-
-		it("mirrors the updated chat into cache.chatUuidToChat (coherent with ConversationParticipantNew)", async () => {
-			mockChatsQueryGet.mockReturnValue([
-				{
-					uuid: "chat-1",
-					participants: [{ userId: OTHER_USER_ID }, { userId: 999n }]
-				}
-			])
-
-			const event = makeConversationParticipantLeftEvent("chat-1", OTHER_USER_ID)
-
-			await handleChatEvent({ event, userId: USER_ID })
-
-			const cached = (cache.chatUuidToChat as unknown as Map<string, { participants: Array<{ userId: bigint }> }>).get("chat-1")
-
-			expect(cached).toBeDefined()
-			expect(cached!.participants.some(p => p.userId === OTHER_USER_ID)).toBe(false)
-			expect(cached!.participants.some(p => p.userId === 999n)).toBe(true)
 		})
 
 		// The leaver is ourselves (left from another device/session) — the chat must be removed

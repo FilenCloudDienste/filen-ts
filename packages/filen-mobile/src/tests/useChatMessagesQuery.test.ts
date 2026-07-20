@@ -1,12 +1,16 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
+import { type Chat } from "@/types"
 
-// #18 — useChatMessages.query.fetchData cache-coherence guards:
-//   1. on a cache.chatUuidToChat miss, fall back to the chats query before giving up;
-//   2. on a TRUE miss (not in cache nor chats query), return the already-cached messages
-//      (chatMessagesQueryGet) rather than [] so a remount/focus/reconnect re-run does not
-//      clobber socket-delivered or optimistic messages with an empty success result.
+// useChatMessages.query.fetchData resolution + cache-coherence guards:
+//   1. prefer the by-value `chat` param (refetchChatsAndMessages' fan-out) — it short-circuits the
+//      chats-query lookup so a chat the list query hasn't committed yet still resolves;
+//   2. otherwise resolve from the chats-list query (the sole substrate for chat identity);
+//   3. on a TRUE miss (no by-value chat, not in the chats query), return the already-cached messages
+//      (chatMessagesQueryGet) rather than [] so a remount/focus/reconnect re-run does not clobber
+//      socket-delivered or optimistic messages with an empty success result.
+//   The `chat` param is NEVER part of the query key — chatMessagesQueryKey strips it to { uuid }.
 
-const { mockGetSdkClients, mockSdkClient, mockChatsQueryGet, mockQueryUpdaterGet, cacheMap } = vi.hoisted(() => {
+const { mockGetSdkClients, mockSdkClient, mockChatsQueryGet, mockQueryUpdaterGet } = vi.hoisted(() => {
 	const mockSdkClient = {
 		listMessagesBefore: vi.fn()
 	}
@@ -15,8 +19,7 @@ const { mockGetSdkClients, mockSdkClient, mockChatsQueryGet, mockQueryUpdaterGet
 		mockSdkClient,
 		mockGetSdkClients: vi.fn().mockResolvedValue({ authedSdkClient: mockSdkClient }),
 		mockChatsQueryGet: vi.fn().mockReturnValue([]),
-		mockQueryUpdaterGet: vi.fn().mockReturnValue(undefined),
-		cacheMap: new Map<string, unknown>()
+		mockQueryUpdaterGet: vi.fn().mockReturnValue(undefined)
 	}
 })
 
@@ -24,19 +27,13 @@ vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@filen/utils", async () => ({
 	...(await import("@/tests/mocks/filenUtils")),
-	// sortParams is used by chatMessagesQueryGet on the true-miss path — identity is fine for the test.
+	// sortParams feeds chatMessagesQueryGet's key on the true-miss path — identity is fine for the test.
 	sortParams: <T>(params: T): T => params
 }))
 
 vi.mock("@/lib/auth", () => ({
 	default: {
 		getSdkClients: mockGetSdkClients
-	}
-}))
-
-vi.mock("@/lib/cache", () => ({
-	default: {
-		chatUuidToChat: cacheMap
 	}
 }))
 
@@ -56,7 +53,7 @@ vi.mock("@/queries/client", () => ({
 	}
 }))
 
-import { fetchData } from "@/features/chats/queries/useChatMessages.query"
+import { fetchData, chatMessagesQueryKey } from "@/features/chats/queries/useChatMessages.query"
 
 function mockMessage(uuid: string, message: string) {
 	return {
@@ -70,29 +67,43 @@ function mockMessage(uuid: string, message: string) {
 	}
 }
 
-describe("useChatMessages.query fetchData (#18 cache coherence)", () => {
+const makeChat = (uuid: string): Chat => ({ uuid, key: "k" }) as unknown as Chat
+
+describe("useChatMessages.query fetchData (resolution + cache coherence)", () => {
 	beforeEach(() => {
-		cacheMap.clear()
 		mockGetSdkClients.mockClear()
 		mockSdkClient.listMessagesBefore.mockReset()
 		mockChatsQueryGet.mockReset().mockReturnValue([])
 		mockQueryUpdaterGet.mockReset().mockReturnValue(undefined)
 	})
 
-	it("resolves the chat from cache.chatUuidToChat and lists its messages", async () => {
-		cacheMap.set("chat-1", { uuid: "chat-1", key: "k" })
+	it("resolves the chat by value (chat param) and lists its messages without consulting the chats query", async () => {
 		mockSdkClient.listMessagesBefore.mockResolvedValueOnce([mockMessage("m1", "hi")])
 
-		const result = await fetchData({ uuid: "chat-1" })
+		const result = await fetchData({ uuid: "chat-1", chat: makeChat("chat-1") })
 
+		// The by-value chat short-circuits the ?? — the chats query is never consulted.
+		expect(mockChatsQueryGet).not.toHaveBeenCalled()
 		expect(mockSdkClient.listMessagesBefore).toHaveBeenCalledTimes(1)
 		expect(result).toHaveLength(1)
 		expect(result[0]!.inner.uuid).toBe("m1")
 		expect(result[0]!.inflightId).toBe("")
 	})
 
-	it("falls back to the chats query on a cache miss, then lists messages", async () => {
-		// Not in cache.
+	it("prefers the by-value chat over a chats-query entry for the same uuid", async () => {
+		const byValue = makeChat("chat-1")
+
+		// The list query also holds an entry for this uuid — the by-value chat must win.
+		mockChatsQueryGet.mockReturnValue([{ uuid: "chat-1", key: "from-list" }])
+		mockSdkClient.listMessagesBefore.mockResolvedValueOnce([])
+
+		await fetchData({ uuid: "chat-1", chat: byValue })
+
+		expect(mockChatsQueryGet).not.toHaveBeenCalled()
+		expect(mockSdkClient.listMessagesBefore).toHaveBeenCalledWith(byValue, expect.anything(), undefined)
+	})
+
+	it("resolves via the chats query when no by-value chat is passed, then lists messages", async () => {
 		mockChatsQueryGet.mockReturnValue([{ uuid: "chat-1", key: "k" }])
 		mockSdkClient.listMessagesBefore.mockResolvedValueOnce([mockMessage("m2", "from-chats-query")])
 
@@ -104,17 +115,8 @@ describe("useChatMessages.query fetchData (#18 cache coherence)", () => {
 		expect(result[0]!.inner.uuid).toBe("m2")
 	})
 
-	it("seeds cache.chatUuidToChat after resolving via the chats-query fallback", async () => {
-		mockChatsQueryGet.mockReturnValue([{ uuid: "chat-seed", key: "k" }])
-		mockSdkClient.listMessagesBefore.mockResolvedValueOnce([])
-
-		await fetchData({ uuid: "chat-seed" })
-
-		expect(cacheMap.get("chat-seed")).toBeDefined()
-	})
-
 	it("on a TRUE miss returns the already-cached messages (no empty-clobber)", async () => {
-		// Not in cache, not in chats query.
+		// No by-value chat, not in the chats query.
 		mockChatsQueryGet.mockReturnValue([{ uuid: "other-chat", key: "k" }])
 
 		const cached = [{ ...mockMessage("socket-msg", "delivered via socket"), inflightId: "" }]
@@ -138,5 +140,13 @@ describe("useChatMessages.query fetchData (#18 cache coherence)", () => {
 
 		expect(mockSdkClient.listMessagesBefore).not.toHaveBeenCalled()
 		expect(result).toEqual([])
+	})
+
+	it("chatMessagesQueryKey strips the by-value chat — { uuid, chat } keys identically to { uuid }", () => {
+		const withChat = chatMessagesQueryKey({ uuid: "chat-1", chat: makeChat("chat-1") })
+		const withoutChat = chatMessagesQueryKey({ uuid: "chat-1" })
+
+		expect(withChat).toEqual({ uuid: "chat-1" })
+		expect(withChat).toEqual(withoutChat)
 	})
 })

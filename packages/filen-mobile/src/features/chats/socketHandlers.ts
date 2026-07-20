@@ -4,7 +4,6 @@ import { chatMessagesQueryUpdate, chatMessagesQueryGet } from "@/features/chats/
 import { chatsQueryGet, chatsQueryUpdate } from "@/features/chats/queries/useChats.query"
 import { wrapChat, wrapMessage } from "@/features/chats/chatsWrap"
 import events from "@/lib/events"
-import cache from "@/lib/cache"
 import { purgeChatInflightState } from "@/features/chats/chatsInflight"
 import logger from "@/lib/logger"
 
@@ -332,11 +331,6 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 
 			const chat = wrapChat(inner.chat)
 
-			// Seed the messages-query cache map: this chat is introduced without a listChats, so
-			// opening it before the chats list refetches would otherwise cache-miss and render
-			// "No messages" (see useChatMessages.query fetchData).
-			cache.chatUuidToChat.set(chat.uuid, chat)
-
 			chatsQueryUpdate({
 				updater: prev => [...(prev ?? []).filter(c => c.uuid !== chat.uuid), chat]
 			})
@@ -379,10 +373,6 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 				participants: chat.participants.filter(p => p.userId !== inner.userId)
 			}
 
-			// Keep the messages-query cache map coherent with the chats query (mirrors
-			// ConversationParticipantNew below).
-			cache.chatUuidToChat.set(updatedChat.uuid, updatedChat)
-
 			chatsQueryUpdate({
 				updater: prev => prev.map(c => (c.uuid === inner.uuid ? updatedChat : c))
 			})
@@ -404,10 +394,6 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 				...chat,
 				participants: [...chat.participants.filter(p => p.userId !== inner.participant.userId), inner.participant]
 			}
-
-			// Keep the messages-query cache map coherent with the chats query so a chat that was
-			// only ever introduced via socket (never via listChats) still resolves on open.
-			cache.chatUuidToChat.set(updatedChat.uuid, updatedChat)
 
 			chatsQueryUpdate({
 				updater: prev => prev.map(c => (c.uuid === inner.chat ? updatedChat : c))
