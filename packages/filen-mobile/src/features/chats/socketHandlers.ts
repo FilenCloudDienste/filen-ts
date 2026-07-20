@@ -127,16 +127,33 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 						// Dedupe by server uuid: if the message is already present (e.g. chats.sendMessage already
 						// reconciled the optimistic in-flight copy into the cache for our own message), leave it
 						// untouched instead of removing and re-appending it, which would cause a brief duplicate.
-						updater: prev =>
-							prev.some(m => m.inner.uuid === inner.msg.inner.uuid)
-								? prev
-								: [
-										...prev,
-										{
-											...wrapMessage(inner.msg),
-											inflightId: "" // Placeholder, actual inflightId is only needed for send sync
-										}
-									]
+						updater: prev => {
+							if (prev.some(m => m.inner.uuid === inner.msg.inner.uuid)) {
+								return prev
+							}
+
+							const committed = {
+								...wrapMessage(inner.msg),
+								inflightId: "" // Placeholder, actual inflightId is only needed for send sync
+							}
+
+							// Slow own send (longer than the 3s self-delay): the optimistic copy still
+							// carries its inflight uuid, invisible to the server-uuid dedupe above — swap
+							// the first matching in-flight copy (same sender + content) for the committed
+							// message instead of appending a duplicate. sendMessage's post-commit
+							// reconcile later drops either shape idempotently.
+							if (userId === inner.msg.inner.senderId) {
+								const inflightIndex = prev.findIndex(
+									m => m.inflightId !== "" && m.inner.senderId === userId && m.inner.message === inner.msg.inner.message
+								)
+
+								if (inflightIndex !== -1) {
+									return prev.map((m, index) => (index === inflightIndex ? committed : m))
+								}
+							}
+
+							return [...prev, committed]
+						}
 					})
 
 					// Update messages query first, then chats query to ensure our unread count logic works correctly
@@ -147,7 +164,13 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 									c.uuid === inner.msg.chat
 										? {
 												...c,
-												lastMessage: inner.msg
+												// Never regress the preview: the delayed self-delivery (3s)
+												// can land after a peer's newer message already did. Only a
+												// STRICTLY older incoming message keeps the current one.
+												lastMessage:
+													!c.lastMessage || !(inner.msg.sentTimestamp < c.lastMessage.sentTimestamp)
+														? inner.msg
+														: c.lastMessage
 											}
 										: c
 								)
@@ -240,7 +263,10 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 				}
 
 				default: {
-					logger.warn("chats", "MessageEdited: received encrypted content, skipping cache update", { chatUuid: inner.chat, msgUuid: inner.uuid })
+					logger.warn("chats", "MessageEdited: received encrypted content, skipping cache update", {
+						chatUuid: inner.chat,
+						msgUuid: inner.uuid
+					})
 				}
 			}
 

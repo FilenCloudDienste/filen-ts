@@ -142,10 +142,11 @@ function makeTypingEvent(typingType: ChatTypingType, chatUuid: string, senderId:
 	})
 }
 
-function makeMessageNewEvent(chatUuid: string, msgUuid: string, senderId: bigint): ChatSocketEvent {
+function makeMessageNewEvent(chatUuid: string, msgUuid: string, senderId: bigint, sentTimestamp: bigint = 0n): ChatSocketEvent {
 	return makeEvent(ChatEvent_Tags.MessageNew, {
 		msg: {
 			chat: chatUuid,
+			sentTimestamp,
 			inner: {
 				uuid: msgUuid,
 				senderId,
@@ -296,11 +297,9 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			// Real in-memory typing store so each watchdog's per-chat auto-clear is observable.
 			let typingState: Record<string, Array<{ senderId: bigint; chat: string }>> = {}
 
-			mockSetTyping.mockImplementation(
-				(fn: Record<string, unknown[]> | ((prev: typeof typingState) => typeof typingState)) => {
-					typingState = typeof fn === "function" ? fn(typingState) : (fn as typeof typingState)
-				}
-			)
+			mockSetTyping.mockImplementation((fn: Record<string, unknown[]> | ((prev: typeof typingState) => typeof typingState)) => {
+				typingState = typeof fn === "function" ? fn(typingState) : (fn as typeof typingState)
+			})
 
 			// The SAME sender starts typing in chat-A, then in chat-B before A's 10s watchdog elapses.
 			// A group-chat member can legitimately be typing in two chats at once.
@@ -405,7 +404,9 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			vi.advanceTimersByTime(3000)
 
 			const { updater } = mockChatMessagesQueryUpdate.mock.calls[0]![0] as {
-				updater: (prev: Array<{ inner: { uuid: string }; inflightId: string }>) => Array<{ inner: { uuid: string }; inflightId: string }>
+				updater: (
+					prev: Array<{ inner: { uuid: string }; inflightId: string }>
+				) => Array<{ inner: { uuid: string }; inflightId: string }>
 			}
 
 			// The message already exists with its real inflightId (reconciled by chats.sendMessage)
@@ -466,6 +467,94 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			vi.advanceTimersByTime(3000)
 
 			expect(mockChatMessagesQueryUpdate).toHaveBeenCalledOnce()
+		})
+
+		it("REPLACES the still-pending optimistic copy (same sender + content) instead of appending a duplicate", async () => {
+			// A send slower than the 3s self-delay: the optimistic copy still carries its
+			// inflight uuid, so the server-uuid dedupe alone can't see it.
+			const event = makeMessageNewEvent("chat-1", "msg-server", USER_ID)
+
+			await handleChatEvent({ event, userId: USER_ID })
+			vi.advanceTimersByTime(3000)
+
+			const { updater } = mockChatMessagesQueryUpdate.mock.calls[0]![0] as {
+				updater: (
+					prev: Array<{ inner: { uuid: string; senderId: bigint; message?: string }; inflightId: string }>
+				) => Array<{ inner: { uuid: string; senderId: bigint; message?: string }; inflightId: string }>
+			}
+
+			const prev = [
+				{ inner: { uuid: "msg-0", senderId: OTHER_USER_ID, message: "hi" }, inflightId: "", undecryptable: false },
+				{ inner: { uuid: "inflight-x", senderId: USER_ID, message: "hello" }, inflightId: "inflight-x", undecryptable: false }
+			]
+			const result = updater(prev)
+
+			// The pending copy was swapped for the committed message — no duplicate row.
+			expect(result).toHaveLength(2)
+			expect(result.map(m => m.inner.uuid)).toEqual(["msg-0", "msg-server"])
+			expect(result[1]!.inflightId).toBe("")
+		})
+
+		it("still APPENDS when the pending copy has different content (only a true match is swapped)", async () => {
+			const event = makeMessageNewEvent("chat-1", "msg-server", USER_ID)
+
+			await handleChatEvent({ event, userId: USER_ID })
+			vi.advanceTimersByTime(3000)
+
+			const { updater } = mockChatMessagesQueryUpdate.mock.calls[0]![0] as {
+				updater: (
+					prev: Array<{ inner: { uuid: string; senderId: bigint; message?: string }; inflightId: string }>
+				) => Array<{ inner: { uuid: string; senderId: bigint; message?: string }; inflightId: string }>
+			}
+
+			const prev = [
+				{
+					inner: { uuid: "inflight-y", senderId: USER_ID, message: "different text" },
+					inflightId: "inflight-y",
+					undecryptable: false
+				}
+			]
+			const result = updater(prev)
+
+			expect(result).toHaveLength(2)
+			expect(result.map(m => m.inner.uuid)).toEqual(["inflight-y", "msg-server"])
+		})
+
+		it("does NOT regress lastMessage to an older self message (delayed 3s delivery after a newer peer message)", async () => {
+			const event = makeMessageNewEvent("chat-1", "msg-old-self", USER_ID, 100n)
+
+			await handleChatEvent({ event, userId: USER_ID })
+			// Outer 3000ms self delay + inner 1ms chats-update delay.
+			vi.advanceTimersByTime(3001)
+
+			expect(mockChatsQueryUpdate).toHaveBeenCalledOnce()
+
+			const updater = capturedChatsUpdaters[capturedChatsUpdaters.length - 1]!
+			const newerPeerMessage = { sentTimestamp: 200n, inner: { uuid: "msg-newer-peer", senderId: OTHER_USER_ID } }
+			const prev = [{ uuid: "chat-1", lastMessage: newerPeerMessage }]
+			const result = updater(prev) as Array<{ lastMessage: { inner: { uuid: string } } }>
+
+			// The newer peer message stays the preview.
+			expect(result[0]!.lastMessage.inner.uuid).toBe("msg-newer-peer")
+		})
+
+		it("replaces lastMessage when the incoming message is newer (or timestamps are missing/equal)", async () => {
+			const event = makeMessageNewEvent("chat-1", "msg-new-self", USER_ID, 300n)
+
+			await handleChatEvent({ event, userId: USER_ID })
+			vi.advanceTimersByTime(3001)
+
+			const updater = capturedChatsUpdaters[capturedChatsUpdaters.length - 1]!
+			const olderPeerMessage = { sentTimestamp: 200n, inner: { uuid: "msg-older-peer", senderId: OTHER_USER_ID } }
+			const prev = [
+				{ uuid: "chat-1", lastMessage: olderPeerMessage },
+				{ uuid: "chat-2", lastMessage: olderPeerMessage }
+			]
+			const result = updater(prev) as Array<{ lastMessage: { inner: { uuid: string } } }>
+
+			expect(result[0]!.lastMessage.inner.uuid).toBe("msg-new-self")
+			// Other chats untouched.
+			expect(result[1]!.lastMessage.inner.uuid).toBe("msg-older-peer")
 		})
 	})
 
