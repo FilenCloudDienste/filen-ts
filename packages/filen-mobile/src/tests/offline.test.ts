@@ -4399,7 +4399,8 @@ describe("Offline", () => {
 	describe("updateIndex / clearBarrier participation (OF-02)", () => {
 		it("updateIndex() participates in the clearBarrier — it waits behind an active exclusive clear", async () => {
 			const offline = await createOffline()
-			const barrier = (offline as unknown as { clearBarrier: { runExclusive: (fn: () => Promise<void>) => Promise<void> } }).clearBarrier
+			const barrier = (offline as unknown as { clearBarrier: { runExclusive: (fn: () => Promise<void>) => Promise<void> } })
+				.clearBarrier
 
 			const order: string[] = []
 			let releaseExclusive!: () => void
@@ -4432,7 +4433,8 @@ describe("Offline", () => {
 
 		it("the in-barrier index rebuild does NOT take the clearBarrier (an in-barrier caller can't deadlock a clear)", async () => {
 			const offline = await createOffline()
-			const barrier = (offline as unknown as { clearBarrier: { runExclusive: (fn: () => Promise<void>) => Promise<void> } }).clearBarrier
+			const barrier = (offline as unknown as { clearBarrier: { runExclusive: (fn: () => Promise<void>) => Promise<void> } })
+				.clearBarrier
 
 			let releaseExclusive!: () => void
 			const exclusiveGate = new Promise<void>(resolve => {
@@ -5939,8 +5941,8 @@ describe("Offline", () => {
 				disk: { "/a.txt": new Uint8Array([1]) }
 			})
 
-			fs.set(`${treeUri}/.sync-tmp-deadbeef`, "dir")
-			fs.set(`${treeUri}/.sync-tmp-deadbeef/orphan.txt`, new Uint8Array([9]))
+			fs.set(`${treeUri}/.sync-tmp-deaddead-dead-dead-dead-deaddeaddead`, "dir")
+			fs.set(`${treeUri}/.sync-tmp-deaddead-dead-dead-dead-deaddeaddead/orphan.txt`, new Uint8Array([9]))
 
 			const offline = await createOffline()
 
@@ -5949,8 +5951,28 @@ describe("Offline", () => {
 			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
 
 			expect(errors).toEqual([])
-			expect(fs.has(`${treeUri}/.sync-tmp-deadbeef`)).toBe(false)
-			expect(fs.has(`${treeUri}/.sync-tmp-deadbeef/orphan.txt`)).toBe(false)
+			expect(fs.has(`${treeUri}/.sync-tmp-deaddead-dead-dead-dead-deaddeaddead`)).toBe(false)
+			expect(fs.has(`${treeUri}/.sync-tmp-deaddead-dead-dead-dead-deaddeaddead/orphan.txt`)).toBe(false)
+		})
+
+		it("a real user file whose name merely starts with .sync-tmp- SURVIVES crash recovery (no delete, no churn)", async () => {
+			// Temps are always /.sync-tmp-{canonical uuid}; a prefix-only name is user content —
+			// deleting it caused a delete/re-download loop with a bogus crash warning every pass.
+			const fileItem = makeFileItemWithSize(fileAUuid, ".sync-tmp-backup", 1n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({ "/.sync-tmp-backup": fileItem }),
+				disk: { "/.sync-tmp-backup": new Uint8Array([7]) }
+			})
+
+			const offline = await createOffline()
+
+			mockListing({ files: [makeListingFile(fileAUuid, ".sync-tmp-backup", ".sync-tmp-backup", 1n)] })
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			expect(errors).toEqual([])
+			// The file is untouched on disk — never classified as residue.
+			expect(fs.has(`${treeUri}/.sync-tmp-backup`)).toBe(true)
 		})
 
 		it("RESCUES a /.sync-tmp-{uuid} temp back to its free meta path (bytes preserved, no download, temp gone)", async () => {
@@ -6013,7 +6035,7 @@ describe("Offline", () => {
 			})
 
 			// Crash residue from an unknown uuid — not rescuable, but still escalation proof.
-			fs.set(`${treeUri}/.sync-tmp-deadbeef`, new Uint8Array([9]))
+			fs.set(`${treeUri}/.sync-tmp-deaddead-dead-dead-dead-deaddeaddead`, new Uint8Array([9]))
 
 			const offline = await createOffline()
 
@@ -6035,7 +6057,7 @@ describe("Offline", () => {
 
 			expect(errors).toEqual([])
 			expect(transfers.download).toHaveBeenCalledTimes(1)
-			expect(fs.has(`${treeUri}/.sync-tmp-deadbeef`)).toBe(false)
+			expect(fs.has(`${treeUri}/.sync-tmp-deaddead-dead-dead-dead-deaddeaddead`)).toBe(false)
 			expect(Array.from(fs.get(`${treeUri}/gone.txt`) as Uint8Array)).toEqual([2])
 		})
 
@@ -6090,7 +6112,7 @@ describe("Offline", () => {
 			})
 
 			fs.set(`${treeUri}/.sync-tmp-${fileAUuid}`, new Uint8Array([1, 2, 3]))
-			fs.set(`${treeUri}/.sync-tmp-deadbeef`, new Uint8Array([9]))
+			fs.set(`${treeUri}/.sync-tmp-deaddead-dead-dead-dead-deaddeaddead`, new Uint8Array([9]))
 
 			const offline = await createOffline()
 
@@ -6101,7 +6123,7 @@ describe("Offline", () => {
 			expect(errors).toEqual([])
 			expect(transfers.download).not.toHaveBeenCalled()
 			expect(fs.has(`${treeUri}/.sync-tmp-${fileAUuid}`)).toBe(false)
-			expect(fs.has(`${treeUri}/.sync-tmp-deadbeef`)).toBe(false)
+			expect(fs.has(`${treeUri}/.sync-tmp-deaddead-dead-dead-dead-deaddeaddead`)).toBe(false)
 			expect(Array.from(fs.get(`${treeUri}/a.txt`) as Uint8Array)).toEqual([1, 2, 3])
 
 			const meta = readTreeMeta()
@@ -6526,9 +6548,7 @@ describe("Offline", () => {
 				dataFileSize: number | null
 			}[]
 
-			expect(broken.map(entry => entry.uuid).sort()).toEqual(
-				[missingMetaUuid, emptyMetaUuid, corruptMetaUuid, noDataUuid].sort()
-			)
+			expect(broken.map(entry => entry.uuid).sort()).toEqual([missingMetaUuid, emptyMetaUuid, corruptMetaUuid, noDataUuid].sort())
 
 			const byUuid = new Map(broken.map(entry => [entry.uuid, entry]))
 

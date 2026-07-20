@@ -24,8 +24,14 @@ function local(entries: [string, string, boolean?, boolean?][]): LocalTreeEntry[
 describe("planTreeReconcile", () => {
 	it("no-op when remote and local match", () => {
 		const plan = planTreeReconcile({
-			remote: remote([["d1", "/sub", true], ["f1", "/sub/a.txt"]]),
-			local: local([["d1", "/sub", true], ["f1", "/sub/a.txt"]]),
+			remote: remote([
+				["d1", "/sub", true],
+				["f1", "/sub/a.txt"]
+			]),
+			local: local([
+				["d1", "/sub", true],
+				["f1", "/sub/a.txt"]
+			]),
 			allowDeletes: true
 		})
 
@@ -58,7 +64,10 @@ describe("planTreeReconcile", () => {
 	it("deletes only-local entries deepest first", () => {
 		const plan = planTreeReconcile({
 			remote: remote([]),
-			local: local([["d1", "/sub", true], ["f1", "/sub/a.txt"]]),
+			local: local([
+				["d1", "/sub", true],
+				["f1", "/sub/a.txt"]
+			]),
 			allowDeletes: true
 		})
 
@@ -93,8 +102,18 @@ describe("planTreeReconcile", () => {
 
 	it("renames a directory with one op pair — children ride along", () => {
 		const plan = planTreeReconcile({
-			remote: remote([["d1", "/new", true], ["f1", "/new/a.txt"], ["f2", "/new/deep/b.txt"], ["d2", "/new/deep", true]]),
-			local: local([["d1", "/old", true], ["f1", "/old/a.txt"], ["f2", "/old/deep/b.txt"], ["d2", "/old/deep", true]]),
+			remote: remote([
+				["d1", "/new", true],
+				["f1", "/new/a.txt"],
+				["f2", "/new/deep/b.txt"],
+				["d2", "/new/deep", true]
+			]),
+			local: local([
+				["d1", "/old", true],
+				["f1", "/old/a.txt"],
+				["f2", "/old/deep/b.txt"],
+				["d2", "/old/deep", true]
+			]),
 			allowDeletes: true
 		})
 
@@ -107,8 +126,14 @@ describe("planTreeReconcile", () => {
 
 	it("handles an independent child move out of a moving directory", () => {
 		const plan = planTreeReconcile({
-			remote: remote([["d1", "/new", true], ["f1", "/elsewhere.txt"]]),
-			local: local([["d1", "/old", true], ["f1", "/old/a.txt"]]),
+			remote: remote([
+				["d1", "/new", true],
+				["f1", "/elsewhere.txt"]
+			]),
+			local: local([
+				["d1", "/old", true],
+				["f1", "/old/a.txt"]
+			]),
 			allowDeletes: true
 		})
 
@@ -124,8 +149,14 @@ describe("planTreeReconcile", () => {
 
 	it("handles swap collisions via temps", () => {
 		const plan = planTreeReconcile({
-			remote: remote([["f1", "/b.txt"], ["f2", "/a.txt"]]),
-			local: local([["f1", "/a.txt"], ["f2", "/b.txt"]]),
+			remote: remote([
+				["f1", "/b.txt"],
+				["f2", "/a.txt"]
+			]),
+			local: local([
+				["f1", "/a.txt"],
+				["f2", "/b.txt"]
+			]),
 			allowDeletes: true
 		})
 
@@ -165,7 +196,10 @@ describe("planTreeReconcile", () => {
 	it("deletes only-local children inside a moving directory at their post-move temp path", () => {
 		const plan = planTreeReconcile({
 			remote: remote([["d1", "/new", true]]),
-			local: local([["d1", "/old", true], ["f1", "/old/gone.txt"]]),
+			local: local([
+				["d1", "/old", true],
+				["f1", "/old/gone.txt"]
+			]),
 			allowDeletes: true
 		})
 
@@ -182,8 +216,14 @@ describe("planTreeReconcile", () => {
 	describe("rescues remote-kept entries riding inside a deleted directory", () => {
 		it("extracts the kept child before the delete and places it at its remote path (D→D' recreate) — never in missingUuids", () => {
 			const plan = planTreeReconcile({
-				remote: remote([["d2", "/D", true], ["f1", "/D/f.txt"]]),
-				local: local([["d1", "/D", true], ["f1", "/D/f.txt"]]),
+				remote: remote([
+					["d2", "/D", true],
+					["f1", "/D/f.txt"]
+				]),
+				local: local([
+					["d1", "/D", true],
+					["f1", "/D/f.txt"]
+				]),
 				allowDeletes: true
 			})
 
@@ -199,8 +239,16 @@ describe("planTreeReconcile", () => {
 
 		it("rescues a file two levels deep under nested deleted directories", () => {
 			const plan = planTreeReconcile({
-				remote: remote([["d2", "/D", true], ["s2", "/D/sub", true], ["f1", "/D/sub/f.txt"]]),
-				local: local([["d1", "/D", true], ["s1", "/D/sub", true], ["f1", "/D/sub/f.txt"]]),
+				remote: remote([
+					["d2", "/D", true],
+					["s2", "/D/sub", true],
+					["f1", "/D/sub/f.txt"]
+				]),
+				local: local([
+					["d1", "/D", true],
+					["s1", "/D/sub", true],
+					["f1", "/D/sub/f.txt"]
+				]),
 				allowDeletes: true
 			})
 
@@ -216,8 +264,15 @@ describe("planTreeReconcile", () => {
 		it("does not rescue an entry that already escapes inside an explicit-mover ancestor", () => {
 			// d1 is deleted; M (kept) moves out of it and carries f1 along — f1 needs no extra ops.
 			const plan = planTreeReconcile({
-				remote: remote([["m1", "/M", true], ["f1", "/M/f.txt"]]),
-				local: local([["d1", "/D", true], ["m1", "/D/M", true], ["f1", "/D/M/f.txt"]]),
+				remote: remote([
+					["m1", "/M", true],
+					["f1", "/M/f.txt"]
+				]),
+				local: local([
+					["d1", "/D", true],
+					["m1", "/D/M", true],
+					["f1", "/D/M/f.txt"]
+				]),
 				allowDeletes: true
 			})
 
@@ -234,7 +289,12 @@ describe("planTreeReconcile", () => {
 			// paths. u (kept) rides out of doomed d1; x1 (only-local dir) rides inside u's temp and
 			// is deleted there — y (kept) under x1 must be rescued out of it first.
 			const plan = planTreeReconcile({
-				remote: remote([["d2", "/D", true], ["u1", "/D/u", true], ["x2", "/D/u/x", true], ["y1", "/D/u/x/y.txt"]]),
+				remote: remote([
+					["d2", "/D", true],
+					["u1", "/D/u", true],
+					["x2", "/D/u/x", true],
+					["y1", "/D/u/x/y.txt"]
+				]),
 				local: local([
 					["d1", "/D", true],
 					["u1", "/D/u", true],
@@ -265,7 +325,10 @@ describe("planTreeReconcile", () => {
 		it("returns the colliding mover in deferredMoves with NO ops for it — the entry stays at its current path", () => {
 			const plan = planTreeReconcile({
 				remote: remote([["f1", "/new.txt"]]),
-				local: local([["f1", "/old.txt"], ["f2", "/new.txt"]]),
+				local: local([
+					["f1", "/old.txt"],
+					["f2", "/new.txt"]
+				]),
 				allowDeletes: false
 			})
 
@@ -277,7 +340,10 @@ describe("planTreeReconcile", () => {
 		it("still plans the move when deletes are allowed — the occupant is deleted before placement", () => {
 			const plan = planTreeReconcile({
 				remote: remote([["f1", "/new.txt"]]),
-				local: local([["f1", "/old.txt"], ["f2", "/new.txt"]]),
+				local: local([
+					["f1", "/old.txt"],
+					["f2", "/new.txt"]
+				]),
 				allowDeletes: true
 			})
 
@@ -292,8 +358,15 @@ describe("planTreeReconcile", () => {
 		it("cascades: a deferred mover is itself a stay that defers movers targeting ITS path", () => {
 			// o (only-local) blocks m1's destination; deferred m1 stays at /a, blocking m2 → /a.
 			const plan = planTreeReconcile({
-				remote: remote([["m1", "/x.txt"], ["m2", "/a.txt"]]),
-				local: local([["m1", "/a.txt"], ["m2", "/b.txt"], ["o1", "/x.txt"]]),
+				remote: remote([
+					["m1", "/x.txt"],
+					["m2", "/a.txt"]
+				]),
+				local: local([
+					["m1", "/a.txt"],
+					["m2", "/b.txt"],
+					["o1", "/x.txt"]
+				]),
 				allowDeletes: false
 			})
 
@@ -303,8 +376,15 @@ describe("planTreeReconcile", () => {
 
 		it("keeps non-colliding movers planned while deferring only the colliding one", () => {
 			const plan = planTreeReconcile({
-				remote: remote([["f1", "/blocked.txt"], ["f3", "/free.txt"]]),
-				local: local([["f1", "/a.txt"], ["f3", "/c.txt"], ["o1", "/blocked.txt"]]),
+				remote: remote([
+					["f1", "/blocked.txt"],
+					["f3", "/free.txt"]
+				]),
+				local: local([
+					["f1", "/a.txt"],
+					["f3", "/c.txt"],
+					["o1", "/blocked.txt"]
+				]),
 				allowDeletes: false
 			})
 
@@ -331,6 +411,10 @@ describe("sync-tmp name helpers", () => {
 		expect(uuidFromSyncTmpName(".filenmeta")).toBeNull()
 		// A bare prefix with no uuid suffix is malformed — never rescuable.
 		expect(uuidFromSyncTmpName(".sync-tmp-")).toBeNull()
+		// A real user file whose name merely carries the prefix is NOT residue — crash
+		// recovery must never classify (and delete) it.
+		expect(uuidFromSyncTmpName(".sync-tmp-backup")).toBeNull()
+		expect(uuidFromSyncTmpName(".sync-tmp-not-a-uuid-at-all")).toBeNull()
 		expect(isSyncTmpName("a.txt")).toBe(false)
 	})
 })

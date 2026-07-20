@@ -19,13 +19,7 @@ import {
 	type OfflineUuidParent,
 	type OfflineSyncError
 } from "@/features/offline/offlineHelpers"
-import {
-	planTreeReconcile,
-	isSyncTmpName,
-	uuidFromSyncTmpName,
-	type LocalTreeEntry,
-	type RemoteTreeEntry
-} from "@/features/offline/offlineSyncPlanner"
+import { planTreeReconcile, uuidFromSyncTmpName, type LocalTreeEntry, type RemoteTreeEntry } from "@/features/offline/offlineSyncPlanner"
 import { validateUuid } from "@/lib/uuid"
 import {
 	driveItemStoredOfflineQueryUpdate,
@@ -1249,14 +1243,17 @@ export class Offline {
 			let crashEscalation = false
 
 			for (const entry of liveDir.list()) {
-				if (!isSyncTmpName(entry.name)) {
+				// Uuid-validated: a real user file named ".sync-tmp-<not a uuid>" is NOT residue —
+				// deleting it here churned delete/re-download forever (and escalated every pass).
+				const tmpUuid = uuidFromSyncTmpName(entry.name)
+
+				if (tmpUuid === null) {
 					continue
 				}
 
 				crashEscalation = true
 
-				const tmpUuid = uuidFromSyncTmpName(entry.name)
-				const claimedEntry = tmpUuid !== null ? existingEntries[tmpUuid] : undefined
+				const claimedEntry = existingEntries[tmpUuid]
 
 				if (claimedEntry) {
 					const destinationUri = FileSystem.Paths.join(liveDirUri, claimedEntry.path)

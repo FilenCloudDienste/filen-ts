@@ -44,8 +44,14 @@ export function isSyncTmpName(name: string): boolean {
 	return name.startsWith(TMP_NAME_PREFIX)
 }
 
+// Canonical backend uuid shape — temps are always created as /.sync-tmp-{entry uuid}
+// (tmpPathForUuid), so anything else carrying the prefix is a USER file, not residue.
+const UUID_SHAPE_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 // Extracts the uuid a /.sync-tmp-{uuid} extraction temp was created for (crash-recovery rescue
-// keys the temp back into the current meta by this uuid). Null for non-temp or malformed names.
+// keys the temp back into the current meta by this uuid). Null for non-temp or malformed names —
+// including a real user file whose name merely starts with the prefix; crash recovery must
+// never classify (and delete) such a file as residue.
 export function uuidFromSyncTmpName(name: string): string | null {
 	if (!isSyncTmpName(name)) {
 		return null
@@ -53,7 +59,7 @@ export function uuidFromSyncTmpName(name: string): string | null {
 
 	const uuid = name.slice(TMP_NAME_PREFIX.length)
 
-	return uuid.length > 0 ? uuid : null
+	return UUID_SHAPE_REGEX.test(uuid) ? uuid : null
 }
 
 // Segment depth without the per-call array allocation of path.split("/").length —
