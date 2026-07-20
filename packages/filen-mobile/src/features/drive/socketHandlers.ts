@@ -1,4 +1,5 @@
 import { DriveEvent_Tags, NonRootItem_Tags, AnyNormalDir_Tags, SocketEvent_Tags, type SocketEvent } from "@filen/sdk-rs"
+import { favoritesListingUpdater } from "@/features/drive/driveMetadata"
 import {
 	driveItemsQueryUpdateGlobal,
 	driveItemsQueryUpdate,
@@ -451,10 +452,13 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					const file = inner.item.inner[0]
 					const unwrappedParentUuid = unwrapParentUuid(file.parent)
 					const unwrappedFileMeta = unwrapFileMeta(file)
+					const driveItem = unwrappedFileIntoDriveItem(unwrappedFileMeta)
+
+					// Mirror the local favorite() path: write the toggled state through the session
+					// caches too, not just the listings.
+					cache.cacheNewFile(file, driveItem)
 
 					if (unwrappedParentUuid) {
-						const driveItem = unwrappedFileIntoDriveItem(unwrappedFileMeta)
-
 						driveItemsQueryUpdateGlobal({
 							parentUuid: unwrappedParentUuid,
 							updater: prev =>
@@ -466,6 +470,20 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 						})
 					}
 
+					// The Favorites virtual root needs insert/remove semantics the replace-only
+					// global patch can't provide: a newly-favorited item isn't a row there yet and
+					// an unfavorited one must leave — favoritesListingUpdater (the local path's
+					// updater) handles both.
+					driveItemsQueryUpdate({
+						params: {
+							path: {
+								type: "favorites",
+								uuid: null
+							}
+						},
+						updater: prev => favoritesListingUpdater(prev, driveItem, file.favorited)
+					})
+
 					break
 				}
 
@@ -475,10 +493,13 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					const dir = inner.item.inner[0]
 					const unwrappedParentUuid = unwrapParentUuid(dir.parent)
 					const unwrappedDirMeta = unwrapDirMeta(dir)
+					const driveItem = unwrappedDirIntoDriveItem(unwrappedDirMeta)
+
+					// Mirror the local favorite() path: write the toggled state through the session
+					// caches too, not just the listings.
+					cache.cacheNewNormalDir(dir, driveItem)
 
 					if (unwrappedParentUuid) {
-						const driveItem = unwrappedDirIntoDriveItem(unwrappedDirMeta)
-
 						driveItemsQueryUpdateGlobal({
 							parentUuid: unwrappedParentUuid,
 							updater: prev =>
@@ -487,6 +508,17 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 								prev.map(i => (i.data.uuid === unwrappedDirMeta.uuid && i.type === driveItem.type ? driveItem : i))
 						})
 					}
+
+					// Same insert/remove fix-up for the Favorites virtual root as the File arm.
+					driveItemsQueryUpdate({
+						params: {
+							path: {
+								type: "favorites",
+								uuid: null
+							}
+						},
+						updater: prev => favoritesListingUpdater(prev, driveItem, dir.favorited)
+					})
 
 					break
 				}

@@ -51,6 +51,16 @@ vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdateForRecents: vi.fn()
 }))
 
+// Faithful mirror of driveMetadata's pure favoritesListingUpdater (the real module pulls
+// auth/query chains unloadable here; the real function is unit-tested in driveMetadata.test.ts).
+vi.mock("@/features/drive/driveMetadata", () => ({
+	favoritesListingUpdater: (prev: Array<{ data: { uuid: string } }>, item: { data: { uuid: string } }, favorited: boolean) => {
+		const withoutItem = prev.filter(i => i.data.uuid !== item.data.uuid)
+
+		return favorited ? [...withoutItem, item] : withoutItem
+	}
+}))
+
 vi.mock("@/lib/cache", () => ({
 	default: {
 		directoryUuidToAnyNormalDir: { get: mockCacheDirectoryUuidToAnyNormalDirGet },
@@ -466,7 +476,9 @@ describe("handleDriveEvent — drive socket handler", () => {
 			await handleDriveEvent({ event: makeFileWithParentEvent(DriveEvent_Tags.FileNew, rawFile) })
 
 			const { updater } = mockDriveItemsQueryUpdateForNormalParent.mock.calls[0]?.[0] as {
-				updater: (prev: Array<{ data: { uuid: string; decryptedMeta: { name: string } | null } }>) => Array<{ data: { uuid: string } }>
+				updater: (
+					prev: Array<{ data: { uuid: string; decryptedMeta: { name: string } | null } }>
+				) => Array<{ data: { uuid: string } }>
 			}
 
 			const prev = [
@@ -1218,6 +1230,54 @@ describe("handleDriveEvent — drive socket handler", () => {
 
 			expect(result[0]).toBe(sharedRow)
 			expect(result[1]).toBe(rebuiltDir)
+		})
+
+		it("File sub-tag: ADDS a newly-favorited file to the Favorites virtual root and writes the caches through", async () => {
+			const rawFile = { uuid: "fav-add", parent: {}, favorited: true }
+			const rebuiltFile = { type: "file", data: { uuid: "fav-add", favorited: true } }
+
+			mockUnwrapParentUuid.mockReturnValue("payload-parent")
+			mockUnwrapFileMeta.mockReturnValue({ file: rawFile, meta: null })
+			mockUnwrappedFileIntoDriveItem.mockReturnValue(rebuiltFile)
+
+			await handleDriveEvent({ event: makeItemFavoriteFileEvent(rawFile) })
+
+			// The session caches got the toggled state (mirrors the local favorite() path).
+			expect(mockCacheNewFile).toHaveBeenCalledWith(rawFile, rebuiltFile)
+
+			// The Favorites root got an INSERT — the replace-only global patch can't add a row
+			// the listing doesn't hold yet, which left cross-device favorites missing until refetch.
+			const favoritesCall = mockDriveItemsQueryUpdate.mock.calls.find(
+				call => (call[0] as { params: { path: { type: string } } }).params.path.type === "favorites"
+			)?.[0] as { params: { path: { type: string; uuid: unknown } }; updater: (prev: unknown[]) => unknown[] }
+
+			expect(favoritesCall).toBeDefined()
+			expect(favoritesCall.params.path.uuid).toBeNull()
+			expect(favoritesCall.updater([])).toEqual([rebuiltFile])
+		})
+
+		it("NormalDir sub-tag: REMOVES an unfavorited directory from the Favorites virtual root", async () => {
+			const rawDir = { uuid: "fav-drop", parent: {}, favorited: false }
+			const rebuiltDir = { type: "directory", data: { uuid: "fav-drop", favorited: false } }
+
+			mockUnwrapParentUuid.mockReturnValue("payload-parent")
+			mockUnwrapDirMeta.mockReturnValue({ uuid: "fav-drop", meta: null })
+			mockUnwrappedDirIntoDriveItem.mockReturnValue(rebuiltDir)
+
+			await handleDriveEvent({ event: makeItemFavoriteDirEvent(rawDir) })
+
+			expect(mockCacheNewNormalDir).toHaveBeenCalledWith(rawDir, rebuiltDir)
+
+			const favoritesCall = mockDriveItemsQueryUpdate.mock.calls.find(
+				call => (call[0] as { params: { path: { type: string } } }).params.path.type === "favorites"
+			)?.[0] as { params: { path: { type: string; uuid: unknown } }; updater: (prev: unknown[]) => unknown[] }
+
+			expect(favoritesCall).toBeDefined()
+
+			// The stale ghost row leaves; other rows stay.
+			const otherRow = { type: "file", data: { uuid: "other" } }
+
+			expect(favoritesCall.updater([{ type: "directory", data: { uuid: "fav-drop" } }, otherRow])).toEqual([otherRow])
 		})
 	})
 
