@@ -18,6 +18,10 @@ concurrency:
   group: build-mobile-android
   cancel-in-progress: false
 
+permissions:
+  # Needed for the "Attach the signed APK to the GitHub release" step (gh release create/upload).
+  contents: write
+
 env:
   NODE_ENV: production
   APP_ENV: production
@@ -127,6 +131,28 @@ jobs:
           name: android-release-aab-${{ github.run_number }}
           path: packages/filen-mobile/android/app/build/outputs/bundle/release/*.aab
           retention-days: 90
+
+      # Tag-triggered runs only: Google Play carries the AAB, but the signed APK is directly
+      # installable, so attach it to this tag's GitHub release for side-loading. Runs before the
+      # Play upload so the download is available even if the store submission later fails.
+      - name: Attach the signed APK to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Create the release for this tag if it doesn't exist yet (notes can be edited afterwards),
+          # then attach the APK under a version-stamped name. --clobber lets a re-run replace it.
+          VERSION="${GITHUB_REF_NAME#filen-mobile@}"
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK" ]; then
+            echo "::error::Release APK not found at $APK"
+            exit 1
+          fi
+          cp "$APK" "${RUNNER_TEMP}/Filen-${VERSION}.apk"
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
+            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes --verify-tag
+          gh release upload "${GITHUB_REF_NAME}" "${RUNNER_TEMP}/Filen-${VERSION}.apk" --clobber
 
       - name: Upload to Google Play
         uses: r0adkll/upload-google-play@v1
