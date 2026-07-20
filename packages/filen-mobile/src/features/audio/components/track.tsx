@@ -209,7 +209,7 @@ export function buildTrackButtons({ t, track, playlist }: { t: TFunction; track:
 export function Track({ track, playlist, reorderDisabled }: { track: TrackType; playlist: PlaylistWithItems; reorderDisabled?: boolean }) {
 	const { t } = useTranslation()
 	const drag = useReorderableDrag()
-	const isCurrent = useIsCurrentTrack(track.item.data.uuid)
+	const isCurrent = useIsCurrentTrack(track.item.data.uuid, playlist.uuid)
 	const { isSelected, areTracksSelected } = usePlaylistTracksStore(
 		useShallow(state => ({
 			isSelected: state.selectedTracks.some(st => st.uuid === track.uuid),
@@ -254,7 +254,9 @@ export function Track({ track, playlist, reorderDisabled }: { track: TrackType; 
 						return
 					}
 
-					playTrack({ t, track, playlist }).catch(e => logger.error("audio", "playTrack failed from row tap", { uuid: track.uuid, error: e }))
+					playTrack({ t, track, playlist }).catch(e =>
+						logger.error("audio", "playTrack failed from row tap", { uuid: track.uuid, error: e })
+					)
 				}}
 			>
 				{areTracksSelected && (
