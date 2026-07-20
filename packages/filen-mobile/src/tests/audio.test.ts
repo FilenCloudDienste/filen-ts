@@ -3796,38 +3796,5 @@ describe("Audio", () => {
 			expect(result).toHaveLength(1)
 			expect(result[0]!.uuid).toBe("pl-qupdate")
 		})
-
-		it("populates cache.uuidToAnyDriveItem for each file in the playlist", async () => {
-			const { audio } = await createAudio()
-
-			setupPlaylistsDirForSave()
-
-			const { default: cacheModule } = await import("@/lib/cache")
-
-			const playlist = {
-				uuid: "pl-cache",
-				name: "Cache Test",
-				created: Date.now(),
-				updated: Date.now(),
-				files: [
-					{
-						uuid: "file-cached-1",
-						name: "track.mp3",
-						mime: "audio/mpeg",
-						size: 200,
-						bucket: "b",
-						key: "k",
-						version: 2,
-						chunks: 1,
-						region: "r",
-						playlist: "pl-cache"
-					}
-				]
-			}
-
-			await audio.savePlaylist({ playlist })
-
-			expect(cacheModule.uuidToAnyDriveItem.has("file-cached-1")).toBe(true)
-		})
 	})
 })

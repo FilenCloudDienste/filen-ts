@@ -12,7 +12,6 @@ import { Buffer } from "react-native-quick-crypto"
 import { type } from "arktype"
 import { wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
 import { playlistsQueryUpdate, playlistsQueryGet } from "@/features/audio/queries/usePlaylists.query"
-import cache from "@/lib/cache"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { convertBigInts } from "@/lib/utils"
 import logger from "@/lib/logger"
@@ -1194,9 +1193,6 @@ export class Audio {
 				undecryptable: false
 			}
 		}
-
-		// We need to cache it here for the audioMetadata query to work later, since it relies on the cache
-		cache.uuidToAnyDriveItem.set(file.uuid, item)
 
 		return item
 	}

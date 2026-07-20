@@ -5,7 +5,6 @@ import { cn, formatBytes, run } from "@filen/utils"
 import { linkedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { Fragment } from "react"
 import { simpleDate } from "@/lib/time"
-import cache from "@/lib/cache"
 import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
 import { PressableScale } from "@/components/ui/pressables"
 import alerts from "@/lib/alerts"
@@ -100,9 +99,6 @@ export const InternalAttachment = ({
 
 					return
 				}
-
-				// We have to set it here since some queries rely on it (e.g. useAudioMetadata)
-				cache.uuidToAnyDriveItem.set(driveItem.data.uuid, driveItem)
 
 				useDrivePreviewStore.getState().open({
 					initialItem: {
