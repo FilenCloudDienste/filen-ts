@@ -1,0 +1,19 @@
+diff --git a/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt b/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt
+index 69ccba6..3fbce27 100644
+--- a/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt
++++ b/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt
+@@ -23,9 +23,11 @@ class SharingModule : Module() {
+     Name("ExpoSharing")
+ 
+     AsyncFunction("shareAsync") { url: String?, params: SharingOptions, promise: Promise ->
+-      if (pendingPromise != null) {
+-        throw SharingInProgressException()
+-      }
++      // A stale pending promise means the previous chooser's activity result was never
++      // delivered (seen on newer Android sharesheets) — rejecting here would wedge every
++      // further share for the whole process. Settle it and let the new share proceed.
++      pendingPromise?.resolve(null)
++      pendingPromise = null
+       try {
+         val fileToShare = getLocalFileFoUrl(url)
+         val contentUri = FileProvider.getUriForFile(

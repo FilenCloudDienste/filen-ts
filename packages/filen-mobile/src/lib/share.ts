@@ -1,7 +1,88 @@
-import { Platform, Share } from "react-native"
+import { AppState, Platform, Share } from "react-native"
 import * as Sharing from "expo-sharing"
 import { run } from "@filen/utils"
 import { withSystemPresentation } from "@/lib/systemPresentation"
+import logger from "@/lib/logger"
+
+// How long after returning to the foreground a still-pending shareAsync is considered
+// abandoned. Android's chooser runs as a separate activity and can fail to deliver its
+// activity result back to the app (issue #77) — expo-sharing's promise then never settles,
+// which would leave the presentation coordinator suppressed (privacy cover off, biometric
+// re-lock disabled) and the caller's cleanup unreached for the rest of the process. A
+// legitimately delivered result lands while the app is still resuming, so a short
+// post-active grace is enough to tell the two apart.
+export const SHARE_SETTLE_GRACE_MS = 1500
+
+/**
+ * shareAsync raced against a foreground-return watchdog so a dropped activity result can
+ * never hang the wrapper. Watchdog settles by RESOLVING — the module's own "result
+ * received" behavior resolves null too; from the user's point of view the share completed
+ * or was dismissed. The native module's stale-request latch is handled separately by the
+ * expo-sharing patch; this guard exists so no share can wedge the JS side regardless.
+ */
+function shareAsyncWithSettleWatchdog(uri: string, options: Sharing.SharingOptions): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		let settled = false
+		let graceTimer: ReturnType<typeof setTimeout> | null = null
+
+		// Only ever CALLED asynchronously (timer / AppState / promise callbacks), so the
+		// subscription below is always initialized by the time this runs.
+		const settle = (complete: () => void) => {
+			if (settled) {
+				return
+			}
+
+			settled = true
+
+			subscription.remove()
+
+			if (graceTimer !== null) {
+				clearTimeout(graceTimer)
+			}
+
+			complete()
+		}
+
+		const subscription = AppState.addEventListener("change", state => {
+			if (settled) {
+				return
+			}
+
+			if (state === "active") {
+				// Back in the app: give a real activity result a moment to land, then settle.
+				if (graceTimer !== null) {
+					clearTimeout(graceTimer)
+				}
+
+				graceTimer = setTimeout(() => {
+					settle(() => {
+						logger.warn("share", "shareAsync did not settle after returning to the app — watchdog settled it", { uri })
+						resolve()
+					})
+				}, SHARE_SETTLE_GRACE_MS)
+
+				return
+			}
+
+			// Left the app again (share target opened, or another presentation) — the share
+			// is still plausibly in flight; re-arm on the next return to the foreground.
+			if (graceTimer !== null) {
+				clearTimeout(graceTimer)
+
+				graceTimer = null
+			}
+		})
+
+		Sharing.shareAsync(uri, options).then(
+			() => {
+				settle(resolve)
+			},
+			(e: unknown) => {
+				settle(() => reject(e instanceof Error ? e : new Error(String(e))))
+			}
+		)
+	})
+}
 
 /**
  * Shares a freshly-written temporary file through the OS share sheet, then runs the
@@ -34,7 +115,7 @@ export async function shareTmpFile({
 		// The OS share sheet resigns the app active (the user hasn't left), so funnel it through the
 		// presentation coordinator like the pickers — keeps the privacy cover hidden and skips a re-lock.
 		await withSystemPresentation(() =>
-			Sharing.shareAsync(uri, {
+			shareAsyncWithSettleWatchdog(uri, {
 				mimeType,
 				dialogTitle: name
 			})
