@@ -119,6 +119,7 @@ vi.mock("@filen/sdk-rs", () => ({
 
 import { handleDriveEvent, type DriveSocketEvent } from "@/features/drive/socketHandlers"
 import { DriveEvent_Tags, AnyNormalDir_Tags, NonRootItem_Tags, SocketEvent_Tags } from "@filen/sdk-rs"
+import logger from "@/lib/logger"
 
 // ---------------------------------------------------------------------------
 // Helpers — build minimal socket-event shapes matching the handler's destructure:
@@ -173,8 +174,9 @@ function makeFileTrashEvent(uuid: string): DriveSocketEvent {
 	return makeEvent(DriveEvent_Tags.FileTrash, { uuid })
 }
 
-function makeFolderTrashEvent(uuid: string): DriveSocketEvent {
-	return makeEvent(DriveEvent_Tags.FolderTrash, { uuid })
+// folderTrash — inner.parent (old parent uuid) + inner.uuid; the SDK payload carries the full pair.
+function makeFolderTrashEvent(uuid: string, parent: string = "parent-1"): DriveSocketEvent {
+	return makeEvent(DriveEvent_Tags.FolderTrash, { parent, uuid })
 }
 
 // folderColorChanged — inner.uuid + inner.color
@@ -655,12 +657,35 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(result[0]?.data.uuid).toBe("other")
 		})
 
-		it("no-op when file is not in cache", async () => {
+		it("still inserts at the destination when the file is not cached (payload-first)", async () => {
+			// Payload-first: the destination insert fires from the payload even on a cold cache; only the
+			// old-parent removal is skipped, so exactly one ForNormalParent call (the new parent) happens.
 			mockCacheFileUuidToNormalFileGet.mockReturnValue(undefined)
+			mockUnwrapParentUuid.mockReturnValue("new-parent")
+			mockUnwrapFileMeta.mockReturnValue({ file: { uuid: "file-not-cached", meta: null }, meta: null })
+			mockUnwrappedFileIntoDriveItem.mockReturnValue({ type: "file", data: { uuid: "file-not-cached" } })
 
 			await handleDriveEvent({ event: makeFileMoveEvent({ uuid: "file-not-cached", parent: {} }) })
 
-			expect(mockDriveItemsQueryUpdateForNormalParent).not.toHaveBeenCalled()
+			expect(mockDriveItemsQueryUpdateForNormalParent).toHaveBeenCalledOnce()
+			expect(mockDriveItemsQueryUpdateForNormalParent).toHaveBeenCalledWith(expect.objectContaining({ parentUuid: "new-parent" }))
+			// Write-through to the caches is unconditional on the payload.
+			expect(mockCacheNewFile).toHaveBeenCalledOnce()
+		})
+
+		it("downgrades the cold-cache miss to logger.debug (not warn)", async () => {
+			vi.mocked(logger.debug).mockClear()
+			vi.mocked(logger.warn).mockClear()
+
+			mockCacheFileUuidToNormalFileGet.mockReturnValue(undefined)
+			mockUnwrapParentUuid.mockReturnValue("new-parent")
+			mockUnwrapFileMeta.mockReturnValue({ file: { uuid: "file-not-cached", meta: null }, meta: null })
+			mockUnwrappedFileIntoDriveItem.mockReturnValue({ type: "file", data: { uuid: "file-not-cached" } })
+
+			await handleDriveEvent({ event: makeFileMoveEvent({ uuid: "file-not-cached", parent: {} }) })
+
+			expect(logger.warn).not.toHaveBeenCalled()
+			expect(logger.debug).toHaveBeenCalledOnce()
 		})
 	})
 
@@ -687,23 +712,36 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(secondCall.parentUuid).toBe("new-parent")
 		})
 
-		it("no-op when folder is not in directory cache", async () => {
+		it("still inserts at the destination when the folder is not cached (payload-first)", async () => {
+			// Payload-first: the destination insert fires from the payload even on a cold cache; only the
+			// old-parent removal is skipped, so exactly one ForNormalParent call (the new parent) happens.
 			mockCacheDirectoryUuidToAnyNormalDirGet.mockReturnValue(undefined)
+			mockUnwrapParentUuid.mockReturnValue("new-parent")
+			mockUnwrapDirMeta.mockReturnValue({ uuid: "dir-not-cached", meta: { name: "d" } })
+			mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: { uuid: "dir-not-cached" } })
 
 			await handleDriveEvent({ event: makeFolderMoveEvent({ uuid: "dir-not-cached", parent: {} }) })
 
-			expect(mockDriveItemsQueryUpdateForNormalParent).not.toHaveBeenCalled()
+			expect(mockDriveItemsQueryUpdateForNormalParent).toHaveBeenCalledOnce()
+			expect(mockDriveItemsQueryUpdateForNormalParent).toHaveBeenCalledWith(expect.objectContaining({ parentUuid: "new-parent" }))
+			expect(mockCacheNewNormalDir).toHaveBeenCalledOnce()
 		})
 
-		it("no-op when cached entry has tag !== Dir", async () => {
+		it("still inserts at the destination but skips the removal when the cached entry has tag !== Dir", async () => {
+			// A Root-tagged cache entry can't locate the previous listing, so the old-parent removal is
+			// skipped — but the payload still drives the destination insert.
 			mockCacheDirectoryUuidToAnyNormalDirGet.mockReturnValue({
 				tag: AnyNormalDir_Tags.Root,
 				inner: [rawDirOld]
 			})
+			mockUnwrapParentUuid.mockReturnValue("new-parent")
+			mockUnwrapDirMeta.mockReturnValue({ uuid: "dir-move", meta: { name: "d" } })
+			mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: { uuid: "dir-move" } })
 
 			await handleDriveEvent({ event: makeFolderMoveEvent(rawDirNew) })
 
-			expect(mockDriveItemsQueryUpdateForNormalParent).not.toHaveBeenCalled()
+			expect(mockDriveItemsQueryUpdateForNormalParent).toHaveBeenCalledOnce()
+			expect(mockDriveItemsQueryUpdateForNormalParent).toHaveBeenCalledWith(expect.objectContaining({ parentUuid: "new-parent" }))
 		})
 	})
 
@@ -865,24 +903,29 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(recentsCall).toBeUndefined()
 		})
 
-		it("no-op when folder is not in cache", async () => {
+		it("removes from the old parent via the payload even with an empty cache; skips the trash-row add", async () => {
+			// Payload-first: `inner.parent` drives the old-listing removal without the cache. The trash
+			// row needs the full Dir, so on a cold cache that half is skipped (the row reappears on refetch).
 			mockCacheDirectoryUuidToAnyNormalDirGet.mockReturnValue(undefined)
 
-			await handleDriveEvent({ event: makeFolderTrashEvent("dir-not-cached") })
+			await handleDriveEvent({ event: makeFolderTrashEvent("dir-not-cached", "old-parent") })
 
-			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
+			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledOnce()
+			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledWith(expect.objectContaining({ parentUuid: "old-parent" }))
+
+			// No cached Dir → no optimistic trash-row insert this session.
 			expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
 		})
 
-		it("no-op when folder cache entry has tag !== Dir", async () => {
+		it("removes from the old parent via the payload but skips the trash-row when the cache entry has tag !== Dir", async () => {
 			mockCacheDirectoryUuidToAnyNormalDirGet.mockReturnValue({
 				tag: AnyNormalDir_Tags.Root,
 				inner: [{ uuid: "dir-trash", parent: {} }]
 			})
 
-			await handleDriveEvent({ event: makeFolderTrashEvent("dir-root") })
+			await handleDriveEvent({ event: makeFolderTrashEvent("dir-root", "old-parent") })
 
-			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
+			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledOnce()
 			expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
 		})
 
@@ -1054,14 +1097,20 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(result[1]).toBe(otherItem)
 		})
 
-		it("File sub-tag: no-op when file is not in cache", async () => {
+		it("File sub-tag: patches via the payload parent even when the file is not cached", async () => {
+			// Payload-first: the favorite patch routes via the payload item's own parent; the cache is
+			// never consulted for this branch, so a cold cache still updates any listing holding the item.
 			mockCacheFileUuidToNormalFileGet.mockReturnValue(undefined)
+			mockUnwrapParentUuid.mockReturnValue("payload-parent")
+			mockUnwrapFileMeta.mockReturnValue({ file: { uuid: "fav-file-not-cached" }, meta: null })
 
 			await handleDriveEvent({
 				event: makeItemFavoriteFileEvent({ uuid: "fav-file-not-cached", parent: {} })
 			})
 
-			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
+			expect(mockCacheFileUuidToNormalFileGet).not.toHaveBeenCalled()
+			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledOnce()
+			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledWith(expect.objectContaining({ parentUuid: "payload-parent" }))
 		})
 
 		it("NormalDir sub-tag: updates the directory item in its parent listing", async () => {
@@ -1091,27 +1140,36 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(result[1]).toBe(otherItem)
 		})
 
-		it("NormalDir sub-tag: no-op when dir is not in cache", async () => {
+		it("NormalDir sub-tag: patches via the payload parent even when the dir is not cached", async () => {
 			mockCacheDirectoryUuidToAnyNormalDirGet.mockReturnValue(undefined)
+			mockUnwrapParentUuid.mockReturnValue("payload-parent")
+			mockUnwrapDirMeta.mockReturnValue({ uuid: "fav-dir-not-cached", meta: null })
 
 			await handleDriveEvent({
 				event: makeItemFavoriteDirEvent({ uuid: "fav-dir-not-cached", parent: {} })
 			})
 
-			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
+			expect(mockCacheDirectoryUuidToAnyNormalDirGet).not.toHaveBeenCalled()
+			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledOnce()
+			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledWith(expect.objectContaining({ parentUuid: "payload-parent" }))
 		})
 
-		it("NormalDir sub-tag: no-op when cached entry has tag !== Dir", async () => {
+		it("NormalDir sub-tag: does not consult the cache (patches via payload parent regardless of any cached entry)", async () => {
+			// A Root-tagged entry used to gate this branch out; the payload-first patch ignores the cache
+			// entirely, so it still fires.
 			mockCacheDirectoryUuidToAnyNormalDirGet.mockReturnValue({
 				tag: AnyNormalDir_Tags.Root,
 				inner: [{ uuid: "fav-dir", parent: {} }]
 			})
+			mockUnwrapParentUuid.mockReturnValue("payload-parent")
+			mockUnwrapDirMeta.mockReturnValue({ uuid: "fav-dir", meta: null })
 
 			await handleDriveEvent({
 				event: makeItemFavoriteDirEvent({ uuid: "fav-dir", parent: {} })
 			})
 
-			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
+			expect(mockCacheDirectoryUuidToAnyNormalDirGet).not.toHaveBeenCalled()
+			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledOnce()
 		})
 	})
 

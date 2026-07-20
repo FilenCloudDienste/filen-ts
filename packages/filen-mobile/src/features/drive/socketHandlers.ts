@@ -141,7 +141,9 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
 
 			if (!fromCache) {
-				logger.warn("drive-socket", "FileMetadataChanged: file not in cache, update skipped", { uuid: inner.uuid })
+				// A session-scoped cache miss is routine for items not listed this session; the next
+				// listing fetch converges, so these misses are debug, not warnings.
+				logger.debug("drive-socket", "FileMetadataChanged: file not in cache, update skipped", { uuid: inner.uuid })
 			}
 
 			if (fromCache) {
@@ -173,37 +175,43 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 		case DriveEvent_Tags.FileMove: {
 			const [inner] = eventInner.inner.inner
 
+			// The payload is the complete new state — write it through + insert at the destination
+			// unconditionally, even on a cold cache. Only locating the PREVIOUS listing needs the
+			// cached old shape, so that removal stays gated on the cache hit. Read the old shape
+			// FIRST: the write-through below overwrites this same cache entry.
 			const fromCacheOld = cache.fileUuidToNormalFile.get(inner.file.uuid)
 
 			if (!fromCacheOld) {
-				logger.warn("drive-socket", "FileMove: file not in cache, listing not updated", { uuid: inner.file.uuid })
+				logger.debug("drive-socket", "FileMove: previous parent not cached, old-listing removal skipped", {
+					uuid: inner.file.uuid
+				})
 			}
 
-			if (fromCacheOld) {
-				const unwrappedParentUuidOld = unwrapParentUuid(fromCacheOld.parent)
-				const unwrappedParentUuidNew = unwrapParentUuid(inner.file.parent)
-				const unwrappedFileMeta = unwrapFileMeta(inner.file)
-				const driveItem = unwrappedFileIntoDriveItem(unwrappedFileMeta)
+			const unwrappedParentUuidOld = fromCacheOld ? unwrapParentUuid(fromCacheOld.parent) : null
+			const unwrappedParentUuidNew = unwrapParentUuid(inner.file.parent)
+			const unwrappedFileMeta = unwrapFileMeta(inner.file)
+			const driveItem = unwrappedFileIntoDriveItem(unwrappedFileMeta)
 
-				// Sync persistent caches — File.parent changed.
-				if (driveItem.type === "file") {
-					cache.cacheNewFile(inner.file, driveItem)
-				}
+			// Sync persistent caches from the payload — File.parent changed.
+			if (driveItem.type === "file") {
+				cache.cacheNewFile(inner.file, driveItem)
+			}
 
-				if (unwrappedParentUuidNew && unwrappedParentUuidOld) {
-					driveItemsQueryUpdateForNormalParent({
-						parentUuid: unwrappedParentUuidOld,
-						updater: prev => prev.filter(i => i.data.uuid !== fromCacheOld.uuid)
-					})
+			if (unwrappedParentUuidOld) {
+				driveItemsQueryUpdateForNormalParent({
+					parentUuid: unwrappedParentUuidOld,
+					updater: prev => prev.filter(i => i.data.uuid !== unwrappedFileMeta.file.uuid)
+				})
+			}
 
-					driveItemsQueryUpdateForNormalParent({
-						parentUuid: unwrappedParentUuidNew,
-						updater: prev => [
-							...prev.filter(i => keepAgainstIncomingDriveItem(i, unwrappedFileMeta.file.uuid, unwrappedFileMeta.meta?.name)),
-							driveItem
-						]
-					})
-				}
+			if (unwrappedParentUuidNew) {
+				driveItemsQueryUpdateForNormalParent({
+					parentUuid: unwrappedParentUuidNew,
+					updater: prev => [
+						...prev.filter(i => keepAgainstIncomingDriveItem(i, unwrappedFileMeta.file.uuid, unwrappedFileMeta.meta?.name)),
+						driveItem
+					]
+				})
 			}
 
 			break
@@ -212,37 +220,44 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 		case DriveEvent_Tags.FolderMove: {
 			const [inner] = eventInner.inner.inner
 
+			// The payload is the complete new state — write it through + insert at the destination
+			// unconditionally, even on a cold cache. Only locating the PREVIOUS listing needs the
+			// cached old shape, so that removal stays gated on the cache hit. Read the old shape
+			// FIRST: the write-through below overwrites this same cache entry.
 			const fromCacheOld = cache.directoryUuidToAnyNormalDir.get(inner.dir.uuid)
+			const fromCacheOldDir = fromCacheOld && fromCacheOld.tag === AnyNormalDir_Tags.Dir ? fromCacheOld.inner[0] : null
 
-			if (!fromCacheOld) {
-				logger.warn("drive-socket", "FolderMove: directory not in cache, listing not updated", { uuid: inner.dir.uuid })
+			if (!fromCacheOldDir) {
+				logger.debug("drive-socket", "FolderMove: previous parent not cached, old-listing removal skipped", {
+					uuid: inner.dir.uuid
+				})
 			}
 
-			if (fromCacheOld && fromCacheOld.tag === AnyNormalDir_Tags.Dir) {
-				const unwrappedParentUuidOld = unwrapParentUuid(fromCacheOld.inner[0].parent)
-				const unwrappedParentUuidNew = unwrapParentUuid(inner.dir.parent)
-				const unwrappedDirMeta = unwrapDirMeta(inner.dir)
-				const driveItem = unwrappedDirIntoDriveItem(unwrappedDirMeta)
+			const unwrappedParentUuidOld = fromCacheOldDir ? unwrapParentUuid(fromCacheOldDir.parent) : null
+			const unwrappedParentUuidNew = unwrapParentUuid(inner.dir.parent)
+			const unwrappedDirMeta = unwrapDirMeta(inner.dir)
+			const driveItem = unwrappedDirIntoDriveItem(unwrappedDirMeta)
 
-				// Sync persistent caches — Dir.parent changed.
-				if (driveItem.type === "directory") {
-					cache.cacheNewNormalDir(inner.dir, driveItem)
-				}
+			// Sync persistent caches from the payload — Dir.parent changed.
+			if (driveItem.type === "directory") {
+				cache.cacheNewNormalDir(inner.dir, driveItem)
+			}
 
-				if (unwrappedParentUuidNew && unwrappedParentUuidOld) {
-					driveItemsQueryUpdateForNormalParent({
-						parentUuid: unwrappedParentUuidOld,
-						updater: prev => prev.filter(i => i.data.uuid !== fromCacheOld.inner[0].uuid)
-					})
+			if (unwrappedParentUuidOld) {
+				driveItemsQueryUpdateForNormalParent({
+					parentUuid: unwrappedParentUuidOld,
+					updater: prev => prev.filter(i => i.data.uuid !== unwrappedDirMeta.uuid)
+				})
+			}
 
-					driveItemsQueryUpdateForNormalParent({
-						parentUuid: unwrappedParentUuidNew,
-						updater: prev => [
-							...prev.filter(i => keepAgainstIncomingDriveItem(i, unwrappedDirMeta.uuid, unwrappedDirMeta.meta?.name)),
-							driveItem
-						]
-					})
-				}
+			if (unwrappedParentUuidNew) {
+				driveItemsQueryUpdateForNormalParent({
+					parentUuid: unwrappedParentUuidNew,
+					updater: prev => [
+						...prev.filter(i => keepAgainstIncomingDriveItem(i, unwrappedDirMeta.uuid, unwrappedDirMeta.meta?.name)),
+						driveItem
+					]
+				})
 			}
 
 			break
@@ -323,18 +338,19 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			// the count / select-all toggle / bulk ops never target a ghost.
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 
+			// The payload's `{ parent, uuid }` is enough to drop the item from its previous listing
+			// without the cache. Building the trash-listing ROW still needs the full Dir, so that half
+			// stays cache-gated (the `{ parent, uuid }` payload can't reconstruct a DriveItem).
+			if (inner.parent) {
+				driveItemsQueryUpdateGlobal({
+					parentUuid: inner.parent,
+					updater: prev => prev.filter(i => i.data.uuid !== inner.uuid)
+				})
+			}
+
 			const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
 
 			if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
-				const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
-
-				if (unwrappedParentUuid) {
-					driveItemsQueryUpdateGlobal({
-						parentUuid: unwrappedParentUuid,
-						updater: prev => prev.filter(i => i.data.uuid !== fromCache.inner[0].uuid)
-					})
-				}
-
 				const item = unwrappedDirIntoDriveItem(unwrapDirMeta(fromCache.inner[0]))
 
 				// Do NOT re-add to recents: the global removal above already
@@ -348,7 +364,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 							uuid: null
 						}
 					},
-					updater: prev => [...prev.filter(i => i.data.uuid !== fromCache.inner[0].uuid), item]
+					updater: prev => [...prev.filter(i => i.data.uuid !== inner.uuid), item]
 				})
 			}
 
@@ -430,40 +446,38 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 			switch (inner.item.tag) {
 				case NonRootItem_Tags.File: {
-					const fromCache = cache.fileUuidToNormalFile.get(inner.item.inner[0].uuid)
+					// Route the listing patch via the payload item's own parent — no cache read needed;
+					// the map updater no-ops on any listing that doesn't already hold the item.
+					const file = inner.item.inner[0]
+					const unwrappedParentUuid = unwrapParentUuid(file.parent)
+					const unwrappedFileMeta = unwrapFileMeta(file)
 
-					if (fromCache) {
-						const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
-						const unwrappedFileMeta = unwrapFileMeta(inner.item.inner[0])
-
-						if (unwrappedParentUuid) {
-							driveItemsQueryUpdateGlobal({
-								parentUuid: unwrappedParentUuid,
-								updater: prev =>
-									prev.map(i =>
-										i.data.uuid === unwrappedFileMeta.file.uuid ? unwrappedFileIntoDriveItem(unwrappedFileMeta) : i
-									)
-							})
-						}
+					if (unwrappedParentUuid) {
+						driveItemsQueryUpdateGlobal({
+							parentUuid: unwrappedParentUuid,
+							updater: prev =>
+								prev.map(i =>
+									i.data.uuid === unwrappedFileMeta.file.uuid ? unwrappedFileIntoDriveItem(unwrappedFileMeta) : i
+								)
+						})
 					}
 
 					break
 				}
 
 				case NonRootItem_Tags.NormalDir: {
-					const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.item.inner[0].uuid)
+					// Route the listing patch via the payload item's own parent — no cache read needed;
+					// the map updater no-ops on any listing that doesn't already hold the item.
+					const dir = inner.item.inner[0]
+					const unwrappedParentUuid = unwrapParentUuid(dir.parent)
+					const unwrappedDirMeta = unwrapDirMeta(dir)
 
-					if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
-						const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
-						const unwrappedDirMeta = unwrapDirMeta(inner.item.inner[0])
-
-						if (unwrappedParentUuid) {
-							driveItemsQueryUpdateGlobal({
-								parentUuid: unwrappedParentUuid,
-								updater: prev =>
-									prev.map(i => (i.data.uuid === unwrappedDirMeta.uuid ? unwrappedDirIntoDriveItem(unwrappedDirMeta) : i))
-							})
-						}
+					if (unwrappedParentUuid) {
+						driveItemsQueryUpdateGlobal({
+							parentUuid: unwrappedParentUuid,
+							updater: prev =>
+								prev.map(i => (i.data.uuid === unwrappedDirMeta.uuid ? unwrappedDirIntoDriveItem(unwrappedDirMeta) : i))
+						})
 					}
 
 					break
