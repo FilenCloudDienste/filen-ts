@@ -14,10 +14,18 @@ index 53d4be0..c63fbe3 100644
    }
  }
 diff --git a/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt b/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt
-index c0ff861..99934d7 100644
+index c0ff861..b232c78 100644
 --- a/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt
 +++ b/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt
-@@ -46,6 +46,9 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
+@@ -7,6 +7,7 @@ import android.net.Uri
+ import expo.modules.kotlin.AppContext
+ import expo.modules.kotlin.views.ExpoView
+ import com.github.barteksc.pdfviewer.PDFView
++import com.github.barteksc.pdfviewer.link.DefaultLinkHandler
+ import expo.modules.kotlin.viewevent.EventDispatcher
+ import java.io.FileNotFoundException
+ import androidx.core.net.toUri
+@@ -46,6 +47,9 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
    private var fitMode: FitMode = DEFAULT_FIT_MODE
    private var autoScaleEnabled: Boolean = DEFAULT_AUTO_SCALE_ENABLED
    private var isPageColorInverted: Boolean = DEFAULT_PAGE_COLOR_INVERTED_ENABLED
@@ -27,7 +35,7 @@ index c0ff861..99934d7 100644
  
    internal val pdfView = PDFView(context, null).apply {
      layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-@@ -125,11 +128,26 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
+@@ -125,11 +129,26 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
      this.reloadPdf()
    }
  
@@ -54,6 +62,16 @@ index c0ff861..99934d7 100644
      val currentUri = this.uri ?: return
  
      val pdfBuilder = try {
+@@ -148,6 +167,9 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
+ 
+     pdfBuilder
+       .pageFitPolicy(this.fitMode.toFitPolicy())
++      // Make embedded links tappable: internal destinations jump to their page, external
++      // URIs open via the system — matching PDFKit's native behavior on iOS.
++      .linkHandler(DefaultLinkHandler(this.pdfView))
+       .enableDoubletap(this.isDoubleTapZoomEnabled)
+       .swipeHorizontal(this.isHorizontalModeEnabled)
+       .nightMode(this.isPageColorInverted)
 diff --git a/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.d.ts b/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.d.ts
 index 43d4a70..d39d307 100644
 --- a/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.d.ts
