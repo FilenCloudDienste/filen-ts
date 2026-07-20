@@ -498,7 +498,13 @@ class Thumbnails {
 		await this.clearBarrier.runExclusive(() => {
 			this.failures.clear()
 
-			cache.availableThumbnails.clear()
+			// Post-logout the map is already emptied and locked, so its clear() throws by design; the
+			// directory wipe below must never be skippable by cache state.
+			try {
+				cache.availableThumbnails.clear()
+			} catch (e) {
+				logger.warn("thumbnails", "availableThumbnails clear failed", { error: e })
+			}
 
 			if (DIRECTORY.exists) {
 				DIRECTORY.delete()

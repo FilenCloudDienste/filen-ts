@@ -1057,6 +1057,24 @@ describe("Thumbnails", () => {
 
 			expect(fs.get(THUMBNAILS_DIR)).toBe("dir")
 		})
+
+		// Post-logout the availableThumbnails map is emptied + locked, so its clear() throws by design.
+		// The directory wipe must not be skippable by that throw — otherwise decrypted thumbnails survive.
+		it("still wipes and recreates the directory when the availableThumbnails clear throws", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set(`${THUMBNAILS_DIR}/a.jpg`, new Uint8Array([1]))
+
+			const clearSpy = vi.spyOn(mockAvailableThumbnails, "clear").mockImplementationOnce(() => {
+				throw new Error("Cache not restored yet")
+			})
+
+			await expect(thumbnails.clear()).resolves.toBeUndefined()
+
+			expect(fs.has(`${THUMBNAILS_DIR}/a.jpg`)).toBe(false)
+			expect(fs.get(THUMBNAILS_DIR)).toBe("dir")
+
+			clearSpy.mockRestore()
+		})
 	})
 
 	describe("size", () => {
