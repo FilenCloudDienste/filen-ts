@@ -67,3 +67,29 @@ describe("redirectSystemPath", () => {
 		expect(useIncomingShareStore.getState().process).toBe(false)
 	})
 })
+
+describe("redirectSystemPath deep-link nullification invariant", () => {
+	// The single return-null is the ONLY thing stopping external iofilenapp://<route> URLs from
+	// cold-starting uuid-parameterized screens whose data resolution assumes in-session seeding.
+	// Every expo-router route is URL-addressable by default, so any future pass-through here must
+	// first revisit how those screens resolve their data.
+	beforeEach(() => {
+		vi.clearAllMocks()
+		useIncomingShareStore.getState().setProcess(false)
+	})
+
+	const paths = [
+		"iofilenapp://note/some-uuid",
+		"iofilenapp://sharedIn/some-uuid",
+		"iofilenapp://tabs/drive/some-uuid",
+		"https://example.com/x",
+		"::: not a url @@@"
+	]
+
+	for (const path of paths) {
+		it(`resolves to null for ${path} regardless of the initial flag`, async () => {
+			expect(await redirectSystemPath({ path, initial: false })).toBeNull()
+			expect(await redirectSystemPath({ path, initial: true })).toBeNull()
+		})
+	}
+})
