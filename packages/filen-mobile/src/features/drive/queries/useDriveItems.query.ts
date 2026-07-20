@@ -110,7 +110,10 @@ async function fetchSharedDir(
 				shareInfo: navContext.kind === "root" ? navContext.dir.sharingRole : navContext.role
 			})
 
-			cache.directoryUuidToAnySharedDirWithContext.set(uuid, rebuilt)
+			// Fill-only: never clobber a fresher listing-seeded role with the static nav payload.
+			if (!cache.directoryUuidToAnySharedDirWithContext.has(uuid)) {
+				cache.directoryUuidToAnySharedDirWithContext.set(uuid, rebuilt)
+			}
 
 			return rebuilt
 		}
@@ -678,8 +681,16 @@ export function driveItemsQueryUpdate({
 		// derives EVERY cache the item's type allows (uuid→item + the type-specific dir/file caches) in one
 		// place, shared with fetchData via the same cacheNew* helpers. Context-only extras (the sharedOut
 		// normal-view, linked meta) stay with fetchData — see cacheDriveItem.
+		// Offline listings keep reference-only parity with fetchData/warm-seed — their items are
+		// index copies that must not overwrite fresher fetch-derived dir views.
+		const offlineListing = params.path.type === "offline"
+
 		for (const item of next) {
-			cache.cacheDriveItem(item)
+			if (offlineListing) {
+				cache.cacheDriveItemReference(item)
+			} else {
+				cache.cacheDriveItem(item)
+			}
 		}
 
 		return next

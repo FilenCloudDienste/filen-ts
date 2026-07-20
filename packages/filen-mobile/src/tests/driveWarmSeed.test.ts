@@ -104,6 +104,34 @@ describe("warmSeedDriveCaches", () => {
 		expect(mockUuidMap.get("p2")).toEqual({ type: "file", data: { uuid: "p2" } })
 	})
 
+	it("playlist pass fills gaps only — it never shadows the freshest drive-listing copy of the same uuid", async () => {
+		// Same uuid X in both a drive listing (variant A) and a stale playlist snapshot (variant B),
+		// plus a playlist-only uuid Y absent from every drive listing.
+		const variantA = { type: "file", data: { uuid: "X" }, source: "drive-listing" }
+		const variantB = { type: "file", data: { uuid: "X" }, source: "stale-playlist" }
+		const variantY = { type: "file", data: { uuid: "Y" }, source: "playlist-only" }
+
+		// The drive-listing pass seeds the uuid map through cacheDriveItem (mirrors the real cache write).
+		mockCacheDriveItem.mockImplementation((it: { data: { uuid: string } }) => {
+			mockUuidMap.set(it.data.uuid, it)
+		})
+
+		mockGetAll.mockReturnValue([
+			driveRow("drive", [variantA], 1),
+			{
+				queryKey: ["usePlaylistsQuery"],
+				state: { data: [{ files: [{ item: variantB }, { item: variantY }] }], dataUpdatedAt: 1 }
+			}
+		])
+
+		await warmSeedDriveCaches()
+
+		// X keeps the drive-listing copy — the stale playlist copy must NOT overwrite it.
+		expect(mockUuidMap.get("X")).toBe(variantA)
+		// Y was absent from the map — the playlist fills the gap with its own copy.
+		expect(mockUuidMap.get("Y")).toBe(variantY)
+	})
+
 	it("isolates a throwing row, keeps seeding the rest, logs a warning, and ignores non-array data", async () => {
 		// The first cacheDriveItem call throws; the ascending sort processes "throws" (1) before "ok" (2).
 		mockCacheDriveItem.mockImplementationOnce(() => {

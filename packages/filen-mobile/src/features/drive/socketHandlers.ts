@@ -453,11 +453,15 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					const unwrappedFileMeta = unwrapFileMeta(file)
 
 					if (unwrappedParentUuid) {
+						const driveItem = unwrappedFileIntoDriveItem(unwrappedFileMeta)
+
 						driveItemsQueryUpdateGlobal({
 							parentUuid: unwrappedParentUuid,
 							updater: prev =>
 								prev.map(i =>
-									i.data.uuid === unwrappedFileMeta.file.uuid ? unwrappedFileIntoDriveItem(unwrappedFileMeta) : i
+									// Same-type only: a role-stamped shared row must not be swapped
+									// for the payload's normal-typed rebuild.
+									i.data.uuid === unwrappedFileMeta.file.uuid && i.type === driveItem.type ? driveItem : i
 								)
 						})
 					}
@@ -473,10 +477,14 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					const unwrappedDirMeta = unwrapDirMeta(dir)
 
 					if (unwrappedParentUuid) {
+						const driveItem = unwrappedDirIntoDriveItem(unwrappedDirMeta)
+
 						driveItemsQueryUpdateGlobal({
 							parentUuid: unwrappedParentUuid,
 							updater: prev =>
-								prev.map(i => (i.data.uuid === unwrappedDirMeta.uuid ? unwrappedDirIntoDriveItem(unwrappedDirMeta) : i))
+								// Same-type only: a role-stamped shared row must not be swapped for
+								// the payload's normal-typed rebuild.
+								prev.map(i => (i.data.uuid === unwrappedDirMeta.uuid && i.type === driveItem.type ? driveItem : i))
 						})
 					}
 

@@ -115,9 +115,14 @@ export async function warmSeedDriveCaches(): Promise<void> {
 			try {
 				for (const playlist of row.data) {
 					for (const { item } of playlist.files ?? []) {
-						cache.uuidToAnyDriveItem.set(item.data.uuid, item)
+						// Fill gaps only: a possibly-stale playlist snapshot must not shadow the
+						// freshest-wins drive-listing copy of the same file.
+						if (!cache.uuidToAnyDriveItem.has(item.data.uuid)) {
+							cache.uuidToAnyDriveItem.set(item.data.uuid, item)
 
-						seeded++
+							seeded++
+						}
+
 						processed++
 
 						if (processed % YIELD_EVERY === 0) {

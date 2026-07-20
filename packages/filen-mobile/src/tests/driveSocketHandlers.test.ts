@@ -1088,8 +1088,9 @@ describe("handleDriveEvent — drive socket handler", () => {
 				updater: (prev: Array<{ data: { uuid: string } }>) => unknown[]
 			}
 
-			const oldItem = { data: { uuid: "fav-file" } }
-			const otherItem = { data: { uuid: "other" } }
+			// The listing row is the SAME type as the payload rebuild, so the same-type guard replaces it.
+			const oldItem = { type: "file", data: { uuid: "fav-file" } }
+			const otherItem = { type: "file", data: { uuid: "other" } }
 			const result = updater([oldItem, otherItem]) as unknown[]
 
 			// Matching item replaced by updatedDriveItem
@@ -1132,8 +1133,9 @@ describe("handleDriveEvent — drive socket handler", () => {
 				updater: (prev: Array<{ data: { uuid: string } }>) => unknown[]
 			}
 
-			const oldItem = { data: { uuid: "fav-dir" } }
-			const otherItem = { data: { uuid: "other" } }
+			// The listing row is the SAME type as the payload rebuild, so the same-type guard replaces it.
+			const oldItem = { type: "directory", data: { uuid: "fav-dir" } }
+			const otherItem = { type: "directory", data: { uuid: "other" } }
 			const result = updater([oldItem, otherItem]) as unknown[]
 
 			expect(result[0]).toBe(updatedDriveItem)
@@ -1170,6 +1172,52 @@ describe("handleDriveEvent — drive socket handler", () => {
 
 			expect(mockCacheDirectoryUuidToAnyNormalDirGet).not.toHaveBeenCalled()
 			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledOnce()
+		})
+
+		it("File sub-tag: same-type guard replaces a normal-file row but leaves a role-stamped shared row untouched", async () => {
+			const rawFile = { uuid: "fav-U", parent: {} }
+			const rebuiltFile = { type: "file", data: { uuid: "fav-U", favorite: true } }
+
+			mockUnwrapParentUuid.mockReturnValue("payload-parent")
+			mockUnwrapFileMeta.mockReturnValue({ file: rawFile, meta: null })
+			mockUnwrappedFileIntoDriveItem.mockReturnValue(rebuiltFile)
+
+			await handleDriveEvent({ event: makeItemFavoriteFileEvent(rawFile) })
+
+			const { updater } = mockDriveItemsQueryUpdateGlobal.mock.calls[0]?.[0] as {
+				updater: (prev: Array<{ type: string; data: { uuid: string } }>) => unknown[]
+			}
+
+			// A role-stamped SHARED row for uuid U must NOT be swapped for the normal-typed rebuild;
+			// a same-type (file) row for the same uuid IS replaced (the favorite flows through).
+			const sharedRow = { type: "sharedFile", data: { uuid: "fav-U" }, sharingRole: { tag: "Receiver" } }
+			const normalRow = { type: "file", data: { uuid: "fav-U" } }
+			const result = updater([sharedRow, normalRow]) as unknown[]
+
+			expect(result[0]).toBe(sharedRow)
+			expect(result[1]).toBe(rebuiltFile)
+		})
+
+		it("NormalDir sub-tag: same-type guard replaces a normal-dir row but leaves a role-stamped shared row untouched", async () => {
+			const rawDir = { uuid: "fav-U", parent: {} }
+			const rebuiltDir = { type: "directory", data: { uuid: "fav-U", favorite: true } }
+
+			mockUnwrapParentUuid.mockReturnValue("payload-parent")
+			mockUnwrapDirMeta.mockReturnValue({ uuid: "fav-U", meta: null })
+			mockUnwrappedDirIntoDriveItem.mockReturnValue(rebuiltDir)
+
+			await handleDriveEvent({ event: makeItemFavoriteDirEvent(rawDir) })
+
+			const { updater } = mockDriveItemsQueryUpdateGlobal.mock.calls[0]?.[0] as {
+				updater: (prev: Array<{ type: string; data: { uuid: string } }>) => unknown[]
+			}
+
+			const sharedRow = { type: "sharedDirectory", data: { uuid: "fav-U" }, sharingRole: { tag: "Receiver" } }
+			const normalRow = { type: "directory", data: { uuid: "fav-U" } }
+			const result = updater([sharedRow, normalRow]) as unknown[]
+
+			expect(result[0]).toBe(sharedRow)
+			expect(result[1]).toBe(rebuiltDir)
 		})
 	})
 
