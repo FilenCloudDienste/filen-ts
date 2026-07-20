@@ -173,7 +173,10 @@ export const Contact = ({
 			})
 		}
 
-		if (info.item.type === "contact") {
+		// Picker mode (selectOptions) is selection-only — the same guard the select button
+		// carries. Without it the ellipsis exposed Message (navigates away, cancelling the
+		// pick) and the destructive Remove/Block mid-pick.
+		if (!selectOptions && info.item.type === "contact") {
 			const contactItem = info.item
 
 			buttons.push({
@@ -291,7 +294,10 @@ export const Contact = ({
 					})
 
 					if (!result.success) {
-						logger.error("contacts", "block contact failed", { email: info.item.type === "contact" ? info.item.data.email : undefined, error: result.error })
+						logger.error("contacts", "block contact failed", {
+							email: info.item.type === "contact" ? info.item.data.email : undefined,
+							error: result.error
+						})
 						alerts.error(result.error)
 
 						return
@@ -339,7 +345,10 @@ export const Contact = ({
 					})
 
 					if (!result.success) {
-						logger.error("contacts", "unblock contact failed", { uuid: info.item.type === "blocked" ? info.item.data.uuid : undefined, error: result.error })
+						logger.error("contacts", "unblock contact failed", {
+							uuid: info.item.type === "blocked" ? info.item.data.uuid : undefined,
+							error: result.error
+						})
 						alerts.error(result.error)
 
 						return
@@ -366,7 +375,10 @@ export const Contact = ({
 					})
 
 					if (!result.success) {
-						logger.error("contacts", "acceptRequest via menu failed", { uuid: info.item.type === "incomingRequest" ? info.item.data.uuid : undefined, error: result.error })
+						logger.error("contacts", "acceptRequest via menu failed", {
+							uuid: info.item.type === "incomingRequest" ? info.item.data.uuid : undefined,
+							error: result.error
+						})
 						alerts.error(result.error)
 
 						return
@@ -413,7 +425,10 @@ export const Contact = ({
 					})
 
 					if (!result.success) {
-						logger.error("contacts", "denyRequest via menu failed", { uuid: info.item.type === "incomingRequest" ? info.item.data.uuid : undefined, error: result.error })
+						logger.error("contacts", "denyRequest via menu failed", {
+							uuid: info.item.type === "incomingRequest" ? info.item.data.uuid : undefined,
+							error: result.error
+						})
 						alerts.error(result.error)
 
 						return
@@ -462,7 +477,10 @@ export const Contact = ({
 					})
 
 					if (!result.success) {
-						logger.error("contacts", "cancelRequest via menu failed", { uuid: info.item.type === "outgoingRequest" ? info.item.data.uuid : undefined, error: result.error })
+						logger.error("contacts", "cancelRequest via menu failed", {
+							uuid: info.item.type === "outgoingRequest" ? info.item.data.uuid : undefined,
+							error: result.error
+						})
 						alerts.error(result.error)
 
 						return
