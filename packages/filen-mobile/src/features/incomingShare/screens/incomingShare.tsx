@@ -72,6 +72,9 @@ function IncomingShare() {
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const navigation = useNavigation()
 	const currentPayloadsRef = useRef<ResolvedSharePayload[]>([])
+	// Bumped whenever a NEW share batch replaces the current one — handleUpload snapshots it to
+	// detect a mid-flight supersede (its closure batch is then no longer the current one).
+	const shareGenerationRef = useRef(0)
 	const isUploadingRef = useRef(false)
 	const isOnline = useIsOnline()
 
@@ -103,8 +106,15 @@ function IncomingShare() {
 
 	useEffect(() => {
 		if (!isResolving && !error && !isEqual(currentPayloadsRef.current, resolvedSharedPayloads)) {
-			clear(currentPayloadsRef.current)
+			// While an upload flow is mid-flight (destination picker open / staging copies), its
+			// batch's source files must survive — deleting them here made the later file.copy()
+			// throw and failed the whole upload. handleUpload owns that batch's cleanup (its
+			// per-file defers plus the generation check in its finally).
+			if (!isUploadingRef.current) {
+				clear(currentPayloadsRef.current)
+			}
 
+			shareGenerationRef.current += 1
 			currentPayloadsRef.current = resolvedSharedPayloads
 		}
 	}, [resolvedSharedPayloads, clear, isResolving, error])
@@ -123,6 +133,9 @@ function IncomingShare() {
 		}
 
 		isUploadingRef.current = true
+
+		const batch = payloads
+		const generation = shareGenerationRef.current
 
 		try {
 			const selectResult = await run(async () => {
@@ -164,7 +177,10 @@ function IncomingShare() {
 				return await Promise.all(
 					payloads.map(async payload => {
 						if (!payload.contentUri || !payload.originalName) {
-							logger.warn("incomingShare", "payload missing contentUri or originalName, skipping", { contentUri: payload.contentUri ?? null, originalName: payload.originalName ?? null })
+							logger.warn("incomingShare", "payload missing contentUri or originalName, skipping", {
+								contentUri: payload.contentUri ?? null,
+								originalName: payload.originalName ?? null
+							})
 
 							return null
 						}
@@ -194,7 +210,10 @@ function IncomingShare() {
 			})
 
 			if (!assetsResult.success) {
-				logger.error("incomingShare", "failed to copy share payloads to tmp dir", { error: assetsResult.error, payloadCount: payloads.length })
+				logger.error("incomingShare", "failed to copy share payloads to tmp dir", {
+					error: assetsResult.error,
+					payloadCount: payloads.length
+				})
 				alerts.error(assetsResult.error)
 
 				return
@@ -209,7 +228,7 @@ function IncomingShare() {
 				} => asset !== null
 			)
 
-			clear(currentPayloadsRef.current)
+			clear(batch)
 
 			navigation.getParent()?.goBack()
 
@@ -239,6 +258,13 @@ function IncomingShare() {
 			}
 		} finally {
 			isUploadingRef.current = false
+
+			// A new batch replaced this one mid-flight: nothing references this batch's source
+			// files anymore (the swap effect deliberately skipped deleting them) — clean them up
+			// on every exit path, including a cancelled destination pick.
+			if (shareGenerationRef.current !== generation) {
+				clear(batch)
+			}
 		}
 	}, [payloads, navigation, clear])
 
