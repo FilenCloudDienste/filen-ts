@@ -19,7 +19,6 @@ const {
 	mockCameraUpload,
 	mockOfflineSync,
 	mockSecureStoreGet,
-	mockCacheFlushNow,
 	mockKvFlushNow,
 	mockRunLogAppend,
 	capturedTaskCallback
@@ -51,8 +50,6 @@ const {
 
 	const mockSecureStoreGet = vi.fn(async () => null as unknown)
 
-	const mockCacheFlushNow = vi.fn(async () => undefined)
-
 	const mockKvFlushNow = vi.fn(async () => undefined)
 
 	const mockRunLogAppend = vi.fn(async () => undefined)
@@ -65,7 +62,6 @@ const {
 		mockCameraUpload,
 		mockOfflineSync,
 		mockSecureStoreGet,
-		mockCacheFlushNow,
 		mockKvFlushNow,
 		mockRunLogAppend,
 		capturedTaskCallback
@@ -94,12 +90,6 @@ vi.mock("@/lib/secureStore", () => ({
 
 vi.mock("@/features/offline/offlineHelpers", () => ({
 	OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY: "offlineBackgroundSync"
-}))
-
-vi.mock("@/lib/cache", () => ({
-	default: {
-		flushNow: mockCacheFlushNow
-	}
 }))
 
 vi.mock("@/queries/client", () => ({
@@ -133,7 +123,6 @@ beforeEach(() => {
 	mockCameraUpload.sync.mockResolvedValue({ success: true })
 	mockOfflineSync.sync.mockResolvedValue(undefined)
 	mockSecureStoreGet.mockResolvedValue(null)
-	mockCacheFlushNow.mockResolvedValue(undefined)
 	mockKvFlushNow.mockResolvedValue(undefined)
 	mockRunLogAppend.mockResolvedValue(undefined)
 	;(Platform as { OS: string }).OS = "ios"
@@ -340,35 +329,32 @@ describe("hardening — budgeted offline phase wiring", () => {
 })
 
 describe("hardening — persist-before-suspend flushes", () => {
-	// The debounced persisters (cache.ts PersistentMaps, QueryPersisterKv) normally flush
-	// on the AppState "background" transition — which never fires in a headless task run
-	// (the app is ALREADY backgrounded). The OS may suspend the process the moment the
-	// task callback returns, so the task must flush both and AWAIT the writes landing.
-	it("flushes BOTH debounced persisters after the sync phases (healthy authed run)", async () => {
+	// The storedOffline query broadcasts still debounce through QueryPersisterKv, which normally
+	// flushes on the AppState "background" transition — never fired in a headless task run (the app
+	// is ALREADY backgrounded). The OS may suspend the process the moment the task callback returns,
+	// so the task must flush the query persister and AWAIT the write landing. (The camera-upload
+	// ledger writes through synchronously now, so it needs no flush.)
+	it("flushes the query persister after the sync phases (healthy authed run)", async () => {
 		mockSetup.setup.mockResolvedValue({ isAuthed: true })
 		mockSecureStoreGet.mockResolvedValue(true)
 
 		await runTask()
 
-		expect(mockCacheFlushNow).toHaveBeenCalledTimes(1)
 		expect(mockKvFlushNow).toHaveBeenCalledTimes(1)
 
 		const cameraOrder = mockCameraUpload.sync.mock.invocationCallOrder[0] as number
 		const offlineOrder = mockOfflineSync.sync.mock.invocationCallOrder[0] as number
-		const cacheFlushOrder = mockCacheFlushNow.mock.invocationCallOrder[0] as number
 		const kvFlushOrder = mockKvFlushNow.mock.invocationCallOrder[0] as number
 
-		expect(cacheFlushOrder).toBeGreaterThan(cameraOrder)
-		expect(cacheFlushOrder).toBeGreaterThan(offlineOrder)
+		expect(kvFlushOrder).toBeGreaterThan(cameraOrder)
 		expect(kvFlushOrder).toBeGreaterThan(offlineOrder)
 	})
 
-	it("flushes the persisters on the unauthed early return too (defers cover every exit path)", async () => {
+	it("flushes the query persister on the unauthed early return too (defers cover every exit path)", async () => {
 		mockSetup.setup.mockResolvedValue({ isAuthed: false })
 
 		await runTask()
 
-		expect(mockCacheFlushNow).toHaveBeenCalledTimes(1)
 		expect(mockKvFlushNow).toHaveBeenCalledTimes(1)
 	})
 
@@ -523,7 +509,7 @@ describe("hardening — persist-before-suspend flushes", () => {
 
 		let releaseFlush!: () => void
 
-		mockCacheFlushNow.mockImplementation(
+		mockKvFlushNow.mockImplementation(
 			() =>
 				new Promise<undefined>(resolve => {
 					releaseFlush = () => resolve(undefined)

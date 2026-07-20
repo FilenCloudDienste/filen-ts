@@ -3,6 +3,7 @@ import { Semaphore, run } from "@filen/utils"
 import { serialize, deserialize } from "@/lib/serializer"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import { SQLITE_VERSION, SQLITE_DB_FILE_NAME, SQLITE_DB_FILE_DIRECTORY } from "@/lib/storageRoots"
+import { prefixUpperBound } from "@/lib/kvScan"
 import logger from "@/lib/logger"
 import * as FileSystem from "expo-file-system"
 
@@ -85,7 +86,7 @@ export const initQueries = (tmpDir: string): string[] => [
 ]
 // prefixUpperBound moved to @/lib/kvScan (pure, dependency-free) together with the paged
 // restore walker; re-exported here because it is part of this module's historical surface.
-export { prefixUpperBound } from "@/lib/kvScan"
+export { prefixUpperBound }
 
 class Sqlite {
 	public db: DB | null = null
@@ -300,6 +301,13 @@ class Sqlite {
 			const db = await this.openDb()
 
 			await db.execute("DELETE FROM kv WHERE key LIKE ?", [prefix + "%"])
+		},
+		removeByPrefixRange: async (prefix: string): Promise<void> => {
+			const db = await this.openDb()
+
+			// RANGE predicate, not LIKE: `key >= prefix AND key < prefixUpperBound(prefix)` is an index
+			// SEARCH over the primary key; `key LIKE 'prefix%'` degrades to a full-table scan.
+			await db.execute("DELETE FROM kv WHERE key >= ? AND key < ?", [prefix, prefixUpperBound(prefix)])
 		},
 		keysByPrefix: async (prefix: string): Promise<string[]> => {
 			const db = await this.openDb()

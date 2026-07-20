@@ -24,9 +24,9 @@ import logger from "@/lib/logger"
 // step is idempotent where its state lives, so repeat calls (iOS cold background launch runs
 // the task body's setup AND RootLayout's; a warm Android process re-runs setup per WorkManager
 // fire) are cheap and never destructive: auth.setSdkClients same-input fast path (no destroy
-// of live handles), sqlite.init/secureStore.init initDone guards, cache.restore once-per-
-// session, QueryPersisterKv.restore once-per-instance, startReconnectListener started guard,
-// initI18n/initTheme re-init no-ops. auth.isAuthed() is re-evaluated EVERY call by design —
+// of live handles), sqlite.init/secureStore.init initDone guards, QueryPersisterKv.restore
+// once-per-instance, startReconnectListener started guard, initI18n/initTheme re-init no-ops.
+// auth.isAuthed() is re-evaluated EVERY call by design —
 // the result must track login/logout transitions within a process.
 const setupMutex = new Semaphore(1)
 
@@ -127,20 +127,16 @@ const setup = {
 
 			// initI18n / initTheme only read the persisted language / theme from secureStore, which
 			// auth.isAuthed() above already initialized — so they run inside this Promise.all to overlap
-			// with the SQLite/cache restore instead of serializing after it. They stay awaited: RootLayout
+			// with the SQLite restore instead of serializing after it. They stay awaited: RootLayout
 			// renders null until setup resolves, so i18n and the theme override are applied before first
 			// paint (no flash of raw keys or the wrong theme). initTheme is a no-op when following the
 			// system (uniwind already defaults to it on import).
 			//
 			// auth.setSdkClients only needs the auth result — nothing else in this block touches the SDK
-			// client (the restores only deserialize, and the reconnect listener attaches after the block),
-			// so the Rust client construction overlaps the restores instead of serializing before them.
-			//
-			// cache.restore() is gated on auth: the persisted camera-upload ledger is account-scoped, so
-			// hydrating it while logged out would re-surface a prior account's state (the logout wipe
-			// clears it; restoring unconditionally would defeat it). When unauthed the persisted maps stay
-			// un-ready, which is correct — nothing writes them before login. The session-scoped metadata
-			// maps need no restore; the warm-seed below rebuilds them from the restored queries.
+			// client (the restore only deserializes, and the reconnect listener attaches after the block),
+			// so the Rust client construction overlaps the restore instead of serializing before it. The
+			// session-scoped metadata maps need no restore; the warm-seed below rebuilds them from the
+			// restored listing queries.
 			await Promise.all([
 				stringifiedClient
 					? timed("auth.setSdkClients", async () => {
@@ -149,11 +145,17 @@ const setup = {
 					: Promise.resolve(),
 				secureStore.init(),
 				timed("sqlite.init", () => sqlite.init()),
-				isAuthed.isAuthed ? cache.restore() : Promise.resolve(),
 				restoreQueries(),
 				timed("initI18n", () => initI18n()),
 				initTheme()
 			])
+
+			// One-time sweep of the dead cache:v1:* rows left by the removed persistent-map layer —
+			// decrypted names must not linger on disk for a user who never logs out; a no-op range seek
+			// once clean. Unconditional (the rows are dead regardless of auth); fire-and-forget.
+			sqlite.kvAsync.removeByPrefixRange("cache:v1:").catch(e => {
+				logger.warn("setup", "legacy cache row sweep failed", { error: e })
+			})
 
 			// Rebuilds the session-scoped uuid indexes from the restored listing queries so socket patches,
 			// breadcrumbs, and shared-context resolution keep their pre-fetch coverage; foreground-only — a

@@ -597,7 +597,7 @@ describe("serializer", () => {
 			expect(entry2.parent.tag).toBe("UnitTag")
 		})
 
-		it("round-trips PersistentMap-style array of [key, enum] pairs", () => {
+		it("round-trips a kv-style array of [key, enum] pairs", () => {
 			const entries: [string, unknown][] = [
 				["dir-1", new MockVariant("normal-dir")],
 				["dir-2", new MockOuter(new MockVariant("shared-dir"))]

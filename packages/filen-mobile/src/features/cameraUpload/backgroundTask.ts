@@ -9,7 +9,6 @@ import cameraUpload from "@/features/cameraUpload/cameraUpload"
 import offlineSync from "@/features/offline/offlineSync"
 import secureStore from "@/lib/secureStore"
 import { OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY } from "@/features/offline/offlineHelpers"
-import cache from "@/lib/cache"
 import { queryClientPersisterKv } from "@/queries/client"
 import backgroundRunLog, { type BackgroundRunPhase } from "@/features/cameraUpload/backgroundRunLog"
 
@@ -60,16 +59,16 @@ TaskManager.defineTask(TASK_NAME, async () => {
 
 	const result = await run(async defer => {
 
-		// Persist-before-suspend: the debounced persisters (cache.ts PersistentMaps —
-		// camera-upload hashes; QueryPersisterKv — storedOffline query broadcasts) normally
-		// flush on the AppState "background" transition, which never fires in a headless
-		// run (the app is ALREADY backgrounded), and the OS may suspend the process the
-		// moment this callback returns. Registered FIRST so the LIFO defer order runs it
-		// LAST — after the deadline timer is cleared and the expiration listener removed.
-		// Both flushNow()s never reject and no-op when clean, so this covers every exit
-		// path (early returns and failures) for free.
+		// Persist-before-suspend: the storedOffline query broadcasts still debounce through
+		// QueryPersisterKv, which normally flushes on the AppState "background" transition —
+		// never fired in a headless run (the app is ALREADY backgrounded), and the OS may suspend
+		// the process the moment this callback returns. The camera-upload ledger now writes through
+		// synchronously (cameraUploadState), so only the query persister needs a flush. Registered
+		// FIRST so the LIFO defer order runs it LAST — after the deadline timer is cleared and the
+		// expiration listener removed. flushNow() never rejects and no-ops when clean, so this
+		// covers every exit path (early returns and failures) for free.
 		defer(async () => {
-			await Promise.all([cache.flushNow(), queryClientPersisterKv.flushNow()])
+			await queryClientPersisterKv.flushNow()
 		})
 
 		// Both engines abort safely mid-flight (aborted stores keep the old copy; every

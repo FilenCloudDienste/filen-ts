@@ -2624,8 +2624,8 @@ export class Offline {
 
 		// Resolve the parent to a bare uuid. A string is the sharedInRoot sentinel (→ null); a
 		// { kind: "uuid" } reference comes from the listing path (no SDK context, index-resolved);
-		// otherwise unwrapAnyDirUuid handles a deserialized tagged-union from the PersistentMap cache
-		// (not a live SDK instance, so unwrapDirMeta would not apply).
+		// otherwise unwrapAnyDirUuid reduces a full AnyDirWithContext (which sync paths still pass)
+		// structurally by tag, so revived non-live instances resolve too.
 		const parentUuid: string | null =
 			typeof parent === "string" ? null : "kind" in parent ? parent.uuid : unwrapAnyDirUuid(parent)
 

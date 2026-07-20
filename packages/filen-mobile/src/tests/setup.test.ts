@@ -31,8 +31,7 @@ const {
 	}
 
 	const mockCache = {
-		rootUuid: null as string | null,
-		restore: vi.fn()
+		rootUuid: null as string | null
 	}
 
 	const mockSemaphoreRelease = vi.fn()
@@ -41,7 +40,7 @@ const {
 		mockAuth,
 		mockCache,
 		mockSecureStore: { init: vi.fn() },
-		mockSqlite: { init: vi.fn() },
+		mockSqlite: { init: vi.fn(), kvAsync: { removeByPrefixRange: vi.fn() } },
 		mockRestoreQueries: vi.fn(),
 		mockStartReconnectListener: vi.fn(),
 		mockSweepTmpDir: vi.fn(),
@@ -137,7 +136,7 @@ beforeEach(() => {
 	mockAuth.setSdkClients.mockResolvedValue(undefined)
 	mockSecureStore.init.mockResolvedValue(undefined)
 	mockSqlite.init.mockResolvedValue(undefined)
-	mockCache.restore.mockResolvedValue(undefined)
+	mockSqlite.kvAsync.removeByPrefixRange.mockResolvedValue(undefined)
 	mockRestoreQueries.mockResolvedValue(undefined)
 	mockForegroundService.init.mockResolvedValue(undefined)
 	mockOffline.updateIndex.mockResolvedValue(undefined)
@@ -205,23 +204,20 @@ describe("setup.setup", () => {
 		expect(mockInitTheme).toHaveBeenCalledOnce()
 	})
 
-	// #1 — cache.restore() is gated on auth: the persistent caches hold decrypted-at-rest metadata,
-	// so they must not be hydrated while logged out (that would re-surface a prior account's data and
-	// defeat the logout wipe).
-	it("restores the cache when authenticated", async () => {
-		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
-
-		await setup.setup()
-
-		expect(mockCache.restore).toHaveBeenCalledOnce()
-	})
-
-	it("does NOT restore the cache when unauthenticated", async () => {
+	// The legacy cache:v1:* rows from the removed persistent-map layer are swept once at boot —
+	// unconditionally (the rows are dead regardless of auth), via a range delete over the kv key.
+	it("sweeps the legacy cache:v1: rows on every setup regardless of auth", async () => {
 		mockAuth.isAuthed.mockResolvedValue({ isAuthed: false })
 
 		await setup.setup()
 
-		expect(mockCache.restore).not.toHaveBeenCalled()
+		expect(mockSqlite.kvAsync.removeByPrefixRange).toHaveBeenCalledWith("cache:v1:")
+
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
+
+		await setup.setup()
+
+		expect(mockSqlite.kvAsync.removeByPrefixRange).toHaveBeenCalledTimes(2)
 	})
 
 	// thumbnails.restore() rebuilds the disk-derived availability Set. It reads only filenames (uuids),

@@ -821,7 +821,7 @@ export async function uploadCore(
 			}
 		}
 
-		// Mirror the new file into the PersistentMap caches so downstream
+		// Mirror the new file into the session uuid caches so downstream
 		// reads (useFileUrlQuery, drive item info, etc.) work without a
 		// manual refetch. Matches what useDriveItems.query.ts:fetchData()
 		// does inline on each fetch.

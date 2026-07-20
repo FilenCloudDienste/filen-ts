@@ -412,9 +412,9 @@ class Auth {
 		this.destroyClient(authedClient)
 		this.destroyClient(unauthedClient)
 
-		// Phase 5 — wipe the in-memory cache BEFORE the SQLite wipe. cache.clear() cancels the pending
-		// persist debounce, bumps the clear generation, locks persistence, empties the maps + dirty
-		// sets, and removes the kv rows — so a stray flush can no longer re-INSERT decrypted metadata.
+		// Phase 5 — wipe the session-scoped decrypted metadata from memory BEFORE the SQLite wipe.
+		// cache.clear() empties the in-memory uuid maps + secureStore mirror and resets rootUuid; the
+		// kv rows themselves die in Phase 6's DELETE FROM kv.
 		try {
 			cache.clear()
 		} catch (e) {

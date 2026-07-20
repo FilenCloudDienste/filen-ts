@@ -49,7 +49,7 @@ vi.mock("@/lib/auth", () => ({
 }))
 
 // No query under test imports @/lib/cache anymore; the mock stays only to block the real
-// cache.ts (op-sqlite / PersistentMap) from loading via any transitive path.
+// cache.ts from loading via any transitive path.
 vi.mock("@/lib/cache", () => ({
 	default: {}
 }))

@@ -494,33 +494,10 @@ class Thumbnails {
 		return result.data
 	}
 
-	public exists(item: DriveItem):
-		| {
-				exists: false
-		  }
-		| {
-				exists: true
-				path: string
-		  } {
-		const file = new FileSystem.File(getPath(item))
-
-		if (!file.exists) {
-			return {
-				exists: false
-			}
-		}
-
-		return {
-			exists: true,
-			path: normalizeFilePathForExpo(file.uri)
-		}
-	}
-
 	// Invalidate a cached thumbnail WITHOUT resetting its failure counter. Used when a render-time
 	// decode failure (e.g. an undecodable-but-nonzero .webp) means the on-disk artifact must be
 	// discarded, but the failure history must be preserved so the consumer can give up permanently
-	// once MAX_ERROR_RETRIES is exhausted instead of looping generate-on-error forever. Contrast
-	// remove(), which also clears this.failures (for explicit user-initiated invalidation).
+	// once MAX_ERROR_RETRIES is exhausted instead of looping generate-on-error forever.
 	public invalidateFile(item: DriveItem): void {
 		const file = new FileSystem.File(getPath(item))
 
@@ -531,18 +508,6 @@ class Thumbnails {
 				// Best-effort removal of the corrupt cache entry
 			}
 		}
-
-		this.available.delete(item.data.uuid)
-	}
-
-	public remove(item: DriveItem): void {
-		const file = new FileSystem.File(getPath(item))
-
-		if (file.exists) {
-			file.delete()
-		}
-
-		this.failures.delete(item.data.uuid)
 
 		this.available.delete(item.data.uuid)
 	}

@@ -35,6 +35,21 @@ const { mockDb, open } = vi.hoisted(() => {
 			return { rows: [], insertId: undefined, rowsAffected: existed ? 1 : 0 }
 		}
 
+		if (query.startsWith("DELETE FROM kv WHERE key >=")) {
+			const lower = params![0] as string
+			const upper = params![1] as string
+			let rowsAffected = 0
+
+			for (const key of [...store.keys()]) {
+				if (key >= lower && key < upper) {
+					store.delete(key)
+					rowsAffected++
+				}
+			}
+
+			return { rows: [], insertId: undefined, rowsAffected }
+		}
+
 		if (query.startsWith("DELETE FROM kv")) {
 			const rowsAffected = store.size
 
@@ -684,6 +699,24 @@ describe("Sqlite", () => {
 			expect(await sqlite.kvAsync.get("prefix_a")).toBeNull()
 			expect(await sqlite.kvAsync.get("prefix_b")).toBeNull()
 			expect(await sqlite.kvAsync.get("other_c")).toBe("three")
+		})
+	})
+
+	describe("removeByPrefixRange", () => {
+		it("removes exactly the prefix range (RANGE predicate) and leaves neighbors", async () => {
+			const sqlite = await createSqlite()
+
+			await sqlite.kvAsync.set("cache:v1:a", "one")
+			await sqlite.kvAsync.set("cache:v1:b", "two")
+			await sqlite.kvAsync.set("cache:v2:c", "three")
+			await sqlite.kvAsync.set("cache:v0:d", "zero")
+
+			await sqlite.kvAsync.removeByPrefixRange("cache:v1:")
+
+			expect(await sqlite.kvAsync.get("cache:v1:a")).toBeNull()
+			expect(await sqlite.kvAsync.get("cache:v1:b")).toBeNull()
+			expect(await sqlite.kvAsync.get("cache:v2:c")).toBe("three")
+			expect(await sqlite.kvAsync.get("cache:v0:d")).toBe("zero")
 		})
 	})
 
