@@ -247,20 +247,22 @@ describe("hardening — refetch-sim state equality oracle", () => {
 
 		await cache.restore()
 
-		const makeLayout = (index: number) => ({
-			width: 100 + (index % 7),
-			height: 200 + (index % 5)
+		// Canary map: cameraUploadHashes — a still-REGISTERED map whose value union carries
+		// objects, so the equal-content/fresh-instance oracle exercises the persist path.
+		const makeEntry = (index: number) => ({
+			md5: `md5-${index % 7}`,
+			verifiedModificationTime: 200 + (index % 5)
 		})
 
 		for (let i = 0; i < 50; i++) {
-			cache.chatAttachmentLayouts.set(`uuid-${i}`, makeLayout(i))
+			cache.cameraUploadHashes.set(`uuid-${i}`, makeEntry(i))
 		}
 
 		await cache.flushNow()
 
 		// Refetch reality: SAME content, FRESH object instances.
 		for (let i = 0; i < 50; i++) {
-			cache.chatAttachmentLayouts.set(`uuid-${i}`, makeLayout(i))
+			cache.cameraUploadHashes.set(`uuid-${i}`, makeEntry(i))
 		}
 
 		await cache.flushNow()
@@ -268,10 +270,10 @@ describe("hardening — refetch-sim state equality oracle", () => {
 		// The kv must mirror the live map regardless of whether redundant INSERTs were
 		// issued or skipped.
 		for (let i = 0; i < 50; i++) {
-			const key = [...kvStore.keys()].find(k => k.endsWith(`chatAttachmentLayouts:uuid-${i}`)) as string
+			const key = [...kvStore.keys()].find(k => k.endsWith(`cameraUploadHashes:uuid-${i}`)) as string
 
 			expect(key, `kv row uuid-${i}`).toBeDefined()
-			expect(kvStore.get(key)).toBe(serialize(makeLayout(i)))
+			expect(kvStore.get(key)).toBe(serialize(makeEntry(i)))
 		}
 	})
 })

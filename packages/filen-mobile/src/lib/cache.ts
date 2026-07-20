@@ -151,12 +151,28 @@ export class Cache {
 	// Not persisted — managed separately by secureStore.ts with its own encryption
 	public readonly secureStore = new Map<string, unknown>()
 
-	// Persisted — each entry independently persisted to SQLite KV
-	public readonly uuidToAnyDriveItem: PersistentMap<DriveItem>
-	public readonly fileUuidToNormalFile: PersistentMap<File>
-	public readonly directoryUuidToAnySharedDirWithContext: PersistentMap<AnySharedDirWithContext>
-	public readonly directoryUuidToAnyNormalDir: PersistentMap<AnyNormalDir>
-	public readonly availableThumbnails: PersistentMap<boolean>
+	// Session-scoped — rebuilt per process by fetches, mutations, and the boot warm-seed; never
+	// persisted (decrypted metadata lives in memory only).
+	public readonly uuidToAnyDriveItem = new Map<string, DriveItem>()
+	public readonly fileUuidToNormalFile = new Map<string, File>()
+	public readonly directoryUuidToAnySharedDirWithContext = new Map<string, AnySharedDirWithContext>()
+	public readonly directoryUuidToAnyNormalDir = new Map<string, AnyNormalDir>()
+	public readonly directoryUuidToAnyLinkedDirWithMeta = new Map<
+		string,
+		{
+			dir: AnyLinkedDir
+			meta: DirPublicLink
+		}
+	>()
+	public readonly chatAttachmentLayouts = new Map<
+		string,
+		{
+			width: number
+			height: number
+		}
+	>()
+
+	// Durable — the only maps still independently persisted to SQLite KV (the camera-upload ledger).
 	// The string arm of the union is the LEGACY persisted shape (bare md5) — see
 	// CameraUploadHashEntry. Writers must always write the object shape.
 	public readonly cameraUploadHashes: PersistentMap<CameraUploadHashEntry | string>
@@ -167,31 +183,10 @@ export class Cache {
 	// forever. Background delta picks skip counts >= MAX_BACKGROUND_UPLOAD_ABORTS
 	// (cameraUpload.ts); any successful upload of the asset deletes its entry.
 	public readonly cameraUploadBackgroundAborts: PersistentMap<number>
-	public readonly chatAttachmentLayouts: PersistentMap<{
-		width: number
-		height: number
-	}>
-	public readonly directoryUuidToAnyLinkedDirWithMeta: PersistentMap<{
-		dir: AnyLinkedDir
-		meta: DirPublicLink
-	}>
 
 	public constructor() {
-		this.uuidToAnyDriveItem = this.createMap<DriveItem>("uuidToAnyDriveItem")
-		this.fileUuidToNormalFile = this.createMap<File>("fileUuidToNormalFile")
-		this.directoryUuidToAnySharedDirWithContext = this.createMap<AnySharedDirWithContext>("directoryUuidToAnySharedDirWithContext")
-		this.directoryUuidToAnyNormalDir = this.createMap<AnyNormalDir>("directoryUuidToAnyNormalDir")
-		this.availableThumbnails = this.createMap<boolean>("availableThumbnails")
 		this.cameraUploadHashes = this.createMap<CameraUploadHashEntry | string>("cameraUploadHashes")
 		this.cameraUploadBackgroundAborts = this.createMap<number>("cameraUploadBackgroundAborts")
-		this.chatAttachmentLayouts = this.createMap<{
-			width: number
-			height: number
-		}>("chatAttachmentLayouts")
-		this.directoryUuidToAnyLinkedDirWithMeta = this.createMap<{
-			dir: AnyLinkedDir
-			meta: DirPublicLink
-		}>("directoryUuidToAnyLinkedDirWithMeta")
 
 		AppState.addEventListener("change", nextAppState => {
 			if (nextAppState === "background") {
@@ -821,17 +816,18 @@ export class Cache {
 
 	/**
 	 * Seed every cache that can be derived from a DriveItem ALONE, dispatching on the item's own type
-	 * discriminator (item.data IS the SDK type each helper needs). Used by the drive optimistic path so
-	 * a listing mutation reseeds the type-derived caches too, not just uuidToAnyDriveItem, without a
-	 * refetch. Context the item can't carry is handled conservatively:
-	 *   - the sharedOut refinement (a shared item ALSO getting the normal-dir/file view) is skipped —
-	 *     the item looks identical shared-in vs shared-out, and shared-out listings only ever refetch;
+	 * discriminator (item.data IS the SDK type each helper needs). Used by the drive optimistic path and
+	 * the boot warm-seed so a listing mutation reseeds the type-derived caches too, not just
+	 * uuidToAnyDriveItem, without a refetch. Context the item can't carry is handled conservatively:
+	 *   - the sharedOut refinement (a `sharedDirectory` ALSO getting the normal-dir view) is taken from
+	 *     `opts.sharedOut` — the caller knows the listing's context (default false); a shared FILE stays
+	 *     shared-in (its raw-size normal view can't be rebuilt from a DriveItem);
 	 *   - a `directory` item is always treated as normal (linked browse is read-only — never
 	 *     optimistically updated — and the linked caches need the parent link meta, not on the item);
 	 *   - a shared item whose optional sharingRole didn't survive onto the DriveItem falls back to a
 	 *     uuid-only reference instead of building a share context with a missing role.
 	 */
-	public cacheDriveItem(item: DriveItem): void {
+	public cacheDriveItem(item: DriveItem, opts?: { sharedOut?: boolean }): void {
 		switch (item.type) {
 			case "file": {
 				this.cacheNewFile(item.data, item)
@@ -847,7 +843,9 @@ export class Cache {
 
 			case "sharedDirectory": {
 				if (item.data.sharingRole) {
-					this.cacheNewSharedDir({ ...item.data, sharingRole: item.data.sharingRole }, item, { sharedOut: false })
+					this.cacheNewSharedDir({ ...item.data, sharingRole: item.data.sharingRole }, item, {
+						sharedOut: opts?.sharedOut ?? false
+					})
 				} else {
 					this.cacheDriveItemReference(item)
 				}
@@ -902,6 +900,14 @@ export class Cache {
 			Map.prototype.clear.call(map)
 			map.ready = false
 		}
+
+		// Session-scoped plain Maps — no ready flag, just drop their in-memory entries.
+		this.uuidToAnyDriveItem.clear()
+		this.fileUuidToNormalFile.clear()
+		this.directoryUuidToAnySharedDirWithContext.clear()
+		this.directoryUuidToAnyNormalDir.clear()
+		this.directoryUuidToAnyLinkedDirWithMeta.clear()
+		this.chatAttachmentLayouts.clear()
 
 		this.dirtyUpserts.clear()
 		this.dirtyDeletes.clear()

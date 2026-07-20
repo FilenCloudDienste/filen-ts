@@ -594,11 +594,29 @@ describe("Cache", () => {
 			expect(() => map.set("key", "value")).toThrow("Cache not restored yet")
 		})
 
-		it("has at least one PersistentMap field", async () => {
+		it("registers exactly the two durable camera-upload maps (metadata maps are session-scoped plain Maps)", async () => {
 			const cache = createCache()
-			const maps = getPersistentMaps(cache)
+			const names = getPersistentMaps(cache)
+				.map(([name]) => name)
+				.sort()
 
-			expect(maps.length).toBeGreaterThan(0)
+			expect(names).toEqual(["cameraUploadBackgroundAborts", "cameraUploadHashes"])
+		})
+
+		it("keeps the session-scoped metadata maps off the persistence registry", async () => {
+			const cache = createCache()
+			const names = getPersistentMaps(cache).map(([name]) => name)
+
+			for (const plain of [
+				"uuidToAnyDriveItem",
+				"fileUuidToNormalFile",
+				"directoryUuidToAnySharedDirWithContext",
+				"directoryUuidToAnyNormalDir",
+				"directoryUuidToAnyLinkedDirWithMeta",
+				"chatAttachmentLayouts"
+			]) {
+				expect(names).not.toContain(plain)
+			}
 		})
 	})
 
@@ -917,6 +935,28 @@ describe("Cache", () => {
 			}
 		})
 
+		it("empties the session-scoped metadata maps too", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			cache.uuidToAnyDriveItem.set("a", makeFileDriveItem("a"))
+			cache.fileUuidToNormalFile.set("a", makeSdkFile("a"))
+			cache.directoryUuidToAnySharedDirWithContext.set("a", {} as any)
+			cache.directoryUuidToAnyNormalDir.set("a", {} as any)
+			cache.directoryUuidToAnyLinkedDirWithMeta.set("a", { dir: {} as any, meta: {} as any })
+			cache.chatAttachmentLayouts.set("a", { width: 1, height: 2 })
+
+			cache.clear()
+
+			expect(cache.uuidToAnyDriveItem.size).toBe(0)
+			expect(cache.fileUuidToNormalFile.size).toBe(0)
+			expect(cache.directoryUuidToAnySharedDirWithContext.size).toBe(0)
+			expect(cache.directoryUuidToAnyNormalDir.size).toBe(0)
+			expect(cache.directoryUuidToAnyLinkedDirWithMeta.size).toBe(0)
+			expect(cache.chatAttachmentLayouts.size).toBe(0)
+		})
+
 		it("removes per-key entries from SQLite", async () => {
 			const cache = createCache()
 
@@ -1148,23 +1188,23 @@ describe("Cache", () => {
 			expect(cache.fileUuidToNormalFile.get(uuid)).toBe(sdkFile2)
 		})
 
-		it("persists both maps to SQLite after flush", async () => {
+		it("keeps the file maps in memory only — a flush persists nothing (session-scoped)", async () => {
 			const cache = createCache()
 
 			await cache.restore()
 
 			const uuid = "file-uuid-persist"
-			const sdkFile = makeSdkFile(uuid)
-			const driveItem = makeFileDriveItem(uuid)
 
-			cache.cacheNewFile(sdkFile, driveItem)
+			cache.cacheNewFile(makeSdkFile(uuid), makeFileDriveItem(uuid))
 
 			cache.flush()
 			vi.advanceTimersByTime(2000)
 			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			expect(kvStore.has(kvKey("uuidToAnyDriveItem", uuid))).toBe(true)
-			expect(kvStore.has(kvKey("fileUuidToNormalFile", uuid))).toBe(true)
+			expect(cache.uuidToAnyDriveItem.has(uuid)).toBe(true)
+			expect(cache.fileUuidToNormalFile.has(uuid)).toBe(true)
+			expect(kvStore.has(kvKey("uuidToAnyDriveItem", uuid))).toBe(false)
+			expect(kvStore.has(kvKey("fileUuidToNormalFile", uuid))).toBe(false)
 		})
 	})
 
@@ -1351,7 +1391,7 @@ describe("Cache", () => {
 			expect(cache.directoryUuidToAnyNormalDir.has("cdi-dir")).toBe(true)
 		})
 
-		it("dispatches a sharedDirectory WITH sharingRole to the shared caches", async () => {
+		it("dispatches a sharedDirectory WITH sharingRole to the shared caches (default sharedOut: false → no normal-dir view)", async () => {
 			const cache = createCache()
 
 			await cache.restore()
@@ -1359,6 +1399,18 @@ describe("Cache", () => {
 			cache.cacheDriveItem(makeSharedDirDriveItem("cdi-shared", "S"))
 
 			expect(cache.directoryUuidToAnySharedDirWithContext.has("cdi-shared")).toBe(true)
+			expect(cache.directoryUuidToAnyNormalDir.has("cdi-shared")).toBe(false)
+		})
+
+		it("passes opts.sharedOut through so a shared-OUT dir ALSO gets the normal-dir refinement", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			cache.cacheDriveItem(makeSharedDirDriveItem("cdi-shared-out", "S"), { sharedOut: true })
+
+			expect(cache.directoryUuidToAnySharedDirWithContext.has("cdi-shared-out")).toBe(true)
+			expect(cache.directoryUuidToAnyNormalDir.has("cdi-shared-out")).toBe(true)
 		})
 
 		it("falls back to a uuid-only reference for a sharedDirectory WITHOUT sharingRole", async () => {
@@ -1399,7 +1451,7 @@ describe("Cache", () => {
 	})
 
 	describe("forgetItem", () => {
-		it("removes uuid from all five persistent per-uuid maps", async () => {
+		it("removes uuid from all five session-scoped per-uuid maps", async () => {
 			const cache = createCache()
 
 			await cache.restore()
@@ -1468,22 +1520,16 @@ describe("Cache", () => {
 			expect(cache.fileUuidToNormalFile.has(uuid2)).toBe(true)
 		})
 
-		it("persists the deletions to SQLite after flush", async () => {
+		it("removes the in-memory entries without touching SQLite (session-scoped)", async () => {
 			const cache = createCache()
 
 			await cache.restore()
 
 			const uuid = "forget-persist-uuid"
-			const sdkFile = makeSdkFile(uuid)
-			const driveItem = makeFileDriveItem(uuid)
 
-			cache.cacheNewFile(sdkFile, driveItem)
+			cache.cacheNewFile(makeSdkFile(uuid), makeFileDriveItem(uuid))
 
-			cache.flush()
-			vi.advanceTimersByTime(2000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
-
-			expect(kvStore.has(kvKey("uuidToAnyDriveItem", uuid))).toBe(true)
+			mockDb.executeBatch.mockClear()
 
 			cache.forgetItem(uuid)
 
@@ -1491,8 +1537,9 @@ describe("Cache", () => {
 			vi.advanceTimersByTime(2000)
 			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			expect(kvStore.has(kvKey("uuidToAnyDriveItem", uuid))).toBe(false)
-			expect(kvStore.has(kvKey("fileUuidToNormalFile", uuid))).toBe(false)
+			expect(cache.uuidToAnyDriveItem.has(uuid)).toBe(false)
+			expect(cache.fileUuidToNormalFile.has(uuid)).toBe(false)
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
 		})
 	})
 
