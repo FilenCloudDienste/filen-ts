@@ -30,11 +30,11 @@ import logger from "@/lib/logger"
 // the result must track login/logout transitions within a process.
 const setupMutex = new Semaphore(1)
 
-// Storage-driven OOM triage: a giant persisted row (e.g. a whale account's photos listing)
-// is invisible in a native crash trace, and the abort itself never reaches JS — so boot
-// profiles the kv store after the restores land. Debug breadcrumb normally; past the
-// watermarks it escalates to a PERSISTED warn, leaving durable evidence in a log export
-// even from an install that OOM-loops at startup.
+// Storage-driven OOM triage (dev-only): a giant persisted row (e.g. a whale account's photos
+// listing) is invisible in a native crash trace, and the abort itself never reaches JS — so a
+// dev boot profiles the kv store after the restores land. Debug breadcrumb normally; past the
+// watermarks it escalates to a warn. Not run in production — the extra boot-time scan isn't
+// worth it there.
 const KV_STATS_WARN_TOTAL_BYTES = 32 * 1024 * 1024
 const KV_STATS_WARN_ROW_BYTES = 4 * 1024 * 1024
 
@@ -172,19 +172,29 @@ const setup = {
 			// debounced gc after writes and gc on app-background, so reclamation happens
 			// where growth happens instead of competing with startup.
 			if (isAuthed.isAuthed && !options?.background) {
-				foregroundService.init().catch(e => { logger.error("setup", "foregroundService.init failed", { error: e }) })
+				foregroundService.init().catch(e => {
+					logger.error("setup", "foregroundService.init failed", { error: e })
+				})
 
 				// configureCache is pure storage (opens no DB until the first search), so this is
 				// fire-and-forget and cheap. Gated like foregroundService: never in a headless
 				// background run (no search worker there), and only when authed.
-				driveSearch.init().catch(e => { logger.error("setup", "driveSearch.init failed", { error: e }) })
+				driveSearch.init().catch(e => {
+					logger.error("setup", "driveSearch.init failed", { error: e })
+				})
 
 				// One-time (per launch) beta migration: re-encrypt a legacy plaintext auth.json if the
 				// provider is enabled. No-op once auth.json is already encrypted or the provider is off.
-				fileProvider.ensureEncrypted().catch(e => { logger.error("setup", "fileProvider.ensureEncrypted failed", { error: e }) })
+				fileProvider.ensureEncrypted().catch(e => {
+					logger.error("setup", "fileProvider.ensureEncrypted failed", { error: e })
+				})
 
-				// Fire-and-forget: reads run against a page cache the restores just warmed.
-				logKvStats()
+				// globalThis read, not bare __DEV__ — undefined-at-eval in the test runner (see the
+				// console polyfill's module-eval gate). Tests (undefined) skip it like production.
+				if ((globalThis as { __DEV__?: boolean }).__DEV__ === true) {
+					// Fire-and-forget: reads run against a page cache the restores just warmed.
+					logKvStats()
+				}
 			}
 
 			const duration = performance.now() - now
