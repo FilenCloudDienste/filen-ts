@@ -164,16 +164,18 @@ export function directoryDriveItemToAnyDirWithContext(item: DriveItem): OfflineP
 				return null
 			}
 
-			const parentDirFromCache = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)
+			// The cached parent may be absent in a fresh session — the listing stamps the role onto the
+			// item, recover from it before giving up.
+			const shareInfo = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)?.shareInfo ?? item.data.sharingRole
 
-			if (!parentDirFromCache) {
+			if (!shareInfo) {
 				return null
 			}
 
 			return new AnyDirWithContext.Shared(
 				AnySharedDirWithContext.new({
 					dir: new AnySharedDir.Dir(item.data),
-					shareInfo: parentDirFromCache.shareInfo
+					shareInfo
 				})
 			)
 		}
