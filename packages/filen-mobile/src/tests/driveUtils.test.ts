@@ -5,20 +5,17 @@ import { type TFunction } from "i18next"
 // Mocks — hoisted so vi.mock factories can reference them safely
 // ---------------------------------------------------------------------------
 
-const { mockDirectoryUuidToName, mockUuidToAnyDriveItem, mockDriveItemDisplayName } = vi.hoisted(() => {
-	const mockDirectoryUuidToName = new Map<string, string>()
+const { mockUuidToAnyDriveItem, mockDriveItemDisplayName } = vi.hoisted(() => {
 	const mockUuidToAnyDriveItem = new Map<string, unknown>()
 	const mockDriveItemDisplayName = vi.fn((item: unknown) => `display:${(item as { data: { uuid: string } }).data.uuid}`)
 
-	return { mockDirectoryUuidToName, mockUuidToAnyDriveItem, mockDriveItemDisplayName }
+	return { mockUuidToAnyDriveItem, mockDriveItemDisplayName }
 })
 
-// cache provides two maps used by resolveDriveHeaderTitle:
-//   cache.directoryUuidToName  — Map<string, string>
+// cache provides the uuid→item map used by resolveDriveHeaderTitle:
 //   cache.uuidToAnyDriveItem   — Map<string, DriveItem>
 vi.mock("@/lib/cache", () => ({
 	default: {
-		directoryUuidToName: mockDirectoryUuidToName,
 		uuidToAnyDriveItem: mockUuidToAnyDriveItem
 	}
 }))
@@ -82,6 +79,13 @@ function undecryptableItem(uuid: string): DriveItem {
 	return {
 		type: "directory",
 		data: { uuid, undecryptable: true, decryptedMeta: null } as DriveItem["data"]
+	} as DriveItem
+}
+
+function decryptableItem(uuid: string, name: string): DriveItem {
+	return {
+		type: "directory",
+		data: { uuid, undecryptable: false, decryptedMeta: { name } } as DriveItem["data"]
 	} as DriveItem
 }
 
@@ -189,7 +193,6 @@ describe("getDriveEmptyStateTitleKey", () => {
 
 describe("resolveDriveHeaderTitle", () => {
 	beforeEach(() => {
-		mockDirectoryUuidToName.clear()
 		mockUuidToAnyDriveItem.clear()
 		mockDriveItemDisplayName.mockClear()
 	})
@@ -348,8 +351,8 @@ describe("resolveDriveHeaderTitle", () => {
 		expect(result).toBe("drive")
 	})
 
-	it("drive: uuid in cache.directoryUuidToName → cached name", () => {
-		mockDirectoryUuidToName.set("dir-abc", "My Folder")
+	it("drive: uuid in cache.uuidToAnyDriveItem (decryptable) → decrypted name", () => {
+		mockUuidToAnyDriveItem.set("dir-abc", decryptableItem("dir-abc", "My Folder"))
 
 		const result = resolveDriveHeaderTitle({
 			drivePath: drivePath("drive", { uuid: "dir-abc" }),
@@ -361,7 +364,7 @@ describe("resolveDriveHeaderTitle", () => {
 		expect(result).toBe("My Folder")
 	})
 
-	it("drive: uuid not in name cache, item in uuidToAnyDriveItem and undecryptable → driveItemDisplayName result", () => {
+	it("drive: item in uuidToAnyDriveItem and undecryptable → driveItemDisplayName result", () => {
 		const item = undecryptableItem("dir-xyz")
 
 		mockUuidToAnyDriveItem.set("dir-xyz", item)
@@ -404,7 +407,7 @@ describe("resolveDriveHeaderTitle", () => {
 	// -------------------------------------------------------------------------
 
 	it("trash: always returns 'trash' (no cache lookup)", () => {
-		mockDirectoryUuidToName.set("trash-dir", "should be ignored")
+		mockUuidToAnyDriveItem.set("trash-dir", decryptableItem("trash-dir", "should be ignored"))
 
 		const result = resolveDriveHeaderTitle({
 			drivePath: drivePath("trash", { uuid: "trash-dir" }),
@@ -436,7 +439,7 @@ describe("resolveDriveHeaderTitle", () => {
 	// -------------------------------------------------------------------------
 
 	it("offline: uuid in cache → cached name", () => {
-		mockDirectoryUuidToName.set("offline-dir", "Offline Folder")
+		mockUuidToAnyDriveItem.set("offline-dir", decryptableItem("offline-dir", "Offline Folder"))
 
 		const result = resolveDriveHeaderTitle({
 			drivePath: drivePath("offline", { uuid: "offline-dir" }),
@@ -463,8 +466,8 @@ describe("resolveDriveHeaderTitle", () => {
 	// drivePath.type = 'sharedIn'
 	// -------------------------------------------------------------------------
 
-	it("sharedIn: uuid in cache → cached name", () => {
-		mockDirectoryUuidToName.set("shared-in-dir", "SharedIn Folder")
+	it("sharedIn: uuid in cache → cached name (shared-dir rename now reflected)", () => {
+		mockUuidToAnyDriveItem.set("shared-in-dir", decryptableItem("shared-in-dir", "SharedIn Folder"))
 
 		const result = resolveDriveHeaderTitle({
 			drivePath: drivePath("sharedIn", { uuid: "shared-in-dir" }),
@@ -537,7 +540,7 @@ describe("resolveDriveHeaderTitle", () => {
 	// -------------------------------------------------------------------------
 
 	it("linked: linked.rootName present → rootName returned (no cache lookup)", () => {
-		mockDirectoryUuidToName.set("linked-dir", "should be ignored")
+		mockUuidToAnyDriveItem.set("linked-dir", decryptableItem("linked-dir", "should be ignored"))
 
 		const result = resolveDriveHeaderTitle({
 			drivePath: drivePath("linked", {
@@ -593,17 +596,12 @@ describe("resolveDriveHeaderTitle", () => {
 	})
 
 	// -------------------------------------------------------------------------
-	// resolveBreadcrumb — cache.uuidToAnyDriveItem present but NOT undecryptable
-	// (should NOT call driveItemDisplayName, fallback to t(key) instead)
+	// resolveBreadcrumb — a decryptable item in cache.uuidToAnyDriveItem resolves
+	// to its decrypted name (never reaches the display-name / fallback branches)
 	// -------------------------------------------------------------------------
 
-	it("drive: item in uuidToAnyDriveItem but NOT undecryptable → falls back to t(fallback)", () => {
-		const decryptableItem = {
-			type: "directory",
-			data: { uuid: "decryptable-dir", undecryptable: false, decryptedMeta: { name: "Decryptable" } }
-		} as unknown as DriveItem
-
-		mockUuidToAnyDriveItem.set("decryptable-dir", decryptableItem)
+	it("drive: item in uuidToAnyDriveItem and decryptable → its decrypted name (no fallback)", () => {
+		mockUuidToAnyDriveItem.set("decryptable-dir", decryptableItem("decryptable-dir", "Decryptable"))
 
 		const result = resolveDriveHeaderTitle({
 			drivePath: drivePath("drive", { uuid: "decryptable-dir" }),
@@ -612,11 +610,10 @@ describe("resolveDriveHeaderTitle", () => {
 			t: t
 		})
 
-		// directoryUuidToName does NOT have this entry, so resolveBreadcrumb
-		// checks uuidToAnyDriveItem — but item is NOT undecryptable, so it
-		// falls through to the fallback t("drive")
+		// A decryptable cached item resolves to its decrypted name directly —
+		// the display-name (undecryptable) branch is never reached.
 		expect(mockDriveItemDisplayName).not.toHaveBeenCalled()
-		expect(result).toBe("drive")
+		expect(result).toBe("Decryptable")
 	})
 })
 

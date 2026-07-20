@@ -121,8 +121,9 @@ export function getDriveEmptyStateDescriptionKey(type: DrivePathType | null): Dr
  * inline derivation:
  *   - bulk-selection (non-picker) → "N selected"
  *   - picker (`selectOptions`)    → destination / select-item(s) phrasing
- *   - otherwise                   → cached decrypted directory name, falling
+ *   - otherwise                   → the cached DriveItem's decrypted name, falling
  *     back to the undecryptable placeholder, then the localized variant default.
+ *     Resolved from the single uuid→item cache.
  */
 export function resolveDriveHeaderTitle({
 	drivePath,
@@ -164,21 +165,20 @@ export function resolveDriveHeaderTitle({
 		}
 	}
 
-	// Resolve the breadcrumb title for the current directory. Prefers the
-	// cached decrypted name; falls back to the cached DriveItem's display
-	// name (which yields `cannot_decrypt_<uuid>` for undecryptable
+	// Resolve the breadcrumb title for the current directory from the single
+	// uuid→item cache: prefers the item's decrypted name, falls back to its
+	// display name (which yields `cannot_decrypt_<uuid>` for undecryptable
 	// directories) before the localized default.
 	const resolveBreadcrumb = (fallback: string): string => {
-		const uuid = drivePath.uuid ?? ""
-		const cachedName = cache.directoryUuidToName.get(uuid)
+		const cachedItem = cache.uuidToAnyDriveItem.get(drivePath.uuid ?? "")
+
+		const cachedName = cachedItem?.data.decryptedMeta?.name
 
 		if (cachedName) {
 			return cachedName
 		}
 
-		const cachedItem = cache.uuidToAnyDriveItem.get(uuid)
-
-		if (cachedItem && cachedItem.data.undecryptable) {
+		if (cachedItem?.data.undecryptable) {
 			return driveItemDisplayName(cachedItem)
 		}
 

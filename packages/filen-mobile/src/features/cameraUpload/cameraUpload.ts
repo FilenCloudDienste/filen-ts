@@ -4,7 +4,7 @@ import logger from "@/lib/logger"
 import auth from "@/lib/auth"
 import { type FileWithPath, AnyNormalDir, AnyNormalDir_Tags, AnyDirWithContext, NonRootDir_Tags } from "@filen/sdk-rs"
 import { normalizeModificationTimestampForComparison } from "@/lib/utils"
-import { type UnwrapFileMetaResult, unwrapFileMeta, unwrapDirMeta } from "@/lib/sdkUnwrap"
+import { type UnwrapFileMetaResult, unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForExpo } from "@/lib/paths"
 import { isConvertHeicToJpgEnabled, convertHeicToJpg } from "@/lib/imageConversion"
 import { transplantMetadata } from "@/modules/filen-exif"
@@ -713,15 +713,12 @@ class CameraUpload {
 			}
 
 			const resultDir = dir.inner[0]
-			const unwrappedDir = unwrapDirMeta(resultDir)
+			const driveItem = unwrappedDirIntoDriveItem(unwrapDirMeta(resultDir))
 
-			const normalDir = new AnyNormalDir.Dir(resultDir)
-
-			cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid, normalDir)
-			cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Normal(normalDir))
-
-			if (unwrappedDir.meta?.name) {
-				cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
+			// Route through the shared helper so every uuid-keyed cache (including the item
+			// map the header title reads) stays coherent.
+			if (driveItem.type === "directory") {
+				cache.cacheNewNormalDir(resultDir, driveItem)
 			}
 		}
 
