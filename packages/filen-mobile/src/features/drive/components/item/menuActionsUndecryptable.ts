@@ -15,13 +15,12 @@ import logger from "@/lib/logger"
 export function buildUndecryptableMenuButtons({
 	item,
 	drivePath,
-	isPreview,
 	t
 }: {
 	item: DriveItem
 	drivePath: DrivePath
-	// True when rendered inside the preview (gallery) — destructive actions then pop
-	// the preview on success. See `isPreview` in createMenuButtons.
+	// Accepted for signature parity with createMenuButtons; unused — the gallery owns
+	// preview navigation for these destructive actions via driveItemRemoved.
 	isPreview?: boolean
 	t: TFunction
 }): MenuButton[] {
@@ -62,8 +61,11 @@ export function buildUndecryptableMenuButtons({
 					promptMessage: t("confirm_delete_permanently"),
 					promptOkText: t("delete_permanently"),
 					action: () => drive.deletePermanently({ item }),
-					// Close the preview when deleting from inside it (stays put from the list).
-					dismissOnSuccess: isPreview === true
+					// deletePermanently emits driveItemRemoved, which the gallery's own subscriber
+					// acts on — advancing to a neighbour, or popping (once) when it was the last
+					// previewed item. A self-pop here too double-navigated (mirrors the decryptable
+					// trash/delete actions).
+					dismissOnSuccess: false
 				})
 			})
 		}
@@ -86,8 +88,9 @@ export function buildUndecryptableMenuButtons({
 				promptMessage: t("confirm_trash"),
 				promptOkText: t("trash"),
 				action: () => drive.trash({ item }),
-				// Close the preview when trashing from inside it.
-				dismissOnSuccess: isPreview === true
+				// trash emits driveItemRemoved — same gallery-owned navigation as above; a self-pop
+				// here closed the preview instead of advancing.
+				dismissOnSuccess: false
 			})
 		})
 	}

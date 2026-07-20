@@ -556,7 +556,7 @@ describe("buildUndecryptableMenuButtons preview dismiss (#40)", () => {
 		mockConfirmedAction.mockClear()
 	})
 
-	it("threads isPreview=true into deletePermanently → dismiss fn returns true", () => {
+	it("never self-dismisses deletePermanently from the preview — the gallery owns navigation via driveItemRemoved", () => {
 		buildUndecryptableMenuButtons({
 			item: makeFile(),
 			drivePath: makeDrivePath("trash"),
@@ -564,11 +564,12 @@ describe("buildUndecryptableMenuButtons preview dismiss (#40)", () => {
 			t
 		})
 
-		// trash branch builds [restore (no confirmedAction), deletePermanently (call #0)]
+		// trash branch builds [restore (no confirmedAction), deletePermanently (call #0)].
+		// A self-pop on top of the gallery's own driveItemRemoved handling double-navigated
+		// (closed the preview instead of advancing) — mirrors the decryptable actions.
 		const callArgs = mockConfirmedAction.mock.calls[0]?.[0] as { dismiss: (() => boolean) | undefined }
 
-		expect(typeof callArgs.dismiss).toBe("function")
-		expect(callArgs.dismiss?.()).toBe(true)
+		expect(callArgs.dismiss).toBeUndefined()
 	})
 
 	it("omits dismiss for deletePermanently when not in preview (stays on the trash list)", () => {
@@ -583,7 +584,7 @@ describe("buildUndecryptableMenuButtons preview dismiss (#40)", () => {
 		expect(callArgs.dismiss).toBeUndefined()
 	})
 
-	it("threads isPreview=true into the trash action (drive variant)", () => {
+	it("never self-dismisses the trash action from the preview (drive variant)", () => {
 		buildUndecryptableMenuButtons({
 			item: makeFile(),
 			drivePath: makeDrivePath("drive"),
@@ -593,7 +594,7 @@ describe("buildUndecryptableMenuButtons preview dismiss (#40)", () => {
 
 		const callArgs = mockConfirmedAction.mock.calls[0]?.[0] as { dismiss: (() => boolean) | undefined }
 
-		expect(callArgs.dismiss?.()).toBe(true)
+		expect(callArgs.dismiss).toBeUndefined()
 	})
 })
 
