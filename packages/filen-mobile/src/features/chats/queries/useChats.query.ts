@@ -51,7 +51,17 @@ export function chatsQueryUpdate({
 		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
 }) {
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY], prev => {
-		return typeof updater === "function" ? updater(prev ?? []) : updater
+		const next = typeof updater === "function" ? updater(prev ?? []) : updater
+
+		// Keep cache.chatUuidToChat in sync with the list query (mirrors fetchData). Otherwise a chat
+		// added optimistically (chats.create) or via socket lives only in the query data, and consumers
+		// that resolve a chat by uuid FROM this cache (useChatMessagesQuery.fetchData) miss it until the
+		// next listChats refetch.
+		for (const chat of next) {
+			cache.chatUuidToChat.set(chat.uuid, chat)
+		}
+
+		return next
 	})
 }
 

@@ -43,7 +43,18 @@ export function playlistsQueryUpdate({
 		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
 }) {
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY], prev => {
-		return typeof updater === "function" ? updater(prev ?? []) : updater
+		const next = typeof updater === "function" ? updater(prev ?? []) : updater
+
+		// Keep cache.uuidToAnyDriveItem in sync with the list query (mirrors fetchData). The audio
+		// metadata query resolves each file by uuid FROM this cache, so an optimistically-updated
+		// playlist's files must be seeded here too, not only on the next refetch.
+		for (const playlist of next) {
+			for (const { item } of playlist.files ?? []) {
+				cache.uuidToAnyDriveItem.set(item.data.uuid, item)
+			}
+		}
+
+		return next
 	})
 }
 
