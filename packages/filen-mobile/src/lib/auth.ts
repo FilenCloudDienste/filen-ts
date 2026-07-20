@@ -19,6 +19,7 @@ import thumbnails from "@/lib/thumbnails"
 import sandboxCache from "@/lib/sandboxCache"
 import logger from "@/lib/logger"
 import driveSearch from "@/features/drive/driveSearch"
+import drive from "@/features/drive/drive"
 import events from "@/lib/events"
 import { reloadAppAsync } from "expo"
 import { isEqual } from "es-toolkit"
@@ -417,6 +418,13 @@ class Auth {
 			cache.clear()
 		} catch (e) {
 			logger.error("auth", "in-memory cache clear failed during logout", { err: e })
+		}
+
+		// Session-cached root uuid must not leak into the next account's session.
+		try {
+			drive.resetCachedRootUuid()
+		} catch (e) {
+			logger.error("auth", "drive root uuid reset failed during logout", { err: e })
 		}
 
 		// Diagnostic logs hold decrypted-at-rest data (file/dir names, paths) by design — wipe them

@@ -275,6 +275,11 @@ const drive = {
 		this.cachedRootUuid = rootUuid
 
 		return rootUuid
+	},
+
+	// Session-cached root uuid must not leak into the next account's session.
+	resetCachedRootUuid(): void {
+		this.cachedRootUuid = null
 	}
 }
 

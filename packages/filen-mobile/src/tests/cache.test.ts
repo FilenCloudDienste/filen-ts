@@ -974,6 +974,16 @@ describe("Cache", () => {
 			expect(cache.secureStore.size).toBe(0)
 		})
 
+		it("resets the session rootUuid to null", () => {
+			const cache = createCache()
+
+			cache.rootUuid = "root-uuid-session"
+
+			cache.clear()
+
+			expect(cache.rootUuid).toBeNull()
+		})
+
 		it("cancels any pending debounced persist", async () => {
 			const cache = createCache()
 

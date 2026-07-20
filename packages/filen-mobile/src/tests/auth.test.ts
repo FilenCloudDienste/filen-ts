@@ -207,6 +207,14 @@ vi.mock("@/features/drive/driveSearch", () => ({
 	}
 }))
 
+vi.mock("@/features/drive/drive", () => ({
+	default: {
+		resetCachedRootUuid: vi.fn(() => {
+			callLog.push("drive.resetCachedRootUuid")
+		})
+	}
+}))
+
 vi.mock("expo", () => ({
 	reloadAppAsync: vi.fn(async () => {
 		callLog.push("reloadAppAsync")
@@ -432,6 +440,12 @@ describe("auth.logout", () => {
 
 		expect(cacheClearIdx).toBeGreaterThanOrEqual(0)
 		expect(sqliteClearIdx).toBeGreaterThan(cacheClearIdx)
+
+		// The session-cached drive root uuid is reset in Phase 5, right after the in-memory cache wipe,
+		// so it can't leak into the next account's session.
+		const driveResetIdx = callLog.indexOf("drive.resetCachedRootUuid")
+
+		expect(driveResetIdx).toBeGreaterThan(cacheClearIdx)
 
 		// All decrypted-at-rest stores are wiped — including the diagnostic logs (file/dir names).
 		expect(callLog).toContain("offline.clearAll")

@@ -1274,6 +1274,23 @@ describe("drive.getRootUuid", () => {
 		expect(drive.cachedRootUuid).toBe("root-uuid-0001")
 	})
 
+	it("resetCachedRootUuid clears the cache so the next call re-fetches from the SDK", async () => {
+		await drive.getRootUuid()
+
+		expect(drive.cachedRootUuid).toBe("root-uuid-0001")
+
+		drive.resetCachedRootUuid()
+
+		expect(drive.cachedRootUuid).toBeNull()
+
+		mockAuthedSdkClient.root.mockReturnValue({ uuid: "root-uuid-next" })
+
+		const result = await drive.getRootUuid()
+
+		expect(mockGetSdkClients).toHaveBeenCalledTimes(2)
+		expect(result).toBe("root-uuid-next")
+	})
+
 	it("FALSY-GUARD REGRESSION: empty-string uuid causes re-fetch on every call (truthy guard bug)", async () => {
 		// root() returns an empty string uuid (edge case)
 		mockAuthedSdkClient.root.mockReturnValue({ uuid: "" })

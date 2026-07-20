@@ -957,6 +957,7 @@ export class Cache {
 		this.restored = false
 
 		this.secureStore.clear()
+		this.rootUuid = null
 
 		for (const { map } of this.registry) {
 			Map.prototype.clear.call(map)
