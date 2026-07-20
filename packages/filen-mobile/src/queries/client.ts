@@ -14,7 +14,7 @@ import logger from "@/lib/logger"
 // Critical: When changing anything related to query persistence, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = 1
 export const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
-// 90 days. Drives gcTime + the persister maxAge + the boot restore-drop (an entry is evicted at
+// 365 days. Drives gcTime + the persister maxAge + the boot restore-drop (an entry is evicted at
 // restore when dataUpdatedAt + this < now). dataUpdatedAt = last online view OR optimistic touch
 // (staleTime:0 + refetchOnMount:"always" restamp it every online view, and queryUpdater.set restamps
 // it on every optimistic/socket update; networkMode:"offlineFirst" freezes it while offline), so this
@@ -23,7 +23,7 @@ export const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
 // cloud state. Offline editing of a note whose content has aged out is guarded in
 // features/notes/components/content (renders a read-only "unavailable offline" surface, never an
 // editable empty seed that a keystroke could push over the real note).
-export const QUERY_CLIENT_CACHE_TIME = 86400 * 90 * 1000
+export const QUERY_CLIENT_CACHE_TIME = 86400 * 365 * 1000
 
 const PERSIST_DEBOUNCE = 1000
 const PERSIST_CHUNK_SIZE = 100
@@ -145,7 +145,10 @@ export class QueryPersisterKv {
 
 		this.restoredOnce = true
 
-		logger.debug("queries-restore", "Restored persisted query rows", { count: this.buffer.size, ms: (performance.now() - now).toFixed(2) })
+		logger.debug("queries-restore", "Restored persisted query rows", {
+			count: this.buffer.size,
+			ms: (performance.now() - now).toFixed(2)
+		})
 	}
 
 	public flush(): void {
@@ -314,7 +317,11 @@ export class QueryPersisterKv {
 
 			logger.debug("queries-persist", "Async persist completed", { ms: (performance.now() - now).toFixed(2) })
 		} catch (err) {
-			logger.error("queries-persist", "Batch persist to SQLite failed", { error: err, upserts: snapshotUpserts.size, deletes: snapshotDeletes.size })
+			logger.error("queries-persist", "Batch persist to SQLite failed", {
+				error: err,
+				upserts: snapshotUpserts.size,
+				deletes: snapshotDeletes.size
+			})
 
 			// Restore failed keys so the finally-block re-trigger actually retries them.
 			// Only re-add keys that were not re-dirtied or re-removed after the snapshot.
