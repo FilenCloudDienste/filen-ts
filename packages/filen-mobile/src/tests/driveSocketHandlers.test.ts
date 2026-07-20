@@ -95,7 +95,9 @@ vi.mock("@filen/sdk-rs", () => ({
 		FolderRestore: "FolderRestore",
 		FolderSubCreated: "FolderSubCreated",
 		ItemFavorite: "ItemFavorite",
-		TrashEmpty: "TrashEmpty"
+		TrashEmpty: "TrashEmpty",
+		DeleteAll: "DeleteAll",
+		DeleteVersioned: "DeleteVersioned"
 	},
 	AnyNormalDir_Tags: {
 		Dir: "Dir",
@@ -1128,6 +1130,24 @@ describe("handleDriveEvent — drive socket handler", () => {
 			// The updater always returns an empty array
 			const result = call.updater()
 			expect(result).toEqual([])
+		})
+	})
+
+	describe("DriveEvent_Tags.DeleteAll / DeleteVersioned — ignored no-ops", () => {
+		it("DeleteAll: resolves without throwing and touches no query updater", async () => {
+			await expect(handleDriveEvent({ event: makeEvent(DriveEvent_Tags.DeleteAll, {}) })).resolves.toBeUndefined()
+
+			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
+			expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
+			expect(mockDriveItemsQueryUpdateForNormalParent).not.toHaveBeenCalled()
+		})
+
+		it("DeleteVersioned: resolves without throwing and touches no query updater", async () => {
+			await expect(handleDriveEvent({ event: makeEvent(DriveEvent_Tags.DeleteVersioned, {}) })).resolves.toBeUndefined()
+
+			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
+			expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
+			expect(mockDriveItemsQueryUpdateForNormalParent).not.toHaveBeenCalled()
 		})
 	})
 

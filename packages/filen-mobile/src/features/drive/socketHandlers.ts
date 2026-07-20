@@ -16,6 +16,10 @@ export type DriveSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Ta
 
 export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): Promise<void> {
 	const [eventInner] = event.inner
+	// Captured while the union is intact — the switch below is exhaustive, so `eventInner.inner`
+	// narrows to `never` in the default branch, which is kept only as runtime defense against a
+	// future SDK tag the pinned bindings don't yet know about.
+	const eventTag = eventInner.inner.tag
 
 	switch (eventInner.inner.tag) {
 		case DriveEvent_Tags.FileArchiveRestored:
@@ -483,8 +487,15 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			break
 		}
 
+		case DriveEvent_Tags.DeleteAll:
+		case DriveEvent_Tags.DeleteVersioned: {
+			// These carry no per-item payload a listing patch could apply; ignoring them beats
+			// surfacing an error for a routine remote action.
+			break
+		}
+
 		default: {
-			logger.error("drive-socket", "unhandled drive event tag", { tag: eventInner.inner.tag })
+			logger.error("drive-socket", "unhandled drive event tag", { tag: eventTag })
 
 			throw new Error("Unhandled drive event")
 		}
