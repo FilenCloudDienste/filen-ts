@@ -40,8 +40,8 @@ export type CameraUploadHashEntry = {
  * Durable, feature-owned camera-upload ledger. Two per-entry kv stores, previously registered maps
  * on the shared cache: the md5/verified-mtime hash shield and the background-abort counter. Owning
  * them here keeps headless camera-upload fires off the shared cache machinery. On existing installs
- * the store simply starts empty — the old `cache:v1:` rows are abandoned in place (a later phase's
- * global `cache:v1:` sweep removes them); the accepted one-time cost is a shield rebuild via
+ * the store simply starts empty — the old `cache:v1:` rows are abandoned in place (the
+ * legacy-row sweep in setup.ts removes them); the accepted one-time cost is a shield rebuild via
  * re-verification.
  *
  * The abort ledger (`aborts`): assetId → count of BACKGROUND uploads of this asset aborted by the
@@ -98,24 +98,43 @@ export class CameraUploadState {
 	}
 
 	private async doLoadHashes(): Promise<void> {
-		this.locked = false
-
 		const generation = this.generation
 		const scanned = new Map<string, CameraUploadHashEntry | string>()
 
 		try {
 			const db = await sqlite.openDb()
 
+			const badKeys: string[] = []
+
 			await forEachKvRowByPrefix(db, HASHES_PREFIX, (rowKey, value) => {
-				scanned.set(rowKey.slice(HASHES_PREFIX.length), deserialize(value) as CameraUploadHashEntry | string)
+				// One corrupt row must not wipe the whole shield — skip and drop just that row.
+				try {
+					scanned.set(rowKey.slice(HASHES_PREFIX.length), deserialize(value) as CameraUploadHashEntry | string)
+				} catch {
+					badKeys.push(rowKey)
+				}
 			})
+
+			if (badKeys.length > 0) {
+				logger.warn("cameraUploadState", "Dropping corrupt hash ledger rows", { count: badKeys.length })
+
+				await db.executeBatch(badKeys.map(key => ["DELETE FROM kv WHERE key = ?", [key]] as KvCommand))
+			}
 		} catch (err) {
 			logger.warn("cameraUploadState", "Hash ledger scan failed — wiping corrupt prefix and proceeding empty", { error: err })
 
+			// Stale-generation zombie: the logout wipe already removed the prefix — never touch
+			// the next session's rows.
+			if (generation !== this.generation) {
+				return
+			}
+
 			await this.rangeDeletePrefix(HASHES_PREFIX).catch(() => {})
 
+			// Re-check: a logout landing during the wipe above must keep the latch closed.
 			if (generation === this.generation) {
 				this.hashesLoaded = true
+				this.locked = false
 			}
 
 			return
@@ -130,6 +149,9 @@ export class CameraUploadState {
 		}
 
 		this.hashesLoaded = true
+		// A fresh session's committed load re-enables writes; un-latching any earlier (before the
+		// generation check) would let a logout-window zombie load defeat the latch.
+		this.locked = false
 	}
 
 	/**
@@ -157,24 +179,43 @@ export class CameraUploadState {
 	}
 
 	private async doLoadAborts(): Promise<void> {
-		this.locked = false
-
 		const generation = this.generation
 		const scanned = new Map<string, number>()
 
 		try {
 			const db = await sqlite.openDb()
 
+			const badKeys: string[] = []
+
 			await forEachKvRowByPrefix(db, ABORTS_PREFIX, (rowKey, value) => {
-				scanned.set(rowKey.slice(ABORTS_PREFIX.length), deserialize(value) as number)
+				// One corrupt row must not wipe the whole ledger — skip and drop just that row.
+				try {
+					scanned.set(rowKey.slice(ABORTS_PREFIX.length), deserialize(value) as number)
+				} catch {
+					badKeys.push(rowKey)
+				}
 			})
+
+			if (badKeys.length > 0) {
+				logger.warn("cameraUploadState", "Dropping corrupt abort ledger rows", { count: badKeys.length })
+
+				await db.executeBatch(badKeys.map(key => ["DELETE FROM kv WHERE key = ?", [key]] as KvCommand))
+			}
 		} catch (err) {
 			logger.warn("cameraUploadState", "Abort ledger scan failed — wiping corrupt prefix and proceeding empty", { error: err })
 
+			// Stale-generation zombie: the logout wipe already removed the prefix — never touch
+			// the next session's rows.
+			if (generation !== this.generation) {
+				return
+			}
+
 			await this.rangeDeletePrefix(ABORTS_PREFIX).catch(() => {})
 
+			// Re-check: a logout landing during the wipe above must keep the latch closed.
 			if (generation === this.generation) {
 				this.abortsLoaded = true
+				this.locked = false
 			}
 
 			return
@@ -189,6 +230,7 @@ export class CameraUploadState {
 		}
 
 		this.abortsLoaded = true
+		this.locked = false
 	}
 
 	private async rangeDeletePrefix(prefix: string): Promise<void> {
@@ -270,14 +312,12 @@ export class CameraUploadState {
 
 	// One awaited kv round for a whole enumeration wave — a 50k-library re-key must not become O(n)
 	// serialized point writes. Memory first (synchronously), then chunked executeBatch.
-	public async applyHashBatch(batch: {
-		upserts?: [string, CameraUploadHashEntry | string][]
-		deletes?: string[]
-	}): Promise<void> {
+	public async applyHashBatch(batch: { upserts?: [string, CameraUploadHashEntry | string][]; deletes?: string[] }): Promise<void> {
 		if (this.locked) {
 			return
 		}
 
+		const generation = this.generation
 		const upserts = batch.upserts ?? []
 		const deletes = batch.deletes ?? []
 
@@ -306,6 +346,12 @@ export class CameraUploadState {
 		const db = await sqlite.openDb()
 
 		for (let i = 0; i < commands.length; i += APPLY_CHUNK_SIZE) {
+			// Re-check per chunk: raw executeBatch bypasses the kv wipe generation, so a logout
+			// landing mid-wave must stop the tail chunks from re-inserting into the emptied store.
+			if (this.locked || generation !== this.generation) {
+				return
+			}
+
 			await db.executeBatch(commands.slice(i, i + APPLY_CHUNK_SIZE))
 		}
 	}

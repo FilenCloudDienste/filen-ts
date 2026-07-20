@@ -18,6 +18,10 @@ vi.mock("@/lib/sqlite", async () => {
 	const { serialize, deserialize } = await import("@/lib/serializer")
 
 	const db = {
+		// Single-statement spy — exposed on the fake DB alongside executeBatch so the two-tier fake
+		// mirrors the real op-sqlite surface. The store's kv writes go through executeBatch; this is here
+		// for inspectability/parity and stays a no-op unless a future path calls it.
+		execute: vi.fn(async () => ({ rows: [], rowsAffected: 0, insertId: undefined })),
 		executeBatch: vi.fn(async (commands: [string, unknown[]][]) => {
 			for (const [query, params] of commands) {
 				if (query.startsWith("INSERT OR REPLACE")) {
@@ -67,12 +71,14 @@ vi.mock("@/lib/sqlite", async () => {
 })
 
 vi.mock("@/lib/kvScan", () => ({
+	// Mirrors the real prefixUpperBound contract: an empty or U+FFFF-terminated prefix cannot form a
+	// valid exclusive upper bound, so the real function throws — the fake must too, or it could drift.
 	prefixUpperBound: (prefix: string): string => {
-		if (prefix.length === 0) {
-			return prefix
-		}
-
 		const lastIndex = prefix.length - 1
+
+		if (prefix.length === 0 || prefix.charCodeAt(lastIndex) === 0xffff) {
+			throw new Error("prefixUpperBound: prefix must be non-empty and must not end in U+FFFF")
+		}
 
 		return prefix.slice(0, lastIndex) + String.fromCharCode(prefix.charCodeAt(lastIndex) + 1)
 	},
@@ -178,6 +184,38 @@ describe("loadHashes", () => {
 		expect(state.hashKeys()).toEqual([])
 		expect(state.getHashSync("asset1")).toBeUndefined()
 	})
+
+	it("skips a single corrupt row: commits the valid rows and DELETEs only the bad key", async () => {
+		seedHash("good1", { md5: "m1", verifiedModificationTime: 1 })
+		seedHash("good2", "legacy")
+		// A value deserialize (JSON.parse) cannot parse — the per-row try/catch must drop just this one.
+		kvStore.set(HASHES_PREFIX + "corrupt", "{ not valid json ")
+
+		const state = make()
+		const db = await sqlite.openDb()
+
+		await state.loadHashes()
+
+		// The two valid rows are committed to memory.
+		expect(state.getHashSync("good1")).toEqual({ md5: "m1", verifiedModificationTime: 1 })
+		expect(state.getHashSync("good2")).toBe("legacy")
+		// The corrupt row is dropped from memory and range-deleted from kv.
+		expect(state.getHashSync("corrupt")).toBeUndefined()
+		expect(kvStore.has(HASHES_PREFIX + "corrupt")).toBe(false)
+		expect(kvStore.has(HASHES_PREFIX + "good1")).toBe(true)
+
+		// A DELETE targeting exactly the corrupt key was issued via the executeBatch spy.
+		const deletedCorruptKey = vi
+			.mocked(db.executeBatch)
+			.mock.calls.some(([commands]) =>
+				(commands as [string, unknown[]][]).some(
+					([query, params]) => query.startsWith("DELETE FROM kv WHERE key = ?") && params[0] === HASHES_PREFIX + "corrupt"
+				)
+			)
+
+		expect(deletedCorruptKey).toBe(true)
+		expect(logger.warn).toHaveBeenCalled()
+	})
 })
 
 describe("getHash (background point reads)", () => {
@@ -217,6 +255,23 @@ describe("getHash (background point reads)", () => {
 
 		expect(await state.getHash("asset1")).toBe("x")
 		expect(vi.mocked(sqlite.kvAsync.get)).not.toHaveBeenCalled()
+	})
+
+	it("dual-mode read: getHash point-reads kv WITHOUT a load; getHashSync serves memory AFTER a load", async () => {
+		seedHash("dual", { md5: "m", verifiedModificationTime: 2 })
+
+		// Fresh instance, no loadHashes: the async getHash point-reads the fake kv and returns the row.
+		const fresh = make()
+
+		expect(await fresh.getHash("dual")).toEqual({ md5: "m", verifiedModificationTime: 2 })
+		expect(vi.mocked(sqlite.kvAsync.get)).toHaveBeenCalledWith(HASHES_PREFIX + "dual")
+
+		// A loaded instance serves the same row synchronously from memory.
+		const loaded = make()
+
+		await loaded.loadHashes()
+
+		expect(loaded.getHashSync("dual")).toEqual({ md5: "m", verifiedModificationTime: 2 })
 	})
 })
 
@@ -259,6 +314,62 @@ describe("write-through", () => {
 		expect(state.getHashSync("stale")).toBeUndefined()
 		expect(deserialize(kvStore.get(HASHES_PREFIX + "a") as string)).toEqual({ md5: "ma", verifiedModificationTime: 1 })
 		expect(kvStore.has(HASHES_PREFIX + "stale")).toBe(false)
+	})
+
+	it("setHash updates memory synchronously BEFORE the kv write promise resolves (memory-first)", async () => {
+		const state = make()
+
+		// Gate the kv write so we can observe the store state mid-flight.
+		let releaseSet!: () => void
+		const setGate = new Promise<void>(resolve => {
+			releaseSet = resolve
+		})
+
+		vi.mocked(sqlite.kvAsync.set).mockImplementationOnce(async (key: string, value: unknown) => {
+			await setGate
+
+			kvStore.set(key, serialize(value))
+
+			return 1
+		})
+
+		const pending = state.setHash("mem", { md5: "m", verifiedModificationTime: 3 })
+
+		// Memory already reflects the write while the kv write promise is still pending.
+		expect(state.getHashSync("mem")).toEqual({ md5: "m", verifiedModificationTime: 3 })
+		expect(kvStore.has(HASHES_PREFIX + "mem")).toBe(false)
+
+		releaseSet()
+
+		await pending
+
+		// The gated write lands only after it resolves.
+		expect(deserialize(kvStore.get(HASHES_PREFIX + "mem") as string)).toEqual({ md5: "m", verifiedModificationTime: 3 })
+	})
+
+	it("applyHashBatch stops issuing executeBatch chunks when a logout lands mid-wave", async () => {
+		const state = make()
+		const db = await sqlite.openDb()
+
+		// 300 upserts → two chunks at APPLY_CHUNK_SIZE=256 (256 + 44).
+		const upserts: [string, string][] = []
+
+		for (let i = 0; i < 300; i++) {
+			upserts.push([`asset${i}`, `md5-${i}`])
+		}
+
+		// After the first chunk lands, a logout latches the store — the per-chunk re-check must abort the tail.
+		vi.mocked(db.executeBatch).mockImplementationOnce(async () => {
+			state.clearForLogout()
+
+			return { rowsAffected: 256 }
+		})
+
+		await state.applyHashBatch({ upserts })
+
+		// Only the first chunk was written; the second chunk was refused by the mid-wave re-check.
+		expect(vi.mocked(db.executeBatch)).toHaveBeenCalledTimes(1)
+		expect((vi.mocked(db.executeBatch).mock.calls[0]?.[0] as unknown[]).length).toBe(256)
 	})
 })
 
@@ -344,5 +455,111 @@ describe("clearForLogout", () => {
 
 		expect(state.getHashSync("fresh")).toBe("value")
 		expect(kvStore.has(HASHES_PREFIX + "fresh")).toBe(true)
+	})
+
+	it("issues NO kv command at all while locked (writes are pure no-ops)", async () => {
+		const state = make()
+
+		await state.loadHashes()
+		await state.loadAborts()
+
+		const db = await sqlite.openDb()
+
+		state.clearForLogout()
+
+		vi.mocked(sqlite.kvAsync.set).mockClear()
+		vi.mocked(sqlite.kvAsync.remove).mockClear()
+		vi.mocked(db.executeBatch).mockClear()
+
+		await state.setHash("x", "v")
+		await state.setAbort("x", 1)
+		await state.deleteHash("x")
+		await state.deleteAbort("x")
+		await state.applyHashBatch({ upserts: [["y", "v"]], deletes: ["z"] })
+
+		// Neither memory nor kv is touched — no set/remove/executeBatch command ever leaves the store.
+		expect(state.getHashSync("x")).toBeUndefined()
+		expect(state.getAbort("x")).toBeUndefined()
+		expect(vi.mocked(sqlite.kvAsync.set)).not.toHaveBeenCalled()
+		expect(vi.mocked(sqlite.kvAsync.remove)).not.toHaveBeenCalled()
+		expect(vi.mocked(db.executeBatch)).not.toHaveBeenCalled()
+	})
+
+	it("zombie-load latch: a logout mid-scan keeps the store locked and drops the scanned rows", async () => {
+		seedHash("zombie", "x")
+
+		const state = make()
+
+		// Hold the scan open so a logout can land while the load is in flight.
+		let releaseScan!: () => void
+		const scanGate = new Promise<void>(resolve => {
+			releaseScan = resolve
+		})
+
+		vi.mocked(forEachKvRowByPrefix).mockImplementationOnce(async (_db, _prefix, onRow) => {
+			await scanGate
+
+			onRow(HASHES_PREFIX + "zombie", serialize("x"))
+
+			return 1
+		})
+
+		const loadPromise = state.loadHashes()
+
+		// Logout lands while the scan is held: latches `locked` and bumps the generation.
+		state.clearForLogout()
+
+		releaseScan()
+
+		await loadPromise
+
+		// The stale-generation load must neither unlatch the store nor commit its scanned rows.
+		await state.setHash("after", "z")
+
+		expect(state.getHashSync("after")).toBeUndefined()
+		expect(state.getHashSync("zombie")).toBeUndefined()
+		expect(state.hashKeys()).toEqual([])
+	})
+
+	it("un-latches only at the generation-checked commit, never at load entry", async () => {
+		seedHash("fresh", "value")
+
+		const state = make()
+
+		// Start locked (post-logout).
+		state.clearForLogout()
+
+		// Hold the fresh load's scan so we can probe the store mid-load.
+		let releaseScan!: () => void
+		const scanGate = new Promise<void>(resolve => {
+			releaseScan = resolve
+		})
+
+		vi.mocked(forEachKvRowByPrefix).mockImplementationOnce(async (_db, _prefix, onRow) => {
+			await scanGate
+
+			onRow(HASHES_PREFIX + "fresh", serialize("value"))
+
+			return 1
+		})
+
+		const loadPromise = state.loadHashes()
+
+		// Entry must NOT unlatch: a write while the scan is still in flight is still refused.
+		await state.setHash("early", "nope")
+
+		expect(state.getHashSync("early")).toBeUndefined()
+
+		releaseScan()
+
+		await loadPromise
+
+		// Only the committed load unlatches — now writes reach memory + kv again.
+		await state.setHash("late", "yes")
+
+		expect(state.getHashSync("late")).toBe("yes")
+		expect(kvStore.has(HASHES_PREFIX + "late")).toBe(true)
+		// The scanned row committed to memory on the same generation-checked path.
+		expect(state.getHashSync("fresh")).toBe("value")
 	})
 })
