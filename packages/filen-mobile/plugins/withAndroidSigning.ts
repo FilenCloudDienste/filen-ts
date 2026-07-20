@@ -3,6 +3,55 @@ import { withAppBuildGradle } from "@expo/config-plugins/build/plugins/android-p
 import fs from "node:fs"
 import path from "node:path"
 
+// Pure gradle transform, exported for tests: insert the release signingConfig and point ONLY
+// buildTypes.release at it. The Expo template sets `signingConfig signingConfigs.debug` in BOTH
+// buildTypes (release deliberately ships debug-signed with a caution comment) — a global replace
+// would rewire the debug buildType to the production keystore too, producing debuggable APKs
+// carrying the release signature.
+export function applyReleaseSigning(
+	contents: string,
+	credentials: {
+		keystorePassword: string
+		keyAlias: string
+		keyPassword: string
+	}
+): string {
+	const releaseSigningConfig = `
+			release {
+				storeFile file('release.keystore')
+				storePassword '${credentials.keystorePassword}'
+				keyAlias '${credentials.keyAlias}'
+				keyPassword '${credentials.keyPassword}'
+			}`
+
+	// Find the signingConfigs block and add the release config after debug
+	const signingConfigsRegex = /(signingConfigs\s*\{[\s\S]*?debug\s*\{[\s\S]*?\}\s*)/
+	const match = contents.match(signingConfigsRegex)
+
+	if (!match) {
+		// Without this insertion the replace below would point buildTypes.release at a signingConfigs.release that does not exist
+		throw new Error(
+			"Unable to locate the signingConfigs block in android/app/build.gradle. The Expo prebuild template may have changed."
+		)
+	}
+
+	contents = contents.replace(signingConfigsRegex, match[1] + releaseSigningConfig)
+
+	// Scoped to the release buildType: the first `signingConfig signingConfigs.debug` AFTER the
+	// first `release {` inside the buildTypes block (the debug buildType's own line precedes any
+	// `release {`, so it can never be the target).
+	const releaseBuildTypeRegex = /(buildTypes\s*\{[\s\S]*?release\s*\{[\s\S]*?)signingConfig signingConfigs\.debug/
+	const replaced = contents.replace(releaseBuildTypeRegex, "$1signingConfig signingConfigs.release")
+
+	if (replaced === contents) {
+		throw new Error(
+			"Unable to locate buildTypes.release's signingConfig line in android/app/build.gradle. The Expo prebuild template may have changed."
+		)
+	}
+
+	return replaced
+}
+
 const withAndroidSigning: ConfigPlugin = config => {
 	return withAppBuildGradle(config, config => {
 		const { modResults } = config
@@ -24,30 +73,11 @@ const withAndroidSigning: ConfigPlugin = config => {
 				fs.writeFileSync(keystoreDestination, Buffer.from(keystoreBase64, "base64"))
 			}
 
-			const releaseSigningConfig = `
-			release {
-				storeFile file('release.keystore')
-				storePassword '${keystorePassword}'
-				keyAlias '${keyAlias}'
-				keyPassword '${keyPassword}'
-			}`
-
-			// Find the signingConfigs block and add release config after debug
-			const signingConfigsRegex = /(signingConfigs\s*\{[\s\S]*?debug\s*\{[\s\S]*?\}\s*)/
-			const match = modResults.contents.match(signingConfigsRegex)
-
-			if (!match) {
-				// Without this insertion the split/join below would point buildTypes.release at a signingConfigs.release that does not exist
-				throw new Error("Unable to locate the signingConfigs block in android/app/build.gradle. The Expo prebuild template may have changed.")
-			}
-
-			// Insert release config after debug config but before closing brace
-			modResults.contents = modResults.contents.replace(signingConfigsRegex, match[1] + releaseSigningConfig)
-
-			// Replace signingConfig in buildTypes.release
-			modResults.contents = modResults.contents
-				.split("signingConfig signingConfigs.debug")
-				.join("signingConfig signingConfigs.release")
+			modResults.contents = applyReleaseSigning(modResults.contents, {
+				keystorePassword,
+				keyAlias,
+				keyPassword
+			})
 		} else {
 			console.log("No Android signing configuration found. Using debug signing config.")
 
