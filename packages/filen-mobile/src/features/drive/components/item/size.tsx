@@ -9,7 +9,10 @@ const Size = ({ info, drivePath }: { info: ListRenderItemInfo<DriveItem>; driveP
 	const directorySizeQuery = useDirectorySizeQuery(
 		{
 			uuid: info.item.data.uuid,
-			type: directorySizeTypeForDrivePath(drivePath.type)
+			type: directorySizeTypeForDrivePath(drivePath.type),
+			// Thread the row's own item so the size resolves by value even when the session-scoped
+			// uuid cache never observed this directory.
+			item: info.item
 		},
 		{
 			enabled: info.item.type === "directory" || info.item.type === "sharedDirectory" || info.item.type === "sharedRootDirectory"
@@ -20,7 +23,10 @@ const Size = ({ info, drivePath }: { info: ListRenderItemInfo<DriveItem>; driveP
 		return ` • ${formatBytes(Number(info.item.data.size))}`
 	}
 
-	if (directorySizeQuery.status !== "success") {
+	// Gate on data presence, not status: hide the label while there is no size (pending / hard
+	// unresolved) so a wrong "0 B" is never shown, but keep rendering a prior size through a failed
+	// refetch (status flips to error while data is retained — stale-while-error, as the listing does).
+	if (!directorySizeQuery.data) {
 		return null
 	}
 

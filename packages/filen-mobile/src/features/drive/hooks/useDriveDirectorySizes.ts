@@ -60,7 +60,11 @@ export function useDriveDirectorySizes({
 				void queryClient.prefetchQuery(
 					directorySizeQueryOptions({
 						uuid: item.data.uuid,
-						type
+						type,
+						// Thread the listing item so a session-scoped cache miss still resolves by value.
+						// directorySizeQueryOptions strips it from the key, so the prefetch stays
+						// cache-compatible with the rows' observed query.
+						item
 					})
 				)
 			}

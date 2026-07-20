@@ -44,7 +44,10 @@ function useDriveItemInfoRows(
 			// The sharing role (sharedIn vs sharedOut) and the trash/offline/linked size
 			// computation can't be inferred from item.type — they depend on the screen the
 			// item is shown in — so derive the query mode from the originating DrivePath.
-			type: directorySizeTypeForDrivePath(drivePathType)
+			type: directorySizeTypeForDrivePath(drivePathType),
+			// The info sheet holds the full item — thread it so the size resolves by value even
+			// when the session-scoped uuid cache never observed this directory.
+			item
 		},
 		{
 			enabled: item !== null && isDirectoryItem(item)
@@ -117,7 +120,10 @@ function useDriveItemInfoRows(
 						return formatBytes(Number(item.data.size))
 					}
 
-					if (directorySizeQuery.status !== "success") {
+					// Gate on data presence, not status: keep the last-known size through a failed
+					// refetch (status flips to error while data is retained) and show "..." only while
+					// there is genuinely no size yet.
+					if (!directorySizeQuery.data) {
 						return "..."
 					}
 
@@ -129,12 +135,12 @@ function useDriveItemInfoRows(
 						{
 							type: "files",
 							title: t("files"),
-							value: directorySizeQuery.status === "success" ? directorySizeQuery.data.files.toString() : "..."
+							value: directorySizeQuery.data ? directorySizeQuery.data.files.toString() : "..."
 						},
 						{
 							type: "directories",
 							title: t("directories"),
-							value: directorySizeQuery.status === "success" ? directorySizeQuery.data.dirs.toString() : "..."
+							value: directorySizeQuery.data ? directorySizeQuery.data.dirs.toString() : "..."
 						}
 					]
 				: []),

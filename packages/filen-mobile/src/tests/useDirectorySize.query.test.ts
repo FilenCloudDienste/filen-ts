@@ -1,24 +1,35 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { mockGetSdkClients, mockGetDirSize, mockOfflineItemSize, cacheDirectoryUuidToAnyNormalDir, cacheUuidToAnyDriveItem } =
-	vi.hoisted(() => {
-		const cacheDirectoryUuidToAnyNormalDir = new Map<string, unknown>()
-		const cacheUuidToAnyDriveItem = new Map<string, unknown>()
-		const mockGetDirSize = vi.fn()
-		const mockOfflineItemSize = vi.fn().mockResolvedValue({ size: 0, files: 0, dirs: 0 })
+const {
+	mockGetSdkClients,
+	mockGetDirSize,
+	mockOfflineItemSize,
+	cacheDirectoryUuidToAnyNormalDir,
+	cacheDirectoryUuidToAnySharedDirWithContext,
+	cacheDirectoryUuidToAnyLinkedDirWithMeta,
+	cacheUuidToAnyDriveItem
+} = vi.hoisted(() => {
+	const cacheDirectoryUuidToAnyNormalDir = new Map<string, unknown>()
+	const cacheDirectoryUuidToAnySharedDirWithContext = new Map<string, unknown>()
+	const cacheDirectoryUuidToAnyLinkedDirWithMeta = new Map<string, unknown>()
+	const cacheUuidToAnyDriveItem = new Map<string, unknown>()
+	const mockGetDirSize = vi.fn()
+	const mockOfflineItemSize = vi.fn().mockResolvedValue({ size: 0, files: 0, dirs: 0 })
 
-		return {
-			mockGetSdkClients: vi.fn().mockResolvedValue({
-				authedSdkClient: {
-					getDirSize: mockGetDirSize
-				}
-			}),
-			mockGetDirSize,
-			mockOfflineItemSize,
-			cacheDirectoryUuidToAnyNormalDir,
-			cacheUuidToAnyDriveItem
-		}
-	})
+	return {
+		mockGetSdkClients: vi.fn().mockResolvedValue({
+			authedSdkClient: {
+				getDirSize: mockGetDirSize
+			}
+		}),
+		mockGetDirSize,
+		mockOfflineItemSize,
+		cacheDirectoryUuidToAnyNormalDir,
+		cacheDirectoryUuidToAnySharedDirWithContext,
+		cacheDirectoryUuidToAnyLinkedDirWithMeta,
+		cacheUuidToAnyDriveItem
+	}
+})
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
@@ -41,8 +52,8 @@ vi.mock("@/queries/client", () => ({
 vi.mock("@/lib/cache", () => ({
 	default: {
 		directoryUuidToAnyNormalDir: cacheDirectoryUuidToAnyNormalDir,
-		directoryUuidToAnySharedDirWithContext: new Map(),
-		directoryUuidToAnyLinkedDirWithMeta: new Map(),
+		directoryUuidToAnySharedDirWithContext: cacheDirectoryUuidToAnySharedDirWithContext,
+		directoryUuidToAnyLinkedDirWithMeta: cacheDirectoryUuidToAnyLinkedDirWithMeta,
 		uuidToAnyDriveItem: cacheUuidToAnyDriveItem
 	}
 }))
@@ -89,7 +100,16 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 }))
 
 vi.mock("@filen/sdk-rs", () => {
-	// AnyDirWithContext_Tags and AnyNormalDir_Tags are string enums used in the trash hack
+	// Each tagged wrapper stores its ordinal-1 payload at inner[0], matching the real UniffiEnum shape
+	// the trash hack + assertions read. The *WithContext factories are identity (`new(v) => v`).
+	class Wrapper {
+		public inner: unknown[]
+
+		public constructor(v: unknown) {
+			this.inner = [v]
+		}
+	}
+
 	return {
 		AnyDirWithContext_Tags: {
 			Normal: "Normal",
@@ -101,22 +121,31 @@ vi.mock("@filen/sdk-rs", () => {
 			Root: "Root"
 		},
 		AnyDirWithContext: {
-			Normal: class {
+			Normal: class extends Wrapper {
 				tag = "Normal"
-				inner: unknown[]
-				constructor(v: unknown) {
-					this.inner = [v]
-				}
+			},
+			Shared: class extends Wrapper {
+				tag = "Shared"
+			},
+			Linked: class extends Wrapper {
+				tag = "Linked"
 			}
 		},
 		AnyNormalDir: {
-			Dir: class {
+			Dir: class extends Wrapper {
 				tag = "Dir"
-				inner: unknown[]
-				constructor(v: unknown) {
-					this.inner = [v]
-				}
 			}
+		},
+		AnySharedDir: {
+			Dir: class extends Wrapper {
+				tag = "Dir"
+			},
+			Root: class extends Wrapper {
+				tag = "Root"
+			}
+		},
+		AnySharedDirWithContext: {
+			new: (v: unknown) => v
 		},
 		ParentUuid: {
 			Trash: class {
@@ -129,7 +158,19 @@ vi.mock("@filen/sdk-rs", () => {
 	}
 })
 
-import { fetchData } from "@/features/drive/queries/useDirectorySize.query"
+import { fetchData, directorySizeQueryKey, DirectorySizeUnresolvedError } from "@/features/drive/queries/useDirectorySize.query"
+
+type FetchParams = Parameters<typeof fetchData>[0]
+
+// Fixtures are minimal DriveItem-shaped stand-ins carrying only the fields fetchData reads
+// (type + data.uuid + data.sharingRole); cast through unknown so the tests don't build full SDK records.
+function callFetch(params: {
+	uuid: string
+	type: "offline" | "trash" | "sharedIn" | "sharedOut" | "normal" | "linked"
+	item?: unknown
+}): ReturnType<typeof fetchData> {
+	return fetchData(params as unknown as FetchParams)
+}
 
 beforeEach(() => {
 	mockGetSdkClients.mockReset()
@@ -143,10 +184,12 @@ beforeEach(() => {
 	mockOfflineItemSize.mockReset()
 	mockOfflineItemSize.mockResolvedValue({ size: 0, files: 0, dirs: 0 })
 	cacheDirectoryUuidToAnyNormalDir.clear()
+	cacheDirectoryUuidToAnySharedDirWithContext.clear()
+	cacheDirectoryUuidToAnyLinkedDirWithMeta.clear()
 	cacheUuidToAnyDriveItem.clear()
 })
 
-// ─── offline arm: resolves via uuidToAnyDriveItem → offline.itemSize ─────────
+// ─── offline arm: resolves via by-value item / uuidToAnyDriveItem → offline.itemSize ─────────
 
 describe("fetchData — offline arm", () => {
 	it("passes the cached DriveItem to offline.itemSize and returns its size", async () => {
@@ -155,7 +198,7 @@ describe("fetchData — offline arm", () => {
 		cacheUuidToAnyDriveItem.set("offline-dir", dirItem)
 		mockOfflineItemSize.mockResolvedValue({ size: 4096, files: 3, dirs: 1 })
 
-		const result = await fetchData({ uuid: "offline-dir", type: "offline" })
+		const result = await callFetch({ uuid: "offline-dir", type: "offline" })
 
 		expect(mockOfflineItemSize).toHaveBeenCalledTimes(1)
 		expect(mockOfflineItemSize).toHaveBeenCalledWith(dirItem)
@@ -163,40 +206,170 @@ describe("fetchData — offline arm", () => {
 		expect(mockGetDirSize).not.toHaveBeenCalled()
 	})
 
-	it("returns zero sizes and skips itemSize when the uuid is not in uuidToAnyDriveItem", async () => {
-		const result = await fetchData({ uuid: "missing-offline-uuid", type: "offline" })
+	it("resolves a by-value offline directory item without any cache entry", async () => {
+		const dirItem = { type: "directory", data: { uuid: "off-byvalue" } }
 
-		expect(result).toEqual({ size: 0, files: 0, dirs: 0 })
+		mockOfflineItemSize.mockResolvedValue({ size: 2048, files: 2, dirs: 0 })
+
+		const result = await callFetch({ uuid: "off-byvalue", type: "offline", item: dirItem })
+
+		expect(mockOfflineItemSize).toHaveBeenCalledTimes(1)
+		expect(mockOfflineItemSize).toHaveBeenCalledWith(dirItem)
+		expect(result).toEqual({ size: 2048, files: 2, dirs: 0 })
+	})
+
+	it("throws DirectorySizeUnresolvedError and skips itemSize when the uuid resolves to nothing", async () => {
+		await expect(callFetch({ uuid: "missing-offline-uuid", type: "offline" })).rejects.toBeInstanceOf(
+			DirectorySizeUnresolvedError
+		)
+
 		expect(mockOfflineItemSize).not.toHaveBeenCalled()
 	})
 
-	it("returns zero sizes and skips itemSize when the cached item is not a directory", async () => {
+	it("throws and skips itemSize when the resolved item is not a directory", async () => {
 		cacheUuidToAnyDriveItem.set("offline-file", { type: "file", data: { uuid: "offline-file" } })
 
-		const result = await fetchData({ uuid: "offline-file", type: "offline" })
+		await expect(callFetch({ uuid: "offline-file", type: "offline" })).rejects.toBeInstanceOf(DirectorySizeUnresolvedError)
 
-		expect(result).toEqual({ size: 0, files: 0, dirs: 0 })
 		expect(mockOfflineItemSize).not.toHaveBeenCalled()
 	})
 })
 
-// ─── trash hack: ParentUuid.Trash substitution ─────────────────────────────
+// ─── by-value resolution: item preferred over the (session-scoped) uuid caches ──────────────
+
+describe("fetchData — by-value resolution", () => {
+	it("resolves a normal directory item by value with no cache entry", async () => {
+		const item = { type: "directory", data: { uuid: "ndir", parent: { tag: "Drive" } } }
+
+		mockGetDirSize.mockResolvedValue({ size: 3n, files: 1n, dirs: 0n })
+
+		await callFetch({ uuid: "ndir", type: "normal", item })
+
+		expect(mockGetDirSize).toHaveBeenCalledTimes(1)
+
+		const calledWith = mockGetDirSize.mock.calls[0]![0]
+
+		expect(calledWith.tag).toBe("Normal")
+		expect(calledWith.inner[0].tag).toBe("Dir")
+		// The wrapper wraps the item's own data — not a cache read.
+		expect(calledWith.inner[0].inner[0]).toBe(item.data)
+	})
+
+	it("applies the trash hack to a by-value directory item (type=trash)", async () => {
+		const item = { type: "directory", data: { uuid: "tdir", parent: { tag: "Drive" }, meta: {} } }
+
+		mockGetDirSize.mockResolvedValue({ size: 1n, files: 0n, dirs: 0n })
+
+		await callFetch({ uuid: "tdir", type: "trash", item })
+
+		expect(mockGetDirSize).toHaveBeenCalledTimes(1)
+
+		const calledWith = mockGetDirSize.mock.calls[0]![0]
+
+		expect(calledWith.tag).toBe("Normal")
+		expect(calledWith.inner[0].tag).toBe("Dir")
+		// The by-value normal wrapper still enters the trash re-parent hack.
+		expect(calledWith.inner[0].inner[0].parent.tag).toBe("Trash")
+	})
+
+	it("resolves a sharedRootDirectory item by value (AnySharedDir.Root + stamped role)", async () => {
+		const item = { type: "sharedRootDirectory", data: { uuid: "sroot", sharingRole: "owner" } }
+
+		mockGetDirSize.mockResolvedValue({ size: 9n, files: 2n, dirs: 1n })
+
+		await callFetch({ uuid: "sroot", type: "sharedIn", item })
+
+		expect(mockGetDirSize).toHaveBeenCalledTimes(1)
+
+		const calledWith = mockGetDirSize.mock.calls[0]![0]
+
+		expect(calledWith.tag).toBe("Shared")
+
+		// AnySharedDirWithContext.new is identity, so inner[0] is the { dir, shareInfo } record.
+		const ctx = calledWith.inner[0]
+
+		expect(ctx.shareInfo).toBe("owner")
+		expect(ctx.dir.tag).toBe("Root")
+		expect(ctx.dir.inner[0]).toBe(item.data)
+	})
+
+	it("resolves a sharedDirectory item with a stamped role by value (AnySharedDir.Dir)", async () => {
+		const item = { type: "sharedDirectory", data: { uuid: "sdir", sharingRole: "owner" } }
+
+		mockGetDirSize.mockResolvedValue({ size: 5n, files: 1n, dirs: 0n })
+
+		await callFetch({ uuid: "sdir", type: "sharedOut", item })
+
+		expect(mockGetDirSize).toHaveBeenCalledTimes(1)
+
+		const calledWith = mockGetDirSize.mock.calls[0]![0]
+
+		expect(calledWith.tag).toBe("Shared")
+
+		const ctx = calledWith.inner[0]
+
+		expect(ctx.shareInfo).toBe("owner")
+		expect(ctx.dir.tag).toBe("Dir")
+		expect(ctx.dir.inner[0]).toBe(item.data)
+	})
+
+	it("falls back to the share-context cache when a sharedDirectory item carries no role", async () => {
+		const cachedShared = { dir: { tag: "Dir" }, shareInfo: "owner" }
+
+		cacheDirectoryUuidToAnySharedDirWithContext.set("sdir-norole", cachedShared)
+
+		// by-value item lacks sharingRole → must NOT build a context by value, must use the cache.
+		const item = { type: "sharedDirectory", data: { uuid: "sdir-norole" } }
+
+		mockGetDirSize.mockResolvedValue({ size: 7n, files: 1n, dirs: 0n })
+
+		await callFetch({ uuid: "sdir-norole", type: "sharedIn", item })
+
+		expect(mockGetDirSize).toHaveBeenCalledTimes(1)
+
+		const calledWith = mockGetDirSize.mock.calls[0]![0]
+
+		expect(calledWith.tag).toBe("Shared")
+		// Wraps the cached context object directly (the by-value path was skipped).
+		expect(calledWith.inner[0]).toBe(cachedShared)
+	})
+})
+
+// ─── unresolved misses throw (never a silent zero) ──────────────────────────────────────────
+
+describe("fetchData — unresolved misses throw", () => {
+	it("throws for type=normal when the uuid has no item and no cache entry", async () => {
+		await expect(callFetch({ uuid: "missing-uuid", type: "normal" })).rejects.toBeInstanceOf(DirectorySizeUnresolvedError)
+
+		expect(mockGetDirSize).not.toHaveBeenCalled()
+	})
+
+	it("throws for type=trash when the uuid has no item and no cache entry", async () => {
+		await expect(callFetch({ uuid: "non-existent-uuid", type: "trash" })).rejects.toBeInstanceOf(DirectorySizeUnresolvedError)
+
+		expect(mockGetDirSize).not.toHaveBeenCalled()
+	})
+
+	it("throws for type=sharedIn when there is no item and no cached share context", async () => {
+		await expect(callFetch({ uuid: "missing-shared", type: "sharedIn" })).rejects.toBeInstanceOf(DirectorySizeUnresolvedError)
+
+		expect(mockGetDirSize).not.toHaveBeenCalled()
+	})
+
+	it("throws for type=linked when there is no cached linked context", async () => {
+		await expect(callFetch({ uuid: "missing-linked", type: "linked" })).rejects.toBeInstanceOf(DirectorySizeUnresolvedError)
+
+		expect(mockGetDirSize).not.toHaveBeenCalled()
+	})
+
+	it("includes the uuid in the thrown error message", async () => {
+		await expect(callFetch({ uuid: "abc-123", type: "normal" })).rejects.toThrow("abc-123")
+	})
+})
+
+// ─── trash hack: ParentUuid.Trash substitution (cache path) ─────────────────────────────────
 
 describe("fetchData — trash hack", () => {
-	it("returns zero sizes immediately when uuid has no cache entry", async () => {
-		const result = await fetchData({ uuid: "non-existent-uuid", type: "trash" })
-
-		expect(result).toEqual({ size: 0, files: 0, dirs: 0 })
-		expect(mockGetDirSize).not.toHaveBeenCalled()
-	})
-
-	it("returns zero sizes immediately for type=normal when uuid has no cache entry", async () => {
-		const result = await fetchData({ uuid: "missing-uuid", type: "normal" })
-
-		expect(result).toEqual({ size: 0, files: 0, dirs: 0 })
-		expect(mockGetDirSize).not.toHaveBeenCalled()
-	})
-
 	it("applies trash hack: reconstructs context with ParentUuid.Trash when type=trash and dir tag is Dir", async () => {
 		// Build a cached AnyNormalDir with tag=Dir to satisfy the trash hack condition
 		const innerDirData = { uuid: "trashed-dir", parent: { tag: "Drive" }, color: "default", timestamp: 0n, favorited: false, meta: {} }
@@ -207,7 +380,7 @@ describe("fetchData — trash hack", () => {
 
 		mockGetDirSize.mockResolvedValue({ size: 100n, files: 5n, dirs: 2n })
 
-		await fetchData({ uuid: "trashed-dir", type: "trash" })
+		await callFetch({ uuid: "trashed-dir", type: "trash" })
 
 		expect(mockGetDirSize).toHaveBeenCalledTimes(1)
 
@@ -236,7 +409,7 @@ describe("fetchData — trash hack", () => {
 
 		mockGetDirSize.mockResolvedValue({ size: 50n, files: 2n, dirs: 1n })
 
-		await fetchData({ uuid: "normal-dir", type: "normal" })
+		await callFetch({ uuid: "normal-dir", type: "normal" })
 
 		expect(mockGetDirSize).toHaveBeenCalledTimes(1)
 
@@ -260,7 +433,7 @@ describe("fetchData — trash hack", () => {
 
 		mockGetDirSize.mockResolvedValue({ size: 10n, files: 1n, dirs: 0n })
 
-		await fetchData({ uuid: "root-dir", type: "trash" })
+		await callFetch({ uuid: "root-dir", type: "trash" })
 
 		expect(mockGetDirSize).toHaveBeenCalledTimes(1)
 
@@ -284,7 +457,7 @@ describe("fetchData — BigInt → Number conversion", () => {
 
 		mockGetDirSize.mockResolvedValue({ size: 1234567890123n, files: 42n, dirs: 7n })
 
-		const result = await fetchData({ uuid: "bigint-dir", type: "normal" })
+		const result = await callFetch({ uuid: "bigint-dir", type: "normal" })
 
 		expect(result.size).toBe(1234567890123)
 		expect(result.files).toBe(42)
@@ -302,7 +475,7 @@ describe("fetchData — BigInt → Number conversion", () => {
 
 		mockGetDirSize.mockResolvedValue({ size: 0n, files: 0n, dirs: 0n })
 
-		const result = await fetchData({ uuid: "zero-dir", type: "normal" })
+		const result = await callFetch({ uuid: "zero-dir", type: "normal" })
 
 		expect(result.size).toBe(0)
 		expect(result.files).toBe(0)
@@ -319,8 +492,23 @@ describe("fetchData — BigInt → Number conversion", () => {
 
 		mockGetDirSize.mockResolvedValue({ size: bigIntMaxSafe, files: 0n, dirs: 0n })
 
-		const result = await fetchData({ uuid: "maxsafe-dir", type: "normal" })
+		const result = await callFetch({ uuid: "maxsafe-dir", type: "normal" })
 
 		expect(result.size).toBe(Number.MAX_SAFE_INTEGER)
+	})
+})
+
+// ─── directorySizeQueryKey: strips the by-value item ────────────────────────────────────────
+
+describe("directorySizeQueryKey", () => {
+	it("strips the by-value item — {uuid,type,item} keys identically to {uuid,type}", () => {
+		const item = { type: "directory", data: { uuid: "u" } }
+
+		const withItem = directorySizeQueryKey({ uuid: "u", type: "normal", item } as unknown as FetchParams)
+		const without = directorySizeQueryKey({ uuid: "u", type: "normal" })
+
+		expect(withItem).toEqual(without)
+		expect(withItem).toEqual({ uuid: "u", type: "normal" })
+		expect(Object.keys(withItem)).not.toContain("item")
 	})
 })
