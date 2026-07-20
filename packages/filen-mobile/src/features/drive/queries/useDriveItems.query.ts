@@ -10,8 +10,6 @@ import {
 	SharingRole,
 	AnyNormalDir,
 	AnyNormalDir_Tags,
-	AnySharedDir,
-	AnySharedDirWithContext,
 	AnyDirWithContext,
 	type NormalDirsAndFiles,
 	type SharedRootDirsAndFiles,
@@ -19,8 +17,7 @@ import {
 	type LinkedDirsAndFiles,
 	AnyLinkedDir,
 	type DirPublicLink,
-	ErrorKind,
-	AnyLinkedDirWithContext
+	ErrorKind
 } from "@filen/sdk-rs"
 import { type DrivePath, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
 import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem, unwrapParentUuid } from "@/lib/sdkUnwrap"
@@ -478,77 +475,43 @@ export async function fetchData(
 			const skipDisplay = params.path.type === "photos" || params.path.type === "recents"
 
 			for (const resultDir of result.dirs) {
-				const unwrappedDir = unwrapDirMeta(resultDir)
-				const driveItem = unwrappedDirIntoDriveItem(unwrappedDir)
+				const driveItem = unwrappedDirIntoDriveItem(unwrapDirMeta(resultDir))
 
 				if (!skipDisplay) {
 					items.push(driveItem)
 				}
 
-				if (unwrappedDir.meta?.name) {
-					cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
-				}
-
-				cache.uuidToAnyDriveItem.set(unwrappedDir.uuid, driveItem)
-
-				const normalDir = new AnyNormalDir.Dir(resultDir)
-
-				cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid, normalDir)
-				cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Normal(normalDir))
+				cache.cacheNewNormalDir(resultDir, driveItem)
 			}
 
 			for (const resultFile of result.files) {
-				const unwrappedFile = unwrapFileMeta(resultFile)
-				const driveItem = unwrappedFileIntoDriveItem(unwrappedFile)
+				const driveItem = unwrappedFileIntoDriveItem(unwrapFileMeta(resultFile))
 
 				items.push(driveItem)
 
-				cache.uuidToAnyDriveItem.set(unwrappedFile.file.uuid, driveItem)
-				cache.fileUuidToNormalFile.set(resultFile.uuid, resultFile)
+				cache.cacheNewFile(resultFile, driveItem)
 			}
 
 			break
 		}
 
 		case "shared": {
+			const sharedOut = params.path.type === "sharedOut"
+
 			for (const resultDir of result.dirs) {
-				const unwrappedDir = unwrapDirMeta(resultDir)
-				const driveItem = unwrappedDirIntoDriveItem(unwrappedDir)
+				const driveItem = unwrappedDirIntoDriveItem(unwrapDirMeta(resultDir))
 
 				items.push(driveItem)
 
-				if (unwrappedDir.meta?.name) {
-					cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
-				}
-
-				cache.uuidToAnyDriveItem.set(unwrappedDir.uuid, driveItem)
-
-				const withContext = AnySharedDirWithContext.new({
-					dir: new AnySharedDir.Dir(resultDir),
-					shareInfo: resultDir.sharingRole
-				})
-
-				cache.directoryUuidToAnySharedDirWithContext.set(unwrappedDir.uuid, withContext)
-				cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Shared(withContext))
-
-				if (params.path.type === "sharedOut") {
-					cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid, new AnyNormalDir.Dir(resultDir.inner))
-				}
+				cache.cacheNewSharedDir(resultDir, driveItem, { sharedOut })
 			}
 
 			for (const resultFile of result.files) {
-				const unwrappedFile = unwrapFileMeta(resultFile)
-				const driveItem = unwrappedFileIntoDriveItem(unwrappedFile)
+				const driveItem = unwrappedFileIntoDriveItem(unwrapFileMeta(resultFile))
 
 				items.push(driveItem)
 
-				cache.uuidToAnyDriveItem.set(unwrappedFile.file.uuid, driveItem)
-
-				if (params.path.type === "sharedOut") {
-					const { sharingRole: _, ...file } = resultFile
-
-					cache.fileUuidToNormalFile.set(unwrappedFile.file.uuid, file)
-				}
+				cache.cacheNewSharedFile(resultFile, driveItem, { sharedOut })
 			}
 
 			break
@@ -556,33 +519,19 @@ export async function fetchData(
 
 		case "sharedRoot": {
 			for (const resultDir of result.dirs) {
-				const unwrappedDir = unwrapDirMeta(resultDir)
-				const driveItem = unwrappedDirIntoDriveItem(unwrappedDir)
+				const driveItem = unwrappedDirIntoDriveItem(unwrapDirMeta(resultDir))
 
 				items.push(driveItem)
 
-				if (unwrappedDir.meta?.name) {
-					cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
-				}
-
-				cache.uuidToAnyDriveItem.set(unwrappedDir.uuid, driveItem)
-
-				const withContext = AnySharedDirWithContext.new({
-					dir: new AnySharedDir.Root(resultDir),
-					shareInfo: resultDir.sharingRole
-				})
-
-				cache.directoryUuidToAnySharedDirWithContext.set(unwrappedDir.uuid, withContext)
-				cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Shared(withContext))
+				cache.cacheNewSharedRootDir(resultDir, driveItem)
 			}
 
 			for (const resultFile of result.files) {
-				const unwrappedFile = unwrapFileMeta(resultFile)
-				const driveItem = unwrappedFileIntoDriveItem(unwrappedFile)
+				const driveItem = unwrappedFileIntoDriveItem(unwrapFileMeta(resultFile))
 
 				items.push(driveItem)
 
-				cache.uuidToAnyDriveItem.set(unwrappedFile.file.uuid, driveItem)
+				cache.cacheDriveItemReference(driveItem)
 			}
 
 			break
@@ -593,13 +542,13 @@ export async function fetchData(
 			for (const driveItem of result.dirs) {
 				items.push(driveItem)
 
-				cache.uuidToAnyDriveItem.set(driveItem.data.uuid, driveItem)
+				cache.cacheDriveItemReference(driveItem)
 			}
 
 			for (const driveItem of result.files) {
 				items.push(driveItem)
 
-				cache.uuidToAnyDriveItem.set(driveItem.data.uuid, driveItem)
+				cache.cacheDriveItemReference(driveItem)
 			}
 
 			break
@@ -607,42 +556,19 @@ export async function fetchData(
 
 		case "linked": {
 			for (const resultDir of result.dirs) {
-				const unwrappedDir = unwrapDirMeta(resultDir.inner)
-				const driveItem = unwrappedDirIntoDriveItem(unwrappedDir)
+				const driveItem = unwrappedDirIntoDriveItem(unwrapDirMeta(resultDir.inner))
 
 				items.push(driveItem)
 
-				cache.uuidToAnyDriveItem.set(unwrappedDir.uuid, driveItem)
-
-				if (unwrappedDir.meta?.name) {
-					cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
-				}
-
-				if (result.meta) {
-					cache.directoryUuidToAnyLinkedDirWithMeta.set(unwrappedDir.uuid, {
-						dir: new AnyLinkedDir.Dir(resultDir),
-						meta: result.meta
-					})
-
-					cache.directoryUuidToAnyDirWithContext.set(
-						unwrappedDir.uuid,
-						new AnyDirWithContext.Linked(
-							AnyLinkedDirWithContext.new({
-								dir: new AnyLinkedDir.Dir(resultDir),
-								link: result.meta
-							})
-						)
-					)
-				}
+				cache.cacheNewLinkedDir(resultDir, driveItem, result.meta)
 			}
 
 			for (const resultFile of result.files) {
-				const unwrappedFile = unwrapFileMeta(resultFile)
-				const driveItem = unwrappedFileIntoDriveItem(unwrappedFile)
+				const driveItem = unwrappedFileIntoDriveItem(unwrapFileMeta(resultFile))
 
 				items.push(driveItem)
 
-				cache.uuidToAnyDriveItem.set(unwrappedFile.file.uuid, driveItem)
+				cache.cacheDriveItemReference(driveItem)
 			}
 		}
 	}

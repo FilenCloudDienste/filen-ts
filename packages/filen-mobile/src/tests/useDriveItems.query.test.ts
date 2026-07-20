@@ -103,7 +103,88 @@ vi.mock("@/lib/cache", () => ({
 		directoryUuidToAnyLinkedDirWithMeta: new Map(),
 		uuidToAnyDriveItem: cacheUuidToAnyDriveItem,
 		fileUuidToNormalFile: cacheFileUuidToNormalFile,
-		directoryUuidToName: cacheDirectoryUuidToName
+		directoryUuidToName: cacheDirectoryUuidToName,
+		// The real cache.ts helpers reconstruct AnyX values via the SDK; here we only replicate WHICH
+		// maps/keys each seeds (what these fetchData tests assert), with the DriveItem as a placeholder
+		// value. The real helpers' value construction is unit-tested in cache.test.ts.
+		cacheNewFile: (file: { uuid: string }, driveItem: unknown) => {
+			cacheUuidToAnyDriveItem.set(file.uuid, driveItem)
+			cacheFileUuidToNormalFile.set(file.uuid, file)
+		},
+		cacheNewNormalDir: (dir: { uuid: string }, driveItem: { data: { decryptedMeta?: { name?: string } | null } }) => {
+			cacheUuidToAnyDriveItem.set(dir.uuid, driveItem)
+
+			if (driveItem.data.decryptedMeta?.name) {
+				cacheDirectoryUuidToName.set(dir.uuid, driveItem.data.decryptedMeta.name)
+			}
+
+			cacheDirectoryUuidToAnyNormalDir.set(dir.uuid, driveItem)
+			cacheDirectoryUuidToAnyDirWithContext.set(dir.uuid, driveItem)
+		},
+		cacheNewSharedDir: (
+			_dir: unknown,
+			driveItem: { data: { uuid: string; decryptedMeta?: { name?: string } | null } },
+			opts: { sharedOut: boolean }
+		) => {
+			const uuid = driveItem.data.uuid
+
+			cacheUuidToAnyDriveItem.set(uuid, driveItem)
+
+			if (driveItem.data.decryptedMeta?.name) {
+				cacheDirectoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
+			}
+
+			cacheDirectoryUuidToAnySharedDirWithContext.set(uuid, driveItem)
+			cacheDirectoryUuidToAnyDirWithContext.set(uuid, driveItem)
+
+			if (opts.sharedOut) {
+				cacheDirectoryUuidToAnyNormalDir.set(uuid, driveItem)
+			}
+		},
+		cacheNewSharedRootDir: (
+			_dir: unknown,
+			driveItem: { data: { uuid: string; decryptedMeta?: { name?: string } | null } }
+		) => {
+			const uuid = driveItem.data.uuid
+
+			cacheUuidToAnyDriveItem.set(uuid, driveItem)
+
+			if (driveItem.data.decryptedMeta?.name) {
+				cacheDirectoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
+			}
+
+			cacheDirectoryUuidToAnySharedDirWithContext.set(uuid, driveItem)
+			cacheDirectoryUuidToAnyDirWithContext.set(uuid, driveItem)
+		},
+		cacheNewSharedFile: (file: unknown, driveItem: { data: { uuid: string } }, opts: { sharedOut: boolean }) => {
+			const uuid = driveItem.data.uuid
+
+			cacheUuidToAnyDriveItem.set(uuid, driveItem)
+
+			if (opts.sharedOut) {
+				cacheFileUuidToNormalFile.set(uuid, file)
+			}
+		},
+		cacheNewLinkedDir: (
+			_dir: unknown,
+			driveItem: { data: { uuid: string; decryptedMeta?: { name?: string } | null } },
+			meta: unknown
+		) => {
+			const uuid = driveItem.data.uuid
+
+			cacheUuidToAnyDriveItem.set(uuid, driveItem)
+
+			if (driveItem.data.decryptedMeta?.name) {
+				cacheDirectoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
+			}
+
+			if (meta) {
+				cacheDirectoryUuidToAnyDirWithContext.set(uuid, driveItem)
+			}
+		},
+		cacheDriveItemReference: (driveItem: { data: { uuid: string } }) => {
+			cacheUuidToAnyDriveItem.set(driveItem.data.uuid, driveItem)
+		}
 	}
 }))
 
@@ -150,7 +231,9 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 			uuid: ((unwrapped as Record<string, unknown>)?.["uuid"] as string) ?? "dir-uuid",
 			size: 0n,
 			undecryptable: false,
-			decryptedMeta: null
+			// Faithful to the real builder: the unwrapped meta becomes the item's decryptedMeta, which is
+			// where the cache helpers read the directory name from.
+			decryptedMeta: ((unwrapped as Record<string, unknown>)?.["meta"] as { name?: string } | null) ?? null
 		}
 	})),
 	unwrappedFileIntoDriveItem: vi.fn().mockImplementation((unwrapped: unknown) => {

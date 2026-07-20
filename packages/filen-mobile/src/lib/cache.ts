@@ -1,9 +1,15 @@
 import {
 	AnyNormalDir,
 	AnyDirWithContext,
-	type AnySharedDirWithContext,
+	AnySharedDir,
+	AnySharedDirWithContext,
+	AnyLinkedDir,
+	AnyLinkedDirWithContext,
+	type SharedDir,
+	type SharingRole,
+	type SharedRootDirsAndFiles,
+	type LinkedDirsAndFiles,
 	type File,
-	type AnyLinkedDir,
 	type DirPublicLink,
 	type Dir
 } from "@filen/sdk-rs"
@@ -705,7 +711,12 @@ export class Cache {
 	 * move-to-destination, etc.). The reference implementation that this mirrors
 	 * lives inline in `src/queries/useDriveItems.query.ts:fetchData()`.
 	 */
-	public cacheNewFile(file: File, driveItem: Extract<DriveItem, { type: "file" }>): void {
+	//
+	// The `driveItem` params below are typed as the full DriveItem union (not the narrowed
+	// Extract<>) so fetchData — whose unwrap builders return the union — can call these without
+	// a per-branch narrowing cast; the strongly-typed RAW SDK param (file/dir) is what drives
+	// the derived-cache construction, so correctness is preserved.
+	public cacheNewFile(file: File, driveItem: DriveItem): void {
 		this.uuidToAnyDriveItem.set(file.uuid, driveItem)
 		this.fileUuidToNormalFile.set(file.uuid, file)
 	}
@@ -715,7 +726,7 @@ export class Cache {
 	 * cache. Use after any optimistic add of a directory to the TanStack listing
 	 * (createDirectory, socket FolderSubCreated/FolderRestore, move-to-destination).
 	 */
-	public cacheNewNormalDir(dir: Dir, driveItem: Extract<DriveItem, { type: "directory" }>): void {
+	public cacheNewNormalDir(dir: Dir, driveItem: DriveItem): void {
 		this.uuidToAnyDriveItem.set(dir.uuid, driveItem)
 
 		if (driveItem.data.decryptedMeta?.name) {
@@ -726,6 +737,126 @@ export class Cache {
 
 		this.directoryUuidToAnyNormalDir.set(dir.uuid, normalDir)
 		this.directoryUuidToAnyDirWithContext.set(dir.uuid, new AnyDirWithContext.Normal(normalDir))
+	}
+
+	/**
+	 * Mirror a newly-known SHARED (non-root) directory into every persistent cache.
+	 * Reference implementation: the "shared" branch of useDriveItems.query.ts fetchData().
+	 * `sharedOut` mirrors fetchData: a directory you share OUT is your own, so it ALSO has a
+	 * valid normal-dir view (cached under directoryUuidToAnyNormalDir); a directory shared IN
+	 * (someone else's) has no normal-dir view and is not.
+	 */
+	public cacheNewSharedDir(
+		dir: SharedDir & { sharingRole: SharingRole },
+		driveItem: DriveItem,
+		opts: { sharedOut: boolean }
+	): void {
+		const uuid = driveItem.data.uuid
+
+		this.uuidToAnyDriveItem.set(uuid, driveItem)
+
+		if (driveItem.data.decryptedMeta?.name) {
+			this.directoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
+		}
+
+		const withContext = AnySharedDirWithContext.new({
+			dir: new AnySharedDir.Dir(dir),
+			shareInfo: dir.sharingRole
+		})
+
+		this.directoryUuidToAnySharedDirWithContext.set(uuid, withContext)
+		this.directoryUuidToAnyDirWithContext.set(uuid, new AnyDirWithContext.Shared(withContext))
+
+		if (opts.sharedOut) {
+			this.directoryUuidToAnyNormalDir.set(uuid, new AnyNormalDir.Dir(dir.inner))
+		}
+	}
+
+	/**
+	 * Mirror a newly-known SHARED ROOT directory (top-level shared-in/out entry) into every
+	 * persistent cache. Reference: the "sharedRoot" branch of fetchData().
+	 */
+	public cacheNewSharedRootDir(dir: SharedRootDirsAndFiles["dirs"][number], driveItem: DriveItem): void {
+		const uuid = driveItem.data.uuid
+
+		this.uuidToAnyDriveItem.set(uuid, driveItem)
+
+		if (driveItem.data.decryptedMeta?.name) {
+			this.directoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
+		}
+
+		const withContext = AnySharedDirWithContext.new({
+			dir: new AnySharedDir.Root(dir),
+			shareInfo: dir.sharingRole
+		})
+
+		this.directoryUuidToAnySharedDirWithContext.set(uuid, withContext)
+		this.directoryUuidToAnyDirWithContext.set(uuid, new AnyDirWithContext.Shared(withContext))
+	}
+
+	/**
+	 * Mirror a newly-known SHARED file into the caches. Reference: the "shared" branch of
+	 * fetchData(). A file you share OUT is also cached as a normal File (own file, sharingRole
+	 * stripped); a file shared IN is referenced by uuid only.
+	 */
+	public cacheNewSharedFile(
+		file: File & { sharingRole: SharingRole },
+		driveItem: DriveItem,
+		opts: { sharedOut: boolean }
+	): void {
+		const uuid = driveItem.data.uuid
+
+		this.uuidToAnyDriveItem.set(uuid, driveItem)
+
+		if (opts.sharedOut) {
+			const { sharingRole: _, ...normalFile } = file
+
+			this.fileUuidToNormalFile.set(uuid, normalFile)
+		}
+	}
+
+	/**
+	 * Mirror a newly-known LINKED directory (public-link browse) into the caches. Reference:
+	 * the "linked" branch of fetchData(). The uuid→item and name mappings are always seeded; the
+	 * linked-context caches (which need the parent link's meta, not carried on the DriveItem) are
+	 * seeded only when `meta` is known — matching fetchData, which caches those under `if (meta)`.
+	 */
+	public cacheNewLinkedDir(dir: LinkedDirsAndFiles["dirs"][number], driveItem: DriveItem, meta: DirPublicLink | null): void {
+		const uuid = driveItem.data.uuid
+
+		this.uuidToAnyDriveItem.set(uuid, driveItem)
+
+		if (driveItem.data.decryptedMeta?.name) {
+			this.directoryUuidToName.set(uuid, driveItem.data.decryptedMeta.name)
+		}
+
+		if (!meta) {
+			return
+		}
+
+		this.directoryUuidToAnyLinkedDirWithMeta.set(uuid, {
+			dir: new AnyLinkedDir.Dir(dir),
+			meta
+		})
+
+		this.directoryUuidToAnyDirWithContext.set(
+			uuid,
+			new AnyDirWithContext.Linked(
+				AnyLinkedDirWithContext.new({
+					dir: new AnyLinkedDir.Dir(dir),
+					link: meta
+				})
+			)
+		)
+	}
+
+	/**
+	 * Reference an item by uuid only (uuidToAnyDriveItem), with no derived-cache seeding.
+	 * Mirrors the "offline", shared-root-file and linked-file branches of fetchData(), which
+	 * cache only the uuid→item mapping.
+	 */
+	public cacheDriveItemReference(driveItem: DriveItem): void {
+		this.uuidToAnyDriveItem.set(driveItem.data.uuid, driveItem)
 	}
 
 	/**

@@ -56,27 +56,26 @@ vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 // helper — without this mock the real SDK module would load its WASM bridge,
 // which references `self` (undefined in node).
 vi.mock("@filen/sdk-rs", () => {
-	class StubDir {
-		public readonly tag = "Dir"
-		public readonly inner: [unknown]
+	// Stub SDK wrapper constructors used by the cacheNew* helpers. Each records its tag and the
+	// constructor arg(s) under `inner` so tests can assert what was wrapped, without loading the real
+	// WASM bridge (which references `self`, undefined in node).
+	const makeStub = (tag: string) =>
+		class {
+			public readonly tag = tag
+			public readonly inner: unknown[]
 
-		public constructor(dir: unknown) {
-			this.inner = [dir]
+			public constructor(...args: unknown[]) {
+				this.inner = args
+			}
 		}
-	}
-
-	class StubNormal {
-		public readonly tag = "Normal"
-		public readonly inner: [unknown]
-
-		public constructor(dir: unknown) {
-			this.inner = [dir]
-		}
-	}
 
 	return {
-		AnyNormalDir: { Dir: StubDir },
-		AnyDirWithContext: { Normal: StubNormal }
+		AnyNormalDir: { Dir: makeStub("Dir") },
+		AnySharedDir: { Dir: makeStub("SharedDir"), Root: makeStub("SharedRoot") },
+		AnyLinkedDir: { Dir: makeStub("LinkedDir") },
+		AnyDirWithContext: { Normal: makeStub("Normal"), Shared: makeStub("Shared"), Linked: makeStub("Linked") },
+		AnySharedDirWithContext: { new: (arg: unknown) => ({ tag: "SharedDirWithContext", inner: [arg] }) },
+		AnyLinkedDirWithContext: { new: (arg: unknown) => ({ tag: "LinkedDirWithContext", inner: [arg] }) }
 	}
 })
 
@@ -370,6 +369,49 @@ function makeSdkDir(uuid: string): any {
 		favorited: false,
 		color: null
 	}
+}
+
+// Shared / shared-root / linked SDK + DriveItem factories for the cacheNewShared*/Linked helpers.
+function makeSdkSharedDir(uuid: string): any {
+	return { uuid, sharingRole: "owner", inner: makeSdkDir(uuid), parent: "parent-uuid", timestamp: 0n, favorited: false }
+}
+
+function makeSdkSharedRootDir(uuid: string): any {
+	return { uuid, sharingRole: "owner", parent: "parent-uuid", timestamp: 0n, favorited: false }
+}
+
+function makeSdkSharedFile(uuid: string): any {
+	return { ...makeSdkFile(uuid), sharingRole: "owner" }
+}
+
+function makeSdkLinkedDir(uuid: string): any {
+	return { uuid, inner: makeSdkDir(uuid) }
+}
+
+function makeSharedDirDriveItem(uuid: string, name?: string): any {
+	return {
+		type: "sharedDirectory",
+		data: { uuid, size: 0n, undecryptable: false, decryptedMeta: name ? { name, color: null } : null, sharingRole: "owner" }
+	}
+}
+
+function makeSharedRootDirDriveItem(uuid: string, name?: string): any {
+	return {
+		type: "sharedRootDirectory",
+		data: { uuid, size: 0n, undecryptable: false, decryptedMeta: name ? { name, color: null } : null }
+	}
+}
+
+function makeSharedFileDriveItem(uuid: string): any {
+	return { type: "sharedFile", data: { uuid, size: 0n, undecryptable: false, decryptedMeta: null } }
+}
+
+function makeSharedRootFileDriveItem(uuid: string): any {
+	return { type: "sharedRootFile", data: { uuid, size: 0n, undecryptable: false, decryptedMeta: null } }
+}
+
+function makeLinkMeta(): any {
+	return { linkUuid: "l-uuid", linkKey: "key" }
 }
 
 // —————————————————————————————————————————————————————————————————————————————
@@ -1184,6 +1226,140 @@ describe("Cache", () => {
 			// StubNormal wraps the AnyNormalDir
 			expect(dirWithCtx.tag).toBe("Normal")
 			expect(dirWithCtx.inner[0]).toBe(normalDir)
+		})
+	})
+
+	describe("cacheNewSharedDir", () => {
+		it("seeds uuidToAnyDriveItem, the shared-context caches and the name", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const uuid = "shared-dir-1"
+
+			cache.cacheNewSharedDir(makeSdkSharedDir(uuid), makeSharedDirDriveItem(uuid, "Shared"), { sharedOut: false })
+
+			expect(cache.uuidToAnyDriveItem.has(uuid)).toBe(true)
+			expect(cache.directoryUuidToAnySharedDirWithContext.has(uuid)).toBe(true)
+			expect(cache.directoryUuidToAnyDirWithContext.has(uuid)).toBe(true)
+			expect(cache.directoryUuidToName.get(uuid)).toBe("Shared")
+		})
+
+		it("does NOT seed directoryUuidToAnyNormalDir for a shared-IN dir (sharedOut: false)", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const uuid = "shared-in-dir"
+
+			cache.cacheNewSharedDir(makeSdkSharedDir(uuid), makeSharedDirDriveItem(uuid), { sharedOut: false })
+
+			expect(cache.directoryUuidToAnyNormalDir.has(uuid)).toBe(false)
+		})
+
+		it("ALSO seeds directoryUuidToAnyNormalDir (from the inner dir) for a shared-OUT dir", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const uuid = "shared-out-dir"
+
+			cache.cacheNewSharedDir(makeSdkSharedDir(uuid), makeSharedDirDriveItem(uuid), { sharedOut: true })
+
+			expect(cache.directoryUuidToAnyNormalDir.has(uuid)).toBe(true)
+		})
+	})
+
+	describe("cacheNewSharedRootDir", () => {
+		it("seeds the shared-context caches and name for a shared root dir", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const uuid = "shared-root-dir"
+
+			cache.cacheNewSharedRootDir(makeSdkSharedRootDir(uuid), makeSharedRootDirDriveItem(uuid, "Root"))
+
+			expect(cache.uuidToAnyDriveItem.has(uuid)).toBe(true)
+			expect(cache.directoryUuidToAnySharedDirWithContext.has(uuid)).toBe(true)
+			expect(cache.directoryUuidToAnyDirWithContext.has(uuid)).toBe(true)
+			expect(cache.directoryUuidToName.get(uuid)).toBe("Root")
+		})
+	})
+
+	describe("cacheNewSharedFile", () => {
+		it("references a shared-IN file by uuid only (no fileUuidToNormalFile)", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const uuid = "shared-in-file"
+
+			cache.cacheNewSharedFile(makeSdkSharedFile(uuid), makeSharedFileDriveItem(uuid), { sharedOut: false })
+
+			expect(cache.uuidToAnyDriveItem.has(uuid)).toBe(true)
+			expect(cache.fileUuidToNormalFile.has(uuid)).toBe(false)
+		})
+
+		it("ALSO seeds fileUuidToNormalFile with sharingRole stripped for a shared-OUT file", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const uuid = "shared-out-file"
+
+			cache.cacheNewSharedFile(makeSdkSharedFile(uuid), makeSharedFileDriveItem(uuid), { sharedOut: true })
+
+			expect(cache.fileUuidToNormalFile.has(uuid)).toBe(true)
+			expect((cache.fileUuidToNormalFile.get(uuid) as { sharingRole?: unknown }).sharingRole).toBeUndefined()
+		})
+	})
+
+	describe("cacheNewLinkedDir", () => {
+		it("seeds the linked-context caches when meta is present", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const uuid = "linked-dir"
+
+			cache.cacheNewLinkedDir(makeSdkLinkedDir(uuid), makeDirectoryDriveItem(uuid, "Linked"), makeLinkMeta())
+
+			expect(cache.uuidToAnyDriveItem.has(uuid)).toBe(true)
+			expect(cache.directoryUuidToName.get(uuid)).toBe("Linked")
+			expect(cache.directoryUuidToAnyLinkedDirWithMeta.has(uuid)).toBe(true)
+			expect(cache.directoryUuidToAnyDirWithContext.has(uuid)).toBe(true)
+		})
+
+		it("seeds only uuid + name when meta is null (no linked-context caches)", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const uuid = "linked-dir-nometa"
+
+			cache.cacheNewLinkedDir(makeSdkLinkedDir(uuid), makeDirectoryDriveItem(uuid, "Linked"), null)
+
+			expect(cache.uuidToAnyDriveItem.has(uuid)).toBe(true)
+			expect(cache.directoryUuidToName.get(uuid)).toBe("Linked")
+			expect(cache.directoryUuidToAnyLinkedDirWithMeta.has(uuid)).toBe(false)
+		})
+	})
+
+	describe("cacheDriveItemReference", () => {
+		it("seeds only uuidToAnyDriveItem, no derived caches", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const uuid = "ref-uuid"
+			const item = makeSharedRootFileDriveItem(uuid)
+
+			cache.cacheDriveItemReference(item)
+
+			expect(cache.uuidToAnyDriveItem.get(uuid)).toBe(item)
+			expect(cache.fileUuidToNormalFile.has(uuid)).toBe(false)
+			expect(cache.directoryUuidToName.has(uuid)).toBe(false)
 		})
 	})
 
