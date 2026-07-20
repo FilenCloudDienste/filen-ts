@@ -24,6 +24,10 @@ export type Transfer = {
 			}
 			localFileOrDir: FileSystem.File | FileSystem.Directory
 			parent: AnyNormalDir
+			// Effective remote name — what the item is called once uploaded (the caller-supplied
+			// override for files, else the local name). Rows display THIS: staged sources (share
+			// intents, scanned documents) carry random tmp names a user can't recognize.
+			name: string
 	  }
 	| {
 			type: "uploadFile"
@@ -34,6 +38,8 @@ export type Transfer = {
 			}
 			localFileOrDir: FileSystem.File | FileSystem.Directory
 			parent: AnyNormalDir
+			// See uploadDirectory.name.
+			name: string
 	  }
 	| {
 			type: "downloadFile"

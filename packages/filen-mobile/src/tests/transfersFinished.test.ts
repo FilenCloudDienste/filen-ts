@@ -34,7 +34,12 @@ vi.mock("@/components/itemIcons", () => ({ DirectoryIcon: "DirectoryIcon", FileI
 vi.mock("@/features/drive/components/item/thumbnail", () => ({ default: "Thumbnail" }))
 vi.mock("@expo/vector-icons/Ionicons", () => ({ default: "Ionicons" }))
 
-import { useTransfersStore, MAX_FINISHED_TRANSFERS, type Transfer, type FinishedTransfer } from "@/features/transfers/store/useTransfers.store"
+import {
+	useTransfersStore,
+	MAX_FINISHED_TRANSFERS,
+	type Transfer,
+	type FinishedTransfer
+} from "@/features/transfers/store/useTransfers.store"
 import { buildTransfersDisplayList, finishedTransferSubtitle } from "@/features/transfers/screens/transfers"
 import { type TFunction } from "i18next"
 
@@ -64,6 +69,7 @@ function makeActiveTransfer(id: string, startedAt: number): Transfer {
 		type: "uploadFile",
 		errors: { upload: [], scan: [], unknown: [] },
 		localFileOrDir: { name: `file-${id}` },
+		name: `file-${id}`,
 		parent: {}
 	} as unknown as Transfer
 }

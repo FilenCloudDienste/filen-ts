@@ -90,7 +90,7 @@ const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: 
 								/>
 							) : (
 								<FileIcon
-									name={transfer.localFileOrDir.name}
+									name={transfer.name}
 									width={32}
 									height={32}
 								/>
@@ -114,7 +114,7 @@ const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: 
 						ellipsizeMode="middle"
 					>
 						{transfer.type === "uploadDirectory" || transfer.type === "uploadFile"
-							? transfer.localFileOrDir.name
+							? transfer.name
 							: driveItemDisplayName(transfer.item)}
 					</Text>
 				</View>
@@ -398,7 +398,9 @@ const TransfersHeader = () => {
 															})
 
 															if (!promptResult.success) {
-																logger.warn("transfers", "Cancel-all prompt failed", { error: promptResult.error })
+																logger.warn("transfers", "Cancel-all prompt failed", {
+																	error: promptResult.error
+																})
 																alerts.error(promptResult.error)
 
 																return

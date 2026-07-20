@@ -1952,6 +1952,78 @@ describe("Transfers", () => {
 			expect(finalEntry).toBeUndefined()
 		})
 
+		it("upload rows carry the EFFECTIVE remote name — the supplied override, not a staged tmp source's random one", async () => {
+			// Staged sources (share intents, scanned documents) upload from tmp files with
+			// random/uuid names; the row and the finished snapshot must show the real name.
+			const file = new FsFile("file:///tmp/2f1a9c3e-7b.tmp")
+			fs.set(file.uri, new Uint8Array([1, 2, 3]))
+			const parent = makeParentDir("parent-uuid")
+
+			const stateSnapshots: unknown[][] = []
+
+			mockSetTransfers.mockImplementation((fn: unknown) => {
+				const next =
+					typeof fn === "function" ? (fn as (prev: unknown[]) => unknown[])(mockTransfersState.transfers) : (fn as unknown[])
+
+				stateSnapshots.push([...next])
+				mockTransfersState.transfers = next
+			})
+
+			mockUploadFile.mockImplementationOnce(async () => ({
+				uuid: "uploaded-file-uuid",
+				parent: { tag: "Uuid", inner: ["parent-uuid"] }
+			}))
+
+			await transfers.upload({
+				localFileOrDir: file,
+				parent,
+				name: "Vacation Photo.jpg"
+			})
+
+			const liveEntry = stateSnapshots.flat().find(t => (t as { type?: string }).type === "uploadFile") as { name: string }
+
+			expect(liveEntry.name).toBe("Vacation Photo.jpg")
+
+			await new Promise(res => setTimeout(res, 0))
+
+			expect(mockAddFinishedTransfer).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "uploadFile",
+					name: "Vacation Photo.jpg"
+				})
+			)
+		})
+
+		it("upload rows fall back to the local file name when no override is supplied", async () => {
+			const file = new FsFile("file:///document/report.pdf")
+			fs.set(file.uri, new Uint8Array([1]))
+			const parent = makeParentDir("parent-uuid")
+
+			const stateSnapshots: unknown[][] = []
+
+			mockSetTransfers.mockImplementation((fn: unknown) => {
+				const next =
+					typeof fn === "function" ? (fn as (prev: unknown[]) => unknown[])(mockTransfersState.transfers) : (fn as unknown[])
+
+				stateSnapshots.push([...next])
+				mockTransfersState.transfers = next
+			})
+
+			mockUploadFile.mockImplementationOnce(async () => ({
+				uuid: "uploaded-file-uuid",
+				parent: { tag: "Uuid", inner: ["parent-uuid"] }
+			}))
+
+			await transfers.upload({
+				localFileOrDir: file,
+				parent
+			})
+
+			const liveEntry = stateSnapshots.flat().find(t => (t as { type?: string }).type === "uploadFile") as { name: string }
+
+			expect(liveEntry.name).toBe("report.pdf")
+		})
+
 		it("settles a cleanly resolved directory download as succeeded with errorCount 0", async () => {
 			const dest = new FsDirectory("file:///document/destdir")
 			const item = makeDirItem("dir-uuid")

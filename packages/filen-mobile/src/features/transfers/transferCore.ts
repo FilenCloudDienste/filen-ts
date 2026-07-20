@@ -24,8 +24,18 @@ import useTransfersStore, { type Transfer, type FinishedTransfer } from "@/featu
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
-import { wrapAbortSignalForSdk, disposeSdkAbortSignal, PauseSignal, createCompositeAbortSignal, createCompositePauseSignal } from "@/lib/signals"
-import { driveItemsQueryUpdateForNormalParent, driveItemsQueryUpdateForPhotos, driveItemsQueryUpdateForRecents } from "@/features/drive/queries/useDriveItems.query"
+import {
+	wrapAbortSignalForSdk,
+	disposeSdkAbortSignal,
+	PauseSignal,
+	createCompositeAbortSignal,
+	createCompositePauseSignal
+} from "@/lib/signals"
+import {
+	driveItemsQueryUpdateForNormalParent,
+	driveItemsQueryUpdateForPhotos,
+	driveItemsQueryUpdateForRecents
+} from "@/features/drive/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
@@ -107,10 +117,10 @@ export function countTransferErrors(transfer: Transfer): number {
 }
 
 // Display name for a settled transfer, matching the transfers screen row exactly:
-// uploads use the local file/directory name, downloads use the drive item's decrypted name.
+// uploads use the effective remote name, downloads use the drive item's decrypted name.
 function finishedTransferName(transfer: Transfer): string {
 	if (transfer.type === "uploadDirectory" || transfer.type === "uploadFile") {
-		return transfer.localFileOrDir.name
+		return transfer.name
 	}
 
 	return driveItemDisplayName(transfer.item)
@@ -369,6 +379,9 @@ export async function uploadCore(
 					localFileOrDir,
 					parent,
 					type: "uploadDirectory",
+					// Directory uploads create the remote dir under the LOCAL name (see
+					// createDirectory below) — the display name must match that outcome.
+					name: localFileOrDir.name,
 					size: 0,
 					knownDirectories: 0,
 					knownFiles: 0,
@@ -404,8 +417,7 @@ export async function uploadCore(
 				id,
 				type: "uploadDirectory",
 				succeeded: () => succeededUploadDirectory,
-				aborted: () =>
-					transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
+				aborted: () => transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
 				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
 				defer
 			})
@@ -679,6 +691,9 @@ export async function uploadCore(
 				localFileOrDir,
 				parent,
 				type: "uploadFile",
+				// Same expression the SDK call below uploads under — the row shows the file's
+				// REMOTE name, not a staged tmp source's random one.
+				name: name ?? localFileOrDir.name,
 				size: localFileOrDir.size,
 				bytesTransferred: 0,
 				startedAt: Date.now(),
@@ -876,7 +891,11 @@ export async function uploadCore(
 				signal: thumbnailAbortSignal
 			})
 			.catch(err => {
-				logger.warn("transfers", "Thumbnail generation failed after upload", { uuid: result.data.uuid, name: uploadedFileName, error: err })
+				logger.warn("transfers", "Thumbnail generation failed after upload", {
+					uuid: result.data.uuid,
+					name: uploadedFileName,
+					error: err
+				})
 			})
 			.finally(() => {
 				thumbnailAbortSignal.dispose()
@@ -1002,8 +1021,7 @@ export async function downloadCore(
 				id,
 				type: "downloadDirectory",
 				succeeded: () => succeededDownloadDirectory,
-				aborted: () =>
-					transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
+				aborted: () => transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
 				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
 				defer
 			})
@@ -1049,7 +1067,9 @@ export async function downloadCore(
 							// recoverable — re-opening the shared parent in the drive repopulates the cache — but
 							// resolving it here would require an extra SDK round-trip the silent transfer layer
 							// deliberately avoids; a clearer retryable message is the sanctioned minimum.
-							throw new Error("Shared directory download is missing its share context. Open the shared directory once, then retry.")
+							throw new Error(
+								"Shared directory download is missing its share context. Open the shared directory once, then retry."
+							)
 						}
 
 						// Target the shared directory ITSELF (item.data), borrowing only the shareInfo resolved
