@@ -514,7 +514,7 @@ describe("driveItemsQueryUpdateForNormalParent", () => {
 	it("forwards the functional updater to both update calls when root match occurs", () => {
 		mockCacheRootUuid.value = "root-uuid-xyz"
 
-		const updater = (prev: unknown[]) => [...prev, { id: 1 }]
+		const updater = (prev: unknown[]) => [...prev, { data: { uuid: "1" } }]
 
 		driveItemsQueryUpdateForNormalParent({
 			parentUuid: "root-uuid-xyz",
@@ -531,8 +531,24 @@ describe("driveItemsQueryUpdateForNormalParent", () => {
 
 		expect(typeof updaterArg0).toBe("function")
 		expect(typeof updaterArg1).toBe("function")
-		expect(updaterArg0([])).toEqual([{ id: 1 }])
-		expect(updaterArg1([])).toEqual([{ id: 1 }])
+		expect(updaterArg0([])).toEqual([{ data: { uuid: "1" } }])
+		expect(updaterArg1([])).toEqual([{ data: { uuid: "1" } }])
+	})
+
+	it("seeds cache.uuidToAnyDriveItem for each item in the optimistic update (notes/chats analog)", () => {
+		mockCacheRootUuid.value = null
+
+		const item = { data: { uuid: "opt-seed-1" } } as unknown as DriveItem
+
+		driveItemsQueryUpdateForNormalParent({ parentUuid: "some-parent", updater: [item] })
+
+		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
+		const inner = calls[0]![1] as (prev: unknown[]) => unknown[]
+
+		// Running the wrapper (what queryUpdater.set invokes) is what seeds the cache.
+		inner([])
+
+		expect(cacheUuidToAnyDriveItem.get("opt-seed-1")).toBe(item)
 	})
 })
 
