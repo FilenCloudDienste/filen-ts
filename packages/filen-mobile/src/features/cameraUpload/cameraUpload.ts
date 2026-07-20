@@ -984,7 +984,7 @@ class CameraUpload {
 				})
 			)
 
-			this.ensureParentDirectoryExistsCache.set(cacheKey, { value: dir, expires: Date.now() + 60000 })
+			this.ensureParentDirectoryExistsCache.set(cacheKey, { value: dir, expires: Date.now() + 15000 })
 
 			return dir
 		})()
@@ -1255,8 +1255,7 @@ class CameraUpload {
 				? allDeltas
 						.filter(
 							delta =>
-								!params?.background ||
-								(cameraUploadState.getAbort(delta.file.info.id) ?? 0) < MAX_BACKGROUND_UPLOAD_ABORTS
+								!params?.background || (cameraUploadState.getAbort(delta.file.info.id) ?? 0) < MAX_BACKGROUND_UPLOAD_ABORTS
 						)
 						.sort(
 							(a, b) =>
@@ -1335,10 +1334,8 @@ class CameraUpload {
 					// pass migrates old entries to id keys (see the hygiene prune in sync()).
 					const cachedEntry = normalizeCameraUploadHashEntry(
 						params?.background
-							? ((await cameraUploadState.getHash(delta.file.info.id)) ??
-									(await cameraUploadState.getHash(delta.file.path)))
-							: (cameraUploadState.getHashSync(delta.file.info.id) ??
-									cameraUploadState.getHashSync(delta.file.path))
+							? ((await cameraUploadState.getHash(delta.file.info.id)) ?? (await cameraUploadState.getHash(delta.file.path)))
+							: (cameraUploadState.getHashSync(delta.file.info.id) ?? cameraUploadState.getHashSync(delta.file.path))
 					)
 					const modificationTime = delta.file.info.modificationTime
 
