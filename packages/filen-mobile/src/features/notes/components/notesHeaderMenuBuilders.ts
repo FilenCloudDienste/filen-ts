@@ -211,7 +211,10 @@ export function buildNotesHeaderRightItems({
 									const documentPickerResult = await run(async () => {
 										return await withSystemPresentation(() =>
 											DocumentPicker.getDocumentAsync({
-												type: "text/plain",
+												// Our own exports are .md / .html now (#83), and code files
+												// often surface as octet-stream on Android SAF — text/plain
+												// alone made re-importing them impossible.
+												type: ["text/*", "application/octet-stream", "application/json", "application/xml"],
 												multiple: false,
 												copyToCacheDirectory: true,
 												base64: false
@@ -434,6 +437,7 @@ export function buildNotesHeaderRightItems({
 						const result = await shareTmpFile({
 							uri: exportResult.data.file.uri,
 							name: exportResult.data.file.name,
+							mimeType: "application/zip",
 							cleanup: () => {
 								exportResult.data.cleanup()
 							}

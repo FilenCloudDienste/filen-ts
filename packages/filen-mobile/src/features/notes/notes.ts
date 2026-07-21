@@ -2,7 +2,7 @@ import auth from "@/lib/auth"
 import logger from "@/lib/logger"
 import { NoteType } from "@filen/sdk-rs"
 import { type Note, type NoteTag } from "@/types"
-import { wrapSdkNote } from "@/features/notes/utils"
+import { noteExportFileName, wrapSdkNote } from "@/features/notes/utils"
 import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
 import JSZip from "jszip"
 import { sanitizeFileName } from "@/lib/utils"
@@ -75,7 +75,8 @@ const notes = {
 			throw new Error("Note content is empty")
 		}
 
-		const file = newTmpFile(sanitizeFileName(`${note.title || note.uuid}.txt`))
+		const exportName = noteExportFileName(note)
+		const file = newTmpFile(sanitizeFileName(exportName.fileName))
 
 		if (file.exists) {
 			file.delete()
@@ -87,6 +88,8 @@ const notes = {
 
 		return {
 			file,
+			// Share MIME matching the typed extension (#83) — callers pass it to the share sheet.
+			mimeType: exportName.mimeType,
 			cleanup: () => {
 				if (file.exists) {
 					file.delete()
@@ -117,7 +120,11 @@ const notes = {
 					return
 				}
 
-				const sanitizedFileName = sanitizeFileName(`${note.title ? `${note.title}_` : ""}${note.uuid}.txt`)
+				const sanitizedFileName = sanitizeFileName(
+					noteExportFileName(note, {
+						includeUuidSuffix: true
+					}).fileName
+				)
 
 				zip.file(sanitizedFileName, content)
 			})

@@ -182,3 +182,87 @@ export function withUntaggedTag(sortedTags: NoteTag[], untaggedCount: number, na
 
 	return [...sortedTags, createUntaggedTag(name)]
 }
+
+// ── Typed export names (#83) ─────────────────────────────────────────────────
+//
+// Exports write the RAW stored content, so the extension/MIME mapping is pure naming:
+// text → .txt, markdown → .md, richtext/checklist → .html (their stored form IS html —
+// Quill v1 markup and the checklist <ul data-checked> markup both open readably in a
+// browser and reimport byte-exact), code → the title's extension when it looks like one.
+
+/**
+ * A usable file extension carried by a code note's title ("script.py" → "py"): 1-10
+ * alphanumeric chars containing at least one letter, so "notes v2.1" doesn't export as ".1".
+ * The editor's syntax highlighting keys off the same title (loadLanguage), which additionally
+ * validates against the known language set inside the WebView — kept there deliberately so the
+ * native bundle never imports the CodeMirror language table.
+ */
+export function noteCodeTitleExtension(title: string | null | undefined): string | null {
+	if (!title) {
+		return null
+	}
+
+	const trimmed = title.trim()
+	const dot = trimmed.lastIndexOf(".")
+
+	if (dot <= 0 || dot === trimmed.length - 1) {
+		return null
+	}
+
+	const ext = trimmed.slice(dot + 1).toLowerCase()
+
+	return /^[a-z0-9]{1,10}$/.test(ext) && /[a-z]/.test(ext) ? ext : null
+}
+
+/**
+ * Export name + share MIME for a note. `includeUuidSuffix` (bulk zip entries) keeps the
+ * uuid-based collision safety: `title_uuid.ext`. A title already ending in the chosen
+ * extension is not double-suffixed ("readme.md" exports as "readme.md", not "readme.md.md");
+ * an empty title falls back to the uuid. The caller sanitizes for the filesystem.
+ */
+export function noteExportFileName(
+	note: Note,
+	opts?: {
+		includeUuidSuffix?: boolean
+	}
+): {
+	fileName: string
+	mimeType: string
+} {
+	const { ext, mimeType } = (() => {
+		switch (note.noteType) {
+			case NoteType.Md: {
+				return { ext: "md", mimeType: "text/markdown" }
+			}
+
+			case NoteType.Rich:
+			case NoteType.Checklist: {
+				return { ext: "html", mimeType: "text/html" }
+			}
+
+			case NoteType.Code: {
+				return { ext: noteCodeTitleExtension(note.title) ?? "txt", mimeType: "text/plain" }
+			}
+
+			default: {
+				return { ext: "txt", mimeType: "text/plain" }
+			}
+		}
+	})()
+
+	const title = note.title?.trim() ?? ""
+	const suffix = `.${ext}`
+	const base = (title.toLowerCase().endsWith(suffix) ? title.slice(0, -suffix.length) : title) || note.uuid
+
+	if (opts?.includeUuidSuffix) {
+		return {
+			fileName: `${base}_${note.uuid}${suffix}`,
+			mimeType
+		}
+	}
+
+	return {
+		fileName: `${base}${suffix}`,
+		mimeType
+	}
+}

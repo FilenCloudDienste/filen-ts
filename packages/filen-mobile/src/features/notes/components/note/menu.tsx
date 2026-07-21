@@ -425,6 +425,7 @@ export function createMenuButtons({
 			const result = await shareTmpFile({
 				uri: exportResult.data.file.uri,
 				name: exportResult.data.file.name,
+				mimeType: exportResult.data.mimeType,
 				cleanup: () => {
 					exportResult.data.cleanup()
 				}

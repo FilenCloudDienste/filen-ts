@@ -15,6 +15,8 @@ vi.mock("@filen/sdk-rs", () => ({
 import { NoteType } from "@filen/sdk-rs"
 import { type Note, type NoteTag, type NoteHistory } from "@/types"
 import {
+	noteCodeTitleExtension,
+	noteExportFileName,
 	UNTAGGED_TAG_UUID,
 	isUntaggedTagUuid,
 	createUntaggedTag,
@@ -268,5 +270,78 @@ describe("virtual untagged tag", () => {
 
 		expect(filterNoteTagsBySearchQuery(tags, "untag").map(t => t.uuid)).toEqual([UNTAGGED_TAG_UUID])
 		expect(filterNoteTagsBySearchQuery(tags, "alp").map(t => t.uuid)).toEqual(["a-a-a-a"])
+	})
+})
+
+// ── #83 typed export names ───────────────────────────────────────────────────
+
+describe("noteCodeTitleExtension", () => {
+	it("extracts a sane extension from a code note title", () => {
+		expect(noteCodeTitleExtension("script.py")).toBe("py")
+		expect(noteCodeTitleExtension("Main.KT")).toBe("kt")
+		expect(noteCodeTitleExtension("archive.tar.gz")).toBe("gz")
+	})
+
+	it("rejects titles without a usable extension", () => {
+		expect(noteCodeTitleExtension("plain title")).toBeNull()
+		// A trailing version number is not an extension.
+		expect(noteCodeTitleExtension("notes v2.1")).toBeNull()
+		expect(noteCodeTitleExtension(".hidden")).toBeNull()
+		expect(noteCodeTitleExtension("trailingdot.")).toBeNull()
+		expect(noteCodeTitleExtension("way.toolongextension")).toBeNull()
+		expect(noteCodeTitleExtension(undefined)).toBeNull()
+		expect(noteCodeTitleExtension(null)).toBeNull()
+	})
+})
+
+describe("noteExportFileName", () => {
+	const makeTypedNote = (noteType: unknown, title: string | undefined): Note =>
+		({ uuid: "note-uuid-1", title, noteType }) as unknown as Note
+
+	it("maps every note type to its extension and MIME", () => {
+		expect(noteExportFileName(makeTypedNote(NoteType.Text, "My Note"))).toEqual({
+			fileName: "My Note.txt",
+			mimeType: "text/plain"
+		})
+		expect(noteExportFileName(makeTypedNote(NoteType.Md, "Readme"))).toEqual({
+			fileName: "Readme.md",
+			mimeType: "text/markdown"
+		})
+		expect(noteExportFileName(makeTypedNote(NoteType.Rich, "Journal"))).toEqual({
+			fileName: "Journal.html",
+			mimeType: "text/html"
+		})
+		expect(noteExportFileName(makeTypedNote(NoteType.Checklist, "Groceries"))).toEqual({
+			fileName: "Groceries.html",
+			mimeType: "text/html"
+		})
+	})
+
+	it("code notes use the title's extension, falling back to .txt without one", () => {
+		expect(noteExportFileName(makeTypedNote(NoteType.Code, "script.py"))).toEqual({
+			fileName: "script.py",
+			mimeType: "text/plain"
+		})
+		expect(noteExportFileName(makeTypedNote(NoteType.Code, "snippets"))).toEqual({
+			fileName: "snippets.txt",
+			mimeType: "text/plain"
+		})
+	})
+
+	it("never double-suffixes a title already carrying the extension", () => {
+		expect(noteExportFileName(makeTypedNote(NoteType.Md, "readme.md")).fileName).toBe("readme.md")
+		expect(noteExportFileName(makeTypedNote(NoteType.Md, "README.MD")).fileName).toBe("README.md")
+	})
+
+	it("falls back to the uuid for an empty title", () => {
+		expect(noteExportFileName(makeTypedNote(NoteType.Text, undefined)).fileName).toBe("note-uuid-1.txt")
+		expect(noteExportFileName(makeTypedNote(NoteType.Text, "   ")).fileName).toBe("note-uuid-1.txt")
+	})
+
+	it("bulk mode keeps the uuid collision suffix BEFORE the extension", () => {
+		expect(noteExportFileName(makeTypedNote(NoteType.Md, "Readme"), { includeUuidSuffix: true }).fileName).toBe("Readme_note-uuid-1.md")
+		expect(noteExportFileName(makeTypedNote(NoteType.Code, "script.py"), { includeUuidSuffix: true }).fileName).toBe(
+			"script_note-uuid-1.py"
+		)
 	})
 })
