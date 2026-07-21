@@ -3,7 +3,7 @@ import { type Note, type NoteHistory } from "@/types"
 import View from "@/components/ui/view"
 import useNoteContentQuery, { noteContentQueryGet } from "@/features/notes/queries/useNoteContent.query"
 import Checklist from "@/features/notes/components/content/checklist"
-import { noteTypeToEditorType } from "@/features/notes/utils"
+import { noteCodeTitleExtension, noteTypeToEditorType } from "@/features/notes/utils"
 import { FadeOut } from "react-native-reanimated"
 import { AnimatedView } from "@/components/ui/animated"
 import { ActivityIndicator } from "react-native"
@@ -504,6 +504,10 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 					readOnly={!hasWriteAccess}
 					placeholder={t("note_editor_placeholder")}
 					type={noteTypeToEditorType(note.noteType)}
+					// Code notes highlight by the TITLE's extension ("script.py" → python). Only a
+					// usable extension is passed — otherwise the editor keeps its default; the
+					// WebView side validates against the known language set (loadLanguage).
+					fileName={note.noteType === NoteType.Code && noteCodeTitleExtension(note.title) !== null ? note.title : undefined}
 					id={`note:${note.uuid}`}
 					paddingBottom={insets.bottom}
 				/>
