@@ -1,0 +1,29 @@
+diff --git a/node_modules/@react-native-menu/menu/android/src/main/java/com/reactnativemenu/MenuView.kt b/node_modules/@react-native-menu/menu/android/src/main/java/com/reactnativemenu/MenuView.kt
+index c45f5cc..e752d98 100644
+--- a/node_modules/@react-native-menu/menu/android/src/main/java/com/reactnativemenu/MenuView.kt
++++ b/node_modules/@react-native-menu/menu/android/src/main/java/com/reactnativemenu/MenuView.kt
+@@ -72,6 +72,11 @@ class MenuView(private val mContext: ReactContext) : ReactViewGroup(mContext) {
+   }
+ 
+   override fun onDetachedFromWindow() {
++    // Uninstall the TouchDelegate this view put on its parent (updateTouchDelegate) — left in
++    // place it keeps forwarding the parent's taps to this detached view forever.
++    (parent as? ViewGroup)?.let { p ->
++      p.touchDelegate = null
++    }
+     super.onDetachedFromWindow()
+     if (mIsMenuDisplayed) {
+       mPopupMenu.dismiss()
+@@ -218,6 +223,12 @@ class MenuView(private val mContext: ReactContext) : ReactViewGroup(mContext) {
+   }
+ 
+   private fun prepareMenu() {
++    // A detached anchor must never show: after this view unmounts, the TouchDelegate it
++    // installed on its old parent (never uninstalled) keeps routing taps in the old hit rect
++    // here, and PopupMenu on a window-less anchor renders at the window origin (top-left).
++    if (!isAttachedToWindow) {
++      return
++    }
+     if (getActionsCount > 0) {
+       mPopupMenu.menu.clear()
+       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
