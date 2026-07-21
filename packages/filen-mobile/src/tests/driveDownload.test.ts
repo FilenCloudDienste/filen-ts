@@ -4,8 +4,12 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // Hoisted mocks (must be defined before any imports)
 // ------------------------------------------------------------------
 
-const { mockCopyToMediaStore, mockTransfersDownload, mockNewTmpDir } = vi.hoisted(() => ({
+const { mockCopyToMediaStore, mockTransfersDownload, mockNewTmpDir, mockPublicExists, mockPublicUnlink } = vi.hoisted(() => ({
 	mockCopyToMediaStore: vi.fn().mockResolvedValue(undefined),
+	// #86 replace-then-copy: exists/unlink of the previous public copy at
+	// LegacyDownloadDir. Default: nothing exists (fresh download).
+	mockPublicExists: vi.fn().mockResolvedValue(false),
+	mockPublicUnlink: vi.fn().mockResolvedValue(undefined),
 	// transfers.download resolves an object ({ files, directories[, errors] }) or null (abort) —
 	// never a bare boolean. The realistic shape matters: the code under test narrows the result
 	// with `"errors" in result`, which throws on primitives.
@@ -29,6 +33,13 @@ vi.mock("react-native-blob-util", () => ({
 	default: {
 		MediaCollection: {
 			copyToMediaStore: mockCopyToMediaStore
+		},
+		fs: {
+			dirs: {
+				LegacyDownloadDir: "/storage/emulated/0/Download"
+			},
+			exists: mockPublicExists,
+			unlink: mockPublicUnlink
 		}
 	}
 }))
@@ -144,7 +155,7 @@ vi.mock("@/lib/i18n", () => ({
 
 import * as FileSystem from "expo-file-system"
 import { fs } from "@/tests/mocks/expoFileSystem"
-import { downloadDriveItemToDevice, clearMediaStoreCopiedCache } from "@/features/drive/driveDownload"
+import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
 import type { DriveItem } from "@/types"
 
 // ------------------------------------------------------------------
@@ -236,7 +247,8 @@ beforeEach(() => {
 	mockNewTmpDir.mockImplementation(() => new FileSystem.Directory(`${TMP_BASE}/${crypto.randomUUID()}`))
 	setOS("ios")
 	// Reset the per-item MediaStore deduplication cache so tests are isolated.
-	clearMediaStoreCopiedCache()
+	mockPublicExists.mockReset().mockResolvedValue(false)
+	mockPublicUnlink.mockReset().mockResolvedValue(undefined)
 })
 
 // ------------------------------------------------------------------
@@ -989,11 +1001,11 @@ describe("downloadDriveItemToDevice — #23 Android directory retry idempotency"
 		setOS("android")
 	})
 
-	it("retry after partial failure: already-succeeded files are NOT re-copied (no duplicate MediaStore entry)", async () => {
+	it("retry after partial failure: already-landed files are REPLACED (unlink-then-copy), never duplicated", async () => {
 		// Scenario: directory with three files. First invocation copies ok.txt and
-		// also-ok.txt successfully, but fail.txt rejects. The user retries —
-		// on the second call, ok.txt and also-ok.txt must be SKIPPED (copyToMediaStore
-		// must NOT be called again for them), and only fail.txt is retried.
+		// also-ok.txt successfully, but fail.txt rejects. The user retries — on the
+		// second call ALL files are copied again, but the two whose public copies
+		// already exist are unlinked first, so no "(1)" duplicates can appear.
 		const uuid = "idempotency-test-uuid"
 		const dirName = "mydir"
 
@@ -1054,27 +1066,30 @@ describe("downloadDriveItemToDevice — #23 Android directory retry idempotency"
 			return { files: [], directories: [] }
 		})
 
+		// The public copies of the two succeeded files exist now — the user did NOT delete them.
+		mockPublicExists.mockImplementation((path: string) => Promise.resolve(path.endsWith("/ok.txt") || path.endsWith("/also-ok.txt")))
+		mockPublicUnlink.mockClear()
+
 		const secondResult = await downloadDriveItemToDevice({ item })
 
 		expect(secondResult.success).toBe(true)
 
-		// CRITICAL: only fail.txt should have been copied on the retry.
-		// ok.txt and also-ok.txt were already recorded as succeeded — skip them.
-		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(1)
+		// Replace-then-copy: every file is copied again on the retry…
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(3)
 
-		const calledNames = mockCopyToMediaStore.mock.calls.map(
-			(call: unknown[]) => (call[0] as { name: string }).name
-		)
+		// …but the two existing public copies were removed FIRST, so nothing duplicates.
+		const unlinkedPaths = mockPublicUnlink.mock.calls.map((call: unknown[]) => call[0] as string)
 
-		expect(calledNames).toEqual(["fail.txt"])
-		expect(calledNames).not.toContain("ok.txt")
-		expect(calledNames).not.toContain("also-ok.txt")
+		expect(unlinkedPaths.some(path => path.endsWith("/Download/Filen/mydir/ok.txt"))).toBe(true)
+		expect(unlinkedPaths.some(path => path.endsWith("/Download/Filen/mydir/also-ok.txt"))).toBe(true)
+		expect(unlinkedPaths.some(path => path.endsWith("/fail.txt"))).toBe(false)
 	})
 
-	it("retry of a fully successful download: all files are skipped (no re-copy)", async () => {
-		// If the first download completed successfully and the user somehow triggers
-		// the same download again (within the same app session), all files must be
-		// skipped — zero copyToMediaStore calls on the second invocation.
+	it("re-download of a fully successful download REPLACES every file (fresh content, no duplicates)", async () => {
+		// Re-downloading the same item must land fresh content (Filen rotates uuids on
+		// content change, so this is a normal flow): every existing public copy is
+		// unlinked and copied again — never skipped (the old session-cache skip is what
+		// made a deleted file unrecoverable, #86) and never duplicated.
 		const uuid = "full-success-retry-uuid"
 		const dirName = "mydir"
 
@@ -1119,17 +1134,86 @@ describe("downloadDriveItemToDevice — #23 Android directory retry idempotency"
 			return { files: [], directories: [] }
 		})
 
+		// Both public copies still exist from the first download.
+		mockPublicExists.mockResolvedValue(true)
+		mockPublicUnlink.mockClear()
+
 		const secondResult = await downloadDriveItemToDevice({ item })
 
 		expect(secondResult.success).toBe(true)
-		// Both files were already recorded — zero new copies.
-		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(0)
+		// Replace-then-copy: both files unlinked, both copied again.
+		expect(mockPublicUnlink).toHaveBeenCalledTimes(2)
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(2)
 	})
 
-	it("different drive items use independent caches — one item's copy does not suppress another", async () => {
-		// Two different directory items with the same internal file name ("file.txt").
-		// The cache must be keyed by item UUID, so copies of item-B are NOT skipped
-		// because item-A already recorded a relPath matching "/file.txt".
+	it("#86: a file the user DELETED from Downloads is recreated by the next download", async () => {
+		const tmpDir1 = new FileSystem.Directory(`${TMP_BASE}/deleted-repro-1`)
+
+		fs.set(tmpDir1.uri, "dir")
+		mockNewTmpDir.mockReturnValue(tmpDir1)
+
+		const item = makeFileItem({ name: "report.pdf", uuid: "deleted-repro-uuid" })
+
+		mockTransfersDownload.mockImplementation(async ({ destination }: { destination: unknown }) => {
+			fs.set((destination as FileSystem.File).uri, new Uint8Array([1]))
+
+			return { files: [], directories: [] }
+		})
+		mockCopyToMediaStore.mockResolvedValue(undefined)
+
+		const firstResult = await downloadDriveItemToDevice({ item })
+
+		expect(firstResult.success).toBe(true)
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(1)
+
+		// The user deletes the file from /Download/Filen/ — nothing exists any more.
+		mockCopyToMediaStore.mockClear()
+		mockPublicUnlink.mockClear()
+		mockPublicExists.mockResolvedValue(false)
+
+		const tmpDir2 = new FileSystem.Directory(`${TMP_BASE}/deleted-repro-2`)
+
+		fs.set(tmpDir2.uri, "dir")
+		mockNewTmpDir.mockReturnValue(tmpDir2)
+
+		const secondResult = await downloadDriveItemToDevice({ item })
+
+		// Pre-fix, the session cache skipped the copy here: the transfer reported success
+		// with no file recreated. Now the copy always runs (nothing existed to unlink).
+		expect(secondResult.success).toBe(true)
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(1)
+		expect(mockPublicUnlink).not.toHaveBeenCalled()
+	})
+
+	it("a failed unlink of the previous public copy never blocks the new copy (best-effort)", async () => {
+		const tmpDir = new FileSystem.Directory(`${TMP_BASE}/unlink-fail`)
+
+		fs.set(tmpDir.uri, "dir")
+		mockNewTmpDir.mockReturnValue(tmpDir)
+
+		const item = makeFileItem({ name: "locked.pdf", uuid: "unlink-fail-uuid" })
+
+		mockTransfersDownload.mockImplementation(async ({ destination }: { destination: unknown }) => {
+			fs.set((destination as FileSystem.File).uri, new Uint8Array([1]))
+
+			return { files: [], directories: [] }
+		})
+		// A same-named file owned by another app: visible? no — but simulate the worst
+		// case where exists succeeds and unlink is refused (EPERM).
+		mockPublicExists.mockResolvedValue(true)
+		mockPublicUnlink.mockRejectedValue(new Error("EPERM"))
+		mockCopyToMediaStore.mockResolvedValue(undefined)
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		// The copy still ran — MediaStore auto-renames on collision, which beats failing.
+		expect(result.success).toBe(true)
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(1)
+	})
+
+	it("different drive items never suppress each other's copies", async () => {
+		// Two different directory items with the same internal file name ("file.txt") —
+		// item-B's copy must run regardless of item-A having copied a same-named entry.
 		const uuidA = "item-a-uuid"
 		const uuidB = "item-b-uuid"
 

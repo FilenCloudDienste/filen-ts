@@ -12,33 +12,36 @@ import i18n from "@/lib/i18n"
 import logger from "@/lib/logger"
 
 /**
- * Per-item cache of already-completed MediaStore copies.
+ * Remove an existing public copy at the target path before re-inserting (#86).
  *
- * The outer key is the Drive item UUID. The inner Set holds relative entry
- * paths (relative to the staging destination dir) that have already been
- * successfully copied into MediaStore during this app session. This makes
- * `copyToMediaStore` idempotent across retries: if a partial directory
- * download fails and the user retries, the files whose copies already
- * landed in MediaStore are skipped instead of being re-inserted, which
- * would produce duplicate `Download/Filen/<dir>` entries.
+ * MediaStore inserts never overwrite — they auto-rename ("name (1)"), so every copy must be
+ * preceded by removing the previous copy or re-downloads duplicate forever. Under scoped
+ * storage the app can stat and unlink its OWN contributed media by direct path (the normal
+ * case: we created these files); files owned by another app or a previous install are
+ * invisible to the FUSE view, so the unlink no-ops and the subsequent insert auto-renames —
+ * the Android-conventional outcome. Best-effort by design: a failed unlink must never block
+ * the copy (fresh content beats duplicate-avoidance), it only logs.
  *
- * Limitation: the cache is in-process only. An app restart clears it, so a
- * partial copy followed by a cold-start retry could still produce duplicates.
- * A persistent query-before-insert approach would require a MediaStore query
- * API that `react-native-blob-util` does not expose (its `MediaCollection`
- * surface only provides `copyToMediaStore` / `createMediafile` /
- * `writeToMediafile` — there is no `queryMediaStore` or equivalent).
- *
- * @internal Exported only for test reset (`clearMediaStoreCopiedCache`).
+ * Replace-then-copy (matching iOS' delete-then-write into its own sandbox) is deliberately
+ * NOT skip-when-exists: Filen rotates file uuids on content change, so re-downloading an
+ * edited file is a normal flow — skipping would silently keep serving the stale local copy.
+ * This also subsumes retry idempotency persistently (the previous in-process session cache
+ * lost its memory on app restart and, worse, skipped the copy entirely after the user
+ * deleted the file from Downloads — the transfer reported success with no file recreated).
  */
-export const _mediaStoreCopiedCache = new Map<string, Set<string>>()
+async function removeExistingPublicCopy(relativePath: string): Promise<void> {
+	const publicPath = `${ReactNativeBlobUtil.default.fs.dirs.LegacyDownloadDir}/${relativePath}`
 
-/**
- * Reset the MediaStore deduplication cache.
- * Must be called in `beforeEach` of any test that exercises retry behaviour.
- */
-export function clearMediaStoreCopiedCache(): void {
-	_mediaStoreCopiedCache.clear()
+	try {
+		if (await ReactNativeBlobUtil.default.fs.exists(publicPath)) {
+			await ReactNativeBlobUtil.default.fs.unlink(publicPath)
+		}
+	} catch (e) {
+		logger.warn("drive-download", "Could not remove existing public copy before re-copy; MediaStore may auto-rename", {
+			relativePath,
+			error: e
+		})
+	}
 }
 
 /**
@@ -129,30 +132,17 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 				})
 
 				if (isFile && destination instanceof FileSystem.File) {
-					// Idempotency key for a single-file download: the item UUID is sufficient
-					// since a single-file download always lands under the same name/parentFolder.
-					const singleFileKey = `${item.data.uuid}:`
+					await removeExistingPublicCopy(`Filen/${item.data.decryptedMeta.name}`)
 
-					let copiedSet = _mediaStoreCopiedCache.get(item.data.uuid)
-
-					if (copiedSet === undefined) {
-						copiedSet = new Set<string>()
-						_mediaStoreCopiedCache.set(item.data.uuid, copiedSet)
-					}
-
-					if (!copiedSet.has(singleFileKey)) {
-						await ReactNativeBlobUtil.default.MediaCollection.copyToMediaStore(
-							{
-								name: item.data.decryptedMeta.name,
-								parentFolder: "Filen",
-								mimeType: item.data.decryptedMeta.mime
-							},
-							"Download",
-							normalizeFilePathForBlobUtil(destination.uri)
-						)
-
-						copiedSet.add(singleFileKey)
-					}
+					await ReactNativeBlobUtil.default.MediaCollection.copyToMediaStore(
+						{
+							name: item.data.decryptedMeta.name,
+							parentFolder: "Filen",
+							mimeType: item.data.decryptedMeta.mime
+						},
+						"Download",
+						normalizeFilePathForBlobUtil(destination.uri)
+					)
 
 					return
 				}
@@ -162,17 +152,6 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 
 					const files = entries.filter(entry => entry instanceof FileSystem.File)
 
-					let copiedSet = _mediaStoreCopiedCache.get(item.data.uuid)
-
-					if (copiedSet === undefined) {
-						copiedSet = new Set<string>()
-						_mediaStoreCopiedCache.set(item.data.uuid, copiedSet)
-					}
-
-					// Capture the reference so the closure below always sees the same Set
-					// even if _mediaStoreCopiedCache is mutated on another call concurrently.
-					const copiedSetRef = copiedSet
-
 					// Use allSettled so a single failure does not abort sibling copies that are
 					// still in flight, and so the defer does not delete the staging dir while a
 					// copy is still reading from it.
@@ -181,14 +160,9 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 							const normalizedEntryPath = normalizeFilePathForBlobUtil(entry.uri)
 							const destinationUriNormalized = normalizeFilePathForBlobUtil(destination.uri)
 
-							// Relative path of this entry inside the destination dir — stable across
-							// retries because the source directory structure is always the same.
+							// Relative path of this entry inside the destination dir — drives the
+							// public Download/ path (parentFolder) for this entry.
 							const relPath = normalizedEntryPath.slice(destinationUriNormalized.length)
-
-							// Skip files already successfully copied in a prior invocation.
-							if (copiedSetRef.has(relPath)) {
-								return
-							}
 
 							// `entry.name` (already decoded by expo's Paths.basename) and the decrypted
 							// plaintext name are passed raw — decoding them again threw URIError on names
@@ -216,25 +190,33 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 								})
 								.join("/")
 
+							const normalizedParentFolder = parentFolder.startsWith("/") ? parentFolder.slice(1) : parentFolder
+
+							// Replace-then-copy per entry (see removeExistingPublicCopy): keeps retries
+							// duplicate-free WITHOUT the old session cache, and recreates entries the
+							// user deleted from Downloads.
+							await removeExistingPublicCopy(`${normalizedParentFolder}/${entry.name}`)
+
 							await ReactNativeBlobUtil.default.MediaCollection.copyToMediaStore(
 								{
 									name: entry.name,
-									parentFolder: parentFolder.startsWith("/") ? parentFolder.slice(1) : parentFolder,
+									parentFolder: normalizedParentFolder,
 									mimeType: mimeTypes.lookup(entry.name) || "application/octet-stream"
 								},
 								"Download",
 								normalizedEntryPath
 							)
-
-							// Record success so a subsequent retry skips this entry.
-							copiedSetRef.add(relPath)
 						})
 					)
 
 					const failedCount = results.filter(r => r.status === "rejected").length
 
 					if (failedCount > 0) {
-						logger.error("drive-download", "MediaStore copy partially failed", { uuid: item.data.uuid, failedCount, total: files.length })
+						logger.error("drive-download", "MediaStore copy partially failed", {
+							uuid: item.data.uuid,
+							failedCount,
+							total: files.length
+						})
 						throw new Error(i18n.t("download_partial_failure", { failed: failedCount, total: files.length }))
 					}
 				}
