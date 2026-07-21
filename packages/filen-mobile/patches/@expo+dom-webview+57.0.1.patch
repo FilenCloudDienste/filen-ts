@@ -1,8 +1,99 @@
 diff --git a/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt b/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt
-index 125ad1d..0f32890 100644
+index 125ad1d..2631c6e 100644
 --- a/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt
 +++ b/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt
-@@ -198,6 +198,13 @@ internal class DomWebView(context: Context, appContext: AppContext) : ExpoView(c
+@@ -7,7 +7,11 @@ import android.annotation.SuppressLint
+ import android.content.Context
+ import android.graphics.Bitmap
+ import android.graphics.Color
++import android.graphics.Rect
+ import android.os.Build
++import android.view.ActionMode
++import android.view.Menu
++import android.view.MenuItem
+ import android.view.MotionEvent
+ import android.view.View
+ import android.view.View.OnTouchListener
+@@ -192,12 +196,91 @@ internal class DomWebView(context: Context, appContext: AppContext) : ExpoView(c
+ 
+   @SuppressLint("SetJavaScriptEnabled")
+   private fun createWebView(): WebView {
+-    return WebView(context).apply {
++    // Patched (filen): floating text-selection action modes place their toolbar just above the
++    // selection rect, measured against the window — so a selection near the top of a WebView that
++    // sits below opaque app chrome gets the OS toolbar painted over that chrome. Wrap Chromium's
++    // Callback2: when the selection sits too close to the view top for the toolbar to fit above
++    // it in-view, present the rect's top one toolbar band (the framework's own placement
++    // threshold) below the selection bottom, so the preferred above-the-rect position resolves to
++    // just below the selection — room-above-else-below, matching other platforms. A rect scrolled
++    // above the view (negative bottom) passes through untouched so the framework still hides the
++    // toolbar. Skipped for full-bleed WebViews (no chrome above to protect) and views shorter
++    // than the band. Only effective while this module is built from source (expo.autolinking
++    // buildFromSource) — the prebuilt AAR does not contain this override.
++    return object : WebView(context) {
++      override fun startActionMode(callback: ActionMode.Callback?, type: Int): ActionMode? {
++        if (type != ActionMode.TYPE_FLOATING || callback !is ActionMode.Callback2) {
++          return super.startActionMode(callback, type)
++        }
++        // Resolved per action-mode session through the view's resources — the same pipeline
++        // (config, density, overlays) the framework toolbar reads these dimens from.
++        val res = context.resources
++        fun frameworkDimenPx(name: String, fallbackDp: Float): Int {
++          val id = res.getIdentifier(name, "dimen", "android")
++          return if (id != 0) res.getDimensionPixelSize(id) else (fallbackDp * res.displayMetrics.density).toInt()
++        }
++        val topInset = frameworkDimenPx("floating_toolbar_height", 48f) +
++          2 * frameworkDimenPx("floating_toolbar_vertical_margin", 8f)
++        val minChromeAbovePx = (8f * res.displayMetrics.density).toInt()
++        val delegate: ActionMode.Callback2 = callback
++        return super.startActionMode(
++          object : ActionMode.Callback2() {
++            override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean =
++              delegate.onCreateActionMode(mode, menu)
++
++            override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean =
++              delegate.onPrepareActionMode(mode, menu)
++
++            override fun onActionItemClicked(mode: ActionMode?, item: MenuItem?): Boolean =
++              delegate.onActionItemClicked(mode, item)
++
++            override fun onDestroyActionMode(mode: ActionMode?) {
++              delegate.onDestroyActionMode(mode)
++            }
++
++            override fun onGetContentRect(mode: ActionMode?, view: View?, outRect: Rect?) {
++              delegate.onGetContentRect(mode, view, outRect)
++              if (view == null || outRect == null || outRect.top >= topInset) {
++                return
++              }
++              // Scrolled above the visible area — untouched, the framework's bounds check keeps
++              // the toolbar hidden.
++              if (outRect.bottom < 0) {
++                return
++              }
++              val location = IntArray(2)
++              view.getLocationInWindow(location)
++              if (location[1] < minChromeAbovePx) {
++                return
++              }
++              val visible = Rect()
++              if (!view.getLocalVisibleRect(visible) || visible.height() < topInset) {
++                return
++              }
++              // Capped inside the visible area: past the cap the toolbar overlaps the selection's
++              // last line instead of leaving the view and being hidden.
++              outRect.top = minOf(outRect.bottom + topInset, visible.bottom - 1)
++              if (outRect.bottom < outRect.top) {
++                outRect.bottom = outRect.top + 1
++              }
++            }
++          },
++          type
++        )
++      }
++    }.apply {
+       setBackgroundColor(Color.TRANSPARENT)
+       settings.javaScriptEnabled = true
        // API 30+ default disables file access; DOM bundles need it for sibling assets.
        settings.allowFileAccess = true
        settings.allowFileAccessFromFileURLs = true
