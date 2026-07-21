@@ -15,10 +15,15 @@ vi.mock("@filen/sdk-rs", () => ({
 import { NoteType } from "@filen/sdk-rs"
 import { type Note, type NoteTag, type NoteHistory } from "@/types"
 import {
+	UNTAGGED_TAG_UUID,
+	isUntaggedTagUuid,
+	createUntaggedTag,
+	filterUntaggedNotes,
+	withUntaggedTag,
+	filterNoteTagsBySearchQuery,
 	noteTypeToEditorType,
 	computeTagState,
 	filterNoteListItemsBySearchQuery,
-	filterNoteTagsBySearchQuery,
 	sortNoteHistoryNewestFirst
 } from "@/features/notes/utils"
 import { type ListItem as NoteListItem } from "@/features/notes/components/note"
@@ -213,5 +218,55 @@ describe("sortNoteHistoryNewestFirst", () => {
 
 	it("returns an empty array unchanged", () => {
 		expect(sortNoteHistoryNewestFirst([])).toEqual([])
+	})
+})
+// ── #84 virtual "Untagged" tag ───────────────────────────────────────────────
+
+describe("virtual untagged tag", () => {
+	const makeTag = (uuid: string, name: string): NoteTag =>
+		({ uuid, name, favorite: false, editedTimestamp: 0n, createdTimestamp: 0n, undecryptable: false }) as NoteTag
+	const makeNote = (uuid: string, tags: NoteTag[]): Note => ({ uuid, tags }) as unknown as Note
+
+	it("createUntaggedTag synthesizes a well-formed, non-favorite, decryptable tag under the sentinel uuid", () => {
+		const tag = createUntaggedTag("Untagged")
+
+		expect(tag.uuid).toBe(UNTAGGED_TAG_UUID)
+		expect(tag.name).toBe("Untagged")
+		expect(tag.favorite).toBe(false)
+		expect(tag.undecryptable).toBe(false)
+	})
+
+	it("isUntaggedTagUuid matches ONLY the sentinel — a real tag the user named 'Untagged' keeps its own identity", () => {
+		expect(isUntaggedTagUuid(UNTAGGED_TAG_UUID)).toBe(true)
+		expect(isUntaggedTagUuid("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")).toBe(false)
+		expect(isUntaggedTagUuid(null)).toBe(false)
+		expect(isUntaggedTagUuid(undefined)).toBe(false)
+	})
+
+	it("filterUntaggedNotes keeps exactly the notes with zero tags", () => {
+		const tagged = makeNote("n1", [makeTag("t1-t1-t1-t1", "work")])
+		const untagged = makeNote("n2", [])
+
+		expect(filterUntaggedNotes([tagged, untagged]).map(n => n.uuid)).toEqual(["n2"])
+	})
+
+	it("withUntaggedTag appends the virtual row at the END (always bottom, regardless of sort)", () => {
+		const sorted = [makeTag("b-b-b-b", "beta"), makeTag("a-a-a-a", "alpha")]
+		const result = withUntaggedTag(sorted, 3, "Untagged")
+
+		expect(result.map(t => t.uuid)).toEqual(["b-b-b-b", "a-a-a-a", UNTAGGED_TAG_UUID])
+	})
+
+	it("withUntaggedTag hides the row when nothing is untagged (returns the input unchanged)", () => {
+		const sorted = [makeTag("a-a-a-a", "alpha")]
+
+		expect(withUntaggedTag(sorted, 0, "Untagged")).toBe(sorted)
+	})
+
+	it("the virtual row is findable via the tags search filter by its label", () => {
+		const tags = withUntaggedTag([makeTag("a-a-a-a", "alpha")], 2, "Untagged")
+
+		expect(filterNoteTagsBySearchQuery(tags, "untag").map(t => t.uuid)).toEqual([UNTAGGED_TAG_UUID])
+		expect(filterNoteTagsBySearchQuery(tags, "alp").map(t => t.uuid)).toEqual(["a-a-a-a"])
 	})
 })

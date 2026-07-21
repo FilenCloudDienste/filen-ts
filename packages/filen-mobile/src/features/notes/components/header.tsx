@@ -16,6 +16,7 @@ import { useNotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import { type DataItem as NoteDataItem } from "@/features/notes/components/note"
 import { type NoteTag } from "@/types"
 import { createNoteFlow } from "@/features/notes/components/notesActions"
+import { isUntaggedTagUuid, createUntaggedTag } from "@/features/notes/utils"
 
 export const Header = ({
 	setSearchQuery,
@@ -64,7 +65,17 @@ export const Header = ({
 	const noteFlags = aggregateNoteSelectionFlags(selectedNotesLive, stringifiedClient?.userId)
 
 	const tag = (() => {
-		if (notesTagsQuery.status !== "success" || !tagUuid) {
+		if (!tagUuid) {
+			return null
+		}
+
+		// #84: the virtual "Untagged" screen resolves to the synthesized tag (title via its
+		// name); it is stripped again before any real tag operation (createNote below).
+		if (isUntaggedTagUuid(tagUuid)) {
+			return createUntaggedTag(t("untagged"))
+		}
+
+		if (notesTagsQuery.status !== "success") {
 			return null
 		}
 
@@ -74,7 +85,8 @@ export const Header = ({
 	const viewMode = tag ? "notes" : notesViewMode
 
 	const createNote = async (type: NoteType) => {
-		await createNoteFlow({ t, tag, type })
+		// #84: never attach the virtual tag to a newly created note.
+		await createNoteFlow({ t, tag: tag && isUntaggedTagUuid(tag.uuid) ? null : tag, type })
 	}
 
 	const headerRightItems = buildNotesHeaderRightItems({

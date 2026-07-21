@@ -17,6 +17,7 @@ export const notes = {
 	notes: "Notes",
 	/** Notes tab — list header title while showing the tags view */
 	tags: "Tags",
+	untagged: "Untagged",
 	/** Empty-state message shown when the user has no notes */
 	no_notes: "No notes",
 	/** Empty-state message shown when the user has no tags */

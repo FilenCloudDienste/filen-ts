@@ -20,7 +20,16 @@ import { useSecureStore } from "@/lib/secureStore"
 import Tag from "@/features/notes/components/tag"
 import { useTranslation } from "react-i18next"
 import Header from "@/features/notes/components/header"
-import { filterNoteListItemsBySearchQuery, filterNoteTagsBySearchQuery, filterNotesByBlockedOwner } from "@/features/notes/utils"
+import {
+	filterNoteListItemsBySearchQuery,
+	filterNoteTagsBySearchQuery,
+	filterNotesByBlockedOwner,
+	filterUntaggedNotes,
+	withUntaggedTag,
+	createUntaggedTag,
+	isUntaggedTagUuid,
+	UNTAGGED_TAG_UUID
+} from "@/features/notes/utils"
 import { LazyWrapper } from "@/components/lazyWrapper"
 import useIsOnline from "@/hooks/useIsOnline"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
@@ -40,11 +49,33 @@ const Notes = () => {
 	const [searchQuery, setSearchQuery] = useState<string>("")
 
 	const tag = (() => {
-		if (notesTagsQuery.status !== "success" || !tagUuid) {
+		if (!tagUuid) {
+			return null
+		}
+
+		// #84: the virtual "Untagged" row navigates with its sentinel uuid — it has no
+		// entry in the tags query, so resolve it to the synthesized tag directly.
+		if (isUntaggedTagUuid(tagUuid)) {
+			return createUntaggedTag(t("untagged"))
+		}
+
+		if (notesTagsQuery.status !== "success") {
 			return null
 		}
 
 		return notesTagsQuery.data.find(noteTag => noteTag.uuid === tagUuid) ?? null
+	})()
+
+	const isUntaggedScreen = tag !== null && isUntaggedTagUuid(tag.uuid)
+
+	// #84: notes without any tag, blocked-filtered like every other listing. Feeds the virtual
+	// "Untagged" row (count/activity/inflight) and the sentinel-filtered screen.
+	const untaggedNotes = ((): TNote[] => {
+		if (notesQuery.status !== "success") {
+			return []
+		}
+
+		return filterUntaggedNotes(filterNotesByBlockedOwner(notesQuery.data, blocked))
 	})()
 
 	const notes = ((): NoteListItem[] => {
@@ -53,12 +84,14 @@ const Notes = () => {
 		}
 
 		const grouped = notesSorter.group({
-			notes: filterNotesByBlockedOwner(notesQuery.data, blocked),
+			// The virtual tag cannot go through group()'s uuid-based tag filter — pre-filter
+			// to the untagged set instead and group untagged.
+			notes: isUntaggedScreen ? untaggedNotes : filterNotesByBlockedOwner(notesQuery.data, blocked),
 			groupArchived: true,
 			groupTrashed: true,
 			groupFavorited: true,
 			groupPinned: true,
-			tag: tag ?? undefined
+			tag: tag && !isUntaggedScreen ? tag : undefined
 		})
 
 		return filterNoteListItemsBySearchQuery(grouped, searchQuery)
@@ -102,6 +135,9 @@ const Notes = () => {
 			}
 		}
 
+		// #84: the virtual row reads its notes through the same index as real tags.
+		index[UNTAGGED_TAG_UUID] = untaggedNotes
+
 		return index
 	})()
 
@@ -112,7 +148,9 @@ const Notes = () => {
 
 		const sorted = sortNoteTags(notesTagsQuery.data, tagsSortBy, notesForTag)
 
-		return filterNoteTagsBySearchQuery(sorted, searchQuery)
+		// #84: virtual "Untagged" row — appended AFTER the sort so it is always at the
+		// bottom regardless of the sort preference; hidden when nothing is untagged.
+		return filterNoteTagsBySearchQuery(withUntaggedTag(sorted, untaggedNotes.length, t("untagged")), searchQuery)
 	})()
 
 	const renderItemNotesView = (info: ListRenderItemInfo<NoteListItem>) => {
@@ -236,7 +274,8 @@ const Notes = () => {
 				action={
 					<Button
 						onPress={() => {
-							void createNoteFlow({ t, tag })
+							// #84: a note created from the virtual screen must not be tag-attached.
+							void createNoteFlow({ t, tag: isUntaggedScreen ? null : tag })
 						}}
 						disabled={!isOnline}
 					>

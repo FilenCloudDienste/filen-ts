@@ -17,9 +17,15 @@ import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
+import { isUntaggedTagUuid } from "@/features/notes/utils"
 
 const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesForTag: Note[] }) => {
 	const { t } = useTranslation()
+	// #84: the virtual "Untagged" row — navigates like a tag but supports no tag operations:
+	// no context menu (rename/delete/favorite are server ops on a real uuid) and no bulk
+	// selection; visually distinct (single-tag outline icon, muted italic label) so a real
+	// tag literally named "Untagged" stays tellable apart.
+	const isVirtual = isUntaggedTagUuid(info.item.uuid)
 	const textForeground = useResolveClassNames("text-foreground")
 	const textRed500 = useResolveClassNames("text-red-500")
 	const textPrimary = useResolveClassNames("text-primary")
@@ -36,7 +42,7 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 	const displayTimestamp = tagLastActivity(info.item, notesForTag)
 
 	const onPress = () => {
-		if (useNotesStore.getState().selectedTags.length > 0) {
+		if (!isVirtual && useNotesStore.getState().selectedTags.length > 0) {
 			useNotesStore.getState().setSelectedTags(prev => {
 				const prevSelected = prev.some(selectedTag => selectedTag.uuid === info.item.uuid)
 
@@ -67,6 +73,7 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 				origin="tags"
 				isAnchoredToRight={true}
 				previewBackground={true}
+				disabled={isVirtual}
 			>
 				<PressableScale
 					onPress={onPress}
@@ -80,7 +87,7 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 					>
 						<View className="flex-1 flex-row gap-4 px-4 w-full h-auto bg-transparent items-center">
 							<View className="gap-2 shrink-0 h-auto w-auto bg-transparent flex-row items-center">
-								{areTagsSelected ? (
+								{areTagsSelected && !isVirtual ? (
 									<View className="flex-row h-full items-center justify-center bg-transparent shrink-0">
 										<Checkbox value={isSelected} />
 									</View>
@@ -120,7 +127,7 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 										/>
 									) : (
 										<Ionicons
-											name="pricetags-outline"
+											name={isVirtual ? "pricetag-outline" : "pricetags-outline"}
 											size={20}
 											color={textForeground.color}
 										/>
@@ -137,7 +144,7 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 									<Text
 										numberOfLines={1}
 										ellipsizeMode="middle"
-										className="flex-1"
+										className={cn("flex-1", isVirtual && "italic text-muted-foreground")}
 									>
 										{tagDisplayName(info.item)}
 									</Text>
