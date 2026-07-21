@@ -11,6 +11,7 @@ import useNotesStore from "@/features/notes/store/useNotes.store"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import notesLib from "@/features/notes/notes"
+import { isUntaggedTagUuid } from "@/features/notes/utils"
 import { shareTmpFile } from "@/lib/share"
 import * as DocumentPicker from "expo-document-picker"
 import * as FileSystem from "expo-file-system"
@@ -281,7 +282,11 @@ export function buildNotesHeaderRightItems({
 										return await notesLib.importFromFile({
 											uri: asset.uri,
 											title: newName,
-											type
+											type,
+											// On a tag-filtered screen the import attaches that tag
+											// (parity with create); the virtual "Untagged" screen
+											// attaches nothing so the note lands in the viewed list.
+											tag: tag && !isUntaggedTagUuid(tag.uuid) ? tag : undefined
 										})
 									})
 

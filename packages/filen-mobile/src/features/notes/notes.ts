@@ -175,11 +175,15 @@ const notes = {
 		uri,
 		title,
 		type,
+		tag,
 		signal
 	}: {
 		uri: string
 		title: string
 		type: NoteType
+		// Importing from a tag-filtered screen attaches that screen's tag — same semantics as
+		// createWithOptionalTag, so the imported note lands in the list being viewed.
+		tag?: NoteTag
 		signal?: AbortSignal
 	}): Promise<Note> {
 		const file = new FileSystem.File(uri)
@@ -190,12 +194,22 @@ const notes = {
 
 		const content = await file.text()
 
-		return await this.create({
+		const note = await this.create({
 			title,
 			content,
 			type,
 			signal
 		})
+
+		if (tag) {
+			return await this.addTag({
+				note,
+				tag,
+				signal
+			})
+		}
+
+		return note
 	},
 
 	async create({ title, content, type, signal }: { title: string; content: string; type: NoteType; signal?: AbortSignal }) {

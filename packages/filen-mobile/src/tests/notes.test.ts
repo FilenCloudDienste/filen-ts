@@ -2066,6 +2066,53 @@ describe("notes.importFromFile", () => {
 		// Returned note should be the created note
 		expect(result.uuid).toBe("note-uuid-imported")
 	})
+
+	it("attaches the supplied tag after import (parity with createWithOptionalTag on tag screens)", async () => {
+		const { File: MockFile } = await import("@/tests/mocks/expoFileSystem")
+		const f = new MockFile("file:///document/import-tagged.txt")
+
+		f.write("content")
+
+		const tag = makeTag({ uuid: "tag-uuid-1" })
+		const sdkClient = makeMockSdkClient({
+			createNote: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-imported")),
+			setNoteType: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-imported")),
+			setNoteContent: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-imported")),
+			addTagToNote: vi.fn().mockResolvedValue({ note: makeSdkNote("note-uuid-imported"), tag })
+		})
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		await notes.importFromFile({
+			uri: "file:///document/import-tagged.txt",
+			title: "Imported Note",
+			type: "text" as unknown as import("@filen/sdk-rs").NoteType,
+			tag
+		})
+
+		expect(sdkClient.addTagToNote).toHaveBeenCalledWith(expect.objectContaining({ uuid: "note-uuid-imported" }), tag, undefined)
+	})
+
+	it("attaches NO tag when none is supplied (plain notes-screen import unchanged)", async () => {
+		const { File: MockFile } = await import("@/tests/mocks/expoFileSystem")
+		const f = new MockFile("file:///document/import-plain.txt")
+
+		f.write("content")
+
+		const sdkClient = makeMockSdkClient({
+			createNote: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-imported")),
+			setNoteType: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-imported")),
+			setNoteContent: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-imported"))
+		})
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		await notes.importFromFile({
+			uri: "file:///document/import-plain.txt",
+			title: "Imported Note",
+			type: "text" as unknown as import("@filen/sdk-rs").NoteType
+		})
+
+		expect(sdkClient.addTagToNote).not.toHaveBeenCalled()
+	})
 })
 
 // ---------------------------------------------------------------------------
