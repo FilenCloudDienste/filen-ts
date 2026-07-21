@@ -41,7 +41,9 @@ import {
 	rawUploadTimestamp,
 	pickDisplayTimestamp,
 	directorySizeTypeForDrivePath,
-	filterDriveItemsBySearchQuery
+	filterDriveItemsBySearchQuery,
+	normalizeCustomDirColorHex,
+	sanitizeDirColorHexInput
 } from "@/features/drive/utils"
 import type { DrivePath, SelectOptions, DrivePathType } from "@/hooks/useDrivePath"
 import type { DriveItem } from "@/types"
@@ -793,5 +795,73 @@ describe("filterDriveItemsBySearchQuery", () => {
 
 		expect(visible).toEqual([report, notes])
 		expect(visible).not.toContain(photo)
+	})
+})
+
+describe("sanitizeDirColorHexInput", () => {
+	it("always yields a single leading #", () => {
+		expect(sanitizeDirColorHexInput("")).toBe("#")
+		expect(sanitizeDirColorHexInput("#")).toBe("#")
+		expect(sanitizeDirColorHexInput("##ab")).toBe("#ab")
+		expect(sanitizeDirColorHexInput("ab")).toBe("#ab")
+	})
+
+	it("strips non-hex characters", () => {
+		expect(sanitizeDirColorHexInput("#a b-c!")).toBe("#abc")
+		expect(sanitizeDirColorHexInput("xyz")).toBe("#")
+		expect(sanitizeDirColorHexInput("#12g34z")).toBe("#1234")
+	})
+
+	it("lowercases and caps at 6 digits", () => {
+		expect(sanitizeDirColorHexInput("#AABBCC")).toBe("#aabbcc")
+		expect(sanitizeDirColorHexInput("#aabbccdd")).toBe("#aabbcc")
+		expect(sanitizeDirColorHexInput("AABBCCDDEE")).toBe("#aabbcc")
+	})
+})
+
+describe("normalizeCustomDirColorHex", () => {
+	it("returns null for incomplete or invalid input", () => {
+		expect(normalizeCustomDirColorHex("")).toBeNull()
+		expect(normalizeCustomDirColorHex("#")).toBeNull()
+		expect(normalizeCustomDirColorHex("#a")).toBeNull()
+		expect(normalizeCustomDirColorHex("#ab")).toBeNull()
+		expect(normalizeCustomDirColorHex("#abcd")).toBeNull()
+		expect(normalizeCustomDirColorHex("#abcde")).toBeNull()
+		expect(normalizeCustomDirColorHex("#abcdefa")).toBeNull()
+		expect(normalizeCustomDirColorHex("#ggg")).toBeNull()
+		expect(normalizeCustomDirColorHex("#zzzzzz")).toBeNull()
+	})
+
+	it("expands 3-digit shorthand to the canonical 6-digit form", () => {
+		expect(normalizeCustomDirColorHex("#abc")).toBe("#aabbcc")
+		expect(normalizeCustomDirColorHex("#f00")).toBe("#ff0000")
+		expect(normalizeCustomDirColorHex("#ABC")).toBe("#aabbcc")
+	})
+
+	it("passes 6-digit colors through lowercased", () => {
+		expect(normalizeCustomDirColorHex("#aabbcc")).toBe("#aabbcc")
+		expect(normalizeCustomDirColorHex("#AABBCC")).toBe("#aabbcc")
+		expect(normalizeCustomDirColorHex("#037AFF")).toBe("#037aff")
+	})
+
+	it("tolerates surrounding whitespace and a missing #", () => {
+		expect(normalizeCustomDirColorHex(" #aabbcc ")).toBe("#aabbcc")
+		expect(normalizeCustomDirColorHex("aabbcc")).toBe("#aabbcc")
+	})
+
+	it("picker write-back shape: an 8-digit hex sliced to 7 chars normalizes", () => {
+		// The color picker can emit "#rrggbbaa"; the screen slices to 7 before normalizing.
+		expect(normalizeCustomDirColorHex("#aabbccff".slice(0, 7))).toBe("#aabbcc")
+	})
+
+	it("matches the cross-client custom-color pattern for its outputs", () => {
+		const pattern = /^#[0-9a-f]{6}$/
+
+		for (const input of ["#abc", "#AABBCC", "aabbcc", "#037aff"]) {
+			const normalized = normalizeCustomDirColorHex(input)
+
+			expect(normalized).not.toBeNull()
+			expect(pattern.test(normalized ?? "")).toBe(true)
+		}
 	})
 })

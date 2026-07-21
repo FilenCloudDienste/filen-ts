@@ -287,3 +287,35 @@ export function directorySizeTypeForDrivePath(type: DrivePathType | null | undef
 		}
 	}
 }
+
+// Display sanitizer for the custom directory-color hex field: strips everything but hex
+// digits, folds casing, caps at 6 digits, and always re-applies the leading "#" so the
+// prefix can't be deleted or duplicated.
+export function sanitizeDirColorHexInput(text: string): string {
+	return `#${text
+		.replace(/[^0-9a-fA-F]/g, "")
+		.toLowerCase()
+		.slice(0, 6)}`
+}
+
+// Parses user/picker hex into the canonical cross-client form, or null when incomplete.
+// Web/desktop validate custom colors against lowercase "#rrggbb" exactly and render
+// anything else as the default color, so 3-digit shorthand is expanded and casing folded
+// before a value ever leaves the screen.
+export function normalizeCustomDirColorHex(text: string): string | null {
+	const digits = text.trim().replace(/^#/, "").toLowerCase()
+
+	if (!/^(?:[0-9a-f]{3}|[0-9a-f]{6})$/.test(digits)) {
+		return null
+	}
+
+	const expanded =
+		digits.length === 3
+			? digits
+					.split("")
+					.map(char => `${char}${char}`)
+					.join("")
+			: digits
+
+	return `#${expanded}`
+}

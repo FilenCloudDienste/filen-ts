@@ -1,6 +1,6 @@
 import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
-import { Platform } from "react-native"
+import { Platform, TextInput } from "react-native"
 import { useLocalSearchParams, useNavigation } from "expo-router"
 import { deserializeRouteParam } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
@@ -23,6 +23,7 @@ import useIsOnline from "@/hooks/useIsOnline"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { useTranslation } from "react-i18next"
 import { isDrivePathType } from "@/hooks/useDrivePath"
+import { normalizeCustomDirColorHex, sanitizeDirColorHexInput } from "@/features/drive/utils"
 
 const ChangeDirectoryColor = () => {
 	const { item: itemSerialized, drivePathType } = useLocalSearchParams<{
@@ -46,6 +47,8 @@ const ChangeDirectoryColor = () => {
 
 		return directoryColorToHex(unwrapDirColor(item.data.color))
 	})
+
+	const [hexInput, setHexInput] = useState<string>(hexColor)
 
 	if (!item || item.type !== "directory") {
 		return <DismissStack />
@@ -110,6 +113,7 @@ const ChangeDirectoryColor = () => {
 									}
 
 									setHexColor(selectedColor)
+									setHexInput(selectedColor)
 									setSelectedColor(null)
 								}
 							}
@@ -128,6 +132,8 @@ const ChangeDirectoryColor = () => {
 					contentContainerClassName={cn("bg-transparent px-4 flex-col pb-40 pt-10", Platform.OS === "ios" && "pt-24")}
 					showsHorizontalScrollIndicator={true}
 					showsVerticalScrollIndicator={false}
+					keyboardShouldPersistTaps="handled"
+					automaticallyAdjustKeyboardInsets={true}
 				>
 					<View className="bg-transparent items-center justify-center flex-col">
 						<DirectoryIcon
@@ -144,13 +150,23 @@ const ChangeDirectoryColor = () => {
 						</Text>
 						<Text className="text-muted-foreground">{t("directory")}</Text>
 					</View>
-					<View className="bg-background-tertiary rounded-3xl p-4 mt-10 items-center justify-center flex-row">
+					<View className="bg-background-tertiary rounded-3xl p-4 mt-10 items-center justify-center flex-col">
 						<ColorPicker
 							style={{
 								width: "100%"
 							}}
-							value={hexColor}
-							onCompleteJS={e => setSelectedColor(e.hex)}
+							value={selectedColor ?? hexColor}
+							onCompleteJS={e => {
+								// The picker can emit "#rrggbbaa"; the first 7 chars are the color.
+								const normalized = normalizeCustomDirColorHex(e.hex.slice(0, 7))
+
+								if (!normalized) {
+									return
+								}
+
+								setSelectedColor(normalized)
+								setHexInput(normalized)
+							}}
 						>
 							<Preview
 								style={{
@@ -174,6 +190,41 @@ const ChangeDirectoryColor = () => {
 								}}
 							/>
 						</ColorPicker>
+						<View className="bg-transparent flex-row items-center gap-3 mt-4 w-full">
+							<View
+								className="h-9 w-9 rounded-lg border border-separator"
+								style={{
+									backgroundColor: selectedColor ?? hexColor
+								}}
+							/>
+							<TextInput
+								className="flex-1 text-foreground text-base leading-5 bg-background-secondary rounded-xl px-3 py-2"
+								style={{
+									fontFamily: Platform.select({
+										ios: "Menlo",
+										default: "monospace"
+									})
+								}}
+								value={hexInput}
+								onChangeText={text => {
+									const sanitized = sanitizeDirColorHexInput(text)
+
+									setHexInput(sanitized)
+
+									const normalized = normalizeCustomDirColorHex(sanitized)
+
+									if (normalized) {
+										setSelectedColor(normalized)
+									}
+								}}
+								maxLength={7}
+								autoCapitalize="none"
+								autoCorrect={false}
+								autoComplete="off"
+								importantForAutofill="no"
+								accessibilityLabel={t("change_directory_color_hex_input")}
+							/>
+						</View>
 					</View>
 					<View className="bg-transparent mt-10">
 						<Information

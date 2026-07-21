@@ -391,6 +391,9 @@ export const drive = {
 	/** Header title for the directory-color picker screen */
 	change_directory_color: "Change color",
 
+	/** Accessibility label for the custom hex color input on the directory-color picker screen */
+	change_directory_color_hex_input: "Hex color code",
+
 	// ── Download partial-failure toast (driveDownload.ts) ────────────────────
 	/** Toast shown when a directory download succeeds for some files but fails for others.
 	 *  {{failed}} = number of files that failed, {{total}} = total files attempted */
