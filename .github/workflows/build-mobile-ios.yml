@@ -211,6 +211,11 @@ jobs:
           issuer-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
           api-key-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           api-private-key: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+          # The upload completes before the processing wait; the action's API token is minted once
+          # and expires during slow App Store processing, failing the job after a successful
+          # upload (401 NOT_AUTHORIZED). Nothing downstream needs the wait - testers are assigned
+          # manually and encryption compliance is declared in the Info.plist.
+          wait-for-processing: 'false'
 
       - name: Build summary
         run: |
