@@ -17,3 +17,62 @@ index 69ccba6..3fbce27 100644
        try {
          val fileToShare = getLocalFileFoUrl(url)
          val contentUri = FileProvider.getUriForFile(
+diff --git a/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/ResolvingShareIntentDataParser.kt b/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/ResolvingShareIntentDataParser.kt
+index 5f4d942..93d30b3 100644
+--- a/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/ResolvingShareIntentDataParser.kt
++++ b/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/ResolvingShareIntentDataParser.kt
+@@ -25,11 +25,20 @@ class ResolvingShareIntentDataParser {
+     }
+ 
+     private fun handleSendAction(context: Context, intent: Intent, type: String): List<ResolvedSharePayload> {
++      // Patched (filen): mirror of the SimpleShareIntentDataParser fix - a text/plain share that
++      // carries a file in EXTRA_STREAM (no EXTRA_TEXT) was dropped to an empty list, wedging
++      // receivers waiting on resolution. Stream first, text handling only without one.
++      // Upstreamable.
++      val streamUri = intent.getParcelableExtraCompat<Uri>(Intent.EXTRA_STREAM)
++
++      if (streamUri != null) {
++        return listOf(resolveUri(context, streamUri, type))
++      }
++
+       return if (type == "text/plain") {
+         extractTextPayload(intent)
+       } else {
+-        val uri = intent.getParcelableExtraCompat<Uri>(Intent.EXTRA_STREAM)
+-        listOfNotNull(uri?.let { resolveUri(context, it, type) })
++        emptyList()
+       }
+     }
+ 
+diff --git a/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/SimpleShareIntentDataParser.kt b/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/SimpleShareIntentDataParser.kt
+index 8dd50e8..0f0e4db 100644
+--- a/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/SimpleShareIntentDataParser.kt
++++ b/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/SimpleShareIntentDataParser.kt
+@@ -17,6 +17,17 @@ internal class SimpleShareIntentDataParser {
+     }
+ 
+     private fun handleSendAction(context: Context, intent: Intent, type: String): List<SharePayload> {
++      // Patched (filen): file shares can arrive with ANY mime type - senders like Files by Google
++      // stamp text-like files (.log/.json/.py/...) as text/plain - carrying the file in
++      // EXTRA_STREAM with no EXTRA_TEXT. The text/plain branch only read EXTRA_TEXT and returned
++      // an empty list for those, silently dropping the share. Prefer the stream whenever present;
++      // the text branch only applies to genuine text-only shares. Upstreamable.
++      val streamUri = intent.getParcelableExtraCompat<Uri>(Intent.EXTRA_STREAM)
++
++      if (streamUri != null) {
++        return listOf(createUriPayload(context, streamUri, type))
++      }
++
+       return if (type == "text/plain") {
+         val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return emptyList()
+         val isUrl = android.util.Patterns.WEB_URL.matcher(text).matches()
+@@ -29,8 +40,7 @@ internal class SimpleShareIntentDataParser {
+           }
+         )
+       } else {
+-        val uri = intent.getParcelableExtraCompat<Uri>(Intent.EXTRA_STREAM)
+-        listOfNotNull(uri?.let { createUriPayload(context, it, type) })
++        emptyList()
+       }
+     }
+ 

@@ -3,7 +3,7 @@ import { Platform } from "react-native"
 import { useTranslation } from "react-i18next"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
-import { Fragment, useCallback, useEffect, useRef } from "react"
+import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import Header from "@/components/ui/header"
 import { useResolveClassNames } from "uniwind"
 import { useNavigation, useFocusEffect } from "expo-router"
@@ -25,6 +25,7 @@ import { getPreviewType } from "@/lib/previewType"
 import { FileIcon } from "@/components/itemIcons"
 import ListRow from "@/components/ui/listRow"
 import logger from "@/lib/logger"
+import { isIncomingShareLoading } from "@/features/incomingShare/utils"
 
 function Payload({ payload }: { payload: ResolvedSharePayload }) {
 	const previewType =
@@ -68,7 +69,7 @@ function IncomingShare() {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const insets = useSafeAreaInsets()
-	const { resolvedSharedPayloads, isResolving, error } = useIncomingShare()
+	const { resolvedSharedPayloads, sharedPayloads, isResolving, error } = useIncomingShare()
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const navigation = useNavigation()
 	const currentPayloadsRef = useRef<ResolvedSharePayload[]>([])
@@ -82,11 +83,29 @@ function IncomingShare() {
 		payload => typeof payload.contentUri === "string" && typeof payload.originalName === "string"
 	)
 
-	// True while the OS share extension is still resolving payloads. The expo-sharing hook
-	// initialises with isResolving=false / resolvedSharedPayloads=[] and only sets isResolving=true
-	// in a post-commit useEffect, so we treat an empty payload list with no error as still-loading
-	// to suppress the "no resolved shares" empty state on the first render frame.
-	const isLoadingPayloads = isResolving || (!error && resolvedSharedPayloads.length === 0)
+	// Marks the first completed resolution attempt (isResolving true -> false transition). The
+	// hook only flips isResolving in a post-commit effect, so the sync-parsed sharedPayloads
+	// list carries the "something was shared, resolution is coming" signal for the first frames.
+	const wasResolvingRef = useRef(false)
+	const [hasResolvedOnce, setHasResolvedOnce] = useState(false)
+
+	useEffect(() => {
+		if (isResolving) {
+			wasResolvingRef.current = true
+		} else if (wasResolvingRef.current) {
+			setHasResolvedOnce(true)
+		}
+	}, [isResolving])
+
+	// Spin only while resolution is running or genuinely pending — a completed-but-empty
+	// resolution (or an empty sync parse) renders the empty state instead of spinning forever.
+	const isLoadingPayloads = isIncomingShareLoading({
+		isResolving,
+		hasError: error !== null,
+		sharedCount: sharedPayloads.length,
+		resolvedCount: resolvedSharedPayloads.length,
+		hasResolvedOnce
+	})
 
 	const clear = useCallback(async (paylodsToClear: ResolvedSharePayload[]) => {
 		await run(() => {
@@ -345,7 +364,7 @@ function IncomingShare() {
 							/>
 						) : (
 							<ListEmpty
-								icon="time-outline"
+								icon="document-outline"
 								title={t("no_resolved_shares")}
 								description={t("no_resolved_shares_description")}
 							/>
