@@ -158,9 +158,8 @@ const setup = {
 			})
 
 			// Rebuilds the session-scoped uuid indexes from the restored listing queries so socket patches,
-			// breadcrumbs, and shared-context resolution keep their pre-fetch coverage; foreground-only — a
-			// headless run needs none of it.
-			if (isAuthed.isAuthed && !options?.background) {
+			// breadcrumbs, and shared-context resolution keep their pre-fetch coverage.
+			if (isAuthed.isAuthed) {
 				await timed("warmSeedDriveCaches", () => warmSeedDriveCaches())
 			}
 

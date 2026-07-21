@@ -237,9 +237,10 @@ describe("setup.setup", () => {
 		expect(mockThumbnails.restore).toHaveBeenCalledTimes(3)
 	})
 
-	// The warm-seed rebuilds the session-scoped uuid indexes from the restored listing queries; it is
-	// foreground-only and authed-only (a headless run needs none of it).
-	it("warm-seeds the drive caches only when authenticated and not background", async () => {
+	// The warm-seed rebuilds the session-scoped uuid indexes from the restored listing queries.
+	// Authed-only, but NOT background-gated: a headless run's uploads then keep their cache
+	// coverage too (e.g. the photos ancestry-gate append) — the cost is negligible.
+	it("warm-seeds the drive caches when authenticated", async () => {
 		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
 
 		await setup.setup()
@@ -255,12 +256,12 @@ describe("setup.setup", () => {
 		expect(mockWarmSeedDriveCaches).not.toHaveBeenCalled()
 	})
 
-	it("does not warm-seed the drive caches in background mode even when authenticated", async () => {
+	it("warm-seeds the drive caches in background mode too when authenticated", async () => {
 		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
 
 		await setup.setup({ background: true })
 
-		expect(mockWarmSeedDriveCaches).not.toHaveBeenCalled()
+		expect(mockWarmSeedDriveCaches).toHaveBeenCalledOnce()
 	})
 
 	it("throws when the inner run callback rejects", async () => {
