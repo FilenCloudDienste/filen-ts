@@ -4,7 +4,7 @@ import "ts-node/register"
 import type { ExpoConfig, ConfigContext } from "expo/config"
 import { SUPPORTED_LANGUAGES } from "./src/locales/languages"
 
-const VERSION: string = "4.0.11"
+const VERSION: string = "4.0.12"
 
 const APPLE_TEAM_ID: string = "7YTW5D2K7P"
 const IOS_APP_GROUP_ID: string = "group.io.filen.app"
