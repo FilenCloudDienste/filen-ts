@@ -418,7 +418,10 @@ const RichTextEditorDom = ({
 			style={{
 				backgroundColor: "transparent",
 				display: "flex",
-				flex: 1,
+				// Real viewport sizing, not flex:1 — the WebView body is not a sized flex
+				// parent, so flex:1 collapsed this chain to content height (#78).
+				height: "100dvh",
+				width: "100dvw",
 				flexDirection: "column",
 				touchAction: "pan-y"
 			}}
@@ -426,8 +429,14 @@ const RichTextEditorDom = ({
 			<div
 				ref={editorRef}
 				style={{
-					display: "flex",
+					// Block, NOT display:flex: Quill's .ql-editor has no width rule, so as a
+					// flex item it shrank to fit its content — an empty note's contenteditable
+					// was a ~30px sliver at the top-left (only the placeholder's first word was
+					// tappable; #78). As a block child it fills the container, and with the
+					// sized ancestors above .ql-editor's height:100% fills the screen — a tap
+					// anywhere focuses the editor.
 					flex: 1,
+					minHeight: 0,
 					...(paddingTop
 						? {
 								paddingTop

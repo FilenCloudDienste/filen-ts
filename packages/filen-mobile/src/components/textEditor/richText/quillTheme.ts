@@ -206,6 +206,9 @@ export class QuillThemeCustomizer {
 			
 			/* Editor content styling */
 			${selector} .ql-editor {
+				/* Belt for #78: quill.snow.css declares no width — never let the
+				   contenteditable shrink below its container again. */
+				width: 100% !important;
 				font-family: ${this.options.editorFontFamily} !important;
 				font-size: ${this.options.editorFontSize} !important;
 				line-height: ${this.options.editorLineHeight} !important;
