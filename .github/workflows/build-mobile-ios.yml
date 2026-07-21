@@ -70,7 +70,12 @@ jobs:
       - name: Set up Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          # Pinned: the runner fleet's latest-stable flip to Xcode 26.6 broke automatic signing at
+          # archive ("The data couldn't be read because it isn't in the correct format" + "No
+          # profiles for 'io.filen.app'") while 26.5 archives cleanly with the same project and
+          # secrets. The simulator workflow stays on latest-stable as the compile canary. Remove
+          # the pin once an archive on 26.6+ is verified (or when the image drops 26.5).
+          xcode-version: "26.5"
 
       - name: Set up distribution certificate
         uses: apple-actions/import-codesign-certs@v6
