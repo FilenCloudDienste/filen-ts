@@ -1,4 +1,6 @@
 import { useRef, useEffect, useState } from "react"
+import { useHeaderHeight } from "expo-router/react-navigation"
+import { Platform } from "react-native"
 import { useStore } from "zustand"
 import { KeyboardAwareScrollView } from "@/components/ui/view"
 import { checklistParser, type ChecklistItem } from "@filen/utils"
@@ -41,6 +43,7 @@ const Checklist = ({
 		useShallow(state => visibleChecklistIds(state.ids, state.parsed, hideCompleted ?? false))
 	)
 	const initialValueFrozen = useState(() => initialValue)[0]
+	const headerHeight = useHeaderHeight()
 
 	const onContentChange = ({ item, content }: { item: ChecklistItem; content: string }) => {
 		store.getState().setParsed(prev =>
@@ -116,8 +119,26 @@ const Checklist = ({
 		<ChecklistStoreContext.Provider value={store}>
 			<KeyboardAwareScrollView
 				className="flex-1"
-				contentInsetAdjustmentBehavior="automatic"
+				// iOS: explicit header offset instead of contentInsetAdjustmentBehavior="automatic" —
+				// the automatic inset makes the resting contentOffset NEGATIVE under the translucent
+				// header, while KeyboardAwareScrollView's caret-follow scrolls compute (and 0-clamp)
+				// their targets assuming top = offset 0; with a hardware keyboard (keyboardHeight 0)
+				// an Enter/Backspace caret hop could park the whole list under the header (#79).
+				// With padding the offset space genuinely starts at 0, the library's math is
+				// consistent, and under-header is geometrically unreachable. Android's opaque header
+				// lays the scroll view out BELOW itself (the automatic inset was an iOS no-op), so
+				// the extra padding must not apply there.
 				contentContainerClassName="p-4 flex-col pb-32 gap-4"
+				contentContainerStyle={Platform.select({
+					ios: {
+						paddingTop: headerHeight + 16
+					}
+				})}
+				scrollIndicatorInsets={Platform.select({
+					ios: {
+						top: headerHeight
+					}
+				})}
 				keyboardShouldPersistTaps="always"
 				keyboardDismissMode="interactive"
 				bottomOffset={32}

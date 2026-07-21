@@ -35,6 +35,16 @@ const Item = ({
 	isLast?: boolean
 }) => {
 	const textInputRef = useRef<TextInput>(null)
+	// Dedupes one physical Enter press reaching us twice (native onSubmitEditing + the key event —
+	// platform-dependent which fire). Genuine repeat presses are slower than this window.
+	const lastEnterAtRef = useRef<number>(0)
+	// Bumped when normalization STRIPPED characters from the native text (a leaked newline, a
+	// multi-line paste). setValue alone can't fix the native field then: the normalized value
+	// usually equals the current state, React bails out without committing, and the native input
+	// keeps the stripped characters forever (#79 — text/cursor rendered a line low until an
+	// unrelated re-render finally reconciled it). A state bump forces the commit; RN's TextInput
+	// then diffs `value` against the native text and rewrites the field.
+	const [, setNativeSyncCounter] = useState<number>(0)
 	const bgBackground = useResolveClassNames("bg-background")
 	const textPrimary = useResolveClassNames("text-primary")
 	// Per-INSTANCE store from the nearest <Checklist> Provider. Always present in practice (<Item> is
@@ -76,6 +86,10 @@ const Item = ({
 		}
 
 		const content = normalizeItemContent(text)
+
+		if (content !== text) {
+			setNativeSyncCounter(n => n + 1)
+		}
 
 		// onChangeText only fires for genuine user input (programmatic hydration writes the
 		// store directly and seeds `value` via the useState initializer, never through here).
@@ -171,6 +185,14 @@ const Item = ({
 		e.preventDefault()
 		e.stopPropagation()
 
+		const now = Date.now()
+
+		if (now - lastEnterAtRef.current < 100) {
+			return
+		}
+
+		lastEnterAtRef.current = now
+
 		if (normalizeItemContent(item.content).length > 0) {
 			addNewLine(item)
 		} else {
@@ -265,6 +287,11 @@ const Item = ({
 				value={value}
 				onChangeText={onChangeText}
 				multiline={true}
+				// Enter SUBMITS (fires onSubmitEditing, keeps focus) instead of the multiline
+				// default of inserting a newline into the native field — the newline is what
+				// left the input a line taller than its value (#79); onChangeText's stripped-
+				// character resync above remains as the belt (hardware keyboards, paste).
+				submitBehavior="submit"
 				scrollEnabled={false}
 				onPress={focus}
 				onSubmitEditing={onSubmitEditing}
