@@ -7,7 +7,7 @@ import { type ChecklistItem, checklistParser, cn } from "@filen/utils"
 import { PressableOpacity } from "@/components/ui/pressables"
 import View from "@/components/ui/view"
 import { ChecklistStoreContext } from "@/features/notes/store/useChecklist.store"
-import { addChecklistLine, removeChecklistItem } from "@/features/notes/checklistEdit"
+import { addChecklistLine, removeChecklistItem, materializeChecklistGhost } from "@/features/notes/checklistEdit"
 import { useShallow } from "zustand/shallow"
 import { randomUUID } from "expo-crypto"
 
@@ -17,6 +17,7 @@ function normalizeItemContent(content: string): string {
 
 const Item = ({
 	id,
+	ghost,
 	onContentChange,
 	onCheckedChange,
 	onChange,
@@ -26,6 +27,10 @@ const Item = ({
 	isLast
 }: {
 	id: string
+	// #80 ghost row: render an empty UI-only row for an id that has no store item yet. The first
+	// keystroke materializes it (append to parsed under this same id); until then it is never
+	// serialized, so merely viewing an all-completed hidden checklist mutates nothing.
+	ghost?: boolean
 	onContentChange: ({ item, content }: { item: ChecklistItem; content: string }) => void
 	onCheckedChange: ({ item, checked }: { item: ChecklistItem; checked: boolean }) => void
 	onChange?: (value: string) => void
@@ -56,10 +61,15 @@ const Item = ({
 		throw new Error("Checklist Item must be rendered within a ChecklistStoreContext.Provider")
 	}
 
-	const item = useStore(
+	const storeItem = useStore(
 		store,
 		useShallow(state => state.parsed.find(i => i.id === id))
 	)
+
+	// A ghost id has no store item until materialized — synthesize the empty row it renders as.
+	// Every handler below is safe on the synthetic item: toggleChecked refuses empty content,
+	// onSubmitEditing on empty content only refocuses, and removeItem guards on store presence.
+	const item = storeItem ?? (ghost ? { id, checked: false, content: "" } : undefined)
 
 	const [value, setValue] = useState<string>(() => normalizeItemContent(item?.content ?? ""))
 
@@ -99,6 +109,26 @@ const Item = ({
 		onDidType()
 
 		setValue(content)
+
+		// #80: first keystroke into the ghost — materialize it into a real appended item and
+		// propagate the structural edit immediately (mirrors addNewLine; onContentChange would
+		// silently no-op here since the id is not in parsed yet). The parent re-renders this SAME
+		// keyed position as a normal row, so the input keeps focus.
+		if (ghost && !store.getState().parsed.some(i => i.id === id)) {
+			const result = materializeChecklistGhost(store.getState().parsed, id, content)
+
+			if (result.changed) {
+				store.getState().setParsed(result.next)
+				store.getState().setIds(result.next.map(i => i.id))
+
+				if (onChange) {
+					onChange(checklistParser.stringify(store.getState().parsed))
+				}
+			}
+
+			return
+		}
+
 		onContentChange({
 			item,
 			content
@@ -155,6 +185,14 @@ const Item = ({
 
 	const removeItem = (item: ChecklistItem) => {
 		const parsed = store.getState().parsed
+
+		// Backspace on an UNMATERIALIZED ghost must be a pure no-op: removeChecklistItem's
+		// single-item branch resets `parsed` to one empty row BEFORE checking the id, so passing
+		// a ghost id over a one-checked-item note would destroy the user's completed item.
+		if (!parsed.some(i => i.id === item.id)) {
+			return
+		}
+
 		const result = removeChecklistItem(parsed, item.id, randomUUID())
 
 		if (!result.changed) {

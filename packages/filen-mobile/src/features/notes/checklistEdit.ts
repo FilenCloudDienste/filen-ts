@@ -54,6 +54,34 @@ export function removeChecklistItem(parsed: Checklist, itemId: string, newId: st
 	}
 }
 
+// First keystroke into the ghost row (#80): the ghost becomes a REAL item, appended at the END
+// of the list (after the hidden checked items — consecutive adds then chain like Enter does).
+// Appending under the ghost's own id is what preserves the focused input across the
+// materialization (same React key, same TextInput instance). No-op if the id already exists
+// (a duplicate keystroke race must not double-append).
+export function materializeChecklistGhost(parsed: Checklist, ghostId: string, content: string): ChecklistEditResult {
+	if (parsed.some(i => i.id === ghostId)) {
+		return {
+			changed: false,
+			next: parsed,
+			focusId: null
+		}
+	}
+
+	return {
+		changed: true,
+		next: [
+			...parsed,
+			{
+				id: ghostId,
+				checked: false,
+				content
+			}
+		],
+		focusId: null
+	}
+}
+
 // Enter on a non-empty row. Mirrors the component's previous inline logic:
 //   - if the next row already exists and is empty, reuse it (focus it) instead of inserting another
 //   - otherwise insert a fresh empty row (`newId`) right after `afterId` and focus it

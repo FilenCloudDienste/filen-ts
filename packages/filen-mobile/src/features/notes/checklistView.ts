@@ -44,3 +44,44 @@ export function useChecklistHideCompleted(noteUuid: string): [boolean, () => voi
 
 	return [hideCompleted, toggle]
 }
+
+// ── Ghost row (#80) ──────────────────────────────────────────────────────────
+//
+// With "hide completed" on and EVERY item checked, the filter renders zero rows — and every
+// editing entry point hangs off a rendered row's input, so the checklist became impossible to
+// edit or extend. The fix renders one GHOST row: a normal-looking empty row that exists only in
+// the UI (never in `parsed`, never serialized) until the user types into it, at which point it
+// materializes into a real appended item. Ghosts also cover the LIVE trap: checking off the last
+// visible item makes the ghost appear in the same commit.
+
+/**
+ * Whether the ghost row is the rendered surface. `hasItems` keeps the pre-hydration mount frame
+ * (store still empty) from flashing a ghost before the initial-value effect seeds the store; a
+ * truly empty note is seeded with a real empty row by that effect instead.
+ */
+export function isChecklistGhostActive(hasItems: boolean, visibleCount: number, hideCompleted: boolean, readOnly: boolean): boolean {
+	return hideCompleted && !readOnly && hasItems && visibleCount === 0
+}
+
+/**
+ * PURE ghost-id derivation: `mountSeed` (random per checklist mount) plus the count of
+ * previously-materialized ghosts still present in `parsed`. Properties the component relies on:
+ *   - stable while the trap is active (count unchanged → same id → stable React key);
+ *   - materializing consumes the id (count +1) — the NEXT trap activation derives a fresh one
+ *     (e.g. the materialized row got checked off);
+ *   - backspacing a materialized ghost away REUSES its id (count back down) — the re-rendered
+ *     ghost keeps the same React key, so the focused TextInput instance survives the round trip
+ *     and the keyboard never drops.
+ * Parser-generated ids are uuids; the `-ghost-` infix cannot collide with them.
+ */
+export function checklistGhostRowId(mountSeed: string, parsed: Checklist): string {
+	let materialized = 0
+
+	for (const item of parsed) {
+		if (item.id.startsWith(`${mountSeed}-ghost-`)) {
+			materialized++
+		}
+	}
+
+	return `${mountSeed}-ghost-${materialized}`
+}

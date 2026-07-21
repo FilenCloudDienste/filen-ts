@@ -9,7 +9,7 @@ import { createChecklistStore, ChecklistStoreContext } from "@/features/notes/st
 import { useShallow } from "zustand/shallow"
 import { randomUUID } from "expo-crypto"
 import Toolbar from "@/features/notes/components/content/checklist/toolbar"
-import { visibleChecklistIds } from "@/features/notes/checklistView"
+import { visibleChecklistIds, isChecklistGhostActive, checklistGhostRowId } from "@/features/notes/checklistView"
 
 const Checklist = ({
 	initialValue,
@@ -43,6 +43,14 @@ const Checklist = ({
 		useShallow(state => visibleChecklistIds(state.ids, state.parsed, hideCompleted ?? false))
 	)
 	const initialValueFrozen = useState(() => initialValue)[0]
+	// Ghost row (#80): with "hide completed" on and every item checked, zero rows render and the
+	// checklist becomes uneditable. Render one ghost row instead — see checklistView.ts for the
+	// activation predicate and the pure id derivation (stability + focus-continuity properties).
+	const ghostMountSeed = useState(() => randomUUID())[0]
+	const hasHydratedIds = useStore(store, state => state.ids.length > 0)
+	const ghostId = useStore(store, state => checklistGhostRowId(ghostMountSeed, state.parsed))
+	const ghostActive = isChecklistGhostActive(hasHydratedIds, visibleIds.length, hideCompleted ?? false, readOnly ?? false)
+	const renderIds = ghostActive ? [ghostId] : visibleIds
 	const headerHeight = useHeaderHeight()
 
 	const onContentChange = ({ item, content }: { item: ChecklistItem; content: string }) => {
@@ -143,17 +151,21 @@ const Checklist = ({
 				keyboardDismissMode="interactive"
 				bottomOffset={32}
 			>
-				{visibleIds.map((id, index) => {
+				{renderIds.map((id, index) => {
 					return (
 						<Item
 							key={id}
 							id={id}
+							// The ghost id renders through the SAME component in the same keyed
+							// position, so materializing (first keystroke) is a props change, not a
+							// component swap — the TextInput instance and keyboard survive.
+							ghost={ghostActive && id === ghostId}
 							onContentChange={onContentChange}
 							onCheckedChange={onCheckedChange}
 							onChange={onChange}
 							readOnly={readOnly}
 							onDidType={onTyped}
-							isLast={index === visibleIds.length - 1}
+							isLast={index === renderIds.length - 1}
 							autoFocus={autoFocus}
 						/>
 					)
