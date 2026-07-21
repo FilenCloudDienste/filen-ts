@@ -105,8 +105,10 @@ import {
 	computeNoteFetchError,
 	isNoteContentUnavailable,
 	buildInflightEntries,
+	sessionBaseHashForNewSession,
 	flushInflightContentWithAlert
 } from "@/features/notes/components/content"
+import { hashNoteContent } from "@/features/notes/components/sync"
 import alerts from "@/lib/alerts"
 import { type Note } from "@/types"
 
@@ -179,6 +181,45 @@ describe("computeNoteFetchError", () => {
 })
 
 // ── M1 + D3 — inflight entry builder (per-note monotonic timestamps + session base) ──────
+
+describe("sessionBaseHashForNewSession", () => {
+	// Regression #79-adjacent solo-toast bug: the base was maintained by a render-keyed effect
+	// that missed drain boundaries (single-keystroke sessions, incidental re-renders), leaving a
+	// stale mount-time base that flagged every later solo push as "overwrote newer remote
+	// changes". The base now derives from the content cache at the instant a session starts.
+	it("a NEW session (no entries) stamps the hash of the cached content", () => {
+		const result = sessionBaseHashForNewSession(undefined, "cloud content")
+
+		expect(result).toBe(hashNoteContent("cloud content"))
+		expect(sessionBaseHashForNewSession([], "cloud content")).toBe(hashNoteContent("cloud content"))
+	})
+
+	it("an ONGOING session returns null — buildInflightEntries carries the existing base forward", () => {
+		const entries = buildInflightEntries({
+			previous: undefined,
+			note: { uuid: "note-1" } as Note,
+			content: "v1",
+			now: 1000,
+			sessionBaseHash: "h(orig)"
+		})
+
+		expect(sessionBaseHashForNewSession(entries, "cloud content")).toBeNull()
+	})
+
+	it("a missing/non-string cache yields null (unchecked-push grace, mirrors the legacy no-hash path)", () => {
+		expect(sessionBaseHashForNewSession(undefined, null)).toBeNull()
+		expect(sessionBaseHashForNewSession(undefined, undefined)).toBeNull()
+	})
+
+	it("solo drain loop: base from the post-push cache matches the cloud our own push wrote — no self-conflict", () => {
+		// Session 1 pushed "v1"; sync wrote "v1" into the content cache. A NEW session starting
+		// now must stamp hash("v1") — the sync's peek then sees hash(cloud "v1") === base and
+		// never toasts. (The old ref kept hash of the MOUNT-time content here.)
+		const base = sessionBaseHashForNewSession(undefined, "v1")
+
+		expect(base).toBe(hashNoteContent("v1"))
+	})
+})
 
 describe("buildInflightEntries", () => {
 	const note = { uuid: "note-1" } as Note

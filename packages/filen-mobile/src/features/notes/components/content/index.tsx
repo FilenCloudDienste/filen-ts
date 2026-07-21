@@ -13,7 +13,7 @@ import { useStringifiedClient } from "@/lib/auth"
 import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight.store"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { useShallow } from "zustand/shallow"
-import { useEffect, useCallback, useRef } from "react"
+import { useEffect, useCallback } from "react"
 import { runEffect, run } from "@filen/utils"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
@@ -90,6 +90,24 @@ export function isNoteContentUnavailable({
 // mid-session would claim a sync point the session never had). Only a FRESH session (no
 // existing entries) stamps `sessionBaseHash` — the hash of the synced/loaded content the
 // editor was seeded from, or none when nothing synced is known.
+/**
+ * D3: base hash for a NEW editing session (no inflight entries yet) — the hash of the per-note
+ * content cache, which sync's post-push write keeps equal to the cloud content at every drain
+ * boundary. Read at the instant the session starts (inside onValueChange), NOT maintained by a
+ * render-keyed effect: the old sessionBaseHashRef only renewed when the editor-seed STRING
+ * changed across a drain, which single-keystroke sessions and incidental re-renders defeat —
+ * leaving a stale mount-time base that flagged every later solo push as a self-conflict
+ * ("overwrote newer remote changes" toasts while editing alone). Ongoing sessions return null;
+ * buildInflightEntries carries the existing base forward.
+ */
+export function sessionBaseHashForNewSession(entries: InflightContent[string] | undefined, cachedContent: unknown): string | null {
+	if (entries && entries.length > 0) {
+		return null
+	}
+
+	return typeof cachedContent === "string" ? hashNoteContent(cachedContent) : null
+}
+
 export function buildInflightEntries({
 	previous,
 	note,
@@ -290,37 +308,6 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 
 	const { refetch } = noteContentQuery
 
-	// D3: hash of the synced/loaded content the CURRENT editing session is based on. A
-	// "session" starts when the editor loads synced content and renews after a successful
-	// push — `buildInflightEntries` stamps this onto the FIRST entry of a session and
-	// carries it forward for the rest (so the ref is only consulted while no inflight
-	// entries exist for this note).
-	const sessionBaseHashRef = useRef<string | null>(null)
-
-	// D3 session boundary — the base renews whenever a fresh seed value arrives with no
-	// session ongoing (its base lives in the entries and must not move under it; history
-	// views are read-only). This single boundary covers every drain type because the seed
-	// sources are kept truthful: after a successful PUSH, sync writes the pushed content
-	// into the per-note query cache, so `editorSeed` advances to exactly what was pushed
-	// (typing again after a 3s debounce push never false-flags our own push as a conflict);
-	// after a 3-STRIKE DROP nothing was pushed, the cache still holds the cloud content,
-	// and the base correctly stays/returns there — stamping the dropped text instead (the
-	// old "queue drained" boundary) produced a false "overwrote newer changes" toast on the
-	// next successful session.
-	useEffect(() => {
-		if (history) {
-			return
-		}
-
-		const entries = useNotesInflightStore.getState().inflightContent[note.uuid] ?? []
-
-		if (entries.length > 0) {
-			return
-		}
-
-		sessionBaseHashRef.current = typeof editorSeed === "string" ? hashNoteContent(editorSeed) : null
-	}, [history, note.uuid, editorSeed])
-
 	const hasWriteAccess = (() => {
 		if (!stringifiedClient || history) {
 			return false
@@ -344,6 +331,15 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 
 		const now = Date.now()
 
+		// D3: stamp a NEW session's base from the content cache at this exact instant (see
+		// sessionBaseHashForNewSession). Synchronous read-then-set is race-free on the JS thread.
+		const sessionBaseHash = sessionBaseHashForNewSession(
+			getInflightContentForNote(note.uuid),
+			noteContentQueryGet({
+				uuid: note.uuid
+			})
+		)
+
 		useNotesInflightStore.getState().setInflightContent(prev => ({
 			...prev,
 			// M1: per-note monotonic timestamp + D3: session base hash — see buildInflightEntries.
@@ -352,7 +348,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 				note,
 				content: value,
 				now,
-				sessionBaseHash: sessionBaseHashRef.current
+				sessionBaseHash
 			})
 		}))
 
