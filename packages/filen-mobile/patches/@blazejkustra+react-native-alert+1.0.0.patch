@@ -1,5 +1,5 @@
 diff --git a/node_modules/@blazejkustra/react-native-alert/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt b/node_modules/@blazejkustra/react-native-alert/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt
-index ceeb405..ace9243 100644
+index ceeb405..8249a37 100644
 --- a/node_modules/@blazejkustra/react-native-alert/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt
 +++ b/node_modules/@blazejkustra/react-native-alert/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt
 @@ -5,6 +5,7 @@ import android.os.Build
@@ -25,3 +25,21 @@ index ceeb405..ace9243 100644
      val username = if (isLogin) EditText(ctx).apply {
        hint = config.getStringOrNull("usernamePlaceholder") ?: "Username"
        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+@@ -197,10 +206,16 @@ class ReactNativeAlertModule(
+ 
+     val main = EditText(ctx).apply {
+       hint = config.getStringOrNull("placeholder") ?: if (isLogin) "Password" else ""
++      // Patched (filen): plain-text prompts used TYPE_TEXT_VARIATION_VISIBLE_PASSWORD to
++      // suppress keyboard suggestions, but IMEs treat every password variation as a no-IME
++      // field - composition engines are disabled, so Japanese/Chinese/Korean (and any
++      // transliteration input) cannot be typed at all, and suggestions/swipe are lost for
++      // everyone. Plain TYPE_CLASS_TEXT restores normal keyboard behavior; the autofill
++      // exclusion above keeps password managers out of these dialogs. Upstreamable.
+       inputType = if (type == "secure-text" || isLogin)
+         InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+       else
+-        InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
++        InputType.TYPE_CLASS_TEXT
+       setText(config.getStringOrNull("defaultValue") ?: "")
+       config.getIntOrNull("maxLength")?.takeIf { it > 0 }?.let {
+         filters = arrayOf(InputFilter.LengthFilter(it))
