@@ -108,6 +108,9 @@ export class Audio {
 
 	// Whether we currently intend to be playing; gates the watchdog so it doesn't poll while paused/stopped.
 	private intendPlaying: boolean = false
+	// True while the player is registered for lock-screen/notification controls. Gates
+	// updateLockScreen into metadata-only updates after the first activation (see there).
+	private lockScreenActive: boolean = false
 
 	// Consecutive watchdog fires with no playback progress while stopped — see TRACK_END_WATCHDOG_MAX_STALLS.
 	// Reset to 0 on every real status update (which means playback is progressing).
@@ -622,23 +625,34 @@ export class Audio {
 			return
 		}
 
-		this.player.setActiveForLockScreen(
-			true,
-			{
-				title: metadata?.title ?? item.item.data.decryptedMeta?.name ?? item.item.data.uuid,
-				artist: metadata?.artist ?? undefined,
-				albumTitle: metadata?.album ?? undefined,
-				artworkUrl: artworkUrl ?? undefined
-			},
-			{
-				// iOS gives the two Now Playing side-button slots to the 10s skip-interval
-				// commands when they're enabled, hiding previous/next track. Disable them on
-				// iOS so prev/next show; keep them on Android where they coexist in the
-				// notification with prev/next.
-				showSeekBackward: false,
-				showSeekForward: false
-			}
-		)
+		const lockScreenMetadata = {
+			title: metadata?.title ?? item.item.data.decryptedMeta?.name ?? item.item.data.uuid,
+			artist: metadata?.artist ?? undefined,
+			albumTitle: metadata?.album ?? undefined,
+			artworkUrl: artworkUrl ?? undefined
+		}
+
+		// Metadata-only updates once active — NEVER a repeat setActiveForLockScreen per track.
+		// On Android that call releases and rebuilds the MediaSession; System UI strips a
+		// released session's notification controls asynchronously, and losing that race leaves
+		// the media notification without its seekbar and play/pause button until the next
+		// player-state-driven repost. The metadata path updates the live session in place.
+		if (this.lockScreenActive) {
+			this.player.updateLockScreenMetadata(lockScreenMetadata)
+
+			return
+		}
+
+		this.player.setActiveForLockScreen(true, lockScreenMetadata, {
+			// iOS gives the two Now Playing side-button slots to the 10s skip-interval
+			// commands when they're enabled, hiding previous/next track. Disable them on
+			// iOS so prev/next show; keep them on Android where they coexist in the
+			// notification with prev/next.
+			showSeekBackward: false,
+			showSeekForward: false
+		})
+
+		this.lockScreenActive = true
 	}
 
 	private clearTrackEndWatchdog(): void {
@@ -1064,6 +1078,7 @@ export class Audio {
 		await this.player.seekTo(0)
 
 		this.player.clearLockScreenControls()
+		this.lockScreenActive = false
 	}
 
 	public async skipTo(index: number): Promise<void> {

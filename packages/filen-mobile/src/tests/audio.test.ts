@@ -13,6 +13,7 @@ function makeMockPlayer() {
 		replace: vi.fn(),
 		seekTo: vi.fn().mockResolvedValue(undefined),
 		setActiveForLockScreen: vi.fn(),
+		updateLockScreenMetadata: vi.fn(),
 		clearLockScreenControls: vi.fn(),
 		remove: vi.fn(),
 		playing: false,
@@ -2736,6 +2737,71 @@ describe("Audio", () => {
 			const lastCall = playlist.setActiveForLockScreen.mock.calls.at(-1)
 
 			expect(lastCall![1].artworkUrl).toBe("file:///cache/cover.jpg")
+		})
+
+		it("skipping tracks updates the lock screen in place instead of re-activating", async () => {
+			// A repeat setActiveForLockScreen on Android releases and rebuilds the MediaSession,
+			// racing System UI's released-session cleanup — the notification loses its seekbar
+			// and play/pause when the race is lost. Track changes must use the metadata-only path.
+			// Keyed by item (not call order): the load pipeline also prefetches upcoming tracks,
+			// so per-call mocks would be consumed out of step.
+			vi.mocked(audioCache.get).mockImplementation((async ({ item }: { item: { data: { data: { uuid: string } } } }) => {
+				const uuid = item.data.data.uuid
+
+				return {
+					audio: { uri: `file:///cache/${uuid}.mp3` },
+					metadata: {
+						title: uuid === "b" ? "Second" : "First",
+						artist: "A",
+						album: "X",
+						pictureUri: `file:///cache/${uuid}.jpg`,
+						cachedAt: Date.now()
+					}
+				}
+			}) as never)
+
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+			await audio.play()
+			await flushMicrotasks()
+
+			expect(playlist.setActiveForLockScreen).toHaveBeenCalledTimes(1)
+
+			await audio.next()
+			await flushMicrotasks()
+
+			expect(playlist.setActiveForLockScreen).toHaveBeenCalledTimes(1)
+
+			const lastMeta = playlist.updateLockScreenMetadata.mock.calls.at(-1)
+
+			expect(lastMeta).toBeDefined()
+			expect(lastMeta![0].title).toBe("Second")
+		})
+
+		it("stop() re-arms full lock screen activation for the next session", async () => {
+			vi.mocked(audioCache.get).mockResolvedValue({
+				audio: { uri: "file:///cache/a.mp3" },
+				metadata: { title: "Song", artist: "A", album: "X", pictureUri: "file:///cache/a.jpg", cachedAt: Date.now() }
+			} as never)
+
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.play()
+			await flushMicrotasks()
+
+			expect(playlist.setActiveForLockScreen).toHaveBeenCalledTimes(1)
+
+			await audio.stop()
+
+			expect(playlist.clearLockScreenControls).toHaveBeenCalled()
+
+			await audio.play()
+			await flushMicrotasks()
+
+			expect(playlist.setActiveForLockScreen).toHaveBeenCalledTimes(2)
 		})
 
 		it("calls Asset.fromModule only once — second play reuses cached placeholder URI", async () => {
