@@ -1,0 +1,25 @@
+diff --git a/node_modules/react-native-reorderable-list/src/components/ReorderableListCore.tsx b/node_modules/react-native-reorderable-list/src/components/ReorderableListCore.tsx
+index 81bdff2..dd6da78 100644
+--- a/node_modules/react-native-reorderable-list/src/components/ReorderableListCore.tsx
++++ b/node_modules/react-native-reorderable-list/src/components/ReorderableListCore.tsx
+@@ -511,7 +511,19 @@ const ReorderableListCore = <T,>(
+   const reorder = (fromIndex: number, toIndex: number) => {
+     runOnUI(resetSharedValues)();
+ 
+-    if (fromIndex !== toIndex) {
++    // Patched (filen): the release animation's completion callback can fire a second time
++    // after resetSharedValues already stamped the shared indices back to -1, invoking this
++    // with garbage indices. markCells would then feed data[-1] (undefined) to the consumer's
++    // keyExtractor - a fatal crash - and the phantom onReorder would leak out-of-range
++    // indices to the app. Legit calls always carry in-range indices, so bound-check here.
++    // Upstreamable.
++    if (
++      fromIndex !== toIndex &&
++      fromIndex >= 0 &&
++      toIndex >= 0 &&
++      fromIndex < data.length &&
++      toIndex < data.length
++    ) {
+       markCells(fromIndex, toIndex);
+       onReorder({from: fromIndex, to: toIndex});
+     }
