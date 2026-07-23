@@ -2,6 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import * as MediaLibraryLegacy from "expo-media-library/legacy"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
+import { Semaphore } from "@filen/utils"
 
 export const BASE_QUERY_KEY = "useCameraUploadAlbumsQuery"
 
@@ -12,9 +13,53 @@ export async function fetchData(_signal?: AbortSignal) {
 		return [] as MediaLibraryLegacy.Album[]
 	}
 
-	return await MediaLibraryLegacy.getAlbumsAsync({
+	const albums = await MediaLibraryLegacy.getAlbumsAsync({
 		includeSmartAlbums: true
 	})
+
+	// Albums are raw OS collections — on Android that means ANY MediaStore bucket, so
+	// audio-only directories (music, recordings, voice notes) arrive here too, and
+	// assetCount totals every media type in the bucket. Camera upload only ever syncs
+	// photos and videos, so re-count each album against that filter: albums with nothing
+	// syncable are dropped, and the count the screen sorts/badges by becomes the filtered
+	// total instead of the misleading bucket total. A failed probe keeps the album with
+	// its original count (fail open — never hide an album over a transient query error).
+	// Bounded concurrency keeps devices with many albums from firing dozens of media-store
+	// queries at once.
+	const semaphore = new Semaphore(4)
+
+	const counted = await Promise.all(
+		albums.map(async album => {
+			if (album.assetCount <= 0) {
+				return null
+			}
+
+			await semaphore.acquire()
+
+			try {
+				const { totalCount } = await MediaLibraryLegacy.getAssetsAsync({
+					album,
+					mediaType: [MediaLibraryLegacy.MediaType.photo, MediaLibraryLegacy.MediaType.video],
+					first: 1
+				})
+
+				if (totalCount <= 0) {
+					return null
+				}
+
+				return {
+					...album,
+					assetCount: totalCount
+				}
+			} catch {
+				return album
+			} finally {
+				semaphore.release()
+			}
+		})
+	)
+
+	return counted.filter((album): album is MediaLibraryLegacy.Album => album !== null)
 }
 
 export function useCameraUploadAlbumsQuery(
