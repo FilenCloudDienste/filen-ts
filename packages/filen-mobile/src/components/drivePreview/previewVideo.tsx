@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useId } from "react"
 import { useWindowDimensions, Platform, AppState, type ViewStyle } from "react-native"
 import { VideoView } from "expo-video"
 import { useEvent } from "expo"
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useShallow } from "zustand/shallow"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -40,6 +41,46 @@ const PreviewVideo = ({ cacheKey, fileUrl }: { cacheKey: string; fileUrl: string
 	const { isPlaying } = useEvent(player, "playingChange", {
 		isPlaying: player.playing
 	})
+
+	// Window-level keep-awake while THIS video plays. expo-video's own view-level
+	// keepScreenOnWhilePlaying is lost whenever the carousel remounts the VideoView
+	// mid-playback (rotation pager): the flag is only re-applied on play/pause transitions,
+	// so a rotation during playback let the screen time out over a running video. The window
+	// flag is remount-immune. Tagged per instance so adjacent gallery videos compose;
+	// released on pause/unmount so paused videos and non-video previews keep the normal
+	// screen timeout.
+	const keepAwakeTag = `drivePreviewVideo:${useId()}`
+
+	// Latch so activate/deactivate dispatches stay strictly alternating even if the effect
+	// re-runs in quick succession (buffer-stall isPlaying flapping, StrictMode double-invoke):
+	// at most one in-flight activation per activation period, one release per deactivation.
+	// The native side is a per-tag set (same-tag repeats are idempotent there), so the pair
+	// can never pin the flag on through unbalanced calls.
+	const keepAwakeActiveRef = useRef<boolean>(false)
+
+	useEffect(() => {
+		if (!isPlaying) {
+			return
+		}
+
+		if (!keepAwakeActiveRef.current) {
+			keepAwakeActiveRef.current = true
+
+			activateKeepAwakeAsync(keepAwakeTag).catch(e => {
+				logger.warn("drivePreview", "activateKeepAwake failed", { error: e })
+			})
+		}
+
+		return () => {
+			if (keepAwakeActiveRef.current) {
+				keepAwakeActiveRef.current = false
+
+				deactivateKeepAwake(keepAwakeTag).catch(e => {
+					logger.warn("drivePreview", "deactivateKeepAwake failed", { error: e })
+				})
+			}
+		}
+	}, [isPlaying, keepAwakeTag])
 
 	// iOS "dismiss ends PiP": the PiP window is OWNED by this view's native playerViewController, and
 	// once the view unmounts iOS keeps the window floating with NO controllable handle — reopening a
