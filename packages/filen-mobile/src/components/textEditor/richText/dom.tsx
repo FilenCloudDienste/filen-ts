@@ -31,7 +31,14 @@ const FLUSH_COMPOSITION_COMMIT_MS = 80
 // debounce-reads the document and reports through the same divergence gate the flush uses.
 // On committing keyboards text-change reports first, the read compares equal, and this is a
 // pure no-op — the healthy path stays single-reported.
-const INPUT_MIRROR_DEBOUNCE_MS = 350
+//
+// The value defines the leave-screen loss window: trailing debounce, so it fires this long
+// after the LAST keystroke — leaving faster than this loses the final composing burst. It
+// only needs to exceed Quill's mutation→text-change latency (microtasks, ~ms) so text-change
+// wins the race on healthy keyboards; per-report cost is no more than what text-change
+// already does per keystroke, so eager is cheap. 150ms is comfortably under the finger
+// travel time to the back button.
+const INPUT_MIRROR_DEBOUNCE_MS = 150
 
 // Forward this WebView's console.* to the RN diagnostic logger (see domConsoleProxy).
 installDomConsoleProxy()
