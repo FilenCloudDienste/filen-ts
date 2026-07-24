@@ -577,11 +577,16 @@ const queryCache = new QueryCache({
 			isOnline: () => onlineManager.isOnline()
 		})
 
-		logger.error("queries", "QueryCache error", { queryHash: query.queryHash, error: err, action })
-
+		// Suppressed = expected, query-local UX (session-cache warm-up misses, offline network
+		// errors) — info keeps them in the breadcrumb ring as context for real errors without
+		// red-flagging dev LogBox or inflating the persisted error log.
 		if (action === "suppress") {
+			logger.info("queries", "QueryCache error", { queryHash: query.queryHash, error: err, action })
+
 			return
 		}
+
+		logger.error("queries", "QueryCache error", { queryHash: query.queryHash, error: err, action })
 
 		if (action === "logout") {
 			// auth.logout() is internally idempotent (logoutPromise dedup), so concurrent
