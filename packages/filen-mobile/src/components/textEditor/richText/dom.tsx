@@ -20,6 +20,19 @@ import type { TextEditorEvents, Colors, Font } from "@/components/textEditor"
 // through the normal event path, short enough to fit inside a screen-pop animation.
 const FLUSH_COMPOSITION_COMMIT_MS = 80
 
+// How long after the last DOM `input` event the live document is mirrored to native (#67).
+// LatinIME-family keyboards (Heliboard, GrapheneOS/AOSP; iOS CJK keyboards behave alike) hold
+// an IME composition open across the whole word or editing session, and Quill 2 suspends ALL
+// text-change events while composing (Composition module batchStart/batchEnd) — so nothing
+// incremental reaches native until the IME commits, and a leave-screen flush round trip cannot
+// complete (React unmounts the screen at pop dispatch; only the native view survives the exit
+// animation, so the WebView's reply is dropped). The `input` event still fires for every
+// composing keystroke and the composed text is ordinary text nodes in the DOM, so this
+// debounce-reads the document and reports through the same divergence gate the flush uses.
+// On committing keyboards text-change reports first, the read compares equal, and this is a
+// pure no-op — the healthy path stays single-reported.
+const INPUT_MIRROR_DEBOUNCE_MS = 350
+
 // Forward this WebView's console.* to the RN diagnostic logger (see domConsoleProxy).
 installDomConsoleProxy()
 
@@ -302,6 +315,13 @@ const RichTextEditorDom = ({
 			// numbered list — checkboxes gone, bullets renumbered. See quillCompat for the mechanism.
 			const html = quillV2ToLegacyV1(quillRef.current.root.innerHTML)
 
+			// Divergence-gated like the mirror/flush paths: when a composition commit lands
+			// content the input mirror already reported, skip the duplicate (#67). Only literal
+			// duplicates of the last delivered value are skipped — any real change diverges.
+			if (html === lastReportedHtmlRef.current) {
+				return
+			}
+
 			lastReportedHtmlRef.current = html
 
 			onValueChange?.(html)
@@ -309,6 +329,38 @@ const RichTextEditorDom = ({
 
 		quillRef.current.on("selection-change", () => {
 			postFormatUpdates(postMessage)
+		})
+
+		// #67: mirror the live document to native while an IME composition suppresses Quill's
+		// text-change events — see INPUT_MIRROR_DEBOUNCE_MS. `input` only fires for user edits
+		// (programmatic seeding via dangerouslyPasteHTML does not dispatch it), and the
+		// divergence gate keeps this silent whenever text-change already delivered the content.
+		let inputMirrorTimer: ReturnType<typeof setTimeout> | null = null
+
+		quillRef.current.root.addEventListener("input", () => {
+			if (readOnlyRef.current) {
+				return
+			}
+
+			if (inputMirrorTimer) {
+				clearTimeout(inputMirrorTimer)
+			}
+
+			inputMirrorTimer = setTimeout(() => {
+				if (!quillRef.current) {
+					return
+				}
+
+				const html = quillV2ToLegacyV1(quillRef.current.root.innerHTML)
+
+				if (html === lastReportedHtmlRef.current) {
+					return
+				}
+
+				lastReportedHtmlRef.current = html
+
+				onValueChangeRef.current?.(html)
+			}, INPUT_MIRROR_DEBOUNCE_MS)
 		})
 	}, [placeholder, onValueChange, postFormatUpdates, postMessage, readOnly])
 
