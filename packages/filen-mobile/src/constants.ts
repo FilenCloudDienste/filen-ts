@@ -23,12 +23,27 @@ export const DEFAULT_PIP_ENABLED = true
 export const HAPTICS_ENABLED_SECURE_STORE_KEY = "hapticsEnabled"
 export const DEFAULT_HAPTICS_ENABLED = true
 
+// Reachability is deliberately pinned to OUR gateway ("online" means Filen is reachable, not
+// "some internet exists" — captive portals and gateway outages must read as offline), so the
+// probe stays the sole arbiter (useNativeReachability: false). The two timeouts do DIFFERENT
+// jobs and must not be conflated:
+//
+//  - reachabilityRequestTimeout bounds how long one probe may take, and a timeout COUNTS AS
+//    UNREACHABLE. The gateway is in Germany and users are global — a working-but-slow route
+//    (congested 3G/4G, intercontinental latency) can legitimately need many seconds, so this
+//    stays GENEROUS or slow-connection users would flap offline on every probe cycle.
+//  - reachabilityShortTimeout is the retry delay while believed-offline, and since NetInfo
+//    chains probes (next scheduled only after the previous settles) it is what governs how
+//    fast a FALSE flip heals. Previously 30s meant a single probe raced against
+//    post-foreground network settling (an app switch to copy text) read as a ~minute-long
+//    offline window in which every isOnline gate went silently dead; 15s halves the healing
+//    time while keeping believed-offline probing battery-polite.
 export const NETINFO_CONFIG: NetInfoConfiguration = {
 	reachabilityUrl: "https://gateway.filen.io",
 	reachabilityTest: async response => response.status === 200,
 	reachabilityLongTimeout: 60 * 1000,
-	reachabilityShortTimeout: 30 * 1000,
-	reachabilityRequestTimeout: 45 * 1000,
+	reachabilityShortTimeout: 15 * 1000,
+	reachabilityRequestTimeout: 30 * 1000,
 	reachabilityShouldRun: () => true,
 	shouldFetchWiFiSSID: false,
 	useNativeReachability: false
