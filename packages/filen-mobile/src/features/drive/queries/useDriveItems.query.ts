@@ -22,6 +22,7 @@ import {
 	ErrorKind
 } from "@filen/sdk-rs"
 import { type DrivePath, type SharedNavContext, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
+import { linkPasswordState } from "@/features/drive/utils"
 import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import type { DriveItem } from "@/types"
@@ -447,7 +448,7 @@ export async function fetchData(
 
 					const meta = {
 						...info.link,
-						password: params.path.linked?.password
+						password: linkPasswordState(params.path.linked?.password, info.link.password)
 					}
 
 					const result = await run(async () => {
@@ -478,7 +479,7 @@ export async function fetchData(
 
 				const meta = {
 					...parent.meta,
-					password: params.path.linked?.password
+					password: linkPasswordState(params.path.linked?.password, parent.meta.password)
 				}
 
 				const result = await authedSdkClient.listLinkedDir(parent.dir, meta, undefined, signal)

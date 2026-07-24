@@ -28,6 +28,21 @@ vi.mock("@/lib/decryption", () => ({
 // @expo/vector-icons pulls in native modules — stub it
 vi.mock("@expo/vector-icons/Ionicons", () => ({ default: {} }))
 
+// @filen/sdk-rs drags the wasm worker helpers into the node env (`self is not defined`) —
+// stub the PasswordState factory linkPasswordState constructs. Mirrors the real shape:
+// tag + frozen [inner] tuple.
+vi.mock("@filen/sdk-rs", () => ({
+	PasswordState: {
+		Known: class {
+			readonly tag = "Known"
+			readonly inner: readonly [string]
+			constructor(v0: string) {
+				this.inner = Object.freeze([v0]) as readonly [string]
+			}
+		}
+	}
+}))
+
 // ---------------------------------------------------------------------------
 // Real module under test
 // ---------------------------------------------------------------------------

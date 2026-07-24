@@ -107,6 +107,16 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
+			// SDK 0.4.35: a drive event arrived whose kind is unknown or whose payload could not
+			// be parsed/decrypted — it carries only the drive message id, for apps that track
+			// their own event counters (we don't; the SDK advances its own). Nothing to apply,
+			// and it must NOT fall into the default's throw + user-facing error toast.
+			case SocketEvent_Tags.DriveMalformed: {
+				logger.warn("socket", "malformed drive event skipped", { driveMessageId: event.inner[0].driveMessageId })
+
+				break
+			}
+
 			default: {
 				logger.error("socket", "Unhandled socket event", { tag: (event as { tag?: string }).tag })
 

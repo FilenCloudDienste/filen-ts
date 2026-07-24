@@ -383,7 +383,11 @@ describe("drive.rename", () => {
 
 		await drive.rename({ item, newName: "NewName" })
 
-		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(item.data, { name: "NewName", created: undefined }, undefined)
+		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(
+			item.data,
+			{ name: "NewName", created: expect.any(MockCreatedTimeKeep) },
+			undefined
+		)
 	})
 
 	it("calls SDK updateFileMetadata when newName differs (file)", async () => {
@@ -422,7 +426,11 @@ describe("drive.rename", () => {
 
 		await drive.rename({ item, newName: "FreshName" })
 
-		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(item.data, { name: "FreshName", created: undefined }, undefined)
+		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(
+			item.data,
+			{ name: "FreshName", created: expect.any(MockCreatedTimeKeep) },
+			undefined
+		)
 	})
 
 	it("throws 'Invalid item type' for sharedRootDirectory", async () => {
@@ -549,7 +557,7 @@ describe("drive.updateTimestamps", () => {
 		mockUnwrapParentUuid.mockReturnValue("parent-uuid-0001")
 	})
 
-	it("sends BigInt(0) for created=0 on a directory (BUGFIX: epoch-0 not falsy)", async () => {
+	it("sends CreatedTime.Set(0n) for created=0 on a directory (BUGFIX: epoch-0 not falsy)", async () => {
 		const item = makeDirItem()
 		const returned = { ...item.data }
 		mockAuthedSdkClient.updateDirMetadata.mockResolvedValue(returned)
@@ -557,7 +565,12 @@ describe("drive.updateTimestamps", () => {
 
 		await drive.updateTimestamps({ item, created: 0 })
 
-		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(item.data, { name: undefined, created: BigInt(0) }, undefined)
+		const callArgs = mockAuthedSdkClient.updateDirMetadata.mock.calls[0]![1] as {
+			created: InstanceType<typeof MockCreatedTimeSet> | InstanceType<typeof MockCreatedTimeKeep>
+		}
+
+		expect(callArgs.created).toBeInstanceOf(MockCreatedTimeSet)
+		expect((callArgs.created as InstanceType<typeof MockCreatedTimeSet>).inner[0]).toBe(BigInt(0))
 	})
 
 	it("sends BigInt(0) for modified=0 on a file (BUGFIX: epoch-0 not falsy)", async () => {
@@ -591,7 +604,7 @@ describe("drive.updateTimestamps", () => {
 		expect((callArgs.created as InstanceType<typeof MockCreatedTimeSet>).inner[0]).toBe(BigInt(0))
 	})
 
-	it("sends BigInt(1700000000000) for created=1700000000000", async () => {
+	it("sends CreatedTime.Set(1700000000000n) for created=1700000000000", async () => {
 		const item = makeDirItem()
 		const returned = { ...item.data }
 		mockAuthedSdkClient.updateDirMetadata.mockResolvedValue(returned)
@@ -599,14 +612,15 @@ describe("drive.updateTimestamps", () => {
 
 		await drive.updateTimestamps({ item, created: 1700000000000 })
 
-		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(
-			item.data,
-			{ name: undefined, created: BigInt(1700000000000) },
-			undefined
-		)
+		const callArgs = mockAuthedSdkClient.updateDirMetadata.mock.calls[0]![1] as {
+			created: InstanceType<typeof MockCreatedTimeSet> | InstanceType<typeof MockCreatedTimeKeep>
+		}
+
+		expect(callArgs.created).toBeInstanceOf(MockCreatedTimeSet)
+		expect((callArgs.created as InstanceType<typeof MockCreatedTimeSet>).inner[0]).toBe(BigInt(1700000000000))
 	})
 
-	it("sends undefined for created when created is not provided (directory)", async () => {
+	it("sends CreatedTime.Keep when created is not provided (directory)", async () => {
 		const item = makeDirItem()
 		const returned = { ...item.data }
 		mockAuthedSdkClient.updateDirMetadata.mockResolvedValue(returned)
@@ -614,7 +628,11 @@ describe("drive.updateTimestamps", () => {
 
 		await drive.updateTimestamps({ item })
 
-		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(item.data, { name: undefined, created: undefined }, undefined)
+		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(
+			item.data,
+			{ name: undefined, created: expect.any(MockCreatedTimeKeep) },
+			undefined
+		)
 	})
 
 	it("uses CreatedTime.Keep when both created and modified are undefined (file)", async () => {

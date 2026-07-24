@@ -152,7 +152,10 @@ export async function fetchData(
 		anyDirWithContext = new AnyDirWithContext.Normal(
 			new AnyNormalDir.Dir({
 				...anyDirWithContext.inner[0].inner[0],
-				parent: new ParentUuid.Trash()
+				// SDK 0.4.35: ParentUuid.Trash carries the item's original parent; the nil
+				// uuid is the documented placeholder for a transient list-trash request
+				// target (every string/wire encoding renders it as "trash" regardless).
+				parent: new ParentUuid.Trash("00000000-0000-0000-0000-000000000000")
 			})
 		)
 	}

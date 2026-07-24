@@ -1,4 +1,5 @@
 import { type TFunction } from "i18next"
+import { PasswordState } from "@filen/sdk-rs"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import type { DrivePath, DrivePathType } from "@/hooks/useDrivePath"
 import { type DriveItem } from "@/types"
@@ -318,4 +319,13 @@ export function normalizeCustomDirColorHex(text: string): string | null {
 			: digits
 
 	return `#${expanded}`
+}
+
+// SDK 0.4.35 made a public link's password a tagged PasswordState instead of an optional
+// plaintext. A user-entered password becomes Known (plaintext available for decryption);
+// with nothing entered the link's OWN state is passed through unchanged (None for an
+// unprotected link, Hashed for a protected one — where the SDK then fails with
+// WrongPassword, which the open/list flows already turn into a password prompt).
+export function linkPasswordState(entered: string | undefined, current: PasswordState): PasswordState {
+	return entered !== undefined ? new PasswordState.Known(entered) : current
 }

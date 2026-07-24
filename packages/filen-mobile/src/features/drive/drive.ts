@@ -9,6 +9,7 @@ import {
 	ParentUuid,
 	MaybeEncryptedUniffi_Tags
 } from "@filen/sdk-rs"
+import { linkPasswordState } from "@/features/drive/utils"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import prompts from "@/lib/prompts"
@@ -77,7 +78,7 @@ const drive = {
 				new AnyLinkedDir.Root(info.root),
 				{
 					...info.link,
-					password
+					password: linkPasswordState(password, info.link.password)
 				},
 				undefined,
 				signal

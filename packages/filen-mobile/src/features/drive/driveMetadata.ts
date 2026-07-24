@@ -105,7 +105,7 @@ export async function rename({ item, newName, signal }: { item: DriveItem; newNa
 					item.data,
 					{
 						name: newName,
-						created: undefined
+						created: CreatedTime.Keep.new()
 					},
 					toSignalOpts(signal)
 				)
@@ -218,7 +218,7 @@ export async function updateTimestamps({
 					item.data,
 					{
 						name: undefined,
-						created: created !== undefined ? BigInt(created) : undefined
+						created: created !== undefined ? CreatedTime.Set.new(BigInt(created)) : CreatedTime.Keep.new()
 					},
 					toSignalOpts(signal)
 				)
