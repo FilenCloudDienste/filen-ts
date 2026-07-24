@@ -124,6 +124,15 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 			? true
 			: itemToUse.type !== "file" || !itemToUse.data.decryptedMeta || !parent || parent === "sharedInRoot"
 
+	const fileName = item.type === "drive" ? item.data.data.decryptedMeta?.name : item.data.name
+
+	// Rendered-markdown parity with notes (Play review request): markdown files get the
+	// markdown editor + the floating preview toggle instead of the plain code editor. One
+	// shared toggle id for ALL drive markdown files — per-file ids would grow the persisted
+	// toggle record with every file ever previewed, and "show rendered markdown" is a mode
+	// preference, not a per-file one.
+	const isMarkdownFile = /\.(md|markdown)$/i.test(fileName ?? "")
+
 	const save = async (): Promise<boolean> => {
 		if (editedText === null || readOnly || !isOnline) {
 			return false
@@ -276,8 +285,9 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 				onValueChange={setEditedText}
 				readOnly={readOnly}
 				placeholder={t("placeholder")}
-				type={previewType === "code" ? "code" : "text"}
-				fileName={item.type === "drive" ? item.data.data.decryptedMeta?.name : item.data.name}
+				type={isMarkdownFile ? "markdown" : previewType === "code" ? "code" : "text"}
+				id={isMarkdownFile ? "drivePreview" : undefined}
+				fileName={fileName}
 				paddingTop={headerHeight ? headerHeight + 8 : undefined}
 				paddingBottom={insets.bottom}
 			/>

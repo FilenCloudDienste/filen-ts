@@ -46,6 +46,7 @@ export function getPreviewType(name: string): PreviewType {
 		case ".tsx":
 		case ".ts":
 		case ".md":
+		case ".markdown":
 		case ".cpp":
 		case ".c":
 		case ".php":
