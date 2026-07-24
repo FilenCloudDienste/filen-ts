@@ -103,7 +103,17 @@ vi.mock("@filen/sdk-rs", () => ({
 	},
 	AnyDirWithContext: {
 		Normal: vi.fn()
-	}
+	},
+	// Contract-shaped stubs for canonicalRemoteName: parseName throws on rejected names,
+	// passes accepted ones through byte-identical; encodeName maps rejected → valid form.
+	parseName: (name: string) => {
+		if (name.length === 0 || name.length > 255 || /[/\\:*?"<>|]/.test(name) || name.startsWith(" ") || /[. ]$/.test(name)) {
+			throw new Error(`invalid name: ${name}`)
+		}
+
+		return name
+	},
+	encodeName: (name: string) => name.replace(/:/g, "：").replace(/[/\\*?"<>|]/g, "＿")
 }))
 
 vi.mock("@filen/utils", async () => {

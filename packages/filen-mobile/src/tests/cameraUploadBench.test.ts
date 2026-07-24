@@ -146,7 +146,17 @@ vi.mock("@filen/sdk-rs", () => ({
 				this.inner = [inner]
 			}
 		}
-	}
+	},
+	// Contract-shaped stubs for canonicalRemoteName (bench fixtures are all valid ASCII, so
+	// parseName is a pure passthrough on the hot path — matching the real identity behavior).
+	parseName: (name: string) => {
+		if (name.length === 0 || name.length > 255 || /[/\\:*?"<>|]/.test(name) || name.startsWith(" ") || /[. ]$/.test(name)) {
+			throw new Error(`invalid name: ${name}`)
+		}
+
+		return name
+	},
+	encodeName: (name: string) => name.replace(/:/g, "：").replace(/[/\\*?"<>|]/g, "＿")
 }))
 
 vi.mock("@/lib/auth", () => ({

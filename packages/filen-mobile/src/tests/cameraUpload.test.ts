@@ -58,10 +58,42 @@ vi.mock("expo-image-manipulator", () => ({
 	SaveFormat: { JPEG: "jpeg" }
 }))
 
+// parseName/encodeName stubs mirror the filen-rs name.rs contract shape: parseName throws on
+// names the validator rejects and passes accepted names through byte-identical (NFC is a
+// no-op for the ASCII fixtures); encodeName deterministically maps rejected names into a
+// valid form (":" → "：", other forbidden → "＿") and throws only on empty/over-length.
+const { mockParseName, mockEncodeName } = vi.hoisted(() => {
+	const FORBIDDEN = /[\u0000-\u001f\u007f/\\:*?"<>|]/
+
+	const mockParseName = vi.fn((name: string) => {
+		if (name.length === 0 || name.length > 255 || FORBIDDEN.test(name) || name.startsWith(" ") || /[. ]$/.test(name)) {
+			throw new Error(`invalid name: ${name}`)
+		}
+
+		return name
+	})
+
+	const mockEncodeName = vi.fn((name: string) => {
+		if (name.length === 0 || name.length > 255) {
+			throw new Error(`unencodable name: ${name}`)
+		}
+
+		return name
+			.replace(/[\u0000-\u001f\u007f/\\*?"<>|]/g, "＿")
+			.replace(/:/g, "：")
+			.replace(/^ +/, "␠")
+			.replace(/[. ]+$/, "．")
+	})
+
+	return { mockParseName, mockEncodeName }
+})
+
 vi.mock("@filen/sdk-rs", () => ({
 	AnyNormalDir: { Dir: vi.fn() },
 	AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" },
-	AnyDirWithContext: { Normal: vi.fn() }
+	AnyDirWithContext: { Normal: vi.fn() },
+	parseName: mockParseName,
+	encodeName: mockEncodeName
 }))
 
 vi.mock("@filen/utils", async () => {
@@ -271,7 +303,7 @@ vi.mock("@/lib/signals", () => ({
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 import cameraUploadState from "@/features/cameraUpload/cameraUploadState"
-import cameraUpload, { type Config } from "@/features/cameraUpload/cameraUpload"
+import cameraUpload, { type Config, canonicalRemoteName } from "@/features/cameraUpload/cameraUpload"
 import {
 	modifyAssetPathOnCollision,
 	effectiveCreationTimestamp,
@@ -4786,5 +4818,131 @@ describe("B10 — enumeration failures are surfaced", () => {
 		)
 
 		expect(albumFailureEntries).toHaveLength(1)
+	})
+})
+
+// ─── canonicalRemoteName (SDK name canonicalization, #issue-colon-albums) ────
+
+describe("canonicalRemoteName", () => {
+	it("returns SDK-valid names byte-identical (parseName passthrough)", () => {
+		expect(canonicalRemoteName("IMG_0001.JPG")).toBe("IMG_0001.JPG")
+		expect(canonicalRemoteName("Camera Roll")).toBe("Camera Roll")
+	})
+
+	it("keeps valid fullwidth names untouched instead of quote-escaping them", () => {
+		// A CJK title with fullwidth punctuation is VALID — it must not be re-encoded,
+		// or every existing folder using one would silently migrate.
+		expect(canonicalRemoteName("旅行：2024")).toBe("旅行：2024")
+	})
+
+	it("falls back to the encoded form for names the SDK rejects", () => {
+		expect(canonicalRemoteName("12:30.png")).toBe("12：30.png")
+	})
+
+	it("returns null when no valid remote name is derivable", () => {
+		expect(canonicalRemoteName("x".repeat(300))).toBeNull()
+	})
+
+	it("memoizes per name — repeats do not re-cross the FFI", () => {
+		const name = "memo-probe-unique.jpg"
+
+		canonicalRemoteName(name)
+
+		const callsAfterFirst = mockParseName.mock.calls.filter(call => call[0] === name).length
+
+		canonicalRemoteName(name)
+		canonicalRemoteName(name)
+
+		expect(mockParseName.mock.calls.filter(call => call[0] === name).length).toBe(callsAfterFirst)
+	})
+})
+
+// ─── sync flow — SDK-rejected names (canonical encoding, loop invariants) ────
+
+describe("sync flow with SDK-rejected names", () => {
+	function setupColonAsset() {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+
+		const uri = "file:///media/a1"
+
+		ml.addAsset({
+			id: "a1",
+			filename: "12:30.png",
+			uri,
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+
+		fs.set(uri, new Uint8Array([1, 2, 3]))
+	}
+
+	it("uploads a forbidden-char filename under its encoded name", async () => {
+		setupColonAsset()
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(transfers.upload).toHaveBeenCalledWith(expect.objectContaining({ name: "12：30.png" }))
+	})
+
+	it("does NOT re-upload when the remote listing already holds the encoded name (no sync loop)", async () => {
+		setupColonAsset()
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({
+					files: [
+						{
+							path: "/Camera Roll/12：30.png",
+							file: { uuid: "remote-1" }
+						}
+					]
+				})),
+				createDir: vi.fn(async () => ({ uuid: "dir" })),
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
+			}
+		} as any)
+
+		vi.mocked(unwrapFileMeta).mockReturnValue({
+			meta: { name: "12：30.png", created: 1000n, modified: 2000n }
+		} as any)
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("creates the album folder under the encoded title and uploads into it", async () => {
+		// id must be in ENABLED_CONFIG.albumIds — the title is the part under test.
+		ml.addAlbum({ id: "album-1", title: "2024: Japan", assetIds: ["a2"] })
+
+		const uri = "file:///media/a2"
+
+		ml.addAsset({
+			id: "a2",
+			filename: "photo.jpg",
+			uri,
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+
+		fs.set(uri, new Uint8Array([1, 2, 3]))
+
+		const createDir = vi.fn(async () => ({ uuid: "album-dir" }))
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({ files: [] })),
+				createDir,
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
+			}
+		} as any)
+
+		await cameraUpload.sync()
+
+		expect(createDir).toHaveBeenCalledWith(expect.anything(), "2024： Japan", expect.anything())
+		expect(transfers.upload).toHaveBeenCalledWith(expect.objectContaining({ name: "photo.jpg" }))
 	})
 })

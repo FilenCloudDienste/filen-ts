@@ -2,7 +2,7 @@ import * as MediaLibrary from "expo-media-library/next"
 import * as MediaLibraryLegacy from "expo-media-library/legacy"
 import logger from "@/lib/logger"
 import auth from "@/lib/auth"
-import { type FileWithPath, AnyNormalDir, AnyNormalDir_Tags, AnyDirWithContext, NonRootDir_Tags } from "@filen/sdk-rs"
+import { type FileWithPath, AnyNormalDir, AnyNormalDir_Tags, AnyDirWithContext, NonRootDir_Tags, parseName, encodeName } from "@filen/sdk-rs"
 import { normalizeModificationTimestampForComparison } from "@/lib/utils"
 import { type UnwrapFileMetaResult, unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForExpo } from "@/lib/paths"
@@ -42,6 +42,57 @@ import {
 	withReleasedSharedObjectRetry,
 	CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY
 } from "@/features/cameraUpload/cameraUploadHelpers"
+
+// Canonical remote name for everything camera upload sends to or compares against the SDK.
+//
+// The SDK validates every entry name (filen-rs fs/name.rs) and REJECTS the Windows-unsafe set
+// outright, so a raw album title like "2024: Japan" failed createDir on every pass and the
+// album never synced. The mapping happens here, at one choke point, under one invariant: the
+// upload name, the local dedup tree key, and the remote listing key (which carries the name
+// exactly as STORED) must all derive from the same canonical string — any asymmetry means a
+// local key that never matches its remote counterpart, which re-uploads the asset on every
+// sync pass, forever.
+//
+// parseName first, encodeName only on rejection:
+//   - parseName returns the NFC form the SDK stores for every name it ACCEPTS. For the ASCII
+//     names cameras produce that is byte-identity, so every currently-synced asset keeps its
+//     exact dedup key (no re-uploads from this change). It also passes VALID names containing
+//     fullwidth characters (routine in CJK album titles) through untouched — encodeName would
+//     quote-escape those and needlessly migrate their folders.
+//   - encodeName (reversible rclone-style encoding, NFC input) handles only names the SDK
+//     rejects (":" → "：" etc). Its output is itself a valid name and is stored verbatim, so
+//     the round trip through the remote listing is byte-exact.
+//   - null = no usable name exists (empty, or the encoding exceeds the 255-byte name limit);
+//     callers surface and skip, like the missing-filename path.
+//
+// Both are pure, deterministic, synchronous Rust calls; the memo keeps the per-asset FFI hop
+// off the eval hot path (the map grows with the number of distinct names in the user's
+// library and lives for the process).
+const canonicalRemoteNameCache = new Map<string, string | null>()
+
+export function canonicalRemoteName(name: string): string | null {
+	const cached = canonicalRemoteNameCache.get(name)
+
+	if (cached !== undefined) {
+		return cached
+	}
+
+	let canonical: string | null
+
+	try {
+		canonical = parseName(name)
+	} catch {
+		try {
+			canonical = encodeName(name)
+		} catch {
+			canonical = null
+		}
+	}
+
+	canonicalRemoteNameCache.set(name, canonical)
+
+	return canonical
+}
 
 export type LocalFile = {
 	info: {
@@ -400,11 +451,18 @@ class CameraUpload {
 
 			// Folder = the album's (trimmed) title; same-titled albums deliberately share
 			// one folder (legacy-compatible — see albumFolderTitle). Empty-after-trim
-			// titles can't form a valid segment and are skipped.
-			const folderTitle = albumFolderTitle(deviceAlbum.title)
+			// titles can't form a valid segment and are skipped. The canonical pass maps
+			// titles the SDK would reject (e.g. "2024: Japan") into their encoded remote
+			// form — used for BOTH createDir and the local tree keys, so the folder the
+			// listing returns reproduces the keys byte-for-byte (see canonicalRemoteName).
+			const rawFolderTitle = albumFolderTitle(deviceAlbum.title)
+			const folderTitle = rawFolderTitle === null ? null : canonicalRemoteName(rawFolderTitle)
 
 			if (folderTitle === null) {
-				logger.warn("cameraUpload", "Skipping selected album: title is empty after trim", { albumId: id })
+				logger.warn("cameraUpload", "Skipping selected album: title is empty or has no valid remote name", {
+					albumId: id,
+					hadTitle: rawFolderTitle !== null
+				})
 
 				continue
 			}
@@ -471,7 +529,17 @@ class CameraUpload {
 				}[] = []
 
 				for (const entry of metadata) {
-					if (entry.filename === null || entry.filename.length === 0) {
+					// Canonicalize at the single ingestion point: the upload name, the local
+					// tree key, and the remote listing key must all derive from this exact
+					// string (see canonicalRemoteName). A name the SDK rejects (Android
+					// MediaStore allows ":" etc.) is mapped to its encoded remote form here;
+					// clean names pass through byte-identical, keeping existing dedup keys.
+					// A null (no name, or no valid remote name derivable) joins the existing
+					// missing-filename error surface — excluded from the tree, never silent.
+					const filename =
+						entry.filename === null || entry.filename.length === 0 ? null : canonicalRemoteName(entry.filename)
+
+					if (filename === null) {
 						degraded = true
 
 						if (reportedFailedAssetIds.has(entry.id)) {
@@ -480,7 +548,11 @@ class CameraUpload {
 
 						reportedFailedAssetIds.add(entry.id)
 
-						logger.error("cameraUpload", "Asset filename missing in media store", { assetId: entry.id, albumId: id })
+						logger.error("cameraUpload", "Asset filename missing or has no valid remote name", {
+							assetId: entry.id,
+							albumId: id,
+							hadFilename: entry.filename !== null && entry.filename.length > 0
+						})
 
 						useCameraUploadStore.getState().setErrors(errors => [
 							...errors,
@@ -497,7 +569,7 @@ class CameraUpload {
 
 					const info: LocalFile["info"] = {
 						id: entry.id,
-						filename: entry.filename,
+						filename,
 						creationTime: entry.creationTime,
 						modificationTime: entry.modificationTime,
 						mediaType: entry.mediaType
