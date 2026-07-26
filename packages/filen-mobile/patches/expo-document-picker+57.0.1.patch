@@ -1,0 +1,132 @@
+diff --git a/node_modules/expo-document-picker/android/src/main/java/expo/modules/documentpicker/DocumentPickerModule.kt b/node_modules/expo-document-picker/android/src/main/java/expo/modules/documentpicker/DocumentPickerModule.kt
+index 6c2bff0..0fa1772 100644
+--- a/node_modules/expo-document-picker/android/src/main/java/expo/modules/documentpicker/DocumentPickerModule.kt
++++ b/node_modules/expo-document-picker/android/src/main/java/expo/modules/documentpicker/DocumentPickerModule.kt
+@@ -12,6 +12,8 @@ import expo.modules.kotlin.exception.Exceptions
+ import expo.modules.kotlin.exception.toCodedException
+ import expo.modules.kotlin.modules.Module
+ import expo.modules.kotlin.modules.ModuleDefinition
++import kotlinx.coroutines.isActive
++import kotlinx.coroutines.launch
+ import org.apache.commons.io.FilenameUtils
+ import java.io.File
+ import java.io.FileNotFoundException
+@@ -49,33 +51,58 @@ class DocumentPickerModule : Module() {
+           options.type[0]
+         }
+       }
+-      appContext.throwingActivity.startActivityForResult(intent, OPEN_DOCUMENT_CODE)
++      // If launching throws — no current activity, or no ACTION_OPEN_DOCUMENT handler on the
++      // device — the pending promise has to be cleared here. Otherwise it stays set for the rest
++      // of the process and every later call fails with PickingInProgressException.
++      try {
++        appContext.throwingActivity.startActivityForResult(intent, OPEN_DOCUMENT_CODE)
++      } catch (e: Throwable) {
++        pendingPromise = null
++
++        throw e
++      }
+     }
+ 
+     OnActivityResult { _, (requestCode, resultCode, intent) ->
+-      if (requestCode != OPEN_DOCUMENT_CODE || pendingPromise == null) {
++      if (requestCode != OPEN_DOCUMENT_CODE) {
+         return@OnActivityResult
+       }
+ 
+-      val promise = pendingPromise!!
++      val promise = pendingPromise ?: return@OnActivityResult
++      pendingPromise = null
++
++      if (resultCode != Activity.RESULT_OK) {
++        promise.resolve(DocumentPickerResult(canceled = true))
+ 
+-      if (resultCode == Activity.RESULT_OK) {
++        return@OnActivityResult
++      }
++
++      // Read the option into a local before going async. Clearing pendingPromise above lets a
++      // second pick start while this one is still copying, and that pick would overwrite the
++      // field mid-read otherwise.
++      val copyToCacheDirectory = this@DocumentPickerModule.copyToCacheDirectory
++
++      // OnActivityResult is dispatched on the main thread, and reading the picked documents
++      // copies every selected file into the cache directory (see readDocumentDetails). Doing
++      // that here holds the main looper for the whole selection, which ANRs on large or
++      // multi-file picks. Resolving a promise from a background coroutine is what
++      // `AsyncFunction ... Coroutine` already does, and backgroundCoroutineScope is cancelled
++      // when the app context is destroyed.
++      appContext.backgroundCoroutineScope.launch {
+         try {
+-          if (intent?.clipData != null) {
+-            handleMultipleSelection(intent)
++          val assets = if (intent?.clipData != null) {
++            readMultipleSelection(intent, copyToCacheDirectory)
+           } else {
+-            handleSingleSelection(intent)
++            readSingleSelection(intent, copyToCacheDirectory)
++          }
++
++          if (isActive) {
++            promise.resolve(DocumentPickerResult(assets = assets))
+           }
+         } catch (e: Exception) {
+           promise.reject(e.toCodedException())
+         }
+-      } else {
+-        promise.resolve(
+-          DocumentPickerResult(canceled = true)
+-        )
+       }
+-
+-      pendingPromise = null
+     }
+   }
+ 
+@@ -99,31 +126,27 @@ class DocumentPickerModule : Module() {
+     return Uri.fromFile(outputFile)
+   }
+ 
+-  private fun handleSingleSelection(intent: Intent?) {
+-    intent?.data?.let { uri ->
+-      val details = readDocumentDetails(uri)
+-      val result = DocumentPickerResult(
+-        assets = listOf(details)
+-      )
+-      pendingPromise?.resolve(result)
+-    } ?: throw FailedToReadDocumentException()
++  // Returns the assets instead of resolving the promise itself: the caller owns the promise now
++  // that the read runs on a background coroutine, and pendingPromise is already cleared by then.
++  // copyToCacheDirectory is passed in rather than read off the module so a concurrent pick can't
++  // change it partway through this one.
++  private fun readSingleSelection(intent: Intent?, copyToCacheDirectory: Boolean): List<DocumentInfo> {
++    val uri = intent?.data ?: throw FailedToReadDocumentException()
++
++    return listOf(readDocumentDetails(uri, copyToCacheDirectory))
+   }
+ 
+-  private fun handleMultipleSelection(intent: Intent?) {
+-    val count = intent?.clipData?.itemCount ?: 0
+-    val assets = mutableListOf<DocumentInfo>()
++  private fun readMultipleSelection(intent: Intent?, copyToCacheDirectory: Boolean): List<DocumentInfo> {
++    val clipData = intent?.clipData ?: throw FailedToReadDocumentException()
+ 
+-    for (i in 0 until count) {
+-      val uri = intent?.clipData?.getItemAt(i)?.uri
+-        ?: throw FailedToReadDocumentException()
+-      val document = readDocumentDetails(uri)
+-      assets.add(document)
+-    }
++    return (0 until clipData.itemCount).map { index ->
++      val uri = clipData.getItemAt(index)?.uri ?: throw FailedToReadDocumentException()
+ 
+-    pendingPromise?.resolve(DocumentPickerResult(assets = assets))
++      readDocumentDetails(uri, copyToCacheDirectory)
++    }
+   }
+ 
+-  private fun readDocumentDetails(uri: Uri): DocumentInfo {
++  private fun readDocumentDetails(uri: Uri, copyToCacheDirectory: Boolean): DocumentInfo {
+     val originalDocumentDetails = DocumentDetailsReader(context).read(uri)
+ 
+     val details = if (!copyToCacheDirectory) {
