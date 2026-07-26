@@ -84,7 +84,7 @@ vi.mock("uniwind", () => ({
 vi.mock("@tanstack/react-query", () => ({
 	onlineManager: { isOnline: () => true }
 }))
-vi.mock("expo-document-picker", () => ({ getDocumentAsync: vi.fn() }))
+vi.mock("@/lib/documentPicker", () => ({ pickDocuments: vi.fn() }))
 vi.mock("expo-image-picker", () => ({
 	launchImageLibraryAsync: vi.fn(),
 	launchCameraAsync: vi.fn(),

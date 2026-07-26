@@ -28,7 +28,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import events from "@/lib/events"
 import { chatMessagesQueryUpdate } from "@/features/chats/queries/useChatMessages.query"
 import Menu from "@/components/ui/menu"
-import * as DocumentPicker from "expo-document-picker"
+import { pickDocuments } from "@/lib/documentPicker"
 import * as ImagePicker from "expo-image-picker"
 import * as FileSystem from "expo-file-system"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
@@ -588,14 +588,10 @@ const Input = ({ chat }: { chat: Chat }) => {
 							icon: "upload",
 							onPress: async () => {
 								const documentPickerResult = await run(async () => {
-									return await withSystemPresentation(() =>
-										DocumentPicker.getDocumentAsync({
-											type: "*/*",
-											multiple: true,
-											copyToCacheDirectory: true,
-											base64: false
-										})
-									)
+									return await pickDocuments({
+										type: "*/*",
+										multiple: true
+									})
 								})
 
 								if (!documentPickerResult.success) {
@@ -609,7 +605,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 									return
 								}
 
-								const assets = documentPickerResult.data.assets
+								const assets = documentPickerResult.data.documents
 
 								await uploadAssetsAndInsert(assets)
 							}

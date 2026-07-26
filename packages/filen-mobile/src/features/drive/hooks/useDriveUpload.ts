@@ -2,7 +2,6 @@ import { type TFunction } from "i18next"
 import { run, type Result } from "@filen/utils"
 import { AnyNormalDir } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
-import * as DocumentPicker from "expo-document-picker"
 import * as ImagePicker from "expo-image-picker"
 import DocumentScanner, {
 	ResponseType as DocumentScannerResponseType,
@@ -13,6 +12,7 @@ import { normalizeFilePathForExpo } from "@/lib/paths"
 import { isConvertHeicToJpgEnabled, convertHeicToJpg } from "@/lib/imageConversion"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { withSystemPresentation } from "@/lib/systemPresentation"
+import { pickDocuments } from "@/lib/documentPicker"
 import transfers from "@/features/transfers/transfers"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
@@ -195,14 +195,10 @@ export function useDriveUpload({
 		}
 
 		const documentPickerResult = await run(async () => {
-			return await withSystemPresentation(() =>
-				DocumentPicker.getDocumentAsync({
-					type: "*/*",
-					multiple: true,
-					copyToCacheDirectory: true,
-					base64: false
-				})
-			)
+			return await pickDocuments({
+				type: "*/*",
+				multiple: true
+			})
 		})
 
 		if (!documentPickerResult.success) {
@@ -216,7 +212,7 @@ export function useDriveUpload({
 			return
 		}
 
-		const assets = documentPickerResult.data.assets
+		const assets = documentPickerResult.data.documents
 		const convertHeic = await isConvertHeicToJpgEnabled()
 
 		const transferResult = await run(async () => {

@@ -13,7 +13,7 @@ import prompts from "@/lib/prompts"
 import notesLib from "@/features/notes/notes"
 import { isUntaggedTagUuid } from "@/features/notes/utils"
 import { shareTmpFile } from "@/lib/share"
-import * as DocumentPicker from "expo-document-picker"
+import { pickDocuments } from "@/lib/documentPicker"
 import * as FileSystem from "expo-file-system"
 import { runBulk } from "@/lib/bulkOps"
 import { serialize } from "@/lib/serializer"
@@ -24,7 +24,6 @@ import { type TFunction } from "i18next"
 import type { Note, NoteTag } from "@/types"
 import { useResolveClassNames } from "uniwind"
 import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
-import { withSystemPresentation } from "@/lib/systemPresentation"
 import logger from "@/lib/logger"
 
 type NotesViewMode = "notes" | "tags"
@@ -209,17 +208,13 @@ export function buildNotesHeaderRightItems({
 							onPress: () => {
 								run(async defer => {
 									const documentPickerResult = await run(async () => {
-										return await withSystemPresentation(() =>
-											DocumentPicker.getDocumentAsync({
-												// Our own exports are .md / .html now (#83), and code files
-												// often surface as octet-stream on Android SAF — text/plain
-												// alone made re-importing them impossible.
-												type: ["text/*", "application/octet-stream", "application/json", "application/xml"],
-												multiple: false,
-												copyToCacheDirectory: true,
-												base64: false
-											})
-										)
+										return await pickDocuments({
+											// Our own exports are .md / .html now (#83), and code files
+											// often surface as octet-stream on Android SAF — text/plain
+											// alone made re-importing them impossible.
+											type: ["text/*", "application/octet-stream", "application/json", "application/xml"],
+											multiple: false
+										})
 									})
 
 									if (!documentPickerResult.success) {
@@ -233,7 +228,7 @@ export function buildNotesHeaderRightItems({
 										return
 									}
 
-									const asset = documentPickerResult.data.assets[0]
+									const asset = documentPickerResult.data.documents[0]
 
 									if (!asset) {
 										alerts.error(t("import_file_not_found"))

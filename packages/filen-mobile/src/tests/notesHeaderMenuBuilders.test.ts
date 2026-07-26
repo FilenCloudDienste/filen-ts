@@ -130,8 +130,8 @@ vi.mock("@/components/ui/view", () => ({
 	SafeAreaView: () => null
 }))
 
-vi.mock("expo-document-picker", () => ({
-	getDocumentAsync: vi.fn()
+vi.mock("@/lib/documentPicker", () => ({
+	pickDocuments: vi.fn()
 }))
 
 vi.mock("expo-file-system", () => ({

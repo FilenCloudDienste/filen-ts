@@ -4,11 +4,11 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // Hoisted mocks (must be defined before any imports)
 // ------------------------------------------------------------------
 
-const { mockTransfersUpload, mockAlertsError, mockAlertsNormal, mockGetDocumentAsync } = vi.hoisted(() => ({
+const { mockTransfersUpload, mockAlertsError, mockAlertsNormal, mockPickDocuments } = vi.hoisted(() => ({
 	mockTransfersUpload: vi.fn(),
 	mockAlertsError: vi.fn(),
 	mockAlertsNormal: vi.fn(),
-	mockGetDocumentAsync: vi.fn()
+	mockPickDocuments: vi.fn()
 }))
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
@@ -30,8 +30,8 @@ vi.mock("@filen/sdk-rs", () => ({
 	AnyNormalDir: class {}
 }))
 
-vi.mock("expo-document-picker", () => ({
-	getDocumentAsync: mockGetDocumentAsync
+vi.mock("@/lib/documentPicker", () => ({
+	pickDocuments: mockPickDocuments
 }))
 
 vi.mock("expo-image-picker", () => ({
@@ -217,9 +217,9 @@ describe("useDriveUpload reportTransferResults wiring (C2)", () => {
 	const drivePath = { type: "drive", uuid: null } as unknown as DrivePath
 
 	function primePicker(assetUris: string[]): void {
-		mockGetDocumentAsync.mockResolvedValue({
+		mockPickDocuments.mockResolvedValue({
 			canceled: false,
-			assets: assetUris.map(uri => ({
+			documents: assetUris.map(uri => ({
 				uri,
 				name: uri.split("/").pop() ?? "file",
 				lastModified: 1000,
@@ -237,7 +237,7 @@ describe("useDriveUpload reportTransferResults wiring (C2)", () => {
 		mockTransfersUpload.mockReset()
 		mockAlertsError.mockClear()
 		mockAlertsNormal.mockClear()
-		mockGetDocumentAsync.mockReset()
+		mockPickDocuments.mockReset()
 	})
 
 	it("an all-aborted batch shows NO success toast and NO error banner", async () => {

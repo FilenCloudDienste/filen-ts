@@ -30,6 +30,12 @@ const NO_EXPO_ROUTER_NAV_IMPORT = {
 		"Import { router } from '@/lib/router' — the guarded drop-in that dedupes double-fired navigation. Don't import router/useRouter from expo-router directly."
 }
 
+const NO_DOCUMENT_PICKER_IMPORT = {
+	name: "expo-document-picker",
+	message:
+		"Import { pickDocuments } from '@/lib/documentPicker' — it owns the withSystemPresentation wrapping and the per-platform copyToCacheDirectory setting. Don't call expo-document-picker directly."
+}
+
 export default [
 	js.configs.recommended,
 	...compat.extends(
@@ -97,7 +103,7 @@ export default [
 			"no-restricted-imports": [
 				"error",
 				{
-					paths: [NO_EXPO_ROUTER_NAV_IMPORT],
+					paths: [NO_EXPO_ROUTER_NAV_IMPORT, NO_DOCUMENT_PICKER_IMPORT],
 					patterns: [".*"]
 				}
 			],
@@ -136,7 +142,7 @@ export default [
 			"no-restricted-imports": [
 				"error",
 				{
-					paths: [NO_EXPO_ROUTER_NAV_IMPORT],
+					paths: [NO_EXPO_ROUTER_NAV_IMPORT, NO_DOCUMENT_PICKER_IMPORT],
 					patterns: [
 						{
 							group: [".*"]
@@ -154,12 +160,29 @@ export default [
 	{
 		// The guarded router itself is the one sanctioned site that imports expo-router's navigation
 		// singleton — it wraps it. Keep the project-wide relative-import ban; lift only the expo-router
-		// navigation restriction here.
+		// navigation restriction here. Overrides REPLACE rule options rather than merging, so every
+		// restriction that should still apply has to be restated.
 		files: ["src/lib/router.ts"],
 		rules: {
 			"no-restricted-imports": [
 				"error",
 				{
+					paths: [NO_DOCUMENT_PICKER_IMPORT],
+					patterns: [".*"]
+				}
+			]
+		}
+	},
+	{
+		// The document-picker wrapper is the one sanctioned site that imports expo-document-picker —
+		// it wraps it. Same replace-not-merge caveat as above: restate everything except the ban
+		// being lifted.
+		files: ["src/lib/documentPicker.ts"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					paths: [NO_EXPO_ROUTER_NAV_IMPORT],
 					patterns: [".*"]
 				}
 			]
