@@ -912,6 +912,57 @@ describe("buildNotesHeaderRightItems", () => {
 			expect(notesViewSub?.checked).toBe(true)
 		})
 
+		it("offers all three views, offline last", () => {
+			const items = buildNotesHeaderRightItems({
+				...defaultParams(),
+				notesViewMode: "notes",
+				tag: null,
+				selectedNotes: [],
+				selectedTags: []
+			})
+			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const viewModeBtn = buttons.find(b => b.id === "viewMode")
+
+			expect(viewModeBtn?.subButtons?.map(sub => sub.id)).toEqual(["notesView", "tagsView", "offlineView"])
+		})
+
+		it("offlineView subButton has checked:true when notesViewMode='offline'", () => {
+			const items = buildNotesHeaderRightItems({
+				...defaultParams(),
+				notesViewMode: "offline",
+				tag: null,
+				selectedNotes: [],
+				selectedTags: []
+			})
+			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const viewModeBtn = buttons.find(b => b.id === "viewMode")
+			const offlineViewSub = viewModeBtn?.subButtons?.find(s => s.id === "offlineView")
+
+			expect(offlineViewSub?.checked).toBe(true)
+			expect(viewModeBtn?.subButtons?.find(s => s.id === "notesView")?.checked).toBe(false)
+		})
+
+		// The parent entry's icon is the at-a-glance signal for which view is active, so it has to
+		// distinguish all three rather than falling back to the notes icon for anything non-tags.
+		it("reflects the active view in the parent icon", () => {
+			function iconFor(notesViewMode: "notes" | "tags" | "offline") {
+				const items = buildNotesHeaderRightItems({
+					...defaultParams(),
+					notesViewMode,
+					tag: null,
+					selectedNotes: [],
+					selectedTags: []
+				})
+				const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+
+				return buttons.find(b => b.id === "viewMode")?.icon
+			}
+
+			expect(iconFor("notes")).toBe("list")
+			expect(iconFor("tags")).toBe("tag")
+			expect(iconFor("offline")).toBe("download")
+		})
+
 		it("tagsView subButton has checked:true when notesViewMode='tags'", () => {
 			const items = buildNotesHeaderRightItems({
 				...defaultParams(),

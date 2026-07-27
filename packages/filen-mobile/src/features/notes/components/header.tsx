@@ -12,7 +12,7 @@ import { useSecureStore } from "@/lib/secureStore"
 import { useStringifiedClient } from "@/lib/auth"
 import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
 import { useTranslation } from "react-i18next"
-import { buildNotesHeaderRightItems } from "@/features/notes/components/notesHeaderMenuBuilders"
+import { buildNotesHeaderRightItems, type NotesViewMode } from "@/features/notes/components/notesHeaderMenuBuilders"
 import { useNotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import { type DataItem as NoteDataItem } from "@/features/notes/components/note"
 import { type NoteTag } from "@/types"
@@ -39,7 +39,7 @@ export const Header = ({
 	const selectedNotes = useNotesStore(useShallow(state => state.selectedNotes))
 	const selectedTags = useNotesStore(useShallow(state => state.selectedTags))
 	const markedOffline = useNotesOfflineStore(useShallow(state => state.marked))
-	const [notesViewMode, setNotesViewMode] = useSecureStore<"notes" | "tags">("notesViewMode", "notes")
+	const [notesViewMode, setNotesViewMode] = useSecureStore<NotesViewMode>("notesViewMode", "notes")
 	const [tagsSortBy, setTagsSortBy] = useNotesTagsSortBy()
 	const { tagUuid } = useLocalSearchParams<{
 		tagUuid?: string
@@ -135,7 +135,7 @@ export const Header = ({
 	})()
 
 	const title = (() => {
-		if (viewMode === "notes") {
+		if (viewMode === "notes" || viewMode === "offline") {
 			if (selectedNotes.length > 0) {
 				return t("selected", { count: selectedNotes.length })
 			}
@@ -144,7 +144,7 @@ export const Header = ({
 				return tag.name ?? tag.uuid
 			}
 
-			return t("notes")
+			return viewMode === "offline" ? t("offline_view") : t("notes")
 		} else {
 			if (selectedTags.length > 0) {
 				return t("selected", { count: selectedTags.length })
@@ -163,7 +163,7 @@ export const Header = ({
 			shadowVisible={false}
 			searchBarOptions={{
 				placement: "integratedButton",
-				placeholder: viewMode === "notes" ? t("search_notes") : t("search_tags"),
+				placeholder: viewMode === "tags" ? t("search_tags") : t("search_notes"),
 				onChangeText: e => setSearchQuery(e.nativeEvent.text),
 				onCancelButtonPress: () => setSearchQuery(""),
 				onClose: () => setSearchQuery(""),

@@ -133,6 +133,17 @@ export function filterNotesByBlockedOwner(notes: readonly Note[], blocked: Block
 	return notes.filter(note => !blocked.userIds.has(note.ownerId))
 }
 
+/**
+ * Narrows the list to the notes kept on the device, for the offline view.
+ *
+ * Membership is the offline ledger's projection, not a property of the note — so a note leaving the
+ * ledger leaves this list, which is what the offline view's selection purge keys off. Pure (no
+ * React/store reads) so the rule is testable without the store.
+ */
+export function filterNotesMarkedOffline(notes: readonly Note[], markedOffline: Record<string, true>): Note[] {
+	return notes.filter(note => markedOffline[note.uuid] === true)
+}
+
 // ── Virtual "Untagged" tag (#84) ─────────────────────────────────────────────
 //
 // The tags view builds its rows from real NoteTags, so notes without any tag were invisible

@@ -12,7 +12,7 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-import { filterNotesByBlockedOwner } from "@/features/notes/utils"
+import { filterNotesByBlockedOwner, filterNotesMarkedOffline } from "@/features/notes/utils"
 import { deriveBlockedUsers } from "@/features/contacts/blockedSelectors"
 import { type Note } from "@/types"
 
@@ -33,5 +33,31 @@ describe("filterNotesByBlockedOwner", () => {
 		const result = filterNotesByBlockedOwner([note(1n, "mine")], blocked)
 
 		expect(result.map(n => n.uuid)).toEqual(["mine"])
+	})
+})
+
+describe("filterNotesMarkedOffline", () => {
+	it("keeps only the notes the ledger says are kept on the device", () => {
+		const result = filterNotesMarkedOffline([note(1n, "a"), note(1n, "b"), note(1n, "c")], { a: true, c: true })
+
+		expect(result.map(n => n.uuid)).toEqual(["a", "c"])
+	})
+
+	it("is empty when nothing is marked — the offline view's empty state", () => {
+		expect(filterNotesMarkedOffline([note(1n, "a")], {})).toEqual([])
+	})
+
+	// Membership is the ledger's, not the note's: a stale entry for a note that is no longer in the
+	// list simply matches nothing rather than conjuring a row.
+	it("ignores ledger entries with no corresponding note", () => {
+		expect(filterNotesMarkedOffline([note(1n, "a")], { a: true, gone: true }).map(n => n.uuid)).toEqual(["a"])
+	})
+
+	it("does not mutate the input", () => {
+		const notes = [note(1n, "a"), note(1n, "b")]
+
+		filterNotesMarkedOffline(notes, { a: true })
+
+		expect(notes).toHaveLength(2)
 	})
 })

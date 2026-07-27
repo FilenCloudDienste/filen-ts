@@ -32,6 +32,8 @@ export const notes = {
 	notes_view: "Notes",
 	/** View-mode submenu entry: show notes grouped by tag */
 	tags_view: "Tags",
+	/** View-mode submenu entry, and list title: show only the notes kept on this device */
+	offline_view: "Offline",
 
 	// ── Note-type labels (canonical — used by both static and dynamic paths) ──
 	/** Note type: plain text */
@@ -220,6 +222,10 @@ export const notes = {
 	// ── Empty-state subtitles (ListEmpty descriptions) ────────────────────────
 	/** Notes list — empty-state subtitle when no notes exist yet */
 	no_notes_description: "Create a note to get started.",
+	/** Offline view — empty-state title when the user has not kept any note on the device */
+	no_offline_notes: "No offline notes",
+	/** Offline view — empty-state subtitle explaining how a note gets here */
+	no_offline_notes_description: "Notes you make available offline stay readable without a connection, and appear here.",
 	/** Tags — empty-state subtitle when no tags exist yet */
 	no_tags_description: "Create tags to organize your notes.",
 	/** Note history — empty-state subtitle when the note has no past versions */

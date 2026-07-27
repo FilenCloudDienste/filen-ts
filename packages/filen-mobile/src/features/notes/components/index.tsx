@@ -17,6 +17,8 @@ import Note, { type ListItem as NoteListItem, type DataItem as NoteDataItem } fr
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import useNotesTagsQuery from "@/features/notes/queries/useNotesTags.query"
 import { useSecureStore } from "@/lib/secureStore"
+import { useShallow } from "zustand/shallow"
+import { type NotesViewMode } from "@/features/notes/components/notesHeaderMenuBuilders"
 import Tag from "@/features/notes/components/tag"
 import { useTranslation } from "react-i18next"
 import Header from "@/features/notes/components/header"
@@ -24,6 +26,7 @@ import {
 	filterNoteListItemsBySearchQuery,
 	filterNoteTagsBySearchQuery,
 	filterNotesByBlockedOwner,
+	filterNotesMarkedOffline,
 	filterUntaggedNotes,
 	withUntaggedTag,
 	createUntaggedTag,
@@ -32,6 +35,7 @@ import {
 } from "@/features/notes/utils"
 import { LazyWrapper } from "@/components/lazyWrapper"
 import useIsOnline from "@/hooks/useIsOnline"
+import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import logger from "@/lib/logger"
 
@@ -40,7 +44,7 @@ const Notes = () => {
 	const isOnline = useIsOnline()
 	const notesQuery = useNotesQuery()
 	const blocked = useBlockedUsers()
-	const [notesViewMode] = useSecureStore<"notes" | "tags">("notesViewMode", "notes")
+	const [notesViewMode] = useSecureStore<NotesViewMode>("notesViewMode", "notes")
 	const [tagsSortBy] = useNotesTagsSortBy()
 	const { tagUuid } = useLocalSearchParams<{
 		tagUuid?: string
@@ -68,6 +72,12 @@ const Notes = () => {
 
 	const isUntaggedScreen = tag !== null && isUntaggedTagUuid(tag.uuid)
 
+	// A tag screen always shows that tag's notes — the offline/tags preference belongs to the root
+	// list, not to a drilled-in tag. Derived here rather than lower down because it now selects which
+	// notes the list is built from, not just which list renders.
+	const viewMode = tag ? "notes" : notesViewMode
+	const markedOffline = useNotesOfflineStore(useShallow(state => state.marked))
+
 	// #84: notes without any tag, blocked-filtered like every other listing. Feeds the virtual
 	// "Untagged" row (count/activity/inflight) and the sentinel-filtered screen.
 	const untaggedNotes = ((): TNote[] => {
@@ -83,10 +93,16 @@ const Notes = () => {
 			return []
 		}
 
+		const visible = filterNotesByBlockedOwner(notesQuery.data, blocked)
+
 		const grouped = notesSorter.group({
 			// The virtual tag cannot go through group()'s uuid-based tag filter — pre-filter
 			// to the untagged set instead and group untagged.
-			notes: isUntaggedScreen ? untaggedNotes : filterNotesByBlockedOwner(notesQuery.data, blocked),
+			//
+			// The offline view is the same list narrowed to the ledger, so it keeps the identical
+			// grouping (pinned / favorited / time buckets) rather than inventing a second layout —
+			// what changes is which notes are in it, not how they read.
+			notes: isUntaggedScreen ? untaggedNotes : viewMode === "offline" ? filterNotesMarkedOffline(visible, markedOffline) : visible,
 			groupArchived: true,
 			groupTrashed: true,
 			groupFavorited: true,
@@ -112,6 +128,24 @@ const Notes = () => {
 			useNotesStore.getState().setSelectedNotes(kept)
 		}
 	}, [blocked])
+
+	// Same purge for the offline view, whose membership IS the ledger: a note that stops being kept
+	// on the device leaves the list, so it must leave the selection with it. Reachable when a bulk
+	// removal fails partway — runBulk is fail-fast and deliberately keeps the selection so the user
+	// can retry, but the notes it already un-marked are gone from this list, and without this the
+	// header would count rows that are no longer on screen.
+	useEffect(() => {
+		if (viewMode !== "offline") {
+			return
+		}
+
+		const selected = useNotesStore.getState().selectedNotes
+		const kept = selected.filter(note => markedOffline[note.uuid] === true)
+
+		if (kept.length !== selected.length) {
+			useNotesStore.getState().setSelectedNotes(kept)
+		}
+	}, [viewMode, markedOffline])
 
 	// Built before notesTags: the tags sort (by "last activity" / note count) reads this index.
 	const notesForTag = (() => {
@@ -195,8 +229,6 @@ const Notes = () => {
 		}
 	}
 
-	const viewMode = tag ? "notes" : notesViewMode
-
 	useFocusEffect(
 		useCallback(() => {
 			useNotesStore.getState().clearSelectedNotes()
@@ -254,6 +286,26 @@ const Notes = () => {
 	}, [liveNoteUuidsKey])
 
 	const searchActive = searchQuery.trim().length > 0
+
+	const offlineEmptyComponent = () => {
+		if (searchActive) {
+			return (
+				<ListEmpty
+					icon="search-outline"
+					title={t("no_results")}
+					description={t("no_results_description")}
+				/>
+			)
+		}
+
+		return (
+			<ListEmpty
+				icon="download-outline"
+				title={t("no_offline_notes")}
+				description={t("no_offline_notes_description")}
+			/>
+		)
+	}
 
 	const notesEmptyComponent = () => {
 		if (searchActive) {
@@ -325,7 +377,7 @@ const Notes = () => {
 			/>
 			<SafeAreaView edges={["left", "right"]}>
 				<LazyWrapper>
-					{viewMode === "notes" ? (
+					{viewMode !== "tags" ? (
 						<VirtualList
 							className="flex-1"
 							contentInsetAdjustmentBehavior="automatic"
@@ -335,7 +387,7 @@ const Notes = () => {
 							renderItem={renderItemNotesView}
 							loading={notesQuery.status !== "success"}
 							onRefresh={onRefresh}
-							emptyComponent={notesEmptyComponent}
+							emptyComponent={viewMode === "offline" ? offlineEmptyComponent : notesEmptyComponent}
 						/>
 					) : (
 						<VirtualList

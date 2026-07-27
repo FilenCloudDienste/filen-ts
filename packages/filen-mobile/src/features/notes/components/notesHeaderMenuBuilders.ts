@@ -27,7 +27,12 @@ import { useResolveClassNames } from "uniwind"
 import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
 import logger from "@/lib/logger"
 
-type NotesViewMode = "notes" | "tags"
+/**
+ * Which list the notes tab renders. "offline" shows the same note rows as "notes", narrowed to the
+ * notes kept on the device — the only way to see, audit and bulk-manage that set, since the badges
+ * are otherwise scattered through the full list.
+ */
+export type NotesViewMode = "notes" | "tags" | "offline"
 
 // Sort picker for the tags view, mirroring the drive header's buildSortMenuButton structure.
 // buildSortFieldButton keeps each field's directions as a nested submenu on iOS and collapses them
@@ -709,7 +714,7 @@ export function buildNotesHeaderRightItems({
 		menuButtons.push({
 			id: "viewMode",
 			title: t("view_mode"),
-			icon: notesViewMode === "notes" ? "list" : "tag",
+			icon: notesViewMode === "tags" ? "tag" : notesViewMode === "offline" ? "download" : "list",
 			subButtons: [
 				{
 					title: t("notes_view"),
@@ -733,6 +738,18 @@ export function buildNotesHeaderRightItems({
 						useNotesStore.getState().clearSelectedTags()
 
 						setNotesViewMode("tags")
+					}
+				},
+				{
+					title: t("offline_view"),
+					id: "offlineView",
+					icon: "download",
+					checked: notesViewMode === "offline",
+					onPress: () => {
+						useNotesStore.getState().clearSelectedNotes()
+						useNotesStore.getState().clearSelectedTags()
+
+						setNotesViewMode("offline")
 					}
 				}
 			]
