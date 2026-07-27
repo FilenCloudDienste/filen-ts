@@ -177,7 +177,15 @@ export class Sync {
 						}
 
 						try {
-							contentByUuid.set(noteUuid, (await notes.getContent({ note, signal })) ?? "")
+							const cloudContent = await notes.getContent({ note, signal })
+
+							// `undefined` means the body EXISTS but could not be decrypted — an empty
+							// note returns "". Coalescing it to "" would make the prune below read a
+							// deliberate "I cleared this note" draft as already-synced and discard it.
+							// Treat it like a failed fetch: keep the entry, let the next pass decide.
+							if (typeof cloudContent === "string") {
+								contentByUuid.set(noteUuid, cloudContent)
+							}
 						} catch (e) {
 							logger.warn("notes-sync", "restore reconcile: getContent failed; keeping inflight entry", {
 								noteUuid,

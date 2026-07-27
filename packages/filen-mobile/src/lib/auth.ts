@@ -32,6 +32,7 @@ import audioCache from "@/features/audio/audioCache"
 import thumbnails from "@/lib/thumbnails"
 import sandboxCache from "@/lib/sandboxCache"
 import logger from "@/lib/logger"
+import { queryClientPersisterKv } from "@/queries/client"
 import driveSearch from "@/features/drive/driveSearch"
 import drive from "@/features/drive/drive"
 import events from "@/lib/events"
@@ -494,6 +495,17 @@ class Auth {
 			notesOffline.clearForLogout()
 		} catch (e) {
 			logger.error("auth", "offline-notes ledger clear failed during logout", { err: e })
+		}
+
+		// Drop the query persister's in-memory buffer and dirty sets BEFORE the kv wipe below. Its
+		// writes go through executeBatch, which bypasses sqlite's clearGeneration guard, and nothing
+		// cancels its debounce — so an update landing within the debounce window of a logout could
+		// otherwise re-insert rows AFTER the DELETE, where the next boot's restore picks them up.
+		// Every optimistic update has had this window; note bodies now flow through it too.
+		try {
+			queryClientPersisterKv.clear()
+		} catch (e) {
+			logger.error("auth", "query persister buffer clear failed during logout", { err: e })
 		}
 
 		// Diagnostic logs hold decrypted-at-rest data (file/dir names, paths) by design — wipe them

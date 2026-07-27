@@ -92,6 +92,15 @@ vi.mock("@/features/chats/components/sync", () => ({
 	SyncHost: vi.fn()
 }))
 
+// auth now clears the query persister's buffer before the kv wipe; queries/client reaches SQLite.
+vi.mock("@/queries/client", () => ({
+	queryClientPersisterKv: {
+		clear: vi.fn(() => {
+			callLog.push("queryClientPersisterKv.clear")
+		})
+	}
+}))
+
 // notesOffline reaches SQLite; stubbed wholesale so this suite stays free of native modules.
 vi.mock("@/features/notes/notesOffline", () => ({
 	default: {
@@ -102,6 +111,7 @@ vi.mock("@/features/notes/notesOffline", () => ({
 		mark: vi.fn(async () => undefined),
 		unmark: vi.fn(async () => undefined),
 		refreshAfterRemoteEdit: vi.fn(async () => undefined),
+		forget: vi.fn(async () => undefined),
 		clearForLogout: vi.fn(() => {
 			callLog.push("notesOffline.clearForLogout")
 		})
@@ -493,6 +503,17 @@ describe("auth.logout", () => {
 
 		if (kvWipeIdx > -1) {
 			expect(notesLedgerClearIdx).toBeLessThan(kvWipeIdx)
+		}
+
+		// The persister's writes bypass sqlite's wipe generation and nothing cancels its debounce, so
+		// its buffer must be emptied BEFORE the kv wipe or a write landing in that window re-inserts
+		// decrypted rows after the DELETE, where the next boot restores them.
+		const persisterClearIdx = callLog.indexOf("queryClientPersisterKv.clear")
+
+		expect(persisterClearIdx).toBeGreaterThan(-1)
+
+		if (kvWipeIdx > -1) {
+			expect(persisterClearIdx).toBeLessThan(kvWipeIdx)
 		}
 
 		// Cancelled in the same phase as the other engines, so its in-flight SDK calls observe a

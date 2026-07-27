@@ -57,6 +57,15 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
+// socketHandlers now reclaims a deleted note's cached body; both of these reach SQLite.
+vi.mock("@/queries/client", () => ({
+	removeQueryEverywhere: vi.fn()
+}))
+
+vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
+	noteContentQueryKey: ({ uuid }: { uuid: string }) => ["useNoteContentQuery", { uuid }]
+}))
+
 // notesOffline reaches SQLite; stubbed wholesale so this suite stays free of native modules.
 vi.mock("@/features/notes/notesOffline", () => ({
 	default: {
@@ -65,6 +74,7 @@ vi.mock("@/features/notes/notesOffline", () => ({
 		mark: vi.fn(async () => undefined),
 		unmark: vi.fn(async () => undefined),
 		refreshAfterRemoteEdit: vi.fn(async () => undefined),
+		forget: vi.fn(async () => undefined),
 		clearForLogout: vi.fn()
 	}
 }))

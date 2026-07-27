@@ -568,6 +568,28 @@ export class NotesOffline {
 	}
 
 	/**
+	 * Drops the ledger row for a note that no longer exists, without touching its body — the caller
+	 * has already reclaimed that. Distinct from `unmark`, which is the user choosing to stop keeping a
+	 * note they still have: there is nothing to defer, nothing to retry, and no failure to surface.
+	 *
+	 * Never throws: this runs from the socket dispatcher.
+	 */
+	public async forget({ uuid }: { uuid: string }): Promise<void> {
+		if (this.locked) {
+			return
+		}
+
+		await this.load()
+
+		if (!this.marked.has(uuid)) {
+			return
+		}
+
+		await this.deleteEntry(uuid)
+		await this.dropPendingEviction(uuid)
+	}
+
+	/**
 	 * Evicts one note's cached body, or defers it when doing so now would disturb live state.
 	 *
 	 * Deferred when the note is on screen or carries unsynced edits. The inflight case is the sharp
@@ -696,6 +718,12 @@ export class NotesOffline {
 
 				removeQueryEverywhere(noteContentQueryKey({ uuid }))
 
+				// Force the buffered delete to disk BEFORE dropping the queue row — the same ordering
+				// evictContent flushes for. The queue row is the only remaining record that this body
+				// owes removal, so retiring it while the delete is still sitting in the persister's
+				// debounce is exactly how a kill strands an unreclaimable decrypted body.
+				await queryClientPersisterKv.flushNow()
+
 				await sqlite.kvAsync.remove(PENDING_EVICTION_PREFIX + uuid)
 			}
 		})
@@ -751,9 +779,10 @@ export class NotesOffline {
 		// (components/sync), so a collaborator typing in a shared note emits a ContentEdited every few
 		// seconds — and every one of them lands a full body download here. The semaphore bounds
 		// concurrency, not volume: ten minutes of co-editing is ~200 downloads for a note the user may
-		// never have marked and is not looking at. One in-flight refresh per note, and a later event
-		// arriving during it is answered by re-reading the note after the fetch rather than by a second
-		// round trip.
+		// never have marked and is not looking at. One in-flight refresh per note; an event arriving
+		// during that fetch is dropped rather than queued, so a marked note converges via its ledger
+		// stamp on the next pass and an unmarked-but-cached one stays one edit stale until it is
+		// opened or edited again.
 		if (this.refreshing.has(note.uuid)) {
 			return
 		}
@@ -989,8 +1018,13 @@ export class NotesOffline {
 
 				// The note is gone from the account, so its body is dead weight regardless of whether
 				// the user ever un-marked it. Evict first, then drop the row — same ordering rationale
-				// as unmark().
-				await this.evictContent(uuid)
+				// as unmark(), including keeping the row when the eviction could not even be recorded.
+				// Dropping it anyway would strand a persisted decrypted body that nothing owns; keeping
+				// it costs one retry on the next pass, since the note stays absent from the listing.
+				if (!(await this.evictContent(uuid))) {
+					continue
+				}
+
 				await this.deleteEntry(uuid)
 			}
 

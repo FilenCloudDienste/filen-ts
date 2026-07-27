@@ -135,7 +135,10 @@ export const Header = ({
 	})()
 
 	const title = (() => {
-		if (viewMode === "notes" || viewMode === "offline") {
+		// `!== "tags"` rather than a positive list: adding a member to a ===-compared union produces no
+		// type error anywhere, so a positive list silently stops matching a new view while a negative
+		// one keeps working. That is exactly how the offline view lost its header menu.
+		if (viewMode !== "tags") {
 			if (selectedNotes.length > 0) {
 				return t("selected", { count: selectedNotes.length })
 			}

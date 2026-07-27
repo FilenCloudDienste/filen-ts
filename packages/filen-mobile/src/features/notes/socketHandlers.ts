@@ -8,7 +8,8 @@ import {
 import events from "@/lib/events"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import notesOffline from "@/features/notes/notesOffline"
-import auth from "@/lib/auth"
+import { noteContentQueryKey } from "@/features/notes/queries/useNoteContent.query"
+import { removeQueryEverywhere } from "@/queries/client"
 import logger from "@/lib/logger"
 
 export type NoteSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Note }>
@@ -46,6 +47,18 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 			// selection count, break the select-all toggle, or cause bulk ops to call
 			// the SDK with a non-existent UUID (#42).
 			useNotesStore.getState().setSelectedNotes(prev => prev.filter(n => n.uuid !== inner.note))
+
+			// Same reclaim the local delete/leave paths do: the account no longer has this note, so
+			// holding its decrypted body in memory and in the persisted cache is retention of data
+			// that is gone. Without this only MARKED notes converged (via the sync pass's prune) —
+			// a note merely opened once kept its plaintext body until logout or the cache TTL.
+			removeQueryEverywhere(noteContentQueryKey({ uuid: inner.note }))
+
+			// The ledger must let go too, or the note stays badged and the pass keeps trying to
+			// refresh a note the account does not have.
+			notesOffline.forget({ uuid: inner.note }).catch((e: unknown) => {
+				logger.warn("notes", "could not drop the offline ledger row for a deleted note", { noteUuid: inner.note, error: e })
+			})
 
 			break
 		}
@@ -214,24 +227,31 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 			// carries the new content, but as MaybeEncryptedStatic, so the refresh re-fetches through
 			// the SDK rather than opening a second decryption path here.
 			//
-			// Our OWN edits need no refresh: components/sync writes the pushed content into the cache
-			// as part of the push, so a fetch here would be a round trip to confirm what we just wrote.
-			if (inner.editorId !== auth.currentUserId()) {
-				notesOffline
-					.refreshAfterRemoteEdit({
-						// The event's OWN edit stamp, not the cached note's. The list entry still
-						// carries the pre-edit value, and stamping the ledger with that would make
-						// every pass consider the freshly-fetched body stale and re-fetch it — two
-						// full downloads for every remote edit, forever.
-						note: {
-							...note,
-							editedTimestamp: inner.editedTimestamp
-						}
-					})
-					.catch((e: unknown) => {
-						logger.warn("notes", "refresh after remote content edit failed", { noteUuid: inner.note, error: e })
-					})
-			}
+			// Deliberately NOT gated on `editorId !== auth.currentUserId()`. `editorId` is a USER id, not
+			// a device id, so that test also suppresses an edit this account made on ANOTHER device —
+			// which is the single most common way a marked note goes stale, and precisely what this
+			// refresh exists to catch. The "we already wrote it during the push" rationale only holds
+			// for the device that pushed; on every other device the cache was never written.
+			//
+			// The cost of not filtering is one redundant fetch after the pushing device's own editing
+			// session (while it is still typing the note is open, so nothing fires), and commitContent
+			// no-ops an identical body — it even advances the ledger stamp early, saving a fetch on the
+			// next pass. The reload PROMPT above keeps its own-user filter: that one is about not
+			// interrupting the person typing.
+			notesOffline
+				.refreshAfterRemoteEdit({
+					// The event's OWN edit stamp, not the cached note's. The list entry still carries
+					// the pre-edit value, and stamping the ledger with that would make every pass
+					// consider the freshly-fetched body stale and re-fetch it — two full downloads
+					// for every remote edit, forever.
+					note: {
+						...note,
+						editedTimestamp: inner.editedTimestamp
+					}
+				})
+				.catch((e: unknown) => {
+					logger.warn("notes", "refresh after remote content edit failed", { noteUuid: inner.note, error: e })
+				})
 
 			break
 		}

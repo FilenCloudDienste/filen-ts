@@ -46,7 +46,7 @@ vi.mock("@/features/notes/notesOffline", () => ({
 	default: {
 		sync: vi.fn(async () => undefined),
 		cancel: vi.fn(),
-		mark: vi.fn(async () => undefined),
+		mark: vi.fn(async () => ({ committed: true })),
 		unmark: vi.fn(async () => undefined),
 		refreshAfterRemoteEdit: vi.fn(async () => undefined),
 		clearForLogout: vi.fn()

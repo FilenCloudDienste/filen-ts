@@ -320,6 +320,38 @@ export function buildNotesHeaderRightItems({
 		}
 
 		if (selectedNotes.length > 0) {
+			// Uuid-only, so it lives OUTSIDE the undecryptable gate below with trash/delete/leave: a
+			// note that became undecryptable after being marked must still be removable, or its badge
+			// and cached body are stuck for good.
+			const markedSelection = selectedNotesLive.filter(n => markedOffline[n.uuid] === true)
+
+			if (markedSelection.length > 0) {
+				menuButtons.push({
+					id: "bulkRemoveOffline",
+					title: t("remove_offline_selected"),
+					icon: "trash",
+					destructive: true,
+					onPress: async () => {
+						// Confirmed, unlike the single-note action: one mis-tap here can undo fifty
+						// marks, and re-marking them is fifty menu round trips. Nothing is destroyed
+						// either way — the notes stay in the cloud — so the prompt is about effort,
+						// not danger.
+						await runBulk({
+							items: markedSelection,
+							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+							confirm: {
+								title: t("remove_offline_selected"),
+								message: t("confirm_remove_notes_offline_selected"),
+								okText: t("remove_offline_selected"),
+								cancelText: t("cancel"),
+								destructive: true
+							},
+							op: n => notesOffline.unmark({ uuid: n.uuid })
+						})
+					}
+				})
+			}
+
 			// Non-destructive bulk actions (pin / favorite / type / tag / duplicate /
 			// export) need decrypted metadata. Hide them when any selected note is
 			// undecryptable. Trash / delete / restore-from-trash / leave appear below
@@ -358,7 +390,6 @@ export function buildNotesHeaderRightItems({
 				// access — keeping a copy is a read, and a read-only share is a perfectly reasonable
 				// thing to want on a plane.
 				const notMarked = selectedNotesLive.filter(n => markedOffline[n.uuid] !== true)
-				const marked = selectedNotesLive.filter(n => markedOffline[n.uuid] === true)
 
 				if (notMarked.length > 0) {
 					menuButtons.push({
@@ -375,33 +406,6 @@ export function buildNotesHeaderRightItems({
 								items: notMarked,
 								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
 								op: n => notesOffline.mark({ note: n })
-							})
-						}
-					})
-				}
-
-				if (marked.length > 0) {
-					menuButtons.push({
-						id: "bulkRemoveOffline",
-						title: t("remove_offline_selected"),
-						icon: "trash",
-						destructive: true,
-						onPress: async () => {
-							// Confirmed, unlike the single-note action: one mis-tap here can undo fifty
-							// marks, and re-marking them is fifty menu round trips. Nothing is destroyed
-							// either way — the notes stay in the cloud — so the prompt is about effort,
-							// not danger.
-							await runBulk({
-								items: marked,
-								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-								confirm: {
-									title: t("remove_offline_selected"),
-									message: t("confirm_remove_notes_offline_selected"),
-									okText: t("remove_offline_selected"),
-									cancelText: t("cancel"),
-									destructive: true
-								},
-								op: n => notesOffline.unmark({ uuid: n.uuid })
 							})
 						}
 					})

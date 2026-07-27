@@ -36,6 +36,7 @@ import {
 import { LazyWrapper } from "@/components/lazyWrapper"
 import useIsOnline from "@/hooks/useIsOnline"
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
+import notesOffline from "@/features/notes/notesOffline"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import logger from "@/lib/logger"
 
@@ -77,6 +78,9 @@ const Notes = () => {
 	// notes the list is built from, not just which list renders.
 	const viewMode = tag ? "notes" : notesViewMode
 	const markedOffline = useNotesOfflineStore(useShallow(state => state.marked))
+	// String key rather than the array itself: the store hands back a fresh array identity on every
+	// update, which would re-run the purge on unrelated churn.
+	const selectedNoteUuidsKey = useNotesStore(state => state.selectedNotes.map(note => note.uuid).join(","))
 
 	// #84: notes without any tag, blocked-filtered like every other listing. Feeds the virtual
 	// "Untagged" row (count/activity/inflight) and the sentinel-filtered screen.
@@ -145,7 +149,11 @@ const Notes = () => {
 		if (kept.length !== selected.length) {
 			useNotesStore.getState().setSelectedNotes(kept)
 		}
-	}, [viewMode, markedOffline])
+		// `selectedNotes` is in the deps so a selection WRITE is re-checked too, not just a ledger
+		// change: the native header menu snapshots its closure when it opens, so "Select all" can
+		// write a row that stopped being marked while the menu was up. The length guard makes the
+		// re-run a no-op once converged, so this cannot loop.
+	}, [viewMode, markedOffline, selectedNoteUuidsKey])
 
 	// Built before notesTags: the tags sort (by "last activity" / note count) reads this index.
 	const notesForTag = (() => {
@@ -220,7 +228,14 @@ const Notes = () => {
 		}
 
 		const result = await run(async () => {
-			await Promise.all([notesQuery.refetch(), notesTagsQuery.refetch()])
+			await Promise.all([
+				notesQuery.refetch(),
+				notesTagsQuery.refetch(),
+				// In the offline view "refresh" means "make my offline copies current", not just
+				// "re-check which notes are in the list". force bypasses the min-interval floor, which
+				// exists to absorb app-switcher flips and would otherwise swallow a deliberate pull.
+				viewMode === "offline" ? notesOffline.sync({ force: true }) : Promise.resolve()
+			])
 		})
 
 		if (!result.success) {

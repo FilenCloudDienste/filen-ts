@@ -548,9 +548,11 @@ describe("buildNotesHeaderRightItems", () => {
 			expect(idsFor([makeNote({ uuid: "a" })], {})).not.toContain("bulkRemoveOffline")
 		})
 
-		// A note we hold no key for can only ever yield an undecryptable body. It shares the
-		// undecryptable gate with the other metadata-dependent bulk actions.
-		it("offers neither when the selection includes an undecryptable note", () => {
+		// Marking needs a decryptable body, so it shares the undecryptable gate with the other
+		// metadata-dependent bulk actions. REMOVAL does not: it is uuid-only, exactly like
+		// trash/delete/leave, and a note that became undecryptable AFTER being marked would otherwise
+		// have a badge and a cached body with no way to get rid of either.
+		it("still offers removal for an undecryptable selection, but not marking", () => {
 			const selected = [makeNote({ uuid: "a", undecryptable: true })]
 			const ids = topLevelIds(
 				buildNotesHeaderRightItems({
@@ -564,7 +566,7 @@ describe("buildNotesHeaderRightItems", () => {
 			)
 
 			expect(ids).not.toContain("bulkMakeAvailableOffline")
-			expect(ids).not.toContain("bulkRemoveOffline")
+			expect(ids).toContain("bulkRemoveOffline")
 		})
 
 		// Keeping a copy is a read, so a read-only share is a legitimate thing to keep offline —

@@ -48,7 +48,7 @@ vi.mock("@/features/cameraUpload/cameraUpload", () => ({ default: { sync: () => 
 vi.mock("@/features/notes/components/sync", () => ({ sync: { executeNow: () => mockNotesExecuteNow() } }))
 vi.mock("@/features/chats/components/sync", () => ({ sync: { syncNow: () => mockChatsSyncNow() } }))
 // notesOffline reaches SQLite; stubbed wholesale so this suite stays free of native modules.
-vi.mock("@/features/notes/notesOffline", () => ({ default: { sync: () => mockNotesOfflineSync() } }))
+vi.mock("@/features/notes/notesOffline", () => ({ default: { sync: (...args: unknown[]) => mockNotesOfflineSync(...args) } }))
 vi.mock("@/lib/logger", () => ({ default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
 function fireOnlineEvent(isOnline: boolean) {
@@ -79,6 +79,10 @@ describe("startReconnectListener", () => {
 		expect(mockNotesExecuteNow).toHaveBeenCalledTimes(1)
 		expect(mockChatsSyncNow).toHaveBeenCalledTimes(1)
 		expect(mockNotesOfflineSync).toHaveBeenCalledTimes(1)
+		// force, not a bare call: a reconnect must bypass the min-interval floor that exists to absorb
+		// `inactive -> active` flips. Without asserting the argument, dropping it silently reinstates
+		// the floor and every reconnect pull is swallowed — the exact regression the flag prevents.
+		expect(mockNotesOfflineSync).toHaveBeenCalledWith({ force: true })
 	})
 
 	it("notesOffline.sync() rejection does not prevent the other syncs from being called", async () => {

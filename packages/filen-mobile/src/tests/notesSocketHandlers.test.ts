@@ -13,6 +13,8 @@ const {
 	mockEventsEmit,
 	mockGetNotesListGeneration,
 	mockCurrentUserId,
+	mockRemoveQueryEverywhere,
+	mockForget,
 	mockRefreshAfterRemoteEdit
 } = vi.hoisted(() => {
 	const capturedUpdaters: Array<(prev: unknown[]) => unknown[]> = []
@@ -31,6 +33,8 @@ const {
 		mockGetNotesListGeneration: vi.fn().mockReturnValue(0),
 		// null = "unknown", which the handler must read as "came from elsewhere" — the safe direction.
 		mockCurrentUserId: vi.fn((): bigint | null => null),
+		mockRemoveQueryEverywhere: vi.fn(),
+		mockForget: vi.fn(async () => undefined),
 		mockRefreshAfterRemoteEdit: vi.fn(async () => undefined)
 	}
 })
@@ -58,9 +62,19 @@ vi.mock("@/features/notes/notesOffline", () => ({
 		mark: vi.fn(async () => undefined),
 		unmark: vi.fn(async () => undefined),
 		refreshAfterRemoteEdit: mockRefreshAfterRemoteEdit,
+		forget: mockForget,
 		clearForLogout: vi.fn()
 	}
 }))
+// socketHandlers now reclaims a deleted note's cached body; both of these reach SQLite.
+vi.mock("@/queries/client", () => ({
+	removeQueryEverywhere: mockRemoveQueryEverywhere
+}))
+
+vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
+	noteContentQueryKey: ({ uuid }: { uuid: string }) => ["useNoteContentQuery", { uuid }]
+}))
+
 vi.mock("@/features/notes/queries/useNotesQuery", () => ({
 	notesQueryUpdate: mockNotesWithContentQueryUpdate,
 	fetchData: mockFetchData,
@@ -265,6 +279,9 @@ describe("handleNoteEvent — notes socket handler", () => {
 		mockNotesWithContentQueryGet.mockClear()
 		mockEventsEmit.mockClear()
 		mockRefreshAfterRemoteEdit.mockClear()
+		mockRemoveQueryEverywhere.mockClear()
+		mockForget.mockClear()
+		mockForget.mockResolvedValue(undefined)
 		mockRefreshAfterRemoteEdit.mockResolvedValue(undefined)
 		mockCurrentUserId.mockReturnValue(null)
 	})
@@ -758,9 +775,11 @@ describe("handleNoteEvent — notes socket handler", () => {
 			})
 		})
 
-		// components/sync already writes our own push into the content cache, so re-fetching it would
-		// be a round trip to confirm what we just wrote.
-		it("does NOT refresh for an edit this device made", async () => {
+		// `editorId` is a USER id, not a device id — so filtering on it would also suppress an edit
+		// this account made on ANOTHER device, which is the most common way a marked note goes stale
+		// and exactly what this refresh exists to catch. The redundant fetch when the event echoes our
+		// own push is the deliberate price; commitContent no-ops an identical body.
+		it("refreshes even when the edit came from this account, because that may be another device", async () => {
 			mockCurrentUserId.mockReturnValue(999n)
 			mockNotesWithContentQueryGet.mockReturnValueOnce([{ uuid: "uuid-1", title: "My Note", editedTimestamp: 10n }])
 
@@ -768,8 +787,7 @@ describe("handleNoteEvent — notes socket handler", () => {
 				event: makeContentEditedEvent("uuid-1", { editorId: 999n, editedTimestamp: 20n })
 			})
 
-			expect(mockRefreshAfterRemoteEdit).not.toHaveBeenCalled()
-			// The prompt still fires — content/index.tsx filters it by editorId on its own side.
+			expect(mockRefreshAfterRemoteEdit).toHaveBeenCalledOnce()
 			expect(mockEventsEmit).toHaveBeenCalledOnce()
 		})
 
@@ -804,6 +822,24 @@ describe("handleNoteEvent — notes socket handler", () => {
 			} finally {
 				process.off("unhandledRejection", onUnhandled)
 			}
+		})
+	})
+
+	describe("NoteEvent_Tags.Deleted reclaims the note's cached body", () => {
+		// The account no longer has this note, so holding its decrypted body is retention of data that
+		// is gone. Previously only MARKED notes converged, via the sync pass's prune — a note merely
+		// opened once kept its plaintext body until logout or the cache TTL.
+		it("evicts the cached body and drops the ledger row", async () => {
+			await handleNoteEvent({ event: makeDeletedEvent("uuid-1") })
+
+			expect(mockRemoveQueryEverywhere).toHaveBeenCalledWith(["useNoteContentQuery", { uuid: "uuid-1" }])
+			expect(mockForget).toHaveBeenCalledWith({ uuid: "uuid-1" })
+		})
+
+		it("does not throw when dropping the ledger row fails", async () => {
+			mockForget.mockRejectedValueOnce(new Error("kv"))
+
+			await expect(handleNoteEvent({ event: makeDeletedEvent("uuid-1") })).resolves.toBeUndefined()
 		})
 	})
 

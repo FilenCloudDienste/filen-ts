@@ -138,6 +138,34 @@ export function createMenuButtons({
 	const buttons: MenuButton[] = []
 
 	if (note.undecryptable) {
+		// Offline removal FIRST, and before the early return below. A note cannot be MARKED while
+		// undecryptable (mark() refuses a body it cannot decrypt), but a note marked while healthy can
+		// later surface with no encryption key — and then the badge, the Offline view entry and the
+		// cached body would have no way out, because every other entry here is metadata-dependent.
+		// unmark() is uuid-only, exactly like the trash/delete/leave actions this branch already keeps.
+		if (isAvailableOffline) {
+			buttons.push({
+				id: "removeOffline",
+				title: t("remove_note_offline"),
+				icon: "download",
+				destructive: true,
+				onPress: async () => {
+					const result = await runWithLoading(async () => {
+						await notesOffline.unmark({
+							uuid: note.uuid
+						})
+					})
+
+					if (!result.success) {
+						logger.error("notes", "remove undecryptable note from offline failed", { error: result.error, noteUuid: note.uuid })
+						alerts.error(result.error)
+
+						return
+					}
+				}
+			})
+		}
+
 		if (note.trash) {
 			buttons.push({
 				id: "restore",

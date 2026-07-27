@@ -5,19 +5,22 @@ import { onlineManager } from "@tanstack/react-query"
 // ledger, the sync plan and — most importantly — the open-editor write rules can be exercised for
 // real. The kv fake is a plain Map so ledger rows genuinely round-trip through serialize/deserialize
 // shaped access rather than being asserted on a spy.
-const { kvStore, contentCache, contentStamps, getContentMock, notesFetchMock, flushNowMock, scanHook, loggerMock } = vi.hoisted(() => ({
-	kvStore: new Map<string, unknown>(),
-	contentCache: new Map<string, string>(),
-	// Mirrors the query's dataUpdatedAt: bumped on every write, so the "did someone else write while
-	// we were fetching" guard is exercised for real rather than stubbed to a constant.
-	contentStamps: new Map<string, number>(),
-	getContentMock: vi.fn(async (): Promise<string | undefined> => ""),
-	notesFetchMock: vi.fn(async () => [] as unknown[]),
-	flushNowMock: vi.fn(async () => undefined),
-	// Lets a test inject a scan failure (SQLITE_BUSY and friends) without stubbing the whole pager.
-	scanHook: vi.fn(),
-	loggerMock: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() }
-}))
+const { kvStore, contentCache, contentStamps, getContentMock, notesFetchMock, flushNowMock, scanHook, kvSetShouldFail, loggerMock } =
+	vi.hoisted(() => ({
+		kvStore: new Map<string, unknown>(),
+		contentCache: new Map<string, string>(),
+		// Mirrors the query's dataUpdatedAt: bumped on every write, so the "did someone else write while
+		// we were fetching" guard is exercised for real rather than stubbed to a constant.
+		contentStamps: new Map<string, number>(),
+		getContentMock: vi.fn(async (): Promise<string | undefined> => ""),
+		notesFetchMock: vi.fn(async () => [] as unknown[]),
+		flushNowMock: vi.fn(async () => undefined),
+		// Lets a test inject a scan failure (SQLITE_BUSY and friends) without stubbing the whole pager.
+		scanHook: vi.fn(),
+		// Lets a test make kv writes fail, for the "eviction could not be recorded" contract.
+		kvSetShouldFail: { value: false },
+		loggerMock: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() }
+	}))
 
 vi.mock("@/lib/logger", () => ({ default: loggerMock }))
 
@@ -41,6 +44,10 @@ vi.mock("@/lib/sqlite", () => ({
 		kvAsync: {
 			get: async (key: string) => kvStore.get(key) ?? null,
 			set: async (key: string, value: unknown) => {
+				if (kvSetShouldFail.value) {
+					throw new Error("kv write failed")
+				}
+
 				kvStore.set(key, value)
 
 				return 1
@@ -144,6 +151,7 @@ beforeEach(() => {
 	getContentMock.mockResolvedValue("")
 	notesFetchMock.mockResolvedValue([])
 	scanHook.mockImplementation(() => undefined)
+	kvSetShouldFail.value = false
 })
 
 describe("planNoteOfflineSync", () => {
@@ -1025,6 +1033,153 @@ describe("un-mark during a refresh", () => {
 
 		expect(getContentMock).toHaveBeenCalledTimes(1)
 		expect(contentCache.get("a")).toBe("fresh")
+	})
+})
+
+// Each of these guards survived a mutation run against the suite as it stood — deleting the guard
+// broke no test. They are the ones whose failure is silent: a user's mark undone, a decrypted body
+// left unreclaimable, a draft re-based, or the pass's rate limit quietly never arming.
+describe("guards that were unpinned", () => {
+	// A note marked DURING the listNotes round trip is absent from that response, so without the
+	// snapshot the prune reads it as "gone from the account" and deletes the mark the user just made.
+	it("does not prune a note marked while the list request was in flight", async () => {
+		kvStore.set("notesOffline:marked:existing", { editedTimestamp: "10" })
+		seedCachedBody("existing", "body")
+
+		const notesOffline = new NotesOffline()
+
+		notesFetchMock.mockImplementation(async () => {
+			await notesOffline.mark({ note: note("late", 10) })
+
+			return [note("existing", 10)]
+		})
+		getContentMock.mockResolvedValue("late body")
+
+		await notesOffline.sync()
+
+		expect(kvStore.get("notesOffline:marked:late")).toEqual({ editedTimestamp: "10" })
+		expect(contentCache.get("late")).toBe("late body")
+	})
+
+	// Steady state IS "nothing to fetch", so a floor that only arms on the fetching path never arms
+	// in practice and every app-switcher flip pays a full listNotes.
+	it("arms the min-interval floor even when the pass had nothing to fetch", async () => {
+		kvStore.set("notesOffline:marked:a", { editedTimestamp: "10" })
+		seedCachedBody("a", "current")
+		notesFetchMock.mockResolvedValue([note("a", 10)])
+
+		const notesOffline = new NotesOffline()
+
+		await notesOffline.sync()
+		await notesOffline.sync()
+
+		expect(notesFetchMock).toHaveBeenCalledTimes(1)
+	})
+
+	// mark() has no pre-fetch inflight check of its own, so commitContent's is the only thing standing
+	// between a marked note and a body written under the user's unsynced draft.
+	it("marking a note that carries a draft leaves the cached body alone", async () => {
+		seedCachedBody("a", "what the draft was based on")
+		setInflight("a", "unsynced draft")
+		getContentMock.mockResolvedValue("remote body")
+
+		const notesOffline = new NotesOffline()
+
+		await notesOffline.mark({ note: note("a", 10) })
+
+		expect(contentCache.get("a")).toBe("what the draft was based on")
+		expect(kvStore.get("notesOffline:marked:a")).toEqual({ editedTimestamp: null })
+	})
+
+	// Latching mid-flight is the case the latch exists for; entry-point checks alone do not cover it.
+	it("writes nothing when logout latches during a mark's fetch", async () => {
+		const notesOffline = new NotesOffline()
+
+		getContentMock.mockImplementation(async () => {
+			notesOffline.clearForLogout()
+
+			return "body"
+		})
+
+		await notesOffline.mark({ note: note("a", 10) })
+
+		expect(contentCache.has("a")).toBe(false)
+		expect(kvStore.has("notesOffline:marked:a")).toBe(false)
+	})
+
+	it("does not repopulate the projection from a load after the latch", async () => {
+		kvStore.set("notesOffline:marked:a", { editedTimestamp: "10" })
+
+		const notesOffline = new NotesOffline()
+
+		notesOffline.clearForLogout()
+
+		await notesOffline.load()
+
+		expect(useNotesOfflineStore.getState().marked).toEqual({})
+	})
+
+	// The ledger row is a direct write while the body is debounced, so a mark that does not flush can
+	// leave a badge promising a body that never reached disk.
+	it("forces a committed mark's body to disk", async () => {
+		getContentMock.mockResolvedValue("body")
+
+		const notesOffline = new NotesOffline()
+
+		await notesOffline.mark({ note: note("a", 10) })
+
+		expect(flushNowMock).toHaveBeenCalled()
+	})
+
+	// Mirror reason: the eviction is buffered, the ledger delete is immediate, so the flush is what
+	// makes the on-disk order match the intended one.
+	it("forces an immediate un-mark's eviction to disk before dropping the ledger row", async () => {
+		getContentMock.mockResolvedValue("body")
+
+		const notesOffline = new NotesOffline()
+
+		await notesOffline.mark({ note: note("a", 10) })
+
+		flushNowMock.mockClear()
+
+		await notesOffline.unmark({ uuid: "a" })
+
+		expect(flushNowMock).toHaveBeenCalled()
+		expect(contentCache.has("a")).toBe(false)
+	})
+
+	// Better to leave a note marked and retryable than un-marked with a body nothing owns.
+	it("keeps the note marked when a deferred eviction cannot be queued", async () => {
+		getContentMock.mockResolvedValue("body")
+
+		const notesOffline = new NotesOffline()
+
+		await notesOffline.mark({ note: note("a", 10) })
+
+		// Deferred branch, and the queue write fails.
+		useAppStore.getState().setPathname("/note/a")
+		kvSetShouldFail.value = true
+
+		await expect(notesOffline.unmark({ uuid: "a" })).rejects.toThrow("note_offline_remove_failed")
+
+		kvSetShouldFail.value = false
+
+		expect(kvStore.has("notesOffline:marked:a")).toBe(true)
+	})
+
+	// forget() is the socket-delete path: the note is gone from the account, the caller already
+	// reclaimed the body, and there is nothing to defer or surface.
+	it("forget drops the ledger row without touching the body", async () => {
+		kvStore.set("notesOffline:marked:a", { editedTimestamp: "10" })
+		seedCachedBody("a", "body")
+
+		const notesOffline = new NotesOffline()
+
+		await notesOffline.forget({ uuid: "a" })
+
+		expect(kvStore.has("notesOffline:marked:a")).toBe(false)
+		expect(useNotesOfflineStore.getState().marked["a"]).toBeUndefined()
+		expect(contentCache.get("a")).toBe("body")
 	})
 })
 
