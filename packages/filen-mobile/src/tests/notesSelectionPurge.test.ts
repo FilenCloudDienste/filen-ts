@@ -48,6 +48,26 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
+// socketHandlers reads the local user id to tell our own edits apart from another device's;
+// auth reaches expo-secure-store, so it is stubbed. null = "unknown", which the handler treats as
+// "came from elsewhere" — the safe reading, and the one that exercises the refresh path.
+vi.mock("@/lib/auth", () => ({
+	default: {
+		currentUserId: () => null
+	}
+}))
+
+// notesOffline reaches SQLite; stubbed wholesale so this suite stays free of native modules.
+vi.mock("@/features/notes/notesOffline", () => ({
+	default: {
+		sync: vi.fn(async () => undefined),
+		cancel: vi.fn(),
+		mark: vi.fn(async () => undefined),
+		unmark: vi.fn(async () => undefined),
+		refreshAfterRemoteEdit: vi.fn(async () => undefined),
+		clearForLogout: vi.fn()
+	}
+}))
 vi.mock("@/features/notes/queries/useNotesQuery", () => ({
 	notesQueryUpdate: mockNotesWithContentQueryUpdate,
 	fetchData: mockFetchData,

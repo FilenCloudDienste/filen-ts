@@ -21,6 +21,7 @@ import { PressablesConfig } from "pressto"
 import haptics from "@/lib/haptics"
 import FullScreenLoadingModal from "@/components/ui/fullScreenLoadingModal"
 import NotesSync from "@/features/notes/components/sync"
+import NotesOfflineSync from "@/features/notes/components/offlineSync"
 import ChatsSync from "@/features/chats/components/sync"
 import ActionSheetProvider from "@/providers/actionSheet.provider"
 import Socket from "@/components/shell/socket"
@@ -330,6 +331,7 @@ const RootLayout = () => {
 												<Socket />
 												<Http />
 												<NotesSync />
+												<NotesOfflineSync />
 												<ChatsSync />
 												<CameraUploadSync />
 												<OfflineSync />

@@ -9,6 +9,8 @@ import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store
 import { useShallow } from "zustand/shallow"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import notes from "@/features/notes/notes"
+import notesOffline from "@/features/notes/notesOffline"
+import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
@@ -113,6 +115,7 @@ export function createMenuButtons({
 	writeAccess,
 	origin,
 	isOwner,
+	isAvailableOffline = false,
 	hideCompletedChecklistItems = false,
 	onToggleHideCompletedChecklistItems
 }: {
@@ -124,6 +127,9 @@ export function createMenuButtons({
 	writeAccess: boolean
 	origin: NoteMenuOrigin
 	isOwner: boolean
+	// Whether the user marked this note to be kept on the device. Read reactively by the callers so
+	// the entry flips label the moment the ledger changes.
+	isAvailableOffline?: boolean
 	// Client-side "hide completed items" view toggle — only surfaced in the checklist editor
 	// (origin === "content"). Omitted by list/search callers, so the entry never appears there.
 	hideCompletedChecklistItems?: boolean
@@ -260,6 +266,64 @@ export function createMenuButtons({
 				alerts.error(result.error)
 
 				return
+			}
+		}
+	})
+
+	// Device-side toggle, so it sits with the other one-tap toggles rather than behind the
+	// export/copy group — a note the user can't reach on a plane is one they never marked, and
+	// burying the switch is what makes that happen. Marking needs the network (the body is fetched
+	// before the mark commits); un-marking is purely local and stays available offline.
+	buttons.push({
+		id: isAvailableOffline ? "removeOffline" : "makeAvailableOffline",
+		title: isAvailableOffline ? t("remove_note_offline") : t("make_note_available_offline"),
+		// "download", not the drive's "archive": this menu already carries an ARCHIVE action, and
+		// reusing that icon here would read as a second way to archive the note. The row BADGE does
+		// match the drive's (download-outline, green), which is where the shared visual language
+		// actually matters.
+		icon: "download",
+		// No `checked`: the title already carries the state, and a checkmark beside "Remove from
+		// offline" reads as "removal is on". Matches the pin/favorite toggles either side of it.
+		requiresOnline: !isAvailableOffline,
+		onPress: async () => {
+			if (isAvailableOffline) {
+				const result = await runWithLoading(async () => {
+					await notesOffline.unmark({
+						uuid: note.uuid
+					})
+				})
+
+				if (!result.success) {
+					logger.error("notes", "remove note from offline failed", { error: result.error, noteUuid: note.uuid })
+					alerts.error(result.error)
+
+					return
+				}
+
+				return
+			}
+
+			const result = await runWithLoading(async () => {
+				return await notesOffline.mark({
+					note
+				})
+			})
+
+			if (!result.success) {
+				logger.error("notes", "make note available offline failed", { error: result.error, noteUuid: note.uuid })
+				alerts.error(result.error)
+
+				return
+			}
+
+			// Confirm only from inside the editor, and only when a body actually landed. In the list the
+			// row badge appears under the user's finger, so a toast on top of it is noise; the editor
+			// shows no badge at all, so without this the action is a spinner followed by nothing. A mark
+			// whose body was refused (an unsynced draft is pending, or the cache moved mid-fetch) is
+			// recorded with no stamp and converges on the next pass — claiming "Available offline" for
+			// it would be a promise the device cannot currently keep.
+			if (origin === "content" && result.data.committed) {
+				alerts.normal(t("note_available_offline"))
 			}
 		}
 	})
@@ -613,6 +677,7 @@ const Menu = ({
 	const stringifiedClient = useStringifiedClient()
 	const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(selectedNote => selectedNote.uuid === note.uuid)))
 	const isInflight = useNotesInflightStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
+	const isAvailableOffline = useNotesOfflineStore(state => state.marked[note.uuid] === true)
 
 	const writeAccess =
 		note.ownerId === stringifiedClient?.userId ||
@@ -636,7 +701,8 @@ const Menu = ({
 					isSelected,
 					writeAccess,
 					origin,
-					isOwner
+					isOwner,
+					isAvailableOffline
 				})
 
 	if (buttons.length === 0 || rest.disabled) {

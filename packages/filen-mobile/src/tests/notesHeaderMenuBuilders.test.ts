@@ -41,6 +41,17 @@ vi.mock("@/features/notes/store/useNotes.store", () => ({
 	}
 }))
 
+// notesOffline reaches SQLite; stubbed wholesale so this suite stays free of native modules.
+vi.mock("@/features/notes/notesOffline", () => ({
+	default: {
+		sync: vi.fn(async () => undefined),
+		cancel: vi.fn(),
+		mark: vi.fn(async () => undefined),
+		unmark: vi.fn(async () => undefined),
+		refreshAfterRemoteEdit: vi.fn(async () => undefined),
+		clearForLogout: vi.fn()
+	}
+}))
 vi.mock("@/features/notes/notes", () => ({
 	default: {}
 }))
@@ -243,6 +254,7 @@ function defaultParams() {
 		setTagsSortBy: vi.fn(),
 		tagFlags: makeTagFlags(),
 		noteFlags: makeNoteFlags(),
+		markedOffline: {} as Record<string, true>,
 		tag: null,
 		viewMode: "notes" as const,
 		onlyNotes: [] as Note[],
@@ -423,6 +435,82 @@ describe("buildNotesHeaderRightItems", () => {
 	// (3) everyOwned=true, no archived/trashed
 	//     → bulkArchive+bulkTrash present, bulkRestore absent
 	// -----------------------------------------------------------------------
+
+	describe("bulk offline availability", () => {
+		function idsFor(selected: Note[], markedOffline: Record<string, true>) {
+			return topLevelIds(
+				buildNotesHeaderRightItems({
+					...defaultParams(),
+					selectedNotes: selected,
+					selectedNotesLive: selected,
+					markedOffline,
+					noteFlags: makeNoteFlags({ count: selected.length, includesUndecryptable: false }),
+					onlyNotes: selected
+				})
+			)
+		}
+
+		it("offers marking when at least one selected note is not yet kept on the device", () => {
+			expect(idsFor([makeNote({ uuid: "a" })], {})).toContain("bulkMakeAvailableOffline")
+		})
+
+		it("offers removal when at least one selected note is kept on the device", () => {
+			expect(idsFor([makeNote({ uuid: "a" })], { a: true })).toContain("bulkRemoveOffline")
+		})
+
+		// A mixed selection needs both: neither action alone covers what the user selected.
+		it("offers both for a mixed selection", () => {
+			const ids = idsFor([makeNote({ uuid: "a" }), makeNote({ uuid: "b" })], { a: true })
+
+			expect(ids).toContain("bulkMakeAvailableOffline")
+			expect(ids).toContain("bulkRemoveOffline")
+		})
+
+		it("hides marking when every selected note is already kept", () => {
+			expect(idsFor([makeNote({ uuid: "a" })], { a: true })).not.toContain("bulkMakeAvailableOffline")
+		})
+
+		it("hides removal when no selected note is kept", () => {
+			expect(idsFor([makeNote({ uuid: "a" })], {})).not.toContain("bulkRemoveOffline")
+		})
+
+		// A note we hold no key for can only ever yield an undecryptable body. It shares the
+		// undecryptable gate with the other metadata-dependent bulk actions.
+		it("offers neither when the selection includes an undecryptable note", () => {
+			const selected = [makeNote({ uuid: "a", undecryptable: true })]
+			const ids = topLevelIds(
+				buildNotesHeaderRightItems({
+					...defaultParams(),
+					selectedNotes: selected,
+					selectedNotesLive: selected,
+					markedOffline: { a: true },
+					noteFlags: makeNoteFlags({ count: 1, includesUndecryptable: true }),
+					onlyNotes: selected
+				})
+			)
+
+			expect(ids).not.toContain("bulkMakeAvailableOffline")
+			expect(ids).not.toContain("bulkRemoveOffline")
+		})
+
+		// Keeping a copy is a read, so a read-only share is a legitimate thing to keep offline —
+		// unlike its neighbours, this action must NOT be gated on write access.
+		it("offers marking even without write access to the selection", () => {
+			const selected = [makeNote({ uuid: "a" })]
+			const ids = topLevelIds(
+				buildNotesHeaderRightItems({
+					...defaultParams(),
+					selectedNotes: selected,
+					selectedNotesLive: selected,
+					markedOffline: {},
+					noteFlags: makeNoteFlags({ count: 1, includesUndecryptable: false, hasWriteAccessToAll: false }),
+					onlyNotes: selected
+				})
+			)
+
+			expect(ids).toContain("bulkMakeAvailableOffline")
+		})
+	})
 
 	describe("everyOwned=true, active notes (no archived/trashed)", () => {
 		it("includes bulkArchive", () => {

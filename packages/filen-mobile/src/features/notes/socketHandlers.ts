@@ -7,6 +7,8 @@ import {
 } from "@/features/notes/queries/useNotesQuery"
 import events from "@/lib/events"
 import useNotesStore from "@/features/notes/store/useNotes.store"
+import notesOffline from "@/features/notes/notesOffline"
+import auth from "@/lib/auth"
 import logger from "@/lib/logger"
 
 export type NoteSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Note }>
@@ -201,6 +203,35 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 				noteUuid: inner.note,
 				contentEdited: inner
 			})
+
+			// Refresh the body we hold for this note, so a copy we now KNOW to be wrong doesn't sit
+			// on disk being served to the user the next time they are offline. Deliberately fire-and-
+			// forget and never awaited — the socket dispatcher must not block on a fetch.
+			//
+			// The note the user is currently viewing is excluded inside refreshAfterRemoteEdit: that
+			// one keeps the reload prompt the event above raises, which is the whole point of the
+			// prompt — the user decides when their editor is replaced, not the network. The event
+			// carries the new content, but as MaybeEncryptedStatic, so the refresh re-fetches through
+			// the SDK rather than opening a second decryption path here.
+			//
+			// Our OWN edits need no refresh: components/sync writes the pushed content into the cache
+			// as part of the push, so a fetch here would be a round trip to confirm what we just wrote.
+			if (inner.editorId !== auth.currentUserId()) {
+				notesOffline
+					.refreshAfterRemoteEdit({
+						// The event's OWN edit stamp, not the cached note's. The list entry still
+						// carries the pre-edit value, and stamping the ledger with that would make
+						// every pass consider the freshly-fetched body stale and re-fetch it — two
+						// full downloads for every remote edit, forever.
+						note: {
+							...note,
+							editedTimestamp: inner.editedTimestamp
+						}
+					})
+					.catch((e: unknown) => {
+						logger.warn("notes", "refresh after remote content edit failed", { noteUuid: inner.note, error: e })
+					})
+			}
 
 			break
 		}

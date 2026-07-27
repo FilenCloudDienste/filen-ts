@@ -11,6 +11,7 @@ import { useResolveClassNames } from "uniwind"
 import TextEditor from "@/components/textEditor"
 import { useStringifiedClient } from "@/lib/auth"
 import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight.store"
+import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { useShallow } from "zustand/shallow"
 import { useEffect, useCallback } from "react"
@@ -435,6 +436,20 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 			cleanup()
 		}
 	}, [note.uuid, onContentEditedRemotely])
+
+	// Announce that a content view for this note is mounted, so the offline sync pass knows not to
+	// replace the body under it. The route pathname cannot answer this: pushing /noteHistory or
+	// /noteParticipants from the header leaves this component mounted (frozen, not unmounted), and a
+	// pathname test would report the editor closed while the user is one back-swipe from it.
+	useEffect(() => {
+		const uuid = note.uuid
+
+		useNotesOfflineStore.getState().openContentView(uuid)
+
+		return () => {
+			useNotesOfflineStore.getState().closeContentView(uuid)
+		}
+	}, [note.uuid])
 
 	if (fetchError) {
 		return (

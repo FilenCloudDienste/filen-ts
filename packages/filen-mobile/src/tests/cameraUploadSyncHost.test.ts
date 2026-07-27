@@ -146,6 +146,7 @@ vi.mock("@/features/offline/offlineHelpers", () => ({
 }))
 
 import CameraUploadSync from "@/features/cameraUpload/sync"
+import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import { AppState } from "react-native"
 import { render } from "@testing-library/react"
 import React from "react"
@@ -175,6 +176,7 @@ async function flushMicrotasks(): Promise<void> {
 beforeEach(() => {
 	vi.clearAllMocks()
 	offlineBg.value = false
+	useNotesOfflineStore.getState().setMarked({})
 	mockAuth.isAuthed.mockResolvedValue({ isAuthed: true })
 	mockBackgroundTask.registerBackgroundSync.mockResolvedValue(undefined)
 	mockBackgroundTask.unregisterBackgroundSync.mockResolvedValue(undefined)
@@ -245,6 +247,56 @@ describe("CameraUploadSync host — scheduler hygiene", () => {
 
 		expect(mockBackgroundTask.unregisterBackgroundSync).toHaveBeenCalled()
 		expect(mockBackgroundTask.registerBackgroundSync).not.toHaveBeenCalled()
+	})
+
+	// The single OS task serves three background producers. Offline notes has no settings toggle —
+	// marking a note IS the opt-in — so a non-empty ledger has to keep the task registered on its own.
+	// Without this, a user who only marks notes (camera upload and offline-files both default off)
+	// gets the task UNREGISTERED, killing the only trigger that reaches someone who never opens the
+	// app while online.
+	it("keeps the background task registered for a user who only marked notes", async () => {
+		useNotesOfflineStore.getState().setMarked({ "note-a": true })
+
+		render(React.createElement(CameraUploadSync))
+
+		updateBackgroundTaskHandle().body()
+		await flushMicrotasks()
+
+		expect(mockBackgroundTask.registerBackgroundSync).toHaveBeenCalledOnce()
+		expect(mockBackgroundTask.unregisterBackgroundSync).not.toHaveBeenCalled()
+	})
+
+	it("unregisters once the last marked note is removed and nothing else wants the task", async () => {
+		useNotesOfflineStore.getState().setMarked({ "note-a": true })
+
+		const { rerender } = render(React.createElement(CameraUploadSync))
+
+		updateBackgroundTaskHandle().body()
+		await flushMicrotasks()
+
+		expect(mockBackgroundTask.registerBackgroundSync).toHaveBeenCalledOnce()
+
+		useNotesOfflineStore.getState().setMarked({})
+		mockBackgroundTask.registerBackgroundSync.mockClear()
+
+		rerender(React.createElement(CameraUploadSync))
+
+		updateBackgroundTaskHandle().body()
+		await flushMicrotasks()
+
+		expect(mockBackgroundTask.unregisterBackgroundSync).toHaveBeenCalled()
+	})
+
+	it("keeps the task registered for marked notes even with the offline-files setting off", async () => {
+		offlineBg.value = false
+		useNotesOfflineStore.getState().setMarked({ "note-a": true })
+
+		render(React.createElement(CameraUploadSync))
+
+		updateBackgroundTaskHandle().body()
+		await flushMicrotasks()
+
+		expect(mockBackgroundTask.unregisterBackgroundSync).not.toHaveBeenCalled()
 	})
 
 	it("CU-02: serializes register/unregister so they never overlap and the LAST requested state wins", async () => {

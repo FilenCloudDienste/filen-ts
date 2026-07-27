@@ -1,6 +1,7 @@
 import { onlineManager } from "@tanstack/react-query"
 import offlineSync from "@/features/offline/offlineSync"
 import { sync as notesSync } from "@/features/notes/components/sync"
+import notesOffline from "@/features/notes/notesOffline"
 import { sync as chatsSync } from "@/features/chats/components/sync"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
 import logger from "@/lib/logger"
@@ -26,6 +27,10 @@ let started = false
  *   accumulated offline. executeNow() now falls through to sync() when no
  *   debounce is queued, so the cold-start case (boot offline with inflight
  *   on disk, no typing yet, then reconnect) also drains.
+ * - notesOffline.sync(): PULLS, where notesSync only pushes. Refreshes the
+ *   bodies of notes marked available offline whose edit stamp moved while we
+ *   were away — including edits made on another device during the outage,
+ *   whose socket events we never received.
  * - chatsSync.syncNow(): same for inflight chat messages.
  */
 export function startReconnectListener(): void {
@@ -54,5 +59,11 @@ export function startReconnectListener(): void {
 		offlineSync.sync().catch(e => { logger.error("reconnect", "offlineSync.sync failed on reconnect", { error: e }) })
 		notesSync.executeNow()
 		chatsSync.syncNow()
+		// force: a reconnect is the opposite of a spurious wake. Socket events are lost while offline,
+		// so this is precisely when a pull is needed — it must not be swallowed by the min-interval
+		// floor that exists to absorb `inactive -> active` flips.
+		notesOffline.sync({ force: true }).catch(e => {
+			logger.error("reconnect", "notesOffline.sync failed on reconnect", { error: e })
+		})
 	})
 }

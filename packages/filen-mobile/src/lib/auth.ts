@@ -24,6 +24,7 @@ import offline from "@/features/offline/offline"
 import offlineSync from "@/features/offline/offlineSync"
 import { sync as chatsSync } from "@/features/chats/components/sync"
 import { sync as notesSync } from "@/features/notes/components/sync"
+import notesOffline from "@/features/notes/notesOffline"
 import cache from "@/lib/cache"
 import { clearSortCaches } from "@/lib/sort"
 import fileCache from "@/lib/fileCache"
@@ -279,6 +280,18 @@ class Auth {
 		}
 	}
 
+	/**
+	 * Synchronous, non-reactive read of the signed-in user's id — for non-React callers (the socket
+	 * dispatcher) that need to tell their own writes apart from another device's without awaiting a
+	 * secureStore round trip. React callers keep using `useStringifiedClient()`.
+	 *
+	 * Null until `setSdkClients` has run in this process. Callers must treat null as "unknown", never
+	 * as "not me": the safe reading of an unattributable event is that it came from elsewhere.
+	 */
+	public currentUserId(): StringifiedClient["userId"] | null {
+		return this.lastStringifiedClient?.userId ?? null
+	}
+
 	public async saveStringifiedClientToSecureStorage(stringifiedClient: StringifiedClient): Promise<void> {
 		const payload = {
 			...stringifiedClient,
@@ -410,6 +423,7 @@ class Auth {
 			cameraUpload.cancel()
 			chatsSync.cancel()
 			notesSync.cancel()
+			notesOffline.cancel()
 			offlineSync.cancel()
 		} catch (e) {
 			logger.warn("auth", "logout phase-2 cancel threw", { err: e })
@@ -472,6 +486,14 @@ class Auth {
 			cameraUploadState.clearForLogout()
 		} catch (e) {
 			logger.error("auth", "camera-upload ledger clear failed during logout", { err: e })
+		}
+
+		// Same contract for the offline-notes ledger: account-scoped, and its latch stops a pass
+		// still unwinding from re-inserting rows after the kv wipe below.
+		try {
+			notesOffline.clearForLogout()
+		} catch (e) {
+			logger.error("auth", "offline-notes ledger clear failed during logout", { err: e })
 		}
 
 		// Diagnostic logs hold decrypted-at-rest data (file/dir names, paths) by design — wipe them

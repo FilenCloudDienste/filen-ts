@@ -5,6 +5,7 @@ import { Platform } from "react-native"
 import { useLocalSearchParams } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import useNotesStore from "@/features/notes/store/useNotes.store"
+import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import { useShallow } from "zustand/shallow"
 import useNotesTagsQuery from "@/features/notes/queries/useNotesTags.query"
 import { useSecureStore } from "@/lib/secureStore"
@@ -37,6 +38,7 @@ export const Header = ({
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const selectedNotes = useNotesStore(useShallow(state => state.selectedNotes))
 	const selectedTags = useNotesStore(useShallow(state => state.selectedTags))
+	const markedOffline = useNotesOfflineStore(useShallow(state => state.marked))
 	const [notesViewMode, setNotesViewMode] = useSecureStore<"notes" | "tags">("notesViewMode", "notes")
 	const [tagsSortBy, setTagsSortBy] = useNotesTagsSortBy()
 	const { tagUuid } = useLocalSearchParams<{
@@ -94,6 +96,7 @@ export const Header = ({
 		textForeground,
 		selectedNotes,
 		selectedNotesLive,
+		markedOffline,
 		selectedTags,
 		notesViewMode,
 		setNotesViewMode,

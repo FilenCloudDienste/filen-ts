@@ -10,6 +10,7 @@ import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import Content from "@/features/notes/components/content"
 import { Platform } from "react-native"
 import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
+import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import { useShallow } from "zustand/shallow"
 import { simpleDate } from "@/lib/time"
 import { run } from "@filen/utils"
@@ -65,6 +66,7 @@ const ReadOnlyTitle = ({ title }: { title: string }) => {
 const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }) => {
 	const { t } = useTranslation()
 	const isInflight = useNotesInflightStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
+	const isAvailableOffline = useNotesOfflineStore(state => state.marked[note.uuid] === true)
 	const textForeground = useResolveClassNames("text-foreground")
 	const stringifiedClient = useStringifiedClient()
 	const navigation = useNavigation()
@@ -204,6 +206,7 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 									writeAccess,
 									origin: "content",
 									isOwner,
+									isAvailableOffline,
 									hideCompletedChecklistItems,
 									onToggleHideCompletedChecklistItems: toggleHideCompletedChecklistItems
 								})

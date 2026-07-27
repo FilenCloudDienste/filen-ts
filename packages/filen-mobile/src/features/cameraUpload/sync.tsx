@@ -6,6 +6,7 @@ import { registerBackgroundSync, unregisterBackgroundSync } from "@/features/cam
 import { debounce } from "es-toolkit/function"
 import { useSecureStore } from "@/lib/secureStore"
 import { OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY } from "@/features/offline/offlineHelpers"
+import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import auth from "@/lib/auth"
 import { Semaphore } from "@filen/utils"
 
@@ -71,14 +72,19 @@ const updateBackgroundTask = debounce(
 
 const CameraUploadSync = () => {
 	const { config } = useCameraUpload()
-	// The single OS background task serves BOTH background producers (camera upload and
-	// the budgeted offline pass) — registration must follow the OR of their settings, or
-	// enabling offline-background alone would never schedule the task. This component is
-	// always mounted while authenticated, so it owns the combined registration.
+	// The single OS background task serves EVERY background producer (camera upload, the budgeted
+	// offline-files pass, and the offline-notes refresh) — registration must follow the OR of their
+	// opt-ins, or enabling one alone would never schedule the task. This component is always mounted
+	// while authenticated, so it owns the combined registration.
 	const [offlineBackgroundSync] = useSecureStore<boolean>(OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY, false)
+	// Offline notes have no settings toggle — marking a note IS the opt-in, so the ledger being
+	// non-empty is this producer's "enabled". Without it, a user who only marks notes (and leaves
+	// camera upload and offline-files alone, both default off) would have the task unregistered and
+	// their marked bodies would never refresh in the background at all.
+	const hasOfflineNotes = useNotesOfflineStore(state => Object.keys(state.marked).length > 0)
 
 	const shouldSync = config.enabled && config.remoteDir !== null && config.albumIds.length > 0
-	const shouldRegisterBackground = (shouldSync && config.background) || offlineBackgroundSync === true
+	const shouldRegisterBackground = (shouldSync && config.background) || offlineBackgroundSync === true || hasOfflineNotes
 	const albumIdsKey = config.albumIds.join(",")
 	const remoteDirUuid = config.remoteDir?.inner[0].uuid
 

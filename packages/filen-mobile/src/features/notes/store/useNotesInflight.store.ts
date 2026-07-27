@@ -1,5 +1,12 @@
 import { create } from "zustand"
 
+/**
+ * SQLite kv row the inflight queue is persisted under. Declared here rather than on the Sync class so
+ * a headless reader can consult the queue without importing components/sync (which never starts in a
+ * background run, and drags the whole notes lib in with it).
+ */
+export const INFLIGHT_CONTENT_SQLITE_KV_KEY = "inflightNoteContent"
+
 export type InflightContent = Record<
 	string,
 	{

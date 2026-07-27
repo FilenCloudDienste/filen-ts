@@ -92,6 +92,21 @@ vi.mock("@/features/chats/components/sync", () => ({
 	SyncHost: vi.fn()
 }))
 
+// notesOffline reaches SQLite; stubbed wholesale so this suite stays free of native modules.
+vi.mock("@/features/notes/notesOffline", () => ({
+	default: {
+		sync: vi.fn(async () => undefined),
+		cancel: vi.fn(() => {
+			callLog.push("notesOffline.cancel")
+		}),
+		mark: vi.fn(async () => undefined),
+		unmark: vi.fn(async () => undefined),
+		refreshAfterRemoteEdit: vi.fn(async () => undefined),
+		clearForLogout: vi.fn(() => {
+			callLog.push("notesOffline.clearForLogout")
+		})
+	}
+}))
 vi.mock("@/features/notes/components/sync", () => ({
 	sync: {
 		cancel: vi.fn(() => {
@@ -467,6 +482,25 @@ describe("auth.logout", () => {
 		const cameraLedgerClearIdx = callLog.indexOf("cameraUploadState.clearForLogout")
 
 		expect(cameraLedgerClearIdx).toBeGreaterThan(cacheClearIdx)
+
+		// Same contract for the offline-notes ledger. Ordering is the whole point of its latch: it must
+		// be closed BEFORE the kv wipe, or a pass still unwinding re-inserts rows the wipe just removed.
+		const notesLedgerClearIdx = callLog.indexOf("notesOffline.clearForLogout")
+		const kvWipeIdx = callLog.indexOf("sqlite.clearAsync")
+
+		expect(notesLedgerClearIdx).toBeGreaterThan(-1)
+		expect(notesLedgerClearIdx).toBeGreaterThan(cacheClearIdx)
+
+		if (kvWipeIdx > -1) {
+			expect(notesLedgerClearIdx).toBeLessThan(kvWipeIdx)
+		}
+
+		// Cancelled in the same phase as the other engines, so its in-flight SDK calls observe a
+		// settled abort before the client handles are destroyed.
+		const notesOfflineCancelIdx = callLog.indexOf("notesOffline.cancel")
+
+		expect(notesOfflineCancelIdx).toBeGreaterThan(-1)
+		expect(notesOfflineCancelIdx).toBeLessThan(notesLedgerClearIdx)
 
 		// All decrypted-at-rest stores are wiped — including the diagnostic logs (file/dir names).
 		expect(callLog).toContain("offline.clearAll")

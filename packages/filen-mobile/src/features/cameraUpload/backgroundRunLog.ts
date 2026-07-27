@@ -6,7 +6,7 @@ export const BACKGROUND_RUN_LOG_MAX_ENTRIES = 20
 // Furthest stage the run ENTERED. "done" means the run completed everything it intended
 // (including intended early ends like offline-disabled or budget-consumed); a cancelled
 // run keeps the phase it was cancelled in, an unauthed/broken run stays at "setup".
-export type BackgroundRunPhase = "setup" | "camera" | "offline" | "done"
+export type BackgroundRunPhase = "setup" | "camera" | "offline" | "notesOffline" | "done"
 
 export type BackgroundRunLogEntry = {
 	v: 1

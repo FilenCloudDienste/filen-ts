@@ -57,6 +57,15 @@ vi.mock("@/features/offline/offlineSync", () => ({
 	}
 }))
 
+// Same boundary-cut rationale for the offline-NOTES phase: notesOffline reaches SQLite and the SDK,
+// and a resolved no-op sync keeps every existing assertion's flow identical.
+vi.mock("@/features/notes/notesOffline", () => ({
+	default: {
+		sync: vi.fn(async () => undefined),
+		cancel: vi.fn()
+	}
+}))
+
 vi.mock("@/lib/secureStore", () => ({
 	default: {
 		get: vi.fn(async () => null)

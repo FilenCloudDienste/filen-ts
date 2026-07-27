@@ -7,6 +7,7 @@ import { run } from "@filen/utils"
 import setup from "@/lib/setup"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
 import offlineSync from "@/features/offline/offlineSync"
+import notesOffline from "@/features/notes/notesOffline"
 import secureStore from "@/lib/secureStore"
 import { OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY } from "@/features/offline/offlineHelpers"
 import { queryClientPersisterKv } from "@/queries/client"
@@ -26,6 +27,11 @@ export const BACKGROUND_RUN_BUDGET_MS = 120_000
 // a pass that gets aborted moments after its first listings is pure wasted network.
 export const OFFLINE_BACKGROUND_MIN_REMAINING_MS = 15_000
 
+// The offline-notes pass is far cheaper than the offline-files one: one listNotes call, then a body
+// fetch only for notes actually edited since the last pass (usually none). A smaller floor lets it
+// still run in the tail of a budget the earlier phases mostly consumed.
+export const NOTES_OFFLINE_BACKGROUND_MIN_REMAINING_MS = 5_000
+
 function cancelBackgroundWork(): void {
 	// BG-02: isolate each cancel so a throw in one engine can't block the other's cancel or escape the
 	// deadline timer / iOS expiration callback this runs from (mirrors auth.ts logout's per-step isolation).
@@ -39,6 +45,12 @@ function cancelBackgroundWork(): void {
 		offlineSync.cancel()
 	} catch (e) {
 		logger.warn("cameraUpload", "offlineSync.cancel() threw during background cancel", { error: e })
+	}
+
+	try {
+		notesOffline.cancel()
+	} catch (e) {
+		logger.warn("cameraUpload", "notesOffline.cancel() threw during background cancel", { error: e })
 	}
 }
 
@@ -123,35 +135,40 @@ TaskManager.defineTask(TASK_NAME, async () => {
 			return
 		}
 
-		// Optional second phase: the budgeted offline pass (default off; offline settings
+		// Optional second phase: the budgeted offline FILES pass (default off; offline settings
 		// screen). Skipped when the camera phase consumed the run budget.
 		const offlineEnabled = (await secureStore.get<boolean>(OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY)) === true
 
-		if (!offlineEnabled) {
-			phase = "done"
+		if (offlineEnabled && !cancelled && BACKGROUND_RUN_BUDGET_MS - (Date.now() - startedAt) >= OFFLINE_BACKGROUND_MIN_REMAINING_MS) {
+			phase = "offline"
 
-			return
+			await offlineSync.sync({
+				background: true
+			})
 		}
 
 		if (cancelled) {
 			return
 		}
 
-		const remaining = BACKGROUND_RUN_BUDGET_MS - (Date.now() - startedAt)
+		// Third phase: refresh the bodies of notes marked available offline. Intentionally NOT behind
+		// a settings toggle — marking a note IS the opt-in, and a pass with an empty ledger costs one
+		// indexed kv range scan and returns before touching the network. It also runs whether or not
+		// the offline-FILES pass above was enabled: the two are unrelated opt-ins.
+		//
+		// This is the only trigger that reaches a user who never opens the app while online, which is
+		// exactly the user the feature is for. notesOffline.sync() never rejects, so a failure here
+		// degrades to a logged warning and the next run retries rather than failing the whole run.
+		if (!cancelled && BACKGROUND_RUN_BUDGET_MS - (Date.now() - startedAt) >= NOTES_OFFLINE_BACKGROUND_MIN_REMAINING_MS) {
+			phase = "notesOffline"
 
-		if (remaining < OFFLINE_BACKGROUND_MIN_REMAINING_MS) {
-			// Budget consumed by the camera phase — an intended outcome, not a cancel.
-			phase = "done"
-
-			return
+			await notesOffline.sync({
+				background: true
+			})
 		}
 
-		phase = "offline"
-
-		await offlineSync.sync({
-			background: true
-		})
-
+		// Every path that reaches here finished what it intended, including the intended early ends
+		// (offline disabled, budget consumed) — those are outcomes, not cancels.
 		if (!cancelled) {
 			phase = "done"
 		}

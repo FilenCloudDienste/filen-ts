@@ -9,6 +9,7 @@ import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
+import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import { useStringifiedClient } from "@/lib/auth"
 import { formatRelativeTime } from "@/lib/time"
 import Icon from "@/features/notes/components/note/icon"
@@ -66,8 +67,12 @@ const NoteRow = ({
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textRed500 = useResolveClassNames("text-red-500")
+	// Same icon + colour as the drive's offline indicator — one visual language for "this is on the
+	// device" across the app.
+	const textGreen500 = useResolveClassNames("text-green-500")
 	const itemUuid = info.item.type === "header" ? info.item.id : info.item.uuid
 	const isInflight = useNotesInflightStore(useShallow(state => (state.inflightContent[itemUuid]?.length ?? 0) > 0))
+	const isAvailableOffline = useNotesOfflineStore(state => state.marked[itemUuid] === true)
 	const isActive = useNotesStore(useShallow(state => state.activeNote?.uuid === itemUuid))
 	const stringifiedClient = useStringifiedClient()
 	const { isSelected, areNotesSelected } = useNotesStore(
@@ -227,6 +232,18 @@ const NoteRow = ({
 											name="eye-outline"
 											size={18}
 											color={textForeground.color}
+										/>
+									</View>
+								)}
+								{isAvailableOffline && (
+									<View
+										accessibilityLabel={t("note_available_offline")}
+										className="flex-row items-center justify-center p-1 rounded-full size-8 bg-background-tertiary"
+									>
+										<Ionicons
+											name="download-outline"
+											size={18}
+											color={textGreen500.color}
 										/>
 									</View>
 								)}

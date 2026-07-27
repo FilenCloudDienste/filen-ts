@@ -105,6 +105,7 @@ vi.mock("@/features/notes/store/useNotesInflight.store", () => {
 	})
 
 	return {
+		INFLIGHT_CONTENT_SQLITE_KV_KEY: "inflightNoteContent",
 		default: {
 			getState: () => ({
 				inflightContent: notesState.inflightContent,

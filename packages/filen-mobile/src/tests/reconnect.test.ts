@@ -1,26 +1,33 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { mockIsOnline, capturedSubscribers, mockCameraUploadSync, mockOfflineSync, mockNotesExecuteNow, mockChatsSyncNow } = vi.hoisted(
-	() => {
-		let _online = false
+const {
+	mockIsOnline,
+	capturedSubscribers,
+	mockCameraUploadSync,
+	mockOfflineSync,
+	mockNotesExecuteNow,
+	mockChatsSyncNow,
+	mockNotesOfflineSync
+} = vi.hoisted(() => {
+	let _online = false
 
-		return {
-			mockIsOnline: {
-				set online(v: boolean) {
-					_online = v
-				},
-				get online() {
-					return _online
-				}
+	return {
+		mockIsOnline: {
+			set online(v: boolean) {
+				_online = v
 			},
-			capturedSubscribers: [] as ((isOnline: boolean) => void)[],
-			mockCameraUploadSync: vi.fn().mockResolvedValue(undefined),
-			mockOfflineSync: vi.fn().mockResolvedValue(undefined),
-			mockNotesExecuteNow: vi.fn(),
-			mockChatsSyncNow: vi.fn()
-		}
+			get online() {
+				return _online
+			}
+		},
+		capturedSubscribers: [] as ((isOnline: boolean) => void)[],
+		mockCameraUploadSync: vi.fn().mockResolvedValue(undefined),
+		mockOfflineSync: vi.fn().mockResolvedValue(undefined),
+		mockNotesExecuteNow: vi.fn(),
+		mockChatsSyncNow: vi.fn(),
+		mockNotesOfflineSync: vi.fn().mockResolvedValue(undefined)
 	}
-)
+})
 
 vi.mock("@tanstack/react-query", () => ({
 	onlineManager: {
@@ -40,6 +47,8 @@ vi.mock("@/features/offline/offlineSync", () => ({ default: { sync: (...args: un
 vi.mock("@/features/cameraUpload/cameraUpload", () => ({ default: { sync: () => mockCameraUploadSync() } }))
 vi.mock("@/features/notes/components/sync", () => ({ sync: { executeNow: () => mockNotesExecuteNow() } }))
 vi.mock("@/features/chats/components/sync", () => ({ sync: { syncNow: () => mockChatsSyncNow() } }))
+// notesOffline reaches SQLite; stubbed wholesale so this suite stays free of native modules.
+vi.mock("@/features/notes/notesOffline", () => ({ default: { sync: () => mockNotesOfflineSync() } }))
 vi.mock("@/lib/logger", () => ({ default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
 function fireOnlineEvent(isOnline: boolean) {
@@ -59,7 +68,21 @@ beforeEach(() => {
 })
 
 describe("startReconnectListener", () => {
-	it("fires all four sync calls on an offline->online transition", async () => {
+	// The fifth is the offline-notes PULL: notesSync only pushes local drafts, so edits made on
+	// another device during the outage — whose socket events we never received — arrive only here.
+	it("fires all five sync calls on an offline->online transition", async () => {
+		const { startReconnectListener } = await import("@/lib/reconnect")
+		startReconnectListener()
+		fireOnlineEvent(true)
+		expect(mockCameraUploadSync).toHaveBeenCalledTimes(1)
+		expect(mockOfflineSync).toHaveBeenCalledTimes(1)
+		expect(mockNotesExecuteNow).toHaveBeenCalledTimes(1)
+		expect(mockChatsSyncNow).toHaveBeenCalledTimes(1)
+		expect(mockNotesOfflineSync).toHaveBeenCalledTimes(1)
+	})
+
+	it("notesOffline.sync() rejection does not prevent the other syncs from being called", async () => {
+		mockNotesOfflineSync.mockRejectedValueOnce(new Error("notes offline boom"))
 		const { startReconnectListener } = await import("@/lib/reconnect")
 		startReconnectListener()
 		fireOnlineEvent(true)

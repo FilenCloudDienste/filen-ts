@@ -96,6 +96,22 @@ export const notes = {
 	/** Shown in place of the editor when a note's content isn't cached and can't be fetched offline — read-only so an empty seed can't overwrite the real note */
 	note_content_unavailable_offline: "This note's content isn't available offline. Connect to the internet to load it.",
 
+	// ── Offline availability (note/menu + note row) ───────────────────────────
+	/** Note menu action: keep this note's content on the device so it stays readable without a connection */
+	make_note_available_offline: "Make available offline",
+	/** Note menu action: stop keeping this note on the device and free its cached content */
+	remove_note_offline: "Remove from offline",
+	/** Notes-list badge, and the toast confirming a note was marked from inside the editor (where no badge is visible) */
+	note_available_offline: "Available offline",
+	/** Error banner when marking a note available offline is attempted without a connection — its content has to be fetched first */
+	note_offline_requires_connection: "Connect to the internet to make this note available offline.",
+	/** Error banner when a note can't be kept offline because its content could not be decrypted */
+	note_offline_content_undecryptable: "This note's content could not be decrypted, so it can't be kept on this device.",
+	/** Confirmation dialog message before removing every selected note from offline storage */
+	confirm_remove_notes_offline_selected: "Are you sure you want to remove the selected notes from offline storage? They stay in your account.",
+	/** Error banner when removing a note from offline storage failed — it stays marked so it can be retried */
+	note_offline_remove_failed: "Couldn't remove this note from offline storage. It's still available offline — try again.",
+
 	// ── Bulk note actions (multi-select toolbar) ──────────────────────────────
 	/** Bulk action: pin every selected note */
 	pin_selected: "Pin selected",

@@ -41,6 +41,17 @@ vi.mock("@/features/notes/store/useNotes.store", () => ({
 	}
 }))
 
+// notesOffline reaches SQLite; stubbed wholesale so this suite stays free of native modules.
+vi.mock("@/features/notes/notesOffline", () => ({
+	default: {
+		sync: vi.fn(async () => undefined),
+		cancel: vi.fn(),
+		mark: vi.fn(async () => undefined),
+		unmark: vi.fn(async () => undefined),
+		refreshAfterRemoteEdit: vi.fn(async () => undefined),
+		clearForLogout: vi.fn()
+	}
+}))
 vi.mock("@/features/notes/notes", () => ({
 	default: {}
 }))
@@ -153,6 +164,45 @@ function makeNote(overrides: Partial<Note> = {}): Note {
 		...overrides
 	} as Note
 }
+
+describe("offline availability entry", () => {
+	function offlineEntry(overrides: Parameters<typeof createMenuButtons>[0]) {
+		return createMenuButtons(overrides).find(button => button.id === "makeAvailableOffline" || button.id === "removeOffline")
+	}
+
+	it("offers marking, gated on connectivity — the body has to be fetched first", () => {
+		const entry = offlineEntry({ note: makeNote(), writeAccess: true, origin: "notes", isOwner: true })
+
+		expect(entry?.id).toBe("makeAvailableOffline")
+		expect(entry?.requiresOnline).toBe(true)
+	})
+
+	// Un-marking is purely local, so it must stay usable offline — which is exactly when a user is
+	// most likely to be pruning what they keep on the device.
+	it("offers removal ungated once the note is marked", () => {
+		const entry = offlineEntry({ note: makeNote(), writeAccess: true, origin: "notes", isOwner: true, isAvailableOffline: true })
+
+		expect(entry?.id).toBe("removeOffline")
+		expect(entry?.requiresOnline).toBe(false)
+	})
+
+	// A note we hold no key for can only ever yield an undecryptable body, so promising to keep it
+	// on the device would be a promise we cannot fulfil.
+	it("is absent for an undecryptable note", () => {
+		expect(
+			offlineEntry({ note: { ...makeNote(), undecryptable: true }, writeAccess: false, origin: "notes", isOwner: true })
+		).toBeUndefined()
+	})
+
+	// Keeping a copy is a read, so a read-only share is a legitimate thing to keep offline.
+	it("is offered on a note shared to us without write access", () => {
+		expect(offlineEntry({ note: makeNote(), writeAccess: false, origin: "notes", isOwner: false })?.id).toBe("makeAvailableOffline")
+	})
+
+	it("is offered from inside the editor too", () => {
+		expect(offlineEntry({ note: makeNote(), writeAccess: true, origin: "content", isOwner: true })?.id).toBe("makeAvailableOffline")
+	})
+})
 
 describe("createMenuButtons", () => {
 	describe("undecryptable + trashed note", () => {

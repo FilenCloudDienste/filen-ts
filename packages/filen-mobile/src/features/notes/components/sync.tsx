@@ -7,7 +7,7 @@ import alerts from "@/lib/alerts"
 import i18n from "@/lib/i18n"
 import { noteDisplayTitle } from "@/lib/decryption"
 import { AppState } from "react-native"
-import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight.store"
+import useNotesInflightStore, { type InflightContent, INFLIGHT_CONTENT_SQLITE_KV_KEY } from "@/features/notes/store/useNotesInflight.store"
 import { type Note } from "@/types"
 import sqlite from "@/lib/sqlite"
 import { fetchData as notesQueryFetch, notesQueryGet } from "@/features/notes/queries/useNotesQuery"
@@ -70,7 +70,7 @@ export function mergeInflight(current: InflightContent, fromDisk: InflightConten
 export class Sync {
 	private readonly mutex: Semaphore = new Semaphore(1)
 	private syncTimeout: ReturnType<typeof createExecutableTimeout> | null = null
-	public readonly sqliteKvKey: string = "inflightNoteContent"
+	public readonly sqliteKvKey: string = INFLIGHT_CONTENT_SQLITE_KV_KEY
 	private readonly initPromise: Promise<void>
 	private resolveInit!: () => void
 	private abortController: AbortController = new AbortController()

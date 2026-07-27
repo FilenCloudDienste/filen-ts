@@ -11,7 +11,9 @@ const {
 	mockFetchData,
 	mockNotesWithContentQueryGet,
 	mockEventsEmit,
-	mockGetNotesListGeneration
+	mockGetNotesListGeneration,
+	mockCurrentUserId,
+	mockRefreshAfterRemoteEdit
 } = vi.hoisted(() => {
 	const capturedUpdaters: Array<(prev: unknown[]) => unknown[]> = []
 
@@ -26,7 +28,10 @@ const {
 		mockNotesWithContentQueryGet: vi.fn().mockReturnValue([]),
 		mockEventsEmit: vi.fn(),
 		// Stable by default: the New handler's stale-snapshot guard sees no mid-fetch writes.
-		mockGetNotesListGeneration: vi.fn().mockReturnValue(0)
+		mockGetNotesListGeneration: vi.fn().mockReturnValue(0),
+		// null = "unknown", which the handler must read as "came from elsewhere" — the safe direction.
+		mockCurrentUserId: vi.fn((): bigint | null => null),
+		mockRefreshAfterRemoteEdit: vi.fn(async () => undefined)
 	}
 })
 
@@ -36,6 +41,26 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
+// socketHandlers reads the local user id to tell our own edits apart from another device's;
+// auth reaches expo-secure-store, so it is stubbed. null = "unknown", which the handler treats as
+// "came from elsewhere" — the safe reading, and the one that exercises the refresh path.
+vi.mock("@/lib/auth", () => ({
+	default: {
+		currentUserId: () => mockCurrentUserId()
+	}
+}))
+
+// notesOffline reaches SQLite; stubbed wholesale so this suite stays free of native modules.
+vi.mock("@/features/notes/notesOffline", () => ({
+	default: {
+		sync: vi.fn(async () => undefined),
+		cancel: vi.fn(),
+		mark: vi.fn(async () => undefined),
+		unmark: vi.fn(async () => undefined),
+		refreshAfterRemoteEdit: mockRefreshAfterRemoteEdit,
+		clearForLogout: vi.fn()
+	}
+}))
 vi.mock("@/features/notes/queries/useNotesQuery", () => ({
 	notesQueryUpdate: mockNotesWithContentQueryUpdate,
 	fetchData: mockFetchData,
@@ -76,6 +101,7 @@ vi.mock("@filen/sdk-rs", () => ({
 // Import the unit under test AFTER all vi.mock declarations
 // ---------------------------------------------------------------------------
 
+import loggerMock from "@/tests/mocks/logger"
 import { handleNoteEvent, type NoteSocketEvent } from "@/features/notes/socketHandlers"
 import { NoteEvent_Tags, SocketEvent_Tags } from "@filen/sdk-rs"
 
@@ -238,6 +264,9 @@ describe("handleNoteEvent — notes socket handler", () => {
 		mockFetchData.mockClear()
 		mockNotesWithContentQueryGet.mockClear()
 		mockEventsEmit.mockClear()
+		mockRefreshAfterRemoteEdit.mockClear()
+		mockRefreshAfterRemoteEdit.mockResolvedValue(undefined)
+		mockCurrentUserId.mockReturnValue(null)
 	})
 
 	describe("NoteEvent_Tags.Archived", () => {
@@ -710,6 +739,71 @@ describe("handleNoteEvent — notes socket handler", () => {
 			mockNotesWithContentQueryGet.mockReturnValueOnce([])
 
 			await expect(handleNoteEvent({ event: makeContentEditedEvent("uuid-missing", {}) })).resolves.toBeUndefined()
+		})
+
+		// The refresh exists so a body we now KNOW to be wrong isn't served offline. The exclusion for
+		// the note the user is looking at lives inside notesOffline; here we pin that the handler asks
+		// for it at all, and with the event's OWN edit stamp — the cached note still carries the
+		// pre-edit one, and stamping the ledger with that would re-fetch the same body on every pass.
+		it("refreshes the cached body, stamped with the event's edit timestamp rather than the cached note's", async () => {
+			mockNotesWithContentQueryGet.mockReturnValueOnce([{ uuid: "uuid-1", title: "My Note", editedTimestamp: 10n }])
+
+			await handleNoteEvent({
+				event: makeContentEditedEvent("uuid-1", { editorId: 999n, editedTimestamp: 20n })
+			})
+
+			expect(mockRefreshAfterRemoteEdit).toHaveBeenCalledOnce()
+			expect(mockRefreshAfterRemoteEdit).toHaveBeenCalledWith({
+				note: expect.objectContaining({ uuid: "uuid-1", editedTimestamp: 20n })
+			})
+		})
+
+		// components/sync already writes our own push into the content cache, so re-fetching it would
+		// be a round trip to confirm what we just wrote.
+		it("does NOT refresh for an edit this device made", async () => {
+			mockCurrentUserId.mockReturnValue(999n)
+			mockNotesWithContentQueryGet.mockReturnValueOnce([{ uuid: "uuid-1", title: "My Note", editedTimestamp: 10n }])
+
+			await handleNoteEvent({
+				event: makeContentEditedEvent("uuid-1", { editorId: 999n, editedTimestamp: 20n })
+			})
+
+			expect(mockRefreshAfterRemoteEdit).not.toHaveBeenCalled()
+			// The prompt still fires — content/index.tsx filters it by editorId on its own side.
+			expect(mockEventsEmit).toHaveBeenCalledOnce()
+		})
+
+		// Asserts the SWALLOW, not just that the handler resolved: the refresh is fire-and-forget, so
+		// the handler resolves either way and removing the .catch would only turn the rejection into an
+		// unhandled one that this suite never sees.
+		it("swallows a refresh rejection into a warning rather than an unhandled rejection", async () => {
+			const unhandled: unknown[] = []
+			const onUnhandled = (reason: unknown): void => {
+				unhandled.push(reason)
+			}
+
+			process.on("unhandledRejection", onUnhandled)
+
+			try {
+				mockRefreshAfterRemoteEdit.mockRejectedValueOnce(new Error("network"))
+				mockNotesWithContentQueryGet.mockReturnValueOnce([{ uuid: "uuid-1", title: "My Note", editedTimestamp: 10n }])
+
+				await expect(
+					handleNoteEvent({ event: makeContentEditedEvent("uuid-1", { editorId: 999n, editedTimestamp: 20n }) })
+				).resolves.toBeUndefined()
+
+				// Let the rejection settle through the .catch.
+				await new Promise(resolve => setTimeout(resolve, 0))
+
+				expect(unhandled).toEqual([])
+				expect(loggerMock.warn).toHaveBeenCalledWith(
+					"notes",
+					expect.stringContaining("refresh after remote content edit"),
+					expect.objectContaining({ noteUuid: "uuid-1" })
+				)
+			} finally {
+				process.off("unhandledRejection", onUnhandled)
+			}
 		})
 	})
 

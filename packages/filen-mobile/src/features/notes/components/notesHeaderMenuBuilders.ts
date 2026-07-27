@@ -16,6 +16,7 @@ import { shareTmpFile } from "@/lib/share"
 import { pickDocuments } from "@/lib/documentPicker"
 import * as FileSystem from "expo-file-system"
 import { runBulk } from "@/lib/bulkOps"
+import notesOffline from "@/features/notes/notesOffline"
 import { serialize } from "@/lib/serializer"
 import { NOTE_TYPE_LABEL_KEY, NOTE_TYPE_OPTIONS, noteTypeToIcon } from "@/features/notes/components/note/menu"
 import { createTagFlow } from "@/features/notes/components/notesActions"
@@ -88,6 +89,7 @@ export function buildNotesHeaderRightItems({
 	setTagsSortBy,
 	tagFlags,
 	noteFlags,
+	markedOffline,
 	tag,
 	viewMode,
 	onlyNotes,
@@ -110,6 +112,9 @@ export function buildNotesHeaderRightItems({
 	setTagsSortBy: (next: NotesTagsSortBy) => void
 	tagFlags: ReturnType<typeof aggregateNoteTagSelectionFlags>
 	noteFlags: ReturnType<typeof aggregateNoteSelectionFlags>
+	// uuid -> true for every note kept on the device. Read reactively by the caller from the
+	// offline-notes store, so the entries below flip the moment the ledger changes.
+	markedOffline: Record<string, true>
 	tag: NoteTag | null
 	viewMode: NotesViewMode
 	onlyNotes: Note[]
@@ -337,6 +342,59 @@ export function buildNotesHeaderRightItems({
 						})
 					}
 				})
+
+				// Offline availability. Device-side, so unlike its neighbours it is NOT gated on write
+				// access — keeping a copy is a read, and a read-only share is a perfectly reasonable
+				// thing to want on a plane.
+				const notMarked = selectedNotesLive.filter(n => markedOffline[n.uuid] !== true)
+				const marked = selectedNotesLive.filter(n => markedOffline[n.uuid] === true)
+
+				if (notMarked.length > 0) {
+					menuButtons.push({
+						id: "bulkMakeAvailableOffline",
+						title: t("make_available_offline_selected"),
+						icon: "download",
+						requiresOnline: true,
+						onPress: async () => {
+							// Foreground (blocking) unlike the drive's equivalent: note bodies are small
+							// text fetched inline, not multi-GB transfers with their own progress bar, so
+							// there is nothing for the user to watch if we return early. notesOffline.mark
+							// bounds the fan-out internally, so a large selection paces itself.
+							await runBulk({
+								items: notMarked,
+								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+								op: n => notesOffline.mark({ note: n })
+							})
+						}
+					})
+				}
+
+				if (marked.length > 0) {
+					menuButtons.push({
+						id: "bulkRemoveOffline",
+						title: t("remove_offline_selected"),
+						icon: "trash",
+						destructive: true,
+						onPress: async () => {
+							// Confirmed, unlike the single-note action: one mis-tap here can undo fifty
+							// marks, and re-marking them is fifty menu round trips. Nothing is destroyed
+							// either way — the notes stay in the cloud — so the prompt is about effort,
+							// not danger.
+							await runBulk({
+								items: marked,
+								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+								confirm: {
+									title: t("remove_offline_selected"),
+									message: t("confirm_remove_notes_offline_selected"),
+									okText: t("remove_offline_selected"),
+									cancelText: t("cancel"),
+									destructive: true
+								},
+								op: n => notesOffline.unmark({ uuid: n.uuid })
+							})
+						}
+					})
+				}
 
 				if (noteFlags.hasWriteAccessToAll) {
 					menuButtons.push({

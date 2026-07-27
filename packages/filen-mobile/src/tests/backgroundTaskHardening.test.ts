@@ -18,6 +18,7 @@ const {
 	mockSetup,
 	mockCameraUpload,
 	mockOfflineSync,
+	mockNotesOffline,
 	mockSecureStoreGet,
 	mockKvFlushNow,
 	mockRunLogAppend,
@@ -48,6 +49,8 @@ const {
 
 	const mockOfflineSync = { cancel: vi.fn(), sync: vi.fn(async () => undefined) }
 
+	const mockNotesOffline = { cancel: vi.fn(), sync: vi.fn(async () => undefined) }
+
 	const mockSecureStoreGet = vi.fn(async () => null as unknown)
 
 	const mockKvFlushNow = vi.fn(async () => undefined)
@@ -61,6 +64,7 @@ const {
 		mockSetup,
 		mockCameraUpload,
 		mockOfflineSync,
+		mockNotesOffline,
 		mockSecureStoreGet,
 		mockKvFlushNow,
 		mockRunLogAppend,
@@ -81,6 +85,8 @@ vi.mock("@/lib/setup", () => ({ default: mockSetup }))
 vi.mock("@/features/cameraUpload/cameraUpload", () => ({ default: mockCameraUpload }))
 
 vi.mock("@/features/offline/offlineSync", () => ({ default: mockOfflineSync }))
+
+vi.mock("@/features/notes/notesOffline", () => ({ default: mockNotesOffline }))
 
 vi.mock("@/lib/secureStore", () => ({
 	default: {
@@ -122,6 +128,7 @@ beforeEach(() => {
 	mockSetup.setup.mockResolvedValue({ isAuthed: false })
 	mockCameraUpload.sync.mockResolvedValue({ success: true })
 	mockOfflineSync.sync.mockResolvedValue(undefined)
+	mockNotesOffline.sync.mockResolvedValue(undefined)
 	mockSecureStoreGet.mockResolvedValue(null)
 	mockKvFlushNow.mockResolvedValue(undefined)
 	mockRunLogAppend.mockResolvedValue(undefined)
@@ -219,7 +226,168 @@ describe("hardening — budgeted offline phase wiring", () => {
 		}
 	})
 
-	it("the run-budget deadline cancels BOTH engines", async () => {
+	// ── Offline-notes phase ───────────────────────────────────────────────────
+	// Marking a note IS the opt-in, so this phase is deliberately NOT behind the offline-FILES
+	// setting. For a user who never opens the app while online, the background run is the only
+	// trigger that ever refreshes their marked bodies.
+
+	it("runs the offline-notes pass after camera upload even when the offline-FILES setting is off", async () => {
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+		mockSecureStoreGet.mockResolvedValue(null)
+
+		await runTask()
+
+		expect(mockOfflineSync.sync).not.toHaveBeenCalled()
+		expect(mockNotesOffline.sync).toHaveBeenCalledTimes(1)
+		expect(mockNotesOffline.sync).toHaveBeenCalledWith({ background: true })
+
+		const cameraOrder = mockCameraUpload.sync.mock.invocationCallOrder[0] as number
+		const notesOrder = mockNotesOffline.sync.mock.invocationCallOrder[0] as number
+
+		expect(cameraOrder).toBeLessThan(notesOrder)
+	})
+
+	it("runs the offline-notes pass AFTER the offline-files pass when both are active", async () => {
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+		mockSecureStoreGet.mockResolvedValue(true)
+
+		await runTask()
+
+		const offlineOrder = mockOfflineSync.sync.mock.invocationCallOrder[0] as number
+		const notesOrder = mockNotesOffline.sync.mock.invocationCallOrder[0] as number
+
+		expect(offlineOrder).toBeLessThan(notesOrder)
+	})
+
+	it("does NOT run the offline-notes pass when not authed", async () => {
+		mockSetup.setup.mockResolvedValue({ isAuthed: false })
+
+		await runTask()
+
+		expect(mockNotesOffline.sync).not.toHaveBeenCalled()
+	})
+
+	it("skips the offline-notes pass when the earlier phases consumed the run budget", async () => {
+		vi.useFakeTimers()
+
+		try {
+			mockSetup.setup.mockResolvedValue({ isAuthed: true })
+			mockCameraUpload.sync.mockImplementation(async () => {
+				vi.advanceTimersByTime(BACKGROUND_RUN_BUDGET_MS - 1_000)
+
+				return { success: true }
+			})
+
+			await runTask()
+
+			expect(mockNotesOffline.sync).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	// The notes phase is cheaper than the files phase, so its floor is lower — a budget tail that is
+	// too short for offline FILES can still refresh note bodies.
+	it("still runs the offline-notes pass in a budget tail too short for the offline-files pass", async () => {
+		vi.useFakeTimers()
+
+		try {
+			mockSetup.setup.mockResolvedValue({ isAuthed: true })
+			mockSecureStoreGet.mockResolvedValue(true)
+			mockCameraUpload.sync.mockImplementation(async () => {
+				vi.advanceTimersByTime(BACKGROUND_RUN_BUDGET_MS - 10_000)
+
+				return { success: true }
+			})
+
+			await runTask()
+
+			expect(mockOfflineSync.sync).not.toHaveBeenCalled()
+			expect(mockNotesOffline.sync).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("an expiration during the camera phase prevents the offline-notes phase from STARTING", async () => {
+		;(Platform as { OS: string }).OS = "ios"
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+
+		let expirationCallback: (() => void) | null = null
+
+		mockBackgroundTask.addExpirationListener.mockImplementation((cb: () => void) => {
+			expirationCallback = cb
+
+			return { remove: mockRemoveListener }
+		})
+
+		mockCameraUpload.sync.mockImplementation(async () => {
+			expirationCallback?.()
+
+			return { success: true }
+		})
+
+		await runTask()
+
+		expect(mockNotesOffline.sync).not.toHaveBeenCalled()
+	})
+
+	// The pass writes bodies through the query persister's debounce, so the run must not report
+	// completion until the flush that follows it has settled.
+	it("flushes the query persister after the offline-notes phase", async () => {
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+
+		await runTask()
+
+		const notesOrder = mockNotesOffline.sync.mock.invocationCallOrder[0] as number
+		const flushOrder = mockKvFlushNow.mock.invocationCallOrder[0] as number
+
+		expect(notesOrder).toBeLessThan(flushOrder)
+	})
+
+	// The breadcrumb is the only field-diagnosable trace a headless run leaves — release builds no-op
+	// console.* and both OS schedulers discard the returned result. A phase that can never be observed
+	// in it cannot be diagnosed at all.
+	it("records phase 'notesOffline' when the run is cancelled during that phase", async () => {
+		;(Platform as { OS: string }).OS = "ios"
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+
+		let expirationCallback: (() => void) | null = null
+
+		mockBackgroundTask.addExpirationListener.mockImplementation((cb: () => void) => {
+			expirationCallback = cb
+
+			return { remove: mockRemoveListener }
+		})
+
+		mockNotesOffline.sync.mockImplementation(async () => {
+			expirationCallback?.()
+		})
+
+		await runTask()
+
+		expect(mockRunLogAppend).toHaveBeenCalledWith(expect.objectContaining({ phase: "notesOffline", cancelled: true }))
+	})
+
+	it("records phase 'done' when the notes phase completes normally", async () => {
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+
+		await runTask()
+
+		expect(mockRunLogAppend).toHaveBeenCalledWith(expect.objectContaining({ phase: "done", result: "success" }))
+	})
+
+	// notesOffline.sync() is awaited un-wrapped, so the whole run leans on its never-rejects contract.
+	it("a rejecting notes pass would fail the run — pinning the contract the task depends on", async () => {
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+		mockNotesOffline.sync.mockRejectedValue(new Error("boom"))
+
+		const result = await runTask()
+
+		expect(result).toBe(mockBackgroundTask.BackgroundTaskResult.Failed)
+	})
+
+	it("the run-budget deadline cancels EVERY engine", async () => {
 		vi.useFakeTimers()
 
 		try {
@@ -241,6 +409,7 @@ describe("hardening — budgeted offline phase wiring", () => {
 
 			expect(mockCameraUpload.cancel).toHaveBeenCalledTimes(1)
 			expect(mockOfflineSync.cancel).toHaveBeenCalledTimes(1)
+			expect(mockNotesOffline.cancel).toHaveBeenCalledTimes(1)
 
 			releaseSync()
 
@@ -250,7 +419,7 @@ describe("hardening — budgeted offline phase wiring", () => {
 		}
 	})
 
-	it("the iOS expiration listener cancels BOTH engines", async () => {
+	it("the iOS expiration listener cancels EVERY engine", async () => {
 		;(Platform as { OS: string }).OS = "ios"
 		mockSetup.setup.mockResolvedValue({ isAuthed: false })
 
@@ -271,6 +440,7 @@ describe("hardening — budgeted offline phase wiring", () => {
 
 		expect(mockCameraUpload.cancel).toHaveBeenCalledTimes(1)
 		expect(mockOfflineSync.cancel).toHaveBeenCalledTimes(1)
+		expect(mockNotesOffline.cancel).toHaveBeenCalledTimes(1)
 	})
 
 	it("an expiration during the camera phase prevents the offline phase from STARTING (cancel() swaps in a fresh AbortController)", async () => {
@@ -463,7 +633,7 @@ describe("hardening — persist-before-suspend flushes", () => {
 		)
 	})
 
-	it("BG-02: a throwing engine cancel does not block the other engine's cancel", async () => {
+	it("BG-02: a throwing engine cancel does not block the remaining engines' cancels", async () => {
 		;(Platform as { OS: string }).OS = "ios"
 		mockSetup.setup.mockResolvedValue({ isAuthed: true })
 		mockSecureStoreGet.mockResolvedValue(true)
@@ -493,6 +663,7 @@ describe("hardening — persist-before-suspend flushes", () => {
 		// Pre-fix the throw escaped cancelBackgroundWork before reaching offlineSync.cancel; the per-engine
 		// try/catch must keep the second cancel reachable.
 		expect(mockOfflineSync.cancel).toHaveBeenCalled()
+		expect(mockNotesOffline.cancel).toHaveBeenCalled()
 	})
 
 	it("a breadcrumb write failure never flips a healthy run's result", async () => {
