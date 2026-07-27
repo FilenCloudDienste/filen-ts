@@ -629,6 +629,32 @@ export const queryClient = new QueryClient({
 	}
 })
 
+// The key the persister stores a query's row under. createPersister builds `${prefix}-${queryHash}`
+// (queryHash is our serialize-based queryKeyHashFn), and QueryPersisterKv then namespaces that again
+// under `${QUERY_CLIENT_PERSISTER_PREFIX}:` inside SQLite. Version-pinned third-party surface —
+// re-verify on @tanstack/query-persist-client-core upgrades (same caveat as the persistQueryByKey
+// facade below).
+export function persistedQueryStorageKey(queryKey: unknown[]): string {
+	return `${QUERY_CLIENT_PERSISTER_PREFIX}-${serialize(queryKey)}`
+}
+
+/**
+ * Drops a query from BOTH the in-memory cache and the persisted store.
+ *
+ * `queryClient.removeQueries` alone frees only memory: the persister is write-only from our side
+ * (persistQueryByKey on a missing query just warns, it never deletes), so the SQLite row would
+ * survive until its maxAge expired. Anything that means "stop keeping this on the device" — e.g.
+ * un-marking a note as available offline — must reclaim the bytes now, not in a year.
+ */
+export function removeQueryEverywhere(queryKey: unknown[]): void {
+	queryClient.removeQueries({
+		queryKey,
+		exact: true
+	})
+
+	queryClientPersisterKv.removeItem(persistedQueryStorageKey(queryKey))
+}
+
 // Plain object namespace (no instance state) — get/set delegate to the module-level
 // queryClient. Former `class QueryUpdater` added no value (zero fields, zero `this`).
 export const queryUpdater = {

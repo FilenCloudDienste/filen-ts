@@ -38,6 +38,13 @@ export async function fetchData(
 	)
 }
 
+// The cache key for one note's content. Single source of the key shape — the offline ledger
+// (features/notes/notesOffline) has to address the same entry to evict it from both the in-memory
+// cache and the persisted store, and a key built by hand there would silently miss on any change here.
+export function noteContentQueryKey(params: UseNoteContentQueryParams): unknown[] {
+	return [BASE_QUERY_KEY, sortParams(params)]
+}
+
 export function useNoteContentQuery(
 	params: UseNoteContentQueryParams,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
@@ -47,7 +54,10 @@ export function useNoteContentQuery(
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
 		...options,
-		queryKey: [BASE_QUERY_KEY, sortedParams],
+		// Built from `sortedParams` rather than `params` so the exhaustive-deps rule can see that the
+		// key covers everything the queryFn closes over. sortParams is idempotent, so routing the
+		// already-sorted object back through the shared builder is a no-op.
+		queryKey: noteContentQueryKey(sortedParams),
 		queryFn: ({ signal }) =>
 			fetchData({
 				...sortedParams,
@@ -63,13 +73,13 @@ export function useNoteContentQuery(
 // cached content WITHOUT wanting an editor remount (sync's post-push truth write) pass it
 // back into noteContentQueryUpdate to keep the key stable.
 export function noteContentQueryDataUpdatedAt(params: UseNoteContentQueryParams): number | undefined {
-	return queryClient.getQueryState([BASE_QUERY_KEY, sortParams(params)])?.dataUpdatedAt
+	return queryClient.getQueryState(noteContentQueryKey(params))?.dataUpdatedAt
 }
 
 // Non-reactive read of the cached per-note content (undefined when never fetched/written).
 // Used by the editor's frozen-seed derivation, which must read sources without subscribing.
 export function noteContentQueryGet(params: UseNoteContentQueryParams): Awaited<ReturnType<typeof fetchData>> {
-	return queryClient.getQueryData([BASE_QUERY_KEY, sortParams(params)])
+	return queryClient.getQueryData(noteContentQueryKey(params))
 }
 
 export function noteContentQueryUpdate({
@@ -84,10 +94,8 @@ export function noteContentQueryUpdate({
 		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
 	dataUpdatedAt?: number
 }): void {
-	const sortedParams = sortParams(params)
-
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>(
-		[BASE_QUERY_KEY, sortedParams],
+		noteContentQueryKey(params),
 		prev => {
 			const currentData = prev ?? (undefined satisfies Awaited<ReturnType<typeof fetchData>>)
 
