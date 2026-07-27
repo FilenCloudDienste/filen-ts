@@ -9,6 +9,7 @@ import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import drive from "@/features/drive/drive"
 import cache from "@/lib/cache"
+import { notifyIfNameIsHidden } from "@/features/drive/components/hiddenNameNotice"
 import logger from "@/lib/logger"
 
 // Resolves the AnyNormalDir to create/upload into for the current Drive path, or null when the
@@ -114,7 +115,14 @@ export function buildDriveCreateMenuButtons({
 				if (!result.success) {
 					logger.error("drive", "create directory failed", { error: result.error })
 					alerts.error(result.error)
+
+					return
 				}
+
+				// canShowDriveCreateMenu already restricts this menu to filtered browsing contexts
+				// (it requires !selectOptions and a drive-like variant), so the listing this lands in
+				// is always one the preference applies to.
+				await notifyIfNameIsHidden({ name: folderName, action: "created", appliesHere: true, t })
 			}
 		},
 		{

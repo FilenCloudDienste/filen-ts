@@ -45,6 +45,8 @@ const PLURAL_CONTEXT_SUFFIXES = ["_one", "_other", "_zero", "_two", "_few", "_ma
 // Intentional plural key pairs declared as `<base>_one` / `<base>_other`; these are
 // genuine i18next plural declarations and must NOT be flagged by the suffix guard.
 const INTENTIONAL_PLURAL_KEYS = new Set([
+	"hidden_items_not_shown_one",
+	"hidden_items_not_shown_other",
 	"selected_one",
 	"selected_other",
 	"new_messages_since_one",

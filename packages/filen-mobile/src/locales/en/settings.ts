@@ -222,6 +222,11 @@ export const settings = {
 	haptic_feedback: "Haptic feedback",
 	/** Advanced — description for the haptic feedback toggle */
 	haptic_feedback_description: "Play a subtle vibration when you tap buttons and controls.",
+	/** Appearance — row title: toggle that hides dot-prefixed files and directories from the drive listings */
+	hide_hidden_items: "Hide hidden items",
+	/** Appearance — description for the hide hidden items toggle. "hidden" here means the dot-prefix naming convention. States the scope explicitly: your own listings only — never the pickers, never content someone shared with you */
+	hide_hidden_items_description:
+		"Leave files and directories whose name starts with a dot out of the drive browser. Nothing is deleted or stops syncing. Other lists, and content shared with you, always show everything.",
 	/** Advanced — row title: clear generated image thumbnails */
 	clear_image_thumbnails: "Clear image thumbnails",
 	/** Advanced — confirm message before clearing image thumbnails */

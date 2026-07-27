@@ -100,6 +100,25 @@ export const drive = {
 	search_unavailable_description: "Couldn't search right now. Pull to refresh or try again later.",
 	/** Footer shown when the match count exceeds the result cap; {{shown}} and {{total}} are counts */
 	search_results_truncated: "Showing the first {{shown}} of {{total}} matches (alphabetical). Refine your search to narrow it down.",
+	/** Empty-state title when every item in a directory listing was withheld by the hide-hidden-items preference */
+	all_items_hidden: "All items are hidden",
+	/** Empty-state subtitle under all_items_hidden. {{setting}} = the toggle's own label, {{path}} = where it lives — both interpolated from their real keys so translations stay in step */
+	all_items_hidden_description: "Everything here is a hidden item. Turn off {{setting}} under {{path}} to show them.",
+	/** Empty-state title when a search DID match, but every match was withheld by the hide-hidden-items preference */
+	all_matches_hidden: "All matches are hidden",
+	/** Empty-state subtitle under all_matches_hidden. {{setting}} / {{path}} as above */
+	all_matches_hidden_description: "Every match here is hidden. Turn off {{setting}} under {{path}} to show them.",
+	/** Empty-state subtitle under all_matches_hidden when the match set was ALSO capped by the search window, so a narrower term genuinely helps. {{setting}} / {{path}} as above */
+	all_matches_hidden_truncated_description:
+		"Every match loaded so far is hidden. There are more matches than the search can load at once — try a more specific term, or turn off {{setting}} under {{path}}.",
+	/** Toast after creating a directory or file whose name makes it hidden while the preference is on. {{setting}} = the toggle's own label */
+	created_item_is_hidden: "Created, but it won't be listed while {{setting}} is on.",
+	/** Toast after renaming an item to a name that makes it hidden while the preference is on. {{setting}} = the toggle's own label */
+	renamed_item_is_hidden: "Renamed, but it won't be listed while {{setting}} is on.",
+	/** Footer line under a listing where the hide-hidden-items preference withheld some (not all) rows. {{count}} = how many, {{setting}} = the toggle's label, {{path}} = where it lives */
+	hidden_items_not_shown_one: "{{count}} hidden item is not shown. Turn off {{setting}} under {{path}} to show it.",
+	/** Plural form of hidden_items_not_shown */
+	hidden_items_not_shown_other: "{{count}} hidden items are not shown. Turn off {{setting}} under {{path}} to show them.",
 	/** Empty-state title while the search has no matches yet but is still streaming the subtree in (resync converging) */
 	no_results_yet: "No results yet",
 	/** Empty-state subtitle under no_results_yet — conveys the search is still working, not finished */

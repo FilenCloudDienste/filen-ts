@@ -26,10 +26,11 @@ import {
 	nextDriveSelectSelection,
 	resolveDriveNavigationTarget,
 	resolveDriveContainingDirectoryTarget,
+	hiddenFilterAppliesTo,
 	keepAgainstIncomingDriveItem
 } from "@/features/drive/driveSelectors"
 import type { DriveItem } from "@/types"
-import type { DrivePath, SelectOptions } from "@/hooks/useDrivePath"
+import type { DrivePath, DrivePathType, SelectOptions } from "@/hooks/useDrivePath"
 
 // ---------------------------------------------------------------------------
 // Factory helpers
@@ -877,5 +878,71 @@ describe("resolveDriveContainingDirectoryTarget", () => {
 				drivePath: searchRoot
 			})
 		).toBeNull()
+	})
+})
+
+// ---------------------------------------------------------------------------
+// hiddenFilterAppliesTo
+// ---------------------------------------------------------------------------
+
+describe("hiddenFilterAppliesTo", () => {
+	// Typed as a full Record, so adding a DrivePathType breaks this at COMPILE time rather than
+	// silently inheriting whichever default the implementation happens to use. (The value
+	// DRIVE_PATH_TYPES is deliberately not imported — that would pull expo-router into this suite,
+	// which is kept dependency-free.)
+	const EXPECTED: Record<DrivePathType, boolean> = {
+		drive: true,
+		recents: true,
+		favorites: false,
+		trash: false,
+		links: false,
+		sharedOut: false,
+		offline: false,
+		sharedIn: false,
+		linked: false,
+		photos: false
+	}
+
+	it("matches the expected answer for every type", () => {
+		for (const type of Object.keys(EXPECTED) as DrivePathType[]) {
+			expect(hiddenFilterAppliesTo(drivePath(type, { uuid: "root" }))).toBe(EXPECTED[type])
+		}
+	})
+
+	// Ownership rule: hiding an item the user has never seen risks reading the share as empty or
+	// broken, in content they cannot rename their way out of.
+	it("never applies to content that came from someone else", () => {
+		expect(hiddenFilterAppliesTo(drivePath("sharedIn", { uuid: "root" }))).toBe(false)
+		expect(hiddenFilterAppliesTo(drivePath("linked", { uuid: "root" }))).toBe(false)
+	})
+
+	// Curated and state-scoped lists are the last place an item can be acted on once the browser
+	// hides it — trash restores or purges, offline un-stores, links and sharedOut revoke, and
+	// favorites is a list the user built by hand.
+	it("never applies to a curated or state-scoped listing", () => {
+		for (const type of ["favorites", "trash", "links", "sharedOut", "offline"] as const) {
+			expect(hiddenFilterAppliesTo(drivePath(type, { uuid: null }))).toBe(false)
+			expect(hiddenFilterAppliesTo(drivePath(type, { uuid: "dir" }))).toBe(false)
+		}
+	})
+
+	it("applies only to the two browsing views", () => {
+		expect(hiddenFilterAppliesTo(drivePath("drive", { uuid: "root" }))).toBe(true)
+		expect(hiddenFilterAppliesTo(drivePath("recents", { uuid: null }))).toBe(true)
+	})
+
+	it("never applies in a picker, whatever the underlying variant", () => {
+		expect(hiddenFilterAppliesTo(drivePath("drive", { uuid: "root", selectOptions: selectOptions({ intention: "move" }) }))).toBe(false)
+		expect(hiddenFilterAppliesTo(drivePath("drive", { uuid: "root", selectOptions: selectOptions({ intention: "select" }) }))).toBe(
+			false
+		)
+	})
+
+	it("never applies on the photos timeline, which runs its own unfiltered pipeline", () => {
+		expect(hiddenFilterAppliesTo(drivePath("photos", { uuid: "root" }))).toBe(false)
+	})
+
+	it("does not apply to an unresolved path", () => {
+		expect(hiddenFilterAppliesTo(drivePath(null))).toBe(false)
 	})
 })

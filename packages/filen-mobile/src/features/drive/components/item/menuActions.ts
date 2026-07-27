@@ -4,6 +4,7 @@ import { router } from "@/lib/router"
 import drive from "@/features/drive/drive"
 import alerts from "@/lib/alerts"
 import { confirmedDriveAction } from "@/features/drive/components/item/menuActionsShared"
+import { notifyIfNameIsHidden } from "@/features/drive/components/hiddenNameNotice"
 import { buildUndecryptableMenuButtons } from "@/features/drive/components/item/menuActionsUndecryptable"
 import { buildDownloadSubButtons, buildExportButton, buildOpenWithButton } from "@/features/drive/components/item/menuActionsDownload"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -20,7 +21,12 @@ import { serialize } from "@/lib/serializer"
 import { selectContacts } from "@/features/contacts/contactsSelect"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { type TFunction } from "i18next"
-import { isFileItem, resolveDriveContainingDirectoryTarget, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
+import {
+	hiddenFilterAppliesTo,
+	isFileItem,
+	resolveDriveContainingDirectoryTarget,
+	resolveDriveNavigationTarget
+} from "@/features/drive/driveSelectors"
 import cache from "@/lib/cache"
 import logger from "@/lib/logger"
 
@@ -313,6 +319,15 @@ export function createMenuButtons({
 
 					return
 				}
+
+				// Same predicate the listing filters by, so the notice can never claim "not listed"
+				// about a context that does not filter (the photos timeline, a picker, a share).
+				await notifyIfNameIsHidden({
+					name: newName,
+					action: "renamed",
+					appliesHere: hiddenFilterAppliesTo(drivePath),
+					t
+				})
 			}
 		})
 

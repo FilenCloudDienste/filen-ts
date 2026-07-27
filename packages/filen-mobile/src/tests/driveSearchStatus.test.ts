@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest"
-import { deriveStatus, isOnlineComplete } from "@/features/drive/hooks/driveSearchStatus"
+import {
+	deriveStatus,
+	isOnlineComplete,
+	shouldShowSearchTruncationNotice,
+	type DriveSearchStatus
+} from "@/features/drive/hooks/driveSearchStatus"
 
 // Baseline: an open, live, online cache search with one empty snapshot delivered and every timer
 // flag still down. Each test overrides only the inputs it exercises.
@@ -97,5 +102,49 @@ describe("isOnlineComplete", () => {
 
 	it("is true with a snapshot reporting matches", () => {
 		expect(isOnlineComplete(true, 5)).toBe(true)
+	})
+})
+
+describe("shouldShowSearchTruncationNotice", () => {
+	const args = (over: { status?: DriveSearchStatus; totalCount?: number; loadedCount?: number }) => ({
+		status: "settled" as DriveSearchStatus,
+		totalCount: 10,
+		loadedCount: 10,
+		...over
+	})
+
+	it("shows once the match count exceeds what the window loaded", () => {
+		expect(shouldShowSearchTruncationNotice(args({ totalCount: 5000, loadedCount: 1000 }))).toBe(true)
+	})
+
+	it("stays visible while a truncated result set is still converging in the background", () => {
+		expect(shouldShowSearchTruncationNotice(args({ status: "background", totalCount: 5000, loadedCount: 1000 }))).toBe(true)
+	})
+
+	it("hides when the whole match set is loaded", () => {
+		expect(shouldShowSearchTruncationNotice(args({ totalCount: 42, loadedCount: 42 }))).toBe(false)
+	})
+
+	// Guards the regression by CONSTRUCTION rather than by assertion: the notice used to key off the
+	// rendered row count, so a local filter shrinking a fully-loaded result set claimed truncation
+	// and told the user to refine a search that had already returned everything. This signature has
+	// no access to a rendered count, so that mistake can no longer be expressed here — the case
+	// below simply pins that a fully-loaded window stays quiet whatever is filtered downstream.
+	it("stays quiet for a fully-loaded window regardless of what a local filter removes", () => {
+		expect(shouldShowSearchTruncationNotice(args({ totalCount: 20, loadedCount: 20 }))).toBe(false)
+	})
+
+	it("stays hidden in every non-presenting status", () => {
+		for (const status of ["idle", "warming", "terminal"] as const) {
+			expect(shouldShowSearchTruncationNotice(args({ status, totalCount: 5000, loadedCount: 1000 }))).toBe(false)
+		}
+	})
+
+	// deriveStatus only yields these two with totalCount === 0, so the truncation comparison can
+	// never be true there anyway — assert the status gate with an input the machine can produce.
+	it("stays hidden in the two zero-match statuses", () => {
+		for (const status of ["searching-empty", "offline-incomplete"] as const) {
+			expect(shouldShowSearchTruncationNotice(args({ status, totalCount: 0, loadedCount: 0 }))).toBe(false)
+		}
 	})
 })

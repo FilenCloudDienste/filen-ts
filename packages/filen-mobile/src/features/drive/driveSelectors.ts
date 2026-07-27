@@ -1,5 +1,5 @@
 import type { DriveItem, DriveItemFileExtracted, DriveItemDirectoryExtracted } from "@/types"
-import type { DrivePath, SharedNavContext } from "@/hooks/useDrivePath"
+import type { DrivePath, DrivePathType, SharedNavContext } from "@/hooks/useDrivePath"
 import type { PreviewType } from "@/lib/previewType"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { serialize } from "@/lib/serializer"
@@ -437,4 +437,58 @@ export function resolveDriveContainingDirectoryTarget({
 			highlight: item.data.uuid
 		}
 	}
+}
+
+/**
+ * Which drive contexts the hide-hidden-items preference applies to.
+ *
+ * An exhaustive map rather than a deny-list: the fail-safe default for a context nobody has
+ * thought about is NOT filtered, and `satisfies Record<DrivePathType, boolean>` makes adding a
+ * variant a compile error rather than a silent opt-in.
+ *
+ * The rule: hiding applies where the user BROWSES their own drive, and nowhere else. `drive` is
+ * the browser; `recents` is the same contents through a chronological window. Those are the two
+ * places dot-prefixed clutter gets in the way, and the two places an item the user created and
+ * knows about costs nothing to omit.
+ *
+ * Everything else shows everything, for one of two reasons:
+ *
+ *  - It is not the user's content. In a public link or a shared-in directory, a hidden item is one
+ *    they have never seen, so hiding it risks reading the share as empty or broken — in content
+ *    they cannot rename their way out of.
+ *  - It is a curated or state-scoped list, and therefore the LAST place an item can be acted on
+ *    once the browser has hidden it. `trash` restores or purges, `offline` un-stores, `links` and
+ *    `sharedOut` revoke — and those two additionally answer "what have I exposed?", where a list
+ *    that claims completeness while omitting entries is misleading about data the user has handed
+ *    to other people. `favorites` is likewise a list the user built by hand; an entry they marked
+ *    themselves should not go missing from it.
+ *
+ * `offline` is also the one context whose ownership is MIXED: anything can be stored offline,
+ * including a directory shared with the user, which keeps its shared type in the offline index.
+ *
+ * `photos` runs its own unfiltered pipeline, so a listing rule stated about it would be untrue.
+ */
+const HIDDEN_FILTER_BY_DRIVE_PATH_TYPE = {
+	drive: true,
+	recents: true,
+	favorites: false,
+	trash: false,
+	links: false,
+	sharedOut: false,
+	offline: false,
+	sharedIn: false,
+	linked: false,
+	photos: false
+} satisfies Record<DrivePathType, boolean>
+
+/**
+ * Whether the hide-hidden-items preference applies to the context being rendered. Off in every
+ * picker too, where the list is not something to read but the only route to a destination.
+ */
+export function hiddenFilterAppliesTo(drivePath: DrivePath): boolean {
+	if (drivePath.selectOptions || drivePath.type === null) {
+		return false
+	}
+
+	return HIDDEN_FILTER_BY_DRIVE_PATH_TYPE[drivePath.type]
 }

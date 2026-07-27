@@ -71,3 +71,25 @@ export function deriveStatus(input: {
 
 	return "settled"
 }
+
+/**
+ * Whether the search list's truncation notice applies: the SDK loaded only the alphabetically
+ * first slice of a larger match set, so the list is capped and the user should refine.
+ *
+ * Shown whenever results are presenting AND the window is truncated — not only once settled: a
+ * >CEILING match set converges in "background" (still resyncing) for a while, during which the
+ * list would otherwise be silently capped with no hint. ("searching-empty" has nothing to
+ * truncate.)
+ *
+ * `loadedCount` is how many hits the window DELIVERED, never how many rows survive local
+ * filtering. Truncation is a property of the window: a display filter (hidden items) shrinks what
+ * is rendered without anything having been left unloaded, and keying off the rendered count would
+ * tell the user to refine a search that had already returned everything.
+ */
+export function isSearchWindowTruncated(totalCount: number, loadedCount: number): boolean {
+	return totalCount > loadedCount
+}
+
+export function shouldShowSearchTruncationNotice(input: { status: DriveSearchStatus; totalCount: number; loadedCount: number }): boolean {
+	return (input.status === "settled" || input.status === "background") && isSearchWindowTruncated(input.totalCount, input.loadedCount)
+}

@@ -13,6 +13,8 @@ import { isConvertHeicToJpgEnabled, convertHeicToJpg } from "@/lib/imageConversi
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { withSystemPresentation } from "@/lib/systemPresentation"
 import { pickDocuments } from "@/lib/documentPicker"
+import { notifyIfNameIsHidden } from "@/features/drive/components/hiddenNameNotice"
+import { hiddenFilterAppliesTo } from "@/features/drive/driveSelectors"
 import transfers from "@/features/transfers/transfers"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
@@ -558,6 +560,10 @@ export function useDriveUpload({
 
 			return
 		}
+
+		// Same silence as the create-directory prompt: the user typed this name, and with the
+		// preference on the file will not appear in the listing they return to.
+		await notifyIfNameIsHidden({ name: fileName, action: "created", appliesHere: hiddenFilterAppliesTo(drivePath), t })
 
 		if (!result.data) {
 			return

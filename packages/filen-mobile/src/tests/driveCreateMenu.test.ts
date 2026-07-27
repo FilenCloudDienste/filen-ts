@@ -5,6 +5,15 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // ---------------------------------------------------------------------------
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
+
+// This suite exercises only getDriveParent / canShowDriveCreateMenu, neither of which touches the
+// hidden-items preference — but driveCreateMenu imports components/hiddenNameNotice, which reaches
+// driveHiddenItems -> secureStore -> expo-secure-store. The stub exists purely to keep the module
+// graph loadable.
+vi.mock("@/features/drive/driveHiddenItems", () => ({
+	isHiddenName: (name: string) => name.trim().startsWith("."),
+	readHideHiddenItems: async () => false
+}))
 vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
 
 vi.mock("@filen/sdk-rs", () => ({

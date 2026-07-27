@@ -6,24 +6,26 @@ import useDriveItemsQuery from "@/features/drive/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 import { itemSorter } from "@/lib/sort"
 import { useDriveSortPreference } from "@/features/drive/driveSortPreference"
+import { filterHiddenDriveItems, useHideHiddenItems } from "@/features/drive/driveHiddenItems"
 import VirtualList, { type ListRef, type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
 import Item from "@/features/drive/components/item"
 import Header from "@/features/drive/components/header"
-import DriveSearchFooter from "@/features/drive/components/searchFooter"
+import DriveListFooter from "@/features/drive/components/listFooter"
 import { run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { type View as RNView, Platform, ActivityIndicator } from "react-native"
 import useViewLayout from "@/hooks/useViewLayout"
 import { useDriveViewMode } from "@/features/drive/driveViewModePreference"
 import { gridColumnsForWidth, GRID_EDGE_PADDING } from "@/features/drive/driveGrid"
-import { driveScreenUsesBaseBackground } from "@/features/drive/driveSelectors"
+import { driveScreenUsesBaseBackground, hiddenFilterAppliesTo } from "@/features/drive/driveSelectors"
 import GridItem from "@/features/drive/components/item/gridItem"
 import { useFocusEffect } from "expo-router"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { onlineManager } from "@tanstack/react-query"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
+import { isSearchWindowTruncated } from "@/features/drive/hooks/driveSearchStatus"
 import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
 import { useDriveHighlight } from "@/features/drive/hooks/useDriveHighlight"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
@@ -67,6 +69,7 @@ const Drive = () => {
 	const { t } = useTranslation()
 	const { searchQuery, setSearchQuery, searchResults, searchResultPaths, status, totalCount } = useDriveSearch({ drivePath })
 	const { sort } = useDriveSortPreference(drivePath)
+	const [hideHiddenItems] = useHideHiddenItems()
 	const blocked = useBlockedUsers()
 	const parent = getDriveParent(drivePath)
 	const upload = useDriveUpload({ parent, drivePath, t })
@@ -112,14 +115,14 @@ const Drive = () => {
 			// would show "the newest of the alphabetically-first 1000" and silently hide the true
 			// top-N. Keep the SDK's name-ascending order (the footer states it); below the cap the
 			// whole match set is loaded, so the user's sort is honoured.
-			totalCount > searchResults.length
+			isSearchWindowTruncated(totalCount, searchResults.length)
 			? searchResults
 			: itemSorter.sortItems(searchResults, sort, { directorySizes })
 		: filterDriveItemsBySearchQuery(itemSorter.sortItems(driveItemsQuery.data ?? [], sort, { directorySizes }), searchQuery)
 
 	// Hide shared-in items shared by a blocked user (virtual-root filter — the query stays
 	// unopinionated). Only the sharedIn context carries a sharer identity to check.
-	const items =
+	const visibleItems =
 		drivePath.type === "sharedIn"
 			? sortedItems.filter(item => {
 					const sharer = getSharerIdentity(item)
@@ -127,6 +130,38 @@ const Drive = () => {
 					return !sharer || !isBlocked(sharer, blocked)
 				})
 			: sortedItems
+
+	// Dot-prefixed items, when the user has opted into hiding them. Applied last and to the single
+	// `items` this screen renders from, so one application covers every context this screen backs.
+	//
+	// Which contexts it applies to is `hiddenFilterAppliesTo`: the two browsing views only. See
+	// there for why every other list this screen backs shows everything.
+	const hidingActive = hideHiddenItems && hiddenFilterAppliesTo(drivePath)
+	const items = filterHiddenDriveItems({
+		items: visibleItems,
+		hide: hidingActive,
+		// Search is recursive: without the hit's ancestry, hiding `.thumb` from the browser would
+		// still flood the results with its contents — and the row prints the full relative path,
+		// naming the hidden directory right back at the user.
+		searchParentPaths: isCacheSearch ? searchResultPaths : undefined
+	})
+	const hiddenCount = visibleItems.length - items.length
+
+	// The filter emptied a listing that wasn't empty. Without its own empty state this reads as
+	// "this directory is empty" or, worse, "no results" for a search whose term WAS matched —
+	// leaving no way to work out why. Covers both, since both render from `items`.
+	const emptiedByHiddenFilter = hiddenCount > 0 && items.length === 0
+	// A truncated search filtered to nothing is a distinct story: matches exist beyond the loaded
+	// window, and since the SDK loads the alphabetically-FIRST slice — and `.` sorts ahead of
+	// letters and digits — that slice skews heavily towards the very items being hidden. Refining
+	// the term shrinks the match set below the cap and brings the rest into view, so say so.
+	const searchTruncated = isCacheSearch && isSearchWindowTruncated(totalCount, searchResults.length)
+
+	// The setting's own label and its location, interpolated rather than written into the sentences
+	// that reference them — otherwise the translator localizes four copies of "Hide hidden items"
+	// and "More"/"Appearance" independently of the real keys, and they drift apart per locale.
+	const hiddenSetting = t("hide_hidden_items")
+	const hiddenSettingPath = `${t("more")} › ${t("appearance")}`
 
 	// Reveal target of an "open containing directory" navigation: scrolls this listing to the item
 	// the search hit pointed at and tints its row once. No-op on every other entry to the screen.
@@ -168,6 +203,29 @@ const Drive = () => {
 			void refetchListing()
 		}
 	}, [isCacheSearch, refetchListing])
+
+	// Stale-selection purge (hidden filter): a selected row that becomes hidden — renamed to a
+	// dot-name locally or remotely, or the preference flipped — would otherwise stay selected while
+	// off screen, so the header would count a row nobody can see and a bulk action would target it.
+	//
+	// Purges exactly what THIS filter removed, never "everything not currently rendered". Two
+	// reasons, both reachable: `items` is legitimately EMPTY while the search suppresses its
+	// results (warming / terminal), so reconciling against it would wipe the whole selection on
+	// every keystroke that re-warms a query; and `selectedItems` is a global store while several
+	// Drive instances are mounted at once (the tab stack plus trash / offline / favorites as
+	// separate routes), whose effects run unfocused — so one listing's notion of "not rendered"
+	// must never speak for another's. A dot-name is hidden in every listing alike, so removing only
+	// those is correct from whichever instance runs it.
+	useEffect(() => {
+		if (hiddenCount === 0) {
+			return
+		}
+
+		const rendered = new Set(items.map(item => item.data.uuid))
+		const removed = visibleItems.filter(item => !rendered.has(item.data.uuid)).map(item => item.data.uuid)
+
+		useDriveStore.getState().removeFromSelection(removed)
+	}, [items, visibleItems, hiddenCount])
 
 	// Stale-selection purge (sharedIn): if a sharer becomes blocked while their items are
 	// selected, drop those items from the selection so bulk actions / select-all stay honest.
@@ -299,17 +357,58 @@ const Drive = () => {
 							}
 							loading={driveItemsQuery.status === "pending" || (isCacheSearch && status === "warming")}
 							footerComponent={
-								isCacheSearch
+								isCacheSearch || hiddenCount > 0
 									? () => (
-											<DriveSearchFooter
+											<DriveListFooter
 												status={status}
 												totalCount={totalCount}
-												resultCount={items.length}
+												loadedCount={searchResults.length}
+												renderedCount={items.length}
+												hiddenCount={hiddenCount}
+												setting={hiddenSetting}
+												settingPath={hiddenSettingPath}
 											/>
 										)
 									: undefined
 							}
 							emptyComponent={() => {
+								// The rows exist and were withheld by a local preference, which none of the
+								// states below describe — including the query-error branch, which would
+								// otherwise claim the directory failed to load when it loaded fine and the
+								// preference emptied it. That branch's Try-again is carried here instead, so
+								// a listing that BOTH failed to refresh and filtered to nothing still offers
+								// the retry. Unreachable from a terminal search — that hides its results, so
+								// nothing was filtered.
+								if (emptiedByHiddenFilter) {
+									return (
+										<ListEmpty
+											icon="eye-off-outline"
+											title={searchActive ? t("all_matches_hidden") : t("all_items_hidden")}
+											description={
+												searchTruncated
+													? t("all_matches_hidden_truncated_description", {
+															setting: hiddenSetting,
+															path: hiddenSettingPath
+														})
+													: searchActive
+														? t("all_matches_hidden_description", {
+																setting: hiddenSetting,
+																path: hiddenSettingPath
+															})
+														: t("all_items_hidden_description", {
+																setting: hiddenSetting,
+																path: hiddenSettingPath
+															})
+											}
+											action={
+												!isCacheSearch && driveItemsQuery.status === "error" ? (
+													<Button onPress={() => void driveItemsQuery.refetch()}>{t("try_again")}</Button>
+												) : undefined
+											}
+										/>
+									)
+								}
+
 								// Plain-drive cache search: its own terminal / no-results states. The
 								// directory listing query is NOT the source here, so its error/empty
 								// states don't apply (`warming` never reaches this — `loading` suppresses

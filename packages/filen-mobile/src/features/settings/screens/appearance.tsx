@@ -9,6 +9,7 @@ import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import { useDriveSortPreferences, DEFAULT_SORT_PREFERENCES } from "@/features/drive/driveSortPreference"
 import { useDriveViewModePreferences, DEFAULT_VIEW_MODE_PREFERENCES } from "@/features/drive/driveViewModePreference"
+import { useHideHiddenItems } from "@/features/drive/driveHiddenItems"
 import { useStartScreen, START_SCREENS, type StartScreen } from "@/features/settings/startScreen"
 import { actionSheet } from "@/providers/actionSheet.provider"
 import { useTranslation } from "react-i18next"
@@ -22,6 +23,7 @@ function Appearance() {
 	const navigation = useNavigation()
 	const [sortPrefs, setSortPrefs] = useDriveSortPreferences()
 	const [viewModePrefs, setViewModePrefs] = useDriveViewModePreferences()
+	const [hideHiddenItems, setHideHiddenItems] = useHideHiddenItems()
 	const [startScreen, setStartScreen] = useStartScreen()
 	const { t } = useTranslation()
 	const [language, setLanguage] = useLanguage()
@@ -219,6 +221,18 @@ function Appearance() {
 					global: DEFAULT_VIEW_MODE_PREFERENCES.global,
 					perDirectory: {}
 				}))
+			}
+		},
+		{
+			icon: "eye-off-outline",
+			title: t("hide_hidden_items"),
+			subTitle: t("hide_hidden_items_description"),
+			rightItem: {
+				type: "switch",
+				value: hideHiddenItems,
+				onValueChange: () => {
+					setHideHiddenItems(prev => !prev)
+				}
 			}
 		}
 	]

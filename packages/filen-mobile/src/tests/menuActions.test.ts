@@ -21,6 +21,14 @@ vi.mock("@/lib/confirmedAction", () => ({
 	confirmedAction: mockConfirmedAction
 }))
 
+// driveHiddenItems (reached via components/hiddenNameNotice) is backed by secureStore, which pulls in
+// expo-secure-store. Stub the two accessors the code under test touches; the preference is off,
+// so the hidden-name notice never fires here.
+vi.mock("@/features/drive/driveHiddenItems", () => ({
+	isHiddenName: (name: string) => name.trim().startsWith("."),
+	readHideHiddenItems: async () => false
+}))
+
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
@@ -37,7 +45,7 @@ vi.mock("@/lib/auth", () => ({
 }))
 
 vi.mock("@/lib/alerts", () => ({
-	default: { error: vi.fn() }
+	default: { error: vi.fn(), normal: vi.fn() }
 }))
 
 vi.mock("@/lib/prompts", () => ({

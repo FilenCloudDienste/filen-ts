@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { run, cn } from "@filen/utils"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
+import { notifyIfNameIsHidden } from "@/features/drive/components/hiddenNameNotice"
 import alerts from "@/lib/alerts"
 import drive from "@/features/drive/drive"
 import cache from "@/lib/cache"
@@ -130,6 +131,12 @@ const DriveSelectToolbar = () => {
 
 			return
 		}
+
+		// The picker itself never filters, so the new directory appears here regardless — but the
+		// listing the user returns to does, and a destination they just created and then cannot find
+		// is the worst version of this. `appliesHere: true`: a picker destination is always in the
+		// user's own drive, which is filtered.
+		await notifyIfNameIsHidden({ name: newName, action: "created", appliesHere: true, t })
 	}
 
 	const submit = async () => {

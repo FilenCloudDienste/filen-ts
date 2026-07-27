@@ -64,6 +64,14 @@ vi.mock("@/features/transfers/transfers", () => ({
 	}
 }))
 
+// hiddenNameNotice (imported by useDriveUpload for the create-text-file notice) reaches
+// driveHiddenItems -> secureStore -> expo-secure-store. Stub the two accessors it uses; the
+// preference is off here, so the notice never fires.
+vi.mock("@/features/drive/driveHiddenItems", () => ({
+	isHiddenName: (name: string) => name.trim().startsWith("."),
+	readHideHiddenItems: async () => false
+}))
+
 vi.mock("@/lib/alerts", () => ({
 	default: {
 		error: mockAlertsError,
