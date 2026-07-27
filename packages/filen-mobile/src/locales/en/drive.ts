@@ -271,6 +271,8 @@ export const drive = {
 	could_not_load_directory: "Couldn't load this directory",
 
 	// ── Per-item context menu actions (drive/item/menu.tsx) ───────────────────
+	/** Per-item context menu (search results): navigate to the directory that holds this item */
+	open_containing_directory: "Open containing directory",
 	/** Per-item context menu: download item to the device filesystem */
 	download_to_device: "Download to device",
 	/** Per-item context menu: make the item available when offline */

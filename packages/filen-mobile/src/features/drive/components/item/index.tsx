@@ -1,6 +1,7 @@
 import View from "@/components/ui/view"
 import { PressableScale } from "@/components/ui/pressables"
 import Menu from "@/features/drive/components/item/menu"
+import HighlightOverlay from "@/features/drive/components/item/highlightOverlay"
 import Text from "@/components/ui/text"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { DriveItem } from "@/types"
@@ -25,7 +26,8 @@ const Item = ({
 	info,
 	drivePath,
 	getListItems,
-	searchParentPath
+	searchParentPath,
+	highlighted
 }: {
 	info: ListRenderItemInfo<DriveItem>
 	drivePath: DrivePath
@@ -33,6 +35,9 @@ const Item = ({
 	// Cache-search only: the hit's parent path relative to the search root. When non-empty, the
 	// row shows the item's full relative path as a third line. Undefined in normal browsing.
 	searchParentPath?: string
+	// True for the single row "open containing directory" navigated here to reveal, for as long as
+	// its tint plays out.
+	highlighted?: boolean
 }) => {
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
@@ -63,6 +68,9 @@ const Item = ({
 				disabled && !navigateOnly && "opacity-50"
 			)}
 		>
+			{/* First child so it paints BEHIND the row, which is transparent throughout — the tint
+			    reads as a row background rather than a wash over the label and thumbnail. */}
+			{highlighted && <HighlightOverlay />}
 			<Menu
 				className="flex-row w-full h-auto flex-1 items-center"
 				type="context"

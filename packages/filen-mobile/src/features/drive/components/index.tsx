@@ -6,7 +6,7 @@ import useDriveItemsQuery from "@/features/drive/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 import { itemSorter } from "@/lib/sort"
 import { useDriveSortPreference } from "@/features/drive/driveSortPreference"
-import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
+import VirtualList, { type ListRef, type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
 import Item from "@/features/drive/components/item"
@@ -25,6 +25,7 @@ import useDriveStore from "@/features/drive/store/useDrive.store"
 import { onlineManager } from "@tanstack/react-query"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
 import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
+import { useDriveHighlight } from "@/features/drive/hooks/useDriveHighlight"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import { isBlocked } from "@/features/contacts/blockedSelectors"
 import { getSharerIdentity } from "@/features/drive/driveSharer"
@@ -54,6 +55,7 @@ const Drive = () => {
 	const drivePath = useDrivePath()
 	const { viewMode } = useDriveViewMode(drivePath)
 	const containerRef = useRef<RNView>(null)
+	const listRef = useRef<ListRef<DriveItem>>(null)
 	const { layout, onLayout } = useViewLayout(containerRef)
 	const isGrid = viewMode === "grid"
 	const columns = gridColumnsForWidth(layout.width)
@@ -125,6 +127,29 @@ const Drive = () => {
 					return !sharer || !isBlocked(sharer, blocked)
 				})
 			: sortedItems
+
+	// Reveal target of an "open containing directory" navigation: scrolls this listing to the item
+	// the search hit pointed at and tints its row once. No-op on every other entry to the screen.
+	// `settled` deliberately keys off isFetching, not just status: this screen mounts with
+	// `refetchOnMount: "always"`, so a directory that WAS visited before renders its persisted
+	// listing at status "success" while the real one is still in flight. Giving up on that
+	// snapshot would miss anything added since. The status term additionally covers a query that
+	// is pending without fetching, where there is no listing to search at all.
+	const highlightedUuid = useDriveHighlight({
+		items,
+		listRef,
+		// Grid mode is resolved from a measured width, so until layout lands the VirtualList below
+		// is the list-mode one and its `key` is about to change — revealing against an instance
+		// that is then remounted loses the scroll with nothing to retry it.
+		ready: layout.width > 0,
+		// `settled` keys off fetchStatus, not status: this screen mounts with
+		// `refetchOnMount: "always"`, so a directory visited before renders its persisted listing at
+		// status "success" while the real one is still in flight, and giving up on that snapshot
+		// would miss anything added since. "idle" (rather than !isFetching) additionally excludes a
+		// query the offlineFirst retryer has PAUSED, which would otherwise read as settled and
+		// permanently abandon a reveal that connectivity is about to make possible.
+		settled: driveItemsQuery.fetchStatus === "idle" && driveItemsQuery.status !== "pending"
+	})
 
 	// Returning from a cache search to the directory listing: the search REPLACED the
 	// listing as the rendered source, so on clear the list shows whatever
@@ -200,6 +225,7 @@ const Drive = () => {
 				>
 					<LazyWrapper>
 						<VirtualList
+							ref={listRef}
 							key={isGridActive ? `grid-${columns}` : "list"}
 							className={cn("flex-1", driveScreenUsesBaseBackground(drivePath) ? "bg-background" : "bg-background-secondary")}
 							contentInsetAdjustmentBehavior="automatic"
@@ -224,6 +250,7 @@ const Drive = () => {
 											drivePath={drivePath}
 											getListItems={() => items}
 											itemWidth={gridItemWidth}
+											highlighted={info.item.data.uuid === highlightedUuid}
 										/>
 									)
 								}
@@ -234,6 +261,7 @@ const Drive = () => {
 										drivePath={drivePath}
 										getListItems={() => items}
 										searchParentPath={isCacheSearch ? searchResultPaths.get(info.item.data.uuid) : undefined}
+										highlighted={info.item.data.uuid === highlightedUuid}
 									/>
 								)
 							}}

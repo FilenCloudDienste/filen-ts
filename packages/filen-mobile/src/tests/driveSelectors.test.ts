@@ -25,6 +25,7 @@ import {
 	isDriveItemNavigateOnly,
 	nextDriveSelectSelection,
 	resolveDriveNavigationTarget,
+	resolveDriveContainingDirectoryTarget,
 	keepAgainstIncomingDriveItem
 } from "@/features/drive/driveSelectors"
 import type { DriveItem } from "@/types"
@@ -772,5 +773,109 @@ describe("resolveDriveNavigationTarget", () => {
 
 	it("returns null for sharedRootDirectory inside trash", () => {
 		expect(resolveDriveNavigationTarget({ item: sharedRootDir("r4"), drivePath: drivePath("trash") })).toBeNull()
+	})
+})
+
+// ---------------------------------------------------------------------------
+// resolveDriveContainingDirectoryTarget
+// ---------------------------------------------------------------------------
+
+describe("resolveDriveContainingDirectoryTarget", () => {
+	const searchRoot = drivePath("drive", { uuid: "root" })
+
+	// The drive root is reachable with no uuid segment at all (native-tab nav), which is exactly
+	// where a whole-account search runs — so this form has to behave identically to the explicit one.
+	const tabNavRoot = drivePath("drive", { uuid: null })
+
+	it("routes a file hit to its parent directory, carrying itself as the reveal target", () => {
+		expect(
+			resolveDriveContainingDirectoryTarget({ item: file("f1"), parentUuid: "p1", rootUuid: "root", drivePath: searchRoot })
+		).toEqual({
+			pathname: "/tabs/drive/[uuid]",
+			params: { uuid: "p1", highlight: "f1" }
+		})
+	})
+
+	it("routes a directory hit to its parent, not into itself", () => {
+		expect(
+			resolveDriveContainingDirectoryTarget({ item: dir("d1"), parentUuid: "p1", rootUuid: "root", drivePath: searchRoot })
+		).toEqual({
+			pathname: "/tabs/drive/[uuid]",
+			params: { uuid: "p1", highlight: "d1" }
+		})
+	})
+
+	it("resolves at the uuid-less drive root (native-tab nav) via the account root", () => {
+		expect(
+			resolveDriveContainingDirectoryTarget({ item: file("f1"), parentUuid: "p1", rootUuid: "root", drivePath: tabNavRoot })
+		).toEqual({
+			pathname: "/tabs/drive/[uuid]",
+			params: { uuid: "p1", highlight: "f1" }
+		})
+	})
+
+	it("returns null at the uuid-less drive root for a hit that already lives in the root", () => {
+		expect(
+			resolveDriveContainingDirectoryTarget({ item: file("f1"), parentUuid: "root", rootUuid: "root", drivePath: tabNavRoot })
+		).toBeNull()
+	})
+
+	it("returns null when the parent is the directory already on screen (every row of a normal listing)", () => {
+		expect(
+			resolveDriveContainingDirectoryTarget({ item: file("f1"), parentUuid: "root", rootUuid: "root", drivePath: searchRoot })
+		).toBeNull()
+	})
+
+	it("returns null when the parent uuid is absent (trashed item / virtual parent)", () => {
+		expect(
+			resolveDriveContainingDirectoryTarget({ item: file("f1"), parentUuid: null, rootUuid: "root", drivePath: searchRoot })
+		).toBeNull()
+	})
+
+	it("returns null when neither the route nor the cache can say which directory is displayed", () => {
+		expect(
+			resolveDriveContainingDirectoryTarget({ item: file("f1"), parentUuid: "p1", rootUuid: null, drivePath: tabNavRoot })
+		).toBeNull()
+	})
+
+	it("returns null outside the plain drive browser", () => {
+		for (const type of ["trash", "recents", "favorites", "links", "sharedIn", "sharedOut", "offline", "photos", "linked"] as const) {
+			expect(
+				resolveDriveContainingDirectoryTarget({
+					item: file("f1"),
+					parentUuid: "p1",
+					rootUuid: "root",
+					drivePath: drivePath(type, { uuid: "root" })
+				})
+			).toBeNull()
+		}
+	})
+
+	it("returns null in picker mode", () => {
+		const path = drivePath("drive", { uuid: "root", selectOptions: selectOptions({ intention: "move" }) })
+
+		expect(resolveDriveContainingDirectoryTarget({ item: file("f1"), parentUuid: "p1", rootUuid: "root", drivePath: path })).toBeNull()
+	})
+
+	it("returns null for shared item types (their parent lives at a different shape)", () => {
+		expect(
+			resolveDriveContainingDirectoryTarget({ item: sharedRootDir("r1"), parentUuid: "p1", rootUuid: "root", drivePath: searchRoot })
+		).toBeNull()
+		expect(
+			resolveDriveContainingDirectoryTarget({
+				item: sharedDirectory("s1"),
+				parentUuid: "p1",
+				rootUuid: "root",
+				drivePath: searchRoot
+			})
+		).toBeNull()
+		expect(
+			resolveDriveContainingDirectoryTarget({
+				item: sharedRootFile("sf1"),
+				parentUuid: "p1",
+				rootUuid: "root",
+				drivePath: searchRoot
+			})
+		).toBeNull()
 	})
 })

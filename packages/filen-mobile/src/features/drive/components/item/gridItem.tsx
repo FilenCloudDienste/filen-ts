@@ -7,6 +7,7 @@ import { PressableScale } from "@/components/ui/pressables"
 import { Checkbox } from "@/components/ui/checkbox"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
 import Menu from "@/features/drive/components/item/menu"
+import HighlightOverlay from "@/features/drive/components/item/highlightOverlay"
 import { FavoritedIndicatorCard, OfflineIndicatorCard } from "@/features/drive/components/item/indicators"
 import useDriveItemInteraction from "@/features/drive/hooks/useDriveItemInteraction"
 import useDriveItemIndicators from "@/features/drive/hooks/useDriveItemIndicators"
@@ -23,12 +24,16 @@ export default function GridItem({
 	info,
 	drivePath,
 	getListItems,
-	itemWidth
+	itemWidth,
+	highlighted
 }: {
 	info: ListRenderItemInfo<DriveItem>
 	drivePath: DrivePath
 	getListItems: () => DriveItem[]
 	itemWidth: number
+	// True for the single cell "open containing directory" navigated here to reveal, for as long as
+	// its tint plays out.
+	highlighted?: boolean
 }) {
 	const { onPress, disabled, navigateOnly, isSelected, isSelecting, isSelectedFromDriveSelect, onPressSelectForDriveSelect } =
 		useDriveItemInteraction({ info, drivePath, getListItems })
@@ -90,6 +95,9 @@ export default function GridItem({
 							size={{ icon: Math.round(cardSize * 0.5), thumbnail: cardSize }}
 							contentFit="cover"
 						/>
+						{/* Over the thumbnail (which fills the card, so a tint behind it would be
+						    invisible) but under the badges. The card clips it to its own rounding. */}
+						{highlighted && <HighlightOverlay />}
 						{showOffline && <OfflineIndicatorCard />}
 						{showFavorited && <FavoritedIndicatorCard />}
 						{isSelecting && (

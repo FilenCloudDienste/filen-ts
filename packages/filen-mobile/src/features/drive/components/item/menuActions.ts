@@ -11,7 +11,7 @@ import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
 import { randomUUID } from "expo-crypto"
 import offline from "@/features/offline/offline"
-import { getRealDriveItemParent, makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
+import { getRealDriveItemParent, makeDriveItemPublicLink, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import * as Clipboard from "expo-clipboard"
 import auth from "@/lib/auth"
 import { getPreviewType } from "@/lib/previewType"
@@ -20,7 +20,7 @@ import { serialize } from "@/lib/serializer"
 import { selectContacts } from "@/features/contacts/contactsSelect"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { type TFunction } from "i18next"
-import { isFileItem, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
+import { isFileItem, resolveDriveContainingDirectoryTarget, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
 import cache from "@/lib/cache"
 import logger from "@/lib/logger"
 
@@ -98,6 +98,37 @@ export function createMenuButtons({
 				icon: "folder",
 				onPress: () => {
 					router.push(openTarget)
+				}
+			})
+		}
+	}
+
+	{
+		// Search matches the whole subtree, so a hit can sit anywhere below the searched
+		// directory — this jumps to the directory holding it. Resolves to null everywhere else
+		// (including every row of a normal listing, whose parent IS the open directory).
+		//
+		// Suppressed inside the preview. The gallery is a modal on the ROOT stack while this
+		// pushes into the drive TAB's stack, so expo-router diverges at the root and appends a
+		// SECOND tabs route — a duplicate tab bar sliding in over the still-open preview. Every
+		// other push in this menu targets a root-level modal, which stacks legitimately. The
+		// action is available on the row the preview was opened from.
+		const containingTarget = isPreview
+			? null
+			: resolveDriveContainingDirectoryTarget({
+					item,
+					parentUuid: item.type === "file" || item.type === "directory" ? unwrapParentUuid(item.data.parent) : null,
+					rootUuid: cache.rootUuid,
+					drivePath
+				})
+
+		if (containingTarget) {
+			menuButtons.push({
+				id: "openContainingDirectory",
+				title: t("open_containing_directory"),
+				icon: "containingFolder",
+				onPress: () => {
+					router.push(containingTarget)
 				}
 			})
 		}

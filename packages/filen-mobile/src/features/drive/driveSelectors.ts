@@ -377,3 +377,64 @@ export function resolveDriveNavigationTarget({ item, drivePath }: { item: DriveI
 		}
 	}
 }
+
+/**
+ * Resolves the router target for navigating to the directory that CONTAINS an item, rather
+ * than into it — the "open containing directory" action. Only ever has something to resolve
+ * for a search hit: the cache-backed search matches the whole subtree, so a result can live
+ * anywhere below the searched directory, and its own path is the only route back to its
+ * siblings. Returns null when there is nowhere to go.
+ *
+ * `parentUuid` is the caller's already-unwrapped `ParentUuid` (this module stays SDK-free — see
+ * the note above `isImageOrVideoExtension`). It is null for a trashed item and for the virtual
+ * Recents/Favorites/Links parents, each of which correctly suppresses the action.
+ *
+ * `rootUuid` is the account root, likewise resolved by the caller. The drive root is reachable
+ * BOTH as an explicit uuid (the index redirect / a start-screen href) and with no uuid at all
+ * (native-tab nav lands on `/tabs/drive/` with no segment), so the displayed directory has to be
+ * normalized through it exactly as `getDriveParent` does — otherwise every hit of a search run
+ * from the tab bar loses the action.
+ *
+ * Gated to the plain drive browser, the only variant that runs the subtree search. A parent equal
+ * to the displayed directory means the item is a direct child of what is already on screen —
+ * every row during normal browsing, plus a search hit from the search root itself — so there is
+ * nothing to navigate to.
+ */
+export function resolveDriveContainingDirectoryTarget({
+	item,
+	parentUuid,
+	rootUuid,
+	drivePath
+}: {
+	item: DriveItem
+	parentUuid: string | null
+	rootUuid: string | null
+	drivePath: DrivePath
+}) {
+	if (drivePath.type !== "drive" || drivePath.selectOptions) {
+		return null
+	}
+
+	// The shared variants never surface here (the plain browser lists only the user's own
+	// items), and their parent lives at a different shape — so they are not resolved.
+	if (item.type !== "file" && item.type !== "directory") {
+		return null
+	}
+
+	const displayedUuid = drivePath.uuid ?? rootUuid
+
+	if (!parentUuid || !displayedUuid || parentUuid === displayedUuid) {
+		return null
+	}
+
+	return {
+		pathname: "/tabs/drive/[uuid]" as const,
+		params: {
+			uuid: parentUuid,
+			// Consumed once by useDriveHighlight on the destination screen, which scrolls the
+			// listing to this item and tints its row — a directory the search hit came from can be
+			// long enough that arriving at its top says nothing about where the match sits.
+			highlight: item.data.uuid
+		}
+	}
+}

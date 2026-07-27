@@ -34,6 +34,7 @@ export type Icons =
 	| "info"
 	| "move"
 	| "folder"
+	| "containingFolder"
 	| "link"
 	| "reply"
 	| "mute"
@@ -196,6 +197,12 @@ export function iconToSwiftUiIcon(name: Icons, fill?: boolean): React.ComponentP
 
 		case "folder": {
 			return fill ? "folder.fill" : "folder"
+		}
+
+		// Distinct from "folder" on purpose: for a directory search hit, "Open" (enter it) and
+		// "Open containing directory" (go to its parent) sit next to each other in the same menu.
+		case "containingFolder": {
+			return fill ? "folder.circle.fill" : "folder.circle"
 		}
 
 		case "link": {
