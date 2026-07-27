@@ -4,15 +4,21 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 // Hoisted mocks (must be defined before any imports)
 // ---------------------------------------------------------------------------
 
-const { mockGetSdkClients, mockNotesWithContentQueryUpdate, mockNoteContentQueryUpdate, mockFlushToDisk, mockClearRejections } = vi.hoisted(
-	() => ({
-		mockGetSdkClients: vi.fn(),
-		mockNotesWithContentQueryUpdate: vi.fn(),
-		mockNoteContentQueryUpdate: vi.fn(),
-		mockFlushToDisk: vi.fn().mockResolvedValue(undefined),
-		mockClearRejections: vi.fn()
-	})
-)
+const {
+	mockGetSdkClients,
+	mockRemoveQueryEverywhere,
+	mockNotesWithContentQueryUpdate,
+	mockNoteContentQueryUpdate,
+	mockFlushToDisk,
+	mockClearRejections
+} = vi.hoisted(() => ({
+	mockGetSdkClients: vi.fn(),
+	mockNotesWithContentQueryUpdate: vi.fn(),
+	mockNoteContentQueryUpdate: vi.fn(),
+	mockRemoveQueryEverywhere: vi.fn(),
+	mockFlushToDisk: vi.fn().mockResolvedValue(undefined),
+	mockClearRejections: vi.fn()
+}))
 
 // ---------------------------------------------------------------------------
 // Module mocks
@@ -33,7 +39,15 @@ vi.mock("@/features/notes/queries/useNotesQuery", () => ({
 }))
 
 vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
-	noteContentQueryUpdate: mockNoteContentQueryUpdate
+	noteContentQueryUpdate: mockNoteContentQueryUpdate,
+	noteContentQueryKey: ({ uuid }: { uuid: string }) => ["useNoteContentQuery", { uuid }]
+}))
+
+// removeQueryEverywhere lives in queries/client, which reaches SQLite — stubbed so the graph stays
+// free of native modules. Deleting a note now genuinely drops its cached body (the old
+// `updater: () => undefined` form was a no-op: query-core bails when an updater yields undefined).
+vi.mock("@/queries/client", () => ({
+	removeQueryEverywhere: mockRemoveQueryEverywhere
 }))
 
 vi.mock("@/features/notes/components/sync", () => ({

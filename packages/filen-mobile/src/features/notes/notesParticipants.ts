@@ -2,7 +2,8 @@ import auth from "@/lib/auth"
 import { type Contact } from "@filen/sdk-rs"
 import { type Note, type NoteParticipant } from "@/types"
 import { wrapSdkNote } from "@/features/notes/utils"
-import { noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
+import { noteContentQueryKey } from "@/features/notes/queries/useNoteContent.query"
+import { removeQueryEverywhere } from "@/queries/client"
 import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 
@@ -33,12 +34,11 @@ export async function leave({ note, signal }: { note: Note; signal?: AbortSignal
 			updater: prev => prev.filter(n => n.uuid !== note.uuid)
 		})
 
-		noteContentQueryUpdate({
-			params: {
-				uuid: note.uuid
-			},
-			updater: () => undefined
-		})
+		// removeQueryEverywhere, not `updater: () => undefined`: query-core's setQueryData bails out
+		// when the updater yields undefined (`if (data === void 0) return`), so the old form was a
+		// silent no-op and this note's decrypted body survived in memory and on disk. This also drops
+		// the persisted row, which removeQueries alone would leave behind.
+		removeQueryEverywhere(noteContentQueryKey({ uuid: note.uuid }))
 	}, 3000)
 
 	return note

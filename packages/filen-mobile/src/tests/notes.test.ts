@@ -4,10 +4,17 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 // Hoisted mocks (must be defined before any imports)
 // ---------------------------------------------------------------------------
 
-const { mockGetSdkClients, mockNotesWithContentQueryUpdate, mockNoteContentQueryUpdate, mockNotesTagsQueryUpdate } = vi.hoisted(() => ({
+const {
+	mockGetSdkClients,
+	mockRemoveQueryEverywhere,
+	mockNotesWithContentQueryUpdate,
+	mockNoteContentQueryUpdate,
+	mockNotesTagsQueryUpdate
+} = vi.hoisted(() => ({
 	mockGetSdkClients: vi.fn(),
 	mockNotesWithContentQueryUpdate: vi.fn(),
 	mockNoteContentQueryUpdate: vi.fn(),
+	mockRemoveQueryEverywhere: vi.fn(),
 	mockNotesTagsQueryUpdate: vi.fn()
 }))
 
@@ -39,7 +46,15 @@ vi.mock("@/features/notes/queries/useNotesQuery", () => ({
 
 vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
 	noteContentQueryUpdate: mockNoteContentQueryUpdate,
-	fetchData: vi.fn().mockResolvedValue(undefined)
+	fetchData: vi.fn().mockResolvedValue(undefined),
+	noteContentQueryKey: ({ uuid }: { uuid: string }) => ["useNoteContentQuery", { uuid }]
+}))
+
+// removeQueryEverywhere lives in queries/client, which reaches SQLite — stubbed so the graph stays
+// free of native modules. Deleting a note now genuinely drops its cached body (the old
+// `updater: () => undefined` form was a no-op: query-core bails when an updater yields undefined).
+vi.mock("@/queries/client", () => ({
+	removeQueryEverywhere: mockRemoveQueryEverywhere
 }))
 
 vi.mock("@/features/notes/queries/useNotesTags.query", () => ({
@@ -568,22 +583,22 @@ describe("notes.delete", () => {
 		expect(result[0].uuid).toBe("other-note")
 	})
 
-	it("after 3000ms setTimeout: noteContentQueryUpdate updater returns undefined", async () => {
+	// Previously this asserted `updater()` returned undefined — which pinned a NO-OP: query-core's
+	// setQueryData bails out when the updater yields undefined (`if (data === void 0) return`), so a
+	// deleted note's decrypted body survived in memory and on disk. The eviction now goes through
+	// removeQueryEverywhere, which also drops the persisted row.
+	it("after 3000ms setTimeout: the deleted note's cached body is actually evicted", async () => {
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const note = makeNote({ trash: true, uuid: "note-uuid-del" })
 
+		mockRemoveQueryEverywhere.mockClear()
+
 		await notes.delete({ note })
 		vi.advanceTimersByTime(3000)
 
-		expect(mockNoteContentQueryUpdate).toHaveBeenCalledTimes(1)
-		const callArgs = mockNoteContentQueryUpdate.mock.calls[0]
-		if (!callArgs) throw new Error("expected a call")
-		const call = callArgs[0]
-
-		expect(call.params.uuid).toBe("note-uuid-del")
-		expect(call.updater()).toBeUndefined()
+		expect(mockRemoveQueryEverywhere).toHaveBeenCalledWith(["useNoteContentQuery", { uuid: "note-uuid-del" }])
 	})
 })
 
@@ -1750,23 +1765,23 @@ describe("notes.leave", () => {
 		expect(result[0].uuid).toBe("other-uuid")
 	})
 
-	it("after 3000ms setTimeout: noteContentQueryUpdate clears content (returns undefined)", async () => {
+	// Previously this asserted `updater()` returned undefined — which pinned a NO-OP: query-core's
+	// setQueryData bails out when the updater yields undefined (`if (data === void 0) return`), so the
+	// left note's decrypted body stayed in memory and on disk. The eviction now goes through
+	// removeQueryEverywhere, which also drops the persisted row.
+	it("after 3000ms setTimeout: the left note's cached body is actually evicted", async () => {
 		// The SDK returns a note with uuid "note-uuid-1" (from makeMockSdkClient default)
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const note = makeNote({ uuid: "note-uuid-1" })
 
+		mockRemoveQueryEverywhere.mockClear()
+
 		await notes.leave({ note })
 		vi.advanceTimersByTime(3000)
 
-		expect(mockNoteContentQueryUpdate).toHaveBeenCalledTimes(1)
-		const callArgs = mockNoteContentQueryUpdate.mock.calls[0]
-		if (!callArgs) throw new Error("expected a call")
-		const { params, updater } = callArgs[0]
-
-		expect(params.uuid).toBe("note-uuid-1")
-		expect(updater()).toBeUndefined()
+		expect(mockRemoveQueryEverywhere).toHaveBeenCalledWith(["useNoteContentQuery", { uuid: "note-uuid-1" }])
 	})
 })
 
