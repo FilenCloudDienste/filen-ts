@@ -436,6 +436,80 @@ describe("buildNotesHeaderRightItems", () => {
 	//     → bulkArchive+bulkTrash present, bulkRestore absent
 	// -----------------------------------------------------------------------
 
+	// The offline view renders the same note rows as the notes view, so the whole notes-branch menu
+	// has to follow it. Gating that branch on `viewMode === "notes"` silently dropped select-all AND
+	// every bulk action there — the rows were selectable but nothing could act on them.
+	describe("viewMode='offline' keeps the note-row menu", () => {
+		function offlineMenu(selected: Note[], onlyNotes: Note[]) {
+			return topLevelIds(
+				buildNotesHeaderRightItems({
+					...defaultParams(),
+					viewMode: "offline",
+					notesViewMode: "offline",
+					selectedNotes: selected,
+					selectedNotesLive: selected,
+					markedOffline: Object.fromEntries(onlyNotes.map(n => [n.uuid, true as const])),
+					noteFlags: makeNoteFlags({ count: selected.length, includesUndecryptable: false }),
+					onlyNotes
+				})
+			)
+		}
+
+		it("offers select-all over the offline rows", () => {
+			expect(offlineMenu([], [makeNote({ uuid: "a" })])).toContain("selectAll")
+		})
+
+		it("offers the bulk actions once notes are selected", () => {
+			const selected = [makeNote({ uuid: "a" })]
+			const ids = offlineMenu(selected, selected)
+
+			expect(ids).toContain("bulkPin")
+			expect(ids).toContain("bulkFavorite")
+			expect(ids).toContain("bulkRemoveOffline")
+		})
+
+		// A note created here would not be kept on the device, so it would be absent from the list the
+		// user is looking at — indistinguishable from the action having failed.
+		it("hides create and import", () => {
+			const ids = offlineMenu([], [makeNote({ uuid: "a" })])
+
+			expect(ids).not.toContain("create")
+			expect(ids).not.toContain("import")
+		})
+
+		it("flips select-all to deselect-all when every offline row is selected", () => {
+			const selected = [makeNote({ uuid: "a" })]
+			const items = buildNotesHeaderRightItems({
+				...defaultParams(),
+				viewMode: "offline",
+				notesViewMode: "offline",
+				selectedNotes: selected,
+				selectedNotesLive: selected,
+				markedOffline: { a: true },
+				noteFlags: makeNoteFlags({ count: 1, includesUndecryptable: false }),
+				onlyNotes: selected
+			})
+			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+
+			expect(buttons.find(b => b.id === "selectAll")?.title).toBe(t("deselect_all"))
+		})
+
+		// The tags view has its own selection model; the note-row menu must stay out of it.
+		it("does not leak the note-row menu into the tags view", () => {
+			const ids = topLevelIds(
+				buildNotesHeaderRightItems({
+					...defaultParams(),
+					viewMode: "tags",
+					notesViewMode: "tags",
+					onlyNotes: [makeNote({ uuid: "a" })]
+				})
+			)
+
+			expect(ids).not.toContain("selectAll")
+			expect(ids).not.toContain("create")
+		})
+	})
+
 	describe("bulk offline availability", () => {
 		function idsFor(selected: Note[], markedOffline: Record<string, true>) {
 			return topLevelIds(

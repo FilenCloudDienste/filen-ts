@@ -129,7 +129,10 @@ export function buildNotesHeaderRightItems({
 	const items: HeaderItem[] = []
 	const menuButtons: MenuButton[] = []
 
-	if (viewMode === "notes") {
+	// Both note-row views: the offline view renders the same rows, so it needs the same select-all and
+	// the same bulk actions. `onlyNotes` is already the narrowed set there, so select-all selects the
+	// offline notes and nothing else.
+	if (viewMode !== "tags") {
 		if (onlyNotes.length > 0) {
 			menuButtons.push({
 				id: "selectAll",
@@ -147,7 +150,10 @@ export function buildNotesHeaderRightItems({
 			})
 		}
 
-		if (selectedNotes.length === 0) {
+		// Creating or importing from the offline view would produce a note that is not kept on the
+		// device, so it would be absent from the list the user is looking at — indistinguishable from
+		// the action having failed. Both stay in the notes view, which is where a new note shows up.
+		if (selectedNotes.length === 0 && viewMode !== "offline") {
 			menuButtons.push({
 				id: "create",
 				title: t("create_note"),
