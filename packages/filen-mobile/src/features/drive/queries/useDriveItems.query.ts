@@ -231,6 +231,15 @@ export async function fetchData(
 						throw new DriveDirectoryNotFoundError(uuid)
 					}
 
+					// Mirror the resolved directory into the uuid caches. Reaching a directory by
+					// listing its parent seeds them as a side effect; arriving here means nothing
+					// did, so without this the screen keeps the generic "Drive" header for the whole
+					// visit (resolveDriveHeaderTitle reads cache.uuidToAnyDriveItem) and every
+					// revisit repeats the by-uuid lookup. The favorites / links branches below run
+					// the same ladder but are only reachable from their own listings, which already
+					// seed the caches, so they are left alone.
+					cache.cacheNewNormalDir(dir, unwrappedDirIntoDriveItem(unwrapDirMeta(dir)))
+
 					return new AnyNormalDir.Dir(dir)
 				})()
 
