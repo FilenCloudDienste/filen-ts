@@ -1,12 +1,13 @@
 diff --git a/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt b/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt
-index 125ad1d..2631c6e 100644
+index 125ad1d..3b045c2 100644
 --- a/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt
 +++ b/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt
-@@ -7,7 +7,11 @@ import android.annotation.SuppressLint
+@@ -7,12 +7,18 @@ import android.annotation.SuppressLint
  import android.content.Context
  import android.graphics.Bitmap
  import android.graphics.Color
 +import android.graphics.Rect
++import android.net.Uri
  import android.os.Build
 +import android.view.ActionMode
 +import android.view.Menu
@@ -14,7 +15,13 @@ index 125ad1d..2631c6e 100644
  import android.view.MotionEvent
  import android.view.View
  import android.view.View.OnTouchListener
-@@ -192,12 +196,91 @@ internal class DomWebView(context: Context, appContext: AppContext) : ExpoView(c
+ import android.view.ViewGroup
+ import android.webkit.RenderProcessGoneDetail
++import android.webkit.WebResourceRequest
+ import android.webkit.WebView
+ import android.webkit.WebViewClient
+ import expo.modules.core.logging.LogHandlers
+@@ -192,12 +198,119 @@ internal class DomWebView(context: Context, appContext: AppContext) : ExpoView(c
  
    @SuppressLint("SetJavaScriptEnabled")
    private fun createWebView(): WebView {
@@ -94,9 +101,40 @@ index 125ad1d..2631c6e 100644
 +    }.apply {
        setBackgroundColor(Color.TRANSPARENT)
        settings.javaScriptEnabled = true
-       // API 30+ default disables file access; DOM bundles need it for sibling assets.
-       settings.allowFileAccess = true
-       settings.allowFileAccessFromFileURLs = true
+-      // API 30+ default disables file access; DOM bundles need it for sibling assets.
+-      settings.allowFileAccess = true
+-      settings.allowFileAccessFromFileURLs = true
++      // Patched (filen): upstream turns both of these ON, reasoning that "DOM bundles need it for
++      // sibling assets". Neither is actually required here, and each is a read primitive that any
++      // script injection in the page inherits, so both are off.
++      //
++      // allowFileAccess gates FILESYSTEM access only — setAllowFileAccess's documented contract
++      // keeps file:///android_asset and file:///android_res reachable either way, and a production
++      // DOM bundle is served from file:///android_asset/www.bundle (expo/src/dom/base.ts), so its
++      // own HTML/JS/CSS still load. react-native-webview ships this false and loads android_asset
++      // HTML the same way.
++      //
++      // allowFileAccessFromFileURLs governs something different: whether script running in a file://
++      // page may READ other file:// URLs. CLASSIC script and stylesheet subresources are no-cors and
++      // never consult it, and the exported DOM HTML loads its bundle with plain `<script src defer>`,
++      // so the bundle does not need it — but injected script does, and it is exactly what turns a
++      // script injection into a read of the entire app sandbox. The invariant is "classic scripts":
++      // `<script type="module">` fetches with CORS and WOULD consult this, so if Expo's exporter ever
++      // switches to module output, this line has to be revisited rather than assumed still free.
++      //
++      // The one setup that WOULD need real filesystem access is expo-updates serving the bundle out
++      // of .expo-internal (see getUpdatesBaseURL); this app ships no OTA updates. Revisit both lines
++      // if expo-updates is ever added.
++      settings.allowFileAccess = false
++      settings.allowFileAccessFromFileURLs = false
++      // Patched (filen): nothing the bundle does needs either, and both are read primitives for
++      // injected script — universal access would let a file:// page read every other origin, content
++      // access would let it read exported content:// providers. allowUniversalAccessFromFileURLs
++      // already defaults to false and is pinned so a platform default can never widen it silently;
++      // allowContentAccess defaults to TRUE, so that line is a real change. Both match
++      // react-native-webview's defaults.
++      settings.allowUniversalAccessFromFileURLs = false
++      settings.allowContentAccess = false
 +      // Patched (filen): builtInZoomControls defaults to false, which disables Chromium's
 +      // multi-touch zoom processing entirely — no page can pinch-zoom regardless of its
 +      // viewport. Enable it (with the on-screen +/- controls hidden); pages keep control
@@ -107,6 +145,149 @@ index 125ad1d..2631c6e 100644
        webViewClient = createWebViewClient()
        addJavascriptInterface(rncWebViewBridge, "ReactNativeWebView")
        addJavascriptInterface(DomWebViewBridge(this@DomWebView), "ExpoDomWebViewBridge")
+@@ -206,6 +319,56 @@ internal class DomWebView(context: Context, appContext: AppContext) : ExpoView(c
+   }
+ 
+   private fun createWebViewClient() = object : WebViewClient() {
++    // Patched (filen): keep a DOM component's WebView on the document it was given.
++    //
++    // Upstream installs no shouldOverrideUrlLoading at all, so a link inside rendered content can
++    // navigate this WebView to any origin — and that origin then inherits the ReactNativeWebView and
++    // ExpoDomWebViewBridge JavaScript interfaces added above, plus injectedJavaScript. Our DOM
++    // components never rely on in-place navigation: real external links are handed to the OS instead
++    // (docxPreview/linkSafety, and the note editors' externalLinkClicked message), so a main-frame
++    // navigation away from the bundle is never something we want to happen.
++    //
++    // Deliberately NOT the control for javascript: URLs. Chromium runs those in the renderer without
++    // dispatching a navigation, so this callback never sees them; they are stripped where the
++    // content is rendered instead. This is defence against the separate "navigate away into a
++    // bridged WebView" problem.
++    //
++    // Scoped narrowly so it cannot be the reason a component fails to load: sub-frames are untouched,
++    // about: is allowed, and anything undeterminable fails OPEN. The app's own initial load is a
++    // loadUrl(), which never routes through this callback at all.
++    //
++    // Compared against the CURRENTLY LOADED page rather than source.uri, matching the iOS hook — the
++    // production bundle (file:///android_asset/www.bundle/...) and the Metro dev server
++    // (http://<lan-ip>:8081/_expo/@dom/...) each stay reachable from themselves, while a link into
++    // any other SCHEME OR HOST is refused.
++    //
++    // Scheme+host is deliberately not a full origin check, and two cases fall through it: port is not
++    // compared (dev-only, production is file://), and every file:// URL has a null host, so one
++    // file:// path can reach another as far as THIS hook is concerned. That second case is covered by
++    // allowFileAccess = false above, which makes non-asset file URLs unloadable — the layers are
++    // meant to be read together, and neither is sufficient alone.
++    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
++      val url = request?.url ?: return false
++
++      if (!request.isForMainFrame) {
++        return false
++      }
++
++      if (url.scheme.equals("about", ignoreCase = true)) {
++        return false
++      }
++
++      val currentUrl = view?.url?.let { Uri.parse(it) } ?: return false
++
++      if (url.scheme.equals(currentUrl.scheme, ignoreCase = true) && url.host.equals(currentUrl.host, ignoreCase = true)) {
++        return false
++      }
++
++      log.warn("Blocked a DOM component navigation away from its bundle (scheme=${url.scheme})")
++
++      return true
++    }
++
+     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+       super.onPageStarted(view, url, favicon)
+       if (this@DomWebView.useExpoModulesBridge) {
+diff --git a/node_modules/@expo/dom-webview/ios/DomWebView.swift b/node_modules/@expo/dom-webview/ios/DomWebView.swift
+index d18e5cb..f8225b0 100644
+--- a/node_modules/@expo/dom-webview/ios/DomWebView.swift
++++ b/node_modules/@expo/dom-webview/ios/DomWebView.swift
+@@ -181,8 +181,13 @@ internal final class DomWebView: ExpoView, UIScrollViewDelegate, WKUIDelegate, W
+ 
+   private func load(request: URLRequest) {
+     if let url = request.url, url.isFileURL {
+-      // Grant read access to the bundle so DOM components can load sibling assets.
+-      webView?.loadFileURL(url, allowingReadAccessTo: URL(fileURLWithPath: "/"))
++      // Patched (filen): upstream's comment says "grant read access to the bundle" but the code
++      // passes the filesystem ROOT, which lets anything running in this WebView read every file the
++      // app process can reach — the app container and the shared app group included. Grant the
++      // directory the document actually lives in instead: WKWebView extends read access to that
++      // directory's whole subtree, and a DOM bundle is self-contained under www.bundle, so sibling
++      // assets (_expo/static/...) still load. Matches the intent of the original comment.
++      webView?.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+     } else {
+       webView?.load(request)
+     }
+@@ -280,6 +285,65 @@ internal final class DomWebView: ExpoView, UIScrollViewDelegate, WKUIDelegate, W
+     onContentProcessDidTerminate(createBaseEventPayload())
+   }
+ 
++  // Patched (filen): keep a DOM component's WebView on the document it was given — the counterpart
++  // of the Android shouldOverrideUrlLoading override, kept in step so the two platforms behave the
++  // same. Upstream implements no policy hook, so a link inside rendered content can navigate this
++  // WebView to any origin, which then inherits the injected script-message handlers.
++  //
++  // Our DOM components never navigate in place: real external links are handed to the OS instead
++  // (docxPreview/linkSafety, and the note editors' externalLinkClicked message).
++  //
++  // Scoped so it cannot be why a component fails to load: only main-frame navigations are examined
++  // (`targetFrame?.isMainFrame`), about: is allowed, and anything undeterminable fails OPEN.
++  //
++  // As on Android this is a scheme+host test, not a full origin check: port is not compared, and all
++  // file:// URLs have a nil host so one file:// path passes as "same origin" as another. That case is
++  // covered by the narrowed `allowingReadAccessTo` in load(request:) — WebKit enforces the grant as a
++  // recursive path-prefix match, so a file outside the bundle directory is unreadable regardless of
++  // what this hook allows. The two layers are meant to be read together.
++  //
++  // The comparison is against the CURRENTLY LOADED page, not against `source.uri`. Unlike Android,
++  // WKWebView routes programmatic loads through this hook too, so the initial load is examined here
++  // — and on iOS `source.uri` is RELATIVE in release builds ("www.bundle/<entry>.html", see
++  // expo/src/dom/base.ts, resolved against the main bundle by RCTConvert), so comparing schemes
++  // against it would reject the app's own first load and leave every DOM component blank. Anchoring
++  // on webView.url avoids that entirely: it is nil for the first navigation (fail open), and
++  // thereafter it is the bundle's own absolute URL, which is exactly the origin we want to keep the
++  // WebView on.
++  func webView(
++    _ webView: WKWebView,
++    decidePolicyFor navigationAction: WKNavigationAction,
++    decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
++  ) {
++    guard let url = navigationAction.request.url else {
++      decisionHandler(.allow)
++      return
++    }
++
++    guard navigationAction.targetFrame?.isMainFrame ?? true else {
++      decisionHandler(.allow)
++      return
++    }
++
++    if url.scheme?.lowercased() == "about" {
++      decisionHandler(.allow)
++      return
++    }
++
++    guard let currentUrl = webView.url else {
++      decisionHandler(.allow)
++      return
++    }
++
++    if url.scheme?.lowercased() == currentUrl.scheme?.lowercased() && url.host?.lowercased() == currentUrl.host?.lowercased() {
++      decisionHandler(.allow)
++      return
++    }
++
++    log.warn("Blocked a DOM component navigation away from its bundle (scheme=\(url.scheme ?? "nil"))")
++    decisionHandler(.cancel)
++  }
++
+   // MARK: - WKScriptMessageHandler implementations
+ 
+   func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
 diff --git a/node_modules/@expo/dom-webview/src/DomWebView.tsx b/node_modules/@expo/dom-webview/src/DomWebView.tsx
 index 3a07ac9..f1ecde1 100644
 --- a/node_modules/@expo/dom-webview/src/DomWebView.tsx

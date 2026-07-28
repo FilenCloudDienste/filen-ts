@@ -8,6 +8,7 @@ import type { DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
 import useDomDomEvents from "@/hooks/useDomEvents/useDomDomEvents"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
 import { decodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
+import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
 import { quillV2ToLegacyV1 } from "@/components/textEditor/richText/quillCompat"
 import Quill from "quill"
 import DOMPurify from "dompurify"
@@ -452,6 +453,68 @@ const RichTextEditorDom = ({
 		// mount while the inflight store still holds the real text. Re-seeding is the
 		// remount key's job; readOnly changes are applied by the theme effect above.
 	}, [initialValue, autoFocus])
+
+	const postMessageRef = useRef(postMessage)
+
+	useEffect(() => {
+		postMessageRef.current = postMessage
+	}, [postMessage])
+
+	// Anchor taps inside the editor body.
+	//
+	// Quill renders note content as real anchors. While editing, contenteditable swallows the
+	// activation (a tap places the caret), but a READ-ONLY note — one shared with you, or opened
+	// without write permission — has contenteditable off, so the anchor is live: before this handler
+	// existed, tapping one navigated the WebView away and replaced the editor with a remote page.
+	// Hand the URL to the OS instead, which is what the user expects and what the markdown preview
+	// already does.
+	//
+	// The native navigation hook added alongside this would now refuse that cross-origin navigation
+	// anyway, so removing this handler would not re-open a security hole — it would just make links
+	// in read-only notes silently do nothing.
+	//
+	// Gated on readOnly so the editing path keeps its exact current behaviour. Registered in the
+	// capture phase, and only allowlisted schemes are forwarded — anything else is cancelled without
+	// being opened, so a scheme that should never have reached the content cannot be activated.
+	useEffect(() => {
+		const onClickCapture = (event: MouseEvent) => {
+			if (!readOnlyRef.current || !(event.target instanceof Element)) {
+				return
+			}
+
+			const anchor = event.target.closest("a")
+
+			if (!anchor) {
+				return
+			}
+
+			const href = anchor.getAttribute("href")
+
+			// No href, or an in-document fragment: nothing to hand off, and nowhere to navigate.
+			if (href === null || href.trim().startsWith("#")) {
+				return
+			}
+
+			event.preventDefault()
+
+			const { url, intercept } = classifyExternalLinkHref(href)
+
+			if (!intercept) {
+				return
+			}
+
+			postMessageRef.current({
+				type: "externalLinkClicked",
+				data: url
+			})
+		}
+
+		window.addEventListener("click", onClickCapture, true)
+
+		return () => {
+			window.removeEventListener("click", onClickCapture, true)
+		}
+	}, [])
 
 	const readyEmittedRef = useRef(false)
 
