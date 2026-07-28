@@ -1,8 +1,13 @@
 import Dom from "@/components/docxPreview/dom"
 import { forwardDomConsoleLog } from "@/hooks/useDomEvents/forwardDomLog"
+import { parseDocxExternalLink } from "@/components/docxPreview/linkSafety"
+import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 import type { WebViewMessageEvent } from "react-native-webview"
+import logger from "@/lib/logger"
 
 const DocxPreview = ({ base64, paddingTop, paddingBottom }: { base64: string; paddingTop?: number; paddingBottom?: number }) => {
+	const openExternalLink = useOpenExternalLink("docxPreview")
+
 	return (
 		<Dom
 			base64={base64}
@@ -12,9 +17,26 @@ const DocxPreview = ({ base64, paddingTop, paddingBottom }: { base64: string; pa
 				overScrollMode: "never",
 				bounces: false,
 				onMessage: (event: WebViewMessageEvent) => {
-					// docxPreview is otherwise one-way; this only receives the WebView console proxy.
+					// Two message kinds share this channel: the WebView console proxy, and a tap on a
+					// link inside the rendered document. Each carries its own envelope key, so they are
+					// demultiplexed rather than guessed at.
 					try {
-						forwardDomConsoleLog(JSON.parse(event.nativeEvent.data))
+						const parsed: unknown = JSON.parse(event.nativeEvent.data)
+
+						if (forwardDomConsoleLog(parsed)) {
+							return
+						}
+
+						// Re-classified here rather than trusted: the WebView is the untrusted side of
+						// this bridge. useOpenExternalLink then applies the same policy every other
+						// untrusted link in the app goes through, including the trusted-domain prompt.
+						const externalUrl = parseDocxExternalLink(parsed)
+
+						if (externalUrl !== null) {
+							openExternalLink(externalUrl).catch(err => {
+								logger.error("docxPreview", "failed to open a document link", { error: err })
+							})
+						}
 					} catch {
 						// ignore malformed messages
 					}

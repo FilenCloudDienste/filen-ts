@@ -5,9 +5,35 @@ import { renderAsync } from "docx-preview"
 import { Buffer } from "buffer"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
+import { classifyDocxLinkHref, hardenDocxDom, DOCX_EXTERNAL_URL_ATTRIBUTE, DOCX_EXTERNAL_LINK_KEY } from "@/components/docxPreview/linkSafety"
 
 // Forward this WebView's console.* to the RN diagnostic logger (see domConsoleProxy).
 installDomConsoleProxy()
+
+/**
+ * Hand an allowlisted URL to the native side, which opens it with the OS. Posts over the same
+ * window.ReactNativeWebView channel the console proxy uses; the envelope key keeps the two apart.
+ */
+function postExternalLink(url: string): void {
+	const rnWebView = (globalThis as unknown as { ReactNativeWebView?: { postMessage?: (message: string) => void } }).ReactNativeWebView
+
+	if (!rnWebView || typeof rnWebView.postMessage !== "function") {
+		return
+	}
+
+	try {
+		rnWebView.postMessage(
+			JSON.stringify({
+				[DOCX_EXTERNAL_LINK_KEY]: {
+					url
+				}
+			})
+		)
+	} catch {
+		// Tapping a link must never throw out of the event handler.
+	}
+}
+
 
 // The DOM-component shell ships `user-scalable=no` in its viewport meta, which blocks
 // pinch-zoom on both engines. Relax it for THIS component only — a document preview is
@@ -32,14 +58,16 @@ const Dom = ({
 	const [error, setError] = useState<string | null>(null)
 
 	const load = async () => {
-		if (!container.current || didLoadRef.current) {
+		const containerElement = container.current
+
+		if (!containerElement || didLoadRef.current) {
 			return
 		}
 
 		didLoadRef.current = true
 
 		try {
-			await renderAsync(Buffer.from(base64, "base64"), container.current, container.current, {
+			await renderAsync(Buffer.from(base64, "base64"), containerElement, containerElement, {
 				ignoreHeight: true,
 				ignoreWidth: true,
 				ignoreFonts: false,
@@ -54,14 +82,23 @@ const Dom = ({
 				renderFootnotes: true,
 				useBase64URL: true,
 				renderEndnotes: true,
-				// Alt-chunks embed foreign HTML/RTF sub-documents carried inside the file itself. They're
-				// rare in real documents and already disabled on the web and desktop clients — keep mobile
-				// consistent and don't render embedded content from the document.
+				// SECURITY-CRITICAL, do not flip. Alt-chunks embed foreign HTML/RTF sub-documents carried
+				// inside the file itself, and docx-preview renders one by assigning the raw attacker HTML
+				// to `iframe.srcdoc` with NO sandbox attribute — i.e. arbitrary script in this WebView's
+				// own origin. The library's default for this option is `true`; it is off here, on web, and
+				// (by composition, since it loads the web UI) on desktop.
 				renderAltChunks: false,
 				renderChanges: true,
 				renderComments: true,
 				hideWrapperOnPrint: false
 			})
+
+			// renderAsync has resolved, so everything the document produced is in the DOM: the library
+			// awaits its image tasks and runs postRenderTasks before resolving, and the only work left
+			// afterwards (tab-stop refresh, VML sizing) restyles existing nodes with fixed values and
+			// creates no anchors. The capture-phase click handler below re-checks at tap time
+			// regardless, so a node this sweep somehow misses still cannot navigate anywhere.
+			hardenDocxDom(containerElement)
 		} catch (e) {
 			console.error(e)
 
@@ -72,6 +109,61 @@ const Dom = ({
 
 	useEffectOnce(() => {
 		load()
+	})
+
+	// Link activation, enforced at tap time.
+	//
+	// This is the layer that actually decides what a tap does, and it is deliberately independent of
+	// the render-time sweep: it re-classifies the live href on every activation, so an anchor added
+	// after the sweep — or one whose href was changed afterwards — is still checked. Registered in
+	// the CAPTURE phase on window so it runs before any handler the document or library installed,
+	// and before the browser performs the default action.
+	//
+	// Keyboard activation (Enter on a focused link) dispatches a click too, so cancelling here covers
+	// every way an anchor can be followed.
+	useEffectOnce(() => {
+		const onClickCapture = (event: MouseEvent) => {
+			if (!(event.target instanceof Element)) {
+				return
+			}
+
+			const anchor = event.target.closest("a")
+
+			if (!anchor) {
+				return
+			}
+
+			const external = anchor.getAttribute(DOCX_EXTERNAL_URL_ATTRIBUTE)
+
+			if (external !== null) {
+				// Cancel the "#" the sweep left behind so the document does not jump to the top, then
+				// hand the real URL over. The native side re-validates before opening it.
+				event.preventDefault()
+
+				postExternalLink(external)
+
+				return
+			}
+
+			const classification = classifyDocxLinkHref(anchor.getAttribute("href"))
+
+			// In-document fragment: let the browser scroll to it as normal.
+			if (classification.action === "internal") {
+				return
+			}
+
+			event.preventDefault()
+
+			if (classification.action === "external") {
+				postExternalLink(classification.url)
+			}
+		}
+
+		window.addEventListener("click", onClickCapture, true)
+
+		return () => {
+			window.removeEventListener("click", onClickCapture, true)
+		}
 	})
 
 	// The browser consults touch-action for visual-viewport panning while pinch-zoomed too —
