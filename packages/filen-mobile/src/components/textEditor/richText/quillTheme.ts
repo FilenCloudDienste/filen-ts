@@ -30,6 +30,9 @@ export type QuillThemeOptions = {
 	customClass?: string
 	codeBackground?: string
 	codeTextColor?: string
+	// The blockquote mark is a BORDER, not a surface, so it needs a colour that stands out
+	// against the editor background rather than the neutral one a code block sits on.
+	blockquoteBorderColor?: string
 	editorFontWeight?: string
 }
 
@@ -275,7 +278,7 @@ export class QuillThemeCustomizer {
 			}
 
 			${selector} .ql-snow .ql-editor blockquote {
-				border-left: 4px solid ${this.options.codeBackground} !important;
+				border-left: 4px solid ${this.options.blockquoteBorderColor} !important;
 			}
 
 			${selector} .ql-toolbar.ql-snow .ql-picker.ql-expanded .ql-picker-label {
@@ -348,7 +351,8 @@ export function getThemeOptions({
 			placeholderColor: colors.text.muted,
 			placeholderStyle: "normal",
 			codeBackground: colors.background.secondary,
-			codeTextColor: colors.text.foreground
+			codeTextColor: colors.text.foreground,
+			blockquoteBorderColor: colors.background.accent
 		}
 	}
 
@@ -377,7 +381,8 @@ export function getThemeOptions({
 		placeholderColor: colors.text.muted,
 		placeholderStyle: "normal",
 		codeBackground: colors.background.secondary,
-		codeTextColor: colors.text.foreground
+		codeTextColor: colors.text.foreground,
+		blockquoteBorderColor: colors.background.accent
 	}
 }
 

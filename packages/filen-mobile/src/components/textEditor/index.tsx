@@ -89,7 +89,12 @@ export type Colors = {
 	}
 	background: {
 		primary: string
+		// A neutral surface — the app's `bg-background-secondary`, not `bg-secondary`, which is the
+		// indigo accent. The rich-text code block reads this.
 		secondary: string
+		// The indigo accent. Used where the editor needs a visible mark against the background rather
+		// than a surface to sit on (the blockquote rule).
+		accent: string
 	}
 }
 
@@ -155,7 +160,9 @@ export const TextEditor = ({
 	const textPrimary = useResolveClassNames("text-primary")
 	const textMuted = useResolveClassNames("text-muted")
 	const bgBackground = useResolveClassNames("bg-background")
-	const bgSecondary = useResolveClassNames("bg-secondary")
+	// The indigo accent. Kept for the blockquote mark only — see Colors.background.accent.
+	const bgAccent = useResolveClassNames("bg-secondary")
+	const bgSecondary = useResolveClassNames("bg-background-secondary")
 	const text = useResolveClassNames("font-normal text-sm")
 	const { theme } = useUniwind()
 	const [textEditorMarkdownPreviewActive] = useSecureStore<Record<string, boolean>>("textEditorMarkdownPreviewActive", {})
@@ -312,7 +319,8 @@ export const TextEditor = ({
 							},
 							background: {
 								primary: bgBackground.backgroundColor as string,
-								secondary: bgSecondary.backgroundColor as string
+								secondary: bgSecondary.backgroundColor as string,
+								accent: bgAccent.backgroundColor as string
 							}
 						}}
 						paddingTop={paddingTop}
@@ -359,7 +367,8 @@ export const TextEditor = ({
 								},
 								background: {
 									primary: bgBackground.backgroundColor as string,
-									secondary: bgSecondary.backgroundColor as string
+									secondary: bgSecondary.backgroundColor as string,
+									accent: bgAccent.backgroundColor as string
 								}
 							}}
 							paddingTop={paddingTop}

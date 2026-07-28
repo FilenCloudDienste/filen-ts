@@ -12,7 +12,7 @@ import { getThemeOptions } from "@/components/textEditor/richText/quillTheme"
 import type { Colors } from "@/components/textEditor"
 
 function makeColors(
-	overrides: Partial<{ foreground: string; muted: string; primary: string; primaryBg: string; secondaryBg: string }> = {}
+	overrides: Partial<{ foreground: string; muted: string; primary: string; primaryBg: string; secondaryBg: string; accentBg: string }> = {}
 ): Colors {
 	return {
 		text: {
@@ -22,7 +22,8 @@ function makeColors(
 		},
 		background: {
 			primary: overrides.primaryBg ?? "#ffffff",
-			secondary: overrides.secondaryBg ?? "#f0f0f0"
+			secondary: overrides.secondaryBg ?? "#f0f0f0",
+			accent: overrides.accentBg ?? "#5e5ce6"
 		}
 	}
 }
@@ -134,6 +135,20 @@ describe("getThemeOptions", () => {
 		})
 
 		expect(result.editorFontWeight).toBe("700")
+	})
+
+	it("keeps the code-block surface and the blockquote mark on separate colours", () => {
+		// The code block sits on a neutral surface; the blockquote is a 4px border that has to stay
+		// visible against an OLED-black background, so it uses the accent. Feeding both from one value
+		// is what made code blocks render indigo.
+		const colors = makeColors({ secondaryBg: "#1c1c1e", accentBg: "#5e5ce6" })
+
+		for (const platform of ["ios", "android"] as const) {
+			const result = getThemeOptions({ darkMode: true, colors, platform })
+
+			expect(result.codeBackground).toBe("#1c1c1e")
+			expect(result.blockquoteBorderColor).toBe("#5e5ce6")
+		}
 	})
 
 	it("colors.text.primary maps to toolbarActiveColor", () => {
