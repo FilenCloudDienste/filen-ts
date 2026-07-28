@@ -6,7 +6,8 @@ import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import useFileUriQuery from "@/queries/useFileUri.query"
-import { PdfView, type OnErrorEventPayload } from "@kishannareshpal/expo-pdf"
+import { PdfView, type OnErrorEventPayload, type OnLinkPressedEventPayload } from "@kishannareshpal/expo-pdf"
+import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
@@ -28,6 +29,7 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
 	const onErrorWorkingRef = useRef<boolean>(false)
+	const openExternalLink = useOpenExternalLink("drivePreview")
 	const [didCancelPasswordPrompt, setDidCancelPasswordPrompt] = useRecyclingState<boolean>(false, [galleryItemKey(item)])
 
 	const query = useFileUriQuery(
@@ -192,6 +194,16 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 						fitMode="both"
 						uri={query.data.uri}
 						onError={onError}
+						// A link annotation inside the document. The native viewers deliberately open
+						// nothing themselves (see the expo-pdf patch) — an embedded link target is
+						// attacker-controlled, and the stock handlers on both platforms would hand it
+						// straight to the OS with no scheme check and no confirmation. useOpenExternalLink
+						// is the single funnel every untrusted link in the app goes through.
+						onLinkPressed={(payload: OnLinkPressedEventPayload) => {
+							openExternalLink(payload.uri).catch(err => {
+								logger.error("drivePreview", "failed to open a pdf link", { error: err })
+							})
+						}}
 					/>
 				)}
 			</View>

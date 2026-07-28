@@ -1,7 +1,16 @@
 diff --git a/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfModule.kt b/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfModule.kt
-index 53d4be0..c63fbe3 100644
+index 53d4be0..88f0aec 100644
 --- a/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfModule.kt
 +++ b/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfModule.kt
+@@ -22,7 +22,7 @@ class KJExpoPdfModule : Module() {
+     // Enables the module to be used as a native view. Definition components that are accepted as part of
+     // the view definition: Prop, Events.
+     View(KJExpoPdfView::class) {
+-      Events("onLoadComplete", "onPageChanged", "onError")
++      Events("onLoadComplete", "onPageChanged", "onError", "onLinkPressed")
+ 
+       Prop("uri") { view: KJExpoPdfView, uri: String? ->
+         view.setUri(uri)
 @@ -63,6 +63,10 @@ class KJExpoPdfModule : Module() {
        Prop("autoScale") { view: KJExpoPdfView, enabled: Boolean? ->
           view.setAutoScaleEnabled(enabled)
@@ -14,18 +23,67 @@ index 53d4be0..c63fbe3 100644
    }
  }
 diff --git a/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt b/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt
-index c0ff861..b232c78 100644
+index c0ff861..d7c9b31 100644
 --- a/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt
 +++ b/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt
-@@ -7,6 +7,7 @@ import android.net.Uri
+@@ -7,6 +7,8 @@ import android.net.Uri
  import expo.modules.kotlin.AppContext
  import expo.modules.kotlin.views.ExpoView
  import com.github.barteksc.pdfviewer.PDFView
-+import com.github.barteksc.pdfviewer.link.DefaultLinkHandler
++import com.github.barteksc.pdfviewer.link.LinkHandler
++import com.github.barteksc.pdfviewer.model.LinkTapEvent
  import expo.modules.kotlin.viewevent.EventDispatcher
  import java.io.FileNotFoundException
  import androidx.core.net.toUri
-@@ -46,6 +47,9 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
+@@ -28,6 +30,47 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
+   private val onLoadComplete by EventDispatcher()
+   private val onPageChanged by EventDispatcher()
+   private val onError by EventDispatcher()
++  private val onLinkPressed by EventDispatcher()
++
++  // Patched (filen): link handling for embedded PDF annotations.
++  //
++  // The library's DefaultLinkHandler resolves an external link by doing, with no filtering at all:
++  //   Intent(ACTION_VIEW, Uri.parse(uri)) -> startActivity(...)
++  // A PDF is untrusted content — it can arrive as a chat attachment, a shared directory item or a
++  // public link — so that is a one-tap arbitrary implicit-intent launch driven by the document, and
++  // it also skips the trusted-domain confirmation every other link surface in this app shows.
++  //
++  // This handler deliberately NEVER starts an activity. Internal destinations are page jumps that
++  // stay entirely inside the view, and anything with a URI is handed to JS, which applies the same
++  // policy as the rest of the app (scheme check + trusted-domain prompt) before opening it. Keeping
++  // the decision on one side of the bridge means there is no second allowlist here to drift.
++  private inner class ForwardingLinkHandler(private val view: PDFView) : LinkHandler {
++    override fun handleLinkEvent(event: LinkTapEvent) {
++      val link = event.link
++      val destPageIdx = link.destPageIdx
++
++      // In-document destination (table of contents, cross reference): resolve it natively, exactly as
++      // DefaultLinkHandler did — jumpTo(page) without animation, so replacing the handler changes
++      // nothing a user can see for internal links.
++      //
++      // Checked BEFORE the URI, where the stock handler checks the URI first. That ordering only
++      // matters for an annotation carrying both, and there the internal jump is the branch that does
++      // not hand anything to the OS.
++      if (destPageIdx != null) {
++        view.jumpTo(destPageIdx)
++
++        return
++      }
++
++      val uri = link.uri
++
++      if (uri.isNullOrBlank()) {
++        return
++      }
++
++      onLinkPressed(mapOf("uri" to uri))
++    }
++  }
+ 
+   internal enum class ErrorCode(val code: String) {
+     invalidUri("invalid_uri"),
+@@ -46,6 +89,9 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
    private var fitMode: FitMode = DEFAULT_FIT_MODE
    private var autoScaleEnabled: Boolean = DEFAULT_AUTO_SCALE_ENABLED
    private var isPageColorInverted: Boolean = DEFAULT_PAGE_COLOR_INVERTED_ENABLED
@@ -35,7 +93,7 @@ index c0ff861..b232c78 100644
  
    internal val pdfView = PDFView(context, null).apply {
      layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-@@ -125,11 +129,26 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
+@@ -125,11 +171,26 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
      this.reloadPdf()
    }
  
@@ -62,21 +120,29 @@ index c0ff861..b232c78 100644
      val currentUri = this.uri ?: return
  
      val pdfBuilder = try {
-@@ -148,6 +167,9 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
+@@ -148,6 +209,10 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
  
      pdfBuilder
        .pageFitPolicy(this.fitMode.toFitPolicy())
-+      // Make embedded links tappable: internal destinations jump to their page, external
-+      // URIs open via the system — matching PDFKit's native behavior on iOS.
-+      .linkHandler(DefaultLinkHandler(this.pdfView))
++      // Make embedded links tappable: internal destinations jump to their page, external URIs are
++      // forwarded to JS to be vetted and opened there. NOT DefaultLinkHandler — see
++      // ForwardingLinkHandler above for why.
++      .linkHandler(ForwardingLinkHandler(this.pdfView))
        .enableDoubletap(this.isDoubleTapZoomEnabled)
        .swipeHorizontal(this.isHorizontalModeEnabled)
        .nightMode(this.isPageColorInverted)
 diff --git a/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.d.ts b/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.d.ts
-index 43d4a70..d39d307 100644
+index 43d4a70..cb0368a 100644
 --- a/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.d.ts
 +++ b/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.d.ts
-@@ -59,6 +59,13 @@ type BaseProps = ViewProps & {
+@@ -1,5 +1,5 @@
+ import * as React from 'react';
+-import { ContentPadding, FitMode, OnErrorEventPayload, OnLoadCompleteEventPayload, OnPageChangedEventPayload } from './types';
++import { ContentPadding, FitMode, OnErrorEventPayload, OnLinkPressedEventPayload, OnLoadCompleteEventPayload, OnPageChangedEventPayload } from './types';
+ import { ViewProps } from 'react-native';
+ type BaseProps = ViewProps & {
+     /**
+@@ -59,12 +59,28 @@ type BaseProps = ViewProps & {
       * Defaults to false.
       */
      pageColorInverted?: boolean;
@@ -90,23 +156,65 @@ index 43d4a70..d39d307 100644
  };
  export type PdfViewProps = BaseProps & {
      onLoadComplete?: (params: OnLoadCompleteEventPayload) => void;
+     onPageChanged?: (params: OnPageChangedEventPayload) => void;
+     onError?: (params: OnErrorEventPayload) => void;
++    /**
++     * Fired when the user taps a link annotation that points OUT of the document.
++     *
++     * In-document destinations (table of contents, cross references) are resolved natively and never
++     * reach here. Nothing is opened by the native side: the viewer deliberately does not launch the
++     * URL itself, so the host app must vet the scheme and open it. Not handling this prop makes such
++     * links inert.
++     */
++    onLinkPressed?: (params: OnLinkPressedEventPayload) => void;
+ };
+-export declare const PdfView: ({ style, onLoadComplete, onError, onPageChanged, ...props }: PdfViewProps) => React.JSX.Element;
++export declare const PdfView: ({ style, onLoadComplete, onError, onPageChanged, onLinkPressed, ...props }: PdfViewProps) => React.JSX.Element;
+ export {};
+ //# sourceMappingURL=pdf-view.d.ts.map
+\ No newline at end of file
 diff --git a/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.js b/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.js
-index 28d2b99..7658f5a 100644
+index 28d2b99..d17ec57 100644
 --- a/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.js
 +++ b/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.js
-@@ -4,7 +4,7 @@ import { StyleSheet } from 'react-native';
+@@ -3,8 +3,8 @@ import * as React from 'react';
+ import { StyleSheet } from 'react-native';
  import { forwardNativeEventTo } from './utils';
  const NativePdfView = requireNativeView('KJExpoPdf');
- export const PdfView = ({ style, onLoadComplete, onError, onPageChanged, ...props }) => {
+-export const PdfView = ({ style, onLoadComplete, onError, onPageChanged, ...props }) => {
 -    return (<NativePdfView style={[styles.container, style]} uri={props.uri} doubleTapToZoom={props.doubleTapToZoom} horizontal={props.horizontal} pageGap={props.pageGap} pagingEnabled={props.pagingEnabled} password={props.password} contentPadding={props.contentPadding} fitMode={props.fitMode} autoScale={props.autoScale} pageColorInverted={props.pageColorInverted} onLoadComplete={forwardNativeEventTo(onLoadComplete)} onPageChanged={forwardNativeEventTo(onPageChanged)} onError={forwardNativeEventTo(onError)}/>);
-+    return (<NativePdfView style={[styles.container, style]} uri={props.uri} doubleTapToZoom={props.doubleTapToZoom} horizontal={props.horizontal} pageGap={props.pageGap} pagingEnabled={props.pagingEnabled} password={props.password} contentPadding={props.contentPadding} fitMode={props.fitMode} autoScale={props.autoScale} pageColorInverted={props.pageColorInverted} maxZoom={props.maxZoom} onLoadComplete={forwardNativeEventTo(onLoadComplete)} onPageChanged={forwardNativeEventTo(onPageChanged)} onError={forwardNativeEventTo(onError)}/>);
++export const PdfView = ({ style, onLoadComplete, onError, onPageChanged, onLinkPressed, ...props }) => {
++    return (<NativePdfView style={[styles.container, style]} uri={props.uri} doubleTapToZoom={props.doubleTapToZoom} horizontal={props.horizontal} pageGap={props.pageGap} pagingEnabled={props.pagingEnabled} password={props.password} contentPadding={props.contentPadding} fitMode={props.fitMode} autoScale={props.autoScale} pageColorInverted={props.pageColorInverted} maxZoom={props.maxZoom} onLoadComplete={forwardNativeEventTo(onLoadComplete)} onPageChanged={forwardNativeEventTo(onPageChanged)} onError={forwardNativeEventTo(onError)} onLinkPressed={forwardNativeEventTo(onLinkPressed)}/>);
  };
  const styles = StyleSheet.create({
      container: {
+diff --git a/node_modules/@kishannareshpal/expo-pdf/build/types.d.ts b/node_modules/@kishannareshpal/expo-pdf/build/types.d.ts
+index 7cfd59f..ef86960 100644
+--- a/node_modules/@kishannareshpal/expo-pdf/build/types.d.ts
++++ b/node_modules/@kishannareshpal/expo-pdf/build/types.d.ts
+@@ -10,6 +10,9 @@ export type OnErrorEventPayload = {
+     code: ErrorCode;
+     message: string;
+ };
++export type OnLinkPressedEventPayload = {
++    uri: string;
++};
+ export type ContentPadding = {
+     top?: number;
+     right?: number;
 diff --git a/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfModule.swift b/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfModule.swift
-index 80acd41..4ed8e13 100644
+index 80acd41..ab643b3 100644
 --- a/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfModule.swift
 +++ b/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfModule.swift
+@@ -13,7 +13,7 @@ public class KJExpoPdfModule: Module {
+     // Enables the module to be used as a native view. Definition components that are accepted as part of the
+     // view definition: Prop, Events.
+     View(KJExpoPdfView.self) {
+-      Events("onLoadComplete", "onPageChanged", "onError")
++      Events("onLoadComplete", "onPageChanged", "onError", "onLinkPressed")
+ 
+       Prop("uri") { (view: KJExpoPdfView, uri: String) in
+         view.setUri(uri)
 @@ -54,6 +54,10 @@ public class KJExpoPdfModule: Module {
        Prop("autoScale") { (view: KJExpoPdfView, enabled: Bool?) in
          view.setAutoScaleEnabled(enabled)
@@ -119,10 +227,18 @@ index 80acd41..4ed8e13 100644
    }
  }
 diff --git a/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfView.swift b/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfView.swift
-index 0012792..4fe84c7 100644
+index 0012792..20eac34 100644
 --- a/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfView.swift
 +++ b/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfView.swift
-@@ -41,6 +41,8 @@ class KJExpoPdfView: ExpoView {
+@@ -17,6 +17,7 @@ class KJExpoPdfView: ExpoView {
+   let onLoadComplete = EventDispatcher()
+   let onPageChanged = EventDispatcher()
+   let onError = EventDispatcher()
++  let onLinkPressed = EventDispatcher()
+ 
+   enum ErrorCode: String, Codable {
+     case invalidUri = "invalid_uri"
+@@ -41,6 +42,8 @@ class KJExpoPdfView: ExpoView {
    private var fitMode: FitMode = DEFAULT_FIT_MODE
    private var isAutoScaleEnabled: Bool = DEFAULT_AUTO_SCALE_ENABLED
    private var isPageColorInverted: Bool = DEFAULT_PAGE_COLOR_INVERTED_ENABLED
@@ -131,7 +247,21 @@ index 0012792..4fe84c7 100644
  
    required init(appContext: AppContext? = nil) {
      super.init(appContext: appContext)
-@@ -196,6 +198,20 @@ class KJExpoPdfView: ExpoView {
+@@ -57,6 +60,13 @@ class KJExpoPdfView: ExpoView {
+     // - TODO: Maybe allow native autoscaling if no content padding is set? as that's the only reason we need the manual method.
+     self.pdfView.autoScales = false
+ 
++    // Patched (filen): take over link activation. With no delegate assigned, PDFKit opens a link
++    // annotation's URL itself, with no scheme check and no confirmation — and a PDF is untrusted
++    // content (chat attachment, shared directory, public link). Implementing
++    // pdfViewWillClick(onLink:) suppresses that default and routes the URL to JS, which applies the
++    // same policy as every other link surface in the app. Mirrors the Android ForwardingLinkHandler.
++    self.pdfView.delegate = self
++
+     addSubview(pdfView)
+     setupListeners()
+   }
+@@ -196,6 +206,20 @@ class KJExpoPdfView: ExpoView {
      }
    }
  
@@ -152,7 +282,7 @@ index 0012792..4fe84c7 100644
    @objc private func handlePageChange() {
      guard
        let page = pdfView.currentPage,
-@@ -279,6 +295,9 @@ class KJExpoPdfView: ExpoView {
+@@ -279,6 +303,9 @@ class KJExpoPdfView: ExpoView {
          fitMode: self.fitMode,
          resetScrollOffset: resetScrollOffset
        )
@@ -162,3 +292,22 @@ index 0012792..4fe84c7 100644
      }
    }
  
+@@ -305,3 +332,18 @@ class KJExpoPdfView: ExpoView {
+     ])
+   }
+ }
++
++// Patched (filen): see the delegate assignment in init().
++//
++// Implementing this method is what stops PDFKit from opening a link annotation's URL on its own —
++// the default behaviour when no delegate implements it. Internal destination links (PDFActionGoTo,
++// e.g. a table of contents entry) are resolved by PDFKit natively and never reach here, so this only
++// sees links that would otherwise leave the app. Nothing is opened on this side: the URL is handed
++// to JS, which vets the scheme and shows the trusted-domain confirmation before opening it.
++extension KJExpoPdfView: PDFViewDelegate {
++  func pdfViewWillClick(onLink sender: PDFView, with url: URL) {
++    self.onLinkPressed([
++      "uri": url.absoluteString
++    ])
++  }
++}
