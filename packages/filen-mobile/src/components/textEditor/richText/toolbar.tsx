@@ -11,10 +11,10 @@ import type { QuillFormats, HeaderLevel } from "@/components/textEditor/richText
 import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
 import Text from "@/components/ui/text"
 import prompts from "@/lib/prompts"
-import * as Linking from "expo-linking"
 import { cn } from "@filen/utils"
 import { Platform } from "react-native"
 import logger from "@/lib/logger"
+import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 
 // Compact sizing tuned for the native stack header bar (~44pt iOS / ~56dp
 // Android). Slightly smaller than the old floating toolbar so all 9 buttons
@@ -24,6 +24,8 @@ const ICON_SIZE = 16
 const BUTTON_CLASS = "flex-row items-center justify-center shrink-0 size-8"
 
 const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event: TextEditorEvents) => void }) => {
+	const openExternalLink = useOpenExternalLink("textEditor")
+
 	const { t } = useTranslation()
 	const active = useRichtextStore(state => state.formats[type])
 	const textForeground = useResolveClassNames("text-foreground")
@@ -69,7 +71,13 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 								return
 							}
 
-							Linking.openURL(active as string).catch(e => logger.warn("textEditor", "openURL failed in richtext toolbar", { error: e }))
+							// The href comes from note content, which can be authored by another user, and
+							// arrives over the WebView bridge. It goes through the same funnel as every
+							// other untrusted link rather than straight to the OS — this was the one link
+							// surface in the app with no scheme check and no confirmation.
+							openExternalLink(active as string).catch(e =>
+								logger.warn("textEditor", "failed to open a link from the richtext toolbar", { error: e })
+							)
 						}
 					},
 					{

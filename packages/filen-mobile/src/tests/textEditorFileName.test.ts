@@ -93,6 +93,13 @@ vi.mock("@/hooks/useDomEvents/useNativeDomEvents", () => ({
 	useNativeDomEvents: () => ({ onDomMessage: vi.fn(), postMessage: nativePostMessageSpy })
 }))
 
+// The wrapper now opens external links through this hook. Mocked at the module boundary so the
+// suite does not pull in @/lib/prompts -> the native alert module, which has no ESM entry under
+// vitest. This test is about fileName forwarding; link opening is covered elsewhere.
+vi.mock("@/hooks/useOpenExternalLink", () => ({
+	default: () => async () => {}
+}))
+
 vi.mock("expo-linking", () => ({
 	canOpenURL: vi.fn(),
 	openURL: vi.fn()

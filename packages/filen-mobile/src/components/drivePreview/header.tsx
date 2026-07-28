@@ -15,13 +15,10 @@ import useDriveItemStoredOfflineQuery from "@/features/drive/queries/useDriveIte
 import { useShallow } from "zustand/shallow"
 import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
-import { cn, run } from "@filen/utils"
+import { cn } from "@filen/utils"
 import { useResolveClassNames } from "uniwind"
 import Menu from "@/components/ui/menu"
-import { useSecureStore } from "@/lib/secureStore"
-import prompts from "@/lib/prompts"
-import alerts from "@/lib/alerts"
-import * as Linking from "expo-linking"
+import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import logger from "@/lib/logger"
 
@@ -42,7 +39,7 @@ const GalleryHeader = ({
 	const viewRef = useRef<TView>(null)
 	const { onLayout, layout } = useViewLayout(viewRef)
 	const textForeground = useResolveClassNames("text-foreground")
-	const [openLinkTrustedDomains, setOpenLinkTrustedDomains] = useSecureStore<Record<string, boolean>>("openLinkTrustedDomains", {})
+	const openExternalLink = useOpenExternalLink("drivePreview")
 	const currentItem = useDrivePreviewStore(useShallow(state => state.currentItem))
 	const drivePath = useDrivePreviewStore(useShallow(state => state.drivePath))
 
@@ -182,81 +179,13 @@ const GalleryHeader = ({
 											id: "openLink",
 											title: t("open_link"),
 											icon: "openExternal",
-											onPress: async () => {
-												const parsedDomain = (() => {
-													try {
-														const url = new URL(currentItem.data.url)
-
-														return url.hostname
-													} catch {
-														return null
-													}
-												})()
-
-												if (!parsedDomain) {
-													return
-												}
-
-												const canOpenResult = await run(async () => {
-													return await Linking.canOpenURL(currentItem.data.url)
+											onPress: () => {
+												// Routed through the app's single funnel for untrusted links rather than a local
+												// copy of the same flow. This site previously had no scheme check at all — it
+												// relied on its callers only ever supplying already-validated https URLs.
+												openExternalLink(currentItem.data.url).catch(err => {
+													logger.error("drivePreview", "failed to open a linked file url", { error: err })
 												})
-
-												if (!canOpenResult.success) {
-													logger.error("drivePreview", "canOpenURL failed for linked file", {
-														error: canOpenResult.error
-													})
-													alerts.error(canOpenResult.error)
-
-													return
-												}
-
-												if (!canOpenResult.data) {
-													alerts.error(t("cannot_open_link"))
-
-													return
-												}
-
-												if (!openLinkTrustedDomains[parsedDomain]) {
-													const promptResponse = await run(async () => {
-														return await prompts.alert({
-															title: t("open_external_link"),
-															message: t("open_external_link_message", {
-																domain: parsedDomain
-															}),
-															cancelText: t("cancel"),
-															okText: t("open_trust")
-														})
-													})
-
-													if (!promptResponse.success) {
-														logger.error("drivePreview", "trust-prompt failed", { error: promptResponse.error })
-														alerts.error(promptResponse.error)
-
-														return
-													}
-
-													if (promptResponse.data.cancelled) {
-														return
-													}
-
-													setOpenLinkTrustedDomains(prev => ({
-														...prev,
-														[parsedDomain]: true
-													}))
-												}
-
-												const openResult = await run(async () => {
-													return await Linking.openURL(currentItem.data.url)
-												})
-
-												if (!openResult.success) {
-													logger.error("drivePreview", "openURL failed for linked file", {
-														error: openResult.error
-													})
-													alerts.error(openResult.error)
-
-													return
-												}
 											}
 										}
 									]}

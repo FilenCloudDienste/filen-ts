@@ -10,11 +10,9 @@ import { useResolveClassNames, useUniwind } from "uniwind"
 import useRichtextStore from "@/stores/useRichtext.store"
 import MarkdownPreviewButton from "@/components/textEditor/markdownPreviewButton"
 import { useSecureStore } from "@/lib/secureStore"
-import * as ExpoLinking from "expo-linking"
-import alerts from "@/lib/alerts"
 import useTextEditorStore from "@/stores/useTextEditor.store"
-import i18n from "@/lib/i18n"
 import logger from "@/lib/logger"
+import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 
 export type TextEditorType = "richtext" | "text" | "markdown" | "code"
 
@@ -165,6 +163,8 @@ export const TextEditor = ({
 
 	const markdownPreviewActive = !id ? false : (textEditorMarkdownPreviewActive[id] ?? false)
 
+	const openExternalLink = useOpenExternalLink("textEditor")
+
 	const { onDomMessage, postMessage } = useNativeDomEvents<TextEditorEvents>({
 		ref,
 		onMessage: message => {
@@ -184,23 +184,13 @@ export const TextEditor = ({
 				}
 
 				case "externalLinkClicked": {
-					ExpoLinking.canOpenURL(message.data)
-						.then(supported => {
-							if (!supported) {
-								alerts.error(i18n.t("cannot_open_link"))
-
-								return
-							}
-
-							ExpoLinking.openURL(message.data).catch(err => {
-								logger.error("textEditor", "openURL failed for external link", { error: err })
-								alerts.error(err)
-							})
-						})
-						.catch(err => {
-							logger.error("textEditor", "canOpenURL failed for external link", { error: err })
-							alerts.error(err)
-						})
+					// Vetted on THIS side of the bridge before opening. The WebView is the untrusted end
+					// of it — note and markdown content can come from another user — so the scheme check
+					// that ran there is only as trustworthy as the page that ran it. useOpenExternalLink
+					// re-classifies and applies the same policy as every other untrusted link surface.
+					openExternalLink(message.data).catch(err => {
+						logger.error("textEditor", "failed to open an external link", { error: err })
+					})
 
 					break
 				}

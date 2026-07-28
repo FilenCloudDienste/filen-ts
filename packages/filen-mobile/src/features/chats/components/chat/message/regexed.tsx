@@ -12,11 +12,8 @@ import { useShallow } from "zustand/shallow"
 import { PressableScale } from "@/components/ui/pressables"
 import { contactDisplayName } from "@/lib/utils"
 import { safeParseUrl, extractLinks } from "@/lib/linkParser"
-import { cn, run } from "@filen/utils"
-import * as Linking from "expo-linking"
-import { useSecureStore } from "@/lib/secureStore"
-import prompts from "@/lib/prompts"
-import alerts from "@/lib/alerts"
+import { cn } from "@filen/utils"
+import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 import { URL_REGEX } from "@/constants"
 import { useTranslation } from "react-i18next"
 import logger from "@/lib/logger"
@@ -102,9 +99,13 @@ const CodeBlock = ({ match, fromSelf }: { match: string; fromSelf: boolean }) =>
 }
 
 export const Link = ({ match, fromSelf, inflight }: { match: string; fromSelf: boolean; inflight?: boolean }) => {
-	const { t } = useTranslation()
-	const [openLinkTrustedDomains, setOpenLinkTrustedDomains] = useSecureStore<Record<string, boolean>>("openLinkTrustedDomains", {})
+	// Chat messages come from another user, so their links go through the app's single funnel for
+	// untrusted links (scheme allowlist -> https/private-host check -> trusted-domain prompt) rather
+	// than a local copy of it. This used to be an inline duplicate that also hard-coded the trust
+	// store's key, so a rename would have silently forked the remembered domains.
+	const openExternalLink = useOpenExternalLink("chats")
 
+	// Still parsed here, but only to decide whether this text is renderable AS a link at all.
 	const parsedDomain = (() => {
 		try {
 			const url = new URL(match)
@@ -115,65 +116,10 @@ export const Link = ({ match, fromSelf, inflight }: { match: string; fromSelf: b
 		}
 	})()
 
-	const onPress = async () => {
-		if (!parsedDomain) {
-			return
-		}
-
-		const canOpenResult = await run(async () => {
-			return await Linking.canOpenURL(match)
+	const onPress = () => {
+		openExternalLink(match).catch(err => {
+			logger.error("chats", "failed to open a message link", { error: err })
 		})
-
-		if (!canOpenResult.success) {
-			logger.error("chats", "canOpenURL check failed", { error: canOpenResult.error })
-			alerts.error(canOpenResult.error)
-
-			return
-		}
-
-		if (!canOpenResult.data) {
-			alerts.error(t("cannot_open_link"))
-
-			return
-		}
-
-		if (!openLinkTrustedDomains[parsedDomain]) {
-			const promptResponse = await run(async () => {
-				return await prompts.alert({
-					title: t("open_external_link"),
-					message: t("open_external_link_message", { domain: parsedDomain }),
-					cancelText: t("cancel"),
-					okText: t("open_trust")
-				})
-			})
-
-			if (!promptResponse.success) {
-				logger.error("chats", "open link confirmation prompt failed", { error: promptResponse.error })
-				alerts.error(promptResponse.error)
-
-				return
-			}
-
-			if (promptResponse.data.cancelled) {
-				return
-			}
-
-			setOpenLinkTrustedDomains(prev => ({
-				...prev,
-				[parsedDomain]: true
-			}))
-		}
-
-		const openResult = await run(async () => {
-			return await Linking.openURL(match)
-		})
-
-		if (!openResult.success) {
-			logger.error("chats", "openURL failed", { error: openResult.error })
-			alerts.error(openResult.error)
-
-			return
-		}
 	}
 
 	if (!parsedDomain) {
