@@ -6,6 +6,19 @@ import { getPreviewType, isImagePreviewType } from "@/lib/previewType"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS } from "@/constants"
 import { Paths } from "expo-file-system"
 
+export type OpenPreviewParams = {
+	items: GalleryItemTagged[]
+	initialItem: InitialItem
+}
+
+// The guarded router (src/lib/router.ts) dedupes by navigation TARGET, and every preview open is the
+// same "/drivePreview" string — so two opens inside NAV_DEDUPE_WINDOW_MS would collapse into a single
+// push while BOTH had already seeded the store, stranding it with a session that has no screen. The
+// open() guard would then never clear and the preview would stay dead for the rest of the process.
+// Distinct sessions ARE distinct navigations; a genuinely double-fired tap is already dropped by
+// open()'s own guard, which is the correct place for it (it knows an item is already showing).
+let openSessionCounter = 0
+
 export type DrivePreviewStore = {
 	headerHeight: number | null
 	currentItem: GalleryItemTagged | null
@@ -13,12 +26,23 @@ export type DrivePreviewStore = {
 	items: GalleryItemTagged[]
 	initialScrollIndex: number
 	drivePath: DrivePath | null
+	// True from the moment the open gallery commits to leaving (its route pop was dispatched) until it
+	// actually unmounts — i.e. for the length of the pop animation, during which its data deliberately
+	// stays in the store to paint that animation. open() needs this to tell "a preview owns the screen"
+	// apart from "a preview is on its way out".
+	isLeaving: boolean
+	setLeaving: (leaving: boolean) => void
+	// An open() that landed during the leaving window. Replayed by endSession() once the outgoing
+	// gallery unmounts; only the newest is kept, so the user's last tap wins.
+	pendingOpen: OpenPreviewParams | null
 	setHeaderHeight: (fn: number | null | ((prev: number | null) => number | null)) => void
 	setCurrentIndex: (fn: number | null | ((prev: number | null) => number | null)) => void
 	reset: () => void
+	// Called by the gallery when it unmounts: clears the session and replays a parked open.
+	endSession: () => void
 	setCurrentItem: (fn: GalleryItemTagged | null | ((prev: GalleryItemTagged | null) => GalleryItemTagged | null)) => void
 	setCurrentItems: (fn: GalleryItemTagged[] | ((prev: GalleryItemTagged[]) => GalleryItemTagged[])) => void
-	open(params: { items: GalleryItemTagged[]; initialItem: InitialItem }): void
+	open(params: OpenPreviewParams): void
 	setInitialScrollIndex: (fn: number | ((prev: number) => number)) => void
 	setDrivePath: (fn: DrivePath | null | ((prev: DrivePath | null) => DrivePath | null)) => void
 	// Whether the currently-open editable text preview has unsaved edits. Published by previewText;
@@ -52,8 +76,27 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 			items: [],
 			drivePath: null,
 			hasUnsavedEdits: false,
-			saveEdits: null
+			saveEdits: null,
+			isLeaving: false,
+			pendingOpen: null
 		})
+	},
+	isLeaving: false,
+	setLeaving(leaving) {
+		// Unwinding the latch also drops anything parked behind it: a dismissal that was BLOCKED (the
+		// unsaved-changes prompt cancelled, or a failed save) keeps this gallery alive, so a tap that
+		// landed during the prompt must not fire later when the user eventually does leave.
+		set(leaving ? { isLeaving: true } : { isLeaving: false, pendingOpen: null })
+	},
+	pendingOpen: null,
+	endSession() {
+		const pending = get().pendingOpen
+
+		get().reset()
+
+		if (pending) {
+			get().open(pending)
+		}
 	},
 	currentItem: null,
 	setCurrentItem(fn) {
@@ -93,6 +136,20 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 	},
 	open({ items, initialItem }) {
 		if (get().currentIndex !== null || get().currentItem !== null) {
+			// A gallery that has committed to leaving still holds the store for the length of its pop
+			// animation, so this tap would otherwise be swallowed — and "close the preview, tap the next
+			// photo" is a routine gesture, not a mis-tap. Park it; endSession() replays it the moment the
+			// outgoing gallery unmounts. While a preview is genuinely VISIBLE the same call is a
+			// double-fired tap and stays dropped.
+			if (get().isLeaving) {
+				set({
+					pendingOpen: {
+						items,
+						initialItem
+					}
+				})
+			}
+
 			return
 		}
 
@@ -174,7 +231,14 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 			drivePath: initialItem.type === "drive" ? initialItem.data.drivePath : null
 		})
 
-		router.push("/drivePreview")
+		openSessionCounter++
+
+		router.push({
+			pathname: "/drivePreview",
+			params: {
+				session: String(openSessionCounter)
+			}
+		})
 	}
 }))
 

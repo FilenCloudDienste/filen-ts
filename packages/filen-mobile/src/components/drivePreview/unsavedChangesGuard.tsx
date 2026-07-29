@@ -58,10 +58,27 @@ const UnsavedChangesGuard = () => {
 
 				if (promptResult.data === "primary") {
 					const saveEdits = useDrivePreviewStore.getState().saveEdits
-					const saved = saveEdits ? await saveEdits() : false
+					// saveEdits() reports an ordinary failure by returning false, but it is not a total
+					// function: previewText's post-upload bookkeeping (cache invalidation and the
+					// driveItemUpdated fan-out) runs outside its own error boundary, and EventEmitter3 does
+					// not catch subscriber throws. A rejection escaping here would skip the
+					// drivePreviewDismissBlocked emit below and strand the user in a preview whose close
+					// button and dismiss gesture are both latched off — with no way out on iOS.
+					const saveResult = await run(async () => (saveEdits ? await saveEdits() : false))
+
+					if (!saveResult.success) {
+						logger.error("drivePreview", "saving before dismissal threw", {
+							error: saveResult.error
+						})
+						alerts.error(saveResult.error)
+
+						events.emit("drivePreviewDismissBlocked")
+
+						return
+					}
 
 					// Could not save (e.g. offline) — keep the user put; save() already surfaced any error.
-					if (!saved) {
+					if (!saveResult.data) {
 						events.emit("drivePreviewDismissBlocked")
 
 						return

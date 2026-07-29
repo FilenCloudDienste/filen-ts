@@ -1,0 +1,49 @@
+diff --git a/node_modules/@shopify/flash-list/dist/recyclerview/RecyclerViewManager.js b/node_modules/@shopify/flash-list/dist/recyclerview/RecyclerViewManager.js
+index 1aa651d..bbe7120 100644
+--- a/node_modules/@shopify/flash-list/dist/recyclerview/RecyclerViewManager.js
++++ b/node_modules/@shopify/flash-list/dist/recyclerview/RecyclerViewManager.js
+@@ -293,7 +293,17 @@ export class RecyclerViewManager {
+             // re-estimate unmeasured items with an updated average height, changing
+             // the target item's position. Reading before recompute would capture a
+             // stale offset, causing the wrong items to be rendered.
+-            this.layoutManager.recomputeLayouts(0, initialScrollIndex);
++            // PATCH (filen-mobile): recompute the WHOLE layout table, not just [0..initialScrollIndex].
++            // Re-basing only the head with the post-measurement average leaves the tail chained off the
++            // 200px default estimate (LayoutManager's MultiTypeAverageWindow(5, 200)), so `layouts` stops
++            // being sorted by x at the seam. getVisibleLayouts binary-searches it and explicitly assumes
++            // sortedness, so it returns a wrong range (wrong cells mounted under a correct offset) or an
++            // EMPTY one (which flips isFirstLayoutComplete vacuously, since [].every() is true, and lets
++            // the initial scroll fire against a still-stale content width). The tail-resync in
++            // _recomputeLayouts cannot repair either: it is gated on `y`, which is always 0 on a
++            // horizontal list, so it never fires there. Upstream: Shopify/flash-list#2307 (open).
++            // Remove this patch once that is released.
++            this.layoutManager.recomputeLayouts(0, this.layoutManager.getLayoutCount() - 1);
+             const initialItemLayout = this.layoutManager.getLayout(initialScrollIndex);
+             const initialItemOffset = this.propsRef.horizontal
+                 ? initialItemLayout.x
+diff --git a/node_modules/@shopify/flash-list/src/recyclerview/RecyclerViewManager.ts b/node_modules/@shopify/flash-list/src/recyclerview/RecyclerViewManager.ts
+index 41704d0..75f7a3c 100644
+--- a/node_modules/@shopify/flash-list/src/recyclerview/RecyclerViewManager.ts
++++ b/node_modules/@shopify/flash-list/src/recyclerview/RecyclerViewManager.ts
+@@ -385,7 +385,20 @@ export class RecyclerViewManager<T> {
+       // re-estimate unmeasured items with an updated average height, changing
+       // the target item's position. Reading before recompute would capture a
+       // stale offset, causing the wrong items to be rendered.
+-      this.layoutManager.recomputeLayouts(0, initialScrollIndex);
++          // PATCH (filen-mobile): recompute the WHOLE layout table, not just [0..initialScrollIndex].
++          // Re-basing only the head with the post-measurement average leaves the tail chained off the
++          // 200px default estimate (LayoutManager's MultiTypeAverageWindow(5, 200)), so `layouts` stops
++          // being sorted by x at the seam. getVisibleLayouts binary-searches it and explicitly assumes
++          // sortedness, so it returns a wrong range (wrong cells mounted under a correct offset) or an
++          // EMPTY one (which flips isFirstLayoutComplete vacuously, since [].every() is true, and lets
++          // the initial scroll fire against a still-stale content width). The tail-resync in
++          // _recomputeLayouts cannot repair either: it is gated on `y`, which is always 0 on a
++          // horizontal list, so it never fires there. Upstream: Shopify/flash-list#2307 (open).
++          // Remove this patch once that is released.
++      this.layoutManager.recomputeLayouts(
++        0,
++        this.layoutManager.getLayoutCount() - 1
++      );
+       const initialItemLayout =
+         this.layoutManager.getLayout(initialScrollIndex);
+       const initialItemOffset = this.propsRef.horizontal

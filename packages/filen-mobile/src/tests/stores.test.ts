@@ -112,7 +112,9 @@ function resetDrivePreviewStore(): void {
 		currentIndex: null,
 		items: [],
 		initialScrollIndex: 0,
-		drivePath: null
+		drivePath: null,
+		isLeaving: false,
+		pendingOpen: null
 	})
 }
 
@@ -218,7 +220,12 @@ describe("useDrivePreviewStore.open", () => {
 		expect(state.items[0]?.type).toBe("external")
 		expect(state.initialScrollIndex).toBe(0)
 		expect(state.currentIndex).toBe(0)
-		expect(mockRouterPush).toHaveBeenCalledWith("/drivePreview")
+		expect(mockRouterPush).toHaveBeenCalledWith({
+			pathname: "/drivePreview",
+			params: {
+				session: expect.any(String)
+			}
+		})
 	})
 
 	it("for a text file, itemsFiltered is a single-element array containing only that file", () => {
@@ -393,7 +400,12 @@ describe("useDrivePreviewStore.open", () => {
 		expect(state.initialScrollIndex).toBe(1)
 		expect(state.currentItem).toBeDefined()
 		expect((state.currentItem as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid).toBe("img2")
-		expect(mockRouterPush).toHaveBeenCalledWith("/drivePreview")
+		expect(mockRouterPush).toHaveBeenCalledWith({
+			pathname: "/drivePreview",
+			params: {
+				session: expect.any(String)
+			}
+		})
 	})
 
 	it("is fully idempotent: calling open twice does not change state after the first call", () => {

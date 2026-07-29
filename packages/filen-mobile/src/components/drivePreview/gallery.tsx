@@ -35,6 +35,11 @@ const DISMISS_EXIT_X_PROJECTION = 0.1
 const DISMISS_MIN_SCALE = 0.72
 const PINCH_BG_FADE_END = 0.7
 
+// How far off an exact page boundary a settle may rest and still count as one, as a fraction of the
+// page. Paging snaps to exact multiples, so anything beyond a rounding wobble means the offset and the
+// viewport it was measured against disagree — see onMomentumScrollEnd.
+const PAGE_SETTLE_TOLERANCE = 0.02
+
 const SPRING_SNAPPY = {
 	duration: 350,
 	dampingRatio: 0.86
@@ -298,7 +303,24 @@ const Gallery = () => {
 	// below without re-subscribing on every settle.
 	const anchorIndexRef = useRef<number>(initialScrollIndex)
 
+	// Only a real USER settle may move the anchor. iOS Fabric synthesizes onMomentumScrollEnd for EVERY
+	// unanimated programmatic scroll (RCTScrollViewComponentView `scrollTo:` calls
+	// `_handleFinishedScrolling` when !animated), so FlashList's own mount-time initial scroll — including
+	// its clamped intermediate shots — arrives here looking exactly like a settle and would drag the
+	// anchor onto whatever page the scroll was momentarily resting at. Android emits nothing for
+	// programmatic scrolls. Every programmatic re-anchor below already targets anchorIndex, so requiring a
+	// real drag first loses nothing.
+	const hasUserDraggedRef = useRef<boolean>(false)
+
+	const onScrollBeginDrag = () => {
+		hasUserDraggedRef.current = true
+	}
+
 	const onMomentumScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+		if (!hasUserDraggedRef.current) {
+			return
+		}
+
 		// Android PiP resizes the ACTIVITY window while the list stays mounted (the remount key is
 		// deliberately frozen during a session): clamp/settle scrolls against the tiny viewport
 		// fire momentum-end with garbage geometry and would poison the anchor — the expand-back
@@ -315,8 +337,20 @@ const Gallery = () => {
 			return
 		}
 
+		const page = e.nativeEvent.contentOffset.x / pageWidth
+		const nearestPage = Math.round(page)
+
+		// pagingEnabled snaps a user settle to an exact multiple of the viewport width, so an offset
+		// resting well off a page boundary was produced against DIFFERENT geometry than it came to rest
+		// in — the clamp/re-layout that follows a window resize (rotation, split-screen/DeX, leaving PiP).
+		// The re-anchor paths below would then faithfully restore that wrong page. The PiP guard above
+		// only covers the case where the resized window stays internally self-consistent.
+		if (Math.abs(page - nearestPage) > PAGE_SETTLE_TOLERANCE) {
+			return
+		}
+
 		const storeItems = useDrivePreviewStore.getState().items
-		const index = Math.max(0, Math.min(Math.round(e.nativeEvent.contentOffset.x / pageWidth), Math.max(0, storeItems.length - 1)))
+		const index = Math.max(0, Math.min(nearestPage, Math.max(0, storeItems.length - 1)))
 
 		setAnchorIndex(index)
 		anchorIndexRef.current = index
@@ -553,13 +587,30 @@ const Gallery = () => {
 		onDismissGestureEnd
 	).enabled(isImage || isVideo || isAudio || items.length === 0 || (isExternal && (isImage || isVideo || isAudio)))
 
+	// The single point where this gallery commits to leaving. Every exit funnels through the route pop
+	// — the header close button, the swipe-down/pinch dismiss, the Android hardware back button, the
+	// last item being removed — so one listener covers them all (the same reason UnsavedChangesGuard
+	// uses it). Until that pop completes this screen keeps its data in the store to paint the
+	// animation, and that window is exactly where a tap on the next item used to be dropped on the
+	// floor; the flag lets the store park it instead.
+	useEffect(() => {
+		const unsubscribe = navigation.addListener("beforeRemove", () => {
+			useDrivePreviewStore.getState().setLeaving(true)
+		})
+
+		return unsubscribe
+	}, [navigation])
+
 	useEffect(() => {
 		return () => {
-			useDrivePreviewStore.getState().reset()
-
+			// Players and the orientation lock are torn down BEFORE the session ends: endSession() can
+			// synchronously open the next preview (a tap parked during the pop animation), and this
+			// session's teardown must not run against it.
 			galleryVideoPlayers.releaseAll()
 
 			ScreenOrientation.unlockAsync().catch(e => logger.warn("gallery", "unlockAsync failed on unmount", { error: e }))
+
+			useDrivePreviewStore.getState().endSession()
 		}
 	}, [])
 
@@ -596,6 +647,10 @@ const Gallery = () => {
 		const dismissBlockedSubscription = events.subscribe("drivePreviewDismissBlocked", () => {
 			didNavigateBack.value = 0
 			isDismissing.value = 0
+
+			// The pop already fired beforeRemove and latched the leaving flag before the guard vetoed it —
+			// unwind it (and anything parked behind it) so this still-live gallery keeps owning the store.
+			useDrivePreviewStore.getState().setLeaving(false)
 		})
 
 		// Removal (trash / delete / restore-out-of-trash): drop the item from the
@@ -717,6 +772,7 @@ const Gallery = () => {
 						bounces={items.length > 1}
 						showsHorizontalScrollIndicator={false}
 						initialScrollIndex={anchorIndex >= 0 && anchorIndex < items.length ? anchorIndex : 0}
+						onScrollBeginDrag={onScrollBeginDrag}
 						onMomentumScrollEnd={onMomentumScrollEnd}
 						onViewableItemsChanged={info => {
 							// Same Android-PiP guard as onMomentumScrollEnd: viewability recomputed

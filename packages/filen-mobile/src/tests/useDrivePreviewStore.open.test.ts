@@ -128,7 +128,9 @@ function resetStore(): void {
 		currentIndex: null,
 		items: [],
 		initialScrollIndex: 0,
-		drivePath: null
+		drivePath: null,
+		isLeaving: false,
+		pendingOpen: null
 	})
 }
 
@@ -573,5 +575,182 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 			expect(uuids).toContain("upper1")
 			expect(uuids).toContain("lower1")
 		})
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Session handover: the leaving window
+//
+// A gallery that has committed to leaving keeps its data in the store for the
+// length of the pop animation (it is still painting it). Before, the re-entry
+// guard could not tell that from a visible preview, so the very common "close
+// the preview, tap the next photo" gesture was swallowed for ~300-500ms.
+// ---------------------------------------------------------------------------
+
+function uuidOf(item: GalleryItemTagged | null): string | null {
+	return item && item.type === "drive" ? item.data.data.uuid : null
+}
+
+describe("useDrivePreviewStore — session handover", () => {
+	beforeEach(() => {
+		resetStore()
+		mockRouterPush.mockClear()
+	})
+
+	it("still drops a second open while the preview is VISIBLE (a double-fired tap)", () => {
+		useDrivePreviewStore.getState().open({
+			items: [makeDriveGalleryItem("img1", "first.jpg")],
+			initialItem: makeInitialDriveItem("img1", "first.jpg")
+		})
+
+		useDrivePreviewStore.getState().open({
+			items: [makeDriveGalleryItem("img2", "second.jpg")],
+			initialItem: makeInitialDriveItem("img2", "second.jpg")
+		})
+
+		expect(mockRouterPush).toHaveBeenCalledTimes(1)
+		expect(useDrivePreviewStore.getState().pendingOpen).toBeNull()
+		expect(uuidOf(useDrivePreviewStore.getState().currentItem)).toBe("img1")
+	})
+
+	it("parks an open that lands while the gallery is leaving instead of dropping it", () => {
+		useDrivePreviewStore.getState().open({
+			items: [makeDriveGalleryItem("img1", "first.jpg")],
+			initialItem: makeInitialDriveItem("img1", "first.jpg")
+		})
+
+		useDrivePreviewStore.getState().setLeaving(true)
+
+		useDrivePreviewStore.getState().open({
+			items: [makeDriveGalleryItem("img2", "second.jpg")],
+			initialItem: makeInitialDriveItem("img2", "second.jpg")
+		})
+
+		// The outgoing gallery still owns the screen until it unmounts, so nothing navigates yet and
+		// its data stays intact to paint the pop animation.
+		expect(mockRouterPush).toHaveBeenCalledTimes(1)
+		expect(uuidOf(useDrivePreviewStore.getState().currentItem)).toBe("img1")
+		expect(useDrivePreviewStore.getState().pendingOpen).not.toBeNull()
+	})
+
+	it("endSession() replays the parked open, so the swallowed tap opens its item", () => {
+		useDrivePreviewStore.getState().open({
+			items: [makeDriveGalleryItem("img1", "first.jpg")],
+			initialItem: makeInitialDriveItem("img1", "first.jpg")
+		})
+
+		useDrivePreviewStore.getState().setLeaving(true)
+		useDrivePreviewStore.getState().open({
+			items: [makeDriveGalleryItem("img2", "second.jpg")],
+			initialItem: makeInitialDriveItem("img2", "second.jpg")
+		})
+
+		useDrivePreviewStore.getState().endSession()
+
+		const state = useDrivePreviewStore.getState()
+
+		expect(mockRouterPush).toHaveBeenCalledTimes(2)
+		expect(uuidOf(state.currentItem)).toBe("img2")
+		expect(state.currentIndex).toBe(0)
+		expect(state.pendingOpen).toBeNull()
+		expect(state.isLeaving).toBe(false)
+	})
+
+	it("keeps only the newest parked open — the user's last tap wins", () => {
+		useDrivePreviewStore.getState().open({
+			items: [makeDriveGalleryItem("img1", "first.jpg")],
+			initialItem: makeInitialDriveItem("img1", "first.jpg")
+		})
+
+		useDrivePreviewStore.getState().setLeaving(true)
+
+		for (const uuid of ["img2", "img3"]) {
+			useDrivePreviewStore.getState().open({
+				items: [makeDriveGalleryItem(uuid, `${uuid}.jpg`)],
+				initialItem: makeInitialDriveItem(uuid, `${uuid}.jpg`)
+			})
+		}
+
+		useDrivePreviewStore.getState().endSession()
+
+		expect(uuidOf(useDrivePreviewStore.getState().currentItem)).toBe("img3")
+	})
+
+	it("drops the parked open when the dismissal is blocked (unsaved-changes cancel)", () => {
+		useDrivePreviewStore.getState().open({
+			items: [makeDriveGalleryItem("img1", "first.jpg")],
+			initialItem: makeInitialDriveItem("img1", "first.jpg")
+		})
+
+		// beforeRemove fired, then the unsaved-changes guard vetoed the pop.
+		useDrivePreviewStore.getState().setLeaving(true)
+		useDrivePreviewStore.getState().open({
+			items: [makeDriveGalleryItem("img2", "second.jpg")],
+			initialItem: makeInitialDriveItem("img2", "second.jpg")
+		})
+		useDrivePreviewStore.getState().setLeaving(false)
+
+		expect(useDrivePreviewStore.getState().pendingOpen).toBeNull()
+
+		// The gallery is live again, so a later legitimate close must not resurrect that tap.
+		useDrivePreviewStore.getState().endSession()
+
+		expect(mockRouterPush).toHaveBeenCalledTimes(1)
+		expect(useDrivePreviewStore.getState().currentItem).toBeNull()
+	})
+
+	it("endSession() with nothing parked just clears the session", () => {
+		useDrivePreviewStore.getState().open({
+			items: [makeDriveGalleryItem("img1", "first.jpg")],
+			initialItem: makeInitialDriveItem("img1", "first.jpg")
+		})
+
+		useDrivePreviewStore.getState().endSession()
+
+		const state = useDrivePreviewStore.getState()
+
+		expect(mockRouterPush).toHaveBeenCalledTimes(1)
+		expect(state.currentItem).toBeNull()
+		expect(state.currentIndex).toBeNull()
+		expect(state.items).toEqual([])
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Each open is its own navigation target
+//
+// The guarded router (src/lib/router.ts) drops a repeat of the SAME target
+// within 500ms. Pushing the bare "/drivePreview" string made every open
+// identical, so a second one inside that window was dropped AFTER the store had
+// been seeded — leaving a session with no screen, which the re-entry guard then
+// pinned forever.
+// ---------------------------------------------------------------------------
+
+describe("useDrivePreviewStore.open — navigation identity", () => {
+	beforeEach(() => {
+		resetStore()
+		mockRouterPush.mockClear()
+	})
+
+	it("pushes a distinct target for each session so the router dedupe cannot collapse two opens", () => {
+		useDrivePreviewStore.getState().open({
+			items: [makeDriveGalleryItem("img1", "first.jpg")],
+			initialItem: makeInitialDriveItem("img1", "first.jpg")
+		})
+
+		useDrivePreviewStore.getState().endSession()
+
+		useDrivePreviewStore.getState().open({
+			items: [makeDriveGalleryItem("img2", "second.jpg")],
+			initialItem: makeInitialDriveItem("img2", "second.jpg")
+		})
+
+		expect(mockRouterPush).toHaveBeenCalledTimes(2)
+
+		const [first, second] = mockRouterPush.mock.calls
+
+		expect(first?.[0]).toMatchObject({ pathname: "/drivePreview" })
+		expect(second?.[0]).toMatchObject({ pathname: "/drivePreview" })
+		expect(JSON.stringify(first?.[0])).not.toBe(JSON.stringify(second?.[0]))
 	})
 })
