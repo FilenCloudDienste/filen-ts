@@ -308,27 +308,6 @@ class Sqlite {
 			// RANGE predicate, not LIKE: `key >= prefix AND key < prefixUpperBound(prefix)` is an index
 			// SEARCH over the primary key; `key LIKE 'prefix%'` degrades to a full-table scan.
 			await db.execute("DELETE FROM kv WHERE key >= ? AND key < ?", [prefix, prefixUpperBound(prefix)])
-		},
-		keysByPrefix: async (prefix: string): Promise<string[]> => {
-			const db = await this.openDb()
-			const result = (await db.executeRaw("SELECT key FROM kv WHERE key LIKE ?", [prefix + "%"])).rawRows
-
-			return result.map(row => row[0] as string)
-		},
-		getByPrefix: async <T>(prefix: string): Promise<Map<string, T>> => {
-			const db = await this.openDb()
-			const result = (await db.executeRaw("SELECT key, value FROM kv WHERE key LIKE ?", [prefix + "%"])).rawRows
-			const map = new Map<string, T>()
-
-			for (const row of result) {
-				try {
-					map.set(row[0] as string, deserialize(row[1] as string) as T)
-				} catch (e) {
-					logger.warn("sqlite", "KV row deserialization failed", { rowId: row[0] as string, error: e })
-				}
-			}
-
-			return map
 		}
 	}
 }

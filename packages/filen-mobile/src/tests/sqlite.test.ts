@@ -399,69 +399,6 @@ describe("Sqlite", () => {
 		})
 	})
 
-	describe("kvAsync.keysByPrefix", () => {
-		it("returns only keys matching the prefix", async () => {
-			const sqlite = await createSqlite()
-
-			await sqlite.kvAsync.set("cache:v1:map:a", "1")
-			await sqlite.kvAsync.set("cache:v1:map:b", "2")
-			await sqlite.kvAsync.set("other:c", "3")
-
-			const keys = await sqlite.kvAsync.keysByPrefix("cache:v1:map:")
-
-			expect([...keys].sort()).toEqual(["cache:v1:map:a", "cache:v1:map:b"])
-		})
-
-		it("returns empty array when no keys match the prefix", async () => {
-			const sqlite = await createSqlite()
-
-			await sqlite.kvAsync.set("unrelated:x", "1")
-
-			const keys = await sqlite.kvAsync.keysByPrefix("nope:")
-
-			expect(keys).toEqual([])
-		})
-	})
-
-	describe("kvAsync.getByPrefix", () => {
-		it("returns matching entries as a Map", async () => {
-			const sqlite = await createSqlite()
-
-			await sqlite.kvAsync.set("data_x", { value: 1 })
-			await sqlite.kvAsync.set("data_y", { value: 2 })
-			await sqlite.kvAsync.set("other_z", { value: 3 })
-
-			const result = (await sqlite.kvAsync.getByPrefix("data_")) as Map<string, { value: number }>
-
-			expect(result.size).toBe(2)
-			expect(result.get("data_x")).toEqual({ value: 1 })
-			expect(result.get("data_y")).toEqual({ value: 2 })
-		})
-
-		it("returns empty Map when no rows match", async () => {
-			const sqlite = await createSqlite()
-
-			const result = await sqlite.kvAsync.getByPrefix("nonexistent_")
-
-			expect(result).toBeInstanceOf(Map)
-			expect(result.size).toBe(0)
-		})
-
-		it("silently omits entries with corrupt serialized data and returns partial map", async () => {
-			const sqlite = await createSqlite()
-
-			await sqlite.kvAsync.set("ok_key", { v: 42 })
-			// Inject a corrupt raw value directly into the backing store
-			mockDb._store.set("bad_key", "}{not valid json")
-
-			const result = (await sqlite.kvAsync.getByPrefix("")) as Map<string, unknown>
-
-			expect(result.size).toBe(1)
-			expect(result.get("ok_key")).toEqual({ v: 42 })
-			expect(result.has("bad_key")).toBe(false)
-		})
-	})
-
 	describe("clearAsync", () => {
 		it("removes all entries from the store", async () => {
 			const sqlite = await createSqlite()
