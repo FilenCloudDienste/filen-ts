@@ -180,6 +180,68 @@ describe("findClosestIndexString", () => {
 	})
 })
 
+// The implementation used to fall back to a loop re-slicing the source for every offset when the
+// first search missed. It was quadratic AND dead — every slice it inspected was a substring of the
+// one already searched. These pin the equivalence, including the multi-character case where the
+// tempting `lastIndexOf(target, index)` overload would NOT be equivalent.
+describe("findClosestIndexString — equivalence of the removed fallback", () => {
+	function reference(sourceString: string, targetString: string, givenIndex: number): number {
+		const extracted = sourceString.slice(0, givenIndex + 1)
+		const within = extracted.lastIndexOf(targetString)
+
+		if (within !== -1) {
+			return within
+		}
+
+		for (let offset = 1; offset <= givenIndex; offset++) {
+			const before = sourceString.slice(givenIndex - offset, givenIndex + 1)
+			const at = before.lastIndexOf(targetString)
+
+			if (at !== -1) {
+				return givenIndex - offset + at
+			}
+		}
+
+		return -1
+	}
+
+	it("matches the previous implementation exhaustively over a small alphabet", () => {
+		const alphabet = "ab:@"
+		const needles = [":", "@", "ab", ":@"]
+		let checked = 0
+
+		for (let length = 0; length <= 5; length++) {
+			const total = alphabet.length ** length
+
+			for (let n = 0; n < total; n++) {
+				let source = ""
+				let rest = n
+
+				for (let k = 0; k < length; k++) {
+					source += alphabet[rest % alphabet.length]
+					rest = Math.floor(rest / alphabet.length)
+				}
+
+				for (const needle of needles) {
+					for (let index = -1; index <= length + 1; index++) {
+						expect(findClosestIndexString(source, needle, index)).toBe(reference(source, needle, index))
+						checked++
+					}
+				}
+			}
+		}
+
+		expect(checked).toBeGreaterThan(40_000)
+	})
+
+	it("bounds the whole match, not just its start (why lastIndexOf(target, index) is wrong here)", () => {
+		// "ab" starts at 0 and ends at 1. Bounded by index 0 it must NOT match.
+		expect(findClosestIndexString("ab", "ab", 0)).toBe(-1)
+		expect(findClosestIndexString("ab", "ab", 1)).toBe(0)
+		expect("ab".lastIndexOf("ab", 0)).toBe(0)
+	})
+})
+
 describe("extractLinksFromString", () => {
 	it("should extract URLs from text", () => {
 		const text = "Visit https://example.com and http://test.org for more"

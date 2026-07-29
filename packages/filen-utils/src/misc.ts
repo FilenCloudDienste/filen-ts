@@ -153,24 +153,19 @@ export function sanitizeFileName(filename: string, replacement: string = "_"): s
 	return sanitizedFilename
 }
 
+/**
+ * Index of the last occurrence of `targetString` at or before `givenIndex`, or -1.
+ *
+ * Keep the slice form: `sourceString.lastIndexOf(targetString, givenIndex)` is NOT equivalent for
+ * multi-character needles — that overload bounds where the match STARTS, not where it ends.
+ *
+ * This previously fell back to a loop that re-sliced `sourceString` for every offset down to 0 when the
+ * search above missed — quadratic in `givenIndex`, on the per-keystroke chat-autocomplete path. The
+ * loop was also dead: every slice it inspected was a substring of the one already searched, and a
+ * string that does not contain the needle has no substring that does, so it could only return -1.
+ */
 export function findClosestIndexString(sourceString: string, targetString: string, givenIndex: number): number {
-	const extractedSubstring = sourceString.slice(0, givenIndex + 1)
-	const lastIndexWithinExtracted = extractedSubstring.lastIndexOf(targetString)
-
-	if (lastIndexWithinExtracted !== -1) {
-		return lastIndexWithinExtracted
-	}
-
-	for (let offset = 1; offset <= givenIndex; offset++) {
-		const substringBefore = sourceString.slice(givenIndex - offset, givenIndex + 1)
-		const lastIndexBefore = substringBefore.lastIndexOf(targetString)
-
-		if (lastIndexBefore !== -1) {
-			return givenIndex - offset + lastIndexBefore
-		}
-	}
-
-	return -1
+	return sourceString.slice(0, givenIndex + 1).lastIndexOf(targetString)
 }
 
 export const URL_REGEX: RegExp =
