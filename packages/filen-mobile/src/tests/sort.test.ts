@@ -9,8 +9,18 @@ vi.mock("@/lib/i18n", () => ({
 	}
 }))
 
+// Getter-backed so a test can flip the language: notesSorter caches its month formatter, and that
+// cache has to invalidate when setIntlLanguage reassigns the binding.
+const { timeMock } = vi.hoisted(() => ({
+	timeMock: {
+		language: "en-US"
+	}
+}))
+
 vi.mock("@/lib/time", () => ({
-	intlLanguage: "en-US"
+	get intlLanguage() {
+		return timeMock.language
+	}
 }))
 
 import { itemSorter, notesSorter, captureTimestamp, clearSortCaches, type SortByType } from "@/lib/sort"
@@ -1340,5 +1350,49 @@ describe("clearSortCaches", () => {
 
 		expect(after).toEqual(before)
 		expect(after).toEqual(["a.txt", "b2.txt", "b10.txt"])
+	})
+})
+
+// ---------------------------------------------------------------------------
+// notesSorter month-header formatter cache
+//
+// Constructing an Intl.DateTimeFormat dominates the cost of formatting one date, so the
+// previous-month header caches its formatter. The cache is keyed on the live `intlLanguage`
+// binding — without that key a language change would keep rendering the old locale's month name.
+// ---------------------------------------------------------------------------
+
+describe("notesSorter.group — month header formatter", () => {
+	function previousMonthTitle(): string | undefined {
+		const twoMonthsAgo = new Date()
+
+		twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2)
+
+		const note = makeNote({
+			uuid: "prev-month",
+			editedTimestamp: BigInt(twoMonthsAgo.getTime())
+		})
+
+		const grouped = notesSorter.group({ notes: [note] })
+		const header = grouped.find(entry => entry.type === "header" && entry.id === "header-month")
+
+		return header && header.type === "header" ? header.title : undefined
+	}
+
+	it("re-formats the month header after the language changes", () => {
+		try {
+			timeMock.language = "en-US"
+
+			const english = previousMonthTitle()
+
+			timeMock.language = "de-DE"
+
+			const german = previousMonthTitle()
+
+			expect(english).toBeDefined()
+			expect(german).toBeDefined()
+			expect(german).not.toBe(english)
+		} finally {
+			timeMock.language = "en-US"
+		}
 	})
 })
