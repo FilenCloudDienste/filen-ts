@@ -15,6 +15,7 @@ vi.mock("@/constants", () => {
 })
 
 import { getPreviewType, getPreviewTypeFromMime, isImagePreviewType, isProbablyBinaryText } from "@/lib/previewType"
+import { Paths } from "@/tests/mocks/expoFileSystem"
 
 // ---------------------------------------------------------------------------
 // getPreviewType
@@ -284,5 +285,84 @@ describe("isProbablyBinaryText", () => {
 
 	it("treats empty content as text", () => {
 		expect(isProbablyBinaryText("")).toBe(false)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// extname fast path + binary-text scan
+//
+// getPreviewType used to route every call through FileSystem.Paths.extname, which runs
+// `new URL(name)` inside a try/catch — and on RN the global URL is Expo's pure-JS parser, so a
+// bare filename ALWAYS threw. The colon guard is what keeps skipping it exact: WHATWG needs a
+// colon-terminated scheme when there is no base, so a colon-free string cannot construct a URL.
+// ---------------------------------------------------------------------------
+
+describe("getPreviewType — extname fast path", () => {
+	it("classifies ordinary names identically to the URL-parsing path", () => {
+		expect(getPreviewType("photo.jpg")).toBe("image")
+		expect(getPreviewType("clip.MP4")).toBe("video")
+		expect(getPreviewType("doc.pdf")).toBe("pdf")
+		expect(getPreviewType("main.rs")).toBe("code")
+		expect(getPreviewType("report.docx")).toBe("docx")
+		expect(getPreviewType("logo.svg")).toBe("svg")
+	})
+
+	it("keeps node's extname edge cases rather than a naive lastIndexOf('.')", () => {
+		// A leading dot is not an extension, so a file literally named ".jpg" has NO extension and must
+		// stay unknown. A hand-rolled `slice(lastIndexOf("."))` would classify it as an image — which is
+		// exactly why the fast path delegates to the same path algorithm rather than rolling its own.
+		expect(getPreviewType(".jpg")).toBe("unknown")
+		expect(getPreviewType(".bashrc")).toBe("unknown")
+		expect(getPreviewType("archive.")).toBe("unknown")
+		expect(getPreviewType("..")).toBe("unknown")
+		expect(getPreviewType("no-extension")).toBe("unknown")
+	})
+
+	it("still classifies colon-bearing names through the original path", () => {
+		// These take the Paths.extname branch; the classification must not drift.
+		expect(getPreviewType("Chapter1: Draft #3.docx")).toBe("docx")
+		expect(getPreviewType("12:30 meeting.pdf")).toBe("pdf")
+	})
+
+	it("routes ONLY colon-bearing names through Paths.extname", () => {
+		// The guard is about which branch runs. Output alone cannot pin it here: the vitest mock of
+		// expo-file-system does no URL decoding, so both branches agree on every input — whereas on
+		// device Paths.extname percent-decodes. Assert the routing directly instead.
+		const extnameSpy = vi.spyOn(Paths, "extname")
+
+		expect(getPreviewType("photo.jpg")).toBe("image")
+		expect(extnameSpy).not.toHaveBeenCalled()
+
+		expect(getPreviewType("12:30 meeting.pdf")).toBe("pdf")
+		expect(extnameSpy).toHaveBeenCalledWith("12:30 meeting.pdf")
+
+		extnameSpy.mockRestore()
+	})
+
+	it("treats surrounding whitespace and case the same as before", () => {
+		expect(getPreviewType("  PHOTO.JPG  ")).toBe("image")
+	})
+})
+
+describe("isProbablyBinaryText — indexOf scan", () => {
+	const FFFD = "\ufffd"
+
+	it("returns false for clean text of any length", () => {
+		expect(isProbablyBinaryText("hello world")).toBe(false)
+		expect(isProbablyBinaryText("a".repeat(100_000))).toBe(false)
+	})
+
+	it("keeps the >10% threshold exclusive at exactly 10%", () => {
+		// 10 replacements in 100 chars is exactly 0.1 — not greater than, so false.
+		expect(isProbablyBinaryText(FFFD.repeat(10) + "a".repeat(90))).toBe(false)
+		expect(isProbablyBinaryText(FFFD.repeat(11) + "a".repeat(89))).toBe(true)
+	})
+
+	it("early-exits on a dense prefix without changing the verdict", () => {
+		expect(isProbablyBinaryText(FFFD.repeat(500) + "a".repeat(100))).toBe(true)
+	})
+
+	it("keeps the NUL short-circuit ahead of the scan", () => {
+		expect(isProbablyBinaryText("a\u0000b")).toBe(true)
 	})
 })
