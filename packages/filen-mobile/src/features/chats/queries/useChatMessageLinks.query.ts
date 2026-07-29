@@ -3,217 +3,25 @@ import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import auth from "@/lib/auth"
 import { sortParams, parseFilenPublicLink, run } from "@filen/utils"
 import { getPreviewType } from "@/lib/previewType"
-import { safeParseUrl, extractLinks } from "@/lib/linkParser"
+import { extractLinks } from "@/lib/linkParser"
 import { MaybeEncryptedUniffi_Tags, type DirPublicInfo, type LinkedFile } from "@filen/sdk-rs"
-import { Paths } from "expo-file-system"
-import mimeTypes from "mime-types"
 import logger from "@/lib/logger"
 
 const MAX_FILE_SIZE_IMAGE = 32 * 1024 * 1024
-const MAX_REDIRECTS = 5
 
 /**
- * Issues the request for the given method and returns the final Response, or null on failure.
+ * What a rendered external link preview carries.
  *
- * IMPORTANT — SSRF caveat: `redirect: "manual"` is INERT on React Native. RN's `fetch` is the
- * whatwg-fetch polyfill over XHR, which does not read `request.redirect`; the native stack
- * (NSURLSession / OkHttp) auto-follows redirects, so JS only ever sees the final response and
- * the 3xx per-hop validation below is dead code in production. The SSRF guard therefore relies
- * SOLELY on the caller's post-hoc `safeParseUrl(res.url)` check (validating the final, redirected
- * URL — rejecting private IPs, non-HTTPS and credentials) plus the immediate body abort in
- * probeMedia. The per-hop loop is kept only for non-RN runtimes that honor `redirect: "manual"`.
+ * Nothing populates this today — see the external branch of fetchData. It is kept because it is the
+ * shape a proxied preview will produce, and because resolveLinkMedia and both attachment render
+ * paths are written against it.
  */
-async function fetchManual(startUrl: string, method: "HEAD" | "GET", signal: AbortSignal): Promise<Response | null> {
-	let currentUrl = startUrl
-
-	for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-		let res: Response
-
-		try {
-			res = await fetch(currentUrl, {
-				method,
-				signal,
-				redirect: "manual"
-			})
-		} catch {
-			return null
-		}
-
-		// 3xx redirect — validate the Location before following
-		if (res.status >= 300 && res.status < 400) {
-			const location = res.headers.get("location")
-
-			if (!location) {
-				return null
-			}
-
-			// Resolve the Location against the current URL (handles relative redirects)
-			let resolved: string
-
-			try {
-				resolved = new URL(location, currentUrl).href
-			} catch {
-				return null
-			}
-
-			// Validate the redirect destination — rejects private IPs, non-HTTPS, credentials
-			const safe = safeParseUrl(resolved)
-
-			if (!safe) {
-				return null
-			}
-
-			currentUrl = safe.href
-			continue
-		}
-
-		return res
-	}
-
-	// Exceeded max redirect hops
-	return null
-}
-
-async function fetchMetadata(url: string, signal: AbortSignal): Promise<Response | null> {
-	try {
-		const res = await fetchManual(url, "HEAD", signal)
-
-		if (res && res.ok) {
-			return res
-		}
-	} catch {
-		if (signal.aborted) {
-			return null
-		}
-	}
-
-	const ctrl = new AbortController()
-
-	signal?.addEventListener(
-		"abort",
-		() => {
-			ctrl.abort()
-		},
-		{
-			once: true
-		}
-	)
-
-	try {
-		const res = await fetchManual(url, "GET", ctrl.signal)
-
-		// We have status + headers at this point. Kill the body stream immediately.
-		// React Native's fetch will keep buffering otherwise.
-		queueMicrotask(() => {
-			ctrl.abort()
-		})
-
-		if (!res || !res.ok) {
-			return null
-		}
-
-		return res
-	} catch {
-		return null
-	}
-}
-
-type ProbeMediaResult =
-	| {
-			success: false
-	  }
-	| {
-			success: true
-			previewType: ReturnType<typeof getPreviewType>
-			contentType: string
-			size: number
-			url: string
-			name: string
-	  }
-
-export async function probeMedia(raw: string, signal?: AbortSignal): Promise<ProbeMediaResult> {
-	const parsed = safeParseUrl(raw)
-
-	if (!parsed) {
-		return {
-			success: false
-		}
-	}
-
-	const ctrl = new AbortController()
-
-	const timer = setTimeout(() => {
-		ctrl.abort()
-	}, 5000)
-
-	signal?.addEventListener(
-		"abort",
-		() => {
-			ctrl.abort()
-		},
-		{
-			once: true
-		}
-	)
-
-	const result = await run(async (defer): Promise<ProbeMediaResult> => {
-		defer(() => {
-			clearTimeout(timer)
-		})
-
-		const res = await fetchMetadata(parsed.href, ctrl.signal)
-
-		if (!res) {
-			return {
-				success: false
-			}
-		}
-
-		const safeUrl = safeParseUrl(res.url)
-
-		if (!safeUrl) {
-			return {
-				success: false
-			}
-		}
-
-		const contentType = (res.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase() ?? ""
-		const lenHeader = res.headers.get("content-length")
-		const size = lenHeader ? parseInt(lenHeader, 10) : undefined
-
-		if (typeof size !== "number" || !isFinite(size) || size < 0 || typeof contentType !== "string" || contentType.length === 0) {
-			return {
-				success: false
-			}
-		}
-
-		const ext = mimeTypes.extension(contentType)
-		const name = `${Paths.parse(safeUrl.pathname).name}${ext ? `.${ext}` : ""}`
-		const previewType = getPreviewType(name)
-
-		if (previewType === "image" && size > MAX_FILE_SIZE_IMAGE) {
-			return {
-				success: false
-			}
-		}
-
-		return {
-			success: true,
-			previewType,
-			contentType,
-			size,
-			url: res.url,
-			name
-		}
-	})
-
-	if (!result.success) {
-		return {
-			success: false
-		}
-	}
-
-	return result.data
+export type ExternalLinkPreview = {
+	previewType: ReturnType<typeof getPreviewType>
+	contentType: string
+	size: number
+	url: string
+	name: string
 }
 
 export const BASE_QUERY_KEY = "useChatMessageLinksQuery"
@@ -250,12 +58,7 @@ export type LinkResult =
 	| {
 			type: "external"
 			success: true
-			data: Extract<
-				ProbeMediaResult,
-				{
-					success: true
-				}
-			>
+			data: ExternalLinkPreview
 	  }
 
 export async function fetchData(
@@ -355,19 +158,24 @@ export async function fetchData(
 				}
 			}
 
-			const mediaInfo = await probeMedia(link.url, params.signal)
-
-			if (!mediaInfo.success) {
-				return {
-					type: "external",
-					success: false
-				}
-			}
-
+			// External links are NOT previewed, and this is the whole reason the branch exists.
+			//
+			// Generating one meant the RECIPIENT's device issuing a request to a host the SENDER chose,
+			// at render time — including for rows FlashList mounts just off-screen, so before the
+			// message was even on screen. That hands any sender an IP address, a rough location, a
+			// User-Agent and the moment a chat was opened, from a message the recipient never
+			// interacted with. No amount of URL vetting fixes that: the request itself is the leak.
+			//
+			// Filen public links above are unaffected — they resolve through the SDK against our own
+			// API, which the client is already talking to. External URLs render as plain text and
+			// contact nothing until the user taps one.
+			//
+			// Restore this when previews can be fetched by our infrastructure on the user's behalf, so
+			// the origin sees our servers instead of the user. `ExternalLinkPreview` above and the
+			// external arm of resolveLinkMedia are the shape that will carry it.
 			return {
 				type: "external",
-				success: true,
-				data: mediaInfo
+				success: false
 			}
 		})
 	)

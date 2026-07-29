@@ -126,7 +126,7 @@ vi.mock("@/lib/linkParser", async () => {
 // Imports under test (placed AFTER all vi.mock() calls)
 // ---------------------------------------------------------------------------
 
-import { probeMedia, fetchData as fetchChatMessageLinks } from "@/features/chats/queries/useChatMessageLinks.query"
+import { fetchData as fetchChatMessageLinks } from "@/features/chats/queries/useChatMessageLinks.query"
 import { fetchData as fetchChatMessages } from "@/features/chats/queries/useChatMessages.query"
 import { fetchData as fetchNotes } from "@/features/notes/queries/useNotesQuery"
 import { fetchData as fetchNotesTags } from "@/features/notes/queries/useNotesTags.query"
@@ -137,461 +137,6 @@ import { type Chat } from "@/types"
 // Helper: build a minimal Response-like object
 // ---------------------------------------------------------------------------
 
-function makeResponse(opts: { url?: string; ok?: boolean; contentType?: string | null; contentLength?: string | null }): Response {
-	const headers = new Map<string, string>()
-
-	if (opts.contentType !== undefined && opts.contentType !== null) {
-		headers.set("content-type", opts.contentType)
-	}
-
-	if (opts.contentLength !== undefined && opts.contentLength !== null) {
-		headers.set("content-length", opts.contentLength)
-	}
-
-	return {
-		ok: opts.ok ?? true,
-		url: opts.url ?? "https://example.com/img.jpg",
-		headers: {
-			get: (key: string) => headers.get(key.toLowerCase()) ?? null
-		},
-		status: 200,
-		statusText: "OK",
-		redirected: false,
-		type: "basic"
-	} as unknown as Response
-}
-
-// ---------------------------------------------------------------------------
-// probeMedia
-// ---------------------------------------------------------------------------
-
-describe("probeMedia", () => {
-	beforeEach(() => {
-		vi.restoreAllMocks()
-	})
-
-	it("returns {success:false} for non-HTTPS URL (http://)", async () => {
-		const result = await probeMedia("http://example.com/img.jpg")
-
-		expect(result.success).toBe(false)
-	})
-
-	it("returns {success:false} for an unparseable raw URL", async () => {
-		const result = await probeMedia("not a url at all!!")
-
-		expect(result.success).toBe(false)
-	})
-
-	it("returns {success:false} when fetchMetadata returns null (both HEAD and GET fail)", async () => {
-		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")))
-
-		const result = await probeMedia("https://example.com/img.jpg")
-
-		expect(result.success).toBe(false)
-	})
-
-	it("returns {success:false} when response URL fails safeParseUrl (private IP redirect — SSRF guard, post-hoc check)", async () => {
-		// Simulate a redirect chain that somehow bypasses the manual-redirect guard
-		// and returns a response whose final URL is a private IP. The post-hoc
-		// safeParseUrl(res.url) check at the end of probeMedia must still reject it.
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				makeResponse({
-					url: "https://192.168.1.1/malicious.jpg",
-					contentType: "image/jpeg",
-					contentLength: "1024"
-				})
-			)
-		)
-
-		const result = await probeMedia("https://example.com/safe")
-
-		expect(result.success).toBe(false)
-	})
-
-	it("SSRF via open redirect: blocks redirect to private IPv4 (192.168.x.x) before issuing the request", async () => {
-		// First call: returns a 301 with Location pointing to an internal host.
-		// Second call should never happen — the guard must abort after validating Location.
-		const fetchMock = vi
-			.fn()
-			.mockResolvedValueOnce({
-				ok: false,
-				status: 301,
-				url: "https://example.com/redirect",
-				headers: {
-					get: (key: string) => (key.toLowerCase() === "location" ? "https://192.168.1.1/admin" : null)
-				},
-				redirected: false,
-				type: "basic"
-			} as unknown as Response)
-			// If somehow a second fetch is made (to the internal host), fail the test
-			.mockResolvedValueOnce(
-				makeResponse({
-					url: "https://192.168.1.1/admin",
-					contentType: "image/jpeg",
-					contentLength: "1024"
-				})
-			)
-
-		vi.stubGlobal("fetch", fetchMock)
-
-		const result = await probeMedia("https://example.com/redirect")
-
-		// Must be blocked
-		expect(result.success).toBe(false)
-		// Must NOT have fetched the internal host — fetch called at most once (HEAD) + maybe GET, never for the internal IP
-		const internalCalls = fetchMock.mock.calls.filter((args: unknown[]) => typeof args[0] === "string" && args[0].includes("192.168"))
-
-		expect(internalCalls).toHaveLength(0)
-	})
-
-	it("SSRF via open redirect: blocks redirect to private IPv6 (::1)", async () => {
-		const fetchMock = vi.fn().mockResolvedValueOnce({
-			ok: false,
-			status: 302,
-			url: "https://example.com/short",
-			headers: {
-				get: (key: string) => (key.toLowerCase() === "location" ? "https://[::1]/internal" : null)
-			},
-			redirected: false,
-			type: "basic"
-		} as unknown as Response)
-
-		vi.stubGlobal("fetch", fetchMock)
-
-		const result = await probeMedia("https://example.com/short")
-
-		expect(result.success).toBe(false)
-
-		const internalCalls = fetchMock.mock.calls.filter(
-			(args: unknown[]) => typeof args[0] === "string" && (args[0].includes("::1") || args[0].includes("%3A%3A1"))
-		)
-
-		expect(internalCalls).toHaveLength(0)
-	})
-
-	it("allows a valid redirect chain (public HTTPS → public HTTPS) and returns success", async () => {
-		// First hop: 301 to another public HTTPS URL
-		// Second hop: 200 OK with the final content
-		const fetchMock = vi
-			.fn()
-			.mockResolvedValueOnce({
-				ok: false,
-				status: 301,
-				url: "https://short.example.com/abc",
-				headers: {
-					get: (key: string) => (key.toLowerCase() === "location" ? "https://cdn.example.com/img.jpg" : null)
-				},
-				redirected: false,
-				type: "basic"
-			} as unknown as Response)
-			.mockResolvedValueOnce(
-				makeResponse({
-					url: "https://cdn.example.com/img.jpg",
-					contentType: "image/jpeg",
-					contentLength: "2048"
-				})
-			)
-
-		vi.stubGlobal("fetch", fetchMock)
-
-		const result = await probeMedia("https://short.example.com/abc")
-
-		expect(result.success).toBe(true)
-
-		if (result.success) {
-			expect(result.contentType).toBe("image/jpeg")
-			expect(result.size).toBe(2048)
-		}
-	})
-
-	it("returns {success:false} when redirect chain exceeds MAX_REDIRECTS (6 hops for limit of 5)", async () => {
-		// Build a fetch mock that always returns a 301 to the same URL — infinite redirect
-		const alwaysRedirect = {
-			ok: false,
-			status: 301,
-			url: "https://loop.example.com/",
-			headers: {
-				get: (key: string) => (key.toLowerCase() === "location" ? "https://loop.example.com/" : null)
-			},
-			redirected: false,
-			type: "basic"
-		} as unknown as Response
-
-		vi.stubGlobal("fetch", vi.fn().mockResolvedValue(alwaysRedirect))
-
-		const result = await probeMedia("https://loop.example.com/")
-
-		expect(result.success).toBe(false)
-	})
-
-	it("returns {success:false} when 301 Location header is missing", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue({
-				ok: false,
-				status: 301,
-				url: "https://example.com/broken-redirect",
-				headers: {
-					get: (_key: string) => null
-				},
-				redirected: false,
-				type: "basic"
-			} as unknown as Response)
-		)
-
-		const result = await probeMedia("https://example.com/broken-redirect")
-
-		expect(result.success).toBe(false)
-	})
-
-	it("returns {success:false} when content-length header is missing (lenHeader null)", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				makeResponse({
-					url: "https://example.com/img.jpg",
-					contentType: "image/jpeg",
-					contentLength: null
-				})
-			)
-		)
-
-		const result = await probeMedia("https://example.com/img.jpg")
-
-		expect(result.success).toBe(false)
-	})
-
-	it("returns {success:false} when content-length is a non-numeric string (parseInt->NaN, !isFinite)", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				makeResponse({
-					url: "https://example.com/img.jpg",
-					contentType: "image/jpeg",
-					contentLength: "banana"
-				})
-			)
-		)
-
-		const result = await probeMedia("https://example.com/img.jpg")
-
-		expect(result.success).toBe(false)
-	})
-
-	it("returns {success:false} for negative content-length", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				makeResponse({
-					url: "https://example.com/img.jpg",
-					contentType: "image/jpeg",
-					contentLength: "-1"
-				})
-			)
-		)
-
-		const result = await probeMedia("https://example.com/img.jpg")
-
-		expect(result.success).toBe(false)
-	})
-
-	it("returns {success:true, size:0} for image with zero content-length", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				makeResponse({
-					url: "https://example.com/img.jpg",
-					contentType: "image/jpeg",
-					contentLength: "0"
-				})
-			)
-		)
-
-		const result = await probeMedia("https://example.com/img.jpg")
-
-		expect(result.success).toBe(true)
-
-		if (result.success) {
-			expect(result.size).toBe(0)
-		}
-	})
-
-	it("returns {success:false} for image with size > 32 MiB (33554433 bytes)", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				makeResponse({
-					url: "https://example.com/big.jpg",
-					contentType: "image/jpeg",
-					contentLength: "33554433"
-				})
-			)
-		)
-
-		const result = await probeMedia("https://example.com/big.jpg")
-
-		expect(result.success).toBe(false)
-	})
-
-	it("returns {success:true} for image with size exactly 32 MiB — inclusive boundary (33554432 bytes)", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				makeResponse({
-					url: "https://example.com/exact.jpg",
-					contentType: "image/jpeg",
-					contentLength: "33554432"
-				})
-			)
-		)
-
-		const result = await probeMedia("https://example.com/exact.jpg")
-
-		expect(result.success).toBe(true)
-
-		if (result.success) {
-			expect(result.size).toBe(33554432)
-		}
-	})
-
-	it("returns {success:false} for image with size exactly 32 MiB + 1 (33554433 bytes)", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				makeResponse({
-					url: "https://example.com/over.jpg",
-					contentType: "image/jpeg",
-					contentLength: String(32 * 1024 * 1024 + 1)
-				})
-			)
-		)
-
-		const result = await probeMedia("https://example.com/over.jpg")
-
-		expect(result.success).toBe(false)
-	})
-
-	it("reports previewType 'video' for video/mp4 content-type", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				makeResponse({
-					url: "https://example.com/clip.mp4",
-					contentType: "video/mp4",
-					contentLength: "1024"
-				})
-			)
-		)
-
-		const result = await probeMedia("https://example.com/clip.mp4")
-
-		expect(result.success).toBe(true)
-
-		if (result.success) {
-			expect(result.previewType).toBe("video")
-		}
-	})
-
-	it("reports previewType 'audio' for audio/mp4 content-type (maps to .m4a extension)", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				makeResponse({
-					url: "https://example.com/song.m4a",
-					contentType: "audio/mp4",
-					contentLength: "1024"
-				})
-			)
-		)
-
-		const result = await probeMedia("https://example.com/song.m4a")
-
-		expect(result.success).toBe(true)
-
-		if (result.success) {
-			// mime-types maps audio/mp4 -> m4a, which is in the AUDIO_EXTS set
-			expect(result.previewType).toBe("audio")
-		}
-	})
-
-	it("strips charset suffix: 'image/jpeg; charset=utf-8' becomes contentType 'image/jpeg'", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				makeResponse({
-					url: "https://example.com/photo.jpg",
-					contentType: "image/jpeg; charset=utf-8",
-					contentLength: "512"
-				})
-			)
-		)
-
-		const result = await probeMedia("https://example.com/photo.jpg")
-
-		expect(result.success).toBe(true)
-
-		if (result.success) {
-			expect(result.contentType).toBe("image/jpeg")
-		}
-	})
-
-	it("returns {success:false} for empty content-type string", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				makeResponse({
-					url: "https://example.com/unknown",
-					contentType: "",
-					contentLength: "128"
-				})
-			)
-		)
-
-		const result = await probeMedia("https://example.com/unknown")
-
-		expect(result.success).toBe(false)
-	})
-
-	it("derives name from pathname stem + mime extension: /img.png with image/jpeg -> 'img.jpeg' (or 'img.jpg')", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				makeResponse({
-					url: "https://example.com/img.png",
-					contentType: "image/jpeg",
-					contentLength: "256"
-				})
-			)
-		)
-
-		const result = await probeMedia("https://example.com/img.png")
-
-		expect(result.success).toBe(true)
-
-		if (result.success) {
-			// stem is "img", mime-types maps image/jpeg to "jpeg"
-			expect(result.name).toMatch(/^img\.(jpeg|jpg)$/)
-		}
-	})
-
-	it("returns {success:false} when AbortSignal is fired before call resolves", async () => {
-		const ctrl = new AbortController()
-
-		ctrl.abort()
-
-		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("aborted", "AbortError")))
-
-		const result = await probeMedia("https://example.com/img.jpg", ctrl.signal)
-
-		expect(result.success).toBe(false)
-	})
-})
-
-// ---------------------------------------------------------------------------
-// fetchData — useChatMessageLinks
-// ---------------------------------------------------------------------------
 
 describe("fetchData (useChatMessageLinks)", () => {
 	beforeEach(() => {
@@ -608,31 +153,12 @@ describe("fetchData (useChatMessageLinks)", () => {
 		expect(mockGetSdkClients).not.toHaveBeenCalled()
 	})
 
-	it("returns {type:'external', success:false} (fulfilled) when probeMedia fails — not a rejected promise", async () => {
-		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network dead")))
+	// The privacy contract: an external link must not cause the RECIPIENT to contact the host the
+	// SENDER chose. `fetch` is stubbed to reject so any request at all fails the test loudly.
+	it("never issues a request for an external link, and reports it as unpreviewable", async () => {
+		const fetchSpy = vi.fn().mockRejectedValue(new Error("no request may be made for an external link"))
 
-		mockParseFilenPublicLink.mockReturnValue(null)
-
-		const result = await fetchChatMessageLinks({
-			links: [{ url: "https://example.com/img.jpg", start: 0, end: 30 }]
-		})
-
-		// Promise.allSettled: the link resolves to {success:false} (not throws), so it's fulfilled
-		expect(result).toHaveLength(1)
-		expect(result[0]).toMatchObject({ type: "external", success: false })
-	})
-
-	it("returns {type:'external', success:true} when probeMedia succeeds for external link", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(
-				makeResponse({
-					url: "https://example.com/photo.jpg",
-					contentType: "image/jpeg",
-					contentLength: "1024"
-				})
-			)
-		)
+		vi.stubGlobal("fetch", fetchSpy)
 
 		mockParseFilenPublicLink.mockReturnValue(null)
 
@@ -640,8 +166,31 @@ describe("fetchData (useChatMessageLinks)", () => {
 			links: [{ url: "https://example.com/photo.jpg", start: 0, end: 35 }]
 		})
 
+		expect(fetchSpy).not.toHaveBeenCalled()
 		expect(result).toHaveLength(1)
-		expect(result[0]).toMatchObject({ type: "external", success: true })
+		expect(result[0]).toMatchObject({ type: "external", success: false })
+	})
+
+	// An image URL is the case that used to probe; it must be just as inert.
+	it("never issues a request for external image URLs either", async () => {
+		const fetchSpy = vi.fn().mockRejectedValue(new Error("no request may be made for an external link"))
+
+		vi.stubGlobal("fetch", fetchSpy)
+
+		mockParseFilenPublicLink.mockReturnValue(null)
+
+		const result = await fetchChatMessageLinks({
+			links: [
+				{ url: "https://example.com/img.jpg", start: 0, end: 30 },
+				{ url: "https://tracker.example/beacon.png", start: 31, end: 70 }
+			]
+		})
+
+		expect(fetchSpy).not.toHaveBeenCalled()
+		expect(result).toEqual([
+			{ type: "external", success: false },
+			{ type: "external", success: false }
+		])
 	})
 
 	it("returns {type:'internal', success:true, data:{type:'directory'}} for filen directory public link", async () => {
