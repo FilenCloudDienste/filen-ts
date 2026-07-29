@@ -85,6 +85,22 @@ vi.mock("@/queries/client", () => ({
 	queryUpdater: {
 		set: mockQueryUpdaterSet,
 		get: mockQueryUpdaterGet
+	},
+	// Real implementation, not a passthrough: driveItemsQueryUpdate returns through it, so a stub
+	// would let these updater-forwarding assertions pass against behaviour production never runs.
+	// Its own contract is unit-tested in client.test.ts.
+	preserveArrayIdentity: <T,>(prev: T[], next: T[]): T[] => {
+		if (prev === next || prev.length !== next.length) {
+			return next
+		}
+
+		for (let i = 0; i < prev.length; i++) {
+			if (prev[i] !== next[i]) {
+				return next
+			}
+		}
+
+		return prev
 	}
 }))
 

@@ -187,3 +187,156 @@ describe("hardening — queryUpdater.set swallows persist failures", () => {
 		}
 	})
 })
+
+// ---------------------------------------------------------------------------
+// Reference-identity persist gate (QueryPersisterKv.canSkipPersist)
+//
+// TanStack's structural sharing hands back the PREVIOUS `data` reference when a
+// refetch produced deep-equal content, so an unchanged reference is an exact
+// "nothing changed". Without this gate a whale account's photos listing — one
+// multi-MB row — was re-serialized and rewritten on every no-op refetch and on
+// every unrelated drive mutation.
+// ---------------------------------------------------------------------------
+
+function persisted(data: unknown, dataUpdatedAt: number): unknown {
+	return {
+		state: {
+			data,
+			dataUpdatedAt,
+			status: "success"
+		}
+	}
+}
+
+async function settle(): Promise<void> {
+	await vi.advanceTimersByTimeAsync(1500)
+	await flushMicrotasks()
+}
+
+describe("hardening — persist gate skips writes for unchanged data", () => {
+	it("writes the first value, then skips a re-set carrying the SAME data reference", async () => {
+		const persister = new QueryPersisterKv()
+		const data = [{ uuid: "a" }]
+
+		persister.setItem("q", persisted(data, 1_000))
+
+		await settle()
+
+		expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+
+		// A no-op refetch: new envelope, newer stamp, identical data reference.
+		persister.setItem("q", persisted(data, 2_000))
+
+		await settle()
+
+		expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+	})
+
+	it("still writes when the data reference actually changes", async () => {
+		const persister = new QueryPersisterKv()
+
+		persister.setItem("q", persisted([{ uuid: "a" }], 1_000))
+
+		await settle()
+
+		persister.setItem("q", persisted([{ uuid: "a" }, { uuid: "b" }], 2_000))
+
+		await settle()
+
+		expect(mockDb.executeBatch).toHaveBeenCalledTimes(2)
+	})
+
+	it("keeps the newest value readable through getItem even when the write was skipped", async () => {
+		const persister = new QueryPersisterKv()
+		const data = [{ uuid: "a" }]
+		const newest = persisted(data, 2_000)
+
+		persister.setItem("q", persisted(data, 1_000))
+
+		await settle()
+
+		persister.setItem("q", newest)
+
+		expect(persister.getItem("q")).toBe(newest)
+	})
+
+	it("re-writes an unchanged row once its stored stamp has aged, so the restore TTL cannot evict live data", async () => {
+		const persister = new QueryPersisterKv()
+		const data = [{ uuid: "a" }]
+		const day = 86400 * 1000
+
+		persister.setItem("q", persisted(data, 1_000))
+
+		await settle()
+
+		// Six days on: still inside the refresh window, still skipped.
+		persister.setItem("q", persisted(data, 1_000 + 6 * day))
+
+		await settle()
+
+		expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+
+		// Eight days past the STORED stamp — the drift bound is measured from what actually
+		// reached disk, not from the previous skip, so a long series of skips can never
+		// accumulate past the window.
+		persister.setItem("q", persisted(data, 1_000 + 8 * day))
+
+		await settle()
+
+		expect(mockDb.executeBatch).toHaveBeenCalledTimes(2)
+	})
+
+	it("coalesces repeats of unchanged data into a single write per debounce window", async () => {
+		const persister = new QueryPersisterKv()
+		const data = [{ uuid: "a" }]
+
+		// Two sets inside one window collapse to one write; a later identical set adds none.
+		// (canSkipPersist also refuses to reason about a key with a pending write, but that guard is
+		// defensive — the flush reads the buffer at flush time, so it cannot be observed here.)
+		persister.setItem("q", persisted(data, 1_000))
+		persister.setItem("q", persisted(data, 2_000))
+
+		await settle()
+
+		expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+
+		persister.setItem("q", persisted(data, 3_000))
+
+		await settle()
+
+		expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not skip for values that are not shaped like a persisted query", async () => {
+		const persister = new QueryPersisterKv()
+
+		persister.setItem("q", { state: 1 })
+
+		await settle()
+
+		persister.setItem("q", { state: 1 })
+
+		await settle()
+
+		expect(mockDb.executeBatch).toHaveBeenCalledTimes(2)
+	})
+
+	it("writes again after a removeItem, even for the same data reference", async () => {
+		const persister = new QueryPersisterKv()
+		const data = [{ uuid: "a" }]
+
+		persister.setItem("q", persisted(data, 1_000))
+
+		await settle()
+
+		persister.removeItem("q")
+
+		await settle()
+
+		persister.setItem("q", persisted(data, 2_000))
+
+		await settle()
+
+		expect(mockDb.executeBatch).toHaveBeenCalledTimes(3)
+	})
+})

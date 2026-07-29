@@ -27,6 +27,38 @@ export const QUERY_CLIENT_CACHE_TIME = 86400 * 365 * 1000
 
 const PERSIST_DEBOUNCE = 1000
 const PERSIST_CHUNK_SIZE = 100
+// How far the stored `dataUpdatedAt` may lag reality while unchanged rows are skipped (see
+// canSkipPersist). Far inside QUERY_CLIENT_CACHE_TIME, so the restore-time eviction clock can never
+// fire on a row that is still being viewed.
+const PERSIST_STALE_REFRESH_MS = 86400 * 7 * 1000
+
+/**
+ * The two persisted fields a skip decision depends on, or null when the value is not shaped like a
+ * PersistedQuery (in which case the caller must fall through to a real write — never guess).
+ */
+function persistedQueryFields(value: unknown): { data: unknown; dataUpdatedAt: number } | null {
+	if (typeof value !== "object" || value === null) {
+		return null
+	}
+
+	const state = (value as { state?: unknown }).state
+
+	if (typeof state !== "object" || state === null) {
+		return null
+	}
+
+	const dataUpdatedAt = (state as { dataUpdatedAt?: unknown }).dataUpdatedAt
+
+	if (typeof dataUpdatedAt !== "number") {
+		return null
+	}
+
+	return {
+		data: (state as { data?: unknown }).data,
+		dataUpdatedAt
+	}
+}
+
 const UNCACHED_QUERY_KEYS = new Map<string, true>([
 	["useFileTextQuery", true],
 	["useFileBase64Query", true],
@@ -55,6 +87,37 @@ function isUncachedKeyPart(part: unknown): boolean {
 	return Array.isArray(part) && part.some(isUncachedKeyString)
 }
 
+/**
+ * `next`, or `prev` itself when the two hold the very same elements in the same order.
+ *
+ * A map/filter updater allocates a fresh array even when it matched nothing — the common case for the
+ * drive updaters, which broadcast to EVERY listing including the recursive photos one (a whale account's
+ * photos listing is a single row holding tens of thousands of items). Handing back the original array
+ * lets TanStack's replaceEqualDeep take its `a === b` fast path instead of walking the whole listing.
+ *
+ * Scope, precisely: replaceEqualDeep would ALSO have returned the previous reference here (that is its
+ * job), so this changes neither what is stored nor whether subscribers re-render — `setQueryData` still
+ * dispatches and still restamps `dataUpdatedAt`. What it saves is the deep walk itself, which is why it
+ * is worth applying only where listings are large enough for that walk to matter.
+ *
+ * Deliberately narrower than replaceEqualDeep's own equality: element identity implies deep equality, so
+ * this can only ever collapse arrays that replaceEqualDeep would have collapsed anyway. A fast path, not
+ * a behaviour change.
+ */
+export function preserveArrayIdentity<T>(prev: T[], next: T[]): T[] {
+	if (prev === next || prev.length !== next.length) {
+		return next
+	}
+
+	for (let i = 0; i < prev.length; i++) {
+		if (prev[i] !== next[i]) {
+			return next
+		}
+	}
+
+	return prev
+}
+
 export const shouldPersistQuery = (query: PersistedQuery): boolean => {
 	return !(query.queryKey as unknown[]).some(isUncachedKeyPart) && query.state.status === "success"
 }
@@ -63,6 +126,9 @@ export class QueryPersisterKv {
 	private readonly buffer = new Map<string, unknown>()
 	private readonly dirtyUpserts = new Set<string>()
 	private readonly dirtyDeletes = new Set<string>()
+	// Per key, the `dataUpdatedAt` of the value last queued for disk (or restored from it). Read by
+	// canSkipPersist to bound how far the stored stamp may lag while unchanged rows are skipped.
+	private readonly persistedStamp = new Map<string, number>()
 	private restoredOnce = false
 
 	public constructor() {
@@ -80,12 +146,61 @@ export class QueryPersisterKv {
 	}
 
 	public setItem(key: string, value: unknown): void {
+		const previous = this.buffer.get(key)
+
 		this.buffer.set(key, value)
+
+		if (this.canSkipPersist(key, previous, value)) {
+			return
+		}
 
 		this.dirtyUpserts.add(key)
 		this.dirtyDeletes.delete(key)
+		this.persistedStamp.set(key, persistedQueryFields(value)?.dataUpdatedAt ?? 0)
 
 		this.persistDirty()
+	}
+
+	/**
+	 * Whether the stored row is already equivalent to `next`, so this update needs no write.
+	 *
+	 * TanStack's structural sharing returns the PREVIOUS `data` reference whenever a refetch produced
+	 * deep-equal content, so an unchanged reference is an exact "nothing changed" — not a heuristic.
+	 * That is worth a lot here: a recursive photos listing is a single multi-MB row, and without this
+	 * gate it was re-serialized (plus two JS-thread copies across the JSI boundary, plus the SQLite
+	 * write) on every no-op refetch AND on every unrelated drive mutation, because
+	 * driveItemsQueryUpdateGlobal ends with an ungated update of the photos query.
+	 *
+	 * Conservative by construction: anything it cannot prove equivalent falls through to a real write.
+	 */
+	private canSkipPersist(key: string, previous: unknown, next: unknown): boolean {
+		// A dirty key says nothing about what is on disk — a failed write re-dirties its key — so never
+		// reason about disk state from one. Defensive rather than load-bearing as things stand: the flush
+		// serializes `buffer.get(key)` at flush time, so a skip behind a pending write would still land
+		// the newest value. It is kept so this stays correct if the flush ever snapshots earlier.
+		if (previous === undefined || this.dirtyUpserts.has(key) || this.dirtyDeletes.has(key)) {
+			return false
+		}
+
+		const before = persistedQueryFields(previous)
+		const after = persistedQueryFields(next)
+
+		if (!before || !after || before.data !== after.data) {
+			return false
+		}
+
+		const stored = this.persistedStamp.get(key)
+
+		// Unknown stored stamp (nothing written or restored under this key yet) — write.
+		if (stored === undefined) {
+			return false
+		}
+
+		// While skipping, the row on disk keeps the older `dataUpdatedAt`, and THAT stamp is what the
+		// restore-time eviction reads (dataUpdatedAt + QUERY_CLIENT_CACHE_TIME < now). Compare against
+		// the last stamp actually queued for disk — not against `previous`, or a long series of skips
+		// would each look fresh while the stored value aged out and vanished at some later boot.
+		return after.dataUpdatedAt - stored < PERSIST_STALE_REFRESH_MS
 	}
 
 	public removeItem(key: string): void {
@@ -93,6 +208,7 @@ export class QueryPersisterKv {
 
 		this.dirtyDeletes.add(key)
 		this.dirtyUpserts.delete(key)
+		this.persistedStamp.delete(key)
 
 		this.persistDirty()
 	}
@@ -105,6 +221,7 @@ export class QueryPersisterKv {
 		this.buffer.clear()
 		this.dirtyUpserts.clear()
 		this.dirtyDeletes.clear()
+		this.persistedStamp.clear()
 		this.restoredOnce = false
 
 		sqlite.kvAsync.removeByPrefix(`${QUERY_CLIENT_PERSISTER_PREFIX}:`).catch(err => {
@@ -137,7 +254,18 @@ export class QueryPersisterKv {
 			// doesn't abort restoration of the remaining rows. Mirrors the per-row
 			// isolation in sqlite.kvAsync.getByPrefix.
 			try {
-				this.buffer.set(key.slice(prefix.length), deserialize(value))
+				const bufferKey = key.slice(prefix.length)
+				const restored = deserialize(value)
+
+				this.buffer.set(bufferKey, restored)
+
+				// Seed the stamp from disk so the first no-op refetch after boot can already skip its
+				// write — without it every restored row would be rewritten once per launch.
+				const fields = persistedQueryFields(restored)
+
+				if (fields) {
+					this.persistedStamp.set(bufferKey, fields.dataUpdatedAt)
+				}
 			} catch (err) {
 				logger.warn("queries-restore", "Skipped corrupt persisted query row", { rowId: key, error: err })
 			}

@@ -123,7 +123,8 @@ import {
 	decideQueryErrorAction,
 	queryUpdater,
 	QUERY_CLIENT_CACHE_TIME,
-	restoreQueries
+	restoreQueries,
+	preserveArrayIdentity
 } from "@/queries/client"
 import { type PlaylistWithItems } from "@/features/audio/audio"
 
@@ -1070,5 +1071,64 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 		await fetchData()
 
 		expect(mockHasPermissions).toHaveBeenCalledWith({ library: "all", needCamera: false })
+	})
+})
+
+// ─── preserveArrayIdentity ───────────────────────────────────────────────────
+// A no-op map/filter updater still allocates a fresh array. Returning the ORIGINAL lets
+// replaceEqualDeep short-circuit on `a === b` instead of deep-walking a listing that can hold
+// tens of thousands of items. It must only ever collapse arrays holding the very same elements.
+
+describe("preserveArrayIdentity", () => {
+	it("returns the previous array when a map matched nothing", () => {
+		const prev = [{ uuid: "a" }, { uuid: "b" }]
+		const next = prev.map(item => (item.uuid === "zzz" ? { uuid: "zzz" } : item))
+
+		expect(next).not.toBe(prev)
+		expect(preserveArrayIdentity(prev, next)).toBe(prev)
+	})
+
+	it("returns the new array when any element was replaced", () => {
+		const prev = [{ uuid: "a" }, { uuid: "b" }]
+		const replacement = { uuid: "b" }
+		const next = prev.map(item => (item.uuid === "b" ? replacement : item))
+
+		expect(preserveArrayIdentity(prev, next)).toBe(next)
+	})
+
+	it("returns the new array when an element was removed", () => {
+		const prev = [{ uuid: "a" }, { uuid: "b" }]
+
+		expect(preserveArrayIdentity(prev, prev.filter(item => item.uuid !== "b"))).toHaveLength(1)
+	})
+
+	it("returns the new array when an element was appended", () => {
+		const prev = [{ uuid: "a" }]
+		const next = [...prev, { uuid: "b" }]
+
+		expect(preserveArrayIdentity(prev, next)).toBe(next)
+	})
+
+	it("does not collapse a reordering — same elements, different order", () => {
+		const a = { uuid: "a" }
+		const b = { uuid: "b" }
+		const prev = [a, b]
+		const next = [b, a]
+
+		expect(preserveArrayIdentity(prev, next)).toBe(next)
+	})
+
+	it("does NOT collapse deep-equal-but-distinct elements (identity only, never a deep compare)", () => {
+		const prev = [{ uuid: "a" }]
+		const next = [{ uuid: "a" }]
+
+		expect(preserveArrayIdentity(prev, next)).toBe(next)
+	})
+
+	it("handles empty arrays and the same-reference case", () => {
+		const prev: unknown[] = []
+
+		expect(preserveArrayIdentity(prev, [])).toBe(prev)
+		expect(preserveArrayIdentity(prev, prev)).toBe(prev)
 	})
 })

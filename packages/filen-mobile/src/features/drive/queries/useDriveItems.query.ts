@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import { DEFAULT_QUERY_OPTIONS, queryUpdater, preserveArrayIdentity } from "@/queries/client"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
 import { sortParams, run } from "@filen/utils"
@@ -703,7 +703,10 @@ export function driveItemsQueryUpdate({
 			}
 		}
 
-		return next
+		// The cache sync above deliberately still runs over every item: it is the one place that keeps the
+		// uuid caches coherent with an optimistic listing, and skipping it would rest on an assumption
+		// about who populated them first. Only the RETURNED value takes the fast path.
+		return preserveArrayIdentity(currentData, next)
 	})
 }
 
