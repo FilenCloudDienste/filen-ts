@@ -212,7 +212,7 @@ vi.mock("@tanstack/react-query", () => ({
 }))
 
 import thumbnails, { DEFAULT_WIDTH, DEFAULT_QUALITY, VERSION } from "@/lib/thumbnails"
-import { fs, Directory } from "@/tests/mocks/expoFileSystem"
+import { fs, Directory, Paths } from "@/tests/mocks/expoFileSystem"
 
 const THUMBNAILS_DIR = `file:///shared/group.io.filen.app/thumbnails/v${VERSION}`
 
@@ -1596,6 +1596,46 @@ describe("Thumbnails", () => {
 			expect(thumbnails.hasThumbnail("anything")).toBe(false)
 
 			listSpy.mockRestore()
+		})
+
+		// restore() takes the last path segment with a plain slice instead of Paths.basename, because
+		// that helper routes every entry through Expo's pure-JS `new URL()` polyfill — seconds of
+		// SYNCHRONOUS boot time on an account with tens of thousands of thumbnails. The slice is only
+		// equivalent while nothing percent-encoded reaches this directory, so the escape hatch has to
+		// keep working.
+		it("indexes a plain <uuid>.webp entry without needing the URL decoder", () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set(`${THUMBNAILS_DIR}/4d2a7e18-0f3b-4c9a-9d61-8e5f0a1b2c3d.webp`, new Uint8Array([1]))
+
+			thumbnails.restore()
+
+			expect(thumbnails.hasThumbnail("4d2a7e18-0f3b-4c9a-9d61-8e5f0a1b2c3d")).toBe(true)
+		})
+
+		it("routes only percent-escaped names through the exact decoder, never the plain ones", () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set(`${THUMBNAILS_DIR}/4d2a7e18-0f3b-4c9a-9d61-8e5f0a1b2c3d.webp`, new Uint8Array([1]))
+
+			const basenameSpy = vi.spyOn(Paths, "basename")
+
+			thumbnails.restore()
+
+			// The whole point of the fast path: a plain name never reaches the URL-parsing helper.
+			expect(basenameSpy).not.toHaveBeenCalled()
+
+			const internals = thumbnails as unknown as { restored: boolean; available: Set<string> }
+
+			internals.restored = false
+			internals.available.clear()
+			fs.set(`${THUMBNAILS_DIR}/a%20b.webp`, new Uint8Array([2]))
+
+			thumbnails.restore()
+
+			// An escaped segment must still be resolved by Paths.basename (the exact decoder in
+			// production), not by the slice — otherwise the fast path would silently change behaviour.
+			expect(basenameSpy).toHaveBeenCalledWith(`${THUMBNAILS_DIR}/a%20b.webp`)
+
+			basenameSpy.mockRestore()
 		})
 	})
 })

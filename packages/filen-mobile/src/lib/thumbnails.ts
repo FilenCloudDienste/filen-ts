@@ -41,6 +41,10 @@ export const MAX_CONCURRENT = Platform.select({
 })
 export const MAX_FAILURES = 3
 
+// Past this, the synchronous boot-path directory scan is worth a persisted warn rather than a
+// debug breadcrumb (production keeps warn/error only).
+const SLOW_RESTORE_WARN_MS = 250
+
 // Critical: When changing anything related to storage index/store/persistence/width/height/quality format, bump THUMBNAILS_VERSION in storageRoots.ts to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = THUMBNAILS_VERSION
 export const DIRECTORY = THUMBNAILS_DIRECTORY
@@ -70,9 +74,29 @@ class Thumbnails {
 		return DIRECTORY.listAsRecords()
 	}
 
+	// The last path segment of a file:// uri. `Paths.basename` is exact but routes every call through
+	// `new URL()` — which on React Native is Expo's PURE-JS whatwg-url polyfill, not a native parser —
+	// plus a decodeURIComponent. That is ~20µs per entry on desktop V8 and worse interpreted on Hermes,
+	// so on an account with tens of thousands of thumbnails it costs seconds of SYNCHRONOUS boot time
+	// (restore() runs ahead of setup's Promise.all, and RootLayout holds the splash until setup
+	// resolves). A slice is equivalent here because the only thing basename adds is percent-decoding
+	// and this directory is written exclusively as `${uuid}.webp` (thumbnailsHelpers getPath) — but the
+	// escape check keeps that an optimization rather than an assumption: anything carrying a '%' falls
+	// back to the exact decoder.
+	private basenameOf(uri: string): string {
+		const slash = uri.lastIndexOf("/")
+		const sliced = slash === -1 ? uri : uri.slice(slash + 1)
+
+		return sliced.includes("%") ? FileSystem.Paths.basename(uri) : sliced
+	}
+
 	// Rebuild the availability Set from disk once per process. Safe pre-auth / headless: it reads only
 	// filenames (uuids), never decrypted data. A readdir failure logs a warn and leaves the Set empty —
 	// the per-item generate path self-heals via its own disk exists-check. Idempotent (once-flag).
+	//
+	// Deliberately still SYNCHRONOUS and still on the boot path: drive rows read `hasThumbnail`
+	// synchronously while rendering, and an empty Set reads as "no thumbnail on disk" — deferring this
+	// would make the first rendered screen regenerate thumbnails it already has.
 	public restore(): void {
 		if (this.restored) {
 			return
@@ -80,15 +104,20 @@ class Thumbnails {
 
 		this.restored = true
 
+		const start = performance.now()
+		let scanned = 0
+
 		try {
 			ensureDirectory()
 
 			for (const record of this.listThumbnailRecords()) {
+				scanned++
+
 				if (record.isDirectory) {
 					continue
 				}
 
-				const basename = FileSystem.Paths.basename(record.uri)
+				const basename = this.basenameOf(record.uri)
 
 				// The Set holds ONLY <uuid>.webp basenames — the generation pipeline also leaves
 				// thumb_tmp_* subdirectories and transient files in DIRECTORY; those must never enter it.
@@ -100,6 +129,22 @@ class Thumbnails {
 			}
 		} catch (e) {
 			logger.warn("thumbnails", "restore failed to list thumbnails directory", { error: e })
+		}
+
+		// This step blocks first paint and had no instrumentation — a slow boot report could not tell
+		// it apart from the SQLite restore. Warn past the threshold so it survives the production log
+		// gate (prod persists warn/error only).
+		const durationMs = performance.now() - start
+		const payload = {
+			scanned,
+			available: this.available.size,
+			durationMs: durationMs.toFixed(2)
+		}
+
+		if (durationMs > SLOW_RESTORE_WARN_MS) {
+			logger.warn("thumbnails", "restore was slow", payload)
+		} else {
+			logger.debug("thumbnails", "restore completed", payload)
 		}
 	}
 
