@@ -3,6 +3,7 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 const {
 	mockQueryUpdaterSet,
+	mockGetQueryState,
 	mockQueryUpdaterGet,
 	mockGetSdkClients,
 	mockOfflineListFiles,
@@ -23,6 +24,10 @@ const {
 	return {
 		mockQueryUpdaterSet: vi.fn(),
 		mockQueryUpdaterGet: vi.fn().mockReturnValue(undefined),
+		// Defaults to "the listing row already exists and holds []" — the pre-existing baseline for
+		// every optimistic-update test here. The row-creation skip is pinned by its own tests below,
+		// which flip this to undefined.
+		mockGetQueryState: vi.fn((): { data: unknown } | undefined => ({ data: [] })),
 		mockGetSdkClients: vi.fn().mockResolvedValue({
 			authedSdkClient: {
 				root: vi.fn().mockReturnValue({ uuid: "root-uuid" }),
@@ -85,6 +90,9 @@ vi.mock("@/queries/client", () => ({
 	queryUpdater: {
 		set: mockQueryUpdaterSet,
 		get: mockQueryUpdaterGet
+	},
+	queryClient: {
+		getQueryState: mockGetQueryState
 	},
 	// Real implementation, not a passthrough: driveItemsQueryUpdate returns through it, so a stub
 	// would let these updater-forwarding assertions pass against behaviour production never runs.
@@ -370,6 +378,8 @@ import { type DriveItem } from "@/types"
 
 beforeEach(() => {
 	mockQueryUpdaterSet.mockClear()
+	mockGetQueryState.mockReset()
+	mockGetQueryState.mockReturnValue({ data: [] })
 	mockQueryUpdaterGet.mockReset()
 	mockQueryUpdaterGet.mockReturnValue(undefined)
 	mockOfflineListFiles.mockReset()
@@ -553,7 +563,7 @@ describe("driveItemsQueryUpdateForNormalParent", () => {
 		expect(calls).toHaveLength(1)
 	})
 
-	it("forwards the functional updater to both update calls when root match occurs", () => {
+	it("forwards the resolved update to both calls when root match occurs", () => {
 		mockCacheRootUuid.value = "root-uuid-xyz"
 
 		const updater = (prev: unknown[]) => [...prev, { data: { uuid: "1" } }]
@@ -567,14 +577,10 @@ describe("driveItemsQueryUpdateForNormalParent", () => {
 
 		expect(calls).toHaveLength(2)
 
-		// Each call should have received a function wrapper that calls through to updater
-		const updaterArg0 = calls[0]![1] as (v: unknown[]) => unknown[]
-		const updaterArg1 = calls[1]![1] as (v: unknown[]) => unknown[]
-
-		expect(typeof updaterArg0).toBe("function")
-		expect(typeof updaterArg1).toBe("function")
-		expect(updaterArg0([])).toEqual([{ data: { uuid: "1" } }])
-		expect(updaterArg1([])).toEqual([{ data: { uuid: "1" } }])
+		// The updater is applied against the cached listing here, not handed onward — queryUpdater.set
+		// receives the resolved array so the row-creation decision can inspect it first.
+		expect(calls[0]![1]).toEqual([{ data: { uuid: "1" } }])
+		expect(calls[1]![1]).toEqual([{ data: { uuid: "1" } }])
 	})
 
 	it("seeds cache.uuidToAnyDriveItem for each item in the optimistic update (notes/chats analog)", () => {
@@ -584,15 +590,48 @@ describe("driveItemsQueryUpdateForNormalParent", () => {
 
 		driveItemsQueryUpdateForNormalParent({ parentUuid: "some-parent", updater: [item] })
 
-		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
-		const inner = calls[0]![1] as (prev: unknown[]) => unknown[]
-
-		// Running the wrapper (what queryUpdater.set invokes) is what seeds the cache: cacheDriveItem
-		// dispatches on the item's own type, so a file also lands in fileUuidToNormalFile.
-		inner([])
-
+		// cacheDriveItem dispatches on the item's own type, so a file also lands in fileUuidToNormalFile.
 		expect(cacheUuidToAnyDriveItem.get("opt-seed-1")).toBe(item)
 		expect(cacheFileUuidToNormalFile.has("opt-seed-1")).toBe(true)
+	})
+
+	// A socket event fans out across every path variant × {uuid, null}; without this gate each of those
+	// twenty absent listings would be materialized holding [] and written to SQLite.
+	it("does not create a listing row when the query is absent and the update is empty", () => {
+		mockCacheRootUuid.value = null
+		mockGetQueryState.mockReturnValue(undefined)
+
+		driveItemsQueryUpdateForNormalParent({ parentUuid: "never-opened", updater: [] })
+
+		expect(mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)).toHaveLength(0)
+	})
+
+	it("still creates the row when the query is absent but the update carries items", () => {
+		mockCacheRootUuid.value = null
+		mockGetQueryState.mockReturnValue(undefined)
+
+		const item = { type: "file", data: { uuid: "opt-create-1" } } as unknown as DriveItem
+
+		driveItemsQueryUpdateForNormalParent({ parentUuid: "never-opened", updater: [item] })
+
+		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
+
+		expect(calls).toHaveLength(1)
+		expect(calls[0]![1]).toEqual([item])
+	})
+
+	// A mounted-but-still-pending query has no data yet and MUST keep the old behaviour: it exists, so
+	// an empty update writes through to it exactly as before.
+	it("updates an existing but data-less query even when the update is empty", () => {
+		mockCacheRootUuid.value = null
+		mockGetQueryState.mockReturnValue({ data: undefined })
+
+		driveItemsQueryUpdateForNormalParent({ parentUuid: "pending-dir", updater: [] })
+
+		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
+
+		expect(calls).toHaveLength(1)
+		expect(calls[0]![1]).toEqual([])
 	})
 })
 

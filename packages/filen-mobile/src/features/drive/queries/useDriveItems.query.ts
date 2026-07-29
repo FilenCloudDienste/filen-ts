@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryUpdater, preserveArrayIdentity } from "@/queries/client"
+import { DEFAULT_QUERY_OPTIONS, queryUpdater, preserveArrayIdentity, queryClient } from "@/queries/client"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
 import { sortParams, run } from "@filen/utils"
@@ -681,33 +681,49 @@ export function driveItemsQueryUpdate({
 		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
 }): void {
 	const sortedParams = removeVolatileParamsForKey(sortParams(params))
+	const queryKey = [BASE_QUERY_KEY, sortedParams]
 
-	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY, sortedParams], prev => {
-		const currentData = prev ?? ([] satisfies Awaited<ReturnType<typeof fetchData>>)
-		const next = typeof updater === "function" ? updater(currentData) : updater
+	// Resolved here rather than inside setQueryData's functional updater so the row-creation decision
+	// below can see it. getQueryState reads the same cache entry through the same global
+	// queryKeyHashFn, and nothing can interleave in straight-line synchronous code, so `currentData`
+	// is exactly the `prev` the updater used to receive.
+	const state = queryClient.getQueryState<Awaited<ReturnType<typeof fetchData>>>(queryKey)
+	const currentData = state?.data ?? ([] satisfies Awaited<ReturnType<typeof fetchData>>)
+	const next = typeof updater === "function" ? updater(currentData) : updater
 
-		// Keep the caches in sync with the optimistic listing update — the notes/chats pattern, but
-		// richer: a DriveItem carries its SDK type (item.data) and a type discriminator, so cacheDriveItem
-		// derives EVERY cache the item's type allows (uuid→item + the type-specific dir/file caches) in one
-		// place, shared with fetchData via the same cacheNew* helpers. Context-only extras (the sharedOut
-		// normal-view, linked meta) stay with fetchData — see cacheDriveItem.
-		// Offline listings keep reference-only parity with fetchData/warm-seed — their items are
-		// index copies that must not overwrite fresher fetch-derived dir views.
-		const offlineListing = params.path.type === "offline"
+	// driveItemsQueryUpdateGlobal fans every mutation across all ten path variants × {uuid, null}, so a
+	// single socket event used to MATERIALIZE up to twenty listing rows for screens the user has never
+	// opened — each holding [], each written to SQLite, each restored and re-persisted on every later
+	// launch. Such a row buys nothing: whatever mounts that query refetches it anyway (refetchOnMount:
+	// "always"), and until that lands the cached [] paints an empty state where a loading state belongs.
+	// Narrow on purpose — the skip needs BOTH no existing entry (a pending, data-less query still counts
+	// as existing and is updated exactly as before) and an empty result, so optimistic inserts into a
+	// never-opened directory still create their row unchanged.
+	if (state === undefined && next.length === 0) {
+		return
+	}
 
-		for (const item of next) {
-			if (offlineListing) {
-				cache.cacheDriveItemReference(item)
-			} else {
-				cache.cacheDriveItem(item)
-			}
+	// Keep the caches in sync with the optimistic listing update — the notes/chats pattern, but
+	// richer: a DriveItem carries its SDK type (item.data) and a type discriminator, so cacheDriveItem
+	// derives EVERY cache the item's type allows (uuid→item + the type-specific dir/file caches) in one
+	// place, shared with fetchData via the same cacheNew* helpers. Context-only extras (the sharedOut
+	// normal-view, linked meta) stay with fetchData — see cacheDriveItem.
+	// Offline listings keep reference-only parity with fetchData/warm-seed — their items are
+	// index copies that must not overwrite fresher fetch-derived dir views.
+	// Runs over every item, before the cache write, exactly as it did inside the updater: it is the one
+	// place that keeps the uuid caches coherent with an optimistic listing, and skipping it would rest
+	// on an assumption about who populated them first. Only the STORED value takes the fast path.
+	const offlineListing = params.path.type === "offline"
+
+	for (const item of next) {
+		if (offlineListing) {
+			cache.cacheDriveItemReference(item)
+		} else {
+			cache.cacheDriveItem(item)
 		}
+	}
 
-		// The cache sync above deliberately still runs over every item: it is the one place that keeps the
-		// uuid caches coherent with an optimistic listing, and skipping it would rest on an assumption
-		// about who populated them first. Only the RETURNED value takes the fast path.
-		return preserveArrayIdentity(currentData, next)
-	})
+	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>(queryKey, preserveArrayIdentity(currentData, next))
 }
 
 /**
