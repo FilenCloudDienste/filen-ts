@@ -997,6 +997,133 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 	})
 })
 
+// ─── QueryPersisterKv oversized-row write cadence ────────────────────────────
+//
+// PERSIST_DEBOUNCE is the wrong clock for a multi-MB row (a whale account's recursive photos
+// listing). The debounced drain holds such a row back to LARGE_ROW_MIN_INTERVAL_MS; explicit
+// flushes never do.
+
+describe("QueryPersisterKv oversized-row write cadence", () => {
+	const BIG = "x".repeat(1_200_000)
+	const BIG_TOO = "y".repeat(1_200_000)
+
+	async function makeKv(executeBatch = vi.fn().mockResolvedValue(undefined)) {
+		vi.resetModules()
+
+		vi.doMock("@/lib/sqlite", () => ({
+			default: {
+				openDb: vi.fn().mockResolvedValue({ executeBatch }),
+				kvAsync: {
+					removeByPrefix: vi.fn().mockResolvedValue(undefined)
+				}
+			}
+		}))
+
+		const { QueryPersisterKv } = await import("@/queries/client")
+		const kv = new QueryPersisterKv()
+		const kvAny = kv as unknown as {
+			persistDirty: { cancel: () => void }
+			dirtyUpserts: Set<string>
+			persistedAt: Map<string, number>
+			runPersistAsync: () => Promise<void>
+		}
+
+		// Every setItem arms the real debounce timer; the tests drive the drain by hand instead.
+		const write = (key: string, value: unknown) => {
+			kv.setItem(key, value)
+			kvAny.persistDirty.cancel()
+		}
+
+		return { kv, kvAny, executeBatch, write }
+	}
+
+	it("writes an oversized row the first time, then holds the next write back", async () => {
+		const { kvAny, executeBatch, write } = await makeKv()
+
+		write("big", BIG)
+		await kvAny.runPersistAsync()
+
+		expect(executeBatch).toHaveBeenCalledTimes(1)
+
+		write("big", BIG_TOO)
+		await kvAny.runPersistAsync()
+
+		// Held back, not dropped: no second batch, and the key is queued for a later window.
+		expect(executeBatch).toHaveBeenCalledTimes(1)
+		expect(kvAny.dirtyUpserts.has("big")).toBe(true)
+	})
+
+	it("never holds back an ordinary row", async () => {
+		const { kvAny, executeBatch, write } = await makeKv()
+
+		write("small", "a")
+		await kvAny.runPersistAsync()
+
+		write("small", "b")
+		await kvAny.runPersistAsync()
+
+		expect(executeBatch).toHaveBeenCalledTimes(2)
+		expect(kvAny.dirtyUpserts.has("small")).toBe(false)
+	})
+
+	it("writes the held-back row once the interval has elapsed", async () => {
+		const { kvAny, executeBatch, write } = await makeKv()
+
+		write("big", BIG)
+		await kvAny.runPersistAsync()
+
+		write("big", BIG_TOO)
+		await kvAny.runPersistAsync()
+
+		expect(executeBatch).toHaveBeenCalledTimes(1)
+
+		// Age the recorded write past LARGE_ROW_MIN_INTERVAL_MS.
+		kvAny.persistedAt.set("big", performance.now() - 60_000)
+
+		await kvAny.runPersistAsync()
+
+		expect(executeBatch).toHaveBeenCalledTimes(2)
+		expect(kvAny.dirtyUpserts.has("big")).toBe(false)
+	})
+
+	it("flushNow writes a held-back row immediately", async () => {
+		const { kv, kvAny, executeBatch, write } = await makeKv()
+
+		write("big", BIG)
+		await kvAny.runPersistAsync()
+
+		write("big", BIG_TOO)
+		await kvAny.runPersistAsync()
+
+		expect(executeBatch).toHaveBeenCalledTimes(1)
+
+		// Backgrounding (and the background task's persist-before-suspend defer) must not leave a
+		// large row on disk stale — the process may not be alive for the next window.
+		await kv.flushNow()
+
+		expect(executeBatch).toHaveBeenCalledTimes(2)
+		expect(kvAny.dirtyUpserts.has("big")).toBe(false)
+	})
+
+	it("does not hold back the retry of a write that failed", async () => {
+		const executeBatch = vi.fn().mockRejectedValueOnce(new Error("db locked")).mockResolvedValue(undefined)
+		const { kvAny, write } = await makeKv(executeBatch)
+
+		write("big", BIG)
+		await kvAny.runPersistAsync()
+
+		expect(executeBatch).toHaveBeenCalledTimes(1)
+		expect(kvAny.dirtyUpserts.has("big")).toBe(true)
+
+		kvAny.persistDirty.cancel()
+
+		// Nothing reached disk, so the row is not "just written" and the retry must go straight out.
+		await kvAny.runPersistAsync()
+
+		expect(executeBatch).toHaveBeenCalledTimes(2)
+		expect(kvAny.dirtyUpserts.has("big")).toBe(false)
+	})
+})
 // ─── fetchData from useCameraUploadAlbums.query ───────────────────────────────
 
 describe("useCameraUploadAlbums.query fetchData", () => {

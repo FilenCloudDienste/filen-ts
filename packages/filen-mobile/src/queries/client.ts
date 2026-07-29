@@ -31,6 +31,21 @@ const PERSIST_CHUNK_SIZE = 100
 // canSkipPersist). Far inside QUERY_CLIENT_CACHE_TIME, so the restore-time eviction clock can never
 // fire on a row that is still being viewed.
 const PERSIST_STALE_REFRESH_MS = 86400 * 7 * 1000
+// Serialized size past which a row gets its own, much slower write cadence, and that cadence.
+//
+// PERSIST_DEBOUNCE is sized for the ordinary row. It is the wrong clock for the outliers: a whale
+// account's recursive photos listing serializes to tens of MB, and every camera-upload completion
+// appends one item to it. At one upload per second that is one multi-MB JS string build + JSI copy +
+// SQLite write PER SECOND, all on the JS thread — the shape behind the "app freezes after startup"
+// reports. Content-equal no-op refetches are already gated by canSkipPersist; these writes are real
+// changes, so the only lever left is how often they land.
+//
+// What this trades: after a crash-without-backgrounding, a large row on disk can be up to this
+// interval stale. It holds re-fetchable server state, whatever mounts the query refetches it anyway,
+// and every deliberate flush point (AppState background, the background task's persist-before-suspend
+// defer) goes through flushNow/buildCommands, which never defers. Small rows are untouched.
+const LARGE_ROW_BYTES = 1024 * 1024
+const LARGE_ROW_MIN_INTERVAL_MS = 30 * 1000
 
 /**
  * The two persisted fields a skip decision depends on, or null when the value is not shaped like a
@@ -129,6 +144,12 @@ export class QueryPersisterKv {
 	// Per key, the `dataUpdatedAt` of the value last queued for disk (or restored from it). Read by
 	// canSkipPersist to bound how far the stored stamp may lag while unchanged rows are skipped.
 	private readonly persistedStamp = new Map<string, number>()
+	// Per key, the serialized length and the wall clock of the last write that actually reached (or
+	// was handed to) SQLite. Only consulted by shouldDeferLargeRow. Both are seeded by a real write,
+	// so a key's FIRST write is never deferred, and a row that shrinks under LARGE_ROW_BYTES stops
+	// being deferred at its next write.
+	private readonly persistedBytes = new Map<string, number>()
+	private readonly persistedAt = new Map<string, number>()
 	private restoredOnce = false
 
 	public constructor() {
@@ -203,12 +224,48 @@ export class QueryPersisterKv {
 		return after.dataUpdatedAt - stored < PERSIST_STALE_REFRESH_MS
 	}
 
+	/**
+	 * Whether `key` is a known-large row whose last write is still inside LARGE_ROW_MIN_INTERVAL_MS.
+	 *
+	 * Only the debounced background drain consults this. Explicit flushes (backgrounding, the
+	 * background task's suspend defer) go through buildCommands and write everything.
+	 */
+	private shouldDeferLargeRow(key: string): boolean {
+		const bytes = this.persistedBytes.get(key)
+
+		if (bytes === undefined || bytes < LARGE_ROW_BYTES) {
+			return false
+		}
+
+		const writtenAt = this.persistedAt.get(key)
+
+		if (writtenAt === undefined) {
+			return false
+		}
+
+		return performance.now() - writtenAt < LARGE_ROW_MIN_INTERVAL_MS
+	}
+
+	// Serialize + record what the deferral decision needs. Recorded at serialize time rather than on
+	// success so the two maps stay in step with `commands`; a failed batch clears persistedAt for its
+	// keys (see the catch blocks), so a retry is never held back by a write that did not land.
+	private serializeForPersist(key: string, value: unknown): string {
+		const serialized = serialize(value)
+
+		this.persistedBytes.set(key, serialized.length)
+		this.persistedAt.set(key, performance.now())
+
+		return serialized
+	}
+
 	public removeItem(key: string): void {
 		this.buffer.delete(key)
 
 		this.dirtyDeletes.add(key)
 		this.dirtyUpserts.delete(key)
 		this.persistedStamp.delete(key)
+		this.persistedBytes.delete(key)
+		this.persistedAt.delete(key)
 
 		this.persistDirty()
 	}
@@ -222,6 +279,8 @@ export class QueryPersisterKv {
 		this.dirtyUpserts.clear()
 		this.dirtyDeletes.clear()
 		this.persistedStamp.clear()
+		this.persistedBytes.clear()
+		this.persistedAt.clear()
 		this.restoredOnce = false
 
 		sqlite.kvAsync.removeByPrefix(`${QUERY_CLIENT_PERSISTER_PREFIX}:`).catch(err => {
@@ -251,8 +310,7 @@ export class QueryPersisterKv {
 		await forEachKvRowByPrefix(db, prefix, (key, value) => {
 			// Isolate each row's deserialize so a single corrupt/unparseable value
 			// (mid-write crash, storage corruption, serializer version mismatch)
-			// doesn't abort restoration of the remaining rows. Mirrors the per-row
-			// isolation in sqlite.kvAsync.getByPrefix.
+			// doesn't abort restoration of the remaining rows.
 			try {
 				const bufferKey = key.slice(prefix.length)
 				const restored = deserialize(value)
@@ -351,6 +409,10 @@ export class QueryPersisterKv {
 				// Only re-add keys that have not been re-dirtied or removed in the interim
 				// (i.e. still absent from the dirty sets after buildCommands() cleared them).
 				for (const key of snapshotUpserts) {
+					// Same reasoning as runPersistAsync's catch: this batch never landed, so no key in it
+					// may look "just written" to shouldDeferLargeRow.
+					this.persistedAt.delete(key)
+
 					if (!this.dirtyUpserts.has(key) && !this.dirtyDeletes.has(key)) {
 						this.dirtyUpserts.add(key)
 					}
@@ -420,19 +482,40 @@ export class QueryPersisterKv {
 			for (const key of snapshotUpserts) {
 				const value = this.buffer.get(key)
 
-				if (value !== undefined) {
-					commands.push(["INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [prefix + key, serialize(value)]])
+				if (value === undefined) {
+					continue
+				}
 
-					serialized++
-
-					if (serialized % PERSIST_CHUNK_SIZE === 0) {
-						await new Promise<void>(resolve => {
-							setImmediate(resolve)
-						})
+				// Held back, not dropped: the key goes straight back into the dirty set, so the
+				// finally-block re-trigger keeps re-checking it once per debounce window until the
+				// interval elapses (or a flushNow writes it outright). Checked before serialize() so a
+				// deferred multi-MB row costs nothing at all on the ticks it skips.
+				if (this.shouldDeferLargeRow(key)) {
+					if (!this.dirtyDeletes.has(key)) {
+						this.dirtyUpserts.add(key)
 					}
+
+					continue
+				}
+
+				commands.push([
+					"INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)",
+					[prefix + key, this.serializeForPersist(key, value)]
+				])
+
+				serialized++
+
+				if (serialized % PERSIST_CHUNK_SIZE === 0) {
+					await new Promise<void>(resolve => {
+						setImmediate(resolve)
+					})
 				}
 			}
 
+			// Deliberately silent when the batch is empty because everything in it was held back: the
+			// re-trigger below re-checks once per debounce window, so logging here would push a line
+			// per second into the bounded breadcrumb ring and evict the context a real error needs.
+			// The cadence is already visible in the started/completed pair around the writes that land.
 			if (commands.length === 0) {
 				return
 			}
@@ -454,6 +537,11 @@ export class QueryPersisterKv {
 			// Restore failed keys so the finally-block re-trigger actually retries them.
 			// Only re-add keys that were not re-dirtied or re-removed after the snapshot.
 			for (const key of snapshotUpserts) {
+				// Nothing in this batch reached disk, so no key in it may count as "just written" —
+				// otherwise a large row's retry would sit out the whole deferral interval for a write
+				// that failed. Clearing the stamp (not the size) puts the retry back on the fast path.
+				this.persistedAt.delete(key)
+
 				if (!this.dirtyUpserts.has(key) && !this.dirtyDeletes.has(key)) {
 					this.dirtyUpserts.add(key)
 				}
@@ -473,6 +561,9 @@ export class QueryPersisterKv {
 		}
 	}
 
+	// The EXPLICIT-flush command set: everything dirty, with no LARGE_ROW_MIN_INTERVAL_MS deferral.
+	// Its callers (flushNow → backgrounding, the background task's persist-before-suspend defer) exist
+	// precisely because the process may not survive to the next debounce window.
 	private buildCommands(): [string, (string | Uint8Array)[]][] {
 		const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
 		const commands: [string, (string | Uint8Array)[]][] = []
@@ -485,7 +576,10 @@ export class QueryPersisterKv {
 			const value = this.buffer.get(key)
 
 			if (value !== undefined) {
-				commands.push(["INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [prefix + key, serialize(value)]])
+				commands.push([
+					"INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)",
+					[prefix + key, this.serializeForPersist(key, value)]
+				])
 			}
 		}
 
