@@ -43,6 +43,47 @@ document
 	.querySelector("meta[name=viewport]")
 	?.setAttribute("content", "width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=5")
 
+/**
+ * Resource CSP for the rendered document — the airtight half of the docx link/style hardening.
+ *
+ * linkSafety sanitises attacker-authored CSS as TEXT, which raises the cost of a beacon but cannot
+ * be airtight: a `url()` hidden behind CSS ident escaping (`\75 rl(...)`) resolves to a url token in
+ * the parser that the sanitiser never saw. A policy the engine itself enforces has no such gap. This
+ * kills the whole class in one line: a document that gets ANY remote URL past the sanitiser — via
+ * `background-image`, `border-image`, `cursor`, `list-style-image`, `content`, `@font-face`, or an
+ * external image relationship — still cannot make the engine fetch it, so there is no beacon (IP,
+ * user agent, open time) and no transport for CSS-attribute-selector exfiltration.
+ *
+ * Applied HERE rather than to the shared DOM shell, which is what previously blocked it: the shell
+ * template is common to every DOM component (the note editors legitimately load remote images in
+ * markdown), but each component gets its OWN document at runtime. Injecting from this module scope
+ * therefore scopes the policy to the docx WebView alone, exactly like the viewport override above,
+ * and runs before React mounts and long before renderAsync inserts any document content.
+ *
+ * Deliberately NOT a `default-src 'none'` lockdown. Only the directives that govern what CSS and
+ * document markup can FETCH are set:
+ *   - `script-src` / `connect-src` are left alone; constraining them would risk the bundle itself and
+ *     Metro's dev channel, and neither is reachable from CSS (renderAltChunks, the one path to
+ *     attacker script, is off — `frame-src` below is a second lock on it).
+ *   - `style-src` is left alone on purpose: the production shell gains a `<link rel=stylesheet>` if
+ *     the bundle ever emits a CSS artifact, and `'self'` does not match a file:// origin, so a
+ *     style-src here could break rendering in production only. `@import` stays covered by the
+ *     text-level strip in hardenDocxStyles.
+ * Nothing legitimate is restricted: docx-preview routes every embedded image and font through
+ * `blobToURL`, which with `useBase64URL: true` returns a `data:` URL (`blob:` otherwise), and the
+ * only `targetMode === "External"` lookup in the library is for HYPERLINKS, which the tap-time
+ * classifier below already governs.
+ */
+const contentSecurityPolicy = document.createElement("meta")
+
+contentSecurityPolicy.setAttribute("http-equiv", "Content-Security-Policy")
+contentSecurityPolicy.setAttribute(
+	"content",
+	"img-src data: blob:; font-src data: blob:; media-src data: blob:; object-src 'none'; frame-src 'none'"
+)
+
+document.head.appendChild(contentSecurityPolicy)
+
 const Dom = ({
 	base64,
 	paddingTop,
