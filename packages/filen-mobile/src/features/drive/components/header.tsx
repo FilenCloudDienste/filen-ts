@@ -174,7 +174,19 @@ const Header = ({
 			// Otherwise stale selection entries (e.g. an item that became undecryptable
 			// after a key change, or whose favorited state flipped via socket event) would
 			// feed outdated booleans into the bulk toolbar.
-			const liveItems = selectedDriveItems.map(sel => listItems.find(live => live.data.uuid === sel.data.uuid) ?? sel)
+			// Indexed rather than a nested scan: this was O(selected x listItems), which on select-all over
+			// a large directory is quadratic (millions of comparisons per header render, and the header
+			// re-renders on every selection tap). First-wins insertion makes the lookup return exactly what
+			// `find` returned — the first match — and a miss still falls through to `sel`.
+			const liveByUuid = new Map<string, (typeof listItems)[number]>()
+
+			for (const live of listItems) {
+				if (!liveByUuid.has(live.data.uuid)) {
+					liveByUuid.set(live.data.uuid, live)
+				}
+			}
+
+			const liveItems = selectedDriveItems.map(sel => liveByUuid.get(sel.data.uuid) ?? sel)
 			const driveFlags = aggregateDriveSelectionFlags(liveItems)
 
 			for (const button of buildBulkActionMenu({
