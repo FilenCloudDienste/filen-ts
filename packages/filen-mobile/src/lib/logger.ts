@@ -2,11 +2,12 @@ import * as FileSystem from "expo-file-system"
 import { LOGS_DIRECTORY } from "@/lib/storageRoots"
 import { serialize, deserialize, freezeForLog } from "@/lib/serializer"
 
-// Async, non-blocking, privacy-aware on-disk diagnostic logger.
+// Async, non-blocking on-disk diagnostic logger.
 //
-// Design goals (jan): prod builds must never notice it. The HOT PATH (a log call) is a single
-// numeric level-gate followed by, at most, one cheap push — NO serialization, NO redaction, NO
-// I/O. Everything expensive (redaction, JSON encoding, file append, rotation) happens off the hot
+// Design goal: prod builds must never notice it. The HOT PATH (a log call) is a single numeric
+// level-gate followed by, at most, one cheap push — NO serialization, NO I/O (the one exception is
+// freezeForLog, a synchronous SDK-error snapshot, because a uniffi handle can be freed before the
+// deferred flush). Everything expensive (JSON encoding, file append, rotation) happens off the hot
 // path at flush time, batched and infrequent. Sub-threshold calls (e.g. log.debug in prod) cost a
 // compare-and-return with zero allocation.
 //
@@ -48,7 +49,7 @@ type Entry = {
 	data: unknown
 }
 
-// A parsed, already-redacted log line as written to disk — the shape the in-app viewer reads back.
+// A parsed log line as written to disk — the shape the in-app viewer reads back.
 export type ReadLogEntry = {
 	t: number
 	l: LogLevel
@@ -555,7 +556,7 @@ export class Logger {
 	// Reads the persisted log lines back for the in-app viewer, newest-first, capped at `limit`.
 	// Flushes pending entries first so the view reflects the latest state. Reads files newest-first
 	// and walks each file's lines in reverse so it can stop at the cap without parsing everything;
-	// malformed/torn lines are skipped. The lines are already redacted (redaction happens at write).
+	// malformed/torn lines are skipped.
 	public readEntries(limit: number = MAX_VIEW_ENTRIES): ReadLogEntry[] {
 		if (this.disabled) {
 			return []
