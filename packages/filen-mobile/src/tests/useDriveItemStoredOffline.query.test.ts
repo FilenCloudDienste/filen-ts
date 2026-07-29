@@ -1,13 +1,13 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { mockQueryUpdaterSet, mockIsItemStored, cacheUuidToAnyDriveItem, mockFindAll } = vi.hoisted(() => {
+const { mockQueryUpdaterSet, mockIsItemStored, cacheUuidToAnyDriveItem, mockGetAll } = vi.hoisted(() => {
 	const cacheUuidToAnyDriveItem = new Map<string, unknown>()
 
 	return {
 		mockQueryUpdaterSet: vi.fn(),
 		mockIsItemStored: vi.fn().mockResolvedValue(false),
 		cacheUuidToAnyDriveItem,
-		mockFindAll: vi.fn(() => [] as unknown[])
+		mockGetAll: vi.fn(() => [] as unknown[])
 	}
 })
 
@@ -33,7 +33,7 @@ vi.mock("@/queries/client", () => ({
 	},
 	queryClient: {
 		getQueryCache: () => ({
-			findAll: mockFindAll
+			getAll: mockGetAll
 		})
 	}
 }))
@@ -80,7 +80,7 @@ beforeEach(() => {
 	mockIsItemStored.mockClear()
 	mockIsItemStored.mockResolvedValue(false)
 	cacheUuidToAnyDriveItem.clear()
-	mockFindAll.mockClear()
+	mockGetAll.mockClear()
 })
 
 describe("normalizeTypeForKey (via driveItemStoredOfflineQueryUpdate key)", () => {
@@ -221,24 +221,40 @@ describe("fetchData", () => {
 })
 
 describe("getStoredOfflineQueryCacheEntries", () => {
-	it("enumerates the query cache by the BASE_QUERY_KEY prefix (partial key match)", () => {
-		getStoredOfflineQueryCacheEntries()
+	it("keeps every entry whose key starts with BASE_QUERY_KEY and drops the rest", () => {
+		const mine = {
+			queryKey: [BASE_QUERY_KEY, { type: "file", uuid: "11111111-1111-1111-1111-111111111111" }],
+			state: { data: true }
+		}
+		const alsoMine = {
+			queryKey: [BASE_QUERY_KEY, { type: "directory", uuid: "22222222-2222-2222-2222-222222222222" }],
+			state: { data: false }
+		}
+		const foreign = {
+			queryKey: ["useDriveItemsQuery", { path: { type: "drive", uuid: null } }],
+			state: { data: [] }
+		}
 
-		expect(mockFindAll).toHaveBeenCalledOnce()
-		expect(mockFindAll).toHaveBeenCalledWith({ queryKey: [BASE_QUERY_KEY] })
+		mockGetAll.mockReturnValueOnce([foreign, mine, alsoMine])
+
+		const result = getStoredOfflineQueryCacheEntries()
+
+		expect(result).toHaveLength(2)
+		expect(result[0]).toBe(mine)
+		expect(result[1]).toBe(alsoMine)
 	})
 
-	it("returns the matched cache entries as-is", () => {
-		const entries = [
+	// The key HEAD must match. A "contains" test would sweep in unrelated queries, and
+	// findStaleStoredOfflineEntries would then broadcast `false` over their data.
+	it("does not match a key that only carries BASE_QUERY_KEY in a later position", () => {
+		mockGetAll.mockReturnValueOnce([
 			{
-				queryKey: [BASE_QUERY_KEY, { type: "file", uuid: "11111111-1111-1111-1111-111111111111" }],
+				queryKey: ["somethingElse", BASE_QUERY_KEY],
 				state: { data: true }
 			}
-		]
+		])
 
-		mockFindAll.mockReturnValueOnce(entries)
-
-		expect(getStoredOfflineQueryCacheEntries()).toBe(entries)
+		expect(getStoredOfflineQueryCacheEntries()).toEqual([])
 	})
 
 	it("returns an empty array when nothing is cached", () => {

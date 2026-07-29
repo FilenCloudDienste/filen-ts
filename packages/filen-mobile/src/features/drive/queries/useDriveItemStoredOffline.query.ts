@@ -109,9 +109,20 @@ export function getStoredOfflineQueryCacheEntries(): {
 		data: unknown
 	}
 }[] {
-	return queryClient.getQueryCache().findAll({
-		queryKey: [BASE_QUERY_KEY]
-	})
+	// Hand-rolled instead of `findAll({ queryKey: [BASE_QUERY_KEY] })`, which is exactly
+	// `getAll().filter(q => matchQuery({queryKey}, q))`. With only a queryKey and no `exact`, matchQuery
+	// reduces to `partialMatchKey(q.queryKey, [BASE_QUERY_KEY])` — which, for two arrays, loops the
+	// one-element pattern and compares `q.queryKey[0] === BASE_QUERY_KEY`. Identical verdict, without
+	// the per-query filter destructure and recursive descent, over a cache that holds every listing,
+	// note and chat query in the account. (Version-pinned third-party surface — re-verify the
+	// matchQuery/partialMatchKey reduction on @tanstack/query-core upgrades.)
+	//
+	// `getAll()` itself still materializes the whole cache: QueryCache exposes no iterator, and
+	// reaching into its private map to avoid one array would be worse than the array.
+	return queryClient
+		.getQueryCache()
+		.getAll()
+		.filter(query => query.queryKey[0] === BASE_QUERY_KEY)
 }
 
 export default useDriveItemStoredOfflineQuery
