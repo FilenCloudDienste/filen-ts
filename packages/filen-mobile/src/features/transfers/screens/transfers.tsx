@@ -39,21 +39,29 @@ export type TransfersListItem = { kind: "active"; transfer: TTransfer } | { kind
 export function buildTransfersDisplayList(args: { transfers: TTransfer[]; finishedTransfers: TFinishedTransfer[] }): TransfersListItem[] {
 	const { transfers, finishedTransfers } = args
 
-	const active: TransfersListItem[] = [...transfers]
-		.sort((a, b) => a.startedAt - b.startedAt)
-		.map(transfer => ({
+	// Built into one output array instead of sort→map→map→concat. Every in-flight progress event
+	// replaces the store's `transfers` array, so this runs per event while the screen is open, and
+	// the old shape allocated five arrays (two copies, two map results, the concat) plus a full
+	// element copy per stage. Two sorted copies and the result are all that is actually needed.
+	// `slice()` over `[...]` for the same reason: no iterator protocol on a plain array. Same
+	// comparators over the same inputs, so ordering (and sort stability) is unchanged.
+	const result: TransfersListItem[] = []
+
+	for (const transfer of transfers.slice().sort((a, b) => a.startedAt - b.startedAt)) {
+		result.push({
 			kind: "active",
 			transfer
-		}))
+		})
+	}
 
-	const finished: TransfersListItem[] = [...finishedTransfers]
-		.sort((a, b) => b.finishedAt - a.finishedAt)
-		.map(finished => ({
+	for (const finished of finishedTransfers.slice().sort((a, b) => b.finishedAt - a.finishedAt)) {
+		result.push({
 			kind: "finished",
 			finished
-		}))
+		})
+	}
 
-	return [...active, ...finished]
+	return result
 }
 
 // Pure, unit-testable subtitle for a finished-transfer row. Errored rows prefer the captured
