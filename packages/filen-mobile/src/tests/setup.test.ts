@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from "vitest"
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
 // setup.ts now imports expo-image (for the iOS disk-cache cap) — unloadable in the node
 // env, which needs the native expo runtime. Mock it.
@@ -118,6 +118,7 @@ vi.mock("@/lib/i18n", () => ({ initI18n: mockInitI18n }))
 vi.mock("@/lib/theme", () => ({ initTheme: mockInitTheme }))
 
 import setup from "@/lib/setup"
+import logger from "@/lib/logger"
 
 const STRINGIFIED_CLIENT = { rootUuid: "root-uuid-1" } as any
 
@@ -326,5 +327,55 @@ describe("setup.setup", () => {
 
 		expect(mockFileCache.gc).not.toHaveBeenCalled()
 		expect(mockAudioCache.gc).not.toHaveBeenCalled()
+	})
+})
+
+// ─── Slow-boot instrumentation ────────────────────────────────────────────────
+//
+// Production persists warn/error only (debug/info are in-memory breadcrumbs), so a boot phase that
+// stalls has to escalate or it is simply absent from the log export a user sends in. These pin the
+// escalation, not the thresholds.
+
+describe("setup.setup slow-phase instrumentation", () => {
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["performance"] })
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it("keeps a fast phase at debug", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: false })
+
+		await setup.setup()
+
+		expect(vi.mocked(logger.debug).mock.calls.some(c => String(c[1]).includes("auth.isAuthed completed"))).toBe(true)
+		expect(vi.mocked(logger.warn)).not.toHaveBeenCalled()
+	})
+
+	it("escalates a slow phase to a persisted warn", async () => {
+		mockAuth.isAuthed.mockImplementation(async () => {
+			vi.advanceTimersByTime(3000)
+
+			return { isAuthed: false }
+		})
+
+		await setup.setup()
+
+		expect(vi.mocked(logger.warn).mock.calls.some(c => String(c[1]).includes("auth.isAuthed was slow"))).toBe(true)
+	})
+
+	it("escalates the whole pipeline to a persisted warn", async () => {
+		mockAuth.isAuthed.mockImplementation(async () => {
+			vi.advanceTimersByTime(20000)
+
+			return { isAuthed: false }
+		})
+
+		await setup.setup()
+
+		expect(vi.mocked(logger.warn).mock.calls.some(c => String(c[1]) === "Setup was slow")).toBe(true)
+		expect(vi.mocked(logger.info).mock.calls.some(c => String(c[1]) === "Setup completed")).toBe(false)
 	})
 })

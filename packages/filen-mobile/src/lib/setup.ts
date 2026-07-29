@@ -64,11 +64,25 @@ function logKvStats(): void {
 	}
 }
 
+// Boot-phase timings are breadcrumbs at healthy speed and evidence when they are not. Production
+// persists only warn/error, so a debug-level timing is missing from exactly the log export that would
+// explain a "startup takes forever / freezes right after launch" report — the affected accounts are
+// the ones we cannot reproduce locally, so the field log is the only instrument. Thresholds sit well
+// above a healthy launch (the whole pipeline is normally a few hundred ms) so a normal boot writes
+// nothing to disk. Same escalation shape as thumbnails.restore.
+const SLOW_PHASE_WARN_MS = 1500
+const SLOW_SETUP_WARN_MS = 5000
+
 async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
 	const start = performance.now()
 	const result = await fn()
+	const durationMs = performance.now() - start
 
-	logger.debug("setup", `${label} completed`, { durationMs: (performance.now() - start).toFixed(2) })
+	if (durationMs > SLOW_PHASE_WARN_MS) {
+		logger.warn("setup", `${label} was slow`, { durationMs: durationMs.toFixed(2) })
+	} else {
+		logger.debug("setup", `${label} completed`, { durationMs: durationMs.toFixed(2) })
+	}
 
 	return result
 }
@@ -198,7 +212,14 @@ const setup = {
 
 			const duration = performance.now() - now
 
-			logger.info("setup", "Setup completed", { durationMs: duration.toFixed(2) })
+			if (duration > SLOW_SETUP_WARN_MS) {
+				logger.warn("setup", "Setup was slow", {
+					durationMs: duration.toFixed(2),
+					background: options?.background === true
+				})
+			} else {
+				logger.info("setup", "Setup completed", { durationMs: duration.toFixed(2) })
+			}
 
 			return {
 				isAuthed: isAuthed.isAuthed

@@ -46,6 +46,13 @@ const PERSIST_STALE_REFRESH_MS = 86400 * 7 * 1000
 // defer) goes through flushNow/buildCommands, which never defers. Small rows are untouched.
 const LARGE_ROW_BYTES = 1024 * 1024
 const LARGE_ROW_MIN_INTERVAL_MS = 30 * 1000
+// Past these, the boot restore is worth a PERSISTED warn rather than a debug breadcrumb: production
+// keeps warn/error only, so the timings are otherwise absent from the one log export that could
+// explain a "startup takes forever" report. Both sit far above a healthy boot. Same escalation shape
+// as thumbnails.restore. The disk walk and the setQueryData replay are timed separately because they
+// fail for different reasons — row bytes versus row count.
+const SLOW_RESTORE_WARN_MS = 1500
+const SLOW_REPLAY_WARN_MS = 1000
 
 /**
  * The two persisted fields a skip decision depends on, or null when the value is not shaped like a
@@ -331,10 +338,16 @@ export class QueryPersisterKv {
 
 		this.restoredOnce = true
 
-		logger.debug("queries-restore", "Restored persisted query rows", {
+		const payload = {
 			count: this.buffer.size,
 			ms: (performance.now() - now).toFixed(2)
-		})
+		}
+
+		if (performance.now() - now > SLOW_RESTORE_WARN_MS) {
+			logger.warn("queries-restore", "Persisted query row scan was slow", payload)
+		} else {
+			logger.debug("queries-restore", "Restored persisted query rows", payload)
+		}
 	}
 
 	public flush(): void {
@@ -661,6 +674,10 @@ export async function restoreQueries(): Promise<void> {
 
 		await queryClientPersisterKv.restore()
 
+		// Timed apart from `now` (which spans the disk walk too, and reports its own slow-warn): the
+		// two stall for different reasons — total row BYTES for the walk, row COUNT for this replay.
+		const replayStart = performance.now()
+
 		let restored = 0
 		let dropped = 0
 
@@ -696,7 +713,14 @@ export async function restoreQueries(): Promise<void> {
 			}
 		})
 
-		logger.debug("queries-restore", "Restored persisted queries", { restored, dropped, ms: (performance.now() - now).toFixed(2) })
+		const replayMs = performance.now() - replayStart
+		const payload = { restored, dropped, replayMs: replayMs.toFixed(2), ms: (performance.now() - now).toFixed(2) }
+
+		if (replayMs > SLOW_REPLAY_WARN_MS) {
+			logger.warn("queries-restore", "Persisted query replay was slow", payload)
+		} else {
+			logger.debug("queries-restore", "Restored persisted queries", payload)
+		}
 	} catch (e) {
 		logger.error("queries-restore", "Failed to restore persisted queries", { error: e })
 		alerts.error(e)

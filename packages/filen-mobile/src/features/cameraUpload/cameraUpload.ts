@@ -194,6 +194,16 @@ const UPLOAD_PIPELINE_CONCURRENCY = 16
 // with the listing objects.
 const remoteFileMetaCache = new WeakMap<object, UnwrapFileMetaResult>()
 
+// Both of these scale with library size and are the two pre-upload phases that hold the JS thread —
+// the shape behind "app freezes for a long time after startup" on a 30k-asset camera roll, which no
+// local test account reproduces. Production persists warn/error only, so a debug-level timing never
+// reaches the log export that would show it; past these thresholds the phase escalates to a persisted
+// warn instead. Sized for a large-but-healthy library so an ordinary sync writes nothing to disk.
+// Same escalation shape as thumbnails.restore / setup's timed().
+const SLOW_LEDGER_WARN_MS = 2000
+const SLOW_LISTING_WARN_MS = 10000
+const SLOW_PIPELINE_WARN_HASHES = 500
+
 class CameraUpload {
 	private globalAbortController = new AbortController()
 	private globalPauseSignal = new PauseSignal()
@@ -913,6 +923,8 @@ class CameraUpload {
 			throw new Error("Remote directory is not set in config")
 		}
 
+		const listingStart = performance.now()
+
 		const [localListing, remoteListing] = await Promise.all([
 			this.listLocal({
 				config,
@@ -926,6 +938,23 @@ class CameraUpload {
 				convertHeic
 			})
 		])
+
+		const listingMs = performance.now() - listingStart
+
+		if (listingMs > SLOW_LISTING_WARN_MS) {
+			// The tree sizes are counted only on this branch: Object.keys over a 30k-entry tree
+			// allocates a 30k-element array, which is not a price a healthy sync should pay for a log
+			// line. On the slow branch it is exactly the number that explains the stall.
+			logger.warn("cameraUpload", "Listing was slow", {
+				durationMs: listingMs.toFixed(2),
+				localFiles: Object.keys(localListing.tree).length,
+				remoteFiles: Object.keys(remoteListing.tree).length,
+				localDegraded: localListing.degraded,
+				remoteDegraded: remoteListing.degraded
+			})
+		} else {
+			logger.debug("cameraUpload", "Listing completed", { durationMs: listingMs.toFixed(2) })
+		}
 
 		const localTree = localListing.tree
 		const remoteTree = remoteListing.tree
@@ -1209,11 +1238,27 @@ class CameraUpload {
 			// Hydrate the durable ledger before any shield read. Foreground pages the whole hash index
 			// into memory (getHashSync); background loads only the small abort ledger and reads hashes
 			// point-wise from kv (getHash) to avoid paging a 50k index per headless fire.
+			const ledgerStart = performance.now()
+
 			if (params?.background) {
 				await cameraUploadState.loadAborts()
 			} else {
 				await cameraUploadState.loadHashes()
 				await cameraUploadState.loadAborts()
+			}
+
+			const ledgerMs = performance.now() - ledgerStart
+
+			if (ledgerMs > SLOW_LEDGER_WARN_MS) {
+				logger.warn("cameraUpload", "Ledger hydration was slow", {
+					durationMs: ledgerMs.toFixed(2),
+					background: params?.background === true
+				})
+			} else {
+				logger.debug("cameraUpload", "Ledger hydrated", {
+					durationMs: ledgerMs.toFixed(2),
+					background: params?.background === true
+				})
 			}
 
 			const {
@@ -1364,6 +1409,13 @@ class CameraUpload {
 			// FIFO waiter array shift()s per release — O(n²) churn at camera-roll scale.
 			let nextDeltaIndex = 0
 
+			// Field instrumentation for the pipeline's own cost, summarized once per pass below.
+			// `hashed` is the one that matters: every increment is a full-file md5 read on the JS
+			// thread, so a pass that hashes thousands is the freeze, not a symptom of it. The mtime
+			// shield is supposed to keep this near zero in the steady state.
+			let shieldSkips = 0
+			let hashed = 0
+
 			const uploadWorker = async (): Promise<void> => {
 				while (true) {
 					const index = nextDeltaIndex++
@@ -1422,6 +1474,8 @@ class CameraUpload {
 						// several destination paths — a match for one folder must not starve another.
 						hashEntryCoversPath(cachedEntry, delta.file.path)
 					) {
+						shieldSkips++
+
 						continue
 					}
 
@@ -1442,6 +1496,10 @@ class CameraUpload {
 								if (!assetFile.exists) {
 									throw new Error(i18n.t("camera_upload_file_missing"))
 								}
+
+								// Synchronous whole-file read on the JS thread — counted so a pass whose
+								// cost is dominated by hashing is visible in the field log.
+								hashed++
 
 								const md5 = assetFile.md5
 
@@ -1629,12 +1687,30 @@ class CameraUpload {
 
 			const uploadWorkers: Promise<void>[] = []
 			const uploadWorkerCount = Math.min(UPLOAD_PIPELINE_CONCURRENCY, deltas.length)
+			const pipelineStart = performance.now()
 
 			for (let workerIndex = 0; workerIndex < uploadWorkerCount; workerIndex++) {
 				uploadWorkers.push(uploadWorker())
 			}
 
 			await Promise.all(uploadWorkers)
+
+			const pipelinePayload = {
+				deltas: deltas.length,
+				hashed,
+				shieldSkips,
+				durationMs: (performance.now() - pipelineStart).toFixed(2),
+				background: params?.background === true
+			}
+
+			// Wall-clock is NOT the trigger — a pass that legitimately uploads for ten minutes is
+			// healthy. The hash count is: every one of those is a synchronous full-file read on the JS
+			// thread, so past this many the pass is JS-thread-bound and that is what the user feels.
+			if (hashed > SLOW_PIPELINE_WARN_HASHES) {
+				logger.warn("cameraUpload", "Upload pass hashed a large number of assets", pipelinePayload)
+			} else {
+				logger.debug("cameraUpload", "Upload pass completed", pipelinePayload)
+			}
 
 			// BG-05: stamp completion of a real FOREGROUND pass (one that reached the upload pipeline).
 			// Background passes are partial (maxUploads-bounded) so they must NOT stamp — else they'd
