@@ -6,12 +6,19 @@ import { customEmojis, type CustomEmoji } from "@/assets/customEmojis"
 import { fastLocaleCompare } from "@filen/utils"
 import AutocompleteSuggestions from "@/features/chats/components/chat/input/autocompleteSuggestions"
 
+// Normalized once at module scope rather than per keystroke: the catalogue is static and over a
+// thousand entries, so the filter below was allocating two throwaway strings per emoji on every
+// search. Index-aligned with `customEmojis` by construction, and `.filter`'s callback receives that
+// index — so the predicate, the order and the resulting list are unchanged. Same module-level
+// precompute pattern the message renderer already uses for its emoji lookups.
+const customEmojiNamesNormalized = customEmojis.map(e => e.name.toLowerCase().trim())
+
 export const EmojiSuggestions = ({ chat }: { chat: Chat }) => {
 	const getItems = (text: string): CustomEmoji[] => {
 		const textNormalized = text.toLowerCase().trim().split(":").join("")
 
 		return customEmojis
-			.filter(e => e.name.toLowerCase().trim().includes(textNormalized))
+			.filter((_, index) => (customEmojiNamesNormalized[index] as string).includes(textNormalized))
 			.slice(0, 10)
 			.sort((a, b) => fastLocaleCompare(a.name, b.name))
 	}

@@ -7,6 +7,10 @@ import { useShallow } from "zustand/shallow"
 import { findClosestIndexString } from "@filen/utils"
 import PopupContainerView from "@/features/chats/components/chat/input/popupContainerView"
 
+// Stable empty list for the hidden case — `never[]` is assignable to any `T[]`, and a shared identity
+// keeps the hidden path allocation-free.
+const EMPTY_ITEMS: never[] = []
+
 // Generic, trigger-driven autocomplete popup shared by mentions (`@`) and emojis (`:`).
 // Both surfaces derive a `{ show, text }` slice from the input value + cursor, mirror their
 // visibility into the chat store under `kind`, and render a pressable list that rewrites the
@@ -80,7 +84,12 @@ export function AutocompleteSuggestions<T>({
 		}
 	})()
 
-	const items = getItems(text)
+	// Only when the popup is actually shown: the render below returns null on `!show` regardless of
+	// `items`, and `getItems` is pure. `show === false` does NOT imply an empty `text` — with no trigger
+	// before the cursor `sliced` is whatever was last typed — so unguarded this filtered the full custom
+	// emoji list on every keystroke, in every chat, twice (mentions and emojis are both mounted), and
+	// allocated an intermediate array that `.slice(0, 10)` immediately discarded.
+	const items = show ? getItems(text) : EMPTY_ITEMS
 
 	useEffect(() => {
 		if (show) {
