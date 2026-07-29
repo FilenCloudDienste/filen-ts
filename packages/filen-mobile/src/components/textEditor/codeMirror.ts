@@ -1,10 +1,13 @@
-import { langs, loadLanguage as uiwLoadLanguage, langNames } from "@uiw/codemirror-extensions-langs"
+import { langs, langNames } from "@uiw/codemirror-extensions-langs"
 import { tags as t } from "@lezer/highlight"
 import { createTheme } from "@uiw/codemirror-themes"
 
-for (const lang in langNames) {
-	uiwLoadLanguage(lang as keyof typeof langs)
-}
+// No eager "preload every language" pass here on purpose. The upstream loadLanguage is a plain
+// `langs[name]?.()` lookup — it registers nothing, so its return value is the only thing it
+// produces and dropping it on the floor achieved exactly nothing. (The loop that used to sit here
+// was `for..in` over an ARRAY, so it walked "0".."227" and every lookup missed anyway.) Writing it
+// as an honest `for..of` would be a regression, not a fix: it would instantiate all 228 parsers on
+// the WebView's cold-boot path. loadLanguage() below already builds the one parser a note needs.
 
 export function parseExtension(name: string) {
 	const normalized = name.toLowerCase().trim()
