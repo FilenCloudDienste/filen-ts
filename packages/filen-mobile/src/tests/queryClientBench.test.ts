@@ -218,6 +218,13 @@ function makeItem(i: number) {
 	}
 }
 
+// Anchored to run time, NOT a literal epoch. restoreQueries evicts a row once
+// `dataUpdatedAt + QUERY_CLIENT_CACHE_TIME < Date.now()`, so a hardcoded timestamp quietly ages past
+// the 365-day window and then every fixture row is dropped — which is what silently rotted this
+// bench: scenario 05 failed its validation and aborted the run, taking 06/07/08 with it. Backdated
+// by a minute so the rows are plausibly "recently written" without ever being in the future.
+const FIXTURE_UPDATED_AT = Date.now() - 60_000
+
 function makePersistedQuery(i: number, itemCount: number): PersistedQuery {
 	const data = new Array(itemCount)
 
@@ -232,7 +239,7 @@ function makePersistedQuery(i: number, itemCount: number): PersistedQuery {
 		state: {
 			data,
 			dataUpdateCount: 1,
-			dataUpdatedAt: 1_750_000_000_000 + i,
+			dataUpdatedAt: FIXTURE_UPDATED_AT + i,
 			error: null,
 			errorUpdateCount: 0,
 			errorUpdatedAt: 0,
