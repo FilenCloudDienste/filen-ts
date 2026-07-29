@@ -209,6 +209,15 @@ const CSS_IMPORT_PATTERN = /@import[^;]*;?/gi
 // `cross-fade` — without having to enumerate them.
 const CSS_QUOTED_ABSOLUTE_URL_PATTERN = /(['"])\s*(?:[a-z][a-z0-9+.-]*:)?\/\/[^'"]*\1/gi
 
+// Cheap pre-filter for an inline declaration worth inspecting. Non-global, so `.test()` never reads or
+// writes `lastIndex` and hoisting it out of the per-property loop is safe.
+const INLINE_STYLE_CANDIDATE_PATTERN = /url\(|:\/\/|(?:^|[\s,('"])\/\//i
+
+// `url(...)` inside an inline declaration. Global, but used ONLY with `matchAll`, which iterates a
+// fresh clone via the species constructor and never writes back to this object — so `lastIndex` stays
+// 0 and hoisting cannot leak state between elements.
+const INLINE_STYLE_URL_PATTERN = /url\(\s*(['"]?)([^'")]*)\1\s*\)/gi
+
 // The only resource URLs a rendered document legitimately needs. docx-preview inlines every embedded
 // image and font from inside the .docx itself (`useBase64URL: true`), so these are the only forms its
 // own output produces — verified: its two `url()` emission sites both take a `blobToURL` result.
@@ -297,11 +306,11 @@ export function hardenDocxInlineStyles(root: ParentNode): void {
 
 			const value = declaration.getPropertyValue(property)
 
-			if (!value || !/url\(|:\/\/|(?:^|[\s,('"])\/\//i.test(value)) {
+			if (!value || !INLINE_STYLE_CANDIDATE_PATTERN.test(value)) {
 				continue
 			}
 
-			const targets = [...value.matchAll(/url\(\s*(['"]?)([^'")]*)\1\s*\)/gi)].map(match => match[2] ?? "")
+			const targets = [...value.matchAll(INLINE_STYLE_URL_PATTERN)].map(match => match[2] ?? "")
 			const hasDisallowed = targets.length === 0 || targets.some(target => !isAllowedCssUrl(target))
 
 			if (hasDisallowed) {

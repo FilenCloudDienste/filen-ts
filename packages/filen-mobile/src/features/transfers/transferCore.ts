@@ -541,14 +541,18 @@ export async function uploadCore(
 
 								cache.cacheNewNormalDir(uploadedDir, driveItem)
 
+								// Hoisted: the right-hand side is fixed for the whole call, but sat inside the
+								// predicate, so it was recomputed for every item in the parent listing (and again
+								// for the root-mirror invocation).
+								const uploadedDirName = unwrappedDirMeta.meta?.name.toLowerCase().trim()
+
 								driveItemsQueryUpdateForNormalParent({
 									parentUuid: dirParentUuid,
 									updater: prev => [
 										...prev.filter(
 											item =>
 												item.data.uuid !== unwrappedDirMeta.uuid &&
-												item.data.decryptedMeta?.name.toLowerCase().trim() !==
-													unwrappedDirMeta.meta?.name.toLowerCase().trim()
+												item.data.decryptedMeta?.name.toLowerCase().trim() !== uploadedDirName
 										),
 										driveItem
 									]
@@ -574,14 +578,16 @@ export async function uploadCore(
 
 								cache.cacheNewFile(uploadedFile, driveItem)
 
+								// Hoisted for the same reason as the directory branch above.
+								const uploadedFileName = unwrappedFileMeta.meta?.name.toLowerCase().trim()
+
 								driveItemsQueryUpdateForNormalParent({
 									parentUuid: fileParentUuid,
 									updater: prev => [
 										...prev.filter(
 											item =>
 												item.data.uuid !== unwrappedFileMeta.file.uuid &&
-												item.data.decryptedMeta?.name.toLowerCase().trim() !==
-													unwrappedFileMeta.meta?.name.toLowerCase().trim()
+												item.data.decryptedMeta?.name.toLowerCase().trim() !== uploadedFileName
 										),
 										driveItem
 									]
@@ -842,13 +848,15 @@ export async function uploadCore(
 		// does inline on each fetch.
 		cache.cacheNewFile(result.data, driveItem)
 
+		// Hoisted out of the predicate: fixed for the whole call, previously recomputed per item in the
+		// parent listing — once per uploaded file, so it multiplies across a camera-upload backfill.
+		const uploadedName = unwrappedFileMeta.meta?.name.toLowerCase().trim()
+
 		driveItemsQueryUpdateForNormalParent({
 			parentUuid: parent.inner[0].uuid,
 			updater: prev => [
 				...prev.filter(
-					item =>
-						item.data.uuid !== result.data.uuid &&
-						item.data.decryptedMeta?.name.toLowerCase().trim() !== unwrappedFileMeta.meta?.name.toLowerCase().trim()
+					item => item.data.uuid !== result.data.uuid && item.data.decryptedMeta?.name.toLowerCase().trim() !== uploadedName
 				),
 				driveItem
 			]

@@ -1737,6 +1737,9 @@ export class Audio {
 	public async deletePlaylist({ playlist, signal }: { playlist: Playlist; signal?: AbortSignal }): Promise<void> {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const playlistsDir = await this.getPlaylistsDirectory(signal)
+		// Built once instead of per candidate file: `playlist.uuid` cannot change during the synchronous
+		// find below, and the template concat + toLowerCase + trim are pure.
+		const playlistFileName = `${playlist.uuid}.json`.toLowerCase().trim()
 
 		const file = (
 			await authedSdkClient.listDir(
@@ -1747,11 +1750,7 @@ export class Audio {
 						}
 					: undefined
 			)
-		).files.find(
-			f =>
-				f.meta.tag === FileMeta_Tags.Decoded &&
-				f.meta.inner[0].name.toLowerCase().trim() === `${playlist.uuid}.json`.toLowerCase().trim()
-		)
+		).files.find(f => f.meta.tag === FileMeta_Tags.Decoded && f.meta.inner[0].name.toLowerCase().trim() === playlistFileName)
 
 		if (file) {
 			await authedSdkClient.deleteFilePermanently(

@@ -72,8 +72,11 @@ export function buildSelectionMenuButtons({
 	// Select-all operates on the currently visible (search-filtered) set, falling back to
 	// the full playlist when no filter is applied — so "Select all" never reaches hidden tracks.
 	const selectableTracks = visibleTracks ?? playlist.files
-	const allVisibleSelected =
-		selectableTracks.length > 0 && selectableTracks.every(track => selectedTracks.some(st => st.uuid === track.uuid))
+	// Indexed rather than a nested scan — this was O(visible x selected), and it re-runs on every
+	// selection toggle. `Set.has` is SameValueZero, identical to `===` for the string uuids, and
+	// `every` still visits the same elements in the same order and short-circuits at the same index.
+	const selectedTrackUuids = new Set(selectedTracks.map(st => st.uuid))
+	const allVisibleSelected = selectableTracks.length > 0 && selectableTracks.every(track => selectedTrackUuids.has(track.uuid))
 
 	buttons.push({
 		id: "selectAllTracks",

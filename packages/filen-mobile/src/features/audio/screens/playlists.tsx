@@ -126,9 +126,10 @@ export function Playlists() {
 		return allPlaylists.filter(playlist => playlist.name.toLowerCase().includes(normalized))
 	})()
 
+	// Same indexed lookup as playlistMenuButtons — identical semantics, no nested scan.
+	const selectedPlaylistUuids = new Set(selectedPlaylists.map(selected => selected.uuid))
 	const allVisibleSelected =
-		visiblePlaylists.length > 0 &&
-		visiblePlaylists.every(playlist => selectedPlaylists.some(selected => selected.uuid === playlist.uuid))
+		visiblePlaylists.length > 0 && visiblePlaylists.every(playlist => selectedPlaylistUuids.has(playlist.uuid))
 
 	const handleCreatePlaylist = async () => {
 		const promptResult = await run(async () => {

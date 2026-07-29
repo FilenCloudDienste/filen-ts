@@ -167,9 +167,10 @@ export class FileCache {
 			throw new Error("Item does not have decrypted metadata")
 		}
 
-		const parentDirectory = new FileSystem.Directory(
-			FileSystem.Paths.join(PARENT_DIRECTORY.uri, item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
-		)
+		// Resolved once: for an external item this is an xxHash32 of its URL, and it was previously
+		// recomputed at all three sites below.
+		const itemId = item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item)
+		const parentDirectory = new FileSystem.Directory(FileSystem.Paths.join(PARENT_DIRECTORY.uri, itemId))
 
 		if ((opts?.ensureParentDirectory ?? true) && !parentDirectory.exists) {
 			parentDirectory.create({
@@ -182,13 +183,13 @@ export class FileCache {
 			file: new FileSystem.File(
 				FileSystem.Paths.join(
 					parentDirectory.uri,
-					`${item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item)}${FileSystem.Paths.extname(item.type === "drive" ? (item.data.data.decryptedMeta?.name ?? "") : item.data.name)}`
+					`${itemId}${FileSystem.Paths.extname(item.type === "drive" ? (item.data.data.decryptedMeta?.name ?? "") : item.data.name)}`
 				)
 			),
 			metadata: new FileSystem.File(
 				FileSystem.Paths.join(
 					parentDirectory.uri,
-					`${item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item)}.filenmeta`
+					`${itemId}.filenmeta`
 				)
 			),
 			parentDirectory
