@@ -147,6 +147,11 @@ const Drive = () => {
 	})
 	const hiddenCount = visibleItems.length - items.length
 
+	// One instance for the whole list rather than one per row: the row components take this as a prop,
+	// so a fresh closure per cell would change the prop identity on every render and defeat FlashList's
+	// per-cell memo. The compiler caches it on [items], which renderItem already depends on.
+	const getListItems = () => items
+
 	// The filter emptied a listing that wasn't empty. Without its own empty state this reads as
 	// "this directory is empty" or, worse, "no results" for a search whose term WAS matched —
 	// leaving no way to work out why. Covers both, since both render from `items`.
@@ -301,12 +306,14 @@ const Drive = () => {
 							itemHeight={isGridActive ? gridItemHeight : undefined}
 							itemsPerRow={isGridActive ? columns : undefined}
 							renderItem={(info: ListRenderItemInfo<DriveItem>) => {
+								// getListItems is hoisted (see above): a fresh closure per row would be a new prop
+								// identity on every cell, defeating FlashList's per-cell memo.
 								if (isGridActive) {
 									return (
 										<GridItem
 											info={info}
 											drivePath={drivePath}
-											getListItems={() => items}
+											getListItems={getListItems}
 											itemWidth={gridItemWidth}
 											highlighted={info.item.data.uuid === highlightedUuid}
 										/>
@@ -317,7 +324,7 @@ const Drive = () => {
 									<Item
 										info={info}
 										drivePath={drivePath}
-										getListItems={() => items}
+										getListItems={getListItems}
 										searchParentPath={isCacheSearch ? searchResultPaths.get(info.item.data.uuid) : undefined}
 										highlighted={info.item.data.uuid === highlightedUuid}
 									/>

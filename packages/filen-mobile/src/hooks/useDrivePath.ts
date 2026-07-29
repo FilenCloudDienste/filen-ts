@@ -87,13 +87,26 @@ export default function useDrivePath(): DrivePath {
 		linked?: string
 		shared?: string
 	}>()
+	// Read the params out as STRINGS up front. useLocalSearchParams() builds a fresh object on every
+	// call (Object.fromEntries over the route params), so any derived value that reads `searchParams`
+	// itself — the `searchParams &&` guard and the `searchParams?.shared` access below both do — gets
+	// keyed on that new identity and recomputes every render. That made the returned DrivePath a new
+	// object every render, which flows into the drive list's `renderItem` and defeats FlashList's per-cell
+	// memo (its comparator checks `renderItem` by identity), re-rendering every visible row — each of
+	// which rebuilds its whole context menu. Keying on the strings instead is behaviour-identical:
+	// useLocalSearchParams never returns null/undefined (it falls back to `{}` internally), so the
+	// object-truthiness guard could not have been false.
+	const uuidParam = searchParams.uuid
+	const selectOptionsParam = searchParams.selectOptions
+	const linkedParam = searchParams.linked
+	const sharedParam = searchParams.shared
 	const { getId: getNavigationId } = useNavigation()
 	const { config: cameraUploadConfig } = useCameraUpload()
 
 	const selectOptions = ((): SelectOptions | null => {
-		if (searchParams && searchParams.selectOptions) {
+		if (selectOptionsParam) {
 			try {
-				const parsed = deserialize(searchParams.selectOptions) as SelectOptions
+				const parsed = deserialize(selectOptionsParam) as SelectOptions
 
 				return {
 					type: parsed.type,
@@ -114,9 +127,9 @@ export default function useDrivePath(): DrivePath {
 	})()
 
 	const linked = ((): Linked | null => {
-		if (searchParams && searchParams.linked) {
+		if (linkedParam) {
 			try {
-				const parsed = deserialize(searchParams.linked) as Linked
+				const parsed = deserialize(linkedParam) as Linked
 
 				return parsed
 			} catch {
@@ -129,13 +142,13 @@ export default function useDrivePath(): DrivePath {
 
 	// The sharedIn/sharedOut destination screens carry the tapped directory's SDK share context here;
 	// garbage/absent parses to null (deserializeRouteParam swallows its own error).
-	const shared = deserializeRouteParam<SharedNavContext>(searchParams?.shared)
+	const shared = deserializeRouteParam<SharedNavContext>(sharedParam)
 
 	const drivePath = ((): DrivePath => {
 		const navigationId = getNavigationId() ?? ""
 		const isDriveSelectScreen = navigationId.startsWith("/driveSelect")
 		const uuid =
-			searchParams && searchParams.uuid && searchParams.uuid.length > 0 && validateUuid(searchParams.uuid) ? searchParams.uuid : null
+			uuidParam && uuidParam.length > 0 && validateUuid(uuidParam) ? uuidParam : null
 
 		if (isDriveSelectScreen && selectOptions) {
 			return {
