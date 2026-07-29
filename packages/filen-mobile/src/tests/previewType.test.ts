@@ -14,7 +14,7 @@ vi.mock("@/constants", () => {
 	}
 })
 
-import { getPreviewType, getPreviewTypeFromMime, isImagePreviewType, isProbablyBinaryText } from "@/lib/previewType"
+import { getPreviewType, isImagePreviewType, isProbablyBinaryText } from "@/lib/previewType"
 import { Paths } from "@/tests/mocks/expoFileSystem"
 
 // ---------------------------------------------------------------------------
@@ -164,80 +164,6 @@ describe("getPreviewType", () => {
 		it("returns 'unknown' for an empty string", () => {
 			expect(getPreviewType("")).toBe("unknown")
 		})
-	})
-})
-
-// ---------------------------------------------------------------------------
-// getPreviewTypeFromMime
-// ---------------------------------------------------------------------------
-
-describe("getPreviewTypeFromMime", () => {
-	it("returns 'image' for image/jpeg", () => {
-		// mime-types.extension('image/jpeg') -> 'jpeg' -> .jpeg -> image
-		expect(getPreviewTypeFromMime("image/jpeg")).toBe("image")
-	})
-
-	it("returns 'image' for image/png", () => {
-		expect(getPreviewTypeFromMime("image/png")).toBe("image")
-	})
-
-	it("returns 'svg' for image/svg+xml", () => {
-		// mime-types.extension('image/svg+xml') -> 'svg' -> .svg -> svg (not image)
-		expect(getPreviewTypeFromMime("image/svg+xml")).toBe("svg")
-	})
-
-	it("returns 'video' for video/mp4", () => {
-		// mime-types.extension('video/mp4') -> 'mp4' -> .mp4 -> video
-		expect(getPreviewTypeFromMime("video/mp4")).toBe("video")
-	})
-
-	it("returns 'audio' for audio/mpeg (maps to .mpga — must be in EXPO_AUDIO_SUPPORTED_EXTENSIONS)", () => {
-		// mime-types resolves audio/mpeg -> 'mpga'; EXPO_AUDIO_SUPPORTED_EXTENSIONS mock includes .mpga
-		expect(getPreviewTypeFromMime("audio/mpeg")).toBe("audio")
-	})
-
-	it("returns 'audio' for audio/mp3 (maps to .mp3)", () => {
-		// mime-types resolves audio/mp3 -> 'mp3'
-		expect(getPreviewTypeFromMime("audio/mp3")).toBe("audio")
-	})
-
-	it("returns 'pdf' for application/pdf", () => {
-		// mime-types.extension('application/pdf') -> 'pdf' -> .pdf -> pdf
-		expect(getPreviewTypeFromMime("application/pdf")).toBe("pdf")
-	})
-
-	it("returns 'text' for text/plain", () => {
-		// mime-types.extension('text/plain') -> 'txt' -> .txt -> text
-		expect(getPreviewTypeFromMime("text/plain")).toBe("text")
-	})
-
-	it("returns 'docx' for the Word MIME type", () => {
-		// mime-types resolves the full OOXML mime -> 'docx'
-		expect(getPreviewTypeFromMime("application/vnd.openxmlformats-officedocument.wordprocessingml.document")).toBe("docx")
-	})
-
-	it("returns 'unknown' for an unrecognised MIME type (extension lookup returns false)", () => {
-		// mime-types.extension('application/x-unknown') -> false -> 'unknown'
-		expect(getPreviewTypeFromMime("application/x-unknown")).toBe("unknown")
-	})
-
-	it("returns 'unknown' for an empty string (extension lookup returns false)", () => {
-		// mime-types.extension('') -> false -> 'unknown'
-		expect(getPreviewTypeFromMime("")).toBe("unknown")
-	})
-
-	it("normalises uppercase MIME via toLowerCase before lookup", () => {
-		// 'IMAGE/JPEG'.toLowerCase() -> 'image/jpeg' -> 'jpeg' -> .jpeg -> image
-		expect(getPreviewTypeFromMime("IMAGE/JPEG")).toBe("image")
-	})
-
-	it("normalises whitespace-padded MIME via trim before lookup", () => {
-		// '  image/jpeg  '.trim() -> 'image/jpeg' -> 'jpeg' -> .jpeg -> image
-		expect(getPreviewTypeFromMime("  image/jpeg  ")).toBe("image")
-	})
-
-	it("normalises mixed-case with surrounding spaces", () => {
-		expect(getPreviewTypeFromMime("  IMAGE/JPEG  ")).toBe("image")
 	})
 })
 

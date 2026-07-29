@@ -3,7 +3,6 @@ import * as FileSystem from "expo-file-system"
 // built-in. Both are ports of the same algorithm expo-file-system vendors, so extname is identical.
 import pathModule from "path"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
-import mimeTypes from "mime-types"
 
 export type PreviewType = "image" | "svg" | "video" | "unknown" | "pdf" | "text" | "code" | "audio" | "docx"
 
@@ -129,17 +128,6 @@ export function getPreviewType(name: string): PreviewType {
 			return "unknown"
 		}
 	}
-}
-
-export function getPreviewTypeFromMime(mimeType: string): PreviewType {
-	const normalizedMimeType = mimeType.toLowerCase().trim()
-	const extname = mimeTypes.extension(normalizedMimeType)
-
-	if (!extname) {
-		return "unknown"
-	}
-
-	return getPreviewType(`file.${extname}`)
 }
 
 // SVG previews render via react-native-svg but are image-equivalent for classification

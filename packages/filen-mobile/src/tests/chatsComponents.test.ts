@@ -244,7 +244,7 @@ vi.mock("@/lib/systemPresentation", () => ({
 // ─── Actual imports ───────────────────────────────────────────────────────────
 
 import {
-	MENTION_REGEX,
+	MENTIONS,
 	CODE_REGEX,
 	EMOJI_REGEX_WITH_SKIN_TONES,
 	LINE_BREAK_REGEX,
@@ -273,32 +273,32 @@ function makeChat(overrides: Partial<Chat> = {}): Chat {
 	} as Chat
 }
 
-// ─── MENTION_REGEX ────────────────────────────────────────────────────────────
+// ─── MENTIONS ─────────────────────────────────────────────────────────────────
 
-describe("MENTION_REGEX", () => {
+describe("MENTIONS", () => {
 	it("matches email-format mention @user@domain.com", () => {
 		const input = "hello @alice@example.com how are you"
-		const matches = input.match(new RegExp(MENTION_REGEX.source, MENTION_REGEX.flags))
+		const matches = input.match(new RegExp(MENTIONS.source, MENTIONS.flags))
 		expect(matches).not.toBeNull()
 		expect(matches).toContain("@alice@example.com")
 	})
 
 	it("matches @everyone", () => {
 		const input = "hey @everyone listen up"
-		const matches = input.match(new RegExp(MENTION_REGEX.source, MENTION_REGEX.flags))
+		const matches = input.match(new RegExp(MENTIONS.source, MENTIONS.flags))
 		expect(matches).not.toBeNull()
 		expect(matches).toContain("@everyone")
 	})
 
 	it("does NOT match a bare @word with no domain", () => {
 		const input = "hello @alice"
-		const matches = input.match(new RegExp(MENTION_REGEX.source, MENTION_REGEX.flags))
+		const matches = input.match(new RegExp(MENTIONS.source, MENTIONS.flags))
 		expect(matches).toBeNull()
 	})
 
 	it("matches multiple email-format mentions in one string", () => {
 		const input = "@a@b.com and @c@d.org"
-		const matches = input.match(new RegExp(MENTION_REGEX.source, MENTION_REGEX.flags))
+		const matches = input.match(new RegExp(MENTIONS.source, MENTIONS.flags))
 		expect(matches).toHaveLength(2)
 	})
 

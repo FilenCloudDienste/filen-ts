@@ -233,26 +233,6 @@ export function simpleDateNoTime(timestamp: number | Date): string {
 	return formatDatePart(year, month, day)
 }
 
-/**
- * Fast replacement for Intl.DateTimeFormat with time only (no date)
- * Automatically uses user's locale for 12h/24h format
- *
- * @param timestamp - Unix timestamp (seconds or milliseconds) or Date object
- * @returns Formatted string according to user's locale
- *
- * @example
- * // US locale: "02:30:45 PM"
- * // EU locale: "14:30:45"
- */
-export function simpleDateNoDate(timestamp: number | Date): string {
-	const date = toDate(timestamp)
-	const hours = date.getHours()
-	const minutes = pad2(date.getMinutes())
-	const seconds = pad2(date.getSeconds())
-
-	return formatTimePart(hours, minutes, seconds)
-}
-
 // Number of days after which formatRelativeTime falls back to the absolute date.
 const RELATIVE_TIME_CUTOFF_DAYS = 7
 

@@ -18,7 +18,6 @@ import { URL_REGEX } from "@/constants"
 import { useTranslation } from "react-i18next"
 import logger from "@/lib/logger"
 
-export const MENTION_REGEX: RegExp = /(@[\w.-]+@[\w.-]+\.\w+|@everyone)/g
 export const LINE_BREAK_REGEX: RegExp = /\n/gi
 export const CODE_REGEX: RegExp = /```([\s\S]*?)```/gi
 export const EMOJI_REGEX_WITH_SKIN_TONES: RegExp = /:[\d+_a-z-]+(?:::skin-tone-\d+)?:/gi

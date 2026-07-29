@@ -14,7 +14,6 @@ describe("time", () => {
 	describe("en-US locale (12-hour, MDY)", () => {
 		let simpleDate: typeof import("@/lib/time").simpleDate
 		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
-		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
 
 		beforeEach(async () => {
 			vi.resetModules()
@@ -27,7 +26,6 @@ describe("time", () => {
 
 			simpleDate = mod.simpleDate
 			simpleDateNoTime = mod.simpleDateNoTime
-			simpleDateNoDate = mod.simpleDateNoDate
 		})
 
 		it("converts seconds timestamp (< 4102444800) by multiplying by 1000", () => {
@@ -69,33 +67,26 @@ describe("time", () => {
 			expect(result).toBe(`${month}/${day}/${year}`)
 		})
 
-		it("simpleDateNoDate returns time only (no date)", () => {
-			const result = simpleDateNoDate(fixedDate)
-			const year = String(fixedDate.getFullYear())
-
-			expect(result).not.toContain(year)
-			expect(result).toMatch(/\d{2}:\d{2}:\d{2} (AM|PM)/)
-		})
 
 		it("12-hour format: hour 0 → 12:XX:XX AM", () => {
 			const midnight = new Date(2025, 0, 1, 0, 7, 3)
-			const result = simpleDateNoDate(midnight)
+			const result = simpleDate(midnight)
 
-			expect(result).toBe("12:07:03 AM")
+			expect(result).toContain("12:07:03 AM")
 		})
 
 		it("12-hour format: hour 12 → 12:XX:XX PM", () => {
 			const noon = new Date(2025, 0, 1, 12, 7, 3)
-			const result = simpleDateNoDate(noon)
+			const result = simpleDate(noon)
 
-			expect(result).toBe("12:07:03 PM")
+			expect(result).toContain("12:07:03 PM")
 		})
 
 		it("12-hour format: hour 13 → 01:XX:XX PM", () => {
 			const afternoon = new Date(2025, 0, 1, 13, 7, 3)
-			const result = simpleDateNoDate(afternoon)
+			const result = simpleDate(afternoon)
 
-			expect(result).toBe("01:07:03 PM")
+			expect(result).toContain("01:07:03 PM")
 		})
 
 		it("pad2: single digit gets leading zero, double digit stays", () => {
@@ -110,7 +101,6 @@ describe("time", () => {
 
 	describe("de-DE locale (24-hour, DMY, dot separator)", () => {
 		let simpleDate: typeof import("@/lib/time").simpleDate
-		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
 
 		beforeEach(async () => {
 			vi.resetModules()
@@ -122,7 +112,6 @@ describe("time", () => {
 			const mod = await import("@/lib/time")
 
 			simpleDate = mod.simpleDate
-			simpleDateNoDate = mod.simpleDateNoDate
 		})
 
 		it("formats as DMY with dot separator", () => {
@@ -136,23 +125,22 @@ describe("time", () => {
 
 		it("24-hour format: hour 0 → 00:XX:XX", () => {
 			const midnight = new Date(2025, 0, 1, 0, 7, 3)
-			const result = simpleDateNoDate(midnight)
+			const result = simpleDate(midnight)
 
-			expect(result).toBe("00:07:03")
+			expect(result).toContain("00:07:03")
 		})
 
 		it("24-hour format: hour 13 → 13:XX:XX", () => {
 			const afternoon = new Date(2025, 0, 1, 13, 7, 3)
-			const result = simpleDateNoDate(afternoon)
+			const result = simpleDate(afternoon)
 
-			expect(result).toBe("13:07:03")
+			expect(result).toContain("13:07:03")
 		})
 	})
 
 	describe("en-GB locale (12-hour, DMY, slash separator)", () => {
 		let simpleDate: typeof import("@/lib/time").simpleDate
 		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
-		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
 
 		beforeEach(async () => {
 			vi.resetModules()
@@ -165,7 +153,6 @@ describe("time", () => {
 
 			simpleDate = mod.simpleDate
 			simpleDateNoTime = mod.simpleDateNoTime
-			simpleDateNoDate = mod.simpleDateNoDate
 		})
 
 		it("formats as DMY with slash separator", () => {
@@ -191,17 +178,10 @@ describe("time", () => {
 			expect(result).toBe("15/01/2025")
 		})
 
-		it("simpleDateNoDate returns 12-hour time only", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoDate(d)
-
-			expect(result).toBe("02:30:45 PM")
-		})
 	})
 
 	describe("en-AU locale (12-hour, DMY, slash separator)", () => {
 		let simpleDate: typeof import("@/lib/time").simpleDate
-		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
 
 		beforeEach(async () => {
 			vi.resetModules()
@@ -213,7 +193,6 @@ describe("time", () => {
 			const mod = await import("@/lib/time")
 
 			simpleDate = mod.simpleDate
-			simpleDateNoDate = mod.simpleDateNoDate
 		})
 
 		it("formats as DMY with slash separator", () => {
@@ -225,15 +204,14 @@ describe("time", () => {
 
 		it("uses 12-hour time with AM/PM", () => {
 			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoDate(d)
+			const result = simpleDate(d)
 
-			expect(result).toBe("02:30:45 PM")
+			expect(result).toContain("02:30:45 PM")
 		})
 	})
 
 	describe("en-CA locale (12-hour, MDY, slash separator)", () => {
 		let simpleDate: typeof import("@/lib/time").simpleDate
-		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
 
 		beforeEach(async () => {
 			vi.resetModules()
@@ -245,7 +223,6 @@ describe("time", () => {
 			const mod = await import("@/lib/time")
 
 			simpleDate = mod.simpleDate
-			simpleDateNoDate = mod.simpleDateNoDate
 		})
 
 		it("formats as MDY with slash separator", () => {
@@ -257,15 +234,14 @@ describe("time", () => {
 
 		it("uses 12-hour time with AM/PM", () => {
 			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoDate(d)
+			const result = simpleDate(d)
 
-			expect(result).toBe("02:30:45 PM")
+			expect(result).toContain("02:30:45 PM")
 		})
 	})
 
 	describe("nb locale (24-hour, DMY, dot separator)", () => {
 		let simpleDate: typeof import("@/lib/time").simpleDate
-		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
 
 		beforeEach(async () => {
 			vi.resetModules()
@@ -277,7 +253,6 @@ describe("time", () => {
 			const mod = await import("@/lib/time")
 
 			simpleDate = mod.simpleDate
-			simpleDateNoDate = mod.simpleDateNoDate
 		})
 
 		it("formats as DMY with dot separator and 24-hour time", () => {
@@ -287,17 +262,16 @@ describe("time", () => {
 			expect(result).toBe("15.01.2025, 14:30:45")
 		})
 
-		it("24-hour format in time-only output", () => {
+		it("24-hour format in the combined output", () => {
 			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoDate(d)
+			const result = simpleDate(d)
 
-			expect(result).toBe("14:30:45")
+			expect(result).toContain("14:30:45")
 		})
 	})
 
 	describe("edge cases", () => {
 		let simpleDate: typeof import("@/lib/time").simpleDate
-		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
 
 		beforeEach(async () => {
 			vi.resetModules()
@@ -309,21 +283,20 @@ describe("time", () => {
 			const mod = await import("@/lib/time")
 
 			simpleDate = mod.simpleDate
-			simpleDateNoDate = mod.simpleDateNoDate
 		})
 
 		it("midnight (hour 0) shows 12:xx:xx AM in 12-hour format", () => {
 			const midnight = new Date(2025, 0, 1, 0, 0, 0)
-			const result = simpleDateNoDate(midnight)
+			const result = simpleDate(midnight)
 
-			expect(result).toBe("12:00:00 AM")
+			expect(result).toContain("12:00:00 AM")
 		})
 
 		it("noon (hour 12) shows 12:xx:xx PM in 12-hour format", () => {
 			const noon = new Date(2025, 0, 1, 12, 0, 0)
-			const result = simpleDateNoDate(noon)
+			const result = simpleDate(noon)
 
-			expect(result).toBe("12:00:00 PM")
+			expect(result).toContain("12:00:00 PM")
 		})
 
 		it("epoch 0 timestamp (treated as seconds) formats the resulting local date without asserting on a specific year", () => {
@@ -385,7 +358,6 @@ describe("time", () => {
 	describe("zh-CN locale (24-hour, YMD, dash separator)", () => {
 		let simpleDate: typeof import("@/lib/time").simpleDate
 		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
-		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
 
 		beforeEach(async () => {
 			vi.resetModules()
@@ -398,7 +370,6 @@ describe("time", () => {
 
 			simpleDate = mod.simpleDate
 			simpleDateNoTime = mod.simpleDateNoTime
-			simpleDateNoDate = mod.simpleDateNoDate
 		})
 
 		it("formats as YMD with dash separator", () => {
@@ -415,11 +386,11 @@ describe("time", () => {
 			expect(result).toBe("2025-01-15")
 		})
 
-		it("24-hour time in time-only output", () => {
+		it("24-hour time in the combined output", () => {
 			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoDate(d)
+			const result = simpleDate(d)
 
-			expect(result).toBe("14:30:45")
+			expect(result).toContain("14:30:45")
 		})
 
 		it("output is distinct from de-DE DMY format", () => {
@@ -477,7 +448,6 @@ describe("time", () => {
 		// silently fall through to DMY and display the wrong date order.
 		let simpleDate: typeof import("@/lib/time").simpleDate
 		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
-		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
 
 		beforeEach(async () => {
 			vi.resetModules()
@@ -490,7 +460,6 @@ describe("time", () => {
 
 			simpleDate = mod.simpleDate
 			simpleDateNoTime = mod.simpleDateNoTime
-			simpleDateNoDate = mod.simpleDateNoDate
 		})
 
 		it("formats as YMD with dash separator (not DMY)", () => {
@@ -510,11 +479,11 @@ describe("time", () => {
 			expect(result).toBe("2025-01-15")
 		})
 
-		it("24-hour time in time-only output", () => {
+		it("24-hour time in the combined output", () => {
 			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoDate(d)
+			const result = simpleDate(d)
 
-			expect(result).toBe("14:30:45")
+			expect(result).toContain("14:30:45")
 		})
 	})
 
@@ -524,7 +493,6 @@ describe("time", () => {
 		// the wrong date order — mirrors the hu-HU regression guard above.
 		let simpleDate: typeof import("@/lib/time").simpleDate
 		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
-		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
 
 		beforeEach(async () => {
 			vi.resetModules()
@@ -537,7 +505,6 @@ describe("time", () => {
 
 			simpleDate = mod.simpleDate
 			simpleDateNoTime = mod.simpleDateNoTime
-			simpleDateNoDate = mod.simpleDateNoDate
 		})
 
 		it("formats as YMD with dash separator (not DMY)", () => {
@@ -557,11 +524,11 @@ describe("time", () => {
 			expect(result).toBe("2025-01-15")
 		})
 
-		it("24-hour time in time-only output", () => {
+		it("24-hour time in the combined output", () => {
 			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoDate(d)
+			const result = simpleDate(d)
 
-			expect(result).toBe("14:30:45")
+			expect(result).toContain("14:30:45")
 		})
 	})
 
@@ -637,7 +604,6 @@ describe("time", () => {
 	describe("ja-JP locale (24-hour, YMD, dash separator)", () => {
 		let simpleDate: typeof import("@/lib/time").simpleDate
 		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
-		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
 
 		beforeEach(async () => {
 			vi.resetModules()
@@ -650,7 +616,6 @@ describe("time", () => {
 
 			simpleDate = mod.simpleDate
 			simpleDateNoTime = mod.simpleDateNoTime
-			simpleDateNoDate = mod.simpleDateNoDate
 		})
 
 		it("formats as YMD with dash separator", () => {
@@ -669,11 +634,11 @@ describe("time", () => {
 			expect(result).toBe("2025-01-15")
 		})
 
-		it("24-hour format in time-only output", () => {
+		it("24-hour format in the combined output", () => {
 			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoDate(d)
+			const result = simpleDate(d)
 
-			expect(result).toBe("14:30:45")
+			expect(result).toContain("14:30:45")
 		})
 	})
 
