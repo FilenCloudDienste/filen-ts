@@ -9,6 +9,7 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 vi.mock("expo-media-library/next", async () => await import("@/tests/mocks/expoMediaLibrary"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
+vi.mock("react-native-blob-util", async () => await import("@/tests/mocks/reactNativeBlobUtil"))
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
@@ -322,6 +323,7 @@ import events from "@/lib/events"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { ml, MediaType } from "@/tests/mocks/expoMediaLibrary"
 import { fs } from "@/tests/mocks/expoFileSystem"
+import { mockBlobUtilHash } from "@/tests/mocks/reactNativeBlobUtil"
 import * as FileSystem from "expo-file-system"
 
 // #103 — capture constructor-registered handlers in beforeAll (after module
@@ -949,6 +951,57 @@ describe("sync flow", () => {
 			fs.set(uri, new Uint8Array([1, 2, 3]))
 		}
 	}
+
+	// The md5 moved off the JS thread (expo's File.md5 is a synchronous whole-file read) onto
+	// blob-util's background queue. These pin the argument shape, which is where that swap can go
+	// wrong in a way no simulator run would reveal.
+	describe("asset hashing", () => {
+		it("passes a scheme-less filesystem path, not the file:// uri", async () => {
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+			await cameraUpload.sync()
+
+			// iOS hands this straight to `fileExistsAtPath:`, which does not understand a URL.
+			expect(mockBlobUtilHash).toHaveBeenCalledWith("/media/a1", "md5")
+		})
+
+		it("percent-decodes the path", async () => {
+			// Asset.getUri() returns a percent-ENCODED file:// url on both platforms, and neither
+			// blob-util path decodes: iOS never touches the string, Android strips the scheme with a
+			// plain replace. Passing it through would ENOENT on every asset with a space in its name.
+			const uri = "file:///media/holiday%20photo.jpg"
+
+			ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+			ml.addAsset({
+				id: "a1",
+				filename: "holiday photo.jpg",
+				uri,
+				mediaType: MediaType.IMAGE,
+				creationTime: 1000,
+				modificationTime: 2000
+			})
+
+			fs.set(uri, new Uint8Array([1, 2, 3]))
+
+			await cameraUpload.sync()
+
+			expect(mockBlobUtilHash).toHaveBeenCalledWith("/media/holiday photo.jpg", "md5")
+		})
+
+		it("stores the returned hash verbatim, so existing ledger entries keep shielding", async () => {
+			// Both implementations emit lowercase hex, so a value written by the old expo path must
+			// still match what blob-util returns — otherwise every asset re-uploads once on update.
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+			mockBlobUtilHash.mockResolvedValueOnce("9e107d9d372bb6826bd81d3542a419d6")
+
+			await cameraUpload.sync()
+
+			expect(cameraUploadState.hashes.get("a1")).toMatchObject({
+				md5: "9e107d9d372bb6826bd81d3542a419d6"
+			})
+		})
+	})
 
 	it("uploads new local files not present on remote", async () => {
 		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])

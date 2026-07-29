@@ -84,6 +84,7 @@ vi.mock("expo-media-library/legacy", async () => {
 })
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
+vi.mock("react-native-blob-util", async () => await import("@/tests/mocks/reactNativeBlobUtil"))
 
 vi.mock("expo-crypto", () => ({
 	randomUUID: () => `bench-uuid-${H.uuidCounter++}`

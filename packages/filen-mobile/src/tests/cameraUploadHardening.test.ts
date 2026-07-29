@@ -34,6 +34,7 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 vi.mock("expo-media-library/next", async () => await import("@/tests/mocks/expoMediaLibrary"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
+vi.mock("react-native-blob-util", async () => await import("@/tests/mocks/reactNativeBlobUtil"))
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
@@ -239,10 +240,18 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 	isTrashParent: (parent: { tag?: string } | null | undefined) => parent?.tag === "Trash"
 }))
 
-vi.mock("@/lib/paths", () => ({
-	normalizeFilePathForSdk: (p: string) => p,
-	normalizeFilePathForExpo: (p: string) => p
-}))
+vi.mock("@/lib/paths", async () => {
+	// normalizeFilePathForSdk is REAL here, not an identity stub: it is what turns Asset.getUri()'s
+	// percent-encoded file:// url into the plain filesystem path blob-util's hash requires, and the
+	// blob-util mock rejects a scheme-qualified path exactly as iOS' fileExistsAtPath: does. Stubbing
+	// it out would make every hash in this suite ENOENT and every upload silently vanish.
+	const actual = await vi.importActual<typeof import("@/lib/paths")>("@/lib/paths")
+
+	return {
+		normalizeFilePathForSdk: actual.normalizeFilePathForSdk,
+		normalizeFilePathForExpo: (p: string) => p
+	}
+})
 
 vi.mock("@/lib/signals", () => ({
 	PauseSignal: class {

@@ -5,12 +5,13 @@ import auth from "@/lib/auth"
 import { type FileWithPath, AnyNormalDir, AnyNormalDir_Tags, AnyDirWithContext, NonRootDir_Tags, parseName, encodeName } from "@filen/sdk-rs"
 import { normalizeModificationTimestampForComparison } from "@/lib/utils"
 import { type UnwrapFileMetaResult, unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
-import { normalizeFilePathForExpo } from "@/lib/paths"
+import { normalizeFilePathForExpo, normalizeFilePathForSdk } from "@/lib/paths"
 import { isConvertHeicToJpgEnabled, convertHeicToJpg } from "@/lib/imageConversion"
 import { transplantMetadata } from "@/modules/filen-exif"
 import { PauseSignal } from "@/lib/signals"
 import transfers from "@/features/transfers/transfers"
 import * as FileSystem from "expo-file-system"
+import * as ReactNativeBlobUtil from "react-native-blob-util"
 import { run, Semaphore, fastLocaleCompare } from "@filen/utils"
 import useCameraUploadStore from "@/features/cameraUpload/store/useCameraUpload.store"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
@@ -203,6 +204,47 @@ const remoteFileMetaCache = new WeakMap<object, UnwrapFileMetaResult>()
 const SLOW_LEDGER_WARN_MS = 2000
 const SLOW_LISTING_WARN_MS = 10000
 const SLOW_PIPELINE_WARN_HASHES = 500
+
+/**
+ * MD5 of the asset at `uri`, computed OFF the JS thread.
+ *
+ * expo-file-system's `File.md5` is a synchronous property: both platforms stream the whole file
+ * inside a JSI getter, so the JS thread is blocked for the length of every hash. That is the cost
+ * that dominates a first sync (or a ledger rebuild) of a large library — thousands of full-file
+ * reads, each one a frame-stopper. blob-util does the same streaming MD5 with the same bounded
+ * memory (1MB chunks) but on a background queue: iOS dispatches it to the module's own serial
+ * methodQueue, Android to its ThreadPoolExecutor. Awaiting it leaves the JS thread free throughout,
+ * and on Android several assets hash in parallel.
+ *
+ * Byte-compatible with what it replaces, which is the load-bearing part: both implementations emit
+ * lowercase hex, and this md5 IS the persisted dedup shield key, so every existing ledger entry
+ * stays valid and no one re-uploads their library.
+ *
+ * The path has to be normalised first, and passing `uri` through would fail in a way that only
+ * shows up in the field: `Asset.getUri()` returns a PERCENT-ENCODED `file://` URL, iOS' hash hands
+ * its argument straight to `fileExistsAtPath:` (no scheme stripping, no decoding), and Android's
+ * `normalizePath` strips `file://` with a plain string replace and likewise never decodes — so any
+ * asset whose name contains a space would ENOENT on both.
+ */
+async function hashAssetMd5(uri: string): Promise<string> {
+	const result = await run(async () => {
+		return await ReactNativeBlobUtil.default.fs.hash(normalizeFilePathForSdk(uri), "md5")
+	})
+
+	if (!result.success || !result.data) {
+		// blob-util REJECTS (ENOENT/EREAD) where the expo property returned a falsy value. Both mean
+		// the same thing to the pipeline, so keep throwing the localized message the call site always
+		// threw — but log the real reason first, or switching to a rejecting API would cost us the
+		// diagnostics the old falsy check never had.
+		logger.warn("cameraUpload", "Asset hash failed", {
+			error: result.success ? "empty hash" : result.error
+		})
+
+		throw new Error(i18n.t("camera_upload_processing_failed"))
+	}
+
+	return result.data
+}
 
 class CameraUpload {
 	private globalAbortController = new AbortController()
@@ -1497,15 +1539,11 @@ class CameraUpload {
 									throw new Error(i18n.t("camera_upload_file_missing"))
 								}
 
-								// Synchronous whole-file read on the JS thread — counted so a pass whose
-								// cost is dominated by hashing is visible in the field log.
+								// Counted so a pass whose cost is dominated by hashing is visible in the
+								// field log (see SLOW_PIPELINE_WARN_HASHES).
 								hashed++
 
-								const md5 = assetFile.md5
-
-								if (!md5) {
-									throw new Error(i18n.t("camera_upload_processing_failed"))
-								}
+								const md5 = await hashAssetMd5(uri)
 
 								if (cachedEntry && md5 === cachedEntry.md5 && hashEntryCoversPath(cachedEntry, delta.file.path)) {
 									// Content unchanged (view-touched mtime bump or a remotely-
@@ -1704,8 +1742,10 @@ class CameraUpload {
 			}
 
 			// Wall-clock is NOT the trigger — a pass that legitimately uploads for ten minutes is
-			// healthy. The hash count is: every one of those is a synchronous full-file read on the JS
-			// thread, so past this many the pass is JS-thread-bound and that is what the user feels.
+			// healthy. The hash count is: each one is a full-file read, so past this many the pass is
+			// IO-bound on the local disk before a single byte goes out. It no longer blocks the JS
+			// thread (hashAssetMd5), but it still says how much work the mtime shield failed to
+			// absorb, which is what distinguishes a normal sync from one re-reading a whole library.
 			if (hashed > SLOW_PIPELINE_WARN_HASHES) {
 				logger.warn("cameraUpload", "Upload pass hashed a large number of assets", pipelinePayload)
 			} else {
