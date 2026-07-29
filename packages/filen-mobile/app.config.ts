@@ -3,6 +3,7 @@
 import "ts-node/register"
 import type { ExpoConfig, ConfigContext } from "expo/config"
 import { SUPPORTED_LANGUAGES } from "./src/locales/languages"
+import { EXTERNAL_LINK_PROTOCOLS } from "./src/components/textEditor/linkUtils"
 
 const VERSION: string = "4.0.15"
 
@@ -271,6 +272,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		],
 		"./plugins/withAndroidNetworkSecurityConfig",
 		"./plugins/withAndroidLargeHeapAndHardwareAcceleration",
+		[
+			"./plugins/withAndroidManifestPolicies",
+			{
+				// Derived from the runtime allowlist so the manifest <queries> block and what the app is
+				// actually willing to open can never drift apart. "http://" -> "http", "tel:" -> "tel".
+				schemes: EXTERNAL_LINK_PROTOCOLS.map(protocol => protocol.replace(/:.*$/, ""))
+			}
+		],
 		"./plugins/withGradleMemory",
 		"./plugins/withNotifeeForegroundServiceType",
 		[
