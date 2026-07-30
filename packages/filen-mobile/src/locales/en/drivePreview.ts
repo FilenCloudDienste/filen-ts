@@ -33,6 +33,12 @@ export const drivePreview = {
 	unable_to_load_pdf: "Unable to load this PDF",
 	/** Button shown after the user dismissed the password prompt — re-opens the prompt to enter the PDF password */
 	enter_pdf_password: "Enter password",
+	/** Password prompt message shown on a second attempt, after the previously entered PDF password was rejected */
+	incorrect_pdf_password: "Incorrect password. Try again",
+	/** Error state body shown when a PDF is larger than the viewer will open */
+	pdf_too_large: "This PDF is too large to preview",
+	/** Error state body shown when this device's system WebView is too old to render PDFs */
+	pdf_preview_unsupported: "PDFs can't be previewed on this device",
 
 	// ── Shared preview error states (previewText.tsx / previewDocx.tsx / previewPdf.tsx) ──────
 	/** Error state body shown when a file preview failed to load */

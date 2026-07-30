@@ -1,0 +1,842 @@
+"use dom"
+
+// Static side-effect import: sets globalThis.pdfjsWorker so PDFWorker resolves a main-thread ("fake")
+// worker and returns before it would otherwise dynamic-import a worker script. GlobalWorkerOptions
+// .workerSrc is deliberately never set — on this path it is never read. A real Worker cannot be used:
+// in a release build the document origin is file://, where the origin is literally "null", so pdf.js
+// wraps the worker in a module blob that the engine then refuses to load.
+import "pdfjs-dist/legacy/build/pdf.worker.mjs"
+
+import { useEffect, useRef, useState } from "react"
+import { AnnotationLayer, AnnotationMode, getDocument, PDFDataRangeTransport, TextLayer } from "pdfjs-dist/legacy/build/pdf.mjs"
+import { STANDARD_FONTS, WASM_BINARIES } from "@/components/pdfPreview/assets.generated"
+import { buildPdfDocumentOptions } from "@/components/pdfPreview/options"
+import { classifyPdfError } from "@/components/pdfPreview/errors"
+import {
+	PDF_EVENT_KEY,
+	PDF_EXTERNAL_LINK_KEY,
+	PDF_EXTERNAL_URL_ATTRIBUTE,
+	type PdfPasswordResponse,
+	type PdfViewerEvent
+} from "@/components/pdfPreview/protocol"
+import { PDF_MAX_PAGE_CANVAS_BYTES, PDF_MAX_RANGE_LENGTH, PDF_MAX_ZOOM } from "@/components/pdfPreview/constants"
+import { hardenFormWidgets } from "@/components/pdfPreview/formWidgets"
+import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
+import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
+import useEffectOnce from "@/hooks/useEffectOnce"
+
+installDomConsoleProxy()
+
+/**
+ * Resource CSP for the rendered document.
+ *
+ * Injected here rather than into the shared DOM shell, which every DOM component uses: each component
+ * gets its own document at runtime, so a module-scope injection scopes the policy to this WebView
+ * alone. It runs before React mounts and long before any document content exists.
+ *
+ * `connect-src 'none'` is production-only. Development needs the Metro channel, and development is a
+ * developer's machine; production is what faces an attacker-authored document. Everything else is
+ * identical in both.
+ *
+ * `script-src` and `style-src` stay omitted deliberately. `'self'` does not match a file:// origin, so
+ * setting them would break rendering in release builds only — and there is nothing left for them to
+ * defend: this version of pdf.js contains no eval path, the scripting sandbox is not bundled, and XFA
+ * is off. `worker-src 'none'` is affordable precisely because of the fake-worker decision above.
+ */
+const contentSecurityPolicy = document.createElement("meta")
+
+contentSecurityPolicy.setAttribute("http-equiv", "Content-Security-Policy")
+contentSecurityPolicy.setAttribute(
+	"content",
+	[
+		"img-src data: blob:",
+		"font-src data: blob:",
+		"media-src data: blob:",
+		"object-src 'none'",
+		"frame-src 'none'",
+		"worker-src 'none'",
+		"child-src 'none'",
+		"form-action 'none'",
+		"base-uri 'none'",
+		...(process.env.NODE_ENV === "production" ? ["connect-src 'none'"] : [])
+	].join("; ")
+)
+
+document.head.appendChild(contentSecurityPolicy)
+
+// The shell ships user-scalable=no, which blocks pinch-zoom on both engines. A document viewer is
+// expected to zoom, so relax it for THIS component only, to the same ceiling the native viewer had.
+document
+	.querySelector("meta[name=viewport]")
+	?.setAttribute("content", `width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=${PDF_MAX_ZOOM}`)
+
+// Authored rather than shipped: pdfjs-dist's stylesheet references ~80 image assets by relative URL,
+// none of which are fetchable at a file:// origin.
+//
+// The custom properties are not decoration — they are a contract. TextLayer positions each span with
+// a percentage left/top plus `font-size: calc(var(--text-scale-factor) * var(--font-height))` and a
+// transform built from --scale-x / --rotate / --min-font-size-inv, and setLayerDimensions sizes the
+// layer with `round(down, var(--total-scale-factor) * <pagePx>, var(--scale-round-x))`. Omit these and
+// every span falls back to 16px, so the selection highlight sits somewhere other than the glyphs it
+// claims to cover. --total-scale-factor is set per page, since it is the CSS scale of that page.
+//
+// `round()` needs a newer engine than the rest of this file does; `inset: 0` above is the deliberate
+// fallback, so a WebView that cannot parse the width/height declaration still gets a correctly sized
+// layer from the containing page div.
+const styles = document.createElement("style")
+
+styles.textContent = `
+	.pdfPage { position: relative; margin: 0 auto 8px auto; background: #fff; overflow: hidden; }
+	.pdfPage canvas { display: block; width: 100%; height: 100%; }
+	.textLayer {
+		position: absolute; inset: 0; overflow: clip; opacity: 1; line-height: 1;
+		text-align: initial; text-size-adjust: none; forced-color-adjust: none;
+		transform-origin: 0 0; caret-color: CanvasText; z-index: 1;
+		--scale-round-x: 1px;
+		--scale-round-y: 1px;
+		--min-font-size: 1;
+		--text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+		--min-font-size-inv: calc(1 / var(--min-font-size));
+	}
+	.textLayer > :not(.markedContent),
+	.textLayer .markedContent span:not(.markedContent) {
+		color: transparent; position: absolute; white-space: pre; cursor: text;
+		transform-origin: 0% 0%; user-select: text; -webkit-user-select: text; z-index: 1;
+		--font-height: 0;
+		font-size: calc(var(--text-scale-factor) * var(--font-height));
+		--scale-x: 1;
+		--rotate: 0deg;
+		transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+	}
+	.textLayer .markedContent { display: contents; }
+	.textLayer ::selection { background: rgba(0, 100, 255, 0.28); }
+	.annotationLayer { position: absolute; inset: 0; transform-origin: 0 0; pointer-events: none; z-index: 2; }
+	.annotationLayer section { position: absolute; pointer-events: auto; box-sizing: border-box; }
+	.annotationLayer .linkAnnotation a { display: block; width: 100%; height: 100%; }
+	.annotationLayer input, .annotationLayer textarea, .annotationLayer select {
+		position: absolute; inset: 0; width: 100%; height: 100%; box-sizing: border-box;
+		font-size: 13px; background: rgba(0, 100, 255, 0.06); border: 1px solid rgba(0, 100, 255, 0.35);
+	}
+`
+
+document.head.appendChild(styles)
+
+function base64ToBytes(encoded: string): Uint8Array {
+	const binary = atob(encoded)
+	const bytes = new Uint8Array(binary.length)
+
+	for (let index = 0; index < binary.length; index++) {
+		bytes[index] = binary.charCodeAt(index)
+	}
+
+	return bytes
+}
+
+/**
+ * Hands pdf.js its font data directly instead of letting it fetch anything. pdf.js constructs this
+ * with { cMapUrl, standardFontDataUrl, wasmUrl } and then calls fetch({ kind, filename }); those
+ * constructor arguments are irrelevant here because nothing is resolved by URL.
+ *
+ * The wasm decoders are served from here too, and that is not optional: in this version ordinary
+ * CCITTFax (G4 fax compression, which a great many scanned documents use) decodes through jbig2.wasm,
+ * and without it those images are skipped silently — a scanned PDF would render as blank white pages
+ * with no error at all.
+ *
+ * cMaps are still not bundled; a document referencing CJK encodings without embedding them degrades
+ * to missing glyphs rather than to a blank page.
+ */
+class InlineBinaryDataFactory {
+	async fetch({ kind, filename }: { kind: string; filename: string }): Promise<Uint8Array> {
+		const encoded = kind === "standardFontDataUrl" ? STANDARD_FONTS[filename] : kind === "wasmUrl" ? WASM_BINARIES[filename] : undefined
+
+		if (encoded === undefined) {
+			throw new Error(`asset not bundled: ${kind}/${filename}`)
+		}
+
+		return base64ToBytes(encoded)
+	}
+}
+
+function post(message: unknown): void {
+	const rnWebView = (globalThis as unknown as { ReactNativeWebView?: { postMessage?: (message: string) => void } }).ReactNativeWebView
+
+	if (!rnWebView || typeof rnWebView.postMessage !== "function") {
+		return
+	}
+
+	try {
+		rnWebView.postMessage(JSON.stringify(message))
+	} catch {
+		// Reporting must never throw out of the path that was reporting a failure.
+	}
+}
+
+function postEvent(event: PdfViewerEvent): void {
+	post({
+		[PDF_EVENT_KEY]: event
+	})
+}
+
+function postExternalLink(url: string): void {
+	post({
+		[PDF_EXTERNAL_LINK_KEY]: {
+			url
+		}
+	})
+}
+
+/**
+ * The link service the annotation layer calls into.
+ *
+ * pdf.js's own service assigns real hrefs and permits schemes we do not (ftp: among them). This one
+ * never produces a navigable URL: an allowlisted external target is stashed on a data attribute for
+ * the capture-phase handler to pick up, and everything else becomes an inert anchor.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createLinkService(goToPage: (pageNumber: number) => void, getPdfDocument: () => any) {
+	return {
+		externalLinkTarget: null,
+		externalLinkRel: null,
+		eventBus: null,
+		addLinkAttributes(link: HTMLAnchorElement, url: string): void {
+			const classification = classifyUntrustedLinkHref(url)
+
+			link.href = "#"
+
+			if (classification.action === "external") {
+				link.setAttribute(PDF_EXTERNAL_URL_ATTRIBUTE, classification.url)
+			}
+		},
+		getAnchorUrl(): string {
+			return "#"
+		},
+		getDestinationHash(): string {
+			return "#"
+		},
+		async goToDestination(dest: unknown): Promise<void> {
+			// In-document destinations never leave the viewer, so they are resolved here rather than being
+			// handed to the host.
+			//
+			// pdf.js passes either a named destination (a string, needing a lookup) or an explicit
+			// destination array whose first element is a page reference — never a page number. An earlier
+			// version of this method only handled a number and returned early on the array, which made
+			// every table-of-contents entry a silent no-op.
+			const pdfDocument = getPdfDocument()
+
+			if (!pdfDocument) {
+				return
+			}
+
+			try {
+				const explicit = typeof dest === "string" ? await pdfDocument.getDestination(dest) : dest
+
+				if (!Array.isArray(explicit) || explicit.length === 0) {
+					return
+				}
+
+				const pageIndex = await pdfDocument.getPageIndex(explicit[0])
+
+				goToPage(pageIndex + 1)
+			} catch {
+				// A destination pointing at nothing is a broken document, not a viewer failure.
+			}
+		},
+		goToPage(pageNumber: number): void {
+			goToPage(pageNumber)
+		},
+		async getAttachmentContent(): Promise<null> {
+			// Embedded attachments are not offered. Returning null rather than leaving the method missing
+			// keeps a tap from producing an unhandled rejection inside the annotation layer.
+			return null
+		},
+		executeNamedAction(): void {
+			// Print, Download, SaveAs and friends. Nothing here is offered to a document.
+		},
+		executeSetOCGState(): void {
+			// Optional-content state changes are ignored; they are a document-driven state machine we
+			// have no use for.
+		}
+	}
+}
+
+type PageEntry = {
+	container: HTMLDivElement
+	rendered: boolean
+	// Bumped on every release. Every await in renderPage re-checks it, so a continuation belonging to a
+	// render that was already torn down cannot repopulate a container that has since been cleared —
+	// which would otherwise leave a page permanently marked un-rendered, never released again, and
+	// leaking its canvas for the life of the document.
+	epoch: number
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	task: any | null
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	textLayer: any | null
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	page: any | null
+}
+
+const Dom = ({
+	readRange,
+	fileSize,
+	passwordResponse,
+	paddingTop,
+	paddingBottom,
+	paddingLeft,
+	paddingRight
+}: {
+	dom?: import("expo/dom").DOMProps
+	readRange: (offset: number, length: number) => Promise<string>
+	fileSize: number
+	passwordResponse: PdfPasswordResponse | null
+	paddingTop?: number
+	paddingBottom?: number
+	paddingLeft?: number
+	paddingRight?: number
+}) => {
+	const scrollRef = useRef<HTMLDivElement>(null)
+	const entriesRef = useRef<Map<number, PageEntry>>(new Map())
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const documentRef = useRef<any>(null)
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const linkServiceRef = useRef<any>(null)
+	const scaleRef = useRef<number>(1)
+	const paintedRef = useRef<boolean>(false)
+	const passwordResolverRef = useRef<((password: string) => void) | null>(null)
+	const pendingRequestIdRef = useRef<string | null>(null)
+	const [fatal, setFatal] = useState<boolean>(false)
+
+	// A password can only arrive after mount, as a prop update. The requestId match is what stops a
+	// stale answer from resolving a later prompt: pdf.js hands out a fresh resolver each time it asks,
+	// and feeding it the previous attempt's password would loop.
+	useEffect(() => {
+		if (passwordResponse === null || passwordResponse.requestId !== pendingRequestIdRef.current) {
+			return
+		}
+
+		const resolve = passwordResolverRef.current
+
+		pendingRequestIdRef.current = null
+		passwordResolverRef.current = null
+
+		resolve?.(passwordResponse.password)
+	}, [passwordResponse])
+
+	useEffectOnce(() => {
+		// Capability gate. Both are hard requirements: pdf.js's main-thread worker moves messages
+		// through structuredClone, and there is nothing to render onto without a 2d context. Reporting
+		// `unsupported` is what lets the host show "cannot preview here" instead of a permanent spinner.
+		if (typeof structuredClone !== "function") {
+			postEvent({
+				event: "unsupported",
+				reason: "structuredClone"
+			})
+
+			setFatal(true)
+
+			return
+		}
+
+		if (!document.createElement("canvas").getContext("2d")) {
+			postEvent({
+				event: "unsupported",
+				reason: "canvas"
+			})
+
+			setFatal(true)
+
+			return
+		}
+
+		postEvent({
+			event: "ready"
+		})
+
+		const scrollElement = scrollRef.current
+
+		if (!scrollElement) {
+			return
+		}
+
+		let destroyed = false
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		let loadingTask: any = null
+		let observer: IntersectionObserver | null = null
+		let resizeObserver: ResizeObserver | null = null
+
+		const goToPage = (pageNumber: number) => {
+			entriesRef.current.get(pageNumber)?.container.scrollIntoView()
+		}
+
+		linkServiceRef.current = createLinkService(goToPage, () => documentRef.current)
+
+		const renderPage = async (pageNumber: number) => {
+			const entry = entriesRef.current.get(pageNumber)
+			const pdfDocument = documentRef.current
+
+			if (!entry || entry.rendered || !pdfDocument || destroyed) {
+				return
+			}
+
+			entry.rendered = true
+
+			const epoch = entry.epoch
+			const current = () => !destroyed && entry.epoch === epoch
+
+			try {
+				const page = await pdfDocument.getPage(pageNumber)
+
+				if (!current()) {
+					return
+				}
+
+				entry.page = page
+
+				const viewport = page.getViewport({
+					scale: scaleRef.current
+				})
+
+				// Device pixels, capped twice: by DPR, and by total backing-store bytes. A large page on a
+				// 3x screen otherwise allocates a canvas the engine refuses outright.
+				const maxRatio = Math.sqrt(PDF_MAX_PAGE_CANVAS_BYTES / 4 / Math.max(viewport.width * viewport.height, 1))
+				const ratio = Math.max(1, Math.min(globalThis.devicePixelRatio || 1, 2, maxRatio))
+				const canvas = document.createElement("canvas")
+
+				canvas.width = Math.floor(viewport.width * ratio)
+				canvas.height = Math.floor(viewport.height * ratio)
+
+				entry.container.style.height = `${Math.floor(viewport.height)}px`
+				// The layers position themselves against this; it is the CSS scale of this page.
+				entry.container.style.setProperty("--total-scale-factor", `${scaleRef.current}`)
+				entry.container.replaceChildren(canvas)
+
+				const renderViewport = page.getViewport({
+					scale: scaleRef.current * ratio
+				})
+
+				const task = page.render({
+					canvas,
+					viewport: renderViewport,
+					annotationMode: AnnotationMode.ENABLE_FORMS
+				})
+
+				entry.task = task
+
+				await task.promise
+
+				if (!current()) {
+					return
+				}
+
+				entry.task = null
+
+				// Reported as soon as there are pixels, not after the text and annotation layers. Those can
+				// fail on their own, and holding the host's overlay until all three succeed turned any one
+				// of them failing into a spinner that never goes away.
+				if (!paintedRef.current) {
+					paintedRef.current = true
+
+					postEvent({
+						event: "firstPagePainted"
+					})
+				}
+
+				const textLayerDiv = document.createElement("div")
+
+				textLayerDiv.className = "textLayer"
+				entry.container.appendChild(textLayerDiv)
+
+				const textLayer = new TextLayer({
+					textContentSource: await page.getTextContent(),
+					container: textLayerDiv,
+					viewport
+				})
+
+				if (!current()) {
+					textLayer.cancel()
+
+					return
+				}
+
+				entry.textLayer = textLayer
+
+				await textLayer.render()
+
+				if (!current()) {
+					return
+				}
+
+				const annotationDiv = document.createElement("div")
+
+				annotationDiv.className = "annotationLayer"
+				entry.container.appendChild(annotationDiv)
+
+				const annotations = await page.getAnnotations({
+					intent: "display"
+				})
+
+				if (!current()) {
+					return
+				}
+
+				const annotationViewport = viewport.clone({
+					dontFlip: true
+				})
+
+				const annotationLayer = new AnnotationLayer({
+					div: annotationDiv,
+					page,
+					viewport: annotationViewport,
+					linkService: linkServiceRef.current,
+					annotationStorage: pdfDocument.annotationStorage,
+					// Explicitly absent. The editor UI manager would bring annotation editing (and a
+					// 16-argument surface we have no use for); the accessibility and struct-tree managers
+					// belong to the full viewer we deliberately do not ship.
+					accessibilityManager: null,
+					annotationCanvasMap: null,
+					annotationEditorUIManager: null,
+					structTreeLayer: null,
+					commentManager: null
+				})
+
+				await annotationLayer.render({
+					annotations,
+					div: annotationDiv,
+					page,
+					viewport: annotationViewport,
+					linkService: linkServiceRef.current,
+					// Forms render and are fillable. Scripting stays off: `enableScripting` is omitted, so
+					// the annotation layer's own opt-in default (false) applies, and `hasJSActions` is
+					// withheld so no JS-action path can be reached even if that changed. No downloadManager
+					// is passed either — it is the only window.open in the distribution.
+					renderForms: true
+				})
+
+				if (!current()) {
+					return
+				}
+
+				hardenFormWidgets(annotationDiv)
+			} catch (error) {
+				const classification = classifyPdfError(error)
+
+				if (classification.type === "aborted" || !current()) {
+					return
+				}
+
+				// One page failing is not the document failing — leave the placeholder and carry on. But if
+				// nothing has painted yet there is nothing to carry on to, and the host is still holding an
+				// opaque overlay, so that case has to be reported rather than logged.
+				entry.rendered = false
+
+				console.warn(`[pdfPreview] page ${pageNumber} failed to render`)
+
+				if (!paintedRef.current) {
+					postEvent({
+						event: "error",
+						kind: "renderFailed"
+					})
+				}
+			}
+		}
+
+		const releasePage = (pageNumber: number) => {
+			const entry = entriesRef.current.get(pageNumber)
+
+			if (!entry || !entry.rendered) {
+				return
+			}
+
+			entry.epoch++
+			entry.task?.cancel()
+			entry.task = null
+			entry.textLayer?.cancel()
+			entry.textLayer = null
+			entry.rendered = false
+
+			// Frees the decoded images and the operator list this page was holding.
+			entry.page?.cleanup()
+			entry.container.replaceChildren()
+		}
+
+		const load = async () => {
+			const transport = new PDFDataRangeTransport(fileSize, new Uint8Array(0), false, undefined)
+
+			// pdf.js requests an END offset; the bridge RPC takes a LENGTH. This is the one place that
+			// knows both conventions.
+			//
+			// The request is split into reader-sized pieces before being reassembled. pdf.js merges
+			// contiguous chunks with no upper bound before asking, so a single object spanning enough of
+			// them — a multi-megabyte scanned image, a large embedded font — asks for more than the
+			// reader's per-call cap allows. Failing that request is not recoverable: pdf.js does not
+			// re-request a range that errored, so the document is dead for the rest of the session.
+			// Splitting keeps the RPC's bound tight without letting it decide which documents can open.
+			transport.requestDataRange = (begin: number, end: number) => {
+				const fetchRange = async () => {
+					const total = end - begin
+
+					if (total <= 0) {
+						return
+					}
+
+					const merged = new Uint8Array(total)
+					let offset = begin
+
+					while (offset < end) {
+						const length = Math.min(PDF_MAX_RANGE_LENGTH, end - offset)
+						const chunk = base64ToBytes(await readRange(offset, length))
+
+						if (destroyed) {
+							return
+						}
+
+						merged.set(chunk, offset - begin)
+
+						offset += chunk.byteLength
+					}
+
+					// `begin` must be echoed exactly — pdf.js asserts on it — so the pieces are reassembled
+					// and handed over as the single range that was asked for.
+					transport.onDataRange(begin, merged)
+				}
+
+				fetchRange().catch(() => {
+					if (!destroyed) {
+						postEvent({
+							event: "error",
+							kind: "transportFailed"
+						})
+					}
+				})
+			}
+
+			loadingTask = getDocument(
+				buildPdfDocumentOptions({
+					binaryDataFactory: InlineBinaryDataFactory,
+					range: transport
+				})
+			)
+
+			loadingTask.onPassword = (updatePassword: (password: string) => void, code: number) => {
+				const requestId = `${Date.now()}-${entriesRef.current.size}`
+
+				pendingRequestIdRef.current = requestId
+				passwordResolverRef.current = updatePassword
+
+				postEvent({
+					event: "passwordRequired",
+					requestId,
+					reason: code === 2 ? "incorrect" : "required"
+				})
+			}
+
+			const pdfDocument = await loadingTask.promise
+
+			if (destroyed) {
+				return
+			}
+
+			documentRef.current = pdfDocument
+
+			postEvent({
+				event: "documentOpened",
+				pageCount: pdfDocument.numPages
+			})
+
+			const firstPage = await pdfDocument.getPage(1)
+			const baseViewport = firstPage.getViewport({
+				scale: 1
+			})
+
+			// clientWidth can be 0 if layout has not settled; a zero scale renders a zero-size canvas and
+			// dismisses the spinner over a blank document, which looks like a corrupt file.
+			const computeScale = () => {
+				const width = scrollElement.clientWidth
+
+				return width > 0 ? width / baseViewport.width : 1
+			}
+
+			scaleRef.current = computeScale()
+
+			// Rotation and split-screen change the available width. Without this the pages keep the scale
+			// they were first laid out at and stay stretched for the rest of the session.
+			const onResize = () => {
+				const next = computeScale()
+
+				if (destroyed || Math.abs(next - scaleRef.current) < 0.01) {
+					return
+				}
+
+				scaleRef.current = next
+
+				for (const [pageNumber, entry] of entriesRef.current) {
+					const wasRendered = entry.rendered
+
+					releasePage(pageNumber)
+
+					entry.container.style.height = `${Math.floor(baseViewport.height * next)}px`
+
+					if (wasRendered) {
+						renderPage(pageNumber)
+					}
+				}
+			}
+
+			resizeObserver = new ResizeObserver(onResize)
+
+			resizeObserver.observe(scrollElement)
+
+			const estimatedHeight = Math.floor(baseViewport.height * scaleRef.current)
+
+			observer = new IntersectionObserver(
+				entries => {
+					for (const entry of entries) {
+						const pageNumber = Number(entry.target.getAttribute("data-page"))
+
+						if (!Number.isInteger(pageNumber)) {
+							continue
+						}
+
+						if (entry.isIntersecting) {
+							renderPage(pageNumber)
+						} else {
+							releasePage(pageNumber)
+						}
+					}
+				},
+				{
+					root: scrollElement,
+					// One viewport of lookahead in each direction, so a page is ready before it is reached
+					// without holding the whole document.
+					rootMargin: "100% 0px"
+				}
+			)
+
+			for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber++) {
+				const container = document.createElement("div")
+
+				container.className = "pdfPage"
+				container.setAttribute("data-page", String(pageNumber))
+				container.style.width = "100%"
+				container.style.height = `${estimatedHeight}px`
+
+				scrollElement.appendChild(container)
+
+				entriesRef.current.set(pageNumber, {
+					container,
+					rendered: false,
+					epoch: 0,
+					task: null,
+					textLayer: null,
+					page: null
+				})
+
+				observer.observe(container)
+			}
+		}
+
+		load().catch(error => {
+			const classification = classifyPdfError(error)
+
+			if (classification.type === "aborted") {
+				return
+			}
+
+			postEvent({
+				event: "error",
+				kind: classification.type === "error" ? classification.kind : "unknown"
+			})
+
+			setFatal(true)
+		})
+
+		return () => {
+			destroyed = true
+
+			observer?.disconnect()
+			resizeObserver?.disconnect()
+
+			for (const pageNumber of entriesRef.current.keys()) {
+				releasePage(pageNumber)
+			}
+
+			entriesRef.current.clear()
+
+			// destroy() is on the loading task; the document proxy only has cleanup().
+			loadingTask?.destroy()
+		}
+	})
+
+	// Link activation, decided at tap time rather than at render time, so an anchor added or mutated
+	// after the sweep is still checked. Capture phase on window, so it runs before any handler pdf.js
+	// installed and before the engine performs the default action. Keyboard activation dispatches a
+	// click too, so this covers every way an anchor can be followed.
+	useEffectOnce(() => {
+		const onActivate = (event: MouseEvent) => {
+			if (!(event.target instanceof Element)) {
+				return
+			}
+
+			const anchor = event.target.closest("a")
+
+			if (!anchor) {
+				return
+			}
+
+			const external = anchor.getAttribute(PDF_EXTERNAL_URL_ATTRIBUTE)
+
+			event.preventDefault()
+
+			if (external !== null) {
+				postExternalLink(external)
+			}
+		}
+
+		const onSubmit = (event: Event) => {
+			// A document cannot be allowed to submit anything. form-action 'none' already blocks the
+			// navigation; this stops the attempt earlier and keeps the page from appearing to act.
+			event.preventDefault()
+		}
+
+		// Re-coerce on focus: autofill decides at focus time, and a field could have been recreated by
+		// a re-render between the last sweep and the tap.
+		const onFocusIn = (event: FocusEvent) => {
+			if (event.target instanceof HTMLInputElement) {
+				hardenFormWidgets(event.target.parentNode ?? document)
+			}
+		}
+
+		window.addEventListener("click", onActivate, true)
+		window.addEventListener("auxclick", onActivate, true)
+		window.addEventListener("submit", onSubmit, true)
+		window.addEventListener("focusin", onFocusIn, true)
+
+		return () => {
+			window.removeEventListener("click", onActivate, true)
+			window.removeEventListener("auxclick", onActivate, true)
+			window.removeEventListener("submit", onSubmit, true)
+			window.removeEventListener("focusin", onFocusIn, true)
+		}
+	})
+
+	return (
+		<div
+			ref={scrollRef}
+			style={{
+				width: "100%",
+				height: "100%",
+				overflow: "auto",
+				background: "#1c1c1e",
+				paddingTop: paddingTop ? `${paddingTop}px` : undefined,
+				paddingBottom: paddingBottom ? `${paddingBottom}px` : undefined,
+				paddingLeft: paddingLeft ? `${paddingLeft}px` : undefined,
+				paddingRight: paddingRight ? `${paddingRight}px` : undefined,
+				// Panning alone suppresses pinch-zoom at the element level, so it has to be re-allowed
+				// explicitly alongside it.
+				touchAction: "pan-x pan-y pinch-zoom",
+				opacity: fatal ? 0 : 1
+			}}
+		/>
+	)
+}
+
+export default Dom

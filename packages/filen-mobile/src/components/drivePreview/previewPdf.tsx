@@ -1,36 +1,21 @@
-import { useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { ActivityIndicator } from "react-native"
+import { useShallow } from "zustand/shallow"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
+import Ionicons from "@expo/vector-icons/Ionicons"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
-import Ionicons from "@expo/vector-icons/Ionicons"
+import PdfPreview from "@/components/pdfPreview"
+import usePdfSource from "@/components/pdfPreview/usePdfSource"
 import useFileUriQuery from "@/queries/useFileUri.query"
-import { PdfView, type OnErrorEventPayload, type OnLinkPressedEventPayload } from "@kishannareshpal/expo-pdf"
-import useOpenExternalLink from "@/hooks/useOpenExternalLink"
-import prompts from "@/lib/prompts"
-import { run } from "@filen/utils"
-import alerts from "@/lib/alerts"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
-import { useShallow } from "zustand/shallow"
-import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { useRecyclingState } from "@shopify/flash-list"
-import Button from "@/components/ui/button"
-import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
-import logger from "@/lib/logger"
-
-// Max zoom for the PDF viewer, via the patched expo-pdf `maxZoom` prop (patches/@kishannareshpal+expo-pdf+0.3.2.patch).
-// iOS: absolute PDFView scaleFactor; Android: zoom relative to the fit scale (library default is 3.0). Tune freely.
-const PDF_MAX_ZOOM = 6
+import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePreview/gallery"
 
 const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
-	const [password, setPassword] = useRecyclingState<string | null>(null, [galleryItemKey(item)])
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
-	const onErrorWorkingRef = useRef<boolean>(false)
-	const openExternalLink = useOpenExternalLink("drivePreview")
-	const [didCancelPasswordPrompt, setDidCancelPasswordPrompt] = useRecyclingState<boolean>(false, [galleryItemKey(item)])
 
 	const query = useFileUriQuery(
 		item.type === "external"
@@ -51,77 +36,7 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 				}
 	)
 
-	const promptPassword = async () => {
-		const result = await run(async () => {
-			return await prompts.input({
-				title: t("password_required"),
-				message: t("enter_the_password"),
-				cancelText: t("cancel"),
-				okText: t("ok"),
-				inputType: "secure-text"
-			})
-		})
-
-		if (!result.success) {
-			logger.error("drivePreview", "PDF password prompt failed", { error: result.error })
-			alerts.error(result.error)
-
-			setDidCancelPasswordPrompt(true)
-
-			return
-		}
-
-		if (result.data.cancelled || result.data.type !== "string") {
-			setDidCancelPasswordPrompt(true)
-
-			return
-		}
-
-		const password = result.data.value
-
-		if (password.length === 0) {
-			setDidCancelPasswordPrompt(true)
-
-			return
-		}
-
-		setPassword(password)
-	}
-
-	const onError = (e: OnErrorEventPayload) => {
-		run(async defer => {
-			if (onErrorWorkingRef.current) {
-				return
-			}
-
-			onErrorWorkingRef.current = true
-
-			defer(() => {
-				onErrorWorkingRef.current = false
-			})
-
-			switch (e.code) {
-				case "invalid_document": {
-					alerts.error(t("invalid_pdf"))
-
-					return
-				}
-
-				case "invalid_uri": {
-					alerts.error(t("unable_to_load_pdf"))
-
-					return
-				}
-
-				case "password_incorrect":
-				case "password_required": {
-					await promptPassword()
-
-					break
-				}
-			}
-		})
-	}
+	const source = usePdfSource(query.status === "success" ? query.data.uri : null)
 
 	if (query.status === "pending" && query.fetchStatus === "fetching") {
 		return (
@@ -167,45 +82,39 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 		)
 	}
 
-	if (query.status === "success") {
+	// Refusals are typed rather than collapsed into the generic error state: "larger than the viewer
+	// will open" is advice and "this is not a PDF" is a different fact, and a lone retry button answers
+	// neither of them.
+	if (source.status === "refused") {
+		return (
+			<View className="bg-background flex-1 items-center justify-center px-8">
+				<Ionicons
+					name={source.reason === "tooLarge" ? "document-outline" : "warning-outline"}
+					size={48}
+					color="#9ca3af"
+				/>
+				<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">
+					{source.reason === "tooLarge" ? t("pdf_too_large") : source.reason === "notAPdf" ? t("invalid_pdf") : t("unable_to_load_pdf")}
+				</Text>
+			</View>
+		)
+	}
+
+	if (source.status === "ready") {
 		return (
 			<View className="bg-background flex-1">
-				{didCancelPasswordPrompt ? (
-					<View className="flex-1 bg-transparent items-center justify-center">
-						<Button onPress={() => promptPassword()}>{t("enter_pdf_password")}</Button>
-					</View>
-				) : (
-					<PdfView
-						key={password ?? "no-password"}
-						style={{
-							flex: 1,
-							backgroundColor: "transparent"
-						}}
-						contentPadding={{
-							top: headerHeight ?? 0,
-							bottom: insets.bottom,
-							left: insets.left,
-							right: insets.right
-						}}
-						password={password ?? undefined}
-						doubleTapToZoom={true}
-						autoScale={false}
-						maxZoom={PDF_MAX_ZOOM}
-						fitMode="both"
-						uri={query.data.uri}
-						onError={onError}
-						// A link annotation inside the document. The native viewers deliberately open
-						// nothing themselves (see the expo-pdf patch) — an embedded link target is
-						// attacker-controlled, and the stock handlers on both platforms would hand it
-						// straight to the OS with no scheme check and no confirmation. useOpenExternalLink
-						// is the single funnel every untrusted link in the app goes through.
-						onLinkPressed={(payload: OnLinkPressedEventPayload) => {
-							openExternalLink(payload.uri).catch(err => {
-								logger.error("drivePreview", "failed to open a pdf link", { error: err })
-							})
-						}}
-					/>
-				)}
+				<PdfPreview
+					// A new document always gets a new WebView. Reusing one is what makes the previous
+					// document's retained buffer a cost the next one pays. The password is deliberately NOT
+					// part of this key — it arrives as a prop and must not remount the viewer.
+					key={galleryItemKey(item)}
+					readRange={source.readRange}
+					fileSize={source.size}
+					paddingTop={headerHeight ? headerHeight : undefined}
+					paddingBottom={insets.bottom}
+					paddingLeft={insets.left}
+					paddingRight={insets.right}
+				/>
 			</View>
 		)
 	}
