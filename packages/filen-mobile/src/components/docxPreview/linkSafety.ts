@@ -16,7 +16,7 @@
  * bundle and the native side can share one definition of the envelope below.
  */
 
-import { EXTERNAL_LINK_PROTOCOLS } from "@/components/textEditor/linkUtils"
+import { classifyUntrustedLinkHref, type UntrustedLinkClassification } from "@/lib/untrustedLinks"
 
 /**
  * What the preview should do with one anchor.
@@ -28,96 +28,20 @@ import { EXTERNAL_LINK_PROTOCOLS } from "@/components/textEditor/linkUtils"
  *   preview WebView.
  * - `block` — everything else. The href is removed so the anchor renders as inert text.
  */
-export type DocxLinkClassification = { action: "internal" } | { action: "external"; url: string } | { action: "block" }
-
-/**
- * True when the value contains any whitespace or control character.
- *
- * Written as a scan rather than a regex because a control-character class trips `no-control-regex`,
- * and suppressing that rule in a security check is worse than spelling the ranges out.
- */
-function hasInteriorWhitespaceOrControl(url: string): boolean {
-	if (/\s/.test(url)) {
-		return true
-	}
-
-	for (let index = 0; index < url.length; index++) {
-		const code = url.charCodeAt(index)
-
-		// C0 controls and DEL, plus the C1 range.
-		if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) {
-			return true
-		}
-	}
-
-	return false
-}
+export type DocxLinkClassification = UntrustedLinkClassification
 
 /**
  * Classify one raw href attribute value.
  *
- * `url` keeps its original casing — paths, query strings and tokens are case-sensitive (signed
- * URLs, reset tokens); only the scheme test is case-insensitive. Mirrors classifyExternalLinkHref.
+ * Delegates to the shared classifier in `@/lib/untrustedLinks` — the .docx preview and the PDF viewer
+ * face the same threat (attacker-authored hrefs rendered inside a WebView that holds the user's
+ * session) and must not drift apart. Kept as a named export so the docx call sites and their tests
+ * continue to read in terms of the format they belong to.
  */
 export function classifyDocxLinkHref(raw: string | null | undefined): DocxLinkClassification {
-	if (typeof raw !== "string") {
-		return {
-			action: "block"
-		}
-	}
-
-	const url = raw.trim()
-
-	if (url.length === 0) {
-		return {
-			action: "block"
-		}
-	}
-
-	// No interior whitespace or control characters, checked BEFORE the scheme allowlist.
-	//
-	// The allowlist is a prefix test, so without this a value that merely STARTS with an allowlisted
-	// scheme carries whatever follows — `tel:+1\njavascript:...` passes `startsWith("tel:")` and the
-	// whole string is what reaches Linking.openURL. The OS resolves by the leading scheme so the tail
-	// is inert, but handing the platform a URL containing raw control characters is not something to
-	// rely on being harmless. A legitimate href has no interior control characters: a real space is
-	// %20 by the time it is a URL.
-	if (hasInteriorWhitespaceOrControl(url)) {
-		return {
-			action: "block"
-		}
-	}
-
-	// A pure fragment. Checked before the scheme allowlist because `#...` carries no scheme at all.
-	// Anything after the `#` is inert by construction — the browser treats the whole value as a
-	// fragment identifier, so `#javascript:alert(1)` navigates nowhere and executes nothing.
-	if (url.startsWith("#")) {
-		return {
-			action: "internal"
-		}
-	}
-
-	const lower = url.toLowerCase()
-
-	if (EXTERNAL_LINK_PROTOCOLS.some(protocol => lower.startsWith(protocol))) {
-		return {
-			action: "external",
-			url
-		}
-	}
-
-	// Default deny. Covers javascript:, data:, file:, content:, intent:, blob:, relative paths and
-	// anything obfuscated enough to miss the allowlist.
-	return {
-		action: "block"
-	}
+	return classifyUntrustedLinkHref(raw)
 }
 
-/**
- * Marks an anchor the sweep has already resolved to an allowlisted external URL. The click handler
- * reads the URL from here rather than re-reading `href`, because the sweep rewrites `href` to "#"
- * to keep the anchor styled as a link without letting the WebView navigate to it.
- */
 export const DOCX_EXTERNAL_URL_ATTRIBUTE = "data-external-url"
 
 export const DOCX_EXTERNAL_LINK_KEY = "__filenDocxExternalLink"
