@@ -91,6 +91,22 @@ describe("hardenFormWidgets", () => {
 		}
 	})
 
+	test("keeps radio groups grouped while removing the name", () => {
+		// Radios are grouped BY name. A per-element index would split one group into several
+		// single-option radios that can all be selected at once — a silently broken form.
+		const root = render(
+			'<input type="radio" name="choice" value="a"><input type="radio" name="choice" value="b"><input type="radio" name="other" value="c">'
+		)
+
+		hardenFormWidgets(root)
+
+		const radios = [...root.querySelectorAll("input")]
+
+		expect(radios[0]?.name).toBe(radios[1]?.name)
+		expect(radios[0]?.name).not.toBe("choice")
+		expect(radios[2]?.name).not.toBe(radios[0]?.name)
+	})
+
 	test("never wraps widgets in a form", () => {
 		// The contract verifies pdf.js creates no form element; adding one here would manufacture the
 		// very thing the check looks for.

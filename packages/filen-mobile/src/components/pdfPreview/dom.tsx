@@ -109,6 +109,13 @@ styles.textContent = `
 		transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
 	}
 	.textLayer .markedContent { display: contents; }
+	/* setLayerDimensions stamps data-main-rotation on both layers from the page's own /Rotate. Without
+	   these the canvas is drawn rotated while the text and annotation layers are not, so on a rotated
+	   page — which scans very often are — selection lands nowhere near the glyphs and links sit in the
+	   wrong place. Copied from the upstream stylesheet. */
+	[data-main-rotation="90"] { transform: rotate(90deg) translateY(-100%); }
+	[data-main-rotation="180"] { transform: rotate(180deg) translate(-100%, -100%); }
+	[data-main-rotation="270"] { transform: rotate(270deg) translateX(-100%); }
 	.textLayer ::selection { background: rgba(0, 100, 255, 0.28); }
 	.annotationLayer { position: absolute; inset: 0; transform-origin: 0 0; pointer-events: none; z-index: 2; }
 	.annotationLayer section { position: absolute; pointer-events: auto; box-sizing: border-box; }
@@ -143,9 +150,12 @@ function base64ToBytes(encoded: string): Uint8Array {
  * with no error at all.
  *
  * cMaps are served from here too, so a document referencing a CJK encoding without embedding the font
- * still renders its text. The one asset that cannot be served this way is the CMYK ICC profile: pdf.js
- * reads that with a synchronous fetch against a concatenated URL, which no factory can intercept, so
- * ICC-based CMYK falls back to an unmanaged colour conversion.
+ * still renders its text.
+ *
+ * ICC colour management is off entirely, and not by choice: pdf.js disables it whenever
+ * `useWorkerFetch` is false, which is pinned off here because leaving it to inference is what makes a
+ * release build behave differently from development. Documents with ICC-based colour spaces fall back
+ * to an unmanaged conversion — slightly different colours, never a failure to render.
  */
 class InlineBinaryDataFactory {
 	async fetch({ kind, filename }: { kind: string; filename: string }): Promise<Uint8Array> {
@@ -407,7 +417,9 @@ const Dom = ({
 				// Device pixels, capped twice: by DPR, and by total backing-store bytes. A large page on a
 				// 3x screen otherwise allocates a canvas the engine refuses outright.
 				const maxRatio = Math.sqrt(PDF_MAX_PAGE_CANVAS_BYTES / 4 / Math.max(viewport.width * viewport.height, 1))
-				const ratio = Math.max(1, Math.min(globalThis.devicePixelRatio || 1, 2, maxRatio))
+				// No floor of 1: on an extreme page the byte cap has to be allowed to take the ratio below
+				// device scale, otherwise the cap it exists to enforce is simply ignored.
+				const ratio = Math.min(globalThis.devicePixelRatio || 1, 2, maxRatio)
 				const canvas = document.createElement("canvas")
 
 				canvas.width = Math.floor(viewport.width * ratio)
@@ -551,10 +563,13 @@ const Dom = ({
 		const releasePage = (pageNumber: number) => {
 			const entry = entriesRef.current.get(pageNumber)
 
-			if (!entry || !entry.rendered) {
+			if (!entry) {
 				return
 			}
 
+			// Not gated on `rendered`: a page whose render threw is marked un-rendered while its canvas is
+			// still attached, and skipping it here would leave that canvas alive for the life of the
+			// document.
 			entry.epoch++
 			entry.task?.cancel()
 			entry.task = null
@@ -646,6 +661,16 @@ const Dom = ({
 
 			documentRef.current = pdfDocument
 
+			if (pdfDocument.numPages < 1) {
+				// Nothing will ever paint, so nothing would ever clear the host's overlay.
+				postEvent({
+					event: "error",
+					kind: "invalidDocument"
+				})
+
+				return
+			}
+
 			postEvent({
 				event: "documentOpened",
 				pageCount: pdfDocument.numPages
@@ -659,7 +684,12 @@ const Dom = ({
 			// clientWidth can be 0 if layout has not settled; a zero scale renders a zero-size canvas and
 			// dismisses the spinner over a blank document, which looks like a corrupt file.
 			const computeScale = () => {
-				const width = scrollElement.clientWidth
+				// clientWidth includes padding, but the page divs are laid out in the content box. Using the
+				// padded width overstates the available space by the safe-area insets, which squashes every
+				// page horizontally in landscape and drags the text layer out of alignment with it.
+				const style = globalThis.getComputedStyle(scrollElement)
+				const horizontalPadding = parseFloat(style.paddingLeft || "0") + parseFloat(style.paddingRight || "0")
+				const width = scrollElement.clientWidth - horizontalPadding
 
 				return width > 0 ? width / baseViewport.width : 1
 			}

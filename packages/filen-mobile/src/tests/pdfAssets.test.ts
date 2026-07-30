@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { CMAPS, STANDARD_FONTS, WASM_BINARIES } from "@/components/pdfPreview/assets.generated"
 
@@ -25,7 +25,7 @@ describe("pdf.js asset payload", () => {
 		// jbig2 is not optional: in this version ordinary CCITTFax (G4 fax compression, used by a great
 		// many scanned documents) decodes through it, and without it those images are skipped silently —
 		// the page renders blank white with no error.
-		expect(Object.keys(WASM_BINARIES).sort()).toStrictEqual(["jbig2.wasm", "openjpeg.wasm", "qcms_bg.wasm"])
+		expect(Object.keys(WASM_BINARIES).sort()).toStrictEqual(["jbig2.wasm", "openjpeg.wasm"])
 
 		for (const fileName of Object.keys(WASM_BINARIES)) {
 			expect(existsSync(join(PDFJS_ROOT, "wasm", fileName))).toBe(true)
@@ -50,6 +50,17 @@ describe("pdf.js asset payload", () => {
 
 		for (const encoded of Object.values(WASM_BINARIES)) {
 			expect(encoded.length).toBeGreaterThan(0)
+		}
+	})
+
+	test("payload bytes match the installed files, not just their names", () => {
+		// A same-name bump would otherwise ship stale bytes with the suite green.
+		for (const [fileName, encoded] of Object.entries(WASM_BINARIES)) {
+			expect(Buffer.from(encoded, "base64").byteLength, fileName).toBe(statSync(join(PDFJS_ROOT, "wasm", fileName)).size)
+		}
+
+		for (const [fileName, encoded] of Object.entries(STANDARD_FONTS)) {
+			expect(Buffer.from(encoded, "base64").byteLength, fileName).toBe(statSync(join(PDFJS_ROOT, "standard_fonts", fileName)).size)
 		}
 	})
 

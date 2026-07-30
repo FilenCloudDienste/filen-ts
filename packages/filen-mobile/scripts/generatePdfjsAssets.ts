@@ -15,7 +15,12 @@ import { dirname, join, relative } from "node:path"
  * The wasm decoders are NOT optional extras. In this version CCITTFax — ordinary G4 fax compression,
  * which is what a great many scanned documents use — is decoded through jbig2.wasm, and with no wasm
  * available those images are skipped silently: a scanned PDF renders as blank white pages with no
- * error at all. openjpeg covers JPEG2000 and qcms covers ICC colour.
+ * error at all. openjpeg covers JPEG2000.
+ *
+ * qcms_bg.wasm is deliberately NOT bundled despite sitting alongside them: ICC colour management is
+ * switched off outright whenever `useWorkerFetch` is false, and pinning that off is non-negotiable
+ * here. It would also be loaded by a synchronous URL fetch rather than through the factory. Shipping
+ * it would be ~96KB that nothing can ever reach.
  *
  * quickjs-eval.wasm sits in the same upstream directory and must NEVER be bundled — it is the PDF
  * scripting engine, and shipping it would hand a document an interpreter.
@@ -43,7 +48,7 @@ const OUTPUT_FILE = join(PACKAGE_ROOT, "src", "components", "pdfPreview", "asset
 
 // Explicit allowlist rather than "everything in the directory": that directory also contains the
 // scripting engine, and a future pdfjs release adding another file must not silently ship it.
-export const BUNDLED_WASM = ["jbig2.wasm", "openjpeg.wasm", "qcms_bg.wasm"]
+export const BUNDLED_WASM = ["jbig2.wasm", "openjpeg.wasm"]
 
 function encodeDirectory(directory: string, fileNames: string[]): { entries: string[]; bytes: number } {
 	const entries = fileNames.map(fileName => {

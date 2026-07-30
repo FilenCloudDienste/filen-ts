@@ -18,6 +18,11 @@
  */
 export function hardenFormWidgets(root: ParentNode): void {
 	const widgets = root.querySelectorAll("input, textarea, select")
+	// Original name -> opaque replacement. Radio buttons are grouped BY name, so replacing each with a
+	// per-element index would split every group into single-option radios that can all be selected at
+	// once. Mapping preserves whatever grouping the document intended while still removing the name a
+	// platform's autofill heuristics would match on.
+	const names = new Map<string, string>()
 
 	for (let index = 0; index < widgets.length; index++) {
 		const widget = widgets[index]
@@ -36,7 +41,11 @@ export function hardenFormWidgets(root: ParentNode): void {
 		widget.setAttribute("data-lpignore", "true")
 
 		if (widget.name) {
-			widget.name = `pdfField-${index}`
+			const replacement = names.get(widget.name) ?? `pdfField-${names.size}`
+
+			names.set(widget.name, replacement)
+
+			widget.name = replacement
 		}
 
 		if (widget.id) {

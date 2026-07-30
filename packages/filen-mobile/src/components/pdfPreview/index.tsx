@@ -20,6 +20,12 @@ type Phase = "loading" | "ready" | "unsupported" | "error" | "passwordCancelled"
 // How long to wait for the viewer to announce itself before deciding the WebView is not going to
 // boot. Generous, because it covers bundle parse on a cold, slow device — but finite, because the
 // alternative is an opaque overlay with nothing behind it and no way out.
+//
+// This budget covers BOOT ONLY, and is cancelled the moment the viewer says `ready`. It deliberately
+// does not cover opening or painting the document: a large file can legitimately take longer than
+// this, and a password prompt can sit open for as long as the user needs. Timing those here turned a
+// slow document — or a user typing carefully — into a hard error. Once the viewer is alive, failures
+// arrive as events, so there is nothing left for a timer to catch.
 const BOOT_TIMEOUT_MS = 20000
 
 /**
@@ -52,14 +58,16 @@ const PdfPreview = ({
 	const openExternalLink = useOpenExternalLink("pdfPreview")
 	const [phase, setPhase] = useState<Phase>("loading")
 	const [passwordResponse, setPasswordResponse] = useState<PdfPasswordResponse | null>(null)
+	const [booted, setBooted] = useState<boolean>(false)
 	const promptingRef = useRef<boolean>(false)
 	const lastRequestIdRef = useRef<string | null>(null)
+	const lastPasswordIncorrectRef = useRef<boolean>(false)
 
 	// The viewer posts `ready` once its bundle has evaluated and its capability checks have passed. If
 	// that never arrives, nothing else will either — no document, no error — so the overlay would stay
-	// up forever. Cleared as soon as any phase other than loading is reached.
+	// up forever.
 	useEffect(() => {
-		if (phase !== "loading") {
+		if (booted || phase !== "loading") {
 			return
 		}
 
@@ -72,7 +80,7 @@ const PdfPreview = ({
 		return () => {
 			clearTimeout(timeout)
 		}
-	}, [phase])
+	}, [booted, phase])
 
 	const promptForPassword = async (requestId: string, incorrect: boolean) => {
 		if (promptingRef.current) {
@@ -98,7 +106,11 @@ const PdfPreview = ({
 				error: result.error
 			})
 
-			setPhase("error")
+			alerts.error(result.error)
+
+			// Recoverable: the prompt failed, not the document. Leaving the retry affordance up beats a
+			// dead-end error for something a second tap may well survive.
+			setPhase("passwordCancelled")
 
 			return
 		}
@@ -191,8 +203,10 @@ const PdfPreview = ({
 								}
 
 								case "ready": {
-									// Boot handshake: the WebView is alive. The document may still fail, but a
-									// failure now arrives as an event rather than as silence.
+									// Boot handshake: the WebView is alive. Retires the boot watchdog — the document
+									// may still fail, but a failure now arrives as an event rather than as silence.
+									setBooted(true)
+
 									break
 								}
 
@@ -200,6 +214,7 @@ const PdfPreview = ({
 									setPasswordResponse(null)
 
 									lastRequestIdRef.current = viewerEvent.requestId
+									lastPasswordIncorrectRef.current = viewerEvent.reason === "incorrect"
 
 									promptForPassword(viewerEvent.requestId, viewerEvent.reason === "incorrect").catch(err => {
 										logger.error("pdfPreview", "password flow failed", {
@@ -250,7 +265,7 @@ const PdfPreview = ({
 
 								setPhase("loading")
 
-								promptForPassword(requestId, false).catch(err => {
+								promptForPassword(requestId, lastPasswordIncorrectRef.current).catch(err => {
 									logger.error("pdfPreview", "password retry failed", {
 										error: err
 									})

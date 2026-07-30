@@ -64,6 +64,27 @@ describe("pdf viewer options", () => {
 	test("supplies a binary data factory, so nothing is resolved by URL", () => {
 		expect(options["BinaryDataFactory"]).toBeTruthy()
 	})
+
+	test("bounds canvas allocation", () => {
+		// pdf.js's own default for this has changed before; pinning it means a future change cannot
+		// silently remove the only in-options bound on canvas memory.
+		expect(typeof options["canvasMaxAreaInBytes"]).toBe("number")
+		expect(options["canvasMaxAreaInBytes"]).toBeGreaterThan(0)
+		expect(Number.isFinite(options["canvasMaxAreaInBytes"])).toBe(true)
+	})
+
+	test("keeps pdf.js quiet", () => {
+		// Anything pdf.js prints goes through the console tee into the persisted log, and a document
+		// controls parts of those strings.
+		expect(options["verbosity"]).toBe(0)
+	})
+
+	test("never passes a url", () => {
+		// Bytes arrive through the range transport. A url would hand the WebView an egress target and
+		// re-enable the fetch paths the inlined factory exists to remove.
+		expect("url" in options).toBe(false)
+		expect(options["range"]).toBeTruthy()
+	})
 })
 
 /**
