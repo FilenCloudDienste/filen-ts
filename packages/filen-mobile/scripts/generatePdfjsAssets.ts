@@ -20,8 +20,15 @@ import { dirname, join, relative } from "node:path"
  * quickjs-eval.wasm sits in the same upstream directory and must NEVER be bundled — it is the PDF
  * scripting engine, and shipping it would hand a document an interpreter.
  *
- * cMaps are still omitted: they only affect documents referencing CJK encodings without embedding
- * them, and that degrades to missing glyphs rather than a blank page.
+ * cMaps are bundled as well. They matter for documents that reference a CJK encoding without
+ * embedding the font, which for a cloud-storage app holding whatever its users put in it is not an
+ * exotic case. Missing them degrades to missing glyphs rather than a blank page, but "some documents
+ * render with holes in them" is not a good property for a file viewer.
+ *
+ * Not bundled, and not bundleable: the CMYK ICC profile. pdf.js reads it with a SYNCHRONOUS fetch
+ * against a URL it builds by concatenation (`${iccUrl}CGATS001Compat-v2-micro.icc`), so it cannot be
+ * served through the factory at all. Documents using an ICC-based CMYK colour space fall back to an
+ * unmanaged conversion — slightly different colours, never a failure to render.
  *
  * Run after every pdfjs-dist bump. `pdfjsAssets.test.ts` fails if this output drifts from the
  * installed package.
@@ -31,6 +38,7 @@ const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
 const PDFJS_ROOT = join(PACKAGE_ROOT, "node_modules", "pdfjs-dist")
 const FONT_DIRECTORY = join(PDFJS_ROOT, "standard_fonts")
 const WASM_DIRECTORY = join(PDFJS_ROOT, "wasm")
+const CMAP_DIRECTORY = join(PDFJS_ROOT, "cmaps")
 const OUTPUT_FILE = join(PACKAGE_ROOT, "src", "components", "pdfPreview", "assets.generated.ts")
 
 // Explicit allowlist rather than "everything in the directory": that directory also contains the
@@ -53,7 +61,7 @@ function encodeDirectory(directory: string, fileNames: string[]): { entries: str
 }
 
 function main(): void {
-	for (const directory of [FONT_DIRECTORY, WASM_DIRECTORY]) {
+	for (const directory of [FONT_DIRECTORY, WASM_DIRECTORY, CMAP_DIRECTORY]) {
 		if (!existsSync(directory)) {
 			throw new Error(`pdfjs-dist assets not found at ${directory} — is pdfjs-dist installed?`)
 		}
@@ -71,8 +79,13 @@ function main(): void {
 		throw new Error(`expected wasm assets are missing from pdfjs-dist: ${missing.join(", ")}`)
 	}
 
+	const cMapNames = readdirSync(CMAP_DIRECTORY)
+		.filter(fileName => fileName.endsWith(".bcmap"))
+		.sort()
+
 	const fonts = encodeDirectory(FONT_DIRECTORY, fontNames)
 	const wasm = encodeDirectory(WASM_DIRECTORY, BUNDLED_WASM)
+	const cMaps = encodeDirectory(CMAP_DIRECTORY, cMapNames)
 
 	const output = [
 		"// GENERATED FILE — do not edit. Produced by scripts/generatePdfjsAssets.ts.",
@@ -84,6 +97,10 @@ function main(): void {
 		"export const WASM_BINARIES: Record<string, string> = {",
 		wasm.entries.join(",\n"),
 		"}",
+		"",
+		"export const CMAPS: Record<string, string> = {",
+		cMaps.entries.join(",\n"),
+		"}",
 		""
 	].join("\n")
 
@@ -94,7 +111,7 @@ function main(): void {
 	writeFileSync(OUTPUT_FILE, output, "utf-8")
 
 	console.log(
-		`wrote ${fontNames.length} fonts (${(fonts.bytes / 1024).toFixed(0)}KB) + ${BUNDLED_WASM.length} wasm (${(wasm.bytes / 1024).toFixed(0)}KB) -> ${relative(PACKAGE_ROOT, OUTPUT_FILE)}`
+		`wrote ${fontNames.length} fonts (${(fonts.bytes / 1024).toFixed(0)}KB) + ${BUNDLED_WASM.length} wasm (${(wasm.bytes / 1024).toFixed(0)}KB) + ${cMapNames.length} cmaps (${(cMaps.bytes / 1024).toFixed(0)}KB) -> ${relative(PACKAGE_ROOT, OUTPUT_FILE)}`
 	)
 }
 

@@ -9,7 +9,7 @@ import "pdfjs-dist/legacy/build/pdf.worker.mjs"
 
 import { useEffect, useRef, useState } from "react"
 import { AnnotationLayer, AnnotationMode, getDocument, PDFDataRangeTransport, TextLayer } from "pdfjs-dist/legacy/build/pdf.mjs"
-import { STANDARD_FONTS, WASM_BINARIES } from "@/components/pdfPreview/assets.generated"
+import { CMAPS, STANDARD_FONTS, WASM_BINARIES } from "@/components/pdfPreview/assets.generated"
 import { buildPdfDocumentOptions } from "@/components/pdfPreview/options"
 import { classifyPdfError } from "@/components/pdfPreview/errors"
 import {
@@ -142,12 +142,21 @@ function base64ToBytes(encoded: string): Uint8Array {
  * and without it those images are skipped silently — a scanned PDF would render as blank white pages
  * with no error at all.
  *
- * cMaps are still not bundled; a document referencing CJK encodings without embedding them degrades
- * to missing glyphs rather than to a blank page.
+ * cMaps are served from here too, so a document referencing a CJK encoding without embedding the font
+ * still renders its text. The one asset that cannot be served this way is the CMYK ICC profile: pdf.js
+ * reads that with a synchronous fetch against a concatenated URL, which no factory can intercept, so
+ * ICC-based CMYK falls back to an unmanaged colour conversion.
  */
 class InlineBinaryDataFactory {
 	async fetch({ kind, filename }: { kind: string; filename: string }): Promise<Uint8Array> {
-		const encoded = kind === "standardFontDataUrl" ? STANDARD_FONTS[filename] : kind === "wasmUrl" ? WASM_BINARIES[filename] : undefined
+		const encoded =
+			kind === "standardFontDataUrl"
+				? STANDARD_FONTS[filename]
+				: kind === "wasmUrl"
+					? WASM_BINARIES[filename]
+					: kind === "cMapUrl"
+						? CMAPS[filename]
+						: undefined
 
 		if (encoded === undefined) {
 			throw new Error(`asset not bundled: ${kind}/${filename}`)

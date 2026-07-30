@@ -41,10 +41,19 @@ export const PDF_CUMULATIVE_READ_FACTOR = 4
 export const PDF_MAX_ZOOM = 6
 
 /**
- * Total pixels a single decoded image may occupy. pdf.js defaults to unlimited; a hostile document
- * can otherwise declare an enormous image and force the allocation.
+ * Largest single image pdf.js will decode, in PIXELS — not bytes. pdf.js drops any image above this
+ * outright, leaving a blank space where it was.
+ *
+ * Sized for real scans rather than for a memory budget, because it cannot serve as one: the limit
+ * counts pixels while the cost depends on bit depth, so a 16 MP cap would refuse a 600 dpi bilevel
+ * fax scan costing about 4 MB while happily decoding a 16 MP colour image costing 64 MB. Bounding the
+ * wrong quantity produced blank pages on exactly the scanned documents people store.
+ *
+ * 80 MP covers a 600 dpi A3 page (≈70 MP) and everything smaller, including the 600 dpi A4 scans that
+ * a 16 MP cap silently blanked. A full-page 1200 dpi scan (≈139 MP) is still refused. The actual
+ * memory bounds are the file-size gate above and the isolated WebView renderer, not this number.
  */
-export const PDF_MAX_IMAGE_SIZE = 16 * 1024 * 1024
+export const PDF_MAX_IMAGE_SIZE = 80 * 1000 * 1000
 
 /**
  * Ceiling on the backing store of any canvas pdf.js allocates internally, in bytes.

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
-import { STANDARD_FONTS, WASM_BINARIES } from "@/components/pdfPreview/assets.generated"
+import { CMAPS, STANDARD_FONTS, WASM_BINARIES } from "@/components/pdfPreview/assets.generated"
 
 const PDFJS_ROOT = join(process.cwd(), "node_modules", "pdfjs-dist")
 
@@ -30,6 +30,17 @@ describe("pdf.js asset payload", () => {
 		for (const fileName of Object.keys(WASM_BINARIES)) {
 			expect(existsSync(join(PDFJS_ROOT, "wasm", fileName))).toBe(true)
 		}
+	})
+
+	test("bundles every cmap the installed package ships", () => {
+		// Documents referencing a CJK encoding without embedding the font need these; without them that
+		// text renders as holes in the page.
+		const expected = readdirSync(join(PDFJS_ROOT, "cmaps"))
+			.filter(fileName => fileName.endsWith(".bcmap"))
+			.sort()
+
+		expect(Object.keys(CMAPS).sort()).toStrictEqual(expected)
+		expect(expected.length).toBeGreaterThan(100)
 	})
 
 	test("never bundles the pdf scripting engine", () => {
