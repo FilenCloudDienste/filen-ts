@@ -124,20 +124,21 @@ function onSelectionChange(): void {
 		}
 	}
 
-	if (!(anchor instanceof Element) && !(anchor instanceof Node)) {
-		return
-	}
+	// Recorded before any of the bail-outs below. Leaving it until the end meant a single event that
+	// took an early return froze it, and every later event then compared against a stale range and
+	// picked the wrong end of the selection to anchor.
+	previousRange = range.cloneRange()
 
-	const parentElement = anchor instanceof Element ? anchor.parentElement : anchor?.parentElement
+	const parentElement = anchor?.parentElement ?? null
 	const layer = parentElement?.closest(".textLayer")
 
-	if (!(layer instanceof HTMLElement)) {
+	if (!(layer instanceof HTMLElement) || !parentElement) {
 		return
 	}
 
 	const end = textLayers.get(layer)
 
-	if (!end || !parentElement) {
+	if (!end) {
 		return
 	}
 
@@ -146,8 +147,6 @@ function onSelectionChange(): void {
 	end.style.userSelect = "text"
 
 	parentElement.insertBefore(end, modifyStart ? anchor : (anchor?.nextSibling ?? null))
-
-	previousRange = range.cloneRange()
 }
 
 function install(): void {
@@ -180,6 +179,37 @@ function install(): void {
 	})
 
 	document.addEventListener("selectionchange", onSelectionChange)
+
+	// Development only: reports what the engine actually chose as the selection boundaries. Selection
+	// behaviour here is engine-specific and cannot be reproduced off-device, and describing a symptom
+	// ("it selected the whole page") does not say whether the anchor landed on a text run, on the
+	// layer, or on something else entirely — which is the one fact that distinguishes the causes.
+	// Stripped from production builds along with every other console.log call site.
+	if (process.env.NODE_ENV !== "production") {
+		document.addEventListener("selectionchange", () => {
+			const selection = document.getSelection()
+
+			if (!selection || selection.rangeCount === 0) {
+				return
+			}
+
+			const range = selection.getRangeAt(0)
+
+			const describe = (node: Node | null): string => {
+				if (node === null) {
+					return "null"
+				}
+
+				const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node
+
+				return element instanceof Element ? `${element.tagName.toLowerCase()}.${element.className || "(none)"}` : `#${node.nodeType}`
+			}
+
+			console.warn(
+				`[pdfPreview] selection anchor=${describe(range.startContainer)} focus=${describe(range.endContainer)} common=${describe(range.commonAncestorContainer)} collapsed=${range.collapsed} len=${selection.toString().length}`
+			)
+		})
+	}
 }
 
 /**

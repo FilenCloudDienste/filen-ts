@@ -104,16 +104,28 @@ styles.textContent = `
 		   omitting it lets the engine resize this text out of alignment on that platform alone. */
 		letter-spacing: normal; word-spacing: normal;
 		-webkit-text-size-adjust: none; text-size-adjust: none;
+		/* The layer is NOT selectable; only the runs inside it are. Text runs are sparse boxes, so most
+		   of a page is gap — and a touch is far less precise than a cursor, so a long press usually
+		   lands on the layer rather than on a run. With the layer selectable the engine has nothing
+		   finer to choose and selects the whole block, which is exactly "it selected the entire page".
+		   Making the container unselectable removes that fallback while leaving the runs selectable. */
+		user-select: none; -webkit-user-select: none;
 		--scale-round-x: 1px;
 		--scale-round-y: 1px;
 		--min-font-size: 1;
 		--text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
 		--min-font-size-inv: calc(1 / var(--min-font-size));
 	}
+	/* Split exactly as upstream does. Merging these into one selector also matched the selection
+	   anchor, which is a direct child of the layer but not a text run, and handed it the selectable
+	   properties it must never have. */
+	.textLayer :is(span, br) {
+		color: transparent; position: absolute; white-space: pre; cursor: text;
+		transform-origin: 0% 0%; user-select: text; -webkit-user-select: text;
+	}
 	.textLayer > :not(.markedContent),
 	.textLayer .markedContent span:not(.markedContent) {
-		color: transparent; position: absolute; white-space: pre; cursor: text;
-		transform-origin: 0% 0%; user-select: text; -webkit-user-select: text; z-index: 1;
+		z-index: 1;
 		--font-height: 0;
 		font-size: calc(var(--text-scale-factor) * var(--font-height));
 		--scale-x: 1;
@@ -129,6 +141,11 @@ styles.textContent = `
 	.textLayer .endOfContent {
 		display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default;
 		user-select: none; -webkit-user-select: none;
+		/* While a selection is in progress this element is stretched to cover the whole layer. It only
+		   needs to exist in the DOM as somewhere for the selection to end — it must never become the
+		   hit target, or every touch after the selection starts lands on an unselectable box and the
+		   engine falls back to selecting the block that contains it. */
+		pointer-events: none;
 	}
 	.textLayer.selecting .endOfContent { top: 0; }
 	/* setLayerDimensions stamps data-main-rotation on both layers from the page's own /Rotate. Without
