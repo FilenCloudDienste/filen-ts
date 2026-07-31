@@ -29,6 +29,10 @@ vi.mock("@/components/textEditor/dom", () => ({
 	}
 }))
 
+// The wrapper owns the chunked-document write target, which stages a save to a temp file.
+vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
+vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
+
 // The wrapper now subscribes to beforeRemove for the content-flush belt (#67) — stub the
 // navigator surface it needs (expo-router's source is untranspilable in vitest).
 vi.mock("expo-router", () => ({

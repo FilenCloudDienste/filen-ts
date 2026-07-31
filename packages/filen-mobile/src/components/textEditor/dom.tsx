@@ -13,9 +13,12 @@ import type { TextEditorType, Font, Colors, TextEditorEvents } from "@/component
 import { createTextThemes, parseExtension, loadLanguage } from "@/components/textEditor/codeMirror"
 import type { DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
 import useDomDomEvents from "@/hooks/useDomEvents/useDomDomEvents"
+import useEffectOnce from "@/hooks/useEffectOnce"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
 import { decodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
 import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
+import { readAllText, writeAllBytes, type ChunkWriter, type RangeReader } from "@/lib/rangeTransfer"
+import { isProbablyBinaryText } from "@/lib/previewType"
 import MDEditor from "@uiw/react-md-editor"
 import rehypeSanitize from "rehype-sanitize"
 import { visit } from "unist-util-visit"
@@ -63,6 +66,9 @@ const TextEditorDOM = ({
 	font,
 	colors,
 	markdownPreviewActive,
+	readRange,
+	fileSize,
+	writeChunk,
 	paddingTop,
 	paddingBottom
 }: {
@@ -80,21 +86,32 @@ const TextEditorDOM = ({
 	font?: Font
 	colors?: Colors
 	markdownPreviewActive?: boolean
+	// Chunked-document mode, used for previewing a file on disk. These three MUST stay top-level
+	// props: expo/dom only recognises a function as a callable action when it is a top-level prop, so
+	// grouping them into an object would silently JSON-serialize them away to undefined.
+	readRange?: RangeReader
+	fileSize?: number
+	writeChunk?: ChunkWriter
 	paddingTop?: number
 	paddingBottom?: number
 }) => {
 	const [value, setValue] = useState<string>(() => decodeEditorInitialValue(initialValue ?? ""))
 	const codeMirrorRef = useRef<ReactCodeMirrorRef>(null)
+	// Chunked mode reports only that the document changed, never the document itself — see onChange.
+	const chunked = readRange !== undefined && fileSize !== undefined
+	const editedReportedRef = useRef<boolean>(false)
 
 	// Latest-props refs for the flush handler: the imperative message handler is captured once
 	// per WebView mount ([] deps on useDOMImperativeHandle), so it must read everything through
 	// refs to stay current.
 	const onValueChangeRef = useRef(onValueChange)
 	const readOnlyRef = useRef(readOnly)
+	const writeChunkRef = useRef(writeChunk)
 
 	useEffect(() => {
 		onValueChangeRef.current = onValueChange
 		readOnlyRef.current = readOnly
+		writeChunkRef.current = writeChunk
 	})
 
 	// The last document value delivered to native — by a change event or a flush. The flush
@@ -108,10 +125,26 @@ const TextEditorDOM = ({
 	// redundant and silently dropped paste / voice-dictation / autocomplete inserts
 	// (which emit no keydown). `setValue` keeps the controlled value in sync.
 	const onChange = (value: string) => {
+		setValue(value)
+
+		// Chunked mode reports that the document changed, never WHAT it changed to. The document
+		// crosses this bridge as a JSON string inside a postMessage, so sending it on every keystroke
+		// makes typing cost the file size per character. The host pulls it once, when the user saves.
+		if (chunked) {
+			if (!editedReportedRef.current) {
+				editedReportedRef.current = true
+
+				postMessageRef.current({
+					type: "contentEdited"
+				})
+			}
+
+			return
+		}
+
 		lastReportedValueRef.current = value
 
 		onValueChange?.(value)
-		setValue(value)
 	}
 
 	// #67: some WebView/keyboard combos (seen on hardened Android WebViews) never deliver
@@ -120,7 +153,11 @@ const TextEditorDOM = ({
 	// (forcing the keyboard to finalize the composing region into the document through the
 	// normal event path), then report the document iff it differs from the last reported
 	// value. setValue keeps the controlled prop aligned so the update can't be reverted.
-	const flushPendingContent = (commitComposition: boolean) => {
+	// `post` is threaded in rather than read from postMessageRef because this runs from the native
+	// message handler, and that handler is an argument to useDomDomEvents — the ref is written after
+	// that call, which the compiler rejects. useDomDomEvents hands the handler its own postMessage for
+	// exactly this, and it is stateless, so any render's copy stays correct.
+	const flushPendingContent = (commitComposition: boolean, post: (message: TextEditorEvents) => void) => {
 		if (readOnlyRef.current) {
 			return
 		}
@@ -145,8 +182,83 @@ const TextEditorDOM = ({
 			lastReportedValueRef.current = doc
 
 			setValue(doc)
+
+			// In chunked mode the document is never reported, only the fact that it changed — but a
+			// divergence found HERE is the one case where a change event never fired, so without this
+			// an IME-composed edit would leave the save button hidden and the navigate-away guard
+			// silent, and the edit would be lost exactly on the devices #67 is about.
+			if (chunked) {
+				if (!editedReportedRef.current) {
+					editedReportedRef.current = true
+
+					post({
+						type: "contentEdited"
+					})
+				}
+
+				return
+			}
+
 			onValueChangeRef.current?.(doc)
 		}, FLUSH_COMPOSITION_COMMIT_MS)
+	}
+
+	/**
+	 * Streams the current document back to the host. The mirror of the load below, and bounded the
+	 * same way: the bytes go through the write RPC rather than riding in a message payload.
+	 *
+	 * Blurs first so the keyboard commits an in-flight IME composition into the document before it is
+	 * read — the hazard flushPendingContent exists for (#67), at the one moment it matters most.
+	 */
+	const writeDocument = async (requestId: string, post: (message: TextEditorEvents) => void) => {
+		const write = writeChunkRef.current
+
+		const fail = () => {
+			post({
+				type: "documentWriteFailed",
+				data: {
+					requestId
+				}
+			})
+		}
+
+		if (!write) {
+			fail()
+
+			return
+		}
+
+		codeMirrorRef.current?.view?.contentDOM.blur()
+
+		await new Promise(resolve => setTimeout(resolve, FLUSH_COMPOSITION_COMMIT_MS))
+
+		try {
+			const doc = codeMirrorRef.current?.view?.state.doc.toString() ?? lastReportedValueRef.current
+
+			if (!(await writeAllBytes(new TextEncoder().encode(doc), write))) {
+				fail()
+
+				return
+			}
+
+			lastReportedValueRef.current = doc
+
+			// What was on screen is now on disk, so anything after this is a fresh change. Without the
+			// reset the latch stays set, no later edit reports itself, and the save button never comes
+			// back for the second edit of a session.
+			editedReportedRef.current = false
+
+			post({
+				type: "documentWritten",
+				data: {
+					requestId
+				}
+			})
+		} catch (e) {
+			console.warn(`[textEditor] failed to serialise the document: ${e instanceof Error ? e.name : "unknown"}`)
+
+			fail()
+		}
 	}
 
 	const isTextFile = type === "text" || parseExtension(fileName ?? "file.tsx") === ".txt"
@@ -226,9 +338,13 @@ const TextEditorDOM = ({
 		return [...base, lang]
 	})()
 
-	const { onNativeMessage, postMessage } = useDomDomEvents<TextEditorEvents>(message => {
+	const { onNativeMessage, postMessage } = useDomDomEvents<TextEditorEvents>((message, post) => {
 		if (message.type === "flushContent") {
-			flushPendingContent(message.data.commitComposition)
+			flushPendingContent(message.data.commitComposition, post)
+		}
+
+		if (message.type === "writeDocument") {
+			writeDocument(message.data.requestId, post)
 		}
 	})
 	const postMessageRef = useRef(postMessage)
@@ -245,6 +361,67 @@ const TextEditorDOM = ({
 		}),
 		[]
 	)
+
+	// Chunked mode: pull the document across the bridge rather than receive it as a prop. Mount-only
+	// is safe here because the host renders this component only once its range source is open, and
+	// keys it per document — so readRange/fileSize are present at mount and never change afterwards.
+	useEffectOnce(() => {
+		if (readRange === undefined || fileSize === undefined) {
+			return
+		}
+
+		let cancelled = false
+
+		const load = async () => {
+			try {
+				const text = await readAllText(readRange, fileSize, {
+					isCancelled: () => cancelled
+				})
+
+				if (text === null || cancelled) {
+					return
+				}
+
+				// Binary bytes behind a text extension (e.g. macOS "._*" AppleDouble sidecars) decode to
+				// NUL/replacement-character soup. Refused rather than shown: it renders as deceptively
+				// empty, and saving it would corrupt the file. Checked here rather than on the host
+				// because the text deliberately no longer crosses the bridge for the host to inspect.
+				if (isProbablyBinaryText(text)) {
+					postMessageRef.current({
+						type: "documentUnavailable",
+						data: {
+							reason: "notText"
+						}
+					})
+
+					return
+				}
+
+				lastReportedValueRef.current = text
+
+				setValue(text)
+
+				postMessageRef.current({
+					type: "documentLoaded"
+				})
+			} catch (e) {
+				console.warn(`[textEditor] failed to load the document: ${e instanceof Error ? e.name : "unknown"}`)
+
+				postMessageRef.current({
+					type: "documentUnavailable",
+					data: {
+						reason: "loadFailed"
+					}
+				})
+			}
+		}
+
+		load()
+
+		return () => {
+			cancelled = true
+		}
+	})
 
 	useEffect(() => {
 		// Emit "ready" exactly once per WebView mount, and register the window

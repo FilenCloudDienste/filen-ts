@@ -622,6 +622,14 @@ function toUriString(path: string | File | Directory): string {
 	return typeof path === "string" ? path : path.uri
 }
 
+/** Mirrors expo-file-system's FileMode. `open()` here ignores the mode; this exists so callers that
+ *  name one (the chunked write target) resolve rather than throwing on a missing export. */
+export enum FileMode {
+	ReadWrite = "rw",
+	ReadOnly = "r",
+	WriteOnly = "w"
+}
+
 export const Paths = {
 	get document(): Directory {
 		return new Directory(DOCUMENT_URI)

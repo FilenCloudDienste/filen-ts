@@ -13,8 +13,15 @@ import { useSecureStore } from "@/lib/secureStore"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import logger from "@/lib/logger"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"
+import useChunkedWriteTarget from "@/hooks/useChunkedWriteTarget"
+import { MAX_TEXT_BYTES } from "@/components/textEditor/constants"
+import type { RangeReader } from "@/lib/rangeTransfer"
+import type { File } from "expo-file-system"
 
 export type TextEditorType = "richtext" | "text" | "markdown" | "code"
+
+/** Outcome of loading a document in chunked mode. */
+export type TextEditorDocumentStatus = "ready" | "notText" | "failed"
 
 export type TextEditorEvents =
 	| {
@@ -80,6 +87,43 @@ export type TextEditorEvents =
 			type: "externalLinkClicked"
 			data: string
 	  }
+	// ── Chunked-document mode (drive file preview) ────────────────────────────
+	// The document is pulled and pushed through bounded RPCs rather than carried in props and
+	// messages, so these carry no content — only which document-sized thing happened.
+	| {
+			// DOM → native: the document now differs from what was loaded. Fired once.
+			type: "contentEdited"
+	  }
+	| {
+			// DOM → native: the document arrived and is in the editor.
+			type: "documentLoaded"
+	  }
+	| {
+			// DOM → native: the document will not be shown.
+			type: "documentUnavailable"
+			data: {
+				reason: "notText" | "loadFailed"
+			}
+	  }
+	| {
+			// Native → DOM: stream the current document back through the write RPC.
+			type: "writeDocument"
+			data: {
+				requestId: string
+			}
+	  }
+	| {
+			type: "documentWritten"
+			data: {
+				requestId: string
+			}
+	  }
+	| {
+			type: "documentWriteFailed"
+			data: {
+				requestId: string
+			}
+	  }
 
 export type Colors = {
 	text: {
@@ -137,6 +181,11 @@ export const TextEditor = ({
 	id,
 	fileName,
 	autoFocus,
+	readRange,
+	fileSize,
+	saveHandleRef,
+	onDocumentEditedChange,
+	onDocumentStatus,
 	paddingTop,
 	paddingBottom
 }: {
@@ -152,6 +201,25 @@ export const TextEditor = ({
 	// language by extension (loadLanguage). Without it every code file defaults to "file.tsx" (TSX).
 	fileName?: string
 	autoFocus?: boolean
+	/**
+	 * Chunked-document mode, for previewing a file on disk rather than editing a note.
+	 *
+	 * Supplying `readRange` switches the editor over completely: the content is pulled through the
+	 * reader instead of `initialValue`, changes are reported as a single `onDocumentEditedChange`
+	 * signal instead of handing the whole document to `onValueChange` on every keystroke, and
+	 * `saveHandleRef` streams it back out. Notes keep the plain-string path — their content comes
+	 * from a query, not a file, and their sync genuinely needs every change.
+	 *
+	 * Deliberately flat rather than one grouped object: a grouped literal would change identity on
+	 * every render of the host and re-run the effect that arms the save, discarding the temp file
+	 * mid-save.
+	 */
+	readRange?: RangeReader
+	fileSize?: number
+	/** Filled with a function that streams the document into a temp file, or null when read-only. */
+	saveHandleRef?: { current: (() => Promise<File | null>) | null }
+	onDocumentEditedChange?: (edited: boolean) => void
+	onDocumentStatus?: (status: TextEditorDocumentStatus) => void
 	paddingTop?: number
 	paddingBottom?: number
 }) => {
@@ -166,7 +234,17 @@ export const TextEditor = ({
 	const text = useResolveClassNames("font-normal text-sm")
 	const { theme } = useUniwind()
 	const [textEditorMarkdownPreviewActive] = useSecureStore<Record<string, boolean>>("textEditorMarkdownPreviewActive", {})
-	const encodedInitialValue = useState(() => encodeEditorInitialValue(initialValue ?? ""))[0]
+	// Both halves of the source are required together, so one condition decides the mode everywhere.
+	// A reader without a size would otherwise suppress `initialValue` while the DOM side stayed on the
+	// plain-string path, and the editor would come up empty.
+	const chunked = readRange !== undefined && fileSize !== undefined
+	// Not sent at all in chunked mode: the point is that the document does not ride in a prop.
+	const encodedInitialValue = useState(() => (chunked ? "" : encodeEditorInitialValue(initialValue ?? "")))[0]
+	const writeTarget = useChunkedWriteTarget({
+		maxBytes: MAX_TEXT_BYTES,
+		fileName: "textSave.txt"
+	})
+	const writeResolverRef = useRef<((file: File | null) => void) | null>(null)
 
 	const markdownPreviewActive = !id ? false : (textEditorMarkdownPreviewActive[id] ?? false)
 
@@ -201,6 +279,42 @@ export const TextEditor = ({
 
 					break
 				}
+
+				case "contentEdited": {
+					onDocumentEditedChange?.(true)
+
+					break
+				}
+
+				case "documentLoaded": {
+					onDocumentStatus?.("ready")
+
+					break
+				}
+
+				case "documentUnavailable": {
+					onDocumentStatus?.(message.data.reason === "notText" ? "notText" : "failed")
+
+					break
+				}
+
+				case "documentWritten": {
+					writeResolverRef.current?.(writeTarget.finish())
+					writeResolverRef.current = null
+
+					break
+				}
+
+				case "documentWriteFailed": {
+					logger.error("textEditor", "the editor could not serialise the document")
+
+					writeTarget.discard()
+
+					writeResolverRef.current?.(null)
+					writeResolverRef.current = null
+
+					break
+				}
 			}
 		}
 	})
@@ -230,6 +344,36 @@ export const TextEditor = ({
 	useEffect(() => {
 		postMessageRef.current = postMessage
 	}, [postMessage])
+
+	// Serialising happens inside the WebView, so the host asks for it through a message and settles the
+	// promise when the editor reports back. Mirrors the PDF viewer's save.
+	useEffect(() => {
+		if (!saveHandleRef) {
+			return
+		}
+
+		saveHandleRef.current = readOnly
+			? null
+			: () =>
+					new Promise<File | null>(resolve => {
+						writeTarget.begin()
+
+						writeResolverRef.current = resolve
+
+						postMessageRef.current({
+							type: "writeDocument",
+							data: {
+								requestId: `${Date.now()}`
+							}
+						})
+					})
+
+		return () => {
+			saveHandleRef.current = null
+
+			writeTarget.discard()
+		}
+	}, [readOnly, saveHandleRef, writeTarget])
 
 	const navigation = useNavigation()
 
@@ -350,6 +494,11 @@ export const TextEditor = ({
 							fileName={fileName}
 							markdownPreviewActive={markdownPreviewActive}
 							autoFocus={autoFocus}
+							// Top-level, never grouped: expo/dom only treats a top-level prop as a callable
+							// action, so a nested function would be JSON-serialized away to undefined.
+							readRange={chunked ? readRange : undefined}
+							fileSize={chunked ? fileSize : undefined}
+							writeChunk={chunked ? writeTarget.writeChunk : undefined}
 							dom={{
 								onMessage: onDomMessage,
 								bounces: false

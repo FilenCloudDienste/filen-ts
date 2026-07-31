@@ -101,7 +101,10 @@ export default function useChunkedWriteTarget(config: { maxBytes: number; magic?
 
 			fileRef.current = null
 
-			if (!file || writtenRef.current === 0 || !file.exists) {
+			// `begin()` having run is the test for a save being in progress, NOT the byte count: emptying
+			// a text file and saving it is a legitimate edit, and a zero-length result is the correct
+			// output for it. A format that cannot be empty is rejected by its magic check below instead.
+			if (!file || !file.exists) {
 				return null
 			}
 
@@ -116,6 +119,10 @@ export default function useChunkedWriteTarget(config: { maxBytes: number; magic?
 
 						return null
 					}
+				} catch {
+					file.delete()
+
+					return null
 				} finally {
 					readHandle.close()
 				}
