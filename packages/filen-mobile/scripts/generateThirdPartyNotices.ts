@@ -406,14 +406,23 @@ function repositoryOf(value: unknown): string | null {
 	return null
 }
 
+/**
+ * The npm packages that reach a device.
+ *
+ * `optional` is excluded alongside `dev` because npm decides per machine whether to install one, so
+ * including them makes the payload depend on where it was generated — a macOS run describes the darwin
+ * native binaries, a Linux run the linux ones. Every optional entry in this tree is build tooling that
+ * cannot execute on a device anyway: the napi-rs/lightningcss/oxide native binaries and their wasm
+ * fallbacks, pdf.js's Node canvas backend (the app runs pdf.js in a WebView), and type-only packages.
+ */
 function collectNpm(): Collected[] {
 	const lock = readJson(join(packageRoot, "package-lock.json"))
-	const packages = (lock?.["packages"] ?? {}) as Record<string, { dev?: boolean; devOptional?: boolean }>
+	const packages = (lock?.["packages"] ?? {}) as Record<string, { dev?: boolean; devOptional?: boolean; optional?: boolean }>
 	const seen = new Set<string>()
 	const entries: Collected[] = []
 
 	for (const [key, meta] of Object.entries(packages)) {
-		if (!key.startsWith("node_modules/") || meta.dev === true || meta.devOptional === true) {
+		if (!key.startsWith("node_modules/") || meta.dev === true || meta.devOptional === true || meta.optional === true) {
 			continue
 		}
 

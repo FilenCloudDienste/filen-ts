@@ -20,26 +20,27 @@ const POD_INFRASTRUCTURE = new Set(["Headers", "Local Podspecs", "Target Support
 const PACKAGE_ROOT = path.join(__dirname, "..", "..")
 
 /**
- * Packages the lockfile ships AND that are actually installed here.
+ * The packages the lockfile says reach a device.
  *
- * The two differ by design: npm records every platform's optionalDependencies (the napi-rs, tailwind
- * and lightningcss native binaries for linux/windows/android) but installs only this machine's. Those
- * are build tooling and never reach a device, so a notice cannot and need not be produced for them —
- * which is why the guard is keyed on what is on disk rather than on the lockfile alone.
+ * Read from the lockfile alone, never from what is installed here: the lockfile is committed, so this
+ * set is identical on every machine, and the payload has to satisfy CI as much as the laptop it was
+ * generated on.
+ *
+ * `optional` is what makes that hold. npm decides per machine whether to install one — a macOS run
+ * gets the darwin native binaries, CI's Linux run the linux ones — so counting them made the payload
+ * describe wherever it happened to be generated. Every optional entry here is build tooling that
+ * cannot execute on a device anyway: the lightningcss/oxide/napi-rs binaries and their wasm fallbacks,
+ * pdf.js's Node canvas backend (the app runs pdf.js in a WebView), and type-only packages.
  */
 function installedShippingPackages(): Set<string> {
 	const lock = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, "package-lock.json"), "utf8")) as {
-		packages?: Record<string, { dev?: boolean; devOptional?: boolean }>
+		packages?: Record<string, { dev?: boolean; devOptional?: boolean; optional?: boolean }>
 	}
 
 	const names = new Set<string>()
 
 	for (const [key, meta] of Object.entries(lock.packages ?? {})) {
-		if (!key.startsWith("node_modules/") || meta.dev === true || meta.devOptional === true) {
-			continue
-		}
-
-		if (!existsSync(path.join(PACKAGE_ROOT, key, "package.json"))) {
+		if (!key.startsWith("node_modules/") || meta.dev === true || meta.devOptional === true || meta.optional === true) {
 			continue
 		}
 
