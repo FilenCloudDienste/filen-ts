@@ -54,7 +54,8 @@ export const Header = ({
 		enabled: false
 	})
 
-	const liveNotes = notesQuery.status === "success" ? notesQuery.data : []
+	// A failed refetch keeps the data and only flips `status` (#103).
+	const liveNotes = notesQuery.data ?? []
 	const liveByUuid = new Map(liveNotes.map(note => [note.uuid, note]))
 	// Drop stale-snapshot entries rather than falling back to them (#42): if the note is
 	// no longer in the live query result it has been deleted and must not influence flags
@@ -77,11 +78,8 @@ export const Header = ({
 			return createUntaggedTag(t("untagged"))
 		}
 
-		if (notesTagsQuery.status !== "success") {
-			return null
-		}
-
-		return notesTagsQuery.data.find(noteTag => noteTag.uuid === tagUuid) ?? null
+		// A failed refetch keeps the data and only flips `status` (#103).
+		return notesTagsQuery.data?.find(noteTag => noteTag.uuid === tagUuid) ?? null
 	})()
 
 	const viewMode = tag ? "notes" : notesViewMode

@@ -53,6 +53,20 @@ const Notes = () => {
 	const notesTagsQuery = useNotesTagsQuery()
 	const [searchQuery, setSearchQuery] = useState<string>("")
 
+	// Read the DATA, never the last fetch's verdict (#103).
+	//
+	// `refetchOnMount: "always"` fires a doomed request the moment this screen opens offline. It
+	// fails, and TanStack flips `status` to "error" while KEEPING whatever data the query already
+	// held — including the full list restored from the persisted cache at boot. Gating on
+	// `status === "success"` therefore threw away a complete, perfectly good offline list and left
+	// the screen spinning on top of it, which is exactly what made notes marked for offline use
+	// unreachable while offline.
+	//
+	// `status` still decides the SPINNER below, but only its "pending" value: pending means there is
+	// genuinely nothing to draw yet, whereas "error" with data in hand means draw the data.
+	const notesData = notesQuery.data
+	const notesTagsData = notesTagsQuery.data
+
 	const tag = (() => {
 		if (!tagUuid) {
 			return null
@@ -64,11 +78,11 @@ const Notes = () => {
 			return createUntaggedTag(t("untagged"))
 		}
 
-		if (notesTagsQuery.status !== "success") {
+		if (!notesTagsData) {
 			return null
 		}
 
-		return notesTagsQuery.data.find(noteTag => noteTag.uuid === tagUuid) ?? null
+		return notesTagsData.find(noteTag => noteTag.uuid === tagUuid) ?? null
 	})()
 
 	const isUntaggedScreen = tag !== null && isUntaggedTagUuid(tag.uuid)
@@ -85,19 +99,19 @@ const Notes = () => {
 	// #84: notes without any tag, blocked-filtered like every other listing. Feeds the virtual
 	// "Untagged" row (count/activity/inflight) and the sentinel-filtered screen.
 	const untaggedNotes = ((): TNote[] => {
-		if (notesQuery.status !== "success") {
+		if (!notesData) {
 			return []
 		}
 
-		return filterUntaggedNotes(filterNotesByBlockedOwner(notesQuery.data, blocked))
+		return filterUntaggedNotes(filterNotesByBlockedOwner(notesData, blocked))
 	})()
 
 	const notes = ((): NoteListItem[] => {
-		if (notesQuery.status !== "success") {
+		if (!notesData) {
 			return []
 		}
 
-		const visible = filterNotesByBlockedOwner(notesQuery.data, blocked)
+		const visible = filterNotesByBlockedOwner(notesData, blocked)
 
 		const grouped = notesSorter.group({
 			// The virtual tag cannot go through group()'s uuid-based tag filter — pre-filter
@@ -157,17 +171,17 @@ const Notes = () => {
 
 	// Built before notesTags: the tags sort (by "last activity" / note count) reads this index.
 	const notesForTag = (() => {
-		if (notesQuery.status !== "success" || notesTagsQuery.status !== "success") {
+		if (!notesData || !notesTagsData) {
 			return {}
 		}
 
 		const index: Record<string, TNote[]> = {}
 
-		for (const tag of notesTagsQuery.data) {
+		for (const tag of notesTagsData) {
 			index[tag.uuid] = []
 		}
 
-		for (const note of notesQuery.data) {
+		for (const note of notesData) {
 			for (const tag of note.tags) {
 				const tagNotes = index[tag.uuid]
 
@@ -184,11 +198,11 @@ const Notes = () => {
 	})()
 
 	const notesTags = (() => {
-		if (notesTagsQuery.status !== "success") {
+		if (!notesTagsData) {
 			return []
 		}
 
-		const sorted = sortNoteTags(notesTagsQuery.data, tagsSortBy, notesForTag)
+		const sorted = sortNoteTags(notesTagsData, tagsSortBy, notesForTag)
 
 		// #84: virtual "Untagged" row — appended AFTER the sort so it is always at the
 		// bottom regardless of the sort preference; hidden when nothing is untagged.
@@ -262,7 +276,7 @@ const Notes = () => {
 	// bulk ops target a tag that no longer exists. Reconcile selectedTags against the
 	// authoritative (unfiltered) tag set whenever the query data changes — keyed on the
 	// live tag uuids so search filtering (which only hides, not removes) doesn't prune.
-	const liveTagUuidsKey = notesTagsQuery.status === "success" ? notesTagsQuery.data.map(noteTag => noteTag.uuid).join(",") : null
+	const liveTagUuidsKey = notesTagsData ? notesTagsData.map(noteTag => noteTag.uuid).join(",") : null
 
 	useEffect(() => {
 		if (liveTagUuidsKey === null) {
@@ -284,7 +298,7 @@ const Notes = () => {
 	// the selectedTags purge above — it prunes selectedNotes against the UNFILTERED live
 	// note uuid set so any ghost that slips through (e.g. from other removal paths) is
 	// caught before it can inflate the count, break select-all, or fail a bulk op.
-	const liveNoteUuidsKey = notesQuery.status === "success" ? notesQuery.data.map(note => note.uuid).join(",") : null
+	const liveNoteUuidsKey = notesData ? notesData.map(note => note.uuid).join(",") : null
 
 	useEffect(() => {
 		if (liveNoteUuidsKey === null) {
@@ -400,7 +414,7 @@ const Notes = () => {
 							keyExtractor={keyExtractorNotesView}
 							data={notes}
 							renderItem={renderItemNotesView}
-							loading={notesQuery.status !== "success"}
+							loading={notesQuery.status === "pending"}
 							onRefresh={onRefresh}
 							emptyComponent={viewMode === "offline" ? offlineEmptyComponent : notesEmptyComponent}
 						/>
@@ -411,7 +425,7 @@ const Notes = () => {
 							contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
 							keyExtractor={keyExtractorTagsView}
 							data={notesTags}
-							loading={notesTagsQuery.status !== "success"}
+							loading={notesTagsQuery.status === "pending"}
 							renderItem={renderItemTagsView}
 							onRefresh={onRefresh}
 							emptyComponent={tagsEmptyComponent}

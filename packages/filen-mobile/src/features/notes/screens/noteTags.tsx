@@ -242,7 +242,8 @@ const NoteTags = () => {
 	})
 
 	const liveNotes = (() => {
-		if (!notesParsed || notesParsed.length === 0 || notesQuery.status !== "success") {
+		// A failed refetch keeps the data and only flips `status` (#103).
+		if (!notesParsed || notesParsed.length === 0 || !notesQuery.data) {
 			return []
 		}
 
@@ -253,10 +254,10 @@ const NoteTags = () => {
 
 	const notesTagsQuery = useNotesTagsQuery()
 
-	const tags =
-		notesTagsQuery.status === "success"
-			? [...notesTagsQuery.data].sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b)))
-			: []
+	// A failed refetch keeps the data and only flips `status` (#103).
+	const tags = notesTagsQuery.data
+		? [...notesTagsQuery.data].sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b)))
+		: []
 
 	if (liveNotes.length === 0) {
 		return <DismissStack />

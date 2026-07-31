@@ -140,7 +140,9 @@ const NoteHistory = () => {
 		enabled: false
 	})
 
-	const note = noteParsed && notesQuery.status === "success" ? (notesQuery.data.find(n => n.uuid === noteParsed.uuid) ?? null) : null
+	// A failed refetch keeps the data and only flips `status` (#103) — resolve from the cached
+	// list so an offline note still opens.
+	const note = noteParsed ? (notesQuery.data?.find(n => n.uuid === noteParsed.uuid) ?? null) : null
 
 	const noteHistoryQuery = useNoteHistoryQuery(
 		{
@@ -151,7 +153,8 @@ const NoteHistory = () => {
 		}
 	)
 
-	const history = noteHistoryQuery.status === "success" && note ? sortNoteHistoryNewestFirst(noteHistoryQuery.data) : []
+	// A failed refetch keeps the data and only flips `status` (#103).
+	const history = noteHistoryQuery.data && note ? sortNoteHistoryNewestFirst(noteHistoryQuery.data) : []
 
 	const historyEmptyComponent = () => {
 		if (noteHistoryQuery.status === "error") {

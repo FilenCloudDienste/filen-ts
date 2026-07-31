@@ -56,7 +56,9 @@ const NoteParticipants = () => {
 		enabled: false
 	})
 
-	const note = noteParsed && notesQuery.status === "success" ? (notesQuery.data.find(n => n.uuid === noteParsed.uuid) ?? null) : null
+	// A failed refetch keeps the data and only flips `status` (#103) — resolve from the cached
+	// list so an offline note still opens.
+	const note = noteParsed ? (notesQuery.data?.find(n => n.uuid === noteParsed.uuid) ?? null) : null
 
 	const participants = note ? note.participants.filter(p => p.userId !== stringifiedClient?.userId) : []
 	const isOwner = note?.ownerId === stringifiedClient?.userId

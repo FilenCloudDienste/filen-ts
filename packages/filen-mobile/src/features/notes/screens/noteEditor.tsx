@@ -247,7 +247,9 @@ const Note = () => {
 		enabled: false
 	})
 
-	const note = notesQuery.status === "success" ? (notesQuery.data.find(n => n.uuid === uuid) ?? null) : null
+	// A failed refetch keeps the data and only flips `status` (#103) — resolve from the cached
+	// list so an offline note still opens.
+	const note = notesQuery.data?.find(n => n.uuid === uuid) ?? null
 
 	const history = deserializeRouteParam<NoteHistory>(historySerialized)
 
