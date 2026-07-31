@@ -7,7 +7,9 @@ import Dom from "@/components/pdfPreview/dom"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import View from "@/components/ui/view"
-import { parsePdfExternalLink, parsePdfViewerEvent, type PdfPasswordResponse } from "@/components/pdfPreview/protocol"
+import { parsePdfExternalLink, parsePdfViewerEvent, type PdfPasswordResponse, type PdfSaveRequest } from "@/components/pdfPreview/protocol"
+import usePdfSaveTarget from "@/components/pdfPreview/usePdfSaveTarget"
+import type { File } from "expo-file-system"
 import { forwardDomConsoleLog } from "@/hooks/useDomEvents/forwardDomLog"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 import prompts from "@/lib/prompts"
@@ -42,6 +44,9 @@ const BOOT_TIMEOUT_MS = 20000
 const PdfPreview = ({
 	readRange,
 	fileSize,
+	readOnly,
+	onEditedChange,
+	saveHandleRef,
 	paddingTop,
 	paddingBottom,
 	paddingLeft,
@@ -49,6 +54,10 @@ const PdfPreview = ({
 }: {
 	readRange: (offset: number, length: number) => Promise<string>
 	fileSize: number
+	readOnly: boolean
+	onEditedChange: (edited: boolean) => void
+	/** Filled with a function that serialises the document to a temp file, or null when not editable. */
+	saveHandleRef: { current: (() => Promise<File | null>) | null }
 	paddingTop?: number
 	paddingBottom?: number
 	paddingLeft?: number
@@ -59,6 +68,9 @@ const PdfPreview = ({
 	const [phase, setPhase] = useState<Phase>("loading")
 	const [passwordResponse, setPasswordResponse] = useState<PdfPasswordResponse | null>(null)
 	const [booted, setBooted] = useState<boolean>(false)
+	const [saveRequest, setSaveRequest] = useState<PdfSaveRequest | null>(null)
+	const saveTarget = usePdfSaveTarget()
+	const saveResolverRef = useRef<((file: File | null) => void) | null>(null)
 	const promptingRef = useRef<boolean>(false)
 	const lastRequestIdRef = useRef<string | null>(null)
 	const lastPasswordIncorrectRef = useRef<boolean>(false)
@@ -129,12 +141,38 @@ const PdfPreview = ({
 		})
 	}
 
+	// Serialising happens inside the WebView, so the host asks for it through a prop and settles the
+	// promise when the viewer reports back. Mirrors the password round trip.
+	useEffect(() => {
+		saveHandleRef.current = readOnly
+			? null
+			: () =>
+					new Promise<File | null>(resolve => {
+						saveTarget.begin()
+
+						saveResolverRef.current = resolve
+
+						setSaveRequest({
+							requestId: `${Date.now()}`
+						})
+					})
+
+		return () => {
+			saveHandleRef.current = null
+
+			saveTarget.discard()
+		}
+	}, [readOnly, saveHandleRef, saveTarget])
+
 	return (
 		<View className="flex-1 bg-background">
 			<Dom
 				readRange={readRange}
+				writeChunk={saveTarget.writeChunk}
 				fileSize={fileSize}
+				readOnly={readOnly}
 				passwordResponse={passwordResponse}
+				saveRequest={saveRequest}
 				paddingTop={paddingTop}
 				paddingBottom={paddingBottom}
 				paddingLeft={paddingLeft}
@@ -189,6 +227,33 @@ const PdfPreview = ({
 									})
 
 									setPhase("unsupported")
+
+									break
+								}
+
+								case "edited": {
+									onEditedChange(true)
+
+									break
+								}
+
+								case "saved": {
+									setSaveRequest(null)
+
+									saveResolverRef.current?.(saveTarget.finish())
+									saveResolverRef.current = null
+
+									break
+								}
+
+								case "saveFailed": {
+									logger.error("pdfPreview", "the viewer could not serialise the document")
+
+									setSaveRequest(null)
+									saveTarget.discard()
+
+									saveResolverRef.current?.(null)
+									saveResolverRef.current = null
 
 									break
 								}

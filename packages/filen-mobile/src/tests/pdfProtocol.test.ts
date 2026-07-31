@@ -94,6 +94,28 @@ describe("parsePdfViewerEvent", () => {
 		expect(parsePdfViewerEvent(eventEnvelope({ event: "unsupported", reason: "canvas" }))).not.toBeNull()
 	})
 
+	test("accepts the edit and save events", () => {
+		expect(parsePdfViewerEvent(eventEnvelope({ event: "edited" }))).toStrictEqual({ event: "edited" })
+		expect(parsePdfViewerEvent(eventEnvelope({ event: "saved", requestId: "s1", byteLength: 4096 }))).toStrictEqual({
+			event: "saved",
+			requestId: "s1",
+			byteLength: 4096
+		})
+		expect(parsePdfViewerEvent(eventEnvelope({ event: "saveFailed", requestId: "s1" }))).toStrictEqual({
+			event: "saveFailed",
+			requestId: "s1"
+		})
+	})
+
+	test("rejects a save report that claims nothing was written", () => {
+		// A zero or negative length would otherwise be handed on as a file to upload over the user's
+		// document.
+		expect(parsePdfViewerEvent(eventEnvelope({ event: "saved", requestId: "s1", byteLength: 0 }))).toBeNull()
+		expect(parsePdfViewerEvent(eventEnvelope({ event: "saved", requestId: "s1", byteLength: -1 }))).toBeNull()
+		expect(parsePdfViewerEvent(eventEnvelope({ event: "saved", requestId: "", byteLength: 10 }))).toBeNull()
+		expect(parsePdfViewerEvent(eventEnvelope({ event: "saved", requestId: "s1" }))).toBeNull()
+	})
+
 	test("rejects values outside each closed set", () => {
 		expect(parsePdfViewerEvent(eventEnvelope({ event: "unsupported", reason: "vibes" }))).toBeNull()
 		expect(parsePdfViewerEvent(eventEnvelope({ event: "error", kind: "TypeError: cannot read x of undefined" }))).toBeNull()

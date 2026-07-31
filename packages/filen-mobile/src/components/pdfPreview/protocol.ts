@@ -54,6 +54,9 @@ export type PdfPasswordReason = "required" | "incorrect"
  */
 export type PdfViewerEvent =
 	| { event: "ready" }
+	| { event: "edited" }
+	| { event: "saved"; requestId: string; byteLength: number }
+	| { event: "saveFailed"; requestId: string }
 	| { event: "unsupported"; reason: PdfUnsupportedReason }
 	| { event: "documentOpened"; pageCount: number }
 	| { event: "firstPagePainted" }
@@ -72,6 +75,14 @@ export type PdfViewerEventEnvelope = {
 export type PdfPasswordResponse = {
 	requestId: string
 	password: string
+}
+
+/**
+ * Native -> WebView. Set when the user has asked to save; the viewer serialises the document and
+ * streams it back through the write RPC, then reports `saved` or `saveFailed` for this requestId.
+ */
+export type PdfSaveRequest = {
+	requestId: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -121,10 +132,40 @@ export function parsePdfViewerEvent(parsed: unknown): PdfViewerEvent | null {
 
 	switch (event) {
 		case "ready":
+		case "edited":
 		case "firstPagePainted": {
 			return {
 				event
 			}
+		}
+
+		case "saved": {
+			const requestId = envelope["requestId"]
+			const byteLength = envelope["byteLength"]
+
+			return typeof requestId === "string" &&
+				requestId.length > 0 &&
+				requestId.length <= 64 &&
+				typeof byteLength === "number" &&
+				Number.isInteger(byteLength) &&
+				byteLength > 0
+				? {
+						event,
+						requestId,
+						byteLength
+					}
+				: null
+		}
+
+		case "saveFailed": {
+			const requestId = envelope["requestId"]
+
+			return typeof requestId === "string" && requestId.length > 0 && requestId.length <= 64
+				? {
+						event,
+						requestId
+					}
+				: null
 		}
 
 		case "unsupported": {

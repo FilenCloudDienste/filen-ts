@@ -17,6 +17,7 @@ import {
 	PDF_EXTERNAL_LINK_KEY,
 	PDF_EXTERNAL_URL_ATTRIBUTE,
 	type PdfPasswordResponse,
+	type PdfSaveRequest,
 	type PdfViewerEvent
 } from "@/components/pdfPreview/protocol"
 import { PDF_MAX_PAGE_CANVAS_BYTES, PDF_MAX_RANGE_LENGTH, PDF_MAX_ZOOM } from "@/components/pdfPreview/constants"
@@ -348,8 +349,11 @@ type PageEntry = {
 
 const Dom = ({
 	readRange,
+	writeChunk,
 	fileSize,
 	passwordResponse,
+	saveRequest,
+	readOnly,
 	paddingTop,
 	paddingBottom,
 	paddingLeft,
@@ -357,8 +361,11 @@ const Dom = ({
 }: {
 	dom?: import("expo/dom").DOMProps
 	readRange: (offset: number, length: number) => Promise<string>
+	writeChunk: (chunk: string) => Promise<void>
 	fileSize: number
 	passwordResponse: PdfPasswordResponse | null
+	saveRequest: PdfSaveRequest | null
+	readOnly: boolean
 	paddingTop?: number
 	paddingBottom?: number
 	paddingLeft?: number
@@ -496,7 +503,9 @@ const Dom = ({
 				const task = page.render({
 					canvas,
 					viewport: renderViewport,
-					annotationMode: AnnotationMode.ENABLE_FORMS
+					// Display-only when the file cannot be written back: offering an editable field for a
+					// change that can never be saved is worse than not offering it.
+					annotationMode: readOnly ? AnnotationMode.ENABLE : AnnotationMode.ENABLE_FORMS
 				})
 
 				entry.task = task
@@ -606,7 +615,7 @@ const Dom = ({
 					// the annotation layer's own opt-in default (false) applies, and `hasJSActions` is
 					// withheld so no JS-action path can be reached even if that changed. No downloadManager
 					// is passed either — it is the only window.open in the distribution.
-					renderForms: true
+					renderForms: !readOnly
 				})
 
 				if (!current()) {
@@ -927,6 +936,74 @@ const Dom = ({
 			loadingTask?.destroy()
 		}
 	})
+
+	// Serialise the document and stream it back when the host asks. saveDocument() returns the whole
+	// file, so it is sliced to the same bound the reader uses rather than crossing the bridge whole.
+	useEffect(() => {
+		if (saveRequest === null) {
+			return
+		}
+
+		let cancelled = false
+
+		const run = async () => {
+			const pdfDocument = documentRef.current
+
+			if (!pdfDocument) {
+				postEvent({
+					event: "saveFailed",
+					requestId: saveRequest.requestId
+				})
+
+				return
+			}
+
+			try {
+				const bytes: Uint8Array = await pdfDocument.saveDocument()
+
+				for (let offset = 0; offset < bytes.byteLength; offset += PDF_MAX_RANGE_LENGTH) {
+					if (cancelled) {
+						return
+					}
+
+					const slice = bytes.subarray(offset, Math.min(offset + PDF_MAX_RANGE_LENGTH, bytes.byteLength))
+					let binary = ""
+
+					for (let index = 0; index < slice.length; index++) {
+						binary += String.fromCharCode(slice[index] ?? 0)
+					}
+
+					await writeChunk(btoa(binary))
+				}
+
+				if (cancelled) {
+					return
+				}
+
+				// The stored edits are now on disk; anything after this is a fresh change.
+				pdfDocument.annotationStorage.resetModified()
+
+				postEvent({
+					event: "saved",
+					requestId: saveRequest.requestId,
+					byteLength: bytes.byteLength
+				})
+			} catch (error) {
+				console.warn(`[pdfPreview] save failed: ${describeError(error)}`)
+
+				postEvent({
+					event: "saveFailed",
+					requestId: saveRequest.requestId
+				})
+			}
+		}
+
+		run()
+
+		return () => {
+			cancelled = true
+		}
+	}, [saveRequest, writeChunk])
 
 	// Link activation, decided at tap time rather than at render time, so an anchor added or mutated
 	// after the sweep is still checked. Capture phase on window, so it runs before any handler pdf.js
