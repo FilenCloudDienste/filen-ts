@@ -2,6 +2,7 @@ import { Fragment } from "react"
 import { Platform } from "react-native"
 import { useLocalSearchParams } from "expo-router"
 import { useTranslation } from "react-i18next"
+import { useResolveClassNames } from "uniwind"
 import Header from "@/components/ui/header"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
@@ -21,6 +22,20 @@ import logger from "@/lib/logger"
 export const OpenSourceNotice = () => {
 	const { t } = useTranslation()
 	const openExternalLink = useOpenExternalLink("settings")
+	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
+
+	// Pushed inside the Open Source stack rather than presented as its own modal, so the native back
+	// arrow is the correct affordance — a close button here would dismiss the whole sheet and lose the
+	// user's place in the list.
+	const headerProps = {
+		shadowVisible: false,
+		transparent: Platform.OS === "ios",
+		backVisible: true,
+		backgroundColor: Platform.select({
+			ios: undefined,
+			default: bgBackgroundSecondary.backgroundColor as string
+		})
+	}
 
 	const { name, version } = useLocalSearchParams<{
 		name?: string
@@ -35,10 +50,12 @@ export const OpenSourceNotice = () => {
 			<Fragment>
 				<Header
 					title={t("open_source")}
-					shadowVisible={false}
-					transparent={Platform.OS === "ios"}
+					{...headerProps}
 				/>
-				<SafeAreaView edges={["left", "right"]}>
+				<SafeAreaView
+					className="flex-1 bg-background-secondary"
+					edges={["left", "right"]}
+				>
 					<ListEmpty
 						icon="warning-outline"
 						title={t("open_source_notice_missing")}
@@ -52,10 +69,12 @@ export const OpenSourceNotice = () => {
 		<Fragment>
 			<Header
 				title={notice.name}
-				shadowVisible={false}
-				transparent={Platform.OS === "ios"}
+				{...headerProps}
 			/>
-			<SafeAreaView edges={["left", "right"]}>
+			<SafeAreaView
+				className="flex-1 bg-background-secondary"
+				edges={["left", "right"]}
+			>
 				<GestureHandlerScrollView
 					contentContainerClassName="px-4 pb-40 gap-4"
 					contentInsetAdjustmentBehavior="automatic"

@@ -315,10 +315,6 @@ const RootLayout = () => {
 												options={modalOptions}
 											/>
 											<Stack.Screen
-												name="openSourceNotice"
-												options={modalOptions}
-											/>
-											<Stack.Screen
 												name="developer"
 												options={modalOptions}
 											/>

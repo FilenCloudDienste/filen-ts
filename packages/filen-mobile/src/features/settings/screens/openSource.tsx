@@ -1,4 +1,5 @@
 import { useState, Fragment, useCallback } from "react"
+import { useNavigation } from "expo-router"
 import { Platform } from "react-native"
 import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
@@ -22,7 +23,7 @@ const Row = ({ notice }: { notice: ThirdPartyNotice }) => {
 			rippleColor="transparent"
 			onPress={() => {
 				router.push({
-					pathname: "/openSourceNotice",
+					pathname: "/openSource/notice",
 					params: {
 						// Name and version together are the only stable identity: the same package can
 						// legitimately appear at two versions, and the index would shift on every regeneration.
@@ -69,6 +70,8 @@ export const OpenSource = () => {
 	const [searchQuery, setSearchQuery] = useState<string>("")
 	const textForeground = useResolveClassNames("text-foreground")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
+	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
+	const navigation = useNavigation()
 
 	const query = searchQuery.trim().toLowerCase()
 
@@ -89,6 +92,29 @@ export const OpenSource = () => {
 				title={t("open_source")}
 				shadowVisible={false}
 				transparent={Platform.OS === "ios"}
+				backVisible={Platform.OS === "android"}
+				backgroundColor={Platform.select({
+					ios: undefined,
+					default: bgBackgroundSecondary.backgroundColor as string
+				})}
+				leftItems={Platform.select({
+					ios: [
+						{
+							type: "button",
+							icon: {
+								name: "close",
+								color: textForeground.color,
+								size: 20
+							},
+							props: {
+								onPress: () => {
+									navigation.getParent()?.goBack()
+								}
+							}
+						}
+					],
+					default: undefined
+				})}
 				searchBarOptions={{
 					placement: "integratedButton",
 					placeholder: t("open_source_search"),
@@ -108,9 +134,12 @@ export const OpenSource = () => {
 					inputType: "text"
 				}}
 			/>
-			<SafeAreaView edges={["left", "right"]}>
+			<SafeAreaView
+				className="flex-1 bg-background-secondary"
+				edges={["left", "right"]}
+			>
 				<VirtualList
-					className="flex-1"
+					className="flex-1 bg-background-secondary"
 					data={visible}
 					renderItem={renderItem}
 					keyExtractor={keyExtractor}
