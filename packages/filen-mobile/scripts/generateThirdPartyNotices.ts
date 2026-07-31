@@ -38,37 +38,197 @@ type Entry = {
 	ecosystem: "npm" | "rust"
 	copyright: string[]
 	repository: string | null
-	/** Index into the deduplicated boilerplate table, or -1 when no license file was found. */
-	text: number
+	/** Indices into the deduplicated boilerplate table. Empty when no license file was found. */
+	texts: number[]
 }
 
-const LICENSE_FILE = /^(LICEN[CS]E|COPYING|NOTICE)([-._].*)?$/i
+/** An entry before its terms are pooled — carries the verbatim texts the dedup pass replaces. */
+type Collected = Entry & { terms: string[] }
+
+const LICENSE_FILE = /^(LICEN[CS]E|COPYING)([-._].*)?$/i
+const NOTICE_FILE = /^NOTICE([-._].*)?$/i
+
+/** Some crates park the holder here rather than in the license file — rustix and linux-raw-sys do. */
+const COPYRIGHT_FILE = /^COPYRIGHT([-._].*)?$/i
 
 /** Lines that carry the holder rather than the terms. Lifted out so the terms can be deduplicated. */
 const COPYRIGHT_LINE = /^\s*(copyright|\(c\)|©)\b/i
 
-function findLicenseFile(dir: string): string | null {
-	if (!existsSync(dir)) {
-		return null
+/**
+ * Which license to elect from a dual-licensed package, lightest obligation first.
+ *
+ * "MIT OR Apache-2.0" is a choice offered to us, and 506 packages here offer one. Electing MIT keeps
+ * the obligation to reproducing a short notice; Apache-2.0 additionally requires propagating any
+ * NOTICE file and stating changes. Copyleft alternatives (MPL, GPL, LGPL) sort last so a permissive
+ * option always wins when one is offered.
+ *
+ * Reversing this election is a one-line change to this order.
+ */
+const ELECTION_ORDER = ["MIT", "ISC", "BSD", "0BSD", "ZLIB", "UNLICENSE", "CC0", "APACHE", "UNICODE", "MPL"]
+
+/**
+ * Collapses an SPDX id or a license file name onto a family token, so "LICENSE-MIT", "MIT-0" and
+ * "MIT" all meet. Order matters: Apache and MPL are tested before MIT because an SPDX id like
+ * "Apache-2.0 WITH LLVM-exception" must not be read as anything else.
+ */
+function licenseFamily(value: string): string {
+	const upper = value.toUpperCase()
+
+	for (const [token, family] of [
+		["APACHE", "APACHE"],
+		["MPL", "MPL"],
+		["UNLICENSE", "UNLICENSE"],
+		["0BSD", "0BSD"],
+		["BSD", "BSD"],
+		["MIT", "MIT"],
+		["ZLIB", "ZLIB"],
+		["CC0", "CC0"],
+		["ISC", "ISC"],
+		["UNICODE", "UNICODE"],
+		["GPL", "GPL"]
+	] as const) {
+		if (upper.includes(token)) {
+			return family
+		}
 	}
 
-	const names = readdirSync(dir).filter(name => LICENSE_FILE.test(name))
+	return upper
+}
 
-	// Prefer a plain LICENSE over LICENSE-APACHE/LICENSE-MIT so dual-licensed packages get the file
-	// the project itself considers primary; fall back to whichever exists.
-	const preferred = names.find(name => /^(LICEN[CS]E|COPYING)$/i.test(name)) ?? names.find(name => /^LICEN[CS]E/i.test(name)) ?? names[0]
+function stripOuterParens(expression: string): string {
+	const trimmed = expression.trim()
 
-	if (!preferred) {
-		return null
+	if (!trimmed.startsWith("(") || !trimmed.endsWith(")")) {
+		return trimmed
 	}
 
+	let depth = 0
+
+	for (let index = 0; index < trimmed.length; index++) {
+		depth += trimmed[index] === "(" ? 1 : trimmed[index] === ")" ? -1 : 0
+
+		// The opening paren closed before the end, so the pair does not enclose the whole expression.
+		if (depth === 0 && index < trimmed.length - 1) {
+			return trimmed
+		}
+	}
+
+	return stripOuterParens(trimmed.slice(1, -1))
+}
+
+function splitTopLevel(expression: string, separator: string): string[] {
+	const parts: string[] = []
+	let depth = 0
+	let start = 0
+
+	for (let index = 0; index < expression.length; index++) {
+		depth += expression[index] === "(" ? 1 : expression[index] === ")" ? -1 : 0
+
+		if (depth === 0 && expression.startsWith(separator, index)) {
+			parts.push(expression.slice(start, index))
+
+			index += separator.length - 1
+			start = index + 1
+		}
+	}
+
+	parts.push(expression.slice(start))
+
+	return parts.map(part => part.trim()).filter(part => part.length > 0)
+}
+
+/**
+ * Splits an SPDX expression into its conjuncts — the obligations that ALL apply — each holding the
+ * alternatives one may choose between.
+ *
+ * "MIT OR Apache-2.0" is one conjunct with two alternatives, so one text discharges it. "MIT AND
+ * Zlib" is two conjuncts, so both texts must ship. Conflating them would under-attribute.
+ */
+function conjuncts(expression: string): string[][] {
+	return splitTopLevel(stripOuterParens(expression), " AND ").map(conjunct =>
+		splitTopLevel(stripOuterParens(conjunct), " OR ")
+			// The legacy npm shorthand for OR, still used by 59 packages here.
+			.flatMap(alternative => alternative.split("/"))
+			.map(alternative => alternative.trim())
+			.filter(alternative => alternative.length > 0)
+	)
+}
+
+function readIfPresent(dir: string, name: string): string | null {
 	try {
-		const text = readFileSync(join(dir, preferred), "utf8")
+		const text = readFileSync(join(dir, name), "utf8")
 
 		return text.trim().length > 0 ? text : null
 	} catch {
 		return null
 	}
+}
+
+/**
+ * The license texts that must ship with a package: one per conjunct of its declared expression.
+ *
+ * Election only happens WITHIN a conjunct, where the alternatives are a genuine choice. An expression
+ * containing AND ships every license file the package has instead — the obligations are cumulative, so
+ * over-shipping a text is safe where guessing which ones combine is not. That path covers 7 packages.
+ */
+function collectLicenseTexts(dir: string, declared: string): string[] {
+	if (!existsSync(dir)) {
+		return []
+	}
+
+	const names = readdirSync(dir)
+	const licenses = names.filter(name => LICENSE_FILE.test(name))
+	const groups = conjuncts(declared)
+	const chosen: string[] = []
+
+	if (groups.length > 1) {
+		chosen.push(...licenses)
+	} else {
+		const byFamily = new Map<string, string>()
+
+		for (const name of licenses) {
+			const family = licenseFamily(name)
+
+			// A bare LICENSE/COPYING carries no family token — it is the fallback below, not a candidate,
+			// otherwise it would win the election under its own filename.
+			if (family !== licenseFamily("LICENSE") && !byFamily.has(family)) {
+				byFamily.set(family, name)
+			}
+		}
+
+		const ranked = (groups[0] ?? []).map(licenseFamily).sort((a, b) => {
+			const rankA = ELECTION_ORDER.indexOf(a)
+			const rankB = ELECTION_ORDER.indexOf(b)
+
+			return (rankA === -1 ? ELECTION_ORDER.length : rankA) - (rankB === -1 ? ELECTION_ORDER.length : rankB)
+		})
+
+		const named = ranked.find(family => byFamily.has(family))
+		const plain = licenses.find(name => /^(LICEN[CS]E|COPYING)$/i.test(name))
+
+		// The named file wins only if it IS the alternative we want. Otherwise the plain LICENSE is far
+		// likelier to hold that alternative than a named file for a worse-ranked one: dompurify keeps
+		// Apache-2.0 in LICENSE beside a LICENSE-MPL, and electing the MPL there would be backwards.
+		const file =
+			(named !== undefined && named === ranked[0] ? byFamily.get(named) : undefined) ??
+			plain ??
+			(named !== undefined ? byFamily.get(named) : undefined) ??
+			licenses[0]
+
+		if (file !== undefined) {
+			chosen.push(file)
+		}
+	}
+
+	// Apache-2.0 §4(d) requires a NOTICE file to travel with the distribution, so it ships alongside
+	// the terms rather than instead of them.
+	if (chosen.some(name => licenseFamily(name) === "APACHE") || licenseFamily(declared) === "APACHE") {
+		chosen.push(...names.filter(name => NOTICE_FILE.test(name)))
+	}
+
+	chosen.push(...names.filter(name => COPYRIGHT_FILE.test(name)))
+
+	return [...new Set(chosen)].map(name => readIfPresent(dir, name)).filter((text): text is string => text !== null)
 }
 
 /**
@@ -141,6 +301,35 @@ function splitCopyright(text: string): { copyright: string[]; terms: string } {
 	}
 }
 
+/**
+ * A package's licensing as it will be rendered: every holder lifted out of every text that ships, and
+ * the terms those texts leave behind.
+ */
+function describeLicensing(dir: string | null, declared: string): { copyright: string[]; terms: string[] } {
+	const copyright: string[] = []
+	const terms: string[] = []
+
+	// A COPYRIGHT file goes through the same header region as any other. Lifting every copyright line in
+	// it instead — tried, reverted — reads wrapped clause text ("...retain the above copyright / notice,
+	// this list of conditions...") as a holder, and cesu8 has no other file to fall back on.
+	for (const text of dir === null ? [] : collectLicenseTexts(dir, declared)) {
+		const split = splitCopyright(text)
+
+		copyright.push(...split.copyright)
+
+		if (split.terms.length > 0) {
+			terms.push(split.terms)
+		}
+	}
+
+	// A holder repeated across a package's own files (LICENSE-MIT and LICENSE-APACHE usually agree) is
+	// one holder, not two.
+	return {
+		copyright: [...new Set(copyright)],
+		terms
+	}
+}
+
 function readJson(path: string): Record<string, unknown> | null {
 	try {
 		return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>
@@ -179,11 +368,11 @@ function repositoryOf(value: unknown): string | null {
 	return null
 }
 
-function collectNpm(): Entry[] {
+function collectNpm(): Collected[] {
 	const lock = readJson(join(packageRoot, "package-lock.json"))
 	const packages = (lock?.["packages"] ?? {}) as Record<string, { dev?: boolean; devOptional?: boolean }>
 	const seen = new Set<string>()
-	const entries: Entry[] = []
+	const entries: Collected[] = []
 
 	for (const [key, meta] of Object.entries(packages)) {
 		if (!key.startsWith("node_modules/") || meta.dev === true || meta.devOptional === true) {
@@ -211,19 +400,19 @@ function collectNpm(): Entry[] {
 
 		seen.add(name)
 
-		const file = findLicenseFile(dir)
-		const split = file ? splitCopyright(file) : null
+		const license = spdxOf(manifest["license"] ?? manifest["licenses"])
+		const licensing = describeLicensing(dir, license)
 
 		entries.push({
 			name,
 			version: typeof manifest["version"] === "string" ? manifest["version"] : "",
-			license: spdxOf(manifest["license"] ?? manifest["licenses"]),
+			license,
 			ecosystem: "npm",
-			copyright: split?.copyright ?? [],
+			copyright: licensing.copyright,
 			repository: repositoryOf(manifest["repository"]),
-			text: -1,
-			...(split ? { terms: split.terms } : {})
-		} as Entry & { terms?: string })
+			texts: [],
+			terms: licensing.terms
+		})
 	}
 
 	return entries
@@ -239,7 +428,7 @@ function crateSourceRoots(): string[] {
 	return readdirSync(base).map(entry => join(base, entry))
 }
 
-function collectRust(): Entry[] {
+function collectRust(): Collected[] {
 	const lockPath = join(packageRoot, "filen-rs", "Cargo.lock")
 
 	if (!existsSync(lockPath)) {
@@ -248,7 +437,7 @@ function collectRust(): Entry[] {
 
 	const lock = readFileSync(lockPath, "utf8")
 	const roots = crateSourceRoots()
-	const entries: Entry[] = []
+	const entries: Collected[] = []
 
 	const matches = lock.matchAll(/\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"(?:\nsource = "([^"]+)")?/g)
 
@@ -261,26 +450,26 @@ function collectRust(): Entry[] {
 		}
 
 		const dir = roots.map(root => join(root, `${name}-${version}`)).find(existsSync) ?? null
-		const file = dir ? findLicenseFile(dir) : null
-		const split = file ? splitCopyright(file) : null
 		const manifest = dir && existsSync(join(dir, "Cargo.toml")) ? readFileSync(join(dir, "Cargo.toml"), "utf8") : ""
+		const license = /^\s*license\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? "UNKNOWN"
+		const licensing = describeLicensing(dir, license)
 
 		entries.push({
 			name,
 			version,
-			license: /^\s*license\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? "UNKNOWN",
+			license,
 			ecosystem: "rust",
-			copyright: split?.copyright ?? [],
+			copyright: licensing.copyright,
 			repository: /^\s*repository\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? null,
-			text: -1,
-			...(split ? { terms: split.terms } : {})
-		} as Entry & { terms?: string })
+			texts: [],
+			terms: licensing.terms
+		})
 	}
 
 	return entries
 }
 
-const collected = [...collectNpm(), ...collectRust()] as (Entry & { terms?: string })[]
+const collected = [...collectNpm(), ...collectRust()]
 
 // Deduplicate the terms. An MIT file is byte-identical everywhere once its copyright line is lifted,
 // so this is what turns ~1.8 MB into something reasonable to bundle.
@@ -288,41 +477,39 @@ const texts: string[] = []
 const textIndex = new Map<string, number>()
 
 for (const entry of collected) {
-	if (typeof entry.terms !== "string" || entry.terms.length === 0) {
-		continue
+	for (const terms of entry.terms) {
+		// Keyed on whitespace-normalised text, but the FIRST occurrence is stored verbatim. Two packages
+		// whose MIT terms differ only in line wrapping share one copy; any real difference in wording still
+		// separates them, because only whitespace is collapsed.
+		const key = terms.replace(/\s+/g, " ").trim().toLowerCase()
+		const existing = textIndex.get(key)
+
+		if (existing !== undefined) {
+			entry.texts.push(existing)
+
+			continue
+		}
+
+		entry.texts.push(texts.length)
+		textIndex.set(key, texts.length)
+		texts.push(terms)
 	}
-
-	// Keyed on whitespace-normalised text, but the FIRST occurrence is stored verbatim. Two packages
-	// whose MIT terms differ only in line wrapping share one copy; any real difference in wording still
-	// separates them, because only whitespace is collapsed.
-	const key = entry.terms.replace(/\s+/g, " ").trim().toLowerCase()
-	const existing = textIndex.get(key)
-
-	if (existing !== undefined) {
-		entry.text = existing
-
-		continue
-	}
-
-	entry.text = texts.length
-
-	textIndex.set(key, texts.length)
-	texts.push(entry.terms)
 }
 
 const notices: Entry[] = collected
 	.map(({ terms: _terms, ...entry }) => entry)
 	.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
 
-const withText = notices.filter(entry => entry.text !== -1).length
+const withText = notices.filter(entry => entry.texts.length > 0).length
 
 const output = `// GENERATED by scripts/generateThirdPartyNotices.ts — do not edit.
 //
 // Attribution for everything compiled or bundled into the app: the npm tree minus devDependencies,
 // plus the Rust crates the SDK is built from. License terms are deduplicated across packages and the
 // copyright lines kept per package, so a rendered notice is that package's copyright followed by the
-// verbatim terms. \`text: -1\` means no license file shipped with the package; its SPDX id and
-// repository are given instead rather than borrowing another package's copyright.
+// verbatim terms. An empty \`texts\` means no license file shipped with the package; its SPDX id and
+// repository are given instead rather than borrowing another package's copyright. More than one entry
+// means the declared license is a conjunction — every text applies.
 
 export type ThirdPartyNotice = {
 	name: string
@@ -331,7 +518,7 @@ export type ThirdPartyNotice = {
 	ecosystem: "npm" | "rust"
 	copyright: string[]
 	repository: string | null
-	text: number
+	texts: number[]
 }
 
 export const LICENSE_TEXTS: readonly string[] = ${JSON.stringify(texts, null, 0)}

@@ -462,13 +462,13 @@ export const settings = {
 	/** Advanced → Transfers — body of the dialog telling the user the change applies on restart */
 	transfer_performance_restart_required: "This change will take effect the next time you restart the app.",
 
-	// ── Open source notices (openSource.tsx / openSourceNotice.tsx) ────────────
+	// ── Third party notices (thirdPartyNotices.tsx / thirdPartyNotice.tsx) ─────
 	/** More → row opening the third-party attribution list, and its screen title */
-	open_source: "Open source",
-	/** Open source → search field placeholder for filtering packages by name or license */
-	open_source_search: "Search packages",
-	/** Open source → shown when a package listed in the notices could not be resolved */
-	open_source_notice_missing: "This package could not be found",
-	/** Open source → shown when a package shipped no license file, so only its identity is known */
-	open_source_no_license_text: "This package did not ship a license file. Its license and source are listed above."
+	third_party_notices: "Third party notices",
+	/** Third party notices → search field placeholder for filtering packages by name or license */
+	third_party_notices_search: "Search packages",
+	/** Third party notices → shown when a package listed in the notices could not be resolved */
+	third_party_notice_missing: "This package could not be found",
+	/** Third party notices → shown when a package shipped no license file, so only its identity is known */
+	third_party_notice_no_license_text: "This package did not ship a license file. Its license and source are listed above."
 } as const

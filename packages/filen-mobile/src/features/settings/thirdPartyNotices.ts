@@ -14,11 +14,14 @@ export function findThirdPartyNotice(name: string, version: string): ThirdPartyN
 }
 
 /**
- * The license terms for a package, or null when it shipped no license file.
+ * The license terms that ship with a package — empty when it shipped no license file.
  *
- * Null is deliberately not filled in from another package's text of the same license: an MIT file is
+ * Empty is deliberately not filled in from another package's text of the same license: an MIT file is
  * only distinguishable by its copyright line, so borrowing one would attribute the wrong holder.
+ *
+ * More than one text means the declared license is a conjunction ("MIT AND Zlib") and every text
+ * applies, so all of them render.
  */
-export function thirdPartyLicenseText(notice: ThirdPartyNotice): string | null {
-	return notice.text >= 0 ? (LICENSE_TEXTS[notice.text] ?? null) : null
+export function thirdPartyLicenseTexts(notice: ThirdPartyNotice): string[] {
+	return notice.texts.map(index => LICENSE_TEXTS[index]).filter((text): text is string => text !== undefined)
 }

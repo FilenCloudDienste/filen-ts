@@ -23,7 +23,7 @@ const Row = ({ notice }: { notice: ThirdPartyNotice }) => {
 			rippleColor="transparent"
 			onPress={() => {
 				router.push({
-					pathname: "/openSource/notice",
+					pathname: "/thirdPartyNotices/notice",
 					params: {
 						// Name and version together are the only stable identity: the same package can
 						// legitimately appear at two versions, and the index would shift on every regeneration.
@@ -65,7 +65,7 @@ const Row = ({ notice }: { notice: ThirdPartyNotice }) => {
  * lockfiles — see scripts/generateThirdPartyNotices.ts — so it cannot drift from what is installed by
  * being edited by hand.
  */
-export const OpenSource = () => {
+export const ThirdPartyNotices = () => {
 	const { t } = useTranslation()
 	const [searchQuery, setSearchQuery] = useState<string>("")
 	const textForeground = useResolveClassNames("text-foreground")
@@ -89,7 +89,7 @@ export const OpenSource = () => {
 	return (
 		<Fragment>
 			<Header
-				title={t("open_source")}
+				title={t("third_party_notices")}
 				shadowVisible={false}
 				transparent={Platform.OS === "ios"}
 				backVisible={Platform.OS === "android"}
@@ -117,7 +117,7 @@ export const OpenSource = () => {
 				})}
 				searchBarOptions={{
 					placement: "integratedButton",
-					placeholder: t("open_source_search"),
+					placeholder: t("third_party_notices_search"),
 					onChangeText: e => setSearchQuery(e.nativeEvent.text),
 					onCancelButtonPress: () => setSearchQuery(""),
 					onClose: () => setSearchQuery(""),
@@ -158,4 +158,4 @@ export const OpenSource = () => {
 	)
 }
 
-export default OpenSource
+export default ThirdPartyNotices

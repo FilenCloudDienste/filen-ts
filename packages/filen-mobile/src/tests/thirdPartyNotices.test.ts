@@ -83,12 +83,10 @@ describe("third-party notices payload", () => {
 	it("resolves every license text index it points at", () => {
 		// A dangling index renders a blank notice — the obligation unmet, with nothing visibly wrong.
 		for (const notice of THIRD_PARTY_NOTICES) {
-			if (notice.text < 0) {
-				continue
+			for (const index of notice.texts) {
+				expect(typeof LICENSE_TEXTS[index]).toBe("string")
+				expect((LICENSE_TEXTS[index] ?? "").length).toBeGreaterThan(0)
 			}
-
-			expect(typeof LICENSE_TEXTS[notice.text]).toBe("string")
-			expect((LICENSE_TEXTS[notice.text] ?? "").length).toBeGreaterThan(0)
 		}
 	})
 
@@ -100,7 +98,7 @@ describe("third-party notices payload", () => {
 		//
 		// The previous version of this test could not see any of that: its regex had no `m` flag, so it
 		// only ever inspected character 0 of each text and matched 0 of the 411.
-		const withText = THIRD_PARTY_NOTICES.filter(notice => notice.text >= 0)
+		const withText = THIRD_PARTY_NOTICES.filter(notice => notice.texts.length > 0)
 		const withCopyright = withText.filter(notice => notice.copyright.length > 0)
 
 		// Pre-fix this ratio was 11.6%.
@@ -125,7 +123,7 @@ describe("third-party notices payload", () => {
 	it("does not borrow a copyright for a package that shipped no license file", () => {
 		// Reusing another package's text of the same license would attribute the wrong holder, so a
 		// package without a file must point at nothing rather than at something plausible.
-		const unlicensed = THIRD_PARTY_NOTICES.filter(notice => notice.text < 0)
+		const unlicensed = THIRD_PARTY_NOTICES.filter(notice => notice.texts.length === 0)
 
 		expect(unlicensed.every(notice => notice.copyright.length === 0)).toBe(true)
 	})

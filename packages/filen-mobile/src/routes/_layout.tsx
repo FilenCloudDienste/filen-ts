@@ -311,7 +311,7 @@ const RootLayout = () => {
 												options={modalOptions}
 											/>
 											<Stack.Screen
-												name="openSource"
+												name="thirdPartyNotices"
 												options={modalOptions}
 											/>
 											<Stack.Screen

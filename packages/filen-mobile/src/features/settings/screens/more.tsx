@@ -307,9 +307,9 @@ function More() {
 							buttons={[
 								{
 									icon: "code-slash-outline",
-									title: t("open_source"),
+									title: t("third_party_notices"),
 									onPress: () => {
-										router.push("/openSource")
+										router.push("/thirdPartyNotices")
 									}
 								},
 								{

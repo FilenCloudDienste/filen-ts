@@ -10,7 +10,7 @@ import Text from "@/components/ui/text"
 import ListEmpty from "@/components/ui/listEmpty"
 import { PressableScale } from "@/components/ui/pressables"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"
-import { findThirdPartyNotice, thirdPartyLicenseText } from "@/features/settings/thirdPartyNotices"
+import { findThirdPartyNotice, thirdPartyLicenseTexts } from "@/features/settings/thirdPartyNotices"
 import logger from "@/lib/logger"
 
 /**
@@ -19,12 +19,12 @@ import logger from "@/lib/logger"
  * The terms are shared across every package using the same license — that deduplication is what keeps
  * the payload to something shippable — so what makes this notice specific is the copyright above it.
  */
-export const OpenSourceNotice = () => {
+export const ThirdPartyNotice = () => {
 	const { t } = useTranslation()
 	const openExternalLink = useOpenExternalLink("settings")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 
-	// Pushed inside the Open Source stack rather than presented as its own modal, so the native back
+	// Pushed inside the Third party notices stack rather than presented as its own modal, so the native back
 	// arrow is the correct affordance — a close button here would dismiss the whole sheet and lose the
 	// user's place in the list.
 	const headerProps = {
@@ -43,13 +43,13 @@ export const OpenSourceNotice = () => {
 	}>()
 
 	const notice = name !== undefined ? findThirdPartyNotice(name, version ?? "") : null
-	const text = notice ? thirdPartyLicenseText(notice) : null
+	const texts = notice ? thirdPartyLicenseTexts(notice) : []
 
 	if (!notice) {
 		return (
 			<Fragment>
 				<Header
-					title={t("open_source")}
+					title={t("third_party_notices")}
 					{...headerProps}
 				/>
 				<SafeAreaView
@@ -58,7 +58,7 @@ export const OpenSourceNotice = () => {
 				>
 					<ListEmpty
 						icon="warning-outline"
-						title={t("open_source_notice_missing")}
+						title={t("third_party_notice_missing")}
 					/>
 				</SafeAreaView>
 			</Fragment>
@@ -112,11 +112,18 @@ export const OpenSourceNotice = () => {
 							))}
 						</View>
 					) : null}
-					{text ? (
-						<Text className="text-muted-foreground text-xs leading-5">{text}</Text>
+					{texts.length > 0 ? (
+						texts.map(text => (
+							<Text
+								key={text}
+								className="text-muted-foreground text-xs leading-5"
+							>
+								{text}
+							</Text>
+						))
 					) : (
 						// Honest about the gap rather than showing another package's copyright.
-						<Text className="text-muted-foreground text-sm leading-5">{t("open_source_no_license_text")}</Text>
+						<Text className="text-muted-foreground text-sm leading-5">{t("third_party_notice_no_license_text")}</Text>
 					)}
 				</GestureHandlerScrollView>
 			</SafeAreaView>
@@ -124,4 +131,4 @@ export const OpenSourceNotice = () => {
 	)
 }
 
-export default OpenSourceNotice
+export default ThirdPartyNotice
