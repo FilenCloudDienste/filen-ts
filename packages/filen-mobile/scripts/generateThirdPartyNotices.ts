@@ -19,10 +19,14 @@ import { homedir } from "node:os"
  * text. Substituting another package's text of the same license would attribute the wrong copyright
  * holder, which is worse than an honest gap.
  *
- * Covers both ecosystems that end up in the binary: the npm tree (minus devDependencies, which are
- * build tooling and never reach a device) and the Rust crates the SDK is compiled from. Crate sources
- * are read out of the local cargo registry cache, so this must run on a machine that has built
- * filen-rs at least once.
+ * Covers all four ecosystems that end up in the binaries: the npm tree (minus devDependencies, which
+ * are build tooling and never reach a device), the Rust crates the SDK is compiled from, the pods
+ * CocoaPods vendors into the iOS build, and the Maven modules Gradle links into the Android one.
+ *
+ * Every one of those is read from a local build artifact or package cache, so this is a release act
+ * rather than a CI step: it must run on a machine that has installed dependencies, built filen-rs, run
+ * pod install, and assembled an Android release. A missing input throws rather than quietly emitting a
+ * payload that omits an ecosystem.
  *
  * Run: npx tsx scripts/generateThirdPartyNotices.ts
  */
@@ -35,7 +39,7 @@ type Entry = {
 	name: string
 	version: string
 	license: string
-	ecosystem: "npm" | "rust"
+	ecosystem: "npm" | "rust" | "pod" | "gradle"
 	copyright: string[]
 	repository: string | null
 	/** Indices into the deduplicated boilerplate table. Empty when no license file was found. */
@@ -93,6 +97,12 @@ function licenseFamily(value: string): string {
 	}
 
 	return upper
+}
+
+function rankLicense(family: string): number {
+	const rank = ELECTION_ORDER.indexOf(family)
+
+	return rank === -1 ? ELECTION_ORDER.length : rank
 }
 
 function stripOuterParens(expression: string): string {
@@ -154,6 +164,39 @@ function conjuncts(expression: string): string[][] {
 	)
 }
 
+/** A nested name resolves against the same root, so every filename test reads the last segment. */
+function baseName(name: string): string {
+	return name.slice(name.lastIndexOf("/") + 1)
+}
+
+/**
+ * The names in `dir` to consider, reaching one level down when the top level holds nothing.
+ *
+ * A pod is a checkout rather than a published package, so its license can sit under the upstream
+ * project's own directory — libdav1d keeps its at dav1d/COPYING. Names come back joined so the reader
+ * resolves them against the same root.
+ */
+function licenseDirectory(dir: string): string[] {
+	const names = readdirSync(dir)
+
+	if (names.some(name => LICENSE_FILE.test(baseName(name)) || NOTICE_FILE.test(baseName(name)) || COPYRIGHT_FILE.test(baseName(name)))) {
+		return names
+	}
+
+	return names.flatMap(name => {
+		try {
+			return readdirSync(join(dir, name)).map(nested => join(name, nested))
+		} catch {
+			return []
+		}
+	})
+}
+
+/** The family we elect for an expression, independent of which files a package happens to ship. */
+function electedFamily(declared: string): string | undefined {
+	return (conjuncts(declared)[0] ?? []).map(licenseFamily).sort((a, b) => rankLicense(a) - rankLicense(b))[0]
+}
+
 function readIfPresent(dir: string, name: string): string | null {
 	try {
 		const text = readFileSync(join(dir, name), "utf8")
@@ -176,8 +219,8 @@ function collectLicenseTexts(dir: string, declared: string): string[] {
 		return []
 	}
 
-	const names = readdirSync(dir)
-	const licenses = names.filter(name => LICENSE_FILE.test(name))
+	const names = licenseDirectory(dir)
+	const licenses = names.filter(name => LICENSE_FILE.test(baseName(name)))
 	const groups = conjuncts(declared)
 	const chosen: string[] = []
 
@@ -187,7 +230,7 @@ function collectLicenseTexts(dir: string, declared: string): string[] {
 		const byFamily = new Map<string, string>()
 
 		for (const name of licenses) {
-			const family = licenseFamily(name)
+			const family = licenseFamily(baseName(name))
 
 			// A bare LICENSE/COPYING carries no family token — it is the fallback below, not a candidate,
 			// otherwise it would win the election under its own filename.
@@ -196,15 +239,10 @@ function collectLicenseTexts(dir: string, declared: string): string[] {
 			}
 		}
 
-		const ranked = (groups[0] ?? []).map(licenseFamily).sort((a, b) => {
-			const rankA = ELECTION_ORDER.indexOf(a)
-			const rankB = ELECTION_ORDER.indexOf(b)
-
-			return (rankA === -1 ? ELECTION_ORDER.length : rankA) - (rankB === -1 ? ELECTION_ORDER.length : rankB)
-		})
+		const ranked = (groups[0] ?? []).map(licenseFamily).sort((a, b) => rankLicense(a) - rankLicense(b))
 
 		const named = ranked.find(family => byFamily.has(family))
-		const plain = licenses.find(name => /^(LICEN[CS]E|COPYING)$/i.test(name))
+		const plain = licenses.find(name => /^(LICEN[CS]E|COPYING)$/i.test(baseName(name)))
 
 		// The named file wins only if it IS the alternative we want. Otherwise the plain LICENSE is far
 		// likelier to hold that alternative than a named file for a worse-ranked one: dompurify keeps
@@ -223,10 +261,10 @@ function collectLicenseTexts(dir: string, declared: string): string[] {
 	// Apache-2.0 §4(d) requires a NOTICE file to travel with the distribution, so it ships alongside
 	// the terms rather than instead of them.
 	if (chosen.some(name => licenseFamily(name) === "APACHE") || licenseFamily(declared) === "APACHE") {
-		chosen.push(...names.filter(name => NOTICE_FILE.test(name)))
+		chosen.push(...names.filter(name => NOTICE_FILE.test(baseName(name))))
 	}
 
-	chosen.push(...names.filter(name => COPYRIGHT_FILE.test(name)))
+	chosen.push(...names.filter(name => COPYRIGHT_FILE.test(baseName(name))))
 
 	return [...new Set(chosen)].map(name => readIfPresent(dir, name)).filter((text): text is string => text !== null)
 }
@@ -469,7 +507,143 @@ function collectRust(): Collected[] {
 	return entries
 }
 
-const collected = [...collectNpm(), ...collectRust()]
+/**
+ * A pod's own metadata, from whichever spec cache holds it.
+ *
+ * Pods installed from a podspec keep theirs in the project (Local Podspecs); pods pulled from the CDN
+ * keep theirs in the shared CocoaPods cache. Neither covers the other, so both are consulted.
+ */
+function podSpec(name: string): { license?: unknown; homepage?: unknown; source?: { git?: unknown } } | null {
+	const local = readJson(join(packageRoot, "ios", "Pods", "Local Podspecs", `${name}.podspec.json`))
+
+	if (local) {
+		return local
+	}
+
+	const cached = join(homedir(), "Library", "Caches", "CocoaPods", "Pods", "Specs", "Release", name)
+
+	if (!existsSync(cached)) {
+		return null
+	}
+
+	// Cached spec names carry a version and a hash, and several versions may be present. Any of them
+	// describes the same project's license, which is all that is read from here.
+	const spec = readdirSync(cached).find(entry => entry.endsWith(".podspec.json"))
+
+	return spec === undefined ? null : readJson(join(cached, spec))
+}
+
+/**
+ * The pods that ship as compiled source rather than as an npm package.
+ *
+ * CocoaPods only copies a pod into ios/Pods when it comes from the CDN or from a podspec; a pod backed
+ * by a `:path:` into node_modules is referenced where it lies and is already described as an npm
+ * package. So the directories that exist here ARE the residue — the CDN pods plus the vendored C++
+ * libraries React Native downloads (boost, glog, folly, double-conversion, fmt), whose licenses appear
+ * nowhere in the npm tree.
+ */
+function collectPods(): Collected[] {
+	const lockPath = join(packageRoot, "ios", "Podfile.lock")
+	const podsRoot = join(packageRoot, "ios", "Pods")
+
+	if (!existsSync(lockPath) || !existsSync(podsRoot)) {
+		throw new Error("ios/Podfile.lock or ios/Pods is missing — run prebuild + pod install before generating notices")
+	}
+
+	const lock = readFileSync(lockPath, "utf8")
+	const installed = lock.split("PODS:")[1]?.split("\nDEPENDENCIES:")[0] ?? ""
+	const entries: Collected[] = []
+	const seen = new Set<string>()
+
+	// Subspecs (SDWebImage/Core) share their parent's directory and license, so each collapses onto its
+	// parent and the parent is described once. They cannot simply be skipped: libavif is installed only
+	// as libavif/core and libavif/libdav1d, and matching bare names alone would drop it entirely.
+	for (const [, subspec, version] of installed.matchAll(/\n {2}- "?([A-Za-z0-9_.+\-/]+)"? \(([^)]+)\)/g)) {
+		const name = subspec?.split("/")[0]
+
+		if (name === undefined || version === undefined || seen.has(name) || !existsSync(join(podsRoot, name))) {
+			continue
+		}
+
+		seen.add(name)
+
+		const spec = podSpec(name)
+		const license = spdxOf(spec?.license) === "UNKNOWN" ? spdxOf((spec?.license as { type?: unknown })?.type) : spdxOf(spec?.license)
+		const licensing = describeLicensing(join(podsRoot, name), license)
+
+		entries.push({
+			name,
+			version,
+			license,
+			ecosystem: "pod",
+			copyright: licensing.copyright,
+			repository: repositoryOf(spec?.homepage) ?? repositoryOf(spec?.source?.git),
+			texts: [],
+			terms: licensing.terms
+		})
+	}
+
+	return entries
+}
+
+/**
+ * The Maven modules linked into the Android build.
+ *
+ * Read from the dependency manifest AGP writes at assemble time rather than by resolving the graph
+ * here, so this needs no Gradle run — but it does need a release build to have happened. Licenses come
+ * from each module's POM in the Gradle cache, which declares one for 240 of the 248 modules.
+ */
+function collectGradle(): Collected[] {
+	const manifestPath = join(packageRoot, "android", "app", "build", "outputs", "sdk-dependencies", "release", "sdkDependencies.txt")
+	const cache = join(homedir(), ".gradle", "caches", "modules-2", "files-2.1")
+
+	if (!existsSync(manifestPath) || !existsSync(cache)) {
+		throw new Error("android sdkDependencies.txt or the Gradle cache is missing — run a release assemble before generating notices")
+	}
+
+	const manifest = readFileSync(manifestPath, "utf8")
+	const entries: Collected[] = []
+
+	for (const [, group, artifact, version] of manifest.matchAll(
+		/maven_library \{\s*groupId: "([^"]+)"\s*artifactId: "([^"]+)"\s*version: "([^"]+)"/g
+	)) {
+		if (group === undefined || artifact === undefined || version === undefined) {
+			continue
+		}
+
+		const moduleRoot = join(cache, group, artifact, version)
+
+		// The cache interposes a hash directory between the version and the files, and there is one per
+		// artifact kind (pom, aar, sources). The pom is what carries the licence declaration.
+		const pom = existsSync(moduleRoot)
+			? readdirSync(moduleRoot)
+					.map(hash => join(moduleRoot, hash, `${artifact}-${version}.pom`))
+					.filter(existsSync)
+					.map(path => readFileSync(path, "utf8"))[0]
+			: undefined
+
+		const declared = pom === undefined ? undefined : /<licenses>([\s\S]*?)<\/licenses>/.exec(pom)?.[1]
+
+		entries.push({
+			name: `${group}:${artifact}`,
+			version,
+			license: (declared === undefined ? undefined : /<name>([^<]+)<\/name>/.exec(declared)?.[1]?.trim()) ?? "UNKNOWN",
+			ecosystem: "gradle",
+			copyright: [],
+			// The project URL, taken before the licence block so a licence's own <url> cannot be mistaken
+			// for it.
+			repository: (pom === undefined ? undefined : /<url>([^<]+)<\/url>/.exec(pom.split("<licenses>")[0] ?? "")?.[1]?.trim()) ?? null,
+			texts: [],
+			// A Maven artifact almost never embeds its licence — 5 of 248 do — so the text comes from the
+			// canonical-terms pass below rather than from disk.
+			terms: []
+		})
+	}
+
+	return entries
+}
+
+const collected = [...collectNpm(), ...collectRust(), ...collectPods(), ...collectGradle()]
 
 // Deduplicate the terms. An MIT file is byte-identical everywhere once its copyright line is lifted,
 // so this is what turns ~1.8 MB into something reasonable to bundle.
@@ -496,6 +670,45 @@ for (const entry of collected) {
 	}
 }
 
+/**
+ * Apache-2.0's license file carries no holder — its appendix is a placeholder, and attribution lives in
+ * a NOTICE instead. One canonical copy therefore serves every package that elected it, which is what
+ * lets Maven modules meet the obligation from a POM declaration alone: 5 of 248 embed their terms.
+ *
+ * This does NOT generalise. An MIT or BSD file IS the holder, so lending one to a package that shipped
+ * none would attribute the wrong author — those stay honestly text-less.
+ */
+const canonicalApache =
+	texts
+		.map((text, index) => ({
+			index,
+			text
+		}))
+		// The text must BE the document, not merely contain it. Matching on content alone picked MMKV's
+		// LICENSE.TXT — it bundles a full Apache-2.0 copy inside a longer file, so it matched and, being
+		// the longest, won: every Apache-declaring Maven module rendered Tencent's terms.
+		.filter(
+			({ text }) =>
+				text.trimStart().startsWith("Apache License") &&
+				/Version 2\.0, January 2004/.test(text) &&
+				/TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION/.test(text) &&
+				/APPENDIX: How to apply the Apache License to your work/.test(text)
+		)
+		// Shortest of the complete copies: they differ only in how the original file was indented, and
+		// the unindented one reads far better on a phone.
+		.sort((a, b) => a.text.length - b.text.length)
+		.map(({ index }) => index)[0] ?? -1
+
+if (canonicalApache === -1) {
+	throw new Error("no canonical Apache-2.0 text was pooled — every Apache-declaring package would ship without terms")
+}
+
+for (const entry of collected) {
+	if (entry.texts.length === 0 && electedFamily(entry.license) === "APACHE") {
+		entry.texts.push(canonicalApache)
+	}
+}
+
 const notices: Entry[] = collected
 	.map(({ terms: _terms, ...entry }) => entry)
 	.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
@@ -515,7 +728,7 @@ export type ThirdPartyNotice = {
 	name: string
 	version: string
 	license: string
-	ecosystem: "npm" | "rust"
+	ecosystem: "npm" | "rust" | "pod" | "gradle"
 	copyright: string[]
 	repository: string | null
 	texts: number[]
@@ -528,13 +741,16 @@ export const THIRD_PARTY_NOTICES: readonly ThirdPartyNotice[] = ${JSON.stringify
 
 writeFileSync(OUTPUT, output, "utf8")
 
-const npmCount = notices.filter(entry => entry.ecosystem === "npm").length
+const perEcosystem = ["npm", "rust", "pod", "gradle"].map(ecosystem => {
+	const rows = notices.filter(entry => entry.ecosystem === ecosystem)
+
+	return `  ${`${ecosystem}:`.padEnd(15)} ${String(rows.length).padStart(4)}  (${rows.filter(entry => entry.texts.length > 0).length} with text)`
+})
 
 console.log(
 	[
 		`third-party notices -> ${OUTPUT}`,
-		`  npm packages:   ${npmCount}`,
-		`  rust crates:    ${notices.length - npmCount}`,
+		...perEcosystem,
 		`  total:          ${notices.length}`,
 		`  license texts:  ${texts.length} unique (deduplicated)`,
 		`  with text:      ${withText}`,

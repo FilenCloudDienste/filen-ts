@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { LICENSE_TEXTS, THIRD_PARTY_NOTICES } from "@/features/settings/thirdPartyNotices.generated"
 
@@ -8,9 +8,14 @@ import { LICENSE_TEXTS, THIRD_PARTY_NOTICES } from "@/features/settings/thirdPar
  * a dependency added or bumped without re-running scripts/generateThirdPartyNotices.ts leaves the
  * shipped attribution describing a tree the app no longer has, and nothing about the app misbehaves.
  *
- * The npm half is checked against the live lockfile, which CI can do without a cargo toolchain. The
- * Rust half is generated from the local crate cache, so it is checked for internal consistency only.
+ * Generation reads four local caches — node_modules, the cargo registry, ios/Pods and the Gradle cache
+ * — and no one machine reliably holds all four. So each ecosystem is checked against its own source of
+ * truth when that source is present, and when it is absent the payload must still describe that
+ * ecosystem: a checkout missing a prebuild has to fail loudly rather than quietly shipping less.
  */
+
+/** Directories CocoaPods generates inside ios/Pods that are not pods. */
+const POD_INFRASTRUCTURE = new Set(["Headers", "Local Podspecs", "Target Support Files", "Pods.xcodeproj", "hermes-engine-artifacts"])
 
 const PACKAGE_ROOT = path.join(__dirname, "..", "..")
 
@@ -54,6 +59,94 @@ describe("third-party notices payload", () => {
 
 		expect([...expected].filter(name => !actual.has(name)).sort()).toEqual([])
 		expect([...actual].filter(name => !expected.has(name)).sort()).toEqual([])
+	})
+
+	it("describes every ecosystem that ships", () => {
+		// A machine missing one of the four caches would otherwise emit a payload that looks complete.
+		const covered = new Set(THIRD_PARTY_NOTICES.map(notice => notice.ecosystem))
+
+		expect([...covered].sort()).toEqual(["gradle", "npm", "pod", "rust"])
+	})
+
+	it("covers every pod CocoaPods vendors into the iOS build", () => {
+		// A pod only lands in ios/Pods when it comes from the CDN or a podspec — one backed by a path into
+		// node_modules is referenced where it lies and described as an npm package instead. So these
+		// directories ARE the residue, including the C++ libraries React Native downloads (boost, glog,
+		// folly, double-conversion), whose licenses appear nowhere in the npm tree.
+		const podsRoot = path.join(PACKAGE_ROOT, "ios", "Pods")
+		const described = new Set(THIRD_PARTY_NOTICES.filter(notice => notice.ecosystem === "pod").map(notice => notice.name))
+
+		if (!existsSync(podsRoot)) {
+			expect(described.size).toBeGreaterThan(0)
+
+			return
+		}
+
+		const installed = readdirSync(podsRoot, { withFileTypes: true })
+			.filter(entry => entry.isDirectory() && !POD_INFRASTRUCTURE.has(entry.name))
+			.map(entry => entry.name)
+
+		expect(installed.filter(name => !described.has(name)).sort()).toEqual([])
+	})
+
+	it("covers every Maven module Gradle links into the Android build", () => {
+		const manifestPath = path.join(
+			PACKAGE_ROOT,
+			"android",
+			"app",
+			"build",
+			"outputs",
+			"sdk-dependencies",
+			"release",
+			"sdkDependencies.txt"
+		)
+		const described = new Set(THIRD_PARTY_NOTICES.filter(notice => notice.ecosystem === "gradle").map(notice => notice.name))
+
+		if (!existsSync(manifestPath)) {
+			expect(described.size).toBeGreaterThan(0)
+
+			return
+		}
+
+		const installed = [
+			...readFileSync(manifestPath, "utf8").matchAll(/maven_library \{\s*groupId: "([^"]+)"\s*artifactId: "([^"]+)"/g)
+		].map(match => `${match[1]}:${match[2]}`)
+
+		expect(installed.filter(name => !described.has(name)).sort()).toEqual([])
+	})
+
+	it("gives Apache-2.0 packages the canonical terms when they shipped no file", () => {
+		// 5 of 248 Maven artifacts embed their license, so without this the Android half would ship almost
+		// no terms at all. Safe only because an Apache-2.0 file carries no holder — its appendix is a
+		// placeholder — which is why the same does not happen for MIT or BSD.
+		const apache = THIRD_PARTY_NOTICES.filter(notice => notice.ecosystem === "gradle" && /apache/i.test(notice.license))
+
+		expect(apache.length).toBeGreaterThan(100)
+		expect(apache.filter(notice => notice.texts.length === 0)).toEqual([])
+	})
+
+	it("lends the Apache document itself, not a file that merely contains one", () => {
+		// The canonical text was first chosen as the LONGEST pooled text containing Apache-2.0's wording.
+		// MMKV's LICENSE.TXT bundles a full copy inside a longer file, so it won, and every Apache-
+		// declaring Maven module rendered Tencent's terms under an androidx name.
+		const shared = new Set(THIRD_PARTY_NOTICES.filter(notice => notice.ecosystem === "gradle").flatMap(notice => notice.texts))
+
+		expect(shared.size).toBe(1)
+
+		for (const index of shared) {
+			expect((LICENSE_TEXTS[index] ?? "").trimStart().startsWith("Apache License")).toBe(true)
+			expect(LICENSE_TEXTS[index]).toContain("APPENDIX: How to apply the Apache License to your work")
+		}
+	})
+
+	it("never lends a holder-bearing license to a package that shipped none", () => {
+		// The mirror of the rule above: an MIT or BSD file IS the holder, so a package without one must
+		// point at nothing rather than at another author's text.
+		const borrowed = THIRD_PARTY_NOTICES.filter(
+			notice => notice.ecosystem === "gradle" && notice.texts.length > 0 && !/apache/i.test(notice.license)
+		)
+
+		expect(borrowed).toEqual([])
 	})
 
 	it("excludes build-only tooling", () => {
