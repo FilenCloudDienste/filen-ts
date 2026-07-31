@@ -106,9 +106,7 @@ function More() {
 								<Avatar
 									size={48}
 									source={
-										accountQuery.status === "success" && accountQuery.data.avatarUrl
-											? accountQuery.data.avatarUrl
-											: undefined
+										accountQuery.data?.avatarUrl ? accountQuery.data.avatarUrl : undefined
 									}
 								/>
 								<View className="flex-1 bg-transparent">
@@ -134,7 +132,7 @@ function More() {
 									color={textMutedForeground.color}
 								/>
 							</View>
-							{accountQuery.status === "success" ? (
+							{accountQuery.data ? (
 								<StorageUsageBar
 									storageUsed={accountQuery.data.storageUsed}
 									versionedStorage={accountQuery.data.versionedStorage}
@@ -261,7 +259,8 @@ function More() {
 								{
 									icon: "lock-closed-outline",
 									title: t("security"),
-									badge: accountQuery.status === "success" && !accountQuery.data.didExportMasterKeys ? "!" : undefined,
+									// Data-loss warning — it must not disappear just because the device is offline (#103).
+									badge: accountQuery.data && !accountQuery.data.didExportMasterKeys ? "!" : undefined,
 									onPress: () => {
 										router.push("/security")
 									}

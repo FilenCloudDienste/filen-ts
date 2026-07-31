@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { beforeEach, describe, expect, test } from "vitest"
-import { hardenFormWidgets } from "@/components/pdfPreview/formWidgets"
+import { createFormWidgetScope, hardenFormWidgets } from "@/components/pdfPreview/formWidgets"
 
 function render(html: string): HTMLElement {
 	const root = document.createElement("div")
@@ -27,7 +27,7 @@ describe("hardenFormWidgets", () => {
 	test("downgrades a password input and suppresses autofill", () => {
 		const root = render('<input type="password" name="password" id="password">')
 
-		hardenFormWidgets(root)
+		hardenFormWidgets(root, createFormWidgetScope())
 
 		const input = root.querySelector("input")
 
@@ -41,7 +41,7 @@ describe("hardenFormWidgets", () => {
 		// name="password" is a hint that must not survive.
 		const root = render('<input type="password" name="password" id="filen-password">')
 
-		hardenFormWidgets(root)
+		hardenFormWidgets(root, createFormWidgetScope())
 
 		const input = root.querySelector("input")
 
@@ -53,7 +53,7 @@ describe("hardenFormWidgets", () => {
 	test("covers textarea and select, not just input", () => {
 		const root = render('<textarea name="password"></textarea><select name="password"></select>')
 
-		hardenFormWidgets(root)
+		hardenFormWidgets(root, createFormWidgetScope())
 
 		for (const element of [root.querySelector("textarea"), root.querySelector("select")]) {
 			expect(element?.getAttribute("autocomplete")).toBe("off")
@@ -66,11 +66,11 @@ describe("hardenFormWidgets", () => {
 		// render and on focus. Running twice must not drift.
 		const root = render('<input type="password" name="password">')
 
-		hardenFormWidgets(root)
+		hardenFormWidgets(root, createFormWidgetScope())
 
 		const first = root.querySelector("input")?.name
 
-		hardenFormWidgets(root)
+		hardenFormWidgets(root, createFormWidgetScope())
 
 		expect(root.querySelector("input")?.name).toBe(first)
 		expect(root.querySelector("input")?.type).toBe("text")
@@ -79,11 +79,11 @@ describe("hardenFormWidgets", () => {
 	test("re-hardens an element the document re-added after the first sweep", () => {
 		const root = render('<input type="password" name="password">')
 
-		hardenFormWidgets(root)
+		hardenFormWidgets(root, createFormWidgetScope())
 
 		root.insertAdjacentHTML("beforeend", '<input type="password" name="password" id="late">')
 
-		hardenFormWidgets(root)
+		hardenFormWidgets(root, createFormWidgetScope())
 
 		for (const input of root.querySelectorAll("input")) {
 			expect(input.type).toBe("text")
@@ -98,7 +98,7 @@ describe("hardenFormWidgets", () => {
 			'<input type="radio" name="choice" value="a"><input type="radio" name="choice" value="b"><input type="radio" name="other" value="c">'
 		)
 
-		hardenFormWidgets(root)
+		hardenFormWidgets(root, createFormWidgetScope())
 
 		const radios = [...root.querySelectorAll("input")]
 
@@ -112,7 +112,7 @@ describe("hardenFormWidgets", () => {
 		// very thing the check looks for.
 		const root = render('<input type="password">')
 
-		hardenFormWidgets(root)
+		hardenFormWidgets(root, createFormWidgetScope())
 
 		expect(root.querySelector("form")).toBeNull()
 	})
@@ -120,12 +120,69 @@ describe("hardenFormWidgets", () => {
 	test("leaves ordinary text fields usable", () => {
 		const root = render('<input type="text" name="firstName" value="hello">')
 
-		hardenFormWidgets(root)
+		hardenFormWidgets(root, createFormWidgetScope())
 
 		const input = root.querySelector("input")
 
 		expect(input?.type).toBe("text")
 		expect(input?.value).toBe("hello")
 		expect(input?.disabled).toBe(false)
+	})
+
+	test("does not reuse a replacement name across separate sweeps of one document", () => {
+		// The sweep runs once per RENDERED PAGE, and adjacent pages are mounted together (the page
+		// observer keeps a viewport of lookahead each way). A per-sweep counter therefore handed page 2's
+		// first named field the same replacement as page 1's. pdf.js creates no <form>, so same-named
+		// widgets group across the whole document and its change handler resolves them through
+		// document.getElementsByName — so ticking a box on one page cleared the collided one on another,
+		// in the DOM and in the annotation storage a save serialises from.
+		const scope = createFormWidgetScope()
+
+		const pageOne = render('<input type="checkbox" name="agree" id="a">')
+
+		hardenFormWidgets(pageOne, scope)
+
+		const first = pageOne.querySelector("input")?.name
+
+		const pageTwo = render('<input type="checkbox" name="subscribe" id="b">')
+
+		hardenFormWidgets(pageTwo, scope)
+
+		const second = pageTwo.querySelector("input")?.name
+
+		expect(first).toBeTruthy()
+		expect(second).toBeTruthy()
+		expect(second).not.toBe(first)
+	})
+
+	test("gives one original name the same replacement in every sweep", () => {
+		// The other half: a radio group legitimately spans pages, and a field with the same name IS the
+		// same field. Splitting it would let two options of one group be selected at once.
+		const scope = createFormWidgetScope()
+
+		const pageOne = render('<input type="radio" name="choice" id="a">')
+
+		hardenFormWidgets(pageOne, scope)
+
+		const pageTwo = render('<input type="radio" name="choice" id="b">')
+
+		hardenFormWidgets(pageTwo, scope)
+
+		expect(pageTwo.querySelector("input")?.name).toBe(pageOne.querySelector("input")?.name)
+	})
+
+	test("keeps ids unique across sweeps", () => {
+		// Duplicate ids in one document break label association and getElementById.
+		const scope = createFormWidgetScope()
+
+		const pageOne = render('<input type="text" name="one" id="x">')
+
+		hardenFormWidgets(pageOne, scope)
+
+		const pageTwo = render('<input type="text" name="two" id="y">')
+
+		hardenFormWidgets(pageTwo, scope)
+
+		expect(pageTwo.querySelector("input")?.id).not.toBe(pageOne.querySelector("input")?.id)
 	})
 })

@@ -14,15 +14,17 @@ vi.mock("@/lib/logger", () => ({
 	default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }
 }))
 
-import useChunkedWriteTarget from "@/hooks/useChunkedWriteTarget"
+import useChunkedWriteTarget, { SAVE_HEADROOM_BYTES } from "@/hooks/useChunkedWriteTarget"
 import { MAX_RANGE_LENGTH, PDF_MAGIC, bytesToBase64 } from "@/lib/rangeTransfer"
 
-function target(config?: { maxBytes?: number; magic?: string }) {
+function target(config?: { maxBytes?: number; magic?: string; headroomBytes?: number }) {
 	return renderHook(() =>
 		useChunkedWriteTarget({
 			maxBytes: config?.maxBytes ?? 10 * 1024 * 1024,
 			magic: config?.magic,
-			fileName: "test.txt"
+			fileName: "test.txt",
+			// Most tests want the ceiling to be exactly maxBytes; the headroom gets its own test below.
+			headroomBytes: config?.headroomBytes ?? 0
 		})
 	).result.current
 }
@@ -114,5 +116,23 @@ describe("useChunkedWriteTarget", () => {
 
 		await expect(writer.writeChunk(chunk(16))).rejects.toThrow("no save in progress")
 		expect(writer.finish()).toBeNull()
+	})
+	it("leaves room above the open ceiling for what the edit added", () => {
+		// Call sites pass the same limit they used to decide whether to OPEN the file, and the open gate
+		// admits a file at exactly that size. Without headroom a document at the cap could be opened and
+		// edited but never saved: every attempt failed on the last chunk, deterministically.
+		expect(SAVE_HEADROOM_BYTES).toBeGreaterThan(0)
+	})
+
+	it("applies the headroom by default", async () => {
+		const writer = target({ maxBytes: 1000, headroomBytes: 8000 })
+
+		writer.begin()
+
+		// Past maxBytes, inside the headroom.
+		await expect(writer.writeChunk(chunk(4000))).resolves.toBeUndefined()
+
+		// Past maxBytes + headroom.
+		await expect(writer.writeChunk(chunk(6000))).rejects.toThrow("save exceeds the size limit")
 	})
 })

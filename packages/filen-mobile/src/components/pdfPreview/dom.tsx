@@ -22,7 +22,7 @@ import {
 } from "@/components/pdfPreview/protocol"
 import { PDF_MAX_PAGE_CANVAS_BYTES, PDF_MAX_ZOOM } from "@/components/pdfPreview/constants"
 import { MAX_RANGE_LENGTH, base64ToBytes, writeAllBytes } from "@/lib/rangeTransfer"
-import { hardenFormWidgets } from "@/components/pdfPreview/formWidgets"
+import { createFormWidgetScope, hardenFormWidgets } from "@/components/pdfPreview/formWidgets"
 import { attachTextLayerSelection } from "@/components/pdfPreview/textSelection"
 import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
@@ -376,6 +376,14 @@ const Dom = ({
 	const paintedRef = useRef<boolean>(false)
 	const passwordResolverRef = useRef<((password: string) => void) | null>(null)
 	const pendingRequestIdRef = useRef<string | null>(null)
+	// One naming scope for the whole document — see FormWidgetScope. Per-sweep scoping collided
+	// field names across pages and silently cleared answers.
+	const formWidgetScopeRef = useRef(createFormWidgetScope())
+	// The save requestId already being serviced. expo/dom re-delivers every prop on each host
+	// render with fresh identities, so the save effect's deps change on renders that have nothing
+	// to do with saving; without this a rotation mid-save started a SECOND serialisation that
+	// appended a whole second document into the same write target.
+	const servicedSaveIdRef = useRef<string | null>(null)
 	const [fatal, setFatal] = useState<boolean>(false)
 
 	// A password can only arrive after mount, as a prop update. The requestId match is what stops a
@@ -557,7 +565,12 @@ const Dom = ({
 						entry.detachSelection = attachTextLayerSelection(textLayerDiv)
 					}
 				} catch (error) {
-					console.warn(`[pdfPreview] text layer failed on page ${pageNumber}: ${describeError(error)}`)
+					// Releasing a page cancels its text layer, and that rejects. Scrolling, a zoom settle, a
+					// rotation and closing the preview all do it by design, so logging it as a failure fills
+					// the persisted diagnostics with the normal operation of the viewer.
+					if (classifyPdfError(error).type !== "aborted") {
+						console.warn(`[pdfPreview] text layer failed on page ${pageNumber}: ${describeError(error)}`)
+					}
 				}
 
 				if (!current()) {
@@ -614,7 +627,7 @@ const Dom = ({
 					return
 				}
 
-				hardenFormWidgets(annotationDiv)
+				hardenFormWidgets(annotationDiv, formWidgetScopeRef.current)
 			} catch (error) {
 				const classification = classifyPdfError(error)
 
@@ -944,6 +957,15 @@ const Dom = ({
 			return
 		}
 
+		// Idempotent per request. The deps below change identity on every host render, not just when a
+		// save is asked for, so without this the effect restarts mid-write and the target receives two
+		// serialisations spliced together — which still begins with %PDF- and so passes validation.
+		if (servicedSaveIdRef.current === saveRequest.requestId) {
+			return
+		}
+
+		servicedSaveIdRef.current = saveRequest.requestId
+
 		let cancelled = false
 
 		const run = async () => {
@@ -1029,7 +1051,7 @@ const Dom = ({
 		// a re-render between the last sweep and the tap.
 		const onFocusIn = (event: FocusEvent) => {
 			if (event.target instanceof HTMLInputElement) {
-				hardenFormWidgets(event.target.parentNode ?? document)
+				hardenFormWidgets(event.target.parentNode ?? document, formWidgetScopeRef.current)
 			}
 		}
 

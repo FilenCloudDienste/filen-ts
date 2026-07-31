@@ -91,6 +91,26 @@ export default function useRangeSource(
 
 				const handleSize = openHandle.size ?? size
 
+				// Re-check against the authority. The gate above reads file metadata, which this file
+				// distrusts everywhere else — and it is the one check documented as the real memory
+				// protection, so it must not be the one place that trusts a stale stat.
+				if (handleSize > maxBytes) {
+					openHandle.close()
+
+					openHandle = null
+
+					setResolved({
+						uri,
+						source: {
+							status: "refused",
+							reason: "tooLarge",
+							size: handleSize
+						}
+					})
+
+					return
+				}
+
 				// Cheap structural check so a mislabelled file fails with an honest message instead of
 				// surfacing as a parse error from inside the rendering library.
 				if (magic !== undefined) {

@@ -32,8 +32,11 @@ const TabsLayout = () => {
 
 	// Master-key export is data-loss-critical, so it claims the More tab's single badge slot;
 	// otherwise fall back to the incoming contact-requests count. Both stay badged inside More.
-	const keysNotExported = accountQuery.status === "success" && !accountQuery.data.didExportMasterKeys
-	const incomingRequests = contactRequestsQuery.status === "success" ? contactRequestsQuery.data.incoming.length : 0
+	// Read the DATA, not the last fetch's verdict (#103): an offline refetch fails and flips
+	// `status` to "error" while keeping it. Both badges warn about
+	// something real; going offline must not quietly retract the warning.
+	const keysNotExported = accountQuery.data ? !accountQuery.data.didExportMasterKeys : false
+	const incomingRequests = contactRequestsQuery.data?.incoming.length ?? 0
 	const moreBadge = keysNotExported ? "!" : incomingRequests > 0 ? incomingRequests.toString() : null
 
 	return (

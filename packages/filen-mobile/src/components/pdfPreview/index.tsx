@@ -34,6 +34,16 @@ type Phase = "loading" | "ready" | "unsupported" | "error" | "passwordCancelled"
 const BOOT_TIMEOUT_MS = 20000
 
 /**
+ * How long to wait for the viewer to answer a save request before giving up on it.
+ *
+ * Distinct from the boot budget above, which is cleared once the viewer says `ready` and so can
+ * never cover a save. Serialising a large document is slow, hence generous — but finite, because
+ * the promise is awaited behind a modal that blocks every touch, so a renderer killed mid-save
+ * would otherwise leave the app unusable until it is force-quit.
+ */
+const SAVE_TIMEOUT_MS = 120000
+
+/**
  * Native half of the PDF viewer.
  *
  * Owns the message boundary: every payload the WebView sends is re-parsed and re-validated here
@@ -78,6 +88,10 @@ const PdfPreview = ({
 		fileName: "pdfSave.pdf"
 	})
 	const saveResolverRef = useRef<((file: File | null) => void) | null>(null)
+	// The requestId the in-flight save is waiting on, so a stale or forged answer for a save that is
+	// no longer running cannot resolve the current one with the wrong file.
+	const pendingSaveIdRef = useRef<string | null>(null)
+	const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const promptingRef = useRef<boolean>(false)
 	const lastRequestIdRef = useRef<string | null>(null)
 	const lastPasswordIncorrectRef = useRef<boolean>(false)
@@ -149,6 +163,26 @@ const PdfPreview = ({
 		})
 	}
 
+	// Settles the in-flight save exactly once, whoever gets there first — the viewer's answer, the
+	// watchdog, or teardown. Everything else routes through here so the promise cannot be orphaned:
+	// it is awaited inside a full-screen modal that blocks every touch and eats the Android back
+	// button, so a save that never settles is an app the user has to force-quit.
+	const settleSave = (file: File | null) => {
+		if (saveTimeoutRef.current !== null) {
+			clearTimeout(saveTimeoutRef.current)
+
+			saveTimeoutRef.current = null
+		}
+
+		pendingSaveIdRef.current = null
+
+		const resolve = saveResolverRef.current
+
+		saveResolverRef.current = null
+
+		resolve?.(file)
+	}
+
 	// Serialising happens inside the WebView, so the host asks for it through a prop and settles the
 	// promise when the viewer reports back. Mirrors the password round trip.
 	useEffect(() => {
@@ -156,12 +190,32 @@ const PdfPreview = ({
 			? null
 			: () =>
 					new Promise<File | null>(resolve => {
+						// A save already in flight owns the write target; starting a second one would
+						// re-arm it under the first and strand this promise.
+						if (saveResolverRef.current) {
+							resolve(null)
+
+							return
+						}
+
+						const requestId = `${Date.now()}`
+
 						saveTarget.begin()
 
 						saveResolverRef.current = resolve
+						pendingSaveIdRef.current = requestId
+
+						// The viewer answering is the ONLY thing that settles this, and a renderer killed
+						// mid-serialisation never answers. Give up rather than hang behind the modal.
+						saveTimeoutRef.current = setTimeout(() => {
+							logger.error("pdfPreview", "the viewer did not answer the save request in time")
+
+							saveTarget.discard()
+							settleSave(null)
+						}, SAVE_TIMEOUT_MS)
 
 						setSaveRequest({
-							requestId: `${Date.now()}`
+							requestId
 						})
 					})
 
@@ -169,6 +223,7 @@ const PdfPreview = ({
 			saveHandleRef.current = null
 
 			saveTarget.discard()
+			settleSave(null)
 		}
 	}, [readOnly, saveHandleRef, saveTarget])
 
@@ -247,22 +302,29 @@ const PdfPreview = ({
 								}
 
 								case "saved": {
+									// Ignore an answer for a save that is no longer the one in flight.
+									if (viewerEvent.requestId !== pendingSaveIdRef.current) {
+										break
+									}
+
 									setSaveRequest(null)
 
-									saveResolverRef.current?.(saveTarget.finish())
-									saveResolverRef.current = null
+									settleSave(saveTarget.finish())
 
 									break
 								}
 
 								case "saveFailed": {
+									if (viewerEvent.requestId !== pendingSaveIdRef.current) {
+										break
+									}
+
 									logger.error("pdfPreview", "the viewer could not serialise the document")
 
 									setSaveRequest(null)
 									saveTarget.discard()
 
-									saveResolverRef.current?.(null)
-									saveResolverRef.current = null
+									settleSave(null)
 
 									break
 								}
@@ -305,6 +367,10 @@ const PdfPreview = ({
 									logger.error("pdfPreview", "the viewer reported a failure", {
 										kind: viewerEvent.kind
 									})
+
+									// The load this password was for is over. Left in state it would be re-serialised
+									// into the WebView on every later render, for a document that will never open.
+									setPasswordResponse(null)
 
 									// Only take over the screen if nothing has painted. Once pages are visible, a
 									// later failure — a range read past the cumulative budget, one page that would

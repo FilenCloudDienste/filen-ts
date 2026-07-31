@@ -86,10 +86,22 @@ describe("checkRangeRequest", () => {
 		expect(past).toBe("exceedsFile")
 	})
 
-	test("does not accept a path or any extra argument by shape", () => {
-		// The reader takes (offset, length) and nothing else; a path parameter would make it an
-		// arbitrary-file-read primitive.
-		expect(checkRangeRequest.length).toBe(1)
+	test("ignores any field it was not asked to consider", () => {
+		// The reader takes (offset, length) and nothing else — a path parameter would make it an
+		// arbitrary-file-read primitive. That shape is a type-level guarantee, NOT something this
+		// assertion can prove: an earlier version checked `checkRangeRequest.length === 1`, which is
+		// true of any destructured-object function no matter what fields it declares, so it passed
+		// with `path` added. What is checkable here is that an extra field cannot influence a verdict.
+		const withExtra = checkRangeRequest({
+			offset: 0,
+			length: 1024,
+			size: SIZE,
+			bytesRead: 0,
+			cumulativeLimit: LIMIT,
+			...({ path: "/etc/passwd" } as unknown as Record<string, never>)
+		})
+
+		expect(withExtra).toBe(check())
 	})
 })
 

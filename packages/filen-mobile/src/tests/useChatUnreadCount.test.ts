@@ -5,7 +5,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // ─── Hoisted mocks ────────────────────────────────────────────────────────────
 
 const mocks = vi.hoisted(() => ({
-	chatMessages: [] as unknown[],
+	chatMessages: [] as unknown[] | undefined,
 	chatMessagesQueryStatus: "success" as "success" | "error" | "pending",
 	stringifiedClient: { userId: 1n } as { userId: bigint } | null
 }))
@@ -90,6 +90,20 @@ beforeEach(() => {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("useChatUnreadCount", () => {
+	it("returns 0 when the query has no data at all", () => {
+		// The load-bearing `!chatMessagesQuery.data` guard. Every other test hands the mock an array, so
+		// without this one the guard could be deleted and the suite would stay green while a chat whose
+		// messages were never fetched — a routine state for a disabled observer with nothing persisted —
+		// crashed the row on `.filter` of undefined.
+		mocks.chatMessages = undefined
+
+		const chat = makeChat({ lastFocus: 100n })
+
+		const { result } = renderHook(() => useChatUnreadCount(chat))
+
+		expect(result.current).toBe(0)
+	})
+
 	it("returns 0 while there is genuinely nothing cached yet", () => {
 		mocks.chatMessagesQueryStatus = "pending"
 

@@ -127,6 +127,13 @@ const TextEditorDOM = ({
 	const onChange = (value: string) => {
 		setValue(value)
 
+		// Tracked in EVERY mode, before the chunked branch returns. This is the fallback `writeDocument`
+		// serialises from when CodeMirror is not mounted — which is exactly the state the rendered
+		// markdown preview puts the editor in. Left un-updated in chunked mode, a save taken from the
+		// preview wrote the document as it was at load and reported success, silently discarding the
+		// edits still visible on screen.
+		lastReportedValueRef.current = value
+
 		// Chunked mode reports that the document changed, never WHAT it changed to. The document
 		// crosses this bridge as a JSON string inside a postMessage, so sending it on every keystroke
 		// makes typing cost the file size per character. The host pulls it once, when the user saves.
@@ -141,8 +148,6 @@ const TextEditorDOM = ({
 
 			return
 		}
-
-		lastReportedValueRef.current = value
 
 		onValueChange?.(value)
 	}

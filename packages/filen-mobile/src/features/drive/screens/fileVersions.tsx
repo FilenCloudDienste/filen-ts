@@ -368,7 +368,7 @@ const FileVersions = () => {
 	)
 
 	const versions =
-		driveItemVersionsQuery.status === "success" && item
+		driveItemVersionsQuery.data && item
 			? driveItemVersionsQuery.data.filter(version => version.uuid !== item.data.uuid)
 			: []
 
@@ -388,7 +388,7 @@ const FileVersions = () => {
 			>
 				<VirtualList
 					data={versions}
-					loading={driveItemVersionsQuery.status !== "success"}
+					loading={driveItemVersionsQuery.status === "pending"}
 					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
 						paddingBottom: insets.bottom

@@ -170,7 +170,11 @@ describe("TextEditor chunked-document mode", () => {
 		expect(props()["writeChunk"]).toBeUndefined()
 	})
 
-	it("offers no write RPC for a read-only document", () => {
+	it("arms no save handle for a read-only document", () => {
+		// Deliberately NOT "offers no write RPC": `writeChunk` is still handed to a read-only WebView.
+		// What stops a read-only document staging a file is useChunkedWriteTarget's armed-window gate
+		// ("no save in progress"), not the absence of the prop — do not weaken that gate believing this
+		// test covers it.
 		const saveHandleRef: { current: (() => Promise<File | null>) | null } = { current: null }
 
 		render(

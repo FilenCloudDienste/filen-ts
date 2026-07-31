@@ -14,7 +14,8 @@ import { QueryClient, QueryObserver, onlineManager } from "@tanstack/react-query
  * that same list, dismissed themselves on open.
  */
 
-const FEATURES = path.join(__dirname, "..", "features")
+const SRC = path.join(__dirname, "..")
+const FEATURES = path.join(SRC, "features")
 const NOTES_FEATURE = path.join(FEATURES, "notes")
 
 /**
@@ -24,11 +25,45 @@ const NOTES_FEATURE = path.join(FEATURES, "notes")
  * nothing on disk, so for them `status === "success"` and `data !== undefined` say the same thing
  * and rewriting them would be churn.
  */
-const PERSISTED_QUERIES = ["notesQuery", "notesTagsQuery", "chatsQuery", "chatMessagesQuery", "contactsQuery", "contactRequestsQuery", "playlistsQuery"]
+const PERSISTED_QUERIES = [
+	"notesQuery",
+	"notesTagsQuery",
+	"chatsQuery",
+	"chatMessagesQuery",
+	"chatMessageLinksQuery",
+	"contactsQuery",
+	"contactRequestsQuery",
+	"playlistsQuery",
+	"eventsQuery",
+	"driveItemVersionsQuery"
+]
+
+/**
+ * `accountQuery` is persisted too and is deliberately NOT here.
+ *
+ * Its subscription-tier reads (`userIsSubbed`, the plan subtitle) are the one place where showing
+ * stale data is arguably worse than showing none, so those stay status-gated as a product decision.
+ * The reads where staleness is plainly better — the storage bar, the avatar, and the
+ * master-keys-not-exported warning — were converted, but the query still has status gates, so
+ * listing it here would fail the scan for a reason that is not a bug.
+ */
+const DELIBERATELY_STATUS_GATED = ["accountQuery"]
+
+/** The shape being hunted. ONE definition, so the self-test below cannot drift from the scan. */
+const STATUS_GATE = /Query\.status\s*(===|!==)\s*"success"/
+
+function statusGateFor(queries: readonly string[]): RegExp {
+	return new RegExp(`\\b(${queries.join("|")})\\.status\\s*(===|!==)\\s*"success"`)
+}
 
 function sourceFiles(dir: string): string[] {
 	return readdirSync(dir).flatMap(entry => {
 		const full = path.join(dir, entry)
+
+		// The tests themselves quote the offending shape on purpose.
+		if (entry === "tests") {
+			return []
+		}
 
 		if (statSync(full).isDirectory()) {
 			return sourceFiles(full)
@@ -83,7 +118,7 @@ describe("notes feature reads query data, not fetch status", () => {
 			const source = readFileSync(file, "utf8")
 
 			source.split("\n").forEach((line, index) => {
-				if (/Query\.status\s*(===|!==)\s*"success"/.test(line)) {
+				if (STATUS_GATE.test(line)) {
 					offenders.push(`${path.relative(NOTES_FEATURE, file)}:${index + 1}`)
 				}
 			})
@@ -92,19 +127,23 @@ describe("notes feature reads query data, not fetch status", () => {
 		expect(offenders).toEqual([])
 	})
 
-	it("no persisted query is gated on status anywhere in the app", () => {
-		// The same defect reached chats, contacts and playlists: an empty list or a dead-end screen
-		// over content already on disk, plus a blocked-user filter that answered "nobody is blocked"
-		// offline. Scoped to the queries that actually have something persisted to draw.
-		const pattern = new RegExp(`\\b(${PERSISTED_QUERIES.join("|")})\\.status\\s*(===|!==)\\s*"success"`)
+	it("no persisted query is gated on status anywhere under src", () => {
+		// The same defect reached chats, contacts, playlists, events and file versions: an empty list
+		// or a dead-end screen over content already on disk, plus a blocked-user filter that answered
+		// "nobody is blocked" offline.
+		//
+		// Scans all of src, not just src/features — the first version of this guard stopped at
+		// features and so stayed green while src/routes/tabs/_layout.tsx held a live offender on one
+		// of the very queries listed here.
+		const pattern = statusGateFor(PERSISTED_QUERIES)
 		const offenders: string[] = []
 
-		for (const file of sourceFiles(FEATURES)) {
+		for (const file of sourceFiles(SRC)) {
 			const source = readFileSync(file, "utf8")
 
 			source.split("\n").forEach((line, index) => {
 				if (pattern.test(line)) {
-					offenders.push(`${path.relative(FEATURES, file)}:${index + 1}`)
+					offenders.push(`${path.relative(SRC, file)}:${index + 1}`)
 				}
 			})
 		}
@@ -112,15 +151,24 @@ describe("notes feature reads query data, not fetch status", () => {
 		expect(offenders).toEqual([])
 	})
 
-	it("self-test: the matcher still recognises the shape it is guarding against", () => {
-		// Without this, a typo in the pattern above turns the guard into a permanent pass.
-		const pattern = /Query\.status\s*(===|!==)\s*"success"/
-
-		expect(pattern.test('const note = notesQuery.status === "success" ? data : null')).toBe(true)
-		expect(pattern.test('loading={notesQuery.status !== "success"}')).toBe(true)
+	it("self-test: the matchers still recognise the shape they guard against", () => {
+		// Exercises the SAME constants the scans use. An earlier version re-declared its own copy of the
+		// regex, so editing the scan pattern left this green — precisely the failure it claims to catch.
+		expect(STATUS_GATE.test('const note = notesQuery.status === "success" ? data : null')).toBe(true)
+		expect(STATUS_GATE.test('loading={notesQuery.status !== "success"}')).toBe(true)
 		// The legitimate forms the feature now uses must NOT trip it.
-		expect(pattern.test('loading={notesQuery.status === "pending"}')).toBe(false)
-		expect(pattern.test("const note = notesQuery.data?.find(n => n.uuid === uuid) ?? null")).toBe(false)
+		expect(STATUS_GATE.test('loading={notesQuery.status === "pending"}')).toBe(false)
+		expect(STATUS_GATE.test("const note = notesQuery.data?.find(n => n.uuid === uuid) ?? null")).toBe(false)
+
+		// And the per-query matcher, which is built from a list a typo could silently empty.
+		const pattern = statusGateFor(PERSISTED_QUERIES)
+
+		expect(PERSISTED_QUERIES.length).toBeGreaterThan(5)
+		expect(pattern.test('const chats = chatsQuery.status === "success" ? chatsQuery.data : []')).toBe(true)
+		expect(pattern.test('eventsQuery.status !== "success"')).toBe(true)
+		expect(pattern.test('somethingElseQuery.status === "success"')).toBe(false)
+		// The documented exclusion must stay excluded, or the scan fails for a non-bug.
+		expect(DELIBERATELY_STATUS_GATED.some(name => PERSISTED_QUERIES.includes(name))).toBe(false)
 	})
 
 	it("still shows a spinner while there is genuinely nothing to draw", () => {

@@ -43,7 +43,8 @@ export const Attachments = ({
 		}
 	)
 
-	if (chatMessageLinksQuery.status !== "success" || chatMessageLinksQuery.data.length === 0) {
+	// Read the DATA, not the last fetch's verdict (#103).
+	if (!chatMessageLinksQuery.data || chatMessageLinksQuery.data.length === 0) {
 		if (single) {
 			return (
 				<Regexed

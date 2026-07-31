@@ -35,6 +35,7 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 	const { itemToUse, parent, readOnly, applySaved } = useEditableTarget(item)
 	const [hasEdits, setHasEdits] = useRecyclingState<boolean>(false, [galleryItemKey(item)])
 	const saveHandleRef = useRef<(() => Promise<File | null>) | null>(null)
+	const savingRef = useRef<boolean>(false)
 
 	const query = useFileUriQuery(
 		item.type === "external"
@@ -61,9 +62,25 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 	})
 
 	const save = async (): Promise<boolean> => {
-		if (!hasEdits || readOnly || !isOnline) {
+		// Synchronous, because the loading overlay is not: it mounts a commit and a native present
+		// later, so a double tap — or the unsaved-changes prompt, which floats ABOVE the overlay —
+		// can enter twice. Two concurrent saves share one write target, and a chunk still in flight
+		// from the first lands in the second's file: the result still begins with %PDF-, so it passes
+		// validation and a spliced document replaces the user's file.
+		if (savingRef.current || !hasEdits || readOnly || !isOnline) {
 			return false
 		}
+
+		savingRef.current = true
+
+		try {
+			return await runSave()
+		} finally {
+			savingRef.current = false
+		}
+	}
+
+	const runSave = async (): Promise<boolean> => {
 
 		const result = await runWithLoading(async defer => {
 			if (!itemToUse?.data.decryptedMeta) {

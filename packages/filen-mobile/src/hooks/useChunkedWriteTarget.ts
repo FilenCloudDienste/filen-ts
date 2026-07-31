@@ -2,7 +2,19 @@ import { useEffect, useRef, useState } from "react"
 import { Buffer } from "buffer"
 import { File, FileMode, type FileHandle } from "expo-file-system"
 import { MAX_RANGE_LENGTH, hasMagic, type ChunkWriter } from "@/lib/rangeTransfer"
+
 import { newTmpFile } from "@/lib/tmp"
+
+/**
+ * Slack above the caller's ceiling for what an edit adds.
+ *
+ * A save is the opened document PLUS whatever was appended to it — an incremental update and xref
+ * for a PDF form, inserted text for a document. Call sites pass the same limit they used to decide
+ * whether to OPEN the file, and the open gate admits a file at exactly that size, so without this a
+ * document at the cap could be opened and edited but never saved: every attempt failed on the last
+ * chunk, deterministically, with the edits unrecoverable.
+ */
+export const SAVE_HEADROOM_BYTES = 16 * 1024 * 1024
 
 export type ChunkedWriteTarget = {
 	/** WebView-callable. Appends one base64 chunk of the document being saved. */
@@ -34,7 +46,13 @@ export type ChunkedWriteTarget = {
  *   back is about to replace the user's file.
  * @param fileName Name for the temp file; only affects the staging path.
  */
-export default function useChunkedWriteTarget(config: { maxBytes: number; magic?: string; fileName: string }): ChunkedWriteTarget {
+export default function useChunkedWriteTarget(config: {
+	maxBytes: number
+	magic?: string
+	fileName: string
+	/** Overrides SAVE_HEADROOM_BYTES. Exists so the ceiling is testable without writing 16 MiB. */
+	headroomBytes?: number
+}): ChunkedWriteTarget {
 	const handleRef = useRef<FileHandle | null>(null)
 	const fileRef = useRef<File | null>(null)
 	const writtenRef = useRef<number>(0)
@@ -65,13 +83,20 @@ export default function useChunkedWriteTarget(config: { maxBytes: number; magic?
 				throw new Error("chunk must be a non-empty string")
 			}
 
+			// Bound the STRING before decoding it. base64 expands by 4/3, so an honest chunk is never
+			// longer than this; without the check the caller picks the allocation size and the byte-length
+			// guard below only reports it after the memory has already been committed.
+			if (chunk.length > Math.ceil((MAX_RANGE_LENGTH * 4) / 3) + 4) {
+				throw new Error("chunk out of bounds")
+			}
+
 			const bytes = Buffer.from(chunk, "base64")
 
 			if (bytes.byteLength === 0 || bytes.byteLength > MAX_RANGE_LENGTH) {
 				throw new Error("chunk out of bounds")
 			}
 
-			if (writtenRef.current + bytes.byteLength > configRef.current.maxBytes) {
+			if (writtenRef.current + bytes.byteLength > configRef.current.maxBytes + (configRef.current.headroomBytes ?? SAVE_HEADROOM_BYTES)) {
 				throw new Error("save exceeds the size limit")
 			}
 

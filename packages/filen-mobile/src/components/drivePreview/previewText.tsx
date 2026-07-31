@@ -46,6 +46,7 @@ const PreviewTextInner = ({
 	const isOnline = useIsOnline()
 	const { itemToUse, parent, readOnly, applySaved } = useEditableTarget(item)
 	const saveHandleRef = useRef<(() => Promise<File | null>) | null>(null)
+	const savingRef = useRef<boolean>(false)
 
 	const fileName = item.type === "drive" ? item.data.data.decryptedMeta?.name : item.data.name
 
@@ -57,9 +58,23 @@ const PreviewTextInner = ({
 	const isMarkdownFile = /\.(md|markdown)$/i.test(fileName ?? "")
 
 	const save = async (): Promise<boolean> => {
-		if (!hasEdits || readOnly || !isOnline) {
+		// See previewPdf: the loading overlay presents asynchronously and the unsaved-changes prompt
+		// renders above it, so re-entry is reachable without a race. Two concurrent saves share one
+		// write target.
+		if (savingRef.current || !hasEdits || readOnly || !isOnline) {
 			return false
 		}
+
+		savingRef.current = true
+
+		try {
+			return await runSave()
+		} finally {
+			savingRef.current = false
+		}
+	}
+
+	const runSave = async (): Promise<boolean> => {
 
 		const result = await runWithLoading(async defer => {
 			if (!itemToUse?.data.decryptedMeta) {

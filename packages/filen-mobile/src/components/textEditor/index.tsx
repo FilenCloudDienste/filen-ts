@@ -23,6 +23,14 @@ export type TextEditorType = "richtext" | "text" | "markdown" | "code"
 /** Outcome of loading a document in chunked mode. */
 export type TextEditorDocumentStatus = "ready" | "notText" | "failed"
 
+/**
+ * How long to wait for the editor to answer a save request before giving up.
+ *
+ * Finite because the promise is awaited behind a touch-blocking modal: a WebView renderer killed
+ * mid-serialisation never answers, and without this the app is unusable until it is force-quit.
+ */
+const SAVE_TIMEOUT_MS = 120000
+
 export type TextEditorEvents =
 	| {
 			type: "quillFormats"
@@ -245,6 +253,7 @@ export const TextEditor = ({
 		fileName: "textSave.txt"
 	})
 	const writeResolverRef = useRef<((file: File | null) => void) | null>(null)
+	const writeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	const markdownPreviewActive = !id ? false : (textEditorMarkdownPreviewActive[id] ?? false)
 
@@ -299,8 +308,7 @@ export const TextEditor = ({
 				}
 
 				case "documentWritten": {
-					writeResolverRef.current?.(writeTarget.finish())
-					writeResolverRef.current = null
+					settleWrite(writeTarget.finish())
 
 					break
 				}
@@ -310,8 +318,7 @@ export const TextEditor = ({
 
 					writeTarget.discard()
 
-					writeResolverRef.current?.(null)
-					writeResolverRef.current = null
+					settleWrite(null)
 
 					break
 				}
@@ -345,6 +352,23 @@ export const TextEditor = ({
 		postMessageRef.current = postMessage
 	}, [postMessage])
 
+	// Settles the in-flight save exactly once, whoever gets there first. The promise is awaited behind
+	// a full-screen modal that blocks every touch and eats the Android back button, so a save that never
+	// settles — a renderer killed mid-serialisation answers nothing — is an app the user must force-quit.
+	const settleWrite = (file: File | null) => {
+		if (writeTimeoutRef.current !== null) {
+			clearTimeout(writeTimeoutRef.current)
+
+			writeTimeoutRef.current = null
+		}
+
+		const resolve = writeResolverRef.current
+
+		writeResolverRef.current = null
+
+		resolve?.(file)
+	}
+
 	// Serialising happens inside the WebView, so the host asks for it through a message and settles the
 	// promise when the editor reports back. Mirrors the PDF viewer's save.
 	useEffect(() => {
@@ -356,9 +380,24 @@ export const TextEditor = ({
 			? null
 			: () =>
 					new Promise<File | null>(resolve => {
+						// A save already in flight owns the write target; a second would re-arm it underneath
+						// the first and strand this promise.
+						if (writeResolverRef.current) {
+							resolve(null)
+
+							return
+						}
+
 						writeTarget.begin()
 
 						writeResolverRef.current = resolve
+
+						writeTimeoutRef.current = setTimeout(() => {
+							logger.error("textEditor", "the editor did not answer the save request in time")
+
+							writeTarget.discard()
+							settleWrite(null)
+						}, SAVE_TIMEOUT_MS)
 
 						postMessageRef.current({
 							type: "writeDocument",
@@ -372,6 +411,7 @@ export const TextEditor = ({
 			saveHandleRef.current = null
 
 			writeTarget.discard()
+			settleWrite(null)
 		}
 	}, [readOnly, saveHandleRef, writeTarget])
 

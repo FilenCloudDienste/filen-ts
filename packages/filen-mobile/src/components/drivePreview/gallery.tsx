@@ -97,7 +97,7 @@ export type InitialItem =
 			data: External
 	  }
 
-export type GalleryItemTagged =
+export type GalleryItemTagged = (
 	| {
 			type: "drive"
 			data: DriveItemFileExtracted
@@ -106,9 +106,20 @@ export type GalleryItemTagged =
 			type: "external"
 			data: External
 	  }
+) & {
+	/**
+	 * Identity of the SLOT, pinned when a preview replaces its own item.
+	 *
+	 * A save uploads a new version, and the backend rotates the uuid — but the cell must not remount,
+	 * because that costs the cursor, the scroll position and any password entered. Keying by the live
+	 * uuid forces a choice between "the item is stale" and "the preview restarts"; pinning the slot's
+	 * original key lets the item stay current while the cell stays put.
+	 */
+	slotKey?: string
+}
 
 export function galleryItemKey(item: GalleryItemTagged): string {
-	return item.type === "drive" ? item.data.data.uuid : item.data.url
+	return item.slotKey ?? (item.type === "drive" ? item.data.data.uuid : item.data.url)
 }
 
 /**
@@ -625,17 +636,41 @@ const Gallery = () => {
 				return
 			}
 
-			// A change the preview made itself: the list behind us still needs the event, but swapping the
-			// item here would change the cell's key and remount the whole preview — losing the cursor, the
-			// page position, and any password entered. The preview has already republished the rotated
-			// identity for itself.
-			if (reseedPreview === false) {
-				return
-			}
-
 			const replacement: GalleryItemTagged = {
 				type: "drive",
 				data: item
+			}
+
+			// A change the preview made itself. Take the new data — the item's uuid and parent have moved
+			// and everything downstream resolves through them — but pin the slot's existing key so the
+			// cell is updated in place instead of remounted, which would cost the cursor, the page
+			// position and any password entered.
+			//
+			// Skipping the swap entirely (what this used to do) left the list holding the pre-save uuid,
+			// so every later event for this file — a version restore, a move, a trash, all reachable from
+			// the preview's own header menu — no longer matched and was dropped on the floor.
+			if (reseedPreview === false) {
+				useDrivePreviewStore.getState().setCurrentItems(prev =>
+					prev.map(existing =>
+						existing.type === "drive" && existing.data.data.uuid === previousUuid
+							? {
+									...replacement,
+									slotKey: galleryItemKey(existing)
+								}
+							: existing
+					)
+				)
+
+				useDrivePreviewStore.getState().setCurrentItem(prev =>
+					prev && prev.type === "drive" && prev.data.data.uuid === previousUuid
+						? {
+								...replacement,
+								slotKey: galleryItemKey(prev)
+							}
+						: prev
+				)
+
+				return
 			}
 
 			useDrivePreviewStore

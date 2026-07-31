@@ -73,8 +73,10 @@ const Events = () => {
 	const navigation = useNavigation()
 	const { t } = useTranslation()
 
+	// Read the DATA, not the last fetch's verdict (#103): an offline refetch fails and flips
+	// `status` to "error" while keeping it.
 	const events =
-		eventsQuery.status === "success"
+		eventsQuery.data
 			? eventsQuery.data
 					.filter(event => event.tag === UserEventResult_Tags.Ok)
 					.sort((a, b) => Number(b.inner[0].timestamp) - Number(a.inner[0].timestamp))
@@ -84,7 +86,7 @@ const Events = () => {
 	// distinct subtitle so the user knows events exist but couldn't be read —
 	// rather than the misleading "No events" empty state.
 	const firstPageErrCount =
-		eventsQuery.status === "success" && events.length === 0
+		eventsQuery.data && events.length === 0
 			? eventsQuery.data.filter(e => e.tag === UserEventResult_Tags.Err).length
 			: 0
 
@@ -146,7 +148,7 @@ const Events = () => {
 						}
 					}}
 					onEndReached={async () => {
-						if (inflightRef.current || !hasMore || eventsQuery.status !== "success") {
+						if (inflightRef.current || !hasMore || !eventsQuery.data) {
 							return
 						}
 
