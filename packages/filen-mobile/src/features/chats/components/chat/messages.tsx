@@ -83,7 +83,8 @@ const Messages = ({ chat }: { chat: TChat }) => {
 	// inflight overlay — pending/failed bubbles must survive refetches (D4c). Dedupe by
 	// inner.uuid + inflightId; sorted newest-first (see composeMessageList).
 	const messages =
-		chatMessagesQuery.status !== "success"
+		// Read the DATA, not the last fetch's verdict (#103) — cached history stays readable offline.
+		!chatMessagesQuery.data
 			? EMPTY_MESSAGES
 			: composeMessageList({
 					queryMessages: chatMessagesQuery.data,
@@ -152,7 +153,7 @@ const Messages = ({ chat }: { chat: TChat }) => {
 						)
 					}}
 					onEndReachedThreshold={0.5}
-					loading={chatMessagesQuery.status !== "success"}
+					loading={chatMessagesQuery.status === "pending"}
 					footerComponent={() => {
 						if (!isFetchingMore) {
 							return undefined
@@ -170,7 +171,7 @@ const Messages = ({ chat }: { chat: TChat }) => {
 					onEndReached={async () => {
 						if (
 							isFetchingMoreRef.current ||
-							chatMessagesQuery.status !== "success" ||
+							!chatMessagesQuery.data ||
 							messages.length === 0 ||
 							!hasMoreRef.current
 						) {

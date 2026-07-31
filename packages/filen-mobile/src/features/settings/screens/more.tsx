@@ -238,8 +238,9 @@ function More() {
 								{
 									icon: "person-outline",
 									title: t("contacts"),
+									// Read the DATA, not the last fetch's verdict (#103) — the badge survives going offline.
 									badge:
-										contactRequestsQuery.status === "success" && contactRequestsQuery.data.incoming.length > 0
+										contactRequestsQuery.data && contactRequestsQuery.data.incoming.length > 0
 											? contactRequestsQuery.data.incoming.length.toString()
 											: undefined,
 									onPress: () => {

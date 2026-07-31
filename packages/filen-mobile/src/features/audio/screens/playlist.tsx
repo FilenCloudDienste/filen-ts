@@ -53,7 +53,8 @@ export function Playlist() {
 		enabled: false
 	})
 
-	const playlist = playlistsQuery.status === "success" ? (playlistsQuery.data.find(p => p.uuid === uuid) ?? null) : null
+	// Read the DATA (#103): gating on status dismissed this screen whenever the device was offline.
+	const playlist = playlistsQuery.data?.find(p => p.uuid === uuid) ?? null
 
 	const trackFiles = playlist?.files
 

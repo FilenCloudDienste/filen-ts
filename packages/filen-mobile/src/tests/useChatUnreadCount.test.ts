@@ -90,7 +90,7 @@ beforeEach(() => {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("useChatUnreadCount", () => {
-	it("returns 0 when query status is not 'success'", () => {
+	it("returns 0 while there is genuinely nothing cached yet", () => {
 		mocks.chatMessagesQueryStatus = "pending"
 
 		const chat = makeChat()
@@ -100,14 +100,26 @@ describe("useChatUnreadCount", () => {
 		expect(result.current).toBe(0)
 	})
 
-	it("returns 0 when query status is 'pending' (disabled query path for null client)", () => {
-		// The hook calls useChatMessagesQuery with enabled:false when the query won't
-		// return success until data is populated. Without success status, count is 0.
-		mocks.chatMessagesQueryStatus = "pending"
+	it("still counts from cached messages after the last fetch failed (#103)", () => {
+		// The offline case: the refetch fails and TanStack flips `status` to "error" while KEEPING
+		// the messages. This used to report zero unread for as long as the device was offline.
+		mocks.chatMessagesQueryStatus = "error"
+		mocks.chatMessages = [makeMessage({ sentTimestamp: 200n, senderId: 999n })]
+
+		const chat = makeChat({ lastFocus: 100n })
+
+		const { result } = renderHook(() => useChatUnreadCount(chat))
+
+		expect(result.current).toBe(1)
+	})
+
+	it("returns 0 without a signed-in user, whatever is cached", () => {
+		// "Unread by me" has no meaning without a user. Asserted directly now — it used to fall out
+		// of the status gate by accident, which is why replacing that gate exposed it.
 		mocks.stringifiedClient = null
 		mocks.chatMessages = [makeMessage({ sentTimestamp: 200n, senderId: 999n })]
 
-		const chat = makeChat()
+		const chat = makeChat({ lastFocus: 100n })
 
 		const { result } = renderHook(() => useChatUnreadCount(chat))
 

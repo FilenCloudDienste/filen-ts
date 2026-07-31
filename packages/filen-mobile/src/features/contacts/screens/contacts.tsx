@@ -188,7 +188,7 @@ const Contacts = () => {
 					keyExtractor={keyExtractor}
 					data={items}
 					renderItem={renderItem}
-					loading={contactRequestsQuery.status !== "success" || contactsQuery.status !== "success"}
+					loading={contactRequestsQuery.status === "pending" || contactsQuery.status === "pending"}
 					onRefresh={onRefresh}
 					emptyComponent={emptyComponent}
 				/>

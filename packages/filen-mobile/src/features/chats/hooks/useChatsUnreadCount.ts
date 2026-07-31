@@ -17,7 +17,8 @@ export function useChatsUnreadCount() {
 	})
 
 	const { unreadCount, hasMissingMessages } = (() => {
-		if (chatsQuery.status !== "success" || !stringifiedClient) {
+		// Read the DATA (#103): a stale count beats reporting zero unread while offline.
+		if (!chatsQuery.data || !stringifiedClient) {
 			return {
 				unreadCount: 0,
 				hasMissingMessages: false

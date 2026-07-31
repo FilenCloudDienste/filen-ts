@@ -57,7 +57,8 @@ const ChatParticipants = () => {
 		enabled: false
 	})
 
-	const chat = chatParsed && chatsQuery.status === "success" ? (chatsQuery.data.find(n => n.uuid === chatParsed.uuid) ?? null) : null
+	// Read the DATA (#103): gating on status dismissed this screen whenever the device was offline.
+	const chat = chatParsed ? (chatsQuery.data?.find(n => n.uuid === chatParsed.uuid) ?? null) : null
 
 	const participants = chat ? chat.participants.filter(p => p.userId !== stringifiedClient?.userId) : []
 	const isOwner = chat?.ownerId === stringifiedClient?.userId

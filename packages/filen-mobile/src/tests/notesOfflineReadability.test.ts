@@ -14,7 +14,17 @@ import { QueryClient, QueryObserver, onlineManager } from "@tanstack/react-query
  * that same list, dismissed themselves on open.
  */
 
-const NOTES_FEATURE = path.join(__dirname, "..", "features", "notes")
+const FEATURES = path.join(__dirname, "..", "features")
+const NOTES_FEATURE = path.join(FEATURES, "notes")
+
+/**
+ * Queries whose data is PERSISTED to SQLite and replayed at boot, so there is real content to draw
+ * while offline and a status gate is always wrong. Deliberately a list rather than "every query":
+ * the ones in UNCACHED_QUERY_KEYS (file bodies, biometric capability, camera-upload albums…) have
+ * nothing on disk, so for them `status === "success"` and `data !== undefined` say the same thing
+ * and rewriting them would be churn.
+ */
+const PERSISTED_QUERIES = ["notesQuery", "notesTagsQuery", "chatsQuery", "chatMessagesQuery", "contactsQuery", "contactRequestsQuery", "playlistsQuery"]
 
 function sourceFiles(dir: string): string[] {
 	return readdirSync(dir).flatMap(entry => {
@@ -75,6 +85,26 @@ describe("notes feature reads query data, not fetch status", () => {
 			source.split("\n").forEach((line, index) => {
 				if (/Query\.status\s*(===|!==)\s*"success"/.test(line)) {
 					offenders.push(`${path.relative(NOTES_FEATURE, file)}:${index + 1}`)
+				}
+			})
+		}
+
+		expect(offenders).toEqual([])
+	})
+
+	it("no persisted query is gated on status anywhere in the app", () => {
+		// The same defect reached chats, contacts and playlists: an empty list or a dead-end screen
+		// over content already on disk, plus a blocked-user filter that answered "nobody is blocked"
+		// offline. Scoped to the queries that actually have something persisted to draw.
+		const pattern = new RegExp(`\\b(${PERSISTED_QUERIES.join("|")})\\.status\\s*(===|!==)\\s*"success"`)
+		const offenders: string[] = []
+
+		for (const file of sourceFiles(FEATURES)) {
+			const source = readFileSync(file, "utf8")
+
+			source.split("\n").forEach((line, index) => {
+				if (pattern.test(line)) {
+					offenders.push(`${path.relative(FEATURES, file)}:${index + 1}`)
 				}
 			})
 		}

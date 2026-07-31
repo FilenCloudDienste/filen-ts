@@ -32,7 +32,9 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 	})
 
 	const chats = (() => {
-		if (chatsQuery.status !== "success") {
+		// Read the DATA, not the last fetch's verdict: an offline refetch fails and flips `status` to
+	// "error" while keeping it (#103).
+		if (!chatsQuery.data) {
 			return []
 		}
 

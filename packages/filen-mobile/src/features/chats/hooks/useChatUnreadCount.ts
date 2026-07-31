@@ -16,12 +16,16 @@ export function useChatUnreadCount(chat: Chat): number {
 		}
 	)
 
-	const unreadCount =
-		chatMessagesQuery.status === "success"
-			? chatMessagesQuery.data.filter(message => isMessageUnread(message, chat, stringifiedClient?.userId, blocked)).length
-			: 0
+	// Read the DATA, not the last fetch's verdict (#103): an offline refetch flips `status` to
+	// "error" while keeping the messages, and a stale count beats reporting zero unread.
+	//
+	// The signed-in user is checked explicitly. "Unread by me" means nothing without one, and that
+	// used to be answered only as a side effect of the status gate this replaces.
+	if (!stringifiedClient || !chatMessagesQuery.data) {
+		return 0
+	}
 
-	return unreadCount
+	return chatMessagesQuery.data.filter(message => isMessageUnread(message, chat, stringifiedClient.userId, blocked)).length
 }
 
 export default useChatUnreadCount

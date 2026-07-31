@@ -94,9 +94,10 @@ export function Playlists() {
 	)
 
 	const allPlaylists =
-		playlistsQuery.status === "success" ? [...playlistsQuery.data].sort((a, b) => b.updated - a.updated) : ([] as PlaylistWithItems[])
+		playlistsQuery.data ? [...playlistsQuery.data].sort((a, b) => b.updated - a.updated) : ([] as PlaylistWithItems[])
 
-	const playlistsData = playlistsQuery.status === "success" ? playlistsQuery.data : null
+	// Read the DATA, not the last fetch's verdict (#103).
+	const playlistsData = playlistsQuery.data ?? null
 
 	// Stale-selection purge: a refetch (e.g. pull-to-refresh) can drop a playlist that was deleted
 	// on another device while it's still selected. Intersect the selection against the freshest data
@@ -331,7 +332,7 @@ export function Playlists() {
 				<VirtualList
 					className="flex-1 bg-background-secondary"
 					data={visiblePlaylists}
-					loading={playlistsQuery.status !== "success"}
+					loading={playlistsQuery.status === "pending"}
 					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
 						paddingBottom: 300

@@ -15,7 +15,8 @@ export function useContactSections({ searchQuery, selectOptions }: { searchQuery
 	const contactRequestsQuery = useContactRequestsQuery()
 
 	const itemsSorted =
-		contactsQuery.status !== "success" || contactRequestsQuery.status !== "success"
+		// See useBlockedUsers (#103): read data, not the last fetch's verdict.
+		!contactsQuery.data || !contactRequestsQuery.data
 			? []
 			: buildContactSections({
 					data: {
