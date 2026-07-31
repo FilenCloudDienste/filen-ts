@@ -28,11 +28,6 @@ const textLayers = new Map<HTMLElement, HTMLElement>()
 let installed = false
 let isPointerDown = false
 let previousRange: Range | null = null
-let selectionLogs = 0
-let attachLogs = 0
-
-const MAX_SELECTION_LOGS = 6
-const MAX_ATTACH_LOGS = 3
 
 /**
  * Whether this engine needs the anchor repositioned by hand. Chromium 148+ and Firefox do it
@@ -185,40 +180,6 @@ function install(): void {
 
 	document.addEventListener("selectionchange", onSelectionChange)
 
-	// TEMPORARY, and deliberately NOT gated on the build type: selection behaviour here is
-	// engine-specific and cannot be reproduced off-device, and the previous attempt at this was
-	// compiled out of the release build — so the one run that mattered produced no evidence at all.
-	// warn survives production stripping. Bounded to a handful of lines so it cannot flood the log.
-	// Remove once iOS selection is settled.
-	document.addEventListener("selectionchange", () => {
-		if (selectionLogs >= MAX_SELECTION_LOGS) {
-			return
-		}
-
-		const selection = document.getSelection()
-
-		if (!selection || selection.rangeCount === 0) {
-			return
-		}
-
-		selectionLogs++
-
-		const range = selection.getRangeAt(0)
-
-		const describe = (node: Node | null): string => {
-			if (node === null) {
-				return "null"
-			}
-
-			const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node
-
-			return element instanceof Element ? `${element.tagName.toLowerCase()}.${element.className || "(none)"}` : `#${node.nodeType}`
-		}
-
-		console.warn(
-			`[pdfPreview] selection anchor=${describe(range.startContainer)} focus=${describe(range.endContainer)} common=${describe(range.commonAncestorContainer)} len=${selection.toString().length}`
-		)
-	})
 }
 
 /**
@@ -241,17 +202,6 @@ export function attachTextLayerSelection(layer: HTMLElement): () => void {
 	layer.addEventListener("mousedown", onMouseDown)
 
 	install()
-
-	// TEMPORARY, same rationale as above: this is the line that says whether the text layer reached
-	// this point at all on a given engine, which the absence of every other log could not distinguish
-	// from the layer simply never rendering.
-	if (attachLogs < MAX_ATTACH_LOGS) {
-		attachLogs++
-
-		console.warn(
-			`[pdfPreview] text layer attached runs=${layer.querySelectorAll("span").length} manualAnchor=${needsManualAnchor()} ua=${navigator.userAgent.slice(0, 60)}`
-		)
-	}
 
 	return () => {
 		layer.removeEventListener("mousedown", onMouseDown)
