@@ -96,7 +96,10 @@ export default function useChunkedWriteTarget(config: {
 				throw new Error("chunk out of bounds")
 			}
 
-			if (writtenRef.current + bytes.byteLength > configRef.current.maxBytes + (configRef.current.headroomBytes ?? SAVE_HEADROOM_BYTES)) {
+			if (
+				writtenRef.current + bytes.byteLength >
+				configRef.current.maxBytes + (configRef.current.headroomBytes ?? SAVE_HEADROOM_BYTES)
+			) {
 				throw new Error("save exceeds the size limit")
 			}
 

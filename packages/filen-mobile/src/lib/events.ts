@@ -29,16 +29,6 @@ export type Events = {
 	driveItemUpdated: {
 		previousUuid: string
 		item: DriveItem
-		/**
-		 * Whether an open preview of this item should reload from the new content.
-		 *
-		 * True for a change made elsewhere — a version restore has to reseed the page, a move retargets
-		 * the preview's own save. False when the preview itself produced the change: saving rotates the
-		 * uuid too, but the content on screen already IS the saved content, so reloading only throws
-		 * away the cursor, the scroll position and any password the user entered. Defaults to reseeding,
-		 * because an unmarked change came from somewhere else.
-		 */
-		reseedPreview?: boolean
 	}
 	driveItemRemoved: {
 		uuid: string

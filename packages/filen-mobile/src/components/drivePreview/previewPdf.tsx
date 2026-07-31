@@ -81,7 +81,6 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 	}
 
 	const runSave = async (): Promise<boolean> => {
-
 		const result = await runWithLoading(async defer => {
 			if (!itemToUse?.data.decryptedMeta) {
 				throw new Error("Missing decryptedMeta")
@@ -221,7 +220,11 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 					color="#9ca3af"
 				/>
 				<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">
-					{source.reason === "tooLarge" ? t("pdf_too_large") : source.reason === "wrongFormat" ? t("invalid_pdf") : t("unable_to_load_pdf")}
+					{source.reason === "tooLarge"
+						? t("pdf_too_large")
+						: source.reason === "wrongFormat"
+							? t("invalid_pdf")
+							: t("unable_to_load_pdf")}
 				</Text>
 			</View>
 		)

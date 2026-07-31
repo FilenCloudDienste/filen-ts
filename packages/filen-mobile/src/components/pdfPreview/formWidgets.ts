@@ -32,6 +32,17 @@ export type FormWidgetScope = {
 	nextId: number
 }
 
+/**
+ * Marks a widget this sweep has already neutralised.
+ *
+ * The sweep runs per rendered page AND again on focus, over elements it has already processed. Its
+ * rename map is keyed by the ORIGINAL name, so re-sweeping a widget whose name is now `pdfField-N`
+ * finds no entry and mints another one — renaming it out of its own field group. For a radio group
+ * that means the browser stops uncticking its siblings and pdf.js stops propagating to them, so two
+ * options read as selected in the DOM and in the storage a save serialises from.
+ */
+const HARDENED_ATTRIBUTE = "data-filen-hardened"
+
 export function createFormWidgetScope(): FormWidgetScope {
 	return {
 		names: new Map<string, string>(),
@@ -48,6 +59,14 @@ export function hardenFormWidgets(root: ParentNode, scope: FormWidgetScope): voi
 		if (!(widget instanceof HTMLInputElement) && !(widget instanceof HTMLTextAreaElement) && !(widget instanceof HTMLSelectElement)) {
 			continue
 		}
+
+		// Idempotent by construction. A re-rendered page builds fresh elements, which arrive unmarked
+		// and get hardened; an element already seen is left exactly as it was.
+		if (widget.hasAttribute(HARDENED_ATTRIBUTE)) {
+			continue
+		}
+
+		widget.setAttribute(HARDENED_ATTRIBUTE, "")
 
 		// Set as a property, not an attribute: the property is what the engine and the platform's
 		// autofill actually consult.

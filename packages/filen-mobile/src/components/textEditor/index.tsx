@@ -254,6 +254,10 @@ export const TextEditor = ({
 	})
 	const writeResolverRef = useRef<((file: File | null) => void) | null>(null)
 	const writeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+	// The request the in-flight save is waiting on. A stalled write that resumes after the watchdog
+	// gave up must not finalize the target a later save armed — text has no magic bytes, so
+	// `finish()` cannot reject the truncated result on its way to replacing the user's file.
+	const pendingWriteIdRef = useRef<string | null>(null)
 
 	const markdownPreviewActive = !id ? false : (textEditorMarkdownPreviewActive[id] ?? false)
 
@@ -308,12 +312,21 @@ export const TextEditor = ({
 				}
 
 				case "documentWritten": {
+					// Ignore an answer for a save that is no longer the one in flight.
+					if (message.data.requestId !== pendingWriteIdRef.current) {
+						break
+					}
+
 					settleWrite(writeTarget.finish())
 
 					break
 				}
 
 				case "documentWriteFailed": {
+					if (message.data.requestId !== pendingWriteIdRef.current) {
+						break
+					}
+
 					logger.error("textEditor", "the editor could not serialise the document")
 
 					writeTarget.discard()
@@ -356,6 +369,8 @@ export const TextEditor = ({
 	// a full-screen modal that blocks every touch and eats the Android back button, so a save that never
 	// settles — a renderer killed mid-serialisation answers nothing — is an app the user must force-quit.
 	const settleWrite = (file: File | null) => {
+		pendingWriteIdRef.current = null
+
 		if (writeTimeoutRef.current !== null) {
 			clearTimeout(writeTimeoutRef.current)
 
@@ -388,9 +403,12 @@ export const TextEditor = ({
 							return
 						}
 
+						const requestId = `${Date.now()}`
+
 						writeTarget.begin()
 
 						writeResolverRef.current = resolve
+						pendingWriteIdRef.current = requestId
 
 						writeTimeoutRef.current = setTimeout(() => {
 							logger.error("textEditor", "the editor did not answer the save request in time")
@@ -402,7 +420,7 @@ export const TextEditor = ({
 						postMessageRef.current({
 							type: "writeDocument",
 							data: {
-								requestId: `${Date.now()}`
+								requestId
 							}
 						})
 					})

@@ -75,7 +75,6 @@ const PreviewTextInner = ({
 	}
 
 	const runSave = async (): Promise<boolean> => {
-
 		const result = await runWithLoading(async defer => {
 			if (!itemToUse?.data.decryptedMeta) {
 				throw new Error("Missing decryptedMeta")

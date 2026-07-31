@@ -134,12 +134,14 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 				cache.forgetItem(oldUuid)
 			}
 
+			// The preview reloads from this, because it must: the file's identity has moved and the
+			// uuid-keyed file queries the preview is built on have to follow it. Suppressing the reload
+			// was tried and does not work — the gallery's own file query re-keys either way, so the
+			// editor is torn down regardless, and holding the pre-save item made later operations on the
+			// file (a move, a trash) address a uuid the server no longer has.
 			events.emit("driveItemUpdated", {
 				previousUuid: oldUuid,
-				item: newItem,
-				// The preview produced this change, so it must not reload from it — itemToUse already
-				// points at the replacement for the next save.
-				reseedPreview: false
+				item: newItem
 			})
 		}
 	}

@@ -183,6 +183,16 @@ const PdfPreview = ({
 		resolve?.(file)
 	}
 
+	// A dead renderer is definitive: it will never answer a save. Settling here rather than waiting
+	// out the watchdog is the difference between a moment's error and two minutes behind a modal that
+	// blocks every touch.
+	const rendererDied = () => {
+		saveTarget.discard()
+		settleSave(null)
+
+		setPhase("error")
+	}
+
 	// Serialising happens inside the WebView, so the host asks for it through a prop and settles the
 	// promise when the viewer reports back. Mirrors the password round trip.
 	useEffect(() => {
@@ -251,12 +261,12 @@ const PdfPreview = ({
 					onContentProcessDidTerminate: () => {
 						logger.warn("pdfPreview", "the webview renderer terminated")
 
-						setPhase("error")
+						rendererDied()
 					},
 					onRenderProcessGone: () => {
 						logger.warn("pdfPreview", "the webview renderer was killed")
 
-						setPhase("error")
+						rendererDied()
 					},
 					onMessage: (event: WebViewMessageEvent) => {
 						try {

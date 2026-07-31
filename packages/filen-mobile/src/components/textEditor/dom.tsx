@@ -100,6 +100,9 @@ const TextEditorDOM = ({
 	// Chunked mode reports only that the document changed, never the document itself — see onChange.
 	const chunked = readRange !== undefined && fileSize !== undefined
 	const editedReportedRef = useRef<boolean>(false)
+	// The write request whose serialisation may keep running. A stalled run that resumes after the
+	// host gave up on it must not stream into the target a LATER save has since armed.
+	const activeWriteIdRef = useRef<string | null>(null)
 
 	// Latest-props refs for the flush handler: the imperative message handler is captured once
 	// per WebView mount ([] deps on useDOMImperativeHandle), so it must read everything through
@@ -233,6 +236,10 @@ const TextEditorDOM = ({
 			return
 		}
 
+		activeWriteIdRef.current = requestId
+
+		const superseded = () => activeWriteIdRef.current !== requestId
+
 		codeMirrorRef.current?.view?.contentDOM.blur()
 
 		await new Promise(resolve => setTimeout(resolve, FLUSH_COMPOSITION_COMMIT_MS))
@@ -240,9 +247,11 @@ const TextEditorDOM = ({
 		try {
 			const doc = codeMirrorRef.current?.view?.state.doc.toString() ?? lastReportedValueRef.current
 
-			if (!(await writeAllBytes(new TextEncoder().encode(doc), write))) {
-				fail()
+			if (!(await writeAllBytes(new TextEncoder().encode(doc), write, { isCancelled: superseded }))) {
+				return
+			}
 
+			if (superseded()) {
 				return
 			}
 

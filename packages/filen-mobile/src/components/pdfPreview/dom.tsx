@@ -384,6 +384,8 @@ const Dom = ({
 	// to do with saving; without this a rotation mid-save started a SECOND serialisation that
 	// appended a whole second document into the same write target.
 	const servicedSaveIdRef = useRef<string | null>(null)
+	// The request whose serialisation is allowed to keep running. Cleared only by teardown.
+	const activeSaveIdRef = useRef<string | null>(null)
 	const [fatal, setFatal] = useState<boolean>(false)
 
 	// A password can only arrive after mount, as a prop update. The requestId match is what stops a
@@ -965,8 +967,14 @@ const Dom = ({
 		}
 
 		servicedSaveIdRef.current = saveRequest.requestId
+		activeSaveIdRef.current = saveRequest.requestId
 
-		let cancelled = false
+		// Cancellation is bound to the REQUEST, not to this effect closure. The deps change on renders
+		// that have nothing to do with saving, and React runs the previous cleanup every time; a closure
+		// flag therefore cancelled the live serialisation while the new body early-returned, so nothing
+		// answered and the host sat on its watchdog for two minutes before reporting a failure that had
+		// not happened.
+		const cancelled = () => activeSaveIdRef.current !== saveRequest.requestId
 
 		const run = async () => {
 			const pdfDocument = documentRef.current
@@ -984,10 +992,10 @@ const Dom = ({
 				const bytes: Uint8Array = await pdfDocument.saveDocument()
 
 				const written = await writeAllBytes(bytes, writeChunk, {
-					isCancelled: () => cancelled
+					isCancelled: cancelled
 				})
 
-				if (!written || cancelled) {
+				if (!written || cancelled()) {
 					return
 				}
 
@@ -1010,10 +1018,6 @@ const Dom = ({
 		}
 
 		run()
-
-		return () => {
-			cancelled = true
-		}
 	}, [saveRequest, writeChunk])
 
 	// Link activation, decided at tap time rather than at render time, so an anchor added or mutated

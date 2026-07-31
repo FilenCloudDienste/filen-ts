@@ -129,6 +129,26 @@ describe("hardenFormWidgets", () => {
 		expect(input?.disabled).toBe(false)
 	})
 
+	test("re-sweeping a widget leaves it exactly as it was", () => {
+		// Production sweeps the SAME element more than once: once per page render, and again on focus.
+		// A non-idempotent sweep renamed the widget on every focus, detaching a radio from its group —
+		// the corruption this scope was introduced to prevent. Note the shared scope: an earlier version
+		// of this test built a fresh one per sweep, the one configuration production never uses, and so
+		// passed against the broken implementation.
+		const scope = createFormWidgetScope()
+		const root = render('<input type="radio" name="choice" id="a"><input type="radio" name="choice" id="b">')
+
+		hardenFormWidgets(root, scope)
+
+		const afterFirst = Array.from(root.querySelectorAll("input")).map(input => `${input.name}#${input.id}`)
+
+		// Focus-time re-harden of one widget, exactly as the viewer does it.
+		hardenFormWidgets(root.querySelector("#" + CSS.escape(afterFirst[1]?.split("#")[1] ?? ""))?.parentNode ?? root, scope)
+		hardenFormWidgets(root, scope)
+
+		expect(Array.from(root.querySelectorAll("input")).map(input => `${input.name}#${input.id}`)).toEqual(afterFirst)
+	})
+
 	test("does not reuse a replacement name across separate sweeps of one document", () => {
 		// The sweep runs once per RENDERED PAGE, and adjacent pages are mounted together (the page
 		// observer keeps a viewport of lookahead each way). A per-sweep counter therefore handed page 2's
