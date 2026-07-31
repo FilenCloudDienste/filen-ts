@@ -1,22 +1,25 @@
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import DocxPreview from "@/components/docxPreview"
+import { MAX_DOCX_BYTES } from "@/components/docxPreview/constants"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import useFileBase64Query from "@/queries/useFileBase64.query"
+import useFileUriQuery from "@/queries/useFileUri.query"
+import useRangeSource from "@/hooks/useRangeSource"
+import { ZIP_MAGIC } from "@/lib/rangeTransfer"
 import { ActivityIndicator } from "react-native"
 import { useTranslation } from "react-i18next"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
+import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePreview/gallery"
 
 const PreviewDocx = ({ item }: { item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
 
-	const query = useFileBase64Query(
+	const query = useFileUriQuery(
 		item.type === "external"
 			? {
 					type: "external",
@@ -34,6 +37,13 @@ const PreviewDocx = ({ item }: { item: GalleryItemTagged }) => {
 					}
 				}
 	)
+
+	// A .docx is a zip, so the header check is on the archive signature rather than on anything
+	// Office-specific — enough to tell a renamed file from a document before the renderer sees it.
+	const source = useRangeSource(query.status === "success" ? query.data.uri : null, {
+		maxBytes: MAX_DOCX_BYTES,
+		magic: ZIP_MAGIC
+	})
 
 	if (query.status === "pending" && query.fetchStatus === "fetching") {
 		return (
@@ -79,11 +89,37 @@ const PreviewDocx = ({ item }: { item: GalleryItemTagged }) => {
 		)
 	}
 
-	if (query.status === "success") {
+	// Refusals are typed rather than collapsed into the generic error state: "larger than the viewer
+	// will open" is advice and "this is not a document" is a different fact, and a lone retry button
+	// answers neither of them.
+	if (source.status === "refused") {
+		return (
+			<View className="bg-background flex-1 items-center justify-center px-8">
+				<Ionicons
+					name={source.reason === "tooLarge" ? "document-outline" : "warning-outline"}
+					size={48}
+					color="#9ca3af"
+				/>
+				<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">
+					{source.reason === "tooLarge"
+						? t("document_too_large")
+						: source.reason === "wrongFormat"
+							? t("invalid_document")
+							: t("preview_load_failed")}
+				</Text>
+			</View>
+		)
+	}
+
+	if (source.status === "ready") {
 		return (
 			<View className="bg-background flex-1">
 				<DocxPreview
-					base64={query.data}
+					// A new document always gets a new WebView. Reusing one is what makes the previous
+					// document's retained DOM a cost the next one pays.
+					key={galleryItemKey(item)}
+					readRange={source.readRange}
+					fileSize={source.size}
 					paddingTop={headerHeight ? headerHeight : undefined}
 					paddingBottom={insets.bottom}
 				/>

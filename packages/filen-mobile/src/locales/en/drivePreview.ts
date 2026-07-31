@@ -40,6 +40,12 @@ export const drivePreview = {
 	/** Error state body shown when this device's system WebView is too old to render PDFs */
 	pdf_preview_unsupported: "PDFs can't be previewed on this device",
 
+	// ── Word document preview (previewDocx.tsx) ────────────────────────────────
+	/** Error state body shown when a Word document is larger than the viewer will open */
+	document_too_large: "This document is too large to preview",
+	/** Error state body shown when a file with a .docx extension is not a Word document */
+	invalid_document: "This document could not be opened",
+
 	// ── Shared preview error states (previewText.tsx / previewDocx.tsx / previewPdf.tsx) ──────
 	/** Error state body shown when a file preview failed to load */
 	preview_load_failed: "Could not load this file",

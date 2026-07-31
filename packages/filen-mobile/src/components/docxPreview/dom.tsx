@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react"
 import { renderAsync } from "docx-preview"
-import { Buffer } from "buffer"
+import { readAllBytes, type RangeReader } from "@/lib/rangeTransfer"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
 import { classifyDocxLinkHref, hardenDocxDom, DOCX_EXTERNAL_URL_ATTRIBUTE, DOCX_EXTERNAL_LINK_KEY } from "@/components/docxPreview/linkSafety"
@@ -85,17 +85,26 @@ contentSecurityPolicy.setAttribute(
 document.head.appendChild(contentSecurityPolicy)
 
 const Dom = ({
-	base64,
+	readRange,
+	fileSize,
 	paddingTop,
 	paddingBottom
 }: {
 	dom?: import("expo/dom").DOMProps
-	base64: string
+	/**
+	 * Pulls the archive across the bridge in bounded pieces. A function rather than the bytes
+	 * themselves: expo/dom re-serializes every prop into an injected JS source string on each render
+	 * of the host, so a whole-document prop is re-encoded and re-parsed continuously, and a large one
+	 * exhausts the renderer. Function props marshal as a name and are exempt.
+	 */
+	readRange: RangeReader
+	fileSize: number
 	paddingTop?: number
 	paddingBottom?: number
 }) => {
 	const container = useRef<HTMLDivElement>(null)
 	const didLoadRef = useRef<boolean>(false)
+	const cancelledRef = useRef<boolean>(false)
 	const [error, setError] = useState<string | null>(null)
 
 	const load = async () => {
@@ -108,7 +117,18 @@ const Dom = ({
 		didLoadRef.current = true
 
 		try {
-			await renderAsync(Buffer.from(base64, "base64"), containerElement, containerElement, {
+			// docx-preview needs the whole archive: it is a zip, and the central directory is at the end.
+			// Chunking bounds what crosses the bridge at once, not what the renderer ultimately holds —
+			// the size gate on the native side is what protects the renderer.
+			const bytes = await readAllBytes(readRange, fileSize, {
+				isCancelled: () => cancelledRef.current
+			})
+
+			if (bytes === null || cancelledRef.current) {
+				return
+			}
+
+			await renderAsync(bytes, containerElement, containerElement, {
 				ignoreHeight: true,
 				ignoreWidth: true,
 				ignoreFonts: false,
@@ -148,8 +168,14 @@ const Dom = ({
 		}
 	}
 
+	// Safe as a mount-only effect: the host renders this component only once its range source is open,
+	// so `readRange` is present at mount and never changes for a given document.
 	useEffectOnce(() => {
 		load()
+
+		return () => {
+			cancelledRef.current = true
+		}
 	})
 
 	// Link activation, enforced at tap time.

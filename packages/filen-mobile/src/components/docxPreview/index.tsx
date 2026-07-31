@@ -3,14 +3,26 @@ import { forwardDomConsoleLog } from "@/hooks/useDomEvents/forwardDomLog"
 import { parseDocxExternalLink } from "@/components/docxPreview/linkSafety"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 import type { WebViewMessageEvent } from "react-native-webview"
+import type { RangeReader } from "@/lib/rangeTransfer"
 import logger from "@/lib/logger"
 
-const DocxPreview = ({ base64, paddingTop, paddingBottom }: { base64: string; paddingTop?: number; paddingBottom?: number }) => {
+const DocxPreview = ({
+	readRange,
+	fileSize,
+	paddingTop,
+	paddingBottom
+}: {
+	readRange: RangeReader
+	fileSize: number
+	paddingTop?: number
+	paddingBottom?: number
+}) => {
 	const openExternalLink = useOpenExternalLink("docxPreview")
 
 	return (
 		<Dom
-			base64={base64}
+			readRange={readRange}
+			fileSize={fileSize}
 			paddingTop={paddingTop}
 			paddingBottom={paddingBottom}
 			dom={{
