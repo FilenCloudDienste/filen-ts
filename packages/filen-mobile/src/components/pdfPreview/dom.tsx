@@ -751,6 +751,14 @@ const Dom = ({
 
 			documentRef.current = pdfDocument
 
+			// Fires once, on the first field change, so the host learns the document is dirty without
+			// polling. Reset after a successful save.
+			pdfDocument.annotationStorage.onSetModified = () => {
+				postEvent({
+					event: "edited"
+				})
+			}
+
 			if (pdfDocument.numPages < 1) {
 				// Nothing will ever paint, so nothing would ever clear the host's overlay.
 				postEvent({
