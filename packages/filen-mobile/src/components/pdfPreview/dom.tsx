@@ -21,6 +21,7 @@ import {
 } from "@/components/pdfPreview/protocol"
 import { PDF_MAX_PAGE_CANVAS_BYTES, PDF_MAX_RANGE_LENGTH, PDF_MAX_ZOOM } from "@/components/pdfPreview/constants"
 import { hardenFormWidgets } from "@/components/pdfPreview/formWidgets"
+import { attachTextLayerSelection } from "@/components/pdfPreview/textSelection"
 import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
 import useEffectOnce from "@/hooks/useEffectOnce"
@@ -96,8 +97,13 @@ styles.textContent = `
 	.pdfPage canvas { display: block; width: 100%; height: 100%; }
 	.textLayer {
 		position: absolute; inset: 0; overflow: clip; opacity: 1; line-height: 1;
-		text-align: initial; text-size-adjust: none; forced-color-adjust: none;
+		text-align: initial; forced-color-adjust: none; color-scheme: only light;
 		transform-origin: 0 0; caret-color: CanvasText; z-index: 1;
+		/* Metrics, not cosmetics: an inherited letter- or word-spacing would shift every run away from
+		   the glyphs painted underneath it, and iOS honours the -webkit- prefixed size-adjust, so
+		   omitting it lets the engine resize this text out of alignment on that platform alone. */
+		letter-spacing: normal; word-spacing: normal;
+		-webkit-text-size-adjust: none; text-size-adjust: none;
 		--scale-round-x: 1px;
 		--scale-round-y: 1px;
 		--min-font-size: 1;
@@ -115,6 +121,16 @@ styles.textContent = `
 		transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
 	}
 	.textLayer .markedContent { display: contents; }
+	.textLayer.highlighting { touch-action: none; }
+	/* The selection anchor. Absolutely positioned runs have no flow between them, so a drag that
+	   leaves the last run has nothing to end on and the engine selects the whole block instead. This
+	   normally sits below the layer and unselectable; while a selection is in progress the selecting
+	   class pulls it up to cover the layer so there is something to anchor to. */
+	.textLayer .endOfContent {
+		display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default;
+		user-select: none; -webkit-user-select: none;
+	}
+	.textLayer.selecting .endOfContent { top: 0; }
 	/* setLayerDimensions stamps data-main-rotation on both layers from the page's own /Rotate. Without
 	   these the canvas is drawn rotated while the text and annotation layers are not, so on a rotated
 	   page — which scans very often are — selection lands nowhere near the glyphs and links sit in the
@@ -308,6 +324,7 @@ type PageEntry = {
 	task: any | null
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	textLayer: any | null
+	detachSelection: (() => void) | null
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	page: any | null
 }
@@ -510,6 +527,10 @@ const Dom = ({
 					entry.textLayer = textLayer
 
 					await textLayer.render()
+
+					if (current()) {
+						entry.detachSelection = attachTextLayerSelection(textLayerDiv)
+					}
 				} catch (error) {
 					console.warn(`[pdfPreview] text layer failed on page ${pageNumber}: ${describeError(error)}`)
 				}
@@ -609,6 +630,8 @@ const Dom = ({
 			entry.task = null
 			entry.textLayer?.cancel()
 			entry.textLayer = null
+			entry.detachSelection?.()
+			entry.detachSelection = null
 			entry.rendered = false
 
 			// Frees the decoded images and the operator list this page was holding.
@@ -840,6 +863,7 @@ const Dom = ({
 					epoch: 0,
 					task: null,
 					textLayer: null,
+					detachSelection: null,
 					page: null
 				})
 
