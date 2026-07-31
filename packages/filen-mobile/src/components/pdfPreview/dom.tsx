@@ -20,7 +20,8 @@ import {
 	type PdfSaveRequest,
 	type PdfViewerEvent
 } from "@/components/pdfPreview/protocol"
-import { PDF_MAX_PAGE_CANVAS_BYTES, PDF_MAX_RANGE_LENGTH, PDF_MAX_ZOOM } from "@/components/pdfPreview/constants"
+import { PDF_MAX_PAGE_CANVAS_BYTES, PDF_MAX_ZOOM } from "@/components/pdfPreview/constants"
+import { MAX_RANGE_LENGTH, base64ToBytes, writeAllBytes } from "@/lib/rangeTransfer"
 import { hardenFormWidgets } from "@/components/pdfPreview/formWidgets"
 import { attachTextLayerSelection } from "@/components/pdfPreview/textSelection"
 import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
@@ -167,17 +168,6 @@ styles.textContent = `
 `
 
 document.head.appendChild(styles)
-
-function base64ToBytes(encoded: string): Uint8Array {
-	const binary = atob(encoded)
-	const bytes = new Uint8Array(binary.length)
-
-	for (let index = 0; index < binary.length; index++) {
-		bytes[index] = binary.charCodeAt(index)
-	}
-
-	return bytes
-}
 
 /**
  * Hands pdf.js its font data directly instead of letting it fetch anything. pdf.js constructs this
@@ -698,7 +688,7 @@ const Dom = ({
 					let offset = begin
 
 					while (offset < end) {
-						const length = Math.min(PDF_MAX_RANGE_LENGTH, end - offset)
+						const length = Math.min(MAX_RANGE_LENGTH, end - offset)
 						const chunk = base64ToBytes(await readRange(offset, length))
 
 						if (destroyed) {
@@ -971,22 +961,11 @@ const Dom = ({
 			try {
 				const bytes: Uint8Array = await pdfDocument.saveDocument()
 
-				for (let offset = 0; offset < bytes.byteLength; offset += PDF_MAX_RANGE_LENGTH) {
-					if (cancelled) {
-						return
-					}
+				const written = await writeAllBytes(bytes, writeChunk, {
+					isCancelled: () => cancelled
+				})
 
-					const slice = bytes.subarray(offset, Math.min(offset + PDF_MAX_RANGE_LENGTH, bytes.byteLength))
-					let binary = ""
-
-					for (let index = 0; index < slice.length; index++) {
-						binary += String.fromCharCode(slice[index] ?? 0)
-					}
-
-					await writeChunk(btoa(binary))
-				}
-
-				if (cancelled) {
+				if (!written || cancelled) {
 					return
 				}
 

@@ -8,7 +8,9 @@ import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import View from "@/components/ui/view"
 import { parsePdfExternalLink, parsePdfViewerEvent, type PdfPasswordResponse, type PdfSaveRequest } from "@/components/pdfPreview/protocol"
-import usePdfSaveTarget from "@/components/pdfPreview/usePdfSaveTarget"
+import useChunkedWriteTarget from "@/hooks/useChunkedWriteTarget"
+import { MAX_PDF_BYTES } from "@/components/pdfPreview/constants"
+import { PDF_MAGIC } from "@/lib/rangeTransfer"
 import type { File } from "expo-file-system"
 import { forwardDomConsoleLog } from "@/hooks/useDomEvents/forwardDomLog"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"
@@ -70,7 +72,11 @@ const PdfPreview = ({
 	const [passwordResponse, setPasswordResponse] = useState<PdfPasswordResponse | null>(null)
 	const [booted, setBooted] = useState<boolean>(false)
 	const [saveRequest, setSaveRequest] = useState<PdfSaveRequest | null>(null)
-	const saveTarget = usePdfSaveTarget()
+	const saveTarget = useChunkedWriteTarget({
+		maxBytes: MAX_PDF_BYTES,
+		magic: PDF_MAGIC,
+		fileName: "pdfSave.pdf"
+	})
 	const saveResolverRef = useRef<((file: File | null) => void) | null>(null)
 	const promptingRef = useRef<boolean>(false)
 	const lastRequestIdRef = useRef<string | null>(null)

@@ -8,7 +8,9 @@ import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import PdfPreview from "@/components/pdfPreview"
-import usePdfSource from "@/components/pdfPreview/usePdfSource"
+import useRangeSource from "@/hooks/useRangeSource"
+import { MAX_PDF_BYTES } from "@/components/pdfPreview/constants"
+import { PDF_MAGIC } from "@/lib/rangeTransfer"
 import useFileUriQuery from "@/queries/useFileUri.query"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePreview/gallery"
@@ -53,7 +55,10 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 				}
 	)
 
-	const source = usePdfSource(query.status === "success" ? query.data.uri : null)
+	const source = useRangeSource(query.status === "success" ? query.data.uri : null, {
+		maxBytes: MAX_PDF_BYTES,
+		magic: PDF_MAGIC
+	})
 
 	const save = async (): Promise<boolean> => {
 		if (!hasEdits || readOnly || !isOnline) {
@@ -199,7 +204,7 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 					color="#9ca3af"
 				/>
 				<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">
-					{source.reason === "tooLarge" ? t("pdf_too_large") : source.reason === "notAPdf" ? t("invalid_pdf") : t("unable_to_load_pdf")}
+					{source.reason === "tooLarge" ? t("pdf_too_large") : source.reason === "wrongFormat" ? t("invalid_pdf") : t("unable_to_load_pdf")}
 				</Text>
 			</View>
 		)

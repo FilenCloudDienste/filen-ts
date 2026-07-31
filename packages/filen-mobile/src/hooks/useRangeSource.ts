@@ -1,44 +1,53 @@
 import { useEffect, useRef, useState } from "react"
 import { Buffer } from "buffer"
 import { File, type FileHandle } from "expo-file-system"
-import { MAX_PDF_BYTES, PDF_CUMULATIVE_READ_FACTOR } from "@/components/pdfPreview/constants"
-import { checkRangeRequest, hasPdfMagic } from "@/components/pdfPreview/rangeGuard"
+import { CUMULATIVE_READ_FACTOR, checkRangeRequest, hasMagic, type RangeReader } from "@/lib/rangeTransfer"
 import { normalizeFilePathForExpo } from "@/lib/paths"
 import logger from "@/lib/logger"
 
-export type PdfSourceRefusal = "tooLarge" | "notAPdf" | "unreadable"
+export type RangeSourceRefusal = "tooLarge" | "wrongFormat" | "unreadable"
 
-export type PdfSource =
+export type RangeSource =
 	| { status: "pending" }
-	| { status: "refused"; reason: PdfSourceRefusal; size: number }
-	| { status: "ready"; size: number; readRange: (offset: number, length: number) => Promise<string> }
+	| { status: "refused"; reason: RangeSourceRefusal; size: number }
+	| { status: "ready"; size: number; readRange: RangeReader }
 
-const PDF_MAGIC_LENGTH = "%PDF-".length
-
-const PENDING: PdfSource = {
+const PENDING: RangeSource = {
 	status: "pending"
 }
 
 /**
- * Opens a local PDF for the viewer and exposes a bounded range reader for it.
+ * Opens a local file for a DOM-component viewer and exposes a bounded range reader for it.
  *
- * The reader is the ONLY function this component hands to the WebView, and every function prop is
- * callable by anything running inside that WebView. So it takes `(offset, length)` and nothing else —
- * never a path, which would make it an arbitrary-file-read primitive the moment a document achieved
- * script execution. It closes over one already-open handle, opened here and closed on teardown, and
- * it never reopens on demand.
+ * The reader is the ONLY function handed to the WebView, and every function prop is callable by
+ * anything running inside it. So it takes `(offset, length)` and nothing else — never a path, which
+ * would make it an arbitrary-file-read primitive the moment a document achieved script execution. It
+ * closes over one already-open handle, opened here and closed on teardown, and never reopens on
+ * demand.
  *
- * pdf.js hands its transport an END offset; the conversion to a length happens on the viewer side, so
- * exactly one place in the system knows both conventions.
+ * @param uri Local file to open, or null while the caller is still resolving one.
+ * @param maxBytes Largest file this viewer will open. The real memory protection — refusing here is
+ *   what keeps a large document from taking the WebView renderer down with it — so it is a required
+ *   decision per viewer rather than a shared default.
+ * @param magic Expected leading bytes, when the format has a signature worth checking.
  */
-export default function usePdfSource(uri: string | null): PdfSource {
+export default function useRangeSource(
+	uri: string | null,
+	{
+		maxBytes,
+		magic
+	}: {
+		maxBytes: number
+		magic?: string
+	}
+): RangeSource {
 	const handleRef = useRef<FileHandle | null>(null)
 	const bytesReadRef = useRef<number>(0)
 	// Keyed by the uri it describes, so a superseded result is never shown for a newer file and no
 	// synchronous "reset to pending" write is needed when the uri changes.
-	const [resolved, setResolved] = useState<{ uri: string; source: PdfSource } | null>(null)
+	const [resolved, setResolved] = useState<{ uri: string; source: RangeSource } | null>(null)
 
-	// Keyed on `uri`, NOT useEffectOnce. The caller passes null until the file query resolves, and that
+	// Keyed on `uri`, NOT useEffectOnce. The caller passes null until its file query resolves, and that
 	// query is always pending at mount (gcTime: 0, no prefetch), so a mount-only effect would capture
 	// null, early-return and never run again — leaving the viewer on a spinner forever for every
 	// document. useEffectOnce documents this exact hazard.
@@ -64,11 +73,8 @@ export default function usePdfSource(uri: string | null): PdfSource {
 				const file = new File(normalizeFilePathForExpo(uri))
 				const size = file.size ?? 0
 
-				// Gate before opening anything. pdf.js reserves a buffer the length of the whole file and,
-				// at open, walks the page tree to the last page — which for a typical layout pulls roughly
-				// one chunk per page. Refusing here is what keeps a large document from taking the WebView
-				// renderer down with it.
-				if (size > MAX_PDF_BYTES) {
+				// Gate before opening anything.
+				if (size > maxBytes) {
 					setResolved({
 						uri,
 						source: {
@@ -86,26 +92,28 @@ export default function usePdfSource(uri: string | null): PdfSource {
 				const handleSize = openHandle.size ?? size
 
 				// Cheap structural check so a mislabelled file fails with an honest message instead of
-				// surfacing as a pdf.js parse error.
-				openHandle.offset = 0
+				// surfacing as a parse error from inside the rendering library.
+				if (magic !== undefined) {
+					openHandle.offset = 0
 
-				const magic = Buffer.from(openHandle.readBytes(Math.min(PDF_MAGIC_LENGTH, handleSize))).toString("latin1")
+					const header = Buffer.from(openHandle.readBytes(Math.min(magic.length, handleSize))).toString("latin1")
 
-				if (!hasPdfMagic(magic)) {
-					openHandle.close()
+					if (!hasMagic(header, magic)) {
+						openHandle.close()
 
-					openHandle = null
+						openHandle = null
 
-					setResolved({
-						uri,
-						source: {
-							status: "refused",
-							reason: "notAPdf",
-							size: handleSize
-						}
-					})
+						setResolved({
+							uri,
+							source: {
+								status: "refused",
+								reason: "wrongFormat",
+								size: handleSize
+							}
+						})
 
-					return
+						return
+					}
 				}
 
 				if (cancelled) {
@@ -121,7 +129,7 @@ export default function usePdfSource(uri: string | null): PdfSource {
 
 				// The size authority is the handle, never file metadata: metadata can disagree with what
 				// is on disk, and a length derived from it would let a read run past the end.
-				const cumulativeLimit = handleSize * PDF_CUMULATIVE_READ_FACTOR
+				const cumulativeLimit = handleSize * CUMULATIVE_READ_FACTOR
 
 				setResolved({
 					uri,
@@ -162,7 +170,7 @@ export default function usePdfSource(uri: string | null): PdfSource {
 					}
 				})
 			} catch (e) {
-				logger.error("pdfPreview", "failed to open the document", {
+				logger.error("rangeSource", "failed to open a file for preview", {
 					error: e
 				})
 
@@ -194,7 +202,7 @@ export default function usePdfSource(uri: string | null): PdfSource {
 
 			openHandle = null
 		}
-	}, [uri])
+	}, [uri, maxBytes, magic])
 
 	return resolved !== null && resolved.uri === uri ? resolved.source : PENDING
 }

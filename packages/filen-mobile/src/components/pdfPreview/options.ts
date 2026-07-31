@@ -1,4 +1,5 @@
-import { PDF_MAX_CANVAS_AREA_BYTES, PDF_MAX_IMAGE_SIZE, PDF_RANGE_CHUNK_SIZE } from "@/components/pdfPreview/constants"
+import { PDF_MAX_CANVAS_AREA_BYTES, PDF_MAX_IMAGE_SIZE } from "@/components/pdfPreview/constants"
+import { RANGE_CHUNK_SIZE } from "@/lib/rangeTransfer"
 
 /**
  * The `getDocument` parameters, built in one place so the security-critical values are assertable in
@@ -36,7 +37,7 @@ export function buildPdfDocumentOptions({
 }): Record<string, unknown> {
 	return {
 		range,
-		rangeChunkSize: PDF_RANGE_CHUNK_SIZE,
+		rangeChunkSize: RANGE_CHUNK_SIZE,
 		useWorkerFetch: false,
 		useSystemFonts: false,
 		BinaryDataFactory: binaryDataFactory,

@@ -17,25 +17,6 @@ import { Platform } from "react-native"
 export const MAX_PDF_BYTES = Platform.OS === "ios" ? 150 * 1024 * 1024 : 75 * 1024 * 1024
 
 /**
- * Bytes pdf.js requests per range. Larger than its 64 KiB default: every request is a bridge round
- * trip with a base64 encode/decode on each side, so fewer, bigger reads win.
- */
-export const PDF_RANGE_CHUNK_SIZE = 256 * 1024
-
-/**
- * Hard ceiling on a single range read. The reader is a WebView-callable RPC, so it needs a bound that
- * does not depend on the caller behaving.
- */
-export const PDF_MAX_RANGE_LENGTH = 2 * 1024 * 1024
-
-/**
- * Total bytes one document may pull before the reader refuses. Reads are synchronous on the JS
- * thread, so an unbounded caller stalls the whole app rather than just the WebView. Four times the
- * file length leaves room for pdf.js to re-read regions it has evicted while still bounding abuse.
- */
-export const PDF_CUMULATIVE_READ_FACTOR = 4
-
-/**
  * Matches the zoom ceiling the native viewer shipped, so the gesture feels the same as before.
  */
 export const PDF_MAX_ZOOM = 6
