@@ -26,6 +26,7 @@
     "superclean": "tsx ./superclean.ts",
     "test": "vitest run",
     "translate-i18n": "tsx scripts/translate-i18n.ts",
+    "notices": "tsx scripts/generateThirdPartyNotices.ts",
     "verify": "npm run lint && npm run typecheck && npm run test"
   },
   "expo": {

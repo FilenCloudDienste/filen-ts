@@ -306,6 +306,13 @@ function More() {
 						<Group
 							buttons={[
 								{
+									icon: "code-slash-outline",
+									title: t("open_source"),
+									onPress: () => {
+										router.push("/openSource")
+									}
+								},
+								{
 									icon: "document-text-outline",
 									title: t("terms_of_service"),
 									onPress: () => {
