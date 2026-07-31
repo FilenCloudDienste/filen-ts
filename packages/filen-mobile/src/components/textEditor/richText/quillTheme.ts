@@ -227,7 +227,35 @@ export class QuillThemeCustomizer {
 				font-style: ${this.options.placeholderStyle} !important;
 			}
 
-			/* Checkboxes styling */
+			/* Checkboxes styling.
+			 *
+			 * .ql-ui is the span Quill attaches the toggle handler to, and it is the box that has to
+			 * line up with the circle drawn below — a tap that lands outside it does not toggle.
+			 * Quill positions it absolutely and lets it shrink-wrap its marker, and its marker rule
+			 * carries margin-left: -1.5em to pull the glyph back into the list item's gutter. A
+			 * negative margin SHRINKS a shrink-to-fit box, so with the 16px circle below the span
+			 * collapses to ~4px and ends up sitting beside the circle rather than on it: the only
+			 * reliably tappable strip is the few pixels along the circle's right edge, and whether
+			 * any of the circle itself responds depends on the engine routing an overflowing
+			 * ::before back to its originating element.
+			 *
+			 * So move the pull-back onto the span itself and give it the gutter as its width. The
+			 * circle lands in exactly the same place, now inside the box that receives the tap.
+			 *
+			 * The pull-back has to stay a MARGIN rather than become a left offset: .ql-ui is positioned
+			 * against the list item, whose padding-left grows with each indent level, so only the
+			 * static position tracks an indented item's marker. Anchoring to the item's edge instead
+			 * would drag every nested checkbox back to the far left.
+			 *
+			 * Checklist markers only — bullets and ordered numbers are not interactive and keep
+			 * Quill's right-aligned-in-the-gutter geometry.
+			 */
+			${selector} .ql-editor li[data-list=unchecked] > .ql-ui,
+			${selector} .ql-editor li[data-list=checked] > .ql-ui {
+				margin-left: -1.5em;
+				width: 1.5em;
+			}
+
 			${selector} .ql-editor li[data-list=unchecked] > .ql-ui:before {
 				content: '\\2713';
 				color: transparent;
@@ -236,6 +264,7 @@ export class QuillThemeCustomizer {
 				height: 16px;
 				border: 1px solid ${this.options.editorTextColor};
 				border-radius: 50%;
+				margin-left: 0;
 				margin-right: 0.5em;
 				text-align: center;
 				line-height: 17px;
@@ -250,6 +279,7 @@ export class QuillThemeCustomizer {
 				height: 16px;
 				border: 1px solid ${this.options.editorTextColor};
 				border-radius: 50%;
+				margin-left: 0;
 				margin-right: 0.5em;
 				text-align: center;
 				line-height: 17px;
