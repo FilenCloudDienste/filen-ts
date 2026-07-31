@@ -549,7 +549,15 @@ const Dom = ({
 						entry.detachSelection = attachTextLayerSelection(textLayerDiv)
 					}
 				} catch (error) {
-					console.warn(`[pdfPreview] text layer failed on page ${pageNumber}: ${describeError(error)}`)
+					// TEMPORARY: the message and the top stack frame, which is what actually identifies the
+					// failure — the class name alone got as far as "a TypeError, on every page, on WebKit
+					// only" and no further. A TypeError here is raised by the engine and describes the
+					// expression that failed, not anything the document supplied; pdf.js reports document
+					// problems as FormatError or InvalidPDFException instead. Remove once iOS is settled.
+					const detail = error instanceof Error ? error.message : String(error)
+					const frame = error instanceof Error && typeof error.stack === "string" ? error.stack.split("\n").slice(0, 3).join(" | ") : "no stack"
+
+					console.warn(`[pdfPreview] text layer failed on page ${pageNumber}: ${describeError(error)}: ${detail} @@ ${frame}`)
 				}
 
 				if (!current()) {
