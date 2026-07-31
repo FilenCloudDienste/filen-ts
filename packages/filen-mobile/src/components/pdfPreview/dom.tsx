@@ -86,6 +86,12 @@ document
 const styles = document.createElement("style")
 
 styles.textContent = `
+	/* The DOM shell sets -webkit-overflow-scrolling on html/body but never gives them a height, so a
+	   height:100% child resolves against auto and never becomes a scroller: the document grows to fit
+	   every page instead, which both defeats virtualization and makes the IntersectionObserver root
+	   meaningless (everything intersects, so every page renders at once). */
+	html, body { height: 100%; margin: 0; }
+	#root { height: 100%; }
 	.pdfPage { position: relative; margin: 0 auto 8px auto; background: #fff; overflow: hidden; }
 	.pdfPage canvas { display: block; width: 100%; height: 100%; }
 	.textLayer {
@@ -174,6 +180,18 @@ class InlineBinaryDataFactory {
 
 		return base64ToBytes(encoded)
 	}
+}
+
+/**
+ * A short, safe label for a failure. Deliberately the error's NAME only: pdf.js embeds
+ * document-controlled fragments in its messages, and this string reaches the persisted log.
+ */
+function describeError(error: unknown): string {
+	if (typeof error === "object" && error !== null && typeof (error as { name?: unknown }).name === "string") {
+		return (error as { name: string }).name
+	}
+
+	return "unknown"
 }
 
 function post(message: unknown): void {
@@ -319,6 +337,9 @@ const Dom = ({
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const linkServiceRef = useRef<any>(null)
 	const scaleRef = useRef<number>(1)
+	// How far the user has pinched in. Pages re-rasterise at this multiple so zooming sharpens instead
+	// of magnifying the pixels already on screen.
+	const zoomRef = useRef<number>(1)
 	const paintedRef = useRef<boolean>(false)
 	const passwordResolverRef = useRef<((password: string) => void) | null>(null)
 	const pendingRequestIdRef = useRef<string | null>(null)
@@ -381,6 +402,8 @@ const Dom = ({
 		let loadingTask: any = null
 		let observer: IntersectionObserver | null = null
 		let resizeObserver: ResizeObserver | null = null
+		let zoomSettleTimer: ReturnType<typeof setTimeout> | null = null
+		let cleanupZoom: (() => void) | null = null
 
 		const goToPage = (pageNumber: number) => {
 			entriesRef.current.get(pageNumber)?.container.scrollIntoView()
@@ -414,12 +437,14 @@ const Dom = ({
 					scale: scaleRef.current
 				})
 
-				// Device pixels, capped twice: by DPR, and by total backing-store bytes. A large page on a
-				// 3x screen otherwise allocates a canvas the engine refuses outright.
+				// Backing-store resolution. Full device pixel ratio — an earlier cap of 2 threw away a third
+				// of the resolution on a 3x screen and made every page look soft — multiplied by how far the
+				// user has pinched in, so zooming re-rasterises instead of stretching the bitmap it already
+				// had. Bounded by total backing-store bytes, with no floor: on an extreme page the byte cap
+				// has to be allowed to pull the ratio below device scale, or the cap it exists to enforce is
+				// simply ignored.
 				const maxRatio = Math.sqrt(PDF_MAX_PAGE_CANVAS_BYTES / 4 / Math.max(viewport.width * viewport.height, 1))
-				// No floor of 1: on an extreme page the byte cap has to be allowed to take the ratio below
-				// device scale, otherwise the cap it exists to enforce is simply ignored.
-				const ratio = Math.min(globalThis.devicePixelRatio || 1, 2, maxRatio)
+				const ratio = Math.min((globalThis.devicePixelRatio || 1) * zoomRef.current, maxRatio)
 				const canvas = document.createElement("canvas")
 
 				canvas.width = Math.floor(viewport.width * ratio)
@@ -461,26 +486,33 @@ const Dom = ({
 					})
 				}
 
-				const textLayerDiv = document.createElement("div")
+				// Each layer is attempted on its own. Sharing one try meant a text layer that threw also
+				// skipped the annotation layer, so a single failure cost both selection AND every link on
+				// the page — and the two have nothing to do with each other.
+				try {
+					const textLayerDiv = document.createElement("div")
 
-				textLayerDiv.className = "textLayer"
-				entry.container.appendChild(textLayerDiv)
+					textLayerDiv.className = "textLayer"
+					entry.container.appendChild(textLayerDiv)
 
-				const textLayer = new TextLayer({
-					textContentSource: await page.getTextContent(),
-					container: textLayerDiv,
-					viewport
-				})
+					const textLayer = new TextLayer({
+						textContentSource: await page.getTextContent(),
+						container: textLayerDiv,
+						viewport
+					})
 
-				if (!current()) {
-					textLayer.cancel()
+					if (!current()) {
+						textLayer.cancel()
 
-					return
+						return
+					}
+
+					entry.textLayer = textLayer
+
+					await textLayer.render()
+				} catch (error) {
+					console.warn(`[pdfPreview] text layer failed on page ${pageNumber}: ${describeError(error)}`)
 				}
-
-				entry.textLayer = textLayer
-
-				await textLayer.render()
 
 				if (!current()) {
 					return
@@ -549,7 +581,9 @@ const Dom = ({
 				// opaque overlay, so that case has to be reported rather than logged.
 				entry.rendered = false
 
-				console.warn(`[pdfPreview] page ${pageNumber} failed to render`)
+				// The error NAME (a pdf.js class) is safe to record; its message is not, because a document
+				// controls parts of it and this reaches the persisted log.
+				console.warn(`[pdfPreview] page ${pageNumber} failed to render: ${describeError(error)}`)
 
 				if (!paintedRef.current) {
 					postEvent({
@@ -724,6 +758,46 @@ const Dom = ({
 
 			resizeObserver.observe(scrollElement)
 
+			// Re-rasterise the visible pages once a pinch settles. Debounced because the event fires
+			// continuously through the gesture and each re-render is real work; the byte cap in renderPage
+			// keeps a deep zoom from allocating without bound.
+			const visualViewport = globalThis.visualViewport
+
+			const onZoom = () => {
+				if (zoomSettleTimer !== null) {
+					clearTimeout(zoomSettleTimer)
+				}
+
+				zoomSettleTimer = setTimeout(() => {
+					const next = Math.min(visualViewport?.scale ?? 1, PDF_MAX_ZOOM)
+
+					if (destroyed || Math.abs(next - zoomRef.current) < 0.2) {
+						return
+					}
+
+					zoomRef.current = next
+
+					for (const [pageNumber, entry] of entriesRef.current) {
+						if (!entry.rendered) {
+							continue
+						}
+
+						releasePage(pageNumber)
+						renderPage(pageNumber)
+					}
+				}, 220)
+			}
+
+			visualViewport?.addEventListener("resize", onZoom)
+
+			cleanupZoom = () => {
+				if (zoomSettleTimer !== null) {
+					clearTimeout(zoomSettleTimer)
+				}
+
+				visualViewport?.removeEventListener("resize", onZoom)
+			}
+
 			const estimatedHeight = Math.floor(baseViewport.height * scaleRef.current)
 
 			observer = new IntersectionObserver(
@@ -793,6 +867,7 @@ const Dom = ({
 
 			observer?.disconnect()
 			resizeObserver?.disconnect()
+			cleanupZoom?.()
 
 			for (const pageNumber of entriesRef.current.keys()) {
 				releasePage(pageNumber)
