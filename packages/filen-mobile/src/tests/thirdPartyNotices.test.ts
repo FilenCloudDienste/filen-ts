@@ -92,12 +92,34 @@ describe("third-party notices payload", () => {
 		}
 	})
 
-	it("keeps the copyright out of the deduplicated terms", () => {
-		// The whole reason terms can be shared across packages is that the holder was lifted out. If a
-		// copyright line survived into a shared text, some package's notice now credits another's holder.
-		const withCopyright = LICENSE_TEXTS.filter(text => /^\s*copyright\b/i.test(text))
+	it("lifts the copyright out of the terms so it can be shown per package", () => {
+		// The lift is what lets terms be shared, and it used to stop at the first non-blank line — so
+		// any license file opening with a title ("MIT License", "(The MIT License)") kept its holder
+		// buried in the shared body. It affected 411 of 453 texts and left 1456 entries rendering an
+		// empty copyright block, while collapsing far fewer texts than it should have.
+		//
+		// The previous version of this test could not see any of that: its regex had no `m` flag, so it
+		// only ever inspected character 0 of each text and matched 0 of the 411.
+		const withText = THIRD_PARTY_NOTICES.filter(notice => notice.text >= 0)
+		const withCopyright = withText.filter(notice => notice.copyright.length > 0)
 
-		expect(withCopyright).toEqual([])
+		// Pre-fix this ratio was 11.6%.
+		expect(withCopyright.length / withText.length).toBeGreaterThan(0.5)
+
+		// And a couple of concrete holders, so the ratio cannot be satisfied by lifting the wrong lines.
+		const expo = THIRD_PARTY_NOTICES.find(notice => notice.name === "expo")
+
+		expect(expo?.copyright.some(line => line.includes("650 Industries"))).toBe(true)
+	})
+
+	it("never lifts a license template's placeholder as a copyright holder", () => {
+		// Apache-2.0's appendix and the BSD template carry `Copyright [yyyy] [name of copyright owner]`.
+		// Lifting one would print a fake holder above the terms — worse than printing none.
+		const placeholder = /\[yyyy\]|\[name of copyright owner\]|<year>|<name of author>/i
+
+		for (const notice of THIRD_PARTY_NOTICES) {
+			expect(notice.copyright.some(line => placeholder.test(line))).toBe(false)
+		}
 	})
 
 	it("does not borrow a copyright for a package that shipped no license file", () => {
@@ -110,6 +132,12 @@ describe("third-party notices payload", () => {
 
 	it("deduplicates the terms rather than storing one per package", () => {
 		// Without this the payload is roughly 1.8 MB of near-identical MIT files.
+		//
+		// Sharing is safe because the dedup key is the terms VERBATIM: a text can only be shared by
+		// packages whose license files match byte for byte, so a holder still sitting inside a shared
+		// text is the holder of every package sharing it. In the payload those groups are same-author
+		// families — futures-*, windows-*, zerocopy and its derive macro. Not asserted here because
+		// every formulation I tried was either vacuous or needed a license-detector too crude to trust.
 		expect(LICENSE_TEXTS.length).toBeLessThan(THIRD_PARTY_NOTICES.length / 2)
 	})
 })

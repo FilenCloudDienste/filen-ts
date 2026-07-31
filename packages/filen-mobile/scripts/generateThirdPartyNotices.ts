@@ -71,22 +71,62 @@ function findLicenseFile(dir: string): string | null {
 	}
 }
 
-/** Splits a license file into its copyright lines and the terms that follow. */
+/**
+ * A short heading rather than license prose — "MIT License", "(The MIT License)", "The MIT License
+ * (MIT)". These sit ABOVE the copyright in the majority of real files, so the header region cannot end
+ * at the first non-blank line without the copyright below them becoming unliftable.
+ */
+function isHeadingLine(line: string): boolean {
+	const trimmed = line.trim()
+
+	return trimmed.length > 0 && trimmed.length <= 60 && !/[.;:]$/.test(trimmed)
+}
+
+/**
+ * Splits a license file into its copyright lines and the terms that follow.
+ *
+ * The header region runs until the first line of actual prose. Ending it at the first non-blank line
+ * instead — which is what this did originally — meant any file opening with a title kept its copyright
+ * buried in the shared terms: 411 of 453 texts, and 1456 entries rendering an empty copyright block.
+ *
+ * Only lines matching COPYRIGHT_LINE are ever lifted. Headings are held back and restored, so widening
+ * the region changes where we stop looking, never what counts as a copyright.
+ */
 function splitCopyright(text: string): { copyright: string[]; terms: string } {
 	const lines = text.split("\n")
 	const copyright: string[] = []
 	const kept: string[] = []
+	const heldBack: string[] = []
+	let inHeader = true
 
 	for (const line of lines) {
-		// Only lift copyright lines while still in the header — a "Copyright" mentioned inside the terms
-		// (Apache-2.0 §4 does this) is part of the license and must stay put.
-		if (kept.length === 0 && COPYRIGHT_LINE.test(line)) {
-			copyright.push(line.trim())
+		if (inHeader) {
+			// A "Copyright" inside the terms (Apache-2.0 §4 names one) belongs to the license and must
+			// stay put — which is exactly what ending the header region protects.
+			if (COPYRIGHT_LINE.test(line)) {
+				copyright.push(line.trim())
 
-			continue
-		}
+				continue
+			}
 
-		if (kept.length === 0 && line.trim().length === 0) {
+			if (line.trim().length === 0) {
+				if (heldBack.length > 0) {
+					heldBack.push(line)
+				}
+
+				continue
+			}
+
+			if (isHeadingLine(line)) {
+				heldBack.push(line)
+
+				continue
+			}
+
+			inHeader = false
+
+			kept.push(...heldBack, line)
+
 			continue
 		}
 
@@ -95,7 +135,9 @@ function splitCopyright(text: string): { copyright: string[]; terms: string } {
 
 	return {
 		copyright,
-		terms: kept.join("\n").trim()
+		// A file that was ALL header (a bare copyright notice with no terms) still yields its held-back
+		// lines rather than an empty body.
+		terms: (inHeader ? heldBack : kept).join("\n").trim()
 	}
 }
 
