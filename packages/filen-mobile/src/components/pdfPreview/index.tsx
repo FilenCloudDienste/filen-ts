@@ -16,6 +16,7 @@ import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import logger from "@/lib/logger"
 import type { WebViewMessageEvent } from "react-native-webview"
+import { useResolveClassNames } from "uniwind"
 
 type Phase = "loading" | "ready" | "unsupported" | "error" | "passwordCancelled"
 
@@ -74,6 +75,7 @@ const PdfPreview = ({
 	const promptingRef = useRef<boolean>(false)
 	const lastRequestIdRef = useRef<string | null>(null)
 	const lastPasswordIncorrectRef = useRef<boolean>(false)
+	const bgBackground = useResolveClassNames("bg-background")
 
 	// The viewer posts `ready` once its bundle has evaluated and its capability checks have passed. If
 	// that never arrives, nothing else will either — no document, no error — so the overlay would stay
@@ -177,6 +179,7 @@ const PdfPreview = ({
 				paddingBottom={paddingBottom}
 				paddingLeft={paddingLeft}
 				paddingRight={paddingRight}
+				background={bgBackground.backgroundColor as string}
 				dom={{
 					overScrollMode: "never",
 					bounces: false,

@@ -357,7 +357,8 @@ const Dom = ({
 	paddingTop,
 	paddingBottom,
 	paddingLeft,
-	paddingRight
+	paddingRight,
+	background
 }: {
 	dom?: import("expo/dom").DOMProps
 	readRange: (offset: number, length: number) => Promise<string>
@@ -370,6 +371,7 @@ const Dom = ({
 	paddingBottom?: number
 	paddingLeft?: number
 	paddingRight?: number
+	background?: string
 }) => {
 	const scrollRef = useRef<HTMLDivElement>(null)
 	const entriesRef = useRef<Map<number, PageEntry>>(new Map())
@@ -1072,7 +1074,7 @@ const Dom = ({
 				width: "100%",
 				height: "100%",
 				overflow: "auto",
-				background: "#1c1c1e",
+				background: background ? background : "#1c1c1e",
 				paddingTop: paddingTop ? `${paddingTop}px` : undefined,
 				paddingBottom: paddingBottom ? `${paddingBottom}px` : undefined,
 				paddingLeft: paddingLeft ? `${paddingLeft}px` : undefined,
