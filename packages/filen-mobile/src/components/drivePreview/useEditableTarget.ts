@@ -136,7 +136,10 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 
 			events.emit("driveItemUpdated", {
 				previousUuid: oldUuid,
-				item: newItem
+				item: newItem,
+				// The preview produced this change, so it must not reload from it — itemToUse already
+				// points at the replacement for the next save.
+				reseedPreview: false
 			})
 		}
 	}

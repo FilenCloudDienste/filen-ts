@@ -620,8 +620,16 @@ const Gallery = () => {
 	// save targets the new directory). Match by the pre-change uuid and swap in
 	// the updated item.
 	useEffect(() => {
-		const updateSubscription = events.subscribe("driveItemUpdated", ({ previousUuid, item }) => {
+		const updateSubscription = events.subscribe("driveItemUpdated", ({ previousUuid, item, reseedPreview }) => {
 			if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+				return
+			}
+
+			// A change the preview made itself: the list behind us still needs the event, but swapping the
+			// item here would change the cell's key and remount the whole preview — losing the cursor, the
+			// page position, and any password entered. The preview has already republished the rotated
+			// identity for itself.
+			if (reseedPreview === false) {
 				return
 			}
 
