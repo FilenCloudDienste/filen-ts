@@ -84,6 +84,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 				NSAllowsLocalNetworking: true,
 				NSAllowsArbitraryLoads: false
 			},
+			// iOS refuses canOpenURL for any scheme not declared here, so without it every mailto:/tel:/
+			// sms: link in the app fails the can-open check and reports "cannot open" — previews, notes
+			// and chat alike. Derived from the runtime allowlist for the same reason the Android <queries>
+			// block is: what the app will open and what it may ask about cannot be allowed to drift.
+			// http/https are handled by the system and must not be listed.
+			LSApplicationQueriesSchemes: EXTERNAL_LINK_PROTOCOLS.map(protocol => protocol.replace(/:.*$/, "")).filter(
+				scheme => scheme !== "http" && scheme !== "https"
+			),
 			LSApplicationCategoryType: "public.app-category.productivity",
 			UIRequiredDeviceCapabilities: ["arm64"],
 			CFBundleAllowMixedLocalizations: true,
