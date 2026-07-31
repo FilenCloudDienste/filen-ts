@@ -16,6 +16,7 @@ vi.mock("@/lib/logger", () => ({
 
 import useChunkedWriteTarget, { SAVE_HEADROOM_BYTES } from "@/hooks/useChunkedWriteTarget"
 import { MAX_RANGE_LENGTH, PDF_MAGIC, bytesToBase64 } from "@/lib/rangeTransfer"
+import { fs } from "@/tests/mocks/expoFileSystem"
 
 function target(config?: { maxBytes?: number; magic?: string; headroomBytes?: number }) {
 	return renderHook(() =>
@@ -134,5 +135,76 @@ describe("useChunkedWriteTarget", () => {
 
 		// Past maxBytes + headroom.
 		await expect(writer.writeChunk(chunk(6000))).rejects.toThrow("save exceeds the size limit")
+	})
+	// ── The accept branch ───────────────────────────────────────────────────────
+	//
+	// Everything above proves the target REFUSES things. Until the filesystem mock grew real writes,
+	// nothing proved it accepts one correctly: `writeBytes` was a no-op, so a streamed document was
+	// never actually written and never read back. A byte-corrupting bug in this path uploads garbage
+	// over the user's cloud file, which is the worst outcome the whole design exists to prevent.
+
+	it("reassembles a streamed document byte for byte, in order", async () => {
+		const writer = target()
+		const file = writer.begin()
+
+		// Distinct, order-sensitive chunks: a swapped or dropped chunk changes the result.
+		await writer.writeChunk(bytesToBase64(new Uint8Array([1, 2, 3])))
+		await writer.writeChunk(bytesToBase64(new Uint8Array([4, 5])))
+		await writer.writeChunk(bytesToBase64(new Uint8Array([6, 7, 8, 9])))
+
+		expect(writer.finish()).not.toBeNull()
+		expect(Array.from(fs.get(file.uri) as Uint8Array)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+	})
+
+	it("accepts a result whose header matches the configured signature", async () => {
+		// The magic check's ACCEPT path. The only magic test before this one staged an empty file and
+		// asserted rejection, so a check that rejected everything would have passed.
+		const writer = target({ magic: PDF_MAGIC })
+
+		writer.begin()
+
+		await writer.writeChunk(bytesToBase64(new TextEncoder().encode("%PDF-1.7\n1 0 obj")))
+
+		expect(writer.finish()).not.toBeNull()
+	})
+
+	it("rejects a result whose header is wrong even though bytes were written", async () => {
+		const writer = target({ magic: PDF_MAGIC })
+
+		writer.begin()
+
+		await writer.writeChunk(bytesToBase64(new TextEncoder().encode("PK\x03\x04 not a pdf")))
+
+		expect(writer.finish()).toBeNull()
+	})
+
+	it("does not carry bytes from one save into the next", async () => {
+		// The staging path is fixed, so a second save re-creates the same file. If that did not
+		// truncate, the leftover head of save #1 would prefix save #2 — and for a PDF the spliced
+		// result still starts with %PDF-, so the magic check would wave it through on its way to
+		// replacing the user's document.
+		const writer = target()
+
+		writer.begin()
+
+		await writer.writeChunk(bytesToBase64(new Uint8Array([9, 9, 9, 9, 9, 9])))
+
+		const second = writer.begin()
+
+		await writer.writeChunk(bytesToBase64(new Uint8Array([1, 2])))
+
+		expect(writer.finish()).not.toBeNull()
+		expect(Array.from(fs.get(second.uri) as Uint8Array)).toEqual([1, 2])
+	})
+
+	it("deletes what it wrote when the save is discarded", async () => {
+		const writer = target()
+		const file = writer.begin()
+
+		await writer.writeChunk(bytesToBase64(new Uint8Array([1, 2, 3])))
+
+		writer.discard()
+
+		expect(fs.get(file.uri)).toBeUndefined()
 	})
 })

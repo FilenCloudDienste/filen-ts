@@ -208,8 +208,11 @@ export class File {
 		fs.set(this.uri, bytes)
 	}
 
-	create(_options?: { intermediates?: boolean; overwrite?: boolean }): void {
-		if (!this.exists) {
+	create(options?: { intermediates?: boolean; overwrite?: boolean }): void {
+		// `overwrite` TRUNCATES an existing file, as the real implementation does. Modelling it matters:
+		// the chunked write target re-creates a fixed staging path per save, and a mock that silently
+		// kept the previous contents would hide bytes bleeding from one save into the next.
+		if (options?.overwrite === true || !this.exists) {
 			fs.set(this.uri, new Uint8Array([]))
 		}
 	}
@@ -281,34 +284,86 @@ export class File {
 		}
 	}
 
-	open(): {
+	/**
+	 * A real file handle: seekable, and its writes are visible to everything else.
+	 *
+	 * The previous version snapshotted the entry at open time, exposed `offset` as a getter only, and
+	 * made `writeBytes` a no-op. That combination made two whole code paths untestable — a seeking
+	 * range reader could not be expressed at all, and the accept branch of any save (write bytes, read
+	 * them back, validate) silently exercised nothing, so a byte-corrupting bug could ship green.
+	 */
+	open(_mode?: unknown): {
 		close: () => void
 		readBytes: (length: number) => Uint8Array
 		writeBytes: (bytes: Uint8Array) => void
 		offset: number | null
 		size: number | null
 	} {
-		const entry = fs.get(this.uri)
+		const uri = this.uri
+
+		// Opening something that is not there throws, as the real implementation does — callers rely on
+		// that to distinguish "unreadable" from "empty", and a lazily-failing handle reported a missing
+		// file as a ready, zero-length one.
+		if (!(fs.get(uri) instanceof Uint8Array)) {
+			throw new Error(`File not found: ${uri}`)
+		}
+
 		let offset = 0
+		let closed = false
+
+		const contents = (): Uint8Array => {
+			const entry = fs.get(uri)
+
+			if (!(entry instanceof Uint8Array)) {
+				throw new Error("File not found")
+			}
+
+			return entry
+		}
 
 		return {
-			close() {},
+			close() {
+				closed = true
+			},
 			readBytes(length: number) {
-				if (!(entry instanceof Uint8Array)) {
-					throw new Error("File not found")
+				if (closed) {
+					throw new Error("handle is closed")
 				}
 
+				const entry = contents()
+				// Advances by what was actually read, not by what was asked for, so a read past the end
+				// returns short — which is how a caller's short-read guard gets exercised.
 				const chunk = entry.slice(offset, offset + length)
 
-				offset += length
+				offset += chunk.length
 
 				return chunk
 			},
-			writeBytes(_bytes: Uint8Array) {},
+			writeBytes(bytes: Uint8Array) {
+				if (closed) {
+					throw new Error("handle is closed")
+				}
+
+				const entry = contents()
+				const end = offset + bytes.length
+				const next = new Uint8Array(Math.max(entry.length, end))
+
+				next.set(entry, 0)
+				next.set(bytes, offset)
+
+				fs.set(uri, next)
+
+				offset = end
+			},
 			get offset() {
 				return offset
 			},
+			set offset(next: number) {
+				offset = next
+			},
 			get size() {
+				const entry = fs.get(uri)
+
 				return entry instanceof Uint8Array ? entry.length : null
 			}
 		}
