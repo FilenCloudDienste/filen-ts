@@ -5,10 +5,19 @@ import { renderAsync } from "docx-preview"
 import { readAllBytes, type RangeReader } from "@/lib/rangeTransfer"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
-import { classifyDocxLinkHref, hardenDocxDom, DOCX_EXTERNAL_URL_ATTRIBUTE, DOCX_EXTERNAL_LINK_KEY } from "@/components/docxPreview/linkSafety"
+import { installDomViewportReset } from "@/lib/domViewport"
+import {
+	classifyDocxLinkHref,
+	hardenDocxDom,
+	DOCX_EXTERNAL_URL_ATTRIBUTE,
+	DOCX_EXTERNAL_LINK_KEY
+} from "@/components/docxPreview/linkSafety"
 
 // Forward this WebView's console.* to the RN diagnostic logger (see domConsoleProxy).
 installDomConsoleProxy()
+
+// Reset the DOM shell's unstyled body and keep the page clear of the keyboard (#102).
+installDomViewportReset()
 
 /**
  * Hand an allowlisted URL to the native side, which opens it with the OS. Posts over the same
@@ -33,7 +42,6 @@ function postExternalLink(url: string): void {
 		// Tapping a link must never throw out of the event handler.
 	}
 }
-
 
 // The DOM-component shell ships `user-scalable=no` in its viewport meta, which blocks
 // pinch-zoom on both engines. Relax it for THIS component only — a document preview is

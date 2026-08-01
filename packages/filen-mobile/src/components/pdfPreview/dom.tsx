@@ -26,9 +26,13 @@ import { createFormWidgetScope, hardenFormWidgets } from "@/components/pdfPrevie
 import { attachTextLayerSelection } from "@/components/pdfPreview/textSelection"
 import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
+import { installDomViewportReset } from "@/lib/domViewport"
 import useEffectOnce from "@/hooks/useEffectOnce"
 
 installDomConsoleProxy()
+
+// Reset the DOM shell's unstyled body and keep the page clear of the keyboard (#102).
+installDomViewportReset()
 
 /**
  * Resource CSP for the rendered document.
@@ -89,12 +93,11 @@ document
 const styles = document.createElement("style")
 
 styles.textContent = `
-	/* The DOM shell sets -webkit-overflow-scrolling on html/body but never gives them a height, so a
-	   height:100% child resolves against auto and never becomes a scroller: the document grows to fit
-	   every page instead, which both defeats virtualization and makes the IntersectionObserver root
-	   meaningless (everything intersects, so every page renders at once). */
-	html, body { height: 100%; margin: 0; }
-	#root { height: 100%; }
+	/* html/body sizing and the shell's missing reset are owned by installDomViewportReset above. It
+	   gives them a height, which this viewer depends on twice over: a height:100% child would
+	   otherwise resolve against auto and never become a scroller (the document would grow to fit every
+	   page, defeating virtualization and making the IntersectionObserver root meaningless), and that
+	   height is what keeps a focused form field clear of the keyboard. */
 	.pdfPage { position: relative; margin: 0 auto 8px auto; background: #fff; overflow: hidden; }
 	.pdfPage canvas { display: block; width: 100%; height: 100%; }
 	.textLayer {

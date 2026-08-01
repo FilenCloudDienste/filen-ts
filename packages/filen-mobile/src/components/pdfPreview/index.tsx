@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { run } from "@filen/utils"
 import Dom from "@/components/pdfPreview/dom"
+import DomKeyboardHost from "@/components/domKeyboardHost"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import View from "@/components/ui/view"
@@ -238,7 +239,7 @@ const PdfPreview = ({
 	}, [readOnly, saveHandleRef, saveTarget])
 
 	return (
-		<View className="flex-1 bg-background">
+		<DomKeyboardHost className="bg-background">
 			<Dom
 				readRange={readRange}
 				writeChunk={saveTarget.writeChunk}
@@ -439,7 +440,7 @@ const PdfPreview = ({
 					)}
 				</View>
 			)}
-		</View>
+		</DomKeyboardHost>
 	)
 }
 
