@@ -148,6 +148,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 				libraries: ["op-sqlite"]
 			}
 		],
+		// The engine is passed explicitly. A bare plugin entry does NOT pin it — the plugin falls back
+		// to ITS OWN default, and this repo regenerates native projects with `prebuild --clean`, so a
+		// future release that flipped that default would silently move camera upload's dedup hashing
+		// onto a different native implementation with no diff here.
+		[
+			"@preeternal/react-native-file-hash",
+			{
+				engine: "native"
+			}
+		],
 		[
 			"expo-build-properties",
 			{
