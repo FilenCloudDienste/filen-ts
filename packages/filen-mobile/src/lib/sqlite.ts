@@ -88,6 +88,9 @@ export const initQueries = (tmpDir: string): string[] => [
 // restore walker; re-exported here because it is part of this module's historical surface.
 export { prefixUpperBound }
 
+/** Keys per batched IN read — well under the 999-variable floor SQLite guarantees. */
+const KV_GET_MANY_CHUNK_SIZE = 256
+
 class Sqlite {
 	public db: DB | null = null
 	private initDone: boolean = false
@@ -250,6 +253,54 @@ class Sqlite {
 			}
 
 			return deserialize(row[0] as string) as T
+		},
+		/**
+		 * Point-read many keys in one round trip per chunk.
+		 *
+		 * A caller resolving N keys with `get` pays N native round trips SERIALLY, which is what made
+		 * camera upload's background delta gate scale with how much of the library the user had
+		 * browsed. Absent keys are simply missing from the result rather than mapped to null, so the
+		 * caller distinguishes "no row" without a sentinel.
+		 */
+		getMany: async <T>(keys: string[]): Promise<Map<string, T>> => {
+			const found = new Map<string, T>()
+
+			if (keys.length === 0) {
+				return found
+			}
+
+			const db = await this.openDb()
+
+			let corrupt = 0
+
+			// Chunked well under SQLITE_MAX_VARIABLE_NUMBER, whose floor across the versions op-sqlite
+			// ships is 999 — one oversized IN list would fail the whole read.
+			for (let offset = 0; offset < keys.length; offset += KV_GET_MANY_CHUNK_SIZE) {
+				const chunk = keys.slice(offset, offset + KV_GET_MANY_CHUNK_SIZE)
+
+				const rows = (await db.executeRaw(`SELECT key, value FROM kv WHERE key IN (${chunk.map(() => "?").join(",")})`, chunk))
+					.rawRows
+
+				for (const row of rows) {
+					// One corrupt row must not discard the whole batch — the same per-row policy the
+					// camera-upload ledger scan applies. A skipped key reads as "not found", which every
+					// caller already treats as the safe direction; the scan's own pruning removes it.
+					try {
+						found.set(row[0] as string, deserialize(row[1] as string) as T)
+					} catch {
+						corrupt++
+					}
+				}
+			}
+
+			if (corrupt > 0) {
+				logger.warn("sqlite", "Skipped corrupt rows in a batched kv read", {
+					corrupt,
+					requested: keys.length
+				})
+			}
+
+			return found
 		},
 		set: async <T>(key: string, value: T): Promise<number | null> => {
 			if (value == null) {
