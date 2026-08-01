@@ -9,7 +9,7 @@ import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useResolveClassNames, useUniwind } from "uniwind"
-import { ActivityIndicator } from "react-native"
+import { ActivityIndicator, Platform } from "react-native"
 import useFileUriQuery from "@/queries/useFileUri.query"
 import useRangeSource, { type RangeSource } from "@/hooks/useRangeSource"
 import { useTranslation } from "react-i18next"
@@ -173,7 +173,10 @@ const PreviewTextInner = ({
 				<View
 					className="absolute left-0 right-0 bg-transparent z-1000 flex-row items-center justify-end pl-4"
 					style={{
-						top: headerHeight ? headerHeight + insets.top : 0,
+						top: Platform.select({
+							ios: headerHeight ? headerHeight + insets.top : 0,
+							default: headerHeight ? headerHeight : 0
+						}),
 						paddingRight: 16 + insets.right
 					}}
 				>

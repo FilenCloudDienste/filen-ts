@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
-import { ActivityIndicator } from "react-native"
+import { ActivityIndicator, Platform } from "react-native"
 import { useShallow } from "zustand/shallow"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -237,7 +237,10 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 					<View
 						className="absolute left-0 right-0 bg-transparent z-1000 flex-row items-center justify-end pl-4"
 						style={{
-							top: headerHeight ? headerHeight + insets.top : 0,
+							top: Platform.select({
+								ios: headerHeight ? headerHeight + insets.top : 0,
+								default: headerHeight ? headerHeight : 0
+							}),
 							paddingRight: 16 + insets.right
 						}}
 					>
