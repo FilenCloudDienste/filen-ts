@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 import { vi, describe, it, expect } from "vitest"
 
 // quillTheme.ts imports Quill (browser-only) and Platform from react-native.
@@ -8,11 +10,19 @@ vi.mock("quill", () => ({
 	default: class Quill {}
 }))
 
-import { getThemeOptions } from "@/components/textEditor/richText/quillTheme"
+import { getThemeOptions, QuillThemeCustomizer } from "@/components/textEditor/richText/quillTheme"
 import type { Colors } from "@/components/textEditor"
+import type Quill from "quill"
 
 function makeColors(
-	overrides: Partial<{ foreground: string; muted: string; primary: string; primaryBg: string; secondaryBg: string; accentBg: string }> = {}
+	overrides: Partial<{
+		foreground: string
+		muted: string
+		primary: string
+		primaryBg: string
+		secondaryBg: string
+		accentBg: string
+	}> = {}
 ): Colors {
 	return {
 		text: {
@@ -156,5 +166,76 @@ describe("getThemeOptions", () => {
 		const result = getThemeOptions({ darkMode: false, colors, platform: "ios" })
 
 		expect(result.toolbarActiveColor).toBe("#ff0000")
+	})
+
+	it("carries the host's padding on BOTH platforms", () => {
+		// Duplicated return objects: a padding wired into one branch and not the other would leave
+		// exactly one platform with a document that cannot clear the keyboard (#102).
+		for (const platform of ["ios", "android"] as const) {
+			const result = getThemeOptions({
+				darkMode: false,
+				colors: makeColors(),
+				platform,
+				paddingTop: 96,
+				paddingBottom: 34
+			})
+
+			expect(result.editorPaddingTop).toBe("96px")
+			expect(result.editorPaddingBottom).toBe("34px")
+		}
+	})
+
+	it("omits padding longhands when the host supplies none", () => {
+		const result = getThemeOptions({ darkMode: false, colors: makeColors(), platform: "ios" })
+
+		expect(result.editorPaddingTop).toBeUndefined()
+		expect(result.editorPaddingBottom).toBeUndefined()
+		expect(result.editorPadding).toBe("16px")
+	})
+})
+
+describe("QuillThemeCustomizer padding placement (#102)", () => {
+	// .ql-editor IS the scroller (quill.snow.css: height 100%, overflow-y auto). Padding there scrolls
+	// with the document; padding on the container around it is a strip the text can never move
+	// through, which is what left the caret stranded under the keyboard.
+	function css(options: Parameters<typeof getThemeOptions>[0]): string {
+		document.head.replaceChildren()
+
+		new QuillThemeCustomizer(getThemeOptions(options)).apply({} as unknown as Quill)
+
+		return document.getElementById("quill-custom-styles")?.textContent ?? ""
+	}
+
+	it("puts the host's padding on .ql-editor, never on .ql-container", () => {
+		const generated = css({
+			darkMode: false,
+			colors: makeColors(),
+			platform: "ios",
+			paddingTop: 96,
+			paddingBottom: 34
+		})
+
+		expect(generated).toContain(".ql-editor { padding-top: 96px !important; }")
+		expect(generated).toContain(".ql-editor { padding-bottom: 34px !important; }")
+
+		for (const rule of generated.split("}")) {
+			if (/padding-(top|bottom)\s*:/.test(rule)) {
+				expect(rule).toContain(".ql-editor")
+				expect(rule).not.toContain(".ql-container")
+			}
+		}
+	})
+
+	it("emits the longhands AFTER the shorthand so they win", () => {
+		// Both carry !important at equal specificity, so source order is the only thing deciding
+		// which one applies.
+		const generated = css({
+			darkMode: false,
+			colors: makeColors(),
+			platform: "ios",
+			paddingBottom: 34
+		})
+
+		expect(generated.indexOf("padding: 16px")).toBeLessThan(generated.indexOf("padding-bottom: 34px"))
 	})
 })

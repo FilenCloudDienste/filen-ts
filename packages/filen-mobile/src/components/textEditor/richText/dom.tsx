@@ -7,6 +7,7 @@ import { useEffect, useRef, useCallback } from "react"
 import type { DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
 import useDomDomEvents from "@/hooks/useDomEvents/useDomDomEvents"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
+import { installDomViewportReset, onViewportChange, VIEWPORT_HEIGHT } from "@/lib/domViewport"
 import { decodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
 import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
 import { quillV2ToLegacyV1 } from "@/components/textEditor/richText/quillCompat"
@@ -43,6 +44,9 @@ const INPUT_MIRROR_DEBOUNCE_MS = 150
 
 // Forward this WebView's console.* to the RN diagnostic logger (see domConsoleProxy).
 installDomConsoleProxy()
+
+// Reset the DOM shell's unstyled body so a viewport-sized editor does not overflow it (#102).
+installDomViewportReset()
 
 DOMPurify.addHook("afterSanitizeAttributes", (node: Element) => {
 	if (node.tagName === "A" && node.getAttribute("href")) {
@@ -335,8 +339,30 @@ const RichTextEditorDom = ({
 			onValueChange?.(html)
 		})
 
-		quillRef.current.on("selection-change", () => {
+		// Keeps the caret visible when the selection moves (#102) — the Quill counterpart of
+		// keepCaretVisible in the CodeMirror editor. Chromium scrolls the focused editable's caret into
+		// view whenever the IME is (re)shown, reading the selection as it was BEFORE the tap that moved
+		// it, so tapping a line while the keyboard is already open snaps the view back to wherever the
+		// caret used to be. scrollSelectionIntoView is documented to do nothing when the selection is
+		// already visible, so re-asserting a frame later is free on every path that got it right.
+		let caretFrame: ReturnType<typeof requestAnimationFrame> | null = null
+
+		quillRef.current.on("selection-change", range => {
 			postFormatUpdates(postMessage)
+
+			if (!range || caretFrame !== null) {
+				return
+			}
+
+			caretFrame = requestAnimationFrame(() => {
+				caretFrame = null
+
+				if (!quillRef.current?.hasFocus()) {
+					return
+				}
+
+				quillRef.current.scrollSelectionIntoView()
+			})
 		})
 
 		// #67: mirror the live document to native while an IME composition suppresses Quill's
@@ -395,12 +421,14 @@ const RichTextEditorDom = ({
 				darkMode,
 				colors,
 				platform,
-				font
+				font,
+				paddingTop,
+				paddingBottom
 			})
 		)
 
 		quillThemeRef.current.apply(quillRef.current, editorRef.current?.id)
-	}, [darkMode, platform, readOnly, colors, font])
+	}, [darkMode, platform, readOnly, colors, font, paddingTop, paddingBottom])
 
 	useEffect(() => {
 		if (!quillRef.current) {
@@ -516,6 +544,25 @@ const RichTextEditorDom = ({
 		}
 	}, [])
 
+	// Keep the caret visible across a viewport change (#102).
+	//
+	// The keyboard shrinks this WebView (the host's KeyboardAvoidingView) AFTER the tap that opened
+	// it, so whatever Quill scrolled at tap time was computed against the pre-keyboard viewport and is
+	// stale by the time the keyboard is up. scrollSelectionIntoView is documented to do nothing when
+	// the selection is already visible, so a resize that does not obscure the caret is free; the focus
+	// check keeps it off the path entirely when there is no caret to chase.
+	useEffect(() => {
+		return onViewportChange(() => {
+			const quill = quillRef.current
+
+			if (!quill || !quill.hasFocus()) {
+				return
+			}
+
+			quill.scrollSelectionIntoView()
+		})
+	}, [])
+
 	const readyEmittedRef = useRef(false)
 
 	useEffect(() => {
@@ -542,7 +589,7 @@ const RichTextEditorDom = ({
 				display: "flex",
 				// Real viewport sizing, not flex:1 — the WebView body is not a sized flex
 				// parent, so flex:1 collapsed this chain to content height (#78).
-				height: "100dvh",
+				height: VIEWPORT_HEIGHT,
 				width: "100dvw",
 				flexDirection: "column",
 				touchAction: "pan-y"
@@ -557,18 +604,12 @@ const RichTextEditorDom = ({
 					// tappable; #78). As a block child it fills the container, and with the
 					// sized ancestors above .ql-editor's height:100% fills the screen — a tap
 					// anywhere focuses the editor.
+					//
+					// paddingTop/paddingBottom deliberately do NOT live here: this is the box AROUND
+					// the scroller, so padding on it is a strip the document can never move through
+					// (#102). They are applied to .ql-editor by the theme instead.
 					flex: 1,
-					minHeight: 0,
-					...(paddingTop
-						? {
-								paddingTop
-							}
-						: {}),
-					...(paddingBottom
-						? {
-								paddingBottom
-							}
-						: {})
+					minHeight: 0
 				}}
 			/>
 		</div>

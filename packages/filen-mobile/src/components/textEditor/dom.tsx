@@ -15,6 +15,13 @@ import type { DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
 import useDomDomEvents from "@/hooks/useDomEvents/useDomDomEvents"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
+import { installDomViewportReset, onViewportChange } from "@/lib/domViewport"
+import {
+	createLayoutThemeSpec,
+	CODE_MIRROR_DIMENSIONS,
+	CODE_MIRROR_HEIGHT,
+	CODE_MIRROR_WIDTH
+} from "@/components/textEditor/codeMirrorLayout"
 import { decodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
 import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
 import { readAllText, writeAllBytes, type ChunkWriter, type RangeReader } from "@/lib/rangeTransfer"
@@ -27,6 +34,9 @@ import type { Root, Element } from "hast"
 
 // Forward this WebView's console.* to the RN diagnostic logger (see domConsoleProxy).
 installDomConsoleProxy()
+
+// Reset the DOM shell's unstyled body so a viewport-sized editor does not overflow it (#102).
+installDomViewportReset()
 
 const rehypeExternalLinks: Plugin<[], Root> = () => {
 	return tree => {
@@ -46,6 +56,47 @@ const rehypeExternalLinks: Plugin<[], Root> = () => {
 		})
 	}
 }
+
+/**
+ * Keeps the caret visible when the selection moves (#102).
+ *
+ * Chromium scrolls the focused editable's caret into view whenever the IME is (re)shown — which a tap
+ * on an already-focused editor does — and it reads the selection as it was BEFORE that tap is
+ * processed. So tapping a row while the keyboard is already open scrolls to wherever the caret used
+ * to be: place the cursor at the bottom of a long document, scroll to the top, tap a line there, and
+ * the view snaps back to the bottom while the cursor correctly lands where it was tapped.
+ *
+ * Re-asserting one frame later is enough, because by then the selection has landed. `scrollIntoView`
+ * defaults to the "nearest" strategy, so on every engine and every path that already got it right
+ * this scrolls nothing at all — including a plain drag-select, where each intermediate selection is
+ * already on screen.
+ */
+const keepCaretVisible = (() => {
+	let frame: number | null = null
+
+	return EditorView.updateListener.of(update => {
+		if (!update.selectionSet || !update.view.hasFocus || frame !== null) {
+			return
+		}
+
+		const view = update.view
+
+		frame = requestAnimationFrame(() => {
+			frame = null
+
+			// The markdown-preview toggle unmounts the editor, so a scheduled frame can outlive it.
+			if (!view.dom.isConnected || !view.hasFocus) {
+				return
+			}
+
+			// Re-read rather than capture: if the selection moved again within the frame, the newest
+			// position is the one the user is looking for.
+			view.dispatch({
+				effects: EditorView.scrollIntoView(view.state.selection.main.head)
+			})
+		})
+	})
+})()
 
 // How long after a flush request (and its optional composition-committing blur) the document
 // is re-read for the divergence check — long enough for the keyboard's finalized text to land
@@ -293,54 +344,16 @@ const TextEditorDOM = ({
 	const extensions = (() => {
 		const base = [
 			EditorView.lineWrapping,
-			EditorView.theme({
-				"&": {
-					outline: "none !important",
-					fontSize: type === "text" ? `${font?.size ?? 16}px !important` : `${font?.size ?? 14}px !important`,
-					// eslint-disable-next-line quotes
-					fontFamily: `${font?.family ?? 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'} !important`,
-					padding: type === "text" ? "16px" : "0px",
-					...(paddingTop
-						? {
-								paddingTop: `${paddingTop}px`
-							}
-						: {}),
-					...(paddingBottom
-						? {
-								paddingBottom: `${paddingBottom}px`
-							}
-						: {})
-				},
-				"&.cm-focused": {
-					outline: "none !important",
-					border: "none !important",
-					boxShadow: "none !important"
-				},
-				"&:focus-visible": {
-					outline: "none !important"
-				},
-				...(isTextFile
-					? {
-							".cm-gutters": {
-								display: "none !important"
-							},
-							".cm-line": {
-								lineHeight: `${font?.lineHeight ?? 1.5} !important`,
-								fontSize: `${font?.size ?? 16}px !important`,
-								fontFamily: `${font?.family ?? "inherit"} !important`
-							}
-						}
-					: {
-							".cm-gutters": {
-								fontSize: `${font?.size ?? 14}px !important`,
-								fontFamily: `${font?.family ?? "inherit"} !important`
-							},
-							".cm-line": {
-								fontSize: `${font?.size ?? 14}px !important`,
-								fontFamily: `${font?.family ?? "inherit"} !important`
-							}
-						})
-			})
+			keepCaretVisible,
+			EditorView.theme(
+				createLayoutThemeSpec({
+					type,
+					isTextFile,
+					font,
+					paddingTop,
+					paddingBottom
+				})
+			)
 		]
 
 		const lang = loadLanguage(fileName ?? "file.tsx")
@@ -437,6 +450,29 @@ const TextEditorDOM = ({
 		}
 	})
 
+	// Keep the caret visible across a viewport change (#102).
+	//
+	// The keyboard shrinks this WebView (the host's KeyboardAvoidingView) AFTER the tap that opened
+	// it, so the scroll CodeMirror did at tap time was computed against the pre-keyboard viewport and
+	// is stale by the time the keyboard is up — which is exactly "tap a line near the bottom and it
+	// stays hidden". Nothing re-scrolls on its own, so re-assert it here. `scrollIntoView` defaults to
+	// the "nearest" strategy, so a resize that does not obscure the caret dispatches a transaction
+	// that scrolls nothing; the focus check keeps it off the path entirely when there is no caret to
+	// chase (read-only documents, the rendered markdown preview, a screen sitting in the background).
+	useEffect(() => {
+		return onViewportChange(() => {
+			const view = codeMirrorRef.current?.view
+
+			if (!view || !view.hasFocus) {
+				return
+			}
+
+			view.dispatch({
+				effects: EditorView.scrollIntoView(view.state.selection.main.head)
+			})
+		})
+	}, [])
+
 	useEffect(() => {
 		// Emit "ready" exactly once per WebView mount, and register the window
 		// listeners once. useDomDomEvents returns a new `postMessage` identity on
@@ -487,8 +523,8 @@ const TextEditorDOM = ({
 				style={{
 					overflowX: "hidden",
 					overflowY: "auto",
-					width: "100dvw",
-					height: "100dvh",
+					width: CODE_MIRROR_WIDTH,
+					height: CODE_MIRROR_HEIGHT,
 					touchAction: "pan-y"
 				}}
 			>
@@ -526,12 +562,8 @@ const TextEditorDOM = ({
 		<CodeMirror
 			ref={codeMirrorRef}
 			value={value}
-			width="100dvw"
-			// Fill the page: an empty/short document otherwise leaves the editable surface only
-			// as tall as its content, and tapping the (dead) area below it neither focuses nor
-			// shows a cursor — an empty new note looked read-only (#67). With the editor at full
-			// height, a tap anywhere focuses and places the cursor at the nearest position.
-			minHeight="100dvh"
+			// A definite height, never a minimum — see CODE_MIRROR_DIMENSIONS.
+			{...CODE_MIRROR_DIMENSIONS}
 			onChange={onChange}
 			extensions={extensions}
 			readOnly={readOnly}
@@ -544,7 +576,10 @@ const TextEditorDOM = ({
 			spellCheck={false}
 			autoFocus={autoFocus}
 			style={{
-				width: "100dvw",
+				width: CODE_MIRROR_WIDTH,
+				// The wrapper is a flex item of #root, which the viewport reset gives a definite
+				// height — so it stretches, and .cm-editor's own height resolves against a real box.
+				height: CODE_MIRROR_HEIGHT,
 				touchAction: "pan-y"
 			}}
 		/>

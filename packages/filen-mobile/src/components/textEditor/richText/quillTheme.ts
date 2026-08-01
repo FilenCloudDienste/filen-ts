@@ -22,6 +22,11 @@ export type QuillThemeOptions = {
 	editorFontSize?: string
 	editorLineHeight?: string
 	editorPadding?: string
+	// Applied to `.ql-editor`, which IS the scroller, so these scroll with the document. On the
+	// container around it they would be a fixed gutter instead — a strip the text can never move
+	// through, and the host's paddingTop exists so content scrolls UNDER a transparent header.
+	editorPaddingTop?: string
+	editorPaddingBottom?: string
 	editorTextColor?: string
 	editorBackground?: string
 	editorMinHeight?: string
@@ -220,6 +225,9 @@ export class QuillThemeCustomizer {
 				color: ${this.options.editorTextColor} !important;
 				background-color: ${this.options.editorBackground} !important;
 			}
+
+			${this.options.editorPaddingTop ? `${selector} .ql-editor { padding-top: ${this.options.editorPaddingTop} !important; }` : ""}
+			${this.options.editorPaddingBottom ? `${selector} .ql-editor { padding-bottom: ${this.options.editorPaddingBottom} !important; }` : ""}
 			
 			/* Placeholder styling */
 			${selector} .ql-editor.ql-blank::before {
@@ -348,13 +356,34 @@ export class QuillThemeCustomizer {
 export function getThemeOptions({
 	colors,
 	platform,
-	font
+	font,
+	paddingTop,
+	paddingBottom
 }: {
 	darkMode: boolean
 	colors: Colors
 	platform: Platform["OS"]
 	font?: Font
+	paddingTop?: number
+	paddingBottom?: number
 }): QuillThemeOptions {
+	// Shared rather than repeated in both branches: the two differ only in the values above, and a
+	// padding that reached one platform and not the other is exactly the kind of drift worth
+	// designing out.
+	const padding: QuillThemeOptions = {
+		editorPadding: "16px",
+		...(paddingTop
+			? {
+					editorPaddingTop: `${paddingTop}px`
+				}
+			: {}),
+		...(paddingBottom
+			? {
+					editorPaddingBottom: `${paddingBottom}px`
+				}
+			: {})
+	}
+
 	if (platform === "ios") {
 		return {
 			containerBorder: "none",
@@ -375,7 +404,7 @@ export function getThemeOptions({
 			editorFontSize: `${font?.size ?? 14}px`,
 			editorLineHeight: `${font?.lineHeight ?? 1.5}`,
 			editorFontWeight: `${font?.weight ?? 400}`,
-			editorPadding: "16px",
+			...padding,
 			editorTextColor: colors.text.foreground,
 			editorBackground: "transparent",
 			placeholderColor: colors.text.muted,
@@ -405,7 +434,7 @@ export function getThemeOptions({
 		editorFontSize: `${font?.size ?? 14}px`,
 		editorLineHeight: `${font?.lineHeight ?? 1.5}`,
 		editorFontWeight: `${font?.weight ?? 400}`,
-		editorPadding: "16px",
+		...padding,
 		editorTextColor: colors.text.foreground,
 		editorBackground: "transparent",
 		placeholderColor: colors.text.muted,

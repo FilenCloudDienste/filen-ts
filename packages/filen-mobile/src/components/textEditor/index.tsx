@@ -2,7 +2,8 @@ import { useRef, Fragment, useEffect, useState } from "react"
 import TextEditorDOM from "@/components/textEditor/dom"
 import RichTextEditorDOM, { type QuillFormats, type HeaderLevel } from "@/components/textEditor/richText/dom"
 import { encodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
-import View, { KeyboardAvoidingView } from "@/components/ui/view"
+import View from "@/components/ui/view"
+import DomKeyboardHost from "@/components/domKeyboardHost"
 import { useNativeDomEvents, type DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
 import { AppState, Platform } from "react-native"
 import { useNavigation } from "expo-router"
@@ -493,7 +494,7 @@ export const TextEditor = ({
 
 	return (
 		<Fragment>
-			<KeyboardAvoidingView className="flex-1">
+			<DomKeyboardHost>
 				{type === "richtext" ? (
 					<RichTextEditorDOM
 						ref={ref}
@@ -583,7 +584,7 @@ export const TextEditor = ({
 						/>
 					</View>
 				)}
-			</KeyboardAvoidingView>
+			</DomKeyboardHost>
 			{!disableMarkdownPreview && type === "markdown" && <MarkdownPreviewButton id={id ?? "textEditor"} />}
 		</Fragment>
 	)
