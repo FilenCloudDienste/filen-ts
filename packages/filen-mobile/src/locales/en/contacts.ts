@@ -117,6 +117,8 @@ export const contacts = {
 	error_resolving_shares: "Could not resolve the shared files",
 	/** Incoming share — terminal empty-state title when a share produced no uploadable files (e.g. shared text/links; only files can be saved) */
 	no_resolved_shares: "No files to save",
+	/** Incoming share — notice row shown in place of the (hidden) confirm button while offline, explaining why saving is unavailable */
+	shares_offline_description: "You can save these files once you're back online.",
 
 	// ── Empty-state subtitles (ListEmpty descriptions) ────────────────────────
 	/** Contacts — empty-state subtitle when no contacts exist yet */

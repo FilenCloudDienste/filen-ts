@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isIncomingShareLoading } from "@/features/incomingShare/utils"
+import { isIncomingShareLoading, incomingShareAction } from "@/features/incomingShare/utils"
 
 const base = {
 	isResolving: false,
@@ -40,5 +40,34 @@ describe("isIncomingShareLoading", () => {
 	it("does not spin once resolved payloads are present", () => {
 		expect(isIncomingShareLoading({ ...base, sharedCount: 1, resolvedCount: 1 })).toBe(false)
 		expect(isIncomingShareLoading({ ...base, sharedCount: 1, resolvedCount: 1, hasResolvedOnce: true })).toBe(false)
+	})
+})
+
+describe("incomingShareAction", () => {
+	it("offers the confirm button when there is something to save and the device is online", () => {
+		expect(incomingShareAction({ hasPayloads: true, isOnline: true })).toBe("confirm")
+	})
+
+	it("replaces the button with the offline notice rather than leaving the screen actionless", () => {
+		// The shipped bug (#104): the button is gated on connectivity, so going offline removed the
+		// screen's only action with nothing explaining why. Whatever the state, it must never be
+		// "button gone AND no notice" while there are files waiting to be saved.
+		expect(incomingShareAction({ hasPayloads: true, isOnline: false })).toBe("offlineNotice")
+	})
+
+	it("always offers something while files are waiting, whatever the connectivity", () => {
+		// The shape of #104 stated directly: with files on screen there is no state where the user is
+		// given neither an action nor an explanation. Which of the two is the tests above; that it is
+		// never "none" is what actually broke.
+		for (const isOnline of [true, false]) {
+			expect(incomingShareAction({ hasPayloads: true, isOnline })).not.toBe("none")
+		}
+	})
+
+	it("stays silent when the share produced no files, online or not", () => {
+		// The list renders its own empty/error state there; an offline notice would blame
+		// connectivity for a share that simply carried nothing uploadable.
+		expect(incomingShareAction({ hasPayloads: false, isOnline: false })).toBe("none")
+		expect(incomingShareAction({ hasPayloads: false, isOnline: true })).toBe("none")
 	})
 })

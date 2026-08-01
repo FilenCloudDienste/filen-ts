@@ -24,8 +24,10 @@ import Image from "@/components/ui/image"
 import { getPreviewType } from "@/lib/previewType"
 import { FileIcon } from "@/components/itemIcons"
 import ListRow from "@/components/ui/listRow"
+import Text from "@/components/ui/text"
+import Ionicons from "@expo/vector-icons/Ionicons"
 import logger from "@/lib/logger"
-import { isIncomingShareLoading } from "@/features/incomingShare/utils"
+import { isIncomingShareLoading, incomingShareAction } from "@/features/incomingShare/utils"
 
 function Payload({ payload }: { payload: ResolvedSharePayload }) {
 	const previewType =
@@ -64,6 +66,45 @@ function Payload({ payload }: { payload: ResolvedSharePayload }) {
 	)
 }
 
+/**
+ * Stands in for the confirm button while offline (#104).
+ *
+ * The button is hidden rather than disabled — the upload genuinely cannot start — which left this
+ * screen with no action and nothing explaining why. Nor is there another signal to fall back on:
+ * the global offline banner is gated to UNAUTHED surfaces, and the floating bar's offline chip only
+ * mounts on the tabs, so a share opened straight from the OS share sheet has neither.
+ *
+ * Rendered through the list's header slot rather than as a sibling above it, because the header is
+ * transparent on iOS: a sibling would sit behind it, while the list already insets its own content.
+ */
+function OfflineNotice() {
+	const { t } = useTranslation()
+	const textWarning = useResolveClassNames("text-warning")
+
+	return (
+		<ListRow
+			separator={true}
+			density="relaxed"
+			leading={
+				<Ionicons
+					name="cloud-offline-outline"
+					size={32}
+					color={textWarning.color as string}
+				/>
+			}
+			title={
+				<Text
+					className="text-warning"
+					numberOfLines={1}
+				>
+					{t("youre_offline")}
+				</Text>
+			}
+			subtitle={t("shares_offline_description")}
+		/>
+	)
+}
+
 function IncomingShare() {
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
@@ -82,6 +123,12 @@ function IncomingShare() {
 	const payloads = resolvedSharedPayloads.filter(
 		payload => typeof payload.contentUri === "string" && typeof payload.originalName === "string"
 	)
+
+	// One decision drives both the confirm button and the offline notice — see incomingShareAction.
+	const action = incomingShareAction({
+		hasPayloads: payloads.length > 0,
+		isOnline
+	})
 
 	// Marks the first completed resolution attempt (isResolving true -> false transition). The
 	// hook only flips isResolving in a post-commit effect, so the sync-parsed sharedPayloads
@@ -327,7 +374,7 @@ function IncomingShare() {
 					default: undefined
 				})}
 				rightItems={
-					payloads.length > 0 && isOnline
+					action === "confirm"
 						? [
 								{
 									type: "button",
@@ -351,6 +398,7 @@ function IncomingShare() {
 				<VirtualList
 					data={payloads}
 					loading={isLoadingPayloads}
+					headerComponent={action === "offlineNotice" ? () => <OfflineNotice /> : undefined}
 					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
