@@ -52,6 +52,7 @@ const H = vi.hoisted(() => {
 		config: any
 		reuploadDeleted: boolean
 		uuidCounter: number
+		surfacedErrors: string[]
 	} = {
 		counters,
 		remoteFiles: [],
@@ -59,7 +60,8 @@ const H = vi.hoisted(() => {
 		uploadCapture: [],
 		config: null,
 		reuploadDeleted: false,
-		uuidCounter: 0
+		uuidCounter: 0,
+		surfacedErrors: []
 	}
 
 	return holders
@@ -85,6 +87,7 @@ vi.mock("expo-media-library/legacy", async () => {
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("react-native-blob-util", async () => await import("@/tests/mocks/reactNativeBlobUtil"))
+vi.mock("@preeternal/react-native-file-hash", async () => await import("@/tests/mocks/reactNativeFileHash"))
 
 vi.mock("expo-crypto", () => ({
 	randomUUID: () => `bench-uuid-${H.uuidCounter++}`
@@ -214,9 +217,12 @@ vi.mock("@/features/cameraUpload/store/useCameraUpload.store", () => {
 			// Surface unexpected error-path entries loudly — happy-path scenarios must not error.
 			const errors = typeof fn === "function" ? fn([]) : fn
 
+			// COLLECTED, not printed: vitest swallows console output on a passing run, so the loud
+			// channel was invisible exactly when it mattered. runScenario asserts this is empty after
+			// the timed loop.
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			for (const entry of errors as any[]) {
-				console.error("[bench] cameraUpload error surfaced:", entry?.error)
+				H.surfacedErrors.push(String(entry?.error))
 			}
 		},
 		addSkippedAsset: () => {},
@@ -238,7 +244,15 @@ vi.mock("@/lib/secureStore", () => ({
 				return H.reuploadDeleted
 			}
 
-			return H.config
+			// Only the config key returns the config. Returning it for EVERY unknown key made the
+			// convertHeic gate pass a whole Config object to a boolean read — inert only because that
+			// read is a strict `=== true`, so any future gate checked by truthiness would silently flip
+			// behaviour in every sync scenario with nothing failing.
+			if (key.startsWith("cameraUploadConfig:")) {
+				return H.config
+			}
+
+			return undefined
 		},
 		set: async () => {}
 	},
@@ -267,6 +281,7 @@ vi.mock("@/lib/cache", () => ({
 // source's post-upload `deleteAbort` threw a swallowed TypeError on every successful upload).
 vi.mock("@/features/cameraUpload/cameraUploadState", () => {
 	const hashes = new Map<string, unknown>()
+	const destination: { current: string | null } = { current: null }
 	const aborts = new Map<string, number>()
 
 	return {
@@ -276,6 +291,29 @@ vi.mock("@/features/cameraUpload/cameraUploadState", () => {
 			loadHashes: async () => {},
 			loadAborts: async () => {},
 			getHashSync: (key: string) => hashes.get(key),
+			// Destination pairing: the shield is scoped to one remote directory, so the fake tracks it
+			// the same way — a bare stub would make every pass look like "never recorded".
+			destination,
+			getSyncedDestination: async () => destination.current,
+			setSyncedDestination: async (uuid: string) => {
+				destination.current = uuid
+			},
+			clearHashes: vi.fn(async () => {
+				hashes.clear()
+			}),
+			getHashMany: async (keys: string[]) => {
+				const found = new Map<string, unknown>()
+
+				for (const key of keys) {
+					const value = hashes.get(key)
+
+					if (value !== undefined) {
+						found.set(key, value)
+					}
+				}
+
+				return found
+			},
 			getHash: async (key: string) => hashes.get(key),
 			hashKeys: () => [...hashes.keys()],
 			setHash: async (key: string, entry: unknown) => {
@@ -336,8 +374,24 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 	isTrashParent: (parent: { tag?: string } | null | undefined) => parent?.tag === "Trash"
 }))
 
+// Identity stubs here silently broke the benchmark: production hands the hasher whatever this
+// returns, the hash mocks REJECT a scheme-qualified path (as the native hashers do), so every upload
+// failed and the sync scenarios were timing the failure path rather than an upload. Mirror the real
+// scheme-strip + percent-decode instead.
 vi.mock("@/lib/paths", () => ({
-	normalizeFilePathForSdk: (p: string) => p,
+	normalizeFilePathForSdk: (p: string) =>
+		p
+			.trim()
+			.replace(/^file:\/+/, "/")
+			.split("/")
+			.map(segment => {
+				try {
+					return decodeURIComponent(segment)
+				} catch {
+					return segment
+				}
+			})
+			.join("/"),
 	normalizeFilePathForExpo: (p: string) => p
 }))
 
@@ -346,6 +400,11 @@ vi.mock("@/lib/signals", () => ({
 		pause() {}
 		resume() {}
 		dispose() {}
+		// A background pass consults this before doing any work; without it the call threw and the
+		// whole pass was swallowed by sync()'s catch, which no foreground-only scenario could reveal.
+		isPaused() {
+			return false
+		}
 	}
 }))
 
@@ -621,7 +680,8 @@ async function runScenario({
 	prepare,
 	restore,
 	run,
-	validate
+	validate,
+	expectedPerRun
 }: {
 	name: string
 	scale: number
@@ -630,6 +690,8 @@ async function runScenario({
 	restore?: () => void | Promise<void>
 	run: () => Promise<unknown>
 	validate: (result: unknown) => void
+	/** What every TIMED run must do, so a silently bailing loop cannot pass. */
+	expectedPerRun?: { label: "uploads" | "listDir"; count: number }
 }): Promise<void> {
 	if (prepare) {
 		await prepare()
@@ -659,6 +721,9 @@ async function runScenario({
 
 	const timings: number[] = []
 
+	H.surfacedErrors.length = 0
+	resetCounters()
+
 	for (let i = 0; i < samples; i++) {
 		if (restore) {
 			await restore()
@@ -671,10 +736,41 @@ async function runScenario({
 		timings.push(performance.now() - start)
 	}
 
+	// Surfaced errors were only ever console.error'd, and vitest swallows that on a passing run — so
+	// a regression that turned every delta into the error path timed the failure path in silence.
+	if (H.surfacedErrors.length > 0) {
+		throw new Error(`bench scenario "${name}" surfaced ${H.surfacedErrors.length} error(s) during timed runs: ${H.surfacedErrors[0]}`)
+	}
+
+	const timedTotals = snapshotCounters()
+
+	const timedCounters =
+		expectedPerRun === undefined
+			? null
+			: {
+					label: expectedPerRun.label,
+					expected: expectedPerRun.count * samples,
+					actual: (expectedPerRun.label === "uploads" ? timedTotals.uploads : timedTotals.listDirCalls) ?? 0
+				}
+
 	timings.sort((a, b) => a - b)
 
 	const min = timings[0] ?? 0
 	const median = timings[Math.floor(timings.length / 2)] ?? 0
+
+	// A scenario that measures ~zero is not fast, it is not running. `=== 0` does not catch that: a
+	// bail still crosses several microtasks, so it measures ~0.0005 ms and merely PRINTS as "0.00".
+	// The threshold covers the shape; the counter check below is what actually proves work happened,
+	// since validate() only ever observes the untimed validation run.
+	if (median < 0.05) {
+		throw new Error(`bench scenario "${name}" measured ${median.toFixed(4)}ms — it is bailing out, not running`)
+	}
+
+	if (timedCounters !== null && timedCounters.expected > 0 && timedCounters.actual !== timedCounters.expected) {
+		throw new Error(
+			`bench scenario "${name}" did ${timedCounters.actual} of ${timedCounters.expected} expected ${timedCounters.label} across ${samples} timed runs — the timed loop is not exercising the scenario`
+		)
+	}
 	const mean = timings.reduce((sum, value) => sum + value, 0) / Math.max(1, timings.length)
 
 	rows.push({
@@ -721,331 +817,417 @@ function formatTable(): string {
 const internal = cameraUpload as any
 
 describe.skipIf(!BENCH)("cameraUpload benchmark", () => {
-	it(
-		"benchmarks listing, diff and sync pipelines at configured scales",
-		{ timeout: 3_600_000 },
-		async () => {
-			for (const scale of SCALES) {
-				const fixture = buildFixture(scale)
+	it("benchmarks listing, diff and sync pipelines at configured scales", { timeout: 3_600_000 }, async () => {
+		for (const scale of SCALES) {
+			const fixture = buildFixture(scale)
 
-				// ── listLocal (cold) ────────────────────────────────────────────────
-				installAssets(fixture)
-				resetSyncState()
-				H.remoteFiles = []
+			// ── listLocal (cold) ────────────────────────────────────────────────
+			installAssets(fixture)
+			resetSyncState()
+			H.remoteFiles = []
 
-				await runScenario({
-					name: "01 listLocal cold",
-					scale,
-					run: () =>
-						internal.listLocal({
-							config: BENCH_CONFIG,
-							signal: abortSignalForRun()
-						}),
-					validate: result => {
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						const listing = result as any
+			await runScenario({
+				name: "01 listLocal cold",
+				scale,
+				run: () =>
+					internal.listLocal({
+						config: BENCH_CONFIG,
+						signal: abortSignalForRun()
+					}),
+				validate: result => {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					const listing = result as any
 
-						expect(listing.degraded).toBe(false)
-						expect(Object.keys(listing.tree)).toHaveLength(scale)
-					}
-				})
+					expect(listing.degraded).toBe(false)
+					expect(Object.keys(listing.tree)).toHaveLength(scale)
+				}
+			})
 
-				// ── listLocal collision-heavy (50% same-name pairs) ─────────────────
-				const collisionFixture = buildCollisionFixture(scale)
+			// ── listLocal collision-heavy (50% same-name pairs) ─────────────────
+			const collisionFixture = buildCollisionFixture(scale)
 
-				installAssets(collisionFixture)
+			installAssets(collisionFixture)
 
-				await runScenario({
-					name: "02 listLocal 50% collisions",
-					scale,
-					run: () =>
-						internal.listLocal({
-							config: BENCH_CONFIG,
-							signal: abortSignalForRun()
-						}),
-					validate: result => {
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						const listing = result as any
+			await runScenario({
+				name: "02 listLocal 50% collisions",
+				scale,
+				run: () =>
+					internal.listLocal({
+						config: BENCH_CONFIG,
+						signal: abortSignalForRun()
+					}),
+				validate: result => {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					const listing = result as any
 
-						expect(listing.degraded).toBe(false)
-						expect(Object.keys(listing.tree)).toHaveLength(collisionFixture.length)
-					}
-				})
+					expect(listing.degraded).toBe(false)
+					expect(Object.keys(listing.tree)).toHaveLength(collisionFixture.length)
+				}
+			})
 
-				// ── capture pass: build the mirror remote (also validates convergence) ──
-				installAssets(fixture)
-				resetSyncState()
-				H.remoteFiles = []
-				H.config = BENCH_CONFIG
-				H.uploadCapture = []
-				H.captureUploads = true
-				resetCounters()
+			// ── capture pass: build the mirror remote (also validates convergence) ──
+			installAssets(fixture)
+			resetSyncState()
+			H.remoteFiles = []
+			H.config = BENCH_CONFIG
+			H.uploadCapture = []
+			H.captureUploads = true
+			resetCounters()
 
-				await cameraUpload.sync()
+			await cameraUpload.sync()
 
-				H.captureUploads = false
+			H.captureUploads = false
 
-				expect(H.counters.uploads).toBe(scale)
-				expect(H.uploadCapture).toHaveLength(scale)
+			expect(H.counters.uploads).toBe(scale)
+			expect(H.uploadCapture).toHaveLength(scale)
 
-				const mirrorFiles = buildMirrorFromCapture()
+			const mirrorFiles = buildMirrorFromCapture()
 
-				// ── listRemote (cold, mirror-sized) ─────────────────────────────────
-				H.remoteFiles = mirrorFiles
+			// ── listRemote (cold, mirror-sized) ─────────────────────────────────
+			H.remoteFiles = mirrorFiles
 
-				await runScenario({
-					name: "03 listRemote cold",
-					scale,
-					run: () =>
-						internal.listRemote({
-							remoteDir: BENCH_CONFIG.remoteDir,
-							signal: abortSignalForRun(),
-							compress: false
-						}),
-					validate: result => {
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						const listing = result as any
+			await runScenario({
+				name: "03 listRemote cold",
+				scale,
+				run: () =>
+					internal.listRemote({
+						remoteDir: BENCH_CONFIG.remoteDir,
+						signal: abortSignalForRun(),
+						compress: false
+					}),
+				validate: result => {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					const listing = result as any
 
-						expect(listing.degraded).toBe(false)
-						expect(Object.keys(listing.tree)).toHaveLength(scale)
-					}
-				})
+					expect(listing.degraded).toBe(false)
+					expect(Object.keys(listing.tree)).toHaveLength(scale)
+				}
+			})
 
-				// ── deltas quiet (steady state: local == remote) ────────────────────
-				await runScenario({
-					name: "04 deltas quiet",
-					scale,
-					run: () =>
-						internal.deltas({
-							config: BENCH_CONFIG,
-							signal: abortSignalForRun()
-						}),
-					validate: result => {
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						const value = result as any
+			// ── deltas quiet (steady state: local == remote) ────────────────────
+			await runScenario({
+				name: "04 deltas quiet",
+				scale,
+				run: () =>
+					internal.deltas({
+						config: BENCH_CONFIG,
+						signal: abortSignalForRun()
+					}),
+				validate: result => {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					const value = result as any
 
-						expect(value.deltas).toHaveLength(0)
-					}
-				})
+					expect(value.deltas).toHaveLength(0)
+				}
+			})
 
-				// ── deltas all-new (remote empty → every asset is a delta) ──────────
-				await runScenario({
-					name: "05 deltas all-new",
-					scale,
-					prepare: () => {
-						H.remoteFiles = []
-					},
-					run: () =>
-						internal.deltas({
-							config: BENCH_CONFIG,
-							signal: abortSignalForRun()
-						}),
-					validate: result => {
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						const value = result as any
+			// ── deltas all-new (remote empty → every asset is a delta) ──────────
+			await runScenario({
+				name: "05 deltas all-new",
+				scale,
+				prepare: () => {
+					H.remoteFiles = []
+				},
+				run: () =>
+					internal.deltas({
+						config: BENCH_CONFIG,
+						signal: abortSignalForRun()
+					}),
+				validate: result => {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					const value = result as any
 
-						expect(value.deltas).toHaveLength(scale)
-					}
-				})
+					expect(value.deltas).toHaveLength(scale)
+				}
+			})
 
-				// ── sync quiet e2e (mirror remote + fully-populated md5 cache) ──────
-				await runScenario({
-					name: "06 sync quiet e2e",
-					scale,
-					prepare: () => {
-						H.remoteFiles = mirrorFiles
-						resetSyncState()
+			// ── sync quiet e2e (mirror remote + fully-populated md5 cache) ──────
+			await runScenario({
+				name: "06 sync quiet e2e",
+				expectedPerRun: { label: "listDir", count: 1 },
+				scale,
+				prepare: () => {
+					H.remoteFiles = mirrorFiles
+					resetSyncState()
 
-						// Steady-state device: md5 cache holds an entry per tree key, all
-						// verified — the #B4 prune loop scans all of them, deletes none.
-						for (const asset of fixture) {
-							const path = `/camera roll/${asset.filename.toLowerCase()}`
+					// Steady-state device: md5 cache holds an entry per tree key, all
+					// verified — the #B4 prune loop scans all of them, deletes none.
+					for (const asset of fixture) {
+						const path = `/camera roll/${asset.filename.toLowerCase()}`
 
-							if (!cameraUploadState.hashes.has(path)) {
-								cameraUploadState.hashes.set(path, {
-									md5: "mock-md5",
-									verifiedModificationTime: asset.modificationTime
-								})
-							}
-						}
-					},
-					run: () => cameraUpload.sync(),
-					validate: () => {
-						expect(H.counters.uploads).toBe(0)
-					}
-				})
-
-				// ── sync md5-shielded (remote empty, cache verified at current mtimes) ──
-				await runScenario({
-					name: "07 sync md5-shielded",
-					scale,
-					samples: Math.min(SAMPLES, 3),
-					prepare: async () => {
-						H.remoteFiles = []
-						resetSyncState()
-
-						// Build the EXACT tree-keyed cache state by listing locally once.
-						const listing = await internal.listLocal({
-							config: BENCH_CONFIG,
-							signal: abortSignalForRun()
-						})
-
-						for (const path in listing.tree) {
-							const entry = listing.tree[path]
-
+						if (!cameraUploadState.hashes.has(path)) {
 							cameraUploadState.hashes.set(path, {
 								md5: "mock-md5",
-								verifiedModificationTime: entry.info.modificationTime
+								verifiedModificationTime: asset.modificationTime
 							})
 						}
-					},
-					run: () => cameraUpload.sync(),
-					validate: () => {
-						expect(H.counters.uploads).toBe(0)
 					}
-				})
-
-				// ── sync all-new e2e (empty remote, empty cache → full upload pipeline) ──
-				await runScenario({
-					name: "08 sync all-new e2e",
-					scale,
-					samples: Math.min(SAMPLES, 3),
-					prepare: () => {
-						H.remoteFiles = []
-					},
-					restore: () => {
-						resetSyncState()
-					},
-					run: () => cameraUpload.sync(),
-					validate: () => {
-						expect(H.counters.uploads).toBe(scale)
-					}
-				})
-
-				// ── deltas quiet with compress ON (stem-keyed dedup both sides) ─────
-				const compressConfig: Config = {
-					...BENCH_CONFIG,
-					compress: true
+				},
+				run: () => cameraUpload.sync({ manual: true }),
+				validate: () => {
+					expect(H.counters.uploads).toBe(0)
 				}
+			})
 
-				// Mirror stays valid: compress() never rewrites in the bench (empty
-				// supported-extension set), so uploaded names keep their extensions and
-				// the stem-keys collapse identically on both sides.
-				await runScenario({
-					name: "09 deltas quiet compress",
-					scale,
-					prepare: () => {
-						H.remoteFiles = mirrorFiles
-						resetSyncState()
-					},
-					run: () =>
-						internal.deltas({
-							config: compressConfig,
-							signal: abortSignalForRun()
-						}),
-					validate: result => {
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						const value = result as any
+			// ── sync md5-shielded (remote empty, cache verified at current mtimes) ──
+			await runScenario({
+				name: "07 sync md5-shielded",
+				expectedPerRun: { label: "listDir", count: 1 },
+				scale,
+				samples: Math.min(SAMPLES, 3),
+				prepare: async () => {
+					H.remoteFiles = []
+					resetSyncState()
 
-						expect(value.deltas).toHaveLength(0)
-					}
-				})
-			}
+					// Build the EXACT tree-keyed cache state by listing locally once.
+					const listing = await internal.listLocal({
+						config: BENCH_CONFIG,
+						signal: abortSignalForRun()
+					})
 
-			// ── helper micro-benchmarks (fixed 200k iterations, scale-independent) ──
-			const iterations = 200_000
-			const microAsset = {
-				name: "IMG_4242.jpg",
-				contentHash: "1700000000"
-			}
+					// Keyed by ASSET ID, not tree path. Path-keyed entries are legacy: the first pass's
+					// hygiene prune deletes and re-keys every one of them, so the timed runs would
+					// measure a migrated state the untimed validation run silently produced — and a
+					// regression in that migration would show up as nothing at all.
+					for (const path in listing.tree) {
+						const entry = listing.tree[path]
 
-			const micro: [string, () => void][] = [
-				[
-					"collisionNameSuffix it0+it1",
-					() => {
-						collisionNameSuffix({ iteration: 0, asset: microAsset })
-						collisionNameSuffix({ iteration: 1, asset: microAsset })
-					}
-				],
-				[
-					"modifyAssetPathOnCollision",
-					() => {
-						modifyAssetPathOnCollision({
-							iteration: 0,
-							path: "/camera roll/img_4242.jpg",
-							asset: microAsset
+						cameraUploadState.hashes.set(entry.info.id, {
+							md5: "mock-md5",
+							verifiedModificationTime: entry.info.modificationTime
 						})
 					}
-				],
-				[
-					"composeLocalTreePath+lower",
-					() => {
-						composeLocalTreePath({
-							folderTitle: "Camera Roll",
-							filename: "IMG_4242.jpg"
-						}).toLowerCase()
-					}
-				],
-				[
-					"dedupTreeKey compress",
-					() => {
-						dedupTreeKey({
-							path: "/camera roll/img_4242.jpg",
-							compress: true
-						})
-					}
-				],
-				[
-					"stripFilenameExtension",
-					() => {
-						stripFilenameExtension("IMG_4242.jpg")
-					}
-				],
-				[
-					"rawRemoteTreePath+lower",
-					() => {
-						rawRemoteTreePath("/Camera Roll/IMG_4242.jpg").toLowerCase()
-					}
-				],
-				[
-					"effectiveCreationTs+floor",
-					() => {
-						Math.floor(
-							effectiveCreationTimestamp({
-								creationTime: 1_700_000_000_123,
-								modificationTime: 1_700_000_000_456
-							}) / 1000
-						)
-					}
-				]
-			]
-
-			for (const [name, fn] of micro) {
-				// warmup
-				for (let i = 0; i < 10_000; i++) {
-					fn()
+				},
+				run: () => cameraUpload.sync({ manual: true }),
+				validate: () => {
+					expect(H.counters.uploads).toBe(0)
 				}
+			})
 
-				const start = performance.now()
-
-				for (let i = 0; i < iterations; i++) {
-					fn()
+			// ── sync all-new e2e (empty remote, empty cache → full upload pipeline) ──
+			await runScenario({
+				name: "08 sync all-new e2e",
+				expectedPerRun: { label: "uploads", count: scale },
+				scale,
+				samples: Math.min(SAMPLES, 3),
+				prepare: () => {
+					H.remoteFiles = []
+				},
+				restore: () => {
+					resetSyncState()
+				},
+				run: () => cameraUpload.sync({ manual: true }),
+				validate: () => {
+					expect(H.counters.uploads).toBe(scale)
 				}
+			})
 
-				const elapsed = performance.now() - start
+			// ── sync view-touched (remote mirror at OLDER mtimes + verified ledger) ──
+			//
+			// The steady state on iOS: viewing a photo bumps PHAsset.modificationDate, the new time is
+			// never written back to the remote file, so the local-newer comparison stays true for the
+			// rest of that photo's life. Every asset here is such a candidate — the shape neither
+			// "quiet" (mtimes agree) nor "md5-shielded" (remote empty) reproduces, and the one the
+			// delta gate exists for.
+			const viewTouchedMirror = mirrorFiles.map((file: RemoteFixtureFile) => ({
+				...file,
+				file: {
+					...file.file,
+					__meta: {
+						...file.file.__meta,
+						modified: file.file.__meta.modified === null ? null : file.file.__meta.modified - 1000n
+					}
+				}
+			}))
 
-				rows.push({
-					name: `90 micro ${name}`,
-					scale: iterations,
-					minMs: elapsed,
-					medianMs: elapsed,
-					meanMs: elapsed,
-					samples: 1,
-					counters: {}
+			async function seedVerifiedLedger(fraction: number = 1): Promise<void> {
+				const listing = await internal.listLocal({
+					config: BENCH_CONFIG,
+					signal: abortSignalForRun()
 				})
+
+				let index = 0
+
+				for (const path in listing.tree) {
+					const entry = listing.tree[path]
+
+					if (index++ % Math.max(1, Math.round(1 / fraction)) !== 0) {
+						continue
+					}
+
+					cameraUploadState.hashes.set(entry.info.id, {
+						md5: "mock-md5",
+						verifiedModificationTime: entry.info.modificationTime
+					})
+				}
 			}
+
+			await runScenario({
+				name: "10 sync view-touched",
+				expectedPerRun: { label: "listDir", count: 1 },
+				scale,
+				samples: Math.min(SAMPLES, 3),
+				prepare: async () => {
+					H.remoteFiles = viewTouchedMirror
+					resetSyncState()
+
+					await seedVerifiedLedger()
+				},
+				run: () => cameraUpload.sync({ manual: true }),
+				validate: () => {
+					expect(H.counters.uploads).toBe(0)
+				}
+			})
+
+			// ── sync background budgeted (mostly view-touched, a real backlog behind it) ──
+			//
+			// Background sorts deltas by modificationTime DESCENDING and slices to maxUploads, and a
+			// just-viewed photo carries the newest mtime of all. Without the delta gate the phantoms
+			// take every slot and the backlog makes no progress; this pins that the budget still goes
+			// to real uploads at scale.
+			await runScenario({
+				name: "11 sync background budgeted",
+				expectedPerRun: { label: "uploads", count: 3 },
+				scale,
+				samples: Math.min(SAMPLES, 3),
+				prepare: async () => {
+					H.remoteFiles = viewTouchedMirror
+				},
+				restore: async () => {
+					resetSyncState()
+
+					// Half the library is view-touched-and-verified; the rest are genuine deltas.
+					await seedVerifiedLedger(0.5)
+				},
+				run: () => cameraUpload.sync({ background: true, maxUploads: 3 }),
+				validate: () => {
+					expect(H.counters.uploads).toBe(3)
+				}
+			})
+
+			// ── deltas quiet with compress ON (stem-keyed dedup both sides) ─────
+			const compressConfig: Config = {
+				...BENCH_CONFIG,
+				compress: true
+			}
+
+			// Mirror stays valid: compress() never rewrites in the bench (empty
+			// supported-extension set), so uploaded names keep their extensions and
+			// the stem-keys collapse identically on both sides.
+			await runScenario({
+				name: "09 deltas quiet compress",
+				scale,
+				prepare: () => {
+					H.remoteFiles = mirrorFiles
+					resetSyncState()
+				},
+				run: () =>
+					internal.deltas({
+						config: compressConfig,
+						signal: abortSignalForRun()
+					}),
+				validate: result => {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					const value = result as any
+
+					expect(value.deltas).toHaveLength(0)
+				}
+			})
 		}
-	)
+
+		// ── helper micro-benchmarks (fixed 200k iterations, scale-independent) ──
+		const iterations = 200_000
+		const microAsset = {
+			name: "IMG_4242.jpg",
+			contentHash: "1700000000"
+		}
+
+		const micro: [string, () => void][] = [
+			[
+				"collisionNameSuffix it0+it1",
+				() => {
+					collisionNameSuffix({ iteration: 0, asset: microAsset })
+					collisionNameSuffix({ iteration: 1, asset: microAsset })
+				}
+			],
+			[
+				"modifyAssetPathOnCollision",
+				() => {
+					modifyAssetPathOnCollision({
+						iteration: 0,
+						path: "/camera roll/img_4242.jpg",
+						asset: microAsset
+					})
+				}
+			],
+			[
+				"composeLocalTreePath+lower",
+				() => {
+					composeLocalTreePath({
+						folderTitle: "Camera Roll",
+						filename: "IMG_4242.jpg"
+					}).toLowerCase()
+				}
+			],
+			[
+				"dedupTreeKey compress",
+				() => {
+					dedupTreeKey({
+						path: "/camera roll/img_4242.jpg",
+						compress: true
+					})
+				}
+			],
+			[
+				"stripFilenameExtension",
+				() => {
+					stripFilenameExtension("IMG_4242.jpg")
+				}
+			],
+			[
+				"rawRemoteTreePath+lower",
+				() => {
+					rawRemoteTreePath("/Camera Roll/IMG_4242.jpg").toLowerCase()
+				}
+			],
+			[
+				"effectiveCreationTs+floor",
+				() => {
+					Math.floor(
+						effectiveCreationTimestamp({
+							creationTime: 1_700_000_000_123,
+							modificationTime: 1_700_000_000_456
+						}) / 1000
+					)
+				}
+			]
+		]
+
+		for (const [name, fn] of micro) {
+			// warmup
+			for (let i = 0; i < 10_000; i++) {
+				fn()
+			}
+
+			const start = performance.now()
+
+			for (let i = 0; i < iterations; i++) {
+				fn()
+			}
+
+			const elapsed = performance.now() - start
+
+			rows.push({
+				name: `90 micro ${name}`,
+				scale: iterations,
+				minMs: elapsed,
+				medianMs: elapsed,
+				meanMs: elapsed,
+				samples: 1,
+				counters: {}
+			})
+		}
+	})
 
 	afterAll(() => {
 		if (rows.length === 0) {
