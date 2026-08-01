@@ -343,3 +343,59 @@ export async function withReleasedSharedObjectRetry<T>(fn: () => Promise<T>): Pr
 		return await fn()
 	}
 }
+
+/**
+ * Whether a shield entry already accounts for this exact modification time at this path.
+ *
+ * The single predicate behind BOTH the delta gate and the upload gate. They have to agree: the
+ * delta gate suppressing something the upload gate would have uploaded is a lost backup, so the
+ * two read from one definition rather than from two copies that can drift.
+ */
+export function shieldCoversModification(
+	entry: CameraUploadHashEntry | undefined,
+	modificationTime: number | null | undefined,
+	path: string
+): boolean {
+	return (
+		entry !== undefined &&
+		modificationTime != null &&
+		// -1 is the "never verified" sentinel that legacy string entries migrate through, and must
+		// never match a real timestamp.
+		entry.verifiedModificationTime !== -1 &&
+		entry.verifiedModificationTime === modificationTime &&
+		// Per-path: an asset in several selected albums has one shield entry but several destination
+		// paths — a match for one folder must not starve another.
+		hashEntryCoversPath(entry, path)
+	)
+}
+
+/**
+ * Lowercase hex of a BLAKE3 digest as the SDK hands it over.
+ *
+ * File metadata carries the hash as 32 RAW BYTES through uniffi (`type Blake3Hash = ArrayBuffer`)
+ * while every local hasher emits hex, so the two only meet after this.
+ */
+export function blake3ToHex(hash: ArrayBuffer): string {
+	const bytes = new Uint8Array(hash)
+	let hex = ""
+
+	for (const byte of bytes) {
+		hex += byte.toString(16).padStart(2, "0")
+	}
+
+	return hex
+}
+
+/**
+ * Directory portion of a tree path.
+ *
+ * The remote content check is scoped to it rather than to the whole account: one asset can belong
+ * to several selected albums and has to reach EVERY album folder, so content already sitting in
+ * album A must not cancel the upload to album B. That is the same reason a shield entry tracks
+ * `paths` instead of a single destination.
+ */
+export function parentTreePath(path: string): string {
+	const index = path.lastIndexOf("/")
+
+	return index <= 0 ? "/" : path.slice(0, index)
+}

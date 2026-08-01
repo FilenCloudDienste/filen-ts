@@ -64,6 +64,21 @@ vi.mock("@/lib/sqlite", async () => {
 				}),
 				remove: vi.fn(async (key: string) => {
 					kvStore.delete(key)
+				}),
+				getMany: vi.fn(async (keys: string[]) => {
+					const found = new Map<string, unknown>()
+
+					for (const key of keys) {
+						const raw = kvStore.get(key)
+
+						// Absent keys are ABSENT, not null — the contract the caller relies on to tell
+						// "no shield entry" from "entry with a falsy value".
+						if (raw !== undefined) {
+							found.set(key, deserialize(raw))
+						}
+					}
+
+					return found
 				})
 			}
 		}
@@ -561,5 +576,188 @@ describe("clearForLogout", () => {
 		expect(kvStore.has(HASHES_PREFIX + "late")).toBe(true)
 		// The scanned row committed to memory on the same generation-checked path.
 		expect(state.getHashSync("fresh")).toBe("value")
+	})
+})
+
+describe("getHashMany", () => {
+	it("resolves many keys and strips the storage prefix", async () => {
+		// The batched read exists because the delta gate consults the ledger for every asset whose
+		// remote copy looks older — on a browsed library that is thousands of keys, and one serial
+		// native round trip each is what it replaces. Getting the prefix strip wrong would return a
+		// map nothing can look up, silently disabling the gate.
+		const state = make()
+
+		seedHash("asset-1", { md5: "a", verifiedModificationTime: 1 })
+		seedHash("asset-2", { md5: "b", verifiedModificationTime: 2 })
+
+		const found = await state.getHashMany(["asset-1", "asset-2"])
+
+		expect(found.get("asset-1")).toMatchObject({ md5: "a" })
+		expect(found.get("asset-2")).toMatchObject({ md5: "b" })
+	})
+
+	it("omits keys that have no entry rather than mapping them to null", async () => {
+		// shieldCoversModification treats `undefined` as "not verified"; a null would have to be
+		// special-cased at every call site to mean the same thing.
+		const state = make()
+
+		seedHash("asset-1", { md5: "a", verifiedModificationTime: 1 })
+
+		const found = await state.getHashMany(["asset-1", "missing"])
+
+		expect(found.has("missing")).toBe(false)
+		expect(found.size).toBe(1)
+	})
+
+	it("returns an empty map for no keys without touching the database", async () => {
+		const state = make()
+		const found = await state.getHashMany([])
+
+		expect(found.size).toBe(0)
+		expect(vi.mocked(sqlite.kvAsync.getMany)).not.toHaveBeenCalled()
+	})
+
+	it("degrades to empty when the read fails, so a broken ledger costs a hash and never a backup", async () => {
+		const state = make()
+
+		vi.mocked(sqlite.kvAsync.getMany).mockRejectedValueOnce(new Error("io error"))
+
+		await expect(state.getHashMany(["asset-1"])).resolves.toEqual(new Map())
+	})
+
+	it("answers from memory once the ledger is loaded, without a database read", async () => {
+		// Foreground pages the whole index in, so the batch must not re-read what is already there.
+		const state = make()
+
+		seedHash("asset-1", { md5: "a", verifiedModificationTime: 1 })
+
+		await state.loadHashes()
+
+		vi.mocked(sqlite.kvAsync.getMany).mockClear()
+
+		const found = await state.getHashMany(["asset-1"])
+
+		expect(found.get("asset-1")).toMatchObject({ md5: "a" })
+		expect(vi.mocked(sqlite.kvAsync.getMany)).not.toHaveBeenCalled()
+	})
+})
+
+describe("destination pairing", () => {
+	it("round-trips the recorded destination", async () => {
+		const state = make()
+
+		expect(await state.getSyncedDestination()).toBeNull()
+
+		await state.setSyncedDestination("dir-a")
+
+		expect(await state.getSyncedDestination()).toBe("dir-a")
+	})
+
+	it("propagates a read failure instead of reporting 'never recorded'", async () => {
+		// The caller answers null by ADOPTING the current destination, so folding an error into null
+		// would record the new destination against a shield built for the old one — and the mismatch
+		// would then never be seen again. Rejecting lets the caller skip and retry next pass.
+		const state = make()
+
+		vi.mocked(sqlite.kvAsync.get).mockRejectedValueOnce(new Error("io error"))
+
+		await expect(state.getSyncedDestination()).rejects.toThrow("io error")
+	})
+
+	it("refuses to record after logout, so no uuid leaks into the next account", async () => {
+		const state = make()
+
+		state.clearForLogout()
+
+		await state.setSyncedDestination("dir-a")
+
+		expect(kvStore.has("cameraUpload:destination")).toBe(false)
+	})
+})
+
+describe("clearHashes", () => {
+	it("removes the hash rows from the kv, not just from memory", async () => {
+		// Memory-only would resurrect the whole shield on the next load — the new destination would
+		// look fully backed up while being empty.
+		const state = make()
+
+		seedHash("asset-1", { md5: "a", verifiedModificationTime: 1 })
+
+		await state.loadHashes()
+		await state.clearHashes()
+
+		expect(state.getHashSync("asset-1")).toBeUndefined()
+		expect(kvStore.has(HASHES_PREFIX + "asset-1")).toBe(false)
+	})
+
+	it("leaves the abort ledger alone", async () => {
+		// Abort counts mean "this asset never fits an OS background window", which stays true at a new
+		// destination; clearing them would re-burn background budgets on assets that cannot finish.
+		const state = make()
+
+		seedAbort("asset-1", 3)
+
+		await state.loadAborts()
+		await state.clearHashes()
+
+		expect(state.getAbort("asset-1")).toBe(3)
+	})
+
+	it("refuses after logout rather than writing into the next account's store", async () => {
+		const state = make()
+
+		seedHash("asset-1", { md5: "a", verifiedModificationTime: 1 })
+		state.clearForLogout()
+
+		await state.clearHashes()
+
+		expect(kvStore.has(HASHES_PREFIX + "asset-1")).toBe(true)
+	})
+
+	it("discards a load that was already scanning when the wipe landed", async () => {
+		// The load captures its generation BEFORE scanning; committing its pre-wipe rows afterwards
+		// would resurrect the entire shield in memory over an emptied kv — every asset then reads as
+		// backed up at a destination that has none of it.
+		//
+		// The scan is suspended mid-flight on purpose: the shared fake resolves synchronously, so
+		// without this gate the load finishes before the clear and the race is never exercised.
+		const state = make()
+
+		seedHash("asset-1", { md5: "a", verifiedModificationTime: 1 })
+
+		let release: () => void = () => {}
+		const scanning = new Promise<void>(resolve => {
+			release = resolve
+		})
+
+		vi.mocked(forEachKvRowByPrefix).mockImplementationOnce(
+			async (_db: unknown, prefix: string, onRow: (key: string, value: string) => void) => {
+				let total = 0
+
+				// Rows are read FIRST, then the scan suspends — so the wipe lands between reading and
+				// committing, which is the only ordering that exercises the guard. Suspending before
+				// the read just scans an already-empty store and proves nothing.
+				for (const [key, value] of kvStore) {
+					if (key.startsWith(prefix)) {
+						onRow(key, value)
+						total++
+					}
+				}
+
+				await scanning
+
+				return total
+			}
+		)
+
+		const loading = state.loadHashes()
+
+		await state.clearHashes()
+
+		release()
+
+		await loading
+
+		expect(state.getHashSync("asset-1")).toBeUndefined()
 	})
 })

@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, beforeAll } from "vitest"
+import { vi, describe, it, expect, beforeEach, beforeAll, afterEach } from "vitest"
 import pathModule from "path"
 
 // @ts-expect-error __DEV__ is a React Native global
@@ -10,6 +10,7 @@ vi.mock("expo-media-library/next", async () => await import("@/tests/mocks/expoM
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("react-native-blob-util", async () => await import("@/tests/mocks/reactNativeBlobUtil"))
+vi.mock("@preeternal/react-native-file-hash", async () => await import("@/tests/mocks/reactNativeFileHash"))
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
@@ -54,8 +55,10 @@ vi.mock("@/hooks/useMediaPermissions", () => ({
 	hasAllNeededMediaPermissions: vi.fn(async () => true)
 }))
 
+const { mockManipulate } = vi.hoisted(() => ({ mockManipulate: vi.fn() }))
+
 vi.mock("expo-image-manipulator", () => ({
-	ImageManipulator: { manipulate: vi.fn() },
+	ImageManipulator: { manipulate: mockManipulate },
 	SaveFormat: { JPEG: "jpeg" }
 }))
 
@@ -202,6 +205,7 @@ vi.mock("@/lib/cache", () => ({
 // keep meaning. loadHashes/loadAborts/getHash are resolved passthroughs.
 vi.mock("@/features/cameraUpload/cameraUploadState", () => {
 	const hashes = new Map<string, unknown>()
+	const destination: { current: string | null } = { current: null }
 	const aborts = new Map<string, number>()
 
 	return {
@@ -211,6 +215,29 @@ vi.mock("@/features/cameraUpload/cameraUploadState", () => {
 			loadHashes: async () => {},
 			loadAborts: async () => {},
 			getHashSync: (key: string) => hashes.get(key),
+			// Destination pairing: the shield is scoped to one remote directory, so the fake tracks it
+			// the same way — a bare stub would make every pass look like "never recorded".
+			destination,
+			getSyncedDestination: async () => destination.current,
+			setSyncedDestination: async (uuid: string) => {
+				destination.current = uuid
+			},
+			clearHashes: vi.fn(async () => {
+				hashes.clear()
+			}),
+			getHashMany: async (keys: string[]) => {
+				const found = new Map<string, unknown>()
+
+				for (const key of keys) {
+					const value = hashes.get(key)
+
+					if (value !== undefined) {
+						found.set(key, value)
+					}
+				}
+
+				return found
+			},
 			getHash: async (key: string) => hashes.get(key),
 			hashKeys: () => [...hashes.keys()],
 			setHash: async (key: string, entry: unknown) => {
@@ -315,15 +342,15 @@ import secureStore from "@/lib/secureStore"
 import { CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY } from "@/lib/imageConversion"
 import NetInfo from "@react-native-community/netinfo"
 import * as Battery from "expo-battery"
+import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { getPermissionsAsync } from "expo-media-library/legacy"
 import auth from "@/lib/auth"
 import transfers from "@/features/transfers/transfers"
 import { unwrapFileMeta } from "@/lib/sdkUnwrap"
 import events from "@/lib/events"
-import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { ml, MediaType } from "@/tests/mocks/expoMediaLibrary"
-import { fs } from "@/tests/mocks/expoFileSystem"
-import { mockBlobUtilHash } from "@/tests/mocks/reactNativeBlobUtil"
+import { fs, File } from "@/tests/mocks/expoFileSystem"
+import { mockFileHash, blake3BytesForContent, fileHashImplementation } from "@/tests/mocks/reactNativeFileHash"
 import * as FileSystem from "expo-file-system"
 
 // #103 — capture constructor-registered handlers in beforeAll (after module
@@ -366,8 +393,60 @@ function setupDefaultMocks() {
 			getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
 		}
 	} as any)
-	vi.mocked(transfers.upload).mockResolvedValue({ files: [] } as any)
+	uploadedPayloads.length = 0
+
+	// Captured AT CALL TIME: the staged file is deleted by the pipeline's own LIFO defer as soon as
+	// the upload resolves, so reading the bytes afterwards always finds nothing.
+	vi.mocked(transfers.upload).mockImplementation(async (params: any) => {
+		const entry = fs.get(params?.localFileOrDir?.uri)
+
+		uploadedPayloads.push({
+			name: params?.name,
+			bytes: entry instanceof Uint8Array ? new Uint8Array(entry) : undefined
+		})
+
+		return { files: [] } as any
+	})
+
 	vi.mocked(unwrapFileMeta).mockReturnValue({ meta: null } as any)
+
+	// Functional by default. The previous bare vi.fn() returned undefined, so renderAsync() threw,
+	// convertHeicToJpg's fail-open catch returned the ORIGINAL file, and the conversion step was
+	// invisible: deleting it entirely kept the whole suite green. This writes a distinct payload so
+	// a test can tell converted bytes from original ones.
+	manipulatedCount = 0
+
+	// Restored per test: clearAllMocks resets calls but not implementations, so one test overriding
+	// the hasher would otherwise govern every test after it.
+	mockFileHash.mockImplementation(fileHashImplementation)
+
+	mockManipulate.mockImplementation(() => ({
+		renderAsync: async () => ({
+			saveAsync: async ({ format }: { format: string }) => {
+				const uri = `file:///manipulated/${manipulatedCount++}.${format}`
+
+				fs.set(uri, MANIPULATED_BYTES)
+
+				return { uri }
+			},
+			release: vi.fn()
+		}),
+		release: vi.fn()
+	}))
+}
+
+// Distinguishable from the [1,2,3] every fixture asset is seeded with, so "did the upload carry the
+// transformed bytes or the original?" is answerable rather than assumed — and deliberately SHORTER,
+// because compress() keeps the original whenever its output is not smaller.
+const MANIPULATED_BYTES = new Uint8Array([9, 9])
+let manipulatedCount = 0
+
+/** What each upload actually carried, recorded as it happened. */
+const uploadedPayloads: Array<{ name?: string; bytes?: Uint8Array }> = []
+
+/** The bytes that actually went out — the assertion the conversion/compression paths lacked. */
+function uploadedBytes(call: number = 0): Uint8Array | undefined {
+	return uploadedPayloads[call]?.bytes
 }
 
 function collision(overrides?: Partial<CollisionParams> & { iteration: number }): string | null {
@@ -390,6 +469,9 @@ beforeEach(() => {
 	fs.clear()
 	cameraUploadState.hashes.clear()
 	cameraUploadState.aborts.clear()
+	// Leaks across tests otherwise: a test that repoints the destination leaves it recorded, and the
+	// next test's unchanged config then reads as a change and wipes its shield.
+	;(cameraUploadState as unknown as { destination: { current: string | null } }).destination.current = null
 	cameraUpload.cancel()
 	// The parent-directory cache lives on the singleton and survives cancel(),
 	// so clear it explicitly between tests to avoid stale dir refs from earlier
@@ -952,23 +1034,49 @@ describe("sync flow", () => {
 		}
 	}
 
-	// The md5 moved off the JS thread (expo's File.md5 is a synchronous whole-file read) onto
-	// blob-util's background queue. These pin the argument shape, which is where that swap can go
-	// wrong in a way no simulator run would reveal.
+	// The md5 moved off the JS thread (expo's File.md5 is a synchronous whole-file read) onto a
+	// native streaming hasher. These pin the argument shape, which is where that swap can go wrong
+	// in a way no simulator run would reveal.
 	describe("asset hashing", () => {
-		it("passes a scheme-less filesystem path, not the file:// uri", async () => {
+		it("passes an encoded file:// uri, not a bare path", async () => {
+			// Not cosmetic. Handed a BARE path the iOS native takes its fallback branch and applies
+			// `removingPercentEncoding` — a second decode on top of ours. A `file://` uri takes
+			// `URL(string:).path` instead, which decodes exactly once, as does Android's
+			// `Uri.getPath()`. The previous hasher decoded on neither platform, so the bare path that
+			// was correct for it is a permanent-failure bug for this one.
 			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
 
 			await cameraUpload.sync()
 
-			// iOS hands this straight to `fileExistsAtPath:`, which does not understand a URL.
-			expect(mockBlobUtilHash).toHaveBeenCalledWith("/media/a1", "md5")
+			expect(mockFileHash).toHaveBeenCalledWith("file:///media/a1", expect.objectContaining({ algorithm: "MD5" }))
 		})
 
-		it("percent-decodes the path", async () => {
-			// Asset.getUri() returns a percent-ENCODED file:// url on both platforms, and neither
-			// blob-util path decodes: iOS never touches the string, Android strips the scheme with a
-			// plain replace. Passing it through would ENOENT on every asset with a space in its name.
+		it("hashes an asset whose real filename contains a literal percent escape", async () => {
+			// The regression the encoded uri prevents: a file genuinely NAMED "holiday%20photo.jpg"
+			// double-decodes to "holiday photo.jpg" under a bare path, ENOENTs on every pass, and the
+			// asset is skipped for good after MAX_UPLOAD_FAILURES. The mock reproduces that trap, so
+			// this fails if the call site ever goes back to a bare path.
+			const uri = "file:///media/holiday%2520photo.jpg"
+
+			ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+			ml.addAsset({
+				id: "a1",
+				filename: "holiday%20photo.jpg",
+				uri,
+				mediaType: MediaType.IMAGE,
+				creationTime: 1000,
+				modificationTime: 2000
+			})
+
+			fs.set(uri, new Uint8Array([1, 2, 3]))
+
+			await cameraUpload.sync()
+
+			expect(transfers.upload).toHaveBeenCalledTimes(1)
+			expect(mockSetErrors).not.toHaveBeenCalled()
+		})
+
+		it("hashes an asset whose name needs encoding", async () => {
 			const uri = "file:///media/holiday%20photo.jpg"
 
 			ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
@@ -985,21 +1093,630 @@ describe("sync flow", () => {
 
 			await cameraUpload.sync()
 
-			expect(mockBlobUtilHash).toHaveBeenCalledWith("/media/holiday photo.jpg", "md5")
+			expect(transfers.upload).toHaveBeenCalledTimes(1)
+			expect(mockSetErrors).not.toHaveBeenCalled()
 		})
 
 		it("stores the returned hash verbatim, so existing ledger entries keep shielding", async () => {
-			// Both implementations emit lowercase hex, so a value written by the old expo path must
-			// still match what blob-util returns — otherwise every asset re-uploads once on update.
+			// Every implementation this has passed through emits lowercase hex, so a value written by
+			// an older one must still match what the current one returns — otherwise every asset
+			// re-uploads once on update. This is why the swap kept MD5 rather than moving the ledger
+			// to BLAKE3.
 			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
 
-			mockBlobUtilHash.mockResolvedValueOnce("9e107d9d372bb6826bd81d3542a419d6")
+			mockFileHash.mockResolvedValueOnce("9e107d9d372bb6826bd81d3542a419d6")
 
 			await cameraUpload.sync()
 
 			expect(cameraUploadState.hashes.get("a1")).toMatchObject({
 				md5: "9e107d9d372bb6826bd81d3542a419d6"
 			})
+		})
+
+		it("hands the pass's abort signal to the hasher", async () => {
+			// blob-util could not be cancelled: aborting a sync still waited out a multi-gigabyte
+			// video mid-hash before anything noticed.
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+			await cameraUpload.sync()
+
+			const request = mockFileHash.mock.calls[0]?.[1]
+
+			expect(request?.signal).toBeDefined()
+
+			// Presence alone passes for any unrelated AbortController. What matters is that cancelling
+			// the pass aborts THIS signal.
+			cameraUpload.cancel()
+
+			expect(request?.signal?.aborted).toBe(true)
+		})
+	})
+
+	/**
+	 * Content that already exists remotely cancels the upload outright — but only in the folder it is
+	 * being uploaded TO. The metadata hash is optional (nothing uploaded before the Rust SDK carries
+	 * one), so every case here also has to hold when it is absent.
+	 */
+	describe("remote content dedup", () => {
+		// Fixture assets are seeded with 3 bytes, so a remote candidate has to declare the same size to
+		// survive the prefilter — matching production, where the SDK records size and hash over the
+		// same plaintext stream.
+		function setupRemote(files: Array<{ path: string; uuid: string; hash?: ArrayBuffer; size?: number }>) {
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					listDirRecursiveWithPaths: vi.fn(async () => ({
+						files: files.map(file => ({
+							path: file.path,
+							file: { uuid: file.uuid }
+						}))
+					})),
+					createDir: vi.fn(async () => ({ uuid: "dir" })),
+					getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
+				}
+			} as any)
+
+			const byUuid = new Map(files.map(file => [file.uuid, file]))
+
+			vi.mocked(unwrapFileMeta).mockImplementation((file: any) => {
+				const remote = byUuid.get(file?.uuid)
+
+				return {
+					meta: remote
+						? {
+								name: remote.path.slice(remote.path.lastIndexOf("/") + 1),
+								created: 1000n,
+								modified: 2000n,
+								size: BigInt(remote.size ?? 3),
+								hash: remote.hash
+							}
+						: null
+				} as any
+			})
+		}
+
+		it("skips the upload when the same content already sits in the destination folder", async () => {
+			// A rename, or a dedup-suffix change, leaves the content backed up under a name the tree
+			// diff cannot match — so the path diff produces a delta and only the hash can tell that the
+			// bytes are already there.
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+			setupRemote([{ path: "/Camera Roll/renamed.jpg", uuid: "remote-1", hash: blake3BytesForContent("mock-md5") }])
+
+			await cameraUpload.sync()
+
+			expect(transfers.upload).not.toHaveBeenCalled()
+		})
+
+		it("records the shield entry it would have written, so the next pass never re-hashes", async () => {
+			// Skipping without recording would re-hash this asset on every single pass forever.
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+			setupRemote([{ path: "/Camera Roll/renamed.jpg", uuid: "remote-1", hash: blake3BytesForContent("mock-md5") }])
+
+			await cameraUpload.sync()
+
+			// `paths` is asserted explicitly: an entry recorded with the wrong path (or none) satisfies
+			// toMatchObject yet fails shieldCoversModification on every later pass — the eternal re-hash
+			// this test is named for.
+			expect(cameraUploadState.hashes.get("a1")).toMatchObject({
+				md5: "mock-md5",
+				verifiedModificationTime: 2000,
+				paths: ["/camera roll/photo.jpg"]
+			})
+		})
+
+		it("still uploads to a folder without the content when another folder has it", async () => {
+			// One asset can belong to several selected albums and must reach EVERY album folder. A
+			// match scoped to the whole account instead of the destination directory would silently
+			// leave the second album missing the photo.
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+			setupRemote([{ path: "/Other Album/photo.jpg", uuid: "remote-1", hash: blake3BytesForContent("mock-md5") }])
+
+			await cameraUpload.sync()
+
+			expect(transfers.upload).toHaveBeenCalled()
+		})
+
+		it("uploads when the remote file predates metadata hashes", async () => {
+			// Anything uploaded before the SDK recorded hashes carries none. Absent must mean "cannot
+			// tell", never "no match" — the only safe direction, since the alternative silently drops
+			// a backup.
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+			setupRemote([{ path: "/Camera Roll/renamed.jpg", uuid: "remote-1" }])
+
+			await cameraUpload.sync()
+
+			expect(transfers.upload).toHaveBeenCalled()
+		})
+
+		it("uploads when the remote content differs", async () => {
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+			setupRemote([{ path: "/Camera Roll/renamed.jpg", uuid: "remote-1", hash: blake3BytesForContent("some-other-content") }])
+
+			await cameraUpload.sync()
+
+			expect(transfers.upload).toHaveBeenCalled()
+		})
+
+		it("hashes nothing at all when the mtime shield answers the delta", async () => {
+			// The load-bearing perf property: hashing stays LAZY. A steady-state pass must not read a
+			// single file, which also means it never builds the remote hash index.
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+			setupRemote([{ path: "/Camera Roll/renamed.jpg", uuid: "remote-1", hash: blake3BytesForContent("mock-md5") }])
+
+			cameraUploadState.hashes.set("a1", {
+				md5: "mock-md5",
+				verifiedModificationTime: 2000
+			})
+
+			await cameraUpload.sync()
+
+			expect(mockFileHash).not.toHaveBeenCalled()
+		})
+
+		it("computes one MD5 and one BLAKE3 when the destination holds content of the same size", async () => {
+			// BLAKE3 is additive, not a second pass: it is paid once, on the branch that was about to
+			// push the whole file over the network anyway — and only when a match is possible.
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+			setupRemote([{ path: "/Camera Roll/other.jpg", uuid: "remote-1", hash: blake3BytesForContent("different") }])
+
+			await cameraUpload.sync()
+
+			expect(mockFileHash.mock.calls.map(call => call[1]?.algorithm)).toEqual(["MD5", "BLAKE3"])
+		})
+
+		it("does not hash BLAKE3 at all when nothing in the destination has the same size", async () => {
+			// Equal hashes imply equal length, so a destination with no candidate of this size cannot
+			// produce a match — reading the whole file to learn that is pure waste. This is the entire
+			// cost of a first sync, where the destination is empty.
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+			setupRemote([{ path: "/Camera Roll/other.jpg", uuid: "remote-1", hash: blake3BytesForContent("different"), size: 999 }])
+
+			await cameraUpload.sync()
+
+			expect(mockFileHash.mock.calls.map(call => call[1]?.algorithm)).toEqual(["MD5"])
+		})
+
+		it("uploads anyway when the content check's own hash fails", async () => {
+			// The check is an optimisation, so its failure has to fall through to the upload. BLAKE3 runs
+			// through a different native path than MD5, so an engine-specific read failure would
+			// otherwise error this asset on every pass instead of merely skipping a shortcut.
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+			setupRemote([{ path: "/Camera Roll/other.jpg", uuid: "remote-1", hash: blake3BytesForContent("different") }])
+
+			mockFileHash.mockImplementation(async (_path: string, request?: { algorithm?: string }) => {
+				if (request?.algorithm === "BLAKE3") {
+					throw new Error("E_IO: engine failure")
+				}
+
+				return "mock-md5"
+			})
+
+			await cameraUpload.sync()
+
+			expect(transfers.upload).toHaveBeenCalledTimes(1)
+			expect(mockSetErrors).not.toHaveBeenCalled()
+		})
+
+		it("does not hash BLAKE3 when the destination is empty", async () => {
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+			setupRemote([])
+
+			await cameraUpload.sync()
+
+			expect(mockFileHash.mock.calls.map(call => call[1]?.algorithm)).toEqual(["MD5"])
+		})
+
+		it("does not hash for content the md5 shield already cleared", async () => {
+			// Unchanged content (an iOS view-touched mtime bump) stops at the md5 comparison — the
+			// upload is not happening, so there is nothing for BLAKE3 to cancel.
+			//
+			// The destination deliberately holds a same-size, hash-bearing candidate: with an EMPTY one
+			// the size prefilter skips BLAKE3 anyway and this passes whether or not the md5 branch
+			// short-circuits, which is what it is here to prove.
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+			setupRemote([{ path: "/Camera Roll/other.jpg", uuid: "remote-1", hash: blake3BytesForContent("different") }])
+
+			cameraUploadState.hashes.set("a1", {
+				md5: "mock-md5",
+				verifiedModificationTime: 1
+			})
+
+			await cameraUpload.sync()
+
+			expect(mockFileHash.mock.calls.map(call => call[1]?.algorithm)).toEqual(["MD5"])
+			expect(transfers.upload).not.toHaveBeenCalled()
+		})
+	})
+
+	/**
+	 * With a transform enabled the bytes that go to the server are NOT the asset's bytes, so the
+	 * content check has to hash the transformed payload. Both directions matter, and the second is the
+	 * one that loses data.
+	 */
+	describe("remote content dedup with a transform enabled", () => {
+		let md5Spy: { mockRestore: () => void } | null = null
+
+		afterEach(() => {
+			md5Spy?.mockRestore()
+			md5Spy = null
+		})
+
+		function setupTransformed(remoteHashSeed: string, remoteSize: bigint) {
+			// Content-derived digests: the shared mock returns one constant for every file, which cannot
+			// tell the asset's bytes from the compressed output.
+			md5Spy = vi.spyOn(File.prototype, "md5", "get").mockImplementation(function (this: { uri: string }) {
+				const entry = fs.get(this.uri)
+
+				return entry instanceof Uint8Array ? `md5-${entry.join("-")}` : null
+			}) as unknown as { mockRestore: () => void }
+
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+			vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, compress: true } as any)
+
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					listDirRecursiveWithPaths: vi.fn(async () => ({
+						files: [{ path: "/Camera Roll/other.jpg", file: { uuid: "remote-1" } }]
+					})),
+					createDir: vi.fn(async () => ({ uuid: "dir" })),
+					getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
+				}
+			} as any)
+
+			vi.mocked(unwrapFileMeta).mockReturnValue({
+				meta: {
+					name: "other.jpg",
+					created: 1000n,
+					modified: 2000n,
+					size: remoteSize,
+					hash: blake3BytesForContent(remoteHashSeed)
+				}
+			} as any)
+		}
+
+		it("cancels the upload when the TRANSFORMED bytes are already in the destination", async () => {
+			// The compressed output is what the previous upload stored, so that is what has to match.
+			// The compressed payload: 2 bytes, matching what the previous upload would have stored.
+			setupTransformed("md5-9-9", 2n)
+
+			await cameraUpload.sync()
+
+			expect(transfers.upload).not.toHaveBeenCalled()
+		})
+
+		it("still uploads when only the ORIGINAL bytes match, because those are not what gets sent", async () => {
+			// The data-loss direction. Hashing the asset instead of the payload would cancel this
+			// upload on the strength of content that matches the file on disk — while the COMPRESSED
+			// bytes, the ones the server would have received, were never stored anywhere.
+			// The asset's own bytes and size — what a check pointed at the wrong file would match.
+			setupTransformed("md5-1-2-3", 3n)
+
+			await cameraUpload.sync()
+
+			expect(transfers.upload).toHaveBeenCalledTimes(1)
+			expect(uploadedBytes()).toEqual(new Uint8Array([9, 9]))
+		})
+	})
+
+	/**
+	 * A viewed photo bumps PHAsset.modificationDate on iOS, and the new time is never written back to
+	 * the remote file — so without a gate the asset re-enters the delta set on every pass forever.
+	 * These cover the gate AND the cases it must not touch.
+	 */
+	describe("view-touched assets", () => {
+		function setupViewTouched({ verified }: { verified: number | null }) {
+			// Local mtime 9999 (just viewed) against a remote uploaded at 2000: permanently local-newer.
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg", creationTime: 1000, modificationTime: 9999 }])
+
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					listDirRecursiveWithPaths: vi.fn(async () => ({
+						files: [{ path: "/Camera Roll/photo.jpg", file: { uuid: "remote-1" } }]
+					})),
+					createDir: vi.fn(async () => ({ uuid: "dir" })),
+					getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
+				}
+			} as any)
+
+			vi.mocked(unwrapFileMeta).mockReturnValue({ meta: { name: "photo.jpg", created: 1000n, modified: 2000n } } as any)
+
+			if (verified !== null) {
+				cameraUploadState.hashes.set("a1", {
+					md5: "mock-md5",
+					verifiedModificationTime: verified
+				})
+			}
+		}
+
+		it("performs no work at all for a photo whose modification time is already verified", async () => {
+			// End-to-end property: no getUri (which re-downloads iCloud-offloaded originals) and no
+			// hash, on every pass for the rest of that photo's life.
+			//
+			// Note this holds with or WITHOUT the delta gate — the upload gate alone produces the same
+			// outcome, which is why it survives removing the gate. What the gate changes that is
+			// externally visible is the bounded background pick; the budget test below is the one that
+			// pins it.
+			setupViewTouched({ verified: 9999 })
+
+			await cameraUpload.sync()
+
+			expect(mockFileHash).not.toHaveBeenCalled()
+			expect(transfers.upload).not.toHaveBeenCalled()
+		})
+
+		it("still reads the asset when the modification time is one the shield has not verified", async () => {
+			// A genuine edit moves the mtime too, so an unverified time must reach the content check
+			// rather than being suppressed. It does NOT upload here: the content is unchanged, so the
+			// md5 comparison clears it one step later — the correct outcome, and the reason this asserts
+			// hashing rather than uploading.
+			setupViewTouched({ verified: 5000 })
+
+			await cameraUpload.sync()
+
+			expect(mockFileHash).toHaveBeenCalled()
+			expect(transfers.upload).not.toHaveBeenCalled()
+			expect(cameraUploadState.hashes.get("a1")).toMatchObject({ verifiedModificationTime: 9999 })
+		})
+
+		it("uploads when there is no shield entry at all", async () => {
+			setupViewTouched({ verified: null })
+
+			await cameraUpload.sync()
+
+			expect(mockFileHash).toHaveBeenCalled()
+			expect(transfers.upload).toHaveBeenCalledTimes(1)
+		})
+
+		it("never suppresses a delta for a file missing from the remote listing", async () => {
+			// THE no-regression case. A remotely-deleted photo is shielded on purpose at the UPLOAD
+			// gate; mirror mode is the opt-out, and it works by dropping the shield entry so the
+			// already-produced delta re-uploads. If the delta gate reached this branch there would be
+			// no delta left for it to act on.
+			//
+			// Mirror mode is what makes this discriminating: WITHOUT it, the delta gate and the upload
+			// gate produce the same observable outcome (no upload either way, since the upload gate
+			// skips before getUri), so the test would pass under the regression it is named for.
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg", creationTime: 1000, modificationTime: 9999 }])
+
+			vi.mocked(secureStore.get).mockImplementation(async (key: string) =>
+				key === CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY ? (true as any) : (ENABLED_CONFIG as any)
+			)
+
+			cameraUploadState.hashes.set("a1", {
+				md5: "mock-md5",
+				verifiedModificationTime: 9999
+			})
+
+			// Remote listing is EMPTY — nothing at the asset's tree path.
+			await cameraUpload.sync()
+
+			expect(transfers.upload).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not suppress the delta for an album the entry does not cover", async () => {
+			// One asset in two selected albums has ONE entry and two destinations. Suppressing on a
+			// match for the first would leave the second album permanently missing the photo.
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg", creationTime: 1000, modificationTime: 9999 }])
+			ml.addAlbum({ id: "album-2", title: "Second", assetIds: ["a1"] })
+
+			vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, albumIds: ["album-1", "album-2"] } as any)
+
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					listDirRecursiveWithPaths: vi.fn(async () => ({
+						files: [
+							{ path: "/Camera Roll/photo.jpg", file: { uuid: "remote-1" } },
+							{ path: "/Second/photo.jpg", file: { uuid: "remote-2" } }
+						]
+					})),
+					createDir: vi.fn(async () => ({ uuid: "dir" })),
+					getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
+				}
+			} as any)
+
+			vi.mocked(unwrapFileMeta).mockReturnValue({ meta: { name: "photo.jpg", created: 1000n, modified: 2000n } } as any)
+
+			// Verified for the first album only.
+			cameraUploadState.hashes.set("a1", {
+				md5: "mock-md5",
+				verifiedModificationTime: 9999,
+				paths: ["/camera roll/photo.jpg"]
+			})
+
+			await cameraUpload.sync()
+
+			// The uncovered album still gets its delta, so the asset is still processed.
+			expect(mockFileHash).toHaveBeenCalled()
+		})
+
+		it("does not let view-touched assets consume a background run's upload budget", async () => {
+			// The reason this gate is a correctness fix and not just an optimisation. A background pass
+			// sorts deltas by modificationTime DESCENDING and slices to maxUploads, and a just-viewed
+			// photo carries the newest mtime of all — so phantoms sort to the FRONT, take every slot,
+			// then get skipped, and the real backlog makes zero progress run after run.
+			setupLocalAssets([
+				{ id: "viewed", filename: "viewed.jpg", creationTime: 1000, modificationTime: 9999 },
+				{ id: "new1", filename: "new1.jpg", creationTime: 1000, modificationTime: 3000 },
+				{ id: "new2", filename: "new2.jpg", creationTime: 1000, modificationTime: 2500 }
+			])
+
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					listDirRecursiveWithPaths: vi.fn(async () => ({
+						files: [{ path: "/Camera Roll/viewed.jpg", file: { uuid: "remote-1" } }]
+					})),
+					createDir: vi.fn(async () => ({ uuid: "dir" })),
+					getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
+				}
+			} as any)
+
+			vi.mocked(unwrapFileMeta).mockReturnValue({ meta: { name: "viewed.jpg", created: 1000n, modified: 2000n } } as any)
+
+			cameraUploadState.hashes.set("viewed", {
+				md5: "mock-md5",
+				verifiedModificationTime: 9999
+			})
+
+			// One slot. The viewed photo would win the sort; the backlog must get it instead.
+			await cameraUpload.sync({ background: true, maxUploads: 1 })
+
+			expect(transfers.upload).toHaveBeenCalledTimes(1)
+			expect(vi.mocked(transfers.upload).mock.calls[0]?.[0]?.name).toBe("new1.jpg")
+		})
+	})
+
+	/**
+	 * A shield entry means "this content is already at its destination", but the tree paths it carries
+	 * are relative to the camera-upload root — so they keep matching after the user repoints camera
+	 * upload, and a brand new empty folder reads as "everything was deleted remotely", which is
+	 * deliberately not re-uploaded. Pairing the shield with the destination it was built against is
+	 * what makes those two situations distinguishable.
+	 */
+	describe("remote destination changes", () => {
+		function shieldedAsset() {
+			setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+			cameraUploadState.hashes.set("a1", {
+				md5: "mock-md5",
+				verifiedModificationTime: 2000,
+				paths: ["/camera roll/photo.jpg"]
+			})
+		}
+
+		it("re-uploads the library when the backup folder changed", async () => {
+			// Without this the sync completes successfully while the new folder stays empty — the worst
+			// shape for a backup app, because nothing looks wrong.
+			shieldedAsset()
+
+			await cameraUpload.sync({ manual: true })
+
+			expect(transfers.upload).not.toHaveBeenCalled()
+
+			vi.mocked(secureStore.get).mockResolvedValue({
+				...ENABLED_CONFIG,
+				remoteDir: { inner: [{ uuid: "a-different-folder" }] }
+			} as any)
+
+			await cameraUpload.sync({ manual: true })
+
+			expect(transfers.upload).toHaveBeenCalled()
+		})
+
+		it("drops the shield entries rather than working around them", async () => {
+			shieldedAsset()
+
+			await cameraUpload.sync({ manual: true })
+
+			vi.mocked(secureStore.get).mockResolvedValue({
+				...ENABLED_CONFIG,
+				remoteDir: { inner: [{ uuid: "a-different-folder" }] }
+			} as any)
+
+			await cameraUpload.sync({ manual: true })
+
+			// The entry alone proves nothing here — it is content-identical before and after, so it is
+			// present whether or not the wipe happened. The wipe itself is the claim.
+			expect(vi.mocked(cameraUploadState.clearHashes)).toHaveBeenCalled()
+
+			// Re-verified against the NEW destination, so the entry is rewritten rather than absent.
+			expect(cameraUploadState.hashes.get("a1")).toBeDefined()
+		})
+
+		it("adopts the destination without clearing when none was ever recorded", async () => {
+			// THE upgrade guard. Every existing install has a populated shield and no recorded
+			// destination; treating "unknown" as "changed" would re-upload every user's entire library
+			// the first time they open the updated app.
+			shieldedAsset()
+
+			await cameraUpload.sync({ manual: true })
+
+			expect(transfers.upload).not.toHaveBeenCalled()
+			expect(cameraUploadState.hashes.get("a1")).toBeDefined()
+			expect(vi.mocked(cameraUploadState.clearHashes)).not.toHaveBeenCalled()
+
+			// Adopted, so the NEXT pass compares against it rather than adopting again.
+			expect((cameraUploadState as unknown as { destination: { current: string | null } }).destination.current).toBe("remote-uuid")
+		})
+
+		it("does not re-upload when the destination is unchanged across passes", async () => {
+			shieldedAsset()
+
+			await cameraUpload.sync({ manual: true })
+			await cameraUpload.sync({ manual: true })
+			await cameraUpload.sync({ manual: true })
+
+			expect(transfers.upload).not.toHaveBeenCalled()
+		})
+
+		it("detects the change on a background pass too", async () => {
+			// The first fire after a change may well be a background one; uploading against a shield
+			// built for somewhere else would silently skip the new folder until a foreground sync.
+			//
+			// The prior destination is seeded rather than produced by a foreground sync: a completed
+			// foreground pass arms the auto-sync throttle, and a background pass is not `manual`, so it
+			// would bail before reaching any of this.
+			shieldedAsset()
+			;(cameraUploadState as unknown as { destination: { current: string | null } }).destination.current = "remote-uuid"
+
+			vi.mocked(secureStore.get).mockResolvedValue({
+				...ENABLED_CONFIG,
+				remoteDir: { inner: [{ uuid: "a-different-folder" }] }
+			} as any)
+
+			await cameraUpload.sync({ background: true, maxUploads: 3 })
+
+			expect(transfers.upload).toHaveBeenCalled()
+		})
+
+		it("does not record the new destination when the wipe failed", async () => {
+			// Order matters only on failure: remembering a clear that never happened would leave a
+			// shield built for the OLD folder in place forever, and no later pass would retry.
+			shieldedAsset()
+			;(cameraUploadState as unknown as { destination: { current: string | null } }).destination.current = "remote-uuid"
+
+			vi.mocked(secureStore.get).mockResolvedValue({
+				...ENABLED_CONFIG,
+				remoteDir: { inner: [{ uuid: "a-different-folder" }] }
+			} as any)
+
+			vi.mocked(cameraUploadState.clearHashes).mockRejectedValueOnce(new Error("kv unavailable"))
+
+			await cameraUpload.sync({ manual: true })
+
+			expect(transfers.upload).not.toHaveBeenCalled()
+
+			// The next pass still sees a change and retries the wipe, so the library reaches the new
+			// folder rather than being stranded by one transient failure.
+			await cameraUpload.sync({ manual: true })
+
+			expect(transfers.upload).toHaveBeenCalled()
+		})
+
+		it("does not clear the shield when the destination is unusable", async () => {
+			// A deleted or trashed folder must not be mistaken for a change of folder — the
+			// existence gate runs first precisely so a server-side deletion cannot wipe the shield.
+			shieldedAsset()
+
+			await cameraUpload.sync({ manual: true })
+
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					listDirRecursiveWithPaths: vi.fn(async () => ({ files: [] })),
+					createDir: vi.fn(async () => ({ uuid: "dir" })),
+					// Undefined = the directory is gone.
+					getDirOptional: vi.fn(async () => undefined)
+				}
+			} as any)
+
+			vi.mocked(secureStore.get).mockResolvedValue({
+				...ENABLED_CONFIG,
+				remoteDir: { inner: [{ uuid: "a-different-folder" }], tag: "Normal" }
+			} as any)
+
+			await cameraUpload.sync({ manual: true })
+
+			expect(cameraUploadState.hashes.get("a1")).toBeDefined()
+			expect(transfers.upload).not.toHaveBeenCalled()
 		})
 	})
 
@@ -2933,6 +3650,371 @@ describe("sync flow — remote collision resolution", () => {
 
 // ─── HEIC→JPG conversion: stem-key dedup + no eternal re-upload loop ──────────
 
+/**
+ * The conversion STEP, as distinct from the dedup naming around it.
+ *
+ * The block below this one covers how a converted file is KEYED. Nothing covered whether the
+ * conversion ran: with the manipulator stubbed to return undefined, every conversion threw into
+ * convertHeicToJpg's fail-open catch and uploaded the original, so removing the conversion call
+ * outright kept the suite green while users would have shipped .heic bytes under a .jpg name.
+ */
+/**
+ * Failure modes a real camera roll produces that the suite never exercised: the photo is gone by the
+ * time its turn comes, and the device runs out of room mid-staging. Both must fail exactly ONE asset
+ * — the pass has to survive, the rest of the backlog has to upload, and nothing may be recorded that
+ * would shield the failed photo from a later retry.
+ */
+/**
+ * One photo across a realistic lifetime: backed up, viewed, viewed again, edited, deleted. Almost
+ * every other test in this file is single-pass, and the state that decides camera upload's behaviour
+ * — the shield ledger — only exists BETWEEN passes. This is where a regression in it shows up.
+ */
+describe("sync flow — a photo's life across passes", () => {
+	// Scoped teardown: the md5 getter below is a prototype spy, and leaving it installed makes every
+	// later test in the file see content-derived digests instead of the shared "mock-md5".
+	let md5Spy: { mockRestore: () => void } | null = null
+
+	afterEach(() => {
+		md5Spy?.mockRestore()
+		md5Spy = null
+	})
+
+	// Remote grows as uploads land, and each file reports the mtime it was uploaded with, so the
+	// local-newer comparison behaves as it does in production rather than being pinned to a constant.
+	function wireRemote(remote: Map<string, number>) {
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({
+					files: [...remote.keys()].map(path => ({ path, file: { uuid: `uuid:${path}` } }))
+				})),
+				createDir: vi.fn(async () => ({ uuid: "dir" })),
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
+			}
+		} as any)
+
+		vi.mocked(unwrapFileMeta).mockImplementation((file: any) => {
+			const path = String(file?.uuid ?? "").replace(/^uuid:/, "")
+
+			return {
+				meta: {
+					name: path.slice(path.lastIndexOf("/") + 1),
+					created: 1000n,
+					modified: BigInt(remote.get(path) ?? 0)
+				}
+			} as any
+		})
+	}
+
+	it("uploads once, ignores views, re-uploads a real edit, and forgets a deleted photo", async () => {
+		const remote = new Map<string, number>()
+
+		wireRemote(remote)
+
+		// Content-derived digests: the shared mock returns a constant "mock-md5" for every file, which
+		// cannot distinguish an edit from a view. Everything downstream (including BLAKE3, which the
+		// hash mock derives from md5) follows from this.
+		md5Spy = vi.spyOn(File.prototype, "md5", "get").mockImplementation(function (this: { uri: string }) {
+			const entry = fs.get(this.uri)
+
+			return entry instanceof Uint8Array ? `md5-${entry.join("-")}` : null
+		}) as unknown as { mockRestore: () => void }
+
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+		ml.addAsset({
+			id: "a1",
+			filename: "photo.jpg",
+			uri: "file:///media/a1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+
+		const stored = ml.assets.get("a1") as { modificationTime: number }
+
+		// ── Pass 1: a new photo is backed up.
+		await cameraUpload.sync()
+
+		expect(uploadedPayloads).toHaveLength(1)
+
+		remote.set("/Camera Roll/photo.jpg", 2000)
+
+		// ── Pass 2: opening it in Photos bumps the modification date. Content is untouched, so the
+		// md5 comparison clears it and the ledger records the new time.
+		stored.modificationTime = 5000
+
+		await cameraUpload.sync({ manual: true })
+
+		expect(uploadedPayloads).toHaveLength(1)
+		expect(cameraUploadState.hashes.get("a1")).toMatchObject({ verifiedModificationTime: 5000 })
+
+		// ── Pass 3: nothing changed since. Now the delta is never even produced, so no file is read.
+		mockFileHash.mockClear()
+
+		await cameraUpload.sync({ manual: true })
+
+		expect(mockFileHash).not.toHaveBeenCalled()
+		expect(uploadedPayloads).toHaveLength(1)
+
+		// ── Pass 4: a real edit — different bytes AND a newer time. This must reach the server.
+		fs.set("file:///media/a1", new Uint8Array([4, 5, 6]))
+		stored.modificationTime = 7000
+
+		await cameraUpload.sync({ manual: true })
+
+		expect(uploadedPayloads).toHaveLength(2)
+		expect(uploadedPayloads[1]?.bytes).toEqual(new Uint8Array([4, 5, 6]))
+
+		// ── Pass 5: the photo is deleted from the device. Its ledger entry is hygiene-pruned, so a
+		// re-added photo is not shielded by a stale entry from its previous life.
+		ml.assets.delete("a1")
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: [] })
+
+		await cameraUpload.sync({ manual: true })
+
+		expect(cameraUploadState.hashes.get("a1")).toBeUndefined()
+	})
+})
+
+describe("sync flow — photo access is revoked between passes", () => {
+	it("does not prune the shield ledger when it can no longer see the library", async () => {
+		// Revoking access makes every asset look "gone from the device". If the pass got as far as
+		// the hygiene prune it would wipe the whole ledger, and re-granting access would re-upload
+		// the user's entire camera roll. The permission gate runs before the prune for this reason.
+		// Revocation does not just flip a flag — the library stops returning assets, which is what
+		// makes the ledger look stale. The album is left EMPTY to model that; a test that kept the
+		// asset visible would pass with or without the gate and prove nothing.
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: [] })
+
+		cameraUploadState.hashes.set("a1", {
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+
+		vi.mocked(hasAllNeededMediaPermissions).mockResolvedValueOnce(false as any)
+
+		await cameraUpload.sync({ manual: true })
+
+		expect(cameraUploadState.hashes.get("a1")).toBeDefined()
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+})
+
+describe("sync flow — the asset disappears mid-pass", () => {
+	function setupTwoAssets() {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["gone", "survivor"] })
+
+		for (const id of ["gone", "survivor"]) {
+			ml.addAsset({
+				id,
+				filename: `${id}.jpg`,
+				uri: `file:///media/${id}`,
+				mediaType: MediaType.IMAGE,
+				creationTime: 1000,
+				modificationTime: 2000
+			})
+			fs.set(`file:///media/${id}`, new Uint8Array([1, 2, 3]))
+		}
+	}
+
+	it("uploads the rest of the backlog when one photo was deleted after the listing", async () => {
+		// The listing is a snapshot; the user can delete a photo while the pass is running. Losing
+		// the whole pass to one missing file would stall every remaining upload.
+		setupTwoAssets()
+		fs.delete("file:///media/gone")
+
+		await cameraUpload.sync()
+
+		expect(uploadedPayloads).toHaveLength(1)
+		expect(uploadedPayloads[0]?.name).toBe("survivor.jpg")
+	})
+
+	it("records no shield entry for the photo it could not read", async () => {
+		// A shield entry written here would mark content as backed up that never left the device,
+		// and the mtime fast path would then skip it forever.
+		setupTwoAssets()
+		fs.delete("file:///media/gone")
+
+		await cameraUpload.sync()
+
+		expect(cameraUploadState.hashes.get("gone")).toBeUndefined()
+		expect(cameraUploadState.hashes.get("survivor")).toBeDefined()
+	})
+
+	it("surfaces the failure instead of failing silently", async () => {
+		// A photo that never made it must reach the issues surface — a silent drop is the failure
+		// mode a backup app can least afford.
+		setupTwoAssets()
+		fs.delete("file:///media/gone")
+
+		await cameraUpload.sync()
+
+		expect(mockSetErrors).toHaveBeenCalled()
+
+		// Attribution matters: the issues modal offers a retry per asset, so an error with no assetId
+		// is not actionable.
+		const surfaced = mockSetErrors.mock.calls.flatMap(call => (call[0] as (errors: unknown[]) => unknown[])([]))
+
+		expect(surfaced.some(error => (error as { assetId?: string }).assetId === "gone")).toBe(true)
+	})
+})
+
+describe("sync flow — the device runs out of storage while staging", () => {
+	it("fails only the asset whose staging copy failed", async () => {
+		// Staging copies the asset into filen-tmp before upload. On a full disk that copy throws,
+		// and the SDK/FS already bubble ENOSPC — the pipeline just has to not treat it as fatal.
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1", "a2"] })
+
+		for (const id of ["a1", "a2"]) {
+			ml.addAsset({
+				id,
+				filename: `${id}.jpg`,
+				uri: `file:///media/${id}`,
+				mediaType: MediaType.IMAGE,
+				creationTime: 1000,
+				modificationTime: 2000
+			})
+			fs.set(`file:///media/${id}`, new Uint8Array([1, 2, 3]))
+		}
+
+		const copy = vi.spyOn(File.prototype, "copy")
+
+		copy.mockRejectedValueOnce(new Error("ENOSPC: no space left on device"))
+
+		try {
+			await cameraUpload.sync()
+		} finally {
+			// Restored unconditionally: a prototype spy left installed by a throwing sync would follow
+			// every later test in the file.
+			copy.mockRestore()
+		}
+
+		expect(uploadedPayloads).toHaveLength(1)
+	})
+
+	it("leaves no shield entry behind for the asset that never uploaded", async () => {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+		ml.addAsset({
+			id: "a1",
+			filename: "a1.jpg",
+			uri: "file:///media/a1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+
+		const copy = vi.spyOn(File.prototype, "copy")
+
+		copy.mockRejectedValue(new Error("ENOSPC: no space left on device"))
+
+		try {
+			await cameraUpload.sync()
+		} finally {
+			copy.mockRestore()
+		}
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+		expect(cameraUploadState.hashes.get("a1")).toBeUndefined()
+	})
+})
+
+describe("sync flow — HEIC→JPG conversion actually converts", () => {
+	function setupHeic() {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["heic-1"] })
+		ml.addAsset({
+			id: "heic-1",
+			filename: "photo.heic",
+			uri: "file:///media/heic-1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/heic-1", new Uint8Array([1, 2, 3]))
+
+		vi.mocked(secureStore.get).mockImplementation(async (key: string) =>
+			key === CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY ? (true as any) : (ENABLED_CONFIG as any)
+		)
+	}
+
+	it("uploads the converted bytes, not the original HEIC", async () => {
+		setupHeic()
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(uploadedBytes()).toEqual(new Uint8Array([9, 9]))
+	})
+
+	it("uploads under a .jpg name so the remote name matches the bytes", async () => {
+		setupHeic()
+
+		await cameraUpload.sync()
+
+		expect(vi.mocked(transfers.upload).mock.calls[0]?.[0]?.name).toBe("photo.jpg")
+	})
+
+	it("falls back to the original when conversion fails, rather than losing the photo", async () => {
+		// Fail-open is deliberate: a decode failure must still back the photo up. The contract is
+		// that the ORIGINAL bytes go out under the ORIGINAL name — not a half-converted file.
+		setupHeic()
+
+		mockManipulate.mockImplementationOnce(() => {
+			throw new Error("decode failed")
+		})
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(uploadedBytes()).toEqual(new Uint8Array([1, 2, 3]))
+		expect(vi.mocked(transfers.upload).mock.calls[0]?.[0]?.name).toBe("photo.heic")
+	})
+
+	it("leaves a non-HEIC asset untouched even with conversion enabled", async () => {
+		// convertHeic is a global flag; a JPEG under it must pass through byte-identical rather
+		// than be re-encoded for nothing.
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["jpg-1"] })
+		ml.addAsset({
+			id: "jpg-1",
+			filename: "photo.jpg",
+			uri: "file:///media/jpg-1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/jpg-1", new Uint8Array([1, 2, 3]))
+
+		vi.mocked(secureStore.get).mockImplementation(async (key: string) =>
+			key === CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY ? (true as any) : (ENABLED_CONFIG as any)
+		)
+
+		await cameraUpload.sync()
+
+		expect(uploadedBytes()).toEqual(new Uint8Array([1, 2, 3]))
+	})
+
+	it("composes with compression: converts first, then compresses the JPEG", async () => {
+		// Both enabled at once is a real configuration and the order matters — converting at max
+		// quality and then compressing is not the same as compressing a HEIC. Two manipulator
+		// passes is the observable proof that both steps ran on this asset.
+		setupHeic()
+
+		vi.mocked(secureStore.get).mockImplementation(async (key: string) =>
+			key === CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY ? (true as any) : ({ ...ENABLED_CONFIG, compress: true } as any)
+		)
+
+		await cameraUpload.sync()
+
+		// Order, not just count: converting at max quality and THEN compressing is not the same as
+		// compressing a HEIC, and a count of two passes for either order.
+		expect(mockManipulate).toHaveBeenCalledTimes(2)
+		expect(String(mockManipulate.mock.calls[0]?.[0])).toMatch(/\.heic$/i)
+		expect(String(mockManipulate.mock.calls[1]?.[0])).toMatch(/\.jpe?g$/i)
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(transfers.upload).mock.calls[0]?.[0]?.name).toBe("photo.jpg")
+	})
+})
+
 describe("sync flow — HEIC→JPG conversion dedup", () => {
 	function setupHeicAsset() {
 		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["heic-1"] })
@@ -4444,6 +5526,47 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 			md5: "mock-md5",
 			verifiedModificationTime: 2000
 		})
+	})
+
+	it("mirror mode ON: content dedup must not cancel the re-upload, or the wave never converges", async () => {
+		// Mirror mode asks for anything missing from its remote PATH to be put back. If the content
+		// check cancels that because the same bytes sit in the directory under another name, the
+		// setting is silently overridden AND the pass never converges: the mirror wave drops the shield
+		// entry every time, the skip re-creates it, and the asset pays a full MD5 + BLAKE3 read on
+		// every foreground sync, forever.
+		setupAsset()
+		enableMirrorMode()
+
+		// The tree key is absent remotely (so mirror fires), but the same content IS in the directory
+		// under a different name — the rename case.
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({
+					files: [{ path: "/Camera Roll/renamed.jpg", file: { uuid: "remote-1" } }]
+				})),
+				createDir: vi.fn(async () => ({ uuid: "dir" })),
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
+			}
+		} as any)
+
+		vi.mocked(unwrapFileMeta).mockReturnValue({
+			meta: {
+				name: "renamed.jpg",
+				created: 1000n,
+				modified: 2000n,
+				size: 3n,
+				hash: blake3BytesForContent("mock-md5")
+			}
+		} as any)
+
+		cameraUploadState.hashes.set("a1", {
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
 	})
 
 	it("mirror mode ON: entries present remotely are NOT dropped (no upload either)", async () => {

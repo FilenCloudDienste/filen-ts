@@ -35,6 +35,7 @@ vi.mock("expo-media-library/next", async () => await import("@/tests/mocks/expoM
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("react-native-blob-util", async () => await import("@/tests/mocks/reactNativeBlobUtil"))
+vi.mock("@preeternal/react-native-file-hash", async () => await import("@/tests/mocks/reactNativeFileHash"))
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
@@ -186,6 +187,7 @@ vi.mock("@/lib/cache", () => ({
 // successful upload; the full mock closes that hole.
 vi.mock("@/features/cameraUpload/cameraUploadState", () => {
 	const hashes = new Map<string, unknown>()
+	const destination: { current: string | null } = { current: null }
 	const aborts = new Map<string, number>()
 
 	return {
@@ -195,6 +197,29 @@ vi.mock("@/features/cameraUpload/cameraUploadState", () => {
 			loadHashes: async () => {},
 			loadAborts: async () => {},
 			getHashSync: (key: string) => hashes.get(key),
+			// Destination pairing: the shield is scoped to one remote directory, so the fake tracks it
+			// the same way — a bare stub would make every pass look like "never recorded".
+			destination,
+			getSyncedDestination: async () => destination.current,
+			setSyncedDestination: async (uuid: string) => {
+				destination.current = uuid
+			},
+			clearHashes: vi.fn(async () => {
+				hashes.clear()
+			}),
+			getHashMany: async (keys: string[]) => {
+				const found = new Map<string, unknown>()
+
+				for (const key of keys) {
+					const value = hashes.get(key)
+
+					if (value !== undefined) {
+						found.set(key, value)
+					}
+				}
+
+				return found
+			},
 			getHash: async (key: string) => hashes.get(key),
 			hashKeys: () => [...hashes.keys()],
 			setHash: async (key: string, entry: unknown) => {
@@ -258,6 +283,12 @@ vi.mock("@/lib/signals", () => ({
 		pause() {}
 		resume() {}
 		dispose() {}
+		// A background pass consults this before doing any work. Omitting it makes every such pass
+		// throw into sync()'s catch and vanish — which is exactly how the benchmark's background
+		// scenario was silently voided, and no foreground-only test can reveal it.
+		isPaused() {
+			return false
+		}
 	}
 }))
 
@@ -427,7 +458,7 @@ function buildMixedFixture(): FixtureAsset[] {
 		"IMG [edited] (1).jpg",
 		"literal %20 percent.jpg",
 		"umlauts äöü ß.jpg",
-		"quote's \"double\".jpg",
+		'quote\'s "double".jpg',
 		"braces {b} caret ^ pipe ¦.jpg",
 		"plus+and&amp.jpg",
 		"trailing space .jpg",

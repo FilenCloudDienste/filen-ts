@@ -2,16 +2,24 @@ import * as MediaLibrary from "expo-media-library/next"
 import * as MediaLibraryLegacy from "expo-media-library/legacy"
 import logger from "@/lib/logger"
 import auth from "@/lib/auth"
-import { type FileWithPath, AnyNormalDir, AnyNormalDir_Tags, AnyDirWithContext, NonRootDir_Tags, parseName, encodeName } from "@filen/sdk-rs"
+import {
+	type FileWithPath,
+	AnyNormalDir,
+	AnyNormalDir_Tags,
+	AnyDirWithContext,
+	NonRootDir_Tags,
+	parseName,
+	encodeName
+} from "@filen/sdk-rs"
 import { normalizeModificationTimestampForComparison } from "@/lib/utils"
 import { type UnwrapFileMetaResult, unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
-import { normalizeFilePathForExpo, normalizeFilePathForSdk } from "@/lib/paths"
+import { normalizeFilePathForExpo } from "@/lib/paths"
 import { isConvertHeicToJpgEnabled, convertHeicToJpg } from "@/lib/imageConversion"
 import { transplantMetadata } from "@/modules/filen-exif"
 import { PauseSignal } from "@/lib/signals"
 import transfers from "@/features/transfers/transfers"
 import * as FileSystem from "expo-file-system"
-import * as ReactNativeBlobUtil from "react-native-blob-util"
+import { fileHash } from "@preeternal/react-native-file-hash"
 import { run, Semaphore, fastLocaleCompare } from "@filen/utils"
 import useCameraUploadStore from "@/features/cameraUpload/store/useCameraUpload.store"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
@@ -28,6 +36,9 @@ import cache from "@/lib/cache"
 import cameraUploadState, { type CameraUploadHashEntry } from "@/features/cameraUpload/cameraUploadState"
 import i18n from "@/lib/i18n"
 import {
+	blake3ToHex,
+	parentTreePath,
+	shieldCoversModification,
 	modifyAssetPathOnCollision,
 	collisionNameSuffix,
 	albumFolderTitle,
@@ -195,6 +206,66 @@ const UPLOAD_PIPELINE_CONCURRENCY = 16
 // with the listing objects.
 const remoteFileMetaCache = new WeakMap<object, UnwrapFileMetaResult>()
 
+const NO_REMOTE_CONTENT_HASHES: ReadonlySet<string> = new Set()
+
+/**
+ * Remote content hashes for each directory, grouped by the SIZE of the content they belong to.
+ *
+ * Built from the listing ALREADY in memory — no request, no file read, no hashing — and reusing the
+ * unwrap the listing pass performed, so this costs one walk over a tree that was fetched anyway.
+ *
+ * Grouping by size is what lets the caller decide whether hashing is worth it at all: equal hashes
+ * imply equal length, so a local file whose size matches nothing here cannot match anything here,
+ * and the full-file read can be skipped outright. It is only ever used in that direction — size
+ * never decides that two files ARE the same, which would silently drop a re-encode that happened to
+ * preserve the byte count. The skip decision remains entirely the hash's.
+ *
+ * `size` is safe to compare against a local file's length: the SDK accumulates it over the same
+ * plaintext stream that feeds the hasher (`confirm_upload_callback(hash, self.written)`), before
+ * encryption.
+ *
+ * Files uploaded before the SDK started recording a hash carry none, so they are simply absent
+ * here. That is the safe direction: an absent hash can only fail to cancel an upload, never cancel
+ * one it should not have.
+ */
+function buildRemoteContentHashIndex(tree: RemoteTree): Map<string, Map<number, Set<string>>> {
+	const index = new Map<string, Map<number, Set<string>>>()
+
+	for (const path in tree) {
+		const entry = tree[path]
+
+		if (!entry) {
+			continue
+		}
+
+		const meta = (remoteFileMetaCache.get(entry.file) ?? unwrapFileMeta(entry.file)).meta
+
+		if (!meta?.hash) {
+			continue
+		}
+
+		const directory = parentTreePath(path)
+		let bySize = index.get(directory)
+
+		if (!bySize) {
+			bySize = new Map<number, Set<string>>()
+
+			index.set(directory, bySize)
+		}
+
+		const size = Number(meta.size)
+		const hashes = bySize.get(size)
+
+		if (hashes) {
+			hashes.add(blake3ToHex(meta.hash))
+		} else {
+			bySize.set(size, new Set([blake3ToHex(meta.hash)]))
+		}
+	}
+
+	return index
+}
+
 // Both of these scale with library size and are the two pre-upload phases that hold the JS thread —
 // the shape behind "app freezes for a long time after startup" on a 30k-asset camera roll, which no
 // local test account reproduces. Production persists warn/error only, so a debug-level timing never
@@ -206,29 +277,35 @@ const SLOW_LISTING_WARN_MS = 10000
 const SLOW_PIPELINE_WARN_HASHES = 500
 
 /**
- * MD5 of the asset at `uri`, computed OFF the JS thread.
+ * Hash of the file at `uri`, computed OFF the JS thread.
  *
  * expo-file-system's `File.md5` is a synchronous property: both platforms stream the whole file
  * inside a JSI getter, so the JS thread is blocked for the length of every hash. That is the cost
  * that dominates a first sync (or a ledger rebuild) of a large library — thousands of full-file
- * reads, each one a frame-stopper. blob-util does the same streaming MD5 with the same bounded
- * memory (1MB chunks) but on a background queue: iOS dispatches it to the module's own serial
- * methodQueue, Android to its ThreadPoolExecutor. Awaiting it leaves the JS thread free throughout,
- * and on Android several assets hash in parallel.
+ * reads, each one a frame-stopper. This streams natively with the same bounded memory but off the
+ * JS thread, so awaiting it leaves the thread free throughout.
  *
- * Byte-compatible with what it replaces, which is the load-bearing part: both implementations emit
- * lowercase hex, and this md5 IS the persisted dedup shield key, so every existing ledger entry
+ * Byte-compatible with the blob-util MD5 it replaces, which is the load-bearing part: both emit
+ * lowercase hex, and that md5 IS the persisted dedup shield key, so every existing ledger entry
  * stays valid and no one re-uploads their library.
  *
- * The path has to be normalised first, and passing `uri` through would fail in a way that only
- * shows up in the field: `Asset.getUri()` returns a PERCENT-ENCODED `file://` URL, iOS' hash hands
- * its argument straight to `fileExistsAtPath:` (no scheme stripping, no decoding), and Android's
- * `normalizePath` strips `file://` with a plain string replace and likewise never decodes — so any
- * asset whose name contains a space would ENOENT on both.
+ * Unlike blob-util this takes the pass's abort signal, so cancelling a sync no longer has to wait
+ * out a multi-gigabyte video mid-hash.
+ *
+ * The path is normalised to a properly-encoded `file://` URI, and the encoding is load-bearing on
+ * iOS. Handed a BARE path, the native takes its fallback branch and applies `removingPercentEncoding`
+ * — a SECOND decode on top of ours — so an asset whose real name contains a literal `%XX` (the class
+ * the tree-key composition already guards) resolves to a different name and ENOENTs on every pass,
+ * permanently. Handed a `file://` URI it takes `URL(string:).path` instead, which decodes exactly
+ * once; Android's `Uri.getPath()` likewise. blob-util decoded on neither platform, which is why the
+ * previous call site passed the bare path.
  */
-async function hashAssetMd5(uri: string): Promise<string> {
+async function hashAsset(uri: string, algorithm: "MD5" | "BLAKE3", signal?: AbortSignal): Promise<string> {
 	const result = await run(async () => {
-		return await ReactNativeBlobUtil.default.fs.hash(normalizeFilePathForSdk(uri), "md5")
+		return await fileHash(normalizeFilePathForExpo(uri), {
+			algorithm,
+			signal
+		})
 	})
 
 	if (!result.success || !result.data) {
@@ -236,9 +313,14 @@ async function hashAssetMd5(uri: string): Promise<string> {
 		// the same thing to the pipeline, so keep throwing the localized message the call site always
 		// threw — but log the real reason first, or switching to a rejecting API would cost us the
 		// diagnostics the old falsy check never had.
-		logger.warn("cameraUpload", "Asset hash failed", {
-			error: result.success ? "empty hash" : result.error
-		})
+		// Cancellation is not a failure. The hasher is abortable now, so cancel() rejects every hash
+		// in flight — without this a single cancel writes one persisted warn per pipeline worker.
+		if (signal?.aborted !== true) {
+			logger.warn("cameraUpload", "Asset hash failed", {
+				algorithm,
+				error: result.success ? "empty hash" : result.error
+			})
+		}
 
 		throw new Error(i18n.t("camera_upload_processing_failed"))
 	}
@@ -588,8 +670,7 @@ class CameraUpload {
 					// clean names pass through byte-identical, keeping existing dedup keys.
 					// A null (no name, or no valid remote name derivable) joins the existing
 					// missing-filename error surface — excluded from the tree, never silent.
-					const filename =
-						entry.filename === null || entry.filename.length === 0 ? null : canonicalRemoteName(entry.filename)
+					const filename = entry.filename === null || entry.filename.length === 0 ? null : canonicalRemoteName(entry.filename)
 
 					if (filename === null) {
 						degraded = true
@@ -956,6 +1037,21 @@ class CameraUpload {
 		}
 	}
 
+	/**
+	 * The shield entry for an asset: keyed by the STABLE asset id, with the legacy tree-path key as
+	 * fallback until a clean foreground pass re-keys it.
+	 *
+	 * Background passes hydrate only the abort ledger, not the hash ledger, so they read points from
+	 * the kv where foreground reads the loaded index synchronously.
+	 */
+	private async shieldEntry(assetId: string, treePath: string, background: boolean): Promise<CameraUploadHashEntry | undefined> {
+		return normalizeCameraUploadHashEntry(
+			background
+				? ((await cameraUploadState.getHash(assetId)) ?? (await cameraUploadState.getHash(treePath)))
+				: (cameraUploadState.getHashSync(assetId) ?? cameraUploadState.getHashSync(treePath))
+		)
+	}
+
 	private async deltas({ config, convertHeic, signal }: { config: Config; convertHeic: boolean; signal: AbortSignal }): Promise<{
 		deltas: Delta[]
 		localListing: LocalListing
@@ -1002,6 +1098,10 @@ class CameraUpload {
 		const remoteTree = remoteListing.tree
 		const deltas: Delta[] = []
 
+		// Assets whose remote copy looks older. Whether each is a REAL delta or an already-verified
+		// modification time is decided below, once the ledger has been read for all of them at once.
+		const mtimeCandidates: { file: LocalFile; path: string; modificationTime: number }[] = []
+
 		for (const path in localTree) {
 			const localFile = localTree[path]
 
@@ -1033,9 +1133,49 @@ class CameraUpload {
 				normalizeModificationTimestampForComparison(Number(remoteModified)) <
 					normalizeModificationTimestampForComparison(localModified)
 			) {
+				// iOS bumps PHAsset.modificationDate on mere VIEWING, and the new time is never written
+				// back to the remote file — so this comparison stays true for the rest of that photo's
+				// life and the asset re-enters the delta set on every pass, forever. Once the shield has
+				// verified THIS modification time the delta is known to be a no-op, so it is never made.
+				//
+				// The cost is not just wasted work. A background pass sorts by modificationTime
+				// DESCENDING and takes maxUploads(3), so freshly-viewed photos sort to the FRONT and
+				// consume the whole budget before being skipped — browsing the library could starve the
+				// real backlog run after run.
+				//
+				// Deliberately confined to this branch. A delta from the branch above (nothing at that
+				// remote path) must still be produced and left to the upload gate, which shields it on
+				// purpose: a photo deleted remotely stays deleted unless mirror mode is on.
+				//
+				// Resolved in one batch after the walk rather than inline: background passes do not page
+				// the ledger in, so an inline read is a serial native round trip per candidate and the
+				// count grows with how much of the library the user has browsed.
+				mtimeCandidates.push({
+					file: localFile,
+					path,
+					modificationTime: localModified
+				})
+			}
+		}
+
+		if (mtimeCandidates.length > 0) {
+			// Both key generations in one read: the stable asset id, and the legacy tree path that a
+			// clean foreground pass has not re-keyed yet.
+			const entries = await cameraUploadState.getHashMany([
+				...mtimeCandidates.map(candidate => candidate.file.info.id),
+				...mtimeCandidates.map(candidate => candidate.path)
+			])
+
+			for (const candidate of mtimeCandidates) {
+				const entry = normalizeCameraUploadHashEntry(entries.get(candidate.file.info.id) ?? entries.get(candidate.path))
+
+				if (shieldCoversModification(entry, candidate.modificationTime, candidate.path)) {
+					continue
+				}
+
 				deltas.push({
 					type: "upload",
-					file: localFile
+					file: candidate.file
 				})
 			}
 		}
@@ -1265,6 +1405,51 @@ class CameraUpload {
 				}
 			}
 
+			// The shield is scoped to ONE destination. Its entries mean "this content is already at its
+			// destination", but the tree paths they carry are relative to the camera-upload root, so
+			// they keep matching after the user repoints camera upload — and a brand new empty folder
+			// then reads as "everything was deleted remotely", which is deliberately not re-uploaded.
+			// The library would look backed up while the new folder stayed empty.
+			//
+			// Runs after the destination-existence gate so a deleted/trashed directory can never wipe
+			// the shield, and in background too — the first background fire after a change must not
+			// upload against a shield built for somewhere else.
+			const destinationUuid = remoteDir.inner[0].uuid
+
+			const destinationResult = await run(async () => {
+				const syncedDestination = await cameraUploadState.getSyncedDestination()
+
+				if (syncedDestination === null) {
+					// Never recorded: an install that predates this tracking. Adopt the current destination
+					// WITHOUT clearing — treating unknown as "changed" would re-upload every existing
+					// user's whole library on upgrade.
+					await cameraUploadState.setSyncedDestination(destinationUuid)
+
+					return
+				}
+
+				if (syncedDestination !== destinationUuid) {
+					logger.warn("cameraUpload", "Remote destination changed, dropping the hash shield so the library re-uploads", {
+						from: syncedDestination,
+						to: destinationUuid
+					})
+
+					// Recorded only once the wipe succeeded: remembering a clear that did not happen would
+					// leave a shield built for the old destination in place forever.
+					await cameraUploadState.clearHashes()
+					await cameraUploadState.setSyncedDestination(destinationUuid)
+				}
+			})
+
+			if (!destinationResult.success) {
+				// Neither adopt nor clear. Adopting on a failed READ is the trap: it records the current
+				// destination against a shield built for the previous one, and the mismatch is then never
+				// seen again. Leaving the record untouched costs this pass and self-heals on the next.
+				logger.warn("cameraUpload", "Destination check failed, leaving the hash shield untouched", {
+					error: destinationResult.error
+				})
+			}
+
 			// Update UI state
 			useCameraUploadStore.getState().setSyncing(true)
 
@@ -1457,6 +1642,25 @@ class CameraUpload {
 			// shield is supposed to keep this near zero in the steady state.
 			let shieldSkips = 0
 			let hashed = 0
+			let remoteSkips = 0
+
+			// Built on FIRST USE, not up front: a steady-state pass answers every delta from the mtime
+			// shield and never reaches the content check, so it must not pay to walk the remote tree.
+			let remoteContentHashes: Map<string, Map<number, Set<string>>> | null = null
+
+			// Candidates are narrowed by SIZE before anything is read: only content of the same length
+			// can share a hash, so an empty result means the check provably cannot hit and the caller
+			// skips the file read entirely. On a first sync — no hash-bearing files in the destination
+			// at all — that removes every BLAKE3 read in the pass.
+			const remoteContentHashesIn = (treePath: string, size: number | null): ReadonlySet<string> => {
+				if (size === null) {
+					return NO_REMOTE_CONTENT_HASHES
+				}
+
+				remoteContentHashes ??= buildRemoteContentHashIndex(remoteListing.tree)
+
+				return remoteContentHashes.get(parentTreePath(treePath))?.get(size) ?? NO_REMOTE_CONTENT_HASHES
+			}
 
 			const uploadWorker = async (): Promise<void> => {
 				while (true) {
@@ -1500,22 +1704,10 @@ class CameraUpload {
 					// (and then pruned) on every toggle — re-uploading already-backed-up content in both
 					// toggle directions. The path lookup is the LEGACY fallback until a clean foreground
 					// pass migrates old entries to id keys (see the hygiene prune in sync()).
-					const cachedEntry = normalizeCameraUploadHashEntry(
-						params?.background
-							? ((await cameraUploadState.getHash(delta.file.info.id)) ?? (await cameraUploadState.getHash(delta.file.path)))
-							: (cameraUploadState.getHashSync(delta.file.info.id) ?? cameraUploadState.getHashSync(delta.file.path))
-					)
+					const cachedEntry = await this.shieldEntry(delta.file.info.id, delta.file.path, params?.background === true)
 					const modificationTime = delta.file.info.modificationTime
 
-					if (
-						cachedEntry &&
-						modificationTime != null &&
-						cachedEntry.verifiedModificationTime !== -1 &&
-						cachedEntry.verifiedModificationTime === modificationTime &&
-						// Per-path: an asset in several selected albums has one shield entry but
-						// several destination paths — a match for one folder must not starve another.
-						hashEntryCoversPath(cachedEntry, delta.file.path)
-					) {
+					if (shieldCoversModification(cachedEntry, modificationTime, delta.file.path)) {
 						shieldSkips++
 
 						continue
@@ -1543,7 +1735,7 @@ class CameraUpload {
 								// field log (see SLOW_PIPELINE_WARN_HASHES).
 								hashed++
 
-								const md5 = await hashAssetMd5(uri)
+								const md5 = await hashAsset(uri, "MD5", abortController.signal)
 
 								if (cachedEntry && md5 === cachedEntry.md5 && hashEntryCoversPath(cachedEntry, delta.file.path)) {
 									// Content unchanged (view-touched mtime bump or a remotely-
@@ -1558,6 +1750,74 @@ class CameraUpload {
 										verifiedModificationTime: modificationTime ?? -1,
 										paths: cachedEntry.paths
 									})
+
+									break
+								}
+
+								// Past here an upload is certain, which is what makes one more hash worth
+								// paying for: if this exact content already sits in the destination folder
+								// under another name, it cancels a whole file transfer. Recording the shield
+								// entry is what an upload would have done, so the next pass takes the mtime
+								// fast path instead of hashing again.
+								const alreadyInDestination = async (file: FileSystem.File): Promise<boolean> => {
+									// Mirror mode ("Re-upload deleted photos") asks for anything missing from its
+									// remote path to be put back. Cancelling that because the same bytes sit in the
+									// folder under another name both overrides the setting and never converges: the
+									// mirror wave drops the shield entry every pass, this re-creates it, and the
+									// asset pays a full MD5 + BLAKE3 read forever. Only this branch is affected —
+									// with mirror off, skipping a duplicate is exactly what should happen.
+									if (reuploadDeleted && !remoteListing.tree[delta.file.path]) {
+										return false
+									}
+
+									const candidates = remoteContentHashesIn(delta.file.path, file.size)
+
+									// Nothing of this length is up there, so nothing of this content is either.
+									if (candidates.size === 0) {
+										return false
+									}
+
+									// The check is an OPTIMISATION, so a hash failure falls through to the upload
+									// rather than failing the asset. BLAKE3 runs through a different native path than
+									// MD5, so an engine-specific read failure would otherwise error this asset on
+									// every pass instead of merely skipping a shortcut.
+									const digest = await run(async () => await hashAsset(file.uri, "BLAKE3", abortController.signal))
+
+									if (!digest.success) {
+										return false
+									}
+
+									return candidates.has(digest.data)
+								}
+
+								const recordAsBackedUp = async (): Promise<void> => {
+									await cameraUploadState.setHash(delta.file.info.id, {
+										md5,
+										verifiedModificationTime: modificationTime ?? -1,
+										paths: mergedHashEntryPaths(cachedEntry, delta.file.path)
+									})
+
+									await cameraUploadState.deleteAbort(assetId)
+								}
+
+								// The hash has to cover the bytes that would actually be UPLOADED, and
+								// convertHeic/compress rewrite them. With neither ENABLED the staged copy is
+								// byte-identical to the asset, so the check runs here and saves the staging
+								// copy too; otherwise it waits until the transforms have produced the real
+								// payload, below. Hashing the original in that case would compare bytes that
+								// are never sent.
+								//
+								// Deliberately keyed on the settings rather than on whether THIS asset would
+								// actually be rewritten: a JPEG under an enabled convertHeic passes through
+								// untouched, but predicting that here would put a second copy of
+								// convertHeicToJpg's own eligibility rules on the correctness path. The cost
+								// of being conservative is only that the check waits until after staging.
+								const transformsUploadBytes = convertHeic || config.compress
+
+								if (!transformsUploadBytes && (await alreadyInDestination(assetFile))) {
+									remoteSkips++
+
+									await recordAsBackedUp()
 
 									break
 								}
@@ -1636,6 +1896,18 @@ class CameraUpload {
 									delta.file.collisionSuffix.length > 0
 										? `${FileSystem.Paths.basename(plainUploadName, plainUploadExt)}${delta.file.collisionSuffix}${plainUploadExt}`
 										: plainUploadName
+
+								// The transformed payload only exists now, so this is the earliest the check
+								// can run for it. Re-encoding is not bit-reproducible in general, so a match
+								// here is not guaranteed even for content that IS backed up — it costs one
+								// hash and cancels the transfer whenever it does hit.
+								if (transformsUploadBytes && (await alreadyInDestination(uploadFile))) {
+									remoteSkips++
+
+									await recordAsBackedUp()
+
+									break
+								}
 
 								const parentDir = await this.ensureParentDirectoryExists({
 									config,
@@ -1737,6 +2009,7 @@ class CameraUpload {
 				deltas: deltas.length,
 				hashed,
 				shieldSkips,
+				remoteSkips,
 				durationMs: (performance.now() - pipelineStart).toFixed(2),
 				background: params?.background === true
 			}
@@ -1744,8 +2017,12 @@ class CameraUpload {
 			// Wall-clock is NOT the trigger — a pass that legitimately uploads for ten minutes is
 			// healthy. The hash count is: each one is a full-file read, so past this many the pass is
 			// IO-bound on the local disk before a single byte goes out. It no longer blocks the JS
-			// thread (hashAssetMd5), but it still says how much work the mtime shield failed to
+			// thread (hashAsset), but it still says how much work the mtime shield failed to
 			// absorb, which is what distinguishes a normal sync from one re-reading a whole library.
+			//
+			// It counts MD5 only, so it is a lower bound on reads: every delta that gets past the md5
+			// comparison is hashed a second time with BLAKE3 for the remote content check. `remoteSkips`
+			// is what that second read bought — uploads cancelled outright.
 			if (hashed > SLOW_PIPELINE_WARN_HASHES) {
 				logger.warn("cameraUpload", "Upload pass hashed a large number of assets", pipelinePayload)
 			} else {

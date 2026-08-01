@@ -1210,3 +1210,46 @@ describe("per-path hash shield helpers", () => {
 		expect(merged[merged.length - 1]).toBe("/new/x.jpg")
 	})
 })
+
+describe("blake3ToHex", () => {
+	it("pads every byte to two characters", async () => {
+		// The whole point is meeting a hex digest produced elsewhere. Dropping the leading zero of a
+		// byte below 0x10 yields a shorter string that silently never matches — and only for digests
+		// that happen to contain a low byte, so it would pass a casual test.
+		const { blake3ToHex } = await import("@/features/cameraUpload/cameraUploadHelpers")
+
+		expect(blake3ToHex(new Uint8Array([0, 15, 16, 255]).buffer)).toBe("000f10ff")
+	})
+
+	it("emits lowercase, which is the form the local hasher returns", async () => {
+		const { blake3ToHex } = await import("@/features/cameraUpload/cameraUploadHelpers")
+		const hex = blake3ToHex(new Uint8Array([0xab, 0xcd, 0xef]).buffer)
+
+		expect(hex).toBe("abcdef")
+		expect(hex).toBe(hex.toLowerCase())
+	})
+
+	it("renders a full 32-byte digest as 64 characters", async () => {
+		const { blake3ToHex } = await import("@/features/cameraUpload/cameraUploadHelpers")
+
+		expect(blake3ToHex(new Uint8Array(32).fill(0x7f).buffer)).toHaveLength(64)
+	})
+})
+
+describe("parentTreePath", () => {
+	it("returns the directory a tree path sits in", async () => {
+		const { parentTreePath } = await import("@/features/cameraUpload/cameraUploadHelpers")
+
+		expect(parentTreePath("/Camera Roll/photo.jpg")).toBe("/Camera Roll")
+		expect(parentTreePath("/Camera Roll/2024/photo.jpg")).toBe("/Camera Roll/2024")
+	})
+
+	it("returns the root for a path with no directory component", async () => {
+		// Grouping these under "" instead would make the root its own bucket AND collide with nothing,
+		// so a root-level remote file would never cancel a root-level upload.
+		const { parentTreePath } = await import("@/features/cameraUpload/cameraUploadHelpers")
+
+		expect(parentTreePath("/photo.jpg")).toBe("/")
+		expect(parentTreePath("photo.jpg")).toBe("/")
+	})
+})

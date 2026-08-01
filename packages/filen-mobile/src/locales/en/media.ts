@@ -36,6 +36,11 @@ export const media = {
 	albums_description: "Choose which albums to sync.",
 	/** Camera upload settings — row title for the cloud destination directory */
 	cloud_directory: "Cloud directory",
+	/** Camera upload → confirmation before repointing the backup at a different cloud directory */
+	camera_upload_change_destination_title: "Change cloud directory?",
+	/** Camera upload → explains the one-time cost of repointing the destination */
+	camera_upload_change_destination_message:
+		"Your photos and videos will be uploaded again to the new directory. Items already backed up stay in the old directory.",
 	/** Camera upload settings — subtitle when no destination directory is selected yet */
 	cloud_directory_description: "No directory selected.",
 	/** Camera upload settings — subtitle when the root of the cloud drive is selected as destination */

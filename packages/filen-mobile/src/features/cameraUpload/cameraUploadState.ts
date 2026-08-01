@@ -8,6 +8,9 @@ import logger from "@/lib/logger"
 const HASHES_PREFIX = "cameraUpload:hashes:"
 const ABORTS_PREFIX = "cameraUpload:aborts:"
 
+// Single row (not a prefix family): the remote directory uuid the hash shield was built against.
+const DESTINATION_KEY = "cameraUpload:destination"
+
 // Rows per executeBatch chunk for a wave — bounds the native hop / arg-array size.
 const APPLY_CHUNK_SIZE = 256
 
@@ -266,6 +269,48 @@ export class CameraUploadState {
 		}
 	}
 
+	/**
+	 * Resolve many shield entries at once.
+	 *
+	 * The delta gate consults the ledger for every asset whose remote copy looks older, which on a
+	 * browsed library is thousands of keys. Foreground answers from the loaded index; background —
+	 * which deliberately does NOT page the whole ledger in — would otherwise pay one serial native
+	 * round trip per key, so it goes through a batched read instead.
+	 */
+	public async getHashMany(keys: string[]): Promise<Map<string, CameraUploadHashEntry | string>> {
+		const found = new Map<string, CameraUploadHashEntry | string>()
+
+		if (keys.length === 0) {
+			return found
+		}
+
+		if (this.hashesLoaded) {
+			for (const key of keys) {
+				const value = this.hashes.get(key)
+
+				if (value !== undefined) {
+					found.set(key, value)
+				}
+			}
+
+			return found
+		}
+
+		try {
+			const rows = await sqlite.kvAsync.getMany<CameraUploadHashEntry | string>(keys.map(key => HASHES_PREFIX + key))
+
+			for (const [key, value] of rows) {
+				found.set(key.slice(HASHES_PREFIX.length), value)
+			}
+		} catch (err) {
+			// Same policy as the point read: a failed shield lookup degrades to "not verified", which
+			// costs a hash (and possibly an upload), never a skipped backup.
+			logger.warn("cameraUploadState", "Background batched hash read failed", { keys: keys.length, error: err })
+		}
+
+		return found
+	}
+
 	// Loaded-memory snapshot of the hash keys (foreground; after loadHashes).
 	public hashKeys(): string[] {
 		return [...this.hashes.keys()]
@@ -367,6 +412,54 @@ export class CameraUploadState {
 	// because sqlite's clearGeneration only discards writes that STARTED before the wipe — a
 	// worker-tail write starting after it would re-insert and poison the next account's shield. Next
 	// load un-locks.
+	/**
+	 * The remote directory the shield belongs to, or null when it has never been recorded.
+	 *
+	 * A shield entry says "this content is already at its destination", but the tree paths it stores
+	 * are RELATIVE to the camera-upload root — so they keep matching after the destination changes,
+	 * and an entirely empty new folder reads as "everything was deleted remotely", which camera
+	 * upload deliberately does not re-upload. Pairing the shield with the destination it was built
+	 * against is what makes that distinguishable.
+	 */
+	public async getSyncedDestination(): Promise<string | null> {
+		// Deliberately NOT caught. `null` means "never recorded", and the caller answers that by
+		// ADOPTING the current destination — so folding a read failure into null would record the new
+		// destination against a shield built for the old one, and the mismatch would never be seen
+		// again. The caller skips both branches when this rejects, leaving the next pass to retry.
+		return await sqlite.kvAsync.get<string>(DESTINATION_KEY)
+	}
+
+	public async setSyncedDestination(uuid: string): Promise<void> {
+		if (this.locked) {
+			return
+		}
+
+		await sqlite.kvAsync.set(DESTINATION_KEY, uuid)
+	}
+
+	/**
+	 * Drop the hash shield only, leaving the abort ledger intact.
+	 *
+	 * Distinct from clearForLogout, which also drops aborts and locks the store against late writes.
+	 * The abort counts mean "this asset never fits an OS background window", which stays true at a new
+	 * destination — clearing them would re-burn background budgets on assets that cannot finish.
+	 */
+	public async clearHashes(): Promise<void> {
+		if (this.locked) {
+			return
+		}
+
+		// Bumped for the same reason clearForLogout bumps it: a load already scanning captured the
+		// previous generation and would otherwise commit its pre-wipe rows into memory AFTER this
+		// clear, resurrecting the whole shield over an emptied kv. Unreachable through today's single
+		// caller, but the primitive must not depend on that.
+		this.generation++
+
+		await this.rangeDeletePrefix(HASHES_PREFIX)
+
+		this.hashes.clear()
+	}
+
 	public clearForLogout(): void {
 		this.generation++
 		this.locked = true

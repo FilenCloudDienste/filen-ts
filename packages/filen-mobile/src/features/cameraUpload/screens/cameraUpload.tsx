@@ -2,6 +2,7 @@ import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group, type Button } from "@/components/ui/settingsGroup"
 import cameraUpload, { useCameraUploadConfig, DEFAULT_CONFIG, type Config } from "@/features/cameraUpload/cameraUpload"
+import cameraUploadState from "@/features/cameraUpload/cameraUploadState"
 import { useCameraUploadDestination } from "@/features/cameraUpload/queries/useCameraUploadDestination.query"
 import { applyAfterActivationToggle, CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY } from "@/features/cameraUpload/cameraUploadHelpers"
 import { useSecureStore } from "@/lib/secureStore"
@@ -12,6 +13,7 @@ import { useFocusEffect } from "expo-router"
 import { router } from "@/lib/router"
 import { selectDriveItems } from "@/features/drive/screens/driveSelect"
 import alerts from "@/lib/alerts"
+import prompts from "@/lib/prompts"
 import logger from "@/lib/logger"
 import { run } from "@filen/utils"
 import cache from "@/lib/cache"
@@ -262,6 +264,61 @@ const CameraUpload = () => {
 
 												if (!remoteDir) {
 													return
+												}
+
+												// Repointing the backup drops the dedup shield on the next sync, so the whole
+												// library uploads again to the new folder. That is what the setting means, but
+												// it is far too expensive to happen without asking. Only a REAL change asks —
+												// setting a destination for the first time, or re-picking the same one, does
+												// not.
+												if (config.remoteDir && config.remoteDir.inner[0].uuid !== remoteDir.inner[0].uuid) {
+													const confirmation = await run(async () => {
+														return await prompts.alert({
+															title: t("camera_upload_change_destination_title"),
+															message: t("camera_upload_change_destination_message"),
+															okText: t("continue"),
+															cancelText: t("cancel"),
+															destructive: true
+														})
+													})
+
+													if (!confirmation.success) {
+														logger.warn("cameraUpload", "Destination change confirmation failed", {
+															error: confirmation.error
+														})
+
+														alerts.error(confirmation.error)
+
+														return
+													}
+
+													if (confirmation.data.cancelled) {
+														return
+													}
+
+													// Cleared HERE as well as in sync(), because sync() cannot always tell.
+													// It records the destination only on a pass that runs, and it bails
+													// long before that when camera upload is disabled — so a user who had
+													// a populated shield, turned the feature off, then re-enabled it
+													// pointing somewhere new would hit sync()'s "never recorded" branch,
+													// which adopts WITHOUT clearing and leaves the new directory empty.
+													// The screen knows a real change happened; it just prompted for it.
+													const cleared = await run(async () => {
+														await cameraUploadState.clearHashes()
+													})
+
+													if (!cleared.success) {
+														// Not fatal: sync()'s own check still catches the mismatch whenever a
+														// destination WAS recorded. Surfacing it keeps the one case it cannot
+														// catch from being silent.
+														logger.warn(
+															"cameraUpload",
+															"Could not drop the hash shield after a destination change",
+															{
+																error: cleared.error
+															}
+														)
+													}
 												}
 
 												setConfig(prev => {
