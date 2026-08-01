@@ -2,42 +2,32 @@
 
 // Guards the in-page half of the WebView keyboard fix (#102).
 //
-// The DOM components laid themselves out — and decided whether the caret was visible — against a
-// viewport that still included the strip the keyboard covers, because neither engine shrinks the
-// LAYOUT viewport for a keyboard. `visualViewport` is what both engines DO shrink, measured on
-// device with the WebView left at full height:
-//
-//     iOS      innerHeight 724 -> 724   visualViewport.height 724 -> 382
-//     Android  innerHeight 844 -> 844   visualViewport.height 844 -> 508
+// The page is sized from the LAYOUT viewport, which DomKeyboardHost keeps clear of the keyboard by
+// shrinking the WebView. Sizing it from `visualViewport` instead was tried and reverted: with the
+// host shrinking the view it can only subtract zero, while a transient reading during an overscroll
+// latched the page smaller than the viewport.
 
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 
 import { createLayoutThemeSpec, CODE_MIRROR_DIMENSIONS, CODE_MIRROR_HEIGHT } from "@/components/textEditor/codeMirrorLayout"
 
-type FakeVisualViewport = EventTarget & { height: number; scale: number }
+function setViewportHeight(height: number): void {
+	Object.defineProperty(window, "innerHeight", {
+		value: height,
+		configurable: true,
+		writable: true
+	})
 
-let visualViewport: FakeVisualViewport
-
-function setVisualViewport(height: number, scale = 1): void {
-	visualViewport.height = height
-	visualViewport.scale = scale
-
-	visualViewport.dispatchEvent(new Event("resize"))
+	window.dispatchEvent(new Event("resize"))
 }
 
 async function freshModule(initialHeight = 800) {
 	vi.resetModules()
 
 	document.head.replaceChildren()
-	document.documentElement.removeAttribute("style")
 
-	// happy-dom ships no visualViewport. The module must still use it: it is the ONLY signal either
-	// engine emits when the keyboard opens — `resize` never fires, because the layout viewport is
-	// untouched.
-	visualViewport = Object.assign(new EventTarget(), { height: initialHeight, scale: 1 })
-
-	Object.defineProperty(window, "visualViewport", {
-		value: visualViewport,
+	Object.defineProperty(window, "innerHeight", {
+		value: initialHeight,
 		configurable: true,
 		writable: true
 	})
@@ -51,10 +41,6 @@ function nextFrame(): Promise<void> {
 
 function resetCss(): string {
 	return document.getElementById("filen-dom-viewport-reset")?.textContent ?? ""
-}
-
-function trackedHeight(): string {
-	return document.documentElement.style.getPropertyValue("--filen-viewport-height")
 }
 
 describe("installDomViewportReset", () => {
@@ -78,22 +64,16 @@ describe("installDomViewportReset", () => {
 		expect(resetCss()).toMatch(/html,\s*body\s*\{[^}]*overflow:\s*hidden/)
 	})
 
-	it("sizes the page from the tracked height rather than the layout viewport", async () => {
-		// `100dvh` is the layout viewport, which neither engine shrinks for a keyboard. Sizing from it
-		// is the whole bug.
+	it("sizes the page from the layout viewport and nothing else", async () => {
+		// The layout viewport is what DomKeyboardHost controls. Deriving the height from any other
+		// measurement is what let a scroll transient latch the page smaller than the viewport.
 		const { installDomViewportReset, VIEWPORT_HEIGHT } = await freshModule()
 
 		installDomViewportReset()
 
+		expect(VIEWPORT_HEIGHT).toBe("100dvh")
 		expect(resetCss()).toContain(`height: ${VIEWPORT_HEIGHT}`)
-		expect(VIEWPORT_HEIGHT).toContain("--filen-viewport-height")
-	})
-
-	it("falls back to the layout viewport before the first measurement", async () => {
-		const { VIEWPORT_HEIGHT } = await freshModule()
-
-		// Degrades to exactly the old behaviour rather than to nothing.
-		expect(VIEWPORT_HEIGHT).toContain("100dvh")
+		expect(resetCss()).not.toContain("var(")
 	})
 
 	it("is idempotent — two components in one WebView inject one stylesheet", async () => {
@@ -107,48 +87,6 @@ describe("installDomViewportReset", () => {
 	})
 })
 
-describe("viewport height tracking", () => {
-	beforeEach(() => {
-		vi.useRealTimers()
-	})
-
-	it("tracks the visual viewport, which is what the keyboard shrinks", async () => {
-		const { installDomViewportReset } = await freshModule(844)
-
-		installDomViewportReset()
-
-		expect(trackedHeight()).toBe("844px")
-
-		// Android's measured keyboard-open value.
-		setVisualViewport(508)
-
-		expect(trackedHeight()).toBe("508px")
-	})
-
-	it("ignores pinch-zoom, which shrinks the visual viewport the same way a keyboard does", async () => {
-		// The docx and pdf viewers both allow pinch-zoom. Reading the raw height would shrink a zoomed
-		// document as if the keyboard were open, so the measurement is scaled back out.
-		const { installDomViewportReset } = await freshModule(800)
-
-		installDomViewportReset()
-
-		setVisualViewport(400, 2)
-
-		expect(trackedHeight()).toBe("800px")
-	})
-
-	it("reports the obscured height while zoomed", async () => {
-		const { installDomViewportReset } = await freshModule(800)
-
-		installDomViewportReset()
-
-		// 800 layout px, 200 covered by the keyboard, viewed at 2x -> (800 - 200) / 2 = 300.
-		setVisualViewport(300, 2)
-
-		expect(trackedHeight()).toBe("600px")
-	})
-})
-
 describe("onViewportChange", () => {
 	it("notifies after a height change, once the new height is laid out", async () => {
 		const { installDomViewportReset, onViewportChange } = await freshModule(800)
@@ -158,7 +96,7 @@ describe("onViewportChange", () => {
 		const listener = vi.fn()
 		const unsubscribe = onViewportChange(listener)
 
-		setVisualViewport(500)
+		setViewportHeight(500)
 
 		await nextFrame()
 
@@ -177,8 +115,23 @@ describe("onViewportChange", () => {
 		const listener = vi.fn()
 		const unsubscribe = onViewportChange(listener)
 
-		setVisualViewport(800)
-		setVisualViewport(800)
+		setViewportHeight(800)
+		setViewportHeight(800)
+
+		await nextFrame()
+
+		expect(listener).not.toHaveBeenCalled()
+
+		unsubscribe()
+	})
+
+	it("does not replay the height it was installed with", async () => {
+		const { installDomViewportReset, onViewportChange } = await freshModule(800)
+
+		installDomViewportReset()
+
+		const listener = vi.fn()
+		const unsubscribe = onViewportChange(listener)
 
 		await nextFrame()
 
@@ -197,14 +150,13 @@ describe("onViewportChange", () => {
 		const listener = vi.fn()
 		const unsubscribe = onViewportChange(listener)
 
-		setVisualViewport(700)
-		setVisualViewport(600)
-		setVisualViewport(500)
+		setViewportHeight(700)
+		setViewportHeight(600)
+		setViewportHeight(500)
 
 		await nextFrame()
 
 		expect(listener).toHaveBeenCalledTimes(1)
-		expect(trackedHeight()).toBe("500px")
 
 		unsubscribe()
 	})
@@ -219,7 +171,7 @@ describe("onViewportChange", () => {
 
 		unsubscribe()
 
-		setVisualViewport(500)
+		setViewportHeight(500)
 
 		await nextFrame()
 
@@ -286,8 +238,7 @@ describe("createLayoutThemeSpec", () => {
 describe("CODE_MIRROR_DIMENSIONS", () => {
 	it("sizes the editor with a definite height and never a minimum", () => {
 		// A minimum lets the editor grow past the viewport, which leaves `.cm-scroller`'s `height: 100%`
-		// unresolved: the PAGE becomes the scroller, and CodeMirror then measures caret visibility
-		// against `innerHeight` — the layout viewport, which includes the keyboard.
+		// unresolved: the PAGE becomes the scroller rather than the editor.
 		// `@uiw/react-codemirror` takes minHeight/maxHeight just as happily, so nothing but this stops
 		// the box from going unbounded again.
 		expect(CODE_MIRROR_DIMENSIONS.height).toBe(CODE_MIRROR_HEIGHT)
@@ -295,7 +246,7 @@ describe("CODE_MIRROR_DIMENSIONS", () => {
 		expect(CODE_MIRROR_DIMENSIONS).not.toHaveProperty("maxHeight")
 	})
 
-	it("sizes from the keyboard-aware height, not the layout viewport", async () => {
+	it("sizes from the shared viewport height", async () => {
 		const { VIEWPORT_HEIGHT } = await freshModule()
 
 		expect(CODE_MIRROR_HEIGHT).toBe(VIEWPORT_HEIGHT)
