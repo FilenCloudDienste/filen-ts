@@ -8,6 +8,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isPasswordStrongEnough } from "@/lib/validate"
 import { runChangePasswordAttempt } from "@/features/settings/components/security/changePassword.logic"
+import { useCapsLock } from "@/features/auth/lib/useCapsLock"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -32,6 +33,9 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 	const [newPassword, setNewPassword] = useState("")
 	const [confirmPassword, setConfirmPassword] = useState("")
 	const [pending, setPending] = useState(false)
+	const currentPasswordCaps = useCapsLock()
+	const newPasswordCaps = useCapsLock()
+	const confirmPasswordCaps = useCapsLock()
 
 	const passwordStrength = newPassword.length > 0 ? ratePasswordStrength(newPassword) : null
 	const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword
@@ -112,7 +116,19 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 								onChange={e => {
 									setCurrentPassword(e.target.value)
 								}}
+								onKeyDown={currentPasswordCaps.onKeyDown}
+								onKeyUp={currentPasswordCaps.onKeyUp}
+								onBlur={currentPasswordCaps.onBlur}
 							/>
+							{/* Rendered unconditionally with only its TEXT toggled: a live region must already be in
+							    the a11y tree when its content changes, so an already-populated role=status inserted
+							    on demand is commonly missed by screen readers. Empty <p> collapses to zero height. */}
+							<p
+								role="status"
+								className="text-xs text-yellow-500"
+							>
+								{currentPasswordCaps.capsLockOn ? t("capsLockOn") : ""}
+							</p>
 						</Field>
 						<Field>
 							<FieldLabel htmlFor="new-password">{t("changePasswordNew")}</FieldLabel>
@@ -125,8 +141,17 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 								onChange={e => {
 									setNewPassword(e.target.value)
 								}}
+								onKeyDown={newPasswordCaps.onKeyDown}
+								onKeyUp={newPasswordCaps.onKeyUp}
+								onBlur={newPasswordCaps.onBlur}
 							/>
 							{passwordStrength && <StrengthMeter tier={passwordStrength.strength} />}
+							<p
+								role="status"
+								className="text-xs text-yellow-500"
+							>
+								{newPasswordCaps.capsLockOn ? t("capsLockOn") : ""}
+							</p>
 						</Field>
 						<Field>
 							<FieldLabel htmlFor="confirm-new-password">{t("changePasswordConfirm")}</FieldLabel>
@@ -140,8 +165,17 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 								onChange={e => {
 									setConfirmPassword(e.target.value)
 								}}
+								onKeyDown={confirmPasswordCaps.onKeyDown}
+								onKeyUp={confirmPasswordCaps.onKeyUp}
+								onBlur={confirmPasswordCaps.onBlur}
 							/>
 							{passwordsMismatched && <FieldError>{t("passwordsDoNotMatch")}</FieldError>}
+							<p
+								role="status"
+								className="text-xs text-yellow-500"
+							>
+								{confirmPasswordCaps.capsLockOn ? t("capsLockOn") : ""}
+							</p>
 						</Field>
 					</FieldGroup>
 				</form>

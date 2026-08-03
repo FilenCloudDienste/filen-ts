@@ -4,6 +4,7 @@ import { redirectIfAuthed } from "@/features/auth/lib/guard"
 import { Logo } from "@/features/shell/components/logo"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { LoginForm } from "@/features/auth/components/loginForm"
+import { AuthLegalLinks } from "@/features/auth/components/legalLinks"
 
 // Unauthed page: a live session bounces straight to /drive. The shared guard awaits boot — which
 // includes session resume — before reading auth state, so the check is race-free.
@@ -16,7 +17,7 @@ function LoginPage() {
 	const { t } = useTranslation("auth")
 
 	return (
-		<div className="flex min-h-svh items-center justify-center bg-canvas p-6 text-foreground">
+		<div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-canvas p-6 text-foreground">
 			<Card className="w-full max-w-sm">
 				<CardHeader className="justify-items-center gap-3 text-center">
 					<Logo className="size-10 text-primary" />
@@ -45,6 +46,7 @@ function LoginPage() {
 					</p>
 				</CardFooter>
 			</Card>
+			<AuthLegalLinks />
 		</div>
 	)
 }

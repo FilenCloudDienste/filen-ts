@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next"
+import { FILEN_PRIVACY_URL, FILEN_TERMS_URL } from "@/lib/externalUrls"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 
@@ -21,7 +22,7 @@ function AboutCard() {
 					size="sm"
 					render={
 						<a
-							href="https://filen.io/terms"
+							href={FILEN_TERMS_URL}
 							target="_blank"
 							rel="noopener noreferrer"
 						/>
@@ -34,7 +35,7 @@ function AboutCard() {
 					size="sm"
 					render={
 						<a
-							href="https://filen.io/privacy"
+							href={FILEN_PRIVACY_URL}
 							target="_blank"
 							rel="noopener noreferrer"
 						/>

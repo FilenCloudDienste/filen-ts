@@ -121,4 +121,11 @@ test.describe("reset", { tag: "@no-sdk" }, () => {
 
 		await expect(page.getByText("Master keys imported", { exact: false })).toHaveCount(0)
 	})
+
+	test("links to the terms and privacy policy", async ({ page }) => {
+		await gotoReset(page)
+
+		await expect(page.getByRole("link", { name: "Terms of Service", exact: true })).toHaveAttribute("href", "https://filen.io/terms")
+		await expect(page.getByRole("link", { name: "Privacy Policy", exact: true })).toHaveAttribute("href", "https://filen.io/privacy")
+	})
 })

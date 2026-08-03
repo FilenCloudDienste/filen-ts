@@ -113,3 +113,37 @@ describe("Auth forms — inputs lock during an in-flight submit", () => {
 		expect(screen.getByLabelText("Password").hasAttribute("disabled")).toBe(true)
 	})
 })
+
+// Asserted on TEXT, never on element presence: the live region is mounted at all times (a region
+// inserted already-populated is commonly not announced), so a presence query is true in both states
+// -- and role="status" is not unique in these forms anyway, the submit spinner carries it too.
+describe("Auth forms — caps-lock warning", () => {
+	it("LoginForm shows the warning while caps lock is on and clears the text, not the region, when it goes off", () => {
+		render(createElement(LoginForm))
+		const input = screen.getByLabelText("Password")
+
+		expect(screen.queryByText("Caps Lock is on")).toBeNull()
+
+		fireEvent.keyDown(input, { key: "a", modifierCapsLock: true })
+
+		expect(screen.queryByText("Caps Lock is on")).not.toBeNull()
+
+		fireEvent.keyUp(input, { key: "a" })
+
+		expect(screen.queryByText("Caps Lock is on")).toBeNull()
+		expect(screen.getAllByRole("status").length).toBeGreaterThan(0)
+	})
+
+	it("RegisterForm warns under the typed field only, and blurring it clears the warning", () => {
+		render(createElement(RegisterForm))
+		const input = screen.getByLabelText("Password")
+
+		fireEvent.keyDown(input, { key: "a", modifierCapsLock: true })
+
+		expect(screen.getAllByText("Caps Lock is on")).toHaveLength(1)
+
+		fireEvent.blur(input)
+
+		expect(screen.queryByText("Caps Lock is on")).toBeNull()
+	})
+})

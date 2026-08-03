@@ -7,6 +7,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isValidEmail } from "@/lib/validate"
 import { runChangeEmailAttempt } from "@/features/settings/components/account/changeEmail.logic"
+import { useCapsLock } from "@/features/auth/lib/useCapsLock"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -25,12 +26,15 @@ interface ChangeEmailCardProps {
 // result. SESSION-INVALIDATING (changes the login identity the harvested e2e session authenticates
 // as) — never live-exercised in e2e, unit/render only.
 function ChangeEmailCard({ accountQuery }: ChangeEmailCardProps) {
-	const { t } = useTranslation(["settings", "common"])
+	// `auth` bound (after `settings`, which stays the default) only so the shared capsLockOn key
+	// resolves — a prefixed key from an unbound namespace does not typecheck.
+	const { t } = useTranslation(["settings", "auth", "common"])
 	const isOnline = useIsOnline()
 	const [newEmail, setNewEmail] = useState("")
 	const [confirmEmail, setConfirmEmail] = useState("")
 	const [password, setPassword] = useState("")
 	const [pending, setPending] = useState(false)
+	const passwordCaps = useCapsLock()
 
 	const emailsMatch = newEmail.length > 0 && newEmail === confirmEmail
 	const canSubmit = emailsMatch && isValidEmail(newEmail) && password.length > 0 && isOnline
@@ -140,7 +144,19 @@ function ChangeEmailCard({ accountQuery }: ChangeEmailCardProps) {
 								onChange={e => {
 									setPassword(e.target.value)
 								}}
+								onKeyDown={passwordCaps.onKeyDown}
+								onKeyUp={passwordCaps.onKeyUp}
+								onBlur={passwordCaps.onBlur}
 							/>
+							{/* Rendered unconditionally with only its TEXT toggled: a live region must already be in
+							    the a11y tree when its content changes, so an already-populated role=status inserted
+							    on demand is commonly missed by screen readers. Empty <p> collapses to zero height. */}
+							<p
+								role="status"
+								className="text-xs text-yellow-500"
+							>
+								{passwordCaps.capsLockOn ? t("auth:capsLockOn") : ""}
+							</p>
 						</Field>
 					</FieldGroup>
 				</form>

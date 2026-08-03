@@ -10,6 +10,11 @@ test.describe("boot", () => {
 		// healthy boot never shows the boot-error screen.
 		await expect(page.getByText("Sign in to Filen")).toBeVisible()
 		await expect(page.getByText("Filen could not start")).toHaveCount(0)
+
+		// Legal footer on the sign-in screen — route wiring has no unit-test surface, and this test
+		// already has the page loaded, so it costs no extra navigation.
+		await expect(page.getByRole("link", { name: "Terms of Service", exact: true })).toHaveAttribute("href", "https://filen.io/terms")
+		await expect(page.getByRole("link", { name: "Privacy Policy", exact: true })).toHaveAttribute("href", "https://filen.io/privacy")
 	})
 
 	test("an injected session boots authenticated and an authed read succeeds", async ({ page, injectedSession, browserName }) => {

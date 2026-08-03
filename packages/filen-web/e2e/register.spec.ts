@@ -91,4 +91,11 @@ test.describe("register", { tag: "@no-sdk" }, () => {
 		await expect(page.getByText("You are eligible for 10 GiB of free storage!")).toHaveCount(0)
 		await expect(page.getByText("You are not eligible", { exact: false })).toHaveCount(0)
 	})
+
+	test("links to the terms and privacy policy", async ({ page }) => {
+		await gotoRegister(page, NOT_ELIGIBLE)
+
+		await expect(page.getByRole("link", { name: "Terms of Service", exact: true })).toHaveAttribute("href", "https://filen.io/terms")
+		await expect(page.getByRole("link", { name: "Privacy Policy", exact: true })).toHaveAttribute("href", "https://filen.io/privacy")
+	})
 })

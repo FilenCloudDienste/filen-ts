@@ -4,6 +4,7 @@ import { redirectIfAuthed } from "@/features/auth/lib/guard"
 import { Logo } from "@/features/shell/components/logo"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ResetForm } from "@/features/auth/components/resetForm"
+import { AuthLegalLinks } from "@/features/auth/components/legalLinks"
 
 // Unauthed page: a live session bounces straight to /drive. Same shared guard as /login and
 // /register — see guard.ts. The reset link carries only a token, no email — the form itself asks for
@@ -18,7 +19,7 @@ function ResetPage() {
 	const { token } = Route.useParams()
 
 	return (
-		<div className="flex min-h-svh items-center justify-center bg-canvas p-6 text-foreground">
+		<div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-canvas p-6 text-foreground">
 			<Card className="w-full max-w-sm">
 				<CardHeader className="justify-items-center gap-3 text-center">
 					<Logo className="size-10 text-primary" />
@@ -31,6 +32,7 @@ function ResetPage() {
 					<ResetForm token={token} />
 				</CardContent>
 			</Card>
+			<AuthLegalLinks />
 		</div>
 	)
 }

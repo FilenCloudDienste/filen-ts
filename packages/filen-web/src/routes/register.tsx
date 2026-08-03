@@ -4,6 +4,7 @@ import { redirectIfAuthed } from "@/features/auth/lib/guard"
 import { Logo } from "@/features/shell/components/logo"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { RegisterForm } from "@/features/auth/components/registerForm"
+import { AuthLegalLinks } from "@/features/auth/components/legalLinks"
 
 // Unauthed page: a live session bounces straight to /drive. Same shared guard as /login — see
 // guard.ts. Mirrors login.tsx's Card shell; the real form (strength meter, referral capture,
@@ -17,7 +18,7 @@ function RegisterPage() {
 	const { t } = useTranslation("auth")
 
 	return (
-		<div className="flex min-h-svh items-center justify-center bg-canvas p-6 text-foreground">
+		<div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-canvas p-6 text-foreground">
 			<Card className="w-full max-w-sm">
 				<CardHeader className="justify-items-center gap-3 text-center">
 					<Logo className="size-10 text-primary" />
@@ -46,6 +47,7 @@ function RegisterPage() {
 					</p>
 				</CardFooter>
 			</Card>
+			<AuthLegalLinks />
 		</div>
 	)
 }

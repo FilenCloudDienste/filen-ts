@@ -7,6 +7,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isValidEmail, isPasswordStrongEnough } from "@/lib/validate"
 import { getReferral } from "@/features/auth/lib/referral"
+import { useCapsLock } from "@/features/auth/lib/useCapsLock"
 import { useRegisterCheckQuery } from "@/features/auth/queries/registerCheck"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
@@ -53,6 +54,8 @@ function RegisterForm() {
 	const [pending, setPending] = useState(false)
 	const [resendPending, setResendPending] = useState(false)
 	const [registered, setRegistered] = useState(false)
+	const passwordCaps = useCapsLock()
+	const confirmPasswordCaps = useCapsLock()
 
 	const emailValid = isValidEmail(email)
 	const passwordStrength = password.length > 0 ? ratePasswordStrength(password) : null
@@ -158,8 +161,20 @@ function RegisterForm() {
 							onChange={e => {
 								setPassword(e.target.value)
 							}}
+							onKeyDown={passwordCaps.onKeyDown}
+							onKeyUp={passwordCaps.onKeyUp}
+							onBlur={passwordCaps.onBlur}
 						/>
 						{passwordStrength && <StrengthMeter tier={passwordStrength.strength} />}
+						{/* Rendered unconditionally with only its TEXT toggled: a live region must already be in
+						    the a11y tree when its content changes, so an already-populated role=status inserted
+						    on demand is commonly missed by screen readers. Empty <p> collapses to zero height. */}
+						<p
+							role="status"
+							className="text-xs text-yellow-500"
+						>
+							{passwordCaps.capsLockOn ? t("capsLockOn") : ""}
+						</p>
 					</Field>
 					<Field>
 						<FieldLabel htmlFor="register-confirm-password">{t("registerConfirmPassword")}</FieldLabel>
@@ -173,8 +188,17 @@ function RegisterForm() {
 							onChange={e => {
 								setConfirmPassword(e.target.value)
 							}}
+							onKeyDown={confirmPasswordCaps.onKeyDown}
+							onKeyUp={confirmPasswordCaps.onKeyUp}
+							onBlur={confirmPasswordCaps.onBlur}
 						/>
 						{passwordsMismatched && <FieldError>{t("passwordsDoNotMatch")}</FieldError>}
+						<p
+							role="status"
+							className="text-xs text-yellow-500"
+						>
+							{confirmPasswordCaps.capsLockOn ? t("capsLockOn") : ""}
+						</p>
 					</Field>
 				</FieldGroup>
 				<Button

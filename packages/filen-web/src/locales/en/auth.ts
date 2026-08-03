@@ -105,6 +105,8 @@ export const auth = {
 	passwordStrengthTooWeak: "Choose a stronger password to continue",
 	/** Inline helper text shown once both password fields are non-empty and don't match — register, reset, and change-password forms */
 	passwordsDoNotMatch: "Passwords do not match",
+	/** Warning shown under a focused account-password field while caps lock is on; shared by every account-password field in the app, settings included */
+	capsLockOn: "Caps Lock is on",
 
 	// ── Free-storage eligibility banner (register screen) ───────────────────────
 	/** Register screen — eligibility banner shown when the region/IP IS eligible for the free-storage signup bonus */
@@ -133,6 +135,13 @@ export const auth = {
 	resetConfirmPassword: "Confirm new password",
 	/** Reset page — submit button */
 	resetSubmit: "Reset password",
+	/** Reset page — title of the terminal panel shown when a two-factor account blocked the automatic sign-in; deliberately says "submitted", not "changed" — the change is near-certain, not confirmed */
+	resetTwoFactorSignInTitle: "Password reset submitted — sign in to continue",
+	/** Reset page — terminal panel body; names the fallback too, because the reset landing is an inference and the user cannot retry from this page */
+	resetTwoFactorSignInBody:
+		"This account uses two-factor authentication, so we could not sign you in automatically. Your new password should now be active — sign in with it and your authenticator code. If it is not accepted, request a new reset link.",
+	/** Reset page — button on the terminal panel that leaves for the sign-in screen */
+	resetGoToSignIn: "Go to sign in",
 
 	// ── Master keys file upload (reset page) ────────────────────────────────────
 	/** Reset page — file input label for the exported master keys file */
@@ -181,6 +190,12 @@ export const auth = {
 	skipMasterKeysWarningTypedConfirmPhrase: "DELETE ALL MY DATA",
 	/** Skip-master-keys warning, stage 4 of 4 — confirm button that runs the actual reset once the typed phrase arms it */
 	skipMasterKeysWarningStage4Confirm: "Reset password and delete my data",
+
+	// ── Legal footer (login / register / reset) ─────────────────────────────────
+	/** Auth screens footer — link to the Terms of Service */
+	legalTerms: "Terms of Service",
+	/** Auth screens footer — link to the Privacy Policy */
+	legalPrivacy: "Privacy Policy",
 
 	// ── Logout confirm ───────────────────────────────────────────────────────────
 	/** Logout confirm dialog — title; the confirm button reuses common:signOut */
