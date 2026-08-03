@@ -4,7 +4,8 @@ import { Link } from "@tanstack/react-router"
 import { VolumeOffIcon, MoreHorizontalIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
-import { chatDisplayName, isChatUndecryptable, chatMessagePreview, chatAvatarUrl } from "@/features/chats/lib/sort"
+import { chatDisplayName, isChatUndecryptable, chatMessagePreview, chatAvatarUrl, chatPreviewTier } from "@/features/chats/lib/sort"
+import type { BlockedUsers } from "@/features/contacts/lib/blocking"
 import { useChatUnreadCount } from "@/features/chats/hooks/useChatUnreadCount"
 import { useChatTypingLabel } from "@/features/chats/hooks/useChatTyping"
 import { formatRelativeTime } from "@/lib/relativeTime"
@@ -23,6 +24,8 @@ export interface ChatRowProps {
 	// that are not the open thread at all, mirrors noteRow.tsx's own selected/multiSelected split.
 	multiSelected: boolean
 	currentUserId: bigint | undefined
+	// From the sidebar's single enabled read (useBlockedUsers) — no per-row contacts observer.
+	blocked: BlockedUsers
 	// Threaded straight through to the row's own menu (chatMenu.tsx's onAction) — the sidebar's ONE
 	// dialog host (useChatDialogHost) is the actual dialog-opening implementation, not this row.
 	onAction: (kind: ChatActionDialogKind, chat: Chat) => void
@@ -38,7 +41,7 @@ export interface ChatRowProps {
 // not its descendant (a <button> nested inside an <a> is invalid content model — same rationale as
 // noteRow.tsx). Carries its own row-level context menu (right-click) and ⋯ trigger (hover-revealed), both
 // rendering the SAME shared descriptor list (chatMenu.logic.ts) the thread header's own menu uses.
-export function ChatRow({ chat, selected, multiSelected, currentUserId, onAction, onPointerSelect }: ChatRowProps) {
+export function ChatRow({ chat, selected, multiSelected, currentUserId, blocked, onAction, onPointerSelect }: ChatRowProps) {
 	const { t } = useTranslation("chats")
 	const { t: tCommon } = useTranslation("common")
 	const undecryptable = isChatUndecryptable(chat)
@@ -47,15 +50,16 @@ export function ChatRow({ chat, selected, multiSelected, currentUserId, onAction
 		: currentUserId !== undefined
 			? chatDisplayName(chat, currentUserId, t("chatJustYou"))
 			: chat.uuid
-	// Typing beats the last-message preview while any remote user is actively typing — the tier
-	// chatMessagePreview (lib/sort.ts) itself does not cover. Falls back to the message preview when nobody is typing.
 	const typingLabel = useChatTypingLabel(chat.uuid, currentUserId)
-	const preview = typingLabel ?? chatMessagePreview(chat) ?? t("chatNoMessages")
+	// chatPreviewTier owns the DECISION (typing > blocked > message > empty); this line owns the COPY.
+	// `typingLabel ?? …` short-circuits exactly the "typing" tier, so no narrowing cast is needed.
+	const previewBlocked = chatPreviewTier(chat, typingLabel, blocked) === "blocked"
+	const preview = typingLabel ?? (previewBlocked ? t("chatMessageHiddenBlocked") : (chatMessagePreview(chat) ?? t("chatNoMessages")))
 	const avatarUrl = chatAvatarUrl(chat, currentUserId)
 	// Client-derived numeric unread — the count of this chat's messages newer than lastFocus, from a
 	// blocked sender excluded, off the passive message cache (never a per-chat SDK round trip). A
 	// still-unresolved cache reads as 0 until the shell's bulk refetch fills it.
-	const unreadCount = useChatUnreadCount(chat, currentUserId)
+	const unreadCount = useChatUnreadCount(chat, currentUserId, blocked)
 	const unread = unreadCount > 0
 	const timestamp = chat.lastMessage?.sentTimestamp
 
@@ -122,10 +126,16 @@ export function ChatRow({ chat, selected, multiSelected, currentUserId, onAction
 									) : null}
 								</div>
 								<div className="flex min-w-0 items-center gap-1.5">
+									{/* A substituted preview ignores the unread treatment — the hidden line is not
+									content the reader is being invited to catch up on. */}
 									<span
 										className={cn(
 											"min-w-0 flex-1 truncate text-xs",
-											unread ? "text-foreground" : "text-muted-foreground"
+											previewBlocked
+												? "text-muted-foreground italic"
+												: unread
+													? "text-foreground"
+													: "text-muted-foreground"
 										)}
 									>
 										{preview}
@@ -163,6 +173,7 @@ export function ChatRow({ chat, selected, multiSelected, currentUserId, onAction
 							<ChatDropdownMenuContent
 								chat={chat}
 								currentUserId={currentUserId}
+								blocked={blocked}
 								onAction={onAction}
 							/>
 						</DropdownMenu>
@@ -172,6 +183,7 @@ export function ChatRow({ chat, selected, multiSelected, currentUserId, onAction
 			<ChatContextMenuContent
 				chat={chat}
 				currentUserId={currentUserId}
+				blocked={blocked}
 				onAction={onAction}
 			/>
 		</ContextMenu>

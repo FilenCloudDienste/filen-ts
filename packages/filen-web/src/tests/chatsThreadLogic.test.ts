@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest"
-import type { ChatMessage, UuidStr } from "@filen/sdk-rs"
+import type { BlockedContact, ChatMessage, UuidStr } from "@filen/sdk-rs"
 import {
 	buildThreadRows,
 	computeScrollAfterPrepend,
 	countNewTailMessages,
 	isScrollNearBottom,
+	nextAnnouncement,
 	nextScrollAffordanceState,
 	INITIAL_SCROLL_AFFORDANCE,
 	type ThreadRow,
 	type ScrollAffordanceState
 } from "@/features/chats/components/thread/thread.logic"
+import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -19,6 +21,17 @@ function testUuid(label: string): UuidStr {
 // (buildThreadRows uses local getFullYear/Month/Date, matching how the day label renders).
 function ts(year: number, month: number, day: number, hour: number, minute: number): bigint {
 	return BigInt(new Date(year, month - 1, day, hour, minute, 0, 0).getTime())
+}
+
+function mockBlockedContact(overrides: Partial<BlockedContact> = {}): BlockedContact {
+	return {
+		uuid: testUuid("blocked"),
+		userId: 3n,
+		email: "blocked@x.io",
+		nickName: "",
+		timestamp: 0n,
+		...overrides
+	}
 }
 
 let counter = 0
@@ -176,6 +189,60 @@ describe("buildThreadRows — unread divider (old-web NewDivider placement/guard
 		// timestamp — simulated here directly on the same messages array.
 		const afterMarkRead = buildThreadRows([a], { lastFocus: a.sentTimestamp, currentUserId: BigInt(SELF) })
 		expect(afterMarkRead.some(r => r.kind === "unread")).toBe(false)
+	})
+
+	const BLOCKED = 3
+	const blockedUsers = deriveBlockedUsers([mockBlockedContact({ userId: BigInt(BLOCKED), email: "blocked@x.io" })])
+
+	it("still inserts the divider before a qualifying message from a non-blocked sender", () => {
+		const a = mockMessage({ senderId: OTHER, sentTimestamp: ts(2021, 1, 1, 12, 0) })
+		const rows = buildThreadRows([a], { lastFocus: ts(2021, 1, 1, 11, 0), currentUserId: BigInt(SELF), blocked: blockedUsers })
+
+		expect(rows.some(r => r.kind === "unread")).toBe(true)
+	})
+
+	it("inserts no divider when the only qualifying message is from a blocked sender", () => {
+		const a = mockMessage({ senderId: BLOCKED, senderEmail: "blocked@x.io", sentTimestamp: ts(2021, 1, 1, 12, 0) })
+		const rows = buildThreadRows([a], { lastFocus: ts(2021, 1, 1, 11, 0), currentUserId: BigInt(SELF), blocked: blockedUsers })
+
+		expect(rows.some(r => r.kind === "unread")).toBe(false)
+	})
+
+	// Deliberate divergence from mobile (which suppresses the divider for the whole session instead).
+	it("moves the divider forward onto the first NON-blocked qualifying message", () => {
+		const a = mockMessage({ senderId: BLOCKED, senderEmail: "blocked@x.io", sentTimestamp: ts(2021, 1, 1, 12, 0) })
+		const b = mockMessage({ senderId: OTHER, sentTimestamp: ts(2021, 1, 1, 12, 5) })
+		const rows = buildThreadRows([a, b], { lastFocus: ts(2021, 1, 1, 11, 0), currentUserId: BigInt(SELF), blocked: blockedUsers })
+
+		const kinds = rows.map(r => (r.kind === "message" ? r.key : r.kind))
+		expect(kinds).toEqual(["day", a.uuid, "unread", b.uuid])
+	})
+
+	it("behaves exactly as before when `blocked` is omitted (fail-open)", () => {
+		const a = mockMessage({ senderId: BLOCKED, senderEmail: "blocked@x.io", sentTimestamp: ts(2021, 1, 1, 12, 0) })
+		const rows = buildThreadRows([a], { lastFocus: ts(2021, 1, 1, 11, 0), currentUserId: BigInt(SELF) })
+
+		expect(rows.some(r => r.kind === "unread")).toBe(true)
+	})
+})
+
+describe("nextAnnouncement", () => {
+	it("starts at seq 1 and carries count/name through", () => {
+		expect(nextAnnouncement(null, 2, "Zoe")).toEqual({ seq: 1, count: 2, name: "Zoe" })
+	})
+
+	// The monotonic seq is the whole re-announcement mechanism — it keys the live region's inner span, so
+	// an identical repeat arrival still remounts that child.
+	it("bumps seq on a second arrival from the same sender", () => {
+		const first = nextAnnouncement(null, 1, "Zoe")
+
+		expect(nextAnnouncement(first, 1, "Zoe").seq).toBe(2)
+	})
+
+	it("replaces count rather than accumulating it", () => {
+		const first = nextAnnouncement(null, 3, "Zoe")
+
+		expect(nextAnnouncement(first, 1, "Zoe").count).toBe(1)
 	})
 })
 

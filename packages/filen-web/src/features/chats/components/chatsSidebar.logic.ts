@@ -1,5 +1,6 @@
 import type { Chat } from "@filen/sdk-rs"
-import { sortChats, chatDisplayName, chatMessagePreview, isChatUndecryptable } from "@/features/chats/lib/sort"
+import { sortChats, chatDisplayName, chatMessagePreview, isChatUndecryptable, isLastMessageFromBlocked } from "@/features/chats/lib/sort"
+import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@/features/contacts/lib/blocking"
 
 // A chat is listed only when the viewer owns it OR it has at least one message — mirrors mobile's own
 // list filter (components/list/index.tsx): an owned-but-empty chat the user just created still shows
@@ -28,7 +29,17 @@ function isListedChat(chat: Chat, currentUserId: bigint | undefined): boolean {
 //
 // `soloFallback` is the rendered title of a chat with no other participants (chatDisplayName's own
 // fallback) — threaded through so searching matches exactly what the row displays.
-export function filterChats(chats: readonly Chat[], search: string, currentUserId: bigint | undefined, soloFallback: string): Chat[] {
+//
+// `blocked` skips ONLY the last-message text branch when that message came from a blocked sender: a group
+// chat (never hidden wholesale — only 1:1s are) would otherwise stay findable by typing the exact text the
+// row substitutes with "Message hidden". Name and participant matching are unaffected.
+export function filterChats(
+	chats: readonly Chat[],
+	search: string,
+	currentUserId: bigint | undefined,
+	soloFallback: string,
+	blocked: BlockedUsers = EMPTY_BLOCKED_USERS
+): Chat[] {
 	const sorted = sortChats(chats).filter(chat => isListedChat(chat, currentUserId))
 	const term = search.trim().toLowerCase()
 
@@ -45,7 +56,7 @@ export function filterChats(chats: readonly Chat[], search: string, currentUserI
 			return true
 		}
 
-		if (chatMessagePreview(chat)?.toLowerCase().includes(term) === true) {
+		if (!isLastMessageFromBlocked(chat, blocked) && chatMessagePreview(chat)?.toLowerCase().includes(term) === true) {
 			return true
 		}
 
@@ -57,6 +68,32 @@ export function filterChats(chats: readonly Chat[], search: string, currentUserI
 			return p.nickName?.toLowerCase().includes(term) ?? false
 		})
 	})
+}
+
+// A 1:1 conversation whose sole other participant is blocked — port of mobile's isOneOnOneWithBlocked
+// (chatSelectors.ts). A group chat (2+ others) is never hidden wholesale; its blocked members are
+// tombstoned per message instead. Uses the shared isBlocked helper so the userId-first / trimmed-email
+// fallback rule stays in one place.
+export function isOneOnOneWithBlocked(chat: Chat, currentUserId: bigint | undefined, blocked: BlockedUsers): boolean {
+	const others = chat.participants.filter(p => currentUserId === undefined || p.userId !== currentUserId)
+	const other = others[0]
+
+	if (others.length !== 1 || other === undefined) {
+		return false
+	}
+
+	return isBlocked({ userId: other.userId, email: other.email }, blocked)
+}
+
+// List-membership policy filter, applied BEFORE search and kept as its own pass (mobile does the same):
+// the sidebar reuses this post-block list for its stale-selection purge, and folding the rule into
+// filterChats would apply the search filter to that purge too.
+export function chatsWithoutBlockedOneOnOne(
+	chats: readonly Chat[],
+	currentUserId: bigint | undefined,
+	blocked: BlockedUsers = EMPTY_BLOCKED_USERS
+): Chat[] {
+	return chats.filter(chat => !isOneOnOneWithBlocked(chat, currentUserId, blocked))
 }
 
 // Uuids of currently-selected chats no longer present in a live chat set — chatsSidebar.tsx's own

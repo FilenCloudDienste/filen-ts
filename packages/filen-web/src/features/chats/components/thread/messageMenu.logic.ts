@@ -20,15 +20,23 @@ export type MessageActionId = "reply" | "copy" | "edit" | "delete" | "retry" | "
 // first). reply/edit set composer state; retry/remove act on a failed optimistic entry; delete acts on
 // a committed message; disableEmbed is the sender's own embed opt-out (confirm-free, mirrors delete's
 // online-only posture minus the confirm step — see messageActions.ts's disableMessageEmbed).
+interface MessageActionDescriptorShared {
+	labelKey: ChatsKey
+	icon: LucideIcon
+	// Present-but-disabled (never absent) once set to false — same field and semantics as
+	// ChatActionDescriptor's. Only applyMessageOfflineGate below ever sets it.
+	enabled?: boolean
+}
+
 export type MessageActionDescriptor =
-	| { id: "reply"; labelKey: ChatsKey; icon: LucideIcon; run: "direct" }
-	| { id: "copy"; labelKey: ChatsKey; icon: LucideIcon; run: "direct" }
-	| { id: "edit"; labelKey: ChatsKey; icon: LucideIcon; run: "direct" }
-	| { id: "delete"; labelKey: ChatsKey; icon: LucideIcon; run: "dialog"; destructive: true }
-	| { id: "retry"; labelKey: ChatsKey; icon: LucideIcon; run: "direct" }
-	| { id: "remove"; labelKey: ChatsKey; icon: LucideIcon; run: "direct"; destructive: true }
-	| { id: "disableEmbed"; labelKey: ChatsKey; icon: LucideIcon; run: "direct" }
-	| { id: "block"; labelKey: ChatsKey; icon: LucideIcon; run: "direct"; destructive: true }
+	| (MessageActionDescriptorShared & { id: "reply"; run: "direct" })
+	| (MessageActionDescriptorShared & { id: "copy"; run: "direct" })
+	| (MessageActionDescriptorShared & { id: "edit"; run: "direct" })
+	| (MessageActionDescriptorShared & { id: "delete"; run: "dialog"; destructive: true })
+	| (MessageActionDescriptorShared & { id: "retry"; run: "direct" })
+	| (MessageActionDescriptorShared & { id: "remove"; run: "direct"; destructive: true })
+	| (MessageActionDescriptorShared & { id: "disableEmbed"; run: "direct" })
+	| (MessageActionDescriptorShared & { id: "block"; run: "direct"; destructive: true })
 
 const REPLY: MessageActionDescriptor = { id: "reply", labelKey: "chatMessageActionReply", icon: CornerUpLeftIcon, run: "direct" }
 const COPY: MessageActionDescriptor = { id: "copy", labelKey: "chatMessageActionCopy", icon: CopyIcon, run: "direct" }
@@ -137,4 +145,17 @@ export function messageMenuActions(
 	}
 
 	return actions
+}
+
+// Offline-gated ids: edit/delete/disableEmbed/block all write to the SDK. reply and copy are purely local
+// (composer state, clipboard); retry re-queues into the durable send outbox, which is deliberately never
+// offline-gated; remove only drops a local optimistic entry.
+const OFFLINE_GATED_IDS: ReadonlySet<MessageActionId> = new Set(["edit", "delete", "disableEmbed", "block"])
+
+export function applyMessageOfflineGate(actions: MessageActionDescriptor[], isOnline: boolean): MessageActionDescriptor[] {
+	if (isOnline) {
+		return actions
+	}
+
+	return actions.map(action => (OFFLINE_GATED_IDS.has(action.id) ? { ...action, enabled: false } : action))
 }

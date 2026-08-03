@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest"
-import type { Chat, ChatMessage, ChatParticipant, UuidStr } from "@filen/sdk-rs"
-import { chatDisplayName, chatMessagePreview, isChatUndecryptable, sortChats } from "@/features/chats/lib/sort"
+import type { BlockedContact, Chat, ChatMessage, ChatParticipant, UuidStr } from "@filen/sdk-rs"
+import {
+	chatDisplayName,
+	chatMessagePreview,
+	chatPreviewTier,
+	isChatUndecryptable,
+	isLastMessageFromBlocked,
+	messageSenderName,
+	sortChats
+} from "@/features/chats/lib/sort"
+import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a
 // short label the same way notesSort.test.ts's testUuid does.
@@ -80,6 +89,17 @@ function mockUndecryptableMessage(overrides: Omit<Partial<ChatMessage>, "message
 		edited: false,
 		editedTimestamp: 0n,
 		sentTimestamp: 1_000n,
+		...overrides
+	}
+}
+
+function mockBlockedContact(overrides: Partial<BlockedContact> = {}): BlockedContact {
+	return {
+		uuid: testUuid("blocked"),
+		userId: 2n,
+		email: "b@example.com",
+		nickName: "",
+		timestamp: 0n,
 		...overrides
 	}
 }
@@ -240,5 +260,85 @@ describe("chatMessagePreview — lastMessage tier only", () => {
 		const chat = mockChat({ lastMessage: mockMessage({ message: "hey there" }) })
 
 		expect(chatMessagePreview(chat)).toBe("hey there")
+	})
+})
+
+describe("messageSenderName", () => {
+	it("prefers a non-empty nickname", () => {
+		expect(messageSenderName(mockMessage({ senderNickName: "Zoe", senderEmail: "zoe@example.com" }))).toBe("Zoe")
+	})
+
+	it("falls back to the email when the nickname is undefined", () => {
+		expect(messageSenderName(mockMessage({ senderNickName: undefined, senderEmail: "zoe@example.com" }))).toBe("zoe@example.com")
+	})
+
+	it("falls back to the email when the nickname is an empty string", () => {
+		expect(messageSenderName(mockMessage({ senderNickName: "", senderEmail: "zoe@example.com" }))).toBe("zoe@example.com")
+	})
+})
+
+describe("isLastMessageFromBlocked", () => {
+	const blocked = deriveBlockedUsers([mockBlockedContact({ userId: 9n, email: "zoe@example.com" })])
+
+	it("is false when the chat has no lastMessage", () => {
+		expect(isLastMessageFromBlocked(mockChat(), blocked)).toBe(false)
+	})
+
+	// senderId is `number` on the wasm surface — this pins the BigInt coercion against a bigint userId.
+	it("is true when the numeric senderId matches a blocked bigint userId", () => {
+		const chat = mockChat({ lastMessage: mockMessage({ senderId: 9, senderEmail: "unlisted@example.com" }) })
+
+		expect(isLastMessageFromBlocked(chat, blocked)).toBe(true)
+	})
+
+	it("is true when only the email matches", () => {
+		const chat = mockChat({ lastMessage: mockMessage({ senderId: 77, senderEmail: "ZOE@example.com" }) })
+
+		expect(isLastMessageFromBlocked(chat, blocked)).toBe(true)
+	})
+
+	it("is false when neither identity matches", () => {
+		const chat = mockChat({ lastMessage: mockMessage({ senderId: 77, senderEmail: "other@example.com" }) })
+
+		expect(isLastMessageFromBlocked(chat, blocked)).toBe(false)
+	})
+})
+
+describe("chatPreviewTier", () => {
+	const blocked = deriveBlockedUsers([mockBlockedContact({ userId: 9n, email: "zoe@example.com" })])
+
+	function chatFromBlockedSender(): Chat {
+		return mockChat({ lastMessage: mockMessage({ senderId: 9, senderEmail: "zoe@example.com", message: "hidden" }) })
+	}
+
+	// A live typing label always wins — the blocked treatment must never bleed onto it.
+	it("returns typing when a typing label is present, even with a blocked last sender", () => {
+		expect(chatPreviewTier(chatFromBlockedSender(), "Zoe is typing…", blocked)).toBe("typing")
+	})
+
+	it("returns blocked when nobody is typing and the last sender is blocked", () => {
+		expect(chatPreviewTier(chatFromBlockedSender(), null, blocked)).toBe("blocked")
+	})
+
+	it("returns message when nobody is typing, nobody is blocked and the last message has text", () => {
+		const chat = mockChat({ lastMessage: mockMessage({ senderId: 3, senderEmail: "c@example.com", message: "hey" }) })
+
+		expect(chatPreviewTier(chat, null, blocked)).toBe("message")
+	})
+
+	it("returns empty when there is no lastMessage at all", () => {
+		expect(chatPreviewTier(mockChat(), null, blocked)).toBe("empty")
+	})
+
+	// Documented divergence from mobile: blocked outranks the message tier and ignores decryptability, so
+	// an undecryptable message from a blocked sender never falls through to "no messages yet".
+	it("returns blocked for an undecryptable last message from a blocked sender", () => {
+		const chat = mockChat({ lastMessage: mockUndecryptableMessage({ senderId: 9, senderEmail: "zoe@example.com" }) })
+
+		expect(chatPreviewTier(chat, null, blocked)).toBe("blocked")
+	})
+
+	it("never returns blocked when the blocked argument is omitted (fail-open default)", () => {
+		expect(chatPreviewTier(chatFromBlockedSender(), null)).toBe("message")
 	})
 })

@@ -156,9 +156,9 @@ export function visibleTypingUsers(users: readonly ChatTypingUser[] | undefined,
 // Don't emit another "down" within this window of the last one (mobile fires per-keystroke; a fixed
 // throttle keeps the wire quiet without losing the "still typing" signal the receiver's watchdog needs).
 const DOWN_THROTTLE_MS = 2_500
-// Emit a single "up" this long after the last keystroke (idle) — shorter than the receiver's expiry so a
-// real stop lands before the watchdog would guess it.
-const IDLE_UP_MS = 5_000
+// Emit a single "up" this long after the last keystroke (idle) — mobile's own 3s idle window, and well
+// short of the receiver's 10s expiry so a real stop lands before the watchdog would guess it.
+const IDLE_UP_MS = 3_000
 
 interface TypingSendState {
 	lastDownAt: number

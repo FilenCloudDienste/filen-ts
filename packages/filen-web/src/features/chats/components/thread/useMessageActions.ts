@@ -3,11 +3,16 @@ import { toast } from "sonner"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { messageMenuActions, type MessageActionDescriptor } from "@/features/chats/components/thread/messageMenu.logic"
+import {
+	applyMessageOfflineGate,
+	messageMenuActions,
+	type MessageActionDescriptor
+} from "@/features/chats/components/thread/messageMenu.logic"
 import { retryInflightMessage, removeInflightMessage } from "@/features/chats/lib/inflight"
 import { disableMessageEmbed } from "@/features/chats/lib/messageActions"
 import { blockContactByEmail } from "@/features/contacts/lib/actions"
-import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
+import type { BlockedUsers } from "@/features/contacts/lib/blocking"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import type { ChatSendState } from "@/features/chats/store/useChatsInflight"
 
@@ -23,10 +28,9 @@ export interface UseMessageActionsArgs {
 	// Delete needs a confirm step; the confirm dialog itself lives with the mounting row (messageRow.tsx)
 	// so it survives past the menu's own close — every renderer of this hook just requests it.
 	onRequestDelete: () => void
-	// Whether to actively fetch the blocked set. The right-click / ⋯-overflow menus warm it on open (a
-	// deliberate interaction, as before). The always-mounted hover bar reads passively so it never fires
-	// a per-row request just to sit idle — its own inline buttons (reply/copy/edit) never need it.
-	warmBlocked: boolean
+	// From the thread's single enabled read (messageThread.tsx) — a per-row observer would be two contacts
+	// subscriptions per rendered message.
+	blocked: BlockedUsers
 }
 
 export interface MessageActionsHandle {
@@ -48,13 +52,13 @@ export function useMessageActions({
 	sendState,
 	hasEmbeds,
 	onRequestDelete,
-	warmBlocked
+	blocked
 }: UseMessageActionsArgs): MessageActionsHandle {
 	const { t } = useTranslation("chats")
+	const isOnline = useIsOnline()
 	const beginReply = useChatComposerStore(state => state.beginReply)
 	const beginEdit = useChatComposerStore(state => state.beginEdit)
-	const blocked = useBlockedUsers(warmBlocked)
-	const descriptors = messageMenuActions(message, currentUserId, sendState, hasEmbeds, blocked)
+	const descriptors = applyMessageOfflineGate(messageMenuActions(message, currentUserId, sendState, hasEmbeds, blocked), isOnline)
 
 	async function handleCopy(): Promise<void> {
 		if (message.message === undefined) {
@@ -97,6 +101,11 @@ export function useMessageActions({
 	}
 
 	function runAction(descriptor: MessageActionDescriptor): void {
+		// Defense in depth at the dispatch layer — a stale render can never fire an offline-gated action.
+		if (descriptor.enabled === false) {
+			return
+		}
+
 		if (descriptor.id === "reply") {
 			beginReply(chat.uuid, { kind: "reply", message })
 

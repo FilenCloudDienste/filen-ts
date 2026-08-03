@@ -26,7 +26,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { CHATS_QUERY_KEY, chatsQueryGet } from "@/features/chats/queries/chats"
 import { chatMessagesQueryKey, chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import { deleteMessage, editMessage, disableMessageEmbed } from "@/features/chats/lib/messageActions"
-import { messageMenuActions } from "@/features/chats/components/thread/messageMenu.logic"
+import { applyMessageOfflineGate, messageMenuActions } from "@/features/chats/components/thread/messageMenu.logic"
 
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 	return {
@@ -202,6 +202,49 @@ describe("messageMenuActions", () => {
 			{ id: "edit", labelKey: "chatMessageActionEdit", icon: PencilIcon, run: "direct" },
 			{ id: "delete", labelKey: "chatMessageActionDelete", icon: Trash2Icon, run: "dialog", destructive: true }
 		])
+	})
+})
+
+describe("applyMessageOfflineGate", () => {
+	it("returns the exact same descriptor array while online", () => {
+		const descriptors = messageMenuActions(mockMessage({ senderId: 1 }), 1n, "confirmed", true)
+
+		expect(applyMessageOfflineGate(descriptors, true)).toEqual(descriptors)
+	})
+
+	it("offline: disables edit, delete and disableEmbed on an own confirmed message with embeds", () => {
+		const descriptors = applyMessageOfflineGate(messageMenuActions(mockMessage({ senderId: 1 }), 1n, "confirmed", true), false)
+		const enabledById = new Map(descriptors.map(descriptor => [descriptor.id, descriptor.enabled]))
+
+		expect(enabledById.get("edit")).toBe(false)
+		expect(enabledById.get("delete")).toBe(false)
+		expect(enabledById.get("disableEmbed")).toBe(false)
+		expect(enabledById.get("reply")).toBeUndefined()
+		expect(enabledById.get("copy")).toBeUndefined()
+	})
+
+	it("offline: disables block on a foreign confirmed message, leaving reply and copy untouched", () => {
+		const descriptors = applyMessageOfflineGate(messageMenuActions(mockMessage({ senderId: 5 }), 1n, "confirmed"), false)
+		const enabledById = new Map(descriptors.map(descriptor => [descriptor.id, descriptor.enabled]))
+
+		expect(enabledById.get("block")).toBe(false)
+		expect(enabledById.get("reply")).toBeUndefined()
+		expect(enabledById.get("copy")).toBeUndefined()
+	})
+
+	// Retry re-queues into the durable outbox and remove only drops a local optimistic entry — neither
+	// needs the network.
+	it("offline: leaves retry and remove enabled on a failed send", () => {
+		const descriptors = applyMessageOfflineGate(messageMenuActions(mockMessage({ senderId: 1 }), 1n, "failed"), false)
+
+		expect(descriptors.every(descriptor => descriptor.enabled === undefined)).toBe(true)
+	})
+
+	it("never changes the descriptor set or its order", () => {
+		const online = messageMenuActions(mockMessage({ senderId: 1 }), 1n, "confirmed", true)
+		const offline = applyMessageOfflineGate(online, false)
+
+		expect(offline.map(descriptor => descriptor.id)).toEqual(online.map(descriptor => descriptor.id))
 	})
 })
 

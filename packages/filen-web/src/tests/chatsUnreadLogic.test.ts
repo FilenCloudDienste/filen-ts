@@ -115,6 +115,57 @@ describe("chatHasUnread (cheap boolean tier, with blocked cross-ref)", () => {
 	})
 })
 
+describe("chatHasUnread with a blocked last-message sender", () => {
+	const blocked = deriveBlockedUsers([{ uuid: testUuid("b"), userId: 2n, email: "peer@x.io", nickName: "P", timestamp: 0n }])
+
+	function blockedLastMessageChat(overrides: Partial<Chat> = {}): Chat {
+		return mockChat({
+			lastFocus: 100n,
+			lastMessage: mockMessage({ senderId: 2, senderEmail: "peer@x.io", sentTimestamp: 900n }),
+			...overrides
+		})
+	}
+
+	it("is false when no message reader is supplied (back-compat)", () => {
+		expect(chatHasUnread(blockedLastMessageChat(), SELF, blocked)).toBe(false)
+	})
+
+	it("is false when the reader has no cached messages — never guesses", () => {
+		expect(chatHasUnread(blockedLastMessageChat(), SELF, blocked, () => undefined)).toBe(false)
+	})
+
+	it("is true when an older cached message from a non-blocked sender is still unread", () => {
+		const older = mockMessage({ uuid: testUuid("older"), senderId: 3, senderEmail: "third@x.io", sentTimestamp: 500n })
+
+		expect(chatHasUnread(blockedLastMessageChat(), SELF, blocked, () => [older])).toBe(true)
+	})
+
+	it("is false when every cached message is blocked, own or already read", () => {
+		const fromBlocked = mockMessage({ uuid: testUuid("m1"), senderId: 2, senderEmail: "peer@x.io", sentTimestamp: 500n })
+		const own = mockMessage({ uuid: testUuid("m2"), senderId: 1, senderEmail: "me@x.io", sentTimestamp: 600n })
+		const alreadyRead = mockMessage({ uuid: testUuid("m3"), senderId: 3, senderEmail: "third@x.io", sentTimestamp: 50n })
+
+		expect(chatHasUnread(blockedLastMessageChat(), SELF, blocked, () => [fromBlocked, own, alreadyRead])).toBe(false)
+	})
+
+	it("is false for a muted chat — mute wins and the scan is never reached", () => {
+		const older = mockMessage({ uuid: testUuid("older"), senderId: 3, senderEmail: "third@x.io", sentTimestamp: 500n })
+
+		expect(chatHasUnread(blockedLastMessageChat({ muted: true }), SELF, blocked, () => [older])).toBe(false)
+	})
+
+	it("answers on the cheap path without touching the reader when the last sender is not blocked", () => {
+		const chat = mockChat({
+			lastFocus: 100n,
+			lastMessage: mockMessage({ senderId: 3, senderEmail: "third@x.io", sentTimestamp: 900n })
+		})
+		const getMessages = vi.fn(() => undefined)
+
+		expect(chatHasUnread(chat, SELF, blocked, getMessages)).toBe(true)
+		expect(getMessages).not.toHaveBeenCalled()
+	})
+})
+
 describe("countUnreadMessages", () => {
 	it("counts exactly the unread messages, excluding own, old, and blocked senders", () => {
 		const chat = mockChat({ lastFocus: 100n })

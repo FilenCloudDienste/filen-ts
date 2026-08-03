@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { ChatMessage, UuidStr } from "@filen/sdk-rs"
-import { messageMenuActions, type MessageActionId } from "@/features/chats/components/thread/messageMenu.logic"
+import { applyMessageOfflineGate, messageMenuActions, type MessageActionId } from "@/features/chats/components/thread/messageMenu.logic"
 import { inlinePrimaryActions, INLINE_PRIMARY } from "@/features/chats/components/thread/messageActionBar.logic"
 
 function testUuid(label: string): UuidStr {
@@ -86,5 +86,17 @@ describe("inlinePrimaryActions (hover action bar)", () => {
 				}
 			}
 		}
+	})
+})
+
+describe("inlinePrimaryActions with an offline-gated descriptor", () => {
+	// Gated actions render disabled rather than vanishing, so the projection must keep them and carry
+	// their enabled flag through.
+	it("still surfaces a gated edit and preserves enabled: false", () => {
+		const descriptors = applyMessageOfflineGate(messageMenuActions(mockMessage({ senderId: 1 }), 1n, "confirmed"), false)
+		const inline = inlinePrimaryActions(descriptors)
+
+		expect(ids(inline)).toEqual(["reply", "copy", "edit"])
+		expect(inline.find(descriptor => descriptor.id === "edit")?.enabled).toBe(false)
 	})
 })

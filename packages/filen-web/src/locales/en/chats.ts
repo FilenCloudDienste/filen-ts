@@ -78,6 +78,14 @@ export const chats = {
 	chatMessageFailed: "Not sent",
 	/** Message — prefix on the compact reply-to reference line above a reply */
 	chatReplyingTo: "Replying to {{name}}",
+	/** Message row / conversation row — replaces a blocked sender's message body and the list preview line */
+	chatMessageHiddenBlocked: "Message hidden",
+	/** Message row — reveals a hidden blocked-sender message for this session */
+	chatMessageHiddenBlockedShow: "Show",
+	/** Thread — screen-reader-only announcement when a message arrives from someone else; {{name}} is its sender */
+	chatNewMessageAnnouncement_one: "New message from {{name}}",
+	/** Thread — screen-reader-only announcement when messages arrive from someone else (plural) */
+	chatNewMessageAnnouncement_other: "{{count}} new messages from {{name}}",
 	/** Message — rendered mention label for @everyone */
 	chatMentionEveryone: "everyone",
 	/** Message — rendered mention label for an unresolved participant */
@@ -199,6 +207,14 @@ export const chats = {
 	chatParticipantsOwnerBadge: "Owner",
 	/** Participants dialog — accessible label on a manageable row's remove button */
 	chatParticipantRemoveAction: "Remove {{email}}",
+	/** Participants dialog — accessible label on a row's block button */
+	chatParticipantsBlockAction: "Block {{email}}",
+	/** Participants dialog — accessible label on a row's unblock button */
+	chatParticipantsUnblockAction: "Unblock {{email}}",
+	/** Participants dialog — inline marker appended to a blocked participant's email */
+	chatParticipantBlockedMarker: "Blocked",
+	/** Participants dialog — shown when the blocked-contact record moved between render and click */
+	chatParticipantBlockStale: "This contact's block status just changed. Please try again.",
 	/** Participants dialog — shown when the conversation has no other participants */
 	chatParticipantsEmpty: "No other participants",
 	/** Remove-participant confirm — heading */

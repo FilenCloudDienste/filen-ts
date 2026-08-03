@@ -1,5 +1,7 @@
 import { fastLocaleCompare, parseNumbersFromString } from "@filen/utils"
-import type { Chat } from "@filen/sdk-rs"
+import type { Chat, ChatMessagePartial } from "@filen/sdk-rs"
+import { contactDisplayName } from "@/features/contacts/components/contactsList.logic"
+import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@/features/contacts/lib/blocking"
 
 // Conversation-list ordering — ported from
 // `filen-mobile/src/features/chats/components/list/index.tsx:36-45`, not a guess. There is no
@@ -96,17 +98,58 @@ export function chatAvatarUrl(chat: Chat, currentUserId: bigint | undefined): st
 	return avatar?.startsWith("http") === true ? avatar : undefined
 }
 
-// lastMessage preview-line derivation — the "last-message" tier ONLY of mobile's full precedence
-// (`typing > blocked > last-message > "no messages yet"`, list/chat/index.tsx). The typing tier is
-// layered on top by the caller (chatRow.tsx's useChatTypingLabel, fed by the socket-driven typing
-// store); "message from a blocked sender" needs the contacts blocking model cross-referenced —
-// not yet implemented here. Returns null when there is no previewable text — the caller renders "no messages yet" for both
-// "no lastMessage at all" and "lastMessage exists but is undecryptable" (mobile's own fallthrough:
-// an undecryptable message has `message === undefined`, which this treats identically to absent).
+// lastMessage preview-line derivation — the "last-message" tier ONLY of the full precedence
+// (`typing > blocked > last-message > "no messages yet"`). chatPreviewTier below decides which tier
+// wins; chatRow.tsx renders the copy for it. Returns null when there is no previewable text — the caller
+// renders "no messages yet" for both "no lastMessage at all" and "lastMessage exists but is
+// undecryptable" (mobile's own fallthrough: an undecryptable message has `message === undefined`, which
+// this treats identically to absent).
 export function chatMessagePreview(chat: Chat): string | null {
 	if (!chat.lastMessage?.message) {
 		return null
 	}
 
 	return chat.lastMessage.message
+}
+
+// Sender display name for a message, from its denormalized sender fields. Messages carry those fields
+// inline rather than a contact record (so a sender who has since left still renders correctly), hence the
+// adapter — the nickname-wins-over-email RULE itself stays in contactDisplayName, its single home.
+export function messageSenderName(message: ChatMessagePartial): string {
+	return contactDisplayName({ email: message.senderEmail, nickName: message.senderNickName })
+}
+
+// Whether a chat's last message came from a blocked sender. senderId is `number` on the wasm surface (the
+// codegen quirk unread.logic.ts documents) — coerce before comparing to a bigint userId.
+export function isLastMessageFromBlocked(chat: Chat, blocked: BlockedUsers): boolean {
+	const lastMessage = chat.lastMessage
+
+	if (!lastMessage) {
+		return false
+	}
+
+	return isBlocked({ userId: BigInt(lastMessage.senderId), email: lastMessage.senderEmail }, blocked)
+}
+
+// Which of the four mutually exclusive preview tiers a conversation row renders. Decided here rather than
+// as a chain of expressions in the row so the precedence is unit-testable: `typingLabel` and
+// chatMessagePreview are both `string | null`, and a comparison loosened against the wrong nullish value
+// silently pins a tier off forever while the surface still looks plausible.
+//
+// Deliberate divergence from mobile: "blocked" outranks the message tier and ignores whether the last
+// message decrypted, so an undecryptable message from a blocked sender still previews as hidden rather
+// than falling through to "no messages yet" — the fallthrough would leak that decryption failed as a
+// separate signal.
+export type ChatPreviewTier = "typing" | "blocked" | "message" | "empty"
+
+export function chatPreviewTier(chat: Chat, typingLabel: string | null, blocked: BlockedUsers = EMPTY_BLOCKED_USERS): ChatPreviewTier {
+	if (typingLabel !== null) {
+		return "typing"
+	}
+
+	if (isLastMessageFromBlocked(chat, blocked)) {
+		return "blocked"
+	}
+
+	return chatMessagePreview(chat) !== null ? "message" : "empty"
 }

@@ -40,11 +40,17 @@ export function isMessageUnread(
 	return !isBlocked({ userId: senderId, email: message.senderEmail }, blocked)
 }
 
-// Boolean tier — derived purely from the chat's own lastMessage vs. lastFocus, never a per-chat message
-// list. A blocked last-message sender reads as "not unread" here (this cheap gate does not scan older
-// messages behind it — the numeric count hook, which does hold the message list, is the authoritative
-// per-chat number).
-export function chatHasUnread(chat: Chat, userId: bigint | undefined, blocked: BlockedUsers = EMPTY_BLOCKED_USERS): boolean {
+// Boolean tier — derived from the chat's own lastMessage vs. lastFocus. When that last message is from a
+// blocked sender it falls back to scanning the chat's cached message list for an older unread from someone
+// else (mobile's chatSelectors pattern), so a blocked member posting into a group never masks a real
+// unread behind it. The reader is INJECTED (never imported here) to keep this module pure and
+// query-free; without one, a blocked last sender answers `false` rather than guessing.
+export function chatHasUnread(
+	chat: Chat,
+	userId: bigint | undefined,
+	blocked: BlockedUsers = EMPTY_BLOCKED_USERS,
+	getMessages?: (uuid: string) => readonly ChatMessage[] | undefined
+): boolean {
 	if (userId === undefined || chat.muted) {
 		return false
 	}
@@ -62,9 +68,15 @@ export function chatHasUnread(chat: Chat, userId: bigint | undefined, blocked: B
 		return false
 	}
 
-	if (lastMessage.sentTimestamp <= chat.lastFocus) {
-		return false
+	if (isBlocked({ userId: senderId, email: lastMessage.senderEmail }, blocked)) {
+		const messages = getMessages?.(chat.uuid)
+
+		if (messages === undefined) {
+			return false
+		}
+
+		return messages.some(message => isMessageUnread(message, chat, userId, blocked))
 	}
 
-	return !isBlocked({ userId: senderId, email: lastMessage.senderEmail }, blocked)
+	return lastMessage.sentTimestamp > chat.lastFocus
 }

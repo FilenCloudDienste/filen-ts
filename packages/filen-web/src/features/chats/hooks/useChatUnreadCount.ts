@@ -1,6 +1,5 @@
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { useChatMessages } from "@/features/chats/queries/chatMessages"
-import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { isMessageUnread } from "@/features/chats/lib/unread.logic"
 import type { BlockedUsers } from "@/features/contacts/lib/blocking"
 
@@ -27,11 +26,10 @@ export function countUnreadMessages(
 // Per-chat numeric unread count — a PASSIVE cache read (`enabled: false`), so a rendered row never fires
 // its own listMessagesBefore; it derives off whatever the bulk refetch (or the open thread) has already
 // populated for this chat. A chat whose message cache is still unresolved reads as 0 here (the global
-// count hook is what notices the gap and triggers a self-heal). Blocked users come from the same passive
-// contacts read the drive sharedIn filter uses — fail-open (0 blocked) until contacts are warm.
-export function useChatUnreadCount(chat: Chat, userId: bigint | undefined): number {
+// count hook is what notices the gap and triggers a self-heal). The blocked set arrives as a parameter
+// from the sidebar's single enabled read — a per-row observer would be one query subscription per row.
+export function useChatUnreadCount(chat: Chat, userId: bigint | undefined, blocked: BlockedUsers): number {
 	const messagesQuery = useChatMessages(chat.uuid, { enabled: false })
-	const blocked = useBlockedUsers(false)
 
 	if (messagesQuery.data === undefined) {
 		return 0

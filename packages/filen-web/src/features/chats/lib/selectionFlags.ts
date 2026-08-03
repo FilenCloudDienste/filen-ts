@@ -1,4 +1,4 @@
-import type { Chat } from "@filen/sdk-rs"
+import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { isChatOwner } from "@/features/chats/lib/actions"
 import { isChatUndecryptable } from "@/features/chats/lib/sort"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
@@ -43,7 +43,10 @@ const EMPTY_CHAT_SELECTION_FLAGS: ChatSelectionFlags = Object.freeze({
 export function aggregateChatSelectionFlags(
 	chats: readonly Chat[],
 	currentUserId: bigint | undefined,
-	blocked: BlockedUsers = EMPTY_BLOCKED_USERS
+	blocked: BlockedUsers = EMPTY_BLOCKED_USERS,
+	// Forwarded to chatHasUnread's blocked-last-message scan — stays injected so this module keeps its
+	// pure, query-free shape.
+	getMessages?: (uuid: string) => readonly ChatMessage[] | undefined
 ): ChatSelectionFlags {
 	if (chats.length === 0 || currentUserId === undefined) {
 		return EMPTY_CHAT_SELECTION_FLAGS
@@ -64,7 +67,7 @@ export function aggregateChatSelectionFlags(
 			includesUndecryptable = true
 		}
 
-		if (chatHasUnread(chat, currentUserId, blocked)) {
+		if (chatHasUnread(chat, currentUserId, blocked, getMessages)) {
 			includesUnread = true
 		}
 

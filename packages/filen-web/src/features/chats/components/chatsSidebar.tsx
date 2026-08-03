@@ -7,7 +7,8 @@ import { SearchIcon, XIcon, MessagesSquareIcon, PlusIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
 import { useChats } from "@/features/chats/queries/chats"
 import { useAccountQuery } from "@/queries/account"
-import { filterChats, staleChatSelectionUuids } from "@/features/chats/components/chatsSidebar.logic"
+import { chatsWithoutBlockedOneOnOne, filterChats, staleChatSelectionUuids } from "@/features/chats/components/chatsSidebar.logic"
+import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { selectableChatsForSelectAll } from "@/features/chats/lib/selectionFlags"
 import { useChatsSelectionStore } from "@/features/chats/store/useChatsSelectionStore"
 import { useChatsListSelection } from "@/features/chats/hooks/useChatsListSelection"
@@ -67,13 +68,20 @@ export function ChatsSidebar() {
 	const chatsQuery = useChats()
 	const accountQuery = useAccountQuery()
 	const currentUserId = accountQuery.data?.id
+	// One enabled read for every list surface: it feeds each row's preview, unread count, menu and the
+	// bulk bar by prop, so no row opens an observer of its own. Must stay inside the component that
+	// renders the rows.
+	const blocked = useBlockedUsers(true)
 	const dialogHost = useChatDialogHost({ currentUuid: selectedUuid })
 
 	const [search, setSearch] = useState("")
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 
 	const allChats = chatsQuery.data ?? []
-	const rows = filterChats(allChats, search, currentUserId, t("chatJustYou"))
+	// A 1:1 whose sole other participant is blocked drops out of the list entirely (mobile parity); the
+	// thread stays URL-reachable and fully tombstoned.
+	const visibleChats = chatsWithoutBlockedOneOnOne(allChats, currentUserId, blocked)
+	const rows = filterChats(visibleChats, search, currentUserId, t("chatJustYou"), blocked)
 	const searching = search.trim().length > 0
 
 	const virtualizer = useVirtualizer({
@@ -92,7 +100,7 @@ export function ChatsSidebar() {
 	// LIVE (ghost-purged) selection: re-derived from the current chats query every render, so a
 	// conversation removed from the account (elsewhere, or by another tab) between selection and
 	// dispatch is never targeted or counted towards the bulk bar's "2+ selected" threshold.
-	const chatsByUuid = new Map(allChats.map(chat => [chat.uuid, chat]))
+	const chatsByUuid = new Map(visibleChats.map(chat => [chat.uuid, chat]))
 	const liveSelectedChats: Chat[] = []
 	for (const selected of rawSelectedChats) {
 		const live = chatsByUuid.get(selected.uuid)
@@ -108,21 +116,23 @@ export function ChatsSidebar() {
 	// navigation involved), so the STORE itself — not just this render's liveSelectedChats view — must
 	// drop a uuid the instant it stops existing, or a stale entry sits there indefinitely until the
 	// sidebar next unmounts. Mirrors directoryListing.tsx's own search-result ghost purge: keyed on a
-	// uuid-content signature (stable across unrelated re-renders, since `allChats` is a brand-new array
-	// every render regardless of whether anything actually changed), not `allChats` itself.
-	const allChatUuidsSignature = allChats
+	// uuid-content signature (stable across unrelated re-renders, since `visibleChats` is a brand-new
+	// array every render regardless of whether anything actually changed), not `visibleChats` itself. The
+	// signature is over the VISIBLE set, so blocking someone drops their 1:1 from an active selection too
+	// — list membership can change with no chat being deleted.
+	const visibleChatUuidsSignature = visibleChats
 		.map(chat => chat.uuid)
 		.sort()
 		.join(",")
 
 	useEffect(() => {
-		const toRemove = staleChatSelectionUuids(useChatsSelectionStore.getState().selectedChats, allChats)
+		const toRemove = staleChatSelectionUuids(useChatsSelectionStore.getState().selectedChats, visibleChats)
 
 		if (toRemove.length > 0) {
 			useChatsSelectionStore.getState().removeFromSelection(toRemove)
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the signature above, not allChats — see comment above
-	}, [allChatUuidsSignature])
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the signature above, not visibleChats — see comment above
+	}, [visibleChatUuidsSignature])
 
 	// Registered at module scope above. Browser default for mod+a is "select all page text" — must
 	// preventDefault or the native selection would visibly compete with the row selection. Guarded on
@@ -216,6 +226,7 @@ export function ChatsSidebar() {
 								selected={chat.uuid === selectedUuid}
 								multiSelected={liveSelectedUuids.has(chat.uuid)}
 								currentUserId={currentUserId}
+								blocked={blocked}
 								onAction={dialogHost.openChatDialog}
 								onPointerSelect={event => {
 									selection.handlePointerSelect(virtualRow.index, event)
@@ -307,6 +318,7 @@ export function ChatsSidebar() {
 							<ChatsBulkActionBar
 								selectedChats={liveSelectedChats}
 								currentUserId={currentUserId}
+								blocked={blocked}
 								onDialogAction={dialogHost.openBulkDialog}
 							/>
 						</div>

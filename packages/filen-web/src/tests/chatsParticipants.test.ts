@@ -28,6 +28,7 @@ import {
 	contactsAvailableToAddToChat,
 	selectedParticipantsForRemoval
 } from "@/features/chats/components/chatParticipantsDialog.logic"
+import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -203,6 +204,48 @@ describe("chatParticipantRows — self-exclusion, ordering, and owner/participan
 		const rows = chatParticipantRows(chat, 3n, false)
 
 		expect(rows.find(r => r.participant.userId === 1n)?.canManage).toBe(false)
+	})
+})
+
+describe("chatParticipantRows blocked flag", () => {
+	const owner = mockParticipant({ userId: 1n, email: "owner@x.io" })
+	const participantA = mockParticipant({ userId: 2n, email: "a@x.io" })
+	const participantB = mockParticipant({ userId: 3n, email: "b@x.io" })
+	const chat = mockChat({ ownerId: 1n, participants: [participantA, owner, participantB] })
+
+	it("marks a participant blocked by userId, leaving the others unblocked", () => {
+		const blocked = deriveBlockedUsers([{ uuid: testUuid("bc"), userId: 3n, email: "unlisted@x.io", nickName: "", timestamp: 0n }])
+		const rows = chatParticipantRows(chat, 1n, true, blocked)
+
+		expect(rows.find(r => r.participant.userId === 3n)?.blocked).toBe(true)
+		expect(rows.find(r => r.participant.userId === 2n)?.blocked).toBe(false)
+	})
+
+	it("marks a participant blocked by email alone, case- and whitespace-insensitively", () => {
+		const blocked = deriveBlockedUsers([{ uuid: testUuid("bc"), userId: 99n, email: " A@X.IO ", nickName: "", timestamp: 0n }])
+		const rows = chatParticipantRows(chat, 1n, true, blocked)
+
+		expect(rows.find(r => r.participant.userId === 2n)?.blocked).toBe(true)
+	})
+
+	it("defaults every row to unblocked when the blocked argument is omitted", () => {
+		expect(chatParticipantRows(chat, 1n, true).every(r => !r.blocked)).toBe(true)
+	})
+
+	// The whole point of the per-row toggle: a non-owner viewer still sees live block state.
+	it("is independent of canManage — a non-owner viewer's rows still carry it", () => {
+		const blocked = deriveBlockedUsers([{ uuid: testUuid("bc"), userId: 3n, email: "b@x.io", nickName: "", timestamp: 0n }])
+		const rows = chatParticipantRows(chat, 2n, false, blocked)
+
+		expect(rows.every(r => !r.canManage)).toBe(true)
+		expect(rows.find(r => r.participant.userId === 3n)?.blocked).toBe(true)
+	})
+
+	it("carries a correct flag on the owner's own (never manageable) row", () => {
+		const blocked = deriveBlockedUsers([{ uuid: testUuid("bc"), userId: 1n, email: "owner@x.io", nickName: "", timestamp: 0n }])
+		const rows = chatParticipantRows(chat, 2n, false, blocked)
+
+		expect(rows.find(r => r.participant.userId === 1n)).toMatchObject({ isOwner: true, canManage: false, blocked: true })
 	})
 })
 

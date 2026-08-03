@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { CheckIcon, CrownIcon, SearchXIcon, UsersIcon, XIcon } from "lucide-react"
+import { CheckIcon, CrownIcon, SearchXIcon, UserCheckIcon, UsersIcon, UserXIcon, XIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 import { cn } from "@/lib/utils"
@@ -16,6 +16,8 @@ import { toastChatParticipantsBulkRemoveOutcome } from "@/features/chats/lib/bul
 import { useChats } from "@/features/chats/queries/chats"
 import { useAccountQuery } from "@/queries/account"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
+import { blockContactByEmail, unblockContact } from "@/features/contacts/lib/actions"
+import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
 import { contactDisplayName, contactInitials, filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
 // Same generic Set<uuid> picker helpers notes' own participantsDialog.tsx reuses — not re-implemented
 // here either (feedback: no duplicated selection/data layer across features for a picker this
@@ -71,10 +73,14 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 	const [bulkRemovePending, setBulkRemovePending] = useState(false)
 	const [confirmingBulkRemove, setConfirmingBulkRemove] = useState(false)
 
-	const contactsQuery = useContactsQuery({ enabled: mode === "add" })
+	// Always enabled (not mode-gated like the "add" picker alone would need): list mode's rows need the
+	// blocked set up front for each row's Block/Unblock control and its live state. Shares one query key
+	// with the picker's read, so entering "add" mode reads warm cache instead of refetching.
+	const contactsQuery = useContactsQuery({ enabled: true })
+	const blockedUsers = deriveBlockedUsers(contactsQuery.data?.blocked ?? [])
 	// Computed once at the top level (not just inside renderListBody) — the footer's bulk-remove button
 	// and its confirm dialog both need to resolve `selected` back to concrete participants too.
-	const rows = chatParticipantRows(chat, currentUserId, owner)
+	const rows = chatParticipantRows(chat, currentUserId, owner, blockedUsers)
 	const selectedForRemoval = selectedParticipantsForRemoval(rows, selected)
 
 	function handleOpenChange(next: boolean, details: DialogRoot.ChangeEventDetails): void {
@@ -93,6 +99,54 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 		const outcome = await removeChatParticipant(chat, participant)
 		setPendingUserId(null)
 		setRemoving(null)
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+		}
+	}
+
+	// Block/unblock a participant, regardless of ownership (mobile parity: never gated on canManage).
+	// Unblock needs the BLOCKED CONTACT's own uuid (unblockContact is uuid-keyed, unlike block itself which
+	// is email-keyed) — resolved from the same warm contacts cache the row's `blocked` flag came from; a
+	// miss (the block list moved since the last render) surfaces as an error rather than a guessed uuid.
+	async function handleToggleBlock(participant: ChatParticipant, isBlockedNow: boolean): Promise<void> {
+		if (isBlockedNow) {
+			const blockedUuid = contactsQuery.data?.blocked.find(c => c.userId === participant.userId)?.uuid
+
+			if (blockedUuid === undefined) {
+				toast.error(
+					errorLabel({
+						species: "plain",
+						message: t("chatParticipantBlockStale"),
+						label: t("chatParticipantBlockStale")
+					})
+				)
+
+				return
+			}
+
+			setPendingUserId(participant.userId)
+			const outcome = await unblockContact(blockedUuid)
+			setPendingUserId(null)
+
+			if (outcome.status === "error") {
+				toast.error(errorLabel(outcome.dto))
+			}
+
+			return
+		}
+
+		setPendingUserId(participant.userId)
+		// ChatParticipant.nickName/avatar are REQUIRED keys that may hold undefined, and
+		// exactOptionalPropertyTypes rejects passing undefined into BlockIdentity's optional fields — hence
+		// the spread guards (notes' NoteParticipant.nickName is a plain string, so its copy needs none).
+		const outcome = await blockContactByEmail({
+			email: participant.email,
+			userId: participant.userId,
+			...(participant.nickName !== undefined ? { nickName: participant.nickName } : {}),
+			...(participant.avatar !== undefined ? { avatar: participant.avatar } : {})
+		})
+		setPendingUserId(null)
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
@@ -168,7 +222,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 				aria-label={t("chatParticipantsDialogTitle")}
 				className="flex max-h-80 flex-col gap-0.5 overflow-y-auto"
 			>
-				{rows.map(({ participant, canManage, isOwner: rowIsOwner }) => {
+				{rows.map(({ participant, canManage, isOwner: rowIsOwner, blocked }) => {
 					const displayName = contactDisplayName(participant)
 					const rowPending = pendingUserId === participant.userId
 					const participantKey = participant.userId.toString()
@@ -196,6 +250,13 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 							onKeyDown={
 								canManage
 									? event => {
+											// Enter/Space here is the ROW's own select gesture; a keydown that bubbled up
+											// from a control inside the row belongs to that control, and preventDefault
+											// would cancel its activation click.
+											if (event.target !== event.currentTarget) {
+												return
+											}
+
 											if (event.key !== "Enter" && event.key !== " ") {
 												return
 											}
@@ -232,30 +293,58 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 										/>
 									) : null}
 								</div>
-								<p className="truncate text-xs text-muted-foreground">{participant.email}</p>
+								<p className="truncate text-xs text-muted-foreground">
+									{blocked ? `${participant.email} · ${t("chatParticipantBlockedMarker")}` : participant.email}
+								</p>
 							</div>
-							{isSelected ? (
-								<CheckIcon
-									aria-hidden="true"
-									className="size-4 shrink-0 text-primary"
-								/>
-							) : canManage ? (
+							<div className="flex shrink-0 items-center gap-1">
+								{isSelected ? (
+									<CheckIcon
+										aria-hidden="true"
+										className="size-4 shrink-0 text-primary"
+									/>
+								) : canManage ? (
+									<Button
+										variant="ghost"
+										size="icon-sm"
+										disabled={rowPending || !isOnline}
+										aria-label={t("chatParticipantRemoveAction", { email: participant.email })}
+										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+										onClick={event => {
+											// Stop the toggle-select handler on the row itself from also firing —
+											// this button dispatches the single-item quick-remove flow instead.
+											event.stopPropagation()
+											setRemoving(participant)
+										}}
+									>
+										{rowPending ? <Spinner /> : <XIcon aria-hidden="true" />}
+									</Button>
+								) : null}
+								{/* Block/unblock, always present regardless of ownership (mobile parity). */}
 								<Button
 									variant="ghost"
 									size="icon-sm"
 									disabled={rowPending || !isOnline}
-									aria-label={t("chatParticipantRemoveAction", { email: participant.email })}
+									aria-label={t(blocked ? "chatParticipantsUnblockAction" : "chatParticipantsBlockAction", {
+										email: participant.email
+									})}
 									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 									onClick={event => {
-										// Stop the toggle-select handler on the row itself from also firing —
-										// this button dispatches the single-item quick-remove flow instead.
+										// Same rationale as the remove button's stop — an owner-manageable row is a
+										// click-toggle, so without this a block click would also flip its selection.
 										event.stopPropagation()
-										setRemoving(participant)
+										void handleToggleBlock(participant, blocked)
 									}}
 								>
-									{rowPending ? <Spinner /> : <XIcon aria-hidden="true" />}
+									{rowPending ? (
+										<Spinner />
+									) : blocked ? (
+										<UserCheckIcon aria-hidden="true" />
+									) : (
+										<UserXIcon aria-hidden="true" />
+									)}
 								</Button>
-							) : null}
+							</div>
 						</li>
 					)
 				})}

@@ -1,4 +1,5 @@
 import type { ChatMessage } from "@filen/sdk-rs"
+import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@/features/contacts/lib/blocking"
 
 // Thread row model + scroll math — PURE, no React, unit-tested.
 //
@@ -23,8 +24,15 @@ export type ThreadRow =
 // The "New" divider's placement: old-web's NewDivider guard (first message where `sentTimestamp >
 // lastFocus && senderId !== self`, never re-inserted for a later qualifying message). senderId is
 // `number` on the wasm surface — coerced with BigInt before comparing, same rule as unread.logic.ts.
-function isFirstUnread(message: ChatMessage, lastFocus: bigint, currentUserId: bigint): boolean {
-	return message.sentTimestamp > lastFocus && BigInt(message.senderId) !== currentUserId
+// A blocked sender's message never qualifies: a red "New" marker for content the reader chose not to see
+// would be its own leak. Not isMessageUnread — there is no Chat in hand here, and the divider deliberately
+// ignores chat.muted (a muted conversation still shows where you left off).
+function isFirstUnread(message: ChatMessage, lastFocus: bigint, currentUserId: bigint, blocked: BlockedUsers): boolean {
+	if (message.sentTimestamp <= lastFocus || BigInt(message.senderId) === currentUserId) {
+		return false
+	}
+
+	return !isBlocked({ userId: BigInt(message.senderId), email: message.senderEmail }, blocked)
 }
 
 function toDayNumber(timestamp: bigint): number {
@@ -61,7 +69,14 @@ function continuesBurst(previous: ChatMessage, current: ChatMessage): boolean {
 // message that qualifies (old-web's NewDivider placement/guard). Omitted entirely
 // once `currentUserId` is unresolved (nothing to compare senderId against) or once the chat has no
 // qualifying message at all — never renders past the first insertion.
-export function buildThreadRows(messages: readonly ChatMessage[], unread?: { lastFocus: bigint; currentUserId: bigint }): ThreadRow[] {
+//
+// Deliberate divergence from mobile: mobile suppresses the divider for the whole session once the first
+// qualifying message is from a blocked sender; the `unreadInserted` flag model here instead moves it
+// forward onto the first non-blocked qualifying message. Intentional — do not "correct" it back.
+export function buildThreadRows(
+	messages: readonly ChatMessage[],
+	unread?: { lastFocus: bigint; currentUserId: bigint; blocked?: BlockedUsers }
+): ThreadRow[] {
 	const rows: ThreadRow[] = []
 	let previous: ChatMessage | undefined
 	let previousDay: number | undefined
@@ -75,7 +90,11 @@ export function buildThreadRows(messages: readonly ChatMessage[], unread?: { las
 			previousDay = day
 		}
 
-		if (!unreadInserted && unread !== undefined && isFirstUnread(message, unread.lastFocus, unread.currentUserId)) {
+		if (
+			!unreadInserted &&
+			unread !== undefined &&
+			isFirstUnread(message, unread.lastFocus, unread.currentUserId, unread.blocked ?? EMPTY_BLOCKED_USERS)
+		) {
 			rows.push({ kind: "unread", key: UNREAD_DIVIDER_KEY })
 			unreadInserted = true
 		}
@@ -152,4 +171,17 @@ export function nextScrollAffordanceState(prev: ScrollAffordanceState, event: Sc
 	}
 
 	return { atBottom: false, unseenCount: prev.unseenCount + event.count }
+}
+
+// The thread's screen-reader arrival announcement. `seq` is the entire re-announcement mechanism: it keys
+// the live region's inner span, so a repeat arrival from the same sender remounts that child and AT speaks
+// it again — an identical text node left in place would simply be skipped.
+export interface ThreadAnnouncement {
+	seq: number
+	count: number
+	name: string
+}
+
+export function nextAnnouncement(prev: ThreadAnnouncement | null, count: number, name: string): ThreadAnnouncement {
+	return { seq: (prev?.seq ?? 0) + 1, count, name }
 }

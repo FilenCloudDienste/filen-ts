@@ -16,11 +16,8 @@ import { Button } from "@/components/ui/button"
 // (the app has no reaction backend on any platform); the react-slot surfaces Reply as the primary
 // action instead.
 export function MessageActionBar(props: MessageMenuContentProps) {
-	const { t } = useTranslation("chats")
-	// Passive blocked read (warmBlocked: false) — the always-mounted bar never fires a per-row request
-	// just to sit idle; its inline actions (reply/copy/edit/retry) never need the blocked set, and the ⋯
-	// overflow warms it itself on open (MessageDropdownMenuContent).
-	const { descriptors, runAction } = useMessageActions({ ...props, warmBlocked: false })
+	const { t } = useTranslation(["chats", "common"])
+	const { descriptors, runAction } = useMessageActions(props)
 
 	if (descriptors.length === 0) {
 		return null
@@ -39,8 +36,9 @@ export function MessageActionBar(props: MessageMenuContentProps) {
 					key={descriptor.id}
 					variant="ghost"
 					size="icon-xs"
+					disabled={descriptor.enabled === false}
 					aria-label={t(descriptor.labelKey)}
-					title={t(descriptor.labelKey)}
+					title={descriptor.enabled === false ? t("common:offlineActionDisabled") : t(descriptor.labelKey)}
 					onClick={event => {
 						event.stopPropagation()
 						runAction(descriptor)

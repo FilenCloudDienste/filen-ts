@@ -6,7 +6,7 @@ import type { MessageActionDescriptor } from "@/features/chats/components/thread
 import { ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu"
 import { DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
 
-export type MessageMenuContentProps = Omit<UseMessageActionsArgs, "warmBlocked">
+export type MessageMenuContentProps = UseMessageActionsArgs
 
 // One descriptor → one menu row, shared by the right-click context menu and the ⋯-overflow dropdown. The
 // `Item` param is typed against DropdownMenuItem but ContextMenuItem is structurally assignable to it
@@ -17,12 +17,16 @@ function renderMenuItems(
 	descriptors: MessageActionDescriptor[],
 	runAction: (descriptor: MessageActionDescriptor) => void,
 	Item: typeof DropdownMenuItem,
-	t: TFunction<"chats">
+	t: TFunction<["chats", "common"]>
 ): ReactNode[] {
 	return descriptors.map(descriptor => (
 		<Item
 			key={descriptor.id}
 			variant={descriptor.id === "delete" || descriptor.id === "remove" || descriptor.id === "block" ? "destructive" : "default"}
+			disabled={descriptor.enabled === false}
+			// `enabled === false` can only come from the offline gate here, so the title needs no
+			// separate online check (unlike chatMenu.tsx's).
+			title={descriptor.enabled === false ? t("common:offlineActionDisabled") : undefined}
 			onClick={event => {
 				event.stopPropagation()
 				runAction(descriptor)
@@ -35,11 +39,10 @@ function renderMenuItems(
 }
 
 // Right-click surface for one message row — rendered inside a per-row <ContextMenu> (messageRow.tsx).
-// Warms the blocked set (a right-click is a deliberate interaction) so the "Block" entry correctly hides
-// an already-blocked sender. Returns null (no popup) when the message has no applicable actions.
+// Returns null (no popup) when the message has no applicable actions.
 export function MessageContextMenuContent(props: MessageMenuContentProps) {
-	const { t } = useTranslation("chats")
-	const { descriptors, runAction } = useMessageActions({ ...props, warmBlocked: true })
+	const { t } = useTranslation(["chats", "common"])
+	const { descriptors, runAction } = useMessageActions(props)
 
 	if (descriptors.length === 0) {
 		return null
@@ -52,8 +55,8 @@ export function MessageContextMenuContent(props: MessageMenuContentProps) {
 // trigger (messageActionBar.tsx). Left-click-opened, so it uses the dropdown family; the descriptor list
 // + dispatch are the SAME useMessageActions as the right-click menu above (zero duplication).
 export function MessageDropdownMenuContent(props: MessageMenuContentProps) {
-	const { t } = useTranslation("chats")
-	const { descriptors, runAction } = useMessageActions({ ...props, warmBlocked: true })
+	const { t } = useTranslation(["chats", "common"])
+	const { descriptors, runAction } = useMessageActions(props)
 
 	if (descriptors.length === 0) {
 		return null

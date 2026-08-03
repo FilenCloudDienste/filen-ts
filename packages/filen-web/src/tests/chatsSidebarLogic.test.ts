@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest"
-import type { Chat, ChatMessage, ChatParticipant, UuidStr } from "@filen/sdk-rs"
-import { filterChats, staleChatSelectionUuids } from "@/features/chats/components/chatsSidebar.logic"
+import type { BlockedContact, Chat, ChatMessage, ChatParticipant, UuidStr } from "@filen/sdk-rs"
+import {
+	chatsWithoutBlockedOneOnOne,
+	filterChats,
+	isOneOnOneWithBlocked,
+	staleChatSelectionUuids
+} from "@/features/chats/components/chatsSidebar.logic"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
+import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@/features/contacts/lib/blocking"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -58,6 +64,17 @@ function mockUndecryptableChat(label: string, overrides: Omit<Partial<Chat>, "ke
 		muted: false,
 		created: 0n,
 		lastFocus: 0n,
+		...overrides
+	}
+}
+
+function mockBlockedContact(overrides: Partial<BlockedContact> = {}): BlockedContact {
+	return {
+		uuid: testUuid("blocked"),
+		userId: 2n,
+		email: "b@example.com",
+		nickName: "",
+		timestamp: 0n,
 		...overrides
 	}
 }
@@ -180,6 +197,118 @@ describe("chatHasUnread (client-derived)", () => {
 		expect(chatHasUnread(muted, SELF)).toBe(false)
 		expect(chatHasUnread(noMessage, SELF)).toBe(false)
 		expect(chatHasUnread(withUnread, undefined)).toBe(false)
+	})
+})
+
+describe("isOneOnOneWithBlocked", () => {
+	function oneOnOne(other: ChatParticipant): Chat {
+		return mockChat("a", { participants: [mockParticipant({ userId: SELF }), other] })
+	}
+
+	it("is true when the sole other participant is blocked by userId", () => {
+		const blocked = deriveBlockedUsers([mockBlockedContact({ userId: 9n, email: "nomatch@example.com" })])
+
+		expect(isOneOnOneWithBlocked(oneOnOne(mockParticipant({ userId: 9n, email: "other@example.com" })), SELF, blocked)).toBe(true)
+	})
+
+	it("is true when the sole other participant matches only by email, case- and whitespace-insensitively", () => {
+		const blocked = deriveBlockedUsers([mockBlockedContact({ userId: 42n, email: "Zoe@Example.com" })])
+		const chat = oneOnOne(mockParticipant({ userId: 9n, email: "  ZOE@example.COM  " }))
+
+		expect(isOneOnOneWithBlocked(chat, SELF, blocked)).toBe(true)
+	})
+
+	it("is false when the sole other participant is not blocked", () => {
+		const blocked = deriveBlockedUsers([mockBlockedContact({ userId: 9n, email: "b@example.com" })])
+
+		expect(isOneOnOneWithBlocked(oneOnOne(mockParticipant({ userId: 3n, email: "c@example.com" })), SELF, blocked)).toBe(false)
+	})
+
+	it("is false for a group chat even when one member is blocked", () => {
+		const blocked = deriveBlockedUsers([mockBlockedContact({ userId: 9n })])
+		const chat = mockChat("a", {
+			participants: [mockParticipant({ userId: SELF }), mockParticipant({ userId: 9n }), mockParticipant({ userId: 3n })]
+		})
+
+		expect(isOneOnOneWithBlocked(chat, SELF, blocked)).toBe(false)
+	})
+
+	it("is false for a solo chat (no other participants)", () => {
+		const blocked = deriveBlockedUsers([mockBlockedContact({ userId: 9n })])
+		const chat = mockChat("a", { participants: [mockParticipant({ userId: SELF })] })
+
+		expect(isOneOnOneWithBlocked(chat, SELF, blocked)).toBe(false)
+	})
+
+	// Nobody counts as "self" while the account query is unresolved, so a 1:1's participant list reads as
+	// two others — pinned so the unresolved-account posture stays fail-open.
+	it("is false when currentUserId is unresolved", () => {
+		const blocked = deriveBlockedUsers([mockBlockedContact({ userId: 9n })])
+		const chat = oneOnOne(mockParticipant({ userId: 9n }))
+
+		expect(isOneOnOneWithBlocked(chat, undefined, blocked)).toBe(false)
+	})
+
+	it("is false against an empty blocked set (fail-open)", () => {
+		expect(isOneOnOneWithBlocked(oneOnOne(mockParticipant({ userId: 9n })), SELF, EMPTY_BLOCKED_USERS)).toBe(false)
+	})
+})
+
+describe("chatsWithoutBlockedOneOnOne", () => {
+	it("removes only the blocked 1:1 chat and preserves input order", () => {
+		const blocked = deriveBlockedUsers([mockBlockedContact({ userId: 9n })])
+		const group = mockChat("a", {
+			participants: [mockParticipant({ userId: SELF }), mockParticipant({ userId: 9n }), mockParticipant({ userId: 3n })]
+		})
+		const blockedOneOnOne = mockChat("b", { participants: [mockParticipant({ userId: SELF }), mockParticipant({ userId: 9n })] })
+		const plain = mockChat("c", { participants: [mockParticipant({ userId: SELF }), mockParticipant({ userId: 3n })] })
+
+		expect(chatsWithoutBlockedOneOnOne([group, blockedOneOnOne, plain], SELF, blocked).map(c => c.uuid)).toEqual([
+			group.uuid,
+			plain.uuid
+		])
+	})
+
+	it("returns the input list unchanged when the blocked argument is omitted", () => {
+		const chat = mockChat("a", { participants: [mockParticipant({ userId: SELF }), mockParticipant({ userId: 9n })] })
+
+		expect(chatsWithoutBlockedOneOnOne([chat], SELF).map(c => c.uuid)).toEqual([chat.uuid])
+	})
+})
+
+describe("filterChats blocked last-message search", () => {
+	// A group chat is never hidden wholesale, so its blocked member's last message stays on the chat —
+	// but the text the row substitutes with "Message hidden" must not remain searchable.
+	function groupWithBlockedLastMessage(): Chat {
+		return mockChat("a", {
+			name: "Team",
+			participants: [
+				mockParticipant({ userId: SELF }),
+				mockParticipant({ userId: 9n, email: "zoe@example.com", nickName: "Zoe" }),
+				mockParticipant({ userId: 3n })
+			],
+			lastMessage: mockMessage({ senderId: 9, senderEmail: "zoe@example.com", message: "secret plan text" })
+		})
+	}
+
+	const blocked = deriveBlockedUsers([mockBlockedContact({ userId: 9n, email: "zoe@example.com" })])
+
+	it("does not match a term drawn from a blocked sender's last message", () => {
+		expect(filterChats([groupWithBlockedLastMessage()], "secret plan", SELF, SOLO, blocked)).toEqual([])
+	})
+
+	it("still matches that chat by display name and by a participant's email or nickname", () => {
+		const chat = groupWithBlockedLastMessage()
+
+		expect(filterChats([chat], "team", SELF, SOLO, blocked).map(c => c.uuid)).toEqual([chat.uuid])
+		expect(filterChats([chat], "zoe@example", SELF, SOLO, blocked).map(c => c.uuid)).toEqual([chat.uuid])
+		expect(filterChats([chat], "zoe", SELF, SOLO, blocked).map(c => c.uuid)).toEqual([chat.uuid])
+	})
+
+	it("reproduces today's behaviour exactly when the blocked argument is omitted", () => {
+		const chat = groupWithBlockedLastMessage()
+
+		expect(filterChats([chat], "secret plan", SELF, SOLO).map(c => c.uuid)).toEqual([chat.uuid])
 	})
 })
 

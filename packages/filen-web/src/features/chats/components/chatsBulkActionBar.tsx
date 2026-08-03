@@ -4,6 +4,8 @@ import { XIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
 import { type BulkOutcome } from "@/features/drive/lib/bulk"
 import { aggregateChatSelectionFlags } from "@/features/chats/lib/selectionFlags"
+import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
+import type { BlockedUsers } from "@/features/contacts/lib/blocking"
 import { markChatsRead, setChatsMuted } from "@/features/chats/lib/bulk"
 import { toastChatsBulkOutcome } from "@/features/chats/lib/bulkToast"
 import { useChatsSelectionStore } from "@/features/chats/store/useChatsSelectionStore"
@@ -24,15 +26,17 @@ export interface ChatsBulkActionBarProps {
 	// selection and dispatch is never targeted.
 	selectedChats: Chat[]
 	currentUserId: bigint | undefined
+	// From the sidebar's single enabled read — the bar opens no observer of its own.
+	blocked: BlockedUsers
 	onDialogAction: (kind: ChatBulkDialogActionKind, chats: Chat[]) => void
 }
 
 // Bottom-anchored floating selection bar (chatsSidebar.tsx overlays it on the scrollable list while a
 // 2+ selection exists) — mirrors features/notes/components/notesBulkActionBar.tsx, sized down: chats
 // have no submenu-driven bulk action, so every descriptor renders as a single tooltip'd icon button.
-export function ChatsBulkActionBar({ selectedChats, currentUserId, onDialogAction }: ChatsBulkActionBarProps) {
+export function ChatsBulkActionBar({ selectedChats, currentUserId, blocked, onDialogAction }: ChatsBulkActionBarProps) {
 	const { t } = useTranslation(["chats", "common"])
-	const flags = aggregateChatSelectionFlags(selectedChats, currentUserId)
+	const flags = aggregateChatSelectionFlags(selectedChats, currentUserId, blocked, chatMessagesQueryGet)
 	const descriptors = chatBulkActions(flags)
 
 	async function runOutcome(pending: Promise<BulkOutcome<Chat>>): Promise<void> {

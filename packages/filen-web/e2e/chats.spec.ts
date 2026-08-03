@@ -453,6 +453,29 @@ test.describe("chats", () => {
 		// Intentionally empty — documented skip (see the block comment above). Unit coverage stands.
 	})
 
+	// The thread's arrival announcements are DOM/ARIA structure and the vitest suite is node-env, so a
+	// browser is the only possible proof. Zero creates, zero deletes — reuses the shared self-chat.
+	test("the thread exposes a polite live region for incoming messages (shared self-chat)", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		test.skip(sharedChatUuid === undefined, "shared self-chat unavailable — the setup test's create was blocked")
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await gotoChats(page)
+		await openSharedChatThread(page, requireSharedChatUuid())
+
+		const liveRegion = page.getByRole("log")
+
+		await expect(liveRegion).toBeAttached()
+		await expect(liveRegion).toHaveAttribute("aria-live", "polite")
+		// Empty at rest — catches a regression that seeds an announcement from the initial load rather
+		// than only from a tail growth, which the structural attributes alone cannot see.
+		await expect(liveRegion).toHaveText("")
+	})
+
 	// TEARDOWN — the one and only delete this file performs, best-effort. The cleanup-setup project's own
 	// "e2e-chat-" name-prefix sweep (e2e/setup/cleanup.setup.ts) is the backstop for a run that dies before
 	// reaching this test.

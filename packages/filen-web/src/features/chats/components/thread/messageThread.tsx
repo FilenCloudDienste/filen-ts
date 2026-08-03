@@ -10,7 +10,9 @@ import {
 	countNewTailMessages,
 	isScrollNearBottom,
 	nextScrollAffordanceState,
-	INITIAL_SCROLL_AFFORDANCE
+	nextAnnouncement,
+	INITIAL_SCROLL_AFFORDANCE,
+	type ThreadAnnouncement
 } from "@/features/chats/components/thread/thread.logic"
 import { composeMessageList, type OptimisticSender } from "@/features/chats/lib/sync.logic"
 import { useChatsInflightStore } from "@/features/chats/store/useChatsInflight"
@@ -18,7 +20,10 @@ import { Composer } from "@/features/chats/components/thread/composer"
 import { TypingIndicator } from "@/features/chats/components/thread/typingIndicator"
 import { setFocusedChat } from "@/features/chats/lib/focusedChat"
 import { dayKind, formatFullDate } from "@/features/chats/lib/time"
-import { chatDisplayName, isChatUndecryptable, chatAvatarUrl } from "@/features/chats/lib/sort"
+import { chatDisplayName, isChatUndecryptable, chatAvatarUrl, messageSenderName } from "@/features/chats/lib/sort"
+import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
+import { isBlocked } from "@/features/contacts/lib/blocking"
+import { useRevealedBlockedMessages } from "@/features/chats/store/useRevealedBlockedMessages"
 import { markChatRead } from "@/features/chats/lib/actions"
 import { MessageRow } from "@/features/chats/components/thread/messageRow"
 import { ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
@@ -45,7 +50,9 @@ function DaySeparator({ timestamp }: { timestamp: bigint }) {
 
 	return (
 		<div className="flex items-center justify-center py-2">
-			<span className="rounded-full bg-muted px-3 py-0.5 text-[11px] font-medium text-muted-foreground">{label}</span>
+			{/* text-foreground, not text-muted-foreground: muted on the muted pill computes 4.34:1 in
+			light, under the 4.5:1 floor for 11px text. */}
+			<span className="rounded-full bg-muted px-3 py-0.5 text-[11px] font-medium text-foreground">{label}</span>
 		</div>
 	)
 }
@@ -77,7 +84,8 @@ function UnreadDivider({ chat }: { chat: Chat }) {
 				}}
 				className="flex flex-1 items-center gap-2 disabled:opacity-60"
 			>
-				<span className="shrink-0 rounded-full bg-destructive px-2 py-0.5 text-[11px] font-medium text-white">
+				{/* text-primary-foreground, not text-white: white on destructive computes 2.89:1 in dark. */}
+				<span className="shrink-0 rounded-full bg-destructive px-2 py-0.5 text-[11px] font-medium text-primary-foreground">
 					{t("chatUnreadDivider")}
 				</span>
 				<span className="h-px flex-1 bg-destructive/60" />
@@ -120,6 +128,11 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	const accountQuery = useAccountQuery()
 	const currentUserId = accountQuery.data?.id
 	const messagesQuery = useChatMessages(chatUuid)
+	// Enabled, deliberately: every blocked-dependent surface in the thread (row tombstone, reply-reference
+	// redaction, unread-divider suppression, the live-region gate) reads this one value, so thread
+	// correctness must not depend on the sidebar happening to be mounted alongside it. Costs one extra
+	// observer on a query key the sidebar already holds — TanStack dedupes the fetch. Do not set it false.
+	const blocked = useBlockedUsers(true)
 	// Select the raw outbox maps (stable references — only change on a store write, so no getSnapshot
 	// churn) and derive this chat's pending/failed entries in render; the composed list re-injects them
 	// on top of the confirmed message cache so a query refetch never drops an in-flight/failed bubble.
@@ -156,6 +169,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	// The scroll-to-bottom pill's derived state (thread.logic.ts's pure reducer) — needs to drive a
 	// visible re-render (the pill's own count), unlike the pagination bookkeeping above.
 	const [affordance, setAffordance] = useState(INITIAL_SCROLL_AFFORDANCE)
+	const [announcement, setAnnouncement] = useState<ThreadAnnouncement | null>(null)
 	// Full previous snapshot (not just `.length`) — countNewTailMessages needs the actual last message to
 	// tell a tail arrival from a head prepend; length alone can't.
 	const prevMessagesRef = useRef<readonly ChatMessage[]>([])
@@ -170,7 +184,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				}
 			: undefined
 
-	const rows = buildThreadRows(messages, currentUserId !== undefined ? { lastFocus: chat.lastFocus, currentUserId } : undefined)
+	const rows = buildThreadRows(messages, currentUserId !== undefined ? { lastFocus: chat.lastFocus, currentUserId, blocked } : undefined)
 
 	const virtualizer = useVirtualizer({
 		count: rows.length,
@@ -182,12 +196,15 @@ export function MessageThread({ chat }: { chat: Chat }) {
 
 	// Reset pagination + the scroll-to-bottom pill when the selected conversation changes — a fresh chat may
 	// have older history and its own bottom-anchor; the previous chat's unseen count never carries over.
+	// Revealed blocked messages reset too, so re-entering a conversation re-hides them.
 	useEffect(() => {
 		hasMoreRef.current = true
 		lastCursorRef.current = null
 		prevMessagesRef.current = []
 		suppressNextArrivalRef.current = false
 		setAffordance(INITIAL_SCROLL_AFFORDANCE)
+		setAnnouncement(null)
+		useRevealedBlockedMessages.getState().clear()
 	}, [chatUuid])
 
 	// Grow the pill's count when messages land at the TAIL while the user is scrolled up (thread.logic.ts's
@@ -209,8 +226,24 @@ export function MessageThread({ chat }: { chat: Chat }) {
 			return
 		}
 
+		const latest = messages[messages.length - 1]
+
+		// Own messages sent from another tab/device arrive as a normal tail growth — suppressNextArrivalRef
+		// only swallows THIS tab's send. The announcement channel is held to the same blocked policy as the
+		// visual surfaces: a blocked sender's name is exactly what those withhold, and this is the one
+		// channel with no visual equivalent to check against.
+		if (
+			latest !== undefined &&
+			BigInt(latest.senderId) !== currentUserId &&
+			!isBlocked({ userId: BigInt(latest.senderId), email: latest.senderEmail }, blocked)
+		) {
+			setAnnouncement(prev => nextAnnouncement(prev, newTailCount, messageSenderName(latest)))
+		}
+
+		// The pill's count deliberately still includes blocked arrivals — it names nobody, and splitting
+		// its count from the row list would make it lie about how far the thread has grown.
 		setAffordance(prev => nextScrollAffordanceState(prev, { kind: "messagesArrived", count: newTailCount }))
-	}, [messages])
+	}, [messages, currentUserId, blocked])
 
 	// Track the open conversation OUTSIDE React so the socket handlers can gate derived-unread: a foreign
 	// message landing in the chat the user is looking at must not flip it unread. Cleared on unmount /
@@ -384,6 +417,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 										message={row.message}
 										showHeader={row.showHeader}
 										currentUserId={currentUserId}
+										blocked={blocked}
 									/>
 								)}
 							</div>
@@ -433,6 +467,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 					<ChatDropdownMenuContent
 						chat={chat}
 						currentUserId={currentUserId}
+						blocked={blocked}
 						onAction={dialogHost.openChatDialog}
 					/>
 				</DropdownMenu>
@@ -445,6 +480,22 @@ export function MessageThread({ chat }: { chat: Chat }) {
 						count={affordance.unseenCount}
 						onClick={scrollToBottom}
 					/>
+				) : null}
+			</div>
+			{/* Arrival announcements. The stable role="log" container with a KEYED inner span is what makes a
+			repeat arrival from the same sender re-announce: the child is removed and re-inserted, which is
+			the additions semantics role="log" defines — a bare changing text node with an identical string
+			would be skipped. The adjacent TypingIndicator is also aria-live="polite"; two sibling polite
+			regions interleave in the AT queue by design, neither preempts. */}
+			<div
+				role="log"
+				aria-live="polite"
+				className="sr-only"
+			>
+				{announcement !== null ? (
+					<span key={announcement.seq}>
+						{t("chatNewMessageAnnouncement", { count: announcement.count, name: announcement.name })}
+					</span>
 				) : null}
 			</div>
 			<TypingIndicator
