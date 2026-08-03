@@ -122,10 +122,10 @@ export async function descendInto(page: Page, listbox: ReturnType<Page["getByRol
 	await waitForListingSettled(page)
 }
 
-// Sonner (src/components/ui/sonner.tsx) renders no close affordance and every bulk/action toast here
-// is transient (default 4s duration, no persistent reminder survives past dismissStartupReminders) —
-// so waiting out the stack is strictly more robust than hunting for a dismiss button that doesn't
-// exist. The floating selection bar (bulkActionBar.tsx) and Sonner's default viewport both anchor
+// Every bulk/action toast here is transient (default 4s duration, no persistent reminder survives past
+// dismissStartupReminders), so waiting the stack out is strictly more robust than clicking each toast's
+// own dismiss button — a stack several deep would need one click per toast, each racing its own
+// auto-expiry. The floating selection bar (bulkActionBar.tsx) and Sonner's default viewport both anchor
 // bottom-right, so a toast still fading can sit directly over the bar's own buttons and swallow the
 // click. Generous timeout: this can be several toasts deep under parallel-spec load, each observed
 // independently rather than assumed to expire in lockstep.

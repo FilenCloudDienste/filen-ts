@@ -23,6 +23,26 @@ export function widthFromDrag(startWidth: number, startClientX: number, clientX:
 	return clampSidebarWidth(startWidth + (clientX - startClientX))
 }
 
+export const SIDEBAR_WIDTH_STEP = 16
+
+// WAI-ARIA window-splitter keys for a TRAILING-edge handle: ArrowRight grows, ArrowLeft shrinks (same
+// sign convention as widthFromDrag's clientX delta), Home/End jump to the clamps. null = a key this
+// separator does not handle, so the caller leaves the event alone.
+export function widthFromKey(key: string, width: number): number | null {
+	switch (key) {
+		case "ArrowLeft":
+			return clampSidebarWidth(width - SIDEBAR_WIDTH_STEP)
+		case "ArrowRight":
+			return clampSidebarWidth(width + SIDEBAR_WIDTH_STEP)
+		case "Home":
+			return SIDEBAR_WIDTH_MIN
+		case "End":
+			return SIDEBAR_WIDTH_MAX
+		default:
+			return null
+	}
+}
+
 function sidebarWidthKvKey(module: SidebarModule): string {
 	return `shell.sidebarWidth.${module}.v1`
 }

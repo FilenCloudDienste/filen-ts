@@ -218,6 +218,11 @@ test.describe("chats", () => {
 		await gotoChats(page)
 		await waitForSharedChatRow(page)
 
+		// The sidebar's a11y contract, asserted where a conversation row is guaranteed to exist (every
+		// test above this one runs before the shared chat is created).
+		await expect(page.getByRole("complementary").getByRole("listbox", { name: "Conversations" })).toBeVisible()
+		await expect(page.getByRole("complementary").getByRole("option").first()).toBeVisible()
+
 		// Enqueue while OFFLINE: the send can't fire, so the durable persist is observable on its own.
 		await page.context().setOffline(true)
 

@@ -88,4 +88,48 @@ test.describe("shell", { tag: "@no-sdk" }, () => {
 		await expect(page.getByRole("link", { name: "Go to Filen" })).toBeVisible()
 		await expect(page).toHaveTitle("Page not found · Filen")
 	})
+
+	test("reduced motion collapses app animation but never the loading indicators", async ({ page }) => {
+		// A CSS media query has no unit-test surface. Durations are compared NUMERICALLY: the CSSOM
+		// canonicalizes computed <time> to seconds, so the 0.01ms rule reads back as "0.00001s" and a
+		// string equality against "0.01ms" could never match.
+		await page.emulateMedia({ reducedMotion: "reduce" })
+		await page.goto("/")
+
+		const submit = page.getByRole("button", { name: "Sign in", exact: true })
+
+		await expect(submit).toBeVisible()
+
+		const transitionDuration = await submit.evaluate(el => getComputedStyle(el).transitionDuration)
+
+		// transition-all's un-reduced Tailwind default is 150ms, so 0.00001 passes and 0.15 fails.
+		expect(parseFloat(transitionDuration)).toBeLessThan(0.001)
+
+		// No spinner or skeleton renders pre-auth, and the CSS RULE is what is under test — so probe it
+		// directly, alongside a no-data-slot control. Without the control the test cannot tell "the
+		// exemption works" from "the media block never applied at all". Both probes are removed again.
+		const durations = await page.evaluate(() => {
+			const exempt = document.createElement("div")
+			exempt.setAttribute("data-slot", "spinner")
+			exempt.className = "animate-spin"
+
+			const control = document.createElement("div")
+			control.className = "animate-spin"
+
+			document.body.append(exempt, control)
+
+			const read = [getComputedStyle(exempt).animationDuration, getComputedStyle(control).animationDuration]
+
+			exempt.remove()
+			control.remove()
+
+			return read
+		})
+
+		// animate-spin is a 1s animation: ~1 when exempt, 0.00001s when the reduce rule applies.
+		expect(parseFloat(durations[0] ?? "")).toBeGreaterThan(0.5)
+		expect(parseFloat(durations[1] ?? "")).toBeLessThan(0.001)
+
+		await page.emulateMedia({ reducedMotion: null })
+	})
 })

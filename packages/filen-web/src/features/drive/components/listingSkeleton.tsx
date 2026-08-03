@@ -1,5 +1,5 @@
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ListSkeleton } from "@/components/listSkeleton"
 
 export interface ListingSkeletonProps {
 	viewMode: DriveViewMode
@@ -8,28 +8,25 @@ export interface ListingSkeletonProps {
 const LIST_ROW_COUNT = 8
 const GRID_TILE_COUNT = 12
 
+// Both branches delegate to the announcing primitive, so the role="status" lives in exactly one place
+// for every consumer (drive's grid and list views, the search-warming state, photos, and the four
+// directory-picker dialogs).
 export function ListingSkeleton({ viewMode }: ListingSkeletonProps) {
 	if (viewMode === "grid") {
 		return (
-			<div className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-4 p-4">
-				{Array.from({ length: GRID_TILE_COUNT }, (_, index) => (
-					<Skeleton
-						key={index}
-						className="aspect-square rounded-2xl"
-					/>
-				))}
-			</div>
+			<ListSkeleton
+				count={GRID_TILE_COUNT}
+				itemClassName="aspect-square rounded-2xl"
+				className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-4 p-4"
+			/>
 		)
 	}
 
 	return (
-		<div className="flex flex-col gap-1 p-4">
-			{Array.from({ length: LIST_ROW_COUNT }, (_, index) => (
-				<Skeleton
-					key={index}
-					className="h-10 w-full rounded-xl"
-				/>
-			))}
-		</div>
+		<ListSkeleton
+			count={LIST_ROW_COUNT}
+			itemClassName="h-10 w-full rounded-xl"
+			className="flex flex-col gap-1 p-4"
+		/>
 	)
 }

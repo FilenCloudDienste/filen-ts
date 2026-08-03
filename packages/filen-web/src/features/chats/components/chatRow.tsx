@@ -23,6 +23,10 @@ export interface ChatRowProps {
 	// distinct from `selected` (the currently-ROUTED conversation): a multi-selection can include chats
 	// that are not the open thread at all, mirrors noteRow.tsx's own selected/multiSelected split.
 	multiSelected: boolean
+	// Virtualized list: only a window of rows is mounted, so the DOM child count is a fabricated total
+	// and the position has to be threaded from the owning list.
+	posInSet: number
+	setSize: number
 	currentUserId: bigint | undefined
 	// From the sidebar's single enabled read (useBlockedUsers) — no per-row contacts observer.
 	blocked: BlockedUsers
@@ -36,12 +40,24 @@ export interface ChatRowProps {
 }
 
 // One conversation row: avatar, display name, last-message preview, relative time, a per-row unread badge
-// (derived client-side), and a muted affordance. Most of the row is a Link to /chats/$uuid — the uuid
-// is a selection key, not a path hierarchy (mirrors NoteRow) — with the ⋯ trigger button as its sibling,
-// not its descendant (a <button> nested inside an <a> is invalid content model — same rationale as
-// noteRow.tsx). Carries its own row-level context menu (right-click) and ⋯ trigger (hover-revealed), both
-// rendering the SAME shared descriptor list (chatMenu.logic.ts) the thread header's own menu uses.
-export function ChatRow({ chat, selected, multiSelected, currentUserId, blocked, onAction, onPointerSelect }: ChatRowProps) {
+// (derived client-side), and a muted affordance. The row container is the sidebar listbox's option (it is
+// what carries the selection ring); the Link inside it is the activation target — a Link to /chats/$uuid,
+// where the uuid is a selection key, not a path hierarchy (mirrors NoteRow) — with the ⋯ trigger button as
+// its sibling, not its descendant (a <button> nested inside an <a> is invalid content model — same
+// rationale as noteRow.tsx). Carries its own row-level context menu (right-click) and ⋯ trigger
+// (hover-revealed), both rendering the SAME shared descriptor list (chatMenu.logic.ts) the thread header's
+// own menu uses.
+export function ChatRow({
+	chat,
+	selected,
+	multiSelected,
+	posInSet,
+	setSize,
+	currentUserId,
+	blocked,
+	onAction,
+	onPointerSelect
+}: ChatRowProps) {
 	const { t } = useTranslation("chats")
 	const { t: tCommon } = useTranslation("common")
 	const undecryptable = isChatUndecryptable(chat)
@@ -71,6 +87,10 @@ export function ChatRow({ chat, selected, multiSelected, currentUserId, blocked,
 			<ContextMenuTrigger
 				render={
 					<div
+						role="option"
+						aria-selected={multiSelected}
+						aria-posinset={posInSet}
+						aria-setsize={setSize}
 						className={cn(
 							"group flex h-full w-full items-center gap-2.5 rounded-xl px-2.5 transition-colors app-region-no-drag",
 							selected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/60",
@@ -80,8 +100,9 @@ export function ChatRow({ chat, selected, multiSelected, currentUserId, blocked,
 						<Link
 							to="/chats/$uuid"
 							params={{ uuid: chat.uuid }}
+							// aria-current is a different fact from aria-selected (which lives on the option
+							// container): this is the routed conversation, not necessarily a selected one.
 							aria-current={selected ? "page" : undefined}
-							aria-selected={multiSelected}
 							onClick={event => {
 								// Ctrl/Cmd/Shift held: this is a selection gesture, not a navigation intent —
 								// preventDefault blocks BOTH the router's own SPA navigate (which already skips

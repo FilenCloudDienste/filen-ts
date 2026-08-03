@@ -14,10 +14,9 @@ import { Spinner } from "@/components/ui/spinner"
 // root row and mounts this when that root is open. Lazy per level: a node's children query only fires
 // once its subtree mounts (an open node renders a nested DirectoryTree; a closed one renders nothing).
 //
-// Roles are honest, not full aria-tree: nested `<ul>`/`<li>` lists of real buttons. The chevron is a
-// button carrying `aria-expanded`; the label is a button that activates (Enter/Space native) to
-// navigate. Full role="tree"/treeitem/aria-level semantics are deferred (noted for a later pass), as
-// is virtualization — every mounted node renders (fine for typical trees; huge trees are future work).
+// Each level is a `role="group"` of `role="treeitem"` rows; the owning surface renders the `role="tree"`
+// container and its own level-1 root node, so depth here starts at level 2. Not virtualized — every
+// mounted node renders (fine for typical trees; huge trees are future work).
 export interface DirectoryTreeContext {
 	// The current location's uuid chain (drive splat), for highlighting the active branch. Empty at root.
 	activePath: string[]
@@ -63,9 +62,14 @@ export function DirectoryTree({ tree, parentUuid = null, parentPath = [], depth 
 	const { useChildren } = tree
 	const query = useChildren(parentUuid)
 
+	// Presentational, not a group: these lines are a status/error, not tree nodes. The role also strips
+	// the <li>'s list semantics while leaving the spinner and the error text announced.
 	if (query.status === "pending") {
 		return (
-			<ul className="flex flex-col">
+			<ul
+				role="presentation"
+				className="flex flex-col"
+			>
 				<li
 					style={{ paddingInlineStart: levelInset(depth) + 20 }}
 					className="flex h-8 items-center gap-2 text-sm text-sidebar-foreground/60"
@@ -78,7 +82,10 @@ export function DirectoryTree({ tree, parentUuid = null, parentPath = [], depth 
 
 	if (query.status === "error") {
 		return (
-			<ul className="flex flex-col">
+			<ul
+				role="presentation"
+				className="flex flex-col"
+			>
 				<li
 					style={{ paddingInlineStart: levelInset(depth) + 20 }}
 					className="flex h-8 items-center text-sm text-muted-foreground"
@@ -94,11 +101,16 @@ export function DirectoryTree({ tree, parentUuid = null, parentPath = [], depth 
 	}
 
 	return (
-		<ul className="flex flex-col gap-0.5">
-			{query.data.map(child => (
+		<ul
+			role="group"
+			className="flex flex-col gap-0.5"
+		>
+			{query.data.map((child, index) => (
 				<DirectoryTreeNode
 					key={child.uuid}
 					child={child}
+					index={index}
+					siblingCount={query.data.length}
 					path={[...parentPath, child.uuid]}
 					depth={depth}
 					tree={tree}
@@ -110,12 +122,14 @@ export function DirectoryTree({ tree, parentUuid = null, parentPath = [], depth 
 
 interface DirectoryTreeNodeProps {
 	child: DirectoryTreeChild
+	index: number
+	siblingCount: number
 	path: string[]
 	depth: number
 	tree: DirectoryTreeContext
 }
 
-function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps) {
+function DirectoryTreeNode({ child, index, siblingCount, path, depth, tree }: DirectoryTreeNodeProps) {
 	const { t } = useTranslation("drive")
 	const open = tree.isOpen(child.uuid)
 	const active = arraysEqual(path, tree.activePath)
@@ -134,8 +148,17 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 	})
 
 	return (
-		<li>
+		<li role="none">
+			{/* The node is the row div, not the <li>: the <li> also holds the nested subtree, and a
+			treeitem there would draw its accessible name from every descendant's text. Level 2 upward
+			because the owning surface renders the drive-root node at level 1. */}
 			<div
+				role="treeitem"
+				aria-level={depth + 2}
+				aria-expanded={open}
+				aria-selected={active}
+				aria-posinset={index + 1}
+				aria-setsize={siblingCount}
 				style={{ paddingInlineStart: levelInset(depth) }}
 				onDragEnter={drop.onDragEnter}
 				onDragOver={drop.onDragOver}
@@ -153,9 +176,10 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 					drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset"
 				)}
 			>
+				{/* No aria-expanded here — the treeitem above owns it, and two nested expanded states
+				double-announce. The label already conveys which way this toggles. */}
 				<button
 					type="button"
-					aria-expanded={open}
 					aria-label={t(open ? "driveTreeCollapseNode" : "driveTreeExpandNode", { name: child.name })}
 					onClick={() => {
 						tree.onToggle(child.uuid)

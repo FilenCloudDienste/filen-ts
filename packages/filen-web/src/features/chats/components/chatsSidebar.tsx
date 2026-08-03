@@ -21,7 +21,7 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import { useAction } from "@/lib/keymap/useAction"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
+import { ListSkeleton } from "@/components/listSkeleton"
 
 // Fixed row height — the single virtualizer needs no measureElement pass (both lines are pinned to a known
 // height), same as notesSidebar's constant-height rows.
@@ -36,10 +36,14 @@ function selectedUuidFromPath(pathname: string): string {
 	return match?.[1] ?? ""
 }
 
-// Compact centered notice sized for the narrow sidebar (mirrors notesSidebar's SidebarNotice).
-function SidebarNotice({ icon, title, description }: { icon: ReactNode; title: string; description?: string }) {
+// Compact centered notice sized for the narrow sidebar (mirrors notesSidebar's SidebarNotice). `role`
+// is opt-in so only the load-failure caller announces — an empty conversation list is not an error.
+function SidebarNotice({ icon, title, description, role }: { icon: ReactNode; title: string; description?: string; role?: "alert" }) {
 	return (
-		<div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center">
+		<div
+			role={role}
+			className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
+		>
 			<div className="text-muted-foreground [&_svg]:size-6">{icon}</div>
 			<p className="text-sm font-medium">{title}</p>
 			{description !== undefined ? <p className="text-xs text-muted-foreground">{description}</p> : null}
@@ -164,16 +168,20 @@ export function ChatsSidebar() {
 
 	function renderBody(): ReactNode {
 		if (chatsQuery.isPending) {
+			// Bar height mirrors CHAT_ROW_HEIGHT so the placeholder list has the rhythm of the real one.
 			return (
-				<div className="flex flex-1 items-center justify-center py-8">
-					<Spinner className="size-5 text-muted-foreground" />
-				</div>
+				<ListSkeleton
+					count={8}
+					itemClassName="h-[60px] w-full rounded-xl"
+					className="flex flex-col gap-1 px-1 pt-1"
+				/>
 			)
 		}
 
 		if (chatsQuery.isError) {
 			return (
 				<SidebarNotice
+					role="alert"
 					icon={<MessagesSquareIcon />}
 					title={t("chatsLoadError")}
 				/>
@@ -198,6 +206,9 @@ export function ChatsSidebar() {
 
 		return (
 			<div
+				role="listbox"
+				aria-multiselectable="true"
+				aria-label={t("chatsListLabel")}
 				className="relative w-full"
 				style={{ height: virtualizer.getTotalSize() }}
 			>
@@ -209,8 +220,11 @@ export function ChatsSidebar() {
 					}
 
 					return (
+						// Presentational: this wrapper only positions the row, and a generic container between
+						// listbox and option breaks the owned-element relationship.
 						<div
 							key={virtualRow.key}
+							role="presentation"
 							className="absolute top-0 left-0 w-full"
 							style={{ height: CHAT_ROW_HEIGHT, transform: `translateY(${String(virtualRow.start)}px)` }}
 						>
@@ -218,6 +232,8 @@ export function ChatsSidebar() {
 								chat={chat}
 								selected={chat.uuid === selectedUuid}
 								multiSelected={liveSelectedUuids.has(chat.uuid)}
+								posInSet={virtualRow.index + 1}
+								setSize={rows.length}
 								currentUserId={currentUserId}
 								blocked={blocked}
 								onAction={dialogHost.openChatDialog}
@@ -324,9 +340,7 @@ export function ChatsSidebar() {
 			</aside>
 			<SidebarResizeHandle
 				ariaLabel={t("chatsSidebarResize")}
-				onPointerDown={resize.onPointerDown}
-				onPointerMove={resize.onPointerMove}
-				onPointerUp={resize.onPointerUp}
+				handle={resize}
 			/>
 		</Fragment>
 	)

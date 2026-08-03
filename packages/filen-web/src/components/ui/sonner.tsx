@@ -1,4 +1,5 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner"
+import { useTranslation } from "react-i18next"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 import { useTheme } from "@/providers/themeProvider"
 
@@ -7,6 +8,7 @@ import { useTheme } from "@/providers/themeProvider"
 // exactly Sonner's own theme union — no cast needed.
 const Toaster = ({ ...props }: ToasterProps) => {
 	const { theme } = useTheme()
+	const { t } = useTranslation("common")
 
 	return (
 		<Sonner
@@ -27,10 +29,15 @@ const Toaster = ({ ...props }: ToasterProps) => {
 					"--border-radius": "var(--radius)"
 				} as React.CSSProperties
 			}
+			// Every toast gets a tabbable dismiss — a timed-only toast is unreachable by keyboard. The
+			// label rides inside toastOptions (sonner declares it there, not on ToasterProps) and is not
+			// caller-overridable: a caller-supplied toastOptions replaces this object wholesale.
+			closeButton
 			toastOptions={{
 				classNames: {
 					toast: "cn-toast"
-				}
+				},
+				closeButtonAriaLabel: t("toastDismiss")
 			}}
 			{...props}
 		/>

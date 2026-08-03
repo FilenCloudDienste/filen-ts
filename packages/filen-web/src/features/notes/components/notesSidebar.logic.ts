@@ -399,3 +399,46 @@ export function selectableRowIndexByKey(rows: readonly NotesSidebarRow[]): Map<s
 
 	return indexByKey
 }
+
+export interface NotesTreePosition {
+	posInSet: number
+	setSize: number
+}
+
+// aria-posinset/aria-setsize for the flat tree the sidebar renders: level-1 rows (date headers in the
+// notes view, tag rows in the tags view) are siblings of each other; a note row is a sibling only of the
+// notes in its own run. Keyed by sidebarRowKey so a note appearing under two expanded tags gets a
+// position per occurrence, matching the row identity the selection math already uses.
+export function notesTreePositions(rows: readonly NotesSidebarRow[]): Map<string, NotesTreePosition> {
+	const positions = new Map<string, NotesTreePosition>()
+	const levelOneKeys: string[] = []
+	// Keys of the note run since the last level-1 row — back-filled with the run's size once it closes.
+	let run: string[] = []
+
+	const closeRun = (): void => {
+		for (const [index, key] of run.entries()) {
+			positions.set(key, { posInSet: index + 1, setSize: run.length })
+		}
+
+		run = []
+	}
+
+	for (const row of rows) {
+		if (row.kind === "note") {
+			run.push(sidebarRowKey(row))
+
+			continue
+		}
+
+		closeRun()
+		levelOneKeys.push(sidebarRowKey(row))
+	}
+
+	closeRun()
+
+	for (const [index, key] of levelOneKeys.entries()) {
+		positions.set(key, { posInSet: index + 1, setSize: levelOneKeys.length })
+	}
+
+	return positions
+}

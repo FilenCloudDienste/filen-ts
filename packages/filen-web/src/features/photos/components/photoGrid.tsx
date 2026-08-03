@@ -304,6 +304,7 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 										rootUuid={rootUuid}
 										item={item}
 										index={itemIndex}
+										total={items.length}
 										selected={selectedItems.some(selected => selected.data.uuid === item.data.uuid)}
 										active={itemIndex === safeActiveIndex}
 										size={tileSize}

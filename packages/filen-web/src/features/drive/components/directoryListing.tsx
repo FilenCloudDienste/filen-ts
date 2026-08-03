@@ -595,6 +595,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 											key={virtualRow.key}
 											item={item}
 											index={virtualRow.index}
+											total={sortedItems.length}
 											selected={selectedUuids.has(item.data.uuid)}
 											active={virtualRow.index === safeActiveIndex}
 											variant={variant}
@@ -647,6 +648,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 													key={item.data.uuid}
 													item={item}
 													index={itemIndex}
+													total={sortedItems.length}
 													selected={selectedUuids.has(item.data.uuid)}
 													active={itemIndex === safeActiveIndex}
 													variant={variant}

@@ -18,8 +18,10 @@ import {
 	DEFAULT_SIDEBAR_WIDTH,
 	SIDEBAR_WIDTH_MIN,
 	SIDEBAR_WIDTH_MAX,
+	SIDEBAR_WIDTH_STEP,
 	clampSidebarWidth,
 	widthFromDrag,
+	widthFromKey,
 	getSidebarWidth,
 	setSidebarWidth
 } from "@/features/shell/lib/sidebarWidth"
@@ -62,6 +64,34 @@ describe("widthFromDrag", () => {
 
 	it("clamps the result to SIDEBAR_WIDTH_MAX when the drag would grow past it", () => {
 		expect(widthFromDrag(DEFAULT_SIDEBAR_WIDTH, 500, 2000)).toBe(SIDEBAR_WIDTH_MAX)
+	})
+})
+
+describe("widthFromKey", () => {
+	it("grows by one step on ArrowRight — the trailing-edge handle's own sign convention", () => {
+		expect(widthFromKey("ArrowRight", 300)).toBe(300 + SIDEBAR_WIDTH_STEP)
+	})
+
+	it("shrinks by one step on ArrowLeft", () => {
+		expect(widthFromKey("ArrowLeft", 300)).toBe(300 - SIDEBAR_WIDTH_STEP)
+	})
+
+	it("stays clamped at SIDEBAR_WIDTH_MIN when ArrowLeft would shrink past it", () => {
+		expect(widthFromKey("ArrowLeft", SIDEBAR_WIDTH_MIN)).toBe(SIDEBAR_WIDTH_MIN)
+	})
+
+	it("stays clamped at SIDEBAR_WIDTH_MAX when ArrowRight would grow past it", () => {
+		expect(widthFromKey("ArrowRight", SIDEBAR_WIDTH_MAX)).toBe(SIDEBAR_WIDTH_MAX)
+	})
+
+	it("jumps straight to the clamps on Home/End", () => {
+		expect(widthFromKey("Home", 400)).toBe(SIDEBAR_WIDTH_MIN)
+		expect(widthFromKey("End", 400)).toBe(SIDEBAR_WIDTH_MAX)
+	})
+
+	it("returns null for a key the separator does not handle, so the caller leaves the event alone", () => {
+		expect(widthFromKey("a", 300)).toBeNull()
+		expect(widthFromKey("ArrowUp", 300)).toBeNull()
 	})
 })
 

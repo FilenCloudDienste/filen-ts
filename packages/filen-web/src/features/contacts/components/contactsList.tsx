@@ -47,7 +47,7 @@ import { ContactsBulkBar } from "@/features/contacts/components/contactsBulkBar"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ListSkeleton } from "@/components/listSkeleton"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 const SKELETON_ROW_COUNT = 6
@@ -612,17 +612,16 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 						</div>
 					) : null}
 					{isPending ? (
-						<div className="flex flex-1 flex-col gap-1 overflow-y-auto p-4">
-							{Array.from({ length: SKELETON_ROW_COUNT }, (_, index) => (
-								<Skeleton
-									key={index}
-									className="h-14 w-full rounded-xl"
-								/>
-							))}
-						</div>
+						<ListSkeleton
+							count={SKELETON_ROW_COUNT}
+							itemClassName="h-14 w-full rounded-xl"
+							className="flex flex-1 flex-col gap-1 overflow-y-auto p-4"
+						/>
 					) : queryError !== null ? (
 						<div className="flex flex-1 overflow-y-auto">
-							<Empty>
+							{/* Assertive: this replaces the skeleton the reader was waiting on, and it carries the
+							retry they need. Same treatment as drive's EmptyState error variant. */}
+							<Empty role="alert">
 								<EmptyHeader>
 									<EmptyMedia variant="icon">
 										<UsersIcon />

@@ -533,7 +533,12 @@ function PdfPageList({ doc, alt }: { doc: PDFDocumentProxy; alt: string }) {
 		const clamped = clampListboxIndex(target - 1, numPages) + 1
 		const el = pageRefs.current.get(clamped)
 
-		el?.scrollIntoView({ behavior: "smooth", block: "start" })
+		// The app's global reduced-motion rule is CSS, which a JS-supplied `behavior` overrides — so the
+		// preference has to be read here too.
+		el?.scrollIntoView({
+			behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+			block: "start"
+		})
 	}
 
 	// Ctrl/Cmd+wheel zoom — a plain React onWheel prop can never preventDefault the browser's own

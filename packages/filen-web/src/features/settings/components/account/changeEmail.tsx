@@ -110,13 +110,16 @@ function ChangeEmailCard({ accountQuery }: ChangeEmailCardProps) {
 								type="email"
 								autoComplete="email"
 								aria-invalid={newEmailInvalid}
+								// Same condition the error below renders on — a describedby pointing at an id that
+								// is not in the document describes nothing.
+								aria-describedby={newEmailInvalid ? "new-email-error" : undefined}
 								value={newEmail}
 								disabled={pending}
 								onChange={e => {
 									setNewEmail(e.target.value)
 								}}
 							/>
-							{newEmailInvalid && <FieldError>{t("settingsChangeEmailInvalid")}</FieldError>}
+							{newEmailInvalid && <FieldError id="new-email-error">{t("settingsChangeEmailInvalid")}</FieldError>}
 						</Field>
 						<Field>
 							<FieldLabel htmlFor="confirm-new-email">{t("settingsChangeEmailConfirm")}</FieldLabel>
@@ -125,13 +128,16 @@ function ChangeEmailCard({ accountQuery }: ChangeEmailCardProps) {
 								type="email"
 								autoComplete="email"
 								aria-invalid={confirmEmailMismatched}
+								aria-describedby={confirmEmailMismatched ? "confirm-new-email-error" : undefined}
 								value={confirmEmail}
 								disabled={pending}
 								onChange={e => {
 									setConfirmEmail(e.target.value)
 								}}
 							/>
-							{confirmEmailMismatched && <FieldError>{t("settingsChangeEmailMismatch")}</FieldError>}
+							{confirmEmailMismatched && (
+								<FieldError id="confirm-new-email-error">{t("settingsChangeEmailMismatch")}</FieldError>
+							)}
 						</Field>
 						<Field>
 							<FieldLabel htmlFor="change-email-password">{t("settingsChangeEmailPassword")}</FieldLabel>

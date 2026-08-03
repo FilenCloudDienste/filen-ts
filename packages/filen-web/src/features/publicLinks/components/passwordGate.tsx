@@ -76,12 +76,15 @@ export function PasswordGate({ state, onSubmit }: { state: "prompt" | "checking"
 								autoFocus={true}
 								placeholder={t("passwordPlaceholder")}
 								aria-invalid={state === "wrong"}
+								// Same condition the error below renders on — a describedby pointing at an id that
+								// is not in the document describes nothing.
+								aria-describedby={state === "wrong" ? "public-link-password-error" : undefined}
 								value={value}
 								onChange={event => {
 									setValue(event.target.value)
 								}}
 							/>
-							{state === "wrong" && <FieldError>{t("passwordWrong")}</FieldError>}
+							{state === "wrong" && <FieldError id="public-link-password-error">{t("passwordWrong")}</FieldError>}
 						</Field>
 						<Button
 							type="submit"

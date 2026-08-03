@@ -107,6 +107,11 @@ function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolea
 
 	return (
 		<div
+			role="treeitem"
+			aria-level={1}
+			aria-expanded={open}
+			aria-posinset={1}
+			aria-setsize={1}
 			onDragEnter={drop.onDragEnter}
 			onDragOver={drop.onDragOver}
 			onDragLeave={drop.onDragLeave}
@@ -116,9 +121,9 @@ function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolea
 				drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset"
 			)}
 		>
+			{/* No aria-expanded here — the treeitem above owns it (see DirectoryTree's own chevron). */}
 			<button
 				type="button"
-				aria-expanded={open}
 				aria-label={t(open ? "driveTreeCollapseNode" : "driveTreeExpandNode", { name: label })}
 				onClick={onToggle}
 				className="ml-2 flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground focus-ring outline-none hover:text-foreground"
@@ -213,7 +218,14 @@ export function DriveSidebar() {
 			>
 				<div className="flex flex-1 flex-col overflow-y-auto p-3">
 					<h2 className="truncate px-2.5 pt-1 pb-2.5 text-[15px] font-semibold">{t("driveMyDrive")}</h2>
-					<div className="flex flex-col gap-0.5">
+					{/* The depth-0 group stays a DOM sibling of the root treeitem rather than its child —
+					aria-level carries the hierarchy, which is the only shape a lazily-mounted per-level tree
+					can take without re-parenting every node. */}
+					<div
+						role="tree"
+						aria-label={t("driveTreeLabel")}
+						className="flex flex-col gap-0.5"
+					>
 						<CloudDriveRoot
 							label={t("driveMyDrive")}
 							open={rootOpen}
@@ -236,9 +248,7 @@ export function DriveSidebar() {
 			</aside>
 			<SidebarResizeHandle
 				ariaLabel={t("driveSidebarResize")}
-				onPointerDown={resize.onPointerDown}
-				onPointerMove={resize.onPointerMove}
-				onPointerUp={resize.onPointerUp}
+				handle={resize}
 			/>
 		</Fragment>
 	)

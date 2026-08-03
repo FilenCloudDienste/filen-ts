@@ -79,6 +79,9 @@ function TwoFactorDialog({ open, pending, error, onOpenChange, onSubmit }: TwoFa
 							autoComplete="one-time-code"
 							disabled={pending}
 							aria-invalid={error !== undefined}
+							// Same condition the error below renders on — a describedby pointing at an id that is
+							// not in the document describes nothing.
+							aria-describedby={error !== undefined ? "two-factor-value-error" : undefined}
 							inputMode={useRecoveryKey ? undefined : "numeric"}
 							maxLength={useRecoveryKey ? undefined : 6}
 							onChange={e => {
@@ -89,7 +92,7 @@ function TwoFactorDialog({ open, pending, error, onOpenChange, onSubmit }: TwoFa
 								}
 							}}
 						/>
-						{error !== undefined && <FieldError>{error}</FieldError>}
+						{error !== undefined && <FieldError id="two-factor-value-error">{error}</FieldError>}
 					</Field>
 					{!useRecoveryKey && (
 						<Button

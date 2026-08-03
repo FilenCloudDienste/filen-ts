@@ -67,6 +67,8 @@ export const notes = {
 	notesGroupTrashed: "Trashed",
 	/** Notes sidebar — accessible label on the trailing-edge drag handle that resizes the sidebar */
 	notesSidebarResize: "Resize sidebar",
+	/** Notes sidebar — accessible name for the note list itself (ARIA tree of date/tag groups and their notes) */
+	notesListLabel: "Notes list",
 
 	// ── Tag row ────────────────────────────────────────────────────────────────
 	/** Tag group row — accessible label to expand the group and reveal its notes; {{name}} = tag name */

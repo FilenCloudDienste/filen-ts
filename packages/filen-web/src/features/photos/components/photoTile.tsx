@@ -17,6 +17,8 @@ export interface PhotoTileProps {
 	rootUuid: string
 	item: PhotoItem
 	index: number
+	// The grid's full item count — see DriveTile's identical prop (virtualized set size).
+	total: number
 	selected: boolean
 	// The roving-tabindex cursor: exactly one tile carries the grid's single tab stop (drive parity,
 	// driveTile.tsx) — its face AND its ⋯ trigger, so tabbing into an unbounded virtualized grid costs
@@ -38,7 +40,18 @@ export interface PhotoTileProps {
 // bottom-left, offline top-right (no web equivalent), video bottom-right) instead of driveTile's own
 // top-left placement, and no offline badge at all (web has no make-offline concept — see the study's
 // own honest enumeration).
-export function PhotoTile({ rootUuid, item, index, selected, active, size, registerRef, onTileClick, onItemAction }: PhotoTileProps) {
+export function PhotoTile({
+	rootUuid,
+	item,
+	index,
+	total,
+	selected,
+	active,
+	size,
+	registerRef,
+	onTileClick,
+	onItemAction
+}: PhotoTileProps) {
 	const { t } = useTranslation(["drive", "photos"])
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
 	const thumbUrl = useThumbnail(item)
@@ -54,6 +67,8 @@ export function PhotoTile({ rootUuid, item, index, selected, active, size, regis
 						}}
 						role="option"
 						aria-selected={selected}
+						aria-posinset={index + 1}
+						aria-setsize={total}
 						tabIndex={active ? 0 : -1}
 						title={name}
 						style={{ width: size }}

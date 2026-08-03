@@ -77,6 +77,8 @@ export const drive = {
 	driveGroupOther: "Other",
 	/** Drive sidebar — group header over the sharing and public-link rows */
 	driveGroupShared: "Shared",
+	/** Drive sidebar tree — accessible name for the collapsible directory tree itself (ARIA tree) */
+	driveTreeLabel: "Directory tree",
 	/** Drive sidebar tree — accessible label on the chevron that expands a directory node; {{name}} = directory name */
 	driveTreeExpandNode: "Expand {{name}}",
 	/** Drive sidebar tree — accessible label on the chevron that collapses a directory node; {{name}} = directory name */

@@ -510,6 +510,13 @@ test.describe("notes: read-only content renderers", () => {
 			// Scoped to <main> (the editor card) — the sidebar row's own preview snippet can equal the
 			// raw content for short text, which would otherwise trip a page-wide exact-text strict match.
 			await expect(page.getByRole("main").getByText(content, { exact: true })).toBeVisible()
+
+			// The sidebar's a11y contract, asserted where the helper above guarantees a row exists (it
+			// leaves the search box filtered to this note's title). .first() may resolve to the level-1
+			// date header rather than the note row — the claim is that the tree exposes items at all; the
+			// per-row level/position math is pinned by notesTreePositions' unit cases.
+			await expect(page.getByRole("complementary").getByRole("tree", { name: "Notes list" })).toBeVisible()
+			await expect(page.getByRole("complementary").getByRole("treeitem").first()).toBeVisible()
 		} finally {
 			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
 		}

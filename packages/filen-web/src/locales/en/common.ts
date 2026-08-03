@@ -20,6 +20,10 @@ export const common = {
 	reset: "Reset",
 	/** Generic retry button for a failed data load (e.g. the security settings page's account query) — shared by any future error-state view */
 	tryAgain: "Try again",
+	/** Shared in-progress announcement: the spinner primitive's default screen-reader label and the list-skeleton wrapper's live-region name */
+	loading: "Loading",
+	/** Toast primitive — screen-reader label on the dismiss button every toast carries */
+	toastDismiss: "Dismiss notification",
 	/** /no-coi error page — title shown when the page loaded without the required cross-origin isolation */
 	noCoiTitle: "Unable to start Filen securely",
 	/** /no-coi error page — body explaining the missing isolation and suggesting a reload */

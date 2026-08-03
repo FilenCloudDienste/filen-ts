@@ -25,6 +25,8 @@ import { Button } from "@/components/ui/button"
 export interface DriveTileProps {
 	item: DriveItem
 	index: number
+	// The listing's full item count — see DriveRow's identical prop (virtualized set size).
+	total: number
 	selected: boolean
 	active: boolean
 	variant: DriveVariant
@@ -48,6 +50,7 @@ export interface DriveTileProps {
 export function DriveTile({
 	item,
 	index,
+	total,
 	selected,
 	active,
 	variant,
@@ -93,6 +96,8 @@ export function DriveTile({
 						}}
 						role="option"
 						aria-selected={selected}
+						aria-posinset={index + 1}
+						aria-setsize={total}
 						tabIndex={active ? 0 : -1}
 						title={searchParentPath !== undefined && searchParentPath.length > 0 ? searchParentPath : undefined}
 						// Fixed width (not full-bleed 1fr) + justify-self-center: the tile stays pinned to

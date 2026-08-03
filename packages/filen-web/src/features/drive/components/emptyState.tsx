@@ -28,7 +28,12 @@ export function EmptyState(props: EmptyStateProps) {
 		// its own bespoke title/body copy here, so copy-based detection breaks on any surface but the
 		// default one (and again on every future copy edit); the error variant is deliberately a
 		// DIFFERENT id — an errored listing is not a settled-empty one.
-		<Empty data-testid={props.variant === "empty" ? "listing-empty" : "listing-error"}>
+		// Assertive on error only: it replaces content the reader was waiting for and carries a retry
+		// they need to act on. An empty directory is not an error and stays silent.
+		<Empty
+			role={props.variant === "error" ? "alert" : undefined}
+			data-testid={props.variant === "empty" ? "listing-empty" : "listing-error"}
+		>
 			<EmptyHeader>
 				<EmptyMedia variant="icon">
 					<Icon />

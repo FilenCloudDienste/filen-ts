@@ -11,6 +11,7 @@ import { clearPhotosRoot, setPhotosRoot, shouldResetRootOnError } from "@/featur
 import { DirectoryChooserDialog } from "@/features/photos/components/directoryChooserDialog"
 import { PhotoGrid } from "@/features/photos/components/photoGrid"
 import { EmptyState } from "@/features/drive/components/emptyState"
+import { ListingSkeleton } from "@/features/drive/components/listingSkeleton"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -134,8 +135,8 @@ export function PhotosScreen() {
 			</header>
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 				{listingQuery.status === "pending" ? (
-					<div className="flex flex-1 items-center justify-center">
-						<Spinner className="size-5 text-muted-foreground" />
+					<div className="flex-1 overflow-y-auto">
+						<ListingSkeleton viewMode="grid" />
 					</div>
 				) : listingQuery.status === "error" ? (
 					<EmptyState

@@ -41,8 +41,10 @@ import {
 	sidebarRowKey,
 	selectableNotesFromRows,
 	selectableRowIndexByKey,
+	notesTreePositions,
 	type NotesSidebarRow,
-	type NotesGroupIcon
+	type NotesGroupIcon,
+	type NotesTreePosition
 } from "@/features/notes/components/notesSidebar.logic"
 import { createNote } from "@/features/notes/lib/actions"
 import { exportAllNotes } from "@/features/notes/lib/export"
@@ -65,7 +67,7 @@ import { TagContextMenuContent } from "@/features/notes/components/noteMenu"
 import { type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Spinner } from "@/components/ui/spinner"
+import { ListSkeleton } from "@/components/listSkeleton"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import {
 	DropdownMenu,
@@ -90,6 +92,10 @@ const NOTE_ROW_ESTIMATE = 76
 const TAG_ROW_ESTIMATE = 40
 const HEADER_ROW_ESTIMATE = 40
 
+// Only reachable if a row's key is missing from the derived position map, which the shared derivation
+// makes impossible — a lone item is the honest thing to announce rather than a wrong position.
+const FALLBACK_TREE_POSITION: NotesTreePosition = { posInSet: 1, setSize: 1 }
+
 // Section-header icon kind → concrete lucide icon (the logic layer stays React-free and only names the
 // kind). Today gets a distinct calendar glyph; the remaining date buckets share the plain calendar.
 const GROUP_ICON: Record<NotesGroupIcon, LucideIcon> = {
@@ -102,14 +108,29 @@ const GROUP_ICON: Record<NotesGroupIcon, LucideIcon> = {
 }
 
 // A notes-view date-group section header — a leading icon + the bucket label. Sticky-free (the
-// virtualizer positions it absolutely like every other row).
-function NotesGroupHeader({ row }: { row: Extract<NotesSidebarRow, { kind: "header" }> }) {
+// virtualizer positions it absolutely like every other row). A level-1 node of the sidebar tree; the
+// note rows it precedes are its level-2 children.
+function NotesGroupHeader({
+	row,
+	posInSet,
+	setSize
+}: {
+	row: Extract<NotesSidebarRow, { kind: "header" }>
+	posInSet: number
+	setSize: number
+}) {
 	const { t } = useTranslation("notes")
 	const Icon = GROUP_ICON[row.icon]
 	const label = row.label.kind === "key" ? t(row.label.key) : row.label.text
 
 	return (
-		<div className="flex items-center gap-2 px-2.5 pt-4 pb-1.5">
+		<div
+			role="treeitem"
+			aria-level={1}
+			aria-posinset={posInSet}
+			aria-setsize={setSize}
+			className="flex items-center gap-2 px-2.5 pt-4 pb-1.5"
+		>
 			<Icon className="size-4 shrink-0 text-muted-foreground" />
 			<span className="truncate text-sm font-semibold text-muted-foreground">{label}</span>
 		</div>
@@ -126,9 +147,25 @@ function selectedUuidFromPath(pathname: string): string {
 }
 
 // Compact centered empty/error state, sized for the narrow sidebar (not the full-page Empty primitive).
-function SidebarNotice({ icon, title, description, action }: { icon: ReactNode; title: string; description?: string; action?: ReactNode }) {
+// `role` is opt-in so only the load-failure caller announces — an empty note list is not an error.
+function SidebarNotice({
+	icon,
+	title,
+	description,
+	action,
+	role
+}: {
+	icon: ReactNode
+	title: string
+	description?: string
+	action?: ReactNode
+	role?: "alert"
+}) {
 	return (
-		<div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center">
+		<div
+			role={role}
+			className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
+		>
 			<div className="text-muted-foreground [&_svg]:size-6">{icon}</div>
 			<p className="text-sm font-medium">{title}</p>
 			{description !== undefined ? <p className="text-xs text-muted-foreground">{description}</p> : null}
@@ -144,13 +181,19 @@ function segmentClass(active: boolean): string {
 	)
 }
 
+// A level-1 node of the sidebar tree; its expanded member notes are its level-2 children. The element
+// stays a real <button>, so Enter/Space activation is native even with the role overridden.
 function TagGroupRow({
 	row,
+	posInSet,
+	setSize,
 	onToggle,
 	onTagAction,
 	onCreateNoteInTag
 }: {
 	row: Extract<NotesSidebarRow, { kind: "tag" }>
+	posInSet: number
+	setSize: number
 	onToggle: () => void
 	onTagAction: (kind: NoteTagDialogKind, tag: NoteTag) => void
 	onCreateNoteInTag: (created: Note) => void
@@ -166,6 +209,10 @@ function TagGroupRow({
 	const trigger = (
 		<button
 			type="button"
+			role="treeitem"
+			aria-level={1}
+			aria-posinset={posInSet}
+			aria-setsize={setSize}
 			aria-expanded={row.expanded}
 			aria-label={t(row.expanded ? "notesTagCollapse" : "notesTagExpand", { name })}
 			onClick={onToggle}
@@ -363,6 +410,7 @@ export function NotesSidebar() {
 	const selectableNotes = selectableNotesFromRows(rows)
 	const selection = useNotesListSelection({ notes: selectableNotes, resetKey: viewMode })
 	const selectableIndexByRowKey = selectableRowIndexByKey(rows)
+	const treePositions = notesTreePositions(rows)
 
 	const rawSelectedNotes = useNotesSelectionStore(useShallow(state => state.selectedNotes))
 	// LIVE (ghost-purged) selection: re-derived from the current notes query every render, so a note
@@ -536,16 +584,20 @@ export function NotesSidebar() {
 
 	function renderBody(): ReactNode {
 		if (activeQuery.isPending) {
+			// Bar height mirrors NOTE_ROW_ESTIMATE so the placeholder list has the rhythm of the real one.
 			return (
-				<div className="flex flex-1 items-center justify-center py-8">
-					<Spinner className="size-5 text-muted-foreground" />
-				</div>
+				<ListSkeleton
+					count={6}
+					itemClassName="h-[76px] w-full rounded-xl"
+					className="flex flex-col gap-1 px-1 pt-1"
+				/>
 			)
 		}
 
 		if (activeQuery.isError) {
 			return (
 				<SidebarNotice
+					role="alert"
 					icon={<StickyNoteIcon />}
 					title={t("notesLoadError")}
 				/>
@@ -595,7 +647,12 @@ export function NotesSidebar() {
 		}
 
 		return (
+			// A tree, not a listbox: the list is heterogeneous (date/tag headers over their notes), and
+			// one flat virtualizer cannot nest DOM levels — aria-level carries the hierarchy instead.
 			<div
+				role="tree"
+				aria-multiselectable="true"
+				aria-label={t("notesListLabel")}
 				className="relative w-full"
 				style={{ height: virtualizer.getTotalSize() }}
 			>
@@ -606,9 +663,14 @@ export function NotesSidebar() {
 						return null
 					}
 
+					const position = treePositions.get(sidebarRowKey(row)) ?? FALLBACK_TREE_POSITION
+
 					return (
+						// Presentational: this wrapper only positions and measures the row, and a generic
+						// container between tree and treeitem breaks the owned-element relationship.
 						<div
 							key={virtualRow.key}
+							role="presentation"
 							data-index={virtualRow.index}
 							ref={element => {
 								virtualizer.measureElement(element)
@@ -617,10 +679,16 @@ export function NotesSidebar() {
 							style={{ transform: `translateY(${String(virtualRow.start)}px)` }}
 						>
 							{row.kind === "header" ? (
-								<NotesGroupHeader row={row} />
+								<NotesGroupHeader
+									row={row}
+									posInSet={position.posInSet}
+									setSize={position.setSize}
+								/>
 							) : row.kind === "tag" ? (
 								<TagGroupRow
 									row={row}
+									posInSet={position.posInSet}
+									setSize={position.setSize}
 									onToggle={() => {
 										toggleTag(row.tag.uuid)
 									}}
@@ -634,6 +702,8 @@ export function NotesSidebar() {
 									note={row.note}
 									selected={row.note.uuid === selectedUuid}
 									multiSelected={liveSelectedUuids.has(row.note.uuid)}
+									posInSet={position.posInSet}
+									setSize={position.setSize}
 									nested={viewMode === "tags"}
 									allTags={allTags}
 									currentUserId={currentUserId}
@@ -852,9 +922,7 @@ export function NotesSidebar() {
 			</aside>
 			<SidebarResizeHandle
 				ariaLabel={t("notesSidebarResize")}
-				onPointerDown={resize.onPointerDown}
-				onPointerMove={resize.onPointerMove}
-				onPointerUp={resize.onPointerUp}
+				handle={resize}
 			/>
 		</Fragment>
 	)

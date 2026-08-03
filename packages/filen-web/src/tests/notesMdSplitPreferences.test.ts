@@ -18,7 +18,9 @@ import {
 	DEFAULT_MD_SPLIT_RATIO,
 	MD_SPLIT_RATIO_MIN,
 	MD_SPLIT_RATIO_MAX,
+	MD_SPLIT_RATIO_STEP,
 	clampMdSplitRatio,
+	ratioFromKey,
 	getMdSplitRatio,
 	setMdSplitRatio
 } from "@/features/notes/lib/preferences"
@@ -40,6 +42,31 @@ describe("clampMdSplitRatio", () => {
 	it("clamps above MD_SPLIT_RATIO_MAX down to the ceiling", () => {
 		expect(clampMdSplitRatio(0.99)).toBe(MD_SPLIT_RATIO_MAX)
 		expect(clampMdSplitRatio(2)).toBe(MD_SPLIT_RATIO_MAX)
+	})
+})
+
+describe("ratioFromKey", () => {
+	it("widens the left pane by one step on ArrowRight", () => {
+		expect(ratioFromKey("ArrowRight", 0.5)).toBeCloseTo(0.5 + MD_SPLIT_RATIO_STEP)
+	})
+
+	it("narrows the left pane by one step on ArrowLeft", () => {
+		expect(ratioFromKey("ArrowLeft", 0.5)).toBeCloseTo(0.5 - MD_SPLIT_RATIO_STEP)
+	})
+
+	it("stays clamped at both bounds instead of stepping past them", () => {
+		expect(ratioFromKey("ArrowLeft", MD_SPLIT_RATIO_MIN)).toBeCloseTo(MD_SPLIT_RATIO_MIN)
+		expect(ratioFromKey("ArrowRight", MD_SPLIT_RATIO_MAX)).toBeCloseTo(MD_SPLIT_RATIO_MAX)
+	})
+
+	it("jumps straight to the clamps on Home/End", () => {
+		expect(ratioFromKey("Home", 0.5)).toBe(MD_SPLIT_RATIO_MIN)
+		expect(ratioFromKey("End", 0.5)).toBe(MD_SPLIT_RATIO_MAX)
+	})
+
+	it("returns null for a key the separator does not handle, so the caller leaves the event alone", () => {
+		expect(ratioFromKey("a", 0.5)).toBeNull()
+		expect(ratioFromKey("ArrowUp", 0.5)).toBeNull()
 	})
 })
 

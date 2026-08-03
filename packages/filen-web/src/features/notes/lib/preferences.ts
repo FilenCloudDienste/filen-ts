@@ -41,6 +41,27 @@ export function clampMdSplitRatio(ratio: number): number {
 	return Math.min(MD_SPLIT_RATIO_MAX, Math.max(MD_SPLIT_RATIO_MIN, ratio))
 }
 
+export const MD_SPLIT_RATIO_STEP = 0.05
+
+// WAI-ARIA window-splitter keys for the split pane's divider: ArrowRight widens the left pane,
+// ArrowLeft narrows it, Home/End jump to the clamps. null = a key this separator does not handle, so
+// the caller leaves the event alone. A sibling of clampMdSplitRatio rather than shared with the
+// sidebar's widthFromKey: different unit, different clamp, different persistence.
+export function ratioFromKey(key: string, ratio: number): number | null {
+	switch (key) {
+		case "ArrowLeft":
+			return clampMdSplitRatio(ratio - MD_SPLIT_RATIO_STEP)
+		case "ArrowRight":
+			return clampMdSplitRatio(ratio + MD_SPLIT_RATIO_STEP)
+		case "Home":
+			return MD_SPLIT_RATIO_MIN
+		case "End":
+			return MD_SPLIT_RATIO_MAX
+		default:
+			return null
+	}
+}
+
 export async function getMdSplitRatio(): Promise<number> {
 	const stored = await kvGetJson(MD_SPLIT_RATIO_KV_KEY, mdSplitRatioSchema)
 

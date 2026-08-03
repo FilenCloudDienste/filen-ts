@@ -175,6 +175,37 @@ test.describe("drive", () => {
 		await page.keyboard.press("Escape")
 	})
 
+	test("the sidebar resize separator is keyboard-operable and two presses compound", async ({ page, injectedSession, browserName }) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await page.goto("/drive")
+		await waitForListingSettled(page)
+
+		// The drive route renders exactly one such separator (the notes md split pane's own is labelled
+		// differently and lives on another route).
+		const handle = page.getByRole("separator", { name: "Resize sidebar" }).first()
+		const before = Number(await handle.getAttribute("aria-valuenow"))
+
+		// MIN 240 / MAX 520 is a 280px range, so from any starting width exactly one direction is
+		// guaranteed two full 16px steps of headroom — no clamp guessing in the assertions.
+		const grow = before + 32 <= 520
+		const forward = grow ? "ArrowRight" : "ArrowLeft"
+		const back = grow ? "ArrowLeft" : "ArrowRight"
+
+		await handle.focus()
+		await handle.press(forward)
+		await handle.press(forward)
+
+		await expect(handle).toHaveAttribute("aria-valuenow", String(grow ? before + 32 : before - 32))
+
+		// Restore, so the shared browser-local kv is net-zero for the next spec.
+		await handle.press(back)
+		await handle.press(back)
+
+		await expect(handle).toHaveAttribute("aria-valuenow", String(before))
+	})
+
 	test("the sort menu opens, a field/direction selection reflects and survives close/reopen", async ({
 		page,
 		injectedSession,

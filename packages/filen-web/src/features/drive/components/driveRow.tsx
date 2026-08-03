@@ -24,6 +24,9 @@ import { Button } from "@/components/ui/button"
 export interface DriveRowProps {
 	item: DriveItem
 	index: number
+	// The listing's full item count. Virtualized: only a window of rows is mounted, so the DOM child
+	// count is a fabricated total and the set size has to come from the owning list.
+	total: number
 	selected: boolean
 	active: boolean
 	variant: DriveVariant
@@ -52,6 +55,7 @@ export interface DriveRowProps {
 export function DriveRow({
 	item,
 	index,
+	total,
 	selected,
 	active,
 	variant,
@@ -104,6 +108,8 @@ export function DriveRow({
 						}}
 						role="option"
 						aria-selected={selected}
+						aria-posinset={index + 1}
+						aria-setsize={total}
 						tabIndex={active ? 0 : -1}
 						style={style}
 						className={cn(

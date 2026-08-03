@@ -160,6 +160,9 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 								type="password"
 								autoComplete="new-password"
 								aria-invalid={passwordsMismatched}
+								// Same condition the error below renders on — a describedby pointing at an id that
+								// is not in the document describes nothing.
+								aria-describedby={passwordsMismatched ? "confirm-new-password-error" : undefined}
 								value={confirmPassword}
 								disabled={pending}
 								onChange={e => {
@@ -169,7 +172,7 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 								onKeyUp={confirmPasswordCaps.onKeyUp}
 								onBlur={confirmPasswordCaps.onBlur}
 							/>
-							{passwordsMismatched && <FieldError>{t("passwordsDoNotMatch")}</FieldError>}
+							{passwordsMismatched && <FieldError id="confirm-new-password-error">{t("passwordsDoNotMatch")}</FieldError>}
 							<p
 								role="status"
 								className="text-xs text-yellow-500"

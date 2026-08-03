@@ -218,6 +218,21 @@
   *::-webkit-scrollbar-thumb:hover {
     background-color: var(--scrollbar-thumb-hover);
     }
+  /* One global motion switch instead of per-component opt-outs. The two loading indicators are
+     exempt: they are the only "work is in progress" signal on the notes/chats/photos/contacts loading
+     states, and a frozen spinner reads as a hung app. 0.01ms rather than 0 so transitionend/
+     animationend listeners still fire — Base UI's exit animations wait for them, and a hard 0 can
+     leave a popup mounted forever. */
+  @media (prefers-reduced-motion: reduce) {
+    *:not([data-slot="spinner"], [data-slot="skeleton"]),
+    *:not([data-slot="spinner"], [data-slot="skeleton"])::before,
+    *:not([data-slot="spinner"], [data-slot="skeleton"])::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+      }
+    }
 }
 
 /* Rich-text (Quill) editor theming — restyle the imported `snow` theme over the app's CSS variables so

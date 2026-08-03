@@ -11,6 +11,8 @@ export const chats = {
 	chatsSidebarTitle: "Chats",
 	/** Chats sidebar — accessible label on the trailing-edge drag handle that resizes the sidebar */
 	chatsSidebarResize: "Resize sidebar",
+	/** Chats sidebar — accessible name for the conversation list itself (ARIA listbox) */
+	chatsListLabel: "Conversations",
 	/** Chats sidebar — search box placeholder and accessible label (filters by name/participant) */
 	chatsSearch: "Search conversations",
 	/** Chats sidebar — clears the search box */

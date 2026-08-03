@@ -218,6 +218,9 @@ function ResetForm({ token }: ResetFormProps) {
 							type="password"
 							autoComplete="new-password"
 							aria-invalid={passwordsMismatched}
+							// Same condition the error below renders on — a describedby pointing at an id that is
+							// not in the document describes nothing.
+							aria-describedby={passwordsMismatched ? "reset-confirm-password-error" : undefined}
 							value={confirmPassword}
 							onChange={e => {
 								setConfirmPassword(e.target.value)
@@ -226,7 +229,7 @@ function ResetForm({ token }: ResetFormProps) {
 							onKeyUp={confirmPasswordCaps.onKeyUp}
 							onBlur={confirmPasswordCaps.onBlur}
 						/>
-						{passwordsMismatched && <FieldError>{t("passwordsDoNotMatch")}</FieldError>}
+						{passwordsMismatched && <FieldError id="reset-confirm-password-error">{t("passwordsDoNotMatch")}</FieldError>}
 						<p
 							role="status"
 							className="text-xs text-yellow-500"
