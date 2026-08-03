@@ -4,7 +4,7 @@ import { toast } from "sonner"
 import { CheckIcon, CrownIcon, SearchXIcon, UserCheckIcon, UsersIcon, UserXIcon, XIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { Note, NoteParticipant } from "@filen/sdk-rs"
-import { isNoteOwner } from "@/features/notes/lib/actions"
+import { isNoteOwner } from "@/features/notes/lib/sort"
 import { addNoteParticipants, removeNoteParticipant, setNoteParticipantPermission } from "@/features/notes/lib/participants"
 import { participantRows, contactsAvailableToAdd } from "@/features/notes/components/participantsDialog.logic"
 import { useNotes } from "@/features/notes/queries/notes"
@@ -18,6 +18,7 @@ import { contactDisplayName, contactInitials, filterContactsBySearch } from "@/f
 // layer/logic across features for a picker this codebase already has one working copy of).
 import { togglePickerContact, resolveSelectedContacts } from "@/features/drive/components/contactPickerDialog.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
@@ -45,6 +46,7 @@ const SKELETON_ROW_COUNT = 3
 // row in this list never carries a remove control even when viewed by the owner.
 export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsDialogProps) {
 	const { t } = useTranslation(["notes", "contacts", "common"])
+	const isOnline = useIsOnline()
 	const notesQuery = useNotes()
 	const accountQuery = useAccountQuery()
 	// Re-resolved from the live list cache every render so an in-dialog add/remove/permission change —
@@ -219,7 +221,8 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 									<>
 										<Switch
 											checked={participant.permissionsWrite}
-											disabled={rowPending}
+											disabled={rowPending || !isOnline}
+											title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 											aria-label={t("noteParticipantsCanEditLabel", { email: participant.email })}
 											onCheckedChange={checked => {
 												void handleTogglePermission(participant, checked)
@@ -228,7 +231,8 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 										<Button
 											variant="ghost"
 											size="icon-sm"
-											disabled={rowPending}
+											disabled={rowPending || !isOnline}
+											title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 											aria-label={t("noteParticipantsRemoveAction", { email: participant.email })}
 											onClick={() => {
 												setRemoving(participant)
@@ -242,7 +246,8 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 								<Button
 									variant="ghost"
 									size="icon-sm"
-									disabled={rowPending}
+									disabled={rowPending || !isOnline}
+									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 									aria-label={t(blocked ? "noteParticipantsUnblockAction" : "noteParticipantsBlockAction", {
 										email: participant.email
 									})}
@@ -414,7 +419,8 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 							{owner ? (
 								<Button
 									variant="outline"
-									disabled={dialogPending}
+									disabled={dialogPending || !isOnline}
+									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 									onClick={() => {
 										setMode("add")
 									}}
@@ -444,7 +450,8 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 								{t("common:cancel")}
 							</Button>
 							<Button
-								disabled={selected.size === 0 || addPending}
+								disabled={selected.size === 0 || addPending || !isOnline}
+								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 								onClick={() => {
 									void handleAddSelected()
 								}}

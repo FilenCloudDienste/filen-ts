@@ -20,6 +20,10 @@ export const notes = {
 	notesExportAllAction: "Export all",
 	/** Notes sidebar bulk-ops menu — the downloaded archive's own file name */
 	notesExportAllFilename: "Notes.zip",
+	/** Export — warning after an archive left out notes that couldn't be decrypted; {{count}} = skipped notes; singular */
+	notesExportSkippedUndecryptable_one: "{{count}} note couldn't be decrypted and was skipped.",
+	/** Export — warning after an archive left out notes that couldn't be decrypted; {{count}} = skipped notes; plural */
+	notesExportSkippedUndecryptable_other: "{{count}} notes couldn't be decrypted and were skipped.",
 	/** Notes sidebar bulk-ops menu — opens the file picker to import a note from a text/markdown/code/html file */
 	notesImportAction: "Import note",
 	/** importNoteFromFile — the picked file's extension doesn't match any recognized note type */
@@ -75,6 +79,8 @@ export const notes = {
 	notesTagCount_other: "{{count}} notes",
 	/** Tag group row — accessible label on the favorite (starred) tag indicator */
 	notesTagFavorite: "Favorite tag",
+	/** Tags view — label of the pinned bottom row grouping every note that carries no tag */
+	notesTagUntagged: "Untagged",
 
 	// ── Tags-view sort control ──────────────────────────────────────────────────
 	/** Tags-view sort menu — trigger button's accessible label and the field group's own heading */
@@ -125,6 +131,10 @@ export const notes = {
 	// ── Editor (live editing) ────────────────────────────────────────────────────
 	/** Editor header — accessible label on the sync spinner shown while the note's edit is in flight */
 	noteSyncing: "Saving…",
+	/** Editor header — chip on a shared note this user may read but not edit */
+	noteViewOnly: "View only",
+	/** Export / copy content — the note's content exists but its ciphertext couldn't be decrypted */
+	noteContentUndecryptableError: "This note's content couldn't be decrypted.",
 	/** Editor — banner shown when a note has reached its maximum size; further edits are not saved */
 	noteSizeLimitReached: "This note has reached its maximum size. New changes won't be saved until you shorten it.",
 	/** Keymap — description for the Cmd/Ctrl+S action that flushes the pending save immediately */

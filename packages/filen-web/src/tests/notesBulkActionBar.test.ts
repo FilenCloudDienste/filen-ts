@@ -1,5 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
-import { QueryClient } from "@tanstack/react-query"
+import { describe, expect, it } from "vitest"
 import {
 	PinIcon,
 	PinOffIcon,
@@ -16,13 +15,11 @@ import {
 } from "lucide-react"
 import type { Note, NoteTag, UuidStr } from "@filen/sdk-rs"
 
-// notesBulkActionBar.logic.ts's own imports are all pure/type-only, but resolving its module path
-// still resolves selectionFlags.ts's — mirrors noteMenu.test.ts's own mock boundary (isNoteOwner's
-// sdk/queryClient chain, unresolvable/unwanted under node vitest).
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
-vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
-
-import { noteBulkActions, noteBulkTagSubmenuEntries } from "@/features/notes/components/notesBulkActionBar.logic"
+import {
+	noteBulkActions,
+	noteBulkTagSubmenuEntries,
+	isNoteBulkActionOfflineDisabled
+} from "@/features/notes/components/notesBulkActionBar.logic"
 import { type NoteSelectionFlags } from "@/features/notes/lib/selectionFlags"
 
 function testUuid(label: string): UuidStr {
@@ -253,5 +250,26 @@ describe("noteBulkTagSubmenuEntries — tri-state collapse", () => {
 		const note = mockNote([tagA, tagB])
 
 		expect(noteBulkTagSubmenuEntries([note], [tagA, tagB]).map(e => e.tag.uuid)).toEqual([tagA.uuid, tagB.uuid])
+	})
+})
+
+describe("isNoteBulkActionOfflineDisabled", () => {
+	const GATED = ["pin", "favorite", "type", "tags", "duplicate", "archive", "restore", "trash", "delete", "leave"] as const
+
+	it("disables every write id while offline", () => {
+		for (const id of GATED) {
+			expect(isNoteBulkActionOfflineDisabled(id, false)).toBe(true)
+		}
+	})
+
+	it("disables nothing while online", () => {
+		for (const id of GATED) {
+			expect(isNoteBulkActionOfflineDisabled(id, true)).toBe(false)
+		}
+	})
+
+	it("never disables export — a cache-first read zipped client-side", () => {
+		expect(isNoteBulkActionOfflineDisabled("export", false)).toBe(false)
+		expect(isNoteBulkActionOfflineDisabled("export", true)).toBe(false)
 	})
 })

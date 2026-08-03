@@ -1,6 +1,6 @@
 import { useQueries } from "@tanstack/react-query"
 import type { Note } from "@filen/sdk-rs"
-import { fetchNoteContent, noteContentQueryKey } from "@/features/notes/queries/noteContent"
+import { fetchNoteContentOrThrow, noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
 import { noteSearchBodyCandidates, buildNoteBodiesMap } from "@/features/notes/hooks/useNoteSearchBodies.logic"
 
@@ -24,7 +24,7 @@ export function useNoteSearchBodies(notes: readonly Note[], search: string): Rea
 	const bodies = useQueries({
 		queries: candidates.map(note => ({
 			queryKey: noteContentQueryKey(note.uuid),
-			queryFn: () => fetchNoteContent(note),
+			queryFn: () => fetchNoteContentOrThrow(note),
 			staleTime: Infinity
 		})),
 		combine: results => results.map(result => result.data)

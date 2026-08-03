@@ -575,3 +575,105 @@ describe("restoreFromDisk — replay-on-launch hydrates before any network, drop
 		expect(testQueryClient.getQueryData(noteContentQueryKey("a"))).toBe("pushed-text")
 	})
 })
+
+describe("restoreFromDisk — undecryptable cloud content never prunes a persisted draft", () => {
+	it("keeps a disk-restored empty draft when the cloud content could not be decrypted", async () => {
+		const note = makeNote("a")
+
+		kvStore.set("inflightNoteContent", { a: [{ timestamp: 1, content: "", note }] })
+		listNotes.mockResolvedValue([note])
+		// The old `?? ""` read this as "cloud is empty too" and pruned a real draft.
+		getNoteContent.mockResolvedValue(undefined)
+		setNoteContent.mockResolvedValue(note)
+
+		const s = new Sync()
+		s.start()
+		await flushAsync()
+
+		expect(setNoteContent).toHaveBeenCalledWith(note, "", expect.any(String))
+	})
+
+	it("still prunes the genuine already-synced case: cloud resolves the same empty string", async () => {
+		const note = makeNote("a")
+
+		kvStore.set("inflightNoteContent", { a: [{ timestamp: 1, content: "", note }] })
+		listNotes.mockResolvedValue([note])
+		getNoteContent.mockResolvedValue("")
+
+		const s = new Sync()
+		s.start()
+		await flushAsync()
+
+		expect(hasInflight("a")).toBe(false)
+		expect(setNoteContent).not.toHaveBeenCalled()
+	})
+})
+
+describe("conflict peek — an undecryptable peek pushes unchecked", () => {
+	it("pushes and stays silent when the cloud content cannot be decrypted", async () => {
+		const note = makeNote("a")
+
+		setStore({ a: [{ timestamp: 1, content: "local", note, baseContentHash: hashNoteContent("base") }] })
+		getNoteContent.mockResolvedValue(undefined)
+		setNoteContent.mockResolvedValue(note)
+
+		const s = await startedSync()
+		s.executeNow()
+		await flushAsync()
+
+		expect(setNoteContent).toHaveBeenCalledWith(note, "local", expect.any(String))
+		expect(toast).not.toHaveBeenCalled()
+	})
+})
+
+describe("cancel() — TERMINAL shutdown", () => {
+	it("leaves the signal aborted so a later executeNow() writes nothing to disk", async () => {
+		const s = await startedSync()
+		const note = makeNote("a")
+
+		s.cancel()
+		setStore({ a: [{ timestamp: 1, content: "edit", note }] })
+		setNoteContent.mockResolvedValue(note)
+		kvSetJson.mockClear()
+		kvDelete.mockClear()
+
+		s.executeNow()
+		await flushAsync()
+
+		expect(kvSetJson).not.toHaveBeenCalled()
+		expect(kvDelete).not.toHaveBeenCalled()
+	})
+
+	it("flushToDisk called directly after cancel() resolves false and writes nothing", async () => {
+		const s = await startedSync()
+		const note = makeNote("a")
+
+		s.cancel()
+		kvSetJson.mockClear()
+		kvDelete.mockClear()
+
+		await expect(s.flushToDisk({ a: [{ timestamp: 1, content: "edit", note }] })).resolves.toBe(false)
+		expect(kvSetJson).not.toHaveBeenCalled()
+		expect(kvDelete).not.toHaveBeenCalled()
+	})
+
+	it("start() re-arms after a cancel so a re-entered shell flushes normally again", async () => {
+		const s = await startedSync()
+		const note = makeNote("a")
+
+		s.cancel()
+		s.start()
+		await flushAsync()
+
+		setStore({ a: [{ timestamp: 1, content: "edit", note }] })
+		setNoteContent.mockResolvedValue(note)
+		kvSetJson.mockClear()
+		kvDelete.mockClear()
+
+		s.executeNow()
+		await flushAsync()
+
+		expect(setNoteContent).toHaveBeenCalledWith(note, "edit", expect.any(String))
+		expect(kvSetJson.mock.calls.length + kvDelete.mock.calls.length).toBeGreaterThan(0)
+	})
+})

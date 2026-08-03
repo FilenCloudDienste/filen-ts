@@ -21,9 +21,11 @@ import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelection
 import {
 	noteBulkActions,
 	noteBulkTagSubmenuEntries,
+	isNoteBulkActionOfflineDisabled,
 	type NoteBulkActionDescriptor,
 	type NoteBulkDialogActionKind
 } from "@/features/notes/components/notesBulkActionBar.logic"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { NOTE_TYPE_SUBMENU } from "@/features/notes/components/noteMenu.logic"
 import { Kbd } from "@/lib/keymap/kbd"
 import { Button } from "@/components/ui/button"
@@ -53,6 +55,7 @@ export interface NotesBulkActionBarProps {
 // popover-driven entries (type/tags) drive's own bar has no equivalent of.
 export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDialogAction }: NotesBulkActionBarProps) {
 	const { t } = useTranslation(["notes", "common"])
+	const isOnline = useIsOnline()
 	const flags = aggregateNoteSelectionFlags(selectedNotes, currentUserId)
 	const descriptors = noteBulkActions(flags)
 
@@ -78,6 +81,12 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
+
+			return
+		}
+
+		if (outcome.skipped > 0) {
+			toast.warning(t("notesExportSkippedUndecryptable", { count: outcome.skipped }))
 		}
 	}
 
@@ -131,6 +140,8 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 			</div>
 			<div className="flex items-center gap-2">
 				{descriptors.map(descriptor => {
+					const offlineDisabled = isNoteBulkActionOfflineDisabled(descriptor.id, isOnline)
+
 					if (descriptor.run === "submenu") {
 						const entries =
 							descriptor.submenu === "tags"
@@ -163,7 +174,9 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 										<Button
 											variant="outline"
 											size="icon-sm"
+											disabled={offlineDisabled}
 											aria-label={t(descriptor.labelKey)}
+											title={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
 										>
 											{createElement(descriptor.icon, { "aria-hidden": true })}
 										</Button>
@@ -188,7 +201,9 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 										<Button
 											variant={descriptor.destructive ? "destructive" : "outline"}
 											size="icon-sm"
+											disabled={offlineDisabled}
 											aria-label={t(descriptor.labelKey)}
+											title={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
 											onClick={() => {
 												onDialogAction(descriptor.dialogKind, selectedNotes)
 											}}
@@ -197,7 +212,9 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 										</Button>
 									}
 								/>
-								<TooltipContent>{t(descriptor.labelKey)}</TooltipContent>
+								<TooltipContent>
+									{offlineDisabled ? t("common:offlineActionDisabled") : t(descriptor.labelKey)}
+								</TooltipContent>
 							</Tooltip>
 						)
 					}
@@ -209,7 +226,9 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 									<Button
 										variant="outline"
 										size="icon-sm"
+										disabled={offlineDisabled}
 										aria-label={t(descriptor.labelKey)}
+										title={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
 										onClick={() => {
 											runDescriptor(descriptor)
 										}}
@@ -218,7 +237,7 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 									</Button>
 								}
 							/>
-							<TooltipContent>{t(descriptor.labelKey)}</TooltipContent>
+							<TooltipContent>{offlineDisabled ? t("common:offlineActionDisabled") : t(descriptor.labelKey)}</TooltipContent>
 						</Tooltip>
 					)
 				})}

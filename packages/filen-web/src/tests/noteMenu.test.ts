@@ -1,5 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
-import { QueryClient } from "@tanstack/react-query"
+import { describe, expect, it } from "vitest"
 import {
 	PencilIcon,
 	CopyIcon,
@@ -22,16 +21,12 @@ import {
 } from "lucide-react"
 import type { Note, NoteTag, UuidStr } from "@filen/sdk-rs"
 
-// noteMenu.logic.ts imports isNoteOwner from lib/actions.ts, which in turn imports the sdk client and
-// query client modules — unresolvable/unwanted under node vitest, mirrors itemMenu.test.ts's own mock
-// boundary (there: features/drive/lib/download.ts).
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
-vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
-
 import {
 	noteMenuActions,
 	noteTagSubmenuEntries,
 	tagMenuActions,
+	applyNoteOfflineGate,
+	applyTagOfflineGate,
 	NOTE_TYPE_SUBMENU,
 	type NoteActionDescriptor
 } from "@/features/notes/components/noteMenu.logic"
@@ -400,5 +395,58 @@ describe("tagMenuActions — the tags-view row menu", () => {
 
 		expect(descriptors.map(d => d.id)).toEqual(["tagDelete"])
 		expect(descriptors[0]?.run === "dialog" && descriptors[0].dialogKind).toBe("deleteTag")
+	})
+})
+
+describe("applyNoteOfflineGate", () => {
+	const GATED = ["rename", "duplicate", "pin", "favorite", "tags", "type", "archive", "restore", "trash", "deletePermanently", "leave"]
+
+	it("returns the input identity-equal when online (no allocation)", () => {
+		const actions = noteMenuActions(mockNote({ ownerId: 1n }), 1n)
+
+		expect(applyNoteOfflineGate(actions, true)).toBe(actions)
+	})
+
+	it("disables every write id offline", () => {
+		const gated = applyNoteOfflineGate(noteMenuActions(mockNote({ ownerId: 1n, archive: true }), 1n), false)
+
+		for (const descriptor of gated) {
+			if (GATED.includes(descriptor.id)) {
+				expect(descriptor.enabled).toBe(false)
+			}
+		}
+	})
+
+	it("leaves the read entries untouched offline", () => {
+		const gated = applyNoteOfflineGate(noteMenuActions(mockNote({ ownerId: 1n }), 1n), false)
+		const reads = gated.filter(d => ["export", "copyId", "copyContent", "participants", "history"].includes(d.id))
+
+		expect(reads.map(d => d.id)).toEqual(["export", "copyId", "copyContent", "participants", "history"])
+
+		for (const descriptor of reads) {
+			expect(descriptor.enabled).toBeUndefined()
+		}
+	})
+
+	it("keeps the trashed variant's two entries, both disabled offline", () => {
+		const gated = applyNoteOfflineGate(noteMenuActions(mockNote({ trash: true, ownerId: 1n }), 1n), false)
+
+		expect(gated.map(d => d.id)).toEqual(["restore", "deletePermanently"])
+		expect(gated.every(d => d.enabled === false)).toBe(true)
+	})
+})
+
+describe("applyTagOfflineGate", () => {
+	it("returns the input identity-equal when online", () => {
+		const actions = tagMenuActions(mockTag())
+
+		expect(applyTagOfflineGate(actions, true)).toBe(actions)
+	})
+
+	it("disables every tag action offline — all four are writes", () => {
+		const gated = applyTagOfflineGate(tagMenuActions(mockTag()), false)
+
+		expect(gated.map(d => d.id)).toEqual(["tagCreateNote", "tagRename", "tagFavorite", "tagDelete"])
+		expect(gated.every(d => d.enabled === false)).toBe(true)
 	})
 })

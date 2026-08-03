@@ -18,10 +18,13 @@ import {
 } from "@/features/notes/lib/actions"
 import { exportNote } from "@/features/notes/lib/export"
 import { addTagToNote, removeTagFromNote, setNoteTagFavorited } from "@/features/notes/lib/tags"
+import { useIsOnline } from "@/lib/useIsOnline"
 import {
 	noteMenuActions,
 	noteTagSubmenuEntries,
 	tagMenuActions,
+	applyNoteOfflineGate,
+	applyTagOfflineGate,
 	NOTE_TYPE_SUBMENU,
 	type NoteActionDescriptor,
 	type NoteActionDialogKind,
@@ -91,8 +94,9 @@ function NoteMenuEntries({
 	hideCompletedChecklist,
 	family
 }: NoteMenuContentProps & { family: MenuFamily }) {
-	const { t } = useTranslation("notes")
-	const descriptors = noteMenuActions(note, currentUserId)
+	const { t } = useTranslation(["notes", "common"])
+	const isOnline = useIsOnline()
+	const descriptors = applyNoteOfflineGate(noteMenuActions(note, currentUserId), isOnline)
 	const { Item, Separator, Sub, SubTrigger, SubContent, CheckboxItem } = family
 
 	async function runDirect(descriptor: Extract<NoteActionDescriptor, { run: "direct" }>): Promise<void> {
@@ -208,6 +212,8 @@ function NoteMenuEntries({
 
 	function renderDescriptor(descriptor: NoteActionDescriptor, index: number) {
 		const separator = index > 0 && SEPARATOR_BEFORE.has(descriptor.id) ? <Separator /> : null
+		const disabled = descriptor.enabled === false
+		const disabledTitle = disabled && !isOnline ? t("common:offlineActionDisabled") : undefined
 
 		if (descriptor.run === "submenu") {
 			if (descriptor.submenu === "tags") {
@@ -217,7 +223,10 @@ function NoteMenuEntries({
 					<Fragment key={descriptor.id}>
 						{separator}
 						<Sub>
-							<SubTrigger>
+							<SubTrigger
+								disabled={disabled}
+								title={disabledTitle}
+							>
 								{createElement(descriptor.icon, { "aria-hidden": true })}
 								{t(descriptor.labelKey)}
 							</SubTrigger>
@@ -239,6 +248,8 @@ function NoteMenuEntries({
 								)}
 								<Separator />
 								<Item
+									disabled={!isOnline}
+									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 									onClick={event => {
 										event.stopPropagation()
 										onAction("createTag", note)
@@ -257,7 +268,10 @@ function NoteMenuEntries({
 				<Fragment key={descriptor.id}>
 					{separator}
 					<Sub>
-						<SubTrigger>
+						<SubTrigger
+							disabled={disabled}
+							title={disabledTitle}
+						>
 							{createElement(descriptor.icon, { "aria-hidden": true })}
 							{t(descriptor.labelKey)}
 						</SubTrigger>
@@ -284,6 +298,8 @@ function NoteMenuEntries({
 				{separator}
 				<Item
 					variant={descriptor.destructive ? "destructive" : "default"}
+					disabled={disabled}
+					title={disabledTitle}
 					onClick={event => {
 						// Stop propagation — the portaled popup's synthetic events still bubble through the
 						// REACT tree even though the DOM node lives elsewhere (same rationale as drive's
@@ -359,8 +375,9 @@ export interface TagMenuContentProps {
 // favorite/delete only. Context-menu family only: tag rows keep no hover ⋯ trigger (the count badge
 // owns that slot), mirroring old-web where tag management was right-click-only too.
 export function TagContextMenuContent({ tag, onTagAction, onCreateNoteInTag }: TagMenuContentProps) {
-	const { t } = useTranslation("notes")
-	const descriptors = tagMenuActions(tag)
+	const { t } = useTranslation(["notes", "common"])
+	const isOnline = useIsOnline()
+	const descriptors = applyTagOfflineGate(tagMenuActions(tag), isOnline)
 
 	async function handleFavoriteToggle(): Promise<void> {
 		const outcome = await setNoteTagFavorited(tag, !tag.favorite)
@@ -397,6 +414,8 @@ export function TagContextMenuContent({ tag, onTagAction, onCreateNoteInTag }: T
 				<ContextMenuItem
 					key={descriptor.id}
 					variant={descriptor.run === "dialog" && descriptor.destructive === true ? "destructive" : "default"}
+					disabled={descriptor.enabled === false}
+					title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
 					onClick={event => {
 						// Same propagation stop as NoteMenuEntries — without it the click would also toggle
 						// the tag group's own expand/collapse underneath the (portaled) menu.

@@ -69,7 +69,6 @@ import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { NOTES_QUERY_KEY, notesQueryGet } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import {
-	isNoteOwner,
 	createNote as createNoteAction,
 	duplicateNote,
 	resolveNoteContent,
@@ -113,20 +112,6 @@ function mockNote(overrides: Partial<Note> = {}): Note {
 function setCurrentUser(id: bigint): void {
 	testQueryClient.setQueryData<UserInfo>(ACCOUNT_QUERY_KEY, { id } as UserInfo)
 }
-
-describe("isNoteOwner", () => {
-	it("is true when the given userId matches the note's ownerId", () => {
-		expect(isNoteOwner(mockNote({ ownerId: 5n }), 5n)).toBe(true)
-	})
-
-	it("is false when the given userId does not match", () => {
-		expect(isNoteOwner(mockNote({ ownerId: 5n }), 6n)).toBe(false)
-	})
-
-	it("is false when userId is undefined (no resolved account yet)", () => {
-		expect(isNoteOwner(mockNote({ ownerId: 5n }), undefined)).toBe(false)
-	})
-})
 
 describe("createNote", () => {
 	it("creates as text and upserts into the cache when the default-type preference is text", async () => {
@@ -231,9 +216,16 @@ describe("resolveNoteContent — copy content", () => {
 		expect(content).toBe("fetched body")
 	})
 
-	it("resolves to an empty string, never undefined, when the SDK returns no content", async () => {
+	it("rejects with a plain ErrorDTO when the content exists but never decrypted, never resolving an empty string", async () => {
 		const note = mockNote()
 		getNoteContent.mockResolvedValueOnce(undefined)
+
+		await expect(resolveNoteContent(note)).rejects.toMatchObject({ species: "plain" })
+	})
+
+	it("resolves an EMPTY note's content as the empty string (not an undecryptable failure)", async () => {
+		const note = mockNote()
+		getNoteContent.mockResolvedValueOnce("")
 
 		await expect(resolveNoteContent(note)).resolves.toBe("")
 	})

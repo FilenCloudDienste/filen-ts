@@ -7,7 +7,8 @@ import { i18n } from "@/lib/i18n"
 import { log } from "@/lib/log"
 import { toast } from "sonner"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
-import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
+import { type OutboxChannelTransport, type OutboxRole } from "@/lib/storage/outboxChannel"
+import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { fetchNotes, notesQueryGet } from "@/features/notes/queries/notes"
 import useNotesInflightStore, { type InflightContent, type InflightEntry } from "@/features/notes/store/useNotesInflight"
 import {
@@ -29,20 +30,13 @@ import {
 const OUTBOX_KV_KEY = "inflightNoteContent"
 const SYNC_DEBOUNCE_MS = 3000
 
-// Multi-tab transport: a follower forwards edits to the leader and asks it to flush;
-// the leader broadcasts authoritative state + a hello on takeover. The Sync class depends only on this
-// seam — the wiring over a real BroadcastChannel lives in outboxCoordinator.ts; tests mock it. A
-// single-tab install attaches NO transport, so every call below is a guarded no-op and the leader path
-// stays byte-identical to the pre-multi-tab outbox.
-export interface OutboxTransport {
-	// follower → leader
-	sendEnqueue: (msg: RemoteEnqueue) => void
-	sendExecuteNow: () => void
-	requestState: () => void
-	// leader → followers
-	broadcastState: (state: InflightContent) => void
-	broadcastLeaderHello: () => void
-}
+// Multi-tab transport: a follower forwards edits to the leader and asks it to flush; the leader
+// broadcasts authoritative state + a hello on takeover, and a terminal shutdown closes the channel. The
+// seam is the shared one chats rides too — only the payload shapes differ; the wiring over a real
+// BroadcastChannel lives in outboxCoordinator.ts and tests mock it. A single-tab install attaches NO
+// transport, so every call below is a guarded no-op and the leader path stays byte-identical to the
+// pre-multi-tab outbox.
+export type NotesOutboxTransport = OutboxChannelTransport<RemoteEnqueue, InflightContent>
 
 // Read the abort flag through a function boundary so an early `if (signal.aborted) return` guard does
 // not narrow later `signal.aborted` reads to a literal `false` (the signal is aborted externally by
@@ -86,8 +80,8 @@ export class Sync {
 	// every broadcast/forward below is a no-op). `unacked` is FOLLOWER-only: the edits this tab has
 	// applied optimistically + forwarded but the leader has not yet confirmed via a state broadcast —
 	// they win the follower's merge (so the optimistic edit is never lost) and are re-sent on takeover.
-	private role: "leader" | "follower" = "leader"
-	private transport: OutboxTransport | null = null
+	private role: OutboxRole = "leader"
+	private transport: NotesOutboxTransport | null = null
 	private unacked: InflightContent = {}
 
 	public constructor() {
@@ -98,29 +92,36 @@ export class Sync {
 
 	// The coordinator reads this to route incoming channel messages by CURRENT role (role flips live on
 	// promotion), so a single dispatcher stays correct across a takeover.
-	public get outboxRole(): "leader" | "follower" {
+	public get outboxRole(): OutboxRole {
 		return this.role
 	}
 
 	// Wire the multi-tab transport (coordinator only). Idempotent-friendly: a single-tab install never
 	// calls this, leaving every forward/broadcast a guarded no-op.
-	public attachTransport(transport: OutboxTransport): void {
+	public attachTransport(transport: NotesOutboxTransport): void {
 		this.transport = transport
 	}
 
-	// Replay-on-launch. Mounted once in the authed shell (SyncHost), never per route.
+	// Replay-on-launch. Mounted once in the authed shell (SyncHost), never per route. Resolves the role
+	// back to "leader" and re-arms a fresh signal: a terminal cancel() deliberately leaves the signal
+	// aborted, so re-entering the shell without a reload must re-arm here or the loop stays gated.
 	public start(): void {
+		this.role = "leader"
+		this.abortController = new AbortController()
+
 		void this.restoreFromDisk()
 	}
 
-	// Wired into the logout path BEFORE the local wipe: abort the loop and suppress further disk
-	// writes. A fresh AbortController is installed so a subsequent start() (a later login in the same
-	// tab, though logout reloads) is not permanently aborted.
+	// TERMINAL shutdown — wired into the logout path BEFORE the local wipe. Flip out of leader so no
+	// forwarded edit is ingested, cancel the armed debounce, abort the loop, and close the cross-tab
+	// channel so no late peer message reaches a tearing-down tab. Deliberately NO fresh controller: the
+	// signal must STAY aborted so a straggler flush can never re-write the queue after kv-clear lands.
 	public cancel(): void {
+		this.role = "shutdown"
 		this.syncTimeout?.cancel()
 		this.syncTimeout = null
 		this.abortController.abort()
-		this.abortController = new AbortController()
+		this.transport?.close()
 	}
 
 	// Drop a note's consecutive-rejection strike count. For the editor's use when it clears a
@@ -238,6 +239,12 @@ export class Sync {
 			return
 		}
 
+		// A terminal shutdown aborts the loop then wipes kv; ingesting after that would re-queue and
+		// re-persist an edit onto a wiping tab. Never ingest once aborted.
+		if (isAborted(this.abortController.signal)) {
+			return
+		}
+
 		useNotesInflightStore.getState().setInflightContent(prev => mergeInflight(prev, remoteEnqueueToPatch(msg)))
 
 		void this.flushToDisk(useNotesInflightStore.getState().inflightContent).then(() => {
@@ -321,6 +328,12 @@ export class Sync {
 	// of throwing (it never throws). Sync-internal callers ignore the return (the next pass
 	// re-flushes); the enqueue call site surfaces a `false`.
 	public async flushToDisk(inflightContent: InflightContent): Promise<boolean> {
+		// Defense-in-depth at the disk boundary: the callers' own abort guards are the first line, this
+		// refuses to persist at all once a terminal shutdown has landed.
+		if (isAborted(this.abortController.signal)) {
+			return false
+		}
+
 		await this.initPromise
 
 		const result = await run(async () => {
@@ -389,7 +402,11 @@ export class Sync {
 						continue
 					}
 
-					cloudContentByUuid.set(noteUuid, (await sdkApi.getNoteContent(cloudNote)) ?? "")
+					const cloudContent = await readNoteContent(cloudNote)
+
+					if (cloudContent.status === "ok") {
+						cloudContentByUuid.set(noteUuid, cloudContent.content)
+					}
 				}
 
 				// Applied as a functional update so any edit made during the fetch is preserved.
@@ -411,7 +428,14 @@ export class Sync {
 							continue
 						}
 
-						const cloudContent = cloudContentByUuid.get(noteUuid) ?? ""
+						const cloudContent = cloudContentByUuid.get(noteUuid)
+
+						// Undecryptable (or unfetched) cloud content is treated exactly like a failed
+						// fetch: never prune a persisted draft against content we could not read.
+						if (cloudContent === undefined) {
+							continue
+						}
+
 						const remaining = entries.filter(c => c.content !== cloudContent)
 
 						if (remaining.length === 0) {
@@ -521,18 +545,25 @@ export class Sync {
 					// unconditional. When the entry carries its session base hash, peek at the note's
 					// current cloud content: if the cloud moved past our base AND past what we are about
 					// to write, this push buries newer remote work and the user hears about it once.
-					// Entries without a base hash push unchecked (legacy grace); a failed peek also
-					// pushes unchecked (availability beats the toast).
+					// Entries without a base hash push unchecked (legacy grace); a failed or undecryptable
+					// peek also pushes unchecked (availability beats the toast).
 					let overwritesNewerRemoteContent = false
 
 					if (mostRecentContent.baseContentHash !== undefined) {
-						const peek = await run(async () => (await sdkApi.getNoteContent(liveNote)) ?? "")
+						const peek = await run(async () => readNoteContent(liveNote))
 
-						if (peek.success) {
+						if (peek.success && peek.data.status === "ok") {
+							const remote = peek.data.content
+
 							overwritesNewerRemoteContent =
-								hashNoteContent(peek.data) !== mostRecentContent.baseContentHash && peek.data !== mostRecentContent.content
+								hashNoteContent(remote) !== mostRecentContent.baseContentHash && remote !== mostRecentContent.content
 						} else {
-							log.warn("notes-sync", "conflict-detection peek failed; pushing without overwrite check", noteUuid, peek.error)
+							log.warn(
+								"notes-sync",
+								"conflict-detection peek unavailable; pushing without overwrite check",
+								noteUuid,
+								peek.success ? "undecryptable" : peek.error
+							)
 						}
 					}
 

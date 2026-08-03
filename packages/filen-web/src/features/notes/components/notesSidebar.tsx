@@ -36,6 +36,7 @@ import {
 	buildNotesGroupedRows,
 	buildNotesByTag,
 	buildTagsViewRows,
+	isUntaggedTagUuid,
 	filterNotesByBlockedOwner,
 	sidebarRowKey,
 	selectableNotesFromRows,
@@ -53,6 +54,7 @@ import { useNotesListSelection } from "@/features/notes/hooks/useNotesListSelect
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
 import { useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
@@ -164,40 +166,47 @@ function TagGroupRow({
 }) {
 	const { t } = useTranslation("notes")
 	const name = tagDisplayName(row.tag)
+	// The synthesized untagged row has no server uuid, so every tag action (rename/delete/favorite/
+	// create-note-in-tag) would be meaningless — it renders without a context menu at all rather than
+	// opening an empty popup. Its label is styled apart so a real tag a user named "Untagged" stays
+	// distinguishable.
+	const isVirtual = isUntaggedTagUuid(row.tag.uuid)
+
+	const trigger = (
+		<button
+			type="button"
+			aria-expanded={row.expanded}
+			aria-label={t(row.expanded ? "notesTagCollapse" : "notesTagExpand", { name })}
+			onClick={onToggle}
+			className="group flex w-full items-center gap-1.5 rounded-xl px-2.5 py-2 text-left transition-colors outline-none app-region-no-drag hover:bg-sidebar-accent/60 focus-visible:ring-3 focus-visible:ring-ring/30"
+		>
+			<ChevronRightIcon className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", row.expanded && "rotate-90")} />
+			<TagIcon className="size-4 shrink-0 text-muted-foreground" />
+			<span className={cn("min-w-0 flex-1 truncate text-sm font-medium", isVirtual && "text-muted-foreground italic")}>{name}</span>
+			{row.tag.favorite ? (
+				<StarIcon
+					aria-label={t("notesTagFavorite")}
+					className="size-3 shrink-0 text-amber-500"
+				/>
+			) : null}
+			<span
+				aria-label={t("notesTagCount", { count: row.noteCount })}
+				className="shrink-0 text-xs text-muted-foreground tabular-nums"
+			>
+				{row.noteCount}
+			</span>
+		</button>
+	)
+
+	if (isVirtual) {
+		return trigger
+	}
 
 	return (
 		<ContextMenu>
 			{/* Same render-prop merge as NoteRow's own trigger — Base UI merges onContextMenu + ref onto
 			the button rather than wrapping it, so the row's geometry stays untouched. */}
-			<ContextMenuTrigger
-				render={
-					<button
-						type="button"
-						aria-expanded={row.expanded}
-						aria-label={t(row.expanded ? "notesTagCollapse" : "notesTagExpand", { name })}
-						onClick={onToggle}
-						className="group flex w-full items-center gap-1.5 rounded-xl px-2.5 py-2 text-left transition-colors outline-none app-region-no-drag hover:bg-sidebar-accent/60 focus-visible:ring-3 focus-visible:ring-ring/30"
-					>
-						<ChevronRightIcon
-							className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", row.expanded && "rotate-90")}
-						/>
-						<TagIcon className="size-4 shrink-0 text-muted-foreground" />
-						<span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
-						{row.tag.favorite ? (
-							<StarIcon
-								aria-label={t("notesTagFavorite")}
-								className="size-3 shrink-0 text-amber-500"
-							/>
-						) : null}
-						<span
-							aria-label={t("notesTagCount", { count: row.noteCount })}
-							className="shrink-0 text-xs text-muted-foreground tabular-nums"
-						>
-							{row.noteCount}
-						</span>
-					</button>
-				}
-			/>
+			<ContextMenuTrigger render={trigger} />
 			<TagContextMenuContent
 				tag={row.tag}
 				onTagAction={onTagAction}
@@ -285,7 +294,8 @@ function TagsSortMenu({ value, onChange }: { value: NoteTagsSortBy; onChange: (n
 }
 
 export function NotesSidebar() {
-	const { t } = useTranslation("notes")
+	const { t } = useTranslation(["notes", "common"])
+	const isOnline = useIsOnline()
 	const navigate = useNavigate()
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const selectedUuid = selectedUuidFromPath(pathname)
@@ -336,6 +346,7 @@ export function NotesSidebar() {
 					expandedTagUuids: expandedTags,
 					search,
 					sortBy: tagsSortBy,
+					untaggedLabel: t("notesTagUntagged"),
 					bodies: searchBodies
 				})
 
@@ -426,6 +437,12 @@ export function NotesSidebar() {
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
+
+			return
+		}
+
+		if (outcome.skipped > 0) {
+			toast.warning(t("notesExportSkippedUndecryptable", { count: outcome.skipped }))
 		}
 	}
 
@@ -450,17 +467,18 @@ export function NotesSidebar() {
 	}
 
 	// Registered at module scope above; guards on dialogHost.isDialogOpen so "n" never fires a second
-	// create while a note dialog (rename/delete/leave/createTag) is already open — same convention as
-	// drive.newDirectory's own dialogOpen guard.
+	// create while a note dialog (rename/delete/leave/createTag) is already open, and on the same
+	// connectivity flag the button is disabled by so the two can never disagree — drive.newDirectory
+	// guards its own hotkey identically.
 	useAction(
 		"notes.newNote",
 		() => {
-			if (!dialogHost.isDialogOpen) {
+			if (!dialogHost.isDialogOpen && isOnline) {
 				void handleNewNote()
 			}
 		},
 		undefined,
-		[dialogHost.isDialogOpen]
+		[dialogHost.isDialogOpen, isOnline]
 	)
 
 	// Registered at module scope above. Browser default for mod+a is "select all page text" — must
@@ -638,7 +656,9 @@ export function NotesSidebar() {
 							<Button
 								variant="ghost"
 								size="icon-sm"
+								disabled={!isOnline}
 								aria-label={t("notesNewNote")}
+								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 								className="app-region-no-drag"
 								onClick={() => {
 									void handleNewNote()
@@ -672,6 +692,8 @@ export function NotesSidebar() {
 										{t("notesExportAllAction")}
 									</DropdownMenuItem>
 									<DropdownMenuItem
+										disabled={!isOnline}
+										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 										onClick={() => {
 											importInputRef.current?.click()
 										}}
@@ -681,6 +703,8 @@ export function NotesSidebar() {
 									</DropdownMenuItem>
 									<DropdownMenuSeparator />
 									<DropdownMenuItem
+										disabled={!isOnline}
+										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 										onClick={() => {
 											dialogHost.openCreateTagDialog()
 										}}

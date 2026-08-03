@@ -1,6 +1,5 @@
 import type { Note } from "@filen/sdk-rs"
-import { isNoteOwner } from "@/features/notes/lib/actions"
-import { isNoteUndecryptable } from "@/features/notes/lib/sort"
+import { isNoteOwner, isNoteUndecryptable, hasNoteWriteAccess } from "@/features/notes/lib/sort"
 
 // Aggregated flags for a Notes multi-selection, computed in a single pass — the bulk-action bar's
 // only source of gating truth. Mirrors features/drive/lib/selectionFlags.ts's own
@@ -98,7 +97,7 @@ export function aggregateNoteSelectionFlags(notes: readonly Note[], currentUserI
 
 		const owner = isNoteOwner(note, currentUserId)
 		const participant = note.participants.find(p => p.userId === currentUserId)
-		const hasWrite = owner || (participant?.permissionsWrite ?? false)
+		const hasWrite = hasNoteWriteAccess(note, currentUserId)
 
 		if (!owner) {
 			everyOwned = false

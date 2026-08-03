@@ -8,6 +8,7 @@ import { ChecklistEditor } from "@/features/notes/components/editor/checklistEdi
 import { NoteReaderByType } from "@/features/notes/components/reader/noteReaderByType"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Spinner } from "@/components/ui/spinner"
+import { CannotDecryptState } from "@/components/cannotDecryptState"
 
 // Per-type dispatch, once the editor controller has a seed to render. `noteType` is the wasm STRING
 // union (never the uniffi enum object) — exhaustive over its 5 members so a future variant fails to
@@ -76,15 +77,19 @@ function BodyByType({
 // Keyed by the caller on `note.uuid` (noteEditorPane.tsx) so switching notes rebuilds the controller.
 export function NoteContentBody({
 	note,
+	currentUserId,
 	hideCompletedChecklist = false
 }: {
 	note: Note
+	// Threaded as a prop rather than read from the account query here, matching NoteRow and
+	// NoteDropdownMenuContent — the pane already holds it.
+	currentUserId: bigint | undefined
 	// The editor header's persisted per-note "hide completed items" preference (noteEditorPane.tsx),
 	// threaded down to the checklist branch only; every other type ignores it.
 	hideCompletedChecklist?: boolean
 }) {
 	const { t } = useTranslation("notes")
-	const controller = useNoteEditor(note)
+	const controller = useNoteEditor(note, currentUserId)
 
 	if (controller.status === "pending") {
 		return (
@@ -93,6 +98,10 @@ export function NoteContentBody({
 				<p className="text-sm">{t("notesLoadingNote")}</p>
 			</div>
 		)
+	}
+
+	if (controller.status === "undecryptable") {
+		return <CannotDecryptState className="min-h-0 flex-1" />
 	}
 
 	if (controller.status === "error") {

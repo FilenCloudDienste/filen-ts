@@ -1,6 +1,7 @@
 import type { Note } from "@filen/sdk-rs"
 import type { InflightEntry } from "@/features/notes/store/useNotesInflight"
 import { hashNoteContent } from "@/features/notes/lib/sync.logic"
+import { hasNoteWriteAccess } from "@/features/notes/lib/sort"
 
 // old-web parity: the client-side note-content cap. A push past this would be rejected server-side and
 // wedge the note, so the editor blocks the ENQUEUE past the cap (never the keystroke — CodeMirror keeps
@@ -41,9 +42,11 @@ export function latestInflightContent(entries: InflightEntry[] | undefined): str
 
 // THE seed-priority rule (mobile content/index.tsx editorSeed): an unsynced inflight edit wins over the
 // content query's data — a cold open with a disk-restored queue must paint the user's own typed text,
-// never stale pre-edit content. Falls through to the query's content, then the empty string (a
-// freshly-created note has no content yet). Read once at mount; the editor freezes it there and only a
-// remount-key change may reseed (the EDITOR INVARIANT).
+// never stale pre-edit content. Read once at mount; the editor freezes it there and only a remount-key
+// change may reseed (the EDITOR INVARIANT). `queryContent` is `undefined` only while the query is
+// pending or failed, and both render before the editor mounts, so the `?? ""` tail is the type-level
+// fallback for a state the editor never paints from: the only `""` it really seeds from is a note whose
+// query resolved `""` (a freshly-created note).
 export function deriveEditorSeed({
 	inflightLatest,
 	queryContent
@@ -66,10 +69,10 @@ export function deriveEditorRemountKey({ uuid, dataUpdatedAt }: { uuid: string; 
 	return `${uuid}:${String(dataUpdatedAt)}`
 }
 
-// Read-only derivation. For now only a trashed note is read-only; a non-writable participant (a shared
-// note without write permission) folds in here once participants land, mirroring mobile's hasWriteAccess.
-export function deriveEditorReadOnly(note: Note): boolean {
-	return note.trash
+// Read-only when the note is trashed, or when this user has no write access to it (a shared note
+// without permissionsWrite). Mobile's hasWriteAccess, one helper shared with the bulk bar.
+export function deriveEditorReadOnly(note: Note, currentUserId: bigint | undefined): boolean {
+	return note.trash || !hasNoteWriteAccess(note, currentUserId)
 }
 
 // The session-base hash the overwrite-conflict check compares the note's cloud content against: the
@@ -118,18 +121,24 @@ export function reducePersistFailureNotice({ persisted, alreadyNotified }: { per
 	return { notified: true, warn: true }
 }
 
-export type EditorLoadState = "pending" | "error" | "ready"
+// What the content query itself can report, versus what the editor renders — "undecryptable" is a
+// narrowing of the query's ERROR state, never an input the query can produce on its own.
+export type QueryLoadState = "pending" | "error" | "ready"
+export type EditorLoadState = QueryLoadState | "undecryptable"
 
 // Decouple the editor's load state from the deliberately-disabled content query (mobile
 // computeNoteLoading): when the note has an inflight entry the query is disabled and stays `pending`
 // FOREVER, but we already have a seed to render — so inflight is always immediately "ready". Only with
-// NO inflight does the query's own pending/error surface as the editor's load state.
+// NO inflight does the query's own pending/error surface as the editor's load state, and an error whose
+// cause is a failed content decryption gets its own explainer instead of a raw fetch-error message.
 export function deriveEditorLoadState({
 	hasInflight,
-	queryStatus
+	queryStatus,
+	isUndecryptable
 }: {
 	hasInflight: boolean
-	queryStatus: EditorLoadState
+	queryStatus: QueryLoadState
+	isUndecryptable: boolean
 }): EditorLoadState {
 	if (hasInflight) {
 		return "ready"
@@ -140,7 +149,7 @@ export function deriveEditorLoadState({
 	}
 
 	if (queryStatus === "error") {
-		return "error"
+		return isUndecryptable ? "undecryptable" : "error"
 	}
 
 	return "ready"

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import type { Note } from "@filen/sdk-rs"
-import { useNoteContentQuery } from "@/features/notes/queries/noteContent"
+import { useNoteContentQuery, isUndecryptableContentError } from "@/features/notes/queries/noteContent"
 import useNotesInflightStore, { useNoteInflight } from "@/features/notes/store/useNotesInflight"
 import { sync } from "@/features/notes/lib/sync"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
@@ -15,7 +15,8 @@ import {
 	reducePersistFailureNotice,
 	latestInflightContent,
 	exceedsNoteSizeCap,
-	type EditorLoadState
+	type EditorLoadState,
+	type QueryLoadState
 } from "@/features/notes/hooks/useNoteEditor.logic"
 
 export interface NoteEditorController {
@@ -39,15 +40,19 @@ export interface NoteEditorController {
 // thing that pushes. Derivations are the pure functions in useNoteEditor.logic.ts (unit-tested); this
 // hook only wires them to the live query + outbox store. A faithful port of mobile's content/index.tsx
 // editor coordination (editorSeed, sessionBaseHashRef, the read-only/size enqueue guards).
-export function useNoteEditor(note: Note): NoteEditorController {
+export function useNoteEditor(note: Note, currentUserId: bigint | undefined): NoteEditorController {
 	const { t } = useTranslation("notes")
 	const query = useNoteContentQuery(note)
 	const isInflight = useNoteInflight(note.uuid)
 	const [sizeReached, setSizeReached] = useState(false)
 
-	const queryStatus: EditorLoadState = query.isPending ? "pending" : query.isError ? "error" : "ready"
-	const status = deriveEditorLoadState({ hasInflight: isInflight, queryStatus })
-	const readOnly = deriveEditorReadOnly(note)
+	const queryStatus: QueryLoadState = query.isPending ? "pending" : query.isError ? "error" : "ready"
+	const status = deriveEditorLoadState({
+		hasInflight: isInflight,
+		queryStatus,
+		isUndecryptable: query.isError && isUndecryptableContentError(query.error)
+	})
+	const readOnly = deriveEditorReadOnly(note, currentUserId)
 
 	// Reactive read of the freshest inflight content for the seed — a zustand selector (not a plain
 	// getState() read during render) so React Compiler treats its return value as always-fresh and a

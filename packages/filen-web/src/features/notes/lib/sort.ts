@@ -63,6 +63,18 @@ export function isTagUndecryptable(tag: NoteTag): boolean {
 	return tag.name === undefined
 }
 
+// An unresolved user id is "not the owner" — the safer default; the SDK is the final authority anyway.
+export function isNoteOwner(note: Note, userId: bigint | undefined): boolean {
+	return userId !== undefined && note.ownerId === userId
+}
+
+// Write access: the owner, or a participant carrying permissionsWrite. ONE definition, so the editor's
+// read-only derivation and the bulk bar's selection flags can never disagree about who may write. An
+// unresolved user id is "no access", the same fail-safe direction as isNoteOwner.
+export function hasNoteWriteAccess(note: Note, userId: bigint | undefined): boolean {
+	return isNoteOwner(note, userId) || (note.participants.find(p => p.userId === userId)?.permissionsWrite ?? false)
+}
+
 // History dialog's own sort — newest first by editedTimestamp (mobile's sortNoteHistoryNewestFirst),
 // bigint-safe throughout like compareNotes above. `id` (also bigint) is the deterministic tiebreak for
 // two entries sharing a timestamp — history ids are server-assigned and monotonically increasing, so

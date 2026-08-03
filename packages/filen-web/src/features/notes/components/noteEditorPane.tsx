@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
-import { StickyNoteIcon, MoreHorizontalIcon } from "lucide-react"
+import { StickyNoteIcon, MoreHorizontalIcon, EyeIcon } from "lucide-react"
 import type { Note } from "@filen/sdk-rs"
 import { noteIcon } from "@/features/notes/lib/icon.logic"
-import { isNoteUndecryptable } from "@/features/notes/lib/sort"
+import { isNoteUndecryptable, hasNoteWriteAccess } from "@/features/notes/lib/sort"
 import { NoteContentBody } from "@/features/notes/components/noteContentBody"
 import { CannotDecryptState } from "@/components/cannotDecryptState"
 import { NoteRemoteEditBanner } from "@/features/notes/components/noteRemoteEditBanner"
@@ -129,11 +129,24 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 	// parsed anyway), and every other note type simply never sees the prop.
 	const showHideCompletedToggle = !undecryptable && note.noteType === "checklist"
 
+	// A shared note this user may only read. Trashed notes are excluded deliberately: the Trashed bucket
+	// header and the restore/delete-only menu already announce that state.
+	const viewOnly = !undecryptable && !note.trash && !hasNoteWriteAccess(note, accountQuery.data?.id)
+
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<header className="flex shrink-0 items-center gap-2.5 px-5 py-4">
 				<Icon className={`size-5 shrink-0 ${colorClass}`} />
 				<h1 className="min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
+				{viewOnly ? (
+					<span className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+						<EyeIcon
+							aria-hidden="true"
+							className="size-3"
+						/>
+						{t("noteViewOnly")}
+					</span>
+				) : null}
 				{/* Subtle in-flight indicator next to the title (mobile parity) — the note is mid-sync. */}
 				{isInflight ? (
 					<Spinner
@@ -191,6 +204,7 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 				<NoteContentBody
 					key={note.uuid}
 					note={note}
+					currentUserId={accountQuery.data?.id}
 					hideCompletedChecklist={showHideCompletedToggle && hideCompleted}
 				/>
 			)}

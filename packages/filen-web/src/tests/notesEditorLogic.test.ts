@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Note } from "@filen/sdk-rs"
+import type { Note, NoteParticipant } from "@filen/sdk-rs"
 import type { InflightEntry } from "@/features/notes/store/useNotesInflight"
 import {
 	MAX_NOTE_SIZE,
@@ -36,6 +36,17 @@ function mockNote(overrides: Partial<Note> = {}): Note {
 	}
 }
 
+function participant(userId: bigint, permissionsWrite: boolean): NoteParticipant {
+	return {
+		userId,
+		isOwner: false,
+		email: "participant@example.com",
+		nickName: "participant",
+		permissionsWrite,
+		addedTimestamp: 0n
+	}
+}
+
 function entry(content: string, timestamp: number): InflightEntry {
 	return { content, timestamp, note: mockNote() }
 }
@@ -62,7 +73,12 @@ describe("deriveEditorSeed — seed priority", () => {
 		expect(deriveEditorSeed({ inflightLatest: null, queryContent: "server content" })).toBe("server content")
 	})
 
-	it("falls through to the empty string when neither source has content (fresh note)", () => {
+	it("seeds a fresh note whose query resolved the empty string as the empty string", () => {
+		expect(deriveEditorSeed({ inflightLatest: null, queryContent: "" })).toBe("")
+	})
+
+	it("falls back to the empty string for undefined query content — the pending/failed tail, never a painted state", () => {
+		// Both states render before the editor mounts, so this branch is the type-level tail only.
 		expect(deriveEditorSeed({ inflightLatest: null, queryContent: undefined })).toBe("")
 	})
 
@@ -122,28 +138,52 @@ describe("deriveEditorRemountKey", () => {
 
 describe("deriveEditorReadOnly", () => {
 	it("is read-only for a trashed note", () => {
-		expect(deriveEditorReadOnly(mockNote({ trash: true }))).toBe(true)
+		expect(deriveEditorReadOnly(mockNote({ trash: true, ownerId: 1n }), 1n)).toBe(true)
 	})
 
-	it("is writable for an active (non-trashed) note", () => {
-		expect(deriveEditorReadOnly(mockNote({ trash: false }))).toBe(false)
+	it("is writable for an active note this user owns", () => {
+		expect(deriveEditorReadOnly(mockNote({ trash: false, ownerId: 1n }), 1n)).toBe(false)
+	})
+
+	it("is read-only for a shared note whose participant row carries no write permission", () => {
+		const note = mockNote({ ownerId: 1n, participants: [participant(7n, false)] })
+
+		expect(deriveEditorReadOnly(note, 7n)).toBe(true)
+	})
+
+	it("is writable for a shared note whose participant row carries write permission", () => {
+		const note = mockNote({ ownerId: 1n, participants: [participant(7n, true)] })
+
+		expect(deriveEditorReadOnly(note, 7n)).toBe(false)
+	})
+
+	it("is read-only when the user id is unresolved (fail-safe)", () => {
+		expect(deriveEditorReadOnly(mockNote({ ownerId: 1n }), undefined)).toBe(true)
 	})
 })
 
 describe("deriveEditorLoadState", () => {
 	it("is always ready when the note has inflight content, even while the query is pending", () => {
 		// The disabled-while-inflight query never resolves — but we have a seed to render.
-		expect(deriveEditorLoadState({ hasInflight: true, queryStatus: "pending" })).toBe("ready")
-		expect(deriveEditorLoadState({ hasInflight: true, queryStatus: "error" })).toBe("ready")
+		expect(deriveEditorLoadState({ hasInflight: true, queryStatus: "pending", isUndecryptable: false })).toBe("ready")
+		expect(deriveEditorLoadState({ hasInflight: true, queryStatus: "error", isUndecryptable: false })).toBe("ready")
+	})
+
+	it("keeps an inflight edit readable even when the content query failed to decrypt", () => {
+		expect(deriveEditorLoadState({ hasInflight: true, queryStatus: "error", isUndecryptable: true })).toBe("ready")
 	})
 
 	it("surfaces the query's pending/error only when there is no inflight", () => {
-		expect(deriveEditorLoadState({ hasInflight: false, queryStatus: "pending" })).toBe("pending")
-		expect(deriveEditorLoadState({ hasInflight: false, queryStatus: "error" })).toBe("error")
+		expect(deriveEditorLoadState({ hasInflight: false, queryStatus: "pending", isUndecryptable: false })).toBe("pending")
+		expect(deriveEditorLoadState({ hasInflight: false, queryStatus: "error", isUndecryptable: false })).toBe("error")
+	})
+
+	it("narrows an undecryptable-content failure out of the generic error state", () => {
+		expect(deriveEditorLoadState({ hasInflight: false, queryStatus: "error", isUndecryptable: true })).toBe("undecryptable")
 	})
 
 	it("is ready once the query resolves with no inflight", () => {
-		expect(deriveEditorLoadState({ hasInflight: false, queryStatus: "ready" })).toBe("ready")
+		expect(deriveEditorLoadState({ hasInflight: false, queryStatus: "ready", isUndecryptable: false })).toBe("ready")
 	})
 })
 

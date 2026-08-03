@@ -108,6 +108,25 @@ export function noteBulkActions(flags: NoteSelectionFlags): NoteBulkActionDescri
 	return descriptors
 }
 
+// Bulk ids whose dispatch is an unconditional SDK write. Export is left enabled (cache-first, and the
+// zip is built client-side); the descriptor list itself is unchanged, only its rendered enabled state.
+const OFFLINE_GATED_BULK_IDS: ReadonlySet<NoteBulkActionDescriptor["id"]> = new Set<NoteBulkActionDescriptor["id"]>([
+	"pin",
+	"favorite",
+	"type",
+	"tags",
+	"duplicate",
+	"archive",
+	"restore",
+	"trash",
+	"delete",
+	"leave"
+])
+
+export function isNoteBulkActionOfflineDisabled(id: NoteBulkActionDescriptor["id"], isOnline: boolean): boolean {
+	return !isOnline && OFFLINE_GATED_BULK_IDS.has(id)
+}
+
 export interface NoteBulkTagSubmenuEntry {
 	tag: NoteTag
 	// True iff EVERY selected note already carries this tag. The underlying checkbox primitive has no

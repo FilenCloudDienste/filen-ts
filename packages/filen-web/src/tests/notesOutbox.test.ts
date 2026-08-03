@@ -65,7 +65,7 @@ function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
 	}
 }
 
-// Inferred return type keeps each field a precisely-typed Mock<Sig> — assignable to OutboxTransport AND
+// Inferred return type keeps each field a precisely-typed Mock<Sig> — assignable to NotesOutboxTransport AND
 // carrying .mock/.mockClear. An explicit mapped-type annotation collapses them to a bare Mock, which is
 // no longer assignable to the method signatures, so it is deliberately left to inference.
 function mockTransport() {
@@ -363,5 +363,57 @@ describe("promoteToLeader — a follower wins the lock and pushes carried-over w
 		const pushed = setNoteContent.mock.calls.map(c => c[0].uuid).sort()
 
 		expect(pushed).toEqual(["d", "l"])
+	})
+})
+
+describe("terminal shutdown — no cross-tab resurrection after logout", () => {
+	it("cancel() closes the cross-tab channel exactly once", async () => {
+		const transport = mockTransport()
+		const s = new Sync()
+
+		s.attachTransport(transport)
+		s.start()
+		await flushAsync()
+
+		s.cancel()
+
+		expect(transport.close).toHaveBeenCalledTimes(1)
+	})
+
+	it("ingestRemoteEnqueue after cancel() neither queues nor persists a peer's forwarded edit", async () => {
+		const transport = mockTransport()
+		const note = makeNote("a")
+		const s = new Sync()
+
+		s.attachTransport(transport)
+		s.start()
+		await flushAsync()
+
+		s.cancel()
+		kvSetJson.mockClear()
+		kvDelete.mockClear()
+
+		s.ingestRemoteEnqueue({ note, content: "peer edit", timestamp: 1 })
+		await flushAsync()
+
+		expect(getStore()).toStrictEqual({})
+		expect(kvSetJson).not.toHaveBeenCalled()
+		expect(kvDelete).not.toHaveBeenCalled()
+	})
+
+	it("broadcastState() after cancel() posts nothing — the role is no longer leader", async () => {
+		const transport = mockTransport()
+		const s = new Sync()
+
+		s.attachTransport(transport)
+		s.start()
+		await flushAsync()
+
+		s.cancel()
+		transport.broadcastState.mockClear()
+
+		s.broadcastState()
+
+		expect(transport.broadcastState).not.toHaveBeenCalled()
 	})
 })

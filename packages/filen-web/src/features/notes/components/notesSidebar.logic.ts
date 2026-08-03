@@ -186,18 +186,45 @@ export function buildNotesGroupedRows(
 
 // ── View 2 (tags) ─────────────────────────────────────────────────────────────
 
+// The synthesized bottom row grouping every note that carries no tag (mobile's own sentinel literal, so
+// both platforms agree). A real server uuid carries 5 dash-separated segments and can never collide.
+export const UNTAGGED_TAG_UUID = "virtual-untagged-notes-row" as const
+
+export function isUntaggedTagUuid(uuid: string): boolean {
+	return uuid === UNTAGGED_TAG_UUID
+}
+
+// Never persisted, never sent to the SDK: it exists only inside this module's row model, so no tag
+// mutation, note-menu tag submenu or bulk tag picker can ever reach it (they all read the real
+// listNoteTags cache). `name` is the caller's localized label so the row is findable by search like a
+// real tag.
+function createUntaggedTag(name: string): NoteTag {
+	return { uuid: UNTAGGED_TAG_UUID, name, favorite: false, editedTimestamp: 0n, createdTimestamp: 0n }
+}
+
 // tag uuid → the notes carrying that tag, from each note's own inline `tags` array (the wasm Note
 // embeds its NoteTag[] — no separate join needed). A tag with zero notes simply never appears as a key
 // here; callers read `notesByTag[uuid] ?? []`. One pass over the notes, O(notes × tags-per-note).
 export function buildNotesByTag(notes: readonly Note[]): Record<string, Note[]> {
 	const byTag: Record<string, Note[]> = {}
+	const untagged: Note[] = []
 
 	for (const note of notes) {
+		if (note.tags.length === 0) {
+			untagged.push(note)
+		}
+
 		for (const tag of note.tags) {
 			const bucket = byTag[tag.uuid] ?? (byTag[tag.uuid] = [])
 
 			bucket.push(note)
 		}
+	}
+
+	// The virtual row reads its notes through the same index as a real tag. Keyed only when non-empty so
+	// buildTagsViewRows can read the count off this map without a second pass over the notes.
+	if (untagged.length > 0) {
+		byTag[UNTAGGED_TAG_UUID] = untagged
 	}
 
 	return byTag
@@ -285,12 +312,28 @@ export interface TagsViewParams {
 	expandedTagUuids: ReadonlySet<string>
 	search: string
 	sortBy: NoteTagsSortBy
+	// Localized label for the synthesized untagged row (the logic layer stays React-free).
+	untaggedLabel: string
 	// Eager-fetched full-body map, undefined outside an active search (see buildNotesView).
 	bodies?: ReadonlyMap<string, string | undefined>
 }
 
-export function buildTagsViewRows({ tags, notesByTag, expandedTagUuids, search, sortBy, bodies }: TagsViewParams): NotesSidebarRow[] {
-	const visible = sortNoteTags(filterTagsForView(tags, notesByTag, search, bodies), sortBy, notesByTag)
+export function buildTagsViewRows({
+	tags,
+	notesByTag,
+	expandedTagUuids,
+	search,
+	sortBy,
+	untaggedLabel,
+	bodies
+}: TagsViewParams): NotesSidebarRow[] {
+	const untaggedNotes = notesByTag[UNTAGGED_TAG_UUID] ?? []
+	// Appended AFTER the sort — always the bottom row regardless of the tags-sort preference — and run
+	// through the SAME search filter as a real tag so it is findable by label or by member note.
+	const visible = [
+		...sortNoteTags(filterTagsForView(tags, notesByTag, search, bodies), sortBy, notesByTag),
+		...(untaggedNotes.length > 0 ? filterTagsForView([createUntaggedTag(untaggedLabel)], notesByTag, search, bodies) : [])
+	]
 	const rows: NotesSidebarRow[] = []
 
 	for (const tag of visible) {

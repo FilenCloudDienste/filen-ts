@@ -4,9 +4,10 @@ import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { notesQueryUpsert, notesQueryRemove } from "@/features/notes/queries/notes"
-import { noteContentQueryKey, fetchNoteContent } from "@/features/notes/queries/noteContent"
+import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
+import { isNoteOwner } from "@/features/notes/lib/sort"
 import { getDefaultNoteType, DEFAULT_NOTE_TYPE } from "@/features/notes/lib/preferences"
-import { asErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type ActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
 
 export type { ActionOutcome, VoidActionOutcome }
@@ -22,10 +23,6 @@ export type { ActionOutcome, VoidActionOutcome }
 // an unresolved id as "not the owner" (the safer default; the SDK itself is the final authority anyway).
 function currentUserId(): bigint | undefined {
 	return queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY)?.id
-}
-
-export function isNoteOwner(note: Note, userId: bigint | undefined = currentUserId()): boolean {
-	return userId !== undefined && note.ownerId === userId
 }
 
 function ownerGateError(): ActionOutcome<Note> {
@@ -66,7 +63,8 @@ export async function createNote(title?: string): Promise<ActionOutcome<Note>> {
 // already-open note's content is almost certainly warm, so this only round-trips to the SDK when it
 // genuinely isn't. A fetch failure propagates as a thrown ErrorDTO (runOp) — the caller's own try/catch
 // (noteMenu.tsx's copyContent handler, same shape as its copyId sibling) surfaces it as an error toast
-// instead of silently copying an empty string.
+// instead of silently copying an empty string. Content that exists but never decrypted throws the same
+// way, for the same reason.
 export async function resolveNoteContent(note: Note): Promise<string> {
 	const cached = queryClient.getQueryData<string | undefined>(noteContentQueryKey(note.uuid))
 
@@ -74,9 +72,16 @@ export async function resolveNoteContent(note: Note): Promise<string> {
 		return cached
 	}
 
-	const content = await runOp(fetchNoteContent(note))
+	const result = await runOp(readNoteContent(note))
 
-	return content ?? ""
+	if (result.status === "undecryptable") {
+		const message = i18n.t("notes:noteContentUndecryptableError")
+
+		// eslint-disable-next-line @typescript-eslint/only-throw-error -- ErrorDTO is the boundary contract, mirrors runOp's own convention
+		throw { species: "plain", message, label: message } satisfies ErrorDTO
+	}
+
+	return result.content
 }
 
 // ── Duplicate ────────────────────────────────────────────────────────────
@@ -164,7 +169,7 @@ export async function toggleFavorited(note: Note): Promise<ActionOutcome<Note>> 
 // builder that hides the entry for a non-owner — defense-in-depth, same rule this codebase already
 // applies to connectivity gates (library AND component layer).
 export async function archiveNote(note: Note): Promise<ActionOutcome<Note>> {
-	if (!isNoteOwner(note)) {
+	if (!isNoteOwner(note, currentUserId())) {
 		return ownerGateError()
 	}
 

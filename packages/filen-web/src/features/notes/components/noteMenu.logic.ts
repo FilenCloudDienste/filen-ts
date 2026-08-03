@@ -1,7 +1,6 @@
 import { type LucideIcon } from "lucide-react"
 import { NOTE_ACTION_DEFS } from "@/features/notes/lib/actionDefs"
-import { isNoteOwner } from "@/features/notes/lib/actions"
-import { isNoteUndecryptable, isTagUndecryptable } from "@/features/notes/lib/sort"
+import { isNoteOwner, isNoteUndecryptable, isTagUndecryptable } from "@/features/notes/lib/sort"
 import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import type { NotesKey } from "@/lib/i18n"
 
@@ -36,6 +35,10 @@ interface NoteActionDescriptorShared {
 	labelKey: NotesKey
 	icon: LucideIcon
 	destructive?: boolean
+	// Present-but-disabled (never absent) once set to false — mirrors itemMenu.logic.ts's own field.
+	// Only applyNoteOfflineGate below ever sets it; noteMenuActions itself never disables a descriptor
+	// it decides to include.
+	enabled?: boolean
 }
 
 // "direct" resolves immediately (pin/favorite/duplicate/archive/restore/trash/type-change/tag-toggle);
@@ -145,6 +148,31 @@ export function noteMenuActions(note: Note, currentUserId: bigint | undefined): 
 	return actions
 }
 
+// Ids whose dispatch is an unconditional SDK write — offline they can only fail. Read entries stay
+// enabled: export/copyId/copyContent are cache-first reads, and participants/history only OPEN a
+// readable dialog — the mutating controls INSIDE those dialogs carry their own offline gate.
+const OFFLINE_GATED_IDS: ReadonlySet<NoteActionId> = new Set<NoteActionId>([
+	"rename",
+	"duplicate",
+	"pin",
+	"favorite",
+	"tags",
+	"type",
+	"archive",
+	"restore",
+	"trash",
+	"deletePermanently",
+	"leave"
+])
+
+export function applyNoteOfflineGate(actions: NoteActionDescriptor[], isOnline: boolean): NoteActionDescriptor[] {
+	if (isOnline) {
+		return actions
+	}
+
+	return actions.map(action => (OFFLINE_GATED_IDS.has(action.id) ? { ...action, enabled: false } : action))
+}
+
 // Tag-row context-menu descriptors (the sidebar tags view's own small menu) — same pure-builder shape
 // as noteMenuActions so the entry list + favorite-label flip stay unit-testable without rendering.
 export type TagActionDescriptor =
@@ -153,10 +181,11 @@ export type TagActionDescriptor =
 			labelKey: NotesKey
 			icon: LucideIcon
 			destructive?: boolean
+			enabled?: boolean
 			run: "dialog"
 			dialogKind: NoteTagDialogKind
 	  }
-	| { id: "tagFavorite" | "tagCreateNote"; labelKey: NotesKey; icon: LucideIcon; run: "direct" }
+	| { id: "tagFavorite" | "tagCreateNote"; labelKey: NotesKey; icon: LucideIcon; enabled?: boolean; run: "direct" }
 
 export function tagMenuActions(tag: NoteTag): TagActionDescriptor[] {
 	const del: TagActionDescriptor = { id: "tagDelete", ...NOTE_ACTION_DEFS.tagDelete, run: "dialog", dialogKind: "deleteTag" }
@@ -178,6 +207,15 @@ export function tagMenuActions(tag: NoteTag): TagActionDescriptor[] {
 	const createNote: TagActionDescriptor = { id: "tagCreateNote", ...NOTE_ACTION_DEFS.tagCreateNote, run: "direct" }
 
 	return [createNote, { id: "tagRename", ...NOTE_ACTION_DEFS.tagRename, run: "dialog", dialogKind: "renameTag" }, favorite, del]
+}
+
+// Every tag action is a write, so the gate is unconditional over the whole list.
+export function applyTagOfflineGate(actions: TagActionDescriptor[], isOnline: boolean): TagActionDescriptor[] {
+	if (isOnline) {
+		return actions
+	}
+
+	return actions.map(action => ({ ...action, enabled: false }))
 }
 
 export interface NoteTagSubmenuEntry {

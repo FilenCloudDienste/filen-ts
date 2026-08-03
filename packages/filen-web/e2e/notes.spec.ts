@@ -224,6 +224,28 @@ test.describe("notes", () => {
 
 			const row = sidebar.locator(`a[href="/notes/${uuid}"]`)
 
+			// Offline gate: the descriptor's `enabled` flag must reach a genuinely disabled menuitem, and
+			// the sidebar's own write triggers must disable too — neither is reachable under this
+			// project's DOM-less vitest config. No mutation is dispatched: the menu is opened, asserted
+			// and dismissed while offline, then connectivity is restored.
+			// The just-created note's initial content write may still be inflight, which disables this
+			// same trigger (disabled-not-hidden, see noteEditorPane) — settle it before cutting the
+			// network, or the offline assertions race the create's own flush.
+			await expect(menuTrigger).toBeEnabled()
+			await page.context().setOffline(true)
+
+			try {
+				await menuTrigger.click()
+				await expect(menu).toBeVisible()
+				await expect(page.getByRole("menuitem", { name: "Trash", exact: true })).toHaveAttribute("aria-disabled", "true")
+				await page.keyboard.press("Escape")
+				await expect(menu).toHaveCount(0)
+
+				await expect(page.getByRole("button", { name: "New note", exact: true })).toBeDisabled()
+			} finally {
+				await page.context().setOffline(false)
+			}
+
 			// Rename — InputDialog (role="dialog"), the field pre-filled with the SDK's default title.
 			const newTitle = `e2e action note ${String(Date.now())}`
 			await runMenuAction(page, menuTrigger, "Rename", "dialogOpen")

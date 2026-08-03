@@ -12,6 +12,7 @@ import { noteTypeIcon } from "@/features/notes/lib/icon.logic"
 import { NoteReaderByType } from "@/features/notes/components/reader/noteReaderByType"
 import { formatVersionTimestamp } from "@/features/drive/lib/format"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
@@ -34,6 +35,7 @@ export interface HistoryDialogProps {
 // version, has meaningfully previewable rich content.
 export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps) {
 	const { t } = useTranslation(["notes", "common"])
+	const isOnline = useIsOnline()
 	const notesQuery = useNotes()
 	const note = notesQuery.data?.find(n => n.uuid === initialNote.uuid) ?? initialNote
 	const historyQuery = useNoteHistoryQuery(note)
@@ -167,8 +169,9 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 							<Button
 								variant="ghost"
 								size="icon-sm"
-								disabled={pending}
+								disabled={pending || !isOnline}
 								aria-label={t("noteHistoryRestoreAction")}
+								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 								onClick={() => {
 									setConfirmingRestore(history)
 								}}

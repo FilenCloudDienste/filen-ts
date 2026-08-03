@@ -54,7 +54,14 @@ import {
 	notesQueryUpsert,
 	useNotes
 } from "@/features/notes/queries/notes"
-import { fetchNoteContent, noteContentQueryKey, useNoteContentQuery } from "@/features/notes/queries/noteContent"
+import {
+	fetchNoteContent,
+	fetchNoteContentOrThrow,
+	isUndecryptableContentError,
+	noteContentQueryKey,
+	readNoteContent,
+	useNoteContentQuery
+} from "@/features/notes/queries/noteContent"
 import { fetchNoteHistory, noteHistoryQueryKey, useNoteHistoryQuery } from "@/features/notes/queries/noteHistory"
 import {
 	fetchNoteTags,
@@ -224,6 +231,57 @@ describe("fetchNoteContent", () => {
 	})
 })
 
+describe("readNoteContent", () => {
+	it("classifies a resolved undefined as undecryptable content", async () => {
+		getNoteContent.mockResolvedValueOnce(undefined)
+
+		await expect(readNoteContent(mockNote())).resolves.toEqual({ status: "undecryptable" })
+	})
+
+	it("classifies a resolved empty string as readable content — an EMPTY note is not undecryptable", async () => {
+		getNoteContent.mockResolvedValueOnce("")
+
+		await expect(readNoteContent(mockNote())).resolves.toEqual({ status: "ok", content: "" })
+	})
+
+	it("passes a resolved body straight through", async () => {
+		getNoteContent.mockResolvedValueOnce("body")
+
+		await expect(readNoteContent(mockNote())).resolves.toEqual({ status: "ok", content: "body" })
+	})
+
+	it("lets an SDK rejection propagate rather than swallowing it into undecryptable", async () => {
+		getNoteContent.mockRejectedValueOnce(new Error("network"))
+
+		await expect(readNoteContent(mockNote())).rejects.toThrow("network")
+	})
+})
+
+describe("fetchNoteContentOrThrow", () => {
+	it("resolves the string for a decryptable note", async () => {
+		getNoteContent.mockResolvedValueOnce("body")
+
+		await expect(fetchNoteContentOrThrow(mockNote())).resolves.toBe("body")
+	})
+
+	it("rejects with the identity-checked sentinel for an undecryptable note", async () => {
+		getNoteContent.mockResolvedValueOnce(undefined)
+
+		await expect(
+			fetchNoteContentOrThrow(mockNote()).then(
+				() => "resolved",
+				(e: unknown) => isUndecryptableContentError(e)
+			)
+		).resolves.toBe(true)
+	})
+
+	it("isUndecryptableContentError is identity-based, not duck-typed", () => {
+		expect(isUndecryptableContentError(new Error("boom"))).toBe(false)
+		expect(isUndecryptableContentError(undefined)).toBe(false)
+		expect(isUndecryptableContentError(Symbol("note-content-undecryptable"))).toBe(false)
+	})
+})
+
 describe("useNoteContentQuery", () => {
 	it("disables the query when note is undefined regardless of the enabled option", () => {
 		useQuery.mockReturnValue({ status: "pending" })
@@ -256,6 +314,26 @@ describe("useNoteContentQuery", () => {
 		useNoteContentQuery(mockNote())
 
 		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ enabled: false }))
+	})
+
+	it("wires a queryFn that rejects the undecryptable sentinel instead of resolving undefined", async () => {
+		useQuery.mockReturnValue({ status: "pending" })
+		getNoteContent.mockResolvedValueOnce(undefined)
+
+		useNoteContentQuery(mockNote())
+
+		const options = useQuery.mock.calls[0]?.[0] as { queryFn: () => Promise<string> } | undefined
+
+		if (options === undefined) {
+			throw new Error("useQuery was not called with options")
+		}
+
+		await expect(
+			options.queryFn().then(
+				() => "resolved",
+				(e: unknown) => isUndecryptableContentError(e)
+			)
+		).resolves.toBe(true)
 	})
 })
 

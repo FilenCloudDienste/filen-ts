@@ -11,9 +11,11 @@ import {
 	sidebarRowKey,
 	selectableNotesFromRows,
 	selectableRowIndexByKey,
+	isUntaggedTagUuid,
+	UNTAGGED_TAG_UUID,
 	type NotesSidebarRow
 } from "@/features/notes/components/notesSidebar.logic"
-import { DEFAULT_NOTE_TAGS_SORT_BY } from "@/features/notes/lib/sort"
+import { DEFAULT_NOTE_TAGS_SORT_BY, type NoteTagsSortBy } from "@/features/notes/lib/sort"
 import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@/features/contacts/lib/blocking"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes — pad a short label, same as notesSort.test.ts.
@@ -99,8 +101,27 @@ describe("notesSidebar.logic — buildNotesByTag count math", () => {
 
 		expect(byTag[work.uuid]?.map(n => n.uuid)).toStrictEqual([n1.uuid, n2.uuid])
 		expect(byTag[home.uuid]?.map(n => n.uuid)).toStrictEqual([n2.uuid])
-		// An untagged note contributes to no bucket.
-		expect(Object.keys(byTag)).toHaveLength(2)
+		// Two real tag buckets plus the synthesized untagged one.
+		expect(Object.keys(byTag)).toHaveLength(3)
+	})
+
+	it("collects the zero-tag notes into the untagged bucket", () => {
+		const work = mockTag({ uuid: testUuid("work"), name: "work" })
+		const tagged = mockNote({ uuid: testUuid("n1"), tags: [work] })
+		const bare1 = mockNote({ uuid: testUuid("n2"), tags: [] })
+		const bare2 = mockNote({ uuid: testUuid("n3"), tags: [] })
+
+		const byTag = buildNotesByTag([tagged, bare1, bare2])
+
+		expect(byTag[UNTAGGED_TAG_UUID]?.map(n => n.uuid)).toStrictEqual([bare1.uuid, bare2.uuid])
+	})
+
+	it("omits the untagged key entirely when every note carries a tag", () => {
+		const work = mockTag({ uuid: testUuid("work"), name: "work" })
+
+		const byTag = buildNotesByTag([mockNote({ uuid: testUuid("n1"), tags: [work] })])
+
+		expect(UNTAGGED_TAG_UUID in byTag).toBe(false)
 	})
 })
 
@@ -151,7 +172,8 @@ describe("notesSidebar.logic — buildTagsViewRows flattening", () => {
 			notesByTag,
 			expandedTagUuids: new Set(),
 			search: "",
-			sortBy: DEFAULT_NOTE_TAGS_SORT_BY
+			sortBy: DEFAULT_NOTE_TAGS_SORT_BY,
+			untaggedLabel: "Untagged"
 		})
 
 		expect(rows.every(r => r.kind === "tag")).toBe(true)
@@ -165,7 +187,8 @@ describe("notesSidebar.logic — buildTagsViewRows flattening", () => {
 			notesByTag,
 			expandedTagUuids: new Set([work.uuid]),
 			search: "",
-			sortBy: DEFAULT_NOTE_TAGS_SORT_BY
+			sortBy: DEFAULT_NOTE_TAGS_SORT_BY,
+			untaggedLabel: "Untagged"
 		})
 
 		// tag(work) → note(b, edited 5n) → note(a, edited 2n) → tag(home) collapsed.
@@ -184,7 +207,8 @@ describe("notesSidebar.logic — buildTagsViewRows flattening", () => {
 			notesByTag,
 			expandedTagUuids: new Set([work.uuid, home.uuid]),
 			search: "work",
-			sortBy: DEFAULT_NOTE_TAGS_SORT_BY
+			sortBy: DEFAULT_NOTE_TAGS_SORT_BY,
+			untaggedLabel: "Untagged"
 		})
 		expect(noteRowUuids(nameMatched)).toStrictEqual([b.uuid, a.uuid])
 
@@ -194,7 +218,8 @@ describe("notesSidebar.logic — buildTagsViewRows flattening", () => {
 			notesByTag,
 			expandedTagUuids: new Set([work.uuid, home.uuid]),
 			search: "alpha",
-			sortBy: DEFAULT_NOTE_TAGS_SORT_BY
+			sortBy: DEFAULT_NOTE_TAGS_SORT_BY,
+			untaggedLabel: "Untagged"
 		})
 		expect(tagRowUuids(memberMatched)).toStrictEqual([work.uuid])
 		expect(noteRowUuids(memberMatched)).toStrictEqual([a.uuid])
@@ -209,6 +234,7 @@ describe("notesSidebar.logic — buildTagsViewRows flattening", () => {
 			expandedTagUuids: new Set([work.uuid, home.uuid]),
 			search: "rare term",
 			sortBy: DEFAULT_NOTE_TAGS_SORT_BY,
+			untaggedLabel: "Untagged",
 			bodies
 		})
 
@@ -459,5 +485,83 @@ describe("filterNotesByBlockedOwner", () => {
 		const notes = [mockNote({ uuid: testUuid("a") }), mockNote({ uuid: testUuid("b"), ownerId: 2n })]
 
 		expect(filterNotesByBlockedOwner(notes, EMPTY_BLOCKED_USERS)).toEqual(notes)
+	})
+})
+
+describe("notesSidebar.logic — untagged virtual row", () => {
+	const work = mockTag({ uuid: testUuid("work"), name: "work" })
+	const zebra = mockTag({ uuid: testUuid("zebra"), name: "zebra" })
+	const tagged = mockNote({ uuid: testUuid("a"), title: "alpha", tags: [work], editedTimestamp: 9n })
+	const zTagged = mockNote({ uuid: testUuid("z"), title: "zulu", tags: [zebra], editedTimestamp: 8n })
+	const bare = mockNote({ uuid: testUuid("b"), title: "beta", tags: [], editedTimestamp: 2n })
+	const bare2 = mockNote({ uuid: testUuid("c"), title: "gamma", tags: [], editedTimestamp: 1n })
+
+	function rowsFor(params: { search?: string; sortBy?: NoteTagsSortBy; expanded?: ReadonlySet<string>; notes?: Note[] }) {
+		const notes = params.notes ?? [tagged, zTagged, bare, bare2]
+
+		return buildTagsViewRows({
+			tags: [work, zebra],
+			notesByTag: buildNotesByTag(notes),
+			expandedTagUuids: params.expanded ?? new Set(),
+			search: params.search ?? "",
+			sortBy: params.sortBy ?? DEFAULT_NOTE_TAGS_SORT_BY,
+			untaggedLabel: "Untagged"
+		})
+	}
+
+	it("appends the virtual row LAST, after the sorted real tags, for every sort order", () => {
+		for (const sortBy of ["nameAsc", "nameDesc", "lastActivityDesc", "notesCountAsc"] as const) {
+			const uuids = tagRowUuids(rowsFor({ sortBy }))
+
+			expect(uuids.at(-1)).toBe(UNTAGGED_TAG_UUID)
+			expect(uuids).toHaveLength(3)
+		}
+	})
+
+	it("carries the untagged count on its own row", () => {
+		const row = rowsFor({}).find(
+			(r): r is Extract<NotesSidebarRow, { kind: "tag" }> => r.kind === "tag" && isUntaggedTagUuid(r.tag.uuid)
+		)
+
+		expect(row?.noteCount).toBe(2)
+		expect(row?.tag.name).toBe("Untagged")
+		expect(row?.tag.favorite).toBe(false)
+	})
+
+	it("hides the row when nothing is untagged", () => {
+		expect(tagRowUuids(rowsFor({ notes: [tagged], sortBy: "nameAsc" }))).toStrictEqual([work.uuid, zebra.uuid])
+	})
+
+	it("is filtered by search exactly like a real tag — by its label, or by one of its member notes", () => {
+		expect(tagRowUuids(rowsFor({ search: "untag" }))).toStrictEqual([UNTAGGED_TAG_UUID])
+		expect(tagRowUuids(rowsFor({ search: "gamma" }))).toStrictEqual([UNTAGGED_TAG_UUID])
+		expect(tagRowUuids(rowsFor({ search: "nothing matches this" }))).toStrictEqual([])
+	})
+
+	it("expands into its member note rows, keyed uniquely against every real group", () => {
+		const rows = rowsFor({ expanded: new Set([work.uuid, UNTAGGED_TAG_UUID]) })
+		const noteRows = rows.filter((r): r is Extract<NotesSidebarRow, { kind: "note" }> => r.kind === "note")
+		const untaggedRows = noteRows.filter(r => r.tagUuid === UNTAGGED_TAG_UUID)
+
+		expect(untaggedRows.map(r => r.note.uuid)).toStrictEqual([bare.uuid, bare2.uuid])
+		expect(new Set(noteRows.map(sidebarRowKey)).size).toBe(noteRows.length)
+	})
+
+	it("a real tag literally named Untagged keeps its own uuid and is never collapsed into the virtual row", () => {
+		const impostor = mockTag({ uuid: testUuid("impostor"), name: "Untagged" })
+		const note = mockNote({ uuid: testUuid("i"), tags: [impostor] })
+
+		const rows = buildTagsViewRows({
+			tags: [impostor],
+			notesByTag: buildNotesByTag([note, bare]),
+			expandedTagUuids: new Set(),
+			search: "",
+			sortBy: DEFAULT_NOTE_TAGS_SORT_BY,
+			untaggedLabel: "Untagged"
+		})
+
+		expect(tagRowUuids(rows)).toStrictEqual([impostor.uuid, UNTAGGED_TAG_UUID])
+		expect(isUntaggedTagUuid(impostor.uuid)).toBe(false)
+		expect(isUntaggedTagUuid(UNTAGGED_TAG_UUID)).toBe(true)
 	})
 })

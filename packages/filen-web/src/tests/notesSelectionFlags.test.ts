@@ -1,14 +1,8 @@
-import { describe, expect, it, vi } from "vitest"
-import { QueryClient } from "@tanstack/react-query"
+import { describe, expect, it } from "vitest"
 import type { Note, NoteParticipant, UuidStr } from "@filen/sdk-rs"
 
-// selectionFlags.ts imports isNoteOwner from lib/actions.ts, which in turn imports the sdk client
-// and query client modules — unresolvable/unwanted under node vitest, mirrors noteMenu.test.ts's own
-// mock boundary.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
-vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
-
 import { aggregateNoteSelectionFlags, selectableNotesForSelectAll } from "@/features/notes/lib/selectionFlags"
+import { deriveEditorReadOnly } from "@/features/notes/hooks/useNoteEditor.logic"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -235,5 +229,18 @@ describe("selectableNotesForSelectAll", () => {
 		const other = mockNote({ uuid: testUuid("b") })
 
 		expect(selectableNotesForSelectAll([note, other, note])).toEqual([note, other])
+	})
+})
+
+describe("write-access SSOT", () => {
+	it("hasWriteAccessToAll and deriveEditorReadOnly agree on the same note/user pair", () => {
+		const readable = mockNote({ ownerId: 2n, participants: [participant({ userId: OWNER, permissionsWrite: false })] })
+		const writable = mockNote({ ownerId: 2n, participants: [participant({ userId: OWNER, permissionsWrite: true })] })
+
+		expect(aggregateNoteSelectionFlags([readable], OWNER).hasWriteAccessToAll).toBe(false)
+		expect(deriveEditorReadOnly(readable, OWNER)).toBe(true)
+
+		expect(aggregateNoteSelectionFlags([writable], OWNER).hasWriteAccessToAll).toBe(true)
+		expect(deriveEditorReadOnly(writable, OWNER)).toBe(false)
 	})
 })
