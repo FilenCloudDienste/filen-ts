@@ -14,28 +14,12 @@ import { useNoteInflight } from "@/features/notes/store/useNotesInflight"
 import { sync } from "@/features/notes/lib/sync"
 import { useHideCompletedChecklistQuery } from "@/features/notes/queries/preferences"
 import { setHideCompletedChecklist } from "@/features/notes/lib/preferences"
-import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { useAccountQuery } from "@/queries/account"
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-
-// Cmd/Ctrl+S — flush the outbox debounce immediately (executeNow), so a user who reflexively saves gets
-// their push kicked at once instead of waiting out the 3s. Nothing is shown on success — the header
-// spinner already communicates in-flight state. Shares its literal combo with the drive/preview save
-// actions, harmlessly: only ONE of those surfaces is mounted at a time (notes route vs drive route vs
-// preview overlay). `enableOnContentEditable`: react-hotkeys-hook's default ignore-list drops a hotkey
-// whose event target is contentEditable, and CodeMirror's content DOM sets contenteditable while
-// editable — without this override Cmd/Ctrl+S would never fire while the cursor is inside the editor,
-// exactly when a user presses it.
-registerAction({
-	id: "notes.saveNow",
-	defaultCombo: "mod+s",
-	scope: "notes",
-	descriptionKey: "notesSaveAction"
-})
 
 export interface NoteEditorPaneProps {
 	// The resolved selected note, or undefined when nothing is selected / not yet resolved.

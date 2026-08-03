@@ -15,7 +15,7 @@ import {
 	PERSONAL_FIELD_ORDER,
 	type PersonalFormState
 } from "@/features/settings/components/account/personalInfoCard.logic"
-import { COUNTRIES } from "@/features/settings/lib/countries"
+import { countryOptions } from "@/features/settings/lib/countries"
 import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -56,6 +56,7 @@ function PersonalInfoCard({ accountQuery }: PersonalInfoCardProps) {
 	const [form, setForm] = useState<PersonalFormState>(initial)
 	const [pending, setPending] = useState(false)
 	const dirty = isPersonalFormDirty(form, initial)
+	const countries = countryOptions(form.country)
 
 	async function handleSave(): Promise<void> {
 		setPending(true)
@@ -101,7 +102,7 @@ function PersonalInfoCard({ accountQuery }: PersonalInfoCardProps) {
 										<Select
 											items={[
 												{ value: "", label: t("settingsPersonalCountryUnset") },
-												...COUNTRIES.map(country => ({ value: country, label: country }))
+												...countries.map(country => ({ value: country, label: country }))
 											]}
 											value={form.country}
 											disabled={pending}
@@ -120,7 +121,7 @@ function PersonalInfoCard({ accountQuery }: PersonalInfoCardProps) {
 											<SelectContent>
 												<SelectGroup>
 													<SelectItem value="">{t("settingsPersonalCountryUnset")}</SelectItem>
-													{COUNTRIES.map(country => (
+													{countries.map(country => (
 														<SelectItem
 															key={country}
 															value={country}

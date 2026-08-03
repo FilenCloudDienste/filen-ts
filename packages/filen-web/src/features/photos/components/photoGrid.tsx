@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
 import { MinusIcon, PlusIcon } from "lucide-react"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
@@ -34,13 +33,6 @@ const GRID_OVERSCAN = 3
 // covered by that one tile's own context menu (photosItemActions), unlike drive's listing which
 // shows its bar from 1 (a deliberate photos-only threshold, not a drive gating drift).
 const BULK_BAR_MIN_SELECTION = 2
-
-// Module scope, not inside the component — registerAction is idempotent-by-id across remounts/HMR
-// (mirrors directoryListing.tsx's own identical module-scope registration).
-registerAction({ id: "photos.selectAll", defaultCombo: "mod+a", scope: "photos", descriptionKey: "driveCommandSelectAll" })
-registerAction({ id: "photos.clearSelection", defaultCombo: "escape", scope: "photos", descriptionKey: "driveCommandClearSelection" })
-// Same combo and rationale as drive.trash and notes.trash — see notesSidebar.tsx's own registration.
-registerAction({ id: "photos.trash", defaultCombo: "delete,backspace", scope: "photos", descriptionKey: "driveCommandTrash" })
 
 export interface PhotoGridProps {
 	rootUuid: string

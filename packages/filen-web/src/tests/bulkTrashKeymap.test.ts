@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { ActionDef } from "@/lib/keymap/registry"
+import { DRIVE_ACTIONS } from "@/features/drive/lib/keymap"
+import { NOTES_ACTIONS } from "@/features/notes/lib/keymap"
+import { PHOTOS_ACTIONS } from "@/features/photos/lib/keymap"
+import { CONTACTS_ACTIONS } from "@/features/contacts/lib/keymap"
 
 // Same isolation approach as photosKeymap.test.ts: registry.ts is a Map-backed singleton, so a fresh
 // dynamic import per test avoids duplicate-id collisions across `it()` blocks.
@@ -13,26 +18,23 @@ vi.mock("@/lib/storage/adapter", () => ({
 	}
 }))
 
-const DRIVE_TRASH = { id: "drive.trash", defaultCombo: "delete,backspace", scope: "drive", descriptionKey: "driveCommandTrash" } as const
-const NOTES_TRASH = { id: "notes.trash", defaultCombo: "delete,backspace", scope: "notes", descriptionKey: "notesCommandTrash" } as const
-const PHOTOS_TRASH = {
-	id: "photos.trash",
-	defaultCombo: "delete,backspace",
-	scope: "photos",
-	descriptionKey: "driveCommandTrash"
-} as const
-const DRIVE_CLEAR = {
-	id: "drive.clearSelection",
-	defaultCombo: "escape",
-	scope: "drive",
-	descriptionKey: "driveCommandClearSelection"
-} as const
-const CONTACTS_CLEAR = {
-	id: "contacts.clearSelection",
-	defaultCombo: "escape",
-	scope: "contacts",
-	descriptionKey: "contactsCommandClearSelection"
-} as const
+// Reads the REAL defs rather than mirroring them, so a combo changed at the source fails here
+// instead of silently drifting away from a copy.
+function defFor(actions: readonly ActionDef[], id: string): ActionDef {
+	const def = actions.find(action => action.id === id)
+
+	if (!def) {
+		throw new Error(`missing action def: ${id}`)
+	}
+
+	return def
+}
+
+const DRIVE_TRASH = defFor(DRIVE_ACTIONS, "drive.trash")
+const NOTES_TRASH = defFor(NOTES_ACTIONS, "notes.trash")
+const PHOTOS_TRASH = defFor(PHOTOS_ACTIONS, "photos.trash")
+const DRIVE_CLEAR = defFor(DRIVE_ACTIONS, "drive.clearSelection")
+const CONTACTS_CLEAR = defFor(CONTACTS_ACTIONS, "contacts.clearSelection")
 
 async function freshRegistry() {
 	vi.resetModules()
@@ -44,10 +46,9 @@ beforeEach(() => {
 	kvStore.clear()
 })
 
-// Mirrors the real module-scope registrations in directoryListing.tsx / notesSidebar.tsx /
-// photoGrid.tsx / contactsList.tsx. What is worth locking down is that these bindings share ONE combo
-// by design across mutually exclusive routes — a drift here would read as a collision rather than the
-// deliberate reuse it is, and `scope` is still inert (useAction.ts) so nothing else enforces it.
+// What is worth locking down is that these bindings share ONE combo BY DESIGN across mutually
+// exclusive routes — a drift here would read as a collision rather than the deliberate reuse it is,
+// and scope carries no runtime isolation (useAction.ts).
 describe("keymap registry — bulk-trash bindings", () => {
 	it("registers notes.trash and photos.trash on drive.trash's own combo", async () => {
 		const { registerAction, comboFor } = await freshRegistry()

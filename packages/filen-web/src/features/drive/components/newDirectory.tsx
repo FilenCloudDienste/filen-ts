@@ -2,7 +2,6 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { FolderPlusIcon } from "lucide-react"
-import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { Kbd } from "@/lib/keymap/kbd"
 import { sdkApi } from "@/lib/sdk/client"
@@ -13,16 +12,6 @@ import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { InputDialog } from "@/components/dialogs/inputDialog"
-
-// Module scope, not inside the component: runs exactly once per module evaluation, which is what
-// `registerAction`'s duplicate-id guard assumes (see themeProvider.tsx's own "app.toggleTheme"
-// registration for the full StrictMode/HMR rationale — identical here).
-registerAction({
-	id: "drive.newDirectory",
-	defaultCombo: "n",
-	scope: "drive",
-	descriptionKey: "driveCommandNewDirectory"
-})
 
 export interface NewDirectoryProps {
 	// The directory the created one is created into — the current listing's own uuid (null at My

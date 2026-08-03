@@ -12,6 +12,7 @@ import {
 	SunIcon,
 	MoonIcon,
 	SettingsIcon,
+	KeyboardIcon,
 	LogOutIcon,
 	UserIcon,
 	CircleHelpIcon
@@ -42,50 +43,10 @@ import {
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
-import { registerAction } from "@/lib/keymap/registry"
+import { ShortcutsDialog } from "@/lib/keymap/shortcutsDialog"
 import { useAction } from "@/lib/keymap/useAction"
 import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import { Kbd } from "@/lib/keymap/kbd"
-
-// Registered at module scope (runs once per module evaluation — mirrors themeProvider.tsx's own
-// "app.toggleTheme" registration right next to its useAction call below). Default UNASSIGNED
-// ("" — react-hotkeys-hook's own combo parser accepts an empty string as "matches no key", verified
-// against the installed package's parseHotkeys, so this never fires until a user rebinds it): the
-// keyboard-first contract only requires every action be user-mappable, not that every action ship
-// with a default combo.
-registerAction({
-	id: "app.openSettings",
-	defaultCombo: "",
-	scope: "global",
-	descriptionKey: "settings"
-})
-
-// Mirrors app.openSettings directly above — same unassigned-by-default route-nav shape, wired the
-// same way in IconRail below.
-registerAction({
-	id: "app.openTransfers",
-	defaultCombo: "",
-	scope: "global",
-	descriptionKey: "moduleTransfers"
-})
-
-// Mirrors app.openTransfers directly above — same unassigned-by-default route-nav shape, wired the
-// same way in IconRail below for the new /playlists rail entry.
-registerAction({
-	id: "app.openPlaylists",
-	defaultCombo: "",
-	scope: "global",
-	descriptionKey: "modulePlaylists"
-})
-
-// Mirrors app.openPlaylists directly above — same unassigned-by-default route-nav shape, wired the
-// same way in IconRail below for the new /photos rail entry.
-registerAction({
-	id: "app.openPhotos",
-	defaultCombo: "",
-	scope: "global",
-	descriptionKey: "modulePhotos"
-})
 
 // Rail section slot: the active section rides a white chip (soft shadow); inactive glyphs are plain
 // muted marks on the canvas that tint on hover. No borders — the chip and hover fills carry the
@@ -133,7 +94,18 @@ function AccountMenu() {
 	const { setTheme } = useTheme()
 	const accountQuery = useAccountQuery()
 	const [confirmOpen, setConfirmOpen] = useState(false)
+	const [shortcutsOpen, setShortcutsOpen] = useState(false)
 	const [pending, setPending] = useState(false)
+
+	// Same shape and guard as the rail's four route-nav actions below: an open dialog owns the
+	// keyboard, so the overlay never stacks on top of one.
+	useAction("app.openShortcuts", () => {
+		if (isAnyDialogOpen()) {
+			return
+		}
+
+		setShortcutsOpen(true)
+	})
 
 	async function handleSignOut(): Promise<void> {
 		setPending(true)
@@ -197,6 +169,17 @@ function AccountMenu() {
 						</DropdownMenuItem>
 						<DropdownMenuItem
 							onClick={() => {
+								setShortcutsOpen(true)
+							}}
+						>
+							<KeyboardIcon />
+							{t("shortcutsTitle")}
+							<span className="ml-auto">
+								<Kbd action="app.openShortcuts" />
+							</span>
+						</DropdownMenuItem>
+						<DropdownMenuItem
+							onClick={() => {
 								setTheme(document.documentElement.classList.contains("dark") ? "light" : "dark")
 							}}
 						>
@@ -232,6 +215,10 @@ function AccountMenu() {
 				onConfirm={() => {
 					void handleSignOut()
 				}}
+			/>
+			<ShortcutsDialog
+				open={shortcutsOpen}
+				onOpenChange={setShortcutsOpen}
 			/>
 		</>
 	)

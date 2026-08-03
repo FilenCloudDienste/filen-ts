@@ -1,7 +1,8 @@
 // The account API stores the personal-info "country" field as a plain English name string (no ISO
 // 3166 region code), so this list cannot be localized via Intl.DisplayNames — it stays a
-// non-translated data constant, same ~190-entry set mobile's own personal-info screen offers
-// (features/settings/constants.ts), kept here so the two clients write the exact same values.
+// non-translated data constant. Matches mobile's own personal-info picker exactly, dependent
+// territories included (features/settings/constants.ts's flat `countries` export, not its unused
+// `sovereignCountries` derivative), so both clients write identical values for the same place.
 export const COUNTRIES: readonly string[] = [
 	"Afghanistan",
 	"Albania",
@@ -199,7 +200,60 @@ export const COUNTRIES: readonly string[] = [
 	"Vietnam",
 	"Yemen",
 	"Zambia",
-	"Zimbabwe"
+	"Zimbabwe",
+	"Åland Islands",
+	"American Samoa",
+	"Anguilla",
+	"Antarctica",
+	"Aruba",
+	"Bermuda",
+	"Bonaire, Sint Eustatius and Saba",
+	"Bouvet Island",
+	"British Indian Ocean Territory",
+	"British Virgin Islands",
+	"Cayman Islands",
+	"Christmas Island",
+	"Cocos (Keeling) Islands",
+	"Cook Islands",
+	"Curaçao",
+	"Falkland Islands",
+	"Faroe Islands",
+	"French Guiana",
+	"French Polynesia",
+	"French Southern Territories",
+	"Gibraltar",
+	"Greenland",
+	"Guadeloupe",
+	"Guam",
+	"Guernsey",
+	"Heard Island and McDonald Islands",
+	"Hong Kong",
+	"Isle of Man",
+	"Jersey",
+	"Macao",
+	"Martinique",
+	"Mayotte",
+	"Montserrat",
+	"New Caledonia",
+	"Niue",
+	"Norfolk Island",
+	"Northern Mariana Islands",
+	"Pitcairn Islands",
+	"Puerto Rico",
+	"Réunion",
+	"Saint Barthélemy",
+	"Saint Helena, Ascension and Tristan da Cunha",
+	"Saint Martin",
+	"Saint Pierre and Miquelon",
+	"Sint Maarten",
+	"South Georgia and the South Sandwich Islands",
+	"Svalbard and Jan Mayen",
+	"Tokelau",
+	"Turks and Caicos Islands",
+	"United States Minor Outlying Islands",
+	"U.S. Virgin Islands",
+	"Wallis and Futuna",
+	"Western Sahara"
 ].sort((a, b) => a.localeCompare(b))
 
 // A blank/unset country is a valid, saved state (see formStateToUpdateInfo's trim-to-undefined
@@ -207,4 +261,16 @@ export const COUNTRIES: readonly string[] = [
 // either "" (unset) or an exact member of COUNTRIES.
 export function isValidCountry(value: string): boolean {
 	return value === "" || COUNTRIES.includes(value)
+}
+
+// The stored country is free text on the wire and other clients may hold a value this closed list
+// does not know. `update_personal_info` is a whole-record write, so a value the dropdown cannot
+// represent would be posted back as "not set" and wiped the next time any unrelated field is
+// saved — the option list therefore carries the current value even when it is off-list.
+export function countryOptions(current: string): readonly string[] {
+	if (isValidCountry(current)) {
+		return COUNTRIES
+	}
+
+	return [...COUNTRIES, current].sort((a, b) => a.localeCompare(b))
 }

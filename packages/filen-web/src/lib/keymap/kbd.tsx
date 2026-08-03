@@ -1,14 +1,12 @@
 import { Kbd as KbdPrimitive, KbdGroup } from "@/components/ui/kbd"
 import { useComboFor } from "@/lib/keymap/registry"
-import { comboKeys } from "@/lib/keymap/kbd.logic"
+import { comboAlternatives, isMacPlatform } from "@/lib/keymap/kbd.logic"
 
 interface KbdProps {
 	action: string
 }
 
-// Display platform follows the real OS (what the physical keyboard says), independent of the
-// keymap's own combo semantics.
-const IS_MAC = typeof navigator !== "undefined" && navigator.platform.toUpperCase().includes("MAC")
+const IS_MAC = isMacPlatform()
 
 // Combo tokens are stored in react-hotkeys-hook's own vocabulary ("mod+f", "escape", …) — rendered
 // as the glyphs/names a user actually sees on their keyboard.
@@ -19,6 +17,7 @@ const KEY_LABELS: Record<string, string> = {
 	alt: IS_MAC ? "⌥" : "Alt",
 	shift: IS_MAC ? "⇧" : "Shift",
 	escape: "Esc",
+	slash: "/",
 	backspace: "⌫",
 	delete: IS_MAC ? "⌦" : "Del",
 	enter: "↵",
@@ -45,13 +44,25 @@ function formatKey(key: string): string {
 // available as a registry component, so nothing here is hand-rolled) inside a `<KbdGroup>`,
 // matching the component's own documented multi-key usage.
 export function Kbd({ action }: KbdProps) {
-	const keys = comboKeys(useComboFor(action))
+	// One group per ALTERNATIVE, separated by a muted slash: "delete,backspace" is two keys that both
+	// work, and rendering only the first (or joining them into one badge) misreports the real binding.
+	const alternatives = comboAlternatives(useComboFor(action))
 
 	return (
-		<KbdGroup>
-			{keys.map((key, index) => (
-				<KbdPrimitive key={`${key}-${String(index)}`}>{formatKey(key)}</KbdPrimitive>
+		<span className="inline-flex items-center gap-1">
+			{alternatives.map((keys, alternativeIndex) => (
+				<span
+					key={keys.join("+")}
+					className="inline-flex items-center gap-1"
+				>
+					{alternativeIndex > 0 && <span className="text-muted-foreground/60">/</span>}
+					<KbdGroup>
+						{keys.map((key, index) => (
+							<KbdPrimitive key={`${key}-${String(index)}`}>{formatKey(key)}</KbdPrimitive>
+						))}
+					</KbdGroup>
+				</span>
 			))}
-		</KbdGroup>
+		</span>
 	)
 }

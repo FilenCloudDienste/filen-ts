@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { APP_ACTIONS } from "@/features/shell/lib/keymap"
 
 // Same isolation approach as registry.test.ts/audioKeymap.test.ts: registry.ts is a Map-backed
 // singleton, so a fresh dynamic import per test avoids duplicate-id collisions across `it()` blocks.
@@ -23,17 +24,24 @@ beforeEach(() => {
 	kvStore.clear()
 })
 
-// Mirrors iconRail.tsx's real module-scope registration for the new /photos rail entry (same
-// unassigned-by-default shape as app.openTransfers/app.openPlaylists right next to it) — a genuine
-// drift between this fixture and the real call site would only surface as an app-wide combo
-// collision (registry.test.ts's own "does not collide" test covers that generically for empty
-// combos, which never match anything per react-hotkeys-hook's own parser), so what's worth locking
-// down here is the registration/resolution contract itself.
+// Reads the REAL def (features/shell/lib/keymap.ts) rather than mirroring it, so this cannot drift
+// from what the app registers. The /photos rail entry ships unassigned-by-default, like
+// app.openTransfers/app.openPlaylists next to it; what is worth locking down is that the empty combo
+// survives registration and resolution intact.
 describe("keymap registry — app.openPhotos registration", () => {
 	it("registers with its unassigned-by-default combo and resolves through comboFor", async () => {
 		const { registerAction, comboFor } = await freshRegistry()
+		const def = APP_ACTIONS.find(action => action.id === "app.openPhotos")
 
-		registerAction({ id: "app.openPhotos", defaultCombo: "", scope: "global", descriptionKey: "modulePhotos" })
+		expect(def).toBeDefined()
+
+		if (!def) {
+			return
+		}
+
+		expect(def.defaultCombo).toBe("")
+
+		registerAction(def)
 
 		expect(comboFor("app.openPhotos")).toBe("")
 	})

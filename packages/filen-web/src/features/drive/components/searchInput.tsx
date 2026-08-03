@@ -1,23 +1,11 @@
 import { useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { SearchIcon, XIcon } from "lucide-react"
-import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import { Kbd } from "@/lib/keymap/kbd"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-
-// Module scope, not inside the component: runs exactly once per module evaluation (see
-// directoryListing.tsx's own drive.* registrations for the full StrictMode/HMR rationale). Old-web
-// parity: mod+f intercepts the browser's own find-in-page ONLY while a drive listing has this
-// registered (see the useAction below's preventDefault) — user-rebindable like every other action.
-registerAction({
-	id: "drive.search",
-	defaultCombo: "mod+f",
-	scope: "drive",
-	descriptionKey: "driveCommandSearch"
-})
 
 export interface SearchInputProps {
 	value: string

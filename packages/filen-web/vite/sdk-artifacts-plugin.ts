@@ -5,10 +5,10 @@ import type { Plugin, ResolvedConfig } from "vite"
 
 const require = createRequire(import.meta.url)
 // NOTE: `@filen/sdk-rs`'s package.json `exports` map does not list "./package.json",
-// so `require.resolve("@filen/sdk-rs/package.json")` throws (verified against the
-// installed 0.4.29 exports map). Resolve the package root via its "." export (main
-// entry, "./sdk-rs.js") instead — robust to node_modules layout, no import.meta.dirname
-// guessing, and doesn't depend on an unexported subpath.
+// so `require.resolve("@filen/sdk-rs/package.json")` throws (verified against the installed
+// package's exports map). Resolve the package root via its "." export (main entry, "./sdk-rs.js")
+// instead — robust to node_modules layout, no import.meta.dirname guessing, and doesn't depend on
+// an unexported subpath.
 const PKG = join(require.resolve("@filen/sdk-rs"), "..")
 // Deployment contract: the SDK wasm holds a RELATIVE `./filen-sdk-worker-thread.js` (verified via
 // `strings` over sdk-rs_bg.wasm) which it hands to `new Worker(...)`. So the async-runtime thread

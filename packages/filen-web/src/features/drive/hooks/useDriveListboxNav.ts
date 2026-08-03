@@ -35,7 +35,7 @@ export interface DriveListboxNav {
 // ARIA listbox roving-cursor navigation on top of the virtualizer: owns the cursor (activeIndex) and
 // range anchor, plain-Arrow/Home/End movement, Space toggle, Shift+Arrow range extension, and pointer
 // selection. Select-all/clear-selection are NOT handled here — they're registered keymap commands (see
-// directoryListing.tsx's module-scope registerAction calls).
+// the drive.* action defs in features/drive/lib/keymap.ts).
 export function useDriveListboxNav({
 	items,
 	viewMode,
@@ -219,7 +219,7 @@ export function useDriveListboxNav({
 	// they never change the selection — Space toggles the active item, Shift+Arrow extends a range
 	// from the last non-shift cursor position. Select-all (Cmd/Ctrl+A) and clear-selection (Escape)
 	// are NOT handled here — they're registered drive.selectAll/drive.clearSelection commands (see
-	// the module-scope registerAction calls in directoryListing.tsx) so they stay user-remappable with
+	// the drive.* action defs in features/drive/lib/keymap.ts) so they stay user-remappable with
 	// one firing owner; keeping a second hand-rolled check here would double-fire on every keypress.
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
 		if (items.length === 0) {

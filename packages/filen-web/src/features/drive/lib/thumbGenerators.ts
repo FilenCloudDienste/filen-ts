@@ -233,7 +233,7 @@ export const generatePdfThumb: ThumbGenerator = async item => {
 }
 
 // Module scope, not inside a function: runs exactly once per module evaluation (mirrors
-// newDirectory.tsx's own module-scope registerAction call). features/drive/lib/thumbnails.ts (the service)
+// the drive.newDirectory def in features/drive/lib/keymap.ts). features/drive/lib/thumbnails.ts (the service)
 // deliberately never imports this module itself — it already exposes registerThumbGenerator as a
 // seam specifically so it doesn't need to know these generators exist, and importing back would cycle
 // — so whichever consumer wants client-generated (image/heic/video/pdf) thumbnails must import this

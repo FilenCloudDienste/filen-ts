@@ -8,6 +8,7 @@ import { createRouter, RouterProvider } from "@tanstack/react-router"
 import "@/index.css"
 import { routeTree } from "@/routeTree.gen"
 import { bootSdk } from "@/lib/sdk/boot"
+import { registerAllActions } from "@/lib/keymap/actions"
 import { NotFoundScreen } from "@/features/shell/components/notFoundScreen"
 
 // notFoundMode "root" (the default is "fuzzy") keeps every unknown URL on ONE full-page 404 instead of
@@ -25,6 +26,11 @@ const router = createRouter({ routeTree, defaultNotFoundComponent: NotFoundScree
 // deadlock. Not awaited — BootGate observes the zustand boot phases and holds the boot screen until
 // ready. Runs exactly once (module code is not double-invoked, unlike StrictMode effects).
 void bootSdk()
+
+// Every keyboard action, registered before the first render — the defs are static data, so `comboFor`
+// and `<Kbd>` are correct from the very first paint instead of only once each feature's lazily
+// imported route chunk has loaded.
+registerAllActions()
 
 // Type-level router registration — makes `Link`/`redirect`/`navigate` paths across the app fully typed
 // against this route tree.

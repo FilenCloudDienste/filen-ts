@@ -12,6 +12,8 @@ export const settings = {
 	settingsSectionSecurity: "Security",
 	/** Settings sidebar — Appearance section nav label and that section's page heading */
 	settingsSectionAppearance: "Appearance",
+	/** Settings sidebar — Keyboard section nav label and that section's page heading */
+	settingsSectionKeyboard: "Keyboard",
 	/** Settings sidebar — Events section nav label and that section's page heading */
 	settingsSectionEvents: "Events",
 	/** Settings sidebar — Billing section nav label and that section's page heading */
@@ -246,18 +248,15 @@ export const settings = {
 	/** Advanced card — scoped explicitly to THIS browser tab's own uploads/downloads, since the same
 	 *  app also serves as the Electron desktop frontend, whose future file-sync/network-drive engine
 	 *  will carry its own separate bandwidth/concurrency settings */
-	settingsAdvancedTransferTitle: "Web transfer limits",
+	settingsAdvancedTransferTitle: "Web transfer performance",
 	settingsAdvancedTransferDescription:
-		"Limit bandwidth and performance for uploads and downloads made from this browser tab. The Electron desktop app's file sync and network drive have their own separate settings.",
-	settingsAdvancedUploadLimit: "Upload limit",
-	settingsAdvancedDownloadLimit: "Download limit",
+		"Tune how many transfers this browser tab runs in parallel and how much memory they may use. The Electron desktop app's file sync and network drive have their own separate settings.",
 	settingsAdvancedTransferPreset: "Transfer performance",
 	settingsAdvancedPresetBatterySaver: "Battery saver",
 	settingsAdvancedPresetBalanced: "Balanced",
 	settingsAdvancedPresetPerformance: "Performance",
 	settingsAdvancedPresetMaximum: "Maximum",
-	settingsAdvancedUnlimited: "Unlimited",
-	/** Shown after any bandwidth/preset change — the wasm client only reads these at startup, there is no live setter */
+	/** Shown after a preset change — the wasm client only reads these at startup, there is no live setter */
 	settingsAdvancedRestartRequired: "This takes effect the next time Filen loads in this browser tab.",
 
 	// ── Advanced: diagnostic logs ─────────────────────────────────────────────

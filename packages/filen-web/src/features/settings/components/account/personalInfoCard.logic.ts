@@ -1,5 +1,4 @@
 import type { Personal, UserPersonalUpdateInfo } from "@filen/sdk-rs"
-import { isValidCountry } from "@/features/settings/lib/countries"
 
 // Pure form <-> wasm-shape mapping, split out of the component (react-refresh requires a component
 // file to export components only) so it is unit-testable without a DOM. `Personal` and
@@ -21,12 +20,6 @@ export const PERSONAL_FIELD_ORDER: (keyof UserPersonalUpdateInfo)[] = [
 ]
 
 export function personalToFormState(personal: Personal): PersonalFormState {
-	// The account's `country` is free text on the wire — it may predate this closed-list dropdown, or
-	// have been written by another client that still accepts arbitrary strings. Folding an unrecognized
-	// value to "" (unset) here, rather than passing it straight into the Select's `value`, keeps the
-	// form state within the same closed list the dropdown itself can ever emit through onValueChange.
-	const country = personal.country ?? ""
-
 	return {
 		firstName: personal.firstName ?? "",
 		lastName: personal.lastName ?? "",
@@ -36,7 +29,10 @@ export function personalToFormState(personal: Personal): PersonalFormState {
 		streetNumber: personal.streetNumber ?? "",
 		city: personal.city ?? "",
 		postalCode: personal.postalCode ?? "",
-		country: isValidCountry(country) ? country : ""
+		// Preserved even when off the closed list (legacy data, or another client's free text) —
+		// `update_personal_info` is a whole-record write, so folding it to "" here would wipe it on the
+		// next unrelated save. `countryOptions` (countries.ts) surfaces it as an extra Select item.
+		country: personal.country ?? ""
 	}
 }
 

@@ -23,7 +23,7 @@ test.describe("settings", () => {
 
 		await gotoSettings(page)
 
-		for (const label of ["Account", "Security", "Appearance", "Events", "Billing", "Advanced"]) {
+		for (const label of ["Account", "Security", "Appearance", "Keyboard", "Events", "Billing", "Advanced"]) {
 			await expect(page.getByRole("link", { name: label, exact: true })).toBeVisible()
 		}
 

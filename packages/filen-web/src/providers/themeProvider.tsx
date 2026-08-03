@@ -1,6 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
-import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 
@@ -54,19 +53,6 @@ function disableTransitionsTemporarily() {
 		})
 	}
 }
-
-// Module scope, not inside the component: runs exactly once per module evaluation, which is what
-// `registerAction`'s duplicate-id guard assumes. React StrictMode's double-invocation only
-// affects render/effects, not top-level module code, so this is safe under StrictMode — the one
-// known edge is Vite/React-Fast-Refresh re-running this file's top level on an HMR edit to THIS
-// file specifically, which would throw on the second registration; a manual browser refresh
-// recovers, same trade-off i18n's module-scope `.init()` already makes.
-registerAction({
-	id: "app.toggleTheme",
-	defaultCombo: "d",
-	scope: "global",
-	descriptionKey: "toggleTheme"
-})
 
 export function ThemeProvider({
 	children,

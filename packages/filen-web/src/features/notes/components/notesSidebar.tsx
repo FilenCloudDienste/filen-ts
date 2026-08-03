@@ -55,7 +55,6 @@ import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
 import { useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
 import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
@@ -78,26 +77,6 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
-
-// Module scope, not inside the component — mirrors drive's "drive.newDirectory" registration
-// (newDirectory.tsx): runs once per module evaluation, which registerAction's duplicate-id guard
-// assumes. Same default combo ("n") as drive's own new-item command — the two never coexist (only one
-// of NotesSidebar/NewDirectory is ever mounted at a time, since they live on mutually exclusive routes).
-registerAction({ id: "notes.newNote", defaultCombo: "n", scope: "notes", descriptionKey: "notesNewNote" })
-// Multi-select commands — mirrors drive.selectAll/drive.clearSelection (directoryListing.tsx) exactly:
-// mod+a selects every currently-visible (search-filtered) decryptable note, Escape clears the
-// selection. Both fire through react-hotkeys-hook's default ignore-list, which already skips real
-// form-tag targets (the search `<Input>`), so these never fight that box's own local
-// Escape-clears-search handling below.
-registerAction({ id: "notes.selectAll", defaultCombo: "mod+a", scope: "notes", descriptionKey: "notesCommandSelectAll" })
-registerAction({ id: "notes.clearSelection", defaultCombo: "escape", scope: "notes", descriptionKey: "notesCommandClearSelection" })
-// Bulk-trash the current selection, same default combo as drive.trash (directoryListing.tsx) — the two
-// never coexist (mutually exclusive routes). No options override: react-hotkeys-hook's defaults already
-// ignore form tags and contentEditable, which is what keeps Backspace inside the note editor from ever
-// reaching this. The sidebar stays mounted on /notes/$uuid, so focus parked on an editor TOOLBAR button
-// is covered by neither guard — the 2+ threshold (the bar and its hint are on screen) and the
-// Cancel-focused destructive confirm are what make that case safe.
-registerAction({ id: "notes.trash", defaultCombo: "delete,backspace", scope: "notes", descriptionKey: "notesCommandTrash" })
 
 // The floating bulk bar mounts at this many selected — and the notes.trash shortcut fires at exactly
 // the same threshold, so the shortcut is never live without the affordance that names it.
@@ -478,7 +457,7 @@ export function NotesSidebar() {
 		await tagsSortByQuery.refetch()
 	}
 
-	// Registered at module scope above; guards on dialogHost.isDialogOpen so "n" never fires a second
+	// Def in features/notes/lib/keymap.ts; guards on dialogHost.isDialogOpen so "n" never fires a second
 	// create while a note dialog (rename/delete/leave/createTag) is already open, and on the same
 	// connectivity flag the button is disabled by so the two can never disagree — drive.newDirectory
 	// guards its own hotkey identically.
@@ -493,7 +472,7 @@ export function NotesSidebar() {
 		[dialogHost.isDialogOpen, isOnline]
 	)
 
-	// Registered at module scope above. Browser default for mod+a is "select all page text" — must
+	// Def in features/notes/lib/keymap.ts. Browser default for mod+a is "select all page text" — must
 	// preventDefault or the native selection would visibly compete with the note-row selection.
 	// Guarded on dialogHost.isDialogOpen so a background Cmd+A can't select notes behind an open
 	// dialog. Targets `selectableNotes` (already search-filtered) minus undecryptable ones — mirrors
@@ -512,7 +491,7 @@ export function NotesSidebar() {
 		[dialogHost.isDialogOpen, selectableNotes]
 	)
 
-	// Registered at module scope above. No preventDefault — bare Escape has no disruptive browser
+	// Def in features/notes/lib/keymap.ts. No preventDefault — bare Escape has no disruptive browser
 	// default. Guarded on dialogHost.isDialogOpen so Escape closes the dialog (its own onOpenChange
 	// handling) without also clearing the background selection.
 	useAction(
@@ -528,7 +507,7 @@ export function NotesSidebar() {
 		[dialogHost.isDialogOpen]
 	)
 
-	// Registered at module scope above. preventDefault: Backspace still has a "go back" default in some
+	// Def in features/notes/lib/keymap.ts. preventDefault: Backspace still has a "go back" default in some
 	// engines. Fires only in the state the bulk bar is actually showing (2+ selected) and only when the
 	// bar would offer Trash at all (canBulkTrashNotes — the identical descriptor gate) under the same
 	// connectivity flag it is disabled by, so the shortcut can never trash something the UI is not

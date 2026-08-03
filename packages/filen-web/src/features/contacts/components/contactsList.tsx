@@ -9,7 +9,6 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import {
@@ -55,16 +54,6 @@ const SKELETON_ROW_COUNT = 6
 // The floating bulk bar mounts at this many selected — a single selection is already fully served by
 // that row's own action buttons.
 const BULK_BAR_MIN_SELECTION = 2
-
-// Module scope, mirroring notesSidebar.tsx's own selection commands: runs once per module evaluation,
-// which registerAction's duplicate-id guard assumes. Escape is deliberately shared with
-// drive/notes/chats/photos — only one of those surfaces is ever mounted at a time.
-registerAction({
-	id: "contacts.clearSelection",
-	defaultCombo: "escape",
-	scope: "contacts",
-	descriptionKey: "contactsCommandClearSelection"
-})
 
 // One stat tile in the summary strip above the list — count + label, no drill-down (see the strip's
 // own render-site doc comment below for why a lightweight strip beats an invented detail pane).
@@ -142,7 +131,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		void requestsQuery.refetch()
 	}
 
-	// Registered at module scope. No preventDefault — bare Escape has no disruptive browser default.
+	// Def in features/contacts/lib/keymap.ts. No preventDefault — bare Escape has no disruptive browser default.
 	// Guarded through the shared DOM-level dialog signal rather than this host's own isDialogOpen:
 	// AddContactDialog owns its own open state outside the host, and Escape must close whichever dialog
 	// is up without also clearing the selection behind it.

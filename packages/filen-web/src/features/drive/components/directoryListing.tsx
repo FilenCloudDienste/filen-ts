@@ -40,7 +40,6 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { ROW_HEIGHT, TILE_ROW_HEIGHT, TILE_WIDTH } from "@/features/drive/lib/gridLayout"
 import { cn } from "@/lib/utils"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { driveItemActions } from "@/features/drive/components/itemMenu.logic"
@@ -94,65 +93,6 @@ export interface DirectoryListingProps {
 	// favorites/trash pass "" (they're flat, never nested). The current directory is the last segment.
 	splat: string
 }
-
-// Module scope, not inside the component: runs exactly once per module evaluation (see
-// themeProvider.tsx's own "app.toggleTheme" registration for the full StrictMode/HMR rationale).
-//
-// Reconciling these with the listbox's own roving-tabindex `onKeyDown` (useDriveListboxNav): select-all
-// and clear-selection used to be hand-rolled checks inside that handler, matching Cmd/Ctrl+A and
-// Escape unconditionally whenever the listbox had focus. They are registered as commands here
-// INSTEAD of that (not in addition to it — a stray double-registration would double-fire, since
-// useAction's useHotkeys binds document-wide, not scoped to the listbox element) so a user remap
-// actually changes what fires, and so `<Kbd action>` reflects the real live combo. This makes them
-// fire regardless of focus location on the page (not just while the listbox itself is focused) —
-// an accepted, documented widening: every registered action fires globally today (no
-// `<HotkeysProvider>` scope activation yet, see registry.ts's ActionScope comment), and drive is
-// currently the app's only real interactive surface, so "global" and "listbox-focused" coincide
-// in practice. Arrow/Home/End/Space/Enter cursor movement stays listbox-local — those are
-// continuous, per-row navigation semantics, not discrete user-remappable commands.
-registerAction({
-	id: "drive.selectAll",
-	defaultCombo: "mod+a",
-	scope: "drive",
-	descriptionKey: "driveCommandSelectAll"
-})
-registerAction({
-	id: "drive.clearSelection",
-	defaultCombo: "escape",
-	scope: "drive",
-	descriptionKey: "driveCommandClearSelection"
-})
-// No prior intrinsic handling to reconcile — view mode had no keyboard toggle before this.
-registerAction({
-	id: "drive.toggleView",
-	defaultCombo: "v",
-	scope: "drive",
-	descriptionKey: "driveCommandToggleView"
-})
-// Opens the rename dialog for the roving-cursor item — see the useAction call below for the guard
-// (only a real, wired dialog blocks it; only an item driveItemActions itself would offer Rename for).
-registerAction({
-	id: "drive.rename",
-	defaultCombo: "f2",
-	scope: "drive",
-	descriptionKey: "driveCommandRename"
-})
-// Opens the trash confirm for the current selection — see the useAction call below for its guards.
-registerAction({
-	id: "drive.trash",
-	defaultCombo: "delete,backspace",
-	scope: "drive",
-	descriptionKey: "driveCommandTrash"
-})
-// Downloads the current selection — see the useAction call below for its guards (single unifying
-// gate, mirroring item-menu/bulk-bar: mod+s reads as "save to disk", the FSA picker's own verb, and
-// is free of every other registered combo (mod+a/escape/v/f2/delete/backspace/n, global "d"/"").
-registerAction({
-	id: "drive.download",
-	defaultCombo: "mod+s",
-	scope: "drive",
-	descriptionKey: "driveCommandDownload"
-})
 
 // Every drive route (drive.$.tsx, recents/favorites/trash.tsx) renders this one container with its
 // own {variant,splat} — the single place the placeholder body is swapped for the real virtualized

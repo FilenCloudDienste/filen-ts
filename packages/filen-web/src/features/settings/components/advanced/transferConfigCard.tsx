@@ -4,8 +4,6 @@ import { useTransferPreferencesQuery } from "@/features/settings/queries/prefere
 import {
 	setTransferPreferences,
 	TRANSFER_PERFORMANCE_PRESETS,
-	TRANSFER_BANDWIDTH_PRESETS_KBPS,
-	kbpsToMbLabel,
 	type TransferPerformancePreset,
 	type TransferPreferences
 } from "@/features/settings/lib/transferConfig"
@@ -22,74 +20,10 @@ const PRESET_LABEL_KEYS: Record<TransferPerformancePreset, SettingsKey> = {
 	maximum: "settingsAdvancedPresetMaximum"
 }
 
-// Bandwidth Select values are strings ("unlimited" sentinel + one per TRANSFER_BANDWIDTH_PRESETS_KBPS
-// entry) — Base UI's generic Select works with any comparable value, but every other Select in this
-// app (theme/expiration/preset) already uses plain strings, so bandwidth follows the same idiom
-// rather than introducing number|null values into this one control.
-const UNLIMITED = "unlimited"
-
-function bandwidthToSelectValue(kbps: number | null): string {
-	return kbps === null ? UNLIMITED : String(kbps)
-}
-
-function selectValueToBandwidth(value: string): number | null {
-	return value === UNLIMITED ? null : Number(value)
-}
-
-interface BandwidthFieldProps {
-	id: string
-	labelKey: SettingsKey
-	kbps: number | null
-	disabled: boolean
-	onChange: (kbps: number | null) => void
-}
-
-function BandwidthField({ id, labelKey, kbps, disabled, onChange }: BandwidthFieldProps) {
-	const { t } = useTranslation("settings")
-	const options = [
-		{ value: UNLIMITED, label: t("settingsAdvancedUnlimited") },
-		...TRANSFER_BANDWIDTH_PRESETS_KBPS.map(preset => ({ value: String(preset), label: kbpsToMbLabel(preset) }))
-	]
-
-	return (
-		<Field orientation="horizontal">
-			<FieldContent>
-				<FieldLabel htmlFor={id}>{t(labelKey)}</FieldLabel>
-			</FieldContent>
-			<Select
-				items={options}
-				value={bandwidthToSelectValue(kbps)}
-				disabled={disabled}
-				onValueChange={value => {
-					if (value !== null) {
-						onChange(selectValueToBandwidth(value))
-					}
-				}}
-			>
-				<SelectTrigger id={id}>
-					<SelectValue />
-				</SelectTrigger>
-				<SelectContent>
-					<SelectGroup>
-						{options.map(option => (
-							<SelectItem
-								key={option.value}
-								value={option.value}
-							>
-								{option.label}
-							</SelectItem>
-						))}
-					</SelectGroup>
-				</SelectContent>
-			</Select>
-		</Field>
-	)
-}
-
-// Advanced → bandwidth caps + transfer performance preset. Scoped explicitly to THIS browser tab's
-// own uploads/downloads (settingsAdvancedTransferDescription) — the wasm client has no live setter
-// for any of these (see transferConfig.ts's own comment), so every change here only takes effect the
-// next time Filen loads, surfaced as an info toast rather than pretended as immediate.
+// Advanced → transfer performance preset. The wasm client has no live setter for concurrency or
+// file-IO memory budget (see transferConfig.ts) and no bandwidth limiter at all — every change here
+// only takes effect the next time Filen loads, surfaced as an info toast rather than pretended as
+// immediate.
 function TransferConfigCard() {
 	const { t } = useTranslation("settings")
 	const query = useTransferPreferencesQuery()
@@ -110,31 +44,9 @@ function TransferConfigCard() {
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
 				{pending ? (
-					<>
-						<Skeleton className="h-8 w-full rounded-2xl" />
-						<Skeleton className="h-8 w-full rounded-2xl" />
-						<Skeleton className="h-8 w-full rounded-2xl" />
-					</>
+					<Skeleton className="h-8 w-full rounded-2xl" />
 				) : (
 					<>
-						<BandwidthField
-							id="advanced-upload-limit"
-							labelKey="settingsAdvancedUploadLimit"
-							kbps={prefs.uploadKbps}
-							disabled={query.isFetching}
-							onChange={kbps => {
-								void apply({ ...prefs, uploadKbps: kbps })
-							}}
-						/>
-						<BandwidthField
-							id="advanced-download-limit"
-							labelKey="settingsAdvancedDownloadLimit"
-							kbps={prefs.downloadKbps}
-							disabled={query.isFetching}
-							onChange={kbps => {
-								void apply({ ...prefs, downloadKbps: kbps })
-							}}
-						/>
 						<Field orientation="horizontal">
 							<FieldContent>
 								<FieldLabel htmlFor="advanced-transfer-preset">{t("settingsAdvancedTransferPreset")}</FieldLabel>

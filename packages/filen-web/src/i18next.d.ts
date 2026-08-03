@@ -1,7 +1,7 @@
 // Type augmentation that gives `t()`/`i18n.t()` fully type-safe key IntelliSense — a key not
-// present in the "common" (default), "errors", "auth", "drive", "contacts", "transfers",
-// "preview", "notes", "chats", "settings", "publicLinks", "audio", or "photos" namespace becomes
-// a compile error.
+// present in one of the namespaces registered in `@/lib/i18n/catalog` becomes a compile error.
+// Reading `resources` off that same object is what stops the augmentation from drifting from the
+// set i18next is actually initialized with.
 //
 // MUST live directly under `src/` so tsconfig's `include: ["src"]` (tsconfig.app.json) picks it
 // up — mirrors a gotcha from the filen-mobile port (a repo-root `i18next.d.ts` is silently ignored
@@ -13,38 +13,12 @@
 // here disables them.
 import "i18next"
 
-import { type common } from "@/locales/en/common"
-import { type errors } from "@/locales/en/errors"
-import { type auth } from "@/locales/en/auth"
-import { type drive } from "@/locales/en/drive"
-import { type contacts } from "@/locales/en/contacts"
-import { type transfers } from "@/locales/en/transfers"
-import { type preview } from "@/locales/en/preview"
-import { type notes } from "@/locales/en/notes"
-import { type chats } from "@/locales/en/chats"
-import { type settings } from "@/locales/en/settings"
-import { type publicLinks } from "@/locales/en/publicLinks"
-import { type audio } from "@/locales/en/audio"
-import { type photos } from "@/locales/en/photos"
+import type { EN_CATALOGS } from "@/lib/i18n/catalog"
 
 declare module "i18next" {
 	interface CustomTypeOptions {
 		defaultNS: "common"
 		returnNull: false
-		resources: {
-			common: typeof common
-			errors: typeof errors
-			auth: typeof auth
-			drive: typeof drive
-			contacts: typeof contacts
-			transfers: typeof transfers
-			preview: typeof preview
-			notes: typeof notes
-			chats: typeof chats
-			settings: typeof settings
-			publicLinks: typeof publicLinks
-			audio: typeof audio
-			photos: typeof photos
-		}
+		resources: typeof EN_CATALOGS
 	}
 }

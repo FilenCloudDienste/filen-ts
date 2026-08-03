@@ -35,6 +35,7 @@ import { Route as AppChatsIndexRouteImport } from './routes/_app/chats.index'
 import { Route as AppSharedOutSplatRouteImport } from './routes/_app/shared-out.$'
 import { Route as AppSharedInSplatRouteImport } from './routes/_app/shared-in.$'
 import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/security'
+import { Route as AppSettingsKeyboardRouteImport } from './routes/_app/settings/keyboard'
 import { Route as AppSettingsEventsRouteImport } from './routes/_app/settings/events'
 import { Route as AppSettingsBillingRouteImport } from './routes/_app/settings/billing'
 import { Route as AppSettingsAppearanceRouteImport } from './routes/_app/settings/appearance'
@@ -173,6 +174,11 @@ const AppSettingsSecurityRoute = AppSettingsSecurityRouteImport.update({
   path: '/security',
   getParentRoute: () => AppSettingsRouteRoute,
 } as any)
+const AppSettingsKeyboardRoute = AppSettingsKeyboardRouteImport.update({
+  id: '/keyboard',
+  path: '/keyboard',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
 const AppSettingsEventsRoute = AppSettingsEventsRouteImport.update({
   id: '/events',
   path: '/events',
@@ -242,6 +248,7 @@ export interface FileRoutesByFullPath {
   '/settings/appearance': typeof AppSettingsAppearanceRoute
   '/settings/billing': typeof AppSettingsBillingRoute
   '/settings/events': typeof AppSettingsEventsRoute
+  '/settings/keyboard': typeof AppSettingsKeyboardRoute
   '/settings/security': typeof AppSettingsSecurityRoute
   '/shared-in/$': typeof AppSharedInSplatRoute
   '/shared-out/$': typeof AppSharedOutSplatRoute
@@ -274,6 +281,7 @@ export interface FileRoutesByTo {
   '/settings/appearance': typeof AppSettingsAppearanceRoute
   '/settings/billing': typeof AppSettingsBillingRoute
   '/settings/events': typeof AppSettingsEventsRoute
+  '/settings/keyboard': typeof AppSettingsKeyboardRoute
   '/settings/security': typeof AppSettingsSecurityRoute
   '/shared-in/$': typeof AppSharedInSplatRoute
   '/shared-out/$': typeof AppSharedOutSplatRoute
@@ -311,6 +319,7 @@ export interface FileRoutesById {
   '/_app/settings/appearance': typeof AppSettingsAppearanceRoute
   '/_app/settings/billing': typeof AppSettingsBillingRoute
   '/_app/settings/events': typeof AppSettingsEventsRoute
+  '/_app/settings/keyboard': typeof AppSettingsKeyboardRoute
   '/_app/settings/security': typeof AppSettingsSecurityRoute
   '/_app/shared-in/$': typeof AppSharedInSplatRoute
   '/_app/shared-out/$': typeof AppSharedOutSplatRoute
@@ -348,6 +357,7 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/billing'
     | '/settings/events'
+    | '/settings/keyboard'
     | '/settings/security'
     | '/shared-in/$'
     | '/shared-out/$'
@@ -380,6 +390,7 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/billing'
     | '/settings/events'
+    | '/settings/keyboard'
     | '/settings/security'
     | '/shared-in/$'
     | '/shared-out/$'
@@ -416,6 +427,7 @@ export interface FileRouteTypes {
     | '/_app/settings/appearance'
     | '/_app/settings/billing'
     | '/_app/settings/events'
+    | '/_app/settings/keyboard'
     | '/_app/settings/security'
     | '/_app/shared-in/$'
     | '/_app/shared-out/$'
@@ -620,6 +632,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsSecurityRouteImport
       parentRoute: typeof AppSettingsRouteRoute
     }
+    '/_app/settings/keyboard': {
+      id: '/_app/settings/keyboard'
+      path: '/keyboard'
+      fullPath: '/settings/keyboard'
+      preLoaderRoute: typeof AppSettingsKeyboardRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
     '/_app/settings/events': {
       id: '/_app/settings/events'
       path: '/events'
@@ -685,6 +704,7 @@ interface AppSettingsRouteRouteChildren {
   AppSettingsAppearanceRoute: typeof AppSettingsAppearanceRoute
   AppSettingsBillingRoute: typeof AppSettingsBillingRoute
   AppSettingsEventsRoute: typeof AppSettingsEventsRoute
+  AppSettingsKeyboardRoute: typeof AppSettingsKeyboardRoute
   AppSettingsSecurityRoute: typeof AppSettingsSecurityRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
 }
@@ -695,6 +715,7 @@ const AppSettingsRouteRouteChildren: AppSettingsRouteRouteChildren = {
   AppSettingsAppearanceRoute: AppSettingsAppearanceRoute,
   AppSettingsBillingRoute: AppSettingsBillingRoute,
   AppSettingsEventsRoute: AppSettingsEventsRoute,
+  AppSettingsKeyboardRoute: AppSettingsKeyboardRoute,
   AppSettingsSecurityRoute: AppSettingsSecurityRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
 }

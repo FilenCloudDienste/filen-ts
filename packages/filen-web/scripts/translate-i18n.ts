@@ -1,9 +1,10 @@
 // i18n translation pipeline — fills the target-language catalogs (src/locales/<lang>.json)
 // from the English source catalogs (src/locales/en/*.ts) via the Anthropic Messages API.
 //
-// The English source is split across real i18next namespaces (currently `common`, `errors`, `auth`,
-// `drive`, `contacts`, `transfers`, `preview`) — each namespace file exports its own `as const` object. Every target-language
-// catalog nests translations under the same namespace keys, e.g. `{ "common": {...}, "errors": {...} }`.
+// The English source is split across real i18next namespaces — the list lives in
+// `@/lib/i18n/catalog` (EN_NAMESPACES), and each namespace file exports its own `as const` object.
+// Every target-language catalog nests translations under the same namespace keys, e.g.
+// `{ "common": {...}, "errors": {...} }`.
 //
 // Run with: npm run translate-i18n            (DELTA mode — only changed English keys)
 //           npm run translate-i18n -- --full  (FULL mode — every key for every language)
@@ -32,20 +33,13 @@ import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 
-import { common } from "@/locales/en/common"
-import { errors } from "@/locales/en/errors"
-import { auth } from "@/locales/en/auth"
-import { drive } from "@/locales/en/drive"
-import { contacts } from "@/locales/en/contacts"
-import { transfers } from "@/locales/en/transfers"
-import { preview } from "@/locales/en/preview"
+import { EN_NAMESPACES, EN_CATALOGS, type EnNamespace } from "@/lib/i18n/catalog"
 
 // NOTE: do NOT import from `@/lib/i18n` here — its index module runs
 // `i18n.use(initReactI18next).init(...)` as an import-time side effect the moment it's loaded,
-// which this script has no reason to trigger. Import the namespace catalogs directly
-// (`@/locales/en/common`, `@/locales/en/errors`, `@/locales/en/auth`, `@/locales/en/drive`,
-// `@/locales/en/contacts`, `@/locales/en/transfers`, `@/locales/en/preview`) instead — that's what
-// EN_CATALOG below does.
+// which this script has no reason to trigger. `@/lib/i18n/catalog` is the sanctioned import: it is
+// side-effect free and owns the namespace list both the app and this pipeline read, so a namespace
+// added there is translated without touching this file.
 //
 // TARGET_LANGUAGES/LANGUAGE_NAMES live in this script rather than a shared module (unlike
 // mobile's `@/locales/languages`): nothing else in the app consumes the target-language list yet.
@@ -86,22 +80,22 @@ const LANGUAGE_NAMES: Record<TargetLanguage, string> = {
 // English source catalog (real i18next namespaces)
 // ---------------------------------------------------------------------------
 
-const NAMESPACES = ["common", "errors", "auth", "drive", "contacts", "transfers", "preview"] as const
+const NAMESPACES = EN_NAMESPACES
 
-type Namespace = (typeof NAMESPACES)[number]
+type Namespace = EnNamespace
 
 // One flat key→value map per namespace; every value is a string (plural keys are separate
 // `_one`/`_other` entries). Unlike mobile's single merged `en` barrel, keys only need to be unique
 // WITHIN a namespace — this mirrors the app's real i18next config (keySeparator/nsSeparator ON,
 // real namespaces), so the delta/plural/translation machinery below is scoped per namespace.
-const EN_CATALOG: Record<Namespace, Record<string, string>> = {
-	common,
-	errors,
-	auth,
-	drive,
-	contacts,
-	transfers,
-	preview
+const EN_CATALOG: Record<Namespace, Record<string, string>> = EN_CATALOGS
+
+// Every per-namespace record below is built from NAMESPACES, so adding a namespace to the catalog
+// module is the only edit a new namespace needs. Object.fromEntries erases the key union, so the
+// result is re-typed once, here — NAMESPACES is the exhaustive tuple Namespace is derived from, so
+// every key is present by construction.
+function perNamespace<T>(make: (ns: Namespace) => T): Record<Namespace, T> {
+	return Object.fromEntries(NAMESPACES.map(ns => [ns, make(ns)])) as Record<Namespace, T>
 }
 
 const DRY_RUN = process.env["DRY_RUN"] === "1"
@@ -186,15 +180,7 @@ interface NamespaceDelta {
 type Delta = Record<Namespace, NamespaceDelta>
 
 function emptyDelta(): Delta {
-	return {
-		common: { upsert: {}, removed: [] },
-		errors: { upsert: {}, removed: [] },
-		auth: { upsert: {}, removed: [] },
-		drive: { upsert: {}, removed: [] },
-		contacts: { upsert: {}, removed: [] },
-		transfers: { upsert: {}, removed: [] },
-		preview: { upsert: {}, removed: [] }
-	}
+	return perNamespace(() => ({ upsert: {}, removed: [] }))
 }
 
 // Shared shape check for one namespace's slice of a parsed catalog/snapshot JSON file: absent →
@@ -237,15 +223,7 @@ function readSnapshot(): Record<Namespace, Record<string, string>> | null {
 
 	const record = parsed as Record<string, unknown>
 
-	return {
-		common: readNamespaceRecord(record, "common", ".en-snapshot.json"),
-		errors: readNamespaceRecord(record, "errors", ".en-snapshot.json"),
-		auth: readNamespaceRecord(record, "auth", ".en-snapshot.json"),
-		drive: readNamespaceRecord(record, "drive", ".en-snapshot.json"),
-		contacts: readNamespaceRecord(record, "contacts", ".en-snapshot.json"),
-		transfers: readNamespaceRecord(record, "transfers", ".en-snapshot.json"),
-		preview: readNamespaceRecord(record, "preview", ".en-snapshot.json")
-	}
+	return perNamespace(ns => readNamespaceRecord(record, ns, ".en-snapshot.json"))
 }
 
 // DELTA = the current English catalog diffed against the snapshot baseline, per namespace. A key
@@ -261,15 +239,7 @@ function computeDelta(): Delta {
 		return emptyDelta()
 	}
 
-	return {
-		common: computeNamespaceDelta(snapshot.common, EN_CATALOG.common),
-		errors: computeNamespaceDelta(snapshot.errors, EN_CATALOG.errors),
-		auth: computeNamespaceDelta(snapshot.auth, EN_CATALOG.auth),
-		drive: computeNamespaceDelta(snapshot.drive, EN_CATALOG.drive),
-		contacts: computeNamespaceDelta(snapshot.contacts, EN_CATALOG.contacts),
-		transfers: computeNamespaceDelta(snapshot.transfers, EN_CATALOG.transfers),
-		preview: computeNamespaceDelta(snapshot.preview, EN_CATALOG.preview)
-	}
+	return perNamespace(ns => computeNamespaceDelta(snapshot[ns], EN_CATALOG[ns]))
 }
 
 function computeNamespaceDelta(baseline: Record<string, string>, catalog: Record<string, string>): NamespaceDelta {
@@ -299,13 +269,13 @@ function readTargetCatalog(lang: TargetLanguage): Record<Namespace, Record<strin
 	const path = join(LOCALES_DIR, `${lang}.json`)
 
 	if (!existsSync(path)) {
-		return { common: {}, errors: {}, auth: {}, drive: {}, contacts: {}, transfers: {}, preview: {} }
+		return perNamespace(() => ({}))
 	}
 
 	const raw = readFileSync(path, "utf8").trim()
 
 	if (raw.length === 0) {
-		return { common: {}, errors: {}, auth: {}, drive: {}, contacts: {}, transfers: {}, preview: {} }
+		return perNamespace(() => ({}))
 	}
 
 	const parsed: unknown = JSON.parse(raw)
@@ -317,15 +287,7 @@ function readTargetCatalog(lang: TargetLanguage): Record<Namespace, Record<strin
 	const record = parsed as Record<string, unknown>
 	const fileLabel = `Catalog ${lang}.json`
 
-	return {
-		common: readNamespaceRecord(record, "common", fileLabel),
-		errors: readNamespaceRecord(record, "errors", fileLabel),
-		auth: readNamespaceRecord(record, "auth", fileLabel),
-		drive: readNamespaceRecord(record, "drive", fileLabel),
-		contacts: readNamespaceRecord(record, "contacts", fileLabel),
-		transfers: readNamespaceRecord(record, "transfers", fileLabel),
-		preview: readNamespaceRecord(record, "preview", fileLabel)
-	}
+	return perNamespace(ns => readNamespaceRecord(record, ns, fileLabel))
 }
 
 // --- CLDR plural expansion -------------------------------------------------
@@ -409,15 +371,9 @@ function computePluralBases(catalog: Record<string, string>): ReadonlyMap<string
 	return bases
 }
 
-const ENGLISH_PLURAL_BASES: Record<Namespace, ReadonlyMap<string, ReadonlySet<string>>> = {
-	common: computePluralBases(EN_CATALOG.common),
-	errors: computePluralBases(EN_CATALOG.errors),
-	auth: computePluralBases(EN_CATALOG.auth),
-	drive: computePluralBases(EN_CATALOG.drive),
-	contacts: computePluralBases(EN_CATALOG.contacts),
-	transfers: computePluralBases(EN_CATALOG.transfers),
-	preview: computePluralBases(EN_CATALOG.preview)
-}
+const ENGLISH_PLURAL_BASES: Record<Namespace, ReadonlyMap<string, ReadonlySet<string>>> = perNamespace(ns =>
+	computePluralBases(EN_CATALOG[ns])
+)
 
 function pluralBaseOf(ns: Namespace, key: string): string | null {
 	const split = splitPluralKey(key)
@@ -794,15 +750,7 @@ function sortRecord(record: Record<string, string>): Record<string, string> {
 }
 
 function writeCatalog(lang: TargetLanguage, catalog: Record<Namespace, Record<string, string>>): void {
-	const sorted: Record<Namespace, Record<string, string>> = {
-		common: sortRecord(catalog.common),
-		errors: sortRecord(catalog.errors),
-		auth: sortRecord(catalog.auth),
-		drive: sortRecord(catalog.drive),
-		contacts: sortRecord(catalog.contacts),
-		transfers: sortRecord(catalog.transfers),
-		preview: sortRecord(catalog.preview)
-	}
+	const sorted: Record<Namespace, Record<string, string>> = perNamespace(ns => sortRecord(catalog[ns]))
 
 	const json = `${JSON.stringify(sorted, null, "\t")}\n`
 
@@ -814,15 +762,7 @@ function writeCatalog(lang: TargetLanguage, catalog: Record<Namespace, Record<st
 // into the same PR as the translations, so the baseline only advances once that PR is merged — an
 // unmerged run keeps re-detecting the same delta.
 function writeSnapshot(): void {
-	const sorted: Record<Namespace, Record<string, string>> = {
-		common: sortRecord(EN_CATALOG.common),
-		errors: sortRecord(EN_CATALOG.errors),
-		auth: sortRecord(EN_CATALOG.auth),
-		drive: sortRecord(EN_CATALOG.drive),
-		contacts: sortRecord(EN_CATALOG.contacts),
-		transfers: sortRecord(EN_CATALOG.transfers),
-		preview: sortRecord(EN_CATALOG.preview)
-	}
+	const sorted: Record<Namespace, Record<string, string>> = perNamespace(ns => sortRecord(EN_CATALOG[ns]))
 
 	const json = `${JSON.stringify(sorted, null, "\t")}\n`
 
@@ -867,15 +807,7 @@ async function main(): Promise<void> {
 
 	for (const lang of args.languages) {
 		const existing = readTargetCatalog(lang)
-		const merged: Record<Namespace, Record<string, string>> = {
-			common: { ...existing.common },
-			errors: { ...existing.errors },
-			auth: { ...existing.auth },
-			drive: { ...existing.drive },
-			contacts: { ...existing.contacts },
-			transfers: { ...existing.transfers },
-			preview: { ...existing.preview }
-		}
+		const merged: Record<Namespace, Record<string, string>> = perNamespace(ns => ({ ...existing[ns] }))
 
 		for (const ns of NAMESPACES) {
 			// Apply removals first so a key removed AND re-added in the same delta nets to the new value.

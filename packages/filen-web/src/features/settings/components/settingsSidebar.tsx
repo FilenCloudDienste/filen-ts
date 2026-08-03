@@ -1,13 +1,19 @@
 import type { ComponentType } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
-import { UserIcon, ShieldIcon, SunMoonIcon, HistoryIcon, CreditCardIcon, SlidersHorizontalIcon } from "lucide-react"
+import { UserIcon, ShieldIcon, SunMoonIcon, KeyboardIcon, HistoryIcon, CreditCardIcon, SlidersHorizontalIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 type IconType = ComponentType<{ className?: string }>
 
 type SettingsRoute =
-	"/settings/account" | "/settings/security" | "/settings/appearance" | "/settings/events" | "/settings/billing" | "/settings/advanced"
+	| "/settings/account"
+	| "/settings/security"
+	| "/settings/appearance"
+	| "/settings/keyboard"
+	| "/settings/events"
+	| "/settings/billing"
+	| "/settings/advanced"
 
 interface SettingsSidebarItem {
 	id: string
@@ -15,6 +21,7 @@ interface SettingsSidebarItem {
 		| "settingsSectionAccount"
 		| "settingsSectionSecurity"
 		| "settingsSectionAppearance"
+		| "settingsSectionKeyboard"
 		| "settingsSectionEvents"
 		| "settingsSectionBilling"
 		| "settingsSectionAdvanced"
@@ -23,11 +30,13 @@ interface SettingsSidebarItem {
 }
 
 // Account first (the index redirect's landing section — see routes/_app/settings/index.tsx),
-// Security second (the already-shipped page, unchanged), then Appearance/Events/Billing/Advanced.
+// Security second (the already-shipped page, unchanged), then Appearance/Keyboard/Events/Billing/
+// Advanced.
 const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 	{ id: "account", labelKey: "settingsSectionAccount", icon: UserIcon, to: "/settings/account" },
 	{ id: "security", labelKey: "settingsSectionSecurity", icon: ShieldIcon, to: "/settings/security" },
 	{ id: "appearance", labelKey: "settingsSectionAppearance", icon: SunMoonIcon, to: "/settings/appearance" },
+	{ id: "keyboard", labelKey: "settingsSectionKeyboard", icon: KeyboardIcon, to: "/settings/keyboard" },
 	{ id: "events", labelKey: "settingsSectionEvents", icon: HistoryIcon, to: "/settings/events" },
 	{ id: "billing", labelKey: "settingsSectionBilling", icon: CreditCardIcon, to: "/settings/billing" },
 	{ id: "advanced", labelKey: "settingsSectionAdvanced", icon: SlidersHorizontalIcon, to: "/settings/advanced" }

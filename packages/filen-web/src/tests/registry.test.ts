@@ -34,12 +34,23 @@ vi.mock("@/lib/storage/adapter", () => ({
 const OVERRIDES_KEY = "keymap.v1.overrides"
 
 function actionDef(id: string, defaultCombo = "k") {
-	return { id, defaultCombo, scope: "global" as const, descriptionKey: "toggleTheme" as const }
+	return { id, defaultCombo, scope: "global" as const, descriptionKey: "common:toggleTheme" as const }
 }
 
 async function freshRegistry() {
 	vi.resetModules()
 	return import("@/lib/keymap/registry")
+}
+
+// useAction reads the registry's recording session through a module-level import, so it has to be
+// imported AFTER the same vi.resetModules() — a static top-of-file import would bind a DIFFERENT
+// registry instance than beginRecording mutates and every assertion below would pass vacuously.
+async function freshKeymap() {
+	vi.resetModules()
+	const registry = await import("@/lib/keymap/registry")
+	const { shouldIgnoreEvent } = await import("@/lib/keymap/useAction")
+
+	return { ...registry, shouldIgnoreEvent }
 }
 
 beforeEach(() => {
@@ -172,55 +183,185 @@ describe("keymap registry", () => {
 	})
 })
 
-// drive.download (directoryListing.tsx's module-scope registration, mirrored here since registry.ts
-// itself holds no concrete actions — every feature registers its own). Combos below mirror the app's
-// REAL default registrations as of this task (directoryListing.tsx/newDirectory.tsx/
-// themeProvider.tsx/iconRail.tsx) so a genuine collision would fail this test, not just a synthetic
-// one.
-describe("keymap registry — drive.download registration", () => {
-	it("registers with its chosen default combo (mod+s)", async () => {
-		const { registerAction, comboFor } = await freshRegistry()
+describe("keymap registry — clearUserCombo", () => {
+	it("drops only the target override and leaves the action resolving to its default", async () => {
+		const { registerAction, comboFor, setUserCombo, clearUserCombo } = await freshRegistry()
 
-		registerAction({ id: "drive.download", defaultCombo: "mod+s", scope: "drive", descriptionKey: "driveCommandDownload" })
+		registerAction(actionDef("app.test"))
+		registerAction(actionDef("app.other"))
+		await setUserCombo("app.test", "shift+k")
+		await setUserCombo("app.other", "shift+o")
+		await clearUserCombo("app.test")
 
-		expect(comboFor("drive.download")).toBe("mod+s")
+		expect(comboFor("app.test")).toBe("k")
+		expect(comboFor("app.other")).toBe("shift+o")
 	})
 
-	it("does not collide with any other registered default combo in the app", async () => {
-		const { registerAction, comboFor } = await freshRegistry()
+	it("persists the remaining overrides at the versioned kv key", async () => {
+		const { registerAction, setUserCombo, clearUserCombo } = await freshRegistry()
 
-		// drive scope (directoryListing.tsx + newDirectory.tsx)
-		registerAction({ id: "drive.selectAll", defaultCombo: "mod+a", scope: "drive", descriptionKey: "driveCommandSelectAll" })
-		registerAction({ id: "drive.clearSelection", defaultCombo: "escape", scope: "drive", descriptionKey: "driveCommandClearSelection" })
-		registerAction({ id: "drive.toggleView", defaultCombo: "v", scope: "drive", descriptionKey: "driveCommandToggleView" })
-		registerAction({ id: "drive.rename", defaultCombo: "f2", scope: "drive", descriptionKey: "driveCommandRename" })
-		registerAction({ id: "drive.trash", defaultCombo: "delete,backspace", scope: "drive", descriptionKey: "driveCommandTrash" })
-		registerAction({ id: "drive.newDirectory", defaultCombo: "n", scope: "drive", descriptionKey: "driveCommandNewDirectory" })
-		registerAction({ id: "drive.download", defaultCombo: "mod+s", scope: "drive", descriptionKey: "driveCommandDownload" })
-		registerAction({ id: "drive.search", defaultCombo: "mod+f", scope: "drive", descriptionKey: "driveCommandSearch" })
-		// global scope (themeProvider.tsx + iconRail.tsx) — scope isn't enforced yet (every action
-		// fires unconditionally, see registry.ts's ActionScope comment), so these are live collision
-		// candidates too, not just drive-scope ones.
-		registerAction({ id: "app.toggleTheme", defaultCombo: "d", scope: "global", descriptionKey: "toggleTheme" })
-		registerAction({ id: "app.openSettings", defaultCombo: "", scope: "global", descriptionKey: "settings" })
+		registerAction(actionDef("app.test"))
+		registerAction(actionDef("app.other"))
+		await setUserCombo("app.test", "shift+k")
+		await setUserCombo("app.other", "shift+o")
+		await clearUserCombo("app.test")
 
-		const ids = [
-			"drive.selectAll",
-			"drive.clearSelection",
-			"drive.toggleView",
-			"drive.rename",
-			"drive.trash",
-			"drive.newDirectory",
-			"drive.download",
-			"drive.search",
-			"app.toggleTheme",
-			"app.openSettings"
-		]
-		// "" (openSettings' unbound default) is excluded from the collision check — an empty combo
-		// isn't a real binding (keymapOverridesSchema itself rejects "" as a value), it just means
-		// unbound-by-default.
-		const combos = ids.map(comboFor).filter(combo => combo.length > 0)
+		expect(kvStore.get(OVERRIDES_KEY)).toEqual({ "app.other": "shift+o" })
+	})
 
-		expect(new Set(combos).size).toBe(combos.length)
+	it("is a no-op for an id with no override", async () => {
+		const { registerAction, comboFor, setUserCombo, clearUserCombo } = await freshRegistry()
+
+		registerAction(actionDef("app.test"))
+		await setUserCombo("app.test", "shift+k")
+		await clearUserCombo("app.unbound")
+
+		expect(comboFor("app.test")).toBe("shift+k")
+		expect(kvStore.get(OVERRIDES_KEY)).toEqual({ "app.test": "shift+k" })
+	})
+})
+
+// Invariant R: at most ONE combo recording exists app-wide, identified by its owner token, and only
+// its owner can end it. Two <ShortcutsList> instances can be mounted at once (the shortcuts dialog
+// opens on top of Settings → Keyboard), so a shared boolean would let the second one's unmount clear
+// a session the first started — a live recorder AND live hotkeys, exactly what the session prevents.
+describe("keymap registry — combo recording session", () => {
+	it("starts with no session", async () => {
+		const { isRecordingCombo } = await freshRegistry()
+
+		expect(isRecordingCombo()).toBe(false)
+	})
+
+	it("carries the action being rebound, so the surface holds no session state of its own", async () => {
+		const { beginRecording, currentRecording } = await freshRegistry()
+
+		beginRecording("a", "app.test")
+
+		expect(currentRecording()).toEqual({ owner: "a", actionId: "app.test" })
+	})
+
+	it("beginRecording claims the session", async () => {
+		const { beginRecording, isRecordingCombo } = await freshRegistry()
+
+		beginRecording("a", "app.test")
+
+		expect(isRecordingCombo()).toBe(true)
+	})
+
+	it("endRecording from a non-owner is a no-op", async () => {
+		const { beginRecording, endRecording, isRecordingCombo } = await freshRegistry()
+
+		beginRecording("a", "app.test")
+		endRecording("b")
+
+		expect(isRecordingCombo()).toBe(true)
+	})
+
+	it("endRecording from the owner ends the session", async () => {
+		const { beginRecording, endRecording, isRecordingCombo } = await freshRegistry()
+
+		beginRecording("a", "app.test")
+		endRecording("a")
+
+		expect(isRecordingCombo()).toBe(false)
+	})
+
+	it("a second beginRecording displaces the owner, leaving exactly one session", async () => {
+		const { beginRecording, endRecording, isRecordingCombo } = await freshRegistry()
+
+		beginRecording("a", "app.test")
+		beginRecording("b", "app.other")
+		endRecording("a")
+
+		expect(isRecordingCombo()).toBe(true)
+
+		endRecording("b")
+
+		expect(isRecordingCombo()).toBe(false)
+	})
+
+	it("clearRecording ends a session owned by anyone", async () => {
+		const { beginRecording, clearRecording, isRecordingCombo } = await freshRegistry()
+
+		beginRecording("a", "app.test")
+		clearRecording()
+
+		expect(isRecordingCombo()).toBe(false)
+	})
+
+	it("rejectRecording ends the owner's session and records which action holds the combo", async () => {
+		const { beginRecording, rejectRecording, isRecordingCombo, currentRecordingRejection } = await freshRegistry()
+
+		beginRecording("a", "app.test")
+		rejectRecording("a", "common:toggleTheme")
+
+		expect(isRecordingCombo()).toBe(false)
+		expect(currentRecordingRejection()).toEqual({ actionId: "app.test", conflictKey: "common:toggleTheme" })
+	})
+
+	it("rejectRecording from a non-owner changes nothing", async () => {
+		const { beginRecording, rejectRecording, isRecordingCombo, currentRecordingRejection } = await freshRegistry()
+
+		beginRecording("a", "app.test")
+		rejectRecording("b", "common:toggleTheme")
+
+		expect(isRecordingCombo()).toBe(true)
+		expect(currentRecordingRejection()).toBeNull()
+	})
+
+	it("retires a rejection once the rebound action's combo changes", async () => {
+		const { registerAction, beginRecording, rejectRecording, setUserCombo, clearUserCombo, currentRecordingRejection } =
+			await freshRegistry()
+
+		registerAction(actionDef("app.test"))
+		beginRecording("a", "app.test")
+		rejectRecording("a", "common:toggleTheme")
+		await setUserCombo("app.test", "shift+k")
+
+		expect(currentRecordingRejection()).toBeNull()
+
+		beginRecording("a", "app.test")
+		rejectRecording("a", "common:toggleTheme")
+		await clearUserCombo("app.test")
+
+		expect(currentRecordingRejection()).toBeNull()
+	})
+
+	it("starting a new recording clears a pending rejection", async () => {
+		const { beginRecording, rejectRecording, currentRecordingRejection } = await freshRegistry()
+
+		beginRecording("a", "app.test")
+		rejectRecording("a", "common:toggleTheme")
+		beginRecording("a", "app.other")
+
+		expect(currentRecordingRejection()).toBeNull()
+	})
+})
+
+// The guard the session exists for, asserted at the exact shape useHotkeys consumes it in
+// (useAction's DEFAULT_OPTIONS.ignoreEventWhen).
+describe("useAction — shouldIgnoreEvent", () => {
+	it("lets a normal keypress through", async () => {
+		const { shouldIgnoreEvent } = await freshKeymap()
+
+		expect(shouldIgnoreEvent({ repeat: false })).toBe(false)
+	})
+
+	it("ignores an OS autorepeat tick", async () => {
+		const { shouldIgnoreEvent } = await freshKeymap()
+
+		expect(shouldIgnoreEvent({ repeat: true })).toBe(true)
+	})
+
+	it("ignores every keypress while any owner is recording a combo", async () => {
+		const { beginRecording, endRecording, shouldIgnoreEvent } = await freshKeymap()
+
+		beginRecording("a", "app.test")
+
+		expect(shouldIgnoreEvent({ repeat: false })).toBe(true)
+
+		endRecording("a")
+
+		expect(shouldIgnoreEvent({ repeat: false })).toBe(false)
 	})
 })

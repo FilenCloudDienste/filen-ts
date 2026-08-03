@@ -26,7 +26,6 @@ import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -70,22 +69,6 @@ const PdfViewer = lazy(() => import("@/features/preview/components/pdfViewer"))
 const DocxViewer = lazy(() => import("@/features/preview/components/docxViewer"))
 const TextViewer = lazy(() => import("@/features/preview/components/textViewer"))
 const MarkdownViewer = lazy(() => import("@/features/preview/components/markdownViewer"))
-
-// Cmd/Ctrl+S — SHARES its literal combo with the already-registered "drive.download" (mod+s,
-// directoryListing.tsx), deliberately: that action's own handler already no-ops (after an
-// unconditional preventDefault, which is what actually suppresses the browser's native Save-Page-As)
-// whenever a dialog — this one included — is open, so the two never race for real effect, only for
-// the harmless preventDefault. `enableOnContentEditable` is load-bearing: react-hotkeys-hook's default
-// ignore-list stops a hotkey whose event target is contentEditable (verified against the installed
-// package's own compiled source), and CodeMirror's own content DOM sets `contenteditable="true"` while
-// editable — without this override, Cmd/Ctrl+S would silently never fire while the cursor is actually
-// inside the editor, exactly the moment a user would press it.
-registerAction({
-	id: "preview.save",
-	defaultCombo: "mod+s",
-	scope: "editor",
-	descriptionKey: "previewSaveAction"
-})
 
 // Module scope, not an inline arrow: useBlocker's registration effect lists shouldBlockFn in its own
 // deps, so a per-render identity would unregister/re-register the history blocker on every render.

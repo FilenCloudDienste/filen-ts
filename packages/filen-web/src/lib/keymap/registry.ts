@@ -7,16 +7,36 @@ import type { CommonKey, DriveKey, PreviewKey, NotesKey, ChatsKey, AudioKey, Pho
 // Keyboard-first from day one — every keyboard-controllable action in the app registers
 // here instead of wiring its own `window.addEventListener("keydown", …)`. A Map-backed registry
 // of ActionDefs (defaults) plus a small persisted-override layer (kv key below) gives every
-// consumer three things for free: one source of truth for "what does this shortcut do" (a future
-// settings UI reads `actions`' defs), a user-remappable combo (`setUserCombo`), and a live
-// indicator (`<Kbd action>`) that always reflects the combo actually in effect.
+// consumer three things for free: one source of truth for "what does this shortcut do" (read by
+// the shortcuts catalog — lib/keymap/actions.ts, rendered by lib/keymap/shortcutsList.tsx on both
+// the `?` dialog and Settings → Keyboard), a user-remappable combo (`setUserCombo` /
+// `clearUserCombo`), and a live indicator (`<Kbd action>`) that always reflects the combo actually
+// in effect. This file stays feature-agnostic: it holds no concrete action, only the mechanism.
 export type ActionScope = "global" | "drive" | "editor" | "notes" | "chats" | "audio" | "photos" | "contacts"
+
+// The namespace has to travel with the key: the shortcuts UI resolves these against several
+// catalogs at once, and an unprefixed key would only ever resolve in the first one. Both halves are
+// compile-checked — the namespace exists, and the key exists IN that namespace.
+export type ShortcutDescriptionKey =
+	| `common:${CommonKey}`
+	| `drive:${DriveKey}`
+	| `notes:${NotesKey}`
+	| `chats:${ChatsKey}`
+	| `photos:${PhotosKey}`
+	| `audio:${AudioKey}`
+	| `preview:${PreviewKey}`
+	| `contacts:${ContactsKey}`
 
 export interface ActionDef {
 	id: string
 	defaultCombo: string
 	scope: ActionScope
-	descriptionKey: CommonKey | DriveKey | PreviewKey | NotesKey | ChatsKey | AudioKey | PhotosKey | ContactsKey
+	descriptionKey: ShortcutDescriptionKey
+}
+
+// An ActionDef plus the combo actually in effect for it (default or user override).
+export interface ResolvedAction extends ActionDef {
+	combo: string
 }
 
 const OVERRIDES_KV_KEY = "keymap.v1.overrides"
@@ -34,10 +54,35 @@ export const keymapOverridesSchema = type({ "[string]": "string > 0" })
 
 const actions = new Map<string, ActionDef>()
 
+// The in-flight combo recording: which surface instance owns it and which action it is rebinding.
+// See beginRecording below for why the session carries an owner rather than being a bare boolean.
+export interface RecordingSession {
+	owner: string
+	actionId: string
+}
+
+// Why the last recording attempt was refused. Outlives the session (the recorder stops the moment a
+// full chord lands) so the surface can say which action already holds the combo.
+export interface RecordingRejection {
+	actionId: string
+	conflictKey: ShortcutDescriptionKey
+}
+
 interface KeymapState {
 	overrides: Record<string, string>
+	recordingSession: RecordingSession | null
+	recordingRejection: RecordingRejection | null
 	setOverrides: (overrides: Record<string, string>) => void
 	setOverride: (id: string, combo: string) => void
+	clearOverride: (id: string) => void
+	setRecordingSession: (session: RecordingSession | null) => void
+	setRecordingRejection: (rejection: RecordingRejection | null) => void
+}
+
+// A rejection is only true of the binding it was computed against, so any change to that binding
+// retires it.
+function withoutRejectionFor(state: KeymapState, id: string): RecordingRejection | null {
+	return state.recordingRejection?.actionId === id ? null : state.recordingRejection
 }
 
 // Internal reactivity primitive only — nothing outside this file touches the store directly (see
@@ -47,13 +92,35 @@ interface KeymapState {
 // runtime, without each of them hand-rolling a subscribe/listener.
 const useKeymapStore = create<KeymapState>(set => ({
 	overrides: {},
+	recordingSession: null,
+	recordingRejection: null,
 	setOverrides: overrides => {
 		set({ overrides })
 	},
 	setOverride: (id, combo) => {
-		set(state => ({ overrides: { ...state.overrides, [id]: combo } }))
+		set(state => ({ overrides: { ...state.overrides, [id]: combo }, recordingRejection: withoutRejectionFor(state, id) }))
+	},
+	clearOverride: id => {
+		// Rebuilt rather than deleted-from: keymapOverridesSchema rejects "", so an override can only
+		// be REMOVED (back to the default), never blanked.
+		set(state => ({
+			overrides: Object.fromEntries(Object.entries(state.overrides).filter(([key]) => key !== id)),
+			recordingRejection: withoutRejectionFor(state, id)
+		}))
+	},
+	setRecordingSession: session => {
+		set({ recordingSession: session })
+	},
+	setRecordingRejection: rejection => {
+		set({ recordingRejection: rejection })
 	}
 }))
+
+// Narrow subscribed read of the override layer, for consumers that resolve many actions at once
+// (lib/keymap/actions.ts's useActionCatalog). Keeps the store itself module-private.
+export function useOverrides(): Record<string, string> {
+	return useKeymapStore(state => state.overrides)
+}
 
 // Memoized like `storage()` in @/lib/storage/adapter.ts — the kv read fires at most once per
 // module lifetime, kicked off by the first `registerAction` call (import order between this
@@ -114,6 +181,15 @@ export function comboFor(id: string): string {
 	return resolveCombo(useKeymapStore.getState().overrides, id)
 }
 
+// Drops a user override so the action resolves to its default again ("reset to default" in the
+// shortcuts UI). Loads first for the same reason setUserCombo does — otherwise the re-persist would
+// write a record built from an empty store.
+export async function clearUserCombo(id: string): Promise<void> {
+	await ensureOverridesLoaded()
+	useKeymapStore.getState().clearOverride(id)
+	await kvSetJson(OVERRIDES_KV_KEY, useKeymapStore.getState().overrides)
+}
+
 export async function setUserCombo(id: string, combo: string): Promise<void> {
 	// Await the persisted-overrides load FIRST: without it, an early remap merges onto an empty store
 	// and persists a one-entry record that clobbers any stored overrides — which the late load then
@@ -135,4 +211,72 @@ export async function setUserCombo(id: string, combo: string): Promise<void> {
 // value IS what the hook returns, sidesteps that hazard.
 export function useComboFor(id: string): string {
 	return useKeymapStore(state => resolveCombo(state.overrides, id))
+}
+
+// A combo recording is a single app-wide session: while one is in flight every keypress is data, not
+// a command. The recorder (react-hotkeys-hook's useRecordHotkeys) and useHotkeys both listen on
+// `document`, and useHotkeys' listeners are registered first, so the recorder cannot out-order or
+// out-propagate them — suppression has to happen inside useHotkeys' own opt-out, which reads
+// `isRecordingCombo()` synchronously at event time (see useAction.ts).
+//
+// The session lives here, not in the surface that renders it, for two reasons: only its owner can end
+// it, so a second shortcuts list (the dialog can open on top of the settings page) can never clear a
+// session it did not start nor strand one it did; and the whole lifecycle — including why an attempt
+// was refused — is then one piece of state with one owner, testable without a DOM.
+export function beginRecording(owner: string, actionId: string): void {
+	useKeymapStore.getState().setRecordingSession({ owner, actionId })
+	useKeymapStore.getState().setRecordingRejection(null)
+}
+
+// No-op unless `owner` currently holds the session — a displaced list's unmount cleanup must not end
+// a session it never started (that would leave a live recorder AND live hotkeys).
+export function endRecording(owner: string): void {
+	if (useKeymapStore.getState().recordingSession?.owner !== owner) {
+		return
+	}
+
+	useKeymapStore.getState().setRecordingSession(null)
+}
+
+// Ends the owner's session and records why the combo was refused, so the surface can name the action
+// already holding it. Same owner check as endRecording.
+export function rejectRecording(owner: string, conflictKey: ShortcutDescriptionKey): void {
+	const session = useKeymapStore.getState().recordingSession
+
+	if (session?.owner !== owner) {
+		return
+	}
+
+	useKeymapStore.getState().setRecordingRejection({ actionId: session.actionId, conflictKey })
+	useKeymapStore.getState().setRecordingSession(null)
+}
+
+// Unconditional; a newly mounted shortcuts list calls this so it can never inherit someone else's
+// in-flight recording.
+export function clearRecording(): void {
+	useKeymapStore.getState().setRecordingSession(null)
+}
+
+// Plain snapshot reads, the same split `comboFor`/`useComboFor` already draws. The predicate is what
+// useAction consults inside a DOM event handler: no subscription, so it re-renders nothing and has
+// none of the React-Compiler staleness hazard `useComboFor` above documents.
+export function currentRecording(): RecordingSession | null {
+	return useKeymapStore.getState().recordingSession
+}
+
+export function currentRecordingRejection(): RecordingRejection | null {
+	return useKeymapStore.getState().recordingRejection
+}
+
+export function isRecordingCombo(): boolean {
+	return currentRecording() !== null
+}
+
+// Subscribed counterparts, for the surface that has to re-render when it gains or loses the session.
+export function useRecordingSession(): RecordingSession | null {
+	return useKeymapStore(state => state.recordingSession)
+}
+
+export function useRecordingRejection(): RecordingRejection | null {
+	return useKeymapStore(state => state.recordingRejection)
 }

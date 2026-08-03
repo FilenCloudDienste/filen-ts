@@ -18,17 +18,10 @@ import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
 import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
 import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-
-// Multi-select commands — mirrors drive.selectAll/drive.clearSelection and notes.selectAll/
-// notes.clearSelection exactly: mod+a selects every currently-visible (search-filtered) decryptable
-// conversation, Escape clears the selection.
-registerAction({ id: "chats.selectAll", defaultCombo: "mod+a", scope: "chats", descriptionKey: "chatsCommandSelectAll" })
-registerAction({ id: "chats.clearSelection", defaultCombo: "escape", scope: "chats", descriptionKey: "chatsCommandClearSelection" })
 
 // Fixed row height — the single virtualizer needs no measureElement pass (both lines are pinned to a known
 // height), same as notesSidebar's constant-height rows.
@@ -134,7 +127,7 @@ export function ChatsSidebar() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the signature above, not visibleChats — see comment above
 	}, [visibleChatUuidsSignature])
 
-	// Registered at module scope above. Browser default for mod+a is "select all page text" — must
+	// Def in features/chats/lib/keymap.ts. Browser default for mod+a is "select all page text" — must
 	// preventDefault or the native selection would visibly compete with the row selection. Guarded on
 	// dialogHost.isDialogOpen so a background Cmd+A can't select conversations behind an open dialog.
 	// Targets `rows` (already search-filtered) minus undecryptable ones — mirrors drive.selectAll/
@@ -153,7 +146,7 @@ export function ChatsSidebar() {
 		[dialogHost.isDialogOpen, rows]
 	)
 
-	// Registered at module scope above. No preventDefault — bare Escape has no disruptive browser
+	// Def in features/chats/lib/keymap.ts. No preventDefault — bare Escape has no disruptive browser
 	// default. Guarded on dialogHost.isDialogOpen so Escape closes the dialog (its own onOpenChange
 	// handling) without also clearing the background selection.
 	useAction(

@@ -6,7 +6,6 @@ import { useAudioNowPlaying, useAudioQueueControls, useAudioOutput, useAudioErro
 import { NowPlayingPanel } from "@/features/audio/components/nowPlayingPanel"
 import { nextLoopMode } from "@/features/audio/components/audioTransport.logic"
 import { formatTime } from "@/features/audio/lib/format"
-import { registerAudioActions } from "@/features/audio/lib/keymap"
 import { useAction } from "@/lib/keymap/useAction"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { MiddleEllipsis } from "@/components/middleEllipsis"
@@ -14,10 +13,6 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
-
-// Transport keyboard shortcuts (mod+shift chords — see AUDIO_ACTIONS for the non-collision rationale).
-// Registered once at module load; the idempotent guard inside makes a re-import harmless.
-registerAudioActions()
 
 // The persistent audio player, docked at the bottom of the authed shell (rendered once by AppShell,
 // which never mounts on public-link routes — so this surface is inherently authed-only). It renders

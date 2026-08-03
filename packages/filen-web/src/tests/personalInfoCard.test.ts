@@ -42,10 +42,10 @@ describe("personalToFormState", () => {
 		expect(personalToFormState(personal)).toMatchObject({ firstName: "Jane", country: "Germany" })
 	})
 
-	it("folds a country outside the closed list (legacy free-text data) to unset", () => {
+	it("preserves a country the closed list does not know (other clients write free text)", () => {
 		const personal: Personal = { ...emptyPersonal(), country: "DE" }
 
-		expect(personalToFormState(personal)).toMatchObject({ country: "" })
+		expect(personalToFormState(personal)).toMatchObject({ country: "DE" })
 	})
 })
 
@@ -82,6 +82,12 @@ describe("formStateToUpdateInfo", () => {
 			postalCode: "10115",
 			country: "Germany"
 		})
+	})
+
+	it("round-trips an unknown stored country through save instead of clearing it", () => {
+		const personal: Personal = { ...emptyPersonal(), country: "DE" }
+
+		expect(formStateToUpdateInfo(personalToFormState(personal))).toMatchObject({ country: "DE" })
 	})
 })
 

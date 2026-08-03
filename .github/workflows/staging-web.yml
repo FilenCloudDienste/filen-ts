@@ -1,5 +1,14 @@
-# Dormant until the web app is finished; deploy wiring is manual (docs/infra/nginx.conf).
-# Builds the app and uploads dist/ as an artifact — no automatic deploy, dispatch-only.
+# Dormant until the web app is finished: this builds dist/ and uploads it as an artifact — there is
+# no deploy step, and deploy wiring is done by hand.
+# Whatever serves dist/ MUST send, on every response:
+#   Cross-Origin-Opener-Policy: same-origin
+#   Cross-Origin-Embedder-Policy: require-corp
+#   Cross-Origin-Resource-Policy: same-origin      (all three, or the SDK's threaded wasm won't load)
+#   Content-Security-Policy: the value of `CSP` in packages/filen-web/vite.config.ts
+#   X-Content-Type-Options: nosniff
+#   Referrer-Policy: no-referrer
+#   Permissions-Policy: camera=(), microphone=(), geolocation=()
+# plus application/wasm for .wasm and the caching rules in packages/filen-web/README.md § Deployment.
 name: Build staging web artifact
 
 on:
