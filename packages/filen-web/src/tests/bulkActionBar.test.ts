@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import { StarIcon, StarOffIcon, FolderInputIcon, UsersIcon, UserMinusIcon, Trash2Icon, RotateCcwIcon, DownloadIcon } from "lucide-react"
-import type { Dir, File } from "@filen/sdk-rs"
+import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
+import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
 // bulkActionBar.logic.ts imports features/drive/lib/download.ts (for startDownloads), which in turn touches
@@ -11,9 +12,21 @@ import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 // it would reach the (also mocked) worker.
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
-const { startDownloadsMock } = vi.hoisted(() => ({ startDownloadsMock: vi.fn() }))
+const { startDownloadsMock, setFavoritedItemsMock, toastSuccess, toastError } = vi.hoisted(() => ({
+	startDownloadsMock: vi.fn(),
+	setFavoritedItemsMock: vi.fn(),
+	toastSuccess: vi.fn(),
+	toastError: vi.fn()
+}))
+
+// runBulkFavorite's own SDK call — replaced at the actions boundary, mirroring driveActions.test.ts's
+// mock shape (the cache-patch half is that file's concern, not this one's).
+vi.mock("@/features/drive/lib/actions", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/features/drive/lib/actions")>()
+	return { ...actual, setFavoritedItems: setFavoritedItemsMock }
+})
 
 vi.mock("@/features/drive/lib/download", async importOriginal => {
 	const actual = await importOriginal<typeof import("@/features/drive/lib/download")>()
@@ -31,18 +44,26 @@ vi.mock("@/features/drive/lib/saveDownload", async importOriginal => {
 	return { ...actual, isFsaAvailable: isFsaAvailableMock }
 })
 
+import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	driveBulkActions,
 	isBulkActionOfflineDisabled,
 	isBulkDownloadEnabled,
+	runBulkFavorite,
 	startBulkDownload
 } from "@/features/drive/components/bulkActionBar.logic"
 
 beforeEach(() => {
+	vi.clearAllMocks()
 	isFsaAvailableMock.mockReturnValue(false)
+	useDriveStore.setState({ selectedItems: [] })
 })
 
 // Local fixtures mirror itemMenu.test.ts's own per-file convention.
+function testUuid(label: string): UuidStr {
+	return `${label}-0000-0000-0000-000000000000` as UuidStr
+}
+
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: "33333333-3333-3333-3333-333333333333",
@@ -415,20 +436,27 @@ describe("isBulkDownloadEnabled", () => {
 })
 
 describe("isBulkActionOfflineDisabled", () => {
-	it("disables move/trash/download while offline", () => {
-		expect(isBulkActionOfflineDisabled("move", false)).toBe(true)
-		expect(isBulkActionOfflineDisabled("trash", false)).toBe(true)
-		expect(isBulkActionOfflineDisabled("download", false)).toBe(true)
+	// Every id driveBulkActions can produce, across all 7 variants and every flag combination — the
+	// case that fails if a bulk action is added without a gating decision.
+	const VARIANTS: DriveVariant[] = ["drive", "recents", "favorites", "trash", "links", "sharedIn", "sharedOut"]
+	const FLAG_COMBINATIONS: DriveSelectionFlags[] = [
+		flags(),
+		flags({ includesFavorited: true }),
+		flags({ includesUndecryptable: true }),
+		flags({ everySharedRoot: true }),
+		flags({ includesFavorited: true, everySharedRoot: true })
+	]
+	const everyBulkId = [
+		...new Set(VARIANTS.flatMap(variant => FLAG_COMBINATIONS.flatMap(f => driveBulkActions(variant, f).map(d => d.id))))
+	]
+
+	it("disables every bulk id while offline", () => {
+		expect(everyBulkId.length).toBeGreaterThan(0)
+		expect(everyBulkId.filter(id => !isBulkActionOfflineDisabled(id, false))).toEqual([])
 	})
 
-	it("leaves move/trash/download enabled while online", () => {
-		expect(isBulkActionOfflineDisabled("move", true)).toBe(false)
-		expect(isBulkActionOfflineDisabled("trash", true)).toBe(false)
-		expect(isBulkActionOfflineDisabled("download", true)).toBe(false)
-	})
-
-	it("leaves favorite enabled offline — untouched by this gating pass", () => {
-		expect(isBulkActionOfflineDisabled("favorite", false)).toBe(false)
+	it("leaves every bulk id enabled while online", () => {
+		expect(everyBulkId.filter(id => isBulkActionOfflineDisabled(id, true))).toEqual([])
 	})
 })
 
@@ -439,5 +467,53 @@ describe("startBulkDownload", () => {
 		startBulkDownload(items)
 
 		expect(startDownloadsMock).toHaveBeenCalledWith(items)
+	})
+})
+
+// The shared bulk-favorite run behind BOTH the floating bar and the selection-aware context menu.
+describe("runBulkFavorite", () => {
+	it("applies the SET target !includesFavorited to every item", async () => {
+		const mixed = [fileItem({ uuid: testUuid("a"), favorited: true }), fileItem({ uuid: testUuid("b"), favorited: false })]
+		setFavoritedItemsMock.mockResolvedValueOnce({ succeeded: [], failed: [] })
+
+		await runBulkFavorite(mixed)
+
+		// One item is already favorited, so the SET target for the WHOLE selection is "unfavorite".
+		expect(setFavoritedItemsMock).toHaveBeenCalledExactlyOnceWith(mixed, false)
+
+		setFavoritedItemsMock.mockResolvedValueOnce({ succeeded: [], failed: [] })
+		const none = [fileItem({ uuid: testUuid("c"), favorited: false })]
+
+		await runBulkFavorite(none)
+
+		expect(setFavoritedItemsMock).toHaveBeenLastCalledWith(none, true)
+	})
+
+	it("prunes only succeeded uuids from the selection", async () => {
+		const ok = fileItem({ uuid: testUuid("ok") })
+		const bad = fileItem({ uuid: testUuid("bad") })
+		useDriveStore.setState({ selectedItems: [ok, bad] })
+		setFavoritedItemsMock.mockResolvedValueOnce({
+			succeeded: [ok],
+			failed: [{ item: bad, dto: { species: "plain", message: "no", label: "no" } }]
+		})
+
+		await runBulkFavorite([ok, bad])
+
+		expect(useDriveStore.getState().selectedItems.map(item => item.data.uuid)).toEqual([bad.data.uuid])
+	})
+
+	it("toasts a partial failure", async () => {
+		const ok = fileItem({ uuid: testUuid("ok2") })
+		const bad = fileItem({ uuid: testUuid("bad2") })
+		setFavoritedItemsMock.mockResolvedValueOnce({
+			succeeded: [ok],
+			failed: [{ item: bad, dto: { species: "plain", message: "no", label: "no" } }]
+		})
+
+		await runBulkFavorite([ok, bad])
+
+		expect(toastError).toHaveBeenCalledTimes(1)
+		expect(toastSuccess).not.toHaveBeenCalled()
 	})
 })

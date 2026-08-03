@@ -18,7 +18,8 @@ const namesByUuid = new Map<string, string>()
 // its target through this, the same cache-first way listDirectory's uuid case resolves a normal dir:
 // every shared listing populates it with the dirs it returned, so descending into one costs no extra
 // round trip. A SharedDir carries no own role, so the parent's role is stored alongside it.
-interface SharedDirContext {
+// Exported: lib/sharedPath.ts re-walks an ancestor chain to reseed this map after a cold start.
+export interface SharedDirContext {
 	dir: AnySharedDir
 	role: SharingRole
 }

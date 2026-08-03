@@ -176,8 +176,29 @@ test.describe("context menus", () => {
 			await expect(page.getByRole("button", { name: "Color", exact: true })).toHaveCount(0)
 			await expect(page.getByRole("button", { name: "Versions", exact: true })).toHaveCount(0)
 
+			// 2b. Right-clicking a row that is PART of the current 2+ selection opens the BULK menu — the
+			// same descriptor set the bar above renders, from the same builder.
+			await fileRow.click({ button: "right" })
+			const bulkContextMenu = page.getByRole("menu")
+			await expect(bulkContextMenu).toBeVisible()
+			await expect(bulkContextMenu.getByRole("menuitem")).toHaveText(expectedBulkLabels)
+			await page.keyboard.press("Escape")
+			await expect(bulkContextMenu).toHaveCount(0)
+
+			// Collapse the selection back to ONE row (a plain click replaces the selection), so the OTHER
+			// row is now unselected — right-clicking it must retarget the selection to it and open the
+			// single-item menu. FILE_MENU_IDS is the exact set the per-type leg above already asserted for
+			// this same row, so a failed retarget would show up as the bulk set instead.
+			await dirRow.click()
+			await fileRow.click({ button: "right" })
+			const retargetedMenu = page.getByRole("menu")
+			await expect(retargetedMenu).toBeVisible()
+			await expect(retargetedMenu.getByRole("menuitem")).toHaveText(labelsFor(FILE_MENU_IDS))
+			await page.keyboard.press("Escape")
+			await expect(retargetedMenu).toHaveCount(0)
+
 			await page.getByRole("button", { name: "Clear selection", exact: true }).click()
-			await expect(page.getByText("2 selected", { exact: true })).toHaveCount(0)
+			await expect(page.getByText("1 selected", { exact: true })).toHaveCount(0)
 
 			// 3. Trash-variant menu: trash the DIRECTORY via its own context menu (proving Trash is
 			// reachable from the right-click surface too, not just the toolbar/bulk bar), then read

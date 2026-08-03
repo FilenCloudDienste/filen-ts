@@ -22,6 +22,7 @@ export type ItemActionId =
 	| "color"
 	| "versions"
 	| "info"
+	| "openContainingDirectory"
 	| "download"
 	| "import"
 	| "publicLink"
@@ -58,6 +59,14 @@ const MOVE: ItemActionDescriptor = { id: "move", ...ACTION_DEFS.move, run: "dial
 const COLOR: ItemActionDescriptor = { id: "color", ...ACTION_DEFS.color, run: "dialog", dialogKind: "color" }
 export const VERSIONS: ItemActionDescriptor = { id: "versions", ...ACTION_DEFS.versions, run: "dialog", dialogKind: "versions" }
 export const INFO: ItemActionDescriptor = { id: "info", ...ACTION_DEFS.info, run: "dialog", dialogKind: "info" }
+// Search results only (see driveItemActions' searchHit option) — navigates to the hit's parent and
+// reveals the row there. "direct": itemMenu.tsx resolves the ancestor chain and navigates itself,
+// there is no dialog to route to.
+const OPEN_CONTAINING_DIRECTORY: ItemActionDescriptor = {
+	id: "openContainingDirectory",
+	...ACTION_DEFS.openContainingDirectory,
+	run: "direct"
+}
 // Public link and Copy link share one dialog kind — both open the same link-management panel as a
 // FALLBACK. Copy link's real one-tap behavior (read existing link status, copy the URL straight to
 // the clipboard when a link is already enabled) is a dispatch-time decision itemMenu.tsx's onClick
@@ -109,10 +118,8 @@ export function downloadDescriptor(): ItemActionDescriptor {
 }
 
 // Download's "direct" action needs no await before it — startDownloads' FSA save picker requires the
-// click's own live user gesture (see download.ts), and itemMenu.tsx's onClick can't be exercised
-// under this project's DOM-less vitest setup (vitest.config.ts's node environment), so this is the
-// unit-testable seam proving the wiring: itemMenu.tsx calls this synchronously off the click, never
-// `await`ed.
+// click's own live user gesture (see download.ts). This is the unit-testable seam proving the wiring:
+// itemMenu.tsx calls it synchronously off the click, never `await`ed.
 export function startItemDownload(item: DriveItem): void {
 	void startDownloads([item])
 }
@@ -121,7 +128,10 @@ export function startItemDownload(item: DriveItem): void {
 // itemMenu.tsx) — same descriptor list either way, gated purely by variant/type/undecryptable so it
 // stays trivially testable without rendering anything. Operates on a SINGLE item; bulk multi-select
 // actions are the selection bar's own concern, not this menu's.
-export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemActionDescriptor[] {
+// `searchHit` is true only for a row whose parent is NOT the directory on screen (driveRow.tsx's own
+// searchParentPath), which is exactly when "Open containing directory" has somewhere to go. Optional,
+// so every existing two-argument call site is unaffected.
+export function driveItemActions(item: DriveItem, variant: DriveVariant, options?: { searchHit?: boolean }): ItemActionDescriptor[] {
 	// Trash's own menu is already the maximally-reduced set (no rename/move/color/versions/link/
 	// download regardless), so an undecryptable item here needs no further reduction — checked first
 	// so that case never has to be special-cased below.
@@ -172,6 +182,13 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 			]
 		: [INFO]
 
+	// Right after Info, the other reference/reveal action. Deliberately absent from the trash branch
+	// above (search is drive-variant only) and from the undecryptable branch (its ancestor walk
+	// resolves nothing the user could act on).
+	if (options?.searchHit === true) {
+		actions.push(OPEN_CONTAINING_DIRECTORY)
+	}
+
 	// Download sits right after Info (the other read/reference action) — offered on every surface this
 	// point is reachable from, owned or shared alike, never gated by ownerMutable/canShareVariant
 	// (download mutates nothing).
@@ -203,18 +220,24 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant): ItemAc
 	return actions
 }
 
-// Action ids offline never reaches the SDK/network for: the item-mutating set (rename/move/color/
-// public-link+copy-link/trash) plus the transfer-starting set (download/import). Left alone:
-// info/versions/favorite/share/unshare/restore. A post-processing step over driveItemActions' own
-// result rather than a parameter threaded into it: the builder above is variant/undecryptable-pure
-// and already has 22 existing call sites in itemMenu.test.ts pinned to its two-argument shape.
+// Every id whose handler awaits an sdkApi call is gated; a read dialog that renders local metadata
+// (info) or its own query error state (versions) stays open offline, with its own network sub-actions
+// gated inside the dialog instead. A post-processing step over driveItemActions' own result rather
+// than a parameter threaded into it: the builder above is variant/undecryptable-pure and already has
+// many existing call sites pinned to its two-argument shape.
 const OFFLINE_GATED_IDS: ReadonlySet<ItemActionId> = new Set([
 	"rename",
 	"move",
+	"favorite",
 	"color",
 	"publicLink",
 	"copyLink",
+	"share",
+	"unshare",
 	"trash",
+	"restore",
+	"deletePermanently",
+	"openContainingDirectory",
 	"download",
 	"import"
 ])

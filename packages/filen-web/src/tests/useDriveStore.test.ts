@@ -25,7 +25,26 @@ function directoryItem(uuid: UuidStr): DriveItem {
 }
 
 beforeEach(() => {
-	useDriveStore.setState({ selectedItems: [] })
+	useDriveStore.setState({ selectedItems: [], pendingReveal: null })
+})
+
+describe("pending reveal", () => {
+	it("round-trips a request and clears it again", () => {
+		useDriveStore.getState().requestReveal({ uuid: testUuid("a"), splat: "a/b" })
+
+		expect(useDriveStore.getState().pendingReveal).toEqual({ uuid: testUuid("a"), splat: "a/b" })
+
+		useDriveStore.getState().clearPendingReveal()
+
+		expect(useDriveStore.getState().pendingReveal).toBeNull()
+	})
+
+	it("a second request replaces the first — only the latest reveal can ever fire", () => {
+		useDriveStore.getState().requestReveal({ uuid: testUuid("a"), splat: "a" })
+		useDriveStore.getState().requestReveal({ uuid: testUuid("b"), splat: "b" })
+
+		expect(useDriveStore.getState().pendingReveal).toEqual({ uuid: testUuid("b"), splat: "b" })
+	})
 })
 
 describe("toggleSelectedItem", () => {

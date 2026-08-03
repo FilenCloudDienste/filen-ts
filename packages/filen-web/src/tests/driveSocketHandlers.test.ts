@@ -84,6 +84,22 @@ function getTrash(): DriveItem[] | undefined {
 	return testQueryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "trash", uuid: null }))
 }
 
+function seedFavorites(items: DriveItem[]): void {
+	testQueryClient.setQueryData(driveListingQueryKey({ variant: "favorites", uuid: null }), items)
+}
+
+function getFavorites(): DriveItem[] | undefined {
+	return testQueryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "favorites", uuid: null }))
+}
+
+function seedRecents(items: DriveItem[]): void {
+	testQueryClient.setQueryData(driveListingQueryKey({ variant: "recents", uuid: null }), items)
+}
+
+function getRecents(): DriveItem[] | undefined {
+	return testQueryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "recents", uuid: null }))
+}
+
 beforeEach(() => {
 	testQueryClient.clear()
 	useDriveStore.setState({ selectedItems: [] })
@@ -218,6 +234,75 @@ describe("drive socket handlers — attribute patches", () => {
 		handleDriveEvent(driveEvt({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: true }) } }))
 
 		expect(getListing(PARENT_A)[0]?.data.favorited).toBe(true)
+	})
+})
+
+describe("drive socket handlers — favorites membership", () => {
+	it("itemFavorite ADDS a newly-favorited file to a cached favorites listing", () => {
+		seedFavorites([])
+		handleDriveEvent(driveEvt({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: true }) } }))
+
+		expect(getFavorites()?.map(item => item.data.uuid)).toEqual([testUuid("file")])
+	})
+
+	it("itemFavorite ADDS a newly-favorited directory to a cached favorites listing", () => {
+		seedFavorites([])
+		handleDriveEvent(driveEvt({ type: "itemFavorite", item: { type: "normalDir", ...mockDir({ favorited: true }) } }))
+
+		expect(getFavorites()?.map(item => item.data.uuid)).toEqual([testUuid("dir")])
+	})
+
+	it("itemFavorite REMOVES an unfavorited item from the favorites listing", () => {
+		seedFavorites([narrowItem(mockFile({ favorited: true }))])
+		handleDriveEvent(driveEvt({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: false }) } }))
+
+		expect(getFavorites()).toEqual([])
+	})
+
+	it("itemFavorite never conjures the favorites listing when it was never fetched", () => {
+		handleDriveEvent(driveEvt({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: true }) } }))
+
+		expect(getFavorites()).toBeUndefined()
+	})
+
+	it("itemFavorite dedups by uuid — a re-delivered event leaves exactly one row", () => {
+		seedFavorites([])
+		handleDriveEvent(driveEvt({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: true }) } }))
+		handleDriveEvent(driveEvt({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: true }) } }))
+
+		expect(getFavorites()?.map(item => item.data.uuid)).toEqual([testUuid("file")])
+	})
+
+	it("itemFavorite still replaces the row in place in every other cached listing", () => {
+		seedListing(PARENT_A, [narrowItem(mockFile())])
+		seedFavorites([])
+		handleDriveEvent(driveEvt({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: true }) } }))
+
+		expect(getListing(PARENT_A).map(item => item.data.uuid)).toEqual([testUuid("file")])
+		expect(getListing(PARENT_A)[0]?.data.favorited).toBe(true)
+	})
+})
+
+describe("drive socket handlers — recents insertion", () => {
+	it("fileNew appends the file to a cached recents listing", () => {
+		seedRecents([])
+		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+
+		expect(getRecents()?.map(item => item.data.uuid)).toEqual([testUuid("file")])
+	})
+
+	it("fileNew never conjures a recents listing that was never fetched", () => {
+		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+
+		expect(getRecents()).toBeUndefined()
+	})
+
+	it("fileNew dedups by uuid in recents on a re-delivered event", () => {
+		seedRecents([])
+		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+
+		expect(getRecents()?.map(item => item.data.uuid)).toEqual([testUuid("file")])
 	})
 })
 

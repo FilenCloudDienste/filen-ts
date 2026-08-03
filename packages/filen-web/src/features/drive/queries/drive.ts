@@ -4,10 +4,21 @@ import { queryClient } from "@/queries/client"
 // Whole-statement `import type` here too — sdk.worker.ts's own top-level code pulls in
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
-import type { Dir, File, FileVersion, DirPublicLinkRW, FilePublicLink, AnyDirWithContext, DirColor, DirSizeResponse } from "@filen/sdk-rs"
+import type {
+	Dir,
+	File,
+	FileVersion,
+	DirPublicLinkRW,
+	FilePublicLink,
+	AnyDirWithContext,
+	DirColor,
+	DirSizeResponse,
+	GetItemPathResult
+} from "@filen/sdk-rs"
 import { fastLocaleCompare } from "@filen/utils"
 import { narrowItem, asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
 import {
+	getHideHiddenItems,
 	getSortPreferences,
 	getViewModePreferences,
 	type DrivePreferences,
@@ -65,11 +76,20 @@ export async function fetchDirectoryListing(variant: DriveVariant, uuid: string 
 // variants fetch through fetchSharedListing (whose worker ops return a different result shape than
 // listDirectory — see fetchSharedListing / toListingTarget's throw), everything else through
 // fetchDirectoryListing. The guard narrows `variant` to the shared union, matching its param.
-export function useDirectoryListingQuery(variant: DriveVariant, uuid: string | null): UseQueryResult<DriveItem[]> {
+// `path` is a shared-variant resolution hint only (see fetchSharedListing) — deliberately NOT part of
+// the query KEY: the same uuid lists the same contents however it was reached, so keying on it would
+// fragment the cache for nothing. Defaulted, so every picker call site keeps its two-argument shape.
+export function useDirectoryListingQuery(
+	variant: DriveVariant,
+	uuid: string | null,
+	path: readonly string[] = []
+): UseQueryResult<DriveItem[]> {
 	return useQuery({
 		queryKey: driveListingQueryKey({ variant, uuid }),
 		queryFn: () =>
-			variant === "sharedIn" || variant === "sharedOut" ? fetchSharedListing(variant, uuid) : fetchDirectoryListing(variant, uuid)
+			variant === "sharedIn" || variant === "sharedOut"
+				? fetchSharedListing(variant, uuid, path)
+				: fetchDirectoryListing(variant, uuid)
 	})
 }
 
@@ -127,13 +147,20 @@ export function useDirectoryTreeChildrenQuery(uuid: string | null): UseQueryResu
 // structurally a plain dir/file and can't be classified as shared. Exported (no hook wrapper of its
 // own — useDirectoryListingQuery's variant dispatch calls it directly) so this project's
 // node-environment unit tests can exercise it against a mocked sdkApi.
-export async function fetchSharedListing(variant: "sharedIn" | "sharedOut", uuid: string | null): Promise<DriveItem[]> {
+// `path` is the route splat's full ancestor-uuid chain (the target itself last) — a resolution HINT
+// for a cold worker whose in-session share-context map has never seen this uuid (a reload, bookmark,
+// restored tab or pasted URL), never part of the listing's identity. The root listing needs none.
+export async function fetchSharedListing(
+	variant: "sharedIn" | "sharedOut",
+	uuid: string | null,
+	path: readonly string[] = []
+): Promise<DriveItem[]> {
 	if (uuid === null) {
 		const { dirs, files } = variant === "sharedIn" ? await sdkApi.listSharedInRoot() : await sdkApi.listSharedOutRoot()
 		return [...dirs.map(narrowItem), ...files.map(narrowItem)]
 	}
 
-	const { dirs, files, role } = await sdkApi.listSharedDirectory(uuid)
+	const { dirs, files, role } = await sdkApi.listSharedDirectory(uuid, { variant, path: [...path] })
 	return [...dirs.map(dir => narrowItem({ ...dir, sharingRole: role })), ...files.map(file => narrowItem({ ...file, sharingRole: role }))]
 }
 
@@ -242,6 +269,19 @@ export function useItemInfoQuery(
 	})
 }
 
+// The reveal's ancestor-chain read (features/drive/lib/reveal.ts). Its OWN key, not itemInfoQueryKey:
+// that entry holds getItemInfo's swallow-on-failure shape plus a directory size, so sharing it would
+// hand the reveal exactly the two properties the path-only worker op exists to avoid. The duplicated
+// cost versus a warm info entry is one path walk — no size aggregate — which is what the reveal needs
+// anyway.
+export function itemPathQueryKey(uuid: string) {
+	return ["drive", "itemPath", uuid] as const
+}
+
+export async function fetchItemPath(item: Dir | File): Promise<GetItemPathResult> {
+	return sdkApi.getItemPath(item)
+}
+
 // Per-directory recursive size aggregate (bytes + child file/dir counts), keyed on the directory's
 // own uuid. One cache slice serves two consumers: the row size column (useDriveDirectorySizes
 // prefetches a listing's directories under this exact key — see directoryListing.tsx) and, at sort
@@ -340,6 +380,15 @@ export function useHeicUploadConvertPreferenceQuery(): UseQueryResult<boolean> {
 	return useQuery({
 		queryKey: ["drive", "heicUploadConvertPreference"] as const,
 		queryFn: getHeicUploadConvertPreference
+	})
+}
+
+// Same convention again — the hide-dot-prefixed-items display filter, surfaced from the drive
+// toolbar's Display menu.
+export function useHideHiddenItemsPreferenceQuery(): UseQueryResult<boolean> {
+	return useQuery({
+		queryKey: ["drive", "hideHiddenItemsPreference"] as const,
+		queryFn: getHideHiddenItems
 	})
 }
 

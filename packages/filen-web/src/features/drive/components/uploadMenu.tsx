@@ -5,6 +5,7 @@ import { UploadIcon } from "lucide-react"
 import { startUploads } from "@/features/drive/lib/upload"
 import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
 import { normalizeTextFileName, runCreateTextFile } from "@/features/drive/lib/createTextFile"
+import { notifyIfNameIsHidden } from "@/features/drive/lib/hiddenNameNotice"
 import { setHeicUploadConvertPreference } from "@/features/drive/lib/heicUpload"
 import { driveListingQueryUpdate, useHeicUploadConvertPreferenceQuery } from "@/features/drive/queries/drive"
 import { type PreviewSource, drivePreviewSources } from "@/features/preview/lib/previewSource"
@@ -36,6 +37,8 @@ export interface UploadMenuProps {
 	// True only when `disabled` is caused specifically by the app being offline — surfaced as the
 	// trigger's native title, mirroring newDirectory.tsx's own offline/disabled split.
 	offline?: boolean
+	// True when this listing would actually hide a dot-prefixed name — see NewDirectory's identical prop.
+	hiddenNotice?: boolean
 }
 
 // Toolbar entry point for starting an upload. A DropdownMenu (not a bare button) holds "Upload
@@ -48,7 +51,7 @@ export interface UploadMenuProps {
 // masterKeysFileField.tsx) — its value is reset after every pick so choosing the exact same
 // file(s)/directory again still fires change. "New text file" instead opens a name dialog (reusing
 // the shared InputDialog primitive, same validation convention as newDirectory.tsx).
-export function UploadMenu({ parentUuid, disabled = false, openPreview, offline = false }: UploadMenuProps) {
+export function UploadMenu({ parentUuid, disabled = false, openPreview, offline = false, hiddenNotice = false }: UploadMenuProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const inputRef = useRef<HTMLInputElement>(null)
 	const directoryInputRef = useRef<HTMLInputElement>(null)
@@ -87,13 +90,16 @@ export function UploadMenu({ parentUuid, disabled = false, openPreview, offline 
 	async function handleTextFileSubmit(name: string): Promise<void> {
 		setTextFilePending(true)
 
+		// The NORMALIZED name is what actually lands (and what the row will show), so it is also what
+		// the hidden-name check below has to judge.
+		const normalized = normalizeTextFileName(name.trim())
 		const outcome = await runCreateTextFile(
 			{
 				uploadFileBytes: (parent, data, fileName, mime) => sdkApi.uploadFileBytes(parent, data, fileName, mime),
 				patchListing: driveListingQueryUpdate
 			},
 			parentUuid,
-			normalizeTextFileName(name.trim())
+			normalized
 		)
 
 		setTextFilePending(false)
@@ -106,6 +112,7 @@ export function UploadMenu({ parentUuid, disabled = false, openPreview, offline 
 		}
 
 		setTextFileDialogOpen(false)
+		notifyIfNameIsHidden(normalized, "created", hiddenNotice)
 		// Opens the editor immediately (mobile parity — useDriveUpload.ts's createTextFile does the
 		// same). A single-item frozen snapshot, same as a lone previewable item's own open path
 		// (directoryListing.tsx's handleOpen).

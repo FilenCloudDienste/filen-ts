@@ -9,6 +9,7 @@ import {
 	isEmptyTrashTriggerVisible,
 	isVisibleSharedInItem,
 	reconcileSelectedItems,
+	resolveListingDisplayItems,
 	resolveSearchDisplayItems,
 	staleBlockedSelectionUuids,
 	staleSelectionUuids
@@ -309,6 +310,113 @@ describe("resolveSearchDisplayItems", () => {
 
 	it("returns an empty array unchanged regardless of total", () => {
 		expect(resolveSearchDisplayItems([], 0n, "nameAsc")).toEqual([])
+	})
+})
+
+describe("resolveListingDisplayItems", () => {
+	const NO_SIZES: ReadonlyMap<string, number> = new Map()
+
+	function named(label: string, name: string) {
+		return narrowItem(mockDir({ uuid: testUuid(label), meta: { type: "decoded", data: { name } } }))
+	}
+
+	it("non-search arm sorts, then hides", () => {
+		const b = named("disp-b", "b")
+		const a = named("disp-a", "a")
+		const hidden = named("disp-hidden", ".hidden")
+
+		const result = resolveListingDisplayItems({ items: [b, hidden, a], sortBy: "nameAsc", directorySizes: NO_SIZES, hide: true })
+
+		expect(result.items.map(item => item.data.uuid)).toEqual([a.data.uuid, b.data.uuid])
+	})
+
+	it("hidden filtering does not disable search sorting — hiding a row never changes the surviving order", () => {
+		const b = named("gate-b", "b")
+		const a = named("gate-a", "a")
+		const hidden = named("gate-hidden", ".hidden")
+		const input = {
+			items: [b, hidden, a],
+			sortBy: "nameAsc" as const,
+			directorySizes: NO_SIZES,
+			search: { total: 3n, parentPaths: new Map<string, string>() }
+		}
+
+		const shown = resolveListingDisplayItems({ ...input, hide: false })
+		const filtered = resolveListingDisplayItems({ ...input, hide: true })
+
+		// A filter-before-resolve implementation would drop `total` below the delivered count, flipping
+		// the convergence gate and leaving the survivors in SDK order instead of sorted.
+		expect(shown.items.map(item => item.data.uuid)).toEqual([hidden.data.uuid, a.data.uuid, b.data.uuid])
+		expect(filtered.items.map(item => item.data.uuid)).toEqual([a.data.uuid, b.data.uuid])
+	})
+
+	it("search arm keeps the SDK's delivered order while truncated (total > results.length)", () => {
+		const b = named("trunc-b", "b")
+		const a = named("trunc-a", "a")
+
+		const result = resolveListingDisplayItems({
+			items: [b, a],
+			sortBy: "nameAsc",
+			directorySizes: NO_SIZES,
+			hide: false,
+			search: { total: 5n, parentPaths: new Map() }
+		})
+
+		expect(result.items.map(item => item.data.uuid)).toEqual([b.data.uuid, a.data.uuid])
+	})
+
+	it("resolvedCount is the PRE-hide count and hiddenCount the difference", () => {
+		const result = resolveListingDisplayItems({
+			items: [named("count-a", "a"), named("count-hidden", ".hidden"), named("count-b", "b")],
+			sortBy: "nameAsc",
+			directorySizes: NO_SIZES,
+			hide: true
+		})
+
+		expect(result.resolvedCount).toBe(3)
+		expect(result.hiddenCount).toBe(1)
+		expect(result.items.length).toBe(2)
+	})
+
+	it("hides a search hit by its ancestor chain, not just its own name", () => {
+		const buried = named("path-buried", "notes")
+		const sibling = named("path-sibling", "readme")
+
+		const result = resolveListingDisplayItems({
+			items: [buried, sibling],
+			sortBy: "nameAsc",
+			directorySizes: NO_SIZES,
+			hide: true,
+			search: {
+				total: 2n,
+				parentPaths: new Map([
+					[buried.data.uuid, "docs/.cache"],
+					[sibling.data.uuid, "docs"]
+				])
+			}
+		})
+
+		expect(result.items.map(item => item.data.uuid)).toEqual([sibling.data.uuid])
+		expect(result.hiddenCount).toBe(1)
+	})
+
+	it("hide: false is an identity pass-through in both arms", () => {
+		const a = named("id-a", "a")
+		const hidden = named("id-hidden", ".hidden")
+
+		const plain = resolveListingDisplayItems({ items: [hidden, a], sortBy: "nameAsc", directorySizes: NO_SIZES, hide: false })
+		const searched = resolveListingDisplayItems({
+			items: [hidden, a],
+			sortBy: "nameAsc",
+			directorySizes: NO_SIZES,
+			hide: false,
+			search: { total: 2n, parentPaths: new Map() }
+		})
+
+		expect(plain.hiddenCount).toBe(0)
+		expect(plain.items.length).toBe(2)
+		expect(searched.hiddenCount).toBe(0)
+		expect(searched.items.length).toBe(2)
 	})
 })
 

@@ -10,7 +10,10 @@ import { splatToUuids } from "@/features/drive/lib/navigate"
 import { canDragVariant } from "@/features/drive/lib/dnd.logic"
 import { buildDragSourceProps } from "@/features/drive/lib/dnd"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
+import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
 import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
+import { DriveBulkContextMenuContent } from "@/features/drive/components/bulkMenu"
+import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
 import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { cn } from "@/lib/utils"
@@ -36,9 +39,13 @@ export interface DriveRowProps {
 	// uuid -> resolved directory bytes, threaded down from the listing's ONE useDriveDirectorySizes call
 	// (never mounted per-row — see directoryListing.tsx) — passed straight through to formatItemSize.
 	directorySizes: ReadonlyMap<string, number>
+	// The listing's already-reconciled selection — right-clicking a row inside a 2+ selection opens the
+	// BULK menu over exactly these items (freshest metadata, same as the bulk bar reads).
+	selectedItems: DriveItem[]
 	onPointerSelect: (index: number, event: MouseEvent<HTMLDivElement>) => void
 	onOpen: (index: number) => void
 	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
+	onBulkAction: (kind: BulkDialogActionKind) => void
 	registerRef: (index: number, el: HTMLDivElement | null) => void
 }
 
@@ -52,9 +59,11 @@ export function DriveRow({
 	splat,
 	searchParentPath,
 	directorySizes,
+	selectedItems,
 	onPointerSelect,
 	onOpen,
 	onItemAction,
+	onBulkAction,
 	registerRef
 }: DriveRowProps) {
 	const { t } = useTranslation("drive")
@@ -75,6 +84,10 @@ export function DriveRow({
 	// Downgrades a torn/corrupt cache entry back to the icon without waiting for a remount — see the
 	// img's own onError below. Never reset back to false: this mount already gave up on this uuid.
 	const [thumbFailed, setThumbFailed] = useState(false)
+	const bulkMenu = selected && selectedItems.length > 1
+	// A cross-directory search hit is the only case "Open containing directory" has somewhere to go —
+	// searchParentPath is "" for a direct child of the search root and undefined outside a search.
+	const searchHit = searchParentPath !== undefined && searchParentPath.length > 0
 
 	return (
 		<ContextMenu>
@@ -103,6 +116,15 @@ export function DriveRow({
 						}}
 						onDoubleClick={() => {
 							onOpen(index)
+						}}
+						onContextMenu={() => {
+							// Right-clicking outside the current selection retargets it to this row (the
+							// file-manager convention) — otherwise a single-item menu would open while
+							// unrelated rows stayed highlighted. Merges with ContextMenuTrigger's own handler
+							// (Base UI's mergeProps chains same-name handlers, see the comment above).
+							if (!selected) {
+								useDriveStore.getState().setSelectedItems([item])
+							}
 						}}
 						onDragEnter={drop.onDragEnter}
 						onDragOver={drop.onDragOver}
@@ -186,20 +208,32 @@ export function DriveRow({
 									</Button>
 								}
 							/>
+							{/* The ⋯ dropdown stays single-item — it is a per-row affordance, and the bulk
+							    surface already has its own bar plus the context menu below. */}
 							<DriveDropdownMenuContent
 								item={item}
 								variant={variant}
 								onItemAction={onItemAction}
+								searchHit={searchHit}
 							/>
 						</DropdownMenu>
 					</div>
 				}
 			/>
-			<DriveContextMenuContent
-				item={item}
-				variant={variant}
-				onItemAction={onItemAction}
-			/>
+			{bulkMenu ? (
+				<DriveBulkContextMenuContent
+					variant={variant}
+					selectedItems={selectedItems}
+					onBulkAction={onBulkAction}
+				/>
+			) : (
+				<DriveContextMenuContent
+					item={item}
+					variant={variant}
+					onItemAction={onItemAction}
+					searchHit={searchHit}
+				/>
+			)}
 		</ContextMenu>
 	)
 }

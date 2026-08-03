@@ -26,5 +26,8 @@ export const errors = {
 	/** Fires when the backend cannot find the referenced file; surfaces via errorLabel wherever the operation reports */
 	FileNotFound: "File not found.",
 	/** Fires when an operation would exceed the account's storage limit (e.g. an upload); surfaces via errorLabel wherever the transfer reports */
-	MaxStorageReached: "You have reached your maximum storage capacity."
+	MaxStorageReached: "You have reached your maximum storage capacity.",
+	/** Fires when the SDK rejects a file/directory name (rename, create directory, new text file, move-picker create, upload). The SDK collapses several distinct causes into this one kind, so this message summarises the whole rule set instead of naming one cause; it replaces the raw, English-only detail string that surfaced through labelFirst before */
+	InvalidName:
+		"That name can't be used. A name can't contain \\ / : * ? \" < > |, can't start or end with a space, can't end with a dot, and must be 255 bytes or shorter."
 } as const satisfies Partial<Record<SdkErrorKind, string>>

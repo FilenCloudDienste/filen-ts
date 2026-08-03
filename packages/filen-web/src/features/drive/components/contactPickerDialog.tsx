@@ -9,6 +9,7 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { resolveSelectedContacts, togglePickerContact } from "@/features/drive/components/contactPickerDialog.logic"
 import { filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
@@ -39,6 +40,7 @@ const SKELETON_ROW_COUNT = 5
 // is a clean functional picker built from existing primitives.
 export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerDialogProps) {
 	const { t } = useTranslation(["drive", "contacts", "common"])
+	const isOnline = useIsOnline()
 	const contactsQuery = useContactsQuery()
 	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
 	const [pending, setPending] = useState(false)
@@ -186,7 +188,9 @@ export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerD
 		)
 	}
 
-	const canSubmit = selected.size > 0 && !pending
+	// Re-checks connectivity at the confirm layer: the entry point that opened this picker was gated
+	// when it was clicked, but the connection can drop while the picker is open.
+	const canSubmit = selected.size > 0 && !pending && isOnline
 
 	return (
 		<Dialog
@@ -222,6 +226,7 @@ export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerD
 					</Button>
 					<Button
 						disabled={!canSubmit}
+						title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 						onClick={() => {
 							void handleShare()
 						}}

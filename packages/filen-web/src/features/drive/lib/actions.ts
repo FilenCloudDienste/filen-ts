@@ -159,23 +159,28 @@ export async function emptyTrash(): Promise<VoidActionOutcome> {
 
 // ── Favorite ─────────────────────────────────────────────────────────────
 
-// Shared cache-patch tail for both the single-item toggle and the bulk SET below — factored out so
-// the favorites-membership rule (favoriting ADDS a row that listing never had, unfavoriting REMOVES
-// it) has exactly one implementation. Takes `favorited` explicitly rather than reading `result.data
-// .favorited` so a caller applying the same target across a whole selection (setFavoritedItems)
-// never has to reconstruct it from the item.
-function applyFavoritePatch(favorited: boolean, result: DriveItem): void {
-	driveListingQueryUpdateGlobal(prev => replaceIfPresent(prev, result))
-
-	// Favorites is its own membership listing, not merely a flag on an existing row: favoriting must
-	// be able to ADD a row that listing never had, unfavoriting must REMOVE it — the global flag patch
-	// above only ever updates rows that already exist. The add path dedups on uuid alone rather than
-	// upsertDriveItem's name-collision rule: favorites aggregates across every directory, so two
-	// distinct items from different parents can legitimately share a name, and every other upsert call
-	// site targets a single drive-parent where the backend already enforces name-uniqueness.
+// Favorites is its own membership listing, not merely a flag on an existing row: favoriting must be
+// able to ADD a row that listing never had, unfavoriting must REMOVE it. The add path dedups on uuid
+// ALONE rather than upsertDriveItem's name-collision rule — favorites aggregates across every
+// directory, so two distinct items from different parents can legitimately share a name, and every
+// other upsert call site targets a single drive-parent where the backend already enforces
+// name-uniqueness. `prev === undefined` (nobody has opened Favorites) stays a no-op so an unfetched
+// listing is never conjured. Exported: the realtime ItemFavorite handler (lib/socketHandlers.ts)
+// applies the identical membership rule for a change made on another device.
+export function patchFavoritesListing(favorited: boolean, item: DriveItem): void {
 	queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "favorites", uuid: null }), prev =>
-		prev === undefined ? prev : favorited ? [...removeByUuid(prev, result.data.uuid), result] : removeByUuid(prev, result.data.uuid)
+		prev === undefined ? prev : favorited ? [...removeByUuid(prev, item.data.uuid), item] : removeByUuid(prev, item.data.uuid)
 	)
+}
+
+// Shared cache-patch tail for both the single-item toggle and the bulk SET below — factored out so
+// the favorites-membership rule has exactly one implementation. Takes `favorited` explicitly rather
+// than reading `result.data.favorited` so a caller applying the same target across a whole selection
+// (setFavoritedItems) never has to reconstruct it from the item.
+function applyFavoritePatch(favorited: boolean, result: DriveItem): void {
+	// The global flag patch only ever updates rows that already exist; membership is the other half.
+	driveListingQueryUpdateGlobal(prev => replaceIfPresent(prev, result))
+	patchFavoritesListing(favorited, result)
 }
 
 export async function toggleFavorite(item: DriveItem): Promise<ActionOutcome> {

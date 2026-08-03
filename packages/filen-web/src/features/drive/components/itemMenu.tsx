@@ -1,9 +1,11 @@
 import { createElement, Fragment } from "react"
 import { useTranslation } from "react-i18next"
+import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { toggleFavorite, restoreItems } from "@/features/drive/lib/actions"
+import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
 import { driveItemLinkStatusQueryKey, fetchDriveItemLinkStatus } from "@/features/drive/queries/drive"
 import { queryClient } from "@/queries/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -38,6 +40,9 @@ export interface ItemMenuContentProps {
 	// Preview-only: descriptor ids to omit from the rendered list — the preview drops "download" since
 	// its header already has its own dedicated download button (previewOverlay.tsx).
 	hiddenActionIds?: ReadonlySet<ItemActionId> | undefined
+	// True for a search hit whose parent is not the directory on screen — the only case
+	// "Open containing directory" is offered for. Omitted by every non-listing caller.
+	searchHit?: boolean | undefined
 }
 
 interface MenuItemFamily {
@@ -64,11 +69,13 @@ function ItemMenuEntries({
 	onFavoriteToggled,
 	onRestored,
 	hiddenActionIds,
+	searchHit,
 	family
 }: ItemMenuContentProps & { family: MenuItemFamily }) {
 	const { t } = useTranslation(["drive", "common"])
+	const navigate = useNavigate()
 	const isOnline = useIsOnline()
-	const descriptors = applyOfflineGate(driveItemActions(item, variant), isOnline).filter(
+	const descriptors = applyOfflineGate(driveItemActions(item, variant, { searchHit: searchHit === true }), isOnline).filter(
 		descriptor => !hiddenActionIds?.has(descriptor.id)
 	)
 	const { Item, Separator } = family
@@ -104,10 +111,17 @@ function ItemMenuEntries({
 			return
 		}
 
-		// "favorite" and "restore" are the only ids the builder ever marks "direct" — restore is the
-		// remaining case. A restored item always vanishes from the trash listing it was selected in
-		// (see actions.ts), so a successful outcome also drops it from selection — mirrors
-		// directoryListing.tsx's identical cleanup after a trash/delete confirm.
+		if (descriptor.id === "openContainingDirectory") {
+			await runOpenContainingDirectory(defaultRevealDeps, item, target => {
+				void navigate(target)
+			})
+
+			return
+		}
+
+		// Restore is the remaining direct id. A restored item always vanishes from the trash listing it
+		// was selected in (see actions.ts), so a successful outcome also drops it from selection —
+		// mirrors directoryListing.tsx's identical cleanup after a trash/delete confirm.
 		const outcome = await restoreItems([item])
 		toastBulkOutcome(outcome)
 		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(succeededItem => succeededItem.data.uuid))
@@ -191,7 +205,8 @@ export function DriveContextMenuContent({
 	onItemAction,
 	onFavoriteToggled,
 	onRestored,
-	hiddenActionIds
+	hiddenActionIds,
+	searchHit
 }: ItemMenuContentProps) {
 	return (
 		<ContextMenuContent>
@@ -202,6 +217,7 @@ export function DriveContextMenuContent({
 				onFavoriteToggled={onFavoriteToggled}
 				onRestored={onRestored}
 				hiddenActionIds={hiddenActionIds}
+				searchHit={searchHit}
 				family={{ Item: ContextMenuItem, Separator: ContextMenuSeparator }}
 			/>
 		</ContextMenuContent>
@@ -216,7 +232,8 @@ export function DriveDropdownMenuContent({
 	onItemAction,
 	onFavoriteToggled,
 	onRestored,
-	hiddenActionIds
+	hiddenActionIds,
+	searchHit
 }: ItemMenuContentProps) {
 	return (
 		<DropdownMenuContent align="end">
@@ -227,6 +244,7 @@ export function DriveDropdownMenuContent({
 				onFavoriteToggled={onFavoriteToggled}
 				onRestored={onRestored}
 				hiddenActionIds={hiddenActionIds}
+				searchHit={searchHit}
 				family={{ Item: DropdownMenuItem, Separator: DropdownMenuSeparator }}
 			/>
 		</DropdownMenuContent>

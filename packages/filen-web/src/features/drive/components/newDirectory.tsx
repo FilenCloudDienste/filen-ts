@@ -8,6 +8,7 @@ import { Kbd } from "@/lib/keymap/kbd"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { runCreateDirectory } from "@/features/drive/lib/createDirectory"
+import { notifyIfNameIsHidden } from "@/features/drive/lib/hiddenNameNotice"
 import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -41,9 +42,12 @@ export interface NewDirectoryProps {
 	// `disabled`'s own broader gate) — swaps the tooltip's copy from the action label to the offline
 	// explanation so a proactively-disabled control still tells the user why.
 	offline?: boolean
+	// True when this listing would actually hide a dot-prefixed name (the preference AND
+	// hiddenFilterAppliesTo) — computed once by the listing, since it already holds both halves.
+	hiddenNotice?: boolean
 }
 
-export function NewDirectory({ parentUuid, disabled = false, dialogOpen, offline = false }: NewDirectoryProps) {
+export function NewDirectory({ parentUuid, disabled = false, dialogOpen, offline = false, hiddenNotice = false }: NewDirectoryProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const [open, setOpen] = useState(false)
 	const [pending, setPending] = useState(false)
@@ -65,10 +69,11 @@ export function NewDirectory({ parentUuid, disabled = false, dialogOpen, offline
 	async function handleSubmit(name: string): Promise<void> {
 		setPending(true)
 
+		const trimmed = name.trim()
 		const outcome = await runCreateDirectory(
 			{ createDirectory: (parent, next) => sdkApi.createDirectory(parent, next), patchListing: driveListingQueryUpdate },
 			parentUuid,
-			name.trim()
+			trimmed
 		)
 
 		setPending(false)
@@ -81,6 +86,9 @@ export function NewDirectory({ parentUuid, disabled = false, dialogOpen, offline
 		}
 
 		setOpen(false)
+		// Creating has no success feedback of its own — the row appearing IS the feedback — so a name
+		// the display filter will swallow needs to say so.
+		notifyIfNameIsHidden(trimmed, "created", hiddenNotice)
 	}
 
 	return (

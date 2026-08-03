@@ -7,6 +7,7 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { type PreviewSource, previewSourceKey, stepPreviewSourceIndex } from "@/features/preview/lib/previewSource"
 import { renameItem, trashItems, restoreItems, deleteItemsPermanently, disableLinks, emptyTrash } from "@/features/drive/lib/actions"
 import { unshareItems } from "@/features/drive/lib/share/actions"
+import { notifyIfNameIsHidden } from "@/features/drive/lib/hiddenNameNotice"
 import { type BulkOutcome } from "@/features/drive/lib/bulk"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
@@ -55,6 +56,9 @@ export interface DriveDialogHost {
 interface UseDriveDialogHostParams {
 	variant: DriveVariant
 	selectedItems: DriveItem[]
+	// True when this listing would actually hide a dot-prefixed name (the preference AND
+	// hiddenFilterAppliesTo) — computed once by the listing, since it already holds both halves.
+	hiddenNoticeApplies: boolean
 }
 
 // One instance of whichever dialog activeDialog.kind names is rendered at a time (renderActiveDialog),
@@ -62,7 +66,7 @@ interface UseDriveDialogHostParams {
 // (rename/trash/delete/emptyTrash/restoreSelected) — the move/color/versions/info dialogs run their own
 // async calls internally and track their own pending state, since each needs more than one shared
 // boolean can express (e.g. versions has an independent restore vs. delete-confirm flow).
-export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHostParams): DriveDialogHost {
+export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies }: UseDriveDialogHostParams): DriveDialogHost {
 	const { t } = useTranslation(["drive", "common"])
 	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, isDialogOpen, closeActiveDialog } =
 		useDialogHost<ActiveDialog>()
@@ -152,7 +156,8 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 
 	async function handleRenameSubmit(item: DriveItem, value: string): Promise<void> {
 		setDialogPending(true)
-		const outcome = await renameItem(item, value.trim())
+		const trimmed = value.trim()
+		const outcome = await renameItem(item, trimmed)
 		setDialogPending(false)
 
 		if (outcome.status === "error") {
@@ -163,6 +168,8 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 		}
 
 		closeActiveDialog()
+		// A rename has no success feedback of its own either — see newDirectory.tsx's identical call.
+		notifyIfNameIsHidden(trimmed, "renamed", hiddenNoticeApplies)
 	}
 
 	// Shared tail for every HOST-owned bulk-dialog confirm (trash/delete/restoreSelected): runs `op`

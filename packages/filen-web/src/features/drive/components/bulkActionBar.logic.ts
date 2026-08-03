@@ -1,11 +1,14 @@
 import { type LucideIcon } from "lucide-react"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { canMoveVariant, type DriveVariant } from "@/features/drive/lib/preferences"
-import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
+import { aggregateDriveSelectionFlags, type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { canShareVariant, isReadOnlySharedVariant } from "@/features/drive/lib/share/gating"
 import { type DriveKey } from "@/lib/i18n"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { startDownloads } from "@/features/drive/lib/download"
+import { setFavoritedItems } from "@/features/drive/lib/actions"
+import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
+import { useDriveStore } from "@/features/drive/store/useDriveStore"
 
 // Dialog kinds the bulk-action bar can ask the listing's dialog host to open — a narrow subset of
 // directoryListing.tsx's own ActiveDialogKind (the per-item-only kinds — rename/color/versions/info/
@@ -120,19 +123,38 @@ export function isBulkDownloadEnabled(items: DriveItem[]): boolean {
 	return items.length > 0
 }
 
-// Bulk-action ids offline never reaches the SDK/network for — move/trash (item-mutating) plus
-// download (a transfer-starting entry point); share/unshare/favorite/restoreSelected/delete are left
-// for a later gating pass, mirroring itemMenu.logic.ts's applyOfflineGate scope note.
-const OFFLINE_GATED_BULK_IDS: ReadonlySet<BulkActionDescriptor["id"]> = new Set(["move", "trash", "download"])
+// Bulk-action ids offline never reaches the SDK/network for. This set is currently TOTAL over
+// BulkActionDescriptor["id"] — kept as an explicit Set rather than collapsed to `return !isOnline` so
+// a future read-only bulk action must opt in consciously (pinned by bulkActionBar.test.ts).
+const OFFLINE_GATED_BULK_IDS: ReadonlySet<BulkActionDescriptor["id"]> = new Set([
+	"favorite",
+	"move",
+	"share",
+	"unshare",
+	"trash",
+	"restoreSelected",
+	"delete",
+	"download",
+	"disableLink"
+])
 
 export function isBulkActionOfflineDisabled(id: BulkActionDescriptor["id"], isOnline: boolean): boolean {
 	return !isOnline && OFFLINE_GATED_BULK_IDS.has(id)
 }
 
 // Download's "direct" action needs no await before it — startDownloads' FSA save picker requires the
-// click's own live user gesture (see features/drive/lib/download.ts), and bulkActionBar.tsx's onClick can't
-// be exercised under this project's DOM-less vitest setup, so this is the unit-testable seam proving
-// the wiring: bulkActionBar.tsx calls this synchronously off the click, never `await`ed.
+// click's own live user gesture (see features/drive/lib/download.ts). This is the unit-testable seam
+// proving the wiring: bulkActionBar.tsx calls it synchronously off the click, never `await`ed.
 export function startBulkDownload(items: DriveItem[]): void {
 	void startDownloads(items)
+}
+
+// The bulk favorite SET, extracted so the floating bar AND the selection-aware context menu
+// (components/bulkMenu.tsx) can never drift on what "Favorite" does to a whole selection — mirrors
+// startBulkDownload's own extraction rationale above. A succeeded item is pruned from the selection,
+// a failed one stays selected so the user can retry.
+export async function runBulkFavorite(items: DriveItem[]): Promise<void> {
+	const outcome = await setFavoritedItems(items, !aggregateDriveSelectionFlags(items).includesFavorited)
+	toastBulkOutcome(outcome)
+	useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
 }

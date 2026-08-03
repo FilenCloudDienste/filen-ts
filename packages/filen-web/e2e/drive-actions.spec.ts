@@ -61,6 +61,30 @@ test.describe("drive bulk actions", () => {
 		await expect(dialog).toBeVisible()
 		await expect(dialog.getByRole("heading", { name: "Select destination", exact: true })).toBeVisible()
 
+		// "Move here" can only ever assert the offline arm: this picker opened on the drive root, which is
+		// where the selected item already lives, so isMoveNoOp (moveTargetDialog.logic.ts) keeps the
+		// confirm disabled online too — it can never be the re-enable probe. The in-picker create button
+		// (gated on `pending` alone before this pass) is the control whose state tracks connectivity.
+		// Filtered by its FolderPlusIcon: the picker's own directory rows are plain <button>s carrying
+		// their directory name, so a live account whose drive root happens to hold a directory literally
+		// named "New directory" would strict-mode-violate a name-only locator. lucide-react stamps every
+		// icon with `lucide-<kebab-name>`, and no row renders that icon. Both locators are scoped to
+		// `dialog`, so the toolbar's own identically-named button behind the modal can never match.
+		const createButton = dialog
+			.getByRole("button", { name: "New directory", exact: true })
+			.filter({ has: page.locator("svg.lucide-folder-plus") })
+		await expect(createButton).toBeEnabled()
+
+		// useIsOnline reads TanStack's onlineManager, which tracks the window online/offline events this
+		// flag fires (precedent: chats.spec.ts). The picker's listing query stays `success` off the warm
+		// cache while offline, so the confirm's own status arm never confounds the assertion.
+		await page.context().setOffline(true)
+		await expect(createButton).toBeDisabled()
+		await expect(dialog.getByRole("button", { name: "Move here", exact: true })).toBeDisabled()
+
+		await page.context().setOffline(false)
+		await expect(createButton).toBeEnabled()
+
 		// Dismiss without ever pressing "Move here" — this test never mutates the live account.
 		await page.keyboard.press("Escape")
 		await expect(dialog).toHaveCount(0)

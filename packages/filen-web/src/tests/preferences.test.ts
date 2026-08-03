@@ -18,9 +18,12 @@ vi.mock("@/lib/storage/adapter", () => ({
 }))
 
 import {
+	DEFAULT_HIDE_HIDDEN_ITEMS,
 	DEFAULT_SORT_PREFERENCES,
 	DEFAULT_VIEW_MODE_PREFERENCES,
 	canWriteVariant,
+	getHideHiddenItems,
+	setHideHiddenItems,
 	getPerDirectoryKey,
 	getSortPreferences,
 	getViewModePreferences,
@@ -122,6 +125,27 @@ describe("sort preferences: get/set", () => {
 		// adapter.test.ts covers kvGetJson's own schema-rejection behavior; this only checks that
 		// THIS module falls back to its default on the null it would receive either way.
 		await expect(getSortPreferences()).resolves.toEqual(DEFAULT_SORT_PREFERENCES)
+	})
+})
+
+describe("hide-hidden-items preference", () => {
+	it("defaults to OFF on an empty store — nothing is hidden until the owner asks for it", async () => {
+		expect(DEFAULT_HIDE_HIDDEN_ITEMS).toBe(false)
+		await expect(getHideHiddenItems()).resolves.toBe(false)
+	})
+
+	it("roundtrips a stored value through set/get", async () => {
+		await setHideHiddenItems(true)
+
+		await expect(getHideHiddenItems()).resolves.toBe(true)
+
+		await setHideHiddenItems(false)
+
+		await expect(getHideHiddenItems()).resolves.toBe(false)
+	})
+
+	it("self-heals to the default when the persisted value is missing/invalid", async () => {
+		await expect(getHideHiddenItems()).resolves.toBe(DEFAULT_HIDE_HIDDEN_ITEMS)
 	})
 })
 

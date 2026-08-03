@@ -1,6 +1,7 @@
 import { getSharerIdentity, type DriveItem } from "@/features/drive/lib/item"
 import { isBlocked, type BlockedUsers } from "@/features/contacts/lib/blocking"
 import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
+import { filterHiddenDriveItems } from "@/features/drive/lib/hiddenItems"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 
 // Fail-open visibility check for a sharedIn item: an unresolved sharer identity (getSharerIdentity
@@ -74,6 +75,45 @@ export function resolveSearchDisplayItems(
 	directorySizes?: ReadonlyMap<string, number>
 ): DriveItem[] {
 	return total <= BigInt(results.length) ? sortDriveItems(results, sortBy, directorySizes) : results
+}
+
+export interface ListingDisplayResult {
+	// Post-hide, in render order — what the virtualizer, keyboard nav, preview pager and the bulk
+	// surfaces all read.
+	items: DriveItem[]
+	// PRE-hide count. The search footer's "Showing N of M" compares DELIVERED matches against
+	// search.total; comparing the post-hide count instead would make that notice permanent the moment
+	// one hit is hidden.
+	resolvedCount: number
+	hiddenCount: number
+}
+
+// Two ordered stages: (1) resolve ORDER — the search arm's convergence gate + sort, or the plain
+// sort; (2) hide. Never the reverse. resolveSearchDisplayItems only sorts once `total <=
+// results.length` (the whole match set is in hand); handing it a pre-hidden array while `total` still
+// counts the hidden hits flips that gate false, so search results would silently stop being sorted
+// the instant anything is hidden. Filtering an already-resolved array can only remove rows, never
+// reorder them, so this order is both correct and free. `search.total` is deliberately never adjusted
+// — subtracting the hidden count can only ever account for hits that already landed, so it would
+// misreport a truncated result set.
+export function resolveListingDisplayItems(input: {
+	items: DriveItem[]
+	sortBy: DriveSortBy
+	directorySizes: ReadonlyMap<string, number>
+	hide: boolean
+	search?: { total: bigint; parentPaths: ReadonlyMap<string, string> }
+}): ListingDisplayResult {
+	const resolved =
+		input.search === undefined
+			? sortDriveItems(input.items, input.sortBy, input.directorySizes)
+			: resolveSearchDisplayItems(input.items, input.search.total, input.sortBy, input.directorySizes)
+	const items = filterHiddenDriveItems({
+		items: resolved,
+		hide: input.hide,
+		...(input.search !== undefined ? { searchParentPaths: input.search.parentPaths } : {})
+	})
+
+	return { items, resolvedCount: resolved.length, hiddenCount: resolved.length - items.length }
 }
 
 // Local-substring fallback for every non-"drive" variant (favorites/recents/trash/sharedIn/

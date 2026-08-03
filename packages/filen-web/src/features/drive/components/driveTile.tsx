@@ -10,7 +10,10 @@ import { splatToUuids } from "@/features/drive/lib/navigate"
 import { canDragVariant } from "@/features/drive/lib/dnd.logic"
 import { buildDragSourceProps } from "@/features/drive/lib/dnd"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
+import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
 import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
+import { DriveBulkContextMenuContent } from "@/features/drive/components/bulkMenu"
+import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
 import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
@@ -31,9 +34,12 @@ export interface DriveTileProps {
 	// active search. Shown as a native hover tooltip (title attr), not inline text — a tile has far
 	// less room than a row for a second line.
 	searchParentPath?: string
+	// The listing's already-reconciled selection — see DriveRow's identical prop (bulk context menu).
+	selectedItems: DriveItem[]
 	onPointerSelect: (index: number, event: MouseEvent<HTMLDivElement>) => void
 	onOpen: (index: number) => void
 	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
+	onBulkAction: (kind: BulkDialogActionKind) => void
 	registerRef: (index: number, el: HTMLDivElement | null) => void
 }
 
@@ -47,9 +53,11 @@ export function DriveTile({
 	variant,
 	splat,
 	searchParentPath,
+	selectedItems,
 	onPointerSelect,
 	onOpen,
 	onItemAction,
+	onBulkAction,
 	registerRef
 }: DriveTileProps) {
 	const { t } = useTranslation("drive")
@@ -69,6 +77,9 @@ export function DriveTile({
 	// Downgrades a torn/corrupt cache entry back to the icon without waiting for a remount — see the
 	// img's own onError below. Never reset back to false: this mount already gave up on this uuid.
 	const [thumbFailed, setThumbFailed] = useState(false)
+	const bulkMenu = selected && selectedItems.length > 1
+	// See DriveRow's identical derivation.
+	const searchHit = searchParentPath !== undefined && searchParentPath.length > 0
 
 	return (
 		<ContextMenu>
@@ -98,6 +109,13 @@ export function DriveTile({
 						}}
 						onDoubleClick={() => {
 							onOpen(index)
+						}}
+						onContextMenu={() => {
+							// Right-clicking outside the current selection retargets it to this tile — see
+							// DriveRow's identical handler.
+							if (!selected) {
+								useDriveStore.getState().setSelectedItems([item])
+							}
 						}}
 						onDragEnter={drop.onDragEnter}
 						onDragOver={drop.onDragOver}
@@ -194,10 +212,12 @@ export function DriveTile({
 										</Button>
 									}
 								/>
+								{/* The ⋯ dropdown stays single-item — see DriveRow's identical note. */}
 								<DriveDropdownMenuContent
 									item={item}
 									variant={variant}
 									onItemAction={onItemAction}
+									searchHit={searchHit}
 								/>
 							</DropdownMenu>
 						</div>
@@ -218,11 +238,20 @@ export function DriveTile({
 					</div>
 				}
 			/>
-			<DriveContextMenuContent
-				item={item}
-				variant={variant}
-				onItemAction={onItemAction}
-			/>
+			{bulkMenu ? (
+				<DriveBulkContextMenuContent
+					variant={variant}
+					selectedItems={selectedItems}
+					onBulkAction={onBulkAction}
+				/>
+			) : (
+				<DriveContextMenuContent
+					item={item}
+					variant={variant}
+					onItemAction={onItemAction}
+					searchHit={searchHit}
+				/>
+			)}
 		</ContextMenu>
 	)
 }

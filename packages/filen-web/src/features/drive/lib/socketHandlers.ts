@@ -9,7 +9,7 @@ import {
 	normalizeParentUuid
 } from "@/features/drive/queries/drive"
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
-import { currentRootUuid } from "@/features/drive/lib/actions"
+import { currentRootUuid, patchFavoritesListing } from "@/features/drive/lib/actions"
 import { invalidatePhotosListing } from "@/features/photos/queries/photos"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
@@ -49,6 +49,24 @@ function replaceIfPresent(items: DriveItem[], updated: DriveItem): DriveItem[] {
 
 function removeByUuid(items: DriveItem[], uuid: string): DriveItem[] {
 	return items.filter(item => item.data.uuid !== uuid)
+}
+
+// Recents is a flat, cross-directory aggregation with its own key — driveListingQueryUpdate is
+// hardcoded to variant "drive" (queries/drive.ts) and the global fan-out can't single out one key, so
+// this patches the key directly, the same way the trashEmpty case below does. Only when it's already
+// cached: an unguarded setQueryData would conjure a phantom one-item Recents for a user who has never
+// opened it. Dedups on uuid alone (recents aggregates across parents, so upsertDriveItem's
+// name-collision rule doesn't apply here — same reasoning as the favorites listing). Appending is
+// enough for ordering: resolveEffectiveSort forces uploadDateDesc for the recents variant
+// (lib/preferences.ts), so the row sorts to the top at render.
+function insertIntoRecents(item: DriveItem): void {
+	const key = driveListingQueryKey({ variant: "recents", uuid: null })
+
+	if (queryClient.getQueryData(key) === undefined) {
+		return
+	}
+
+	queryClient.setQueryData<DriveItem[]>(key, prev => (prev === undefined ? prev : [...removeByUuid(prev, item.data.uuid), item]))
 }
 
 // ItemFavorite ships a NonRootItemTagged (the full item carrying its new favorited flag). Mobile's socket
@@ -101,7 +119,11 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 		case "fileNew": {
 			// A brand-new file — splice into its parent listing. upsertDriveItem drops any same-name/same-uuid
 			// stale row so a re-delivered event never duplicates.
-			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, narrowItem(inner.file)))
+			const item = narrowItem(inner.file)
+
+			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			// A brand-new file is a recents entry by definition — mobile inserts unconditionally too.
+			insertIntoRecents(item)
 
 			break
 		}
@@ -249,10 +271,11 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			const item = narrowFavoriteItem(inner.item)
 
 			if (item !== undefined) {
-				// Attribute-only refresh — replace the row in place wherever it's cached. No favorites-listing
-				// membership add/remove: mobile's socket path doesn't touch it either (only the local
-				// toggleFavorite action does), and the row's own favorited flag is now current everywhere.
+				// Attribute refresh wherever the row is already cached…
 				driveListingQueryUpdateGlobal(prev => replaceIfPresent(prev, item))
+				// …plus the Favorites root's own membership add/remove, which a replace-only fan-out can never
+				// do (mobile does both arms too). The payload item carries its NEW favorited flag.
+				patchFavoritesListing(item.data.favorited, item)
 			}
 
 			break

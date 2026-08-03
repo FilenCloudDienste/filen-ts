@@ -62,6 +62,7 @@ export function useDriveListboxNav({
 	const [activeFallback, setActiveFallback] = useState(0)
 	const [anchorFallback, setAnchorFallback] = useState(0)
 	const focusRequestRef = useRef(0)
+	const pendingReveal = useDriveStore(state => state.pendingReveal)
 
 	const uuids = items.map(item => item.data.uuid)
 	const safeActiveIndex = clampListboxIndex(resolveCursorIndex(activeUuid, uuids, activeFallback), items.length)
@@ -89,6 +90,15 @@ export function useDriveListboxNav({
 		setAnchorUuid(null)
 		setActiveFallback(0)
 		setAnchorFallback(0)
+
+		// A reveal armed for a DIFFERENT listing means the user navigated somewhere else instead — drop
+		// it rather than let it hijack this listing's cursor. One armed for THIS listing is left alone;
+		// the effect below is still waiting to consume it.
+		const reveal = useDriveStore.getState().pendingReveal
+
+		if (reveal !== null && reveal.splat !== splat) {
+			useDriveStore.getState().clearPendingReveal()
+		}
 	}, [variant, splat])
 
 	// Focus is imperative by nature here: the target index may be scrolled fully out of the mounted
@@ -135,6 +145,34 @@ export function useDriveListboxNav({
 
 		return next
 	}
+
+	// Declared AFTER the navigation reset above so a same-commit reset can't clear the selection this
+	// one just made. One-shot: the request is consumed before the cursor moves, so it can never
+	// re-fire and steal a click the user made afterwards. A request whose row hasn't landed yet stays
+	// pending — this re-runs when `items` arrives, which is the virtualized/late-fetch case the
+	// destination listing actually hits.
+	useEffect(() => {
+		if (pendingReveal?.splat !== splat) {
+			return
+		}
+
+		const index = items.findIndex(item => item.data.uuid === pendingReveal.uuid)
+
+		if (index === -1) {
+			return
+		}
+
+		const item = items[index]
+
+		if (item) {
+			useDriveStore.getState().setSelectedItems([item])
+		}
+
+		useDriveStore.getState().clearPendingReveal()
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot navigation-driven cursor move that clears its own trigger, see above
+		moveActive(index)
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- moveActive is re-created every render; the request above is self-clearing, so re-running on its identity would only add churn
+	}, [pendingReveal, items, splat])
 
 	function selectRange(anchor: number, active: number) {
 		const rangeItems: DriveItem[] = []

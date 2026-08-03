@@ -12,6 +12,20 @@ describe("errorLabel", () => {
 		expect(errorLabel(dto)).toBe("Wrong password. Please try again.")
 	})
 
+	it("returns the localized message for InvalidName instead of the raw Rust detail", () => {
+		const dto: ErrorDTO = {
+			species: "sdk",
+			kind: "InvalidName",
+			message: "invalid name",
+			innerMessage: `invalid filename "My:File": filename contains forbidden character ':' at position 2`,
+			label: "invalid name"
+		}
+
+		expect(errorLabel(dto)).toBe(
+			"That name can't be used. A name can't contain \\ / : * ? \" < > |, can't start or end with a space, can't end with a dot, and must be 255 bytes or shorter."
+		)
+	})
+
 	it("falls back to labelFirst for a real SdkErrorKind that has no catalog entry", () => {
 		const dto: ErrorDTO = {
 			species: "sdk",

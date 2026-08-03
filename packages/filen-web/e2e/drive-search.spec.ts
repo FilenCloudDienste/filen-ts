@@ -151,6 +151,33 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		await page.getByRole("button", { name: "Clear search", exact: true }).click()
 		await expect(searchInput).toHaveValue("")
 
+		// Re-open a scratch-ROOT search: "Open containing directory" only renders for a hit whose parent
+		// is not the directory on screen (driveRow's searchParentPath), and the two searches above are
+		// both spent — the first was torn down by the directory-hit navigation, the second runs from
+		// inside nestedName, where the target IS a direct child. Placed last so a timeout here cannot
+		// mask a failure in the legs that already pass; the root re-open is warm (this same page session
+		// converged it earlier), but the file's established ceiling is kept rather than assumed away.
+		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
+		const { listbox: rootListboxForReveal } = await waitForListingSettled(page)
+		await descendInto(page, rootListboxForReveal, scratchName)
+
+		await searchInput.fill(runId)
+		const revealHit = listbox.getByRole("option", { name: targetName })
+		await expect(revealHit).toBeVisible({ timeout: 40_000 })
+		await expect(revealHit).toContainText(nestedName)
+
+		// Right-click retargets the selection to this row and opens the single-item menu.
+		await revealHit.click({ button: "right" })
+		await page.getByRole("menuitem", { name: "Open containing directory", exact: true }).click()
+
+		// TWO splat segments — the regression guard for the truncated-splat defect: the target is built
+		// from the SDK's full ancestor chain, never from the item's own single `parent` uuid.
+		await expect(page).toHaveURL(/\/drive\/[^/]+\/[^/]+$/)
+		await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText(nestedName, { exact: true })).toBeVisible()
+
+		const { listbox: revealedListbox } = await waitForListingSettled(page)
+		await expect(revealedListbox.getByRole("option", { name: targetName })).toHaveAttribute("aria-selected", "true")
+
 		expect(cspViolations).toEqual([])
 	} finally {
 		// This scratch directory still holds its own nested subtree (nested/target-*.txt) at cleanup

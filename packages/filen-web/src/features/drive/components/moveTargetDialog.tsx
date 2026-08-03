@@ -13,6 +13,7 @@ import { useDirectoryListingQuery, useDirectoryNamesQuery, driveListingQueryUpda
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { cn } from "@/lib/utils"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { isMoveConfirmDisabled, isMoveRowDisabled } from "@/features/drive/components/moveTargetDialog.logic"
@@ -44,7 +45,11 @@ export interface MoveTargetDialogProps {
 // move/import was dispatched from — recents/favorites/trash/sharedIn have no navigable tree of their
 // own to land into (mirrors newDirectory.tsx's identical rule for creating a directory).
 export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDialogProps) {
-	const { t } = useTranslation("drive")
+	const { t } = useTranslation(["drive", "common"])
+	const isOnline = useIsOnline()
+	// Both writes in this dialog (the confirm and the in-place create) re-check connectivity here: the
+	// entry point was gated when it was clicked, but the connection can drop while the picker is open.
+	const offlineTitle = !isOnline ? t("common:offlineActionDisabled") : undefined
 	const [pathStack, setPathStack] = useState<string[]>([])
 	const [pending, setPending] = useState(false)
 	const [filter, setFilter] = useState("")
@@ -196,22 +201,21 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 							/>
 						) : null}
 					</div>
-					{/* Create-folder-in-place — lands inside whichever directory is currently open (targetUuid),
+					{/* Create-directory-in-place — lands inside whichever directory is currently open (targetUuid),
 					so the new destination is immediately browsable/pickable without leaving the picker (mobile
-					parity: driveSelectToolbar.tsx's own in-picker create). Gated only on `pending` (the
-					move/import confirm's own in-flight flag), same as every other control in this dialog —
-					this picker has no offline gate of its own yet to mirror. */}
+					parity: driveSelectToolbar.tsx's own in-picker create). */}
 					<Button
 						type="button"
 						variant="outline"
 						size="sm"
-						disabled={pending}
+						disabled={pending || !isOnline}
+						title={offlineTitle}
 						onClick={() => {
 							setNewFolderOpen(true)
 						}}
 					>
 						<FolderPlusIcon />
-						{t("driveMoveDialogNewFolder")}
+						{t("driveMoveDialogNewDirectory")}
 					</Button>
 				</div>
 				<div className="h-72 overflow-y-auto rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
@@ -281,8 +285,12 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 				<DialogFooter>
 					<Button
 						disabled={
-							pending || listingQuery.status !== "success" || isMoveConfirmDisabled(pathStack, items, listingQuery.data)
+							pending ||
+							!isOnline ||
+							listingQuery.status !== "success" ||
+							isMoveConfirmDisabled(pathStack, items, listingQuery.data)
 						}
+						title={offlineTitle}
 						onClick={() => {
 							void handleConfirm()
 						}}

@@ -48,7 +48,14 @@ vi.mock("@/features/drive/lib/saveDownload", async importOriginal => {
 	return { ...actual, isFsaAvailable: isFsaAvailableMock }
 })
 
-import { applyOfflineGate, driveItemActions, resolveCopyLinkAction, startItemDownload } from "@/features/drive/components/itemMenu.logic"
+import {
+	applyOfflineGate,
+	driveItemActions,
+	resolveCopyLinkAction,
+	startItemDownload,
+	type ItemActionDescriptor,
+	type ItemActionId
+} from "@/features/drive/components/itemMenu.logic"
 
 beforeEach(() => {
 	isFsaAvailableMock.mockReturnValue(false)
@@ -637,6 +644,38 @@ describe("driveItemActions — descriptor label/icon facts (ACTION_DEFS drift gu
 	})
 })
 
+describe("driveItemActions — Open containing directory (search hits only)", () => {
+	it("offers it right after Info for a search hit", () => {
+		const offered = driveItemActions(fileItem(), "drive", { searchHit: true }).map(descriptor => descriptor.id)
+
+		expect(offered).toContain("openContainingDirectory")
+		expect(offered.indexOf("openContainingDirectory")).toBe(offered.indexOf("info") + 1)
+	})
+
+	it("never offers it outside a search hit", () => {
+		expect(ids(fileItem(), "drive")).not.toContain("openContainingDirectory")
+		expect(driveItemActions(fileItem(), "drive", { searchHit: false }).map(d => d.id)).not.toContain("openContainingDirectory")
+	})
+
+	it("never offers it in the trash variant — search is drive-variant only", () => {
+		expect(driveItemActions(fileItem(), "trash", { searchHit: true }).map(d => d.id)).not.toContain("openContainingDirectory")
+	})
+
+	it("never offers it for an undecryptable item — its ancestor walk resolves nothing useful", () => {
+		const undecryptable = fileItem({ meta: { type: "encrypted", data: "ciphertext" } })
+
+		expect(driveItemActions(undecryptable, "drive", { searchHit: true }).map(d => d.id)).not.toContain("openContainingDirectory")
+	})
+
+	it("is offline-gated — its handler awaits the ancestor walk", () => {
+		const descriptor = applyOfflineGate(driveItemActions(fileItem(), "drive", { searchHit: true }), false).find(
+			d => d.id === "openContainingDirectory"
+		)
+
+		expect(descriptor?.enabled).toBe(false)
+	})
+})
+
 describe("applyOfflineGate", () => {
 	it("leaves every descriptor untouched while online", () => {
 		const actions = driveItemActions(dirItem(), "drive")
@@ -644,9 +683,43 @@ describe("applyOfflineGate", () => {
 		expect(applyOfflineGate(actions, true)).toEqual(actions)
 	})
 
-	it("disables rename/move/color/publicLink/copyLink/trash/download while offline", () => {
-		const gated = applyOfflineGate(driveItemActions(dirItem(), "drive"), false)
-		const gatedIds = new Set(["rename", "move", "color", "publicLink", "copyLink", "trash", "download"])
+	// The table is the gate contract: every id whose handler awaits an sdkApi call. A new
+	// network-write descriptor that nobody adds here fails this case rather than shipping ungated.
+	const NETWORK_WRITE_IDS: ItemActionId[] = [
+		"rename",
+		"move",
+		"favorite",
+		"color",
+		"publicLink",
+		"copyLink",
+		"share",
+		"unshare",
+		"trash",
+		"restore",
+		"deletePermanently",
+		"openContainingDirectory",
+		"download",
+		"import"
+	]
+
+	it("gates every network-write id while offline", () => {
+		const gated = applyOfflineGate(
+			NETWORK_WRITE_IDS.map(
+				id => ({ id, labelKey: "driveActionInfo", icon: InfoIcon, run: "direct" }) satisfies ItemActionDescriptor
+			),
+			false
+		)
+
+		expect(gated.map(descriptor => descriptor.enabled)).toEqual(NETWORK_WRITE_IDS.map(() => false))
+	})
+
+	it("gates every network-write id the real builders actually offer", () => {
+		const gated = [
+			...applyOfflineGate(driveItemActions(dirItem(), "drive"), false),
+			...applyOfflineGate(driveItemActions(sharedRootFileItem(), "sharedIn"), false),
+			...applyOfflineGate(driveItemActions(fileItem(), "trash"), false)
+		]
+		const gatedIds = new Set<string>(NETWORK_WRITE_IDS)
 
 		for (const descriptor of gated) {
 			if (gatedIds.has(descriptor.id)) {
@@ -655,17 +728,10 @@ describe("applyOfflineGate", () => {
 		}
 	})
 
-	it("disables import while offline (sharedIn)", () => {
-		const descriptor = applyOfflineGate(driveItemActions(sharedRootFileItem(), "sharedIn"), false).find(d => d.id === "import")
+	it("leaves info and versions enabled while offline — both open read dialogs that gate their own writes", () => {
+		const gated = applyOfflineGate(driveItemActions(fileItem(), "drive"), false)
 
-		expect(descriptor?.enabled).toBe(false)
-	})
-
-	it("leaves read-only actions (info/favorite/share) enabled while offline", () => {
-		const gated = applyOfflineGate(driveItemActions(dirItem(), "drive"), false)
-		const untouchedIds = ["info", "favorite", "share"]
-
-		for (const id of untouchedIds) {
+		for (const id of ["info", "versions"]) {
 			const descriptor = gated.find(d => d.id === id)
 			expect(descriptor?.enabled).not.toBe(false)
 		}

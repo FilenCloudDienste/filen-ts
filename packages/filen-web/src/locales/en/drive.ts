@@ -27,6 +27,20 @@ export const drive = {
 	driveViewGrid: "Grid view",
 	/** Drive toolbar — trigger of the display dropdown holding the list/grid choice */
 	driveDisplay: "Display",
+	/** Display menu — checkbox controlling whether dot-prefixed items are listed; also interpolated as {{setting}} in the hidden-items notices below */
+	driveShowHiddenItems: "Show hidden items",
+	/** Drive listing footer — count of dot-prefixed rows the display filter removed; {{count}} = how many */
+	driveHiddenItemsNotShown_one: "{{count}} hidden item is not shown",
+	/** Drive listing footer — plural form of the hidden-row count */
+	driveHiddenItemsNotShown_other: "{{count}} hidden items are not shown",
+	/** Drive listing empty state — title when the hidden-items filter removed every row in this directory */
+	driveHiddenItemsAllHiddenTitle: "Everything here is hidden",
+	/** Drive listing empty state — body of the all-hidden state; {{setting}} = driveShowHiddenItems, {{display}} = driveDisplay */
+	driveHiddenItemsAllHiddenBody: "Turn on {{setting}} under {{display}} to see them.",
+	/** Toast after creating a dot-prefixed directory or text file while the hidden-items filter is on; {{setting}} = driveShowHiddenItems, {{display}} = driveDisplay */
+	driveCreatedItemHiddenToast: "Created — it won't be listed until you turn on {{setting}} under {{display}}.",
+	/** Toast after renaming an item to a dot-prefixed name while the hidden-items filter is on; {{setting}} = driveShowHiddenItems, {{display}} = driveDisplay */
+	driveRenamedItemHiddenToast: "Renamed — it won't be listed until you turn on {{setting}} under {{display}}.",
 
 	// ── New menu (opened via driveNew) ──────────────────────────────────────
 	/** New menu — entry opening the browser file picker to upload one or more files into the current directory */
@@ -245,6 +259,8 @@ export const drive = {
 	driveActionVersions: "Versions",
 	/** Item menu — open the info panel for the selected item */
 	driveActionInfo: "Info",
+	/** Item menu (search results only) — navigate to the directory a search hit lives in and reveal the row there */
+	driveActionOpenContainingDirectory: "Open containing directory",
 	/** Item menu — download the selected item to disk; disabled for a directory or a multi-selection until zip download ships */
 	driveActionDownload: "Download",
 	/** Item menu (shared-with-me only) — copy the selected item into your own drive; opens the destination picker (driveImportDialogTitle) */
@@ -328,7 +344,7 @@ export const drive = {
 	/** Move/import dialog — filter box placeholder and aria-label over the currently listed directories (shared with the import dialog below, same picker component) */
 	driveMoveDialogFilterPlaceholder: "Filter directories",
 	/** Move/import dialog — button creating a new destination directory in place, right inside the directory currently open in the picker */
-	driveMoveDialogNewFolder: "New folder",
+	driveMoveDialogNewDirectory: "New directory",
 
 	// ── Import dialog (reuses the move dialog's destination picker, see moveTargetDialog.tsx's mode prop) ──
 	/** Import dialog — title of the destination-directory picker (driveActionImport) */

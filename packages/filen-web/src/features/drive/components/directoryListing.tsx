@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { useShallow } from "zustand/shallow"
-import { SearchXIcon, CircleAlertIcon } from "lucide-react"
+import { SearchXIcon, CircleAlertIcon, EyeOffIcon } from "lucide-react"
 import {
 	resolveEffectiveSort,
 	resolveEffectiveViewMode,
@@ -10,15 +10,18 @@ import {
 	withViewModeSelection,
 	setSortPreferences,
 	setViewModePreferences,
+	setHideHiddenItems,
 	isSortableVariant,
 	canWriteVariant,
 	DEFAULT_SORT_PREFERENCES,
 	DEFAULT_VIEW_MODE_PREFERENCES,
+	DEFAULT_HIDE_HIDDEN_ITEMS,
 	type DriveVariant,
 	type DriveLocation,
 	type DriveViewMode
 } from "@/features/drive/lib/preferences"
-import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
+import { hiddenFilterAppliesTo } from "@/features/drive/lib/hiddenItems"
+import { type DriveSortBy } from "@/features/drive/lib/sort"
 import { resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
 import { asDirectoryOrFile } from "@/features/drive/lib/item"
 import { canPreview, previewableSiblings } from "@/features/drive/lib/preview.logic"
@@ -27,7 +30,12 @@ import { drivePreviewSources } from "@/features/preview/lib/previewSource"
 import { deriveAudioHandoff, isAudioItem } from "@/features/audio/lib/handoff"
 import { audioEngine } from "@/features/audio/lib/audioEngine"
 import { startDownloads } from "@/features/drive/lib/download"
-import { useDirectoryListingQuery, useSortPreferencesQuery, useViewModePreferencesQuery } from "@/features/drive/queries/drive"
+import {
+	useDirectoryListingQuery,
+	useHideHiddenItemsPreferenceQuery,
+	useSortPreferencesQuery,
+	useViewModePreferencesQuery
+} from "@/features/drive/queries/drive"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { cn } from "@/lib/utils"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -42,7 +50,7 @@ import {
 	isBlockingListingError,
 	isEmptyTrashTriggerVisible,
 	reconcileSelectedItems,
-	resolveSearchDisplayItems,
+	resolveListingDisplayItems,
 	staleBlockedSelectionUuids,
 	staleSelectionUuids
 } from "@/features/drive/components/directoryListing.logic"
@@ -69,7 +77,7 @@ import { useDriveMarquee } from "@/features/drive/hooks/useDriveMarquee"
 import { useDriveDialogHost } from "@/features/drive/hooks/useDriveDialogHost"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Spinner } from "@/components/ui/spinner"
-import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 // Centered content column inside the card — the width cap rides one CSS var (see index.css) so the
 // preset flips project-wide in one place.
@@ -152,12 +160,16 @@ registerAction({
 export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const navigate = useNavigate()
-	const uuid = splatToUuids(splat).at(-1) ?? null
+	// The full ancestor-uuid chain, current directory last. Also handed to the listing query as the
+	// shared variants' cold-worker resolution hint (see fetchSharedListing).
+	const pathUuids = splatToUuids(splat)
+	const uuid = pathUuids.at(-1) ?? null
 	const driveLocation: DriveLocation = { variant, uuid }
 
-	const listingQuery = useDirectoryListingQuery(variant, uuid)
+	const listingQuery = useDirectoryListingQuery(variant, uuid, pathUuids)
 	const sortPrefsQuery = useSortPreferencesQuery()
 	const viewModePrefsQuery = useViewModePreferencesQuery()
+	const hiddenPrefQuery = useHideHiddenItemsPreferenceQuery()
 	const isOnline = useIsOnline()
 	// New directory / upload make sense in the navigable "drive" variant AND inside an owned nested
 	// sharedOut directory (canWriteVariant) — recents/favorites/trash/links/sharedIn/the sharedOut ROOT
@@ -175,6 +187,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const viewModePrefs = viewModePrefsQuery.data ?? DEFAULT_VIEW_MODE_PREFERENCES
 	const effectiveSort = resolveEffectiveSort(sortPrefs, driveLocation)
 	const effectiveViewMode = resolveEffectiveViewMode(viewModePrefs, driveLocation)
+	// The stored polarity is HIDE (mobile parity); the Display menu below phrases it as SHOW, and this
+	// is the single inversion site. The preference resolves async, so the first frames of a mount
+	// render the default (show everything) and then hide — the same first-paint behavior the sort and
+	// view-mode preferences already have on this screen.
+	const hiddenPref = hiddenPrefQuery.data ?? DEFAULT_HIDE_HIDDEN_ITEMS
+	const hiddenFilterApplies = hiddenFilterAppliesTo(variant)
+	const hideHidden = hiddenPref && hiddenFilterApplies
 
 	// sharedIn ONLY: hide items shared by a blocked user (fail-open — see directoryListing.logic.ts).
 	// Every other variant's listing data passes straight through, untouched.
@@ -215,9 +234,18 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const directorySizes =
 		useDriveDirectorySizes({ items: search.active ? search.results : locallyFilteredItems, enabled: effectiveViewMode === "list" }) ??
 		EMPTY_DIRECTORY_SIZES
-	const sortedItems = search.active
-		? resolveSearchDisplayItems(search.results, search.total, effectiveSort, directorySizes)
-		: sortDriveItems(locallyFilteredItems, effectiveSort, directorySizes)
+	// Order is resolved BEFORE anything is hidden (see resolveListingDisplayItems) — everything
+	// downstream keeps reading `sortedItems` and now sees the post-hide set.
+	const display = resolveListingDisplayItems({
+		items: search.active ? search.results : locallyFilteredItems,
+		sortBy: effectiveSort,
+		directorySizes,
+		hide: hideHidden,
+		...(search.active ? { search: { total: search.total, parentPaths: search.parentPaths } } : {})
+	})
+	const sortedItems = display.items
+	const hiddenCount = display.hiddenCount
+	const resolvedCount = display.resolvedCount
 
 	const selectedItems = useDriveStore(useShallow(state => state.selectedItems))
 	// Bulk consumers (the dialog host + the floating bulk bar below) always read the freshest
@@ -234,7 +262,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const { isDialogOpen, handleItemAction, handleBulkDialogAction, handleEmptyTrash, openPreview, renderActiveDialog } =
 		useDriveDialogHost({
 			variant,
-			selectedItems: reconciledSelectedItems
+			selectedItems: reconciledSelectedItems,
+			hiddenNoticeApplies: hideHidden
 		})
 
 	const { setScrollElement, scrollElement, columns, listVirtualizer, gridVirtualizer, activeVirtualizer, registerRef, itemRefs } =
@@ -347,7 +376,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// own onKeyDown consumes Escape locally to clear the query, so drive.clearSelection never reaches
 	// the store either). Mirrors the sharedIn purge above.
 	//
-	// Keyed on a uuid-content signature, not `sortedItems` itself: resolveSearchDisplayItems/
+	// Keyed on a uuid-content signature, not `sortedItems` itself: resolveListingDisplayItems/
 	// buildSearchResults rebuild a brand-new array of brand-new items every render regardless of
 	// whether a push changed anything, so a reference-keyed effect would re-fire on every unrelated
 	// re-render — this string stays `===`-stable across those, so an unchanged heartbeat can't fight
@@ -382,6 +411,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	async function applyViewModeChange(next: DriveViewMode): Promise<void> {
 		await setViewModePreferences(withViewModeSelection(viewModePrefs, driveLocation, next))
 		await viewModePrefsQuery.refetch()
+	}
+
+	async function applyHideHiddenItemsChange(next: boolean): Promise<void> {
+		await setHideHiddenItems(next)
+		await hiddenPrefQuery.refetch()
 	}
 
 	// Registered above at module scope. Browser default for mod+a is "select all page text" — must
@@ -520,6 +554,28 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		[reconciledSelectedItems, isDialogOpen, variant, isOnline]
 	)
 
+	const isSearchTruncated = search.active && search.total > BigInt(resolvedCount)
+	const searchFooterVisible = search.active && (search.status === "background" || isSearchTruncated)
+	// Every row that exists here was removed by the display filter — the "No matches"/"Nothing here
+	// yet" states below would both lie, so this one takes their place and names the way back.
+	const allHidden = sortedItems.length === 0 && hiddenCount > 0
+
+	function renderAllHiddenEmpty(): ReactNode {
+		return (
+			<Empty>
+				<EmptyHeader>
+					<EmptyMedia variant="icon">
+						<EyeOffIcon />
+					</EmptyMedia>
+					<EmptyTitle>{t("driveHiddenItemsAllHiddenTitle")}</EmptyTitle>
+					<EmptyDescription>
+						{t("driveHiddenItemsAllHiddenBody", { setting: t("driveShowHiddenItems"), display: t("driveDisplay") })}
+					</EmptyDescription>
+				</EmptyHeader>
+			</Empty>
+		)
+	}
+
 	// The column header + virtualized listbox — identical shape whether sortedItems is the normal
 	// listing or (search.active) the search results; only the per-row/tile searchParentPath and the
 	// trailing footer differ. Kept as one render function rather than duplicated JSX in both branches
@@ -598,9 +654,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 											}}
 											{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
 											directorySizes={directorySizes}
+											selectedItems={reconciledSelectedItems}
 											onPointerSelect={handlePointerSelect}
 											onOpen={handleOpen}
 											onItemAction={handleItemAction}
+											onBulkAction={handleBulkDialogAction}
 											registerRef={registerRef}
 										/>
 									)
@@ -640,9 +698,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 													variant={variant}
 													splat={splat}
 													{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
+													selectedItems={reconciledSelectedItems}
 													onPointerSelect={handlePointerSelect}
 													onOpen={handleOpen}
 													onItemAction={handleItemAction}
+													onBulkAction={handleBulkDialogAction}
 													registerRef={registerRef}
 												/>
 											)
@@ -651,17 +711,23 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 								))}
 					</div>
 				</div>
-				{search.active && (search.status === "background" || search.total > BigInt(sortedItems.length)) ? (
+				{/* One strip, one 32px row — the search progress notes and the hidden-row count share it, so
+				    they can never stack into a second bar. Both search reads compare against the PRE-hide
+				    count: post-hide, "Showing N of M" would render forever and its N would mean the wrong
+				    thing (delivered matches, not displayed rows). */}
+				{searchFooterVisible || hiddenCount > 0 ? (
 					<div className="flex h-8 shrink-0 items-center justify-center gap-2 border-t border-border/50 px-3 text-xs text-muted-foreground">
-						{search.status === "background" ? (
+						{search.active && search.status === "background" ? (
 							<Spinner
 								aria-hidden="true"
 								className="size-3"
 							/>
 						) : null}
-						{search.total > BigInt(sortedItems.length) ? (
-							<span>{t("driveSearchShowingOf", { shown: sortedItems.length, total: search.total.toString() })}</span>
+						{isSearchTruncated ? (
+							<span>{t("driveSearchShowingOf", { shown: resolvedCount, total: search.total.toString() })}</span>
 						) : null}
+						{searchFooterVisible && hiddenCount > 0 ? <span aria-hidden="true">·</span> : null}
+						{hiddenCount > 0 ? <span>{t("driveHiddenItemsNotShown", { count: hiddenCount })}</span> : null}
 					</div>
 				) : null}
 			</>
@@ -691,12 +757,14 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							disabled={writeDisabled}
 							dialogOpen={isDialogOpen}
 							offline={!isOnline}
+							hiddenNotice={hideHidden}
 						/>
 						<UploadMenu
 							parentUuid={uuid}
 							disabled={writeDisabled}
 							openPreview={openPreview}
 							offline={!isOnline}
+							hiddenNotice={hideHidden}
 						/>
 					</div>
 				</div>
@@ -717,6 +785,16 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							onChange={next => {
 								void applyViewModeChange(next)
 							}}
+							{...(hiddenFilterApplies
+								? {
+										hiddenItems: {
+											show: !hiddenPref,
+											onChange: next => {
+												void applyHideHiddenItemsChange(!next)
+											}
+										}
+									}
+								: {})}
 						/>
 					</div>
 					{/* Every variant gets a filter box — "drive" drives the cache-backed recursive engine
@@ -771,14 +849,18 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 								</div>
 							) : sortedItems.length === 0 ? (
 								<div className="flex flex-1 overflow-y-auto">
-									<Empty>
-										<EmptyHeader>
-											<EmptyMedia variant="icon">
-												<SearchXIcon />
-											</EmptyMedia>
-											<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>
-										</EmptyHeader>
-									</Empty>
+									{allHidden ? (
+										renderAllHiddenEmpty()
+									) : (
+										<Empty>
+											<EmptyHeader>
+												<EmptyMedia variant="icon">
+													<SearchXIcon />
+												</EmptyMedia>
+												<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>
+											</EmptyHeader>
+										</Empty>
+									)}
 								</div>
 							) : (
 								renderListboxContent()
@@ -800,7 +882,9 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							</div>
 						) : sortedItems.length === 0 ? (
 							<div className="flex flex-1 overflow-y-auto">
-								{localSearchActive ? (
+								{allHidden ? (
+									renderAllHiddenEmpty()
+								) : localSearchActive ? (
 									// The local-filter empty state — a non-matching query on a non-empty listing
 									// reads as "no matches", never the generic "nothing here yet" onboarding copy
 									// (same distinction the contacts list makes for its own search).
@@ -828,10 +912,12 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 													<NewDirectory
 														parentUuid={uuid}
 														dialogOpen={isDialogOpen}
+														hiddenNotice={hideHidden}
 													/>
 													<UploadMenu
 														parentUuid={uuid}
 														openPreview={openPreview}
+														hiddenNotice={hideHidden}
 													/>
 												</>
 											)

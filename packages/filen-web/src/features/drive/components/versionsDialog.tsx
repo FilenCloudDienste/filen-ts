@@ -13,6 +13,7 @@ import { fileVersionsQueryKey, useFileVersionsQuery } from "@/features/drive/que
 import { queryClient } from "@/queries/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import {
 	hasNoPreviousVersions,
@@ -67,6 +68,12 @@ function toastVersionsBulkOutcome(outcome: BulkOutcome<FileVersion>): void {
 // select mode.
 export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 	const { t } = useTranslation(["drive", "common"])
+	const isOnline = useIsOnline()
+	// The panel itself opens offline (it renders its own query error state); its four write triggers
+	// are what the gate covers. The nested ConfirmDialog is deliberately not gated — it can only be
+	// reached from a trigger that was enabled, and a drop while it is open still lands on the existing
+	// toast.error path.
+	const offlineTitle = !isOnline ? t("common:offlineActionDisabled") : undefined
 	const versionsQuery = useFileVersionsQuery(file.data)
 	const [pending, setPending] = useState(false)
 	const [confirming, setConfirming] = useState<PendingConfirm | null>(null)
@@ -275,8 +282,9 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 											<Button
 												variant="ghost"
 												size="icon-sm"
-												disabled={pending || current}
+												disabled={pending || current || !isOnline}
 												aria-label={t("driveVersionsRestoreAction")}
+												title={offlineTitle}
 												onClick={() => {
 													setConfirming({ kind: "restore", version })
 												}}
@@ -286,8 +294,9 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 											<Button
 												variant="ghost"
 												size="icon-sm"
-												disabled={pending || current}
+												disabled={pending || current || !isOnline}
 												aria-label={t("driveVersionsDeleteAction")}
+												title={offlineTitle}
 												onClick={() => {
 													setConfirming({ kind: "delete", version })
 												}}
@@ -310,7 +319,8 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 								</span>
 								<Button
 									variant="destructive"
-									disabled={pending || selectedVersions.length === 0}
+									disabled={pending || selectedVersions.length === 0 || !isOnline}
+									title={offlineTitle}
 									onClick={() => {
 										setConfirming({ kind: "bulkDelete", versions: selectedVersions })
 									}}
@@ -322,7 +332,8 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 						) : (
 							<Button
 								variant="destructive"
-								disabled={pending}
+								disabled={pending || !isOnline}
+								title={offlineTitle}
 								onClick={() => {
 									setConfirming({ kind: "bulkDelete", versions: candidates })
 								}}

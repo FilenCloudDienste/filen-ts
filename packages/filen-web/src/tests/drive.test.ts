@@ -23,6 +23,7 @@ const {
 	listDirectory,
 	resolveDirectoryNames,
 	getItemInfo,
+	getItemPath,
 	getDirSize,
 	listFileVersionsOp,
 	getDirectoryLinkStatus,
@@ -34,13 +35,17 @@ const {
 	listDirectory: vi.fn<(target: unknown) => Promise<NormalDirsAndFiles>>(),
 	resolveDirectoryNames: vi.fn<(uuids: string[]) => Promise<Record<string, string>>>(),
 	getItemInfo: vi.fn(),
+	getItemPath: vi.fn(),
 	getDirSize: vi.fn(),
 	listFileVersionsOp: vi.fn(),
 	getDirectoryLinkStatus: vi.fn(),
 	getFileLinkStatus: vi.fn(),
 	listSharedInRoot: vi.fn<() => Promise<SharedRootDirsAndFiles>>(),
 	listSharedOutRoot: vi.fn<() => Promise<SharedRootDirsAndFiles>>(),
-	listSharedDirectory: vi.fn<(uuid: string) => Promise<{ dirs: SharedDir[]; files: File[]; role: SharingRole }>>()
+	listSharedDirectory:
+		vi.fn<
+			(uuid: string, hint?: { variant: string; path: string[] }) => Promise<{ dirs: SharedDir[]; files: File[]; role: SharingRole }>
+		>()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({
@@ -48,6 +53,7 @@ vi.mock("@/lib/sdk/client", () => ({
 		listDirectory,
 		resolveDirectoryNames,
 		getItemInfo,
+		getItemPath,
 		getDirSize,
 		listFileVersionsOp,
 		getDirectoryLinkStatus,
@@ -96,10 +102,12 @@ import {
 	fetchDriveItemLinkStatus,
 	fetchFileVersions,
 	fetchItemInfo,
+	fetchItemPath,
 	fetchSharedListing,
 	fileVersionsQueryKey,
 	invalidateDirectorySize,
 	itemInfoQueryKey,
+	itemPathQueryKey,
 	normalizeParentUuid,
 	toListingTarget,
 	useItemInfoQuery
@@ -316,6 +324,28 @@ describe("fetchDirectoryNames", () => {
 describe("itemInfoQueryKey", () => {
 	it("builds the [domain, entity, uuid] tuple", () => {
 		expect(itemInfoQueryKey("abc")).toEqual(["drive", "itemInfo", "abc"])
+	})
+})
+
+describe("itemPathQueryKey / fetchItemPath", () => {
+	it("keys the reveal's ancestor-chain read under its own entry, not itemInfo's", () => {
+		expect(itemPathQueryKey("abc")).toEqual(["drive", "itemPath", "abc"])
+	})
+
+	it("passes the item straight to sdkApi.getItemPath", async () => {
+		const file = mockFile()
+		const result = { path: "Documents/report.pdf", ancestors: [mockDir()] }
+		getItemPath.mockResolvedValueOnce(result)
+
+		await expect(fetchItemPath(file)).resolves.toEqual(result)
+		expect(getItemPath).toHaveBeenCalledExactlyOnceWith(file)
+	})
+
+	it("propagates a rejection unchanged — a failed walk must never degrade to an empty chain here", async () => {
+		const error = new Error("item has no navigable ancestry")
+		getItemPath.mockRejectedValueOnce(error)
+
+		await expect(fetchItemPath(mockFile())).rejects.toBe(error)
 	})
 })
 
@@ -740,9 +770,12 @@ describe("fetchSharedListing", () => {
 		const fileUuid = testUuid("nested-file")
 		listSharedDirectory.mockResolvedValueOnce({ dirs: [mockSharedDir(dirUuid)], files: [mockFile({ uuid: fileUuid })], role })
 
-		const items = await fetchSharedListing("sharedIn", "parent-uuid")
+		const items = await fetchSharedListing("sharedIn", "parent-uuid", ["ancestor-uuid", "parent-uuid"])
 
-		expect(listSharedDirectory).toHaveBeenCalledExactlyOnceWith("parent-uuid")
+		expect(listSharedDirectory).toHaveBeenCalledExactlyOnceWith("parent-uuid", {
+			variant: "sharedIn",
+			path: ["ancestor-uuid", "parent-uuid"]
+		})
 		expect(items.map(item => item.type)).toEqual(["sharedDirectory", "sharedFile"])
 		// The parent role is spread onto each nested item — this is the whole point of the context-tag.
 		const [dir, file] = items
@@ -755,5 +788,13 @@ describe("fetchSharedListing", () => {
 		listSharedDirectory.mockRejectedValueOnce(error)
 
 		await expect(fetchSharedListing("sharedIn", "parent-uuid")).rejects.toBe(error)
+	})
+
+	it("a root listing (uuid null) never sends a path hint", async () => {
+		listSharedInRoot.mockResolvedValueOnce({ dirs: [], files: [] })
+
+		await fetchSharedListing("sharedIn", null, ["ignored-uuid"])
+
+		expect(listSharedDirectory).not.toHaveBeenCalled()
 	})
 })

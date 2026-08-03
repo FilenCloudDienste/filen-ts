@@ -101,6 +101,7 @@ import {
 	disableLinks,
 	emptyTrash,
 	moveItems,
+	patchFavoritesListing,
 	renameItem,
 	restoreItems,
 	restoreVersion,
@@ -778,6 +779,14 @@ describe("setFavoritedItems", () => {
 		await toggleFavorite(item)
 
 		expect(setFavorited).toHaveBeenCalledExactlyOnceWith(item.data, true)
+	})
+})
+
+describe("patchFavoritesListing", () => {
+	it("is a no-op for an unfetched favorites listing", () => {
+		patchFavoritesListing(true, dirItem({ uuid: testUuid("a"), favorited: true }))
+
+		expect(testQueryClient.getQueryData(favoritesListing())).toBeUndefined()
 	})
 })
 

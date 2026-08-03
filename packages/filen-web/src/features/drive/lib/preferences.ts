@@ -187,3 +187,22 @@ export function withViewModeModeToggle(prefs: DrivePreferences<DriveViewMode>, p
 export function resetViewModePreferences(prefs: DrivePreferences<DriveViewMode>): DrivePreferences<DriveViewMode> {
 	return { ...prefs, global: DEFAULT_VIEW_MODE_PREFERENCES.global, perDirectory: {} }
 }
+
+const HIDE_HIDDEN_ITEMS_KV_KEY = "drive.hideHiddenItems.v1"
+
+const hideHiddenItemsSchema: Type<boolean> = type("boolean")
+
+// Default OFF, deliberately unlike Finder and File Explorer (mobile parity). Those hide dot-prefixed
+// entries out of the box because their users mostly did not create them; a Filen drive holds what its
+// owner put there, so nothing is hidden until the owner asks for it. The toggle itself lives in the
+// drive toolbar's Display menu (components/viewModeToggle.tsx); WHICH listings it applies to is
+// lib/hiddenItems.ts's hiddenFilterAppliesTo.
+export const DEFAULT_HIDE_HIDDEN_ITEMS = false
+
+export async function getHideHiddenItems(): Promise<boolean> {
+	return (await kvGetJson(HIDE_HIDDEN_ITEMS_KV_KEY, hideHiddenItemsSchema)) ?? DEFAULT_HIDE_HIDDEN_ITEMS
+}
+
+export async function setHideHiddenItems(next: boolean): Promise<void> {
+	await kvSetJson(HIDE_HIDDEN_ITEMS_KV_KEY, next)
+}

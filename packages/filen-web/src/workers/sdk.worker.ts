@@ -24,6 +24,7 @@ import init, {
 	type DirPublicLinkRW,
 	type FilePublicLink,
 	type DirSizeResponse,
+	type GetItemPathResult,
 	type Contact,
 	type BlockedContact,
 	type ContactRequestIn,
@@ -71,6 +72,7 @@ import {
 	getCachedName,
 	getSharedDirContext
 } from "@/features/drive/lib/cache"
+import { resolveSharedDirContext, type SharedPathDeps } from "@/features/drive/lib/sharedPath"
 import { THUMB_CACHE_CAP } from "@/features/drive/lib/thumbnails.logic"
 import { removeStaleThumbGenerations, sweepThumbs, writeThumb } from "@/workers/thumbStore"
 import { createSearchEngine, type SearchPush, type SearchSnapshotDTO } from "@/workers/searchEngine"
@@ -334,6 +336,26 @@ export interface SharedNestedListing {
 function cacheSharedRootContexts(dirs: readonly SharedRootDir[]): void {
 	for (const dir of dirs) {
 		cacheSharedDirContext(dir.inner.uuid, { dir, role: dir.sharingRole })
+	}
+}
+
+// Which shared surface a nested listing's ancestor chain should be re-walked through — the route
+// splat's own variant, since a uuid alone cannot say whether it was reached via shared-in or
+// shared-out.
+export interface SharedPathHint {
+	variant: "sharedIn" | "sharedOut"
+	path: string[]
+}
+
+// Binds resolveSharedDirContext (features/drive/lib/sharedPath.ts) to this worker's live client and
+// its own in-memory context map.
+function sharedPathDeps(c: Client, variant: "sharedIn" | "sharedOut"): SharedPathDeps {
+	return {
+		getContext: getSharedDirContext,
+		listRootDirs: async () => (variant === "sharedIn" ? await c.listInShared() : await c.listOutShared(undefined)).dirs,
+		cacheRootContexts: cacheSharedRootContexts,
+		listChildDirs: async context => (await c.listSharedDir(context.dir, context.role)).dirs,
+		cacheChildContext: cacheSharedDirContext
 	}
 }
 
@@ -897,6 +919,20 @@ const api = {
 		const [pathResult, size] = await Promise.all([pathPromise, c.getDirSize(dirContext ?? item).catch(() => null)])
 		return { path: pathResult?.path ?? null, ancestors: pathResult?.ancestors ?? [], size }
 	},
+	// Path-only sibling of getItemInfo, for callers that need the ancestor CHAIN and nothing else (the
+	// reveal action, features/drive/lib/reveal.ts). Deliberately NOT a slice of getItemInfo: that op
+	// swallows a failed walk into an empty chain so its other rows can still render, and it also awaits
+	// a recursive getDirSize for a directory — both wrong for a caller whose entire answer is the chain
+	// and whose navigation must not proceed when the walk fails. So this one REJECTS on failure and
+	// issues exactly one request. A pseudo-parent sentinel has no chain and makes getItemPath stall
+	// rather than reject (see getItemInfo's own note), so it throws before the call instead of hanging
+	// the caller.
+	getItemPath(item: Dir | File): Promise<GetItemPathResult> {
+		if (PSEUDO_PARENTS.has(item.parent)) {
+			throw new Error(`item has no navigable ancestry: ${item.uuid}`)
+		}
+		return requireClient().getItemPath(item)
+	},
 	// Size-only aggregate (bytes + child file/dir counts) for ONE directory, split out from
 	// getItemInfo (which also walks getItemPath) so the size-sort bridge can prefetch a whole
 	// listing's directories without paying for a path walk each. `dir` is the AnyDirWithContext the
@@ -1292,13 +1328,16 @@ const api = {
 		cacheSharedRootContexts(result.dirs)
 		return result
 	},
-	// Browsing into a shared directory: resolve the dir+role cached from a prior shared listing (a
-	// cache miss is a hard not-found, same as listDirectory's uuid case — no silent fallback to a
-	// different listing), list it, cache the children for further descent, and return the role so the
-	// query can context-tag the nested items before narrowing.
-	async listSharedDirectory(uuid: string): Promise<SharedNestedListing> {
+	// Browsing into a shared directory: resolve the dir+role cached from a prior shared listing, list
+	// it, cache the children for further descent, and return the role so the query can context-tag the
+	// nested items before narrowing. The context map is worker memory only, so a fresh worker (reload,
+	// bookmark, restored tab, pasted URL) always misses it — `hint` carries the route splat's own
+	// ancestor chain so the walk can be redone. Only then is a miss a hard not-found; there is no
+	// by-uuid resolver on the wasm surface to fall back to.
+	async listSharedDirectory(uuid: string, hint?: SharedPathHint): Promise<SharedNestedListing> {
 		const c = requireClient()
-		const context = getSharedDirContext(uuid)
+		const context =
+			hint === undefined ? getSharedDirContext(uuid) : await resolveSharedDirContext(sharedPathDeps(c, hint.variant), uuid, hint.path)
 		if (context === undefined) {
 			throw new Error(`shared directory not found: ${uuid}`)
 		}
