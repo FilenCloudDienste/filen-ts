@@ -43,3 +43,36 @@ export function resolveCursorIndex(targetUuid: string | null, uuids: readonly st
 
 	return clampListboxIndex(fallbackIndex, uuids.length)
 }
+
+// The plain-Arrow/Home/End cursor target for one key press, or null for a key this listbox does not
+// move on. `step` is how far a vertical arrow jumps (1 in a single-column list, `columns` in a grid);
+// `horizontal` enables Left/Right, which a single-column list has no axis for. The result is raw —
+// callers clamp it through moveActive/clampListboxIndex. One definition of the table, shared by the
+// drive listbox and the photos grid.
+export function listboxKeyTarget(key: string, activeIndex: number, itemCount: number, step: number, horizontal: boolean): number | null {
+	if (key === "ArrowDown") {
+		return activeIndex + step
+	}
+
+	if (key === "ArrowUp") {
+		return activeIndex - step
+	}
+
+	if (key === "ArrowRight" && horizontal) {
+		return activeIndex + 1
+	}
+
+	if (key === "ArrowLeft" && horizontal) {
+		return activeIndex - 1
+	}
+
+	if (key === "Home") {
+		return 0
+	}
+
+	if (key === "End") {
+		return itemCount - 1
+	}
+
+	return null
+}

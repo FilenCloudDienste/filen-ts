@@ -102,6 +102,81 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 		// ---- the patch proof: the grid's heart badge shows on the video tile with NO reload ----
 		await expect(videoTile.getByText("Favorited")).toBeVisible({ timeout: 20_000 })
 
+		// ---- keyboard operability: one tab stop into the grid, arrows move the cursor, Enter opens ----
+		// Placed AFTER the imageTile.click() above on purpose: that click's "a plain click opens the
+		// overlay" expectation only holds while the grid has NO selection, and this leg leaves the cursor
+		// on a tile (the marquee leg below leaves a real selection). The focus model is DOM-only, so this
+		// is its only proof.
+		const tiles = grid.getByRole("option")
+
+		await tiles.first().focus()
+		await expect(tiles.first()).toBeFocused()
+
+		await page.keyboard.press("ArrowRight")
+		await expect(tiles.nth(1)).toBeFocused()
+
+		await page.keyboard.press("Enter")
+		await expect(overlay).toBeVisible({ timeout: 30_000 })
+		await page.keyboard.press("Escape")
+		await expect(overlay).toHaveCount(0)
+
+		// ---- marquee: a drag over blank grid space rubber-band-selects the tiles it covers ----
+		// Also after the click above, for the same reason: this leg ends with a real selection, which
+		// would silently turn that click into a "select" instead of an "open".
+		const gridBox = await grid.boundingBox()
+		const firstTileBox = await tiles.first().boundingBox()
+		const secondTileBox = await tiles.nth(1).boundingBox()
+
+		if (!gridBox || !firstTileBox || !secondTileBox) {
+			throw new Error("photos grid or its tiles have no bounding box")
+		}
+
+		// A press point BELOW the tile row (blank space inside the grid), dragged right and down:
+		// marqueeRectFromPoints normalizes the rect, so only a right/down drag puts its x/y at the press
+		// point — a leftward drag would put x at the live pointer instead.
+		const pressX = gridBox.x + 8
+		const pressY = firstTileBox.y + firstTileBox.height + 12
+
+		await page.mouse.move(pressX, pressY)
+		await page.mouse.down()
+		// Past the 4px arm threshold, still inside the grid.
+		await page.mouse.move(pressX + 40, pressY + 40, { steps: 5 })
+
+		// The rectangle tracks the POINTER, not a padding-shifted origin: under padding-blind geometry the
+		// box lands exactly +16px in x (the grid's own px-4), an unambiguous failure independent of tile
+		// count or viewport width.
+		const rectBox = await page.getByTestId("marquee-rect").boundingBox()
+
+		if (!rectBox) {
+			throw new Error("marquee rectangle has no bounding box")
+		}
+
+		expect(Math.abs(rectBox.x - pressX)).toBeLessThanOrEqual(2)
+		expect(Math.abs(rectBox.y - pressY)).toBeLessThanOrEqual(2)
+
+		// Column boundaries are where the tiles actually are: a band confined to the FIRST tile's column
+		// selects only it. An inflated cellWidth moves that boundary and this fails.
+		await page.mouse.move(firstTileBox.x + firstTileBox.width / 2, firstTileBox.y + firstTileBox.height / 2, { steps: 5 })
+		await page.mouse.up()
+
+		await expect(tiles.first()).toHaveAttribute("aria-selected", "true")
+		await expect(tiles.nth(1)).toHaveAttribute("aria-selected", "false")
+
+		// And the whole-grid case still works: a drag spanning both tiles selects both and raises the bulk
+		// bar (threshold 2).
+		await page.mouse.move(pressX, pressY)
+		await page.mouse.down()
+		await page.mouse.move(secondTileBox.x + secondTileBox.width / 2, secondTileBox.y + secondTileBox.height / 2, { steps: 8 })
+		await page.mouse.up()
+
+		await expect(grid.locator('[role="option"][aria-selected="true"]')).toHaveCount(2)
+
+		// Clear the selection so the change-directory block and the teardown below run against exactly the
+		// state they run against without this leg.
+		await tiles.first().focus()
+		await page.keyboard.press("Escape")
+		await expect(grid.locator('[role="option"][aria-selected="true"]')).toHaveCount(0)
+
 		// ---- change-directory affordance re-opens the chooser ----
 		await page.getByRole("button", { name: "Change directory", exact: true }).click()
 		await expect(page.getByRole("dialog")).toBeVisible()

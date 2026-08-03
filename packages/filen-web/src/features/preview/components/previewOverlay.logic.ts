@@ -77,8 +77,8 @@ export function isVideoControlsBandClick(elementHeight: number, clickOffsetY: nu
 // no DOM: previewOverlay.tsx computes `isInteractive`/`isMedia`/`mediaControlsBandHit` from the real
 // click event (hasClosest + isVideoControlsBandClick above) and hands them here.
 export interface ChromeToggleClick {
-	// True when the click target sits inside a button/link/input/CodeMirror surface, or any other
-	// widget that owns its own click semantics.
+	// True when the click target sits inside a button/link/input, a text-selection surface (a CodeMirror
+	// editor or a pdf.js text layer), or any other widget that owns its own click semantics.
 	isInteractive: boolean
 	// True when the click target IS the <video>/<audio> element itself (isMediaTarget).
 	isMedia: boolean
@@ -96,4 +96,50 @@ export function shouldToggleChrome(click: ChromeToggleClick): boolean {
 	}
 
 	return true
+}
+
+// What close/prev/next resolve to once an unsaved-changes prompt is answered — the SAME confirm dialog
+// serves all three trigger points (Escape/backdrop/X, the two pager buttons, and the in-dialog arrow
+// keys), so this is the only state needed to remember which of them was actually requested.
+export type PreviewDismissIntent = "close" | "prev" | "next"
+
+// Only a navigation that leaves this route ever unmounts the overlay (and with it the dirty buffer):
+// a same-route param change — a deeper /drive/$ splat — re-renders the listing in place with the
+// dialog host, the frozen pager snapshot and the editor buffer all intact. Prompting there would
+// claim a loss that never happens.
+export function previewNavigationUnmountsOverlay(currentRouteId: string, nextRouteId: string): boolean {
+	return currentRouteId !== nextRouteId
+}
+
+// What one "Discard" answer has to do. Not a precedence ranking: a blocked navigation and a waiting
+// sign-out can both be live (a force-logout can arrive while the navigation prompt is already up),
+// and each holds a promise someone is awaiting, so both get released by the same answer. The queued
+// in-app intent is dropped whenever either external waiter is released — the overlay is going away on
+// that path regardless, so stepping the pager first would be a visible flicker with no meaning.
+export interface UnsavedConfirmActions {
+	proceedNavigation: boolean
+	proceedLogout: boolean
+	intent: PreviewDismissIntent | null
+}
+
+export function resolveUnsavedConfirm(
+	pendingIntent: PreviewDismissIntent | null,
+	navigationBlocked: boolean,
+	logoutRequested: boolean
+): UnsavedConfirmActions {
+	return {
+		proceedNavigation: navigationBlocked,
+		proceedLogout: logoutRequested,
+		intent: navigationBlocked || logoutRequested ? null : pendingIntent
+	}
+}
+
+// One prompt for all five trigger vectors (close/prev/next, a blocked navigation, a waiting sign-out),
+// so a second one can never stack behind the first.
+export function unsavedPromptOpen(
+	pendingIntent: PreviewDismissIntent | null,
+	navigationBlocked: boolean,
+	logoutRequested: boolean
+): boolean {
+	return pendingIntent !== null || navigationBlocked || logoutRequested
 }

@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { enterScratchDirectory, trashScratchDirectory, waitForListingSettled } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -95,39 +95,138 @@ test("docx preview renders document content and closes, no CSP console errors", 
 
 // The one live proof the text path actually works: a real lazy CodeMirror chunk, real UTF-8 decode, in
 // a real browser — unlike preview.logic.test.ts's pure decodeUtf8/codeMirrorLanguageFor unit coverage,
-// none of that is provable without one.
-test("text preview decodes and renders read-only content, no CSP console errors", async ({ page, injectedSession, browserName }) => {
+// none of that is provable without one. A `.txt` in the drive variant is EDITABLE (isEditable), which
+// is what also makes this leg the right host for the unsaved-edits navigation guard below: it drives
+// browser BACK, the vector the guard is actually about (a sidebar click cannot be used — the overlay's
+// backdrop and popup are both `fixed inset-0 z-50`, so the sidebar link is covered and outside the
+// modal's interaction scope, and Playwright's actionability check would simply time out).
+test("text preview renders, edits, and guards unsaved edits against navigation, no CSP console errors", async ({
+	page,
+	injectedSession,
+	browserName
+}) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
 	const runId = crypto.randomUUID()
 	const scratchName = `e2e-preview-text-${runId}`
 	const nameTxt = `e2e-preview-text-${runId}.txt`
+	const nameDocx = `e2e-preview-text-${runId}.docx`
 
 	const cspViolations = trackCspViolations(page)
 
-	await page.goto("/drive")
+	const dialog = page.getByRole("dialog")
+	const unsavedPrompt = page.getByRole("alertdialog", { name: "Unsaved changes" })
+
+	// History has to be seeded across two DIFFERENT routes: there is exactly one drive route file
+	// (routes/_app/drive.$.tsx), so /drive and /drive/<uuid> share routeId "/_app/drive/$" and a back
+	// between them is deliberately NOT blocked. Starting at /favorites and pushing into /drive gives the
+	// leg one same-route back and one leave-route back, both inside ONE document so every back is a real
+	// popstate the router's blocker sees.
+	await page.goto("/favorites")
 
 	try {
+		await waitForListingSettled(page)
+		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
+
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
 		const input = page.locator('input[type="file"]').first()
-		await input.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }])
+		await input.setInputFiles([
+			{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES },
+			// A sibling slot that mounts NO editor — what proves the discard actually resets the buffer.
+			{
+				name: nameDocx,
+				mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+				buffer: DOCX_BYTES
+			}
+		])
 
 		const row = listbox.getByRole("option", { name: nameTxt })
 		await expect(row).toBeVisible({ timeout: 45_000 })
+		await expect(listbox.getByRole("option", { name: nameDocx })).toBeVisible({ timeout: 45_000 })
 
 		// Opens the CodeMirror lazy chunk for the first time this run.
 		await row.dblclick()
-		const line = page.getByRole("dialog").getByText("Hello from a tiny text fixture.")
+		const line = dialog.getByText("Hello from a tiny text fixture.")
 		await expect(line).toBeVisible({ timeout: 30_000 })
 		await expect(page.getByText("Second line here.")).toBeVisible()
 
-		await page.keyboard.press("Escape")
+		const saveButton = dialog.getByRole("button", { name: "Save", exact: true })
+		const prevButton = dialog.getByRole("button", { name: "Previous file", exact: true })
+		const nextButton = dialog.getByRole("button", { name: "Next file", exact: true })
+
+		// Whichever pager direction the docx sibling happens to sit in — with exactly two slots, exactly
+		// one of the two buttons is enabled from either end.
+		async function stepToSibling(): Promise<void> {
+			if (await nextButton.isEnabled()) {
+				await nextButton.click()
+			} else {
+				await prevButton.click()
+			}
+		}
+
+		async function dirtyTheBuffer(): Promise<void> {
+			await dialog.locator(".cm-content").click()
+			await page.keyboard.type("x")
+			await expect(saveButton).toBeVisible()
+		}
+
+		await dirtyTheBuffer()
+
+		// Discard on a pager step must land on the sibling CLEAN: without the reset the overlay stays
+		// "dirty" over a slot that mounts no editor at all, leaving a Save-less overlay permanently dirty
+		// — a phantom prompt, and with the navigation blocker a phantom route block too.
+		await stepToSibling()
+		await expect(unsavedPrompt).toBeVisible()
+		await unsavedPrompt.getByRole("button", { name: "Discard", exact: true }).click()
+		await expect(page.getByText("Hello from a tiny docx fixture.")).toBeVisible({ timeout: 60_000 })
+		await expect(saveButton).toHaveCount(0)
+
+		await stepToSibling()
+		await expect(line).toBeVisible({ timeout: 30_000 })
+		await expect(unsavedPrompt).toHaveCount(0)
+
+		await dirtyTheBuffer()
+
+		// Same routeId ⇒ NO prompt: the listing re-renders in place with the dialog host, the frozen pager
+		// snapshot and the editor buffer all intact, so prompting here would claim a loss that never
+		// happens. This is the direct proof of the leave-route-only design.
+		await page.goBack()
+		await expect(page).toHaveURL(/\/drive$/)
+		await expect(unsavedPrompt).toHaveCount(0)
+		await expect(line).toBeVisible()
+
+		// Different routeId ⇒ blocked. While the prompt is open the browser URL is ALREADY /favorites (the
+		// pop landed; only the router was held back) — it is the blocker's own go(1) that restores it once
+		// the navigation is reset, hence the retrying toHaveURL rather than a bare page.url() read.
+		await page.goBack()
+		await expect(unsavedPrompt).toBeVisible()
+		await unsavedPrompt.getByRole("button", { name: "Cancel", exact: true }).click()
+		await expect(page).toHaveURL(/\/drive$/)
+		await expect(line).toBeVisible()
+
+		await page.goBack()
+		await expect(unsavedPrompt).toBeVisible()
+		await unsavedPrompt.getByRole("button", { name: "Discard", exact: true }).click()
+		await expect(page).toHaveURL(/\/favorites$/)
 		await expect(line).toHaveCount(0)
 
 		expect(cspViolations).toEqual([])
 	} finally {
+		// trashScratchDirectory opens with Escape + a sidebar "Cloud Drive" click, and BOTH are defeated by
+		// a still-dirty buffer (Escape opens the prompt; the link is covered by the overlay or blocked by
+		// the router). The happy path above ends clean, but a failure mid-leg would otherwise leak the
+		// scratch directory.
+		await page.keyboard.press("Escape").catch(() => undefined)
+
+		if (await unsavedPrompt.isVisible().catch(() => false)) {
+			await unsavedPrompt
+				.getByRole("button", { name: "Discard", exact: true })
+				.click()
+				.catch(() => undefined)
+		}
+
 		await trashScratchDirectory(page, scratchName)
 	}
 })
@@ -208,15 +307,44 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 
 		// View source — mounts the same CodeMirror surface the text/code legs use, this run's first use
 		// of it since this file never opened via the text/code path.
-		await page.getByRole("button", { name: "View source" }).click()
+		const viewSource = page.getByRole("button", { name: "View source" })
+		const viewRendered = page.getByRole("button", { name: "View rendered" })
+
+		await viewSource.click()
 		await expect(page.getByText("# Hello Markdown")).toBeVisible({ timeout: 30_000 })
 		await expect(heading).toHaveCount(0)
 
 		// Back to rendered.
-		await page.getByRole("button", { name: "View rendered" }).click()
+		await viewRendered.click()
 		await expect(heading).toBeVisible({ timeout: 15_000 })
 
+		// Editing the source: the toggle LOCKS while the buffer is dirty (flipping back to rendered
+		// unmounts the editor, which would discard the buffer and strand the dirty flag), and the header's
+		// Save button appears. The whole toggle/unmount interplay is DOM-only, so this is its only proof.
+		const dialog = page.getByRole("dialog")
+		const saveButton = dialog.getByRole("button", { name: "Save", exact: true })
+
+		await viewSource.click()
+		await expect(page.getByText("# Hello Markdown")).toBeVisible({ timeout: 30_000 })
+		// The FIRST line specifically (a center click on .cm-content could land on the blank second line),
+		// so the typed character lands in the heading and the saved result is observable as one.
+		await dialog.locator(".cm-line").first().click()
+		await page.keyboard.press("End")
+		await page.keyboard.type("!")
+		await expect(viewRendered).toBeDisabled()
+		await expect(saveButton).toBeVisible()
+
+		// A save rotates the file uuid, which re-keys the body and remounts the viewer in its default
+		// rendered mode — "save, then see the rendered result" is the shipped behavior.
+		await saveButton.click()
+		await expect(page.getByRole("heading", { name: "Hello Markdown!", level: 1 })).toBeVisible({ timeout: 60_000 })
+		// The dirty reset: without it both the Save button and the locked toggle stay in their dirty state
+		// forever, and Escape below would pop a phantom "Unsaved changes" prompt instead of closing.
+		await expect(saveButton).toHaveCount(0)
+		await expect(viewSource).toBeEnabled()
+
 		await page.keyboard.press("Escape")
+		await expect(page.getByRole("alertdialog", { name: "Unsaved changes" })).toHaveCount(0)
 		await expect(heading).toHaveCount(0)
 
 		expect(cspViolations).toEqual([])

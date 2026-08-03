@@ -18,7 +18,12 @@ export interface PhotoTileProps {
 	item: PhotoItem
 	index: number
 	selected: boolean
+	// The roving-tabindex cursor: exactly one tile carries the grid's single tab stop (drive parity,
+	// driveTile.tsx) — its face AND its ⋯ trigger, so tabbing into an unbounded virtualized grid costs
+	// one stop, not one per tile.
+	active: boolean
 	size: number
+	registerRef: (index: number, el: HTMLDivElement | null) => void
 	// Fires for every plain/modifier click on the tile's face — photoGrid.tsx's own handleTileClick
 	// decides open-vs-select (photoGrid.logic.ts's resolveTileClickIntent) before this ever runs, so by
 	// the time it's called the caller has already committed to one outcome; the tile itself stays a
@@ -33,7 +38,7 @@ export interface PhotoTileProps {
 // bottom-left, offline top-right (no web equivalent), video bottom-right) instead of driveTile's own
 // top-left placement, and no offline badge at all (web has no make-offline concept — see the study's
 // own honest enumeration).
-export function PhotoTile({ rootUuid, item, index, selected, size, onTileClick, onItemAction }: PhotoTileProps) {
+export function PhotoTile({ rootUuid, item, index, selected, active, size, registerRef, onTileClick, onItemAction }: PhotoTileProps) {
 	const { t } = useTranslation(["drive", "photos"])
 	const name = item.data.decryptedMeta?.name ?? item.data.uuid
 	const thumbUrl = useThumbnail(item)
@@ -44,11 +49,19 @@ export function PhotoTile({ rootUuid, item, index, selected, size, onTileClick, 
 			<ContextMenuTrigger
 				render={
 					<div
+						ref={el => {
+							registerRef(index, el)
+						}}
 						role="option"
 						aria-selected={selected}
+						tabIndex={active ? 0 : -1}
 						title={name}
 						style={{ width: size }}
-						className="group/tile relative flex shrink-0 flex-col gap-1 outline-none select-none"
+						// justify-self-center (drive parity, driveTile.tsx): with a gap-corrected column count the
+						// cell is always at least as wide as the tile, so centering distributes the slack evenly
+						// instead of piling it on each cell's right edge — which is also the geometry
+						// marquee.logic.ts encodes.
+						className="group/tile relative flex shrink-0 flex-col gap-1 justify-self-center outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50"
 						onClick={event => {
 							onTileClick(index, event)
 						}}
@@ -113,6 +126,7 @@ export function PhotoTile({ rootUuid, item, index, selected, size, onTileClick, 
 										<Button
 											variant="ghost"
 											size="icon-xs"
+											tabIndex={active ? 0 : -1}
 											aria-label={t("driveItemMenuTrigger")}
 											// Coarse-pointer fallback — see DriveRow's identical trigger.
 											className="absolute top-1 right-1 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 pointer-coarse:size-8 pointer-coarse:opacity-100 pointer-coarse:[&_svg:not([class*='size-'])]:size-4"

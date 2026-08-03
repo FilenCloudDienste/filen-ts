@@ -5,6 +5,12 @@ import { i18n } from "@/lib/i18n"
 import { sdkApi } from "@/lib/sdk/client"
 import { runCreateDirectory, type CreateDirectoryDeps } from "@/features/drive/lib/createDirectory"
 import { runUpload, defaultUploadDeps, type RunUploadDeps } from "@/features/drive/lib/upload"
+import {
+	defaultHeicUploadDeps,
+	heicUploadConversionEnabled,
+	maybeConvertHeicUpload,
+	type HeicUploadDeps
+} from "@/features/drive/lib/heicUpload"
 import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 
 // Directory upload: pick/drop a whole directory and recreate its sub-directory tree in the current
@@ -203,6 +209,7 @@ export function depthOf(relPath: string): number {
 export interface RunDirectoryUploadDeps {
 	createDirectory: CreateDirectoryDeps
 	upload: RunUploadDeps
+	heic: HeicUploadDeps
 }
 
 export async function runDirectoryUpload(
@@ -248,6 +255,13 @@ export async function runDirectoryUpload(
 		createdDirs += 1
 	}
 
+	// One preference read for the whole walk (see heicUploadConversionEnabled); the conversion itself
+	// stays inside the fan-out below so a converted file uploads as soon as IT is ready.
+	const convertHeic = await heicUploadConversionEnabled(
+		deps.heic,
+		files.map(entry => entry.file)
+	)
+
 	// Files fan out in parallel — no JS queue/semaphore, same rationale as startUploads: the SDK's own
 	// Tower layer throttles real upload concurrency, never reimplemented here.
 	const fileOutcomes = await Promise.all(
@@ -259,7 +273,9 @@ export async function runDirectoryUpload(
 				return false
 			}
 
-			const outcome = await runUpload(deps.upload, { parentUuid, file })
+			// renameToJpg only rewrites file.name; `relPath` is untouched and still resolves the parent above.
+			const prepared = await maybeConvertHeicUpload(deps.heic.convert, file, convertHeic)
+			const outcome = await runUpload(deps.upload, { parentUuid, file: prepared })
 
 			return outcome.status === "success"
 		})
@@ -296,7 +312,8 @@ const defaultDirectoryUploadDeps: RunDirectoryUploadDeps = {
 		createDirectory: (parentUuid, name) => sdkApi.createDirectory(parentUuid, name),
 		patchListing: driveListingQueryUpdate
 	},
-	upload: defaultUploadDeps
+	upload: defaultUploadDeps,
+	heic: defaultHeicUploadDeps
 }
 
 // Both call sites (uploadMenu.tsx's directory picker, uploadDropzone.tsx's DnD drop) fire this

@@ -37,6 +37,7 @@ import {
 	useViewModePreferencesQuery
 } from "@/features/drive/queries/drive"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import { ROW_HEIGHT, TILE_ROW_HEIGHT, TILE_WIDTH } from "@/features/drive/lib/gridLayout"
 import { cn } from "@/lib/utils"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { registerAction } from "@/lib/keymap/registry"
@@ -73,7 +74,7 @@ import { isSearchConverging } from "@/features/drive/lib/searchStatus.logic"
 import { useDriveVirtualizer } from "@/features/drive/hooks/useDriveVirtualizer"
 import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
 import { useDriveListboxNav } from "@/features/drive/hooks/useDriveListboxNav"
-import { useDriveMarquee } from "@/features/drive/hooks/useDriveMarquee"
+import { useMarqueeSelection } from "@/features/drive/hooks/useMarqueeSelection"
 import { useDriveDialogHost } from "@/features/drive/hooks/useDriveDialogHost"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Spinner } from "@/components/ui/spinner"
@@ -346,10 +347,22 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	// Rubber-band selection over blank listbox space (list + grid). Owns its own pointer/keyboard/rAF
 	// listeners; renders the rectangle returned below inside the scrolled content layer.
-	const marquee = useDriveMarquee({
+	const marquee = useMarqueeSelection({
 		items: sortedItems,
 		viewMode: effectiveViewMode,
 		columns,
+		geometry: {
+			rowHeight: effectiveViewMode === "list" ? ROW_HEIGHT : TILE_ROW_HEIGHT,
+			tileWidth: TILE_WIDTH,
+			// The drive grid has no inter-column gap; the cell IS the tile's slot.
+			gap: 0
+		},
+		selection: {
+			read: () => useDriveStore.getState().selectedItems,
+			write: items => {
+				useDriveStore.getState().setSelectedItems(items)
+			}
+		},
 		scrollElement,
 		setCursor
 	})
@@ -615,6 +628,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						{marquee.rect ? (
 							<div
 								aria-hidden="true"
+								data-testid="marquee-rect"
 								className="pointer-events-none absolute z-20 rounded-xs border border-primary/60 bg-primary/15"
 								style={{
 									left: marquee.rect.left,

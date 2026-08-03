@@ -11,6 +11,7 @@ import {
 	type RefObject
 } from "react"
 import { useTranslation } from "react-i18next"
+import { useBlocker, type ShouldBlockFn } from "@tanstack/react-router"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { XIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, SaveIcon, MoreHorizontalIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -35,11 +36,16 @@ import { MediaViewer, MediaElement } from "@/features/preview/components/mediaVi
 import {
 	isTextEditingTarget,
 	previewMenuVisible,
+	previewNavigationUnmountsOverlay,
 	PREVIEW_MENU_HIDDEN_ACTION_IDS,
 	hasClosest,
 	isVideoControlsBandClick,
-	shouldToggleChrome
+	resolveUnsavedConfirm,
+	shouldToggleChrome,
+	unsavedPromptOpen,
+	type PreviewDismissIntent
 } from "@/features/preview/components/previewOverlay.logic"
+import { setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { type PreviewSource, previewSourceKey, previewSourceName } from "@/features/preview/lib/previewSource"
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
@@ -80,6 +86,10 @@ registerAction({
 	scope: "editor",
 	descriptionKey: "previewSaveAction"
 })
+
+// Module scope, not an inline arrow: useBlocker's registration effect lists shouldBlockFn in its own
+// deps, so a per-render identity would unregister/re-register the history blocker on every render.
+const blockWhenLeavingRoute: ShouldBlockFn = ({ current, next }) => previewNavigationUnmountsOverlay(current.routeId, next.routeId)
 
 export interface PreviewOverlayProps {
 	variant: DriveVariant
@@ -122,11 +132,6 @@ export interface PreviewOverlayProps {
 function isMediaTarget(target: EventTarget | null): boolean {
 	return target instanceof HTMLMediaElement
 }
-
-// What close/prev/next resolve to once an unsaved-changes prompt is answered — the SAME confirm
-// dialog serves all three trigger points (Escape/backdrop/X, the two pager buttons, and the in-dialog
-// arrow keys), so this is the only state needed to remember which of them was actually requested.
-type PendingIntent = "close" | "prev" | "next"
 
 interface PreviewErrorBoundaryState {
 	hasError: boolean
@@ -197,9 +202,13 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 	// failed save). Mirrors mobile parity's "a failed save locks the file read-only" rule; cleared by a
 	// fresh item or a fresh overlay mount, never by an effect.
 	const [lockedReadOnly, setLockedReadOnly] = useState<{ forUuid: string } | null>(null)
-	const [dirty, setDirty] = useState(false)
+	// Not component state: the sign-out path is a plain lib function and has to be able to read this
+	// same bit (see usePreviewUnsavedGuard). Boolean-collapsed selector, so the overlay still re-renders
+	// on the dirty EDGE only.
+	const dirty = usePreviewUnsavedGuardStore(state => state.dirty)
+	const logoutRequest = usePreviewUnsavedGuardStore(state => state.logoutRequest)
 	const [saving, setSaving] = useState(false)
-	const [pendingIntent, setPendingIntent] = useState<PendingIntent | null>(null)
+	const [pendingIntent, setPendingIntent] = useState<PreviewDismissIntent | null>(null)
 	// Which secondary dialog the header's item menu (below) currently has open, if any — a single slot
 	// since only ever one item (the currently-viewed one) is ever being acted on from in here, unlike
 	// useDriveDialogHost's own activeDialog which also has to carry a whole bulk-selection items[].
@@ -524,14 +533,46 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 		}
 	}, [])
 
+	// The prompt that answers a waiting sign-out lives BELOW the `currentSource === undefined` early
+	// return, so a slot that vanished under a dirty editor (its item removed elsewhere) must drop the
+	// guard too — otherwise a sign-out would wait forever on a dialog that can never render. Store
+	// writes, not React setState, so react-hooks/set-state-in-effect does not apply.
+	const slotVanished = currentSource === undefined
+
+	useEffect(() => {
+		if (slotVanished) {
+			usePreviewUnsavedGuardStore.getState().clear()
+		}
+	}, [slotVanished])
+
+	useEffect(() => {
+		return () => {
+			usePreviewUnsavedGuardStore.getState().clear()
+		}
+	}, [])
+
+	// Browser-level guard for the two vectors the in-app requestOrRun path cannot see: a tab
+	// refresh/close (enableBeforeUnload — the router's own history owns that listener) and any
+	// navigation that unmounts this overlay's route body. Registered ONLY while the buffer is dirty AND
+	// a slot is actually rendered: without the second term a vanished slot (early return below → no
+	// ConfirmDialog in the tree) could block a navigation nothing can then resolve, leaving the
+	// blocker's own promise unsettled after the popstate already moved the URL.
+	const blocker = useBlocker({
+		shouldBlockFn: blockWhenLeavingRoute,
+		enableBeforeUnload: true,
+		disabled: !dirty || currentSource === undefined,
+		withResolver: true
+	})
+
 	// The one write path: encode -> upload -> patch listing -> re-key onto the rotated uuid (success), or
 	// a LABEL-FIRST toast (failure) — read-only lockdown is reserved for the ONE failure class retrying
 	// can never fix (isUnresolvableParentError, see previewSave.logic.ts's own comment on why); every
-	// other failure leaves the buffer editable+dirty for a retry. `dirty` resets for free on SUCCESS
-	// only: a new `item.data.uuid` re-keys PreviewBody, remounting TextViewer fresh with its own clean
-	// `dirty=false` (see textViewer.tsx's own mount-time effect) — a FAILURE never remounts anything, so
-	// the buffer (and its dirty bit) simply survives untouched, which is exactly what keeps the typed
-	// content visible and the close/nav prompt still armed either way.
+	// other failure leaves the buffer editable+dirty for a retry. `dirty` is reset explicitly on SUCCESS
+	// below — a new `item.data.uuid` re-keys PreviewBody and the remounted viewer re-seeds a fresh
+	// editor's own buffer, but a slot that mounts NO editor (markdown returns in rendered mode) would
+	// otherwise never report the buffer clean. A FAILURE never remounts anything, so the buffer (and its
+	// dirty bit) simply survives untouched, which is what keeps the typed content visible and the
+	// close/nav prompt still armed.
 	async function performSave(): Promise<void> {
 		// Locals, not the outer `driveItem`/`rawDriveItem` directly — this closure runs asynchronously, well
 		// after this render's narrowing; re-binding here gives the guard below its own, freshly-narrowable copy.
@@ -575,6 +616,10 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 		// Keyed by the FROZEN slot uuid (targetRawItem), never targetItem's own uuid — see `saved`'s own
 		// comment on why that's what makes a chained re-save of the same slot collapse onto one entry.
 		setSaved(prev => new Map(prev).set(targetRawItem.data.uuid, outcome.item))
+		setPreviewDirty(false)
+		// The remounted viewer re-seeds this itself when it mounts an editor; markdown returns in RENDERED
+		// mode and mounts none, so a stale buffer would otherwise stay readable to a second save.
+		contentRef.current = null
 	}
 
 	useAction(
@@ -599,7 +644,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 	// in-flight save blocks the intent outright (mirrors the pager buttons' own disabled state):
 	// prompting "discard?" mid-save would let the user discard while the un-cancellable upload still
 	// lands and patches the listing — a silent contradiction of the choice they just made.
-	function requestOrRun(intent: PendingIntent, run: () => void): void {
+	function requestOrRun(intent: PreviewDismissIntent, run: () => void): void {
 		if (saving) {
 			return
 		}
@@ -630,8 +675,12 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 	// area at all.
 	function handleBodyClick(event: ReactMouseEvent<HTMLDivElement>): void {
 		const target = event.target
+		// `.pdf-text-layer` joins `.cm-editor` as a whole text-SELECTION surface excluded from the toggle:
+		// pdf.js's layer covers the entire page with no pointer-events opt-out, so once it exists every
+		// click on a PDF page — including the one that concludes a drag-selection — lands on it.
 		const isInteractive =
-			hasClosest(target) && target.closest("button, a, [role='button'], .cm-editor, input, select, textarea") !== null
+			hasClosest(target) &&
+			target.closest("button, a, [role='button'], .cm-editor, .pdf-text-layer, input, select, textarea") !== null
 		const isMedia = isMediaTarget(target)
 		let mediaControlsBandHit = false
 
@@ -679,14 +728,36 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 	}
 
 	function handleUnsavedConfirm(): void {
-		const intent = pendingIntent
-		setPendingIntent(null)
+		const actions = resolveUnsavedConfirm(pendingIntent, blocker.status === "blocked", logoutRequest !== null)
 
-		if (intent === "close") {
+		setPendingIntent(null)
+		// The buffer is gone by the user's own choice: drop the dirty bit and the stale content with it.
+		// Without this the flag survives into a slot that mounts no editor at all (an image, a PDF, a
+		// rendered markdown), leaving a Save-less overlay permanently "dirty" — a phantom prompt, and
+		// with the blocker above a phantom route block plus an armed beforeunload.
+		setPreviewDirty(false)
+		contentRef.current = null
+
+		// `logoutRequest !== null` is re-tested (not read off `actions` alone) so TS narrows it — same
+		// reason `blocker.status` is re-tested below.
+		if (actions.proceedLogout && logoutRequest !== null) {
+			logoutRequest.resolve(true)
+			usePreviewUnsavedGuardStore.getState().setLogoutRequest(null)
+			// Closing is what makes the sign-out deterministic rather than timing-dependent: the editor
+			// unmounts here, so nothing can re-dirty the buffer (and re-arm beforeunload) during the wipe
+			// that follows, which stays fully interactive until its final reload.
 			onClose()
-		} else if (intent === "prev") {
+		}
+
+		if (actions.proceedNavigation && blocker.status === "blocked") {
+			blocker.proceed()
+		}
+
+		if (actions.intent === "close") {
+			onClose()
+		} else if (actions.intent === "prev") {
 			onStep(-1)
-		} else if (intent === "next") {
+		} else if (actions.intent === "next") {
 			onStep(1)
 		}
 	}
@@ -827,7 +898,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 							<PreviewBody
 								source={currentSource}
 								editable={editable}
-								onDirtyChange={setDirty}
+								onDirtyChange={setPreviewDirty}
 								contentRef={contentRef}
 							/>
 						</PreviewErrorBoundary>
@@ -835,9 +906,9 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 					{/* Nested confirmation dialog — Base UI supports nesting a dialog inside another normally
 					(see versionsDialog.tsx's own identical precedent); this must stay a child of the outer
 					Dialog, not a sibling rendered outside it, for the stacked focus-trap/backdrop behavior to
-					apply. Shared by close/prev/next — see PendingIntent — rather than one instance per trigger. */}
+					apply. Shared by close/prev/next — see PreviewDismissIntent — rather than one instance per trigger. */}
 					<ConfirmDialog
-						open={pendingIntent !== null}
+						open={unsavedPromptOpen(pendingIntent, blocker.status === "blocked", logoutRequest !== null)}
 						pending={false}
 						title={t("previewUnsavedChangesTitle")}
 						body={t("previewUnsavedChangesBody")}
@@ -847,6 +918,17 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 						onOpenChange={open => {
 							if (!open) {
 								setPendingIntent(null)
+
+								// Cancel settles every live waiter with "don't proceed" — the mirror image of
+								// confirm — so neither promise can strand.
+								if (blocker.status === "blocked") {
+									blocker.reset()
+								}
+
+								if (logoutRequest !== null) {
+									logoutRequest.resolve(false)
+									usePreviewUnsavedGuardStore.getState().setLogoutRequest(null)
+								}
 							}
 						}}
 						onConfirm={handleUnsavedConfirm}
@@ -929,8 +1011,9 @@ function ExternalPreviewBody({ url, name }: { url: string; name: string }) {
 // own data source (a streamed SW URL or a buffered blob, see imageViewer.tsx/mediaViewer.tsx),
 // pdf/docx each own a lazy chunk plus their own whole-buffer load (see pdfViewer.tsx/docxViewer.tsx)
 // — a category still rendered by the fallback below (text/code/markdown) has nothing to load yet.
-// `editable`/`onDirtyChange`/`contentRef` only ever reach TextViewer (the "text"/"code" case) — every
-// other category ignores them.
+// `editable`/`onDirtyChange`/`contentRef` only ever reach a CodeMirror surface: the "text"/"code"
+// case's TextViewer, and the "markdown" case's own source-mode TextViewer — every other category
+// ignores them.
 function PreviewBody({ source, editable, onDirtyChange, contentRef }: PreviewBodyProps) {
 	const { t } = useTranslation("preview")
 
@@ -1039,6 +1122,9 @@ function PreviewBody({ source, editable, onDirtyChange, contentRef }: PreviewBod
 					<MarkdownViewer
 						item={item}
 						alt={alt}
+						editable={editable}
+						onDirtyChange={onDirtyChange}
+						contentRef={contentRef}
 					/>
 				</Suspense>
 			)

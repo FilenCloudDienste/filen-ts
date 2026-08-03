@@ -70,5 +70,7 @@ export const preview = {
 	/** Markdown viewer — toolbar button shown while viewing the rendered output; switches to the raw-text source view */
 	previewMarkdownViewSourceAction: "View source",
 	/** Markdown viewer — toolbar button shown while viewing the raw-text source; switches back to the rendered output */
-	previewMarkdownViewRenderedAction: "View rendered"
+	previewMarkdownViewRenderedAction: "View rendered",
+	/** Markdown viewer — native tooltip on the disabled rendered/source toggle: switching views unmounts the editor buffer, so the toggle is locked until the edit is saved or discarded */
+	previewMarkdownToggleDirtyHint: "Save or discard your changes before switching views."
 } as const

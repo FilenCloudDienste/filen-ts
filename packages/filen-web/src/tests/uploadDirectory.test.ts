@@ -290,13 +290,16 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 		const settle = vi.fn<(id: string, status: TerminalStatus, error?: ErrorDTO) => void>()
 		const remove = vi.fn<(id: string) => void>()
 		const patchFileListing = vi.fn<(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void>()
+		const transform = vi.fn<(bytes: Uint8Array) => Promise<Blob>>().mockResolvedValue(new Blob([new Uint8Array([9])]))
+		const readPreference = vi.fn<() => Promise<boolean>>().mockResolvedValue(false)
 
 		const deps: RunDirectoryUploadDeps = {
 			createDirectory: { createDirectory: create, patchListing: patchDirListing },
-			upload: { upload, store: { add, setProgress, settle, remove }, patchListing: patchFileListing }
+			upload: { upload, store: { add, setProgress, settle, remove }, patchListing: patchFileListing },
+			heic: { convert: { transform }, readPreference }
 		}
 
-		return { deps, create, patchDirListing, upload, add, settle, patchFileListing }
+		return { deps, create, patchDirListing, upload, add, settle, patchFileListing, transform, readPreference }
 	}
 
 	// createDirectory resolves a distinct uuid per leaf name — lets assertions confirm each file/dir
@@ -458,8 +461,9 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 			]
 		})
 
-		await Promise.resolve()
-		await Promise.resolve()
+		// A macrotask turn rather than a fixed number of microtask ticks: the walk awaits its
+		// convert-on-upload gate and each file's own conversion step before runUpload is reached.
+		await new Promise(resolve => setTimeout(resolve, 0))
 
 		expect(callOrder).toEqual(["called:a.txt", "called:b.txt"])
 
@@ -467,6 +471,79 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 			resolve()
 		})
 		await promise
+	})
+
+	it("uploads the CONVERTED file into its own recreated sub-directory when the preference is on", async () => {
+		const h = makeHarness()
+		resolveByName(h)
+		h.readPreference.mockResolvedValue(true)
+		h.upload.mockResolvedValue(mockSdkFile())
+
+		await runDirectoryUpload(h.deps, {
+			rootParentUuid: null,
+			dirs: ["a"],
+			files: [{ file: mockBrowserFile("photo.heic"), relPath: "a/photo.heic" }]
+		})
+
+		expect(h.transform).toHaveBeenCalledTimes(1)
+		// The rename never touches relPath, so the converted file still resolves "a" as its parent.
+		expect(h.upload).toHaveBeenCalledWith(
+			testUuid("a"),
+			expect.any(String),
+			expect.objectContaining({ name: "photo.jpg" }),
+			expect.any(Function)
+		)
+	})
+
+	it("reads the preference exactly once for a multi-file, multi-directory walk", async () => {
+		const h = makeHarness()
+		resolveByName(h)
+		h.readPreference.mockResolvedValue(true)
+		h.upload.mockResolvedValue(mockSdkFile())
+
+		await runDirectoryUpload(h.deps, {
+			rootParentUuid: null,
+			dirs: ["a", "a/b"],
+			files: [
+				{ file: mockBrowserFile("one.heic"), relPath: "a/one.heic" },
+				{ file: mockBrowserFile("two.heic"), relPath: "a/b/two.heic" },
+				{ file: mockBrowserFile("three.txt"), relPath: "a/b/three.txt" }
+			]
+		})
+
+		expect(h.readPreference).toHaveBeenCalledTimes(1)
+		expect(h.transform).toHaveBeenCalledTimes(2)
+	})
+
+	it("never reads the preference for a walk with no HEIC/HEIF candidate", async () => {
+		const h = makeHarness()
+		resolveByName(h)
+		h.upload.mockResolvedValue(mockSdkFile())
+
+		await runDirectoryUpload(h.deps, {
+			rootParentUuid: null,
+			dirs: ["a"],
+			files: [{ file: mockBrowserFile("x.txt"), relPath: "a/x.txt" }]
+		})
+
+		expect(h.readPreference).not.toHaveBeenCalled()
+		expect(h.transform).not.toHaveBeenCalled()
+	})
+
+	it("never converts a file whose parent directory failed — the guard precedes the conversion", async () => {
+		const h = makeHarness()
+		h.readPreference.mockResolvedValue(true)
+		h.create.mockRejectedValue(new Error("create failed"))
+		h.upload.mockResolvedValue(mockSdkFile())
+
+		await runDirectoryUpload(h.deps, {
+			rootParentUuid: null,
+			dirs: ["a"],
+			files: [{ file: mockBrowserFile("photo.heic"), relPath: "a/photo.heic" }]
+		})
+
+		expect(h.transform).not.toHaveBeenCalled()
+		expect(h.upload).not.toHaveBeenCalled()
 	})
 })
 

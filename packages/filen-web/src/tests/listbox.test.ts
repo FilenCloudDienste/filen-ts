@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { clampListboxIndex, listboxRange, resolveCursorIndex } from "@/features/drive/lib/listbox"
+import { clampListboxIndex, listboxKeyTarget, listboxRange, resolveCursorIndex } from "@/features/drive/lib/listbox"
 
 describe("clampListboxIndex", () => {
 	it("passes through an index already in range", () => {
@@ -70,5 +70,46 @@ describe("resolveCursorIndex", () => {
 
 	it("clamps the fallback into an empty list without throwing", () => {
 		expect(resolveCursorIndex("gone", [], 4)).toBe(0)
+	})
+})
+
+describe("listboxKeyTarget", () => {
+	it("moves one row down/up by `step` in a single-column list", () => {
+		expect(listboxKeyTarget("ArrowDown", 3, 10, 1, false)).toBe(4)
+		expect(listboxKeyTarget("ArrowUp", 3, 10, 1, false)).toBe(2)
+	})
+
+	it("moves a whole grid row down/up when `step` is the column count", () => {
+		expect(listboxKeyTarget("ArrowDown", 1, 20, 4, true)).toBe(5)
+		expect(listboxKeyTarget("ArrowUp", 9, 20, 4, true)).toBe(5)
+	})
+
+	it("honors Left/Right only when the horizontal axis is live", () => {
+		expect(listboxKeyTarget("ArrowRight", 3, 10, 4, true)).toBe(4)
+		expect(listboxKeyTarget("ArrowLeft", 3, 10, 4, true)).toBe(2)
+	})
+
+	it("ignores Left/Right in a single-column list, which has no horizontal axis", () => {
+		expect(listboxKeyTarget("ArrowRight", 3, 10, 1, false)).toBeNull()
+		expect(listboxKeyTarget("ArrowLeft", 3, 10, 1, false)).toBeNull()
+	})
+
+	it("Home targets the first item", () => {
+		expect(listboxKeyTarget("Home", 7, 10, 4, true)).toBe(0)
+	})
+
+	it("End targets the last item", () => {
+		expect(listboxKeyTarget("End", 0, 10, 4, true)).toBe(9)
+	})
+
+	it("returns null for a key this listbox does not move on", () => {
+		expect(listboxKeyTarget("Enter", 3, 10, 4, true)).toBeNull()
+		expect(listboxKeyTarget(" ", 3, 10, 4, true)).toBeNull()
+		expect(listboxKeyTarget("PageDown", 3, 10, 4, true)).toBeNull()
+	})
+
+	it("returns out-of-range targets raw — clamping is the caller's job", () => {
+		expect(listboxKeyTarget("ArrowDown", 9, 10, 4, true)).toBe(13)
+		expect(listboxKeyTarget("ArrowUp", 0, 10, 4, true)).toBe(-4)
 	})
 })

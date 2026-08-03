@@ -1,0 +1,193 @@
+/*
+ * pdf.js text-layer styles.
+ *
+ * The `.pdf-text-layer` block below is a VERBATIM copy of `.textLayer` from
+ * pdfjs-dist/web/pdf_viewer.css with only the selector renamed; the three `[data-main-rotation]`
+ * rules that follow are re-scoped copies of that file's own bare top-level rules.
+ * Copyright the pdf.js contributors, licensed under the Apache License, Version 2.0.
+ *
+ * Why a copy rather than importing pdf_viewer.css: that file is ~163 KB and carries four top-level
+ * `:root` blocks (including a `color-scheme` override) plus bare top-level attribute selectors, all
+ * of which would leak global tokens and an unscoped transform into this app's theme.
+ *
+ * Why a copy rather than a hand-picked subset: pdf.js splits the layer contract across JS and CSS,
+ * and the CSS half is not discoverable from the JS. `--min-font-size`, `--text-scale-factor` and
+ * `--min-font-size-inv` are defined ONLY here — pdf.js never writes them — so dropping them makes
+ * the span rule's `font-size`/`transform` invalid at computed-value time while the layer still
+ * renders visible, in-canvas, selectable spans. That failure is silent to every weak assertion.
+ *
+ * The app must supply `--total-scale-factor` / `--scale-round-x` / `--scale-round-y` on the
+ * container (pdfLayerScaleVars, pdfViewer.logic.ts): pdf.js sizes it with
+ * `round(down, var(--total-scale-factor) * <page px>, var(--scale-round-*))`, which is invalid — and
+ * collapses the layer to auto size — if any of them is missing.
+ *
+ * Two inert leftovers the copy deliberately keeps: `.endOfContent` is created by the viewer's own
+ * TextLayerBuilder (not the core TextLayer this app uses), and the `forced-colors` `.highlight`
+ * declarations reference `--hcm-highlight-*` variables that live only in the `:root` blocks this
+ * file refuses to import — both are simply never matched or never valid.
+ *
+ * The class name is also referenced from previewOverlay.tsx's chrome-toggle selector, so a rename
+ * has to touch both.
+ */
+
+.pdf-text-layer {
+	color-scheme: only light;
+
+	position: absolute;
+	text-align: initial;
+	inset: 0;
+	overflow: clip;
+	opacity: 1;
+	line-height: 1;
+	letter-spacing: normal;
+	word-spacing: normal;
+	-webkit-text-size-adjust: none;
+	-moz-text-size-adjust: none;
+	text-size-adjust: none;
+	forced-color-adjust: none;
+	transform-origin: 0 0;
+	caret-color: CanvasText;
+	z-index: 0;
+
+	&.highlighting {
+		touch-action: none;
+	}
+
+	:is(span, br) {
+		color: transparent;
+		position: absolute;
+		white-space: pre;
+		cursor: text;
+		transform-origin: 0% 0%;
+		-webkit-user-select: text;
+		-moz-user-select: text;
+		user-select: text;
+	}
+	--min-font-size: 1;
+	--text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+	--min-font-size-inv: calc(1 / var(--min-font-size));
+
+	> :not(.markedContent),
+	.markedContent span:not(.markedContent) {
+		z-index: 1;
+
+		--font-height: 0;
+		font-size: calc(var(--text-scale-factor) * var(--font-height));
+
+		--scale-x: 1;
+		--rotate: 0deg;
+		transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+	}
+
+	.markedContent {
+		display: contents;
+	}
+
+	span[role="img"] {
+		-webkit-user-select: none;
+		-moz-user-select: none;
+		user-select: none;
+		cursor: default;
+	}
+
+	.highlight {
+		--highlight-bg-color: rgb(180 0 170 / 0.25);
+		--highlight-selected-bg-color: rgb(0 100 0 / 0.25);
+		--highlight-backdrop-filter: none;
+		--highlight-selected-backdrop-filter: none;
+
+		@media screen and (forced-colors: active) {
+			--highlight-bg-color: transparent;
+			--highlight-selected-bg-color: transparent;
+			--highlight-backdrop-filter: var(--hcm-highlight-filter);
+			--highlight-selected-backdrop-filter: var(--hcm-highlight-selected-filter);
+		}
+
+		margin: -1px;
+		padding: 1px;
+		background-color: var(--highlight-bg-color);
+		backdrop-filter: var(--highlight-backdrop-filter);
+		border-radius: 4px;
+
+		&.appended {
+			position: initial;
+		}
+
+		&.begin {
+			border-radius: 4px 0 0 4px;
+		}
+
+		&.end {
+			border-radius: 0 4px 4px 0;
+		}
+
+		&.middle {
+			border-radius: 0;
+		}
+
+		&.selected {
+			background-color: var(--highlight-selected-bg-color);
+			backdrop-filter: var(--highlight-selected-backdrop-filter);
+			scroll-margin-top: 50px;
+		}
+	}
+
+	::-moz-selection {
+		background: rgba(0 0 255 / 0.25);
+		background: color-mix(in srgb, AccentColor, transparent 50%);
+		color: transparent;
+	}
+
+	::selection {
+		background: rgba(0 0 255 / 0.25);
+		background: color-mix(in srgb, AccentColor, transparent 50%);
+		color: transparent;
+	}
+
+	&.selectionRendering {
+		::-moz-selection {
+			background: transparent;
+			color: transparent;
+		}
+		::selection {
+			background: transparent;
+			color: transparent;
+		}
+	}
+	br::-moz-selection {
+		background: transparent;
+	}
+	br::selection {
+		background: transparent;
+	}
+
+	.endOfContent {
+		display: block;
+		position: absolute;
+		inset: 100% 0 0;
+		z-index: 0;
+		cursor: default;
+		-webkit-user-select: none;
+		-moz-user-select: none;
+		user-select: none;
+	}
+
+	&.selecting .endOfContent {
+		top: 0;
+	}
+}
+
+/* pdf.js sets data-main-rotation on the container (setLayerDimensions); this app's viewer never
+ * overrides a page's own /Rotate, so a rotated page would otherwise leave its text layer unrotated
+ * over a rotated canvas. Scoped copies of pdf_viewer.css's bare top-level rules. */
+.pdf-text-layer[data-main-rotation="90"] {
+	transform: rotate(90deg) translateY(-100%);
+}
+
+.pdf-text-layer[data-main-rotation="180"] {
+	transform: rotate(180deg) translate(-100%, -100%);
+}
+
+.pdf-text-layer[data-main-rotation="270"] {
+	transform: rotate(270deg) translateX(-100%);
+}

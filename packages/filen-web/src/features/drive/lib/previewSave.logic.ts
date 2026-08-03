@@ -6,11 +6,12 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
 import { asErrorDTO, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
 
-// Editable-preview eligibility gate (mobile parity): only a decryptable text/code file inside the
-// navigable "drive" variant — never trash/recents/favorites/sharedIn/sharedOut (no writable parent
-// context, or a variant this app never lets a write reach), never markdown (its own view-source
-// toggle re-renders the SAME read-only TextViewer, deliberately not this editable path), never an
-// undecryptable row (nothing to encode a diff against).
+// Editable-preview eligibility gate (mobile parity): only a decryptable text/code/markdown file
+// inside the navigable "drive" variant — never trash/recents/favorites/sharedIn/sharedOut (no
+// writable parent context, or a variant this app never lets a write reach), never an undecryptable
+// row (nothing to encode a diff against). Markdown is edited through the viewer's own source mode,
+// which mounts the same CodeMirror surface text/code use; its rendered arm is never an editing
+// surface.
 export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
 	if (variant !== "drive") {
 		return false
@@ -24,7 +25,7 @@ export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
 
 	const category = previewType(item)
 
-	return category === "text" || category === "code"
+	return category === "text" || category === "code" || category === "markdown"
 }
 
 // Injected collaborators so a save attempt is unit-testable without a worker or a query client —

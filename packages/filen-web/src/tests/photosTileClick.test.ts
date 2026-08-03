@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest"
 import type { File, UuidStr } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
-import { resolveTileClickIntent, previewOpenTarget, type ClickModifiers } from "@/features/photos/components/photoGrid.logic"
+import {
+	resolveTileClickIntent,
+	previewOpenTarget,
+	photosRangeSelection,
+	type ClickModifiers
+} from "@/features/photos/components/photoGrid.logic"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -89,5 +94,29 @@ describe("previewOpenTarget", () => {
 
 	it("returns null against an empty list", () => {
 		expect(previewOpenTarget([], 0)).toBeNull()
+	})
+})
+
+describe("photosRangeSelection", () => {
+	const items = [photoItem("a"), photoItem("b"), photoItem("c"), photoItem("d")]
+
+	function uuidsOf(selected: PhotoItem[]): string[] {
+		return selected.map(item => item.data.uuid)
+	}
+
+	it("covers a forward range from the anchor, inclusive", () => {
+		expect(uuidsOf(photosRangeSelection(items, testUuid("a"), 2))).toEqual([testUuid("a"), testUuid("b"), testUuid("c")])
+	})
+
+	it("covers a backward range when the anchor sits after the index", () => {
+		expect(uuidsOf(photosRangeSelection(items, testUuid("d"), 1))).toEqual([testUuid("b"), testUuid("c"), testUuid("d")])
+	})
+
+	it("selects just the target when there is no live anchor", () => {
+		expect(uuidsOf(photosRangeSelection(items, null, 2))).toEqual([testUuid("c")])
+	})
+
+	it("selects just the target when the anchor uuid is no longer in items", () => {
+		expect(uuidsOf(photosRangeSelection(items, testUuid("gone"), 1))).toEqual([testUuid("b")])
 	})
 })

@@ -51,17 +51,19 @@ export function marqueeListIndices(rect: MarqueeContentRect, itemCount: number, 
 }
 
 // Grid mode: item i sits at (row = floor(i/cols), col = i%cols). Rows are `rowHeight` bands like list.
-// Within a row each tile is a fixed `tileWidth` box centered in its column cell (cellWidth =
-// contentWidth/cols), so a rect falling entirely in a between-tile gutter selects nothing in that
-// column — hit-test each candidate cell's ACTUAL tile box, not the whole cell. The last grid row can be
-// partial: an index past itemCount is skipped.
+// Within a row each tile is a fixed `tileWidth` box centered in its column cell, so a rect falling
+// entirely in a between-tile gutter selects nothing in that column — hit-test each candidate cell's
+// ACTUAL tile box, not the whole cell. The last grid row can be partial: an index past itemCount is
+// skipped. `gap` is the grid's own inter-column gap (defaulted to 0, which reduces every expression
+// below exactly to the gapless form the drive listing uses).
 export function marqueeGridIndices(
 	rect: MarqueeContentRect,
 	itemCount: number,
 	columns: number,
 	contentWidth: number,
 	tileWidth: number,
-	rowHeight: number
+	rowHeight: number,
+	gap = 0
 ): number[] {
 	if (itemCount === 0 || columns <= 0 || rowHeight <= 0 || contentWidth <= 0 || rect.bottom <= 0) {
 		return []
@@ -80,8 +82,8 @@ export function marqueeGridIndices(
 		return []
 	}
 
-	const cellWidth = contentWidth / columns
-	// columns is floor(contentWidth/tileWidth) upstream, so cellWidth >= tileWidth normally; clamp for
+	const cellWidth = (contentWidth - gap * (columns - 1)) / columns
+	// columns is the gap-aware auto-fill count upstream, so cellWidth >= tileWidth normally; clamp for
 	// the forced-single-column case where the container is narrower than one tile.
 	const boxWidth = Math.min(tileWidth, cellWidth)
 	const inset = Math.max(0, (cellWidth - tileWidth) / 2)
@@ -95,7 +97,7 @@ export function marqueeGridIndices(
 				break
 			}
 
-			const tileLeft = col * cellWidth + inset
+			const tileLeft = col * (cellWidth + gap) + inset
 			const tileRight = tileLeft + boxWidth
 
 			if (rect.left < tileRight && rect.right > tileLeft) {
@@ -107,8 +109,8 @@ export function marqueeGridIndices(
 	return out
 }
 
-// Dispatches to the mode-specific hit-test. `columns`/`contentWidth`/`tileWidth` are ignored in list
-// mode. Returns ascending indices.
+// Dispatches to the mode-specific hit-test. `columns`/`contentWidth`/`tileWidth`/`gap` are ignored in
+// list mode. Returns ascending indices.
 export function marqueeIndices(
 	rect: MarqueeContentRect,
 	itemCount: number,
@@ -116,11 +118,12 @@ export function marqueeIndices(
 	columns: number,
 	contentWidth: number,
 	tileWidth: number,
-	rowHeight: number
+	rowHeight: number,
+	gap = 0
 ): number[] {
 	return viewMode === "list"
 		? marqueeListIndices(rect, itemCount, rowHeight)
-		: marqueeGridIndices(rect, itemCount, columns, contentWidth, tileWidth, rowHeight)
+		: marqueeGridIndices(rect, itemCount, columns, contentWidth, tileWidth, rowHeight, gap)
 }
 
 // The single item index under a content-space point, or -1 for a gutter / empty cell / out of range.
@@ -134,7 +137,8 @@ export function marqueeIndexAtPoint(
 	columns: number,
 	contentWidth: number,
 	tileWidth: number,
-	rowHeight: number
+	rowHeight: number,
+	gap = 0
 ): number {
 	if (itemCount === 0 || rowHeight <= 0 || y < 0) {
 		return -1
@@ -150,8 +154,10 @@ export function marqueeIndexAtPoint(
 		return -1
 	}
 
-	const cellWidth = contentWidth / columns
-	const col = Math.floor(x / cellWidth)
+	const cellWidth = (contentWidth - gap * (columns - 1)) / columns
+	// Divided by the cell PITCH, not the narrower cellWidth: with a gap the latter returns col === columns
+	// for a point inside the LAST tile, which the guard below would then turn into a bogus -1.
+	const col = Math.floor(x / (cellWidth + gap))
 
 	if (col >= columns) {
 		return -1
@@ -159,7 +165,7 @@ export function marqueeIndexAtPoint(
 
 	const boxWidth = Math.min(tileWidth, cellWidth)
 	const inset = Math.max(0, (cellWidth - tileWidth) / 2)
-	const tileLeft = col * cellWidth + inset
+	const tileLeft = col * (cellWidth + gap) + inset
 	const tileRight = tileLeft + boxWidth
 
 	if (x < tileLeft || x > tileRight) {
@@ -196,4 +202,34 @@ export function marqueeAutoScrollVelocity(clientY: number, top: number, height: 
 	}
 
 	return 0
+}
+
+// Everything above is CONTENT-space: coordinates are relative to the sized wrapper the virtualizer
+// renders into, which sits at the scroll container's padding-box origin plus its padding. A container
+// with no padding (the drive listing) gets a zero inset and exactly today's numbers; one with padding
+// (the photos grid) would otherwise offset every hit-test and draw the rectangle away from the pointer.
+// Border widths come in via clientLeft/clientTop because getBoundingClientRect is a BORDER box while
+// scrollLeft/scrollTop and clientWidth are padding-box quantities.
+export interface MarqueeContentBox {
+	insetLeft: number
+	insetTop: number
+	width: number
+}
+
+export function marqueeContentBox(
+	clientLeft: number,
+	clientTop: number,
+	clientWidth: number,
+	paddingLeft: number,
+	paddingTop: number,
+	paddingRight: number
+): MarqueeContentBox {
+	return {
+		insetLeft: clientLeft + paddingLeft,
+		insetTop: clientTop + paddingTop,
+		// Matches exactly what a ResizeObserver's default content-box contentRect reports for the same
+		// element (both exclude the scrollbar), so the hit-test and the layout can never disagree about
+		// how wide a cell is.
+		width: Math.max(0, clientWidth - paddingLeft - paddingRight)
+	}
 }

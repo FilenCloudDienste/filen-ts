@@ -8,14 +8,23 @@ import { wipeSwClient } from "@/features/drive/lib/saveDownload"
 import { clearSession, broadcastAuth } from "@/lib/sdk/session"
 import { kvClear } from "@/lib/storage/adapter"
 import { disposeAudioEngine } from "@/features/audio/lib/audioEngine"
+import { confirmDiscardUnsavedPreview } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { queryClient } from "@/queries/client"
 
 // The single unified sign-out both surfaces drive through: the account menu (user-initiated) and the
 // realtime socket's password-changed force-logout — one teardown path, mirroring mobile's lone
 // auth.logout(). @/lib/logout stays free of any worker-constructing import so its own node test can
 // import it (see runLogout's own note); the real collaborators are wired here instead, at the component
-// layer, and injected into runLogout's phased wipe.
-export async function performLogout(): Promise<void> {
+// layer, and injected into runLogout's phased wipe. Resolves `false` — with nothing torn down — when
+// the user declined at the unsaved-preview prompt below.
+export async function performLogout(): Promise<boolean> {
+	// A dirty preview buffer lives only in memory: the wipe + reload below destroys it with no recovery,
+	// so the user answers BEFORE anything is torn down. Cancel leaves the session completely intact —
+	// nothing has run at this point.
+	if (!(await confirmDiscardUnsavedPreview())) {
+		return false
+	}
+
 	// Notes + chats sync cancel BEFORE the wipe: abort each outbox loop and suppress any further disk
 	// write so a late flush can never resurrect this account's plaintext queue after kv-clear lands.
 	notesSync.cancel()
@@ -45,4 +54,6 @@ export async function performLogout(): Promise<void> {
 			location.reload()
 		}
 	})
+
+	return true
 }

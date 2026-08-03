@@ -26,9 +26,21 @@ export function handleGeneralEvent(event: GeneralSocketEvent): void {
 			// wipe + reload the account menu's sign-out drives, so no decrypted state survives a password
 			// change made from another device. Fire-and-forget: performLogout isolates every phase and never
 			// rejects, but its own reload can throw synchronously, so the promise is owned with a catch here.
-			void performLogout().catch((e: unknown) => {
-				log.error("socket", "passwordChanged force-logout failed", e)
-			})
+			void performLogout()
+				.then(signedOut => {
+					if (!signedOut) {
+						// The user declined at the unsaved-preview prompt. The server has already invalidated this
+						// session, so what is left behind is locally live but server-side dead — nothing, including
+						// a save of the very buffer being protected, can succeed. Declining buys exactly one thing:
+						// the chance to copy the unsaved text out. The sign-out completes as soon as the user
+						// discards, closes the preview, or reloads; nothing re-arms it, since a background retry
+						// would race that copy-out.
+						log.warn("socket", "passwordChanged force-logout declined at the unsaved-preview prompt")
+					}
+				})
+				.catch((e: unknown) => {
+					log.error("socket", "passwordChanged force-logout failed", e)
+				})
 
 			break
 		}

@@ -1,6 +1,9 @@
 // Pure page-visibility/canvas-sizing math for pdfViewer.tsx — framework-free so it is testable in
 // node (pdfViewer.logic.test.ts) with no pdf.js, canvas, or DOM involved.
 
+import { type CSSProperties } from "react"
+import { isSafeLinkHref } from "@/features/preview/components/docxViewer.logic"
+
 // Two IntersectionObserver rootMargin values per page: RENDER (tight) triggers the first render as a
 // page approaches the viewport; EVICT (generous) releases that page's canvas only once it has
 // scrolled much further away. The gap between them is deliberate hysteresis — a single shared
@@ -113,4 +116,92 @@ export function pdfStepZoomScale(current: number, direction: 1 | -1): number {
 
 export function pdfWheelZoomScale(current: number, deltaY: number): number {
 	return clampPdfScale(current - deltaY * PDF_ZOOM_WHEEL_SENSITIVITY)
+}
+
+// The three CSS custom properties pdf.js's own layer DOM reads: TextLayer sizes its container with
+// round(down, var(--total-scale-factor) * <page px>, var(--scale-round-*)), so all three must be
+// present or that declaration is invalid and the layer collapses to auto size. The scale is
+// stringified deliberately — React would suffix a bare number with "px".
+export function pdfLayerScaleVars(scale: number): CSSProperties {
+	return { "--total-scale-factor": String(scale), "--scale-round-x": "1px", "--scale-round-y": "1px" } as CSSProperties
+}
+
+// A display-intent Link annotation reduced to the two things this viewer renders: the PDF-space rect
+// and an already-scheme-checked absolute URL. getAnnotations returns `any[]` (its own d.ts), so every
+// field is narrowed with typeof/Array.isArray guards here rather than trusted at the call site — which
+// is also what keeps the DOM half free of `any`.
+export interface PdfLinkAnnotation {
+	rect: [number, number, number, number]
+	url: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null
+}
+
+function asRect(value: unknown): [number, number, number, number] | null {
+	// `readonly unknown[]` rather than a bare Array.isArray narrowing, which would widen to `any[]` and
+	// make every element read unsafe.
+	const rect: readonly unknown[] | null = Array.isArray(value) ? (value as readonly unknown[]) : null
+
+	if (rect?.length !== 4) {
+		return null
+	}
+
+	const [x1, y1, x2, y2] = rect
+
+	if (typeof x1 !== "number" || typeof y1 !== "number" || typeof x2 !== "number" || typeof y2 !== "number") {
+		return null
+	}
+
+	return [x1, y1, x2, y2]
+}
+
+// Keeps only entries that are Links with a usable URL. The scheme allowlist is the preview surface's
+// single URL-safety verdict (isSafeLinkHref), the same one the docx and markdown viewers apply — a PDF
+// can carry a javascript:/data: URI action just as a crafted docx can. An entry with no `url` is an
+// internal/destination link, which this viewer cannot resolve and therefore never renders.
+export function pdfLinkAnnotations(annotations: readonly unknown[]): PdfLinkAnnotation[] {
+	const links: PdfLinkAnnotation[] = []
+
+	for (const entry of annotations) {
+		if (!isRecord(entry)) {
+			continue
+		}
+
+		const url = entry["url"]
+
+		if (entry["subtype"] !== "Link" || typeof url !== "string" || !isSafeLinkHref(url)) {
+			continue
+		}
+
+		const rect = asRect(entry["rect"])
+
+		if (rect === null) {
+			continue
+		}
+
+		links.push({ rect, url })
+	}
+
+	return links
+}
+
+export interface PdfAnnotationBox {
+	left: number
+	top: number
+	width: number
+	height: number
+}
+
+// convertToViewportPoint returns the two corners in no guaranteed order (the y axis is flipped), so
+// the CSS box is the min/abs of the pair. pdfjs-dist exposes only convertToViewportPoint/
+// convertToPdfPoint — there is no convertToViewportRectangle in this build — hence this helper.
+export function pdfAnnotationBox(x1: number, y1: number, x2: number, y2: number): PdfAnnotationBox {
+	return {
+		left: Math.min(x1, x2),
+		top: Math.min(y1, y2),
+		width: Math.abs(x2 - x1),
+		height: Math.abs(y2 - y1)
+	}
 }

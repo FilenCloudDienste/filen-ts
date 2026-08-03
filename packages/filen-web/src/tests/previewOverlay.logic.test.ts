@@ -21,9 +21,12 @@ import {
 	isTextEditingTarget,
 	previewMenuActions,
 	previewMenuVisible,
+	previewNavigationUnmountsOverlay,
 	hasClosest,
 	isVideoControlsBandClick,
+	resolveUnsavedConfirm,
 	shouldToggleChrome,
+	unsavedPromptOpen,
 	VIDEO_CONTROLS_BAND_PX
 } from "@/features/preview/components/previewOverlay.logic"
 
@@ -220,5 +223,53 @@ describe("shouldToggleChrome", () => {
 
 	it("never toggles for a click within the video's native controls band", () => {
 		expect(shouldToggleChrome({ isInteractive: false, isMedia: true, mediaControlsBandHit: true })).toBe(false)
+	})
+})
+
+describe("previewNavigationUnmountsOverlay", () => {
+	it("is false for a same-route change (a deeper /drive/$ splat keeps the overlay mounted)", () => {
+		expect(previewNavigationUnmountsOverlay("/_app/drive/$", "/_app/drive/$")).toBe(false)
+	})
+
+	it("is true when the navigation lands on a different route file", () => {
+		expect(previewNavigationUnmountsOverlay("/_app/drive/$", "/_app/favorites")).toBe(true)
+	})
+})
+
+describe("unsavedPromptOpen", () => {
+	it("is false when nothing is pending, nothing is blocked and no sign-out waits", () => {
+		expect(unsavedPromptOpen(null, false, false)).toBe(false)
+	})
+
+	it("is true for a pending in-app intent alone", () => {
+		expect(unsavedPromptOpen("close", false, false)).toBe(true)
+	})
+
+	it("is true for a blocked navigation alone", () => {
+		expect(unsavedPromptOpen(null, true, false)).toBe(true)
+	})
+
+	it("is true for a waiting sign-out alone", () => {
+		expect(unsavedPromptOpen(null, false, true)).toBe(true)
+	})
+})
+
+describe("resolveUnsavedConfirm", () => {
+	it("releases the navigation and drops the queued intent when both are live", () => {
+		expect(resolveUnsavedConfirm("next", true, false)).toEqual({ proceedNavigation: true, proceedLogout: false, intent: null })
+	})
+
+	it("releases BOTH external waiters when a blocked navigation and a waiting sign-out are live at once", () => {
+		expect(resolveUnsavedConfirm("close", true, true)).toEqual({ proceedNavigation: true, proceedLogout: true, intent: null })
+	})
+
+	it("returns the intent for each of close/prev/next when no external waiter is live", () => {
+		expect(resolveUnsavedConfirm("close", false, false).intent).toBe("close")
+		expect(resolveUnsavedConfirm("prev", false, false).intent).toBe("prev")
+		expect(resolveUnsavedConfirm("next", false, false).intent).toBe("next")
+	})
+
+	it("returns all-false/null when nothing is live", () => {
+		expect(resolveUnsavedConfirm(null, false, false)).toEqual({ proceedNavigation: false, proceedLogout: false, intent: null })
 	})
 })

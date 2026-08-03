@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
 	marqueeAutoScrollVelocity,
+	marqueeContentBox,
 	marqueeGridIndices,
 	marqueeIndexAtPoint,
 	marqueeIndices,
@@ -169,5 +170,74 @@ describe("marqueeAutoScrollVelocity", () => {
 	it("respects a non-zero container top offset", () => {
 		// container top at 100, height 600 => bottom edge zone starts at 668
 		expect(marqueeAutoScrollVelocity(684, 100, 600, EDGE, MAX)).toBeCloseTo(9)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Gap-aware grid geometry — a 3-column grid of 100px tiles with an 8px gap in a 316px content box
+// (3*100 + 2*8 = 316), so cellWidth === tileWidth and every tile starts exactly at col * 108.
+// ---------------------------------------------------------------------------
+
+describe("marqueeGridIndices with a column gap", () => {
+	const CONTENT_WIDTH = 316
+	const TILE = 100
+	const GAP = 8
+	const ROW_HEIGHT = 120
+
+	it("selects only column 0 for a rect confined to the first tile's own band", () => {
+		const rect = { top: 0, bottom: 10, left: 10, right: 90 }
+
+		expect(marqueeGridIndices(rect, 6, 3, CONTENT_WIDTH, TILE, ROW_HEIGHT, GAP)).toEqual([0])
+	})
+
+	it("selects nothing for a rect landing entirely in an inter-column gutter", () => {
+		const rect = { top: 0, bottom: 10, left: 101, right: 107 }
+
+		expect(marqueeGridIndices(rect, 6, 3, CONTENT_WIDTH, TILE, ROW_HEIGHT, GAP)).toEqual([])
+	})
+
+	it("reproduces the gapless expectations at gap 0 (the default's regression guard)", () => {
+		const rect = { top: 0, bottom: 10, left: 0, right: 300 }
+
+		expect(marqueeGridIndices(rect, 6, 3, 300, 100, ROW_HEIGHT, 0)).toEqual(marqueeGridIndices(rect, 6, 3, 300, 100, ROW_HEIGHT))
+	})
+})
+
+describe("marqueeIndexAtPoint with a column gap", () => {
+	const CONTENT_WIDTH = 316
+	const TILE = 100
+	const GAP = 8
+	const ROW_HEIGHT = 120
+
+	it("returns -1 for a point in an inter-column gutter", () => {
+		expect(marqueeIndexAtPoint(103, 10, 6, "grid", 3, CONTENT_WIDTH, TILE, ROW_HEIGHT, GAP)).toBe(-1)
+	})
+
+	it("returns the right index for a point inside a middle tile", () => {
+		expect(marqueeIndexAtPoint(150, 10, 6, "grid", 3, CONTENT_WIDTH, TILE, ROW_HEIGHT, GAP)).toBe(1)
+	})
+
+	// The pitch-divisor regression: dividing by the narrower cellWidth returns col === columns for a
+	// point inside the LAST tile, which the col >= columns guard then turns into a bogus -1.
+	it("returns the last column's index for a point inside the RIGHTMOST tile", () => {
+		expect(marqueeIndexAtPoint(310, 10, 6, "grid", 3, CONTENT_WIDTH, TILE, ROW_HEIGHT, GAP)).toBe(2)
+	})
+})
+
+describe("marqueeContentBox", () => {
+	it("reproduces today's drive numbers for a container with no padding and no border", () => {
+		expect(marqueeContentBox(0, 0, 800, 0, 0, 0)).toEqual({ insetLeft: 0, insetTop: 0, width: 800 })
+	})
+
+	it("insets by horizontal padding and narrows the content width by both sides", () => {
+		expect(marqueeContentBox(0, 0, 800, 16, 0, 16)).toEqual({ insetLeft: 16, insetTop: 0, width: 768 })
+	})
+
+	it("folds a border width into the insets via clientLeft/clientTop", () => {
+		expect(marqueeContentBox(2, 3, 800, 16, 8, 16)).toEqual({ insetLeft: 18, insetTop: 11, width: 768 })
+	})
+
+	it("clamps the width at 0 rather than going negative when padding exceeds the container", () => {
+		expect(marqueeContentBox(0, 0, 20, 30, 0, 30)).toEqual({ insetLeft: 30, insetTop: 0, width: 0 })
 	})
 })

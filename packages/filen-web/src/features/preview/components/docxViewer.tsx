@@ -22,9 +22,12 @@ export interface DocxViewerProps {
 // markup still renders); the actual backstop is that a srcdoc document inherits its parent's CSP, and
 // script-src here has no unsafe-inline — the same mechanism the rest of this pipeline already relies
 // on for its real DOM nodes. Disabling the option keeps the content out of the render entirely
-// instead of depending on that inheritance alone. Every other option keeps docx-preview's own default
-// (the page-like white-on-gray wrapper it injects via its own <style> element into this same
-// container needs no extra styling from this file).
+// instead of depending on that inheritance alone. `experimental: true` governs exactly one thing in
+// the installed build — tab-stop positioning: it makes renderTab register each tab span so
+// refreshTabStops can measure and place it, and without it a document's tab stops collapse to a bare
+// em space. Every other option keeps docx-preview's own default (the page-like white-on-gray wrapper
+// it injects via its own <style> element into this same container needs no extra styling from this
+// file).
 //
 // renderHyperlink (same source) copies a relationship's target straight into `href` with no scheme
 // check of its own — sanitizeLinks below is the closing sweep for that, run once per render.
@@ -72,7 +75,7 @@ function DocxRender({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 				// keeps a re-render from appending a second copy alongside whatever a failed prior attempt
 				// may have already painted before throwing.
 				target.replaceChildren()
-				await renderAsync(bytes, target, undefined, { renderAltChunks: false })
+				await renderAsync(bytes, target, undefined, { renderAltChunks: false, experimental: true })
 				sanitizeLinks(target)
 
 				if (live) {

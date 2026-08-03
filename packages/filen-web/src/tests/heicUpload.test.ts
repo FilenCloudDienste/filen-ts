@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
-import { isHeicUploadCandidate, maybeConvertHeicUpload, renameToJpg, type HeicUploadConvertDeps } from "@/features/drive/lib/heicUpload"
+import {
+	heicUploadConversionEnabled,
+	isHeicUploadCandidate,
+	maybeConvertHeicUpload,
+	renameToJpg,
+	type HeicUploadConvertDeps,
+	type HeicUploadDeps
+} from "@/features/drive/lib/heicUpload"
 
 function mockFile(name: string, bytes = new Uint8Array([1, 2, 3])): File {
 	return new File([bytes], name)
@@ -95,5 +102,48 @@ describe("maybeConvertHeicUpload", () => {
 		const result = await maybeConvertHeicUpload(h.deps, file, true)
 
 		expect(result).toBe(file)
+	})
+})
+
+describe("heicUploadConversionEnabled", () => {
+	function harness(preference: boolean): { deps: HeicUploadDeps; readPreference: ReturnType<typeof vi.fn> } {
+		const readPreference = vi.fn<HeicUploadDeps["readPreference"]>().mockResolvedValue(preference)
+
+		return { deps: { convert: { transform: vi.fn() }, readPreference }, readPreference }
+	}
+
+	it("is false and never reads the preference for a batch with no candidate", async () => {
+		const h = harness(true)
+
+		expect(await heicUploadConversionEnabled(h.deps, [mockFile("a.jpg"), mockFile("b.png")])).toBe(false)
+		expect(h.readPreference).not.toHaveBeenCalled()
+	})
+
+	it("is false when a candidate is present but the preference is off", async () => {
+		const h = harness(false)
+
+		expect(await heicUploadConversionEnabled(h.deps, [mockFile("a.jpg"), mockFile("b.heic")])).toBe(false)
+		expect(h.readPreference).toHaveBeenCalledTimes(1)
+	})
+
+	it("is true when a candidate is present and the preference is on", async () => {
+		const h = harness(true)
+
+		expect(await heicUploadConversionEnabled(h.deps, [mockFile("a.heif")])).toBe(true)
+	})
+
+	it("reads the preference exactly once for a batch holding many candidates", async () => {
+		const h = harness(true)
+
+		await heicUploadConversionEnabled(h.deps, [mockFile("a.heic"), mockFile("b.heic"), mockFile("c.heic")])
+
+		expect(h.readPreference).toHaveBeenCalledTimes(1)
+	})
+
+	it("never reads the preference for an empty batch", async () => {
+		const h = harness(true)
+
+		expect(await heicUploadConversionEnabled(h.deps, [])).toBe(false)
+		expect(h.readPreference).not.toHaveBeenCalled()
 	})
 })

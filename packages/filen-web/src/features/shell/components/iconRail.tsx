@@ -138,7 +138,11 @@ function AccountMenu() {
 	async function handleSignOut(): Promise<void> {
 		setPending(true)
 		try {
-			await performLogout()
+			if (!(await performLogout())) {
+				// Declined at the unsaved-preview prompt — don't leave this confirm sitting open behind an
+				// already-answered dialog.
+				setConfirmOpen(false)
+			}
 		} finally {
 			// performLogout isolates every phase internally (log-and-continue) and never rejects; this
 			// mirrors login-form's unconditional reset — harmless even though a successful sign-out

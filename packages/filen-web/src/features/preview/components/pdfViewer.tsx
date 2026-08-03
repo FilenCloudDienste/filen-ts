@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
-import { getDocument, GlobalWorkerOptions, PasswordResponses, type PDFDocumentProxy, type PDFPageProxy, type RenderTask } from "pdfjs-dist"
+import {
+	getDocument,
+	GlobalWorkerOptions,
+	PasswordResponses,
+	TextLayer,
+	type PDFDocumentProxy,
+	type PDFPageProxy,
+	type RenderTask
+} from "pdfjs-dist"
 import { ChevronLeftIcon, ChevronRightIcon, ZoomInIcon, ZoomOutIcon } from "lucide-react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { clampListboxIndex } from "@/features/drive/lib/listbox"
@@ -10,19 +18,24 @@ import {
 	canvasDimsForViewport,
 	canvasRenderTransform,
 	pdfPageAction,
+	pdfAnnotationBox,
+	pdfLayerScaleVars,
+	pdfLinkAnnotations,
 	pdfStepZoomScale,
 	pdfWheelZoomScale,
 	PDF_PAGE_RENDER_MARGIN_PX,
 	PDF_PAGE_EVICT_MARGIN_PX,
 	PDF_MIN_SCALE,
 	PDF_MAX_SCALE,
-	type PageVisibility
+	type PageVisibility,
+	type PdfLinkAnnotation
 } from "@/features/preview/components/pdfViewer.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
+import "@/features/preview/components/pdfLayers.css"
 
 export interface PdfViewerProps {
 	item: DriveItem
@@ -164,6 +177,14 @@ function PdfPasswordPrompt({ attempt, onSubmit }: { attempt: PasswordAttempt; on
 	)
 }
 
+// convertToViewportPoint is typed `any[]` by pdfjs-dist, so its corners are narrowed here rather than
+// cast — same guard-not-cast rule pdfLinkAnnotations follows.
+function viewportPoint(point: unknown[]): { x: number; y: number } {
+	const [x, y] = point
+
+	return { x: typeof x === "number" ? x : 0, y: typeof y === "number" ? y : 0 }
+}
+
 // One page's canvas — resolves its own PDFPageProxy on mount (cheap: already-parsed doc structure,
 // not rasterization), then renders once metadata is ready AND the parent's lazy gate opens. The gate
 // keeps a many-page document from rasterizing every page up front (each canvas allocates
@@ -198,6 +219,8 @@ function PdfPage({
 }) {
 	const divRef = useRef<HTMLDivElement | null>(null)
 	const canvasRef = useRef<HTMLCanvasElement | null>(null)
+	const textLayerRef = useRef<HTMLDivElement | null>(null)
+	const [links, setLinks] = useState<PdfLinkAnnotation[]>([])
 	const [page, setPage] = useState<PDFPageProxy | null>(null)
 	// Which scale this page's canvas was last painted at, if any — `null` before any render (or right
 	// after eviction). Storing the SCALE (not just a rendered boolean) is what lets a zoom change force
@@ -360,6 +383,68 @@ function PdfPage({
 		}
 	}, [page, shouldRender, withinExtendedView, rendered, scale])
 
+	// Deliberately NOT part of the canvas effect above: that one lists `rendered` in its own deps, so it
+	// tears down and re-runs the instant its render resolves — anything destructive in its cleanup would
+	// fire immediately after every successful page paint and never be rebuilt. The text layer's
+	// lifecycle is the page/scale/visibility one, so it gets its own effect, whose cleanup is then the
+	// single place that both cancels the layer and releases its DOM. Eviction flips withinExtendedView,
+	// which re-runs that cleanup, so a long document releases text layers on the canvas's own schedule
+	// with no eviction-observer change.
+	useEffect(() => {
+		const textLayerDiv = textLayerRef.current
+
+		if (!page || !shouldRender || !withinExtendedView || !textLayerDiv) {
+			return
+		}
+
+		const viewport = page.getViewport({ scale })
+		// streamTextContent is synchronous to call and streams progressively, so this effect body stays
+		// synchronous and needs no `cancelled` flag of its own.
+		const textLayer = new TextLayer({ textContentSource: page.streamTextContent(), container: textLayerDiv, viewport })
+
+		textLayer.render().catch(() => {
+			// A cancelled/failed text layer is a degraded-but-usable preview: the canvas still renders and
+			// the page stays readable, just not selectable. Never surfaced — the document-level error branch
+			// already covers a genuinely broken PDF.
+		})
+
+		return () => {
+			textLayer.cancel()
+			// The ctor never clears the container and render() appends progressively, so a rebuild at a new
+			// scale would otherwise stack two sets of spans.
+			textLayerDiv.replaceChildren()
+		}
+	}, [page, shouldRender, withinExtendedView, scale])
+
+	// Fetched once per page, in its own effect: not in the canvas render effect (same `rendered`-in-deps
+	// teardown trap as above) and not in the text-layer effect either, since the annotation DATA does not
+	// depend on `scale` — only its layout does. Only external links are rendered: resolving an internal
+	// destination needs a real link service wired to this viewer's own scroll container, which this
+	// viewer has none of.
+	useEffect(() => {
+		if (!page) {
+			return
+		}
+
+		let live = true
+
+		void page
+			.getAnnotations({ intent: "display" })
+			.then((annotations: unknown[]) => {
+				if (live) {
+					setLinks(pdfLinkAnnotations(annotations))
+				}
+			})
+			.catch(() => {
+				// A page whose annotations fail to parse still renders and stays readable — just without its
+				// links. The document-level error branch already covers a genuinely broken PDF.
+			})
+
+		return () => {
+			live = false
+		}
+	}, [page])
+
 	const viewport = page?.getViewport({ scale })
 
 	return (
@@ -381,6 +466,36 @@ function PdfPage({
 				aria-label={label}
 				className={rendered ? "block max-w-full" : "invisible"}
 			/>
+			{/* Positioning + the whole span contract come from pdfLayers.css; the wrapper is already
+			`relative` and sized to the viewport. */}
+			<div
+				ref={textLayerRef}
+				className="pdf-text-layer"
+				style={pdfLayerScaleVars(scale)}
+			/>
+			{/* LAST children of the wrapper on purpose: the text layer above covers the whole page with no
+			pointer-events opt-out, so anchors painted before it would be unclickable. Real <a href> elements,
+			so they are keyboard-reachable — a capability the canvas-only viewer never had. The aria-label is
+			the URL itself (data, not UI copy — an empty anchor would have no accessible name at all). */}
+			{viewport
+				? links.map(link => {
+						const start = viewportPoint(viewport.convertToViewportPoint(link.rect[0], link.rect[1]))
+						const end = viewportPoint(viewport.convertToViewportPoint(link.rect[2], link.rect[3]))
+						const box = pdfAnnotationBox(start.x, start.y, end.x, end.y)
+
+						return (
+							<a
+								key={`${link.url}-${String(box.left)}-${String(box.top)}`}
+								href={link.url}
+								target="_blank"
+								rel="noreferrer"
+								aria-label={link.url}
+								className="absolute rounded-xs focus-visible:ring-2 focus-visible:ring-ring/50"
+								style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+							/>
+						)
+					})
+				: null}
 		</div>
 	)
 }

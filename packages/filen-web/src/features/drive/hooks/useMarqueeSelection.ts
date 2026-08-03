@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
-import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
-import { ROW_HEIGHT, TILE_ROW_HEIGHT, TILE_WIDTH } from "@/features/drive/lib/gridLayout"
-import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	marqueeAutoScrollVelocity,
+	marqueeContentBox,
 	marqueeIndexAtPoint,
 	marqueeIndices,
 	marqueeRectFromPoints,
+	type MarqueeContentBox,
 	type MarqueeContentRect
 } from "@/features/drive/lib/marquee.logic"
 
@@ -19,10 +18,29 @@ const START_THRESHOLD_PX = 4
 const AUTO_SCROLL_EDGE_PX = 32
 const AUTO_SCROLL_MAX_SPEED_PX = 18
 
-interface MarqueeParams {
-	items: DriveItem[]
+// The one thing a marqueeable item has to expose: a stable identity for the additive-union set.
+export interface MarqueeItem {
+	data: { uuid: string }
+}
+
+// The item geometry the hit-test needs, injected rather than read from drive's gridLayout constants so
+// the photos grid (its own tile size + an 8px gap) can use the same machinery. Drive computes it from
+// its viewMode at the call site, keeping gridLayout.ts its own source of truth.
+export interface MarqueeGeometry {
+	rowHeight: number
+	tileWidth: number
+	gap: number
+}
+
+interface MarqueeParams<T extends MarqueeItem> {
+	items: T[]
+	// Photos passes "grid" — it has no list mode; only the hit-test branch reads this.
 	viewMode: DriveViewMode
 	columns: number
+	// Replaces the rowHeightFor(viewMode) lookup this hook used to do against drive's own constants.
+	geometry: MarqueeGeometry
+	// The selection store this marquee drives — drive's useDriveStore, photos' usePhotosStore.
+	selection: { read: () => T[]; write: (items: T[]) => void }
 	scrollElement: HTMLDivElement | null
 	// Moves the roving cursor to the drag-end item, mirroring how a click sets it.
 	setCursor: (index: number) => void
@@ -31,7 +49,7 @@ interface MarqueeParams {
 // Live per-drag state. Kept entirely in a ref (not React state): it mutates on every pointermove/frame
 // and must not itself drive renders — only the rendered rectangle does, via `rect` state below. Keeping
 // the mutable tracking in a ref is also what keeps this compiler-safe.
-interface MarqueeDrag {
+interface MarqueeDrag<T> {
 	// content-space anchor (fixed while the listing scrolls under the pointer)
 	anchorX: number
 	anchorY: number
@@ -40,13 +58,19 @@ interface MarqueeDrag {
 	startClientY: number
 	// ctrl/cmd at arm time: union with the pre-drag set instead of replacing it
 	additive: boolean
-	preset: DriveItem[]
+	preset: T[]
 	presetUuids: Set<string>
 	started: boolean
 	lastClientX: number
 	lastClientY: number
 	// highest index the rectangle covered — cursor fallback when the drag ends over a gutter
 	lastHitIndex: number
+	// Read ONCE at pointer-down (one getComputedStyle per drag, never per pointermove — paddings do not
+	// change mid-drag in any layout this app renders). The live clientWidth is still re-read on every
+	// move, so a mid-drag resize re-measures exactly as before.
+	paddingLeft: number
+	paddingTop: number
+	paddingRight: number
 }
 
 interface MarqueeHandlers {
@@ -55,18 +79,27 @@ interface MarqueeHandlers {
 	key: (event: KeyboardEvent) => void
 }
 
-export interface DriveMarquee {
+export interface MarqueeSelection {
 	onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void
 	rect: MarqueeContentRect | null
 }
 
-// Rubber-band selection over the virtualized drive listing (list AND grid). Pointer-down on blank
-// listbox space arms it; a drag past the threshold renders a rectangle and continuously replaces (or,
-// under ctrl/cmd, unions) the selection with the items it covers — hit-tested in item space so scrolled
-// -away rows count. Auto-scrolls near the edges; Escape cancels and restores the arm-time selection.
-export function useDriveMarquee({ items, viewMode, columns, scrollElement, setCursor }: MarqueeParams): DriveMarquee {
+// Rubber-band selection over a virtualized listbox (the drive listing in list OR grid mode, and the
+// photos grid). Pointer-down on blank listbox space arms it; a drag past the threshold renders a
+// rectangle and continuously replaces (or, under ctrl/cmd, unions) the selection with the items it
+// covers — hit-tested in item space so scrolled-away rows count. Auto-scrolls near the edges; Escape
+// cancels and restores the arm-time selection.
+export function useMarqueeSelection<T extends MarqueeItem>({
+	items,
+	viewMode,
+	columns,
+	geometry,
+	selection,
+	scrollElement,
+	setCursor
+}: MarqueeParams<T>): MarqueeSelection {
 	const [rect, setRect] = useState<MarqueeContentRect | null>(null)
-	const dragRef = useRef<MarqueeDrag | null>(null)
+	const dragRef = useRef<MarqueeDrag<T> | null>(null)
 	const rafRef = useRef(0)
 	const handlersRef = useRef<MarqueeHandlers | null>(null)
 
@@ -76,6 +109,8 @@ export function useDriveMarquee({ items, viewMode, columns, scrollElement, setCu
 	const itemsRef = useRef(items)
 	const viewModeRef = useRef(viewMode)
 	const columnsRef = useRef(columns)
+	const geometryRef = useRef(geometry)
+	const selectionRef = useRef(selection)
 	const scrollElementRef = useRef(scrollElement)
 	const setCursorRef = useRef(setCursor)
 
@@ -83,12 +118,17 @@ export function useDriveMarquee({ items, viewMode, columns, scrollElement, setCu
 		itemsRef.current = items
 		viewModeRef.current = viewMode
 		columnsRef.current = columns
+		geometryRef.current = geometry
+		selectionRef.current = selection
 		scrollElementRef.current = scrollElement
 		setCursorRef.current = setCursor
 	})
 
-	function rowHeightFor(mode: DriveViewMode): number {
-		return mode === "list" ? ROW_HEIGHT : TILE_ROW_HEIGHT
+	// The container's live content box, rebuilt per move from the current clientWidth + the drag's own
+	// paddings — a container with no padding and no border reduces to the raw border-box math this hook
+	// used before.
+	function contentBoxFor(el: HTMLDivElement, drag: MarqueeDrag<T>): MarqueeContentBox {
+		return marqueeContentBox(el.clientLeft, el.clientTop, el.clientWidth, drag.paddingLeft, drag.paddingTop, drag.paddingRight)
 	}
 
 	// Recomputes the rectangle from the fixed content-space anchor and the given viewport point, hit-tests
@@ -102,23 +142,26 @@ export function useDriveMarquee({ items, viewMode, columns, scrollElement, setCu
 		}
 
 		const bounds = el.getBoundingClientRect()
-		const contentX = clientX - bounds.left
-		const contentY = clientY - bounds.top + el.scrollTop
+		const box = contentBoxFor(el, drag)
+		const contentX = clientX - bounds.left - box.insetLeft
+		const contentY = clientY - bounds.top - box.insetTop + el.scrollTop
 		const marqueeRect = marqueeRectFromPoints(drag.anchorX, drag.anchorY, contentX, contentY)
 		const items = itemsRef.current
+		const geometry = geometryRef.current
 		const indices = marqueeIndices(
 			marqueeRect,
 			items.length,
 			viewModeRef.current,
 			columnsRef.current,
-			el.clientWidth,
-			TILE_WIDTH,
-			rowHeightFor(viewModeRef.current)
+			box.width,
+			geometry.tileWidth,
+			geometry.rowHeight,
+			geometry.gap
 		)
 
 		drag.lastHitIndex = indices.length > 0 ? (indices[indices.length - 1] ?? -1) : -1
 
-		const hitItems: DriveItem[] = []
+		const hitItems: T[] = []
 
 		for (const index of indices) {
 			const item = items[index]
@@ -128,7 +171,7 @@ export function useDriveMarquee({ items, viewMode, columns, scrollElement, setCu
 			}
 		}
 
-		let next: DriveItem[]
+		let next: T[]
 
 		if (drag.additive) {
 			next = drag.preset.slice()
@@ -142,7 +185,7 @@ export function useDriveMarquee({ items, viewMode, columns, scrollElement, setCu
 			next = hitItems
 		}
 
-		useDriveStore.getState().setSelectedItems(next)
+		selectionRef.current.write(next)
 		setRect(marqueeRect)
 	}
 
@@ -156,17 +199,20 @@ export function useDriveMarquee({ items, viewMode, columns, scrollElement, setCu
 		}
 
 		const bounds = el.getBoundingClientRect()
-		const contentX = drag.lastClientX - bounds.left
-		const contentY = drag.lastClientY - bounds.top + el.scrollTop
+		const box = contentBoxFor(el, drag)
+		const contentX = drag.lastClientX - bounds.left - box.insetLeft
+		const contentY = drag.lastClientY - bounds.top - box.insetTop + el.scrollTop
+		const geometry = geometryRef.current
 		const index = marqueeIndexAtPoint(
 			contentX,
 			contentY,
 			itemsRef.current.length,
 			viewModeRef.current,
 			columnsRef.current,
-			el.clientWidth,
-			TILE_WIDTH,
-			rowHeightFor(viewModeRef.current)
+			box.width,
+			geometry.tileWidth,
+			geometry.rowHeight,
+			geometry.gap
 		)
 
 		if (index >= 0) {
@@ -296,7 +342,7 @@ export function useDriveMarquee({ items, viewMode, columns, scrollElement, setCu
 		event.stopPropagation()
 
 		if (drag.started) {
-			useDriveStore.getState().setSelectedItems(drag.preset)
+			selectionRef.current.write(drag.preset)
 		}
 
 		endDrag()
@@ -321,8 +367,9 @@ export function useDriveMarquee({ items, viewMode, columns, scrollElement, setCu
 		const offsetX = event.clientX - bounds.left
 		const offsetY = event.clientY - bounds.top
 
-		// The scrollbar gutter lives outside the client box — never arm a drag from it.
-		if (offsetX >= el.clientWidth || offsetY >= el.clientHeight) {
+		// The scrollbar gutter lives outside the client box — never arm a drag from it. Compared against
+		// the PADDING box (offset by clientLeft/clientTop), so a bordered container is exact too.
+		if (offsetX - el.clientLeft >= el.clientWidth || offsetY - el.clientTop >= el.clientHeight) {
 			return
 		}
 
@@ -330,10 +377,15 @@ export function useDriveMarquee({ items, viewMode, columns, scrollElement, setCu
 			endDrag()
 		}
 
-		const preset = useDriveStore.getState().selectedItems
-		const drag: MarqueeDrag = {
-			anchorX: offsetX,
-			anchorY: offsetY + el.scrollTop,
+		const style = getComputedStyle(el)
+		const paddingLeft = parseFloat(style.paddingLeft) || 0
+		const paddingTop = parseFloat(style.paddingTop) || 0
+		const paddingRight = parseFloat(style.paddingRight) || 0
+		const box = marqueeContentBox(el.clientLeft, el.clientTop, el.clientWidth, paddingLeft, paddingTop, paddingRight)
+		const preset = selection.read()
+		const drag: MarqueeDrag<T> = {
+			anchorX: offsetX - box.insetLeft,
+			anchorY: offsetY - box.insetTop + el.scrollTop,
 			startClientX: event.clientX,
 			startClientY: event.clientY,
 			additive: event.metaKey || event.ctrlKey,
@@ -342,7 +394,10 @@ export function useDriveMarquee({ items, viewMode, columns, scrollElement, setCu
 			started: false,
 			lastClientX: event.clientX,
 			lastClientY: event.clientY,
-			lastHitIndex: -1
+			lastHitIndex: -1,
+			paddingLeft,
+			paddingTop,
+			paddingRight
 		}
 		const handlers: MarqueeHandlers = { move: onMove, up: onUp, key: onKey }
 

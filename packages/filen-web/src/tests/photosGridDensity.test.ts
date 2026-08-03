@@ -82,6 +82,20 @@ describe("columnsForWidth", () => {
 		expect(columnsForWidth(1000, 0)).toBe(1)
 		expect(columnsForWidth(1000, -10)).toBe(1)
 	})
+
+	it("accounts for the grid's inter-column gap at an exact-fit width that used to over-count", () => {
+		// 2 columns need 2*176 + 8 = 360 > 352, so only one fits.
+		expect(columnsForWidth(352, 176, 8)).toBe(1)
+	})
+
+	it("counts a comfortable fit correctly with a gap", () => {
+		// 4 columns need 4*176 + 3*8 = 728 <= 744; 5 would need 928.
+		expect(columnsForWidth(744, 176, 8)).toBe(4)
+	})
+
+	it("never returns fewer than 1 column with a gap either", () => {
+		expect(columnsForWidth(50, 176, 8)).toBe(1)
+	})
 })
 
 describe("getPhotosGridDensity / setPhotosGridDensity", () => {

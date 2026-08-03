@@ -26,13 +26,14 @@ const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), 
 
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
-// getHeicUploadConvertPreference touches kv storage (features/drive/lib/heicUpload.ts -> storage/
-// adapter.ts -> a real ?worker) — unresolvable under node vitest, same rationale as the sdk-client/
-// query-client mocks above. Stubbed here so startUploads' own gating (skip the read entirely for an
-// all-non-HEIC batch) can be exercised without ever touching real storage; isHeicUploadCandidate stays
-// real (importOriginal) since it's the pure extension check startUploads' own gate depends on.
-const { getHeicUploadConvertPreferenceMock, maybeConvertHeicUploadMock } = vi.hoisted(() => ({
-	getHeicUploadConvertPreferenceMock: vi.fn<() => Promise<boolean>>(),
+// The convert-on-upload gate reads kv storage (features/drive/lib/heicUpload.ts -> storage/adapter.ts
+// -> a real ?worker) — unresolvable under node vitest, same rationale as the sdk-client/query-client
+// mocks above. Both cross-module imports startUploads makes are stubbed here so its own wiring (one
+// gate call per batch, one conversion per file, upload whatever the conversion returned) is provable
+// without ever touching real storage. The gate's own semantics are unit-tested against real DI in
+// heicUpload.test.ts.
+const { heicUploadConversionEnabledMock, maybeConvertHeicUploadMock } = vi.hoisted(() => ({
+	heicUploadConversionEnabledMock: vi.fn<(deps: unknown, files: readonly File[]) => Promise<boolean>>(),
 	maybeConvertHeicUploadMock: vi.fn<(deps: unknown, file: File, enabled: boolean) => Promise<File>>()
 }))
 
@@ -40,7 +41,7 @@ vi.mock("@/features/drive/lib/heicUpload", async importOriginal => {
 	const actual = await importOriginal<typeof import("@/features/drive/lib/heicUpload")>()
 	return {
 		...actual,
-		getHeicUploadConvertPreference: getHeicUploadConvertPreferenceMock,
+		heicUploadConversionEnabled: heicUploadConversionEnabledMock,
 		maybeConvertHeicUpload: maybeConvertHeicUploadMock
 	}
 })
@@ -84,7 +85,7 @@ function sdkDto(kind: string): ErrorDTO {
 beforeEach(() => {
 	vi.clearAllMocks()
 	useTransfersStore.setState({ transfers: [] })
-	getHeicUploadConvertPreferenceMock.mockResolvedValue(false)
+	heicUploadConversionEnabledMock.mockResolvedValue(false)
 	maybeConvertHeicUploadMock.mockImplementation((_deps, file) => Promise.resolve(file))
 })
 
@@ -422,33 +423,39 @@ describe("startUploads (real runUpload + defaultUploadDeps, mocked sdk client/qu
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// startUploads — HEIC/HEIF convert-on-upload wiring. The conversion logic itself is unit-tested
-// in heicUpload.test.ts; this only proves startUploads' own gating (skip the kv read entirely for an
-// all-non-HEIC batch) and that it threads the fetched preference through to every file.
+// startUploads — HEIC/HEIF convert-on-upload wiring. The gate's own semantics (when the preference is
+// read at all) are unit-tested against real DI in heicUpload.test.ts; this only proves startUploads
+// consults it once per batch and hands every file the answer, uploading whatever comes back.
 // ---------------------------------------------------------------------------
 
 describe("startUploads — HEIC convert-on-upload gating", () => {
-	it("never reads the preference for a batch with no HEIC/HEIF candidate", async () => {
+	it("hands every file the gate's answer for an all-non-HEIC batch, uploading the original files", async () => {
+		const first = mockBrowserFile("a.txt")
+		const second = mockBrowserFile("b.pdf")
 		uploadFile.mockResolvedValue(mockSdkFile())
 
-		await startUploads([mockBrowserFile("a.txt"), mockBrowserFile("b.pdf")], null)
+		await startUploads([first, second], null)
 
-		expect(getHeicUploadConvertPreferenceMock).not.toHaveBeenCalled()
-		expect(maybeConvertHeicUploadMock).not.toHaveBeenCalled()
+		expect(heicUploadConversionEnabledMock).toHaveBeenCalledTimes(1)
+		expect(heicUploadConversionEnabledMock).toHaveBeenCalledWith(expect.anything(), [first, second])
+		expect(maybeConvertHeicUploadMock).toHaveBeenCalledWith(expect.anything(), first, false)
+		expect(maybeConvertHeicUploadMock).toHaveBeenCalledWith(expect.anything(), second, false)
+		expect(uploadFile).toHaveBeenCalledWith(null, expect.any(String), first, expect.any(Function))
 	})
 
-	it("reads the preference once a HEIC/HEIF candidate is present, and skips conversion when it's off", async () => {
-		getHeicUploadConvertPreferenceMock.mockResolvedValue(false)
+	it("skips conversion when the gate resolves false with a HEIC present", async () => {
+		heicUploadConversionEnabledMock.mockResolvedValue(false)
+		const heicFile = mockBrowserFile("photo.heic")
 		uploadFile.mockResolvedValue(mockSdkFile())
 
-		await startUploads([mockBrowserFile("photo.heic")], null)
+		await startUploads([heicFile], null)
 
-		expect(getHeicUploadConvertPreferenceMock).toHaveBeenCalledTimes(1)
-		expect(maybeConvertHeicUploadMock).not.toHaveBeenCalled()
+		expect(maybeConvertHeicUploadMock).toHaveBeenCalledWith(expect.anything(), heicFile, false)
+		expect(uploadFile).toHaveBeenCalledWith(null, expect.any(String), heicFile, expect.any(Function))
 	})
 
-	it("runs every file (HEIC and non-HEIC alike) through maybeConvertHeicUpload once the preference is on", async () => {
-		getHeicUploadConvertPreferenceMock.mockResolvedValue(true)
+	it("runs every file (HEIC and non-HEIC alike) through maybeConvertHeicUpload once the gate resolves true", async () => {
+		heicUploadConversionEnabledMock.mockResolvedValue(true)
 		const heicFile = mockBrowserFile("photo.heic")
 		const otherFile = mockBrowserFile("report.pdf")
 		uploadFile.mockResolvedValue(mockSdkFile())
@@ -461,7 +468,7 @@ describe("startUploads — HEIC convert-on-upload gating", () => {
 	})
 
 	it("uploads whatever maybeConvertHeicUpload returns, not the original picked file", async () => {
-		getHeicUploadConvertPreferenceMock.mockResolvedValue(true)
+		heicUploadConversionEnabledMock.mockResolvedValue(true)
 		const converted = mockBrowserFile("photo.jpg")
 		maybeConvertHeicUploadMock.mockResolvedValue(converted)
 		uploadFile.mockResolvedValue(mockSdkFile())
@@ -469,6 +476,15 @@ describe("startUploads — HEIC convert-on-upload gating", () => {
 		await startUploads([mockBrowserFile("photo.heic")], null)
 
 		expect(uploadFile).toHaveBeenCalledWith(null, expect.any(String), converted, expect.any(Function))
+	})
+
+	it("consults the gate exactly once for a multi-file batch", async () => {
+		heicUploadConversionEnabledMock.mockResolvedValue(true)
+		uploadFile.mockResolvedValue(mockSdkFile())
+
+		await startUploads([mockBrowserFile("a.heic"), mockBrowserFile("b.heic"), mockBrowserFile("c.txt")], null)
+
+		expect(heicUploadConversionEnabledMock).toHaveBeenCalledTimes(1)
 	})
 })
 

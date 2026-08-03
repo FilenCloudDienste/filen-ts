@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react"
-import { clampListboxIndex, listboxRange, resolveCursorIndex } from "@/features/drive/lib/listbox"
+import { clampListboxIndex, listboxKeyTarget, listboxRange, resolveCursorIndex } from "@/features/drive/lib/listbox"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant, type DriveViewMode } from "@/features/drive/lib/preferences"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
@@ -246,22 +246,7 @@ export function useDriveListboxNav({
 			return
 		}
 
-		const step = viewMode === "grid" ? columns : 1
-		let target: number | null = null
-
-		if (event.key === "ArrowDown") {
-			target = safeActiveIndex + step
-		} else if (event.key === "ArrowUp") {
-			target = safeActiveIndex - step
-		} else if (event.key === "ArrowRight" && viewMode === "grid") {
-			target = safeActiveIndex + 1
-		} else if (event.key === "ArrowLeft" && viewMode === "grid") {
-			target = safeActiveIndex - 1
-		} else if (event.key === "Home") {
-			target = 0
-		} else if (event.key === "End") {
-			target = items.length - 1
-		}
+		const target = listboxKeyTarget(event.key, safeActiveIndex, items.length, viewMode === "grid" ? columns : 1, viewMode === "grid")
 
 		if (target === null) {
 			return

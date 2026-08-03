@@ -9,6 +9,8 @@ import { selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { usePhotosSelection } from "@/features/photos/hooks/usePhotosSelection"
+import { usePhotosGridNav } from "@/features/photos/hooks/usePhotosGridNav"
+import { useMarqueeSelection } from "@/features/drive/hooks/useMarqueeSelection"
 import { usePhotosDialogHost } from "@/features/photos/hooks/usePhotosDialogHost"
 import { resolveTileClickIntent, previewOpenTarget } from "@/features/photos/components/photoGrid.logic"
 import { usePhotosGridDensityQuery } from "@/features/photos/queries/preferences"
@@ -68,24 +70,32 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 		const intent = resolveTileClickIntent(event, selectedItems.length > 0)
 
 		if (intent.kind === "open") {
-			const target = previewOpenTarget(items, index)
-
-			if (target) {
-				openPreview(target.sources, target.index)
-			}
+			handleOpenAt(index)
 
 			return
 		}
 
 		handlePointerSelect(index, event)
+		// The cursor follows the click, exactly as drive's own handlePointerSelect moves activeUuid.
+		setActive(index)
 	}
 
-	// A fresh root must never inherit a previous root's selection/anchor — mirrors drive's own
+	// One open path shared by a plain click and Enter.
+	function handleOpenAt(index: number): void {
+		const target = previewOpenTarget(items, index)
+
+		if (target) {
+			openPreview(target.sources, target.index)
+		}
+	}
+
+	// A fresh root must never inherit a previous root's selection/anchor/cursor — mirrors drive's own
 	// [variant, splat]-keyed reset effect (useDriveListboxNav.ts), keyed here on rootUuid alone since
 	// photos has no nested navigation to reset against.
 	useEffect(() => {
 		usePhotosStore.getState().clearSelectedItems()
 		setAnchorUuid(null)
+		resetCursor()
 	}, [rootUuid])
 
 	useEffect(() => {
@@ -108,7 +118,7 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 		}
 	}, [scrollElement])
 
-	const columns = columnsForWidth(containerWidth, tileSize)
+	const columns = columnsForWidth(containerWidth, tileSize, GRID_GAP)
 	const rowCount = Math.ceil(items.length / columns)
 
 	const virtualizer = useVirtualizer({
@@ -117,6 +127,33 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 		estimateSize: () => tileSize + GRID_GAP,
 		overscan: GRID_OVERSCAN,
 		getItemKey: index => index
+	})
+
+	const { safeActiveIndex, handleKeyDown, registerRef, setActive, setCursor, resetCursor } = usePhotosGridNav({
+		items,
+		columns,
+		virtualizer,
+		anchorUuid,
+		setAnchorUuid,
+		onOpen: handleOpenAt
+	})
+
+	// Rubber-band selection over blank grid space — the same hook the drive listing uses, with photos'
+	// own tile geometry and selection store injected. The hook measures the container's px-4 padding
+	// itself, so this call site passes no origin/width.
+	const marquee = useMarqueeSelection({
+		items,
+		viewMode: "grid",
+		columns,
+		geometry: { rowHeight: tileSize + GRID_GAP, tileWidth: tileSize, gap: GRID_GAP },
+		selection: {
+			read: () => usePhotosStore.getState().selectedItems,
+			write: next => {
+				usePhotosStore.getState().setSelectedItems(next)
+			}
+		},
+		scrollElement,
+		setCursor
 	})
 
 	useAction(
@@ -201,10 +238,30 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 				role="listbox"
 				aria-multiselectable="true"
 				aria-label={t("photos:photosGridLabel")}
+				// Drive parity (directoryListing.tsx): the tab stop is the ACTIVE tile's own tabIndex={0},
+				// never the container.
 				tabIndex={-1}
 				className="min-h-0 flex-1 overflow-y-auto px-4"
+				onKeyDown={handleKeyDown}
+				onPointerDown={marquee.onPointerDown}
 			>
 				<div style={{ position: "relative", width: "100%", height: virtualizer.getTotalSize() }}>
+					{/* Marquee rectangle — content-space, so it stretches correctly as the grid auto-scrolls, and
+					    the FIRST child of the sized wrapper so it shares the tiles' own content-space origin.
+					    Non-interactive (pointer-events-none) so it never intercepts the ongoing drag. */}
+					{marquee.rect ? (
+						<div
+							aria-hidden="true"
+							data-testid="marquee-rect"
+							className="pointer-events-none absolute z-20 rounded-xs border border-primary/60 bg-primary/15"
+							style={{
+								left: marquee.rect.left,
+								top: marquee.rect.top,
+								width: marquee.rect.right - marquee.rect.left,
+								height: marquee.rect.bottom - marquee.rect.top
+							}}
+						/>
+					) : null}
 					{virtualizer.getVirtualItems().map(virtualRow => (
 						<div
 							key={virtualRow.key}
@@ -234,7 +291,9 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 										item={item}
 										index={itemIndex}
 										selected={selectedItems.some(selected => selected.data.uuid === item.data.uuid)}
+										active={itemIndex === safeActiveIndex}
 										size={tileSize}
+										registerRef={registerRef}
 										onTileClick={handleTileClick}
 										onItemAction={handleItemAction}
 									/>

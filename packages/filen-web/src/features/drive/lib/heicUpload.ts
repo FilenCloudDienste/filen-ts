@@ -64,3 +64,23 @@ export async function maybeConvertHeicUpload(deps: HeicUploadConvertDeps, file: 
 		return file
 	}
 }
+
+export interface HeicUploadDeps {
+	convert: HeicUploadConvertDeps
+	readPreference: () => Promise<boolean>
+}
+
+export const defaultHeicUploadDeps: HeicUploadDeps = {
+	convert: defaultHeicUploadConvertDeps,
+	readPreference: getHeicUploadConvertPreference
+}
+
+// Does convert-on-upload apply to this batch? One definition, shared by the flat upload (startUploads)
+// and the directory walk (runDirectoryUpload), so a new upload entry point can never silently skip the
+// preference again. The kv read happens ONCE per batch and only when the batch actually holds a
+// candidate — every other batch skips the storage round trip entirely. Deliberately only the GATE: the
+// conversion itself stays per file inside each caller's own fan-out, so the first converted file starts
+// uploading (and shows a transfer row) while the rest are still decoding.
+export async function heicUploadConversionEnabled(deps: HeicUploadDeps, files: readonly File[]): Promise<boolean> {
+	return files.some(isHeicUploadCandidate) ? await deps.readPreference() : false
+}

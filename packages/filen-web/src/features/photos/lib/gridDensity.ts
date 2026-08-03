@@ -28,12 +28,15 @@ export function tileSizeForDensity(index: number): number {
 // `repeat(auto-fill, minmax(tile, 1fr))` semantics expressed as plain arithmetic so the virtualizer's
 // row-count math (features/photos/components/photoGrid.tsx) can compute it without measuring the DOM
 // grid itself. Never less than 1 (a container narrower than one tile still shows a single column).
-export function columnsForWidth(containerWidth: number, tileSize: number): number {
+// `gap` is the grid's own inter-column gap: n columns occupy n*tile + (n-1)*gap, so ignoring it
+// over-counts at exact-fit widths and leaves each 1fr cell narrower than the fixed-width tile inside
+// it. Defaulted to 0, which reduces the expression exactly to the gapless form.
+export function columnsForWidth(containerWidth: number, tileSize: number, gap = 0): number {
 	if (tileSize <= 0) {
 		return 1
 	}
 
-	return Math.max(1, Math.floor(containerWidth / tileSize))
+	return Math.max(1, Math.floor((containerWidth + gap) / (tileSize + gap)))
 }
 
 const GRID_DENSITY_KV_KEY = "photos.gridDensity.v1"

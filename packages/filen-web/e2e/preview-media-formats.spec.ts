@@ -43,6 +43,16 @@ const PDF_BYTES = Buffer.from(
 	"base64"
 )
 
+// A hand-built, single-page PDF carrying two /Link annotations with /URI actions: one `https:` and one
+// `javascript:`. Same 300x400pt geometry as PDF_BYTES above. Validated against the exact installed
+// pdfjs-dist build before being embedded here — getAnnotations({ intent: "display" }) reports both as
+// Link, and pdf.js's own URL normalization already leaves the javascript: one with no `url` (only
+// `unsafeUrl`), which this app's scheme allowlist is then the second, independent gate for.
+const PDF_LINKS_BYTES = Buffer.from(
+	"JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAzMDAgNDAwXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvQ29udGVudHMgNCAwIFIgL0Fubm90cyBbNiAwIFIgNyAwIFJdID4+CmVuZG9iago0IDAgb2JqCjw8IC9MZW5ndGggNDAgPj4Kc3RyZWFtCkJUIC9GMSAyNCBUZiAyMCAyMDAgVGQgKExpbmsgUGFnZSkgVGogRVQKZW5kc3RyZWFtCmVuZG9iago1IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hlbHZldGljYSA+PgplbmRvYmoKNiAwIG9iago8PCAvVHlwZSAvQW5ub3QgL1N1YnR5cGUgL0xpbmsgL1JlY3QgWzIwIDE5MCAxNjAgMjIwXSAvQm9yZGVyIFswIDAgMF0gL0EgPDwgL1R5cGUgL0FjdGlvbiAvUyAvVVJJIC9VUkkgKGh0dHBzOi8vZXhhbXBsZS5jb20vcGRmLWxpbmspID4+ID4+CmVuZG9iago3IDAgb2JqCjw8IC9UeXBlIC9Bbm5vdCAvU3VidHlwZSAvTGluayAvUmVjdCBbMjAgMTAwIDE2MCAxMzBdIC9Cb3JkZXIgWzAgMCAwXSAvQSA8PCAvVHlwZSAvQWN0aW9uIC9TIC9VUkkgL1VSSSAoamF2YXNjcmlwdDphbGVydFwoMVwpKSA+PiA+PgplbmRvYmoKeHJlZgowIDgKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjYzIDAwMDAwIG4gCjAwMDAwMDAzNTMgMDAwMDAgbiAKMDAwMDAwMDQyMyAwMDAwMCBuIAowMDAwMDAwNTc4IDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgOCAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKNzI2CiUlRU9G",
+	"base64"
+)
+
 // The same 2-page PDF, password-protected — AES-128 (PDF standard security handler R4), generated
 // once via pikepdf (a real, independent encryption implementation, not this app's own code) with
 // user password "secret123". Validated against the exact installed pdfjs-dist build before being
@@ -163,8 +173,9 @@ test("HEIC preview transforms client-side and renders via the buffered path, nev
 // pure page-visibility/canvas-sizing math, none of that is provable without one. Also proves the
 // page-nav toolbar (button clicks, not the overlay's own file-level arrow keys) actually drives a
 // real scroll and that the lazy render gate keeps up with it, and that the whole load produces zero
-// CSP console violations (the pdf.js worker's own acceptance check).
-test("PDF preview renders multi-page content, pages via its own toolbar with a real scroll, and closes, no CSP console errors", async ({
+// CSP console violations (the pdf.js worker's own acceptance check). The selectable text layer and the
+// annotation link overlay are DOM-only too — pdf.js generates that DOM, so this is their only proof.
+test("PDF preview renders multi-page content with a selectable text layer and safe annotation links, pages via its own toolbar with a real scroll, and closes, no CSP console errors", async ({
 	page,
 	injectedSession,
 	browserName
@@ -175,6 +186,7 @@ test("PDF preview renders multi-page content, pages via its own toolbar with a r
 	const runId = crypto.randomUUID()
 	const scratchName = `e2e-preview-pdf-${runId}`
 	const namePdf = `e2e-preview-pdf-${runId}.pdf`
+	const nameLinksPdf = `e2e-preview-pdf-links-${runId}.pdf`
 
 	const cspViolations = trackCspViolations(page)
 
@@ -184,10 +196,15 @@ test("PDF preview renders multi-page content, pages via its own toolbar with a r
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
 		const input = page.locator('input[type="file"]').first()
-		await input.setInputFiles([{ name: namePdf, mimeType: "application/pdf", buffer: PDF_BYTES }])
+		await input.setInputFiles([
+			{ name: namePdf, mimeType: "application/pdf", buffer: PDF_BYTES },
+			{ name: nameLinksPdf, mimeType: "application/pdf", buffer: PDF_LINKS_BYTES }
+		])
 
 		const row = listbox.getByRole("option", { name: namePdf })
 		await expect(row).toBeVisible({ timeout: 45_000 })
+		const linksRow = listbox.getByRole("option", { name: nameLinksPdf })
+		await expect(linksRow).toBeVisible({ timeout: 45_000 })
 
 		// A short viewport (rather than enterScratchDirectory's tall one, which exists only to defeat
 		// the drive LISTING's own virtualization) — PDF_BYTES' two 300x400pt pages can't both fit at
@@ -201,6 +218,47 @@ test("PDF preview renders multi-page content, pages via its own toolbar with a r
 		await expect(firstPageCanvas).toBeVisible({ timeout: 60_000 })
 		await expect(page.getByText("Page 1 of 2")).toBeVisible()
 
+		// The selectable text layer: only present once TextLayer has actually rendered.
+		const pageOneSpan = page.getByText("Page One")
+		await expect(pageOneSpan).toBeVisible({ timeout: 30_000 })
+
+		// STILL present after the canvas has finished (the spinner is gone / the canvas is no longer
+		// `invisible`). Direct regression net for the effect-lifecycle trap: a text layer wiped by the
+		// canvas render effect's own cleanup would pass a racy "appears" check and fail this one.
+		await expect(firstPageCanvas).not.toHaveClass(/invisible/)
+		await expect(pageOneSpan).toBeVisible()
+
+		// The span must be laid out to the RIGHT SIZE, not merely present. A "non-zero bounding box"
+		// check would be worthless: pdf.js positions spans with PERCENTAGE left/top, so a layer whose
+		// font-size/transform are invalid at computed-value time (the missing --text-scale-factor /
+		// --min-font-size-inv failure the copied stylesheet exists to prevent) still yields spans with
+		// non-zero, in-canvas boxes. These ratios are derived from the fixture's own operators —
+		// `BT /F1 24 Tf 20 200 Td (Page One) Tj ET` on a 300pt-wide MediaBox — and the standard Helvetica
+		// advance widths: "Page One" is 667+556+556+556+278+778+556+556 = 4503/1000 em, x 24pt = 108.1pt,
+		// / 300pt = 0.360; its left edge is 20/300 = 0.067. pdf.js pins the span to exactly that ratio via
+		// --scale-x = canvasWidth * scale / measuredWidth, so both are scale- and zoom-independent, and a
+		// broken layer (inherited ~14-16px font, no scaleX) lands far outside either band.
+		const spanBox = await pageOneSpan.boundingBox()
+		const canvasBox = await firstPageCanvas.boundingBox()
+
+		if (!spanBox || !canvasBox) {
+			throw new Error("text-layer span or page canvas has no bounding box")
+		}
+
+		expect(spanBox.x).toBeGreaterThanOrEqual(canvasBox.x - 1)
+		expect(spanBox.y).toBeGreaterThanOrEqual(canvasBox.y - 1)
+		expect(spanBox.x + spanBox.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width + 1)
+		expect(spanBox.y + spanBox.height).toBeLessThanOrEqual(canvasBox.y + canvasBox.height + 1)
+		expect(spanBox.width / canvasBox.width).toBeGreaterThan(0.3)
+		expect(spanBox.width / canvasBox.width).toBeLessThan(0.42)
+		expect((spanBox.x - canvasBox.x) / canvasBox.width).toBeGreaterThan(0.047)
+		expect((spanBox.x - canvasBox.x) / canvasBox.width).toBeLessThan(0.087)
+
+		// A click on a text-layer span selects text; it must never toggle the overlay chrome away.
+		const closeButton = page.getByRole("dialog").getByRole("button", { name: "Close", exact: true })
+		await pageOneSpan.click()
+		await expect(closeButton).toBeVisible()
+
 		// The page-nav "Next page" button (distinct from the overlay's own file-level "Next file")
 		// scrolls page 2 into view; the indicator is IntersectionObserver-driven, so it follows once
 		// the scroll settles rather than updating synchronously with the click.
@@ -210,6 +268,34 @@ test("PDF preview renders multi-page content, pages via its own toolbar with a r
 
 		await page.keyboard.press("Escape")
 		await expect(firstPageCanvas).toHaveCount(0)
+
+		// The link overlay: real positioned <a> elements built from getAnnotations() data. Only the
+		// https: annotation renders — the javascript: one is dropped before it ever reaches the DOM
+		// (unlike the docx sweep, which strips an href after render).
+		await linksRow.dblclick()
+		const linksPageCanvas = page.locator('canvas[aria-label*="Page 1 of 1"]')
+		await expect(linksPageCanvas).toBeVisible({ timeout: 60_000 })
+
+		const annotationLink = page.getByRole("dialog").getByRole("link")
+		await expect(annotationLink).toHaveCount(1)
+		await expect(annotationLink).toHaveAttribute("href", "https://example.com/pdf-link")
+		await expect(annotationLink).toHaveAttribute("target", "_blank")
+		await expect(annotationLink).toHaveAttribute("rel", "noreferrer")
+
+		const linkBox = await annotationLink.boundingBox()
+		const linksCanvasBox = await linksPageCanvas.boundingBox()
+
+		if (!linkBox || !linksCanvasBox) {
+			throw new Error("annotation link or page canvas has no bounding box")
+		}
+
+		expect(linkBox.x).toBeGreaterThanOrEqual(linksCanvasBox.x - 1)
+		expect(linkBox.x + linkBox.width).toBeLessThanOrEqual(linksCanvasBox.x + linksCanvasBox.width + 1)
+		expect(linkBox.y).toBeGreaterThanOrEqual(linksCanvasBox.y - 1)
+		expect(linkBox.y + linkBox.height).toBeLessThanOrEqual(linksCanvasBox.y + linksCanvasBox.height + 1)
+
+		await page.keyboard.press("Escape")
+		await expect(linksPageCanvas).toHaveCount(0)
 
 		expect(cspViolations).toEqual([])
 	} finally {

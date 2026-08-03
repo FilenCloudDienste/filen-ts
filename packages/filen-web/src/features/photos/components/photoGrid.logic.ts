@@ -1,3 +1,4 @@
+import { listboxKeyTarget, listboxRange } from "@/features/drive/lib/listbox"
 import { drivePreviewSources, type PreviewSource } from "@/features/preview/lib/previewSource"
 import type { PhotoItem } from "@/features/photos/lib/captureSort"
 
@@ -49,4 +50,40 @@ export function previewOpenTarget(items: PhotoItem[], index: number): PreviewOpe
 	}
 
 	return { sources: drivePreviewSources(items), index }
+}
+
+// The items a shift-extended selection covers: everything between the anchor (or `index` itself when
+// there is no live anchor) and `index`, inclusive. One resolver for both entry points —
+// modifier-click (usePhotosSelection) and Shift+Arrow (usePhotosGridNav).
+export function photosRangeSelection(items: readonly PhotoItem[], anchorUuid: string | null, index: number): PhotoItem[] {
+	const anchorIndex = anchorUuid === null ? -1 : items.findIndex(existing => existing.data.uuid === anchorUuid)
+	const resolvedAnchor = anchorIndex === -1 ? index : anchorIndex
+
+	return listboxRange(resolvedAnchor, index)
+		.map(rangeIndex => items[rangeIndex])
+		.filter((rangeItem): rangeItem is PhotoItem => rangeItem !== undefined)
+}
+
+export type PhotosGridKeyAction = { kind: "move"; target: number } | { kind: "toggle" } | { kind: "open" } | { kind: "none" }
+
+// The photos grid's key semantics, composed from the shared cursor table: Space toggles the cursor
+// item's selection, Enter opens the viewer, arrows/Home/End move the cursor. Always a grid (photos has
+// no list mode), so the vertical step is always `columns` and the horizontal axis is always live.
+// Select-all/clear-selection are NOT here — they stay registered keymap commands (photoGrid.tsx).
+export function photosGridKeyAction(key: string, activeIndex: number, itemCount: number, columns: number): PhotosGridKeyAction {
+	if (itemCount === 0) {
+		return { kind: "none" }
+	}
+
+	if (key === " ") {
+		return { kind: "toggle" }
+	}
+
+	if (key === "Enter") {
+		return { kind: "open" }
+	}
+
+	const target = listboxKeyTarget(key, activeIndex, itemCount, columns, true)
+
+	return target === null ? { kind: "none" } : { kind: "move", target }
 }

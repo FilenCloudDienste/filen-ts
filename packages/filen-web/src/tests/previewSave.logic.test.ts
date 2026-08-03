@@ -82,8 +82,22 @@ describe("isEditable", () => {
 		expect(isEditable(fileItem({ meta: decodedMeta("photo.png") }), "drive")).toBe(false)
 	})
 
-	it("is false for markdown (its own view-source toggle stays read-only)", () => {
-		expect(isEditable(fileItem({ meta: decodedMeta("readme.md") }), "drive")).toBe(false)
+	it("is true for markdown — edited through the viewer's own source mode", () => {
+		expect(isEditable(fileItem({ meta: decodedMeta("readme.md") }), "drive")).toBe(true)
+	})
+
+	it("is true for a .markdown file too", () => {
+		expect(isEditable(fileItem({ meta: decodedMeta("readme.markdown") }), "drive")).toBe(true)
+	})
+
+	it("is false for markdown outside the drive variant — the variant gate is untouched", () => {
+		expect(isEditable(fileItem({ meta: decodedMeta("readme.md") }), "trash")).toBe(false)
+		expect(isEditable(fileItem({ meta: decodedMeta("readme.md") }), "favorites")).toBe(false)
+		expect(isEditable(fileItem({ meta: decodedMeta("readme.md") }), "sharedIn")).toBe(false)
+	})
+
+	it("is false for an undecryptable markdown row", () => {
+		expect(isEditable(fileItem({ meta: { type: "encrypted", data: "cipher" } }), "drive")).toBe(false)
 	})
 
 	it("is false for an undecryptable file", () => {
