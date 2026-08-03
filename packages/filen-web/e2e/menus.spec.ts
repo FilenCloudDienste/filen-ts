@@ -225,8 +225,16 @@ test.describe("context menus", () => {
 			// row under alphabetically-earlier debris — sorting by upload date (descending) puts THIS
 			// test's own just-trashed directory at or near the top of its partition instead, since
 			// nothing else in the account was uploaded more recently.
-			await page.getByRole("complementary").getByRole("link", { name: "Trash", exact: true }).click()
+			// The nav click can silently fail to commit under suite load (observed: every later step then
+			// runs against the still-mounted /drive listing, whose toolbar renders the same Sort/Display
+			// controls) — retry until the URL proves the route changed, then require the trash-only
+			// Empty-trash trigger before touching anything, so a wrong-listing state can never pass.
+			await expect(async () => {
+				await page.getByRole("complementary").getByRole("link", { name: "Trash", exact: true }).click()
+				await expect(page).toHaveURL(/\/trash$/, { timeout: 5_000 })
+			}).toPass({ timeout: 30_000 })
 			const trashListing = await waitForListingSettled(page)
+			await expect(page.getByRole("button", { name: "Empty trash", exact: true })).toBeVisible()
 
 			await page.getByRole("button", { name: "Sort by", exact: true }).click()
 			const sortMenu = page.getByRole("menu")
