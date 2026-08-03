@@ -165,25 +165,61 @@ describe("deriveEditorReadOnly", () => {
 describe("deriveEditorLoadState", () => {
 	it("is always ready when the note has inflight content, even while the query is pending", () => {
 		// The disabled-while-inflight query never resolves — but we have a seed to render.
-		expect(deriveEditorLoadState({ hasInflight: true, queryStatus: "pending", isUndecryptable: false })).toBe("ready")
-		expect(deriveEditorLoadState({ hasInflight: true, queryStatus: "error", isUndecryptable: false })).toBe("ready")
+		expect(deriveEditorLoadState({ hasInflight: true, outboxHydrated: true, queryStatus: "pending", isUndecryptable: false })).toBe(
+			"ready"
+		)
+		expect(deriveEditorLoadState({ hasInflight: true, outboxHydrated: true, queryStatus: "error", isUndecryptable: false })).toBe(
+			"ready"
+		)
 	})
 
 	it("keeps an inflight edit readable even when the content query failed to decrypt", () => {
-		expect(deriveEditorLoadState({ hasInflight: true, queryStatus: "error", isUndecryptable: true })).toBe("ready")
+		expect(deriveEditorLoadState({ hasInflight: true, outboxHydrated: true, queryStatus: "error", isUndecryptable: true })).toBe(
+			"ready"
+		)
 	})
 
 	it("surfaces the query's pending/error only when there is no inflight", () => {
-		expect(deriveEditorLoadState({ hasInflight: false, queryStatus: "pending", isUndecryptable: false })).toBe("pending")
-		expect(deriveEditorLoadState({ hasInflight: false, queryStatus: "error", isUndecryptable: false })).toBe("error")
+		expect(deriveEditorLoadState({ hasInflight: false, outboxHydrated: true, queryStatus: "pending", isUndecryptable: false })).toBe(
+			"pending"
+		)
+		expect(deriveEditorLoadState({ hasInflight: false, outboxHydrated: true, queryStatus: "error", isUndecryptable: false })).toBe(
+			"error"
+		)
 	})
 
 	it("narrows an undecryptable-content failure out of the generic error state", () => {
-		expect(deriveEditorLoadState({ hasInflight: false, queryStatus: "error", isUndecryptable: true })).toBe("undecryptable")
+		expect(deriveEditorLoadState({ hasInflight: false, outboxHydrated: true, queryStatus: "error", isUndecryptable: true })).toBe(
+			"undecryptable"
+		)
 	})
 
 	it("is ready once the query resolves with no inflight", () => {
-		expect(deriveEditorLoadState({ hasInflight: false, queryStatus: "ready", isUndecryptable: false })).toBe("ready")
+		expect(deriveEditorLoadState({ hasInflight: false, outboxHydrated: true, queryStatus: "ready", isUndecryptable: false })).toBe(
+			"ready"
+		)
+	})
+
+	// The reload race: the outbox restores from disk asynchronously, so an editor that mounts first sees
+	// an EMPTY inflight view for a note that DOES have a queued edit. Seeding there paints the server's
+	// pre-edit content and, because the seed only re-derives on a remount-key change, never corrects
+	// itself — the user's edit is silently lost the moment they type again.
+	it("holds the pending state until the outbox has hydrated, whatever the query already resolved", () => {
+		expect(deriveEditorLoadState({ hasInflight: false, outboxHydrated: false, queryStatus: "ready", isUndecryptable: false })).toBe(
+			"pending"
+		)
+		expect(deriveEditorLoadState({ hasInflight: false, outboxHydrated: false, queryStatus: "error", isUndecryptable: true })).toBe(
+			"pending"
+		)
+	})
+
+	it("releases the gate the instant the outbox hydrates, with the inflight-first rule intact", () => {
+		expect(deriveEditorLoadState({ hasInflight: true, outboxHydrated: false, queryStatus: "ready", isUndecryptable: false })).toBe(
+			"pending"
+		)
+		expect(deriveEditorLoadState({ hasInflight: true, outboxHydrated: true, queryStatus: "ready", isUndecryptable: false })).toBe(
+			"ready"
+		)
 	})
 })
 

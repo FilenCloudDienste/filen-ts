@@ -89,9 +89,10 @@ describe("PlaylistsScreen", () => {
 	it("shows a loading spinner while the query is pending, not the empty state", () => {
 		usePlaylistsQuery.mockReturnValue(pending())
 
-		render(createElement(PlaylistsScreen))
+		const { container } = render(createElement(PlaylistsScreen))
 
 		expect(screen.getByRole("heading", { name: "Playlists" })).toBeTruthy()
+		expect(container.querySelector('[data-slot="spinner"]')).not.toBeNull()
 		expect(screen.queryByText("No playlists yet")).toBeNull()
 	})
 })

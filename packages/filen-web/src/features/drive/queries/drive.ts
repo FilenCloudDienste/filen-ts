@@ -188,27 +188,62 @@ export function cancelListingFetch(queryKey: ReturnType<typeof driveListingQuery
 	}
 }
 
+// Every updater this fan-out receives is a filter/map, which allocates a fresh array even when nothing
+// matched — so an array-reference check can't tell an affected listing from an untouched one, but an
+// element-identity walk can.
+function sameItems(prev: DriveItem[], next: DriveItem[]): boolean {
+	return prev.length === next.length && prev.every((item, index) => item === next[index])
+}
+
 // Fan-out patch across EVERY currently-instantiated listing, any variant, any uuid — a
 // `["drive","listing"]` queryKey filter only compares the indices IT specifies (verified against
 // the installed @tanstack/query-core's partialMatchKey: it walks Object.keys of the FILTER key, so
 // index 2's params object is never inspected), so this matches every "drive"/"recents"/"favorites"/
 // "trash" listing at once, the null-root included. For an action whose effect isn't confined to one
-// parent — an item can be favorited/colored in place, or trashed out of a normal listing while
-// simultaneously belonging to the trash's own flat listing — a single narrow driveListingQueryUpdate
-// call can't reach every affected key, but this can. A listing nobody has fetched yet has no cached
-// data; the updater never runs for it (returning `undefined` from the per-query updater is
-// setQueryData's own documented no-op), so this can never conjure a `[]` into an unfetched query.
+// parent — an item can be favorited/colored in place, or moved out of one listing into another — a
+// single narrow driveListingQueryUpdate call can't reach every affected key, but this can. A listing
+// nobody has fetched yet has no cached data and is skipped entirely, so this can never conjure a `[]`
+// into an unfetched query.
 export function driveListingQueryUpdateGlobal(updater: (items: DriveItem[]) => DriveItem[]): void {
 	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
-		// Same in-flight-refetch hazard as driveListingQueryUpdate above, with the same initial-fetch
-		// carve-out — only queries that already hold data get their in-flight fetch aborted. Keyed off
-		// the cache entry's own data rather than cancelListingFetch's lookup, which this loop already has.
-		if (query.state.data !== undefined) {
-			void queryClient.cancelQueries({ queryKey: query.queryKey, exact: true })
+		const prev = queryClient.getQueryData<DriveItem[]>(query.queryKey)
+
+		if (prev === undefined) {
+			continue
 		}
 
-		queryClient.setQueryData<DriveItem[]>(query.queryKey, prev => (prev === undefined ? undefined : updater(prev)))
+		const next = updater(prev)
+
+		// Most cached listings hold no row a given updater touches, and an untouched listing must be left
+		// strictly alone: cancelling its in-flight refetch (below) would strand it on pre-fetch rows until
+		// the next mount/focus, since a cancelled fetch reverts and never retries on its own.
+		if (sameItems(prev, next)) {
+			continue
+		}
+
+		// Same in-flight-refetch hazard as driveListingQueryUpdate above, with the same initial-fetch
+		// carve-out — only a listing that already holds data (and is actually changing) gets its fetch
+		// aborted, so an initial fetch is never left stranded on its loading state.
+		void queryClient.cancelQueries({ queryKey: query.queryKey, exact: true })
+		queryClient.setQueryData<DriveItem[]>(query.queryKey, next)
 	}
+}
+
+// The row behind a uuid-only socket payload. Web keeps no worker-side item cache (mobile's
+// fileUuidToNormalFile), so the only full shape available for such an event is the row a cached
+// listing still holds — read it BEFORE a removal fan-out strips it. `undefined` when no cached listing
+// holds the uuid: there is nothing to rebuild the row from, and the affected listing refetches on its
+// next mount.
+export function findCachedListingItem(uuid: string): DriveItem | undefined {
+	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
+		const found = queryClient.getQueryData<DriveItem[]>(query.queryKey)?.find(item => item.data.uuid === uuid)
+
+		if (found !== undefined) {
+			return found
+		}
+	}
+
+	return undefined
 }
 
 // Dir/File.parent is NEVER null on the wasm side (ParentUuid = a real uuid or one of

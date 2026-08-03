@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react"
 import { useContactsListSelection } from "@/features/contacts/hooks/useContactsListSelection"
@@ -17,6 +17,24 @@ function optionTarget(): HTMLElement {
 
 	return element
 }
+
+// A row as the page actually renders it: an option in the document with the section listbox's single
+// Tab stop, so .focus() genuinely moves document.activeElement (a detached or tabindex-less div cannot).
+function rowElement(): HTMLDivElement {
+	const element = document.createElement("div")
+	element.setAttribute("role", "option")
+	element.setAttribute("data-test-row", "")
+	element.tabIndex = -1
+	document.body.appendChild(element)
+
+	return element
+}
+
+afterEach(() => {
+	for (const element of document.querySelectorAll("[data-test-row]")) {
+		element.remove()
+	}
+})
 
 function keyEvent(
 	key: string,
@@ -227,6 +245,67 @@ describe("useContactsListSelection — roving cursor", () => {
 
 		expect(preventDefault).not.toHaveBeenCalled()
 		expect(result.current.selectedCount).toBe(0)
+	})
+
+	// Moving DOM focus with the cursor is the entire reason registerRowRef exists: each section is one
+	// listbox with a single Tab stop, so an arrow key that moved the cursor without moving focus would
+	// leave a keyboard user typing into the row they just left.
+	it("ArrowDown moves DOM focus onto the row the cursor landed on", () => {
+		const { result } = renderHook(() => useContactsListSelection({ resetKey: "all" }))
+		const first = rowElement()
+		const second = rowElement()
+
+		act(() => {
+			result.current.registerRowRef("contacts", "a", first)
+			result.current.registerRowRef("contacts", "b", second)
+		})
+
+		const { event } = keyEvent("ArrowDown", { target: first })
+
+		act(() => {
+			result.current.handleKeyDown("contacts", UUIDS, event)
+		})
+
+		expect(document.activeElement).toBe(second)
+	})
+
+	it("focuses the row of the section that owns the cursor, never a same-uuid row in another section", () => {
+		const { result } = renderHook(() => useContactsListSelection({ resetKey: "all" }))
+		const contactsRow = rowElement()
+		const blockedRow = rowElement()
+
+		// Registered blocked-first so a section-agnostic key would resolve to the contacts row instead.
+		act(() => {
+			result.current.registerRowRef("blocked", "b", blockedRow)
+			result.current.registerRowRef("contacts", "b", contactsRow)
+		})
+
+		const { event } = keyEvent("ArrowDown")
+
+		act(() => {
+			result.current.handleKeyDown("blocked", UUIDS, event)
+		})
+
+		expect(document.activeElement).toBe(blockedRow)
+	})
+
+	it("an unregistered row (unmounted) still moves the cursor instead of throwing", () => {
+		const { result } = renderHook(() => useContactsListSelection({ resetKey: "all" }))
+		const second = rowElement()
+
+		act(() => {
+			result.current.registerRowRef("contacts", "b", second)
+			result.current.registerRowRef("contacts", "b", null)
+		})
+
+		const { event } = keyEvent("ArrowDown")
+
+		act(() => {
+			result.current.handleKeyDown("contacts", UUIDS, event)
+		})
+
+		expect(result.current.activeIndexFor("contacts", UUIDS)).toBe(1)
+		expect(document.activeElement).not.toBe(second)
 	})
 
 	it("ignores a keypress that originated inside a row's own action button", () => {

@@ -65,7 +65,9 @@ export async function fetchNoteContentOrThrow(note: Note): Promise<string> {
 // USAGE NOTE for the editor: `dataUpdatedAt` on this hook's result is the editor remount key —
 // because the query is disabled while the note has an inflight outbox entry, `dataUpdatedAt`
 // cannot advance mid-edit, so a component keyed on it never remounts (and blows away in-progress
-// keystrokes) while a local edit is still pending.
+// keystrokes) while a local edit is still pending. The one read that can outrun that gate — issued
+// before the outbox hydrated, while the store still looked clean — is cancelled by the outbox at its
+// hydration edge (sync.ts), which the editor also waits on before freezing a seed.
 export function useNoteContentQuery(note: Note | undefined, options?: { enabled?: boolean }): UseQueryResult<string | undefined> {
 	// UI gating seam: disable the read while the note has a pending sync-outbox entry.
 	// `dataUpdatedAt` (the editor's remount key) therefore cannot advance mid-edit, so the editor never

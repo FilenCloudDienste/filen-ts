@@ -29,10 +29,6 @@ export interface NoteRowProps {
 	// independent: clicking a different note while others stay Ctrl-selected opens it without
 	// touching the selection.
 	multiSelected: boolean
-	// Virtualized list: only a window of rows is mounted, so the DOM child count is a fabricated total
-	// and the position among the row's own siblings has to be threaded from the owning list.
-	posInSet: number
-	setSize: number
 	// Rendered indented under a tag group in the tags view; flat (no indent) in the notes view.
 	nested?: boolean
 	allTags: readonly NoteTag[]
@@ -56,10 +52,9 @@ function RowBadge({ children }: { children: ReactNode }) {
 }
 
 // One note row, shared by both sidebar views (the notes list and a tag group's expanded members). The
-// row container is the sidebar tree's level-2 node (it is what carries the selection ring); the Link
-// inside it is the activation target — a Link to /notes/$uuid, where the uuid is a selection key, not a
-// path hierarchy — with the ⋯ trigger button as its sibling, not its descendant (see the
-// ContextMenuTrigger comment below).
+// row container carries the selection ring; the Link inside it is the activation target — a Link to
+// /notes/$uuid, where the uuid is a selection key, not a path hierarchy — with the ⋯ trigger button as
+// its sibling, not its descendant (see the ContextMenuTrigger comment below).
 // A rich mobile-parity row: a circular badge column (type + pin + favorite) beside a text column with
 // title, optional preview, relative edited-time, an optional "Shared by <email>" line, a participant
 // avatar strip, and a tag-chip strip. Carries its own row-level context menu (right-click) and ⋯
@@ -68,8 +63,6 @@ export function NoteRow({
 	note,
 	selected,
 	multiSelected,
-	posInSet,
-	setSize,
 	nested = false,
 	allTags,
 	currentUserId,
@@ -98,13 +91,6 @@ export function NoteRow({
 			<ContextMenuTrigger
 				render={
 					<div
-						role="treeitem"
-						// Every note row sits under a date-group header (notes view) or a tag row (tags view) —
-						// groupNotesForView/buildTagsViewRows always emit a level-1 row before a bucket.
-						aria-level={2}
-						aria-selected={multiSelected}
-						aria-posinset={posInSet}
-						aria-setsize={setSize}
 						className={cn(
 							"group flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2 transition-colors app-region-no-drag",
 							nested && "pl-8",
@@ -115,8 +101,9 @@ export function NoteRow({
 						<Link
 							to="/notes/$uuid"
 							params={{ uuid: note.uuid }}
-							// aria-current is a different fact from aria-selected (which lives on the treeitem
-							// container): this is the routed note, not necessarily a selected one.
+							// The routed note, announced on the link that navigates to it (the drive sidebar's own
+							// rows do the same). The multi-selection is a separate fact with no honest ARIA on a
+							// plain list item — it shows as the ring below, plus the bulk bar's own selected count.
 							aria-current={selected ? "page" : undefined}
 							onClick={event => {
 								// Ctrl/Cmd/Shift held: this is a selection gesture, not a navigation intent —

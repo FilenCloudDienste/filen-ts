@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import type { Note } from "@filen/sdk-rs"
 import { useNoteContentQuery, isUndecryptableContentError } from "@/features/notes/queries/noteContent"
-import useNotesInflightStore, { useNoteInflight } from "@/features/notes/store/useNotesInflight"
+import useNotesInflightStore, { useNoteInflight, useOutboxHydrated } from "@/features/notes/store/useNotesInflight"
 import { sync } from "@/features/notes/lib/sync"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import {
@@ -44,11 +44,15 @@ export function useNoteEditor(note: Note, currentUserId: bigint | undefined): No
 	const { t } = useTranslation("notes")
 	const query = useNoteContentQuery(note)
 	const isInflight = useNoteInflight(note.uuid)
+	// The outbox's async hydration edge — the editor stays on its loading state until the inflight view
+	// is truthful, so a seed frozen here can never be the server's pre-edit content over a queued edit.
+	const outboxHydrated = useOutboxHydrated()
 	const [sizeReached, setSizeReached] = useState(false)
 
 	const queryStatus: QueryLoadState = query.isPending ? "pending" : query.isError ? "error" : "ready"
 	const status = deriveEditorLoadState({
 		hasInflight: isInflight,
+		outboxHydrated,
 		queryStatus,
 		isUndecryptable: query.isError && isUndecryptableContentError(query.error)
 	})

@@ -113,6 +113,7 @@ beforeEach(() => {
 	listNotes.mockReset()
 	toast.mockClear()
 	setStore({})
+	useNotesInflightStore.setState({ outboxHydrated: false })
 	onlineManager.setOnline(true)
 })
 
@@ -220,6 +221,36 @@ describe("follower enqueue — optimistic local apply + forward, no disk", () =>
 		s.startAsFollower()
 
 		expect(transport.requestState).toHaveBeenCalledTimes(1)
+	})
+})
+
+// A follower owns no disk: the leader's first broadcast IS its hydration, and until it lands an empty
+// inflight view means "not known yet" — an editor seeding there would paint the server's content over
+// an edit another tab has queued.
+describe("follower hydration gate", () => {
+	it("stays closed until the leader's first state broadcast lands", () => {
+		const s = new Sync()
+		const transport = mockTransport()
+
+		s.attachTransport(transport)
+		s.startAsFollower()
+
+		expect(useNotesInflightStore.getState().outboxHydrated).toBe(false)
+
+		const note = makeNote("a")
+
+		s.applyLeaderState({ a: [{ timestamp: 1, content: "another tab's edit", note }] })
+
+		expect(useNotesInflightStore.getState().outboxHydrated).toBe(true)
+		expect(hasInflight("a")).toBe(true)
+	})
+
+	it("opens immediately when no channel is attached — nothing can ever answer", () => {
+		const s = new Sync()
+
+		s.startAsFollower()
+
+		expect(useNotesInflightStore.getState().outboxHydrated).toBe(true)
 	})
 })
 

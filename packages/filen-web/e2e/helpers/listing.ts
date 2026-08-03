@@ -60,6 +60,30 @@ export async function waitForListingSettled(page: Page): Promise<{ listbox: Retu
 	return { listbox, hasItems: await listbox.isVisible() }
 }
 
+// Ceiling for a wait that closes on a live ACCOUNT WRITE rather than on UI responsiveness. Every
+// create/rename/move/trash serialises on the SDK's account-wide drive lock, whose acquisition under
+// contention is a poll lottery with no useful bound — a write queued behind a sibling worker's write
+// (or behind a lease left by a context torn down mid-write) routinely outlives the 15s expect default,
+// and in a setup step that turns into a burnt test plus scratch debris on the shared account.
+// Assertions that are genuinely about UI responsiveness keep the tight default.
+const LIVE_WRITE_TIMEOUT_MS = 60_000
+
+// The "New directory" dialog round trip, shared by every spec that needs a directory to exist.
+// .first(): an EMPTY writable listing renders a second identical "New directory" button inside its
+// empty-state "+ Add" affordance (it deliberately reuses the toolbar's own controls), so on an empty
+// listing this name matches two buttons. The toolbar's is always first in DOM order (the card header
+// precedes the listing body), so .first() is the toolbar button either way.
+export async function createDirectoryViaDialog(page: Page, name: string): Promise<void> {
+	await page.getByRole("button", { name: "New directory", exact: true }).first().click()
+
+	const dialog = page.getByRole("dialog")
+
+	await expect(dialog).toBeVisible()
+	await page.getByLabel("Name", { exact: true }).fill(name)
+	await page.getByRole("button", { name: "Create", exact: true }).click()
+	await expect(dialog).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+}
+
 // Every data-mutating authed spec nests its fixture file(s) inside a per-test scratch directory rather
 // than creating them at /drive's root — this suite runs fullyParallel (playwright.config.ts), and a
 // root-level create/trash races root-level reads from another spec: drive.spec.ts's own "selection"
@@ -73,7 +97,7 @@ export async function enterScratchDirectory(
 ): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
 	// The listing virtualizes its rows (directoryListing.tsx's useVirtualizer, keyed by item uuid) —
 	// on a long/shared listing a row sorted well below the fold may not be mounted in the DOM at all, so
-	// a locator that depends on finding a SPECIFIC named row (this function's own scratchRow below,
+	// a locator that depends on finding a SPECIFIC named row (descendInto's row below,
 	// trashScratchDirectory's row) can silently miss it. A generously tall viewport makes the scroll
 	// container's height exceed any realistic item count's total row height, so the virtualizer renders
 	// every row in one pass for the rest of this test — simpler and more robust here than driving
@@ -82,17 +106,7 @@ export async function enterScratchDirectory(
 
 	const { listbox } = await waitForListingSettled(page)
 
-	// .first(): an EMPTY writable listing renders a second identical "New directory" button inside its
-	// empty-state "+ Add" affordance (it deliberately reuses the toolbar's own controls), so when the
-	// scratch root happens to be empty this name matches two buttons. The toolbar's is always first in
-	// DOM order (the card header precedes the listing body), so .first() is the toolbar button either way.
-	await page.getByRole("button", { name: "New directory", exact: true }).first().click()
-	const dialog = page.getByRole("dialog")
-	await expect(dialog).toBeVisible()
-	await page.getByLabel("Name", { exact: true }).fill(name)
-	await page.getByRole("button", { name: "Create", exact: true }).click()
-	await expect(dialog).toHaveCount(0)
-
+	await createDirectoryViaDialog(page, name)
 	await descendInto(page, listbox, name)
 
 	return waitForListingSettled(page)
@@ -133,42 +147,63 @@ async function waitForToastsClear(page: Page): Promise<void> {
 	await expect(page.locator("[data-sonner-toast]")).toHaveCount(0, { timeout: 20_000 })
 }
 
-// Selects then trashes exactly ONE row by name — the whole select → toolbar-click → confirm sequence
-// retried as a single unit against a FRESHLY re-resolved row locator each attempt. A row captured once
-// outside the retry can go from visible to "element is not stable"/detached mid-sequence when the root
-// listing reorders underneath it (a concurrent spec's own root-level mutation, or the background
-// refetch waitForListingSettled's own doc comment describes) — re-querying `listbox.getByRole` inside
-// the callback is what actually recovers, the same shape as descendInto's own toPass above. Exported for
-// the debris sweep in setup/cleanup.setup.ts, which hits this exact churn by construction (it runs
-// against a root that, by definition, still has rows left to remove).
+// Selects then removes exactly ONE row by name through the bulk bar (whose buttons are icon-only, so
+// the label is their accessible name) — the whole select → toolbar-click → confirm sequence retried as
+// a single unit against a FRESHLY re-resolved row locator each attempt. A row captured once outside the
+// retry can go from visible to "element is not stable"/detached mid-sequence when the listing reorders
+// underneath it (a concurrent spec's own root-level mutation, or the background refetch
+// waitForListingSettled's own doc comment describes) — re-querying `listbox.getByRole` inside the
+// callback is what actually recovers, the same shape as descendInto's own toPass above.
 //
-// No per-step timeout overrides inside the callback: they fall back to the same budgets the
-// pre-toPass version of this sequence relied on (expect's config default of 15s, and actions' own
-// default — unbounded, i.e. bounded only by the enclosing test's timeout) rather than a tight
-// hardcoded 5s each, which left too little slack for a single attempt (let alone a retry) once
-// waitForToastsClear's own up-to-20s wait was in the mix. The outer envelope is sized off
-// confirmTimeoutMs so a caller's wider override (e.g. drive-search.spec.ts's nested-tree 30s) still
-// gets real headroom around it instead of being silently capped by a fixed outer ceiling.
+// Only the confirm wait is pinned: it closes on a live account write, so it gets LIVE_WRITE_TIMEOUT_MS
+// rather than the 15s expect default — a slow-but-succeeding removal must not trip a retry whose next
+// attempt then finds the row already gone. Every other step falls back to the standard budgets
+// (expect's config default, actions' own) rather than tight hardcoded ones, which left too little slack
+// for a single attempt once waitForToastsClear's own up-to-20s wait was in the mix. The outer envelope
+// is sized off the confirm wait so a caller's wider override (e.g. drive-search.spec.ts's nested-tree
+// 30s) still gets real headroom around it instead of being silently capped by a fixed outer ceiling.
+async function selectAndConfirmRowAction(
+	page: Page,
+	listbox: ReturnType<Page["getByRole"]>,
+	name: string | RegExp,
+	actionLabel: string,
+	confirmTimeoutMs: number
+): Promise<void> {
+	await expect(async () => {
+		const row = listbox.getByRole("option", { name })
+		await expect(row).toBeVisible()
+		await row.click()
+		await waitForToastsClear(page)
+		await page.getByRole("button", { name: actionLabel, exact: true }).click()
+
+		const confirm = page.getByRole("alertdialog")
+		await expect(confirm).toBeVisible()
+		await confirm.getByRole("button", { name: actionLabel, exact: true }).click()
+		await expect(confirm).toHaveCount(0, { timeout: confirmTimeoutMs })
+	}).toPass({ timeout: confirmTimeoutMs + 40_000 })
+}
+
+// Exported for the debris sweep in setup/cleanup.setup.ts, which hits the row churn above by
+// construction (it runs against a listing that, by definition, still has rows left to remove).
 export async function selectAndTrashRow(
 	page: Page,
 	listbox: ReturnType<Page["getByRole"]>,
 	name: string,
 	confirmTimeoutMs?: number
 ): Promise<void> {
-	const envelopeTimeoutMs = Math.max(60_000, (confirmTimeoutMs ?? 0) + 40_000)
+	await selectAndConfirmRowAction(page, listbox, name, "Trash", confirmTimeoutMs ?? LIVE_WRITE_TIMEOUT_MS)
+}
 
-	await expect(async () => {
-		const row = listbox.getByRole("option", { name })
-		await expect(row).toBeVisible()
-		await row.click()
-		await waitForToastsClear(page)
-		await page.getByRole("button", { name: "Trash", exact: true }).click()
+// /trash's own bulk action. IRREVERSIBLE — the only caller is the trash debris sweep, which selects one
+// row at a time by a name it has already matched against isScratchDebrisName. Anchored to the row's OWN
+// name rather than the substring match the trash path uses: a row's accessible name concatenates its
+// size/date columns (see firstMatchingRowName), so `exact` cannot be used, and a bare substring would
+// also accept a row whose name merely CONTAINS a debris name — which for a permanent delete would mean
+// destroying an item the predicate never approved.
+export async function selectAndDeleteTrashRow(page: Page, listbox: ReturnType<Page["getByRole"]>, name: string): Promise<void> {
+	const ownName = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)
 
-		const confirm = page.getByRole("alertdialog")
-		await expect(confirm).toBeVisible()
-		await confirm.getByRole("button", { name: "Trash", exact: true }).click()
-		await expect(confirm).toHaveCount(0, confirmTimeoutMs === undefined ? undefined : { timeout: confirmTimeoutMs })
-	}).toPass({ timeout: envelopeTimeoutMs })
+	await selectAndConfirmRowAction(page, listbox, ownName, "Delete permanently", LIVE_WRITE_TIMEOUT_MS)
 }
 
 // Failure-proof companion to enterScratchDirectory above — called from every test's own finally, so

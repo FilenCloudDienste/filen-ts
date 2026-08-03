@@ -466,14 +466,40 @@ describe("trashItems", () => {
 		expect(testQueryClient.getQueryData<DriveItem[]>(driveListing(null))).toEqual([])
 	})
 
-	it("never optimistically adds the trashed item to the trash listing itself", async () => {
+	// The item does not merely vanish — it MOVES into the trash listing. Removing it there too (which the
+	// fan-out above does on its own) leaves an already-open /trash blank until its next refetch.
+	it("splices the trashed item INTO an already-fetched trash listing, carrying the SDK's post-trash shape", async () => {
 		const item = fileItem({ uuid: testUuid("f") })
 		testQueryClient.setQueryData(trashListing(), [])
-		trashFile.mockResolvedValueOnce(mockFile({ uuid: testUuid("f") }))
+		testQueryClient.setQueryData(driveListing(null), [item])
+		trashFile.mockResolvedValueOnce(mockFile({ uuid: testUuid("f"), parent: "trash" }))
 
 		await trashItems([item])
 
-		expect(testQueryClient.getQueryData<DriveItem[]>(trashListing())).toEqual([])
+		expect(testQueryClient.getQueryData<DriveItem[]>(driveListing(null))).toEqual([])
+		const trashed = testQueryClient.getQueryData<DriveItem[]>(trashListing())
+
+		expect(trashed?.map(i => i.data.uuid)).toEqual([testUuid("f")])
+		expect(trashed?.[0]?.data.parent).toBe("trash")
+	})
+
+	it("never conjures a trash listing nobody has opened", async () => {
+		const item = fileItem({ uuid: testUuid("f") })
+		trashFile.mockResolvedValueOnce(mockFile({ uuid: testUuid("f"), parent: "trash" }))
+
+		await trashItems([item])
+
+		expect(testQueryClient.getQueryData<DriveItem[]>(trashListing())).toBeUndefined()
+	})
+
+	it("dedups by uuid in the trash listing — trashing a row it already holds leaves exactly one", async () => {
+		const item = fileItem({ uuid: testUuid("f") })
+		testQueryClient.setQueryData(trashListing(), [item])
+		trashFile.mockResolvedValueOnce(mockFile({ uuid: testUuid("f"), parent: "trash" }))
+
+		await trashItems([item])
+
+		expect(testQueryClient.getQueryData<DriveItem[]>(trashListing())?.map(i => i.data.uuid)).toEqual([testUuid("f")])
 	})
 
 	it("trashes a file via trashFile, not trashDirectory", async () => {

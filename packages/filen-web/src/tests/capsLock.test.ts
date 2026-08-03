@@ -104,41 +104,44 @@ describe("ChangePasswordCard — caps-lock warning", () => {
 
 		const input = screen.getByLabelText("New password")
 		fireEvent.keyDown(input, { key: "a", modifierCapsLock: true })
+
+		// The SAME node, not merely "a role=status exists" — role=status is not unique in this form (the
+		// submit spinner carries it too), and a region inserted already-populated is commonly not
+		// announced, so only the text may change on blur.
+		const region = screen.getByText("Caps Lock is on")
+
 		fireEvent.blur(input)
 
-		expect(screen.queryByText("Caps Lock is on")).toBeNull()
-		// The region must pre-exist its content change or screen readers skip the announcement.
-		expect(screen.getAllByRole("status").length).toBeGreaterThan(0)
+		expect(region.isConnected).toBe(true)
+		expect(region.getAttribute("role")).toBe("status")
+		expect(region.textContent).toBe("")
 	})
 })
 
 describe("CapsLockWarning", () => {
-	it("stays mounted but cancels the enclosing Field's gap while empty", () => {
-		render(createElement(CapsLockWarning, { active: false }))
+	it("stays mounted with empty text while inactive, and only fills in when active", () => {
+		const empty = render(createElement(CapsLockWarning, { active: false }))
 
-		const region = screen.getByRole("status")
+		expect(empty.getByRole("status").textContent).toBe("")
 
-		expect(region.textContent).toBe("")
-		// A zero-height element is still a flex item, so without this every password field would carry a
-		// permanent extra line of space.
-		expect(region.className).toContain("-mt-3")
+		cleanup()
+
+		const active = render(createElement(CapsLockWarning, { active: true }))
+
+		expect(active.getByRole("status").textContent).toBe("Caps Lock is on")
 	})
 
-	it("takes its own line once the warning is showing", () => {
-		render(createElement(CapsLockWarning, { active: true }))
+	it("cancels its own spacing only while empty — a zero-height flex item would otherwise add a permanent line of space", () => {
+		// jsdom computes no layout, so the spacing-cancel utility is pinned by name; what the assertion
+		// actually proves is that it applies in one state and not the other.
+		const empty = render(createElement(CapsLockWarning, { active: false }))
+		const emptyClassName = empty.getByRole("status").className
 
-		const region = screen.getByRole("status")
+		cleanup()
 
-		expect(region.textContent).toBe("Caps Lock is on")
-		expect(region.className).not.toContain("-mt-3")
-	})
+		const active = render(createElement(CapsLockWarning, { active: true }))
 
-	it("keeps a readable shade on both themes", () => {
-		render(createElement(CapsLockWarning, { active: true }))
-
-		// yellow-500 on the light theme's near-white card is ~1.9:1 — the warning has to be readable on the
-		// theme the user is actually on.
-		expect(screen.getByRole("status").className).toContain("text-yellow-600")
-		expect(screen.getByRole("status").className).toContain("dark:text-yellow-500")
+		expect(emptyClassName).toContain("-mt-3")
+		expect(active.getByRole("status").className).not.toContain("-mt-3")
 	})
 })

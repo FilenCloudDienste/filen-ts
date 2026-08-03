@@ -97,14 +97,35 @@ export function moveItems(items: DriveItem[], targetParentUuid: string | null): 
 
 // ── Trash (bulk) ─────────────────────────────────────────────────────────
 
+// Trash is a membership listing of its own, not merely an absence from the normal ones: a trashed item
+// leaves every normal listing and JOINS this one. The removal fan-out below sweeps the trash key too
+// (it can't single one out), so it must be followed by this insert — otherwise a trash performed here
+// or echoed from another device makes the row invisible in an already-open trash until its next
+// refetch. Dedups on uuid ALONE rather than upsertDriveItem's name-collision rule (trash aggregates
+// across directories, so two trashed items can legitimately share a name — same reasoning as the
+// favorites listing), and `prev === undefined` (nobody has opened Trash) stays a no-op so an unfetched
+// listing is never conjured. Exported: the realtime fileTrash/folderTrash handlers apply the same rule.
+export function insertIntoTrashListing(item: DriveItem): void {
+	const queryKey = driveListingQueryKey({ variant: "trash", uuid: null })
+
+	// Same cancel-before-patch discipline as every other listing patch: a trash refetch already in
+	// flight was snapshotted before this membership change and would land on top of it.
+	cancelListingFetch(queryKey)
+	queryClient.setQueryData<DriveItem[]>(queryKey, prev => (prev === undefined ? prev : [...removeByUuid(prev, item.data.uuid), item]))
+}
+
 export function trashItems(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> {
 	return runBulk(items, async item => {
 		const base = asDirectoryOrFile(item)
-		await runOp<Dir | File>(base.type === "directory" ? sdkApi.trashDirectory(base.data) : sdkApi.trashFile(base.data))
+		const trashed = narrowItem(
+			await runOp<Dir | File>(base.type === "directory" ? sdkApi.trashDirectory(base.data) : sdkApi.trashFile(base.data))
+		)
 
-		// Vanishes from wherever it was visible (drive/favorites/recents) — never optimistically added
-		// to the trash listing itself, which refetches on open (accepted staleness).
+		// Global remove FIRST (it also strips the trash listing this item is about to join), then splice
+		// the SDK's own post-trash shape into that listing — uuid is preserved across a trash, so removing
+		// after the insert would strip the just-trashed row right back out.
 		driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
+		insertIntoTrashListing(trashed)
 	})
 }
 

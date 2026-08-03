@@ -11,7 +11,6 @@ import {
 	sidebarRowKey,
 	selectableNotesFromRows,
 	selectableRowIndexByKey,
-	notesTreePositions,
 	isUntaggedTagUuid,
 	UNTAGGED_TAG_UUID,
 	type NotesSidebarRow
@@ -457,97 +456,6 @@ describe("notesSidebar.logic — selectableRowIndexByKey (click target resolutio
 		expect(selectableNotesFromRows(rows)[indexByKey.get(sidebarRowKey({ kind: "note", note: noteB, tagUuid: tag.uuid })) ?? -1]).toBe(
 			noteB
 		)
-	})
-})
-
-describe("notesSidebar.logic — notesTreePositions (aria-posinset/aria-setsize)", () => {
-	function headerRow(id: string): NotesSidebarRow {
-		return { kind: "header", id, label: { kind: "literal", text: id }, icon: "calendar" }
-	}
-
-	it("counts level-1 headers against each other and each note only against its own run", () => {
-		const first = mockNote({ uuid: testUuid("a") })
-		const second = mockNote({ uuid: testUuid("b") })
-		const third = mockNote({ uuid: testUuid("c") })
-		const rows: NotesSidebarRow[] = [
-			headerRow("today"),
-			{ kind: "note", note: first, tagUuid: "" },
-			{ kind: "note", note: second, tagUuid: "" },
-			headerRow("archived"),
-			{ kind: "note", note: third, tagUuid: "" }
-		]
-
-		const positions = notesTreePositions(rows)
-
-		expect(positions.get("header:today")).toStrictEqual({ posInSet: 1, setSize: 2 })
-		expect(positions.get("header:archived")).toStrictEqual({ posInSet: 2, setSize: 2 })
-		expect(positions.get(sidebarRowKey({ kind: "note", note: first, tagUuid: "" }))).toStrictEqual({ posInSet: 1, setSize: 2 })
-		expect(positions.get(sidebarRowKey({ kind: "note", note: second, tagUuid: "" }))).toStrictEqual({ posInSet: 2, setSize: 2 })
-		expect(positions.get(sidebarRowKey({ kind: "note", note: third, tagUuid: "" }))).toStrictEqual({ posInSet: 1, setSize: 1 })
-	})
-
-	it("treats tag rows as level-1 siblings too, a collapsed one included", () => {
-		const expandedTag = mockTag({ uuid: testUuid("ta") })
-		const collapsedTag = mockTag({ uuid: testUuid("tb") })
-		const note = mockNote({ uuid: testUuid("n") })
-		const rows: NotesSidebarRow[] = [
-			{ kind: "tag", tag: expandedTag, noteCount: 1, expanded: true },
-			{ kind: "note", note, tagUuid: expandedTag.uuid },
-			{ kind: "tag", tag: collapsedTag, noteCount: 3, expanded: false }
-		]
-
-		const positions = notesTreePositions(rows)
-
-		expect(positions.get(`tag:${expandedTag.uuid}`)).toStrictEqual({ posInSet: 1, setSize: 2 })
-		expect(positions.get(`tag:${collapsedTag.uuid}`)).toStrictEqual({ posInSet: 2, setSize: 2 })
-		expect(positions.get(sidebarRowKey({ kind: "note", note, tagUuid: expandedTag.uuid }))).toStrictEqual({ posInSet: 1, setSize: 1 })
-	})
-
-	it("gives a note appearing under two expanded tags one entry per occurrence", () => {
-		const tagA = mockTag({ uuid: testUuid("ta") })
-		const tagB = mockTag({ uuid: testUuid("tb") })
-		const note = mockNote({ uuid: testUuid("n") })
-		const other = mockNote({ uuid: testUuid("o") })
-		const rows: NotesSidebarRow[] = [
-			{ kind: "tag", tag: tagA, noteCount: 2, expanded: true },
-			{ kind: "note", note, tagUuid: tagA.uuid },
-			{ kind: "note", note: other, tagUuid: tagA.uuid },
-			{ kind: "tag", tag: tagB, noteCount: 1, expanded: true },
-			{ kind: "note", note, tagUuid: tagB.uuid }
-		]
-
-		const positions = notesTreePositions(rows)
-
-		// Same note uuid, two distinct rows — the run under tagB has a set size of its own.
-		expect(positions.get(sidebarRowKey({ kind: "note", note, tagUuid: tagA.uuid }))).toStrictEqual({ posInSet: 1, setSize: 2 })
-		expect(positions.get(sidebarRowKey({ kind: "note", note, tagUuid: tagB.uuid }))).toStrictEqual({ posInSet: 1, setSize: 1 })
-	})
-
-	it("returns an empty map for an empty row list", () => {
-		expect(notesTreePositions([]).size).toBe(0)
-	})
-
-	it("numbers level-1-only rows n/total and records nothing else", () => {
-		const positions = notesTreePositions([headerRow("today"), headerRow("archived"), headerRow("trashed")])
-
-		expect(positions.size).toBe(3)
-		expect(positions.get("header:today")).toStrictEqual({ posInSet: 1, setSize: 3 })
-		expect(positions.get("header:trashed")).toStrictEqual({ posInSet: 3, setSize: 3 })
-	})
-
-	it("back-fills a run that ends the list rather than leaving its set size at the first note's count", () => {
-		const first = mockNote({ uuid: testUuid("a") })
-		const second = mockNote({ uuid: testUuid("b") })
-		const rows: NotesSidebarRow[] = [
-			headerRow("today"),
-			{ kind: "note", note: first, tagUuid: "" },
-			{ kind: "note", note: second, tagUuid: "" }
-		]
-
-		const positions = notesTreePositions(rows)
-
-		expect(positions.get(sidebarRowKey({ kind: "note", note: first, tagUuid: "" }))).toStrictEqual({ posInSet: 1, setSize: 2 })
-		expect(positions.get(sidebarRowKey({ kind: "note", note: second, tagUuid: "" }))).toStrictEqual({ posInSet: 2, setSize: 2 })
 	})
 })
 

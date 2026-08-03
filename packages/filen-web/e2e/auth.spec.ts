@@ -61,13 +61,11 @@ test.describe("auth", () => {
 		test.describe.configure({ retries: 0 })
 
 		test("a wrong password surfaces the label-first error through the minified worker", async ({ page, browserName }) => {
-			// Both browser projects run the full testDir (see playwright.config.ts) — an ungated attempt
-			// here would fire the one deliberate failed login TWICE, busting the login budget (auth-setup's
-			// one success + this one failure, exactly once each per full run).
-			test.skip(
-				browserName !== "chromium",
-				"chromium-only: firefox also runs this file; ungated, this would double the failed-login budget"
-			)
+			// The run's ONE deliberate failed login (auth-setup's one success + this one failure, exactly
+			// once each per full run). The firefox lane no longer collects this file (playwright.config.ts
+			// scopes it to the specs that have something to run there), so this gate is the guarantee that
+			// no second browser project can ever double it.
+			test.skip(browserName !== "chromium", "chromium-only: a second browser project would double the failed-login budget")
 			test.skip(email === "", "no e2e credentials configured")
 
 			await page.goto("/login")
@@ -102,6 +100,10 @@ test.describe("auth", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await page.goto("/")
+		// THE RULE (helpers/listing.ts): the blocking startup reminder renders the rest of the shell
+		// inert, so it is dismissed before any role-based landmark assertion — and again after the
+		// reload, which re-arms it.
+		await dismissStartupReminders(page)
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
 		const sdkHostRequests: string[] = []
@@ -112,6 +114,7 @@ test.describe("auth", () => {
 		})
 
 		await page.reload()
+		await dismissStartupReminders(page)
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
 		// The authed shell's own account query (IconRail's AccountMenu + the export-keys reminder) fires
@@ -123,7 +126,13 @@ test.describe("auth", () => {
 		// is a synchronous, zero-network wasm call (sdk.worker.ts), so the login endpoint (verified via
 		// `strings` over sdk-rs_bg.wasm: the literal path "v3/login") is the one thing that must never
 		// appear here.
-		await page.waitForRequest(req => new URL(req.url()).pathname.includes("/v3/user/"))
+		//
+		// Polled over the recorded array, never page.waitForRequest: that subscribes at call time and
+		// never replays, and these reads fire the instant the shell mounts — the very condition the
+		// visibility wait above is satisfied by. Nothing refetches them afterwards (queries/account.ts
+		// has no refetchInterval), so a late subscription simply waits forever. The listener above was
+		// attached BEFORE the reload, so it cannot miss them.
+		await expect.poll(() => sdkHostRequests.some(url => new URL(url).pathname.includes("/v3/user/")), { timeout: 30_000 }).toBe(true)
 
 		const loginRequests = sdkHostRequests.filter(url => url.includes("/v3/login"))
 		expect(loginRequests, sdkHostRequests.join("\n")).toEqual([])

@@ -10,7 +10,7 @@ import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { type OutboxChannelTransport, type OutboxRole } from "@/lib/storage/outboxChannel"
 import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { fetchNotes, notesQueryGet } from "@/features/notes/queries/notes"
-import useNotesInflightStore, { type InflightContent, type InflightEntry } from "@/features/notes/store/useNotesInflight"
+import useNotesInflightStore, { setOutboxHydrated, type InflightContent, type InflightEntry } from "@/features/notes/store/useNotesInflight"
 import {
 	hashNoteContent,
 	buildInflightEntries,
@@ -122,6 +122,9 @@ export class Sync {
 		this.syncTimeout = null
 		this.abortController.abort()
 		this.transport?.close()
+		// The store no longer reflects any account's outbox — an editor still mounted through the teardown
+		// must hold its loading state rather than seed from a wiped store.
+		setOutboxHydrated(false)
 	}
 
 	// Drop a note's consecutive-rejection strike count. For the editor's use when it clears a
@@ -266,6 +269,9 @@ export class Sync {
 
 		this.unacked = reconciled.unacked
 		useNotesInflightStore.getState().setInflightContent(() => reconciled.store)
+		// A follower owns no disk: the leader's first broadcast IS its hydration, and any content read a
+		// note in that state has in flight would land on top of the edit it just learned about.
+		this.markHydrated(Object.keys(reconciled.store))
 	}
 
 	// FOLLOWER: on a new leader announcing itself, re-forward every still-unacked edit so an edit that
@@ -295,11 +301,20 @@ export class Sync {
 	}
 
 	// Follower start: adopt the follower role and ask the leader for its current state so a note another
-	// tab already has pending shows its inflight (content-query gate, spinner) here too. Never touches
-	// disk and never runs the loop — the leader owns both.
+	// tab already has pending shows its inflight (editor gate, spinner) here too. Never touches disk and
+	// never runs the loop — the leader owns both.
 	public startAsFollower(): void {
 		this.role = "follower"
-		this.transport?.requestState()
+
+		if (this.transport === null) {
+			// No channel attached: nobody can ever answer, so this tab is as hydrated as it will get —
+			// never leave the editor waiting on a broadcast that cannot arrive.
+			this.markHydrated([])
+
+			return
+		}
+
+		this.transport.requestState()
 	}
 
 	// Promotion (this follower just won the db lock after the leader died). Flip to leader, announce so
@@ -353,6 +368,24 @@ export class Sync {
 		return result.success
 	}
 
+	// The hydration edge the editor waits on: the store now reflects this tab's authoritative pending
+	// work, so a seed taken from it is truthful. Any content read still in flight for one of these notes
+	// was issued while the store looked clean — it would land on top of the restored draft and remount
+	// the editor onto server content, so it is cancelled here (the drive modules' cancel-before-patch
+	// discipline). A note with no cached content simply refetches once its outbox entry drains. Only the
+	// FIRST hydration can have raced such a read (from then on the store itself keeps the query
+	// disabled), so later calls — the leader's own tail, a follower's every subsequent broadcast — only
+	// re-assert the flag.
+	private markHydrated(pendingNoteUuids: string[]): void {
+		if (!useNotesInflightStore.getState().outboxHydrated) {
+			for (const noteUuid of pendingNoteUuids) {
+				void queryClient.cancelQueries({ queryKey: noteContentQueryKey(noteUuid), exact: true })
+			}
+		}
+
+		setOutboxHydrated(true)
+	}
+
 	// The ONLY disk→store bridge, so it MUST hydrate the store even with no network.
 	// (1) hydrate UNCONDITIONALLY via a functional merge before any network call — an offline boot
 	// must not strand persisted edits. (2) reconcile against the cloud best-effort only when online;
@@ -375,6 +408,9 @@ export class Sync {
 
 			// (1) Hydrate before any network call, merging into the current store.
 			useNotesInflightStore.getState().setInflightContent(prev => mergeInflight(prev, fromDisk))
+			// The store is truthful now — release the editor's gate BEFORE the (network) reconcile below,
+			// which must never hold an editor's first paint hostage.
+			this.markHydrated(Object.keys(fromDisk))
 
 			// (2) Reconcile only when online.
 			if (!onlineManager.isOnline()) {
@@ -462,6 +498,9 @@ export class Sync {
 			log.error("notes-sync", "restoreFromDisk failed; unsaved edits from previous session may be lost", result.error)
 		}
 
+		// Covers the paths the hydrate above never reached: an empty disk, and a failed read — neither
+		// leaves pending work to protect, and neither may hold the editor's gate closed.
+		this.markHydrated([])
 		this.resolveInit()
 
 		// Publish the restored/reconciled outbox so any follower already present reflects it (no-op
@@ -621,6 +660,12 @@ export class Sync {
 					// never the stale pre-edit cache. dataUpdatedAt is PRESERVED so the editor's remount
 					// key (this timestamp) does not advance and reset the cursor after every push.
 					const contentKey = noteContentQueryKey(noteUuid)
+
+					// Cancel-before-patch, like every drive listing patch: a content read snapshotted BEFORE
+					// this push would otherwise land after it, overwrite the pushed content with pre-edit
+					// bytes AND advance dataUpdatedAt, remounting the editor onto the stale text.
+					void queryClient.cancelQueries({ queryKey: contentKey, exact: true })
+
 					const previousUpdatedAt = queryClient.getQueryState<string | undefined>(contentKey)?.dataUpdatedAt
 
 					queryClient.setQueryData<string>(

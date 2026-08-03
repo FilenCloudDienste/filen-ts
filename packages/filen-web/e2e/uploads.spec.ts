@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test, expect } from "./fixtures"
-import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { descendInto, enterScratchDirectory, trashScratchDirectory, waitForListingSettled } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Drag-and-drop upload — both the files dropzone and a dropped directory's FileSystemEntry walk — is
@@ -85,6 +85,18 @@ test.describe("uploads", () => {
 
 			const row = listbox.getByRole("option", { name: rootName })
 			await expect(row).toBeVisible({ timeout: 60_000 }) // cold boot + a tree walk + two file uploads
+
+			// The top-level row alone proves nothing about the TREE: a walk that created the root and
+			// dropped every child passes that assertion identically. Descend both levels and assert each
+			// one's own contents.
+			await descendInto(page, listbox, rootName)
+			const uploadedRoot = await waitForListingSettled(page)
+			await expect(uploadedRoot.listbox.getByRole("option", { name: "a.txt" })).toBeVisible({ timeout: 60_000 })
+			await expect(uploadedRoot.listbox.getByRole("option", { name: "sub" })).toBeVisible({ timeout: 60_000 })
+
+			await descendInto(page, uploadedRoot.listbox, "sub")
+			const uploadedSub = await waitForListingSettled(page)
+			await expect(uploadedSub.listbox.getByRole("option", { name: "b.txt" })).toBeVisible({ timeout: 60_000 })
 		} finally {
 			await trashScratchDirectory(page, scratchName)
 		}

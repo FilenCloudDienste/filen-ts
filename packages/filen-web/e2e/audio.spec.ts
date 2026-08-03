@@ -147,6 +147,33 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 	// the playlist would make every name-scoped locator below ambiguous between a drive row and a
 	// playlist row.
 	const playlistName = `e2e-playlist-mix-${runId}`
+	// Scoped to the specific row: the shared account can carry other playlists from unrelated runs, so a
+	// page-wide role query risks a strict-mode ambiguity.
+	const playlistRow = page.getByRole("listitem").filter({ hasText: playlistName })
+
+	// Idempotent by construction, so the same steps serve as this test's delete proof AND as the
+	// finally's net — a playlist lives in the app-created `.filen/Playlists` directory, which the drive
+	// listing sweeps never descend into, so the only other thing that would ever remove a leaked one is
+	// the NEXT run's cleanup setup.
+	async function deleteScratchPlaylist(): Promise<void> {
+		await page.getByRole("link", { name: "Playlists", exact: true }).click()
+		await expect(page.getByRole("heading", { name: "Playlists", exact: true })).toBeVisible()
+
+		const present = await playlistRow
+			.first()
+			.waitFor({ state: "visible", timeout: 15_000 })
+			.then(() => true)
+			.catch(() => false)
+
+		if (!present) {
+			return
+		}
+
+		await playlistRow.getByRole("button", { name: "Playlist options" }).click()
+		await page.getByRole("menuitem", { name: "Delete" }).click()
+		await page.getByRole("alertdialog", { name: "Delete playlist" }).getByRole("button", { name: "Delete", exact: true }).click()
+		await expect(playlistRow).toHaveCount(0, { timeout: 15_000 })
+	}
 
 	await page.goto("/drive")
 
@@ -178,9 +205,7 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		await createDialog.getByRole("button", { name: "Create", exact: true }).click()
 		await expect(createDialog).toHaveCount(0)
 
-		// Open the new playlist's detail dialog. Scoped to the specific row: the shared account can carry
-		// other playlists from unrelated runs, so a page-wide role query risks a strict-mode ambiguity.
-		const playlistRow = page.getByRole("listitem").filter({ hasText: playlistName })
+		// Open the new playlist's detail dialog.
 		await playlistRow.getByRole("button", { name: playlistName }).click()
 		const detailDialog = page.getByRole("dialog", { name: playlistName })
 		await expect(detailDialog).toBeVisible()
@@ -217,15 +242,17 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		await expect(detailDialog).toHaveCount(0)
 		await expect(bar.locator(`[title="${nameB}"]`)).toBeVisible({ timeout: 30_000 })
 
-		await playlistRow.getByRole("button", { name: "Playlist options" }).click()
-		await page.getByRole("menuitem", { name: "Delete" }).click()
-		await page.getByRole("alertdialog", { name: "Delete playlist" }).getByRole("button", { name: "Delete", exact: true }).click()
-		await expect(playlistRow).toHaveCount(0, { timeout: 15_000 })
+		// The row must still be there, so the idempotent delete below cannot no-op into a false pass.
+		await expect(playlistRow).toHaveCount(1)
+		await deleteScratchPlaylist()
 
 		// Queue playback is client-only (never persisted server-side, useAudioStore.ts), so leaving it
 		// playing here carries no net-zero cost — nothing left behind to clean up.
 		expect(cspViolations, `CSP violations: ${JSON.stringify(cspViolations)}`).toHaveLength(0)
 	} finally {
+		// Best-effort: a no-op once the delete above already ran, the only teardown otherwise.
+		await page.keyboard.press("Escape").catch(() => undefined)
+		await deleteScratchPlaylist().catch(() => undefined)
 		await trashScratchDirectory(page, scratchName)
 	}
 })

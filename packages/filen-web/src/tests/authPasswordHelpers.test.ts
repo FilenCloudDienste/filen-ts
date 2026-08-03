@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 import { createElement } from "react"
 import "@/lib/i18n"
-import { StrengthMeter } from "@/features/auth/components/strengthMeter"
+import { StrengthMeter, type PasswordStrengthTier } from "@/features/auth/components/strengthMeter"
 
 const { register, login, logout } = vi.hoisted(() => ({ register: vi.fn(), login: vi.fn(), logout: vi.fn() }))
 
@@ -35,22 +35,34 @@ afterEach(() => {
 	cleanup()
 })
 
+const STRENGTH_TIERS: PasswordStrengthTier[] = ["weak", "normal", "strong", "best"]
+
+// The bar's fill is the only inline-styled element (its width steps in quarters); the label is the
+// meter's first paragraph.
+function strengthShades(tier: PasswordStrengthTier): { fill: string; label: string } {
+	const { container, unmount } = render(createElement(StrengthMeter, { tier }))
+	const fill = container.querySelector("div[style]")
+	const label = container.querySelector("p")
+
+	if (!fill || !label) {
+		throw new Error(`strength meter rendered no fill/label for tier: ${tier}`)
+	}
+
+	const shades = { fill: fill.className, label: label.className }
+
+	unmount()
+
+	return shades
+}
+
 describe("StrengthMeter — distinct hue per tier", () => {
-	it("gives each tier its own color instead of a shared grayscale step", () => {
-		const { unmount: unmountWeak } = render(createElement(StrengthMeter, { tier: "weak" }))
-		expect(screen.getByText("Weak").className).toContain("text-destructive")
-		unmountWeak()
+	// Asserts the PROPERTY the design promises rather than each tier's utility class: pinning the
+	// literals breaks on any equivalent restyle while still never proving the tiers read apart.
+	it("gives each tier its own bar and label color instead of a shared grayscale step", () => {
+		const shades = STRENGTH_TIERS.map(strengthShades)
 
-		const { unmount: unmountNormal } = render(createElement(StrengthMeter, { tier: "normal" }))
-		expect(screen.getByText("Fair").className).toContain("text-yellow-500")
-		unmountNormal()
-
-		const { unmount: unmountStrong } = render(createElement(StrengthMeter, { tier: "strong" }))
-		expect(screen.getByText("Strong").className).toContain("text-blue-500")
-		unmountStrong()
-
-		render(createElement(StrengthMeter, { tier: "best" }))
-		expect(screen.getByText("Very strong").className).toContain("text-green-500")
+		expect(new Set(shades.map(shade => shade.fill)).size).toBe(STRENGTH_TIERS.length)
+		expect(new Set(shades.map(shade => shade.label)).size).toBe(STRENGTH_TIERS.length)
 	})
 })
 
@@ -114,9 +126,10 @@ describe("Auth forms — inputs lock during an in-flight submit", () => {
 	})
 })
 
-// Asserted on TEXT, never on element presence: the live region is mounted at all times (a region
-// inserted already-populated is commonly not announced), so a presence query is true in both states
-// -- and role="status" is not unique in these forms anyway, the submit spinner carries it too.
+// Asserted on TEXT and on the region NODE, never on element presence: the live region is mounted at
+// all times (a region inserted already-populated is commonly not announced), so a presence query is
+// true in both states -- and role="status" is not unique in these forms anyway, the submit spinner
+// carries it too, which is why the same node is held across the transition.
 describe("Auth forms — caps-lock warning", () => {
 	it("LoginForm shows the warning while caps lock is on and clears the text, not the region, when it goes off", () => {
 		render(createElement(LoginForm))
@@ -126,12 +139,13 @@ describe("Auth forms — caps-lock warning", () => {
 
 		fireEvent.keyDown(input, { key: "a", modifierCapsLock: true })
 
-		expect(screen.queryByText("Caps Lock is on")).not.toBeNull()
+		const region = screen.getByText("Caps Lock is on")
 
 		fireEvent.keyUp(input, { key: "a" })
 
-		expect(screen.queryByText("Caps Lock is on")).toBeNull()
-		expect(screen.getAllByRole("status").length).toBeGreaterThan(0)
+		expect(region.isConnected).toBe(true)
+		expect(region.getAttribute("role")).toBe("status")
+		expect(region.textContent).toBe("")
 	})
 
 	it("RegisterForm warns under the typed field only, and blurring it clears the warning", () => {

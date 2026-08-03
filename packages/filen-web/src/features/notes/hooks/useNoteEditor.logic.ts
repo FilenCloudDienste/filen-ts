@@ -131,15 +131,28 @@ export type EditorLoadState = QueryLoadState | "undecryptable"
 // FOREVER, but we already have a seed to render — so inflight is always immediately "ready". Only with
 // NO inflight does the query's own pending/error surface as the editor's load state, and an error whose
 // cause is a failed content decryption gets its own explainer instead of a raw fetch-error message.
+//
+// `outboxHydrated` gates all of it: the outbox loads asynchronously (disk for the leader tab, a
+// broadcast for a follower), and until it has, an empty inflight view is "not known yet", not "clean".
+// The editor freezes its seed at its first ready render, so seeding before that point paints the
+// server's pre-edit content over a queued local edit — and since the seed only ever re-derives on a
+// remount-key change, nothing would ever correct it. Holding the existing pending state costs a
+// disk read's latency and makes the seed's inflight-first rule truthful.
 export function deriveEditorLoadState({
 	hasInflight,
+	outboxHydrated,
 	queryStatus,
 	isUndecryptable
 }: {
 	hasInflight: boolean
+	outboxHydrated: boolean
 	queryStatus: QueryLoadState
 	isUndecryptable: boolean
 }): EditorLoadState {
+	if (!outboxHydrated) {
+		return "pending"
+	}
+
 	if (hasInflight) {
 		return "ready"
 	}

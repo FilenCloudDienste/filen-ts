@@ -30,7 +30,26 @@ describe("EmptyState", () => {
 		const alert = getByRole("alert")
 
 		expect(alert.textContent).toContain("Couldn't load this directory")
+		// LABEL-FIRST: the failure's own detail rides the announcement, not just the static title.
+		expect(alert.textContent).toContain("listing exploded")
 		expect(alert.textContent).toContain("Try again")
+	})
+
+	it("announces the localized copy for an SDK error kind, never its raw technical message", () => {
+		const { getByRole } = render(
+			createElement(EmptyState, {
+				variant: "error",
+				error: { species: "sdk", kind: "FolderNotFound", label: "folder uuid missing", message: "folder uuid missing" },
+				onRetry: () => {
+					// no-op
+				}
+			})
+		)
+
+		const alert = getByRole("alert")
+
+		expect(alert.textContent).toContain("Directory not found.")
+		expect(alert.textContent).not.toContain("folder uuid missing")
 	})
 
 	it("stays silent on the empty variant — an empty directory is not an error", () => {

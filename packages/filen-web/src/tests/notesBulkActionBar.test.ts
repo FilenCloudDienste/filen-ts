@@ -293,4 +293,20 @@ describe("canBulkTrashNotes", () => {
 	it("still allows an owned selection that includes an undecryptable note (a pure-uuid disposition)", () => {
 		expect(canBulkTrashNotes(flags({ everyOwned: true, includesUndecryptable: true }))).toBe(true)
 	})
+
+	// The gate matches on the dialogKind too, not merely on "some descriptor opens a dialog" — these two
+	// selections DO offer a dialog action, just a different one, and the trash shortcut must stay inert.
+	it("refuses an all-trashed selection, whose offered dialog is delete-permanently", () => {
+		const offered = noteBulkActions(flags({ everyOwned: true, includesTrashed: true, everyTrashed: true }))
+
+		expect(offered.some(descriptor => descriptor.run === "dialog" && descriptor.dialogKind === "deleteSelected")).toBe(true)
+		expect(canBulkTrashNotes(flags({ everyOwned: true, includesTrashed: true, everyTrashed: true }))).toBe(false)
+	})
+
+	it("refuses a participant-only selection, whose offered dialog is leave", () => {
+		const offered = noteBulkActions(flags({ participantOfEveryAndNotOwner: true }))
+
+		expect(offered.some(descriptor => descriptor.run === "dialog" && descriptor.dialogKind === "leaveSelected")).toBe(true)
+		expect(canBulkTrashNotes(flags({ participantOfEveryAndNotOwner: true }))).toBe(false)
+	})
 })

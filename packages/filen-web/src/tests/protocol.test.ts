@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { readFileSync } from "node:fs"
 import { isAllowedInlineContentType } from "@/lib/sw/protocol"
 
 // SECURITY: this is the SW's own independent re-check (sw.ts's handleDownload) for what may render
@@ -97,4 +98,45 @@ describe("isAllowedInlineContentType — empty/garbage input", () => {
 			expect(isAllowedInlineContentType(mime)).toBe(false)
 		}
 	)
+})
+
+// Only the ENDS are trimmed, so anything smuggled into the middle of the value — the shape a header
+// injection takes — can never normalize back onto the allowlist.
+describe("isAllowedInlineContentType — interior whitespace is never normalized away", () => {
+	it.each(["image/\npng", "image/ png", "image/png\r\nContent-Disposition: inline", "video/mp4\r\nX-Frame-Options: none"])(
+		"rejects %s",
+		mime => {
+			expect(isAllowedInlineContentType(mime)).toBe(false)
+		}
+	)
+})
+
+// The predicate's load-bearing consumer is sw.ts's serve path, which cannot be imported here: it is a
+// ServiceWorkerGlobalScope module that registers listeners and pulls the SW-hosted wasm SDK at import.
+// So this is a source-level drift guard over that one decision — the shape of the check, and that the
+// only inline Content-Type the SW ever emits sits behind it. A page-supplied contentType served inline
+// without this re-validation is a same-origin XSS primitive.
+describe("sw.ts inline-serve gate", () => {
+	const source = readFileSync("src/sw/sw.ts", "utf8")
+	const start = source.indexOf("function handleDownload(")
+	const handleDownload = source.slice(start, source.indexOf("\n}", start))
+
+	it("re-validates the registered contentType inside the download route", () => {
+		expect(start).toBeGreaterThan(-1)
+		expect(handleDownload).toMatch(/if\s*\(!isAllowedInlineContentType\(pending\.contentType\)\)/)
+	})
+
+	it("imports the predicate from the shared protocol contract rather than restating the allowlist", () => {
+		expect(source).toMatch(/import\s*\{[^}]*isAllowedInlineContentType[^}]*\}\s*from\s*"@\/lib\/sw\/protocol"/s)
+	})
+
+	it("serves the claimed contentType inline only after that gate, and degrades to an attachment otherwise", () => {
+		const gate = handleDownload.search(/if\s*\(!isAllowedInlineContentType\(pending\.contentType\)\)/)
+		const inlineServe = handleDownload.indexOf("contentType: pending.contentType")
+
+		expect(gate).toBeGreaterThan(-1)
+		expect(inlineServe).toBeGreaterThan(gate)
+		// The rejected arm falls back to the forced-attachment response a plain file download gets.
+		expect(handleDownload.slice(gate, inlineServe)).toContain("attachmentHeaders(pending.name)")
+	})
 })

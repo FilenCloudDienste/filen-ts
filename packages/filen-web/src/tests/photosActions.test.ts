@@ -92,7 +92,7 @@ describe("drive's own action helpers do not reach the photos cache (the gap phot
 	it("trashItems leaves a seeded photos listing untouched", async () => {
 		const item = photoItem()
 		seedPhotosListing([item])
-		trashFile.mockResolvedValueOnce(undefined)
+		trashFile.mockResolvedValueOnce(mockFile({ parent: "trash" }))
 
 		await trashItems([item])
 
@@ -153,7 +153,8 @@ describe("trashPhotos", () => {
 		const a = photoItem({ uuid: testUuid("a") })
 		const b = photoItem({ uuid: testUuid("b") })
 		seedPhotosListing([a, b])
-		trashFile.mockResolvedValue(undefined)
+		// The worker op resolves the trashed File (sdk.worker.ts) — the trash-listing patch narrows it.
+		trashFile.mockResolvedValue(mockFile({ uuid: testUuid("a"), parent: "trash" }))
 
 		await trashPhotos(ROOT_UUID, [a])
 

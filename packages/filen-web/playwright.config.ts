@@ -14,12 +14,19 @@ try {
 const PORT = 4173
 const BASE_URL = `http://localhost:${String(PORT)}`
 
+// Split out of the chromium lane into its own exclusive one — see the chromium-search project below.
+const SEARCH_SPEC = /\/drive-search\.spec\.ts$/
+
 export default defineConfig({
 	testDir: "./e2e",
 	fullyParallel: true,
 	// Bounded: at this suite's size, unbounded workers (one chromium + a full SDK wasm thread pool
 	// each) saturate a dev host and the live rate-limited API — runs blow up ~5x slower with disjoint
-	// spurious failure sets. Four is empirically fast AND stable.
+	// spurious failure sets. Four is what the read-heavy majority is worth: parallelism buys wall time
+	// on reads/navigation only, never write throughput, because every create/rename/move/trash/upload
+	// across all workers serialises on ONE account-wide drive lock — extra workers lengthen each
+	// write's tail rather than overlapping them. Anything whose correctness depends on winning that
+	// lock belongs in the exclusive lane below, not in a higher worker count.
 	workers: 4,
 	forbidOnly: Boolean(process.env["CI"]),
 	// The authed specs reuse a single injected session, so a retry never re-logs in (auth.setup itself
@@ -52,25 +59,48 @@ export default defineConfig({
 	},
 	projects: [
 		{ name: "auth-setup", testMatch: /auth\.setup\.ts/ },
-		// Self-cleaning sweep: trashes every root item matching a retired e2e scratch-name prefix before
-		// any spec project starts (see setup/cleanup.setup.ts). Depends on auth-setup rather than
-		// duplicating its login, and every spec project below depends on THIS instead of auth-setup
-		// directly — Playwright resolves the chain, so auth-setup still always runs first.
-		// Generous timeout above even the suite default: a debris-heavy root sweeps one item per round
-		// (see cleanup.setup.ts), and a backlog run has genuinely needed several minutes on its own.
+		// Self-cleaning sweep: removes every drive-root / trash / playlist item matching a retired e2e
+		// scratch-name prefix before any spec project starts (see setup/cleanup.setup.ts). Depends on
+		// auth-setup rather than duplicating its login, and every spec project below depends on THIS
+		// instead of auth-setup directly — Playwright resolves the chain, so auth-setup still always runs
+		// first. Generous timeout above even the suite default: a debris-heavy account is swept one item
+		// per round across three surfaces, each with its own wall-clock budget — this is the outer bound
+		// those budgets sit inside, not a target.
 		{ name: "cleanup-setup", testMatch: /cleanup\.setup\.ts/, dependencies: ["auth-setup"], timeout: 600_000 },
 		{
 			name: "chromium",
 			use: { ...devices["Desktop Chrome"] },
-			dependencies: ["cleanup-setup"]
+			dependencies: ["cleanup-setup"],
+			testIgnore: SEARCH_SPEC
+		},
+		{
+			// Runs ALONE, after every other lane: subtree search opens the SDK's cache-search engine,
+			// whose convergence resync walks the subtree under the same account-wide drive lock every FS
+			// write takes — but with a BOUNDED, politely-yielding acquisition, while the writes acquire it
+			// unboundedly. Sibling workers therefore starve it indefinitely: the search never converges,
+			// the listing never leaves its searching state, and no assertion ceiling can fix that (the
+			// starvation has no bound). A later phase, not a bigger timeout, is the only real remedy.
+			// Trade-off of the dependency: a genuine chromium failure elsewhere skips this lane for the
+			// run (Playwright does not schedule a project whose dependency failed).
+			name: "chromium-search",
+			use: { ...devices["Desktop Chrome"] },
+			dependencies: ["chromium"],
+			testMatch: SEARCH_SPEC,
+			workers: 1
 		},
 		{
 			// Verified empirically (login-free probe, real getDirectory()/SAH-pool open against this
 			// exact Playwright build): Playwright's bundled Firefox has working OPFS-SAH storage, so it
-			// boots the app like chromium and runs the full suite — unlike webkit below.
+			// boots the app — unlike webkit below. It does NOT run the full suite: every spec whose tests
+			// need an authenticated SDK read is gated chromium-only in the test body (helpers/firefox.ts),
+			// and each of those files is gated in ALL of its tests, so scoping the lane to the files that
+			// actually have something to run here is exact rather than approximate. Without it firefox
+			// built a browser context and installed the session init script for ~113 tests that then
+			// skipped on their first line. A new spec opts in by being listed here.
 			name: "firefox",
 			use: { ...devices["Desktop Firefox"] },
-			dependencies: ["cleanup-setup"]
+			dependencies: ["cleanup-setup"],
+			testMatch: /\/(boot|keymap|no-coi|no-opfs|public-links|register|reset|shell|storage|sw)\.spec\.ts$/
 		},
 		{
 			// Playwright's bundled WebKit cannot open OPFS-SAH storage (verified empirically: it

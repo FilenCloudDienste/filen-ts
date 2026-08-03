@@ -512,11 +512,11 @@ test.describe("notes: read-only content renderers", () => {
 			await expect(page.getByRole("main").getByText(content, { exact: true })).toBeVisible()
 
 			// The sidebar's a11y contract, asserted where the helper above guarantees a row exists (it
-			// leaves the search box filtered to this note's title). .first() may resolve to the level-1
-			// date header rather than the note row — the claim is that the tree exposes items at all; the
-			// per-row level/position math is pinned by notesTreePositions' unit cases.
-			await expect(page.getByRole("complementary").getByRole("tree", { name: "Notes list" })).toBeVisible()
-			await expect(page.getByRole("complementary").getByRole("treeitem").first()).toBeVisible()
+			// leaves the search box filtered to this note's title). .first() may resolve to a date header
+			// rather than the note row — the claim is that the list exposes items at all; the per-row
+			// attributes are pinned by notesSidebarRows' unit cases.
+			await expect(page.getByRole("complementary").getByRole("list", { name: "Notes list" })).toBeVisible()
+			await expect(page.getByRole("complementary").getByRole("listitem").first()).toBeVisible()
 		} finally {
 			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
 		}
@@ -946,6 +946,8 @@ test.describe("notes: realtime", () => {
 		const initialContent = `initial-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 		const remoteContent = `remote-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 		const title = `e2e realtime-content ${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
+		// Keeps the debris prefix the teardown sweeps on — a renamed note must stay sweepable.
+		const renamedTitle = `${title} renamed`
 		const main = page.getByRole("main")
 
 		// Create the content-bearing note through the hook, then open it BY HREF (openNoteByTitle) rather
@@ -980,9 +982,17 @@ test.describe("notes: realtime", () => {
 				.poll(() => pageB.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), uuid), { timeout: 30_000 })
 				.toBe(remoteContent)
 
-			// Give any socket delivery to page A time to (not) act, then assert suppression held: the reload
-			// banner never appeared and the editor still shows the initial content (never refetched/clobbered).
-			await page.waitForTimeout(3_000)
+			// A rename from page B AFTER that write, landing live on page A's header, is what makes the
+			// negatives below mean something: it proves page A's socket is connected, subscribed and
+			// delivering — and delivering an event the server broadcast strictly after the content edit, so
+			// the content event has demonstrably had its chance. A fixed wait proves none of that (every
+			// negative also holds on a page whose socket never connected). titleEdited only patches the
+			// notes list cache (features/notes/lib/socketHandlers.ts), so it cannot itself reseed the editor.
+			await pageB.evaluate(args => window.__filenE2E.renameTestNoteByUuid(args.uuid, args.title), { uuid, title: renamedTitle })
+			await expect(main.getByRole("heading", { level: 1, name: renamedTitle, exact: true })).toBeVisible({ timeout: 30_000 })
+
+			// Suppression held: the reload banner never appeared and the editor still shows the initial
+			// content (never refetched/clobbered).
 			await expect(page.getByText("Updated elsewhere", { exact: true })).toHaveCount(0)
 			await expect(main.getByText(initialContent, { exact: true })).toBeVisible()
 			await expect(main.getByText(remoteContent, { exact: true })).toHaveCount(0)

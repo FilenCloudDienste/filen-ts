@@ -7,10 +7,11 @@ import {
 	driveListingQueryKey,
 	driveListingQueryUpdate,
 	driveListingQueryUpdateGlobal,
+	findCachedListingItem,
 	normalizeParentUuid
 } from "@/features/drive/queries/drive"
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
-import { currentRootUuid, patchFavoritesListing } from "@/features/drive/lib/actions"
+import { currentRootUuid, insertIntoTrashListing, patchFavoritesListing } from "@/features/drive/lib/actions"
 import { invalidatePhotosListing } from "@/features/photos/queries/photos"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
@@ -50,6 +51,12 @@ function replaceIfPresent(items: DriveItem[], updated: DriveItem): DriveItem[] {
 
 function removeByUuid(items: DriveItem[], uuid: string): DriveItem[] {
 	return items.filter(item => item.data.uuid !== uuid)
+}
+
+// Only an OWNED row can enter this account's trash: a shared-in item its owner trashed leaves the
+// shared listing without ever landing here (mobile gates the same insert on its owned-item cache).
+function ownedRowOrUndefined(item: DriveItem | undefined): DriveItem | undefined {
+	return item !== undefined && (item.type === "file" || item.type === "directory") ? item : undefined
 }
 
 // Recents is a flat, cross-directory aggregation with its own key — driveListingQueryUpdate is
@@ -197,11 +204,21 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 
 		case "fileTrash":
 		case "folderTrash": {
-			// The item left every normal listing (trash refetches on open — never optimistically populated,
-			// mirroring actions.ts's trashItems). Purge it from the selection so the count / select-all toggle /
-			// bulk ops never target a ghost.
+			// The item left every normal listing and JOINED the trash's own listing (actions.ts's trashItems
+			// patches both halves the same way). Purge it from the selection so the count / select-all toggle /
+			// bulk ops never target a ghost. The payload is uuid-only, so the row for the trash insert is read
+			// out of a cached listing BEFORE the removal fan-out strips it — with no cached copy anywhere,
+			// only the removal applies and the trash listing refetches on its next mount.
 			useDriveStore.getState().removeFromSelection([inner.uuid])
+
+			const trashed = ownedRowOrUndefined(findCachedListingItem(inner.uuid))
+
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, inner.uuid))
+
+			if (trashed !== undefined) {
+				insertIntoTrashListing(trashed)
+			}
+
 			// A preview open on the trashed item advances to a neighbour or closes.
 			emitPreviewItemRemoved(inner.uuid)
 

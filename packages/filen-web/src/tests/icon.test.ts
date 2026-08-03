@@ -55,7 +55,9 @@ describe("directoryFolderTint", () => {
 		const tint = directoryFolderTint("red")
 
 		expect(tint.path2).toBe("#FF3B30")
-		expect(tint.path1).toBe(shadeColor("#FF3B30", 1.3))
+		// Literal, not shadeColor("#FF3B30", 1.3): an expected value computed with the function under test
+		// proves only the routing, never the arithmetic on this divisor's own path (255/1.3, 59/1.3, 48/1.3).
+		expect(tint.path1).toBe("#c42d25")
 	})
 
 	it("passes a custom hex through as the body color", () => {

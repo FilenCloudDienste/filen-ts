@@ -1,20 +1,12 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { waitForListingSettled, trashScratchDirectory, descendInto } from "./helpers/listing"
+import { waitForListingSettled, trashScratchDirectory, descendInto, createDirectoryViaDialog } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 async function createDirectory(page: Page, listbox: ReturnType<Page["getByRole"]>, name: string): Promise<void> {
-	// .first(): an empty writable listing renders a second identical button inside its empty-state
-	// "+ Add" affordance; the toolbar's copy is always first in DOM order (see enterScratchDirectory).
-	await page.getByRole("button", { name: "New directory", exact: true }).first().click()
-	const dialog = page.getByRole("dialog")
-	await expect(dialog).toBeVisible()
-	await page.getByLabel("Name", { exact: true }).fill(name)
-	await page.getByRole("button", { name: "Create", exact: true }).click()
-	await expect(dialog).toHaveCount(0)
-
+	await createDirectoryViaDialog(page, name)
 	await expect(listbox.getByRole("option", { name })).toBeVisible()
 }
 

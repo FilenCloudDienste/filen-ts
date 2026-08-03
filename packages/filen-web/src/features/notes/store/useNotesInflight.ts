@@ -28,6 +28,12 @@ export type InflightContent = Record<string, InflightEntry[]>
 export interface NotesInflightStore {
 	inflightContent: InflightContent
 	setInflightContent: (fn: InflightContent | ((prev: InflightContent) => InflightContent)) => void
+	// False until this tab's outbox has loaded whatever pending edits it owns — the leader from disk,
+	// a follower from the leader's first state broadcast (sync.ts). Until it flips, an EMPTY store means
+	// "not known yet", not "clean": an editor that froze its seed here would paint the server's pre-edit
+	// content over a queued local edit, and the next keystroke would push that stale text back over it.
+	outboxHydrated: boolean
+	setOutboxHydrated: (hydrated: boolean) => void
 }
 
 export const useNotesInflightStore = create<NotesInflightStore>(set => ({
@@ -36,6 +42,10 @@ export const useNotesInflightStore = create<NotesInflightStore>(set => ({
 		set(state => ({
 			inflightContent: typeof fn === "function" ? fn(state.inflightContent) : fn
 		}))
+	},
+	outboxHydrated: false,
+	setOutboxHydrated(hydrated) {
+		set({ outboxHydrated: hydrated })
 	}
 }))
 
@@ -50,6 +60,17 @@ export function useNoteInflight(uuid: string): boolean {
 // Non-reactive read off the store singleton for sync-internal callers that must not subscribe.
 export function hasInflight(uuid: string): boolean {
 	return (useNotesInflightStore.getState().inflightContent[uuid] ?? []).length > 0
+}
+
+// Reactive subscription to the hydration edge — the editor holds its loading state until it flips, so
+// no seed is ever frozen from an outbox that has not spoken yet (useNoteEditor).
+export function useOutboxHydrated(): boolean {
+	return useNotesInflightStore(state => state.outboxHydrated)
+}
+
+// The outbox's own marker (sync.ts, outboxCoordinator.ts). Idempotent.
+export function setOutboxHydrated(hydrated: boolean): void {
+	useNotesInflightStore.getState().setOutboxHydrated(hydrated)
 }
 
 export default useNotesInflightStore

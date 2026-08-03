@@ -105,6 +105,21 @@ function getStore(): InflightContent {
 	return useNotesInflightStore.getState().inflightContent
 }
 
+// The editor's seed gate: false means "this tab's outbox has not spoken yet", never "clean".
+function hydrated(): boolean {
+	return useNotesInflightStore.getState().outboxHydrated
+}
+
+function firstCallOrder(spy: { mock: { invocationCallOrder: number[] } }): number {
+	const order = spy.mock.invocationCallOrder[0]
+
+	if (order === undefined) {
+		throw new Error("spy was never called")
+	}
+
+	return order
+}
+
 async function flushAsync(): Promise<void> {
 	await new Promise(resolve => setTimeout(resolve, 15))
 }
@@ -129,6 +144,7 @@ beforeEach(() => {
 	listNotes.mockReset()
 	toast.mockClear()
 	setStore({})
+	useNotesInflightStore.setState({ outboxHydrated: false })
 	testQueryClient.clear()
 	onlineManager.setOnline(true)
 })
@@ -574,6 +590,26 @@ describe("restoreFromDisk — replay-on-launch hydrates before any network, drop
 
 		expect(testQueryClient.getQueryData(noteContentQueryKey("a"))).toBe("pushed-text")
 	})
+
+	// A read snapshotted before the push resolves after it, overwriting the pushed content with pre-edit
+	// bytes AND advancing dataUpdatedAt — which remounts the editor onto the stale text.
+	it("aborts an in-flight content read BEFORE writing the pushed content forward", async () => {
+		const note = makeNote("a")
+
+		setStore({ a: [{ timestamp: 1, content: "pushed-text", note }] })
+		setNoteContent.mockResolvedValue(note)
+
+		const s = await startedSync()
+		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
+		const setSpy = vi.spyOn(testQueryClient, "setQueryData")
+
+		s.executeNow()
+		await flushAsync()
+
+		expect(cancelSpy).toHaveBeenCalledWith({ queryKey: noteContentQueryKey("a"), exact: true })
+		expect(firstCallOrder(cancelSpy)).toBeLessThan(firstCallOrder(setSpy))
+		expect(testQueryClient.getQueryData(noteContentQueryKey("a"))).toBe("pushed-text")
+	})
 })
 
 describe("restoreFromDisk — undecryptable cloud content never prunes a persisted draft", () => {
@@ -623,6 +659,102 @@ describe("conflict peek — an undecryptable peek pushes unchecked", () => {
 
 		expect(setNoteContent).toHaveBeenCalledWith(note, "local", expect.any(String))
 		expect(toast).not.toHaveBeenCalled()
+	})
+})
+
+// The editor freezes its seed at its first ready render and only re-derives it on a remount-key
+// change, so a seed taken while the store was still empty-because-unloaded paints the server's
+// pre-edit content over a queued edit and never corrects itself. The gate below is what the editor
+// waits on; these pin that it always opens, and opens EARLY (a network reconcile must not delay it).
+describe("outbox hydration gate — the editor's seed may never precede the restored queue", () => {
+	it("starts closed and opens once the disk restore has merged into the store", async () => {
+		const note = makeNote("a")
+
+		kvStore.set("inflightNoteContent", { a: [{ timestamp: 1, content: "draft", note }] })
+		listNotes.mockResolvedValue([note])
+		getNoteContent.mockResolvedValue("cloud-old")
+		setNoteContent.mockResolvedValue(note)
+
+		expect(hydrated()).toBe(false)
+
+		const s = new Sync()
+		s.start()
+		await flushAsync()
+
+		expect(hydrated()).toBe(true)
+		expect(s.outboxRole).toBe("leader")
+	})
+
+	it("opens BEFORE the cloud reconcile — a network round trip must not hold the editor's first paint", async () => {
+		const note = makeNote("a")
+
+		kvStore.set("inflightNoteContent", { a: [{ timestamp: 1, content: "draft", note }] })
+
+		const cloud = deferred<Note[]>()
+
+		listNotes.mockReturnValue(cloud.promise)
+		setNoteContent.mockResolvedValue(note)
+
+		const s = new Sync()
+
+		s.start()
+		await flushAsync()
+
+		// The reconcile is still in flight, yet the store already holds the restored draft and the gate is
+		// open — an editor mounting now seeds from the draft, not from the server.
+		expect(hasInflight("a")).toBe(true)
+		expect(hydrated()).toBe(true)
+
+		cloud.resolve([note])
+		getNoteContent.mockResolvedValue("cloud-old")
+		await flushAsync()
+	})
+
+	it("cancels a content read issued before hydration for a note the disk still owes", async () => {
+		const note = makeNote("a")
+
+		kvStore.set("inflightNoteContent", { a: [{ timestamp: 1, content: "draft", note }] })
+		listNotes.mockResolvedValue([note])
+		getNoteContent.mockResolvedValue("cloud-old")
+		setNoteContent.mockResolvedValue(note)
+
+		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
+		const s = new Sync()
+
+		s.start()
+		await flushAsync()
+
+		expect(cancelSpy).toHaveBeenCalledWith({ queryKey: noteContentQueryKey("a"), exact: true })
+		expect(s.outboxRole).toBe("leader")
+	})
+
+	it("opens on an EMPTY disk and on a failed disk read — neither may wedge the editor", async () => {
+		const empty = new Sync()
+
+		empty.start()
+		await flushAsync()
+
+		expect(hydrated()).toBe(true)
+
+		useNotesInflightStore.setState({ outboxHydrated: false })
+		kvGetJson.mockRejectedValueOnce(new Error("kv unavailable"))
+
+		const failed = new Sync()
+
+		failed.start()
+		await flushAsync()
+
+		expect(hydrated()).toBe(true)
+	})
+
+	it("closes again on the terminal shutdown — the store no longer reflects any account's outbox", async () => {
+		const s = await startedSync()
+
+		expect(hydrated()).toBe(true)
+
+		s.cancel()
+
+		expect(hydrated()).toBe(false)
 	})
 })
 

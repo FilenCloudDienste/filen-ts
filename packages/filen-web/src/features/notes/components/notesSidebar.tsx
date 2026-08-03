@@ -41,10 +41,8 @@ import {
 	sidebarRowKey,
 	selectableNotesFromRows,
 	selectableRowIndexByKey,
-	notesTreePositions,
 	type NotesSidebarRow,
-	type NotesGroupIcon,
-	type NotesTreePosition
+	type NotesGroupIcon
 } from "@/features/notes/components/notesSidebar.logic"
 import { createNote } from "@/features/notes/lib/actions"
 import { exportAllNotes } from "@/features/notes/lib/export"
@@ -93,10 +91,6 @@ const NOTE_ROW_ESTIMATE = 76
 const TAG_ROW_ESTIMATE = 40
 const HEADER_ROW_ESTIMATE = 40
 
-// Only reachable if a row's key is missing from the derived position map, which the shared derivation
-// makes impossible — a lone item is the honest thing to announce rather than a wrong position.
-const FALLBACK_TREE_POSITION: NotesTreePosition = { posInSet: 1, setSize: 1 }
-
 // Section-header icon kind → concrete lucide icon (the logic layer stays React-free and only names the
 // kind). Today gets a distinct calendar glyph; the remaining date buckets share the plain calendar.
 const GROUP_ICON: Record<NotesGroupIcon, LucideIcon> = {
@@ -109,29 +103,15 @@ const GROUP_ICON: Record<NotesGroupIcon, LucideIcon> = {
 }
 
 // A notes-view date-group section header — a leading icon + the bucket label. Sticky-free (the
-// virtualizer positions it absolutely like every other row). A level-1 node of the sidebar tree; the
-// note rows it precedes are its level-2 children.
-function NotesGroupHeader({
-	row,
-	posInSet,
-	setSize
-}: {
-	row: Extract<NotesSidebarRow, { kind: "header" }>
-	posInSet: number
-	setSize: number
-}) {
+// virtualizer positions it absolutely like every other row), and a plain label: the flat row model
+// puts it beside the rows it introduces rather than around them, so it claims no ownership of them.
+function NotesGroupHeader({ row }: { row: Extract<NotesSidebarRow, { kind: "header" }> }) {
 	const { t } = useTranslation("notes")
 	const Icon = GROUP_ICON[row.icon]
 	const label = row.label.kind === "key" ? t(row.label.key) : row.label.text
 
 	return (
-		<div
-			role="treeitem"
-			aria-level={1}
-			aria-posinset={posInSet}
-			aria-setsize={setSize}
-			className="flex items-center gap-2 px-2.5 pt-4 pb-1.5"
-		>
+		<div className="flex items-center gap-2 px-2.5 pt-4 pb-1.5">
 			<Icon className="size-4 shrink-0 text-muted-foreground" />
 			<span className="truncate text-sm font-semibold text-muted-foreground">{label}</span>
 		</div>
@@ -182,19 +162,16 @@ function segmentClass(active: boolean): string {
 	)
 }
 
-// A level-1 node of the sidebar tree; its expanded member notes are its level-2 children. The element
-// stays a real <button>, so Enter/Space activation is native even with the role overridden.
-function TagGroupRow({
+// A tag group's disclosure row, over the member note rows the flat row model emits after it. A plain
+// <button> carrying its own aria-expanded — no role override, so it keeps both native activation and
+// the button semantics every caller (and locator) resolves it by.
+export function TagGroupRow({
 	row,
-	posInSet,
-	setSize,
 	onToggle,
 	onTagAction,
 	onCreateNoteInTag
 }: {
 	row: Extract<NotesSidebarRow, { kind: "tag" }>
-	posInSet: number
-	setSize: number
 	onToggle: () => void
 	onTagAction: (kind: NoteTagDialogKind, tag: NoteTag) => void
 	onCreateNoteInTag: (created: Note) => void
@@ -210,10 +187,6 @@ function TagGroupRow({
 	const trigger = (
 		<button
 			type="button"
-			role="treeitem"
-			aria-level={1}
-			aria-posinset={posInSet}
-			aria-setsize={setSize}
 			aria-expanded={row.expanded}
 			aria-label={t(row.expanded ? "notesTagCollapse" : "notesTagExpand", { name })}
 			onClick={onToggle}
@@ -412,7 +385,6 @@ export function NotesSidebar() {
 	const selectableNotes = selectableNotesFromRows(rows)
 	const selection = useNotesListSelection({ notes: selectableNotes, resetKey: viewMode })
 	const selectableIndexByRowKey = selectableRowIndexByKey(rows)
-	const treePositions = notesTreePositions(rows)
 
 	const rawSelectedNotes = useNotesSelectionStore(useShallow(state => state.selectedNotes))
 	// LIVE (ghost-purged) selection: re-derived from the current notes query every render, so a note
@@ -655,11 +627,13 @@ export function NotesSidebar() {
 		}
 
 		return (
-			// A tree, not a listbox: the list is heterogeneous (date/tag headers over their notes), and
-			// one flat virtualizer cannot nest DOM levels — aria-level carries the hierarchy instead.
-			<div
-				role="tree"
-				aria-multiselectable="true"
+			// A plain list, deliberately neither tree nor listbox: both patterns owe a roving-tabindex/
+			// arrow-key focus model this sidebar does not implement, and one flat virtualizer cannot nest
+			// DOM levels anyway — so the grouping stays where it honestly is, in the flat row order, with
+			// each tag row's own aria-expanded as the only disclosure claim (same shape as the drive
+			// sidebar's disclosure list). Positions are threaded per item because virtualization mounts
+			// only a window: the DOM child count here is never the real total.
+			<ul
 				aria-label={t("notesListLabel")}
 				className="relative w-full"
 				style={{ height: virtualizer.getTotalSize() }}
@@ -671,15 +645,12 @@ export function NotesSidebar() {
 						return null
 					}
 
-					const position = treePositions.get(sidebarRowKey(row)) ?? FALLBACK_TREE_POSITION
-
 					return (
-						// Presentational: this wrapper only positions and measures the row, and a generic
-						// container between tree and treeitem breaks the owned-element relationship.
-						<div
+						<li
 							key={virtualRow.key}
-							role="presentation"
 							data-index={virtualRow.index}
+							aria-posinset={virtualRow.index + 1}
+							aria-setsize={rows.length}
 							ref={element => {
 								virtualizer.measureElement(element)
 							}}
@@ -687,16 +658,10 @@ export function NotesSidebar() {
 							style={{ transform: `translateY(${String(virtualRow.start)}px)` }}
 						>
 							{row.kind === "header" ? (
-								<NotesGroupHeader
-									row={row}
-									posInSet={position.posInSet}
-									setSize={position.setSize}
-								/>
+								<NotesGroupHeader row={row} />
 							) : row.kind === "tag" ? (
 								<TagGroupRow
 									row={row}
-									posInSet={position.posInSet}
-									setSize={position.setSize}
 									onToggle={() => {
 										toggleTag(row.tag.uuid)
 									}}
@@ -710,8 +675,6 @@ export function NotesSidebar() {
 									note={row.note}
 									selected={row.note.uuid === selectedUuid}
 									multiSelected={liveSelectedUuids.has(row.note.uuid)}
-									posInSet={position.posInSet}
-									setSize={position.setSize}
 									nested={viewMode === "tags"}
 									allTags={allTags}
 									currentUserId={currentUserId}
@@ -724,10 +687,10 @@ export function NotesSidebar() {
 									}}
 								/>
 							)}
-						</div>
+						</li>
 					)
 				})}
-			</div>
+			</ul>
 		)
 	}
 

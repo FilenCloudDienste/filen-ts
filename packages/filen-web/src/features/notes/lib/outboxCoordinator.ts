@@ -2,7 +2,7 @@ import { type } from "arktype"
 import { type OutboxChannelMsg, makeOutboxChannelTransport, decodeOutboxPayload, bindOutboxLeadership } from "@/lib/storage/outboxChannel"
 import { sync } from "@/features/notes/lib/sync"
 import { inflightContentSchema, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
-import { type InflightContent } from "@/features/notes/store/useNotesInflight"
+import { setOutboxHydrated, type InflightContent } from "@/features/notes/store/useNotesInflight"
 
 // Binds the leader-owned notes outbox (sync.ts) to a dedicated cross-tab channel + the db-lock leadership
 // signal, via the shared coordinator core (outboxChannel.ts). The leader tab (whoever holds the db lock) runs
@@ -23,6 +23,12 @@ const remoteEnqueueSchema = type({
 }).as<RemoteEnqueue>()
 
 let started = false
+
+// Backstop for the editor's hydration gate (useNoteEditor): every normal path flips it within a disk
+// read or a same-machine broadcast, but leadership resolution, that disk read and a peer leader are all
+// things that can hang. The editor must degrade to the un-gated behavior instead of spinning forever,
+// so the gate opens on its own well after any healthy boot has already opened it.
+const HYDRATION_BACKSTOP_MS = 5000
 
 // One dispatcher, routed by the outbox's CURRENT role (role flips live on promotion): the leader half handles
 // follower forwards, the follower half handles leader broadcasts. A message meant for the other role is
@@ -82,6 +88,10 @@ export async function startOutbox(): Promise<void> {
 	}
 
 	started = true
+
+	setTimeout(() => {
+		setOutboxHydrated(true)
+	}, HYDRATION_BACKSTOP_MS)
 
 	await bindOutboxLeadership(OUTBOX_CHANNEL, sync, channel => {
 		sync.attachTransport(makeOutboxChannelTransport<RemoteEnqueue, InflightContent>(channel))

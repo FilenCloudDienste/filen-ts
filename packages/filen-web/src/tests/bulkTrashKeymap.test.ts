@@ -50,6 +50,9 @@ beforeEach(() => {
 // exclusive routes — a drift here would read as a collision rather than the deliberate reuse it is,
 // and scope carries no runtime isolation (useAction.ts).
 describe("keymap registry — bulk-trash bindings", () => {
+	// Registering all three into one registry is also what proves the ids stayed distinct — the
+	// registry rejects a duplicate id (registry.test.ts owns that guard), so a collision fails here
+	// rather than silently collapsing the three surfaces onto one binding.
 	it("registers notes.trash and photos.trash on drive.trash's own combo", async () => {
 		const { registerAction, comboFor } = await freshRegistry()
 
@@ -60,17 +63,6 @@ describe("keymap registry — bulk-trash bindings", () => {
 		expect(comboFor("notes.trash")).toBe("delete,backspace")
 		expect(comboFor("photos.trash")).toBe("delete,backspace")
 		expect(comboFor("notes.trash")).toBe(comboFor("drive.trash"))
-	})
-
-	it("keeps the three bulk-trash bindings distinct ids, so a scope-aware future can separate them", async () => {
-		const { registerAction } = await freshRegistry()
-
-		registerAction(DRIVE_TRASH)
-		registerAction(NOTES_TRASH)
-
-		expect(() => {
-			registerAction(NOTES_TRASH)
-		}).toThrow()
 	})
 
 	it("registers contacts.clearSelection on the same Escape every other surface clears with", async () => {

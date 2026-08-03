@@ -1,30 +1,50 @@
 import type { ElementHandle, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { descendInto, enterScratchDirectory, trashScratchDirectory, waitForListingSettled } from "./helpers/listing"
+import {
+	createDirectoryViaDialog,
+	descendInto,
+	enterScratchDirectory,
+	trashScratchDirectory,
+	waitForListingSettled
+} from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
-// Playwright's mouse cannot synthesize a native HTML5 drag (there is no way to populate a real
-// DataTransfer via move+down+up). Drive the exact browser event sequence instead: one shared
-// DataTransfer threaded through dragstart → dragenter → dragover → drop → dragend, dispatched on the
-// real row/target elements so React's own onDragStart/onDrop handlers (and the module-level payload
-// they set/read) run end-to-end. dispatchEvent runs inside the page, so this is as close to a genuine
-// drag as automation allows here.
+// Drives the exact browser event sequence a native HTML5 drag produces: one shared DataTransfer
+// threaded through dragstart → dragenter → dragover → drop → dragend, dispatched on the real
+// row/target elements so React's own onDragStart/onDrop handlers (and the module-level payload they
+// set/read) run end-to-end.
+//
+// A dispatched sequence fires the handlers whether or not a real browser would ever have reached them,
+// so the two gates a real drag has to clear first are asserted rather than assumed: the source must
+// carry draggable="true" (nothing else starts a drag), and the target must cancel dragover (nothing
+// else permits a drop) — dispatchEvent returning false IS that cancellation. Without them, a row that
+// stopped being draggable or a target that stopped calling preventDefault would leave this green while
+// the feature is dead for users.
 async function html5DragMove(page: Page, source: ElementHandle<Element>, target: ElementHandle<Element>): Promise<void> {
-	await page.evaluate(
+	const contract = await page.evaluate(
 		([src, tgt]) => {
 			const dataTransfer = new DataTransfer()
-			const fire = (element: Element, type: string): void => {
-				element.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer }))
+			const fire = (element: Element, type: string): boolean => {
+				return element.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer }))
 			}
+
+			const draggable = src.getAttribute("draggable")
 
 			fire(src, "dragstart")
 			fire(tgt, "dragenter")
-			fire(tgt, "dragover")
+
+			const dropAllowed = !fire(tgt, "dragover")
+
 			fire(tgt, "drop")
 			fire(src, "dragend")
+
+			return { draggable, dropAllowed }
 		},
 		[source, target] as const
 	)
+
+	expect(contract.draggable).toBe("true")
+	expect(contract.dropAllowed).toBe(true)
 }
 
 // A row/target element handle for the drag helper — throws (never returns null) so a missing element is
@@ -54,14 +74,8 @@ test.describe("drive drag-to-move", () => {
 		try {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
 
-			// A sibling directory to drop into. .first(): the fresh scratch directory is empty, so its
-			// empty-state "+ Add" affordance renders a second identical button; the toolbar's is first.
-			await page.getByRole("button", { name: "New directory", exact: true }).first().click()
-			const dialog = page.getByRole("dialog")
-			await expect(dialog).toBeVisible()
-			await page.getByLabel("Name", { exact: true }).fill(targetDirName)
-			await page.getByRole("button", { name: "Create", exact: true }).click()
-			await expect(dialog).toHaveCount(0)
+			// A sibling directory to drop into.
+			await createDirectoryViaDialog(page, targetDirName)
 
 			// A file to drag.
 			await page

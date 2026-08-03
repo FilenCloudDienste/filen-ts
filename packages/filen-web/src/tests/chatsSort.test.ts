@@ -121,8 +121,11 @@ describe("sortChats", () => {
 		expect(sortChats([withoutMessage, withMessage]).map(c => c.uuid)).toEqual([withMessage.uuid, withoutMessage.uuid])
 	})
 
-	it("bigint sentTimestamp values beyond Number.MAX_SAFE_INTEGER still order correctly", () => {
-		const huge = mockChat({ uuid: testUuid("huge"), lastMessage: mockMessage({ sentTimestamp: 9_007_199_254_740_993n }) })
+	// The comparator converts with Number(), so ADJACENT bigints past MAX_SAFE_INTEGER collapse and fall
+	// through to the uuid tiebreak — accepted, since ms timestamps sit nowhere near that range. What is
+	// pinned here is that a bigint that far out still survives the conversion with its ordering intact.
+	it("orders large bigint sentTimestamps that survive the comparator's Number() conversion", () => {
+		const huge = mockChat({ uuid: testUuid("huge"), lastMessage: mockMessage({ sentTimestamp: 9_007_199_254_740_992n }) })
 		const hugePlusOne = mockChat({
 			uuid: testUuid("hugePlusOne"),
 			lastMessage: mockMessage({ sentTimestamp: 9_007_199_254_740_994n })

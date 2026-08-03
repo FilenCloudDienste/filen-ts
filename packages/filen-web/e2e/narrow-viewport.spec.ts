@@ -137,7 +137,10 @@ test.describe("narrow viewport", () => {
 			const button = page.getByRole("button", { name, exact: true })
 
 			await expect(button).toBeVisible()
-			await expect(button).toBeInViewport()
+			// ratio: 1, matching the drive chrome assertions above — the toolbar's contract is "shed
+			// labels, then wrap, never scroll, never clip" (transfers.tsx), and the default ratio (> 0)
+			// passes on a button clipped almost entirely off a 390px viewport.
+			await expect(button).toBeInViewport({ ratio: 1 })
 		}
 	})
 })

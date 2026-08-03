@@ -19,6 +19,7 @@ import {
 } from "lucide-react"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { type DriveVariant } from "@/features/drive/lib/preferences"
 import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
 
 // itemMenu.logic.ts imports features/drive/lib/download.ts (for startDownloads) which in turn touches the
@@ -53,7 +54,6 @@ import {
 	driveItemActions,
 	resolveCopyLinkAction,
 	startItemDownload,
-	type ItemActionDescriptor,
 	type ItemActionId
 } from "@/features/drive/components/itemMenu.logic"
 
@@ -683,58 +683,56 @@ describe("applyOfflineGate", () => {
 		expect(applyOfflineGate(actions, true)).toEqual(actions)
 	})
 
-	// The table is the gate contract: every id whose handler awaits an sdkApi call. A new
-	// network-write descriptor that nobody adds here fails this case rather than shipping ungated.
-	const NETWORK_WRITE_IDS: ItemActionId[] = [
-		"rename",
-		"move",
-		"favorite",
-		"color",
-		"publicLink",
-		"copyLink",
-		"share",
-		"unshare",
-		"trash",
-		"restore",
-		"deletePermanently",
-		"openContainingDirectory",
-		"download",
-		"import"
-	]
+	// The gate contract, classified per id rather than mirrored from the implementation's own set: a
+	// Record over the whole ItemActionId union, so widening it forces a conscious "gated" (the handler
+	// awaits an sdkApi call) or "readOnly" (a dialog rendering local metadata / its own query error
+	// state, gating its network sub-actions inside) decision here. The expectation is then checked
+	// against what the REAL builders offer, so an entry that claims "gated" but is missing from
+	// OFFLINE_GATED_IDS fails rather than shipping ungated.
+	const OFFLINE_EXPECTATION: Record<ItemActionId, "gated" | "readOnly"> = {
+		rename: "gated",
+		move: "gated",
+		favorite: "gated",
+		color: "gated",
+		versions: "readOnly",
+		info: "readOnly",
+		openContainingDirectory: "gated",
+		download: "gated",
+		import: "gated",
+		publicLink: "gated",
+		copyLink: "gated",
+		share: "gated",
+		unshare: "gated",
+		trash: "gated",
+		restore: "gated",
+		deletePermanently: "gated"
+	}
 
-	it("gates every network-write id while offline", () => {
-		const gated = applyOfflineGate(
-			NETWORK_WRITE_IDS.map(
-				id => ({ id, labelKey: "driveActionInfo", icon: InfoIcon, run: "direct" }) satisfies ItemActionDescriptor
-			),
-			false
+	const VARIANTS: DriveVariant[] = ["drive", "recents", "favorites", "trash", "links", "sharedIn", "sharedOut"]
+	const ITEMS: (() => DriveItem)[] = [
+		dirItem,
+		fileItem,
+		sharedRootDirItem,
+		sharedRootFileItem,
+		sharedDirItem,
+		sharedFileItem,
+		() => dirItem({ meta: { type: "encrypted", data: "ciphertext" } }),
+		() => fileItem({ meta: { type: "encrypted", data: "ciphertext" } })
+	]
+	const EVERY_DESCRIPTOR = VARIANTS.flatMap(variant =>
+		ITEMS.flatMap(item => [true, false].flatMap(searchHit => driveItemActions(item(), variant, { searchHit })))
+	)
+
+	it("offers every classified id somewhere, so the table cannot drift away from the builders", () => {
+		expect([...new Set(EVERY_DESCRIPTOR.map(descriptor => descriptor.id))].sort()).toEqual(Object.keys(OFFLINE_EXPECTATION).sort())
+	})
+
+	it("gates exactly the ids classified as network writes, across every descriptor the real builders offer", () => {
+		const misgated = applyOfflineGate(EVERY_DESCRIPTOR, false).filter(
+			descriptor => (OFFLINE_EXPECTATION[descriptor.id] === "gated") !== (descriptor.enabled === false)
 		)
 
-		expect(gated.map(descriptor => descriptor.enabled)).toEqual(NETWORK_WRITE_IDS.map(() => false))
-	})
-
-	it("gates every network-write id the real builders actually offer", () => {
-		const gated = [
-			...applyOfflineGate(driveItemActions(dirItem(), "drive"), false),
-			...applyOfflineGate(driveItemActions(sharedRootFileItem(), "sharedIn"), false),
-			...applyOfflineGate(driveItemActions(fileItem(), "trash"), false)
-		]
-		const gatedIds = new Set<string>(NETWORK_WRITE_IDS)
-
-		for (const descriptor of gated) {
-			if (gatedIds.has(descriptor.id)) {
-				expect(descriptor.enabled).toBe(false)
-			}
-		}
-	})
-
-	it("leaves info and versions enabled while offline — both open read dialogs that gate their own writes", () => {
-		const gated = applyOfflineGate(driveItemActions(fileItem(), "drive"), false)
-
-		for (const id of ["info", "versions"]) {
-			const descriptor = gated.find(d => d.id === id)
-			expect(descriptor?.enabled).not.toBe(false)
-		}
+		expect([...new Set(misgated.map(descriptor => descriptor.id))]).toEqual([])
 	})
 
 	it("does not mutate the input array's descriptor objects", () => {

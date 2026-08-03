@@ -1,5 +1,11 @@
 import { test, expect } from "./fixtures"
-import { waitForListingSettled, dismissStartupReminders } from "./helpers/listing"
+import {
+	waitForListingSettled,
+	dismissStartupReminders,
+	enterScratchDirectory,
+	createDirectoryViaDialog,
+	trashScratchDirectory
+} from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Sharing/unsharing are OUTWARD-FACING mutations (a share reaches ANOTHER account; unshare revokes
@@ -52,70 +58,59 @@ test.describe("sharing", () => {
 		await expect(sharedOutLink).toHaveAttribute("aria-current", "page")
 	})
 
-	// The only test in this file that touches live account state — a net-zero create-then-trash of a
-	// scratch directory, purely so there is something selectable to open the bulk Share action on (the
-	// account's /drive root may otherwise be empty). The picker itself is only ever driven up to its
-	// own disabled submit button, then dismissed via Escape — this suite never shares anything for real.
+	// The only test in this file that touches live account state — a net-zero scratch directory holding
+	// one nested directory, purely so there is something selectable to open the bulk Share action on
+	// (the account's /drive root may otherwise be empty). Nested rather than created at root, and torn
+	// down from a finally, like every other mutating spec here: a root-level create/trash races
+	// drive.spec.ts's own root option-count assertions, and an inline teardown leaks the directory the
+	// moment anything above it throws. The picker itself is only ever driven up to its own disabled
+	// submit button, then dismissed via Escape — this suite never shares anything for real.
 	test("the bulk Share button opens the contact picker; dismissing shares nothing", async ({ page, injectedSession, browserName }) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		const scratchName = `e2e-share-${crypto.randomUUID()}`
-
-		async function createDirectory(name: string): Promise<void> {
-			await page.getByRole("button", { name: "New directory", exact: true }).click()
-			const dialog = page.getByRole("dialog")
-			await expect(dialog).toBeVisible()
-			await page.getByLabel("Name", { exact: true }).fill(name)
-			await page.getByRole("button", { name: "Create", exact: true }).click()
-			await expect(dialog).toHaveCount(0)
-		}
+		const runId = crypto.randomUUID()
+		const scratchName = `e2e-share-${runId}`
+		const nestedName = `shared-candidate-${runId}`
 
 		await page.goto("/drive")
-		const { listbox } = await waitForListingSettled(page)
 
-		await createDirectory(scratchName)
-		const scratchRow = listbox.getByRole("option", { name: scratchName })
-		await expect(scratchRow).toBeVisible()
+		try {
+			const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		await scratchRow.click()
-		await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
+			await createDirectoryViaDialog(page, nestedName)
 
-		// Pre-dialog, the bulk bar's own "Share" button is the only one in the DOM — the picker's
-		// identically-labeled submit button doesn't exist until the dialog itself opens.
-		await page.getByRole("button", { name: "Share", exact: true }).click()
+			const nestedRow = listbox.getByRole("option", { name: nestedName })
+			await expect(nestedRow).toBeVisible()
 
-		const dialog = page.getByRole("dialog")
-		await expect(dialog).toBeVisible()
-		await expect(dialog.getByRole("heading", { name: "Share with contacts", exact: true })).toBeVisible()
+			await nestedRow.click()
+			await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
 
-		// Terminal render states mirror waitForListingSettled above: this free account has no contacts,
-		// so the empty state is what actually renders here, but a populated account's own listbox is
-		// asserted too so this test still holds if that ever changes — never a crash either way.
-		const noContacts = dialog.getByText("No contacts", { exact: true })
-		const contactsListbox = dialog.getByRole("listbox", { name: "Contacts" })
-		await expect(noContacts.or(contactsListbox)).toBeVisible()
+			// Pre-dialog, the bulk bar's own "Share" button is the only one in the DOM — the picker's
+			// identically-labeled submit button doesn't exist until the dialog itself opens.
+			await page.getByRole("button", { name: "Share", exact: true }).click()
 
-		// Nothing is selected — the submit stays disabled regardless of whether any contacts rendered.
-		const shareSubmit = dialog.getByRole("button", { name: "Share", exact: true })
-		await expect(shareSubmit).toBeDisabled()
+			const dialog = page.getByRole("dialog")
+			await expect(dialog).toBeVisible()
+			await expect(dialog.getByRole("heading", { name: "Share with contacts", exact: true })).toBeVisible()
 
-		// Dismiss without ever pressing the picker's own Share — a live share reaches another account,
-		// so this suite never sends one.
-		await page.keyboard.press("Escape")
-		await expect(dialog).toHaveCount(0)
+			// Terminal render states mirror waitForListingSettled above: this free account has no contacts,
+			// so the empty state is what actually renders here, but a populated account's own listbox is
+			// asserted too so this test still holds if that ever changes — never a crash either way.
+			const noContacts = dialog.getByText("No contacts", { exact: true })
+			const contactsListbox = dialog.getByRole("listbox", { name: "Contacts" })
+			await expect(noContacts.or(contactsListbox)).toBeVisible()
 
-		// Cleanup: re-select the scratch row and trash it, netting the account back to its pre-test
-		// state — mirrors drive-actions.spec.ts's own create -> act -> trash convention.
-		await scratchRow.click()
-		await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
-		await page.getByRole("button", { name: "Trash", exact: true }).click()
+			// Nothing is selected — the submit stays disabled regardless of whether any contacts rendered.
+			const shareSubmit = dialog.getByRole("button", { name: "Share", exact: true })
+			await expect(shareSubmit).toBeDisabled()
 
-		const trashConfirm = page.getByRole("alertdialog")
-		await expect(trashConfirm).toBeVisible()
-		await trashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-		await expect(trashConfirm).toHaveCount(0)
-
-		await expect(scratchRow).toHaveCount(0)
+			// Dismiss without ever pressing the picker's own Share — a live share reaches another account,
+			// so this suite never sends one.
+			await page.keyboard.press("Escape")
+			await expect(dialog).toHaveCount(0)
+		} finally {
+			await trashScratchDirectory(page, scratchName)
+		}
 	})
 })

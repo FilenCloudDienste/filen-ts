@@ -120,9 +120,11 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 
 	// History has to be seeded across two DIFFERENT routes: there is exactly one drive route file
 	// (routes/_app/drive.$.tsx), so /drive and /drive/<uuid> share routeId "/_app/drive/$" and a back
-	// between them is deliberately NOT blocked. Starting at /favorites and pushing into /drive gives the
-	// leg one same-route back and one leave-route back, both inside ONE document so every back is a real
-	// popstate the router's blocker sees.
+	// between them is deliberately NOT blocked. Loading, then pushing into /drive and on into the
+	// scratch directory, gives the leg one same-route back and one leave-route back, both inside ONE
+	// document so every back is a real popstate the router's blocker sees. This leg never asserts WHICH
+	// route sits behind /drive — the session-injection hook's own seed navigation decides that (see the
+	// discard test below, which builds the stack in-app because it does depend on the destination).
 	await page.goto("/favorites")
 
 	try {
@@ -206,10 +208,8 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 		await expect(page).toHaveURL(/\/drive$/)
 		await expect(line).toBeVisible()
 
-		// The blocked-pop DISCARD leg lives in the fixme test below — under this fixture context its
-		// proceed() lands back on /drive, while the identical flow driven manually against the same
-		// build reproducibly lands on /favorites. The buffer intentionally ends DIRTY here; the finally
-		// below already dismisses the prompt its own Escape raises.
+		// The blocked-pop DISCARD leg lives in its own test below. The buffer intentionally ends DIRTY
+		// here; the finally below already dismisses the prompt its own Escape raises.
 		expect(cspViolations).toEqual([])
 	} finally {
 		// trashScratchDirectory opens with Escape + a sidebar "Cloud Drive" click, and BOTH are defeated by
@@ -351,13 +351,13 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 	}
 })
 
-// Deterministically red under THIS fixture context only: the identical flow (scratch directory,
-// dirty buffer, back → Cancel → back → Discard) driven manually against the same VITE_E2E build
-// lands on /favorites every time, while here the discard's proceed() resolves back onto /drive.
-// Remaining suspects: the pager-leg dirty/discard cycles the main test runs first, or the injected
-// session fixture. Root-causing this belongs to the suite audit; the guard's primary behaviors are
-// covered live by the main test above.
-test.fixme("discarding after a cancelled back on the same pop still proceeds to the destination", async ({
+// The blocked pop's DISCARD half — the main test above only proves Cancel/restore. Unlike that leg,
+// this one asserts the destination, so the entry behind /drive has to be a route this test put there:
+// a hard goto to any authed route re-seeds the session and navigates to "/" (src/e2e-hooks/index.ts),
+// so the entry it leaves behind /drive is a guarded one that bounces straight back to /drive — which is
+// what a proceed() onto it looks like. Every hop below is therefore an in-app click with its resulting
+// URL asserted.
+test("discarding after a cancelled back on the same pop still proceeds to the destination", async ({
 	page,
 	injectedSession,
 	browserName
@@ -369,11 +369,20 @@ test.fixme("discarding after a cancelled back on the same pop still proceeds to 
 	const nameTxt = `${scratchName}.txt`
 	const unsavedPrompt = page.getByRole("alertdialog", { name: "Unsaved changes" })
 
-	await page.goto("/favorites")
+	await page.goto("/drive")
 
 	try {
 		await waitForListingSettled(page)
-		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
+
+		const sidebar = page.getByRole("complementary")
+
+		await sidebar.getByRole("link", { name: "Favorites", exact: true }).click()
+		await expect(page).toHaveURL(/\/favorites$/)
+		await waitForListingSettled(page)
+
+		await sidebar.getByRole("link", { name: "Cloud Drive", exact: true }).click()
+		await expect(page).toHaveURL(/\/drive$/)
+
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
 		await page

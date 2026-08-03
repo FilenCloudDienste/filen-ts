@@ -105,6 +105,7 @@ import {
 	fetchItemPath,
 	fetchSharedListing,
 	fileVersionsQueryKey,
+	findCachedListingItem,
 	invalidateDirectorySize,
 	itemInfoQueryKey,
 	itemPathQueryKey,
@@ -676,6 +677,54 @@ describe("driveListingQueryUpdateGlobal", () => {
 
 		expect(testQueryClient.getQueryData(keyA)).toEqual([keep])
 		expect(testQueryClient.getQueryData(keyB)).toEqual([])
+	})
+
+	// A cancelled TanStack fetch reverts and never retries on its own: cancelling listings the updater
+	// does not even touch strands them on pre-fetch rows until the next mount/focus.
+	it("cancels the in-flight fetch of ONLY the listings the updater actually changes", () => {
+		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
+		const drop = narrowItem(mockDir({ uuid: testUuid("drop") }))
+		const affected = driveListingQueryKey({ variant: "drive", uuid: null })
+		const untouched = driveListingQueryKey({ variant: "favorites", uuid: null })
+		testQueryClient.setQueryData(affected, [drop])
+		testQueryClient.setQueryData(untouched, [narrowItem(mockDir({ uuid: testUuid("other") }))])
+
+		driveListingQueryUpdateGlobal(items => items.filter(item => item.data.uuid !== drop.data.uuid))
+
+		expect(cancelSpy).toHaveBeenCalledWith({ queryKey: affected, exact: true })
+		expect(cancelSpy).not.toHaveBeenCalledWith({ queryKey: untouched, exact: true })
+	})
+
+	it("does not write to a listing the updater left unchanged", () => {
+		const untouched = driveListingQueryKey({ variant: "favorites", uuid: null })
+		testQueryClient.setQueryData(untouched, [narrowItem(mockDir({ uuid: testUuid("other") }))])
+		const setSpy = vi.spyOn(testQueryClient, "setQueryData")
+
+		driveListingQueryUpdateGlobal(items => items.filter(item => item.data.uuid !== testUuid("absent")))
+
+		expect(setSpy).not.toHaveBeenCalled()
+	})
+})
+
+describe("findCachedListingItem", () => {
+	it("finds the row in whichever cached listing holds it, whatever the variant", () => {
+		const item = narrowItem(mockFile({ uuid: testUuid("wanted") }))
+		testQueryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: null }), [narrowItem(mockDir())])
+		testQueryClient.setQueryData(driveListingQueryKey({ variant: "recents", uuid: null }), [item])
+
+		expect(findCachedListingItem(testUuid("wanted"))).toBe(item)
+	})
+
+	it("resolves undefined when no cached listing holds the uuid", () => {
+		testQueryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: null }), [narrowItem(mockDir())])
+
+		expect(findCachedListingItem(testUuid("absent"))).toBeUndefined()
+	})
+
+	it("ignores a listing key that was registered but never fetched", () => {
+		void testQueryClient.getQueryCache().build(testQueryClient, { queryKey: driveListingQueryKey({ variant: "drive", uuid: "cold" }) })
+
+		expect(findCachedListingItem(testUuid("absent"))).toBeUndefined()
 	})
 })
 

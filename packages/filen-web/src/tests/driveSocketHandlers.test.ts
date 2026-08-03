@@ -145,6 +145,32 @@ describe("drive socket handlers — additions", () => {
 
 		expect(getListing(PARENT_A).map(i => i.data.uuid)).toEqual([testUuid("file")])
 	})
+
+	it("folderRestore removes the directory everywhere then re-adds it to its parent (trash included)", () => {
+		seedTrash([narrowItem(mockDir())])
+		seedListing(PARENT_A, [])
+		handleDriveEvent(driveEvt({ type: "folderRestore", dir: mockDir() }))
+
+		expect(getTrash()).toEqual([])
+		expect(getListing(PARENT_A).map(i => i.data.uuid)).toEqual([testUuid("dir")])
+	})
+
+	it("folderRestore splices into the NEW parent the payload carries, not the listing it came from", () => {
+		seedListing(PARENT_A, [narrowItem(mockDir())])
+		seedListing(PARENT_B, [])
+		handleDriveEvent(driveEvt({ type: "folderRestore", dir: mockDir({ parent: PARENT_B }) }))
+
+		expect(getListing(PARENT_A)).toEqual([])
+		expect(getListing(PARENT_B).map(i => i.data.uuid)).toEqual([testUuid("dir")])
+	})
+
+	it("folderRestore into the root collapses the real root uuid onto the null-keyed listing", () => {
+		seedRootUuid()
+		seedListing(null, [])
+		handleDriveEvent(driveEvt({ type: "folderRestore", dir: mockDir({ parent: ROOT_UUID }) }))
+
+		expect(getListing(null).map(i => i.data.uuid)).toEqual([testUuid("dir")])
+	})
 })
 
 describe("drive socket handlers — moves", () => {
@@ -168,14 +194,18 @@ describe("drive socket handlers — moves", () => {
 })
 
 describe("drive socket handlers — removals + selection purge", () => {
-	it("fileTrash removes the row from every listing and purges the selection", () => {
+	it("fileTrash removes the row from every normal listing and purges the selection", () => {
 		const item = narrowItem(mockFile())
 		seedListing(PARENT_A, [item])
+		seedFavorites([item])
+		seedRecents([item])
 		useDriveStore.setState({ selectedItems: [item] })
 
 		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file") }))
 
 		expect(getListing(PARENT_A)).toEqual([])
+		expect(getFavorites()).toEqual([])
+		expect(getRecents()).toEqual([])
 		expect(useDriveStore.getState().selectedItems).toEqual([])
 	})
 
@@ -190,11 +220,134 @@ describe("drive socket handlers — removals + selection purge", () => {
 		expect(useDriveStore.getState().selectedItems).toEqual([])
 	})
 
-	it("folderTrash removes the directory from every listing", () => {
+	it("folderDeletedPermanent removes the directory from every listing and purges the selection", () => {
+		const item = narrowItem(mockDir())
+		seedListing(PARENT_A, [item])
+		seedTrash([item])
+		useDriveStore.setState({ selectedItems: [item] })
+
+		handleDriveEvent(driveEvt({ type: "folderDeletedPermanent", uuid: testUuid("dir") }))
+
+		expect(getListing(PARENT_A)).toEqual([])
+		expect(getTrash()).toEqual([])
+		expect(useDriveStore.getState().selectedItems).toEqual([])
+	})
+
+	it("folderTrash removes the directory from every normal listing", () => {
 		seedListing(PARENT_A, [narrowItem(mockDir())])
 		handleDriveEvent(driveEvt({ type: "folderTrash", parent: PARENT_A, uuid: testUuid("dir") }))
 
 		expect(getListing(PARENT_A)).toEqual([])
+	})
+
+	it("fileArchived strips the superseded row from every listing and purges the selection", () => {
+		const item = narrowItem(mockFile())
+		seedListing(PARENT_A, [item])
+		seedRecents([item])
+		useDriveStore.setState({ selectedItems: [item] })
+
+		handleDriveEvent(driveEvt({ type: "fileArchived", uuid: testUuid("file") }))
+
+		expect(getListing(PARENT_A)).toEqual([])
+		expect(getRecents()).toEqual([])
+		expect(useDriveStore.getState().selectedItems).toEqual([])
+	})
+
+	// A version rotation is not a trashing: the successor arrives as its own fileNew, so the superseded
+	// uuid must never surface in the trash listing.
+	it("fileArchived never adds the superseded row to the trash listing", () => {
+		const item = narrowItem(mockFile())
+		seedListing(PARENT_A, [item])
+		seedTrash([])
+
+		handleDriveEvent(driveEvt({ type: "fileArchived", uuid: testUuid("file") }))
+
+		expect(getTrash()).toEqual([])
+	})
+
+	it("deleteVersioned is logged and mutates nothing", () => {
+		const item = narrowItem(mockFile())
+		seedListing(PARENT_A, [item])
+		useDriveStore.setState({ selectedItems: [item] })
+
+		handleDriveEvent(driveEvt({ type: "deleteVersioned" }))
+
+		expect(getListing(PARENT_A).map(i => i.data.uuid)).toEqual([testUuid("file")])
+		expect(useDriveStore.getState().selectedItems).toEqual([item])
+		expect(logWarn).toHaveBeenCalled()
+	})
+})
+
+// The realtime echo of a trash (another device, another tab, or this tab's own action) must not make
+// the item disappear from the ONE listing it just joined: a fan-out removal alone leaves an already-open
+// /trash showing nothing until its next refetch.
+describe("drive socket handlers — trash listing membership", () => {
+	it("fileTrash moves the row INTO an already-fetched trash listing", () => {
+		const item = narrowItem(mockFile())
+		seedListing(PARENT_A, [item])
+		seedTrash([])
+
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file") }))
+
+		expect(getListing(PARENT_A)).toEqual([])
+		expect(getTrash()?.map(i => i.data.uuid)).toEqual([testUuid("file")])
+	})
+
+	it("fileTrash leaves a row the trash listing already holds in place (a re-delivered echo never drops it)", () => {
+		seedTrash([narrowItem(mockFile())])
+
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file") }))
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file") }))
+
+		expect(getTrash()?.map(i => i.data.uuid)).toEqual([testUuid("file")])
+	})
+
+	it("folderTrash moves the directory INTO an already-fetched trash listing", () => {
+		seedListing(PARENT_A, [narrowItem(mockDir())])
+		seedTrash([])
+
+		handleDriveEvent(driveEvt({ type: "folderTrash", parent: PARENT_A, uuid: testUuid("dir") }))
+
+		expect(getTrash()?.map(i => i.data.uuid)).toEqual([testUuid("dir")])
+	})
+
+	it("never conjures a trash listing nobody has opened", () => {
+		seedListing(PARENT_A, [narrowItem(mockFile())])
+
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file") }))
+
+		expect(getTrash()).toBeUndefined()
+	})
+
+	it("applies the removal alone when no cached listing holds the trashed uuid", () => {
+		seedTrash([])
+
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("unknown") }))
+
+		expect(getTrash()).toEqual([])
+	})
+
+	// The owner trashing a file they shared with this account removes it from the shared listing; it
+	// never lands in THIS account's trash.
+	it("never moves a shared-in row into this account's trash listing", () => {
+		const shared = narrowItem({ ...mockFile(), sharingRole: { Receiver: { email: "sharer@filen.io", id: 7 } } })
+		testQueryClient.setQueryData(driveListingQueryKey({ variant: "sharedIn", uuid: null }), [shared])
+		seedTrash([])
+
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file") }))
+
+		expect(testQueryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "sharedIn", uuid: null }))).toEqual([])
+		expect(getTrash()).toEqual([])
+	})
+
+	it("aborts an in-flight trash refetch before patching membership", () => {
+		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
+
+		seedListing(PARENT_A, [narrowItem(mockFile())])
+		seedTrash([])
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file") }))
+
+		expect(cancelSpy).toHaveBeenCalledWith({ queryKey: driveListingQueryKey({ variant: "trash", uuid: null }), exact: true })
 	})
 })
 
@@ -399,6 +552,16 @@ describe("drive socket handlers — open-preview reconcile signals", () => {
 
 	it("fileRestore emits a removed signal (the item leaves the trash preview)", () => {
 		expect(captureReconcile({ type: "fileRestore", file: mockFile() })).toEqual([{ type: "removed", uuid: testUuid("file") }])
+	})
+
+	it("folderRestore emits a removed signal (the directory leaves the trash listing)", () => {
+		expect(captureReconcile({ type: "folderRestore", dir: mockDir() })).toEqual([{ type: "removed", uuid: testUuid("dir") }])
+	})
+
+	it("folderDeletedPermanent emits a removed signal", () => {
+		expect(captureReconcile({ type: "folderDeletedPermanent", uuid: testUuid("dir") })).toEqual([
+			{ type: "removed", uuid: testUuid("dir") }
+		])
 	})
 
 	it("fileArchiveRestored emits a replaced signal keyed by the superseded uuid", () => {
