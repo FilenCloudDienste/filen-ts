@@ -1,6 +1,6 @@
 import type { StringifiedClient } from "@filen/sdk-rs"
+import { readTwoFactorKind } from "@/features/auth/lib/twoFactorKinds"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
-import type { SdkErrorKind } from "@/lib/sdk/errorKinds.gen"
 import { log } from "@/lib/log"
 
 export interface LoginParams {
@@ -30,11 +30,6 @@ export type LoginAttemptOutcome =
 	// Canceled while in flight — the result was discarded; the caller changes nothing.
 	| { status: "stale" }
 
-// `satisfies` pins these to the generated kind union: an SDK rename fails compilation here instead
-// of silently breaking the two-factor branch at runtime.
-const TWO_FACTOR_KINDS: readonly string[] = ["Enter2fa", "Wrong2fa"] satisfies readonly SdkErrorKind[]
-const WRONG_2FA = "Wrong2fa" satisfies SdkErrorKind
-
 // One login attempt (first submit or two-factor retry — identical apart from `twoFactorCode`).
 // The generation captured at start decides, once the login settles, whether anyone still wants the
 // result: a dialog dismissal mid-flight bumps the counter, so a late failure is swallowed (no
@@ -49,10 +44,9 @@ export async function runLoginAttempt(deps: LoginAttemptDeps, params: LoginParam
 			return { status: "stale" }
 		}
 		const dto = asErrorDTO(e)
-		if (dto.kind !== undefined && TWO_FACTOR_KINDS.includes(dto.kind)) {
-			// Wrong2fa only ever arrives for an attempt that DID send a code (a retry), so it always
-			// means "the code you just entered was rejected"; Enter2fa is the code-less first attempt.
-			return { status: "two-factor", wrongCode: dto.kind === WRONG_2FA }
+		const twoFactor = readTwoFactorKind(dto.kind)
+		if (twoFactor !== null) {
+			return { status: "two-factor", wrongCode: twoFactor.wrongCode }
 		}
 		return { status: "error", dto }
 	}

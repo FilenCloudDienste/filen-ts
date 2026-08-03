@@ -9,6 +9,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isValidEmail, isPasswordStrongEnough } from "@/lib/validate"
 import { runResetAttempt } from "@/features/auth/lib/resetAttempt"
+import { useCapsLock } from "@/features/auth/lib/useCapsLock"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -41,6 +42,11 @@ function ResetForm({ token }: ResetFormProps) {
 	const [masterKeysFileText, setMasterKeysFileText] = useState<string>()
 	const [pending, setPending] = useState(false)
 	const [chainStage, setChainStage] = useState<SkipMasterKeysStage | null>(null)
+	// Set once a two-factor account blocked the automatic sign-in — terminal, never a resubmit (the
+	// token is already spent).
+	const [signInRequired, setSignInRequired] = useState(false)
+	const passwordCaps = useCapsLock()
+	const confirmPasswordCaps = useCapsLock()
 
 	const trimmedEmail = email.trim()
 	const passwordStrength = password.length > 0 ? ratePasswordStrength(password) : null
@@ -91,6 +97,12 @@ function ResetForm({ token }: ResetFormProps) {
 					}
 					await navigate({ to: "/drive/$", params: { _splat: "" } })
 					break
+				case "two-factor-terminal":
+					// The reset landed; only the automatic sign-in didn't. Close the ceremony and replace the
+					// form — re-submitting would re-post the reset with a spent token.
+					setChainStage(null)
+					setSignInRequired(true)
+					break
 				case "error":
 					// Expired/invalid token arrives as a generic server error here — LABEL-FIRST surfaces its
 					// serverMessage; a rejected master-keys file gets errors.ts's mapped BadRecoveryKey label.
@@ -135,6 +147,26 @@ function ResetForm({ token }: ResetFormProps) {
 		}
 	}
 
+	// Replaces the form outright, and deliberately does NOT toast: this panel is the only place the user
+	// learns what became of their reset, and a toast is dismissible.
+	if (signInRequired) {
+		return (
+			<div className="flex flex-col gap-4 text-center">
+				<p className="text-sm font-medium">{t("resetTwoFactorSignInTitle")}</p>
+				<p className="text-sm text-muted-foreground">{t("resetTwoFactorSignInBody")}</p>
+				<Button
+					type="button"
+					className="w-full"
+					onClick={() => {
+						void navigate({ to: "/login" })
+					}}
+				>
+					{t("resetGoToSignIn")}
+				</Button>
+			</div>
+		)
+	}
+
 	return (
 		<div className="flex flex-col gap-6">
 			<form
@@ -164,8 +196,20 @@ function ResetForm({ token }: ResetFormProps) {
 							onChange={e => {
 								setPassword(e.target.value)
 							}}
+							onKeyDown={passwordCaps.onKeyDown}
+							onKeyUp={passwordCaps.onKeyUp}
+							onBlur={passwordCaps.onBlur}
 						/>
 						{passwordStrength && <StrengthMeter tier={passwordStrength.strength} />}
+						{/* Rendered unconditionally with only its TEXT toggled: a live region must already be in
+						    the a11y tree when its content changes, so an already-populated role=status inserted
+						    on demand is commonly missed by screen readers. Empty <p> collapses to zero height. */}
+						<p
+							role="status"
+							className="text-xs text-yellow-500"
+						>
+							{passwordCaps.capsLockOn ? t("capsLockOn") : ""}
+						</p>
 					</Field>
 					<Field>
 						<FieldLabel htmlFor="reset-confirm-password">{t("resetConfirmPassword")}</FieldLabel>
@@ -178,8 +222,17 @@ function ResetForm({ token }: ResetFormProps) {
 							onChange={e => {
 								setConfirmPassword(e.target.value)
 							}}
+							onKeyDown={confirmPasswordCaps.onKeyDown}
+							onKeyUp={confirmPasswordCaps.onKeyUp}
+							onBlur={confirmPasswordCaps.onBlur}
 						/>
 						{passwordsMismatched && <FieldError>{t("passwordsDoNotMatch")}</FieldError>}
+						<p
+							role="status"
+							className="text-xs text-yellow-500"
+						>
+							{confirmPasswordCaps.capsLockOn ? t("capsLockOn") : ""}
+						</p>
 					</Field>
 					<MasterKeysFileField
 						disabled={pending}

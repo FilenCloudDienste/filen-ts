@@ -96,4 +96,40 @@ describe("runResetAttempt (injected deps, no worker)", () => {
 
 		await expect(runResetAttempt(h.deps, PARAMS)).resolves.toEqual({ status: "error", dto })
 	})
+
+	it("a two-factor account is terminal: the reset landed, the sign-in did not", async () => {
+		const h = makeHarness()
+		h.completeReset.mockRejectedValue(sdkDto("Enter2fa"))
+
+		const outcome = await runResetAttempt(h.deps, PARAMS)
+
+		expect(outcome).toEqual({ status: "two-factor-terminal" })
+		expect(h.persist).not.toHaveBeenCalled()
+		expect(h.broadcast).not.toHaveBeenCalled()
+	})
+
+	// Which of the two kinds the backend answers with is a backend detail — the SDK's internal login
+	// leg does send a placeholder code, so both describe the same event and must not diverge here.
+	it("treats a rejected placeholder code exactly like a missing one", async () => {
+		const h = makeHarness()
+		h.completeReset.mockRejectedValue(sdkDto("Wrong2fa"))
+
+		await expect(runResetAttempt(h.deps, PARAMS)).resolves.toEqual({ status: "two-factor-terminal" })
+	})
+
+	it("does not swallow non-two-factor SDK kinds into the two-factor arm", async () => {
+		const h = makeHarness()
+		const dto = sdkDto("BadRecoveryKey")
+		h.completeReset.mockRejectedValue(dto)
+
+		await expect(runResetAttempt(h.deps, PARAMS)).resolves.toEqual({ status: "error", dto })
+	})
+
+	it("does not swallow a kindless plain error into the two-factor arm", async () => {
+		const h = makeHarness()
+		const dto = plainDto("gateway timeout")
+		h.completeReset.mockRejectedValue(dto)
+
+		await expect(runResetAttempt(h.deps, PARAMS)).resolves.toEqual({ status: "error", dto })
+	})
 })

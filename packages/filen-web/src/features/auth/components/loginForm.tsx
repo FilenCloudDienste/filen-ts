@@ -8,6 +8,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { isValidEmail } from "@/lib/validate"
 import { runLoginAttempt } from "@/features/auth/lib/loginAttempt"
+import { useCapsLock } from "@/features/auth/lib/useCapsLock"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -113,6 +114,7 @@ function LoginForm() {
 	const [twoFactorOpen, setTwoFactorOpen] = useState(false)
 	const [twoFactorError, setTwoFactorError] = useState<string>()
 	const [forgotOpen, setForgotOpen] = useState(false)
+	const passwordCaps = useCapsLock()
 	// Cancellation counter for in-flight attempts: bumped on every two-factor dialog dismissal, so an
 	// attempt that started under an older value is stale when it settles and its result is discarded
 	// (no dialog reopen, no toast, no navigation — a late success is logged out by the helper).
@@ -215,7 +217,19 @@ function LoginForm() {
 							onChange={e => {
 								setPassword(e.target.value)
 							}}
+							onKeyDown={passwordCaps.onKeyDown}
+							onKeyUp={passwordCaps.onKeyUp}
+							onBlur={passwordCaps.onBlur}
 						/>
+						{/* Rendered unconditionally with only its TEXT toggled: a live region must already be in
+						    the a11y tree when its content changes, so an already-populated role=status inserted
+						    on demand is commonly missed by screen readers. Empty <p> collapses to zero height. */}
+						<p
+							role="status"
+							className="text-xs text-yellow-500"
+						>
+							{passwordCaps.capsLockOn ? t("capsLockOn") : ""}
+						</p>
 					</Field>
 				</FieldGroup>
 				<Button
