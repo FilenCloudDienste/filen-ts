@@ -534,8 +534,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					>
 						<span className="size-4 shrink-0" />
 						<span className="min-w-0 flex-1">{t("driveColumnName")}</span>
-						<span className="w-20 shrink-0 text-right">{t("driveColumnSize")}</span>
-						<span className="w-28 shrink-0 text-right">{t("driveColumnModified")}</span>
+						{/* Secondary columns step out by importance as the card narrows (size at sm, modified at lg);
+						    name keeps min-w-0 flex-1 and never yields. Modified waits for lg, not md: md is where
+						    the shell puts the sidebar back into the row, so the card is at its narrowest just above
+						    that breakpoint — the row's variant-only labels (driveRow.tsx) ride with modified for
+						    the same reason. */}
+						<span className="hidden w-20 shrink-0 text-right sm:block">{t("driveColumnSize")}</span>
+						<span className="hidden w-28 shrink-0 text-right lg:block">{t("driveColumnModified")}</span>
 					</div>
 				) : null}
 				<div

@@ -52,9 +52,9 @@ interface UsePhotosDialogHostParams {
 // The photos-scoped counterpart of drive's useDriveDialogHost, trimmed to the seven dialog kinds the
 // photos menu/bar/grid ever dispatch. rename/trash route through this file's own PhotoItem-cache-
 // patching wrappers (features/photos/lib/actions.ts); versions/info/link/share/preview reuse the EXACT
-// same generic dialog components drive uses unchanged (none of them take a `variant` the preview
-// overlay does, but it defaults photos to "drive" — see openPreview's own render-site comment), so
-// there is no photos-specific fork of any of them beyond the preview's one extra favorite-patch prop.
+// same generic dialog components drive uses unchanged (the two that take the `variant` the preview
+// overlay does — the overlay itself and the info dialog — get "drive", see their render-site comments),
+// so there is no photos-specific fork of any of them beyond the preview's one extra favorite-patch prop.
 export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialogHostParams): PhotosDialogHost {
 	const { t } = useTranslation(["drive", "photos", "common"])
 	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, isDialogOpen, closeActiveDialog } =
@@ -249,6 +249,10 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 				return (
 					<InfoDialog
 						item={item}
+						// Same reasoning as the preview overlay's own variant below: a photos item is always an
+						// owned, non-trashed file under the user's own drive, so it carries no sharing
+						// counterparty row.
+						variant="drive"
 						remoteInfoEnabled
 						onClose={closeActiveDialog}
 					/>

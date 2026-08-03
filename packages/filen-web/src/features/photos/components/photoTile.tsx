@@ -114,7 +114,8 @@ export function PhotoTile({ rootUuid, item, index, selected, size, onTileClick, 
 											variant="ghost"
 											size="icon-xs"
 											aria-label={t("driveItemMenuTrigger")}
-											className="absolute top-1 right-1 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
+											// Coarse-pointer fallback — see DriveRow's identical trigger.
+											className="absolute top-1 right-1 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 pointer-coarse:size-8 pointer-coarse:opacity-100 pointer-coarse:[&_svg:not([class*='size-'])]:size-4"
 											onClick={event => {
 												event.stopPropagation()
 											}}

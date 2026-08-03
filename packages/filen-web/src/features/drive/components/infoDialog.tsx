@@ -5,8 +5,9 @@ import { formatBytes } from "@filen/utils"
 import { StarIcon } from "lucide-react"
 import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
+import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
-import { formatCreatedDate, formatItemSize, formatModifiedDate, formatUploadedDate } from "@/features/drive/lib/format"
+import { formatCreatedDate, formatItemSize, formatModifiedDate, formatUploadedDate, sharedIdentityLabel } from "@/features/drive/lib/format"
 import { previewType } from "@/features/drive/lib/preview.logic"
 import { dirColorHex } from "@/features/drive/lib/dirColor"
 import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
@@ -23,6 +24,7 @@ import { Spinner } from "@/components/ui/spinner"
 
 export interface InfoDialogProps {
 	item: DriveItem
+	variant: DriveVariant
 	remoteInfoEnabled: boolean
 	onClose: () => void
 }
@@ -65,7 +67,7 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
 // on a soft tonal tile tinted by the directory's own color) carries the name and a type label; the
 // grouped rows follow in filen-mobile's order. The Location row is a deliberate desktop addition — its
 // value is a link that navigates to the item's parent directory and closes the dialog.
-export function InfoDialog({ item, remoteInfoEnabled, onClose }: InfoDialogProps) {
+export function InfoDialog({ item, variant, remoteInfoEnabled, onClose }: InfoDialogProps) {
 	// ["drive", "common"] so the undecryptable branch can reach the shared cannot-decrypt label; drive
 	// stays the default namespace, so every bare t("drive…") key below is unaffected.
 	const { t } = useTranslation(["drive", "common"])
@@ -99,6 +101,10 @@ export function InfoDialog({ item, remoteInfoEnabled, onClose }: InfoDialogProps
 
 	const mime = base.type === "file" ? base.data.decryptedMeta?.mime : undefined
 	const kindKey = base.type === "file" ? previewKindLabelKey(previewType(item)) : null
+	// The sharing counterparty is item metadata that belongs here at every width — and it is the only
+	// place it survives once the listing row sheds its own label on a narrow card (see driveRow.tsx).
+	// Non-null for exactly the rows that carry that label: the two shared variants' root arms.
+	const shared = sharedIdentityLabel(item, variant)
 
 	// Remote-query projections — every remote row degrades independently to omitted (a directory that
 	// never resolves a size shows no size row; an item whose path can't resolve shows no Location row).
@@ -218,6 +224,10 @@ export function InfoDialog({ item, remoteInfoEnabled, onClose }: InfoDialogProps
 					<InfoRow label={t("driveInfoCreated")}>{formatCreatedDate(item)}</InfoRow>
 					<InfoRow label={t("driveInfoUploaded")}>{formatUploadedDate(item)}</InfoRow>
 					<InfoRow label={t("driveInfoModified")}>{formatModifiedDate(item)}</InfoRow>
+
+					{shared ? (
+						<InfoRow label={t(variant === "sharedIn" ? "driveInfoSharedBy" : "driveInfoSharedWith")}>{shared.name}</InfoRow>
+					) : null}
 
 					{remoteInfoEnabled && (remoteLoading || remoteError || path !== null) ? (
 						<InfoRow label={t("driveInfoPath")}>

@@ -6,14 +6,14 @@ interface SidebarResizeHandleProps {
 	onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void
 	onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void
 	onPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void
-	// Mirrors the sidebar's own "hidden … md:flex" visibility — a lone divider must never render
-	// while the aside beside it is display:none below the md breakpoint.
 	className?: string
 }
 
 // Trailing-edge drag handle shared by every resizable contextual sidebar — same idiom as the notes
 // markdown split-pane's own divider (markdownSplitPane.tsx), just rendered as a sibling of the
-// `<aside>` instead of nested inside a percentage-split container.
+// `<aside>` instead of nested inside a percentage-split container. Desktop-only affordance: the `md:block`
+// below is what keeps it out of the narrow-viewport drawer, where the panel fills the popup and there is
+// no adjacent content column to resize against.
 export function SidebarResizeHandle({ ariaLabel, onPointerDown, onPointerMove, onPointerUp, className }: SidebarResizeHandleProps) {
 	return (
 		<div

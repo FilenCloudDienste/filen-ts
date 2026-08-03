@@ -158,7 +158,8 @@ export function ChatRow({ chat, selected, multiSelected, currentUserId, blocked,
 										variant="ghost"
 										size="icon-xs"
 										aria-label={t("chatItemMenuTrigger")}
-										className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
+										// Coarse-pointer fallback — see DriveRow's identical trigger.
+										className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 pointer-coarse:size-8 pointer-coarse:opacity-100 pointer-coarse:[&_svg:not([class*='size-'])]:size-4"
 										onClick={event => {
 											// The button is a sibling of the Link now, not a descendant, so a click here
 											// can never bubble into a navigation — this only stops it reaching the row

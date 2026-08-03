@@ -643,10 +643,12 @@ export function NotesSidebar() {
 			<aside
 				// Geometry mirrors DriveSidebar (rounded-xl, borderless) — the shell's contextual panel slot.
 				// Width is user-resizable (useResizableSidebar) — the inline style replaces the old static
-				// w-52 utility, and a trailing drag-handle sibling (below) commits the new width. Drag region
-				// is Electron plumbing, inert in a plain browser; interactive descendants opt back out with
-				// app-region-no-drag.
-				className="hidden shrink-0 flex-col rounded-xl bg-sidebar app-region-drag md:flex"
+				// w-52 utility, and a trailing drag-handle sibling (below) commits the new width; max-w-full
+				// clamps a wide persisted width to whatever host it lands in (the shell row, or the
+				// narrow-viewport drawer). Visibility is the shell's call, never this panel's — see
+				// appShell.tsx. Drag region is Electron plumbing, inert in a plain browser; interactive
+				// descendants opt back out with app-region-no-drag.
+				className="flex max-w-full shrink-0 flex-col rounded-xl bg-sidebar app-region-drag"
 				style={{ width: resize.width }}
 			>
 				<div className="flex flex-col gap-2 p-3">

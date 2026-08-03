@@ -26,6 +26,7 @@ import { useAccountQuery } from "@/queries/account"
 import { useTransfersAggregate } from "@/features/transfers/store/useTransfersStore"
 import { shouldShowTransfersAggregate } from "@/features/transfers/screens/transfers.logic"
 import { Logo } from "@/features/shell/components/logo"
+import { SidebarDrawerTrigger } from "@/features/shell/components/sidebarDrawer"
 import { useTheme } from "@/providers/themeProvider"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -444,8 +445,10 @@ export function IconRail() {
 			aria-label={t("appName")}
 			// Drag region (Electron plumbing): a plain browser ignores -webkit-app-region entirely, so
 			// this is inert weight everywhere else. Every interactive descendant below opts back out
-			// with app-region-no-drag so it stays clickable.
-			className="flex w-12 shrink-0 flex-col items-center gap-1.5 py-1.5 app-region-drag"
+			// with app-region-no-drag so it stays clickable. overflow-y-auto: the entry list is fixed-height
+			// and can outgrow a short viewport (landscape phone); tooltips portal out, so a scroll container
+			// here cannot clip them.
+			className="flex w-12 shrink-0 flex-col items-center gap-1.5 overflow-y-auto py-1.5 app-region-drag"
 		>
 			<Link
 				to="/drive/$"
@@ -455,6 +458,10 @@ export function IconRail() {
 			>
 				<Logo className="size-5" />
 			</Link>
+
+			{/* Narrow viewports only (md:hidden): opens the drawer holding the current module's sidebar.
+			    Sits with the section entries it reaches, below the brand. */}
+			<SidebarDrawerTrigger className={railItemClass(false)} />
 
 			<Tooltip>
 				<TooltipTrigger

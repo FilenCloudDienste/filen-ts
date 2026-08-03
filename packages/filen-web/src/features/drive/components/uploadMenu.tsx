@@ -138,11 +138,15 @@ export function UploadMenu({ parentUuid, disabled = false, openPreview, offline 
 					render={
 						<Button
 							size="sm"
+							// Label sheds below sm so this cluster stops pushing the breadcrumb — and itself — past
+							// the card edge; the aria-label is the same key, so the accessible name is unchanged at
+							// every width.
+							aria-label={t("driveUploadMenuTrigger")}
 							disabled={disabled}
 							title={offline && disabled ? t("common:offlineActionDisabled") : undefined}
 						>
 							<UploadIcon />
-							{t("driveUploadMenuTrigger")}
+							<span className="hidden sm:inline">{t("driveUploadMenuTrigger")}</span>
 						</Button>
 					}
 				/>

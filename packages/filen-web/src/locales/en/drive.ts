@@ -444,6 +444,10 @@ export const drive = {
 	driveInfoCreated: "Created",
 	/** Info panel — row label: last-modified date */
 	driveInfoModified: "Modified",
+	/** Info panel — row label on a "Shared with me" root item; the value is the sharing account's email */
+	driveInfoSharedBy: "Shared by",
+	/** Info panel — row label on a "Shared with others" root item; the value is the recipient account's email */
+	driveInfoSharedWith: "Shared with",
 	/** Info panel — row label: MIME type of a file */
 	driveInfoMimeType: "MIME type",
 	/** Info panel — row label: upload date (raw server timestamp, distinct from Created/Modified) */

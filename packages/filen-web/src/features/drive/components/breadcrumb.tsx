@@ -87,8 +87,16 @@ export function Breadcrumb({ variant, splat }: BreadcrumbProps) {
 	const namesQuery = useDirectoryNamesQuery(uuids)
 
 	return (
-		<nav aria-label={t("driveBreadcrumbLabel")}>
-			<ol className="flex items-center gap-1.5 text-sm">
+		// The trail is the header row's only yielding item — the action cluster beside it is shrink-0 and
+		// its buttons must never be pushed past the card edge. min-w-0 lets it shrink below its crumbs'
+		// own width; justify-end then overflows the OLDEST ancestors out of the clipped box instead of the
+		// current directory, which is the one crumb worth keeping. All three are inert wherever the row
+		// already fits, so desktop is unchanged.
+		<nav
+			aria-label={t("driveBreadcrumbLabel")}
+			className="min-w-0 overflow-hidden"
+		>
+			<ol className="flex items-center justify-end gap-1.5 text-sm whitespace-nowrap">
 				<li>
 					{uuids.length === 0 ? (
 						<span

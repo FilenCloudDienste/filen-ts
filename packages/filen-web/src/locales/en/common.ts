@@ -35,6 +35,8 @@ export const common = {
 	/** Icon rail — tooltip suffix on modules and items that are not available yet */
 	comingSoon: "Coming soon",
 	// Rail modules
+	/** Icon rail — narrow-viewport only: opens the drawer holding the current module's sidebar (hidden at desktop widths) */
+	openNavigation: "Open navigation",
 	/** Drive module — icon rail tooltip/accessible label and the drive page heading */
 	moduleDrive: "Cloud Drive",
 	/** Notes module — icon rail tooltip/accessible label (not available yet) */

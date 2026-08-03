@@ -91,13 +91,16 @@ export function NewDirectory({ parentUuid, disabled = false, dialogOpen, offline
 						<Button
 							variant="outline"
 							size="sm"
+							// Label sheds below sm — see uploadMenu.tsx's matching trigger for why the aria-label is
+							// the same key.
+							aria-label={t("driveNewDirectoryTitle")}
 							disabled={disabled}
 							onClick={() => {
 								setOpen(true)
 							}}
 						>
 							<FolderPlusIcon />
-							{t("driveNewDirectoryTitle")}
+							<span className="hidden sm:inline">{t("driveNewDirectoryTitle")}</span>
 						</Button>
 					}
 				/>

@@ -24,12 +24,15 @@ export function EmptyTrashButton({ onClick, disabled, offlineTitle }: EmptyTrash
 		<Button
 			variant="destructive"
 			size="sm"
+			// Label sheds below sm — see uploadMenu.tsx's matching trigger for why the aria-label is the
+			// same key.
+			aria-label={t(labelKey)}
 			disabled={disabled}
 			title={offlineTitle}
 			onClick={onClick}
 		>
 			{createElement(icon, { "aria-hidden": true })}
-			{t(labelKey)}
+			<span className="hidden sm:inline">{t(labelKey)}</span>
 		</Button>
 	)
 }

@@ -78,47 +78,58 @@ export function TransfersScreen() {
 						<span className="shrink-0 text-xs text-muted-foreground tabular-nums">
 							{t("transfersAggregateSpeed", { speed: formatBytes(speed) })}
 						</span>
+						{/* Narrower bar below sm: the speed label beside it does not shrink either, so at phone
+						    widths the two together overflow this row. */}
 						<Progress
 							value={percent}
 							aria-label={t("transfersAggregateProgressLabel")}
-							className="h-1.5 w-32 shrink-0 gap-0"
+							className="h-1.5 w-20 shrink-0 gap-0 sm:w-32"
 						/>
 					</div>
 				) : null}
 			</header>
-			<div className="flex h-12 shrink-0 items-center justify-end gap-2 px-4">
+			{/* Shed labels below sm, then wrap — never scroll, never clip. Each button keeps its visible label
+			    as a permanent aria-label, so its accessible name is the same at every width; min-h + symmetric
+			    padding replaces the fixed height so a wrapped second line has somewhere to go (this row sits
+			    inside the shell's overflow-hidden main). flex-wrap is the valve for longer locales — icon-only
+			    en-US fits on one line well below 390px. */}
+			<div className="flex min-h-12 shrink-0 flex-wrap items-center justify-end gap-2 px-4 py-2">
 				<Button
 					variant="outline"
 					size="sm"
+					aria-label={t("transfersScreenPauseAll")}
 					disabled={pausable.length === 0}
 					onClick={handlePauseAll}
 				>
 					<PauseIcon aria-hidden="true" />
-					{t("transfersScreenPauseAll")}
+					<span className="hidden sm:inline">{t("transfersScreenPauseAll")}</span>
 				</Button>
 				<Button
 					variant="outline"
 					size="sm"
+					aria-label={t("transfersScreenResumeAll")}
 					disabled={resumable.length === 0}
 					onClick={handleResumeAll}
 				>
 					<PlayIcon aria-hidden="true" />
-					{t("transfersScreenResumeAll")}
+					<span className="hidden sm:inline">{t("transfersScreenResumeAll")}</span>
 				</Button>
 				<Button
 					variant="outline"
 					size="sm"
+					aria-label={t("transfersScreenCancelAll")}
 					disabled={cancellable.length === 0}
 					onClick={() => {
 						setCancelAllConfirmOpen(true)
 					}}
 				>
 					<XIcon aria-hidden="true" />
-					{t("transfersScreenCancelAll")}
+					<span className="hidden sm:inline">{t("transfersScreenCancelAll")}</span>
 				</Button>
 				<Button
 					variant="outline"
 					size="sm"
+					aria-label={t("transfersClearFinished")}
 					disabled={!clearable}
 					onClick={() => {
 						// .getState() idiom — the exact store call, outside render (mirrors directoryListing.tsx's
@@ -127,7 +138,7 @@ export function TransfersScreen() {
 					}}
 				>
 					<Trash2Icon aria-hidden="true" />
-					{t("transfersClearFinished")}
+					<span className="hidden sm:inline">{t("transfersClearFinished")}</span>
 				</Button>
 			</div>
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">

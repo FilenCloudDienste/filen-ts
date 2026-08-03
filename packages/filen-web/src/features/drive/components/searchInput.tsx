@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { SearchIcon, XIcon } from "lucide-react"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
+import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import { Kbd } from "@/lib/keymap/kbd"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -41,7 +42,11 @@ export function SearchInput({ value, onChange, onClear, dialogOpen }: SearchInpu
 		keyboardEvent => {
 			keyboardEvent.preventDefault()
 
-			if (dialogOpen) {
+			// dialogOpen only knows about drive's own dialog host; a modal raised anywhere else in the shell
+			// (the startup account reminders, the narrow-viewport sidebar drawer) would otherwise still let
+			// mod+f pull focus onto this input behind that surface's focus trap. Same shared signal the rail's
+			// own navigation actions guard on.
+			if (dialogOpen || isAnyDialogOpen()) {
 				return
 			}
 
@@ -52,7 +57,10 @@ export function SearchInput({ value, onChange, onClear, dialogOpen }: SearchInpu
 	)
 
 	return (
-		<div className="relative w-full max-w-xs">
+		// min-w-0: the input's own intrinsic width is this wrapper's flex floor otherwise, and the controls
+		// row beside it cannot shrink at all — on a narrow card the box would be pushed past the content
+		// card's edge instead of narrowing.
+		<div className="relative w-full max-w-xs min-w-0">
 			<SearchIcon
 				aria-hidden="true"
 				className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"

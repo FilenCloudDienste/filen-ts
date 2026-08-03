@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs"
-import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { dismissStartupReminders } from "./helpers/listing"
+import { gotoSettings } from "./helpers/settings"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Every settings section here is either a plain, read-only render (Account/Appearance/Security's own
@@ -10,24 +9,9 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // uploadAvatar/deleteAll* all stay unit/render-only, never invoked against the live shared account).
 // getUserInfo/getGdprInfo are the only live network reads exercised, both read-only.
 //
-// Client-nav only (same constraint as contacts.spec.ts/notes.spec.ts): the injection hook re-seeds and
-// navigates to "/" → /drive on every load, so a hard goto to any other authed route bounces back before
-// it renders. The one path into /settings is goto("/drive") then a real in-app click through the
-// account menu — the "Settings" entry now lands on /settings/account (the index route's redirect target).
-//
 // Chromium-only: the account query (useAccountQuery -> getUserInfo) fires a real authenticated read on
 // every settings page mount — the same worker cross-origin SDK path that hangs on Playwright-firefox
 // (helpers/firefox.ts).
-async function gotoSettings(page: Page): Promise<void> {
-	await page.goto("/drive")
-	await dismissStartupReminders(page)
-	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
-
-	await page.getByRole("button", { name: "Account", exact: true }).click()
-	await page.getByRole("menuitem", { name: "Settings", exact: true }).click()
-	await page.waitForURL(/\/settings\/account$/)
-}
-
 test.describe("settings", () => {
 	test("the settings sidebar renders every section and Account is the index-redirect landing section", async ({
 		page,
@@ -262,7 +246,7 @@ test.describe("settings", () => {
 		await page.waitForURL(/\/settings\/advanced$/)
 
 		// Asserted, never clicked — a real click would leave the app on an external filen.io page,
-		// which the on-load-into-"/" injection hook (see gotoSettings's own doc comment) can't undo.
+		// which the on-load-into-"/" injection hook (see helpers/settings.ts's own doc comment) can't undo.
 		const tos = page.getByRole("link", { name: "Terms of Service", exact: true })
 		await expect(tos).toBeVisible()
 		await expect(tos).toHaveAttribute("href", "https://filen.io/terms")

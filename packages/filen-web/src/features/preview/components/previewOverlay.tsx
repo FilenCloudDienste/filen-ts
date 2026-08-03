@@ -409,6 +409,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 				return (
 					<InfoDialog
 						item={driveItem}
+						variant={variant}
 						remoteInfoEnabled={variant !== "trash"}
 						onClose={() => {
 							setMenuDialogKind(null)

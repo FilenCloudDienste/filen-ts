@@ -53,7 +53,8 @@ export function SettingsSidebar() {
 		<aside
 			// Drag region (Electron plumbing): inert in a plain browser, opted back out by every
 			// interactive descendant via app-region-no-drag — same convention as the other sidebars.
-			className="hidden w-52 shrink-0 flex-col rounded-xl bg-sidebar app-region-drag md:flex"
+			// Visibility is the shell's call, never this panel's — see appShell.tsx.
+			className="flex w-52 max-w-full shrink-0 flex-col rounded-xl bg-sidebar app-region-drag"
 		>
 			<div className="flex flex-1 flex-col overflow-y-auto p-3">
 				<h2 className="truncate px-2.5 pt-1 pb-2.5 text-[15px] font-semibold">{t("common:settings")}</h2>

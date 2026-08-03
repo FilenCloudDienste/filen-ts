@@ -408,6 +408,7 @@ export function useDriveDialogHost({ variant, selectedItems }: UseDriveDialogHos
 				return (
 					<InfoDialog
 						item={item}
+						variant={variant}
 						remoteInfoEnabled={variant !== "trash"}
 						onClose={closeActiveDialog}
 					/>

@@ -205,8 +205,10 @@ export function DriveSidebar() {
 				// Drag region (Electron plumbing): inert in a plain browser (-webkit-app-region is ignored
 				// outside Chromium/Electron). Interactive descendants opt back out with app-region-no-drag.
 				// Width is user-resizable (see useResizableSidebar) — the inline style replaces what used
-				// to be a static w-52 utility class.
-				className="hidden shrink-0 flex-col rounded-xl bg-sidebar app-region-drag md:flex"
+				// to be a static w-52 utility class, and max-w-full clamps a wide persisted width to
+				// whatever host it lands in (the shell row, or the narrow-viewport drawer). Visibility is
+				// the shell's call, never this panel's — see appShell.tsx.
+				className="flex max-w-full shrink-0 flex-col rounded-xl bg-sidebar app-region-drag"
 				style={{ width: resize.width }}
 			>
 				<div className="flex flex-1 flex-col overflow-y-auto p-3">

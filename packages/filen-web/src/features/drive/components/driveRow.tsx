@@ -128,11 +128,18 @@ export function DriveRow({
 							/>
 						)}
 						<span className="min-w-0 flex-1 truncate">{name}</span>
+						{/* These two ride with the Modified column (see directoryListing.tsx's header): their flex
+						    base size is their own content width while the name's is 0, so every pixel the card is
+						    short comes out of the name first. Non-monotonic on purpose — the card is widest just
+						    below md and narrowest just above it, because that is where the shell puts the sidebar
+						    back into the row. What they carry stays reachable in the item info dialog. */}
 						{searchParentPath !== undefined && searchParentPath.length > 0 ? (
-							<span className="max-w-48 min-w-0 shrink truncate text-xs text-muted-foreground">{searchParentPath}</span>
+							<span className="hidden max-w-48 min-w-0 shrink truncate text-xs text-muted-foreground sm:block md:hidden lg:block">
+								{searchParentPath}
+							</span>
 						) : null}
 						{shared ? (
-							<span className="max-w-48 min-w-0 shrink truncate text-xs text-muted-foreground">
+							<span className="hidden max-w-48 min-w-0 shrink truncate text-xs text-muted-foreground sm:block md:hidden lg:block">
 								{t(shared.labelKey, { name: shared.name })}
 							</span>
 						) : null}
@@ -145,10 +152,12 @@ export function DriveRow({
 								<span className="sr-only">{t("driveFavorited")}</span>
 							</>
 						) : null}
-						<span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+						<span className="hidden w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums sm:block">
 							{formatItemSize(item, directorySizes)}
 						</span>
-						<span className="w-28 shrink-0 text-right text-xs text-muted-foreground">{formatModifiedDate(item)}</span>
+						<span className="hidden w-28 shrink-0 text-right text-xs text-muted-foreground lg:block">
+							{formatModifiedDate(item)}
+						</span>
 						<DropdownMenu>
 							<DropdownMenuTrigger
 								render={
@@ -160,7 +169,10 @@ export function DriveRow({
 										// sequence, matching the row's own tabIndex — otherwise every visible row would
 										// add its own Tab stop, defeating the listbox's one-stop roving pattern.
 										tabIndex={active ? 0 : -1}
-										className="shrink-0 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
+										// A coarse pointer cannot hover, so the reveal never fires there — show the trigger
+										// unconditionally and grow it (glyph included, or icon-xs would pin a 12px mark
+										// inside a 32px box). 32px is the ceiling: the row is ROW_HEIGHT tall.
+										className="shrink-0 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 pointer-coarse:size-8 pointer-coarse:opacity-100 pointer-coarse:[&_svg:not([class*='size-'])]:size-4"
 										onClick={event => {
 											// Must not select the row — see itemMenu.tsx's own onClick for why a click
 											// inside the (portaled) menu content needs the same guard.

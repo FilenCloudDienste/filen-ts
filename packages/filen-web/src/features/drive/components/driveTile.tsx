@@ -179,7 +179,8 @@ export function DriveTile({
 											aria-label={t("driveItemMenuTrigger")}
 											// Roving-tabindex-friendly — see DriveRow's identical comment.
 											tabIndex={active ? 0 : -1}
-											className="absolute top-1 right-1 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
+											// Coarse-pointer fallback — see DriveRow's identical trigger.
+											className="absolute top-1 right-1 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 pointer-coarse:size-8 pointer-coarse:opacity-100 pointer-coarse:[&_svg:not([class*='size-'])]:size-4"
 											onClick={event => {
 												// Must not select the tile — see itemMenu.tsx's own onClick for why a click
 												// inside the (portaled) menu content needs the same guard.
