@@ -5,11 +5,14 @@ import { Logo } from "@/features/shell/components/logo"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ResetForm } from "@/features/auth/components/resetForm"
 import { AuthLegalLinks } from "@/features/auth/components/legalLinks"
+import { routeHead } from "@/lib/head/routeHead"
+import { i18n } from "@/lib/i18n"
 
 // Unauthed page: a live session bounces straight to /drive. Same shared guard as /login and
 // /register — see guard.ts. The reset link carries only a token, no email — the form itself asks for
 // it (see resetForm.tsx).
 export const Route = createFileRoute("/reset/$token")({
+	head: routeHead({ title: () => [i18n.t("auth:resetDocumentTitle")] }),
 	beforeLoad: redirectIfAuthed,
 	component: ResetPage
 })

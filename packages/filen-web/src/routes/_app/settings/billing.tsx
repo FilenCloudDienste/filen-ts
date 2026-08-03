@@ -9,13 +9,18 @@ import { ReferralCard } from "@/features/settings/components/billing/referralCar
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { routeHead } from "@/lib/head/routeHead"
+import { i18n } from "@/lib/i18n"
 
 // Read-only billing: plans/subscriptions/invoices tables (from getUserInfo — no separate billing
 // read exists) + a referral copy-link + "manage on filen.io" external links wherever a mutation would
 // otherwise live. Billing MANAGEMENT ops are a known SDK gap — sdk-rs has no cancelSubscription/
 // generateInvoice/withdrawal equivalent — this section only ever reads. Same
 // one-top-level-gate shape as the Account page.
-export const Route = createFileRoute("/_app/settings/billing")({ component: BillingPage })
+export const Route = createFileRoute("/_app/settings/billing")({
+	head: routeHead({ title: () => [i18n.t("settings:settingsSectionBilling"), i18n.t("common:settings")] }),
+	component: BillingPage
+})
 
 function BillingPage() {
 	const { t } = useTranslation(["settings", "common"])

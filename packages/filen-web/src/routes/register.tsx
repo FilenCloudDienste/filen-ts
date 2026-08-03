@@ -5,11 +5,14 @@ import { Logo } from "@/features/shell/components/logo"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { RegisterForm } from "@/features/auth/components/registerForm"
 import { AuthLegalLinks } from "@/features/auth/components/legalLinks"
+import { routeHead } from "@/lib/head/routeHead"
+import { i18n } from "@/lib/i18n"
 
 // Unauthed page: a live session bounces straight to /drive. Same shared guard as /login — see
 // guard.ts. Mirrors login.tsx's Card shell; the real form (strength meter, referral capture,
 // eligibility banner, check-your-email success state) lives in RegisterForm.
 export const Route = createFileRoute("/register")({
+	head: routeHead({ title: () => [i18n.t("auth:registerDocumentTitle")] }),
 	beforeLoad: redirectIfAuthed,
 	component: RegisterPage
 })

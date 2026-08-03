@@ -4,6 +4,9 @@ import {
 	canvasDimsForViewport,
 	canvasRenderTransform,
 	pdfPageAction,
+	pdfAnnotationBox,
+	pdfLayerScaleVars,
+	pdfLinkAnnotations,
 	clampPdfScale,
 	pdfStepZoomScale,
 	pdfWheelZoomScale,
@@ -197,5 +200,69 @@ describe("pdfPageAction — scale-change re-render (via a stale-vs-current rende
 		const rendered = renderedAtScale === currentScale
 
 		expect(pdfPageAction(true, rendered)).toBe("idle")
+	})
+})
+
+describe("pdfLayerScaleVars", () => {
+	it("supplies all three properties pdf.js's own layer sizing reads", () => {
+		const vars = pdfLayerScaleVars(1.5) as Record<string, string>
+
+		expect(Object.keys(vars).sort()).toEqual(["--scale-round-x", "--scale-round-y", "--total-scale-factor"])
+	})
+
+	it("stringifies the scale — a bare number would be suffixed with px by React", () => {
+		const vars = pdfLayerScaleVars(1.5) as Record<string, string>
+
+		expect(vars["--total-scale-factor"]).toBe("1.5")
+		expect(typeof vars["--total-scale-factor"]).toBe("string")
+	})
+
+	it("emits unit-bearing rounding properties — a unitless value makes round() invalid", () => {
+		const vars = pdfLayerScaleVars(1) as Record<string, string>
+
+		expect(vars["--scale-round-x"]).toBe("1px")
+		expect(vars["--scale-round-y"]).toBe("1px")
+	})
+})
+
+describe("pdfLinkAnnotations", () => {
+	function link(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+		return { subtype: "Link", url: "https://example.com/", rect: [10, 20, 110, 40], ...overrides }
+	}
+
+	it("keeps a Link carrying an http(s) URL", () => {
+		expect(pdfLinkAnnotations([link()])).toEqual([{ rect: [10, 20, 110, 40], url: "https://example.com/" }])
+	})
+
+	it("drops a javascript: URL — the shared scheme allowlist", () => {
+		expect(pdfLinkAnnotations([link({ url: "javascript:alert(1)" })])).toEqual([])
+	})
+
+	it("drops a non-Link subtype", () => {
+		expect(pdfLinkAnnotations([link({ subtype: "Widget" })])).toEqual([])
+	})
+
+	it("drops a Link with no url — an internal/destination link this viewer cannot resolve", () => {
+		expect(pdfLinkAnnotations([{ subtype: "Link", dest: "chapter-2", rect: [0, 0, 10, 10] }])).toEqual([])
+	})
+
+	it("drops a malformed rect", () => {
+		expect(pdfLinkAnnotations([link({ rect: [1, 2, 3] })])).toEqual([])
+		expect(pdfLinkAnnotations([link({ rect: [1, 2, 3, "4"] })])).toEqual([])
+		expect(pdfLinkAnnotations([link({ rect: undefined })])).toEqual([])
+	})
+
+	it("tolerates a non-object entry without throwing", () => {
+		expect(pdfLinkAnnotations([null, undefined, 42, "x", link()])).toHaveLength(1)
+	})
+})
+
+describe("pdfAnnotationBox", () => {
+	it("normalizes flipped corners into a positive box", () => {
+		expect(pdfAnnotationBox(10, 80, 110, 40)).toEqual({ left: 10, top: 40, width: 100, height: 40 })
+	})
+
+	it("yields a zero-size box for a zero-area rect rather than a negative one", () => {
+		expect(pdfAnnotationBox(25, 25, 25, 25)).toEqual({ left: 25, top: 25, width: 0, height: 0 })
 	})
 })

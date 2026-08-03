@@ -129,5 +129,13 @@ export const common = {
 	/** Relative time — days ago; singular */
 	relativeDaysAgo_one: "{{count}} day ago",
 	/** Relative time — days ago; plural */
-	relativeDaysAgo_other: "{{count}} days ago"
+	relativeDaysAgo_other: "{{count}} days ago",
+
+	// Not-found page — the router's global 404, also the browser tab title for any unmatched URL
+	/** Not-found page — heading shown when a URL matches no route */
+	notFoundTitle: "Page not found",
+	/** Not-found page — body explaining the URL is wrong or the item is gone */
+	notFoundBody: "This page doesn't exist, or the item it pointed to has been moved or deleted.",
+	/** Not-found page — action returning the visitor to the app (or sign-in when signed out) */
+	notFoundAction: "Go to Filen"
 } as const

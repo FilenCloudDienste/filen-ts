@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { DirectoryListing } from "@/features/drive/components/directoryListing"
+import { routeHead } from "@/lib/head/routeHead"
+import { i18n } from "@/lib/i18n"
 
 // Full-path splat, mirroring old web's own drive.$.tsx: `_splat` is the "/"-joined ancestor-uuid
 // chain with no leading/trailing slash. An empty splat matches bare /drive (My Drive root); a
@@ -7,7 +9,10 @@ import { DirectoryListing } from "@/features/drive/components/directoryListing"
 // (see features/drive/lib/navigate.ts's splatToUuids). Replaces the old flat drive.tsx + trailing-underscore
 // drive_.$uuid.tsx pair — one route now covers every depth, so the breadcrumb/navigate layer can
 // build straight off the URL instead of a getItemPath walk.
-export const Route = createFileRoute("/_app/drive/$")({ component: DrivePage })
+export const Route = createFileRoute("/_app/drive/$")({
+	head: routeHead({ title: () => [i18n.t("drive:driveMyDrive")] }),
+	component: DrivePage
+})
 
 function DrivePage() {
 	const { _splat } = Route.useParams()

@@ -43,4 +43,49 @@ test.describe("shell", { tag: "@no-sdk" }, () => {
 		expect(cspViolations, cspViolations.join("\n")).toEqual([])
 		expect(consoleErrors, consoleErrors.join("\n")).toEqual([])
 	})
+
+	test("the route's own title beats index.html's static one", async ({ page }) => {
+		// The browser is the only real proof that React's hoisted <title> is inserted AHEAD of the static
+		// fallback in index.html — a unit test cannot make that claim.
+		await page.goto("/")
+
+		await expect(page.getByText("Sign in to Filen")).toBeVisible()
+		await expect(page).toHaveTitle("Sign in · Filen")
+	})
+
+	test("serves a robots.txt that keeps crawlers off the public-link prefixes", async ({ page }) => {
+		const response = await page.request.get("/robots.txt")
+
+		expect(response.status()).toBe(200)
+
+		const body = await response.text()
+
+		expect(body).toContain("Disallow: /f/")
+		expect(body).toContain("Disallow: /d/")
+	})
+
+	test("carries the static description meta", async ({ page }) => {
+		await page.goto("/")
+
+		await expect(page.locator('meta[name="description"]')).toHaveAttribute("content", /end-to-end encrypted/)
+	})
+
+	test("an unknown root URL renders the 404 page", async ({ page }) => {
+		await page.goto("/definitely-not-a-route")
+
+		await expect(page.getByText("Page not found")).toBeVisible()
+		await expect(page.getByRole("link", { name: "Go to Filen" })).toBeVisible()
+		await expect(page).toHaveTitle("Page not found · Filen")
+	})
+
+	test("an unknown NESTED URL renders the 404 page under its own title, not its ancestor's", async ({ page }) => {
+		// The regression test: /login/bogus fuzzy-matches /login, whose head still runs, so without
+		// routeHead's not-found guard the tab would read "Sign in · Filen" while the 404 body renders.
+		// /login is chosen because it is a nested not-found URL reachable without a session.
+		await page.goto("/login/bogus")
+
+		await expect(page.getByText("Page not found")).toBeVisible()
+		await expect(page.getByRole("link", { name: "Go to Filen" })).toBeVisible()
+		await expect(page).toHaveTitle("Page not found · Filen")
+	})
 })

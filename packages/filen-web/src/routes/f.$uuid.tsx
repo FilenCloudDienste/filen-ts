@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { PublicLinkView } from "@/features/publicLinks/components/publicLinkView"
+import { NOINDEX_META, routeHead } from "@/lib/head/routeHead"
+import { i18n } from "@/lib/i18n"
 
 // UNAUTHENTICATED public-link viewer — FILE. A top-level route (sibling of /login), gated ONLY by the
 // root BootGate: no beforeLoad auth logic in either direction, so an anonymous visitor AND a signed-in
@@ -8,6 +10,7 @@ import { PublicLinkView } from "@/features/publicLinks/components/publicLinkView
 // route's redirect). The decryption key rides the URL fragment (#<key>), read client-side, never sent
 // to any server.
 export const Route = createFileRoute("/f/$uuid")({
+	head: routeHead({ title: () => [i18n.t("publicLinks:documentTitleFile")], meta: [NOINDEX_META] }),
 	component: FilePublicLinkPage
 })
 

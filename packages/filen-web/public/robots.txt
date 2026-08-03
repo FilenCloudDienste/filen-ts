@@ -1,0 +1,7 @@
+# A JS-executing crawler that follows a shared link renders the URL fragment client-side and would index
+# the DECRYPTED contents of someone's file or directory. The key itself never reaches a server (it rides
+# the fragment) — this is about rendered output, not the URL.
+# /f/ = file, /d/ = directory (features/publicLinks/lib/format.logic.ts).
+User-agent: *
+Disallow: /f/
+Disallow: /d/

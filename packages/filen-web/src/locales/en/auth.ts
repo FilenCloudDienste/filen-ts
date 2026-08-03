@@ -27,6 +27,14 @@
 // phrase and the compared phrase cannot drift — that same-source rule is TypedConfirmDialog's
 // matchValue contract.
 export const auth = {
+	// ── Browser tab titles ──────────────────────────────────────────────────────
+	/** Browser tab title for the sign-in page — short form of loginTitle, which is the page heading */
+	loginDocumentTitle: "Sign in",
+	/** Browser tab title for the register page */
+	registerDocumentTitle: "Create account",
+	/** Browser tab title for the password-reset page */
+	resetDocumentTitle: "Reset password",
+
 	// ── Login screen ────────────────────────────────────────────────────────────
 	/** Login screen — page title above the sign-in form */
 	loginTitle: "Sign in to Filen",

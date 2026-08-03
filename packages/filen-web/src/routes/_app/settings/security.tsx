@@ -9,13 +9,18 @@ import { DeleteAccountCard } from "@/features/settings/components/security/delet
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { routeHead } from "@/lib/head/routeHead"
+import { i18n } from "@/lib/i18n"
 
 // Guard inherited from `_app` (a session already exists by the time this route renders). Every
 // card independently reads useAccountQuery (react-query dedupes the shared ["account"] key — one
 // request, any number of subscribers), but the page gates on ONE top-level pending/error branch
 // (mirrors filen-mobile's security.tsx) so every card mounts only once the account has genuinely
 // loaded, rather than each re-deriving the same tri-state branch.
-export const Route = createFileRoute("/_app/settings/security")({ component: SecurityPage })
+export const Route = createFileRoute("/_app/settings/security")({
+	head: routeHead({ title: () => [i18n.t("settings:settingsSectionSecurity"), i18n.t("common:settings")] }),
+	component: SecurityPage
+})
 
 function SecurityPage() {
 	const { t } = useTranslation(["auth", "common"])

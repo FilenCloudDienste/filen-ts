@@ -272,5 +272,25 @@ export const settings = {
 	// ── Advanced: about / legal ────────────────────────────────────────────────
 	settingsAboutTitle: "About",
 	settingsAboutTermsOfService: "Terms of Service",
-	settingsAboutPrivacyPolicy: "Privacy Policy"
+	settingsAboutPrivacyPolicy: "Privacy Policy",
+
+	// ── Advanced: open source licenses ────────────────────────────────────────
+	/** Advanced settings — card title for the third-party attribution surface */
+	settingsNoticesTitle: "Open source licenses",
+	/** Advanced settings — card body explaining what the list contains */
+	settingsNoticesDescription: "Filen is built on open source software. These are the packages it includes, with their licenses.",
+	/** Advanced settings — button opening the licenses dialog */
+	settingsNoticesOpen: "View licenses",
+	/** Licenses dialog — filter box placeholder and aria-label */
+	settingsNoticesFilterPlaceholder: "Filter packages",
+	/** Licenses dialog — subtitle showing how many packages are listed; singular */
+	settingsNoticesCount_one: "{{count}} package",
+	/** Licenses dialog — subtitle showing how many packages are listed; plural */
+	settingsNoticesCount_other: "{{count}} packages",
+	/** Licenses dialog — empty state when the filter matches nothing */
+	settingsNoticesEmpty: "No packages match your filter.",
+	/** Licenses dialog — back button returning from one package's notice to the full list */
+	settingsNoticesBack: "Back to all packages",
+	/** Licenses dialog — shown for a package that shipped no license file; its SPDX id and repository are listed instead of another package's copyright */
+	settingsNoticesNoLicenseText: "This package did not ship a license file. Its license and repository are listed above."
 } as const

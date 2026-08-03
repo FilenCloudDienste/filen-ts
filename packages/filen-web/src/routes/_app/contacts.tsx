@@ -5,6 +5,8 @@ import {
 	isContactsSectionFilter,
 	type ContactsSectionFilter
 } from "@/features/contacts/components/contactsList.logic"
+import { routeHead } from "@/lib/head/routeHead"
+import { i18n } from "@/lib/i18n"
 
 // Flat page, no splat — unlike Drive there's no nested path segment. Requests/pending/contacts/
 // blocked all live in ContactsList's own single sectioned list, switched by this route's own
@@ -28,6 +30,7 @@ function validateSearch(search: Record<string, unknown>): ContactsSearch {
 // object partially matches everything) — always showing active, never actually distinguishing. Every
 // section, "all" included, always serializes explicitly instead.
 export const Route = createFileRoute("/_app/contacts")({
+	head: routeHead({ title: () => [i18n.t("common:moduleContacts")] }),
 	validateSearch,
 	component: ContactsPage
 })

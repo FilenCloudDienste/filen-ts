@@ -5,10 +5,13 @@ import { Logo } from "@/features/shell/components/logo"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { LoginForm } from "@/features/auth/components/loginForm"
 import { AuthLegalLinks } from "@/features/auth/components/legalLinks"
+import { routeHead } from "@/lib/head/routeHead"
+import { i18n } from "@/lib/i18n"
 
 // Unauthed page: a live session bounces straight to /drive. The shared guard awaits boot — which
 // includes session resume — before reading auth state, so the check is race-free.
 export const Route = createFileRoute("/login")({
+	head: routeHead({ title: () => [i18n.t("auth:loginDocumentTitle")] }),
 	beforeLoad: redirectIfAuthed,
 	component: LoginPage
 })

@@ -8,8 +8,16 @@ import { createRouter, RouterProvider } from "@tanstack/react-router"
 import "@/index.css"
 import { routeTree } from "@/routeTree.gen"
 import { bootSdk } from "@/lib/sdk/boot"
+import { NotFoundScreen } from "@/features/shell/components/notFoundScreen"
 
-const router = createRouter({ routeTree })
+// notFoundMode "root" (the default is "fuzzy") keeps every unknown URL on ONE full-page 404 instead of
+// rendering it inside whichever ancestor layout happened to match, and makes the root match the
+// not-found boundary — which is what lets the root route title the page (see __root.tsx). A future
+// thrown notFound() therefore also renders at the root; nothing throws one today.
+// Accepted: the 404 renders through the root Outlet, which is inside BootGate, so an unknown URL shows
+// the boot screen until the SDK is ready. Bypassing that would mean teaching BootGate to read
+// router-internal not-found state for a page whose only action is a router Link.
+const router = createRouter({ routeTree, defaultNotFoundComponent: NotFoundScreen, notFoundMode: "root" })
 
 // Kick the SDK boot as a module-level side effect, BEFORE <RouterProvider> mounts, so the boot-ready
 // gate (whenBootReady) is already in flight when the router runs its initial route guards. It must

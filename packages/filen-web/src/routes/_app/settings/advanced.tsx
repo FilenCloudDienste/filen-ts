@@ -4,8 +4,14 @@ import { SlidersHorizontalIcon } from "lucide-react"
 import { TransferConfigCard } from "@/features/settings/components/advanced/transferConfigCard"
 import { LogsCard } from "@/features/settings/components/advanced/logsCard"
 import { AboutCard } from "@/features/settings/components/advanced/aboutCard"
+import { ThirdPartyNoticesCard } from "@/features/settings/components/advanced/thirdPartyNoticesCard"
+import { routeHead } from "@/lib/head/routeHead"
+import { i18n } from "@/lib/i18n"
 
-export const Route = createFileRoute("/_app/settings/advanced")({ component: AdvancedPage })
+export const Route = createFileRoute("/_app/settings/advanced")({
+	head: routeHead({ title: () => [i18n.t("settings:settingsSectionAdvanced"), i18n.t("common:settings")] }),
+	component: AdvancedPage
+})
 
 function AdvancedPage() {
 	const { t } = useTranslation("settings")
@@ -23,6 +29,7 @@ function AdvancedPage() {
 					<TransferConfigCard />
 					<LogsCard />
 					<AboutCard />
+					<ThirdPartyNoticesCard />
 				</div>
 			</div>
 		</>

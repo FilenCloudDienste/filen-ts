@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { createRootRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
+import { createRootRoute, HeadContent, Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
 import { QueryClientProvider } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { queryClient } from "@/queries/client"
@@ -14,8 +14,17 @@ import { useBootStore } from "@/stores/boot"
 import { BootScreen } from "@/features/shell/components/bootScreen"
 import { BootErrorScreen } from "@/features/shell/components/bootErrorScreen"
 import { OfflineIndicator } from "@/features/shell/components/offlineIndicator"
+import { titleMeta } from "@/lib/head/routeHead"
 
-export const Route = createRootRoute({ component: RootLayout })
+export const Route = createRootRoute({
+	component: RootLayout,
+	// Fallback title for every route that declares none, and the only title a global not-found gets.
+	// Reads its OWN match, not matches[0], because the root IS matches[0] — and for the same reason this
+	// is the one route that must not go through routeHead(), whose job is to yield to this title.
+	head: ({ match }) => ({
+		meta: match.globalNotFound === true ? titleMeta(i18n.t("common:notFoundTitle")) : titleMeta()
+	})
+})
 
 // Every route inherits this gate. It renders the boot/error screens in place of the route Outlet
 // until the SDK is ready — except /no-coi and /no-opfs, which are intentionally boot-independent and
@@ -102,6 +111,10 @@ function RootLayout() {
 		<QueryClientProvider client={queryClient}>
 			<ThemeProvider>
 				<TooltipProvider>
+					{/* Router-managed <title>/<meta>. React 19 hoists these into <head> and inserts a hoisted
+					    <title> ahead of index.html's static one, which stays as the pre-hydration fallback.
+					    Outside BootGate so the title is also correct during boot and on the capability screens. */}
+					<HeadContent />
 					<BootGate />
 					{/* Mounted once here (not inside AppShell/the auth pages separately) — a fixed overlay
 					    with its own top-center position, so this single instance covers the authed shell

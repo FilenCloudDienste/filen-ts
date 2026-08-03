@@ -4,8 +4,13 @@ import { SunMoonIcon } from "lucide-react"
 import { ThemeCard } from "@/features/settings/components/appearance/themeCard"
 import { DriveMemoryCard } from "@/features/settings/components/appearance/driveMemoryCard"
 import { StartScreenCard } from "@/features/settings/components/appearance/startScreenCard"
+import { routeHead } from "@/lib/head/routeHead"
+import { i18n } from "@/lib/i18n"
 
-export const Route = createFileRoute("/_app/settings/appearance")({ component: AppearancePage })
+export const Route = createFileRoute("/_app/settings/appearance")({
+	head: routeHead({ title: () => [i18n.t("settings:settingsSectionAppearance"), i18n.t("common:settings")] }),
+	component: AppearancePage
+})
 
 function AppearancePage() {
 	const { t } = useTranslation("settings")

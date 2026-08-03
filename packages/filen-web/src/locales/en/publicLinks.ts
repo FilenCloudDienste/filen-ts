@@ -2,6 +2,11 @@
 // /f/ (file) and /d/ (directory) routes. Flat `as const` object, camelCase keys, no literal '.'/':'
 // (this app runs real i18next namespaces with keySeparator/nsSeparator both ON).
 export const publicLinks = {
+	/** Browser tab title for a /f/ file link — deliberately generic: no shared item's name ever enters the title or any meta tag */
+	documentTitleFile: "Shared file",
+	/** Browser tab title for a /d/ directory link — same privacy rule as documentTitleFile */
+	documentTitleDirectory: "Shared directory",
+
 	/** Shown while the link's metadata is being resolved */
 	opening: "Opening link…",
 	/** Invalid/expired surface — title (shared by bad uuid, bad/short key, not-found, network failure) */

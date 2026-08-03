@@ -14,11 +14,16 @@ import { DeleteAllItemsCard } from "@/features/settings/components/account/delet
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { routeHead } from "@/lib/head/routeHead"
+import { i18n } from "@/lib/i18n"
 
 // Same one-top-level-gate shape as the Security page: every card independently reads
 // useAccountQuery (dedupe via the shared ["account"] key), but the page gates on ONE
 // pending/error branch so every card mounts only once the account has genuinely loaded.
-export const Route = createFileRoute("/_app/settings/account")({ component: AccountPage })
+export const Route = createFileRoute("/_app/settings/account")({
+	head: routeHead({ title: () => [i18n.t("settings:settingsSectionAccount"), i18n.t("common:settings")] }),
+	component: AccountPage
+})
 
 function AccountPage() {
 	const { t } = useTranslation(["settings", "common"])

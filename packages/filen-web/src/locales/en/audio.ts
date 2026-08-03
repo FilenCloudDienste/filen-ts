@@ -62,9 +62,9 @@ export const audio = {
 	commandPrevious: "Previous track",
 
 	// ── Status / errors ────────────────────────────────────────────────────
-	/** Toast when a folder/selection is enqueued but some tracks couldn't be decrypted and were skipped, singular */
+	/** Toast when a directory/selection is enqueued but some tracks couldn't be decrypted and were skipped, singular */
 	droppedUndecryptable_one: "{{count}} track couldn't be decrypted and was skipped",
-	/** Toast when a folder/selection is enqueued but some tracks couldn't be decrypted and were skipped, plural */
+	/** Toast when a directory/selection is enqueued but some tracks couldn't be decrypted and were skipped, plural */
 	droppedUndecryptable_other: "{{count}} tracks couldn't be decrypted and were skipped",
 	/** Generic playback-failure label surfaced when a track can't be played and the queue settles */
 	playbackFailed: "Couldn't play this track",

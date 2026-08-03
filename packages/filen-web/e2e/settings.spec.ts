@@ -259,4 +259,25 @@ test.describe("settings", () => {
 		await expect(privacy).toHaveAttribute("target", "_blank")
 		await expect(privacy).toHaveAttribute("rel", "noopener noreferrer")
 	})
+
+	test("the Advanced section opens the lazily-loaded open source licenses dialog", async ({ page, injectedSession, browserName }) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		await gotoSettings(page)
+
+		await page.getByRole("link", { name: "Advanced", exact: true }).click()
+		await page.waitForURL(/\/settings\/advanced$/)
+
+		// The only real proof that the lazily-imported payload chunk loads under the hardened preview CSP.
+		await page.getByRole("button", { name: "View licenses", exact: true }).click()
+
+		await expect(page.getByRole("heading", { name: "Open source licenses" })).toBeVisible()
+
+		// The list is virtualized over ~1300 rows, so any given package is outside the initial window —
+		// filter for it first rather than expecting it on screen.
+		await page.getByRole("searchbox", { name: "Filter packages" }).fill("react")
+
+		await expect(page.getByRole("button", { name: /^react /, exact: false }).first()).toBeVisible()
+	})
 })

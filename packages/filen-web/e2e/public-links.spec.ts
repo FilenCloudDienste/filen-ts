@@ -97,4 +97,14 @@ test.describe("public links (unauthenticated)", () => {
 
 		await expect(page).toHaveURL(new RegExp(`/d/${RANDOM_UUID}#${HEX_KEY}`))
 	})
+
+	test("a link route carries a generic title and a noindex robots meta", async ({ page }) => {
+		// Belt to robots.txt's braces for a JS-executing crawler that reached the route anyway. The title
+		// is deliberately generic — a shared item's NAME never enters the title or any meta tag. Needs only
+		// the route to mount, not the SDK round trip, so no engine gate is required.
+		await page.goto(`/f/${RANDOM_UUID}#${HEX_KEY}`)
+
+		await expect(page).toHaveTitle("Shared file · Filen", { timeout: 30_000 })
+		await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/)
+	})
 })
