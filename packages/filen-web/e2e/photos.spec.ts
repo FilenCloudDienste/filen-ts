@@ -85,7 +85,13 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 		const overlay = page.getByRole("dialog")
 		await expect(page.getByRole("img", { name: nameImage })).toBeVisible({ timeout: 30_000 })
 
-		await overlay.getByRole("button", { name: "Next file", exact: true }).click()
+		// Whichever pager direction the video sibling happens to sit in: both files are uploaded in one
+		// batch, so the capture-sort tie-break decides which of the two slots the image occupies, and with
+		// exactly two slots exactly one button is enabled from either end (same reason preview-text.spec
+		// steps by enablement rather than by name).
+		const nextButton = overlay.getByRole("button", { name: "Next file", exact: true })
+		const prevButton = overlay.getByRole("button", { name: "Previous file", exact: true })
+		await ((await nextButton.isEnabled()) ? nextButton : prevButton).click()
 		await expect(page.locator("video")).toBeVisible({ timeout: 30_000 })
 
 		// ---- favorite FROM INSIDE the overlay (the currently-viewed video slot) ----
