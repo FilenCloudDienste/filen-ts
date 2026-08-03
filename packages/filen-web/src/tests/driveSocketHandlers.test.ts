@@ -273,6 +273,15 @@ describe("drive socket handlers — favorites membership", () => {
 		expect(getFavorites()?.map(item => item.data.uuid)).toEqual([testUuid("file")])
 	})
 
+	it("itemFavorite aborts an in-flight favorites refetch before patching membership", () => {
+		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
+
+		seedFavorites([])
+		handleDriveEvent(driveEvt({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: true }) } }))
+
+		expect(cancelSpy).toHaveBeenCalledWith({ queryKey: driveListingQueryKey({ variant: "favorites", uuid: null }), exact: true })
+	})
+
 	it("itemFavorite still replaces the row in place in every other cached listing", () => {
 		seedListing(PARENT_A, [narrowItem(mockFile())])
 		seedFavorites([])
@@ -303,6 +312,25 @@ describe("drive socket handlers — recents insertion", () => {
 		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
 
 		expect(getRecents()?.map(item => item.data.uuid)).toEqual([testUuid("file")])
+	})
+
+	// Recents runs staleTime 0 and refetches on mount/focus: a refetch snapshotted before the upload was
+	// server-visible would land after this insert and drop the row again.
+	it("fileNew aborts an in-flight recents refetch before patching it", () => {
+		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
+
+		seedRecents([])
+		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+
+		expect(cancelSpy).toHaveBeenCalledWith({ queryKey: driveListingQueryKey({ variant: "recents", uuid: null }), exact: true })
+	})
+
+	it("leaves an unfetched recents listing's fetch alone — cancelling an INITIAL fetch would strand it", () => {
+		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
+
+		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
+
+		expect(cancelSpy).not.toHaveBeenCalledWith({ queryKey: driveListingQueryKey({ variant: "recents", uuid: null }), exact: true })
 	})
 })
 

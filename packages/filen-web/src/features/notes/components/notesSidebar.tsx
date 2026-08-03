@@ -59,6 +59,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useAction } from "@/lib/keymap/useAction"
 import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
+import { useIsSidebarPanelVisible } from "@/features/shell/lib/sidebarPanelVisibility"
 import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
 import { NoteRow } from "@/features/notes/components/noteRow"
 import { NotesBulkActionBar } from "@/features/notes/components/notesBulkActionBar"
@@ -334,6 +335,7 @@ function TagsSortMenu({ value, onChange }: { value: NoteTagsSortBy; onChange: (n
 export function NotesSidebar() {
 	const { t } = useTranslation(["notes", "common"])
 	const isOnline = useIsOnline()
+	const panelVisible = useIsSidebarPanelVisible()
 	const navigate = useNavigate()
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const selectedUuid = selectedUuidFromPath(pathname)
@@ -525,6 +527,12 @@ export function NotesSidebar() {
 	// Guarded on dialogHost.isDialogOpen so a background Cmd+A can't select notes behind an open
 	// dialog. Targets `selectableNotes` (already search-filtered) minus undecryptable ones — mirrors
 	// drive.selectAll exactly.
+	//
+	// The three selection actions below are additionally OFF while the panel is out of sight (drawer
+	// closed below the layout breakpoint): every trace of a selection — rows, count, bulk bar — lives
+	// inside this panel, so firing them there would swallow the browser's own select-all and leave an
+	// invisible selection a later Delete could act on. notes.newNote stays live: it navigates, so its
+	// result is visible wherever it is triggered from.
 	useAction(
 		"notes.selectAll",
 		event => {
@@ -535,7 +543,7 @@ export function NotesSidebar() {
 			event.preventDefault()
 			useNotesSelectionStore.getState().setSelectedNotes(selectableNotesForSelectAll(selectableNotes))
 		},
-		undefined,
+		{ enabled: panelVisible },
 		[dialogHost.isDialogOpen, selectableNotes]
 	)
 
@@ -551,7 +559,7 @@ export function NotesSidebar() {
 
 			useNotesSelectionStore.getState().clearSelectedNotes()
 		},
-		undefined,
+		{ enabled: panelVisible },
 		[dialogHost.isDialogOpen]
 	)
 
@@ -575,7 +583,7 @@ export function NotesSidebar() {
 
 			dialogHost.openBulkDialog("trashSelected", liveSelectedNotes)
 		},
-		undefined,
+		{ enabled: panelVisible },
 		[dialogHost.isDialogOpen, isOnline, liveSelectedNotes, currentUserId]
 	)
 

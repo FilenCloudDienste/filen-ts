@@ -5,6 +5,7 @@ import { deriveBlockedUsers, type BlockedUsers } from "@/features/contacts/lib/b
 import {
 	filterDriveItemsByLocalSearch,
 	filterSharedInByBlocked,
+	hiddenSelectionUuids,
 	isBlockingListingError,
 	isEmptyTrashTriggerVisible,
 	isVisibleSharedInItem,
@@ -245,6 +246,30 @@ describe("staleSelectionUuids", () => {
 	})
 })
 
+describe("hiddenSelectionUuids", () => {
+	it("returns the selected uuids the hide filter removed from the display", () => {
+		const kept = narrowItem(mockDir({ uuid: testUuid("hid-kept") }))
+		const gone = narrowItem(mockFile({ uuid: testUuid("hid-gone") }))
+
+		expect(hiddenSelectionUuids([kept, gone], [gone.data.uuid])).toEqual([gone.data.uuid])
+	})
+
+	// The rename case: the store still holds the PRE-rename snapshot, so the purge has to be driven by
+	// the display pipeline's own output rather than by the selected items' own names.
+	it("purges by uuid, never by the selected item's own (possibly stale) name", () => {
+		const renamed = narrowItem(mockDir({ uuid: testUuid("hid-renamed"), meta: { type: "decoded", data: { name: "notes" } } }))
+
+		expect(hiddenSelectionUuids([renamed], [renamed.data.uuid])).toEqual([renamed.data.uuid])
+	})
+
+	it("returns an empty array when nothing selected is hidden", () => {
+		const kept = narrowItem(mockDir({ uuid: testUuid("hid-none") }))
+
+		expect(hiddenSelectionUuids([kept], [])).toEqual([])
+		expect(hiddenSelectionUuids([], [testUuid("hid-other")])).toEqual([])
+	})
+})
+
 describe("isBlockingListingError", () => {
 	// A background refetch failure with cached items retained must never blank the listing.
 	it("is false (non-blocking) for a refetch error with retained data", () => {
@@ -376,6 +401,18 @@ describe("resolveListingDisplayItems", () => {
 		expect(result.resolvedCount).toBe(3)
 		expect(result.hiddenCount).toBe(1)
 		expect(result.items.length).toBe(2)
+	})
+
+	it("reports WHICH uuids were hidden, so the listing can purge them from the selection", () => {
+		const hidden = named("uuids-hidden", ".env")
+		const shown = named("uuids-shown", "readme")
+
+		const result = resolveListingDisplayItems({ items: [shown, hidden], sortBy: "nameAsc", directorySizes: NO_SIZES, hide: true })
+
+		expect(result.hiddenUuids).toEqual([hidden.data.uuid])
+		expect(
+			resolveListingDisplayItems({ items: [shown, hidden], sortBy: "nameAsc", directorySizes: NO_SIZES, hide: false }).hiddenUuids
+		).toEqual([])
 	})
 
 	it("hides a search hit by its ancestor chain, not just its own name", () => {

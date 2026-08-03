@@ -4,9 +4,11 @@ import type { Dir, File, GetItemPathResult, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — reveal.ts
-// pulls it in transitively through queries/drive. Every case below injects its own fetchPath, so no
-// worker op is ever reached.
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
+// pulls it in transitively through queries/drive. Every resolver case below injects its own
+// fetchPath; only the defaultRevealDeps case reaches this stub.
+const { getItemPath } = vi.hoisted(() => ({ getItemPath: vi.fn() }))
+
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getItemPath } }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
@@ -14,7 +16,12 @@ const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: toastError, info: vi.fn() } }))
 
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
-import { resolveContainingDirectoryTarget, runOpenContainingDirectory, type RevealDeps } from "@/features/drive/lib/reveal"
+import {
+	defaultRevealDeps,
+	resolveContainingDirectoryTarget,
+	runOpenContainingDirectory,
+	type RevealDeps
+} from "@/features/drive/lib/reveal"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -109,6 +116,18 @@ describe("resolveContainingDirectoryTarget", () => {
 		await resolveContainingDirectoryTarget(deps(fetchPath), item)
 
 		expect(fetchPath).toHaveBeenCalledExactlyOnceWith(item)
+	})
+})
+
+describe("defaultRevealDeps", () => {
+	it("re-walks the chain on every reveal — a move keeps the uuid, so a cached path would land the user where the item used to be", async () => {
+		getItemPath.mockResolvedValueOnce(pathResult(["a"])).mockResolvedValueOnce(pathResult(["b"]))
+
+		const item = hitItem()
+
+		await expect(defaultRevealDeps.fetchPath(item)).resolves.toEqual(pathResult(["a"]))
+		await expect(defaultRevealDeps.fetchPath(item)).resolves.toEqual(pathResult(["b"]))
+		expect(getItemPath).toHaveBeenCalledTimes(2)
 	})
 })
 

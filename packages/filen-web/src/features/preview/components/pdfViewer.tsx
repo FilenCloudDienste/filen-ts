@@ -222,6 +222,9 @@ function PdfPage({
 	const textLayerRef = useRef<HTMLDivElement | null>(null)
 	const [links, setLinks] = useState<PdfLinkAnnotation[]>([])
 	const [page, setPage] = useState<PDFPageProxy | null>(null)
+	// The proxy whose annotations have already been requested — the lazy fetch below must fire once per
+	// page, not once per re-entry into the extended view.
+	const annotationsRequestedFor = useRef<PDFPageProxy | null>(null)
 	// Which scale this page's canvas was last painted at, if any — `null` before any render (or right
 	// after eviction). Storing the SCALE (not just a rendered boolean) is what lets a zoom change force
 	// a fresh render without a separate reset effect: `rendered` below is derived fresh every render
@@ -418,20 +421,26 @@ function PdfPage({
 
 	// Fetched once per page, in its own effect: not in the canvas render effect (same `rendered`-in-deps
 	// teardown trap as above) and not in the text-layer effect either, since the annotation DATA does not
-	// depend on `scale` — only its layout does. Only external links are rendered: resolving an internal
-	// destination needs a real link service wired to this viewer's own scroll container, which this
-	// viewer has none of.
+	// depend on `scale` — only its layout does. Gated on the same extended-viewport membership those two
+	// use, so a long document costs one worker round trip per page the reader actually approaches instead
+	// of one per page at open. Only external links are rendered: resolving an internal destination needs
+	// a real link service wired to this viewer's own scroll container, which this viewer has none of.
 	useEffect(() => {
-		if (!page) {
+		if (!page || !withinExtendedView || annotationsRequestedFor.current === page) {
 			return
 		}
 
-		let live = true
+		annotationsRequestedFor.current = page
 
 		void page
 			.getAnnotations({ intent: "display" })
 			.then((annotations: unknown[]) => {
-				if (live) {
+				// Guarded on the page identity, not on an effect-scoped `live` flag: getAnnotations is a raw
+				// worker round trip with no cache of its own, so a page that leaves the extended view
+				// mid-flight must keep the result it already paid for rather than drop it and refetch on the
+				// way back. What must stay inert is a response for a REPLACED proxy (a new document in the
+				// same slot), which this comparison catches.
+				if (annotationsRequestedFor.current === page) {
 					setLinks(pdfLinkAnnotations(annotations))
 				}
 			})
@@ -439,11 +448,7 @@ function PdfPage({
 				// A page whose annotations fail to parse still renders and stays readable — just without its
 				// links. The document-level error branch already covers a genuinely broken PDF.
 			})
-
-		return () => {
-			live = false
-		}
-	}, [page])
+	}, [page, withinExtendedView])
 
 	const viewport = page?.getViewport({ scale })
 
@@ -471,13 +476,16 @@ function PdfPage({
 			<div
 				ref={textLayerRef}
 				className="pdf-text-layer"
-				style={pdfLayerScaleVars(scale)}
+				style={pdfLayerScaleVars(scale, page?.userUnit ?? 1)}
 			/>
 			{/* LAST children of the wrapper on purpose: the text layer above covers the whole page with no
 			pointer-events opt-out, so anchors painted before it would be unclickable. Real <a href> elements,
 			so they are keyboard-reachable — a capability the canvas-only viewer never had. The aria-label is
-			the URL itself (data, not UI copy — an empty anchor would have no accessible name at all). */}
-			{viewport
+			the URL itself (data, not UI copy — an empty anchor would have no accessible name at all).
+			Rendered on the same gate the canvas and text layer use: an anchor over an evicted (spinner-only)
+			page is invisible but still in the tab order, so Tab would land focus on nothing and scroll the
+			list there. */}
+			{viewport && shouldRender && withinExtendedView
 				? links.map(link => {
 						const start = viewportPoint(viewport.convertToViewportPoint(link.rect[0], link.rect[1]))
 						const end = viewportPoint(viewport.convertToViewportPoint(link.rect[2], link.rect[3]))

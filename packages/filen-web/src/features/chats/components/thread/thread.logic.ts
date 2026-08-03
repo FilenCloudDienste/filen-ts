@@ -1,5 +1,6 @@
 import type { ChatMessage } from "@filen/sdk-rs"
 import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@/features/contacts/lib/blocking"
+import { messageSenderName } from "@/features/chats/lib/sort"
 
 // Thread row model + scroll math — PURE, no React, unit-tested.
 //
@@ -175,13 +176,56 @@ export function nextScrollAffordanceState(prev: ScrollAffordanceState, event: Sc
 
 // The thread's screen-reader arrival announcement. `seq` is the entire re-announcement mechanism: it keys
 // the live region's inner span, so a repeat arrival from the same sender remounts that child and AT speaks
-// it again — an identical text node left in place would simply be skipped.
+// it again — an identical text node left in place would simply be skipped. `name` is null when the batch
+// mixes senders: the count is announced alone rather than credited to one of them.
 export interface ThreadAnnouncement {
 	seq: number
 	count: number
-	name: string
+	name: string | null
 }
 
-export function nextAnnouncement(prev: ThreadAnnouncement | null, count: number, name: string): ThreadAnnouncement {
+export function nextAnnouncement(prev: ThreadAnnouncement | null, count: number, name: string | null): ThreadAnnouncement {
 	return { seq: (prev?.seq ?? 0) + 1, count, name }
+}
+
+// What an arrival announces, derived from the whole tail slice that just landed rather than from its last
+// message: a window-focus/reconnect refetch commits several messages in ONE cache write, and those can come
+// from different senders — pairing the batch count with the last sender's name misattributes the rest.
+// Self and blocked senders drop out of both the count and the name, so a batch whose last message is
+// blocked still announces the others; the announcement channel is held to the same blocked policy as the
+// visual surfaces, and it is the one channel with no visual equivalent to check against.
+// null = nothing to announce. `currentUserId` unresolved makes self-detection impossible, so nothing is
+// announced until it lands (own sends from another tab arrive as ordinary tail growth).
+export function announcementSubject(
+	messages: readonly ChatMessage[],
+	newTailCount: number,
+	currentUserId: bigint | undefined,
+	blocked: BlockedUsers
+): { count: number; name: string | null } | null {
+	if (currentUserId === undefined || newTailCount <= 0) {
+		return null
+	}
+
+	let count = 0
+	let senderId: number | undefined
+	let name: string | null = null
+
+	for (const message of messages.slice(Math.max(0, messages.length - newTailCount))) {
+		const messageSenderId = BigInt(message.senderId)
+
+		if (messageSenderId === currentUserId || isBlocked({ userId: messageSenderId, email: message.senderEmail }, blocked)) {
+			continue
+		}
+
+		count += 1
+
+		if (count === 1) {
+			senderId = message.senderId
+			name = messageSenderName(message)
+		} else if (message.senderId !== senderId) {
+			name = null
+		}
+	}
+
+	return count === 0 ? null : { count, name }
 }

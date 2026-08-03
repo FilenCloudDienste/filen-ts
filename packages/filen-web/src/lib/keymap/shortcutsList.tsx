@@ -7,7 +7,7 @@ import { Kbd } from "@/lib/keymap/kbd"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { useActionCatalog } from "@/lib/keymap/actions"
 import { conflictingActions } from "@/lib/keymap/conflicts"
-import { normalizeRecordedCombo } from "@/lib/keymap/captureCombo"
+import { recordingOutcome } from "@/lib/keymap/captureCombo"
 import { groupShortcuts, SHORTCUT_NAMESPACES } from "@/lib/keymap/shortcutsCatalog"
 import {
 	beginRecording,
@@ -25,8 +25,8 @@ import {
 // blacklist on that reference. Tab is a near-certain accidental capture while the "Change" button has
 // focus, and it is an ordinary non-modifier token the recorder would otherwise happily save; a
 // blacklisted key is skipped AND not preventDefault-ed, so Tab keeps moving focus normally. Escape is
-// deliberately NOT blacklisted — it is handled at capture on this component's root, one layer
-// earlier, and never reaches the recorder.
+// deliberately NOT blacklisted — it is the cancel key, handled at capture on this component's root when
+// focus is inside it and recognized by recordingOutcome when it arrives through the recorder instead.
 const RECORDER_BLACKLIST = ["tab"]
 
 // The one shortcuts list in the app, rendered by BOTH surfaces (the ? dialog and Settings →
@@ -45,21 +45,26 @@ export function ShortcutsList() {
 	const overrides = useOverrides()
 	const session = useRecordingSession()
 	const rejection = useRecordingRejection()
-	const [keys, { start, stop }] = useRecordHotkeys(false, RECORDER_BLACKLIST)
+	const [keys, { start, stop, isRecording }] = useRecordHotkeys(false, RECORDER_BLACKLIST)
 
 	// The session is the only source of truth for "which row is recording" — this component holds no
 	// state of its own, so a session claimed by another mounted list simply reads as "not recording
 	// here" instead of needing to be mirrored and re-synced.
 	const recordingId = session?.owner === owner ? session.actionId : null
-	// A recorded set that is still modifiers-only normalizes to null — the chord is not finished yet.
-	const recorded = recordingId === null ? null : normalizeRecordedCombo(keys, isMacPlatform())
+	// The recorder's key set outlives the session that filled it, so what it currently MEANS is decided
+	// in one place (recordingOutcome) and read back here as two primitives — keeping the commit effect's
+	// deps free of any per-render identity.
+	const outcome = recordingId === null ? null : recordingOutcome(keys, isRecording, isMacPlatform())
+	const recorded = outcome?.kind === "commit" ? outcome.combo : null
+	const cancelled = outcome?.kind === "cancel"
 	const [blockedBy] = recorded === null || recordingId === null ? [] : conflictingActions(actions, recorded, recordingId)
 	const blockedByKey = blockedBy?.descriptionKey ?? null
 
-	// A freshly mounted list cancels whatever recording was in flight, so opening the dialog over a
-	// recording settings page ends that recording instead of letting it capture the dialog's keys. On
-	// unmount it ends only its own: endRecording is a no-op unless this instance still owns the
-	// session, which is what stops a displaced list from clearing someone else's.
+	// A freshly mounted list cancels whatever recording was in flight (and any rejection left over from
+	// an earlier attempt — see clearRecording), so opening the dialog over a recording settings page ends
+	// that recording instead of letting it capture the dialog's keys. On unmount it ends only its own:
+	// endRecording is a no-op unless this instance still owns the session, which is what stops a
+	// displaced list from clearing someone else's.
 	useEffect(() => {
 		clearRecording()
 
@@ -84,7 +89,17 @@ export function ShortcutsList() {
 	// resolved during render and passed in as its key, so the catalog's per-render identity never
 	// re-triggers this.
 	useEffect(() => {
-		if (recorded === null || recordingId === null) {
+		if (recordingId === null) {
+			return
+		}
+
+		if (cancelled) {
+			endRecording(owner)
+
+			return
+		}
+
+		if (recorded === null) {
 			return
 		}
 
@@ -96,14 +111,18 @@ export function ShortcutsList() {
 
 		endRecording(owner)
 		void setUserCombo(recordingId, recorded)
-	}, [recorded, recordingId, blockedByKey, owner])
+	}, [recorded, cancelled, recordingId, blockedByKey, owner])
 
-	// Escape cancels the recording instead of being recorded or dismissing the surface around us.
-	// Capture phase on our own root is the only position that beats every other listener: React
-	// attaches its native capture listener on the root container (and on each portal container), so
-	// this runs before the event reaches the focused button, before React's bubble dispatch (Base UI's
-	// onKeyDown dismiss), and before the document listeners (Base UI's escape dismiss, and both of
-	// react-hotkeys-hook's). React's stopPropagation calls the native one, so none of them see it.
+	// Escape cancels the recording instead of dismissing the surface around us. Capture phase on our own
+	// root is the only position that beats every other listener: React attaches its native capture
+	// listener on the root container (and on each portal container), so this runs before the event
+	// reaches the focused button, before React's bubble dispatch (Base UI's onKeyDown dismiss), and
+	// before the document listeners (Base UI's escape dismiss, and both of react-hotkeys-hook's).
+	// React's stopPropagation calls the native one, so none of them see it.
+	//
+	// It only covers keydowns inside this subtree though — this list is a plain page as often as it is a
+	// dialog, and a press with focus elsewhere reaches the recorder's own document listener instead,
+	// which is why recordingOutcome treats a recorded escape as cancel too.
 	//
 	// Consequence: `escape` cannot be RECORDED as a combo. It is the cancel key here, as in every
 	// recorder; the shipped clearSelection defaults that use it are unaffected, and "Reset to default"

@@ -8,6 +8,7 @@ import {
 	THIRD_PARTY_NOTICES,
 	type ThirdPartyNotice
 } from "@/features/settings/lib/thirdPartyNotices"
+import { noticeRepositoryHref } from "@/features/settings/components/advanced/thirdPartyNoticesDialog.logic"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -30,6 +31,7 @@ function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNoticesDialog
 	const [selected, setSelected] = useState<ThirdPartyNotice | null>(null)
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const notices = filterThirdPartyNotices(THIRD_PARTY_NOTICES, query)
+	const repositoryHref = noticeRepositoryHref(selected?.repository ?? null)
 
 	const virtualizer = useVirtualizer({
 		count: notices.length,
@@ -130,9 +132,11 @@ function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNoticesDialog
 							<ArrowLeftIcon />
 							{t("settingsNoticesBack")}
 						</Button>
-						{selected.repository === null ? null : (
+						{selected.repository === null ? null : repositoryHref === null ? (
+							<span className="truncate text-xs text-muted-foreground">{selected.repository}</span>
+						) : (
 							<a
-								href={selected.repository}
+								href={repositoryHref}
 								target="_blank"
 								rel="noopener noreferrer"
 								className="truncate text-xs text-muted-foreground underline underline-offset-4"

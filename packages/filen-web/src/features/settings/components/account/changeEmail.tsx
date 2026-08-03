@@ -15,6 +15,7 @@ import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { CapsLockWarning } from "@/features/auth/components/capsLockWarning"
 
 interface ChangeEmailCardProps {
 	accountQuery: AccountQuerySuccess
@@ -26,9 +27,7 @@ interface ChangeEmailCardProps {
 // result. SESSION-INVALIDATING (changes the login identity the harvested e2e session authenticates
 // as) — never live-exercised in e2e, unit/render only.
 function ChangeEmailCard({ accountQuery }: ChangeEmailCardProps) {
-	// `auth` bound (after `settings`, which stays the default) only so the shared capsLockOn key
-	// resolves — a prefixed key from an unbound namespace does not typecheck.
-	const { t } = useTranslation(["settings", "auth", "common"])
+	const { t } = useTranslation(["settings", "common"])
 	const isOnline = useIsOnline()
 	const [newEmail, setNewEmail] = useState("")
 	const [confirmEmail, setConfirmEmail] = useState("")
@@ -154,15 +153,7 @@ function ChangeEmailCard({ accountQuery }: ChangeEmailCardProps) {
 								onKeyUp={passwordCaps.onKeyUp}
 								onBlur={passwordCaps.onBlur}
 							/>
-							{/* Rendered unconditionally with only its TEXT toggled: a live region must already be in
-							    the a11y tree when its content changes, so an already-populated role=status inserted
-							    on demand is commonly missed by screen readers. Empty <p> collapses to zero height. */}
-							<p
-								role="status"
-								className="text-xs text-yellow-500"
-							>
-								{passwordCaps.capsLockOn ? t("auth:capsLockOn") : ""}
-							</p>
+							<CapsLockWarning active={passwordCaps.capsLockOn} />
 						</Field>
 					</FieldGroup>
 				</form>

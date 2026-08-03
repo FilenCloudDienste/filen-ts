@@ -48,6 +48,10 @@ export async function runResetAttempt(deps: ResetAttemptDeps, params: ResetParam
 	} catch (e) {
 		const dto = asErrorDTO(e)
 		if (readTwoFactorKind(dto.kind) !== null) {
+			// The only arm that drops its DTO — logged because the outcome rests on the endpoint-response
+			// assumption above: if a reset endpoint ever answers this itself (token NOT spent), the panel's
+			// guidance is wrong and this line is the only thing that can attribute the reports.
+			log.warn("reset", "two-factor blocked the post-reset sign-in", dto)
 			return { status: "two-factor-terminal" }
 		}
 		return { status: "error", dto }

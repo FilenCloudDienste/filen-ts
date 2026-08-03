@@ -73,7 +73,7 @@ export function FileHero({ item, downloadEnabled, onBack }: { item: DriveItem; d
 							variant="ghost"
 							size="icon-sm"
 							onClick={onBack}
-							aria-label={t("back")}
+							aria-label={t("backToDirectory")}
 						>
 							<ArrowLeftIcon />
 						</Button>
@@ -155,7 +155,7 @@ export function FileHero({ item, downloadEnabled, onBack }: { item: DriveItem; d
 							onClick={onBack}
 						>
 							<ArrowLeftIcon data-icon="inline-start" />
-							{t("back")}
+							{t("backToDirectory")}
 						</Button>
 					)}
 				</div>

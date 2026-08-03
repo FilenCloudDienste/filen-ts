@@ -28,4 +28,14 @@ describe("comboAlternatives (<Kbd> rendering and conflict detection)", () => {
 	it("yields nothing for an unassigned combo", () => {
 		expect(comboAlternatives("")).toEqual([])
 	})
+
+	// react-hotkeys-hook maps these onto the canonical token before matching, so the two spellings fire
+	// on the same physical key — the shipped audio transport defaults are written in the alias form.
+	it("resolves the library's key aliases, so an alias and its canonical token compare equal", () => {
+		expect(comboAlternatives("mod+shift+right")).toEqual([["mod", "shift", "arrowright"]])
+		expect(comboAlternatives("mod+shift+left")).toEqual([["mod", "shift", "arrowleft"]])
+		expect(comboAlternatives("up,down")).toEqual([["arrowup"], ["arrowdown"]])
+		expect(comboAlternatives("esc")).toEqual([["escape"]])
+		expect(comboAlternatives("return")).toEqual([["enter"]])
+	})
 })

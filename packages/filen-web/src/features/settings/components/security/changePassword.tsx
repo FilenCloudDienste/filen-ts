@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { StrengthMeter } from "@/features/auth/components/strengthMeter"
+import { CapsLockWarning } from "@/features/auth/components/capsLockWarning"
 
 interface ChangePasswordCardProps {
 	accountQuery: AccountQuerySuccess
@@ -120,15 +121,7 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 								onKeyUp={currentPasswordCaps.onKeyUp}
 								onBlur={currentPasswordCaps.onBlur}
 							/>
-							{/* Rendered unconditionally with only its TEXT toggled: a live region must already be in
-							    the a11y tree when its content changes, so an already-populated role=status inserted
-							    on demand is commonly missed by screen readers. Empty <p> collapses to zero height. */}
-							<p
-								role="status"
-								className="text-xs text-yellow-500"
-							>
-								{currentPasswordCaps.capsLockOn ? t("capsLockOn") : ""}
-							</p>
+							<CapsLockWarning active={currentPasswordCaps.capsLockOn} />
 						</Field>
 						<Field>
 							<FieldLabel htmlFor="new-password">{t("changePasswordNew")}</FieldLabel>
@@ -146,12 +139,7 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 								onBlur={newPasswordCaps.onBlur}
 							/>
 							{passwordStrength && <StrengthMeter tier={passwordStrength.strength} />}
-							<p
-								role="status"
-								className="text-xs text-yellow-500"
-							>
-								{newPasswordCaps.capsLockOn ? t("capsLockOn") : ""}
-							</p>
+							<CapsLockWarning active={newPasswordCaps.capsLockOn} />
 						</Field>
 						<Field>
 							<FieldLabel htmlFor="confirm-new-password">{t("changePasswordConfirm")}</FieldLabel>
@@ -173,12 +161,7 @@ function ChangePasswordCard({ accountQuery }: ChangePasswordCardProps) {
 								onBlur={confirmPasswordCaps.onBlur}
 							/>
 							{passwordsMismatched && <FieldError id="confirm-new-password-error">{t("passwordsDoNotMatch")}</FieldError>}
-							<p
-								role="status"
-								className="text-xs text-yellow-500"
-							>
-								{confirmPasswordCaps.capsLockOn ? t("capsLockOn") : ""}
-							</p>
+							<CapsLockWarning active={confirmPasswordCaps.capsLockOn} />
 						</Field>
 					</FieldGroup>
 				</form>

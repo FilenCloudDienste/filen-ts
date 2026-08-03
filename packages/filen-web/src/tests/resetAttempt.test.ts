@@ -108,6 +108,19 @@ describe("runResetAttempt (injected deps, no worker)", () => {
 		expect(h.broadcast).not.toHaveBeenCalled()
 	})
 
+	// The outcome carries no DTO, so this log line is the only thing that can attribute field reports if
+	// the endpoint ever answers a two-factor kind BEFORE the reset is posted.
+	it("logs the dropped DTO on the terminal arm", async () => {
+		const h = makeHarness()
+		const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined)
+		const dto = sdkDto("Enter2fa")
+		h.completeReset.mockRejectedValue(dto)
+
+		await runResetAttempt(h.deps, PARAMS)
+
+		expect(warnSpy).toHaveBeenCalledWith("reset", expect.any(String), dto)
+	})
+
 	// Which of the two kinds the backend answers with is a backend detail — the SDK's internal login
 	// leg does send a placeholder code, so both describe the same event and must not diverge here.
 	it("treats a rejected placeholder code exactly like a missing one", async () => {

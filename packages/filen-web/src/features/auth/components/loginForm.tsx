@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { TwoFactorDialog } from "@/features/auth/components/twoFactorDialog"
+import { CapsLockWarning } from "@/features/auth/components/capsLockWarning"
 
 // Forgot-password dialog: small enough to live as a private sibling of the login form rather than
 // its own file. Re-seeds its email field from the login form's current value on every open (the
@@ -221,15 +222,7 @@ function LoginForm() {
 							onKeyUp={passwordCaps.onKeyUp}
 							onBlur={passwordCaps.onBlur}
 						/>
-						{/* Rendered unconditionally with only its TEXT toggled: a live region must already be in
-						    the a11y tree when its content changes, so an already-populated role=status inserted
-						    on demand is commonly missed by screen readers. Empty <p> collapses to zero height. */}
-						<p
-							role="status"
-							className="text-xs text-yellow-500"
-						>
-							{passwordCaps.capsLockOn ? t("capsLockOn") : ""}
-						</p>
+						<CapsLockWarning active={passwordCaps.capsLockOn} />
 					</Field>
 				</FieldGroup>
 				<Button

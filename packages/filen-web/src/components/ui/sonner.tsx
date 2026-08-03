@@ -19,7 +19,14 @@ const Toaster = ({ ...props }: ToasterProps) => {
 				info: <InfoIcon className="size-4" />,
 				warning: <TriangleAlertIcon className="size-4" />,
 				error: <OctagonXIcon className="size-4" />,
-				loading: <Loader2Icon className="size-4 animate-spin" />
+				// data-slot="spinner" is what exempts it from the global reduced-motion freeze (index.css) —
+				// a frozen loading toast reads as a hung app, the exact case that exemption exists for.
+				loading: (
+					<Loader2Icon
+						data-slot="spinner"
+						className="size-4 animate-spin"
+					/>
+				)
 			}}
 			style={
 				{

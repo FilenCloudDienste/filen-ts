@@ -528,6 +528,20 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 		}
 	}, [slotVanished])
 
+	// A dirty buffer belongs to exactly ONE slot, and every slot change remounts PreviewBody (keyed by
+	// this same value), so whatever editor mounts next re-seeds and reports its own bit. The gap this
+	// closes is a slot REMOVED under a dirty editor — trashed/deleted from the header menu below, or
+	// removed on another device and reconciled away by the host: the pager lands on a neighbour with the
+	// overlay still mounted, so neither the unmount cleanup nor the vanished-slot effect above runs, and a
+	// neighbour that mounts no editor at all (an image, a PDF, a rendered markdown) would strand the flag
+	// on a buffer that no longer exists — a prompt about nothing, an armed route block and beforeunload.
+	const slotKey = currentSource === undefined ? null : previewSourceKey(currentSource)
+
+	useEffect(() => {
+		setPreviewDirty(false)
+		contentRef.current = null
+	}, [slotKey])
+
 	useEffect(() => {
 		return () => {
 			usePreviewUnsavedGuardStore.getState().clear()
@@ -546,6 +560,16 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 		disabled: !dirty || currentSource === undefined,
 		withResolver: true
 	})
+
+	// A save in flight must never reach the prompt: Discard would release the navigation while the
+	// un-cancellable upload still lands and patches the listing with exactly the content the user just
+	// chose to drop. Cancelling the block outright is the same refusal requestOrRun applies to the in-app
+	// routes (close/prev/next) — the navigation is simply repeatable once the save settles.
+	useEffect(() => {
+		if (saving && blocker.status === "blocked") {
+			blocker.reset()
+		}
+	}, [saving, blocker])
 
 	// The one write path: encode -> upload -> patch listing -> re-key onto the rotated uuid (success), or
 	// a LABEL-FIRST toast (failure) — read-only lockdown is reserved for the ONE failure class retrying
@@ -715,9 +739,8 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 
 		setPendingIntent(null)
 		// The buffer is gone by the user's own choice: drop the dirty bit and the stale content with it.
-		// Without this the flag survives into a slot that mounts no editor at all (an image, a PDF, a
-		// rendered markdown), leaving a Save-less overlay permanently "dirty" — a phantom prompt, and
-		// with the blocker above a phantom route block plus an armed beforeunload.
+		// The slot-change effect above cannot cover this one — a discarded "close" answer changes no slot,
+		// and a discarded prev/next must be clean BEFORE the step, not after it.
 		setPreviewDirty(false)
 		contentRef.current = null
 

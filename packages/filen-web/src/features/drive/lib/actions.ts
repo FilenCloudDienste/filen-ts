@@ -6,6 +6,7 @@ import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import {
 	driveListingQueryKey,
+	cancelListingFetch,
 	driveListingQueryUpdate,
 	driveListingQueryUpdateGlobal,
 	driveItemLinkStatusQueryUpdate,
@@ -168,7 +169,12 @@ export async function emptyTrash(): Promise<VoidActionOutcome> {
 // listing is never conjured. Exported: the realtime ItemFavorite handler (lib/socketHandlers.ts)
 // applies the identical membership rule for a change made on another device.
 export function patchFavoritesListing(favorited: boolean, item: DriveItem): void {
-	queryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "favorites", uuid: null }), prev =>
+	const queryKey = driveListingQueryKey({ variant: "favorites", uuid: null })
+
+	// Same cancel-before-patch discipline as every other listing patch: a Favorites refetch already in
+	// flight was snapshotted before this membership change and would land on top of it.
+	cancelListingFetch(queryKey)
+	queryClient.setQueryData<DriveItem[]>(queryKey, prev =>
 		prev === undefined ? prev : favorited ? [...removeByUuid(prev, item.data.uuid), item] : removeByUuid(prev, item.data.uuid)
 	)
 }

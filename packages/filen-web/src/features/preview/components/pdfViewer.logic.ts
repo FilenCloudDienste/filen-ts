@@ -122,8 +122,14 @@ export function pdfWheelZoomScale(current: number, deltaY: number): number {
 // round(down, var(--total-scale-factor) * <page px>, var(--scale-round-*)), so all three must be
 // present or that declaration is invalid and the layer collapses to auto size. The scale is
 // stringified deliberately — React would suffix a bare number with "px".
-export function pdfLayerScaleVars(scale: number): CSSProperties {
-	return { "--total-scale-factor": String(scale), "--scale-round-x": "1px", "--scale-round-y": "1px" } as CSSProperties
+//
+// The page's UserUnit is folded in here rather than left to the caller: that container is sized from
+// the page's RAW (unscaled) box, while the viewport driving the canvas and the link overlay already
+// multiplies the scale by userUnit (PageViewport does it in its constructor). Supplying the bare scale
+// collapses the selectable spans into the top-left 1/userUnit of a large-format page that declares one,
+// so text selection highlights and copies the wrong run while the links above it stay correct.
+export function pdfLayerScaleVars(scale: number, userUnit: number): CSSProperties {
+	return { "--total-scale-factor": String(scale * userUnit), "--scale-round-x": "1px", "--scale-round-y": "1px" } as CSSProperties
 }
 
 // A display-intent Link annotation reduced to the two things this viewer renders: the PDF-space rect

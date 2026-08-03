@@ -97,6 +97,16 @@ describe("conflictingActions", () => {
 		expect(ids(conflictingActions(actions, "d", "notes.subject"))).toEqual(["app.toggleTheme", "audio.playPause"])
 	})
 
+	// The recorder emits canonical tokens from event.code ("arrowright"), while the shipped audio
+	// transport defaults are written in react-hotkeys-hook's alias form ("right") — the library matches
+	// both on the same physical key, so the checker has to as well or it hands out a binding that fires
+	// two actions at once.
+	it("reports an alias-form default against a canonically recorded chord", () => {
+		const actions = [action("audio.next", "audio", "mod+shift+right"), action("drive.rename", "drive", "f2")]
+
+		expect(ids(conflictingActions(actions, "mod+shift+arrowright", "drive.rename"))).toEqual(["audio.next"])
+	})
+
 	it("never reports the action being rebound against itself", () => {
 		const actions = [action("drive.selectAll", "drive", "mod+a")]
 

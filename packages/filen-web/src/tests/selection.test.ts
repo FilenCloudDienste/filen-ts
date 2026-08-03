@@ -5,7 +5,9 @@ import {
 	contactSelectionSize,
 	nextContactSelection,
 	removeFromContactSelection,
+	resolveSelectedContacts,
 	toggleContactSelection,
+	type ContactRecords,
 	type ContactSelectionState
 } from "@/features/contacts/lib/selection"
 
@@ -89,6 +91,42 @@ describe("contactSelectionSize", () => {
 		const withContacts = toggleContactSelection(toggleContactSelection(withRequest, "contacts", "b"), "contacts", "c")
 
 		expect(contactSelectionSize(withContacts)).toBe(3)
+	})
+})
+
+// The bulk bar's contents AND the gate that mounts it both read this, so a uuid whose record is gone
+// (accepted request, removed contact) can never keep an empty bar floating over the list.
+describe("resolveSelectedContacts", () => {
+	function records(uuids: { requests?: string[]; pending?: string[]; contacts?: string[]; blocked?: string[] } = {}) {
+		return {
+			requests: (uuids.requests ?? []).map(uuid => ({ uuid })),
+			pending: (uuids.pending ?? []).map(uuid => ({ uuid })),
+			contacts: (uuids.contacts ?? []).map(uuid => ({ uuid })),
+			blocked: (uuids.blocked ?? []).map(uuid => ({ uuid }))
+		} as unknown as ContactRecords
+	}
+
+	it("keeps only the selected records that still exist", () => {
+		const selection = toggleContactSelection(toggleContactSelection(EMPTY_CONTACT_SELECTION, "requests", "a"), "requests", "b")
+		const resolved = resolveSelectedContacts(records({ requests: ["b"] }), selection)
+
+		expect(resolved.requests.map(request => request.uuid)).toEqual(["b"])
+		expect(resolved.total).toBe(1)
+	})
+
+	it("totals nothing once every selected record has left its section", () => {
+		const selection = toggleContactSelection(toggleContactSelection(EMPTY_CONTACT_SELECTION, "requests", "a"), "requests", "b")
+
+		expect(resolveSelectedContacts(records(), selection).total).toBe(0)
+	})
+
+	it("sums across sections", () => {
+		const selection = toggleContactSelection(toggleContactSelection(EMPTY_CONTACT_SELECTION, "contacts", "a"), "blocked", "b")
+		const resolved = resolveSelectedContacts(records({ contacts: ["a", "z"], blocked: ["b"] }), selection)
+
+		expect(resolved.contacts.map(contact => contact.uuid)).toEqual(["a"])
+		expect(resolved.blocked.map(contact => contact.uuid)).toEqual(["b"])
+		expect(resolved.total).toBe(2)
 	})
 })
 

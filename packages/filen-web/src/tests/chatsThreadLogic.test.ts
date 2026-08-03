@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { BlockedContact, ChatMessage, UuidStr } from "@filen/sdk-rs"
 import {
+	announcementSubject,
 	buildThreadRows,
 	computeScrollAfterPrepend,
 	countNewTailMessages,
@@ -12,6 +13,7 @@ import {
 	type ScrollAffordanceState
 } from "@/features/chats/components/thread/thread.logic"
 import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
+import { i18n } from "@/lib/i18n"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -243,6 +245,78 @@ describe("nextAnnouncement", () => {
 		const first = nextAnnouncement(null, 3, "Zoe")
 
 		expect(nextAnnouncement(first, 1, "Zoe").count).toBe(1)
+	})
+})
+
+// A refetch commits a whole batch in one cache write, so the subject must come from the arrived SLICE —
+// deriving it from the last message alone misattributes the rest and lets one blocked/self tail message
+// silence everyone else in the batch.
+describe("announcementSubject", () => {
+	const SELF = 1
+	const BLOCKED = 3
+	const blockedUsers = deriveBlockedUsers([mockBlockedContact({ userId: BigInt(BLOCKED), email: "blocked@x.io" })])
+
+	it("names the single sender of a uniform batch", () => {
+		const older = mockMessage({ senderId: 2, senderEmail: "alice@x.io" })
+		const a = mockMessage({ senderId: 2, senderEmail: "alice@x.io" })
+		const b = mockMessage({ senderId: 2, senderEmail: "alice@x.io" })
+
+		expect(announcementSubject([older, a, b], 2, BigInt(SELF), blockedUsers)).toEqual({ count: 2, name: "alice@x.io" })
+	})
+
+	it("prefers the sender's nickname, like every other name surface", () => {
+		const a = mockMessage({ senderId: 2, senderEmail: "alice@x.io", senderNickName: "Alice" })
+
+		expect(announcementSubject([a], 1, BigInt(SELF), blockedUsers)?.name).toBe("Alice")
+	})
+
+	it("drops the name when the batch mixes senders instead of crediting the last one", () => {
+		const a = mockMessage({ senderId: 2, senderEmail: "alice@x.io" })
+		const b = mockMessage({ senderId: 2, senderEmail: "alice@x.io" })
+		const c = mockMessage({ senderId: 4, senderEmail: "bob@x.io" })
+
+		expect(announcementSubject([a, b, c], 3, BigInt(SELF), blockedUsers)).toEqual({ count: 3, name: null })
+	})
+
+	it("still announces the others when the batch's LAST message is from a blocked sender", () => {
+		const a = mockMessage({ senderId: 2, senderEmail: "alice@x.io" })
+		const b = mockMessage({ senderId: BLOCKED, senderEmail: "blocked@x.io" })
+
+		expect(announcementSubject([a, b], 2, BigInt(SELF), blockedUsers)).toEqual({ count: 1, name: "alice@x.io" })
+	})
+
+	it("counts neither blocked senders nor own messages", () => {
+		const a = mockMessage({ senderId: BLOCKED, senderEmail: "blocked@x.io" })
+		const b = mockMessage({ senderId: SELF, senderEmail: "me@x.io" })
+		const c = mockMessage({ senderId: 2, senderEmail: "alice@x.io" })
+
+		expect(announcementSubject([a, b, c], 3, BigInt(SELF), blockedUsers)).toEqual({ count: 1, name: "alice@x.io" })
+	})
+
+	it("announces nothing when every arrived message is blocked or own", () => {
+		const a = mockMessage({ senderId: BLOCKED, senderEmail: "blocked@x.io" })
+		const b = mockMessage({ senderId: SELF, senderEmail: "me@x.io" })
+
+		expect(announcementSubject([a, b], 2, BigInt(SELF), blockedUsers)).toBeNull()
+	})
+
+	it("announces nothing while the account is unresolved — own messages are indistinguishable then", () => {
+		const a = mockMessage({ senderId: 2, senderEmail: "alice@x.io" })
+
+		expect(announcementSubject([a], 1, undefined, blockedUsers)).toBeNull()
+	})
+
+	it("announces nothing without tail growth", () => {
+		const a = mockMessage({ senderId: 2, senderEmail: "alice@x.io" })
+
+		expect(announcementSubject([a], 0, BigInt(SELF), blockedUsers)).toBeNull()
+	})
+
+	// The mixed key ships no plural forms — a mixed batch is two messages or more by construction. i18next
+	// falls back to the bare key when a `_one`/`_other` variant is absent; this pins that it does.
+	it("renders both announcement variants", () => {
+		expect(i18n.t("chats:chatNewMessageAnnouncement", { count: 2, name: "Alice" })).toBe("2 new messages from Alice")
+		expect(i18n.t("chats:chatNewMessagesMixedAnnouncement", { count: 3 })).toBe("3 new messages")
 	})
 })
 

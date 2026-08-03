@@ -39,6 +39,8 @@ export interface DriveTileProps {
 	// The listing's already-reconciled selection — see DriveRow's identical prop (bulk context menu).
 	selectedItems: DriveItem[]
 	onPointerSelect: (index: number, event: MouseEvent<HTMLDivElement>) => void
+	// See DriveRow's identical prop (the right-click retarget's cursor half).
+	onCursorMove: (index: number) => void
 	onOpen: (index: number) => void
 	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
 	onBulkAction: (kind: BulkDialogActionKind) => void
@@ -58,6 +60,7 @@ export function DriveTile({
 	searchParentPath,
 	selectedItems,
 	onPointerSelect,
+	onCursorMove,
 	onOpen,
 	onItemAction,
 	onBulkAction,
@@ -116,10 +119,11 @@ export function DriveTile({
 							onOpen(index)
 						}}
 						onContextMenu={() => {
-							// Right-clicking outside the current selection retargets it to this tile — see
-							// DriveRow's identical handler.
+							// Right-clicking outside the current selection retargets it (and the cursor +
+							// range anchor) to this tile — see DriveRow's identical handler.
 							if (!selected) {
 								useDriveStore.getState().setSelectedItems([item])
+								onCursorMove(index)
 							}
 						}}
 						onDragEnter={drop.onDragEnter}

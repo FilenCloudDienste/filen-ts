@@ -92,13 +92,13 @@ function SplatNavItem({ icon: Icon, label, to }: { icon: IconType; label: string
 	)
 }
 
-// The Cloud Drive root row: a chevron toggling the whole tree open, plus a real `<Link>` navigating to
-// the drive root (kept a Link — not a tree button — so it keeps TanStack's automatic active status and
-// stays the sidebar's stable "Cloud Drive" landmark link). Its own open flag rides ROOT_KEY.
+// The Cloud Drive root row: a chevron disclosing the whole tree, plus a real `<Link>` navigating to
+// the drive root (a Link, not a button, so it keeps TanStack's automatic active status and stays the
+// sidebar's stable "Cloud Drive" landmark link). Its own open flag rides ROOT_KEY.
 function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) {
 	const { t } = useTranslation("drive")
 	// The drive root as a drag-to-move drop target (empty ancestry). A collapsed root auto-expands on
-	// hover-dwell, same as any tree node.
+	// hover-dwell, same as any node below it.
 	const drop = useDriveDropTarget({
 		targetUuid: null,
 		targetAncestry: [],
@@ -107,11 +107,6 @@ function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolea
 
 	return (
 		<div
-			role="treeitem"
-			aria-level={1}
-			aria-expanded={open}
-			aria-posinset={1}
-			aria-setsize={1}
 			onDragEnter={drop.onDragEnter}
 			onDragOver={drop.onDragOver}
 			onDragLeave={drop.onDragLeave}
@@ -121,9 +116,9 @@ function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolea
 				drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset"
 			)}
 		>
-			{/* No aria-expanded here — the treeitem above owns it (see DirectoryTree's own chevron). */}
 			<button
 				type="button"
+				aria-expanded={open}
 				aria-label={t(open ? "driveTreeCollapseNode" : "driveTreeExpandNode", { name: label })}
 				onClick={onToggle}
 				className="ml-2 flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground focus-ring outline-none hover:text-foreground"
@@ -218,23 +213,26 @@ export function DriveSidebar() {
 			>
 				<div className="flex flex-1 flex-col overflow-y-auto p-3">
 					<h2 className="truncate px-2.5 pt-1 pb-2.5 text-[15px] font-semibold">{t("driveMyDrive")}</h2>
-					{/* The depth-0 group stays a DOM sibling of the root treeitem rather than its child —
-					aria-level carries the hierarchy, which is the only shape a lazily-mounted per-level tree
-					can take without re-parenting every node. */}
-					<div
-						role="tree"
+					{/* A nested disclosure list, deliberately NOT role="tree": the ARIA tree pattern owes a
+					roving-tabindex/arrow-key focus model this sidebar does not implement, and claiming the
+					role without it sends a screen-reader user into an interaction mode whose items never take
+					focus. Plain list semantics describe what is really here — each row's chevron carries its
+					own aria-expanded, and the subtree it discloses is nested inside its own item. */}
+					<ul
 						aria-label={t("driveTreeLabel")}
 						className="flex flex-col gap-0.5"
 					>
-						<CloudDriveRoot
-							label={t("driveMyDrive")}
-							open={rootOpen}
-							onToggle={() => {
-								toggle(ROOT_KEY)
-							}}
-						/>
-						{rootOpen ? <DirectoryTree tree={tree} /> : null}
-					</div>
+						<li className="flex flex-col gap-0.5">
+							<CloudDriveRoot
+								label={t("driveMyDrive")}
+								open={rootOpen}
+								onToggle={() => {
+									toggle(ROOT_KEY)
+								}}
+							/>
+							{rootOpen ? <DirectoryTree tree={tree} /> : null}
+						</li>
+					</ul>
 					<p className={GROUP_HEADER_CLASS}>{t("driveGroupOther")}</p>
 					<div className="flex flex-col gap-0.5">{otherItems.map(renderItem)}</div>
 					<p className={GROUP_HEADER_CLASS}>{t("driveGroupShared")}</p>

@@ -16,23 +16,24 @@ vi.mock("@tanstack/react-router", () => ({
 }))
 
 const { useDialogHost } = await import("@/lib/useDialogHost")
-const { shouldCloseDialogOnNavigate } = await import("@/lib/useDialogHost.logic")
+const { resolveDialogNavigationClose } = await import("@/lib/useDialogHost.logic")
 
-describe("shouldCloseDialogOnNavigate", () => {
+describe("resolveDialogNavigationClose", () => {
 	it("closes an idle dialog", () => {
-		expect(shouldCloseDialogOnNavigate({ hasDialog: true, pending: false, keepOpen: false })).toBe(true)
+		expect(resolveDialogNavigationClose({ hasDialog: true, pending: false, keepOpen: false })).toBe("close")
 	})
 
 	it("does nothing when no dialog is open", () => {
-		expect(shouldCloseDialogOnNavigate({ hasDialog: false, pending: false, keepOpen: false })).toBe(false)
+		expect(resolveDialogNavigationClose({ hasDialog: false, pending: false, keepOpen: false })).toBe("ignore")
 	})
 
-	it("keeps a dialog whose mutation is still in flight", () => {
-		expect(shouldCloseDialogOnNavigate({ hasDialog: true, pending: true, keepOpen: false })).toBe(false)
+	it("defers — never drops — the close while the mutation is still in flight", () => {
+		expect(resolveDialogNavigationClose({ hasDialog: true, pending: true, keepOpen: false })).toBe("defer")
 	})
 
-	it("keeps a dialog whose host owns its navigation semantics", () => {
-		expect(shouldCloseDialogOnNavigate({ hasDialog: true, pending: false, keepOpen: true })).toBe(false)
+	it("keeps a dialog whose host owns its navigation semantics, pending or not", () => {
+		expect(resolveDialogNavigationClose({ hasDialog: true, pending: false, keepOpen: true })).toBe("ignore")
+		expect(resolveDialogNavigationClose({ hasDialog: true, pending: true, keepOpen: true })).toBe("ignore")
 	})
 })
 
@@ -68,7 +69,9 @@ describe("useDialogHost", () => {
 		expect(result.current.isDialogOpen).toBe(false)
 	})
 
-	it("does not close retroactively once a pending mutation settles", () => {
+	// The strand this guards: the host's error arm keeps the dialog open for a retry, but the user has
+	// already navigated away from the screen it belongs to.
+	it("holds the close while the mutation is in flight, then applies it once it settles", () => {
 		const { result, rerender } = renderHook(() => useDialogHost<TestDialog>())
 
 		act(() => {
@@ -87,7 +90,48 @@ describe("useDialogHost", () => {
 
 		rerender()
 
-		expect(result.current.activeDialog).toEqual({ kind: "trash" })
+		expect(result.current.activeDialog).toBeNull()
+	})
+
+	it("a dialog opened without a navigation still survives a mutation settling", () => {
+		const { result, rerender } = renderHook(() => useDialogHost<TestDialog>())
+
+		act(() => {
+			result.current.setActiveDialog({ kind: "rename" })
+			result.current.setDialogPending(true)
+		})
+
+		rerender()
+
+		act(() => {
+			result.current.setDialogPending(false)
+		})
+
+		rerender()
+
+		expect(result.current.activeDialog).toEqual({ kind: "rename" })
+	})
+
+	it("a keepOpen kind is never closed retroactively either", () => {
+		const { result, rerender } = renderHook(() =>
+			useDialogHost<TestDialog>({ keepOpenOnNavigate: dialog => dialog.kind === "preview" })
+		)
+
+		act(() => {
+			result.current.setActiveDialog({ kind: "preview" })
+			result.current.setDialogPending(true)
+		})
+
+		currentHref = "/drive/sub"
+		rerender()
+
+		act(() => {
+			result.current.setDialogPending(false)
+		})
+
+		rerender()
+
+		expect(result.current.activeDialog).toEqual({ kind: "preview" })
 	})
 
 	it("hands keepOpenOnNavigate the live dialog and honours its opt-out per kind", () => {

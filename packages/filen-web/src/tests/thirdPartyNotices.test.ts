@@ -9,6 +9,7 @@ import {
 	THIRD_PARTY_NOTICES_FILEN_RS_REF,
 	THIRD_PARTY_NOTICES_SDK_VERSION
 } from "@/features/settings/lib/thirdPartyNotices"
+import { noticeRepositoryHref } from "@/features/settings/components/advanced/thirdPartyNoticesDialog.logic"
 
 /**
  * The notices payload discharges a legal obligation, so the failure that matters is a SILENT one: a
@@ -263,5 +264,36 @@ describe("third-party notices surface", () => {
 			true
 		)
 		expect(filterThirdPartyNotices(THIRD_PARTY_NOTICES, "zzzz-no-such-package-zzzz")).toEqual([])
+	})
+})
+
+describe("noticeRepositoryHref", () => {
+	it("links a plain http(s) repository URL", () => {
+		expect(noticeRepositoryHref("https://github.com/facebook/react")).toBe("https://github.com/facebook/react")
+		expect(noticeRepositoryHref("http://example.com/pkg")).toBe("http://example.com/pkg")
+	})
+
+	it("refuses a scheme no browser can navigate — the payload carries these verbatim from manifests", () => {
+		expect(noticeRepositoryHref("git://github.com/cure53/DOMPurify")).toBeNull()
+		expect(noticeRepositoryHref("git+https://github.com/dsherret/ts-morph.git")).toBeNull()
+		expect(noticeRepositoryHref("ssh://git@github.com/owner/repo.git")).toBeNull()
+		expect(noticeRepositoryHref("github:owner/repo")).toBeNull()
+	})
+
+	it("refuses npm's bare owner/repo shorthand, which would resolve as an in-app relative link", () => {
+		expect(noticeRepositoryHref("sindresorhus/merge-streams")).toBeNull()
+	})
+
+	it("refuses a hostile scheme and a missing repository", () => {
+		expect(noticeRepositoryHref("javascript:alert(1)")).toBeNull()
+		expect(noticeRepositoryHref("  Java\tScript:alert(1)")).toBeNull()
+		expect(noticeRepositoryHref("data:text/html,<script>alert(1)</script>")).toBeNull()
+		expect(noticeRepositoryHref(null)).toBeNull()
+	})
+
+	it("never hands the shipped payload a value it would render as a live but unusable link", () => {
+		const linked = THIRD_PARTY_NOTICES.map(notice => noticeRepositoryHref(notice.repository)).filter(href => href !== null)
+
+		expect(linked.every(href => href.startsWith("https://") || href.startsWith("http://"))).toBe(true)
 	})
 })

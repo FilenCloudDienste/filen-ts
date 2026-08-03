@@ -3,6 +3,7 @@ import { registerSocketHandler } from "@/lib/sdk/socket"
 import { queryClient } from "@/queries/client"
 import { log } from "@/lib/log"
 import {
+	cancelListingFetch,
 	driveListingQueryKey,
 	driveListingQueryUpdate,
 	driveListingQueryUpdateGlobal,
@@ -53,19 +54,19 @@ function removeByUuid(items: DriveItem[], uuid: string): DriveItem[] {
 
 // Recents is a flat, cross-directory aggregation with its own key — driveListingQueryUpdate is
 // hardcoded to variant "drive" (queries/drive.ts) and the global fan-out can't single out one key, so
-// this patches the key directly, the same way the trashEmpty case below does. Only when it's already
-// cached: an unguarded setQueryData would conjure a phantom one-item Recents for a user who has never
-// opened it. Dedups on uuid alone (recents aggregates across parents, so upsertDriveItem's
-// name-collision rule doesn't apply here — same reasoning as the favorites listing). Appending is
-// enough for ordering: resolveEffectiveSort forces uploadDateDesc for the recents variant
-// (lib/preferences.ts), so the row sorts to the top at render.
+// this patches the key directly, the same way the trashEmpty case below does, with the same
+// cancel-before-patch guard (recents runs staleTime 0 and refetches on mount/focus, so an in-flight
+// refetch snapshotted before the upload would otherwise land on top of this insert). Only when it's
+// already cached: the updater returns an unfetched key's `undefined` untouched (setQueryData's own
+// no-op) rather than conjuring a phantom one-item Recents for a user who has never opened it. Dedups
+// on uuid alone (recents aggregates across parents, so upsertDriveItem's name-collision rule doesn't
+// apply here — same reasoning as the favorites listing). Appending is enough for ordering:
+// resolveEffectiveSort forces uploadDateDesc for the recents variant (lib/preferences.ts), so the row
+// sorts to the top at render.
 function insertIntoRecents(item: DriveItem): void {
 	const key = driveListingQueryKey({ variant: "recents", uuid: null })
 
-	if (queryClient.getQueryData(key) === undefined) {
-		return
-	}
-
+	cancelListingFetch(key)
 	queryClient.setQueryData<DriveItem[]>(key, prev => (prev === undefined ? prev : [...removeByUuid(prev, item.data.uuid), item]))
 }
 
@@ -284,10 +285,12 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 		case "trashEmpty": {
 			// Clear the trash listing directly (neither driveListingQueryUpdate — hardcoded to "drive" — nor the
 			// global fan-out can single out one key). Only when it's cached: an unopened trash listing has
-			// nothing to empty and setting [] would conjure a phantom slice.
+			// nothing to empty and setting [] would conjure a phantom slice. Cancel first, like every other
+			// patch here: an in-flight trash refetch would otherwise restore the rows this just cleared.
 			const key = driveListingQueryKey({ variant: "trash", uuid: null })
 
 			if (queryClient.getQueryData(key) !== undefined) {
+				cancelListingFetch(key)
 				queryClient.setQueryData<DriveItem[]>(key, [])
 			}
 

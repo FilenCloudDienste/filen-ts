@@ -15,6 +15,7 @@ import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { StrengthMeter } from "@/features/auth/components/strengthMeter"
+import { CapsLockWarning } from "@/features/auth/components/capsLockWarning"
 
 const REGISTER_CHECK_LEARN_MORE_URL = "https://filen.io/hub/free-10-gb-at-signup-eligibility-check-before-creating-an-account/"
 
@@ -166,15 +167,7 @@ function RegisterForm() {
 							onBlur={passwordCaps.onBlur}
 						/>
 						{passwordStrength && <StrengthMeter tier={passwordStrength.strength} />}
-						{/* Rendered unconditionally with only its TEXT toggled: a live region must already be in
-						    the a11y tree when its content changes, so an already-populated role=status inserted
-						    on demand is commonly missed by screen readers. Empty <p> collapses to zero height. */}
-						<p
-							role="status"
-							className="text-xs text-yellow-500"
-						>
-							{passwordCaps.capsLockOn ? t("capsLockOn") : ""}
-						</p>
+						<CapsLockWarning active={passwordCaps.capsLockOn} />
 					</Field>
 					<Field>
 						<FieldLabel htmlFor="register-confirm-password">{t("registerConfirmPassword")}</FieldLabel>
@@ -196,12 +189,7 @@ function RegisterForm() {
 							onBlur={confirmPasswordCaps.onBlur}
 						/>
 						{passwordsMismatched && <FieldError id="register-confirm-password-error">{t("passwordsDoNotMatch")}</FieldError>}
-						<p
-							role="status"
-							className="text-xs text-yellow-500"
-						>
-							{confirmPasswordCaps.capsLockOn ? t("capsLockOn") : ""}
-						</p>
+						<CapsLockWarning active={confirmPasswordCaps.capsLockOn} />
 					</Field>
 				</FieldGroup>
 				<Button

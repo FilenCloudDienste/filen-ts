@@ -31,7 +31,7 @@ import {
 	type VoidActionOutcome
 } from "@/features/contacts/lib/actions"
 import { toastContactsBulkOutcome } from "@/features/contacts/lib/bulkToast"
-import { type ContactSectionKey } from "@/features/contacts/lib/selection"
+import { resolveSelectedContacts, type ContactSectionKey } from "@/features/contacts/lib/selection"
 import { useContactsListSelection } from "@/features/contacts/hooks/useContactsListSelection"
 import {
 	ContactRow,
@@ -125,6 +125,13 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		search
 	})
 	const sections = filterContactSections(searchedSections, section)
+	// Gated on the LIVE resolved selection, never on the raw uuid count: a row acted on through its own
+	// controls leaves the query data immediately, and a bar mounted on stale uuids renders as an empty
+	// pill with no actions floating over the list.
+	const selected = resolveSelectedContacts(
+		{ requests: incomingData, pending: outgoingData, contacts: contactsData, blocked: blockedData },
+		selection.selection
+	)
 
 	function handleRetry(): void {
 		void contactsQuery.refetch()
@@ -155,7 +162,11 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
+
+			return
 		}
+
+		selection.pruneSelection("requests", [request.uuid])
 	}
 
 	// Row menu "Message": creates-or-opens a 1:1 chat with the contact, then navigates straight into
@@ -184,8 +195,14 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 
 	// Shared tail for a per-row single confirm: run the singular action helper, close silently on
 	// success, toast + stay open (so the user can retry) on failure — mirrors directoryListing.tsx's
-	// rename handler, the closest single-item (non-bulk-shaped) precedent there.
-	async function runSingleDialogAction<T>(item: T, op: (item: T) => Promise<VoidActionOutcome>): Promise<void> {
+	// rename handler, the closest single-item (non-bulk-shaped) precedent there. Prunes on success for
+	// the same reason the bulk tail does: rows stay selectable while their own controls are usable, so a
+	// selected row can be acted on individually and must then leave the selection with it.
+	async function runSingleDialogAction<T extends { uuid: string }>(
+		section: ContactSectionKey,
+		item: T,
+		op: (item: T) => Promise<VoidActionOutcome>
+	): Promise<void> {
 		setDialogPending(true)
 		const outcome = await op(item)
 		setDialogPending(false)
@@ -196,6 +213,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		}
 
 		closeActiveDialog()
+		selection.pruneSelection(section, [item.uuid])
 	}
 
 	// Shared tail for a bulk confirm: run every item independently via runContactsBulk, always close
@@ -257,7 +275,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 								return
 							}
 
-							void runSingleDialogAction(item, request => denyRequest(request.uuid))
+							void runSingleDialogAction("requests", item, request => denyRequest(request.uuid))
 						}}
 					/>
 				)
@@ -295,7 +313,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 								return
 							}
 
-							void runSingleDialogAction(item, request => cancelRequest(request.uuid))
+							void runSingleDialogAction("pending", item, request => cancelRequest(request.uuid))
 						}}
 					/>
 				)
@@ -334,7 +352,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 								return
 							}
 
-							void runSingleDialogAction(item, contact => removeContact(contact.uuid))
+							void runSingleDialogAction("contacts", item, contact => removeContact(contact.uuid))
 						}}
 					/>
 				)
@@ -373,7 +391,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 								return
 							}
 
-							void runSingleDialogAction(item, contact => blockContact(contact))
+							void runSingleDialogAction("contacts", item, contact => blockContact(contact))
 						}}
 					/>
 				)
@@ -411,7 +429,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 								return
 							}
 
-							void runSingleDialogAction(item, contact => unblockContact(contact.uuid))
+							void runSingleDialogAction("blocked", item, contact => unblockContact(contact.uuid))
 						}}
 					/>
 				)
@@ -579,14 +597,10 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 				<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
 					{/* Bottom-anchored floating selection bar — overlays the list, replacing nothing in the
 				    toolbar. Mirrors notesSidebar.tsx / directoryListing.tsx placement. */}
-					{selection.selectedCount >= BULK_BAR_MIN_SELECTION ? (
+					{selected.total >= BULK_BAR_MIN_SELECTION ? (
 						<div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-center">
 							<ContactsBulkBar
-								requests={incomingData}
-								pending={outgoingData}
-								contacts={contactsData}
-								blocked={blockedData}
-								selection={selection.selection}
+								selected={selected}
 								disabled={!isOnline}
 								title={offlineTitle}
 								onClear={selection.clearSelection}

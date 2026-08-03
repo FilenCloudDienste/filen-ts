@@ -6,6 +6,7 @@ import { SidebarDrawer } from "@/features/shell/components/sidebarDrawer"
 import { useIsNarrowViewport } from "@/features/shell/hooks/useIsNarrowViewport"
 import { resolveSidebarKind, SIDEBAR_LABEL_KEY } from "@/features/shell/lib/appShell.logic"
 import { subscribeToLayoutBreakpoint } from "@/features/shell/lib/breakpoints"
+import { SidebarPanelVisibilityProvider } from "@/features/shell/lib/sidebarPanelVisibility"
 import { DriveSidebar } from "@/features/shell/components/driveSidebar"
 import { NotesSidebar } from "@/features/notes/components/notesSidebar"
 import { ChatsSidebar } from "@/features/chats/components/chatsSidebar"
@@ -43,18 +44,24 @@ export function AppShell() {
 	const sidebarKind = resolveSidebarKind(pathname)
 	const narrow = useIsNarrowViewport()
 	const [sidebarOpen, setSidebarOpen] = useState(false)
-	const sidebar =
-		sidebarKind === "chats" ? (
-			<ChatsSidebar />
-		) : sidebarKind === "notes" ? (
-			<NotesSidebar />
-		) : sidebarKind === "settings" ? (
-			<SettingsSidebar />
-		) : sidebarKind === "contacts" ? (
-			<ContactsSidebar />
-		) : (
-			<DriveSidebar />
-		)
+	// The panel is mounted either way (inline in the row, or inside the closed drawer behind display:none),
+	// so the panels themselves cannot tell whether anyone can see them — this is the shell's answer to
+	// that, and it is what keeps a hidden panel's document-level shortcuts from acting on it.
+	const sidebar = (
+		<SidebarPanelVisibilityProvider visible={!narrow || sidebarOpen}>
+			{sidebarKind === "chats" ? (
+				<ChatsSidebar />
+			) : sidebarKind === "notes" ? (
+				<NotesSidebar />
+			) : sidebarKind === "settings" ? (
+				<SettingsSidebar />
+			) : sidebarKind === "contacts" ? (
+				<ContactsSidebar />
+			) : (
+				<DriveSidebar />
+			)}
+		</SidebarPanelVisibilityProvider>
+	)
 
 	// The drawer must survive neither a navigation (it would cover the result it just navigated to) nor a
 	// trip across the layout breakpoint: `open` is gated on `narrow`, but the state behind it is not, so a

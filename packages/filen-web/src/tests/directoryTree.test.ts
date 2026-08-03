@@ -52,69 +52,78 @@ function renderTree(overrides: Partial<DirectoryTreeContext> = {}) {
 	return render(createElement(DirectoryTree, { tree }))
 }
 
-function nodeNamed(container: HTMLElement, name: string): Element {
-	for (const node of container.querySelectorAll('[role="treeitem"]')) {
-		if (node.textContent.includes(name)) {
-			return node
+function chevronFor(container: HTMLElement, name: string): Element {
+	const chevron = rowFor(container, name).querySelector("button")
+
+	if (!chevron) {
+		throw new Error(`no chevron rendering "${name}"`)
+	}
+
+	return chevron
+}
+
+function rowFor(container: HTMLElement, name: string): Element {
+	for (const item of container.querySelectorAll("li")) {
+		// The row div is the item's FIRST child; a nested subtree's own items live below it.
+		const row = item.firstElementChild
+
+		if (row !== null && row.textContent.includes(name) && row.querySelector("li") === null) {
+			return row
 		}
 	}
 
-	throw new Error(`no treeitem rendering "${name}"`)
+	throw new Error(`no row rendering "${name}"`)
 }
 
 afterEach(() => {
 	cleanup()
 })
 
-describe("DirectoryTree — tree semantics", () => {
-	it("renders every level as a group of treeitem rows", () => {
+// Deliberately NOT the ARIA tree pattern: without a roving-tabindex/arrow-key focus model, role="tree"
+// would promise an interaction contract this widget does not honour (see directoryTree.tsx's header).
+describe("DirectoryTree — list + disclosure semantics", () => {
+	it("renders plain nested lists, never tree roles it cannot back up", () => {
 		const { container } = renderTree()
-
-		expect(container.querySelectorAll('[role="group"]').length).toBeGreaterThanOrEqual(2)
-		expect(container.querySelectorAll('[role="treeitem"]')).toHaveLength(3)
-	})
-
-	it("starts at level 2 (the owning surface renders the root at level 1) and deepens with the subtree", () => {
-		const { container } = renderTree()
-
-		expect(nodeNamed(container, "Docs").getAttribute("aria-level")).toBe("2")
-		expect(nodeNamed(container, "Invoices").getAttribute("aria-level")).toBe("3")
-	})
-
-	it("reports each node's position among its own siblings, not among everything mounted", () => {
-		const { container } = renderTree()
-
-		const docs = nodeNamed(container, "Docs")
-		const photos = nodeNamed(container, "Photos")
-		const invoices = nodeNamed(container, "Invoices")
-
-		expect([docs.getAttribute("aria-posinset"), docs.getAttribute("aria-setsize")]).toStrictEqual(["1", "2"])
-		expect([photos.getAttribute("aria-posinset"), photos.getAttribute("aria-setsize")]).toStrictEqual(["2", "2"])
-		expect([invoices.getAttribute("aria-posinset"), invoices.getAttribute("aria-setsize")]).toStrictEqual(["1", "1"])
-	})
-
-	it("carries the expanded state on the node itself, never also on the chevron", () => {
-		const { container } = renderTree()
-
-		expect(nodeNamed(container, "Docs").getAttribute("aria-expanded")).toBe("true")
-		expect(nodeNamed(container, "Photos").getAttribute("aria-expanded")).toBe("false")
-
-		for (const button of container.querySelectorAll("button")) {
-			expect(button.hasAttribute("aria-expanded")).toBe(false)
-		}
-	})
-
-	it("marks only the node matching activePath as selected", () => {
-		const { container } = renderTree({ activePath: ["docs"] })
-
-		expect(nodeNamed(container, "Docs").getAttribute("aria-selected")).toBe("true")
-		expect(nodeNamed(container, "Photos").getAttribute("aria-selected")).toBe("false")
-	})
-
-	it("renders the loading level as presentational — a pending fetch is not a tree node", () => {
-		const { container } = renderTree({ isOpen: () => false, useChildren: () => pending() })
 
 		expect(container.querySelectorAll('[role="treeitem"]')).toHaveLength(0)
+		expect(container.querySelectorAll('[role="tree"], [role="group"]')).toHaveLength(0)
+		expect(container.querySelectorAll("li")).toHaveLength(3)
+	})
+
+	it("nests an open node's subtree inside that node's own list item", () => {
+		const { container } = renderTree()
+
+		const docs = container.querySelector("li")
+
+		expect(docs?.querySelectorAll("li")).toHaveLength(1)
+	})
+
+	it("carries the disclosure state on the chevron that toggles it", () => {
+		const { container } = renderTree()
+
+		expect(chevronFor(container, "Docs").getAttribute("aria-expanded")).toBe("true")
+		expect(chevronFor(container, "Photos").getAttribute("aria-expanded")).toBe("false")
+	})
+
+	it("names each row's chevron without also naming the row twice over", () => {
+		const { container } = renderTree()
+
+		expect(chevronFor(container, "Docs").getAttribute("aria-label")).toBe("Collapse Docs")
+		expect(rowFor(container, "Docs").hasAttribute("aria-label")).toBe(false)
+	})
+
+	it("marks only the node matching activePath as the current page", () => {
+		const { container } = renderTree({ activePath: ["docs"] })
+
+		const navButtons = (name: string) => rowFor(container, name).querySelectorAll("button")[1]
+
+		expect(navButtons("Docs")?.getAttribute("aria-current")).toBe("page")
+		expect(navButtons("Photos")?.hasAttribute("aria-current")).toBe(false)
+	})
+
+	it("renders the loading level as presentational — a pending fetch is not a list item", () => {
+		const { container } = renderTree({ isOpen: () => false, useChildren: () => pending() })
+
 		expect(container.querySelector('[role="presentation"]')).not.toBeNull()
 	})
 })

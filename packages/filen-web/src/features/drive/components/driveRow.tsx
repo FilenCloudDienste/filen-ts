@@ -46,6 +46,9 @@ export interface DriveRowProps {
 	// BULK menu over exactly these items (freshest metadata, same as the bulk bar reads).
 	selectedItems: DriveItem[]
 	onPointerSelect: (index: number, event: MouseEvent<HTMLDivElement>) => void
+	// Moves the roving cursor + range anchor to a row (useDriveListboxNav's setCursor) — the retarget
+	// half of a right-click, which never fires onClick and so never reaches onPointerSelect.
+	onCursorMove: (index: number) => void
 	onOpen: (index: number) => void
 	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
 	onBulkAction: (kind: BulkDialogActionKind) => void
@@ -65,6 +68,7 @@ export function DriveRow({
 	directorySizes,
 	selectedItems,
 	onPointerSelect,
+	onCursorMove,
 	onOpen,
 	onItemAction,
 	onBulkAction,
@@ -127,9 +131,13 @@ export function DriveRow({
 							// Right-clicking outside the current selection retargets it to this row (the
 							// file-manager convention) — otherwise a single-item menu would open while
 							// unrelated rows stayed highlighted. Merges with ContextMenuTrigger's own handler
-							// (Base UI's mergeProps chains same-name handlers, see the comment above).
+							// (Base UI's mergeProps chains same-name handlers, see the comment above). The
+							// cursor and range anchor move with it — a right-click is a pointer selection, and
+							// leaving them behind would make the next Arrow jump from an unselected row and
+							// Shift+Click range from an anchor the user never set.
 							if (!selected) {
 								useDriveStore.getState().setSelectedItems([item])
+								onCursorMove(index)
 							}
 						}}
 						onDragEnter={drop.onDragEnter}

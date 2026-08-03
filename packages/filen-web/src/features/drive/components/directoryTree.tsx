@@ -14,9 +14,11 @@ import { Spinner } from "@/components/ui/spinner"
 // root row and mounts this when that root is open. Lazy per level: a node's children query only fires
 // once its subtree mounts (an open node renders a nested DirectoryTree; a closed one renders nothing).
 //
-// Each level is a `role="group"` of `role="treeitem"` rows; the owning surface renders the `role="tree"`
-// container and its own level-1 root node, so depth here starts at level 2. Not virtualized — every
-// mounted node renders (fine for typical trees; huge trees are future work).
+// Each level is a plain nested list whose rows are ordinary buttons — NOT role="tree"/"treeitem": the
+// ARIA tree pattern owes a roving-tabindex/arrow-key focus model this widget does not implement (see
+// the owning sidebar's own note). The chevron carries the disclosure state, and an open node nests its
+// subtree inside its own list item. Not virtualized — every mounted node renders (fine for typical
+// trees; huge trees are future work).
 export interface DirectoryTreeContext {
 	// The current location's uuid chain (drive splat), for highlighting the active branch. Empty at root.
 	activePath: string[]
@@ -101,16 +103,11 @@ export function DirectoryTree({ tree, parentUuid = null, parentPath = [], depth 
 	}
 
 	return (
-		<ul
-			role="group"
-			className="flex flex-col gap-0.5"
-		>
-			{query.data.map((child, index) => (
+		<ul className="flex flex-col gap-0.5">
+			{query.data.map(child => (
 				<DirectoryTreeNode
 					key={child.uuid}
 					child={child}
-					index={index}
-					siblingCount={query.data.length}
 					path={[...parentPath, child.uuid]}
 					depth={depth}
 					tree={tree}
@@ -122,14 +119,12 @@ export function DirectoryTree({ tree, parentUuid = null, parentPath = [], depth 
 
 interface DirectoryTreeNodeProps {
 	child: DirectoryTreeChild
-	index: number
-	siblingCount: number
 	path: string[]
 	depth: number
 	tree: DirectoryTreeContext
 }
 
-function DirectoryTreeNode({ child, index, siblingCount, path, depth, tree }: DirectoryTreeNodeProps) {
+function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps) {
 	const { t } = useTranslation("drive")
 	const open = tree.isOpen(child.uuid)
 	const active = arraysEqual(path, tree.activePath)
@@ -148,17 +143,8 @@ function DirectoryTreeNode({ child, index, siblingCount, path, depth, tree }: Di
 	})
 
 	return (
-		<li role="none">
-			{/* The node is the row div, not the <li>: the <li> also holds the nested subtree, and a
-			treeitem there would draw its accessible name from every descendant's text. Level 2 upward
-			because the owning surface renders the drive-root node at level 1. */}
+		<li>
 			<div
-				role="treeitem"
-				aria-level={depth + 2}
-				aria-expanded={open}
-				aria-selected={active}
-				aria-posinset={index + 1}
-				aria-setsize={siblingCount}
 				style={{ paddingInlineStart: levelInset(depth) }}
 				onDragEnter={drop.onDragEnter}
 				onDragOver={drop.onDragOver}
@@ -176,10 +162,10 @@ function DirectoryTreeNode({ child, index, siblingCount, path, depth, tree }: Di
 					drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset"
 				)}
 			>
-				{/* No aria-expanded here — the treeitem above owns it, and two nested expanded states
-				double-announce. The label already conveys which way this toggles. */}
+				{/* The chevron owns the disclosure state — it is what expands and collapses the subtree. */}
 				<button
 					type="button"
+					aria-expanded={open}
 					aria-label={t(open ? "driveTreeCollapseNode" : "driveTreeExpandNode", { name: child.name })}
 					onClick={() => {
 						tree.onToggle(child.uuid)
@@ -190,6 +176,9 @@ function DirectoryTreeNode({ child, index, siblingCount, path, depth, tree }: Di
 				</button>
 				<button
 					type="button"
+					// The routed directory, announced on the row that navigates to it — the row itself is a
+					// plain list item and carries no selection state of its own.
+					aria-current={active ? "page" : undefined}
 					onClick={() => {
 						tree.onNavigate(path)
 					}}

@@ -130,6 +130,36 @@ describe("keymap registry", () => {
 		expect(kvStore.get(OVERRIDES_KEY)).toEqual({ "app.existing": "ctrl+e", "app.other": "shift+o" })
 	})
 
+	it("merges onto an override another tab persisted AFTER this one loaded", async () => {
+		// Two tabs live since boot: both loaded the record, then the other one rebound something. This
+		// tab's store never saw that entry, so persisting its own snapshot wholesale would silently drop
+		// it — the write has to re-read and merge just the entry it owns.
+		const { registerAction, setUserCombo, keymapOverridesLoaded } = await freshRegistry()
+
+		registerAction(actionDef("app.mine"))
+		registerAction(actionDef("app.theirs"))
+		await keymapOverridesLoaded()
+
+		kvStore.set(OVERRIDES_KEY, { "app.theirs": "ctrl+t" })
+		await setUserCombo("app.mine", "shift+m")
+
+		expect(kvStore.get(OVERRIDES_KEY)).toEqual({ "app.theirs": "ctrl+t", "app.mine": "shift+m" })
+	})
+
+	it("clearUserCombo drops only its own entry from what another tab persisted", async () => {
+		const { registerAction, setUserCombo, clearUserCombo, keymapOverridesLoaded } = await freshRegistry()
+
+		registerAction(actionDef("app.mine"))
+		registerAction(actionDef("app.theirs"))
+		await keymapOverridesLoaded()
+		await setUserCombo("app.mine", "shift+m")
+
+		kvStore.set(OVERRIDES_KEY, { "app.mine": "shift+m", "app.theirs": "ctrl+t" })
+		await clearUserCombo("app.mine")
+
+		expect(kvStore.get(OVERRIDES_KEY)).toEqual({ "app.theirs": "ctrl+t" })
+	})
+
 	it("applies a valid persisted override on load, ahead of the default combo", async () => {
 		kvStore.set(OVERRIDES_KEY, { "app.test": "ctrl+k" })
 
@@ -287,6 +317,16 @@ describe("keymap registry — combo recording session", () => {
 		clearRecording()
 
 		expect(isRecordingCombo()).toBe(false)
+	})
+
+	it("clearRecording retires a rejection too, so a freshly mounted surface shows no stale error", async () => {
+		const { beginRecording, rejectRecording, clearRecording, currentRecordingRejection } = await freshRegistry()
+
+		beginRecording("a", "app.test")
+		rejectRecording("a", "common:toggleTheme")
+		clearRecording()
+
+		expect(currentRecordingRejection()).toBeNull()
 	})
 
 	it("rejectRecording ends the owner's session and records which action holds the combo", async () => {

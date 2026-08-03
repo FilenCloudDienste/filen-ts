@@ -9,6 +9,7 @@ import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreview
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 
 export interface MarkdownViewerProps {
@@ -32,25 +33,41 @@ function MarkdownToolbar({ mode, disabled, onToggle }: { mode: "rendered" | "sou
 
 	return (
 		<div className="flex h-10 shrink-0 items-center justify-end px-2">
-			<Button
-				variant="ghost"
-				size="sm"
-				disabled={disabled}
-				title={disabled ? t("previewMarkdownToggleDirtyHint") : undefined}
-				onClick={onToggle}
-			>
-				{mode === "rendered" ? (
-					<>
-						<CodeIcon />
-						{t("previewMarkdownViewSourceAction")}
-					</>
-				) : (
-					<>
-						<EyeIcon />
-						{t("previewMarkdownViewRenderedAction")}
-					</>
-				)}
-			</Button>
+			{/* The tooltip is the whole point of the disabled state: it is the only thing that explains why
+			    the toggle is locked. It only opens while locked — an enabled toggle already carries its own
+			    visible label. */}
+			<Tooltip disabled={!disabled}>
+				<TooltipTrigger
+					render={
+						<Button
+							variant="ghost"
+							size="sm"
+							disabled={disabled}
+							// aria-disabled (Base UI's focusableWhenDisabled) instead of the native disabled
+							// attribute: a natively disabled button gets pointer-events:none from the Button base
+							// class and drops out of the tab order, so neither hover nor focus could ever reach the
+							// hint below. Clicks and keys stay inert either way — Base UI's own button handlers
+							// swallow them while `disabled` is set — so the styling is all that has to be restated.
+							focusableWhenDisabled
+							className="aria-disabled:opacity-50"
+							onClick={onToggle}
+						>
+							{mode === "rendered" ? (
+								<>
+									<CodeIcon />
+									{t("previewMarkdownViewSourceAction")}
+								</>
+							) : (
+								<>
+									<EyeIcon />
+									{t("previewMarkdownViewRenderedAction")}
+								</>
+							)}
+						</Button>
+					}
+				/>
+				<TooltipContent>{t("previewMarkdownToggleDirtyHint")}</TooltipContent>
+			</Tooltip>
 		</div>
 	)
 }

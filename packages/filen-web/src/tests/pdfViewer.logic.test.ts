@@ -205,20 +205,26 @@ describe("pdfPageAction — scale-change re-render (via a stale-vs-current rende
 
 describe("pdfLayerScaleVars", () => {
 	it("supplies all three properties pdf.js's own layer sizing reads", () => {
-		const vars = pdfLayerScaleVars(1.5) as Record<string, string>
+		const vars = pdfLayerScaleVars(1.5, 1) as Record<string, string>
 
 		expect(Object.keys(vars).sort()).toEqual(["--scale-round-x", "--scale-round-y", "--total-scale-factor"])
 	})
 
 	it("stringifies the scale — a bare number would be suffixed with px by React", () => {
-		const vars = pdfLayerScaleVars(1.5) as Record<string, string>
+		const vars = pdfLayerScaleVars(1.5, 1) as Record<string, string>
 
 		expect(vars["--total-scale-factor"]).toBe("1.5")
 		expect(typeof vars["--total-scale-factor"]).toBe("string")
 	})
 
+	it("folds the page's UserUnit in — the viewport driving the canvas and links already carries it", () => {
+		const vars = pdfLayerScaleVars(1.5, 10) as Record<string, string>
+
+		expect(vars["--total-scale-factor"]).toBe("15")
+	})
+
 	it("emits unit-bearing rounding properties — a unitless value makes round() invalid", () => {
-		const vars = pdfLayerScaleVars(1) as Record<string, string>
+		const vars = pdfLayerScaleVars(1, 1) as Record<string, string>
 
 		expect(vars["--scale-round-x"]).toBe("1px")
 		expect(vars["--scale-round-y"]).toBe("1px")

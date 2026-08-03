@@ -19,6 +19,7 @@ import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
 import { StrengthMeter } from "@/features/auth/components/strengthMeter"
 import { MasterKeysFileField } from "@/features/auth/components/masterKeysFileField"
+import { CapsLockWarning } from "@/features/auth/components/capsLockWarning"
 import { advanceSkipMasterKeysChain, type SkipMasterKeysStage } from "@/features/auth/components/skipMasterKeysChain.logic"
 
 interface ResetFormProps {
@@ -201,15 +202,7 @@ function ResetForm({ token }: ResetFormProps) {
 							onBlur={passwordCaps.onBlur}
 						/>
 						{passwordStrength && <StrengthMeter tier={passwordStrength.strength} />}
-						{/* Rendered unconditionally with only its TEXT toggled: a live region must already be in
-						    the a11y tree when its content changes, so an already-populated role=status inserted
-						    on demand is commonly missed by screen readers. Empty <p> collapses to zero height. */}
-						<p
-							role="status"
-							className="text-xs text-yellow-500"
-						>
-							{passwordCaps.capsLockOn ? t("capsLockOn") : ""}
-						</p>
+						<CapsLockWarning active={passwordCaps.capsLockOn} />
 					</Field>
 					<Field>
 						<FieldLabel htmlFor="reset-confirm-password">{t("resetConfirmPassword")}</FieldLabel>
@@ -230,12 +223,7 @@ function ResetForm({ token }: ResetFormProps) {
 							onBlur={confirmPasswordCaps.onBlur}
 						/>
 						{passwordsMismatched && <FieldError id="reset-confirm-password-error">{t("passwordsDoNotMatch")}</FieldError>}
-						<p
-							role="status"
-							className="text-xs text-yellow-500"
-						>
-							{confirmPasswordCaps.capsLockOn ? t("capsLockOn") : ""}
-						</p>
+						<CapsLockWarning active={confirmPasswordCaps.capsLockOn} />
 					</Field>
 					<MasterKeysFileField
 						disabled={pending}

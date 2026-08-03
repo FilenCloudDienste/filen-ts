@@ -16,6 +16,7 @@ import { ChatRow } from "@/features/chats/components/chatRow"
 import { ChatsBulkActionBar } from "@/features/chats/components/chatsBulkActionBar"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
 import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
+import { useIsSidebarPanelVisible } from "@/features/shell/lib/sidebarPanelVisibility"
 import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useAction } from "@/lib/keymap/useAction"
@@ -58,6 +59,7 @@ function SidebarNotice({ icon, title, description, role }: { icon: ReactNode; ti
 export function ChatsSidebar() {
 	const { t } = useTranslation(["chats", "common"])
 	const isOnline = useIsOnline()
+	const panelVisible = useIsSidebarPanelVisible()
 	const resize = useResizableSidebar("chats")
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const selectedUuid = selectedUuidFromPath(pathname)
@@ -135,7 +137,9 @@ export function ChatsSidebar() {
 	// preventDefault or the native selection would visibly compete with the row selection. Guarded on
 	// dialogHost.isDialogOpen so a background Cmd+A can't select conversations behind an open dialog.
 	// Targets `rows` (already search-filtered) minus undecryptable ones — mirrors drive.selectAll/
-	// notes.selectAll exactly.
+	// notes.selectAll exactly. Both actions below are additionally OFF while the panel is out of sight
+	// (drawer closed below the layout breakpoint): rows, count and bulk bar all live inside this panel, so
+	// firing them there would swallow the browser's own select-all and leave an invisible selection behind.
 	useAction(
 		"chats.selectAll",
 		event => {
@@ -146,7 +150,7 @@ export function ChatsSidebar() {
 			event.preventDefault()
 			useChatsSelectionStore.getState().setSelectedChats(selectableChatsForSelectAll(rows))
 		},
-		undefined,
+		{ enabled: panelVisible },
 		[dialogHost.isDialogOpen, rows]
 	)
 
@@ -162,7 +166,7 @@ export function ChatsSidebar() {
 
 			useChatsSelectionStore.getState().clearSelectedChats()
 		},
-		undefined,
+		{ enabled: panelVisible },
 		[dialogHost.isDialogOpen]
 	)
 

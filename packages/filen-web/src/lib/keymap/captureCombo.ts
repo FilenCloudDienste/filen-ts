@@ -44,3 +44,37 @@ export function normalizeRecordedCombo(keys: Iterable<string>, isMac: boolean): 
 
 	return [...MODIFIER_ORDER.filter(modifier => modifiers.has(modifier)), key].join("+")
 }
+
+// Escape is the recorder's cancel key, never a recordable binding.
+const CANCEL_KEY = "escape"
+
+// What the surface should do with the recorder's current state: keep waiting, cancel the session, or
+// commit the finished chord.
+export type RecordingOutcome = { kind: "pending" } | { kind: "cancel" } | { kind: "commit"; combo: string }
+
+const PENDING: RecordingOutcome = { kind: "pending" }
+const CANCEL: RecordingOutcome = { kind: "cancel" }
+
+// The one reader of react-hotkeys-hook's recorder state, kept here rather than inline in the surface so
+// its two non-obvious rules are testable without a DOM:
+//
+//   - `isRecording`, not just "a session exists", gates the key set. useRecordHotkeys clears its keys in
+//     start() and NEVER in stop(), and that reset only lands on the render after the flag flips — a set
+//     read while the recorder is stopped still holds the PREVIOUS session's chord, which would otherwise
+//     be committed to the next action rebound in the same mount with zero keypresses.
+//   - A recorded Escape cancels. The surface's own capture handler catches Escape while focus is inside
+//     it, but the recorder listens on `document`, so a press with focus anywhere else (the shortcuts list
+//     is a plain page, not a modal) reaches the recorder and must not be saved as a binding.
+export function recordingOutcome(keys: Iterable<string>, isRecording: boolean, isMac: boolean): RecordingOutcome {
+	if (!isRecording) {
+		return PENDING
+	}
+
+	const combo = normalizeRecordedCombo(keys, isMac)
+
+	if (combo === null) {
+		return PENDING
+	}
+
+	return combo.split("+").includes(CANCEL_KEY) ? CANCEL : { kind: "commit", combo }
+}

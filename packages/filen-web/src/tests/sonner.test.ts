@@ -58,4 +58,14 @@ describe("ui/sonner Toaster", () => {
 
 		expect(lastProps().closeButton).toBe(false)
 	})
+
+	// The global reduced-motion rule freezes every animation except data-slot="spinner"/"skeleton";
+	// without the slot a long upload's loading toast would sit on a motionless spinner.
+	it("marks the loading icon as a spinner so reduced motion cannot freeze it", () => {
+		render(createElement(Toaster))
+
+		const { container } = render(createElement("div", null, lastProps().icons?.loading))
+
+		expect(container.querySelector('[data-slot="spinner"]')).not.toBeNull()
+	})
 })

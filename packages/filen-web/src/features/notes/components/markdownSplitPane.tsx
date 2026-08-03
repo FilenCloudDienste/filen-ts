@@ -82,6 +82,19 @@ export function MarkdownSplitPane({ left, right }: { left: ReactNode; right: Rea
 		commitRatio()
 	}
 
+	// A cancelled drag (the browser reclaiming a touch gesture, pen palm-rejection) never fires pointerup,
+	// so without this draggingRef would stay true and silently veto every later keyboard commit below.
+	// The panes already show the last dragged position, so that position is what gets committed.
+	function handlePointerCancel(): void {
+		if (!draggingRef.current) {
+			return
+		}
+
+		draggingRef.current = false
+
+		commitRatio()
+	}
+
 	function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
 		const next = ratioFromKey(event.key, ratio)
 
@@ -130,10 +143,12 @@ export function MarkdownSplitPane({ left, right }: { left: ReactNode; right: Rea
 				onPointerDown={handlePointerDown}
 				onPointerMove={handlePointerMove}
 				onPointerUp={handlePointerUp}
+				onPointerCancel={handlePointerCancel}
 				onKeyDown={handleKeyDown}
 				onKeyUp={handleRelease}
 				onBlur={handleRelease}
-				className="w-1 shrink-0 cursor-col-resize bg-border/50 transition-colors outline-none hover:bg-border focus-visible:bg-ring/50"
+				// touch-none keeps the browser from reclaiming a touch drag as a scroll in the first place.
+				className="w-1 shrink-0 cursor-col-resize touch-none bg-border/50 transition-colors outline-none hover:bg-border focus-visible:bg-ring/50"
 			/>
 			<div
 				className="min-h-0 min-w-0 flex-1 overflow-hidden"

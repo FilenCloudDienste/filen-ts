@@ -88,6 +88,8 @@ export const chats = {
 	chatNewMessageAnnouncement_one: "New message from {{name}}",
 	/** Thread — screen-reader-only announcement when messages arrive from someone else (plural) */
 	chatNewMessageAnnouncement_other: "{{count}} new messages from {{name}}",
+	/** Thread — screen-reader-only announcement when one batch of arriving messages comes from several senders, so naming one would misattribute the others */
+	chatNewMessagesMixedAnnouncement: "{{count}} new messages",
 	/** Message — rendered mention label for @everyone */
 	chatMentionEveryone: "everyone",
 	/** Message — rendered mention label for an unresolved participant */

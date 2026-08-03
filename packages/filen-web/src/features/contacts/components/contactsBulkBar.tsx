@@ -2,21 +2,17 @@ import { createElement } from "react"
 import { useTranslation } from "react-i18next"
 import { XIcon } from "lucide-react"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
-import { type ContactSelection } from "@/features/contacts/lib/selection"
+import { type SelectedContacts } from "@/features/contacts/lib/selection"
 import { buildContactBulkActions, type ContactBulkActionKind } from "@/features/contacts/components/contactsBulkBar.logic"
 import { Kbd } from "@/lib/keymap/kbd"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 export interface ContactsBulkBarProps {
-	// The current (unfiltered) query data per section — the bar filters these by uuid, so a selection
-	// made before a search still resolves to the right records even though the rows behind this bar are
-	// search-filtered (same semantics as notesSidebar.tsx's liveSelectedNotes, derived from allNotes).
-	requests: ContactRequestIn[]
-	pending: ContactRequestOut[]
-	contacts: Contact[]
-	blocked: BlockedContact[]
-	selection: ContactSelection
+	// The selection already resolved against the live records (resolveSelectedContacts) — the same value
+	// the list gates this bar's mounting on, so the bar can never disagree with the gate about how many
+	// of the selected rows still exist.
+	selected: SelectedContacts
 	onClear: () => void
 	// Direct — no confirm (mirrors mobile: accept never confirms).
 	onAccept: (items: ContactRequestIn[]) => void
@@ -38,11 +34,7 @@ export interface ContactsBulkBarProps {
 // on the left, actions on the right), plus its "compute selected items from a selection set, gate the
 // descriptor list, dispatch by kind" structure.
 export function ContactsBulkBar({
-	requests,
-	pending,
-	contacts,
-	blocked,
-	selection,
+	selected,
 	onClear,
 	onAccept,
 	onDeny,
@@ -55,38 +47,32 @@ export function ContactsBulkBar({
 }: ContactsBulkBarProps) {
 	const { t } = useTranslation("contacts")
 
-	const selectedRequests = requests.filter(request => selection.requests.has(request.uuid))
-	const selectedPending = pending.filter(request => selection.pending.has(request.uuid))
-	const selectedContacts = contacts.filter(contact => selection.contacts.has(contact.uuid))
-	const selectedBlocked = blocked.filter(contact => selection.blocked.has(contact.uuid))
-	const total = selectedRequests.length + selectedPending.length + selectedContacts.length + selectedBlocked.length
-
 	const descriptors = buildContactBulkActions({
-		requests: selectedRequests.length,
-		pending: selectedPending.length,
-		contacts: selectedContacts.length,
-		blocked: selectedBlocked.length
+		requests: selected.requests.length,
+		pending: selected.pending.length,
+		contacts: selected.contacts.length,
+		blocked: selected.blocked.length
 	})
 
 	function run(kind: ContactBulkActionKind): void {
 		switch (kind) {
 			case "unblock":
-				onUnblock(selectedBlocked)
+				onUnblock(selected.blocked)
 				return
 			case "accept":
-				onAccept(selectedRequests)
+				onAccept(selected.requests)
 				return
 			case "deny":
-				onDeny(selectedRequests)
+				onDeny(selected.requests)
 				return
 			case "cancel":
-				onCancel(selectedPending)
+				onCancel(selected.pending)
 				return
 			case "remove":
-				onRemove(selectedContacts)
+				onRemove(selected.contacts)
 				return
 			case "block":
-				onBlock(selectedContacts)
+				onBlock(selected.contacts)
 				return
 		}
 	}
@@ -112,7 +98,7 @@ export function ContactsBulkBar({
 						<Kbd action="contacts.clearSelection" />
 					</TooltipContent>
 				</Tooltip>
-				<p className="text-sm text-muted-foreground">{t("contactsSelectionCount", { count: total })}</p>
+				<p className="text-sm text-muted-foreground">{t("contactsSelectionCount", { count: selected.total })}</p>
 			</div>
 			<div className="flex items-center gap-2">
 				{descriptors.map(descriptor => (

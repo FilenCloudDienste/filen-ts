@@ -7,6 +7,7 @@ import { cn, noop } from "@/lib/utils"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { enqueueChatMessage } from "@/features/chats/lib/sync"
 import { signalTyping, signalStopped } from "@/features/chats/lib/typing"
+import { messageSenderName } from "@/features/chats/lib/sort"
 import { editMessage } from "@/features/chats/lib/messageActions"
 import { uploadAttachment } from "@/features/chats/lib/attachments"
 import type { OptimisticSender } from "@/features/chats/lib/sync.logic"
@@ -48,10 +49,6 @@ const MAX_TEXTAREA_HEIGHT = 200
 // Autocomplete popovers cap at this many rows (mobile caps emoji at 10).
 const MENTION_LIMIT = 12
 const EMOJI_LIMIT = 8
-
-function senderName(message: ChatMessage): string {
-	return message.senderNickName !== undefined && message.senderNickName.length > 0 ? message.senderNickName : message.senderEmail
-}
 
 // The composer — replaces the earlier disabled strip. EVERY send goes through the durable outbox (enqueueChatMessage),
 // never sdkApi.sendChatMessage directly, so a send survives a window close / lost connection. Edits are
@@ -560,7 +557,7 @@ export function Composer({
 				{mode.kind === "reply" ? (
 					<div className="flex items-center gap-2 border-b border-input px-3 py-1.5 text-sm">
 						<CornerUpLeftIcon className="size-3.5 shrink-0 text-muted-foreground" />
-						<span className="shrink-0 font-medium">{t("chatReplyingTo", { name: senderName(mode.message) })}</span>
+						<span className="shrink-0 font-medium">{t("chatReplyingTo", { name: messageSenderName(mode.message) })}</span>
 						{mode.message.message !== undefined && mode.message.message.length > 0 ? (
 							<span className="min-w-0 flex-1 truncate text-muted-foreground">{mode.message.message}</span>
 						) : (

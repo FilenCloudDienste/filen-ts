@@ -15,6 +15,8 @@ export const publicLinks = {
 	unavailableBody: "This link is invalid or has expired.",
 	/** Invalid/expired surface — action returning to the app's home */
 	back: "Back to Filen",
+	/** File view inside a directory link — action returning to that directory's listing */
+	backToDirectory: "Back to directory",
 	/** Shared error surface — retry the failed resolution */
 	retry: "Try again",
 

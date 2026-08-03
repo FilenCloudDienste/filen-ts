@@ -13,11 +13,14 @@ export interface RevealDeps {
 	fetchPath: (item: DriveItem) => Promise<GetItemPathResult>
 }
 
-// ensureQueryData so a repeated reveal of the same item (or a second one from the same result set) is
-// a cache read — the same shape itemMenu.tsx's runCopyLink already uses for the link status.
+// fetchQuery, never ensureQueryData: a cached ancestor chain is only valid until the item (or any
+// ancestor) is moved, and a move preserves the uuid this key is built from — nothing invalidates it,
+// and the entry outlives the session on disk, so a cache read would navigate a later reveal to where
+// the item used to be. At the client's staleTime 0 this always refetches while still deduping
+// concurrent calls (a second reveal from the same result set joins the in-flight one).
 export const defaultRevealDeps: RevealDeps = {
 	fetchPath: item =>
-		queryClient.ensureQueryData({
+		queryClient.fetchQuery({
 			queryKey: itemPathQueryKey(item.data.uuid),
 			queryFn: () => fetchItemPath(asDirectoryOrFile(item).data)
 		})

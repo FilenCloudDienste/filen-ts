@@ -171,15 +171,21 @@ export async function fetchSharedListing(
 export function driveListingQueryUpdate(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]): void {
 	const queryKey = driveListingQueryKey({ variant: "drive", uuid: parentUuid })
 
-	// A refetch snapshotted on the server BEFORE this write would land after the patch and silently
-	// overwrite it — abort anything in flight first. Only when cached data already exists: cancelling
-	// a query's INITIAL fetch would strand it on its loading state with nothing to show until the
-	// next mount/focus trigger, and the overwrite hazard only applies to data a patch can lose.
-	if (queryClient.getQueryData(queryKey) !== undefined) {
-		void queryClient.cancelQueries({ queryKey })
-	}
-
+	cancelListingFetch(queryKey)
 	queryClient.setQueryData<DriveItem[]>(queryKey, prev => updater(prev ?? []))
+}
+
+// The cancel half of this module's cancel-before-patch discipline, shared by every listing patch —
+// the variant-hardcoded updater above, the fan-out below, and the flat recents/favorites keys those
+// two can't single out (socketHandlers.ts, actions.ts). A refetch snapshotted on the server BEFORE a
+// write lands after the patch and silently overwrites it, so anything in flight is aborted first.
+// Only when cached data already exists: cancelling a query's INITIAL fetch would strand it on its
+// loading state with nothing to show until the next mount/focus trigger, and the overwrite hazard
+// only applies to data a patch can lose.
+export function cancelListingFetch(queryKey: ReturnType<typeof driveListingQueryKey>): void {
+	if (queryClient.getQueryData(queryKey) !== undefined) {
+		void queryClient.cancelQueries({ queryKey, exact: true })
+	}
 }
 
 // Fan-out patch across EVERY currently-instantiated listing, any variant, any uuid — a
@@ -195,7 +201,8 @@ export function driveListingQueryUpdate(parentUuid: string | null, updater: (pre
 export function driveListingQueryUpdateGlobal(updater: (items: DriveItem[]) => DriveItem[]): void {
 	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["drive", "listing"] })) {
 		// Same in-flight-refetch hazard as driveListingQueryUpdate above, with the same initial-fetch
-		// carve-out — only queries that already hold data get their in-flight fetch aborted.
+		// carve-out — only queries that already hold data get their in-flight fetch aborted. Keyed off
+		// the cache entry's own data rather than cancelListingFetch's lookup, which this loop already has.
 		if (query.state.data !== undefined) {
 			void queryClient.cancelQueries({ queryKey: query.queryKey, exact: true })
 		}

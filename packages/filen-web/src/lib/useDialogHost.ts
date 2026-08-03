@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react"
 import { useRouterState } from "@tanstack/react-router"
-import { shouldCloseDialogOnNavigate } from "@/lib/useDialogHost.logic"
+import { resolveDialogNavigationClose } from "@/lib/useDialogHost.logic"
 
 // The listing-level "one dialog at a time" state machine, shared by every feature that hosts a
 // kind-discriminated confirm/edit dialog off a list (drive's directory listing, contacts). `Dialog`
@@ -32,23 +32,30 @@ export function useDialogHost<Dialog>(options?: UseDialogHostOptions<Dialog>): D
 	// without changing its path.
 	const locationHref = useRouterState({ select: state => state.location.href })
 	const lastHrefRef = useRef(locationHref)
+	// A navigation that arrived mid-mutation owes a close; this remembers it so the effect below can
+	// re-decide when `dialogPending` settles instead of dropping it (an error arm keeps its dialog open,
+	// which after a navigation is exactly the strand this rule exists to prevent).
+	const deferredCloseRef = useRef(false)
 	const keepOpenOnNavigate = options?.keepOpenOnNavigate
 
 	// Browser back/forward (and any in-app navigation that leaves this host mounted) must not strand an
 	// open modal over a screen it no longer belongs to. Pending is respected, so a navigation fired from
 	// inside a mutation (notes/chats navigate away from the note being deleted BEFORE its cache removal
 	// — useNoteDialogHost's navigateAwayIfCurrent) never yanks the dialog out from under its own
-	// spinner; that flow closes itself when it settles.
+	// spinner; a flow that closes itself when it settles gets there first and this finds nothing to do.
 	useEffect(() => {
-		if (lastHrefRef.current === locationHref) {
+		if (lastHrefRef.current === locationHref && !deferredCloseRef.current) {
 			return
 		}
 
 		lastHrefRef.current = locationHref
 
 		const keepOpen = activeDialog !== null && (keepOpenOnNavigate?.(activeDialog) ?? false)
+		const outcome = resolveDialogNavigationClose({ hasDialog: activeDialog !== null, pending: dialogPending, keepOpen })
 
-		if (!shouldCloseDialogOnNavigate({ hasDialog: activeDialog !== null, pending: dialogPending, keepOpen })) {
+		deferredCloseRef.current = outcome === "defer"
+
+		if (outcome !== "close") {
 			return
 		}
 

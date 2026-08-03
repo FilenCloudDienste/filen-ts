@@ -10,7 +10,9 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 // performLogout wires the real worker-backed teardown collaborators — mocked at the seam so its heavy
 // import graph stays out of node and the force-logout call is observable.
-const { performLogout } = vi.hoisted(() => ({ performLogout: vi.fn<() => Promise<boolean>>(() => Promise.resolve(true)) }))
+const { performLogout } = vi.hoisted(() => ({
+	performLogout: vi.fn<(options?: { forced?: boolean }) => Promise<boolean>>(() => Promise.resolve(true))
+}))
 
 vi.mock("@/features/shell/lib/performLogout", () => ({ performLogout }))
 
@@ -40,22 +42,22 @@ beforeEach(() => {
 })
 
 describe("general socket handlers", () => {
-	it("passwordChanged forces the unified logout", () => {
+	// `forced` is the whole security property of this arm: the server already revoked the session, so the
+	// unsaved-preview prompt may delay the wipe but must never cancel it.
+	it("passwordChanged forces the unified logout, uncancellable", () => {
 		handleGeneralEvent(generalEvt({ type: "passwordChanged" }))
 
-		expect(performLogout).toHaveBeenCalledTimes(1)
+		expect(performLogout).toHaveBeenCalledExactlyOnceWith({ forced: true })
 	})
 
-	it("logs a warn and tears nothing else down when the sign-out is declined at the unsaved-preview prompt", async () => {
-		performLogout.mockResolvedValueOnce(false)
+	it("logs a failed force-logout instead of swallowing it", async () => {
+		performLogout.mockRejectedValueOnce(new Error("wipe failed"))
 
 		handleGeneralEvent(generalEvt({ type: "passwordChanged" }))
 		await Promise.resolve()
 		await Promise.resolve()
 
-		expect(performLogout).toHaveBeenCalledTimes(1)
-		expect(logWarn).toHaveBeenCalledTimes(1)
-		expect(logError).not.toHaveBeenCalled()
+		expect(logError).toHaveBeenCalledTimes(1)
 	})
 
 	it("newEvent refetches the events cache when it has already been loaded", () => {

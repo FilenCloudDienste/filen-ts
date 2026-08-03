@@ -1,3 +1,4 @@
+import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import { clampListboxIndex, listboxRange } from "@/features/drive/lib/listbox"
 import { type ContactSection } from "@/features/contacts/components/contactsList.logic"
 
@@ -46,6 +47,37 @@ export const EMPTY_CONTACT_SELECTION_STATE: ContactSelectionState = Object.freez
 
 export function contactSelectionSize(selection: ContactSelection): number {
 	return selection.requests.size + selection.pending.size + selection.contacts.size + selection.blocked.size
+}
+
+// The account's four unfiltered record sets, keyed the way the selection is.
+export interface ContactRecords {
+	requests: readonly ContactRequestIn[]
+	pending: readonly ContactRequestOut[]
+	contacts: readonly Contact[]
+	blocked: readonly BlockedContact[]
+}
+
+export interface SelectedContacts {
+	requests: ContactRequestIn[]
+	pending: ContactRequestOut[]
+	contacts: Contact[]
+	blocked: BlockedContact[]
+	total: number
+}
+
+// The selection resolved against what still EXISTS. A uuid outlives its record — an accepted request or
+// a removed contact leaves the query data the moment its action lands — so both the bulk bar's contents
+// and the gate that mounts it read this, never the raw uuid count: gating on uuids alone floats an empty
+// bar with no actions over the list. Records are unfiltered by search on purpose (a selection made before
+// typing still resolves), and the lists are short and unvirtualized, so a plain filter per section is the
+// whole cost.
+export function resolveSelectedContacts(records: ContactRecords, selection: ContactSelection): SelectedContacts {
+	const requests = records.requests.filter(request => selection.requests.has(request.uuid))
+	const pending = records.pending.filter(request => selection.pending.has(request.uuid))
+	const contacts = records.contacts.filter(contact => selection.contacts.has(contact.uuid))
+	const blocked = records.blocked.filter(contact => selection.blocked.has(contact.uuid))
+
+	return { requests, pending, contacts, blocked, total: requests.length + pending.length + contacts.length + blocked.length }
 }
 
 function onlySection(section: ContactSectionKey, uuids: readonly string[]): ContactSelection {

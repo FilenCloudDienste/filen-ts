@@ -64,6 +64,25 @@ export function photosRangeSelection(items: readonly PhotoItem[], anchorUuid: st
 		.filter((rangeItem): rangeItem is PhotoItem => rangeItem !== undefined)
 }
 
+// Controls inside a tile that own their own keyboard semantics — today the tile's ⋯ menu trigger, which
+// carries the cursor tile's tab stop alongside the tile face itself (photoTile.tsx).
+const INTERACTIVE_KEY_TARGET_SELECTOR = "button, a, input, select, textarea"
+
+// Probed by shape, not with `instanceof Element`, so this module stays testable in the DOM-free node
+// environment — previewOverlay.logic.ts's exported hasClosest does the same for its own guards and is
+// deliberately not reused here: importing it would drag that module's whole drive action/query graph
+// (down to the SDK worker) into the photos grid.
+function hasClosest(target: EventTarget | null): target is EventTarget & { closest: (selector: string) => Element | null } {
+	return typeof target === "object" && target !== null && typeof (target as { closest?: unknown }).closest === "function"
+}
+
+// True when a keydown originated on such a control rather than on the tile face. The grid's container
+// handler must leave those keys alone: preventDefault on Enter/Space would suppress the button's own
+// native activation, leaving the ⋯ menu unreachable by keyboard.
+export function photosGridKeyTargetIsInteractive(target: EventTarget | null): boolean {
+	return hasClosest(target) && target.closest(INTERACTIVE_KEY_TARGET_SELECTOR) !== null
+}
+
 export type PhotosGridKeyAction = { kind: "move"; target: number } | { kind: "toggle" } | { kind: "open" } | { kind: "none" }
 
 // The photos grid's key semantics, composed from the shared cursor table: Space toggles the cursor

@@ -86,6 +86,9 @@ export interface ListingDisplayResult {
 	// one hit is hidden.
 	resolvedCount: number
 	hiddenCount: number
+	// The uuids the hide filter removed — the listing purges these from the selection (see
+	// hiddenSelectionUuids), so a row nobody can see can never sit in the bulk bar's scope.
+	hiddenUuids: string[]
 }
 
 // Two ordered stages: (1) resolve ORDER — the search arm's convergence gate + sort, or the plain
@@ -112,8 +115,26 @@ export function resolveListingDisplayItems(input: {
 		hide: input.hide,
 		...(input.search !== undefined ? { searchParentPaths: input.search.parentPaths } : {})
 	})
+	const shown = new Set(items.map(item => item.data.uuid))
+	const hiddenUuids = resolved.filter(item => !shown.has(item.data.uuid)).map(item => item.data.uuid)
 
-	return { items, resolvedCount: resolved.length, hiddenCount: resolved.length - items.length }
+	return { items, resolvedCount: resolved.length, hiddenCount: hiddenUuids.length, hiddenUuids }
+}
+
+// Uuids of currently-selected items the hide filter just removed from the display — directoryListing
+// .tsx purges exactly these from useDriveStore. Both ways a selected row becomes hidden are covered
+// by feeding it the display pipeline's own output: switching the preference on, and renaming a
+// selected row to a dot-name (the store still holds the pre-rename snapshot, so judging the selection
+// by its own names would miss it). The bulk bar and its count-only confirms would otherwise act on
+// rows the user cannot see or verify.
+export function hiddenSelectionUuids(selectedItems: readonly DriveItem[], hiddenUuids: readonly string[]): string[] {
+	if (hiddenUuids.length === 0) {
+		return []
+	}
+
+	const hidden = new Set(hiddenUuids)
+
+	return selectedItems.filter(item => hidden.has(item.data.uuid)).map(item => item.data.uuid)
 }
 
 // Local-substring fallback for every non-"drive" variant (favorites/recents/trash/sharedIn/

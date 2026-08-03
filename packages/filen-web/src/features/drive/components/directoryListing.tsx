@@ -47,6 +47,7 @@ import { isBulkDownloadEnabled } from "@/features/drive/components/bulkActionBar
 import {
 	filterDriveItemsByLocalSearch,
 	filterSharedInByBlocked,
+	hiddenSelectionUuids,
 	isBlockingListingError,
 	isEmptyTrashTriggerVisible,
 	reconcileSelectedItems,
@@ -356,6 +357,25 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the signature above, not sortedItems — see comment above
 	}, [search.active, searchResultUuids])
 
+	// Hidden-selection purge: a row the display filter removed must not stay selected, or the floating
+	// bulk bar keeps offering Trash/Move/Delete over rows the user can neither see nor verify (its
+	// confirms count rows, they don't name them). Keyed on the uuid signature for the same reason the
+	// ghost purge above is — `display` is rebuilt every render — so the uuids are read back out of the
+	// key itself rather than the array.
+	const hiddenUuidsKey = display.hiddenUuids.join(",")
+
+	useEffect(() => {
+		if (hiddenUuidsKey.length === 0) {
+			return
+		}
+
+		const toRemove = hiddenSelectionUuids(useDriveStore.getState().selectedItems, hiddenUuidsKey.split(","))
+
+		if (toRemove.length > 0) {
+			useDriveStore.getState().removeFromSelection(toRemove)
+		}
+	}, [hiddenUuidsKey])
+
 	async function applySortChange(next: DriveSortBy): Promise<void> {
 		await setSortPreferences(withSortSelection(sortPrefs, driveLocation, next))
 		await sortPrefsQuery.refetch()
@@ -562,7 +582,12 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					onPointerDown={marquee.onPointerDown}
 					className="min-h-0 flex-1 overflow-y-auto"
 				>
-					<div style={{ position: "relative", width: "100%", height: activeVirtualizer.getTotalSize() }}>
+					{/* Generic layout wrappers between the listbox and its options: role="presentation" keeps
+					    the owned-element relationship intact (an unlabelled generic in between breaks it). */}
+					<div
+						role="presentation"
+						style={{ position: "relative", width: "100%", height: activeVirtualizer.getTotalSize() }}
+					>
 						{/* Marquee rectangle — content-space, so it stretches correctly as the listing auto-scrolls.
 						    Non-interactive (pointer-events-none) so it never intercepts the ongoing drag. */}
 						{marquee.rect ? (
@@ -611,6 +636,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 											directorySizes={directorySizes}
 											selectedItems={reconciledSelectedItems}
 											onPointerSelect={handlePointerSelect}
+											onCursorMove={setCursor}
 											onOpen={handleOpen}
 											onItemAction={handleItemAction}
 											onBulkAction={handleBulkDialogAction}
@@ -621,6 +647,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							: gridVirtualizer.getVirtualItems().map(virtualRow => (
 									<div
 										key={virtualRow.key}
+										role="presentation"
 										style={{
 											position: "absolute",
 											top: 0,
@@ -656,6 +683,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 													{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
 													selectedItems={reconciledSelectedItems}
 													onPointerSelect={handlePointerSelect}
+													onCursorMove={setCursor}
 													onOpen={handleOpen}
 													onItemAction={handleItemAction}
 													onBulkAction={handleBulkDialogAction}

@@ -181,22 +181,36 @@ export function comboFor(id: string): string {
 	return resolveCombo(useKeymapStore.getState().overrides, id)
 }
 
+// Every override lives in ONE persisted record, but a write only ever owns a single action's entry.
+// Re-reading that record and merging just this entry onto it is what keeps a second tab's rebind (made
+// after this tab's one-shot load) alive — persisting this tab's own snapshot wholesale would silently
+// drop it. Falls back to the in-memory record when nothing readable is stored, so a dropped/corrupt blob
+// still gets rewritten from what the app is actually using.
+async function persistOverride(id: string, combo: string | null): Promise<void> {
+	const persisted = await kvGetJson(OVERRIDES_KV_KEY, keymapOverridesSchema)
+	const merged = Object.fromEntries(Object.entries(persisted ?? useKeymapStore.getState().overrides).filter(([key]) => key !== id))
+
+	if (combo !== null) {
+		merged[id] = combo
+	}
+
+	await kvSetJson(OVERRIDES_KV_KEY, merged)
+}
+
 // Drops a user override so the action resolves to its default again ("reset to default" in the
-// shortcuts UI). Loads first for the same reason setUserCombo does — otherwise the re-persist would
-// write a record built from an empty store.
+// shortcuts UI). Loads first for the same reason setUserCombo does.
 export async function clearUserCombo(id: string): Promise<void> {
 	await ensureOverridesLoaded()
 	useKeymapStore.getState().clearOverride(id)
-	await kvSetJson(OVERRIDES_KV_KEY, useKeymapStore.getState().overrides)
+	await persistOverride(id, null)
 }
 
 export async function setUserCombo(id: string, combo: string): Promise<void> {
-	// Await the persisted-overrides load FIRST: without it, an early remap merges onto an empty store
-	// and persists a one-entry record that clobbers any stored overrides — which the late load then
-	// reverts in the UI. Loading first means we merge onto (and re-persist) the full existing set.
+	// Await the persisted-overrides load FIRST: without it a late load would land on top of the override
+	// just set here and revert it in the UI.
 	await ensureOverridesLoaded()
 	useKeymapStore.getState().setOverride(id, combo)
-	await kvSetJson(OVERRIDES_KV_KEY, useKeymapStore.getState().overrides)
+	await persistOverride(id, combo)
 }
 
 // Reactive read for `useAction`/`<Kbd>`. The combo is computed INSIDE the zustand selector (not
@@ -252,9 +266,11 @@ export function rejectRecording(owner: string, conflictKey: ShortcutDescriptionK
 }
 
 // Unconditional; a newly mounted shortcuts list calls this so it can never inherit someone else's
-// in-flight recording.
+// in-flight recording — nor a rejection from an attempt made before it existed, which would otherwise
+// render as a live "already used by" error under a row the user has not touched this time around.
 export function clearRecording(): void {
 	useKeymapStore.getState().setRecordingSession(null)
+	useKeymapStore.getState().setRecordingRejection(null)
 }
 
 // Plain snapshot reads, the same split `comboFor`/`useComboFor` already draws. The predicate is what

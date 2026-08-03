@@ -11,6 +11,7 @@ import {
 	isScrollNearBottom,
 	nextScrollAffordanceState,
 	nextAnnouncement,
+	announcementSubject,
 	INITIAL_SCROLL_AFFORDANCE,
 	type ThreadAnnouncement
 } from "@/features/chats/components/thread/thread.logic"
@@ -20,9 +21,8 @@ import { Composer } from "@/features/chats/components/thread/composer"
 import { TypingIndicator } from "@/features/chats/components/thread/typingIndicator"
 import { setFocusedChat } from "@/features/chats/lib/focusedChat"
 import { dayKind, formatFullDate } from "@/features/chats/lib/time"
-import { chatDisplayName, isChatUndecryptable, chatAvatarUrl, messageSenderName } from "@/features/chats/lib/sort"
+import { chatDisplayName, isChatUndecryptable, chatAvatarUrl } from "@/features/chats/lib/sort"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
-import { isBlocked } from "@/features/contacts/lib/blocking"
 import { useRevealedBlockedMessages } from "@/features/chats/store/useRevealedBlockedMessages"
 import { markChatRead } from "@/features/chats/lib/actions"
 import { MessageRow } from "@/features/chats/components/thread/messageRow"
@@ -226,18 +226,12 @@ export function MessageThread({ chat }: { chat: Chat }) {
 			return
 		}
 
-		const latest = messages[messages.length - 1]
+		// Whole-batch derivation (thread.logic.ts): a refetch can land several messages from several senders
+		// in one write, and self/blocked senders are dropped from both the count and the name there.
+		const subject = announcementSubject(messages, newTailCount, currentUserId, blocked)
 
-		// Own messages sent from another tab/device arrive as a normal tail growth — suppressNextArrivalRef
-		// only swallows THIS tab's send. The announcement channel is held to the same blocked policy as the
-		// visual surfaces: a blocked sender's name is exactly what those withhold, and this is the one
-		// channel with no visual equivalent to check against.
-		if (
-			latest !== undefined &&
-			BigInt(latest.senderId) !== currentUserId &&
-			!isBlocked({ userId: BigInt(latest.senderId), email: latest.senderEmail }, blocked)
-		) {
-			setAnnouncement(prev => nextAnnouncement(prev, newTailCount, messageSenderName(latest)))
+		if (subject !== null) {
+			setAnnouncement(prev => nextAnnouncement(prev, subject.count, subject.name))
 		}
 
 		// The pill's count deliberately still includes blocked arrivals — it names nobody, and splitting
@@ -494,7 +488,9 @@ export function MessageThread({ chat }: { chat: Chat }) {
 			>
 				{announcement !== null ? (
 					<span key={announcement.seq}>
-						{t("chatNewMessageAnnouncement", { count: announcement.count, name: announcement.name })}
+						{announcement.name !== null
+							? t("chatNewMessageAnnouncement", { count: announcement.count, name: announcement.name })
+							: t("chatNewMessagesMixedAnnouncement", { count: announcement.count })}
 					</span>
 				) : null}
 			</div>
