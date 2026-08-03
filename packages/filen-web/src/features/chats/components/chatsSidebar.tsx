@@ -298,7 +298,7 @@ export function ChatsSidebar() {
 								onClick={() => {
 									setSearch("")
 								}}
-								className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/30 [&_svg]:size-3.5"
+								className="absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground focus-ring outline-none hover:text-foreground [&_svg]:size-3.5"
 							>
 								<XIcon />
 							</button>

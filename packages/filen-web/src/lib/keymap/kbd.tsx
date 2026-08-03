@@ -1,5 +1,6 @@
 import { Kbd as KbdPrimitive, KbdGroup } from "@/components/ui/kbd"
 import { useComboFor } from "@/lib/keymap/registry"
+import { comboKeys } from "@/lib/keymap/kbd.logic"
 
 interface KbdProps {
 	action: string
@@ -44,11 +45,7 @@ function formatKey(key: string): string {
 // available as a registry component, so nothing here is hand-rolled) inside a `<KbdGroup>`,
 // matching the component's own documented multi-key usage.
 export function Kbd({ action }: KbdProps) {
-	const combo = useComboFor(action)
-	const keys = combo
-		.split("+")
-		.map(key => key.trim())
-		.filter(key => key.length > 0)
+	const keys = comboKeys(useComboFor(action))
 
 	return (
 		<KbdGroup>

@@ -270,12 +270,23 @@ test.describe("drive bulk actions", () => {
 		await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible()
 		await expect(page.getByRole("button", { name: "Delete permanently", exact: true })).toBeVisible()
 
+		// Destructive confirms open with Cancel focused — a blind Enter must never fire an irreversible
+		// delete. Opened and dismissed; this suite never permanently deletes anything.
+		await page.getByRole("button", { name: "Delete permanently", exact: true }).click()
+		const deleteConfirm = page.getByRole("alertdialog")
+		await expect(deleteConfirm).toBeVisible()
+		await expect(deleteConfirm.getByRole("button", { name: "Cancel", exact: true })).toBeFocused()
+		await page.keyboard.press("Escape")
+		await expect(deleteConfirm).toHaveCount(0)
+
 		// Bulk restore CONFIRMS — the one behavior this task adds (a single item's own restore, from the
 		// per-item menu, stays direct/unconfirmed; only the bulk path opens this dialog).
 		await page.getByRole("button", { name: "Restore", exact: true }).click()
 		const restoreConfirm = page.getByRole("alertdialog")
 		await expect(restoreConfirm).toBeVisible()
 		await expect(restoreConfirm.getByRole("heading", { name: "Restore items?", exact: true })).toBeVisible()
+		// The preserved half of the same tier rule: a reversible confirm still opens on its confirm button.
+		await expect(restoreConfirm.getByRole("button", { name: "Restore", exact: true })).toBeFocused()
 		await restoreConfirm.getByRole("button", { name: "Restore", exact: true }).click()
 		await expect(restoreConfirm).toHaveCount(0)
 

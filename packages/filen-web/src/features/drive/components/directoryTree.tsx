@@ -160,7 +160,7 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 					onClick={() => {
 						tree.onToggle(child.uuid)
 					}}
-					className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/30"
+					className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground focus-ring outline-none hover:text-foreground"
 				>
 					<ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
 				</button>
@@ -169,7 +169,7 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 					onClick={() => {
 						tree.onNavigate(path)
 					}}
-					className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-left text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/30 [&_svg]:size-4 [&_svg]:shrink-0"
+					className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-left text-sm focus-ring outline-none [&_svg]:size-4 [&_svg]:shrink-0"
 				>
 					<DirectoryGlyph
 						color={child.color}

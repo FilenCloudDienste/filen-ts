@@ -40,6 +40,12 @@ import {
 
 export type { NoteBulkDialogActionKind }
 
+// Descriptors with a registered keyboard shortcut surface it in their tooltip alongside the label —
+// mirrors drive's own bulk bar.
+const KEYMAP_ACTION_FOR: Partial<Record<NoteBulkActionDescriptor["id"], string>> = {
+	trash: "notes.trash"
+}
+
 export interface NotesBulkActionBarProps {
 	// The LIVE (ghost-purged) selection — notesSidebar.tsx re-derives this from the current notes
 	// query every render, so a note removed from the account (elsewhere, or by another tab) between
@@ -141,6 +147,7 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 			<div className="flex items-center gap-2">
 				{descriptors.map(descriptor => {
 					const offlineDisabled = isNoteBulkActionOfflineDisabled(descriptor.id, isOnline)
+					const keymapAction = KEYMAP_ACTION_FOR[descriptor.id]
 
 					if (descriptor.run === "submenu") {
 						const entries =
@@ -214,6 +221,7 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 								/>
 								<TooltipContent>
 									{offlineDisabled ? t("common:offlineActionDisabled") : t(descriptor.labelKey)}
+									{keymapAction === undefined ? null : <Kbd action={keymapAction} />}
 								</TooltipContent>
 							</Tooltip>
 						)

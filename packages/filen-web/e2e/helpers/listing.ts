@@ -180,6 +180,22 @@ export async function selectAndTrashRow(
 // the default.
 export async function trashScratchDirectory(page: Page, name: string, confirmTimeoutMs?: number): Promise<void> {
 	await page.keyboard.press("Escape")
+
+	// A dialog whose SDK mutation never settled is undismissable by design (Escape is blocked while
+	// pending), and its modality makes the whole app inert — the sidebar click below would starve.
+	// Only a reload kills that stuck state; the scratch sweep afterwards works exactly as usual.
+	const stuckDialog = page.getByRole("dialog").first()
+	if (await stuckDialog.isVisible().catch(() => false)) {
+		const closeDisabled = await stuckDialog
+			.getByRole("button", { name: "Close", exact: true })
+			.isDisabled()
+			.catch(() => false)
+		if (closeDisabled) {
+			await page.goto("/drive")
+			await dismissStartupReminders(page)
+		}
+	}
+
 	await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
 
 	const { listbox } = await waitForListingSettled(page)

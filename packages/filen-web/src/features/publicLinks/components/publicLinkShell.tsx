@@ -24,7 +24,7 @@ export function PublicLinkShell({ children }: { children: ReactNode }) {
 					target="_blank"
 					rel="noopener noreferrer"
 					aria-label={t("homeLabel")}
-					className="flex items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+					className="flex items-center gap-2 rounded-md focus-ring outline-none"
 				>
 					<Logo className="size-6 text-primary" />
 					<span className="text-base font-semibold tracking-tight">Filen</span>
@@ -32,7 +32,7 @@ export function PublicLinkShell({ children }: { children: ReactNode }) {
 				<div className="flex items-center gap-1 sm:gap-2">
 					<Link
 						to="/login"
-						className="rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+						className="rounded-md px-2 py-1 text-sm text-muted-foreground focus-ring transition-colors outline-none hover:text-foreground"
 					>
 						{t("signIn")}
 					</Link>
@@ -63,7 +63,7 @@ export function PublicLinkShell({ children }: { children: ReactNode }) {
 				</span>
 				<a
 					href={REPORT_ABUSE_MAILTO}
-					className="rounded-md underline underline-offset-4 transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+					className="rounded-md underline underline-offset-4 focus-ring transition-colors outline-none hover:text-foreground"
 				>
 					{t("reportAbuse")}
 				</a>

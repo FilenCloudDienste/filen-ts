@@ -61,7 +61,7 @@ export function PhotoTile({ rootUuid, item, index, selected, active, size, regis
 						// cell is always at least as wide as the tile, so centering distributes the slack evenly
 						// instead of piling it on each cell's right edge — which is also the geometry
 						// marquee.logic.ts encodes.
-						className="group/tile relative flex shrink-0 flex-col gap-1 justify-self-center outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50"
+						className="group/tile relative flex shrink-0 flex-col gap-1 justify-self-center focus-ring-row outline-none select-none"
 						onClick={event => {
 							onTileClick(index, event)
 						}}

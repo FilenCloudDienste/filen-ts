@@ -214,7 +214,7 @@ export function AddPlaylistTracksDialog({ playlist, onClose }: AddPlaylistTracks
 											}}
 											aria-pressed={item.type === "file" ? isSelected : undefined}
 											className={cn(
-												"flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
+												"flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm focus-ring-row outline-none hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50",
 												isSelected && "bg-accent/70 text-accent-foreground"
 											)}
 										>

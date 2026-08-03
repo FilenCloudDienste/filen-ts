@@ -1,3 +1,4 @@
+import { clampListboxIndex, listboxRange } from "@/features/drive/lib/listbox"
 import { type ContactSection } from "@/features/contacts/components/contactsList.logic"
 
 // Per-section selected-uuid buckets for the contacts bulk-selection mode. Unlike drive's single
@@ -16,6 +17,82 @@ export const EMPTY_CONTACT_SELECTION: ContactSelection = Object.freeze({
 	contacts: new Set<string>(),
 	blocked: new Set<string>()
 })
+
+export interface ContactSelectionAnchor {
+	section: ContactSectionKey
+	uuid: string
+}
+
+export interface ContactSelectionState {
+	selection: ContactSelection
+	anchor: ContactSelectionAnchor | null
+}
+
+export interface ContactPointerSelectInput {
+	section: ContactSectionKey
+	// The section's ordered, currently-rendered uuids (search-filtered, in render order) — shift-range
+	// math walks this array's indices, exactly like useNotesListSelection walks its `notes`.
+	uuids: readonly string[]
+	index: number
+	shift: boolean
+	// Ctrl/Cmd — resolved by the caller from the real MouseEvent so this stays React-free.
+	toggle: boolean
+}
+
+export const EMPTY_CONTACT_SELECTION_STATE: ContactSelectionState = Object.freeze({
+	selection: EMPTY_CONTACT_SELECTION,
+	anchor: null
+})
+
+export function contactSelectionSize(selection: ContactSelection): number {
+	return selection.requests.size + selection.pending.size + selection.contacts.size + selection.blocked.size
+}
+
+function onlySection(section: ContactSectionKey, uuids: readonly string[]): ContactSelection {
+	return { ...EMPTY_CONTACT_SELECTION, [section]: new Set(uuids) }
+}
+
+// The app-wide modifier-click model (drive/notes/chats), sectioned: plain click replaces the whole
+// selection with the clicked row, Ctrl/Cmd toggles it into a multi-section selection, Shift extends an
+// inclusive range from the anchor. A cross-section range has no meaning here — contacts has four
+// structurally distinct row kinds and every bulk action is section-scoped — so a Shift with a foreign
+// or vanished anchor collapses to a plain select rather than guessing.
+export function nextContactSelection(state: ContactSelectionState, input: ContactPointerSelectInput): ContactSelectionState {
+	const uuid = input.uuids[input.index]
+
+	if (uuid === undefined) {
+		return state
+	}
+
+	const anchor = state.anchor
+	const anchorIndex = anchor !== null && anchor.section === input.section ? input.uuids.indexOf(anchor.uuid) : -1
+
+	if (input.shift && anchorIndex !== -1) {
+		const range = listboxRange(anchorIndex, clampListboxIndex(input.index, input.uuids.length))
+		const ranged: string[] = []
+
+		for (const i of range) {
+			const rangedUuid = input.uuids[i]
+
+			if (rangedUuid !== undefined) {
+				ranged.push(rangedUuid)
+			}
+		}
+
+		// The anchor deliberately does NOT move: a run of consecutive Shift+clicks keeps ranging from the
+		// same fixed start, exactly like useNotesListSelection.
+		return { selection: onlySection(input.section, ranged), anchor }
+	}
+
+	if (input.toggle) {
+		return {
+			selection: toggleContactSelection(state.selection, input.section, uuid),
+			anchor: { section: input.section, uuid }
+		}
+	}
+
+	return { selection: onlySection(input.section, [uuid]), anchor: { section: input.section, uuid } }
+}
 
 // Add if absent, remove if present — the toggle boilerplate the row click handler builds on.
 // Returns a new selection; the input is never mutated (React state-update contract).

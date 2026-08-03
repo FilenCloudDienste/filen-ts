@@ -10,6 +10,7 @@ import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { Kbd } from "@/lib/keymap/kbd"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -17,6 +18,12 @@ export interface PhotosBulkActionBarProps {
 	rootUuid: string
 	selectedItems: PhotoItem[]
 	onDialogAction: (kind: BulkDialogActionKind) => void
+}
+
+// Descriptors with a registered keyboard shortcut surface it in their tooltip alongside the label —
+// mirrors drive's own bulk bar.
+const KEYMAP_ACTION_FOR: Partial<Record<BulkActionDescriptor["id"], string>> = {
+	trash: "photos.trash"
 }
 
 // Floating selection bar for the photos grid — mirrors drive's own bulkActionBar.tsx layout/behavior
@@ -76,6 +83,7 @@ export function PhotosBulkActionBar({ rootUuid, selectedItems, onDialogAction }:
 				{descriptors.map(descriptor => {
 					const offlineDisabled = !isOnline && (descriptor.id === "trash" || descriptor.id === "download")
 					const disabled = (descriptor.id === "download" && selectedItems.length === 0) || offlineDisabled
+					const keymapAction = KEYMAP_ACTION_FOR[descriptor.id]
 
 					return (
 						<Tooltip key={descriptor.id}>
@@ -94,7 +102,10 @@ export function PhotosBulkActionBar({ rootUuid, selectedItems, onDialogAction }:
 									</Button>
 								}
 							/>
-							<TooltipContent>{offlineDisabled ? t("common:offlineActionDisabled") : t(descriptor.labelKey)}</TooltipContent>
+							<TooltipContent>
+								{offlineDisabled ? t("common:offlineActionDisabled") : t(descriptor.labelKey)}
+								{keymapAction === undefined ? null : <Kbd action={keymapAction} />}
+							</TooltipContent>
 						</Tooltip>
 					)
 				})}

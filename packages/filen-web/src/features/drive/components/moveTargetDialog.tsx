@@ -266,7 +266,7 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 													descend(directory.data.uuid)
 												}
 											}}
-											className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
+											className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm focus-ring-row outline-none hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
 										>
 											<DirectoryGlyph
 												color={directory.data.color}

@@ -120,7 +120,7 @@ export function MessageRow({ chat, message, showHeader, currentUserId, blocked }
 					onClick={() => {
 						useRevealedBlockedMessages.getState().reveal(message.uuid)
 					}}
-					className="flex min-w-0 items-center gap-1.5 rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+					className="flex min-w-0 items-center gap-1.5 rounded-md focus-ring outline-none"
 				>
 					<BanIcon
 						aria-hidden="true"

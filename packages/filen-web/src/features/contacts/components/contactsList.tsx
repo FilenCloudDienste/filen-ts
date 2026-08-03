@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from "react"
+import { useState, type MouseEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
-import { SearchIcon, UsersIcon, ListChecksIcon } from "lucide-react"
+import { SearchIcon, UsersIcon } from "lucide-react"
 import { toast } from "sonner"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import { useContactsQuery, useContactRequestsQuery } from "@/features/contacts/queries/contacts"
@@ -9,6 +9,9 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { registerAction } from "@/lib/keymap/registry"
+import { useAction } from "@/lib/keymap/useAction"
+import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import {
 	buildContactSections,
 	filterContactSections,
@@ -29,13 +32,8 @@ import {
 	type VoidActionOutcome
 } from "@/features/contacts/lib/actions"
 import { toastContactsBulkOutcome } from "@/features/contacts/lib/bulkToast"
-import {
-	EMPTY_CONTACT_SELECTION,
-	toggleContactSelection,
-	removeFromContactSelection,
-	type ContactSelection,
-	type ContactSectionKey
-} from "@/features/contacts/lib/selection"
+import { type ContactSectionKey } from "@/features/contacts/lib/selection"
+import { useContactsListSelection } from "@/features/contacts/hooks/useContactsListSelection"
 import {
 	ContactRow,
 	ContactRequestRow,
@@ -54,6 +52,19 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 const SKELETON_ROW_COUNT = 6
+// The floating bulk bar mounts at this many selected — a single selection is already fully served by
+// that row's own action buttons.
+const BULK_BAR_MIN_SELECTION = 2
+
+// Module scope, mirroring notesSidebar.tsx's own selection commands: runs once per module evaluation,
+// which registerAction's duplicate-id guard assumes. Escape is deliberately shared with
+// drive/notes/chats/photos — only one of those surfaces is ever mounted at a time.
+registerAction({
+	id: "contacts.clearSelection",
+	defaultCombo: "escape",
+	scope: "contacts",
+	descriptionKey: "contactsCommandClearSelection"
+})
 
 // One stat tile in the summary strip above the list — count + label, no drill-down (see the strip's
 // own render-site doc comment below for why a lightweight strip beats an invented detail pane).
@@ -94,8 +105,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	// of the 6 call sites below.
 	const offlineTitle = !isOnline ? t("common:offlineActionDisabled") : undefined
 	const [search, setSearch] = useState("")
-	const [selectMode, setSelectMode] = useState(false)
-	const [selection, setSelection] = useState<ContactSelection>(EMPTY_CONTACT_SELECTION)
+	const selection = useContactsListSelection({ resetKey: section })
 	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, closeActiveDialog } = useDialogHost<ActiveContactDialog>()
 
 	const contactsQuery = useContactsQuery()
@@ -132,22 +142,22 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		void requestsQuery.refetch()
 	}
 
-	function toggleSelect(section: ContactSectionKey, uuid: string): void {
-		setSelection(prev => toggleContactSelection(prev, section, uuid))
-	}
+	// Registered at module scope. No preventDefault — bare Escape has no disruptive browser default.
+	// Guarded through the shared DOM-level dialog signal rather than this host's own isDialogOpen:
+	// AddContactDialog owns its own open state outside the host, and Escape must close whichever dialog
+	// is up without also clearing the selection behind it.
+	useAction(
+		"contacts.clearSelection",
+		() => {
+			if (isAnyDialogOpen()) {
+				return
+			}
 
-	function pruneSelection(section: ContactSectionKey, uuids: string[]): void {
-		if (uuids.length === 0) {
-			return
-		}
-
-		setSelection(prev => removeFromContactSelection(prev, section, uuids))
-	}
-
-	function exitSelectMode(): void {
-		setSelectMode(false)
-		setSelection(EMPTY_CONTACT_SELECTION)
-	}
+			selection.clearSelection()
+		},
+		undefined,
+		[selection]
+	)
 
 	// No confirm (mirrors mobile) — silent success, LABEL-FIRST toast on failure, matching every
 	// other singular contact action's convention (see runSingleDialogAction below).
@@ -177,7 +187,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	async function handleBulkAccept(items: ContactRequestIn[]): Promise<void> {
 		const outcome = await runContactsBulk(items, request => acceptRequest(request.uuid))
 		toastContactsBulkOutcome(outcome)
-		pruneSelection(
+		selection.pruneSelection(
 			"requests",
 			outcome.succeeded.map(request => request.uuid)
 		)
@@ -213,7 +223,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		setDialogPending(false)
 		closeActiveDialog()
 		toastContactsBulkOutcome(outcome)
-		pruneSelection(section, outcome.succeeded.map(uuidOf))
+		selection.pruneSelection(section, outcome.succeeded.map(uuidOf))
 	}
 
 	// One instance of whichever dialog is active, switching on activeDialog.kind — never more than one
@@ -422,122 +432,106 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 
 	// One row per section item, dispatched on the section's own key — the key already discriminates
 	// `items`' concrete type (see contactsList.logic.ts's ContactSection), so no per-item type tag is
-	// needed the way mobile's flat single-list rendering requires one. In bulk-selection mode every row
-	// becomes a selectable option instead (see contactRow.tsx's ContactRowShell) and the trailing
-	// action slot is left empty — the bulk bar replaces the per-row actions entirely.
-	function renderSectionItems(section: ContactSection): ReactNode {
-		switch (section.key) {
+	// needed the way mobile's flat single-list rendering requires one. Every row is permanently a
+	// listbox option AND permanently shows its own actions; only the cursor row (and its controls) is
+	// tabbable, so the section's Tab cost stays 1 regardless of how many contacts an account has.
+	function renderSectionItems(contactSection: ContactSection, uuids: string[]): ReactNode {
+		const key = contactSection.key
+		const activeIndex = selection.activeIndexFor(key, uuids)
+
+		function rowProps(uuid: string, index: number) {
+			return {
+				selected: selection.selection[key].has(uuid),
+				active: index === activeIndex,
+				rowRef: (element: HTMLDivElement | null) => {
+					selection.registerRowRef(key, uuid, element)
+				},
+				onSelect: (event: MouseEvent<HTMLDivElement>) => {
+					selection.handlePointerSelect(key, uuids, index, event)
+				}
+			}
+		}
+
+		switch (contactSection.key) {
 			case "requests":
-				return section.items.map(request => (
+				return contactSection.items.map((request, index) => (
 					<ContactRequestRow
 						key={request.uuid}
 						request={request}
-						selected={selectMode ? selection.requests.has(request.uuid) : undefined}
-						onToggleSelect={
-							selectMode
-								? () => {
-										toggleSelect("requests", request.uuid)
-									}
-								: undefined
-						}
+						{...rowProps(request.uuid, index)}
 					>
-						{!selectMode ? (
-							<IncomingRequestActions
-								request={request}
-								disabled={!isOnline}
-								title={offlineTitle}
-								onAccept={item => {
-									void handleAccept(item)
-								}}
-								onDeny={item => {
-									setActiveDialog({ kind: "deny", bulk: false, items: [item] })
-								}}
-							/>
-						) : null}
+						<IncomingRequestActions
+							request={request}
+							disabled={!isOnline}
+							title={offlineTitle}
+							tabIndex={index === activeIndex ? 0 : -1}
+							onAccept={item => {
+								void handleAccept(item)
+							}}
+							onDeny={item => {
+								setActiveDialog({ kind: "deny", bulk: false, items: [item] })
+							}}
+						/>
 					</ContactRequestRow>
 				))
 			case "pending":
-				return section.items.map(request => (
+				return contactSection.items.map((request, index) => (
 					<ContactRequestRow
 						key={request.uuid}
 						request={request}
-						selected={selectMode ? selection.pending.has(request.uuid) : undefined}
-						onToggleSelect={
-							selectMode
-								? () => {
-										toggleSelect("pending", request.uuid)
-									}
-								: undefined
-						}
+						{...rowProps(request.uuid, index)}
 					>
-						{!selectMode ? (
-							<OutgoingRequestActions
-								request={request}
-								disabled={!isOnline}
-								title={offlineTitle}
-								onCancel={item => {
-									setActiveDialog({ kind: "cancel", bulk: false, items: [item] })
-								}}
-							/>
-						) : null}
+						<OutgoingRequestActions
+							request={request}
+							disabled={!isOnline}
+							title={offlineTitle}
+							tabIndex={index === activeIndex ? 0 : -1}
+							onCancel={item => {
+								setActiveDialog({ kind: "cancel", bulk: false, items: [item] })
+							}}
+						/>
 					</ContactRequestRow>
 				))
 			case "contacts":
-				return section.items.map(contact => (
+				return contactSection.items.map((contact, index) => (
 					<ContactRow
 						key={contact.uuid}
 						contact={contact}
-						selected={selectMode ? selection.contacts.has(contact.uuid) : undefined}
-						onToggleSelect={
-							selectMode
-								? () => {
-										toggleSelect("contacts", contact.uuid)
-									}
-								: undefined
-						}
+						{...rowProps(contact.uuid, index)}
 					>
-						{!selectMode ? (
-							<ContactActions
-								contact={contact}
-								disabled={!isOnline}
-								title={offlineTitle}
-								onMessage={item => {
-									void handleMessage(item)
-								}}
-								onRemove={item => {
-									setActiveDialog({ kind: "remove", bulk: false, items: [item] })
-								}}
-								onBlock={item => {
-									setActiveDialog({ kind: "block", bulk: false, items: [item] })
-								}}
-							/>
-						) : null}
+						<ContactActions
+							contact={contact}
+							disabled={!isOnline}
+							title={offlineTitle}
+							tabIndex={index === activeIndex ? 0 : -1}
+							onMessage={item => {
+								void handleMessage(item)
+							}}
+							onRemove={item => {
+								setActiveDialog({ kind: "remove", bulk: false, items: [item] })
+							}}
+							onBlock={item => {
+								setActiveDialog({ kind: "block", bulk: false, items: [item] })
+							}}
+						/>
 					</ContactRow>
 				))
 			case "blocked":
-				return section.items.map(blocked => (
+				return contactSection.items.map((blocked, index) => (
 					<BlockedContactRow
 						key={blocked.uuid}
 						contact={blocked}
-						selected={selectMode ? selection.blocked.has(blocked.uuid) : undefined}
-						onToggleSelect={
-							selectMode
-								? () => {
-										toggleSelect("blocked", blocked.uuid)
-									}
-								: undefined
-						}
+						{...rowProps(blocked.uuid, index)}
 					>
-						{!selectMode ? (
-							<BlockedActions
-								contact={blocked}
-								disabled={!isOnline}
-								title={offlineTitle}
-								onUnblock={item => {
-									setActiveDialog({ kind: "unblock", bulk: false, items: [item] })
-								}}
-							/>
-						) : null}
+						<BlockedActions
+							contact={blocked}
+							disabled={!isOnline}
+							title={offlineTitle}
+							tabIndex={index === activeIndex ? 0 : -1}
+							onUnblock={item => {
+								setActiveDialog({ kind: "unblock", bulk: false, items: [item] })
+							}}
+						/>
 					</BlockedContactRow>
 				))
 		}
@@ -575,71 +569,59 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 					</div>
 				) : null}
 				<div className="flex h-12 shrink-0 items-center justify-between gap-4 px-4">
-					{selectMode ? (
-						<ContactsBulkBar
-							requests={incomingData}
-							pending={outgoingData}
-							contacts={contactsData}
-							blocked={blockedData}
-							selection={selection}
-							disabled={!isOnline}
-							title={offlineTitle}
-							onClear={exitSelectMode}
-							onAccept={items => {
-								void handleBulkAccept(items)
-							}}
-							onDeny={items => {
-								setActiveDialog({ kind: "deny", bulk: true, items })
-							}}
-							onCancel={items => {
-								setActiveDialog({ kind: "cancel", bulk: true, items })
-							}}
-							onRemove={items => {
-								setActiveDialog({ kind: "remove", bulk: true, items })
-							}}
-							onBlock={items => {
-								setActiveDialog({ kind: "block", bulk: true, items })
-							}}
-							onUnblock={items => {
-								setActiveDialog({ kind: "unblock", bulk: true, items })
-							}}
+					<div className="relative max-w-xs flex-1">
+						<SearchIcon
+							aria-hidden="true"
+							className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
 						/>
-					) : (
-						<>
-							<div className="relative max-w-xs flex-1">
-								<SearchIcon
-									aria-hidden="true"
-									className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-								/>
-								<Input
-									type="search"
-									aria-label={t("contactsSearchPlaceholder")}
-									placeholder={t("contactsSearchPlaceholder")}
-									value={search}
-									onChange={event => {
-										setSearch(event.target.value)
-									}}
-									className="pl-8"
-								/>
-							</div>
-							<div className="flex shrink-0 items-center gap-2">
-								<AddContactDialog />
-								<Button
-									variant="outline"
-									size="sm"
-									disabled={isPending || queryError !== null || sections.length === 0}
-									onClick={() => {
-										setSelectMode(true)
-									}}
-								>
-									<ListChecksIcon aria-hidden="true" />
-									{t("contactsActionSelect")}
-								</Button>
-							</div>
-						</>
-					)}
+						<Input
+							type="search"
+							aria-label={t("contactsSearchPlaceholder")}
+							placeholder={t("contactsSearchPlaceholder")}
+							value={search}
+							onChange={event => {
+								setSearch(event.target.value)
+							}}
+							className="pl-8"
+						/>
+					</div>
+					<AddContactDialog />
 				</div>
-				<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+				<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+					{/* Bottom-anchored floating selection bar — overlays the list, replacing nothing in the
+				    toolbar. Mirrors notesSidebar.tsx / directoryListing.tsx placement. */}
+					{selection.selectedCount >= BULK_BAR_MIN_SELECTION ? (
+						<div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-center">
+							<ContactsBulkBar
+								requests={incomingData}
+								pending={outgoingData}
+								contacts={contactsData}
+								blocked={blockedData}
+								selection={selection.selection}
+								disabled={!isOnline}
+								title={offlineTitle}
+								onClear={selection.clearSelection}
+								onAccept={items => {
+									void handleBulkAccept(items)
+								}}
+								onDeny={items => {
+									setActiveDialog({ kind: "deny", bulk: true, items })
+								}}
+								onCancel={items => {
+									setActiveDialog({ kind: "cancel", bulk: true, items })
+								}}
+								onRemove={items => {
+									setActiveDialog({ kind: "remove", bulk: true, items })
+								}}
+								onBlock={items => {
+									setActiveDialog({ kind: "block", bulk: true, items })
+								}}
+								onUnblock={items => {
+									setActiveDialog({ kind: "unblock", bulk: true, items })
+								}}
+							/>
+						</div>
+					) : null}
 					{isPending ? (
 						<div className="flex flex-1 flex-col gap-1 overflow-y-auto p-4">
 							{Array.from({ length: SKELETON_ROW_COUNT }, (_, index) => (
@@ -704,19 +686,38 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 						</div>
 					) : (
 						<div className="flex-1 overflow-y-auto p-2">
-							{sections.map(contactSection => (
-								<section key={contactSection.key}>
-									{/* Only "all" stacks more than one section at once — a single filtered section
-								already names itself via the page's own <h1> above, so its inline header would be
-								pure redundancy. */}
-									{section === "all" ? (
-										<h2 className="px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground">
-											{t(CONTACTS_SECTION_HEADER_KEY[contactSection.key])}
-										</h2>
-									) : null}
-									<div className="flex flex-col gap-0.5">{renderSectionItems(contactSection)}</div>
-								</section>
-							))}
+							{sections.map(contactSection => {
+								// One array identity per render, shared by the container's key handler and its rows.
+								const uuids = contactSection.items.map(item => item.uuid)
+
+								return (
+									<section key={contactSection.key}>
+										{/* Only "all" stacks more than one section at once — a single filtered section
+									already names itself via the page's own <h1> above, so its inline header would be
+									pure redundancy. */}
+										{section === "all" ? (
+											<h2 className="px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground">
+												{t(CONTACTS_SECTION_HEADER_KEY[contactSection.key])}
+											</h2>
+										) : null}
+										<div
+											role="listbox"
+											aria-multiselectable="true"
+											aria-label={t(CONTACTS_SECTION_HEADER_KEY[contactSection.key])}
+											// One roving Tab stop per section: the cursor row (and only its controls) is
+											// tabbable, Arrow/Home/End move it, Space/Enter toggle it. Same contract as
+											// drive's listbox — contacts renders every row of every section at once, so a
+											// Tab stop per row would scale with the account.
+											onKeyDown={event => {
+												selection.handleKeyDown(contactSection.key, uuids, event)
+											}}
+											className="flex flex-col gap-0.5"
+										>
+											{renderSectionItems(contactSection, uuids)}
+										</div>
+									</section>
+								)
+							})}
 						</div>
 					)}
 				</div>

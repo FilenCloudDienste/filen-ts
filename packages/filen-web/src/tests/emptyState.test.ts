@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { HeartIcon, StarIcon } from "lucide-react"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { driveEmptyStateCopy } from "@/features/drive/components/emptyState.logic"
 
@@ -31,5 +32,13 @@ describe("driveEmptyStateCopy", () => {
 
 	it("drive variant resolves to the generic driveEmptyTitle/Body keys (also used by the move/import picker)", () => {
 		expect(driveEmptyStateCopy("drive")).toMatchObject({ titleKey: "driveEmptyTitle", bodyKey: "driveEmptyBody" })
+	})
+
+	it("favorites uses the same Star glyph every live favorite indicator in Drive uses", () => {
+		expect(driveEmptyStateCopy("favorites").icon).toBe(StarIcon)
+	})
+
+	it("no variant falls back to the heart glyph", () => {
+		expect(variants.map(variant => driveEmptyStateCopy(variant).icon)).not.toContain(HeartIcon)
 	})
 })

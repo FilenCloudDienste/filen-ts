@@ -36,6 +36,13 @@ interface ActivePhotosDialog {
 	previewSources?: PreviewSource[]
 }
 
+// The preview overlay owns its own navigation semantics — same rule and rationale as drive's
+// keepPreviewOpenOnNavigate: its dirty-buffer guard, not the dialog host, decides what a route change
+// means for unsaved edits.
+function keepPreviewOpenOnNavigate(dialog: ActivePhotosDialog): boolean {
+	return dialog.kind === "preview"
+}
+
 export interface PhotosDialogHost {
 	isDialogOpen: boolean
 	handleItemAction: (kind: ItemActionDialogKind, item: PhotoItem) => void
@@ -58,7 +65,7 @@ interface UsePhotosDialogHostParams {
 export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialogHostParams): PhotosDialogHost {
 	const { t } = useTranslation(["drive", "photos", "common"])
 	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, isDialogOpen, closeActiveDialog } =
-		useDialogHost<ActivePhotosDialog>()
+		useDialogHost<ActivePhotosDialog>({ keepOpenOnNavigate: keepPreviewOpenOnNavigate })
 
 	// Keeps an OPEN photos preview in sync with realtime drive mutations — the same previewReconcile bus
 	// useDriveDialogHost subscribes to, safe to share: at most one of the two hosts is ever mounted at a

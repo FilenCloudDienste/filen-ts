@@ -44,6 +44,14 @@ interface ActiveDialog {
 	previewSources?: PreviewSource[]
 }
 
+// The preview overlay owns its own navigation semantics: its dirty-buffer guard decides what a route
+// change means for unsaved edits, and a same-route splat change deliberately keeps it mounted with the
+// buffer intact. Closing it from the dialog host would silently discard exactly what that guard exists
+// to protect.
+function keepPreviewOpenOnNavigate(dialog: ActiveDialog): boolean {
+	return dialog.kind === "preview"
+}
+
 export interface DriveDialogHost {
 	isDialogOpen: boolean
 	handleItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
@@ -68,8 +76,9 @@ interface UseDriveDialogHostParams {
 // boolean can express (e.g. versions has an independent restore vs. delete-confirm flow).
 export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies }: UseDriveDialogHostParams): DriveDialogHost {
 	const { t } = useTranslation(["drive", "common"])
-	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, isDialogOpen, closeActiveDialog } =
-		useDialogHost<ActiveDialog>()
+	const { activeDialog, setActiveDialog, dialogPending, setDialogPending, isDialogOpen, closeActiveDialog } = useDialogHost<ActiveDialog>(
+		{ keepOpenOnNavigate: keepPreviewOpenOnNavigate }
+	)
 
 	// Keeps an OPEN preview in sync with realtime drive mutations from ANOTHER device. The pager steps a
 	// frozen previewSources snapshot the socket handler's listing-cache patch can't reach, so the drive

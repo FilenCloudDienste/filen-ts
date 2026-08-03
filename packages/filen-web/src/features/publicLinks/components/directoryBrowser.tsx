@@ -228,7 +228,7 @@ function Breadcrumbs({ stack, onJump }: { stack: BrowseCrumb[]; onJump: (index: 
 								onClick={() => {
 									onJump(index)
 								}}
-								className="max-w-[10rem] truncate rounded-md px-1 transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+								className="max-w-[10rem] truncate rounded-md px-1 focus-ring-row transition-colors outline-none hover:text-foreground"
 							>
 								{crumb.name}
 							</button>
@@ -314,7 +314,7 @@ function BrowseRow({ entry, onOpen }: { entry: BrowseEntry; onOpen: (entry: Brow
 				onOpen(entry)
 			}}
 			className={cn(
-				"flex h-11 items-center gap-3 rounded-xl px-3 text-left text-sm transition-colors outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50"
+				"flex h-11 items-center gap-3 rounded-xl px-3 text-left text-sm focus-ring-row transition-colors outline-none hover:bg-accent/50"
 			)}
 		>
 			<ItemIcon

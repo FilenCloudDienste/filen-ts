@@ -95,7 +95,7 @@ export function ChatRow({ chat, selected, multiSelected, currentUserId, blocked,
 
 								onPointerSelect(event)
 							}}
-							className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+							className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left focus-ring-row outline-none"
 						>
 							<Avatar>
 								{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin

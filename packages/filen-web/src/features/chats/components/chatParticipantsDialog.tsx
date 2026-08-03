@@ -268,7 +268,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 							}
 							className={cn(
 								"flex items-center gap-3 rounded-xl px-2 py-2 text-sm outline-none",
-								canManage && "cursor-pointer select-none focus-visible:ring-2 focus-visible:ring-ring/50",
+								canManage && "cursor-pointer focus-ring-row select-none",
 								isSelected && "bg-accent text-accent-foreground"
 							)}
 						>
@@ -440,7 +440,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 								event.preventDefault()
 								setSelected(prev => togglePickerContact(prev, contact.uuid))
 							}}
-							className="flex h-14 cursor-pointer items-center gap-3 rounded-xl px-2 text-sm outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50 aria-selected:bg-accent aria-selected:text-accent-foreground"
+							className="flex h-14 cursor-pointer items-center gap-3 rounded-xl px-2 text-sm focus-ring-row outline-none select-none aria-selected:bg-accent aria-selected:text-accent-foreground"
 						>
 							<Avatar>
 								{/* crossOrigin: require-corp COEP needs a CORS-mode request for this cross-origin

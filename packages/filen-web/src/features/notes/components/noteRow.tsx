@@ -116,7 +116,7 @@ export function NoteRow({
 
 								onPointerSelect(event)
 							}}
-							className="flex min-w-0 flex-1 items-start gap-2.5 rounded-lg text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+							className="flex min-w-0 flex-1 items-start gap-2.5 rounded-lg text-left focus-ring-row outline-none"
 						>
 							<div className="flex shrink-0 flex-col items-center gap-1.5">
 								<RowBadge>

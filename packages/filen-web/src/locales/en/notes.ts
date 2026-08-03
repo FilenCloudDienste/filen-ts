@@ -378,6 +378,8 @@ export const notes = {
 	notesCommandSelectAll: "Select all notes",
 	/** Keymap — description for the Escape action that clears the notes selection; also the bulk bar's clear button */
 	notesCommandClearSelection: "Clear selection",
+	/** Keymap — description for the Delete/Backspace action that bulk-trashes the selected notes */
+	notesCommandTrash: "Trash selected notes",
 	/** Bulk-action bar — selection-count label; singular */
 	notesSelectionCount_one: "{{count}} selected",
 	/** Bulk-action bar — selection-count label; plural */

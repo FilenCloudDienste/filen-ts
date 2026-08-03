@@ -263,7 +263,7 @@ function PlaylistRow({ entry, isOnline, onOpen, onPlay, onShufflePlay, onRename,
 		<li className={cn("group/prow flex items-center gap-2 rounded-xl px-1 pr-2")}>
 			<button
 				type="button"
-				className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+				className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left focus-ring-row outline-none"
 				onClick={() => {
 					onOpen(playlist)
 				}}

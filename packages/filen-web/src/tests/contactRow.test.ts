@@ -7,6 +7,8 @@ import type { Contact } from "@filen/sdk-rs"
 import "@/lib/i18n"
 import { ContactRow, ContactActions } from "@/features/contacts/components/contactRow"
 
+const CHECK_GLYPH = "check-glyph"
+
 afterEach(() => {
 	cleanup()
 })
@@ -82,5 +84,79 @@ describe("ContactActions — Message menu item", () => {
 		const message = screen.getByRole("menuitem", { name: "Message" })
 		expect(message.getAttribute("aria-disabled")).toBe("true")
 		expect(message.getAttribute("title")).toBe("You're offline")
+	})
+})
+
+// Two mutually exclusive selection contracts share this shell: the contacts page's roving section
+// listbox (onSelect + active + rowRef), and the two dialog pickers' row-owned toggle (onToggleSelect).
+describe("ContactRow — selection contracts", () => {
+	it("contract B renders a roving option whose Tab stop follows `active`, with no row-level key handling", () => {
+		const onSelect = vi.fn()
+		const rowRef = vi.fn()
+		const { container, rerender } = render(
+			createElement(ContactRow, { contact: mockContact(), selected: false, active: false, onSelect, rowRef })
+		)
+
+		const row = screen.getByRole("option")
+		expect(row.getAttribute("aria-selected")).toBe("false")
+		expect(row.getAttribute("tabindex")).toBe("-1")
+		expect(rowRef).toHaveBeenCalled()
+
+		fireEvent.keyDown(row, { key: " " })
+		expect(onSelect).not.toHaveBeenCalled()
+
+		rerender(createElement(ContactRow, { contact: mockContact(), selected: true, active: true, onSelect, rowRef }))
+
+		const activeRow = container.querySelector('[role="option"]')
+		expect(activeRow?.getAttribute("tabindex")).toBe("0")
+		expect(activeRow?.getAttribute("aria-selected")).toBe("true")
+	})
+
+	it("contract A stays unconditionally tabbable and keeps its Enter/Space toggle", () => {
+		const onToggleSelect = vi.fn()
+
+		render(createElement(ContactRow, { contact: mockContact(), selected: false, onToggleSelect }))
+
+		const row = screen.getByRole("option")
+		expect(row.getAttribute("tabindex")).toBe("0")
+
+		fireEvent.keyDown(row, { key: "Enter" })
+		fireEvent.keyDown(row, { key: " " })
+
+		expect(onToggleSelect).toHaveBeenCalledTimes(2)
+	})
+
+	it("contract A toggles from a click anywhere in the row, including its trailing glyph", () => {
+		const onToggleSelect = vi.fn()
+
+		render(
+			createElement(
+				ContactRow,
+				{ contact: mockContact(), selected: true, onToggleSelect },
+				createElement("span", { "data-testid": CHECK_GLYPH })
+			)
+		)
+
+		fireEvent.click(screen.getByTestId(CHECK_GLYPH))
+
+		expect(onToggleSelect).toHaveBeenCalledOnce()
+	})
+
+	it("contract B does not select the row when a trailing action button is clicked", () => {
+		const onSelect = vi.fn()
+
+		render(
+			createElement(
+				ContactRow,
+				{ contact: mockContact(), selected: false, active: true, onSelect },
+				createElement("button", { type: "button" }, "Remove")
+			)
+		)
+
+		fireEvent.click(screen.getByRole("button", { name: "Remove" }))
+		expect(onSelect).not.toHaveBeenCalled()
+
+		fireEvent.click(screen.getByRole("option"))
+		expect(onSelect).toHaveBeenCalledOnce()
 	})
 })

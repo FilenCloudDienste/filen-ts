@@ -17,6 +17,20 @@
     -webkit-app-region: no-drag;
 }
 
+/* The app's two focus-ring recipes, named once so a call site can never invent a third. `focus-ring`
+   is the control recipe (inputs, nav chips, window controls, links); `focus-ring-row` is the tighter,
+   denser ring selectable list rows, grid tiles and dialog list rows use. Values are unchanged from the
+   recipes already in the tree — this only removes the ability to drift from them. Not usable by a
+   component whose variants override the ring color (button, badge): tailwind-merge cannot dedupe a
+   custom utility, so those keep the classes spelled out. */
+@utility focus-ring {
+    @apply focus-visible:ring-3 focus-visible:ring-ring/30;
+}
+
+@utility focus-ring-row {
+    @apply focus-visible:ring-2 focus-visible:ring-ring/50;
+}
+
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Inter Variable', sans-serif;

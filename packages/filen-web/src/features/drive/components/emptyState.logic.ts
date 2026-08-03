@@ -1,4 +1,4 @@
-import { FolderClosedIcon, HeartIcon, ClockIcon, UsersIcon, LinkIcon, Trash2Icon, type LucideIcon } from "lucide-react"
+import { FolderClosedIcon, StarIcon, ClockIcon, UsersIcon, LinkIcon, Trash2Icon, type LucideIcon } from "lucide-react"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { type DriveKey } from "@/lib/i18n"
 
@@ -13,11 +13,13 @@ export interface DriveEmptyStateCopy {
 // state per variant instead of a single generic pair reused everywhere. "drive" covers both My
 // Drive's own root and any nested writable directory alike (mobile's folder_is_empty), and doubles as
 // the picker's own empty-directory copy (emptyState.tsx's caller passes driveVariant="drive" there —
-// the picker only ever browses the owned directory tree, never a flat listing).
+// the picker only ever browses the owned directory tree, never a flat listing). One deliberate
+// deviation from the ported table: favorites uses the Star every live favorite indicator in Drive
+// already uses (row, tile, info dialog, sidebar), not mobile's heart.
 const DRIVE_EMPTY_STATE: Record<DriveVariant, DriveEmptyStateCopy> = {
 	drive: { icon: FolderClosedIcon, titleKey: "driveEmptyTitle", bodyKey: "driveEmptyBody" },
 	trash: { icon: Trash2Icon, titleKey: "driveEmptyTrashTitle", bodyKey: "driveEmptyTrashBody" },
-	favorites: { icon: HeartIcon, titleKey: "driveEmptyFavoritesTitle", bodyKey: "driveEmptyFavoritesBody" },
+	favorites: { icon: StarIcon, titleKey: "driveEmptyFavoritesTitle", bodyKey: "driveEmptyFavoritesBody" },
 	recents: { icon: ClockIcon, titleKey: "driveEmptyRecentsTitle", bodyKey: "driveEmptyRecentsBody" },
 	sharedIn: { icon: UsersIcon, titleKey: "driveEmptySharedInTitle", bodyKey: "driveEmptySharedInBody" },
 	sharedOut: { icon: UsersIcon, titleKey: "driveEmptySharedOutTitle", bodyKey: "driveEmptySharedOutBody" },

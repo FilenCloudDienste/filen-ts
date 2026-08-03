@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
+import { confirmInitialFocus } from "@/components/dialogs/confirmDialog.logic"
 
 interface ConfirmDialogProps {
 	open: boolean
@@ -34,9 +35,10 @@ interface ConfirmDialogProps {
 // `pending`: every dismissal route (Escape here — the alert-dialog primitive already disables
 // outside-press, and the cancel button is disabled) funnels through onOpenChange, and a `false`
 // while the operation runs is a no-op, so the dialog stays open until it settles — rationale in
-// dismissal.logic.ts. No text input here, so (unlike its siblings) there is no `<form>`: the
-// confirm button is a plain, auto-focused, native button — Enter activates it, and `disabled` while
-// pending blocks both the click and the Enter key natively, no bespoke listener needed.
+// dismissal.logic.ts. No text input here, so (unlike its siblings) there is no `<form>`: both buttons
+// are plain native buttons — Enter activates whichever one is focused, and `disabled` while pending
+// blocks both the click and the Enter key natively, no bespoke listener needed. WHICH one opens
+// focused depends on `destructive` — see confirmDialog.logic.ts.
 function ConfirmDialog({
 	open,
 	pending,
@@ -48,6 +50,8 @@ function ConfirmDialog({
 	onOpenChange,
 	onConfirm
 }: ConfirmDialogProps) {
+	const initialFocus = confirmInitialFocus(destructive)
+
 	function handleOpenChange(next: boolean, details: AlertDialogRoot.ChangeEventDetails): void {
 		if (!shouldForwardOpenChange(next, pending)) {
 			// Also stops Base UI's own store from flipping (it closes itself after this callback
@@ -69,9 +73,14 @@ function ConfirmDialog({
 					<AlertDialogDescription>{body}</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>
-					<AlertDialogCancel disabled={pending}>{cancelLabel}</AlertDialogCancel>
+					<AlertDialogCancel
+						autoFocus={initialFocus === "cancel"}
+						disabled={pending}
+					>
+						{cancelLabel}
+					</AlertDialogCancel>
 					<AlertDialogAction
-						autoFocus
+						autoFocus={initialFocus === "confirm"}
 						variant={destructive ? "destructive" : "default"}
 						disabled={pending}
 						onClick={() => {

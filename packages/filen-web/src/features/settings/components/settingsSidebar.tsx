@@ -37,7 +37,7 @@ const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 // defines its own copy rather than sharing one (none of the three existing ones export theirs
 // either), so this follows the established precedent rather than introducing a new shared module.
 const NAV_ITEM_CLASS = cn(
-	"group flex h-8 w-full items-center gap-2.5 rounded-xl px-2.5 text-sm transition-colors outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/30 [&_svg]:size-4 [&_svg]:shrink-0",
+	"group flex h-8 w-full items-center gap-2.5 rounded-xl px-2.5 text-sm focus-ring transition-colors outline-none app-region-no-drag [&_svg]:size-4 [&_svg]:shrink-0",
 	"text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
 	"data-[status=active]:bg-sidebar-accent data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground"
 )

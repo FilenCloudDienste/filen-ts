@@ -108,6 +108,13 @@ export function noteBulkActions(flags: NoteSelectionFlags): NoteBulkActionDescri
 	return descriptors
 }
 
+// The single gate behind BOTH the bar's Trash button and the notes.trash shortcut: derived from the
+// same descriptor list the bar renders, so the two can never disagree about when a bulk trash is
+// offered.
+export function canBulkTrashNotes(flags: NoteSelectionFlags): boolean {
+	return noteBulkActions(flags).some(descriptor => descriptor.run === "dialog" && descriptor.dialogKind === "trashSelected")
+}
+
 // Bulk ids whose dispatch is an unconditional SDK write. Export is left enabled (cache-first, and the
 // zip is built client-side); the descriptor list itself is unchanged, only its rendered enabled state.
 const OFFLINE_GATED_BULK_IDS: ReadonlySet<NoteBulkActionDescriptor["id"]> = new Set<NoteBulkActionDescriptor["id"]>([

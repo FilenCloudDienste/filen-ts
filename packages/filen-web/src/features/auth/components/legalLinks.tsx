@@ -14,7 +14,7 @@ function AuthLegalLinks() {
 				href={FILEN_TERMS_URL}
 				target="_blank"
 				rel="noopener noreferrer"
-				className="rounded-md underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
+				className="rounded-md underline-offset-4 focus-ring outline-none hover:text-foreground hover:underline"
 			>
 				{t("legalTerms")}
 			</a>
@@ -22,7 +22,7 @@ function AuthLegalLinks() {
 				href={FILEN_PRIVACY_URL}
 				target="_blank"
 				rel="noopener noreferrer"
-				className="rounded-md underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
+				className="rounded-md underline-offset-4 focus-ring outline-none hover:text-foreground hover:underline"
 			>
 				{t("legalPrivacy")}
 			</a>

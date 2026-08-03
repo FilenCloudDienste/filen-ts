@@ -44,6 +44,16 @@ interface TypedConfirmDialogProps {
 // forgot-password) each own their full scaffold rather than sharing a base, since the disabled/armed
 // condition here differs from ConfirmDialog's plain `pending` gate. Dismissal is BLOCKED while
 // `pending`, same gate and rationale as ConfirmDialog — see dismissal.logic.ts.
+//
+// The three confirmation tiers, so a new prompt lands on the right one:
+//  1. `ConfirmDialog` without `destructive` — reversible disposition (trash, restore, archive,
+//     unshare). Confirm button focused; Enter is the fast path.
+//  2. `ConfirmDialog` with `destructive` — irreversible, but bounded to a selection the user just
+//     made (permanent delete of selected trashed items, a version delete, chat delete/leave, contact
+//     remove/block). Red confirm, Cancel focused (confirmDialog.logic.ts).
+//  3. This dialog — irreversible AND unbounded: it destroys a whole container or an account-level
+//     resource the user never enumerated (empty trash, delete all items, delete all file versions).
+//     The phrase must be typed.
 function TypedConfirmDialog({
 	open,
 	pending,

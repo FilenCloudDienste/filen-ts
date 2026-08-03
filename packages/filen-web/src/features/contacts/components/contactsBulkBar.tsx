@@ -4,13 +4,14 @@ import { XIcon } from "lucide-react"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import { type ContactSelection } from "@/features/contacts/lib/selection"
 import { buildContactBulkActions, type ContactBulkActionKind } from "@/features/contacts/components/contactsBulkBar.logic"
+import { Kbd } from "@/lib/keymap/kbd"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 export interface ContactsBulkBarProps {
-	// The current (unfiltered) query data per section — search can't change while this bar is showing
-	// (contactsList.tsx swaps the search box out for this bar), so filtering by `selection` against
-	// either the filtered or unfiltered set yields the same rows; the unfiltered arrays are already
-	// sitting in the caller's scope, so this reuses them directly rather than re-deriving anything.
+	// The current (unfiltered) query data per section — the bar filters these by uuid, so a selection
+	// made before a search still resolves to the right records even though the rows behind this bar are
+	// search-filtered (same semantics as notesSidebar.tsx's liveSelectedNotes, derived from allNotes).
 	requests: ContactRequestIn[]
 	pending: ContactRequestOut[]
 	contacts: Contact[]
@@ -32,9 +33,9 @@ export interface ContactsBulkBarProps {
 	title?: string | undefined
 }
 
-// Replaces the toolbar's search region while bulk-selection mode is active (mounted by
-// contactsList.tsx) — mirrors drive/bulkActionBar.tsx's two-flex-child shape (clear+count on the
-// left, actions on the right) and its "compute selected items from a selection set, gate the
+// Bottom-anchored floating selection bar (contactsList.tsx overlays it on the list while a 2+
+// selection exists) — mirrors drive/bulkActionBar.tsx's pill and its two-flex-child shape (clear+count
+// on the left, actions on the right), plus its "compute selected items from a selection set, gate the
 // descriptor list, dispatch by kind" structure.
 export function ContactsBulkBar({
 	requests,
@@ -91,16 +92,26 @@ export function ContactsBulkBar({
 	}
 
 	return (
-		<>
+		<div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-popover px-3 py-2 text-popover-foreground shadow-lg">
 			<div className="flex items-center gap-2">
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("contactsCommandClearSelection")}
-					onClick={onClear}
-				>
-					<XIcon />
-				</Button>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								aria-label={t("contactsCommandClearSelection")}
+								onClick={onClear}
+							>
+								<XIcon />
+							</Button>
+						}
+					/>
+					<TooltipContent>
+						{t("contactsCommandClearSelection")}
+						<Kbd action="contacts.clearSelection" />
+					</TooltipContent>
+				</Tooltip>
 				<p className="text-sm text-muted-foreground">{t("contactsSelectionCount", { count: total })}</p>
 			</div>
 			<div className="flex items-center gap-2">
@@ -120,6 +131,6 @@ export function ContactsBulkBar({
 					</Button>
 				))}
 			</div>
-		</>
+		</div>
 	)
 }

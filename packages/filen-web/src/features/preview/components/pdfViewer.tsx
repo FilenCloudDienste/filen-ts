@@ -490,7 +490,7 @@ function PdfPage({
 								target="_blank"
 								rel="noreferrer"
 								aria-label={link.url}
-								className="absolute rounded-xs focus-visible:ring-2 focus-visible:ring-ring/50"
+								className="absolute rounded-xs focus-ring-row"
 								style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
 							/>
 						)

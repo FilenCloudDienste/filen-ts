@@ -43,16 +43,15 @@ export const contacts = {
 	contactsSearchPlaceholder: "Search contacts",
 
 	// ── Bulk selection ───────────────────────────────────────────────────────
-	// List toolbar — mirrors filen-mobile's contactsHeader.tsx bulk mode: a selection toggle replaces
-	// the search box with a "N selected" bar and per-section bulk actions (see the Row / bulk action
-	// labels below, reused verbatim as the bulk buttons' own labels).
-	/** List toolbar — button that turns on bulk-selection mode (rows become selectable; replaces search while active) */
-	contactsActionSelect: "Select",
-	/** Bulk-selection toolbar — accessible label on the button that clears the selection and exits selection mode */
+	// Rows are permanently selectable (plain click replaces, Ctrl/Cmd toggles, Shift extends a range)
+	// and a floating bar appears at 2+ selected, overlaying the list without replacing the search box —
+	// the same model drive/notes/chats/photos use. Its per-section action buttons reuse the Row action
+	// labels below verbatim.
+	/** Floating selection bar — accessible label on the clear-selection button; also the Escape command's description */
 	contactsCommandClearSelection: "Clear selection",
-	/** Bulk-selection toolbar — total selected row count across every section, singular */
+	/** Floating selection bar — total selected row count across every section, singular */
 	contactsSelectionCount_one: "{{count}} selected",
-	/** Bulk-selection toolbar — total selected row count across every section, plural */
+	/** Floating selection bar — total selected row count across every section, plural */
 	contactsSelectionCount_other: "{{count}} selected",
 
 	// ── Stats strip ──────────────────────────────────────────────────────────

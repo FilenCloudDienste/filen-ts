@@ -43,7 +43,7 @@ const GROUP_HEADER_CLASS = "px-2.5 pt-4 pb-1 text-xs font-medium text-muted-fore
 const NAV_ITEM_CLASS = cn(
 	// app-region-no-drag: every row is a real click target inside the sidebar's own drag region (see
 	// the <aside> below).
-	"group flex h-8 w-full items-center gap-2.5 rounded-xl px-2.5 text-sm transition-colors outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/30 [&_svg]:size-4 [&_svg]:shrink-0",
+	"group flex h-8 w-full items-center gap-2.5 rounded-xl px-2.5 text-sm focus-ring transition-colors outline-none app-region-no-drag [&_svg]:size-4 [&_svg]:shrink-0",
 	"text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
 	"data-[status=active]:bg-sidebar-accent data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground"
 )
@@ -121,14 +121,14 @@ function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolea
 				aria-expanded={open}
 				aria-label={t(open ? "driveTreeCollapseNode" : "driveTreeExpandNode", { name: label })}
 				onClick={onToggle}
-				className="ml-2 flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/30"
+				className="ml-2 flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground focus-ring outline-none hover:text-foreground"
 			>
 				<ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
 			</button>
 			<Link
 				to="/drive/$"
 				params={{ _splat: "" }}
-				className="group/link flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-left text-sm text-sidebar-foreground/80 transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/30 data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
+				className="group/link flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-left text-sm text-sidebar-foreground/80 focus-ring transition-colors outline-none data-[status=active]:font-medium data-[status=active]:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0"
 			>
 				<FolderClosedIcon className="text-muted-foreground group-data-[status=active]/link:text-primary" />
 				<span className="truncate">{label}</span>

@@ -106,7 +106,7 @@ export function ColorDialog({ directory, onClose }: ColorDialogProps) {
 									void handleSelect(swatch.color)
 								}}
 								className={cn(
-									"flex size-10 items-center justify-center rounded-full ring-1 ring-foreground/10 transition-transform outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
+									"flex size-10 items-center justify-center rounded-full focus-ring-row ring-1 ring-foreground/10 transition-transform outline-none disabled:pointer-events-none disabled:opacity-50",
 									selected && "ring-2 ring-ring ring-offset-2 ring-offset-popover"
 								)}
 								style={{ backgroundColor: dirColorHex(swatch.color) }}

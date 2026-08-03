@@ -276,7 +276,7 @@ function TrackRow({
 			/>
 			<button
 				type="button"
-				className="flex min-w-0 flex-1 items-center gap-2 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+				className="flex min-w-0 flex-1 items-center gap-2 rounded-lg text-left focus-ring-row outline-none"
 				onClick={onPlay}
 			>
 				<MusicIcon className="size-4 shrink-0 text-muted-foreground" />

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { EMPTY_CONTACT_SELECTION, removeFromContactSelection, toggleContactSelection } from "@/features/contacts/lib/selection"
+import {
+	EMPTY_CONTACT_SELECTION,
+	EMPTY_CONTACT_SELECTION_STATE,
+	contactSelectionSize,
+	nextContactSelection,
+	removeFromContactSelection,
+	toggleContactSelection,
+	type ContactSelectionState
+} from "@/features/contacts/lib/selection"
 
 describe("toggleContactSelection", () => {
 	it("adds a uuid that is not yet selected in the given section", () => {
@@ -68,5 +76,109 @@ describe("removeFromContactSelection", () => {
 		const next = removeFromContactSelection(EMPTY_CONTACT_SELECTION, "contacts", ["ghost"])
 
 		expect(next).toBe(EMPTY_CONTACT_SELECTION)
+	})
+})
+
+describe("contactSelectionSize", () => {
+	it("is zero for an empty selection", () => {
+		expect(contactSelectionSize(EMPTY_CONTACT_SELECTION)).toBe(0)
+	})
+
+	it("counts every section's bucket", () => {
+		const withRequest = toggleContactSelection(EMPTY_CONTACT_SELECTION, "requests", "a")
+		const withContacts = toggleContactSelection(toggleContactSelection(withRequest, "contacts", "b"), "contacts", "c")
+
+		expect(contactSelectionSize(withContacts)).toBe(3)
+	})
+})
+
+const CONTACT_UUIDS = ["a", "b", "c", "d", "e"]
+
+function plainClick(state: ContactSelectionState, index: number, uuids = CONTACT_UUIDS): ContactSelectionState {
+	return nextContactSelection(state, { section: "contacts", uuids, index, shift: false, toggle: false })
+}
+
+function shiftClick(state: ContactSelectionState, index: number, uuids = CONTACT_UUIDS): ContactSelectionState {
+	return nextContactSelection(state, { section: "contacts", uuids, index, shift: true, toggle: false })
+}
+
+function toggleClick(state: ContactSelectionState, index: number, uuids = CONTACT_UUIDS): ContactSelectionState {
+	return nextContactSelection(state, { section: "contacts", uuids, index, shift: false, toggle: true })
+}
+
+describe("nextContactSelection", () => {
+	it("plain click selects only that row and clears every other section", () => {
+		const withRequest = { selection: toggleContactSelection(EMPTY_CONTACT_SELECTION, "requests", "r1"), anchor: null }
+		const next = plainClick(withRequest, 2)
+
+		expect([...next.selection.contacts]).toEqual(["c"])
+		expect(next.selection.requests.size).toBe(0)
+	})
+
+	it("plain click sets the anchor", () => {
+		expect(plainClick(EMPTY_CONTACT_SELECTION_STATE, 1).anchor).toEqual({ section: "contacts", uuid: "b" })
+	})
+
+	it("ctrl/cmd toggle adds without clearing other sections", () => {
+		const withRequest = { selection: toggleContactSelection(EMPTY_CONTACT_SELECTION, "requests", "r1"), anchor: null }
+		const next = toggleClick(toggleClick(withRequest, 0), 2)
+
+		expect([...next.selection.contacts]).toEqual(["a", "c"])
+		expect([...next.selection.requests]).toEqual(["r1"])
+	})
+
+	it("ctrl/cmd toggle on an already-selected row removes it", () => {
+		const next = toggleClick(plainClick(EMPTY_CONTACT_SELECTION_STATE, 0), 0)
+
+		expect(next.selection.contacts.size).toBe(0)
+	})
+
+	it("shift after a plain click selects the inclusive range, ascending", () => {
+		const next = shiftClick(plainClick(EMPTY_CONTACT_SELECTION_STATE, 1), 3)
+
+		expect([...next.selection.contacts]).toEqual(["b", "c", "d"])
+	})
+
+	it("shift selects the same range when clicked backwards", () => {
+		const next = shiftClick(plainClick(EMPTY_CONTACT_SELECTION_STATE, 3), 1)
+
+		expect([...next.selection.contacts].sort()).toEqual(["b", "c", "d"])
+	})
+
+	it("two consecutive shift clicks both range from the ORIGINAL anchor", () => {
+		const anchored = plainClick(EMPTY_CONTACT_SELECTION_STATE, 1)
+		const next = shiftClick(shiftClick(anchored, 3), 2)
+
+		expect([...next.selection.contacts]).toEqual(["b", "c"])
+		expect(next.anchor).toEqual({ section: "contacts", uuid: "b" })
+	})
+
+	it("shift with an anchor in another section collapses to a plain select", () => {
+		const foreign: ContactSelectionState = { selection: EMPTY_CONTACT_SELECTION, anchor: { section: "requests", uuid: "r1" } }
+		const next = shiftClick(foreign, 3)
+
+		expect([...next.selection.contacts]).toEqual(["d"])
+		expect(next.anchor).toEqual({ section: "contacts", uuid: "d" })
+	})
+
+	it("shift with an anchor whose uuid is gone collapses to a plain select", () => {
+		const stale: ContactSelectionState = { selection: EMPTY_CONTACT_SELECTION, anchor: { section: "contacts", uuid: "gone" } }
+		const next = shiftClick(stale, 2)
+
+		expect([...next.selection.contacts]).toEqual(["c"])
+	})
+
+	it("a range replaces a selection held in another section", () => {
+		const withBlocked = { selection: toggleContactSelection(EMPTY_CONTACT_SELECTION, "blocked", "x"), anchor: null }
+		const next = shiftClick(plainClick(withBlocked, 0), 1)
+
+		expect([...next.selection.contacts]).toEqual(["a", "b"])
+		expect(next.selection.blocked.size).toBe(0)
+	})
+
+	it("ignores a click on an index that is not in the section", () => {
+		const state = plainClick(EMPTY_CONTACT_SELECTION_STATE, 0)
+
+		expect(plainClick(state, 99)).toBe(state)
 	})
 })

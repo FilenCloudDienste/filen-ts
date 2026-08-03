@@ -95,7 +95,7 @@ function railItemClass(active: boolean): string {
 	return cn(
 		// app-region-no-drag: every rail item is a real click target inside the rail's own drag region
 		// (see IconRail's <nav> below).
-		"flex size-9 items-center justify-center rounded-lg transition-colors outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/40 [&_svg]:size-[22px] [&_svg]:shrink-0",
+		"flex size-9 items-center justify-center rounded-lg focus-ring transition-colors outline-none app-region-no-drag [&_svg]:size-[22px] [&_svg]:shrink-0",
 		active ? "bg-rail-chip text-rail-chip-foreground shadow-sm" : "text-muted-foreground hover:bg-rail-hover hover:text-foreground"
 	)
 }
@@ -458,7 +458,7 @@ export function IconRail() {
 				to="/drive/$"
 				params={{ _splat: "" }}
 				aria-label={t("moduleDrive")}
-				className="mb-1.5 flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/40 dark:bg-rail-chip dark:text-rail-chip-foreground"
+				className="mb-1.5 flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground focus-ring outline-none app-region-no-drag dark:bg-rail-chip dark:text-rail-chip-foreground"
 			>
 				<Logo className="size-5" />
 			</Link>

@@ -48,7 +48,7 @@ import { createNote } from "@/features/notes/lib/actions"
 import { exportAllNotes } from "@/features/notes/lib/export"
 import { importNoteFromFile } from "@/features/notes/lib/import"
 import { importAcceptAttribute } from "@/features/notes/lib/import.logic"
-import { selectableNotesForSelectAll } from "@/features/notes/lib/selectionFlags"
+import { aggregateNoteSelectionFlags, selectableNotesForSelectAll } from "@/features/notes/lib/selectionFlags"
 import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelectionStore"
 import { useNotesListSelection } from "@/features/notes/hooks/useNotesListSelection"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
@@ -61,6 +61,7 @@ import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
 import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHandle"
 import { NoteRow } from "@/features/notes/components/noteRow"
 import { NotesBulkActionBar } from "@/features/notes/components/notesBulkActionBar"
+import { canBulkTrashNotes } from "@/features/notes/components/notesBulkActionBar.logic"
 import { TagContextMenuContent } from "@/features/notes/components/noteMenu"
 import { type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { Button } from "@/components/ui/button"
@@ -90,6 +91,17 @@ registerAction({ id: "notes.newNote", defaultCombo: "n", scope: "notes", descrip
 // Escape-clears-search handling below.
 registerAction({ id: "notes.selectAll", defaultCombo: "mod+a", scope: "notes", descriptionKey: "notesCommandSelectAll" })
 registerAction({ id: "notes.clearSelection", defaultCombo: "escape", scope: "notes", descriptionKey: "notesCommandClearSelection" })
+// Bulk-trash the current selection, same default combo as drive.trash (directoryListing.tsx) — the two
+// never coexist (mutually exclusive routes). No options override: react-hotkeys-hook's defaults already
+// ignore form tags and contentEditable, which is what keeps Backspace inside the note editor from ever
+// reaching this. The sidebar stays mounted on /notes/$uuid, so focus parked on an editor TOOLBAR button
+// is covered by neither guard — the 2+ threshold (the bar and its hint are on screen) and the
+// Cancel-focused destructive confirm are what make that case safe.
+registerAction({ id: "notes.trash", defaultCombo: "delete,backspace", scope: "notes", descriptionKey: "notesCommandTrash" })
+
+// The floating bulk bar mounts at this many selected — and the notes.trash shortcut fires at exactly
+// the same threshold, so the shortcut is never live without the affordance that names it.
+const BULK_BAR_MIN_SELECTION = 2
 
 // First-pass size estimates only — note rows now vary in height (optional preview / shared-by /
 // avatar / tag lines), and the notes view interleaves section headers, so real heights come from the
@@ -148,7 +160,7 @@ function SidebarNotice({ icon, title, description, action }: { icon: ReactNode; 
 
 function segmentClass(active: boolean): string {
 	return cn(
-		"flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors outline-none app-region-no-drag focus-visible:ring-3 focus-visible:ring-ring/30",
+		"flex-1 rounded-md px-2 py-1 text-xs font-medium focus-ring transition-colors outline-none app-region-no-drag",
 		active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
 	)
 }
@@ -178,7 +190,7 @@ function TagGroupRow({
 			aria-expanded={row.expanded}
 			aria-label={t(row.expanded ? "notesTagCollapse" : "notesTagExpand", { name })}
 			onClick={onToggle}
-			className="group flex w-full items-center gap-1.5 rounded-xl px-2.5 py-2 text-left transition-colors outline-none app-region-no-drag hover:bg-sidebar-accent/60 focus-visible:ring-3 focus-visible:ring-ring/30"
+			className="group flex w-full items-center gap-1.5 rounded-xl px-2.5 py-2 text-left focus-ring transition-colors outline-none app-region-no-drag hover:bg-sidebar-accent/60"
 		>
 			<ChevronRightIcon className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", row.expanded && "rotate-90")} />
 			<TagIcon className="size-4 shrink-0 text-muted-foreground" />
@@ -516,6 +528,30 @@ export function NotesSidebar() {
 		[dialogHost.isDialogOpen]
 	)
 
+	// Registered at module scope above. preventDefault: Backspace still has a "go back" default in some
+	// engines. Fires only in the state the bulk bar is actually showing (2+ selected) and only when the
+	// bar would offer Trash at all (canBulkTrashNotes — the identical descriptor gate) under the same
+	// connectivity flag it is disabled by, so the shortcut can never trash something the UI is not
+	// simultaneously offering to trash.
+	useAction(
+		"notes.trash",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+
+			if (dialogHost.isDialogOpen || !isOnline || liveSelectedNotes.length < BULK_BAR_MIN_SELECTION) {
+				return
+			}
+
+			if (!canBulkTrashNotes(aggregateNoteSelectionFlags(liveSelectedNotes, currentUserId))) {
+				return
+			}
+
+			dialogHost.openBulkDialog("trashSelected", liveSelectedNotes)
+		},
+		undefined,
+		[dialogHost.isDialogOpen, isOnline, liveSelectedNotes, currentUserId]
+	)
+
 	const activeQuery = viewMode === "notes" ? notesQuery : tagsQuery
 	const searching = search.trim().length > 0
 
@@ -822,7 +858,7 @@ export function NotesSidebar() {
 					{/* Bottom-anchored floating selection bar — overlays the scroll container, replacing
 				    nothing in the header. Mirrors directoryListing.tsx's own BulkActionBar placement. Shown
 				    at 2+ selected only — a single selection is just normal browsing. */}
-					{liveSelectedNotes.length > 1 ? (
+					{liveSelectedNotes.length >= BULK_BAR_MIN_SELECTION ? (
 						<div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-center">
 							<NotesBulkActionBar
 								selectedNotes={liveSelectedNotes}

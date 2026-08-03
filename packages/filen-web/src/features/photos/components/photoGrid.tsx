@@ -5,6 +5,7 @@ import { MinusIcon, PlusIcon } from "lucide-react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { registerAction } from "@/lib/keymap/registry"
 import { useAction } from "@/lib/keymap/useAction"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
@@ -38,6 +39,8 @@ const BULK_BAR_MIN_SELECTION = 2
 // (mirrors directoryListing.tsx's own identical module-scope registration).
 registerAction({ id: "photos.selectAll", defaultCombo: "mod+a", scope: "photos", descriptionKey: "driveCommandSelectAll" })
 registerAction({ id: "photos.clearSelection", defaultCombo: "escape", scope: "photos", descriptionKey: "driveCommandClearSelection" })
+// Same combo and rationale as drive.trash and notes.trash — see notesSidebar.tsx's own registration.
+registerAction({ id: "photos.trash", defaultCombo: "delete,backspace", scope: "photos", descriptionKey: "driveCommandTrash" })
 
 export interface PhotoGridProps {
 	rootUuid: string
@@ -46,6 +49,7 @@ export interface PhotoGridProps {
 
 export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 	const { t } = useTranslation(["drive", "photos"])
+	const isOnline = useIsOnline()
 	const densityQuery = usePhotosGridDensityQuery()
 	const densityIndex = densityQuery.data ?? DEFAULT_DENSITY_INDEX
 	const tileSize = tileSizeForDensity(densityIndex)
@@ -184,6 +188,24 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 		},
 		undefined,
 		[isDialogOpen]
+	)
+
+	// Gated on the same threshold that mounts the bulk bar and on the same offline rule its Trash button
+	// uses (bulkActionBar.tsx) — a trash has nothing to reach without a connection. preventDefault:
+	// Backspace still has a "go back" default in some engines.
+	useAction(
+		"photos.trash",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+
+			if (isDialogOpen || !isOnline || selectedItems.length < BULK_BAR_MIN_SELECTION) {
+				return
+			}
+
+			handleBulkDialogAction("trash")
+		},
+		undefined,
+		[isDialogOpen, isOnline, selectedItems]
 	)
 
 	async function handleDensityChange(nextIndex: number): Promise<void> {

@@ -81,6 +81,60 @@ test.describe("drive", () => {
 		await waitForListingSettled(page)
 	})
 
+	test("an open dialog closes when a history pop changes the location under the same route", async ({
+		page,
+		injectedSession,
+		browserName
+	}) => {
+		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+		expect(injectedSession.length).toBeGreaterThan(0)
+
+		// The axis matters: /drive and /drive/<uuid> are ONE route (routes/_app/drive.$.tsx), so a pop
+		// along the splat re-renders the listing in place and its dialog host survives — which is the
+		// only state in which closing an open dialog is this host's job. A pop across two DIFFERENT
+		// routes unmounts the host outright and would pass with or without the fix.
+		await page.goto("/drive")
+		const { listbox, hasItems } = await waitForListingSettled(page)
+
+		test.skip(!hasItems, "drive root has no items in this account — nothing to navigate into")
+
+		const beforeUrl = page.url()
+		await listbox.getByRole("option").first().dblclick()
+
+		const navigated = await page
+			.waitForURL(url => url.toString() !== beforeUrl, { timeout: 5000 })
+			.then(() => true)
+			.catch(() => false)
+
+		test.skip(!navigated, "the first row did not navigate (likely a file, not a directory, in this account)")
+
+		await waitForListingSettled(page)
+		await page.goBack()
+		await page.waitForURL(/\/drive$/)
+		const root = await waitForListingSettled(page)
+
+		// Info is a pure read dialog — nothing is created or destroyed by opening it.
+		async function openInfoOn(list: ReturnType<typeof page.getByRole>): Promise<void> {
+			await list.getByRole("option").first().getByRole("button", { name: "More actions", exact: true }).click()
+			await page.getByRole("menu").getByRole("menuitem", { name: "Info", exact: true }).click()
+			await expect(page.getByRole("dialog")).toBeVisible()
+		}
+
+		await openInfoOn(root.listbox)
+		await page.goForward()
+		await expect(page.getByRole("dialog")).toHaveCount(0)
+
+		// The literal browser-Back wording of the same rule, whenever the subdirectory has a row of its
+		// own to open a dialog on.
+		const nested = await waitForListingSettled(page)
+
+		if (nested.hasItems) {
+			await openInfoOn(nested.listbox)
+			await page.goBack()
+			await expect(page.getByRole("dialog")).toHaveCount(0)
+		}
+	})
+
 	test("view mode toggles between list and grid and persists across a reload", async ({ page, injectedSession, browserName }) => {
 		// Doubly chromium-only: the initial listing read already hangs on firefox (see
 		// FIREFOX_HANG_REASON above), and even past that, reloading an already-authed page hits

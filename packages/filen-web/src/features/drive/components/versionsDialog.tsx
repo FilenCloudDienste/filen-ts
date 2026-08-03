@@ -251,7 +251,7 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 											onClick={() => {
 												toggleVersionSelected(version.uuid)
 											}}
-											className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm outline-none not-aria-pressed:hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
+											className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm focus-ring-row outline-none not-aria-pressed:hover:bg-accent/50 disabled:pointer-events-none disabled:opacity-50 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
 										>
 											<span
 												aria-hidden="true"

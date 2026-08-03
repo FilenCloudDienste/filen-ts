@@ -18,7 +18,8 @@ import type { Note, NoteTag, UuidStr } from "@filen/sdk-rs"
 import {
 	noteBulkActions,
 	noteBulkTagSubmenuEntries,
-	isNoteBulkActionOfflineDisabled
+	isNoteBulkActionOfflineDisabled,
+	canBulkTrashNotes
 } from "@/features/notes/components/notesBulkActionBar.logic"
 import { type NoteSelectionFlags } from "@/features/notes/lib/selectionFlags"
 
@@ -271,5 +272,25 @@ describe("isNoteBulkActionOfflineDisabled", () => {
 	it("never disables export — a cache-first read zipped client-side", () => {
 		expect(isNoteBulkActionOfflineDisabled("export", false)).toBe(false)
 		expect(isNoteBulkActionOfflineDisabled("export", true)).toBe(false)
+	})
+})
+
+// The notes.trash shortcut and the bar's Trash button read this ONE gate, so they can never disagree
+// about when a bulk trash is offered.
+describe("canBulkTrashNotes", () => {
+	it("allows a bulk trash of an owned, non-trashed selection", () => {
+		expect(canBulkTrashNotes(flags({ everyOwned: true }))).toBe(true)
+	})
+
+	it("refuses once anything in the selection is already trashed", () => {
+		expect(canBulkTrashNotes(flags({ everyOwned: true, includesTrashed: true }))).toBe(false)
+	})
+
+	it("refuses a selection the user does not own outright", () => {
+		expect(canBulkTrashNotes(flags({ everyOwned: false }))).toBe(false)
+	})
+
+	it("still allows an owned selection that includes an undecryptable note (a pure-uuid disposition)", () => {
+		expect(canBulkTrashNotes(flags({ everyOwned: true, includesUndecryptable: true }))).toBe(true)
 	})
 })

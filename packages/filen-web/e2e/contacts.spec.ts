@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { dismissStartupReminders } from "./helpers/listing"
+import { MOD_KEY } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Contact requests, blocks, and removals are OUTWARD-FACING: a request lands in another Filen
@@ -160,35 +161,47 @@ test.describe("contacts", () => {
 		await expect(dialog).toHaveCount(0)
 	})
 
-	test("the Select toggle renders, gated on whether this account has any contacts or requests", async ({
-		page,
-		injectedSession,
-		browserName
-	}) => {
+	test("rows are permanently selectable listbox options with a roving Tab stop", async ({ page, injectedSession, browserName }) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		await gotoContacts(page)
 		const { hasContacts } = await waitForContactsSettled(page)
 
-		const selectButton = page.getByRole("button", { name: "Select", exact: true })
-		await expect(selectButton).toBeVisible()
+		// The selection model converged on the app-wide one: no mode to enter, and the search box is
+		// never swapped out for a selection bar. Asserted before the content skip so it holds on an
+		// account with no contacts at all.
+		await expect(page.getByRole("button", { name: "Select", exact: true })).toHaveCount(0)
+		await expect(page.getByRole("searchbox", { name: "Search contacts" })).toBeVisible()
 
-		if (!hasContacts) {
-			await expect(selectButton).toBeDisabled()
-			return
+		test.skip(!hasContacts, "account has no contacts, requests or blocked users to select")
+
+		// Scoped to ONE section listbox: <main> spans up to four of them and the cursor is per section,
+		// so an ArrowDown from the last row of section 1 clamps inside section 1.
+		const list = page.getByRole("main").getByRole("listbox").first()
+		const options = list.getByRole("option")
+
+		await options.first().click()
+		await expect(options.first()).toHaveAttribute("aria-selected", "true")
+		// Roving tabindex: the cursor row owns the section's only Tab stop.
+		await expect(options.first()).toHaveAttribute("tabindex", "0")
+
+		if ((await options.count()) > 1) {
+			await expect(options.nth(1)).toHaveAttribute("tabindex", "-1")
+
+			await page.keyboard.press("ArrowDown")
+			await expect(options.nth(1)).toBeFocused()
+			await expect(options.nth(1)).toHaveAttribute("tabindex", "0")
+			// The cursor moved; the selection did not.
+			await expect(options.first()).toHaveAttribute("aria-selected", "true")
+
+			await options.nth(1).click({ modifiers: [MOD_KEY] })
+			await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
 		}
 
-		await expect(selectButton).toBeEnabled()
-		await selectButton.click()
-
-		const clearSelection = page.getByRole("button", { name: "Clear selection", exact: true })
-		await expect(clearSelection).toBeVisible()
-		await expect(page.getByText("0 selected", { exact: true })).toBeVisible()
-
-		// Exit select mode again — a purely local UI toggle, no query or mutation involved.
-		await clearSelection.click()
-		await expect(selectButton).toBeVisible()
+		// Escape clears — a purely local UI reset, no query or mutation involved.
+		await page.keyboard.press("Escape")
+		await expect(options.first()).toHaveAttribute("aria-selected", "false")
 	})
 
 	test("an established contact's destructive row action opens a confirm dialog and dismisses without mutating", async ({

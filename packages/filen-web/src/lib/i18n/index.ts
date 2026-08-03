@@ -28,10 +28,9 @@ export type CommonKey = Extract<keyof typeof common, string>
 // own actions extend the union the same way instead of forcing every description into "common".
 export type DriveKey = Extract<keyof typeof drive, string>
 
-// Same derivation for the "contacts" namespace, exported ahead of need: no contacts action
-// registers a keymap command yet (lib/keymap/registry.ts's ActionDef.descriptionKey is still
-// `CommonKey | DriveKey`), but a later add-contact command can extend that union with this type
-// without this file needing a matching edit at that time.
+// Same derivation for the "contacts" namespace — the contacts page's own keymap command
+// (contacts.clearSelection) describes itself with contacts-namespace copy rather than borrowing a
+// "common" key, the same way drive.* does above.
 export type ContactsKey = Extract<keyof typeof contacts, string>
 
 // Same derivation for the "transfers" namespace, exported ahead of need: only its own two

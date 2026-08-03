@@ -73,7 +73,7 @@ export function NowPlayingPanel() {
 						<button
 							type="button"
 							aria-current={index === currentIndex ? "true" : undefined}
-							className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+							className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left focus-ring-row outline-none"
 							onClick={() => {
 								void audioEngine.playIndex(index)
 							}}
