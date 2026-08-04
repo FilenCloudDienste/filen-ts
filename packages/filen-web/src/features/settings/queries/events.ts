@@ -2,7 +2,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import type { UserEventResult } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
-import { computeNextEventsPage } from "@/features/settings/lib/eventsPagination"
+import { computeNextEventsPage, selectEventsView, type EventsView } from "@/features/settings/lib/eventsPagination"
 
 // Single flat cache slice (no per-cursor pages), same shape as chatMessages.ts's own single-slice
 // convention: `loadOlderEvents` below mutates this one entry in place (append + dedupe) rather than
@@ -18,10 +18,13 @@ export function fetchEvents(): Promise<UserEventResult[]> {
 	return sdkApi.getUserEvents()
 }
 
-export function useEventsQuery(): UseQueryResult<UserEventResult[]> {
+// `select` (a module-level function, so query-core reuses its cached result until the raw data
+// identity changes) keeps the sort + Ok/Err partition off the render path — see selectEventsView.
+export function useEventsQuery(): UseQueryResult<EventsView> {
 	return useQuery({
 		queryKey: EVENTS_QUERY_KEY,
-		queryFn: fetchEvents
+		queryFn: fetchEvents,
+		select: selectEventsView
 	})
 }
 

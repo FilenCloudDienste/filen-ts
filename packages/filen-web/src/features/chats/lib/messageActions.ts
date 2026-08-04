@@ -2,6 +2,7 @@ import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { chatsQueryUpsert } from "@/features/chats/queries/chats"
 import { chatMessagesQueryRemove, chatMessagesQueryUpsert } from "@/features/chats/queries/chatMessages"
+import { cancelOwnMessageEcho } from "@/features/chats/lib/parkedOwnMessages"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 
@@ -28,6 +29,10 @@ export async function deleteMessage(chat: Chat, message: ChatMessage): Promise<V
 
 	chatsQueryUpsert(updatedChat)
 	chatMessagesQueryRemove(chat.uuid, message.uuid)
+	// Deleting a message this client sent seconds ago: its own socket echo may still be parked (see
+	// parkedOwnMessages), holding a patch that would re-append what was just deleted. Not covered by the
+	// removal above — a parked echo is in no cache yet.
+	cancelOwnMessageEcho(message.uuid)
 
 	return { status: "success" }
 }

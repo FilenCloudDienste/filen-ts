@@ -268,6 +268,38 @@ describe("chat socket handlers — messages", () => {
 		expect(getMessages("c1").map(m => m.uuid)).toEqual([testUuid("m2")])
 	})
 
+	// Send-then-delete: the echo of an own message is still parked when the delete lands, so it is in no
+	// cache for the removal to find. Left alone, the park would re-append the deleted message — and the
+	// server 404s a second delete of it, so the ghost could not be removed again.
+	it("messageDelete inside the reconcile window drops the parked own-message echo", () => {
+		vi.useFakeTimers()
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id: 2n })
+		seedChats([makeChat("c1")])
+		seedMessages("c1", [])
+
+		handleChatEvent({ inner: { type: "messageNew", msg: makeMessage("m1", "c1", { senderId: 2 }) }, chatMessageId: 0n })
+
+		vi.advanceTimersByTime(100)
+		handleChatEvent({ inner: { type: "messageDelete", uuid: testUuid("m1") }, chatMessageId: 0n })
+
+		vi.advanceTimersByTime(5_000)
+
+		expect(getMessages("c1")).toEqual([])
+		// Nor may the deleted message be stamped onto the conversation row as its last message.
+		expect(getChats()[0]?.lastMessage).toBeUndefined()
+		// A parked echo is a known message — not the "unknown uuid" the warning is for.
+		expect(logWarn).not.toHaveBeenCalled()
+	})
+
+	it("messageDelete for a uuid that is neither cached nor parked still warns", () => {
+		seedChats([makeChat("c1")])
+		seedMessages("c1", [])
+
+		handleChatEvent({ inner: { type: "messageDelete", uuid: testUuid("unknown") }, chatMessageId: 0n })
+
+		expect(logWarn).toHaveBeenCalled()
+	})
+
 	it("messageEmbedDisabled flips embedDisabled on the matched message", () => {
 		seedChats([makeChat("c1")])
 		seedMessages("c1", [makeMessage("m1", "c1")])

@@ -113,9 +113,18 @@ export class AudioEngine {
 	private element: AudioElementAdapter | null = null
 	// The object URL of the currently-loaded blob source, if any — revoked on switch/dispose.
 	private currentBlobUrl: string | null = null
+	// The uuid of the track whose bytes the main element currently holds. Identity is the uuid, not the
+	// queue index, because indices shift under queue mutations. `null` means the element holds nothing
+	// playable, so anything that would resume/replay "what is loaded" must load first.
+	private loadedTrackUuid: string | null = null
 	// Bumped on every load attempt so an older in-flight resolve/play can detect it was superseded and
 	// bail (the user skipped, the queue was replaced, dispose ran) rather than stomping newer state.
 	private loadGeneration = 0
+	// Bumped on every pause. A pause refuses PLAYBACK, not the load: the track is still the one the user
+	// wants, so an in-flight load finishes onto the element, but every play() tail started before the bump
+	// must abandon itself — never starting audio behind the pause, and never mistaking the play() the
+	// pause aborted for a playback failure.
+	private pauseGeneration = 0
 	// Consecutive failed-track auto-skips; reset to 0 on any successful play. Bounds the auto-skip pass.
 	private skipGuard = 0
 	private lastPositionWriteAt = 0
@@ -144,6 +153,12 @@ export class AudioEngine {
 
 	private revoke(url: string): void {
 		;(this.deps.revokeObjectUrl ?? defaultRevoke)(url)
+	}
+
+	// An in-flight attempt no longer owns the transport once another load superseded it or the user paused
+	// meanwhile — either way it must not settle the store, start audio, or report a failure.
+	private superseded(loadGeneration: number, pauseGeneration: number): boolean {
+		return loadGeneration !== this.loadGeneration || pauseGeneration !== this.pauseGeneration
 	}
 
 	private nav(): QueueNav {
@@ -299,6 +314,7 @@ export class AudioEngine {
 	// buffered/decoded for the promoted element instead of resolving+loading from scratch.
 	private async promotePrefetch(index: number): Promise<void> {
 		const generation = ++this.loadGeneration
+		const pauseGeneration = this.pauseGeneration
 		const track = useAudioStore.getState().queue[index]
 		const promoted = this.prefetchElement
 
@@ -340,6 +356,7 @@ export class AudioEngine {
 		const outgoing = this.element
 
 		this.element = promoted
+		this.loadedTrackUuid = track.uuid
 		outgoing?.pause()
 		outgoing?.clear()
 		outgoing?.dispose()
@@ -347,7 +364,7 @@ export class AudioEngine {
 		try {
 			await promoted.play()
 		} catch (error) {
-			if (generation !== this.loadGeneration) {
+			if (this.superseded(generation, pauseGeneration)) {
 				return
 			}
 
@@ -356,7 +373,7 @@ export class AudioEngine {
 			return
 		}
 
-		if (generation !== this.loadGeneration) {
+		if (this.superseded(generation, pauseGeneration)) {
 			return
 		}
 
@@ -451,7 +468,8 @@ export class AudioEngine {
 	// (no re-resolve, no reload). Otherwise the cold-start path: resolve a source (SW stream or
 	// whole-buffer blob), swap the element's src, play. Every await re-checks the generation so a
 	// superseding load/skip/dispose bails cleanly; a source resolved for a superseded load still has its
-	// blob URL freed. A resolve error or a rejected play() routes into the bounded auto-skip.
+	// blob URL freed. A pause is NOT a supersede: the resolved bytes still land on the element, only the
+	// playing is dropped. A resolve error or a rejected play() routes into the bounded auto-skip.
 	private async loadAndPlay(index: number): Promise<void> {
 		if (index === this.prefetchIndex && this.prefetchElement) {
 			await this.promotePrefetch(index)
@@ -460,6 +478,7 @@ export class AudioEngine {
 		}
 
 		const generation = ++this.loadGeneration
+		const pauseGeneration = this.pauseGeneration
 		const track = useAudioStore.getState().queue[index]
 
 		if (!track) {
@@ -476,7 +495,9 @@ export class AudioEngine {
 		try {
 			source = await this.deps.resolveSource(track)
 		} catch (error) {
-			if (generation !== this.loadGeneration) {
+			// A pause abandons the failure too, not just the playback: the retry when the user asks for
+			// audio again is what should surface it, rather than an error the paused user never provoked.
+			if (this.superseded(generation, pauseGeneration)) {
 				return
 			}
 
@@ -499,11 +520,19 @@ export class AudioEngine {
 
 		this.swapBlobUrl(source)
 		element.load(source.url)
+		this.loadedTrackUuid = track.uuid
+
+		// Paused while this was resolving: the bytes stay on the element — that is what gives the paused
+		// track a duration and a live scrubber, and what lets resume() replay it without a second download
+		// — but the playback the user just refused never starts.
+		if (this.pauseGeneration !== pauseGeneration) {
+			return
+		}
 
 		try {
 			await element.play()
 		} catch (error) {
-			if (generation !== this.loadGeneration) {
+			if (this.superseded(generation, pauseGeneration)) {
 				return
 			}
 
@@ -512,7 +541,7 @@ export class AudioEngine {
 			return
 		}
 
-		if (generation !== this.loadGeneration) {
+		if (this.superseded(generation, pauseGeneration)) {
 			return
 		}
 
@@ -536,6 +565,14 @@ export class AudioEngine {
 	// advance to the next track and try it.
 	private onPlaybackFailure(error: ErrorDTO): void {
 		useAudioStore.getState().setError(error)
+
+		// The auto-skip exists to get playback past a broken track. A paused transport is not asking for
+		// audio, so a failure reaching it here (a stray element error on the loaded-but-paused track) stops
+		// at the error instead of advancing the queue into playback the user did not ask for.
+		if (useAudioStore.getState().status === "paused") {
+			return
+		}
+
 		this.skipGuard += 1
 
 		if (!withinSkipBudget(this.skipGuard, useAudioStore.getState().queue.length)) {
@@ -588,7 +625,7 @@ export class AudioEngine {
 		}
 
 		if (state.loopMode === "one") {
-			await this.loadAndPlay(state.currentIndex)
+			await this.repeatCurrent(state.currentIndex)
 
 			return
 		}
@@ -603,6 +640,46 @@ export class AudioEngine {
 
 		this.applyAdvance(advance)
 		await this.loadAndPlay(advance.index)
+	}
+
+	// Loop "one": replay the element in place. Reloading would re-resolve the source on every lap — a
+	// full re-download and re-decrypt of the file on the blob path, a fresh SW registration on the stream
+	// path — and throw away whatever the browser had already buffered. Prefetch can never cover this: it
+	// warms what comes AFTER the current track. Falls back to a cold load only when the element no longer
+	// holds this track.
+	private async repeatCurrent(index: number): Promise<void> {
+		const element = this.element
+		const track = useAudioStore.getState().queue[index]
+
+		if (!element || track?.uuid !== this.loadedTrackUuid) {
+			await this.loadAndPlay(index)
+
+			return
+		}
+
+		const generation = ++this.loadGeneration
+		const pauseGeneration = this.pauseGeneration
+
+		element.seek(0)
+		useAudioStore.getState().setPosition(0)
+
+		try {
+			await element.play()
+		} catch (error) {
+			if (this.superseded(generation, pauseGeneration)) {
+				return
+			}
+
+			this.onPlaybackFailure(asErrorDTO(error))
+
+			return
+		}
+
+		if (this.superseded(generation, pauseGeneration)) {
+			return
+		}
+
+		this.settlePlaying(element)
 	}
 
 	// Replace the whole queue positioned at a track and start playing — the folder-open / playlist-play
@@ -633,29 +710,53 @@ export class AudioEngine {
 		await this.loadAndPlay(useAudioStore.getState().currentIndex)
 	}
 
-	// Resume an already-loaded element in place; if nothing is loaded yet, start the current track.
+	// Resume an already-loaded element in place. When the element holds anything other than the current
+	// track — nothing yet, or the previous track because a load was paused/superseded mid-flight — this
+	// starts the current track instead of replaying stale bytes.
 	public resume(): void {
-		if (!this.element || useAudioStore.getState().queue.length === 0) {
+		const state = useAudioStore.getState()
+		const current = state.queue[state.currentIndex]
+
+		if (!this.element || current?.uuid !== this.loadedTrackUuid) {
 			void this.playCurrent()
 
 			return
 		}
 
-		useAudioStore.getState().setStatus("playing")
+		const pauseGeneration = this.pauseGeneration
+
+		state.setStatus("playing")
 		this.deps.mediaSession?.setPlaybackState("playing")
 		void this.element.play().catch((error: unknown) => {
+			// A pause landing before this settles rejects it with AbortError; that is the user's own doing,
+			// not a broken track, so it must not surface an error or trigger the auto-skip.
+			if (this.pauseGeneration !== pauseGeneration) {
+				return
+			}
+
 			this.onPlaybackFailure(asErrorDTO(error))
 		})
 	}
 
+	// Pausing supersedes the PLAYBACK an in-flight load is heading for, not the load itself: without the
+	// bump, a load that resolves after this settles to "playing" and starts audio the user just refused —
+	// and the element.pause() below would reject that load's own play() promise, surfacing a playback
+	// error and auto-skipping to another track. The load still finishes onto the element, so the paused
+	// track keeps a duration/scrubber and resume() replays it without re-downloading it.
 	public pause(): void {
+		this.pauseGeneration++
 		this.element?.pause()
 		useAudioStore.getState().setStatus("paused")
 		this.deps.mediaSession?.setPlaybackState("paused")
 	}
 
+	// "loading" is playback intent already in flight, so a toggle during it is a PAUSE — the transport
+	// button stays enabled through the spinner, and resuming there would play whatever the element still
+	// holds (the previous track).
 	public toggle(): void {
-		if (useAudioStore.getState().status === "playing") {
+		const status = useAudioStore.getState().status
+
+		if (status === "playing" || status === "loading") {
 			this.pause()
 		} else {
 			this.resume()
@@ -750,6 +851,7 @@ export class AudioEngine {
 		this.loadGeneration++
 		this.element?.pause()
 		this.element?.clear()
+		this.loadedTrackUuid = null
 		this.teardownPrefetch()
 
 		if (this.currentBlobUrl !== null) {
@@ -885,6 +987,7 @@ export class AudioEngine {
 		this.element?.clear()
 		this.element?.dispose()
 		this.element = null
+		this.loadedTrackUuid = null
 		this.teardownPrefetch()
 		this.coverCache.revokeAll()
 

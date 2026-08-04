@@ -59,11 +59,13 @@ function RowBadge({ children }: { children: ReactNode }) {
 // title, optional preview, relative edited-time, an optional "Shared by <email>" line, a participant
 // avatar strip, and a tag-chip strip. Carries its own row-level context menu (right-click) and ⋯
 // trigger (hover-revealed), both rendering the SAME shared descriptor list (noteMenu.logic.ts).
+// No default in the destructuring pattern (`nested = false`): the React Compiler bails out of any
+// component whose parameters carry one, which would leave this per-row component fully unmemoized.
 export function NoteRow({
 	note,
 	selected,
 	multiSelected,
-	nested = false,
+	nested,
 	allTags,
 	currentUserId,
 	onAction,

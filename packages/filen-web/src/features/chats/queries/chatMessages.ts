@@ -41,6 +41,28 @@ export async function fetchMessagesForChat(chat: Chat): Promise<ChatMessage[]> {
 	return sortAscending(messages)
 }
 
+// Folds a freshly-fetched NEWEST page into what the chat already has cached. A refetch (window focus,
+// remount, socket reconnect) only ever returns that newest page, so replacing the slice would throw away
+// every older page `loadOlderChatMessages` merged in — the history the user scrolled up to reads as gone
+// and the virtualizer collapses under their scroll position. The page is authoritative over ITS OWN
+// window only: cached messages older than its oldest survive (the paged-in scrollback) and so do any
+// newer than its newest (a socket delivery that raced the fetch), while everything inside the window
+// comes from the page, so a server-side delete or edit still reconciles. An EMPTY page means the thread
+// genuinely has no messages — nothing outside the window to keep.
+export function mergeNewestPage(cached: readonly ChatMessage[], page: readonly ChatMessage[]): ChatMessage[] {
+	const sortedPage = sortAscending(page)
+	const oldest = sortedPage.at(0)
+	const newest = sortedPage.at(-1)
+
+	if (oldest === undefined || newest === undefined) {
+		return sortedPage
+	}
+
+	const outsideWindow = cached.filter(m => m.sentTimestamp < oldest.sentTimestamp || m.sentTimestamp > newest.sentTimestamp)
+
+	return sortAscending([...outsideWindow, ...sortedPage])
+}
+
 // Exported bare, same rationale as fetchNoteContent: node-environment tests exercise this against
 // a mocked sdkApi without a React render. Resolves the Chat from the chats list cache — a
 // socket-delivered chat is seeded into that same cache by socketHandlers.ts's own conversationsNew
@@ -55,7 +77,10 @@ export async function fetchChatMessages(chatUuid: string): Promise<ChatMessage[]
 		return chatMessagesQueryGet(chatUuid) ?? []
 	}
 
-	return fetchMessagesForChat(chat)
+	const page = await fetchMessagesForChat(chat)
+
+	// Read the cache AFTER the fetch so anything socket-delivered mid-flight is part of the merge.
+	return mergeNewestPage(chatMessagesQueryGet(chatUuid) ?? [], page)
 }
 
 // `enabled` lets a caller subscribe to a chat's message cache WITHOUT triggering its own fetch (react-

@@ -114,23 +114,23 @@ export function ChatsSidebar() {
 	// conversationParticipantLeft socket event, or another tab's delete/leave, can drop a chat with no
 	// navigation involved), so the STORE itself — not just this render's liveSelectedChats view — must
 	// drop a uuid the instant it stops existing, or a stale entry sits there indefinitely until the
-	// sidebar next unmounts. Mirrors directoryListing.tsx's own search-result ghost purge: keyed on a
+	// sidebar next unmounts. Mirrors directoryListing.tsx's own selection purges: keyed on a
 	// uuid-content signature (stable across unrelated re-renders, since `visibleChats` is a brand-new
-	// array every render regardless of whether anything actually changed), not `visibleChats` itself. The
-	// signature is over the VISIBLE set, so blocking someone drops their 1:1 from an active selection too
-	// — list membership can change with no chat being deleted.
+	// array every render regardless of whether anything actually changed), not `visibleChats` itself,
+	// and the uuids are read back out of that key rather than off the array — so the effect depends on
+	// exactly what it uses. The signature is over the VISIBLE set, so blocking someone drops their 1:1
+	// from an active selection too — list membership can change with no chat being deleted.
 	const visibleChatUuidsSignature = visibleChats
 		.map(chat => chat.uuid)
 		.sort()
 		.join(",")
 
 	useEffect(() => {
-		const toRemove = staleChatSelectionUuids(useChatsSelectionStore.getState().selectedChats, visibleChats)
+		const toRemove = staleChatSelectionUuids(useChatsSelectionStore.getState().selectedChats, visibleChatUuidsSignature.split(","))
 
 		if (toRemove.length > 0) {
 			useChatsSelectionStore.getState().removeFromSelection(toRemove)
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the signature above, not visibleChats — see comment above
 	}, [visibleChatUuidsSignature])
 
 	// Def in features/chats/lib/keymap.ts. Browser default for mod+a is "select all page text" — must

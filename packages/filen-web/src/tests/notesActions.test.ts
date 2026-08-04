@@ -68,6 +68,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { NOTES_QUERY_KEY, notesQueryGet } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
+import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
 import {
 	createNote as createNoteAction,
 	duplicateNote,
@@ -86,6 +87,7 @@ import {
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
+	useNotesInflightStore.setState({ inflightContent: {} })
 	getDefaultNoteTypeMock.mockResolvedValue("text")
 })
 
@@ -203,6 +205,25 @@ describe("resolveNoteContent — copy content", () => {
 		const content = await resolveNoteContent(note)
 
 		expect(content).toBe("cached body")
+		expect(getNoteContent).not.toHaveBeenCalled()
+	})
+
+	// Copy stays enabled offline, so it must yield what the editor shows — the queued edit — rather than
+	// the last text that reached the server.
+	it("prefers an unsynced outbox edit over the content the last push left in the cache", async () => {
+		const note = mockNote()
+		testQueryClient.setQueryData(noteContentQueryKey(note.uuid), "synced old")
+		useNotesInflightStore.setState({ inflightContent: { [note.uuid]: [{ timestamp: 1, note, content: "typed new" }] } })
+
+		await expect(resolveNoteContent(note)).resolves.toBe("typed new")
+		expect(getNoteContent).not.toHaveBeenCalled()
+	})
+
+	it("returns a queued outbox edit with a COLD cache instead of fetching pre-edit content", async () => {
+		const note = mockNote()
+		useNotesInflightStore.setState({ inflightContent: { [note.uuid]: [{ timestamp: 1, note, content: "typed offline" }] } })
+
+		await expect(resolveNoteContent(note)).resolves.toBe("typed offline")
 		expect(getNoteContent).not.toHaveBeenCalled()
 	})
 

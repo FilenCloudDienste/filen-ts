@@ -18,6 +18,35 @@ export function computeNextEventsPage(
 	return { newOk, terminate: newOk.length === 0 }
 }
 
+export interface EventsView {
+	// Sorted desc by timestamp (newest first, matching mobile's own Events screen).
+	ok: OkEventResult[]
+	// Err (undecryptable) entries never enter `ok` — they carry no stable id to key or dedupe by, the
+	// same rule computeNextEventsPage applies to every later page. Counted so the empty state can say
+	// why a page that fetched something still shows nothing.
+	errCount: number
+}
+
+// The list's whole view model, derived ONCE per cache write (wired as the events query's `select`, so
+// query-core memoizes it on the raw data identity) instead of per render of a list that re-renders on
+// every scroll tick.
+export function selectEventsView(data: UserEventResult[]): EventsView {
+	const ok: OkEventResult[] = []
+	let errCount = 0
+
+	for (const event of data) {
+		if (event.type === "ok") {
+			ok.push(event)
+		} else {
+			errCount++
+		}
+	}
+
+	ok.sort((a, b) => (a.timestamp === b.timestamp ? 0 : a.timestamp > b.timestamp ? -1 : 1))
+
+	return { ok, errCount }
+}
+
 // Scroll-triggered pagination's combined guard (eventsList.tsx's handleScroll) — pulled out so the
 // offline branch is unit-testable without mounting the virtualized list. Mirrors mobile's
 // onEndReached: offline early-returns WITHOUT flipping hasMore, so the very next near-bottom scroll

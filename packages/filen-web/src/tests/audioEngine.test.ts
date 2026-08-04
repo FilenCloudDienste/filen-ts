@@ -321,7 +321,7 @@ describe("handleTrackEnd", () => {
 		expect(useAudioStore.getState().currentIndex).toBe(0)
 	})
 
-	it("replays the same track under loop one", async () => {
+	it("replays the same track under loop one without re-resolving or reloading it", async () => {
 		const h = makeHarness()
 
 		useAudioStore.setState({ loopMode: "one" })
@@ -332,7 +332,24 @@ describe("handleTrackEnd", () => {
 		await flush()
 
 		expect(useAudioStore.getState().currentIndex).toBe(0)
-		expect(h.fake.calls.load).toEqual(["blob:a", "blob:a"])
+		// A reload would re-download and re-decrypt the whole file on every lap.
+		expect(h.resolveSource).toHaveBeenCalledTimes(1)
+		expect(h.fake.calls.load).toEqual(["blob:a"])
+		expect(h.fake.calls.seek).toContain(0)
+		expect(h.fake.calls.play).toBe(2)
+		expect(useAudioStore.getState().status).toBe("playing")
+	})
+
+	it("cold-loads the loop-one track when the element does not hold it", async () => {
+		const h = makeHarness()
+
+		useAudioStore.setState({ loopMode: "one", queue: [track("a")], currentIndex: 0 })
+
+		await h.engine.handleTrackEnd()
+		await flush()
+
+		expect(h.resolveSource).toHaveBeenCalledTimes(1)
+		expect(h.fake.calls.load).toEqual(["blob:a"])
 	})
 })
 
@@ -348,6 +365,196 @@ describe("transport", () => {
 
 		h.engine.resume()
 		await flush()
+		expect(useAudioStore.getState().status).toBe("playing")
+	})
+
+	it("pause during a track load lands the bytes on the element without ever starting playback", async () => {
+		const h = makeHarness()
+		let release: ((source: TrackSource) => void) | undefined
+
+		h.resolveSource.mockImplementationOnce(
+			() =>
+				new Promise<TrackSource>(resolve => {
+					release = resolve
+				})
+		)
+
+		void h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+		expect(useAudioStore.getState().status).toBe("loading")
+
+		h.engine.pause()
+		expect(useAudioStore.getState().status).toBe("paused")
+
+		release?.({ kind: "blob", url: "blob:a" })
+		await flush()
+
+		expect(useAudioStore.getState().status).toBe("paused")
+		expect(h.fake.calls.play).toBe(0)
+		// The bytes are already downloaded and decrypted — leaving them on the element is what gives the
+		// paused track its duration (a scrubber the user can drag) instead of a dead 0:00 transport.
+		expect(h.fake.calls.load).toEqual(["blob:a"])
+		expect(h.revoke).not.toHaveBeenCalled()
+	})
+
+	it("resume after a pause mid-load replays the loaded track instead of re-resolving it", async () => {
+		const h = makeHarness()
+		let release: ((source: TrackSource) => void) | undefined
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		h.resolveSource.mockImplementationOnce(
+			() =>
+				new Promise<TrackSource>(resolve => {
+					release = resolve
+				})
+		)
+
+		void h.engine.skipNext()
+		await flush()
+
+		h.engine.pause()
+		release?.({ kind: "blob", url: "blob:b" })
+		await flush()
+
+		expect(h.fake.calls.load).toEqual(["blob:a", "blob:b"])
+		expect(h.fake.calls.play).toBe(1)
+
+		h.engine.resume()
+		await flush()
+
+		expect(h.resolveSource).toHaveBeenCalledTimes(2)
+		expect(h.fake.calls.load).toEqual(["blob:a", "blob:b"])
+		expect(h.fake.calls.play).toBe(2)
+		expect(useAudioStore.getState().currentIndex).toBe(1)
+		expect(useAudioStore.getState().status).toBe("playing")
+	})
+
+	it("a resolve failure after a pause stays silent instead of auto-skipping", async () => {
+		const h = makeHarness()
+		let rejectResolve: ((error: unknown) => void) | undefined
+
+		h.resolveSource.mockImplementationOnce(
+			() =>
+				new Promise<TrackSource>((_, reject) => {
+					rejectResolve = reject
+				})
+		)
+
+		void h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		h.engine.pause()
+		rejectResolve?.(new Error("boom"))
+		await flush()
+
+		// The retry when the user asks for audio again is what surfaces it.
+		expect(useAudioStore.getState().lastError).toBeNull()
+		expect(useAudioStore.getState().currentIndex).toBe(0)
+		expect(useAudioStore.getState().status).toBe("paused")
+		expect(h.fake.calls.play).toBe(0)
+	})
+
+	it("an element error while paused surfaces it without advancing the queue", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		h.engine.pause()
+		h.events().onError()
+		await flush()
+
+		expect(useAudioStore.getState().lastError).not.toBeNull()
+		expect(useAudioStore.getState().currentIndex).toBe(0)
+		expect(useAudioStore.getState().status).toBe("paused")
+		expect(h.fake.calls.load).toEqual(["blob:a"])
+	})
+
+	it("pause right after resume neither surfaces an error nor auto-skips", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+		h.engine.pause()
+
+		let rejectPlay: ((error: unknown) => void) | undefined
+
+		h.fake.setPlayImpl(
+			() =>
+				new Promise<void>((_, reject) => {
+					rejectPlay = reject
+				})
+		)
+
+		h.engine.resume()
+		h.engine.pause()
+		rejectPlay?.(new DOMException("interrupted by pause", "AbortError"))
+		await flush()
+
+		expect(useAudioStore.getState().status).toBe("paused")
+		expect(useAudioStore.getState().currentIndex).toBe(0)
+		expect(useAudioStore.getState().lastError).toBeNull()
+	})
+
+	it("pause while play() is in flight neither surfaces an error nor auto-skips", async () => {
+		const h = makeHarness()
+		let rejectPlay: ((error: unknown) => void) | undefined
+
+		h.fake.setPlayImpl(
+			() =>
+				new Promise<void>((_, reject) => {
+					rejectPlay = reject
+				})
+		)
+
+		void h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		h.engine.pause()
+		// A real media element rejects the pending play() with AbortError when it is paused mid-flight.
+		rejectPlay?.(new DOMException("interrupted by pause", "AbortError"))
+		await flush()
+
+		expect(useAudioStore.getState().status).toBe("paused")
+		expect(useAudioStore.getState().currentIndex).toBe(0)
+		expect(useAudioStore.getState().lastError).toBeNull()
+	})
+
+	it("toggle during a load pauses, and the later resume plays the intended track", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		let release: ((source: TrackSource) => void) | undefined
+
+		h.resolveSource.mockImplementationOnce(
+			() =>
+				new Promise<TrackSource>(resolve => {
+					release = resolve
+				})
+		)
+
+		void h.engine.skipNext()
+		await flush()
+		expect(useAudioStore.getState().status).toBe("loading")
+
+		h.engine.toggle()
+		expect(useAudioStore.getState().status).toBe("paused")
+		// The element still holds track a — resuming it here would audibly restart the previous track.
+		expect(h.fake.calls.play).toBe(1)
+
+		release?.({ kind: "blob", url: "blob:b" })
+		await flush()
+		expect(useAudioStore.getState().status).toBe("paused")
+
+		h.engine.resume()
+		await flush()
+
+		expect(h.fake.calls.load).toEqual(["blob:a", "blob:b"])
+		expect(useAudioStore.getState().currentIndex).toBe(1)
 		expect(useAudioStore.getState().status).toBe("playing")
 	})
 

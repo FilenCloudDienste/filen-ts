@@ -132,7 +132,7 @@ export function AudioPlayerBar() {
 						<Button
 							variant="default"
 							size="icon"
-							aria-label={isPlaying ? t("pause") : t("play")}
+							aria-label={isPlaying || isLoading ? t("pause") : t("play")}
 							onClick={() => {
 								audioEngine.toggle()
 							}}

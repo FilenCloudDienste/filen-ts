@@ -1,9 +1,11 @@
 import DOMPurify from "dompurify"
 
-// Read-only rich-note render — sanitize config MUST match the new mobile app byte-for-byte
-// (mobile reference: packages/filen-mobile/src/components/textEditor/richText/dom.tsx).
+// Read-only rich-note render — the tag/attribute allow-lists MUST match the new mobile app
+// byte-for-byte (mobile reference: packages/filen-mobile/src/components/textEditor/richText/dom.tsx).
 // The live-edit path (Quill) re-sanitizes with this SAME config before every seed
 // paste; this module is shared between both paths so they can never drift.
+// The afterSanitizeAttributes hook below is where web-only hardening lives: mobile renders note HTML
+// inside an isolated WebView with no app CSS, we render it into the app's own document.
 
 export const RICH_TEXT_ALLOWED_TAGS = [
 	"p",
@@ -39,6 +41,22 @@ export const RICH_TEXT_ALLOWED_ATTR = ["href", "target", "rel", "src", "alt", "c
 // only bite with positioning) and viewport-relative sizing. Everything else in `style` survives.
 const FORBIDDEN_STYLE_PROPERTIES = new Set(["position", "z-index", "top", "right", "bottom", "left", "inset"])
 const VIEWPORT_UNIT = /\d*\.?\d+(vw|vh|vmin|vmax)\b/
+
+// `class` stays on the allow-list for the same reason (Quill emits alignment, indentation, sizing and
+// code blocks as classes), and it is the LOUDER hole: a class resolves against whatever CSS the
+// embedding document already ships, so on the web `class="fixed inset-0 z-50 bg-background"` reproduces
+// the exact full-viewport overlay the style filter above strips — with none of the declarations the
+// filter can see. Nothing in `style` can substitute for it, so the answer is a positive allow-list:
+// only Quill's CONTENT formatting classes survive. Everything else goes, including Quill's own chrome
+// classes (`ql-tooltip` is absolutely positioned, `ql-container` establishes a containing block).
+const ALLOWED_CLASS = /^ql-(?:align|bg|color|direction|font|indent|size)-[a-z0-9]+$|^ql-(?:code-block|code-block-container|syntax|ui)$/
+
+function filterClassTokens(value: string): string {
+	return value
+		.split(/\s+/)
+		.filter(token => ALLOWED_CLASS.test(token))
+		.join(" ")
+}
 
 // The denylist MUST be applied to CSS-parser-canonical property names and values, never to the raw
 // attribute string. A raw string/regex match is bypassable: browsers decode CSS escape sequences, so
@@ -86,6 +104,18 @@ DOMPurify.addHook("afterSanitizeAttributes", node => {
 			node.setAttribute("style", filtered)
 		} else {
 			node.removeAttribute("style")
+		}
+	}
+
+	const className = node.getAttribute("class")
+
+	if (className) {
+		const filtered = filterClassTokens(className)
+
+		if (filtered.length > 0) {
+			node.setAttribute("class", filtered)
+		} else {
+			node.removeAttribute("class")
 		}
 	}
 })

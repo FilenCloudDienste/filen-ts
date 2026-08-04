@@ -416,6 +416,18 @@ describe("nextScrollAffordanceState — scroll-to-bottom pill (count-while-scrol
 		expect(next).toEqual<ScrollAffordanceState>({ atBottom: false, unseenCount: 4 })
 	})
 
+	// Reference equality, not value equality: a fresh object for an unchanged state would defeat React's
+	// setState bailout and re-render the whole thread on every native scroll event while scrolled up.
+	it("a redundant still-scrolled-up scroll event returns the same state reference", () => {
+		const scrolledUpWithUnseen: ScrollAffordanceState = { atBottom: false, unseenCount: 4 }
+
+		expect(nextScrollAffordanceState(scrolledUpWithUnseen, { kind: "scroll", atBottom: false })).toBe(scrolledUpWithUnseen)
+	})
+
+	it("a redundant still-at-bottom scroll event returns the same state reference", () => {
+		expect(nextScrollAffordanceState(INITIAL_SCROLL_AFFORDANCE, { kind: "scroll", atBottom: true })).toBe(INITIAL_SCROLL_AFFORDANCE)
+	})
+
 	it("a non-positive arrival count is a no-op", () => {
 		const scrolledUp: ScrollAffordanceState = { atBottom: false, unseenCount: 2 }
 		const next = nextScrollAffordanceState(scrolledUp, { kind: "messagesArrived", count: 0 })

@@ -1,6 +1,6 @@
 import type { Note } from "@filen/sdk-rs"
 import type { InflightEntry } from "@/features/notes/store/useNotesInflight"
-import { hashNoteContent } from "@/features/notes/lib/sync.logic"
+import { hashNoteContent, newestEntry } from "@/features/notes/lib/sync.logic"
 import { hasNoteWriteAccess } from "@/features/notes/lib/sort"
 
 // old-web parity: the client-side note-content cap. A push past this would be rejected server-side and
@@ -25,19 +25,7 @@ export function exceedsNoteSizeCap(value: string): boolean {
 // outbox is a time-ordered list per uuid (it collapses to one entry in steady state); the seed wants
 // the newest by LOCAL author-time, the same entry the push loop sends.
 export function latestInflightContent(entries: InflightEntry[] | undefined): string | null {
-	if (!entries || entries.length === 0) {
-		return null
-	}
-
-	let latest: InflightEntry | null = null
-
-	for (const entry of entries) {
-		if (!latest || entry.timestamp > latest.timestamp) {
-			latest = entry
-		}
-	}
-
-	return latest ? latest.content : null
+	return newestEntry(entries ?? [])?.content ?? null
 }
 
 // THE seed-priority rule (mobile content/index.tsx editorSeed): an unsynced inflight edit wins over the

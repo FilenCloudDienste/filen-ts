@@ -5,6 +5,7 @@ import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { notesQueryUpsert, notesQueryRemove } from "@/features/notes/queries/notes"
 import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
+import { localNoteContent } from "@/features/notes/lib/localContent"
 import { isNoteOwner } from "@/features/notes/lib/sort"
 import { getDefaultNoteType, DEFAULT_NOTE_TYPE } from "@/features/notes/lib/preferences"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
@@ -59,17 +60,18 @@ export async function createNote(title?: string): Promise<ActionOutcome<Note>> {
 
 // ── Copy content ─────────────────────────────────────────────────────────
 
-// Cache-first-then-fetch, same rule duplicateNote already applies to the note it's copying FROM: an
+// Local-first-then-fetch (localNoteContent: unsynced outbox edit, then the content cache): an
 // already-open note's content is almost certainly warm, so this only round-trips to the SDK when it
-// genuinely isn't. A fetch failure propagates as a thrown ErrorDTO (runOp) — the caller's own try/catch
+// genuinely isn't — and what gets copied is what the user sees, not the last text that reached the
+// server. A fetch failure propagates as a thrown ErrorDTO (runOp) — the caller's own try/catch
 // (noteMenu.tsx's copyContent handler, same shape as its copyId sibling) surfaces it as an error toast
 // instead of silently copying an empty string. Content that exists but never decrypted throws the same
 // way, for the same reason.
 export async function resolveNoteContent(note: Note): Promise<string> {
-	const cached = queryClient.getQueryData<string | undefined>(noteContentQueryKey(note.uuid))
+	const local = localNoteContent(note.uuid)
 
-	if (cached !== undefined) {
-		return cached
+	if (local !== undefined) {
+		return local
 	}
 
 	const result = await runOp(readNoteContent(note))

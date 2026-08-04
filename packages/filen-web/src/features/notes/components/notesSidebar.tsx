@@ -55,6 +55,7 @@ import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
 import { useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { useNowMinute } from "@/lib/useNowMinute"
 import { useAction } from "@/lib/keymap/useAction"
 import { useResizableSidebar } from "@/features/shell/hooks/useResizableSidebar"
 import { useIsSidebarPanelVisible } from "@/features/shell/lib/sidebarPanelVisibility"
@@ -347,12 +348,17 @@ export function NotesSidebar() {
 	// note still navigates to /notes before the row disappears out of the cache.
 	const dialogHost = useNoteDialogHost({ currentUuid: selectedUuid })
 
+	// The notes view's date groups ("Today", "Previous 7 days", …) cut on rolling windows back from now,
+	// so the row model needs a clock — as state, never a `Date.now()` read in this render body (see
+	// useNowMinute).
+	const now = useNowMinute()
+
 	// One flattened row model for BOTH views, so a single virtualizer covers either (never a nested
 	// virtualizer per tag). Notes view: each note as a flat note row. Tags view: tag headers + expanded
 	// member notes interleaved.
 	const rows: NotesSidebarRow[] =
 		viewMode === "notes"
-			? buildNotesGroupedRows(allNotes, search, Date.now(), searchBodies)
+			? buildNotesGroupedRows(allNotes, search, now, searchBodies)
 			: buildTagsViewRows({
 					tags: allTags,
 					notesByTag: buildNotesByTag(allNotes),

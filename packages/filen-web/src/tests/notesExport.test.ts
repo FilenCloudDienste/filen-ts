@@ -33,6 +33,7 @@ vi.mock("jszip", () => ({
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
+import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
 import { exportNote, exportAllNotes } from "@/features/notes/lib/export"
 
 function testUuid(label: string): UuidStr {
@@ -74,6 +75,7 @@ beforeEach(() => {
 	vi.clearAllMocks()
 	zipEntries.length = 0
 	testQueryClient.clear()
+	useNotesInflightStore.setState({ inflightContent: {} })
 })
 
 describe("exportNote", () => {
@@ -99,6 +101,17 @@ describe("exportNote", () => {
 		getNoteContent.mockResolvedValueOnce("")
 
 		await expect(exportNote(mockNote())).resolves.toStrictEqual({ status: "success" })
+		expect(downloadBlob).toHaveBeenCalledTimes(1)
+	})
+
+	// Export stays enabled offline, so it must read what the editor shows — the queued edit — not the
+	// server's pre-edit content. A "backup" missing everything just typed is worse than no backup.
+	it("exports a queued outbox edit with a COLD content cache, never round-tripping to the SDK", async () => {
+		const note = mockNote()
+		useNotesInflightStore.setState({ inflightContent: { [note.uuid]: [{ timestamp: 1, note, content: "typed offline" }] } })
+
+		await expect(exportNote(note)).resolves.toStrictEqual({ status: "success" })
+		expect(getNoteContent).not.toHaveBeenCalled()
 		expect(downloadBlob).toHaveBeenCalledTimes(1)
 	})
 })
@@ -168,6 +181,17 @@ describe("exportAllNotes", () => {
 
 		expect(maxInFlight).toBe(1)
 		expect(getNoteContent.mock.calls.map(call => call[0])).toStrictEqual([first, second])
+	})
+
+	it("zips an unsynced outbox edit ahead of the older content the last push left in the cache", async () => {
+		const note = mockNote({ uuid: testUuid("a"), title: "draft" })
+		testQueryClient.setQueryData(noteContentQueryKey(note.uuid), "synced old")
+		useNotesInflightStore.setState({ inflightContent: { [note.uuid]: [{ timestamp: 1, note, content: "typed new" }] } })
+
+		await exportAllNotes([note])
+
+		expect(zipEntries).toStrictEqual([{ name: "draft.txt", content: "typed new" }])
+		expect(getNoteContent).not.toHaveBeenCalled()
 	})
 
 	it("reads a warm content cache instead of round-tripping to the SDK", async () => {

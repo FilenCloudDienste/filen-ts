@@ -11,6 +11,12 @@ import { purgeChatInflightState } from "@/features/chats/lib/inflight"
 import { applyTypingSignal, clearTypingForSender } from "@/features/chats/lib/typing"
 import { useChatTypingStore, type ChatTypingUser } from "@/features/chats/store/useChatTyping"
 import { isChatFocused, getFocusedChat, setFocusedChat } from "@/features/chats/lib/focusedChat"
+import {
+	parkOwnMessageEcho,
+	releaseOwnMessageEcho,
+	cancelOwnMessageEcho,
+	cancelOwnMessageEchoesForChat
+} from "@/features/chats/lib/parkedOwnMessages"
 
 // The realtime CHAT event handlers — a faithful port of filen-mobile's chats socketHandlers.ts semantics
 // onto the flat wasm surface, registered on the generic socket bridge (a pure consumer; the bridge itself
@@ -66,46 +72,6 @@ function bySentTimestampAsc(a: ChatMessage, b: ChatMessage): number {
 	return a.sentTimestamp === b.sentTimestamp ? 0 : a.sentTimestamp < b.sentTimestamp ? -1 : 1
 }
 
-// Own-message reconcile patches (see OWN_MESSAGE_RECONCILE_DELAY_MS) sit in a plain setTimeout for up to
-// 3s — long enough for a same-chat conversationDeleted to land first. Track the pending timer per chat so
-// the deletion handler can cancel it before it fires and recreates the message-cache slice being purged.
-const pendingOwnMessageTimeouts = new Map<string, Set<ReturnType<typeof setTimeout>>>()
-
-function trackOwnMessageTimeout(chatUuid: string, id: ReturnType<typeof setTimeout>): void {
-	const pending = pendingOwnMessageTimeouts.get(chatUuid) ?? new Set()
-
-	pending.add(id)
-	pendingOwnMessageTimeouts.set(chatUuid, pending)
-}
-
-function untrackOwnMessageTimeout(chatUuid: string, id: ReturnType<typeof setTimeout>): void {
-	const pending = pendingOwnMessageTimeouts.get(chatUuid)
-
-	if (pending === undefined) {
-		return
-	}
-
-	pending.delete(id)
-
-	if (pending.size === 0) {
-		pendingOwnMessageTimeouts.delete(chatUuid)
-	}
-}
-
-function clearPendingOwnMessageTimeouts(chatUuid: string): void {
-	const pending = pendingOwnMessageTimeouts.get(chatUuid)
-
-	if (pending === undefined) {
-		return
-	}
-
-	for (const id of pending) {
-		clearTimeout(id)
-	}
-
-	pendingOwnMessageTimeouts.delete(chatUuid)
-}
-
 // Resolve the chat that currently holds `messageUuid` in its message cache — MessageDelete /
 // MessageEmbedDisabled carry only the message uuid (no chat), so mobile searches every cached thread.
 function findChatUuidForMessage(messageUuid: string): string | undefined {
@@ -155,10 +121,16 @@ export function handleChatEvent(event: TypedChatSocketEvent): void {
 		}
 
 		case "messageDelete": {
+			// Send-then-delete inside the reconcile window: the message's own echo is still parked, so it
+			// is in no cache for the removal below to find and would re-appear when the park expires. The
+			// delete is authoritative — drop the parked patch.
+			const wasParked = cancelOwnMessageEcho(inner.uuid)
 			const chatUuid = findChatUuidForMessage(inner.uuid)
 
 			if (chatUuid === undefined) {
-				log.warn("socket", "chat messageDelete: message not in any cached thread", inner.uuid)
+				if (!wasParked) {
+					log.warn("socket", "chat messageDelete: message not in any cached thread", inner.uuid)
+				}
 
 				return
 			}
@@ -267,7 +239,7 @@ function handleMessageNew(msg: ChatMessage): void {
 	const timeoutId = setTimeout(
 		() => {
 			if (isOwn) {
-				untrackOwnMessageTimeout(msg.chat, timeoutId)
+				releaseOwnMessageEcho(msg.uuid)
 			}
 
 			// Dedup by SERVER uuid against the thread cache AND the reconciled outbox: if the message is
@@ -302,7 +274,7 @@ function handleMessageNew(msg: ChatMessage): void {
 	)
 
 	if (isOwn) {
-		trackOwnMessageTimeout(msg.chat, timeoutId)
+		parkOwnMessageEcho(msg.uuid, msg.chat, timeoutId)
 	}
 }
 
@@ -311,7 +283,7 @@ function handleMessageNew(msg: ChatMessage): void {
 export async function handleConversationDeleted(uuid: string): Promise<void> {
 	// Cancel first: an own-message reconcile patch still pending for this chat would otherwise fire after
 	// the purge below and recreate the message-cache slice it just emptied.
-	clearPendingOwnMessageTimeouts(uuid)
+	cancelOwnMessageEchoesForChat(uuid)
 
 	// Purge-first: drop the deleted chat's queued unsent messages, send errors and input draft
 	// BEFORE the cache removal so a concurrent send loop never resolves + retries into a gone chat. Best-

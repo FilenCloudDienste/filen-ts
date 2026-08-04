@@ -76,6 +76,21 @@ describe("refetchChatsAndMessages", () => {
 		expect(listMessagesBefore).not.toHaveBeenCalled()
 	})
 
+	// The reconnect resync pulls only the newest page per chat; an open thread with older pages scrolled
+	// in must not lose them to it.
+	it("merges each chat's newest page into its cache instead of replacing the paged-in history", async () => {
+		const a = mockChat("a")
+		const pagedIn: ChatMessage = { ...mockMessage("old", "a"), sentTimestamp: 1n }
+		const newest = mockMessage("new", "a")
+		testQueryClient.setQueryData(["chats", "messages", { chatUuid: a.uuid }], [pagedIn, newest])
+		listChats.mockResolvedValueOnce([a])
+		listMessagesBefore.mockResolvedValueOnce([newest])
+
+		await refetchChatsAndMessages()
+
+		expect(chatMessagesQueryGet(a.uuid)?.map(m => m.uuid)).toEqual([pagedIn.uuid, newest.uuid])
+	})
+
 	it("tolerates a per-chat message failure: the list and the other chats still land", async () => {
 		const a = mockChat("a")
 		const b = mockChat("b")

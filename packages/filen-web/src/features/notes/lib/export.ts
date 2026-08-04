@@ -1,11 +1,11 @@
 import JSZip from "jszip"
 import type { Note } from "@filen/sdk-rs"
-import { queryClient } from "@/queries/client"
 import { i18n } from "@/lib/i18n"
 import { downloadBlob } from "@/lib/downloadBlob"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
-import { noteContentQueryKey, readNoteContent, type NoteContentResult } from "@/features/notes/queries/noteContent"
+import { readNoteContent, type NoteContentResult } from "@/features/notes/queries/noteContent"
+import { localNoteContent } from "@/features/notes/lib/localContent"
 import { isNoteUndecryptable } from "@/features/notes/lib/sort"
 import { exportFilename, exportContent, exportMimeType, dedupeExportNames } from "@/features/notes/lib/export.logic"
 
@@ -13,14 +13,16 @@ import { exportFilename, exportContent, exportMimeType, dedupeExportNames } from
 // a real browser download. Never calls toast itself — same convention as lib/actions.ts, the caller
 // (noteMenu.tsx / notesSidebar.tsx) resolves the outcome and surfaces `errorLabel(dto)`.
 
-// Cache-first content read, same rationale as duplicateNote (lib/actions.ts): a note already open in
-// the editor has its content warm, so exporting it costs no extra round trip. Content that exists but
-// never decrypted is reported as such, never coalesced to "" — an empty file is not a backup.
+// Local-first content read (localNoteContent: unsynced outbox edit, then the content cache): a note
+// already open in the editor has its content warm, so exporting it costs no extra round trip — and an
+// export must be what the user SEES, which offline (or inside the outbox debounce) is the queued edit,
+// not the last thing that reached the server. Content that exists but never decrypted is reported as
+// such, never coalesced to "" — an empty file is not a backup.
 async function resolveContent(note: Note): Promise<NoteContentResult> {
-	const cached = queryClient.getQueryData<string | undefined>(noteContentQueryKey(note.uuid))
+	const local = localNoteContent(note.uuid)
 
-	if (cached !== undefined) {
-		return { status: "ok", content: cached }
+	if (local !== undefined) {
+		return { status: "ok", content: local }
 	}
 
 	return runOp(readNoteContent(note))

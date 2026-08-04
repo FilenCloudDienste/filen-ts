@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 import type { UserEventResult } from "@filen/sdk-rs"
-import { computeNextEventsPage, shouldSkipEventsScroll, fetchEventsPageSafely } from "@/features/settings/lib/eventsPagination"
+import {
+	computeNextEventsPage,
+	shouldSkipEventsScroll,
+	fetchEventsPageSafely,
+	selectEventsView
+} from "@/features/settings/lib/eventsPagination"
 
 function ok(id: bigint): UserEventResult {
 	return {
@@ -85,5 +90,37 @@ describe("fetchEventsPageSafely", () => {
 
 		expect(result.status).toBe("error")
 		expect(result.status === "error" && result.dto.message).toBe("network down")
+	})
+})
+
+describe("selectEventsView", () => {
+	it("sorts Ok events newest first", () => {
+		expect(selectEventsView([ok(2n), ok(5n), ok(1n)]).ok.map(e => e.id)).toEqual([5n, 2n, 1n])
+	})
+
+	it("drops Err entries from the list and counts them instead", () => {
+		const view = selectEventsView([err(), ok(3n), err(), ok(9n)])
+
+		expect(view.ok.map(e => e.id)).toEqual([9n, 3n])
+		expect(view.errCount).toBe(2)
+	})
+
+	it("keeps equal timestamps in their existing relative order", () => {
+		const first = ok(1n)
+		const second = { ...ok(2n), timestamp: 1n }
+
+		expect(selectEventsView([first, second]).ok).toEqual([first, second])
+	})
+
+	it("never mutates the raw cache array it derives from", () => {
+		const data = [ok(1n), ok(7n)]
+
+		selectEventsView(data)
+
+		expect(data.map(e => (e.type === "ok" ? e.id : null))).toEqual([1n, 7n])
+	})
+
+	it("returns an empty view for an empty cache", () => {
+		expect(selectEventsView([])).toEqual({ ok: [], errCount: 0 })
 	})
 })

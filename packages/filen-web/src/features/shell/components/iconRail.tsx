@@ -20,7 +20,8 @@ import {
 import { formatBytes } from "@filen/utils"
 import { cn } from "@/lib/utils"
 import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/contactsList.logic"
-import { performLogout } from "@/features/shell/lib/performLogout"
+import { flushOutboxes, performLogout } from "@/features/shell/lib/performLogout"
+import { useHasUnsyncedWork } from "@/features/shell/hooks/useUnsyncedWork"
 import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
 import { useContactRequestsQuery } from "@/features/contacts/queries/contacts"
 import { useAccountQuery } from "@/queries/account"
@@ -93,6 +94,7 @@ function AccountMenu() {
 	const navigate = useNavigate()
 	const { setTheme } = useTheme()
 	const accountQuery = useAccountQuery()
+	const hasUnsyncedWork = useHasUnsyncedWork()
 	const [confirmOpen, setConfirmOpen] = useState(false)
 	const [shortcutsOpen, setShortcutsOpen] = useState(false)
 	const [pending, setPending] = useState(false)
@@ -195,6 +197,9 @@ function AccountMenu() {
 					<DropdownMenuItem
 						variant="destructive"
 						onClick={() => {
+							// Anything still queued has until the confirm is answered to reach the server;
+							// past that the wipe destroys it.
+							flushOutboxes()
 							setConfirmOpen(true)
 						}}
 					>
@@ -207,7 +212,7 @@ function AccountMenu() {
 				open={confirmOpen}
 				pending={pending}
 				title={t("auth:logoutConfirmTitle")}
-				body={t("auth:logoutConfirmBody")}
+				body={hasUnsyncedWork ? t("auth:logoutConfirmBodyUnsynced") : t("auth:logoutConfirmBody")}
 				confirmLabel={t("signOut")}
 				cancelLabel={t("cancel")}
 				destructive

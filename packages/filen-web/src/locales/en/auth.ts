@@ -211,6 +211,9 @@ export const auth = {
 	/** Logout confirm dialog — body warning that locally cached data is wiped, distinct from the account data itself which stays intact */
 	logoutConfirmBody:
 		"Signing out clears any files, notes and chats cached on this device. Your account and its contents stay safe on Filen's servers and sync back the next time you sign in.",
+	/** Logout confirm dialog — body used instead of logoutConfirmBody while a note edit or chat message is still queued on this device, because signing out destroys that queue */
+	logoutConfirmBodyUnsynced:
+		"Some note edits or messages have not reached Filen's servers yet. Signing out deletes them permanently, along with everything cached on this device. Anything already synced stays safe and comes back the next time you sign in.",
 	/** Toast shown when a password change on another device forced a sign-out and the user postponed it at the unsaved-changes prompt */
 	logoutForcedPending:
 		"Your password was changed on another device, so this device is signing out. Copy anything you still need from the unsaved preview — the sign-out finishes as soon as you close it.",

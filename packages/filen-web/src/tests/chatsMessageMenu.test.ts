@@ -26,6 +26,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { CHATS_QUERY_KEY, chatsQueryGet } from "@/features/chats/queries/chats"
 import { chatMessagesQueryKey, chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import { deleteMessage, editMessage, disableMessageEmbed } from "@/features/chats/lib/messageActions"
+import { parkOwnMessageEcho } from "@/features/chats/lib/parkedOwnMessages"
 import { applyMessageOfflineGate, messageMenuActions } from "@/features/chats/components/thread/messageMenu.logic"
 
 function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
@@ -268,6 +269,33 @@ describe("deleteMessage", () => {
 		expect(outcome).toEqual({ status: "success" })
 		expect(chatMessagesQueryGet(chat.uuid)).toEqual([])
 		expect(chatsQueryGet()).toEqual([updatedChat])
+	})
+
+	// A message deleted seconds after sending may still have its own socket echo parked; that patch is in
+	// no cache, so removing the message cannot reach it and it would re-append the deletion afterwards.
+	it("cancels a still-parked own-message echo for the deleted uuid", async () => {
+		vi.useFakeTimers()
+
+		try {
+			const chat = mockChat()
+			const message = mockMessage()
+			const echo = vi.fn()
+			parkOwnMessageEcho(
+				message.uuid,
+				chat.uuid,
+				setTimeout(() => {
+					echo()
+				}, 3_000)
+			)
+			deleteMessageOp.mockResolvedValueOnce(chat)
+
+			await deleteMessage(chat, message)
+			vi.advanceTimersByTime(5_000)
+
+			expect(echo).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("returns an error outcome on rejection, without touching either cache", async () => {

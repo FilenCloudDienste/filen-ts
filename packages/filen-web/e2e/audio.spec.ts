@@ -103,7 +103,10 @@ test("drive audio double-click hands off to the persistent player and transport 
 		await expect(bar.locator(`[title="${nameA}"]`)).toBeVisible({ timeout: 30_000 })
 
 		// Scrubber seek: pause for a stable readout, then nudge the slider forward one step and confirm the
-		// position jumps to the seeked point.
+		// position jumps to the seeked point. A track switch clears the duration until the new track's
+		// metadata lands, and the scrubber is inert (disabled, and `press` does not wait on that) until it
+		// does — so wait for a scrubbable slider first, exactly as after the initial load above.
+		await expect(seek).toBeEnabled({ timeout: 30_000 })
 		await pauseButton.click()
 		await expect(bar.getByRole("button", { name: "Play" })).toBeVisible()
 

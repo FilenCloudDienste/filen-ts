@@ -164,7 +164,13 @@ export type ScrollAffordanceEvent = { kind: "scroll"; atBottom: boolean } | { ki
 
 export function nextScrollAffordanceState(prev: ScrollAffordanceState, event: ScrollAffordanceEvent): ScrollAffordanceState {
 	if (event.kind === "scroll") {
-		return event.atBottom ? INITIAL_SCROLL_AFFORDANCE : { atBottom: false, unseenCount: prev.unseenCount }
+		if (event.atBottom) {
+			return INITIAL_SCROLL_AFFORDANCE
+		}
+
+		// Same reference for a value-identical state, so React's setState bailout can absorb it: this runs
+		// from a raw onScroll handler, i.e. on every native scroll event while the user is scrolled up.
+		return prev.atBottom ? { atBottom: false, unseenCount: prev.unseenCount } : prev
 	}
 
 	if (prev.atBottom || event.count <= 0) {

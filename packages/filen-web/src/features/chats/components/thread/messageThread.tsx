@@ -300,7 +300,8 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	}
 
 	// Recomputes bottom-proximity on every scroll (clears the pill's count the instant the user — or the
-	// pill's own click — reaches bottom; the reducer no-ops a redundant "still at bottom" event).
+	// pill's own click — reaches bottom; the reducer returns `prev` unchanged for a redundant event, so a
+	// scroll that changes nothing costs no render).
 	function trackScrollAffordance(): void {
 		const el = scrollRef.current
 

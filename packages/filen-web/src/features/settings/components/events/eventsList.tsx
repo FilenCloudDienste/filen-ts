@@ -5,7 +5,7 @@ import { HistoryIcon } from "lucide-react"
 import { toast } from "sonner"
 import type { UserEvent } from "@filen/sdk-rs"
 import { useEventsQuery, loadOlderEvents } from "@/features/settings/queries/events"
-import { shouldSkipEventsScroll, fetchEventsPageSafely } from "@/features/settings/lib/eventsPagination"
+import { shouldSkipEventsScroll, fetchEventsPageSafely, type OkEventResult } from "@/features/settings/lib/eventsPagination"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { log } from "@/lib/log"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -22,20 +22,8 @@ const OVERSCAN = 10
 // renders newest-first, so "load more" means "approach the bottom", mirroring the notes/chats
 // sidebars' own near-edge thresholds.
 const BOTTOM_THRESHOLD = 200
-
-// Sorted desc by timestamp (newest first, matching mobile's own Events screen) and Err (undecryptable)
-// entries dropped — they carry no stable id to key/dedupe by, same rule loadOlderEvents/
-// eventsPagination.ts applies to every later page.
-function sortedOkEvents(data: ReturnType<typeof useEventsQuery>["data"]): UserEvent[] {
-	if (!data) {
-		return []
-	}
-
-	return data
-		.filter(e => e.type === "ok")
-		.slice()
-		.sort((a, b) => (a.timestamp === b.timestamp ? 0 : a.timestamp > b.timestamp ? -1 : 1))
-}
+// One identity for the not-yet-loaded case, so a pending render can't churn the virtualizer's inputs.
+const EMPTY_EVENTS: OkEventResult[] = []
 
 export function EventsList() {
 	const { t } = useTranslation(["settings", "common"])
@@ -47,9 +35,8 @@ export function EventsList() {
 	const [loadingMore, setLoadingMore] = useState(false)
 	const inflightRef = useRef(false)
 
-	const events = sortedOkEvents(eventsQuery.data)
-	const firstPageErrCount =
-		eventsQuery.status === "success" && events.length === 0 ? eventsQuery.data.filter(e => e.type === "err").length : 0
+	const events = eventsQuery.data?.ok ?? EMPTY_EVENTS
+	const firstPageErrCount = eventsQuery.status === "success" && events.length === 0 ? eventsQuery.data.errCount : 0
 
 	const virtualizer = useVirtualizer({
 		count: events.length,

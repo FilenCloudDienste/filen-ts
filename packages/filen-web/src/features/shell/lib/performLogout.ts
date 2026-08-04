@@ -30,6 +30,15 @@ function awaitPreviewBufferReleased(): Promise<void> {
 	})
 }
 
+// Kick both outboxes now rather than waiting on the notes debounce / the chats retry cadence — the
+// sign-out confirm calls this as it opens, so anything still queued gets the dialog's dwell to reach the
+// server before the teardown below destroys it. Must never run after cancel(): a post-abort pass is the
+// straggler flush the wipe order exists to prevent.
+export function flushOutboxes(): void {
+	notesSync.executeNow()
+	chatsSync.executeNow()
+}
+
 export interface PerformLogoutOptions {
 	// The server has already revoked this session (a password change on another device). The
 	// unsaved-preview prompt may then only DELAY the wipe — one chance to copy the text out — never veto
@@ -62,6 +71,8 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 
 	// Notes + chats sync cancel BEFORE the wipe: abort each outbox loop and suppress any further disk
 	// write so a late flush can never resurrect this account's plaintext queue after kv-clear lands.
+	// Whatever is still queued dies here, so the confirm that leads to this warns about it
+	// (useUnsyncedWork) instead of promising it syncs back on the next sign-in.
 	notesSync.cancel()
 	chatsSync.cancel()
 	// Stop every typing watchdog + wipe the typing store so no timer fires into the cleared session.

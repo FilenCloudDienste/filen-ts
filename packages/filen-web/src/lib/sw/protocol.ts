@@ -2,7 +2,7 @@
 // `/__sw/version` (bump on any change to sw.ts's runtime behavior, never on app/feature versioning)
 // and the message types + route prefixes it understands. Imported by both sw.ts and register.ts;
 // that import is the only edge between them.
-export const SW_PROTOCOL_VERSION = 6
+export const SW_PROTOCOL_VERSION = 7
 
 // Shared so the page side (register.ts's applyUpdate) can't drift from sw.ts's message listener with
 // a typo'd literal.
@@ -29,9 +29,12 @@ export const SW_MSG_REGISTER_ZIP_DOWNLOAD = "FILEN_SW_REGISTER_ZIP_DOWNLOAD"
 // it independently at serve time (isAllowedInlineContentType below) rather than trusting the message,
 // so a compromised/buggy sender can never force an arbitrary inline Content-Type through.
 export const SW_MSG_REGISTER_PREVIEW = "FILEN_SW_REGISTER_PREVIEW"
-// page ↔ SW keepalive heartbeat — Firefox kills an idle SW at ~30 s mid-stream, so the page pings
-// every ~10-15 s for the duration of any active download and the SW pongs.
-export const SW_MSG_PING = "FILEN_SW_PING"
+// Ack error a registration answers with when the worker holds no session Client. An idle worker is
+// terminated and restarts with empty module globals, so the handed-over Client is gone while the page's
+// handoff memo still believes otherwise — the page heals on this by re-handing the session over and
+// retrying once (features/drive/lib/saveDownload.ts's registerWithSw). Anything the SW registered before
+// that restart is gone too, which is why the acks must never blindly report ok.
+export const SW_ERROR_NO_CLIENT = "no-client"
 // page → SW logout signal: nulls the reconstructed Client and clears the pending-downloads map so no
 // decrypted key material survives sign-out inside the worker. Sent (and acked) from runLogout before
 // the page reload.

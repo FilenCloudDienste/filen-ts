@@ -1,19 +1,16 @@
 import type { AnyFile } from "@filen/sdk-rs"
-import { activeServiceWorker, ensureSwClientReady, sendToSw } from "@/features/drive/lib/saveDownload"
+import { registerWithSw } from "@/features/drive/lib/saveDownload"
 import { SW_DOWNLOAD_PREFIX, SW_MSG_REGISTER_PREVIEW } from "@/lib/sw/protocol"
 
 // Registers `file` against the SW's inline-preview route (no attachment disposition, an allowlisted
 // Content-Type, Range/206-capable) and returns its fetchable, same-origin URL — the src a
-// <video>/<audio>/<img> element streams+seeks against directly. Mirrors saveDownload.ts's own
-// triggerSwDownload registration step, minus the FSA branch and the plain-navigation trigger: an
-// inline media element just needs a stable URL, it never "saves" anything.
+// <video>/<audio>/<img> element streams+seeks against directly. Rides saveDownload.ts's shared
+// registration seam (session handoff + restart healing), minus the FSA branch and the plain-navigation
+// trigger: an inline media element just needs a stable URL, it never "saves" anything.
 export async function previewStreamUrl(file: AnyFile, name: string, contentType: string): Promise<string> {
-	await ensureSwClientReady()
-
-	const target = await activeServiceWorker()
 	const id = crypto.randomUUID()
 
-	await sendToSw(target, SW_MSG_REGISTER_PREVIEW, { id, file, name, size: Number(file.size), contentType })
+	await registerWithSw(SW_MSG_REGISTER_PREVIEW, { id, file, name, size: Number(file.size), contentType })
 
 	return `${SW_DOWNLOAD_PREFIX}${id}`
 }

@@ -53,6 +53,7 @@ import {
 	fetchChatMessages,
 	fetchMessagesForChat,
 	loadOlderChatMessages,
+	mergeNewestPage,
 	useChatMessages
 } from "@/features/chats/queries/chatMessages"
 
@@ -260,6 +261,66 @@ describe("fetchChatMessages", () => {
 
 	it("returns [] for an uncached miss on a chat not in the list", async () => {
 		await expect(fetchChatMessages("missing")).resolves.toEqual([])
+	})
+
+	// A refetch (window focus, remount, reconnect) returns only the newest page; the paged-in history
+	// above it must survive or the thread the user scrolled through vanishes under them.
+	it("keeps older pages already merged into the cache when a refetch returns only the newest page", async () => {
+		const chat = mockChat({ uuid: testUuid("a") })
+		testQueryClient.setQueryData(CHATS_QUERY_KEY, [chat])
+
+		const pagedIn = mockMessage({ uuid: testUuid("old"), sentTimestamp: 1n })
+		const newest = mockMessage({ uuid: testUuid("new"), sentTimestamp: 9n })
+		testQueryClient.setQueryData(chatMessagesQueryKey(chat.uuid), [pagedIn, newest])
+		listMessagesBefore.mockResolvedValueOnce([newest])
+
+		const result = await fetchChatMessages(chat.uuid)
+
+		expect(result.map(m => m.uuid)).toEqual([pagedIn.uuid, newest.uuid])
+	})
+})
+
+describe("mergeNewestPage", () => {
+	it("prepends the cached history that sits above the page's window", () => {
+		const older = mockMessage({ uuid: testUuid("older"), sentTimestamp: 1n })
+		const inWindow = mockMessage({ uuid: testUuid("in"), sentTimestamp: 5n })
+
+		expect(mergeNewestPage([older, inWindow], [inWindow]).map(m => m.uuid)).toEqual([older.uuid, inWindow.uuid])
+	})
+
+	it("drops a cached message inside the page's window that the page no longer carries (a server-side delete)", () => {
+		const deleted = mockMessage({ uuid: testUuid("deleted"), sentTimestamp: 6n })
+		const kept = mockMessage({ uuid: testUuid("kept"), sentTimestamp: 5n })
+		const newest = mockMessage({ uuid: testUuid("newest"), sentTimestamp: 7n })
+
+		expect(mergeNewestPage([kept, deleted, newest], [kept, newest]).map(m => m.uuid)).toEqual([kept.uuid, newest.uuid])
+	})
+
+	it("takes the page's version of a message inside the window (a server-side edit)", () => {
+		const stale = mockMessage({ uuid: testUuid("a"), sentTimestamp: 5n, message: "before" })
+		const edited = { ...stale, message: "after", edited: true }
+
+		expect(mergeNewestPage([stale], [edited])).toEqual([edited])
+	})
+
+	it("keeps a message newer than the page's newest (a socket delivery that raced the fetch)", () => {
+		const inPage = mockMessage({ uuid: testUuid("in"), sentTimestamp: 5n })
+		const raced = mockMessage({ uuid: testUuid("raced"), sentTimestamp: 6n })
+
+		expect(mergeNewestPage([inPage, raced], [inPage]).map(m => m.uuid)).toEqual([inPage.uuid, raced.uuid])
+	})
+
+	it("empties the slice when the page is empty (every message is gone server-side)", () => {
+		expect(mergeNewestPage([mockMessage()], [])).toEqual([])
+	})
+
+	it("never mutates the cached array in place", () => {
+		const cached = [mockMessage({ uuid: testUuid("a"), sentTimestamp: 1n })]
+		const snapshot = [...cached]
+
+		mergeNewestPage(cached, [mockMessage({ uuid: testUuid("b"), sentTimestamp: 9n })])
+
+		expect(cached).toEqual(snapshot)
 	})
 })
 
