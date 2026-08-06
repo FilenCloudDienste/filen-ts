@@ -176,6 +176,11 @@ export const ListRow = (props: ListRowProps) => {
 						className="flex-row items-center gap-3 bg-transparent flex-1"
 						onPress={props.onPress}
 						onLongPress={props.onLongPress}
+						// No row here is pressable end to end — none opens a context menu, and most carry a
+						// trailing dropdown outside the press target — so Android's ripple, masked to that
+						// target, drew a chip floating inside the row rather than feedback for it. The scale
+						// is the feedback instead, as on the app's other controls.
+						rippleColor="transparent"
 					>
 						{content}
 					</PressableScale>

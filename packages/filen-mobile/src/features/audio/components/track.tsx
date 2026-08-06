@@ -240,6 +240,10 @@ export function Track({ track, playlist, reorderDisabled }: { track: TrackType; 
 		<View className={cn("bg-transparent flex-row items-center px-4", isSelected && "bg-background-tertiary")}>
 			<PressableScale
 				className="bg-transparent flex-row items-center gap-3 flex-1"
+				// Same shape as ListRow: the trailing "⋯" sits outside the press target and long-press is the
+				// drag handle, not a context menu — so Android's ripple, masked to that target, drew a chip
+				// stopping 72dp short of the row's edge. The scale is the feedback instead.
+				rippleColor="transparent"
 				onLongPress={areTracksSelected || reorderDisabled ? undefined : drag}
 				onPress={() => {
 					if (areTracksSelected) {
