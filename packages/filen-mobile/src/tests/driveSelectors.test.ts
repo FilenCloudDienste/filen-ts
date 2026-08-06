@@ -27,7 +27,8 @@ import {
 	resolveDriveNavigationTarget,
 	resolveDriveContainingDirectoryTarget,
 	hiddenFilterAppliesTo,
-	keepAgainstIncomingDriveItem
+	keepAgainstIncomingDriveItem,
+	driveItemHasLeadingCheckbox
 } from "@/features/drive/driveSelectors"
 import type { DriveItem } from "@/types"
 import type { DrivePath, DrivePathType, SelectOptions } from "@/hooks/useDrivePath"
@@ -944,5 +945,35 @@ describe("hiddenFilterAppliesTo", () => {
 
 	it("does not apply to an unresolved path", () => {
 		expect(hiddenFilterAppliesTo(drivePath(null))).toBe(false)
+	})
+})
+
+describe("driveItemHasLeadingCheckbox", () => {
+	// This mirrors the row's two checkbox render conditions. Drift means the row's leading gutter is
+	// either claimed twice (content jumps 16dp right in selection mode) or by nobody (the checkbox sits
+	// flush against the screen edge) — see the selector's own note.
+
+	it("reports the bulk-selection checkbox while browsing with a selection open", () => {
+		expect(driveItemHasLeadingCheckbox({ drivePath: drivePath("drive"), areDriveItemsSelected: true })).toBe(true)
+	})
+
+	it("reports no checkbox while browsing with nothing selected", () => {
+		expect(driveItemHasLeadingCheckbox({ drivePath: drivePath("drive"), areDriveItemsSelected: false })).toBe(false)
+	})
+
+	it("reports the picker's own checkbox in select mode, whatever the bulk selection says", () => {
+		const path = drivePath("drive", { selectOptions: selectOptions({ intention: "select" }) })
+
+		expect(driveItemHasLeadingCheckbox({ drivePath: path, areDriveItemsSelected: false })).toBe(true)
+		expect(driveItemHasLeadingCheckbox({ drivePath: path, areDriveItemsSelected: true })).toBe(true)
+	})
+
+	it("reports no checkbox in a move/copy picker, where rows are destinations rather than choices", () => {
+		// The row renders neither checkbox here: the bulk one is gated on there being no selectOptions,
+		// and the picker's own on the intention being "select".
+		const path = drivePath("drive", { selectOptions: selectOptions({ intention: "move" }) })
+
+		expect(driveItemHasLeadingCheckbox({ drivePath: path, areDriveItemsSelected: false })).toBe(false)
+		expect(driveItemHasLeadingCheckbox({ drivePath: path, areDriveItemsSelected: true })).toBe(false)
 	})
 })

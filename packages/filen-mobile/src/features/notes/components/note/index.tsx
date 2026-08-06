@@ -159,6 +159,10 @@ const NoteRow = ({
 					style={{
 						borderCurve: "continuous"
 					}}
+					// The card below is opaque, so Android's background-layer ripple would be hidden behind it
+					// (see pressables.tsx). The pressable already spans exactly the card — the row's gutter
+					// sits on the Menu above — so only the z-order is wrong here, not the bounds.
+					foreground={true}
 				>
 					<View
 						className={cn(

@@ -492,3 +492,23 @@ export function hiddenFilterAppliesTo(drivePath: DrivePath): boolean {
 
 	return HIDDEN_FILTER_BY_DRIVE_PATH_TYPE[drivePath.type]
 }
+
+/**
+ * Whether the list row renders a checkbox column ahead of its pressable — the picker's own checkbox
+ * in select mode, otherwise the bulk-selection one.
+ *
+ * Load-bearing for the row's gutter: on Android the pressable carries that gutter itself so its press
+ * ripple can reach the row edges, and it must not also claim the left one when a checkbox already
+ * owns it. Both checkboxes are siblings rather than children of the pressable (nesting them inside a
+ * gesture-handler button lets the parent swallow their touch), so this has to mirror their render
+ * conditions exactly.
+ */
+export function driveItemHasLeadingCheckbox({
+	drivePath,
+	areDriveItemsSelected
+}: {
+	drivePath: DrivePath
+	areDriveItemsSelected: boolean
+}): boolean {
+	return drivePath.selectOptions ? drivePath.selectOptions.intention === "select" : areDriveItemsSelected
+}

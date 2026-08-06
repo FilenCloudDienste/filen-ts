@@ -76,6 +76,9 @@ export default function GridItem({
 				<PressableScale
 					className="bg-transparent items-center w-full rounded-3xl"
 					onPress={onPress}
+					// The card below is opaque, so Android's background-layer ripple would be hidden behind
+					// it — only leaking through the corner cut-outs and the label strip (see pressables.tsx).
+					foreground={true}
 				>
 					{/*
 					 * Square card — fills with the thumbnail image/video (contentFit="cover") for

@@ -20,6 +20,7 @@ import { FavoritedIndicator, OfflineIndicator } from "@/features/drive/component
 import useDriveItemInteraction from "@/features/drive/hooks/useDriveItemInteraction"
 import useDriveItemIndicators from "@/features/drive/hooks/useDriveItemIndicators"
 import { driveItemDisplayName } from "@/lib/decryption"
+import { driveItemHasLeadingCheckbox } from "@/features/drive/driveSelectors"
 import { useTranslation } from "react-i18next"
 
 const Item = ({
@@ -55,6 +56,7 @@ const Item = ({
 		item: info.item,
 		drivePath
 	})
+	const hasLeadingCheckbox = driveItemHasLeadingCheckbox({ drivePath, areDriveItemsSelected })
 
 	return (
 		<View
@@ -85,12 +87,16 @@ const Item = ({
 			>
 				<View
 					className={cn(
-						"w-full h-auto flex-row px-4 bg-transparent items-center gap-4",
+						"w-full h-auto flex-row bg-transparent items-center gap-4",
+						// The row's gutter moves onto the children on Android so the pressable reaches the row
+						// edges — its ripple is masked to its own box, and long-press covers the whole row
+						// (see pressables.tsx). iOS has no ripple, so it keeps the gutter here.
+						Platform.OS !== "android" && "px-4",
 						areDriveItemsSelected || (drivePath.selectOptions && drivePath.selectOptions.intention === "select" && "pr-14")
 					)}
 				>
 					{areDriveItemsSelected && !drivePath.selectOptions && (
-						<View className="flex-row h-full items-center justify-center bg-transparent shrink-0">
+						<View className={cn("flex-row h-full items-center justify-center bg-transparent shrink-0", Platform.OS === "android" && "pl-4")}>
 							<Checkbox
 								value={isSelected}
 								onValueChange={onPress}
@@ -99,7 +105,7 @@ const Item = ({
 						</View>
 					)}
 					{drivePath.selectOptions && drivePath.selectOptions.intention === "select" && (
-						<View className="flex-row h-full items-center justify-center bg-transparent shrink-0">
+						<View className={cn("flex-row h-full items-center justify-center bg-transparent shrink-0", Platform.OS === "android" && "pl-4")}>
 							<Checkbox
 								value={disabled ? false : isSelectedFromDriveSelect}
 								onValueChange={disabled ? undefined : onPressSelectForDriveSelect}
@@ -109,7 +115,10 @@ const Item = ({
 						</View>
 					)}
 					<PressableScale
-						className="w-full h-auto flex-row gap-4 bg-transparent"
+						className={cn(
+							"w-full h-auto flex-row gap-4 bg-transparent",
+							Platform.OS === "android" && (hasLeadingCheckbox ? "pr-4" : "px-4")
+						)}
 						onPress={onPress}
 					>
 						<View className="bg-transparent shrink-0 items-center flex-row">

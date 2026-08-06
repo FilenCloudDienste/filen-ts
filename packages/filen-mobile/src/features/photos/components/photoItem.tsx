@@ -129,6 +129,9 @@ export const Photo = ({
 						className={cn("items-center justify-center flex-1 overflow-hidden", isSelected && "opacity-60")}
 						onPress={onPress}
 						style={viewStyle}
+						// The thumbnail fills the cell, so Android's background-layer ripple would never be
+						// seen behind it (see pressables.tsx).
+						foreground={true}
 					>
 						{previewType === "video" && <VideoIndicator />}
 						{info.item.type === "file" && info.item.data.favorited && <FavoritedIndicator />}
