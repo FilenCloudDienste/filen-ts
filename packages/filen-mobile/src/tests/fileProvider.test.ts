@@ -65,14 +65,31 @@ vi.mock("@/features/settings/authFileKey", () => ({
 	openAuthFile: (sealed: Uint8Array) => new TextDecoder().decode(sealed)
 }))
 
-import fileProvider, { AUTH_FILE, FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/features/settings/fileProvider"
+// The domain module calls requireOptionalNativeModule() at import, which is unloadable in the node
+// test env. Mocked per-file (the same way authFileKey.test.ts mocks @/modules/filen-auth-key) —
+// fileProvider.test.ts is the only suite that loads the real fileProvider module.
+vi.mock("@/modules/file-provider-domain", () => ({
+	registerDomain: vi.fn(async () => {}),
+	unregisterDomain: vi.fn(async () => {})
+}))
+
+import fileProvider, {
+	AUTH_FILE,
+	FILE_PROVIDER_ENABLED_SECURE_STORE_KEY,
+	FILE_PROVIDER_DOMAIN_IDENTIFIER,
+	FILE_PROVIDER_DOMAIN_DISPLAY_NAME
+} from "@/features/settings/fileProvider"
 import { fs } from "@/tests/mocks/expoFileSystem"
 import auth from "@/lib/auth"
+import { Platform } from "@/tests/mocks/reactNative"
+import { registerDomain, unregisterDomain } from "@/modules/file-provider-domain"
 
 beforeEach(() => {
 	fs.clear()
 	mockSecureStoreData.clear()
 	vi.clearAllMocks()
+
+	Platform.OS = "ios"
 })
 
 describe("fileProvider", () => {
@@ -376,6 +393,70 @@ describe("fileProvider", () => {
 
 			// auth.json must NOT be recreated by the failed call
 			expect(AUTH_FILE.exists).toBe(false)
+		})
+	})
+
+	describe("domain registration", () => {
+		it("enable() registers the domain, and only after auth.json exists", async () => {
+			// Ordering matters: the extension is instantiated by the registration, so the credentials
+			// must already be on disk when it comes up.
+			let authFileExistedAtRegistration: boolean | undefined
+
+			vi.mocked(registerDomain).mockImplementationOnce(async () => {
+				authFileExistedAtRegistration = AUTH_FILE.exists
+			})
+
+			await fileProvider.enable()
+
+			expect(registerDomain).toHaveBeenCalledWith(FILE_PROVIDER_DOMAIN_IDENTIFIER, FILE_PROVIDER_DOMAIN_DISPLAY_NAME)
+			expect(authFileExistedAtRegistration).toBe(true)
+		})
+
+		it("disable() unregisters the domain, and before auth.json is deleted", async () => {
+			await fileProvider.enable()
+
+			let authFileExistedAtUnregistration: boolean | undefined
+
+			vi.mocked(unregisterDomain).mockImplementationOnce(async () => {
+				authFileExistedAtUnregistration = AUTH_FILE.exists
+			})
+
+			await fileProvider.disable()
+
+			expect(unregisterDomain).toHaveBeenCalledWith(FILE_PROVIDER_DOMAIN_IDENTIFIER)
+			expect(authFileExistedAtUnregistration).toBe(true)
+			expect(AUTH_FILE.exists).toBe(false)
+		})
+
+		it("a failed registration does not fail enable()", async () => {
+			vi.mocked(registerDomain).mockRejectedValueOnce(new Error("NSFileProviderErrorDomain -2011"))
+
+			await expect(fileProvider.enable()).resolves.toBeUndefined()
+
+			// The provider degrades to "not registered": auth.json and the UI flag still land.
+			expect(AUTH_FILE.exists).toBe(true)
+			expect(mockSecureStoreData.get(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY)).toBe(true)
+		})
+
+		it("a failed unregistration still clears the credentials", async () => {
+			await fileProvider.enable()
+
+			vi.mocked(unregisterDomain).mockRejectedValueOnce(new Error("domain stuck"))
+
+			await expect(fileProvider.disable()).resolves.toBeUndefined()
+
+			expect(AUTH_FILE.exists).toBe(false)
+			expect(mockSecureStoreData.get(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY)).toBe(false)
+		})
+
+		it("does not touch domains on Android", async () => {
+			Platform.OS = "android"
+
+			await fileProvider.enable()
+			await fileProvider.disable()
+
+			expect(registerDomain).not.toHaveBeenCalled()
+			expect(unregisterDomain).not.toHaveBeenCalled()
 		})
 	})
 })

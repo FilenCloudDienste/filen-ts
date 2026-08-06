@@ -6,6 +6,7 @@ import auth from "@/lib/auth"
 import secureStore from "@/lib/secureStore"
 import logger from "@/lib/logger"
 import { getOrCreateAuthDek, purgeAuthDek, sealAuthFile, openAuthFile } from "@/features/settings/authFileKey"
+import { registerDomain, unregisterDomain } from "@/modules/file-provider-domain"
 
 // Safety floor for cache budgets. Below this the extension would thrash —
 // thumbnails alone need ~32 MiB to be useful.
@@ -15,6 +16,12 @@ const MIN_CACHE_BUDGET_BYTES = 64 * 1024 * 1024
 // reactive UI reads via useSecureStore. enable() / disable() keep it in sync;
 // the source of truth for the native extensions is still auth.json itself.
 export const FILE_PROVIDER_ENABLED_SECURE_STORE_KEY = "fileProviderEnabled"
+
+// The replicated iOS extension has no implicit default domain: unless the app registers one the
+// system never instantiates it and nothing appears in Files.app. See
+// modules/file-provider-domain/README.md.
+export const FILE_PROVIDER_DOMAIN_IDENTIFIER = "io.filen.drive"
+export const FILE_PROVIDER_DOMAIN_DISPLAY_NAME = "Filen"
 
 export const AUTH_FILE = new FileSystem.File(
 	FileSystem.Paths.join(
@@ -127,6 +134,18 @@ class FileProvider {
 	}
 
 	public async disable(): Promise<void> {
+		// Before the delete (and therefore outside writeMutex — this is a slow system call, not a
+		// write), so the extension is never asked to serve a domain it can no longer authenticate for.
+		if (Platform.OS === "ios") {
+			try {
+				await unregisterDomain(FILE_PROVIDER_DOMAIN_IDENTIFIER)
+			} catch (e) {
+				// A stuck domain is a stale Files.app location, not a broken app — keep going and
+				// still clear the credentials.
+				logger.warn("file-provider", "file provider domain unregistration failed", { identifier: FILE_PROVIDER_DOMAIN_IDENTIFIER, error: e })
+			}
+		}
+
 		await this.writeMutex.acquire()
 
 		try {
@@ -183,6 +202,19 @@ class FileProvider {
 			} satisfies AuthFileSchema, dek)
 		} finally {
 			this.writeMutex.release()
+		}
+
+		// After the write succeeded (and after the mutex is released — registration is a slow system
+		// call, not a write), so the extension finds credentials the moment the system brings it up.
+		// Registering an already-registered domain is a no-op, so repeated enables are fine.
+		if (Platform.OS === "ios") {
+			try {
+				await registerDomain(FILE_PROVIDER_DOMAIN_IDENTIFIER, FILE_PROVIDER_DOMAIN_DISPLAY_NAME)
+			} catch (e) {
+				// Degrading the provider to unregistered is not a reason to fail enable() — the setting
+				// stays on, the location just does not show up until the next enable.
+				logger.warn("file-provider", "file provider domain registration failed", { identifier: FILE_PROVIDER_DOMAIN_IDENTIFIER, error: e })
+			}
 		}
 
 		await secureStore.set(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, true)
