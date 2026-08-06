@@ -25,14 +25,12 @@ import { type TFunction } from "i18next"
 import type { Note, NoteTag } from "@/types"
 import { useResolveClassNames } from "uniwind"
 import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
+import { NOTES_VIEW_MODES, NOTES_VIEW_MODE_ORDER, type NotesViewMode } from "@/features/notes/notesViewModes"
 import logger from "@/lib/logger"
 
-/**
- * Which list the notes tab renders. "offline" shows the same note rows as "notes", narrowed to the
- * notes kept on the device — the only way to see, audit and bulk-manage that set, since the badges
- * are otherwise scattered through the full list.
- */
-export type NotesViewMode = "notes" | "tags" | "offline"
+// Re-exported so the existing importers keep their import path; the type and everything that varies
+// per mode now live together in notesViewModes, which is exhaustive over the union.
+export { type NotesViewMode } from "@/features/notes/notesViewModes"
 
 // Sort picker for the tags view, mirroring the drive header's buildSortMenuButton structure.
 // buildSortFieldButton keeps each field's directions as a nested submenu on iOS and collapses them
@@ -150,10 +148,11 @@ export function buildNotesHeaderRightItems({
 			})
 		}
 
-		// Creating or importing from the offline view would produce a note that is not kept on the
-		// device, so it would be absent from the list the user is looking at — indistinguishable from
-		// the action having failed. Both stay in the notes view, which is where a new note shows up.
-		if (selectedNotes.length === 0 && viewMode !== "offline") {
+		// A note created from a narrowed view is neither kept on the device nor shared with anyone, so
+		// it would be absent from the list the user is looking at — indistinguishable from the action
+		// having failed. `allowsCreate` carries that per view rather than naming one here, so a new
+		// narrowed view cannot inherit the entry by omission.
+		if (selectedNotes.length === 0 && NOTES_VIEW_MODES[viewMode].allowsCreate) {
 			menuButtons.push({
 				id: "create",
 				title: t("create_note"),
@@ -724,45 +723,27 @@ export function buildNotesHeaderRightItems({
 		menuButtons.push({
 			id: "viewMode",
 			title: t("view_mode"),
-			icon: notesViewMode === "tags" ? "tag" : notesViewMode === "offline" ? "download" : "list",
-			subButtons: [
-				{
-					title: t("notes_view"),
-					id: "notesView",
-					icon: "list",
-					checked: notesViewMode === "notes",
-					onPress: () => {
-						useNotesStore.getState().clearSelectedNotes()
-						useNotesStore.getState().clearSelectedTags()
+			icon: NOTES_VIEW_MODES[notesViewMode].icon,
+			// Built from the shared table, so a view can never appear in the list body without also
+			// being reachable from this menu.
+			subButtons: NOTES_VIEW_MODE_ORDER.map(
+				mode =>
+					({
+						title: t(NOTES_VIEW_MODES[mode].menuKey),
+						id: `${mode}View`,
+						icon: NOTES_VIEW_MODES[mode].icon,
+						checked: notesViewMode === mode,
+						onPress: () => {
+							// The selection belongs to the list that made it: switching views changes which
+							// notes exist to act on, so carrying it over would leave the header counting rows
+							// that are no longer on screen.
+							useNotesStore.getState().clearSelectedNotes()
+							useNotesStore.getState().clearSelectedTags()
 
-						setNotesViewMode("notes")
-					}
-				},
-				{
-					title: t("tags_view"),
-					id: "tagsView",
-					icon: "tag",
-					checked: notesViewMode === "tags",
-					onPress: () => {
-						useNotesStore.getState().clearSelectedNotes()
-						useNotesStore.getState().clearSelectedTags()
-
-						setNotesViewMode("tags")
-					}
-				},
-				{
-					title: t("offline_view"),
-					id: "offlineView",
-					icon: "download",
-					checked: notesViewMode === "offline",
-					onPress: () => {
-						useNotesStore.getState().clearSelectedNotes()
-						useNotesStore.getState().clearSelectedTags()
-
-						setNotesViewMode("offline")
-					}
-				}
-			]
+							setNotesViewMode(mode)
+						}
+					}) satisfies MenuButton
+			)
 		})
 	}
 

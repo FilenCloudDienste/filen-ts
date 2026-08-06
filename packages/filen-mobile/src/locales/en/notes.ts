@@ -34,6 +34,8 @@ export const notes = {
 	tags_view: "Tags",
 	/** View-mode submenu entry, and list title: show only the notes kept on this device */
 	offline_view: "Offline",
+	/** View-mode submenu entry, and list title: show only the notes shared with someone — in either direction */
+	shared_view: "Shared",
 
 	// ── Note-type labels (canonical — used by both static and dynamic paths) ──
 	/** Note type: plain text */
@@ -226,6 +228,10 @@ export const notes = {
 	no_offline_notes: "No offline notes",
 	/** Offline view — empty-state subtitle explaining how a note gets here */
 	no_offline_notes_description: "Notes you make available offline stay readable without a connection, and appear here.",
+	/** Shared view — empty-state title when no note has anyone else on it */
+	no_shared_notes: "No shared notes",
+	/** Shared view — empty-state subtitle explaining how a note gets here */
+	no_shared_notes_description: "Notes you share with others, and notes others share with you, appear here.",
 	/** Tags — empty-state subtitle when no tags exist yet */
 	no_tags_description: "Create tags to organize your notes.",
 	/** Note history — empty-state subtitle when the note has no past versions */

@@ -18,7 +18,13 @@ import useNotesStore from "@/features/notes/store/useNotes.store"
 import useNotesTagsQuery from "@/features/notes/queries/useNotesTags.query"
 import { useSecureStore } from "@/lib/secureStore"
 import { useShallow } from "zustand/shallow"
-import { type NotesViewMode } from "@/features/notes/components/notesHeaderMenuBuilders"
+import {
+	NOTES_VIEW_MODES,
+	narrowNotesForViewMode,
+	notesViewModeAwaitsUser,
+	type NotesViewMode
+} from "@/features/notes/notesViewModes"
+import { useStringifiedClient } from "@/lib/auth"
 import Tag from "@/features/notes/components/tag"
 import { useTranslation } from "react-i18next"
 import Header from "@/features/notes/components/header"
@@ -26,7 +32,6 @@ import {
 	filterNoteListItemsBySearchQuery,
 	filterNoteTagsBySearchQuery,
 	filterNotesByBlockedOwner,
-	filterNotesMarkedOffline,
 	filterUntaggedNotes,
 	withUntaggedTag,
 	createUntaggedTag,
@@ -92,6 +97,10 @@ const Notes = () => {
 	// notes the list is built from, not just which list renders.
 	const viewMode = tag ? "notes" : notesViewMode
 	const markedOffline = useNotesOfflineStore(useShallow(state => state.marked))
+	// The shared view classifies notes against the signed-in user, so it needs the id the header
+	// already reads for its selection flags.
+	const userId = useStringifiedClient()?.userId
+	const awaitsUser = notesViewModeAwaitsUser({ viewMode, userId })
 	// String key rather than the array itself: the store hands back a fresh array identity on every
 	// update, which would re-run the purge on unrelated churn.
 	const selectedNoteUuidsKey = useNotesStore(state => state.selectedNotes.map(note => note.uuid).join(","))
@@ -106,21 +115,37 @@ const Notes = () => {
 		return filterUntaggedNotes(filterNotesByBlockedOwner(notesData, blocked))
 	})()
 
+	// The notes this view is built from, before grouping and search. Membership of THIS set is what
+	// decides whether a note can be selected — search only hides rows, it does not remove them.
+	const narrowedNotes = ((): TNote[] => {
+		if (!notesData) {
+			return []
+		}
+
+		// The virtual tag cannot go through group()'s uuid-based tag filter — pre-filter to the
+		// untagged set instead and group untagged.
+		if (isUntaggedScreen) {
+			return untaggedNotes
+		}
+
+		return narrowNotesForViewMode({
+			notes: filterNotesByBlockedOwner(notesData, blocked),
+			viewMode,
+			markedOffline,
+			userId
+		})
+	})()
+
 	const notes = ((): NoteListItem[] => {
 		if (!notesData) {
 			return []
 		}
 
-		const visible = filterNotesByBlockedOwner(notesData, blocked)
-
+		// Every narrowed view (offline, shared) is the same list with fewer notes in it, so they all
+		// keep the identical grouping (pinned / favorited / time buckets) rather than inventing a
+		// second layout — what changes is which notes are in it, not how they read.
 		const grouped = notesSorter.group({
-			// The virtual tag cannot go through group()'s uuid-based tag filter — pre-filter
-			// to the untagged set instead and group untagged.
-			//
-			// The offline view is the same list narrowed to the ledger, so it keeps the identical
-			// grouping (pinned / favorited / time buckets) rather than inventing a second layout —
-			// what changes is which notes are in it, not how they read.
-			notes: isUntaggedScreen ? untaggedNotes : viewMode === "offline" ? filterNotesMarkedOffline(visible, markedOffline) : visible,
+			notes: narrowedNotes,
 			groupArchived: true,
 			groupTrashed: true,
 			groupFavorited: true,
@@ -147,27 +172,31 @@ const Notes = () => {
 		}
 	}, [blocked])
 
-	// Same purge for the offline view, whose membership IS the ledger: a note that stops being kept
-	// on the device leaves the list, so it must leave the selection with it. Reachable when a bulk
-	// removal fails partway — runBulk is fail-fast and deliberately keeps the selection so the user
-	// can retry, but the notes it already un-marked are gone from this list, and without this the
-	// header would count rows that are no longer on screen.
-	useEffect(() => {
-		if (viewMode !== "offline") {
-			return
-		}
+	// Same purge against the view's own membership rather than the note's existence: in a narrowed
+	// view a note can leave the list while still existing, and the header's bulk actions must not keep
+	// counting it. Offline membership IS the ledger (un-mark a note and it goes); shared membership is
+	// the participant list (remove the last participant, or be removed yourself, and it goes).
+	//
+	// Reachable when a bulk removal fails partway — runBulk is fail-fast and deliberately keeps the
+	// selection so the user can retry, but the notes it already un-marked are gone from this list.
+	//
+	// Keyed on the narrowed set, not on the ledger, so every view is covered by one rule; in the
+	// unnarrowed views this converges to the same answer the blocked/live purges already give.
+	const narrowedNoteUuidsKey = narrowedNotes.map(note => note.uuid).join(",")
 
+	useEffect(() => {
+		const narrowedUuids = new Set(narrowedNoteUuidsKey.length > 0 ? narrowedNoteUuidsKey.split(",") : [])
 		const selected = useNotesStore.getState().selectedNotes
-		const kept = selected.filter(note => markedOffline[note.uuid] === true)
+		const kept = selected.filter(note => narrowedUuids.has(note.uuid))
 
 		if (kept.length !== selected.length) {
 			useNotesStore.getState().setSelectedNotes(kept)
 		}
-		// `selectedNotes` is in the deps so a selection WRITE is re-checked too, not just a ledger
+		// `selectedNotes` is in the deps so a selection WRITE is re-checked too, not just a membership
 		// change: the native header menu snapshots its closure when it opens, so "Select all" can
-		// write a row that stopped being marked while the menu was up. The length guard makes the
-		// re-run a no-op once converged, so this cannot loop.
-	}, [viewMode, markedOffline, selectedNoteUuidsKey])
+		// write a row that left the view while the menu was up. The length guard makes the re-run a
+		// no-op once converged, so this cannot loop.
+	}, [narrowedNoteUuidsKey, selectedNoteUuidsKey])
 
 	// Built before notesTags: the tags sort (by "last activity" / note count) reads this index.
 	const notesForTag = (() => {
@@ -316,7 +345,11 @@ const Notes = () => {
 
 	const searchActive = searchQuery.trim().length > 0
 
-	const offlineEmptyComponent = () => {
+	// One empty state for every note-row view, resolved through the same table as the title and the
+	// View menu — so a new view cannot inherit another one's copy by falling through a ternary. The
+	// create action rides on `allowsCreate` for the same reason the header's create entry does: from a
+	// narrowed view the new note would not appear here, which reads as the action having failed.
+	const noteRowsEmptyComponent = () => {
 		if (searchActive) {
 			return (
 				<ListEmpty
@@ -327,41 +360,25 @@ const Notes = () => {
 			)
 		}
 
-		return (
-			<ListEmpty
-				icon="download-outline"
-				title={t("no_offline_notes")}
-				description={t("no_offline_notes_description")}
-			/>
-		)
-	}
-
-	const notesEmptyComponent = () => {
-		if (searchActive) {
-			return (
-				<ListEmpty
-					icon="search-outline"
-					title={t("no_results")}
-					description={t("no_results_description")}
-				/>
-			)
-		}
+		const descriptor = NOTES_VIEW_MODES[viewMode]
 
 		return (
 			<ListEmpty
-				icon="document-text-outline"
-				title={t("no_notes")}
-				description={t("no_notes_description")}
+				icon={descriptor.empty.icon}
+				title={t(descriptor.empty.titleKey)}
+				description={t(descriptor.empty.descriptionKey)}
 				action={
-					<Button
-						onPress={() => {
-							// #84: a note created from the virtual screen must not be tag-attached.
-							void createNoteFlow({ t, tag: isUntaggedScreen ? null : tag })
-						}}
-						disabled={!isOnline}
-					>
-						{t("create_note")}
-					</Button>
+					descriptor.allowsCreate ? (
+						<Button
+							onPress={() => {
+								// #84: a note created from the virtual screen must not be tag-attached.
+								void createNoteFlow({ t, tag: isUntaggedScreen ? null : tag })
+							}}
+							disabled={!isOnline}
+						>
+							{t("create_note")}
+						</Button>
+					) : undefined
 				}
 			/>
 		)
@@ -414,9 +431,12 @@ const Notes = () => {
 							keyExtractor={keyExtractorNotesView}
 							data={notes}
 							renderItem={renderItemNotesView}
-							loading={notesQuery.status === "pending"}
+							// `awaitsUser`: the shared view cannot classify anything until the signed-in user's
+							// id resolves, and an empty list under "No shared notes" is a wrong answer rather
+							// than a slow one.
+							loading={notesQuery.status === "pending" || awaitsUser}
 							onRefresh={onRefresh}
-							emptyComponent={viewMode === "offline" ? offlineEmptyComponent : notesEmptyComponent}
+							emptyComponent={noteRowsEmptyComponent}
 						/>
 					) : (
 						<VirtualList

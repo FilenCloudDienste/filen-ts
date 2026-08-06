@@ -144,6 +144,27 @@ export function filterNotesMarkedOffline(notes: readonly Note[], markedOffline: 
 	return notes.filter(note => markedOffline[note.uuid] === true)
 }
 
+/**
+ * Narrows the list to the notes that involve somebody else, for the shared view — in either
+ * direction, since both read the same way from here: a note you shared with others and a note
+ * someone shared with you are both "not yours alone".
+ *
+ * One predicate covers both because the owner is IN `participants` (NoteParticipant carries
+ * `isOwner`), so an unshared note has nobody but you in it whether the SDK reports `[you]` or `[]`.
+ * Comparing `ownerId` instead would answer only "did I make this", which is the wrong question.
+ *
+ * Without a user id there is no "yourself" to compare against, so nothing can be classified — the
+ * caller shows a loading state rather than letting an empty result read as "nothing is shared".
+ * Pure (no React/store reads).
+ */
+export function filterNotesShared(notes: readonly Note[], userId: bigint | undefined): Note[] {
+	if (userId === undefined) {
+		return []
+	}
+
+	return notes.filter(note => note.participants.some(participant => participant.userId !== userId))
+}
+
 // ── Virtual "Untagged" tag (#84) ─────────────────────────────────────────────
 //
 // The tags view builds its rows from real NoteTags, so notes without any tag were invisible

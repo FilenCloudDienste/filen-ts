@@ -12,7 +12,7 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-import { filterNotesByBlockedOwner, filterNotesMarkedOffline } from "@/features/notes/utils"
+import { filterNotesByBlockedOwner, filterNotesMarkedOffline, filterNotesShared } from "@/features/notes/utils"
 import { deriveBlockedUsers } from "@/features/contacts/blockedSelectors"
 import { type Note } from "@/types"
 
@@ -20,6 +20,18 @@ const blocked = deriveBlockedUsers([{ uuid: "x", userId: 99n, email: "b@x.com", 
 
 function note(ownerId: bigint, uuid: string): Note {
 	return { uuid, ownerId, participants: [] } as unknown as Note
+}
+
+const ME = 1n
+
+// The owner is IN participants (NoteParticipant carries isOwner), so these mirror what the SDK hands
+// back rather than a convenient shape.
+function sharedNote(uuid: string, ownerId: bigint, participantIds: bigint[]): Note {
+	return {
+		uuid,
+		ownerId,
+		participants: participantIds.map(userId => ({ userId, isOwner: userId === ownerId }))
+	} as unknown as Note
 }
 
 describe("filterNotesByBlockedOwner", () => {
@@ -57,6 +69,52 @@ describe("filterNotesMarkedOffline", () => {
 		const notes = [note(1n, "a"), note(1n, "b")]
 
 		filterNotesMarkedOffline(notes, { a: true })
+
+		expect(notes).toHaveLength(2)
+	})
+})
+
+describe("filterNotesShared", () => {
+	it("keeps a note you own and shared with someone else", () => {
+		const notes = [sharedNote("out", ME, [ME, 7n])]
+
+		expect(filterNotesShared(notes, ME).map(n => n.uuid)).toEqual(["out"])
+	})
+
+	it("keeps a note somebody else shared with you", () => {
+		// The direction the ownerId test alone would answer backwards: you are not the owner here.
+		const notes = [sharedNote("in", 7n, [7n, ME])]
+
+		expect(filterNotesShared(notes, ME).map(n => n.uuid)).toEqual(["in"])
+	})
+
+	it("drops a note that is yours alone", () => {
+		// The owner sits in participants, so an unshared note still has one entry — which is exactly
+		// why the predicate asks "is anyone here who is not me" rather than counting participants.
+		expect(filterNotesShared([sharedNote("solo", ME, [ME])], ME)).toEqual([])
+	})
+
+	it("drops an unshared note whichever way the SDK reports its participants", () => {
+		// Some payloads carry an empty participant list for a note nobody else touches.
+		expect(filterNotesShared([sharedNote("solo", ME, [])], ME)).toEqual([])
+	})
+
+	it("keeps both directions together — one view, not two", () => {
+		const notes = [sharedNote("out", ME, [ME, 7n]), sharedNote("solo", ME, [ME]), sharedNote("in", 7n, [7n, ME])]
+
+		expect(filterNotesShared(notes, ME).map(n => n.uuid)).toEqual(["out", "in"])
+	})
+
+	it("classifies nothing without a user id, so the caller can hold the spinner", () => {
+		// Returning the full list here would label every note "Shared"; returning [] lets the view
+		// distinguish "not answerable yet" from "nothing is shared" (see notesViewModeAwaitsUser).
+		expect(filterNotesShared([sharedNote("out", ME, [ME, 7n])], undefined)).toEqual([])
+	})
+
+	it("does not mutate the input", () => {
+		const notes = [sharedNote("out", ME, [ME, 7n]), sharedNote("solo", ME, [ME])]
+
+		filterNotesShared(notes, ME)
 
 		expect(notes).toHaveLength(2)
 	})

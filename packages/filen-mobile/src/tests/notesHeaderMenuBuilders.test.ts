@@ -510,6 +510,82 @@ describe("buildNotesHeaderRightItems", () => {
 		})
 	})
 
+	// The shared view is the offline view's sibling: same rows, different narrowing. Its bulk actions
+	// are the interesting part, because a selection there routinely MIXES notes you own with notes
+	// somebody shared to you — the one place where the ownership flags have to do real work.
+	describe("viewMode='shared' gates the bulk actions by ownership", () => {
+		function sharedMenu(selected: Note[], flags: Partial<NoteSelectionFlags> = {}, onlyNotes: Note[] = selected) {
+			return topLevelIds(
+				buildNotesHeaderRightItems({
+					...defaultParams(),
+					viewMode: "shared",
+					notesViewMode: "shared",
+					selectedNotes: selected,
+					selectedNotesLive: selected,
+					noteFlags: makeNoteFlags({ count: selected.length, ...flags }),
+					onlyNotes
+				})
+			)
+		}
+
+		it("keeps the note-row menu — select-all and the bulk actions", () => {
+			// The failure this mirrors: gating the note-row branch positively on "notes" once dropped
+			// select-all and every bulk action from the offline view.
+			const selected = [makeNote({ uuid: "a" })]
+
+			expect(sharedMenu([], {}, selected)).toContain("selectAll")
+			expect(sharedMenu(selected)).toContain("bulkPin")
+			expect(sharedMenu(selected)).toContain("bulkFavorite")
+		})
+
+		it("hides create and import", () => {
+			// A note created here has no participants, so it would not appear in this list.
+			const ids = sharedMenu([], {}, [makeNote({ uuid: "a" })])
+
+			expect(ids).not.toContain("create")
+			expect(ids).not.toContain("import")
+		})
+
+		it("hides the owner-only actions on a mixed selection", () => {
+			// everyOwned=false is the normal case here: you selected one of yours and one of theirs.
+			const ids = sharedMenu([makeNote({ uuid: "mine" }), makeNote({ uuid: "theirs" })], { everyOwned: false })
+
+			expect(ids).not.toContain("bulkArchive")
+			expect(ids).not.toContain("bulkTrash")
+			expect(ids).not.toContain("bulkDelete")
+			expect(ids).not.toContain("bulkRestore")
+		})
+
+		it("offers the owner-only actions when the whole selection is yours", () => {
+			const ids = sharedMenu([makeNote({ uuid: "mine" })], { everyOwned: true })
+
+			expect(ids).toContain("bulkArchive")
+			expect(ids).toContain("bulkTrash")
+		})
+
+		it("offers leave only when nothing selected is yours", () => {
+			// Leave is the participant's counterpart to trash; on a mixed selection neither applies, which
+			// is exactly what the two flags encode.
+			expect(sharedMenu([makeNote({ uuid: "theirs" })], { participantOfEveryAndNotOwner: true })).toContain("bulkLeave")
+			expect(sharedMenu([makeNote({ uuid: "a" }), makeNote({ uuid: "b" })], { participantOfEveryAndNotOwner: false })).not.toContain(
+				"bulkLeave"
+			)
+		})
+
+		it("hides the write-gated type change when any note is read-only to you", () => {
+			expect(sharedMenu([makeNote({ uuid: "a" })], { hasWriteAccessToAll: false })).not.toContain("type")
+			expect(sharedMenu([makeNote({ uuid: "a" })], { hasWriteAccessToAll: true })).toContain("type")
+		})
+
+		it("still offers offline availability on a note shared to you", () => {
+			// Deliberately NOT gated on write access: keeping a copy is a read, and a read-only share is a
+			// perfectly reasonable thing to want on a plane.
+			expect(sharedMenu([makeNote({ uuid: "theirs" })], { everyOwned: false, hasWriteAccessToAll: false })).toContain(
+				"bulkMakeAvailableOffline"
+			)
+		})
+	})
+
 	describe("bulk offline availability", () => {
 		function idsFor(selected: Note[], markedOffline: Record<string, true>) {
 			return topLevelIds(
@@ -988,7 +1064,9 @@ describe("buildNotesHeaderRightItems", () => {
 			expect(notesViewSub?.checked).toBe(true)
 		})
 
-		it("offers all three views, offline last", () => {
+		it("offers every view, in the declared order", () => {
+			// Built from NOTES_VIEW_MODE_ORDER rather than hand-listed, so a view can never exist in the
+			// list body without also being reachable from this menu.
 			const items = buildNotesHeaderRightItems({
 				...defaultParams(),
 				notesViewMode: "notes",
@@ -999,7 +1077,61 @@ describe("buildNotesHeaderRightItems", () => {
 			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
 			const viewModeBtn = buttons.find(b => b.id === "viewMode")
 
-			expect(viewModeBtn?.subButtons?.map(sub => sub.id)).toEqual(["notesView", "tagsView", "offlineView"])
+			expect(viewModeBtn?.subButtons?.map(sub => sub.id)).toEqual(["notesView", "tagsView", "offlineView", "sharedView"])
+		})
+
+		it("clears the selection when switching views", async () => {
+			// The selection belongs to the list that made it. Carrying it across a switch leaves the
+			// header counting — and acting on — rows the new view does not contain, which is precisely
+			// what the narrowed views make reachable.
+			const useNotesStore = (await import("@/features/notes/store/useNotes.store")).default
+			const clearSelectedNotes = vi.fn()
+			const clearSelectedTags = vi.fn()
+			const setNotesViewMode = vi.fn()
+			const getState = vi.mocked(useNotesStore.getState)
+			const original = getState.getMockImplementation()
+
+			getState.mockReturnValue({ clearSelectedNotes, clearSelectedTags } as never)
+
+			try {
+				const items = buildNotesHeaderRightItems({
+					...defaultParams(),
+					notesViewMode: "notes",
+					setNotesViewMode,
+					tag: null,
+					selectedNotes: [],
+					selectedTags: []
+				})
+				const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+				const sharedSub = buttons.find(b => b.id === "viewMode")?.subButtons?.find(s => s.id === "sharedView")
+
+				sharedSub?.onPress?.()
+
+				expect(setNotesViewMode).toHaveBeenCalledWith("shared")
+				expect(clearSelectedNotes).toHaveBeenCalled()
+				expect(clearSelectedTags).toHaveBeenCalled()
+			} finally {
+				getState.mockReset()
+
+				if (original) {
+					getState.mockImplementation(original)
+				}
+			}
+		})
+
+		it("sharedView subButton has checked:true when notesViewMode='shared'", () => {
+			const items = buildNotesHeaderRightItems({
+				...defaultParams(),
+				notesViewMode: "shared",
+				tag: null,
+				selectedNotes: [],
+				selectedTags: []
+			})
+			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const viewModeBtn = buttons.find(b => b.id === "viewMode")
+
+			expect(viewModeBtn?.subButtons?.find(s => s.id === "sharedView")?.checked).toBe(true)
+			expect(viewModeBtn?.subButtons?.find(s => s.id === "notesView")?.checked).toBe(false)
 		})
 
 		it("offlineView subButton has checked:true when notesViewMode='offline'", () => {
@@ -1018,10 +1150,10 @@ describe("buildNotesHeaderRightItems", () => {
 			expect(viewModeBtn?.subButtons?.find(s => s.id === "notesView")?.checked).toBe(false)
 		})
 
-		// The parent entry's icon is the at-a-glance signal for which view is active, so it has to
-		// distinguish all three rather than falling back to the notes icon for anything non-tags.
+		// The parent entry's icon is the at-a-glance signal for which view is active, so every view needs
+		// its own rather than falling back to the notes icon for anything non-tags.
 		it("reflects the active view in the parent icon", () => {
-			function iconFor(notesViewMode: "notes" | "tags" | "offline") {
+			function iconFor(notesViewMode: "notes" | "tags" | "offline" | "shared") {
 				const items = buildNotesHeaderRightItems({
 					...defaultParams(),
 					notesViewMode,
@@ -1037,6 +1169,8 @@ describe("buildNotesHeaderRightItems", () => {
 			expect(iconFor("notes")).toBe("list")
 			expect(iconFor("tags")).toBe("tag")
 			expect(iconFor("offline")).toBe("download")
+			expect(iconFor("shared")).toBe("users")
+			expect(new Set([iconFor("notes"), iconFor("tags"), iconFor("offline"), iconFor("shared")]).size).toBe(4)
 		})
 
 		it("tagsView subButton has checked:true when notesViewMode='tags'", () => {

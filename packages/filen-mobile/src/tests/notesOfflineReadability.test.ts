@@ -174,9 +174,14 @@ describe("notes feature reads query data, not fetch status", () => {
 	it("still shows a spinner while there is genuinely nothing to draw", () => {
 		// The other half of the fix: "pending" means no data yet, and that IS a spinner. Only the
 		// error-with-data case had to stop being one.
+		//
+		// Matched as a substring of the `loading` expression rather than the whole of it: a view may
+		// have FURTHER reasons to wait (the shared view also waits on the signed-in user's id, without
+		// which it cannot tell a shared note from an unshared one), and pinning the exact expression
+		// would fail those for a non-bug. What must not change is that "pending" is always one of them.
 		const listSource = readFileSync(path.join(NOTES_FEATURE, "components", "index.tsx"), "utf8")
 
-		expect(listSource).toContain('loading={notesQuery.status === "pending"}')
-		expect(listSource).toContain('loading={notesTagsQuery.status === "pending"}')
+		expect(listSource).toMatch(/loading=\{[^}]*notesQuery\.status === "pending"[^}]*\}/)
+		expect(listSource).toMatch(/loading=\{[^}]*notesTagsQuery\.status === "pending"[^}]*\}/)
 	})
 })

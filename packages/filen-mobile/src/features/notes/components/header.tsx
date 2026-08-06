@@ -12,7 +12,8 @@ import { useSecureStore } from "@/lib/secureStore"
 import { useStringifiedClient } from "@/lib/auth"
 import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
 import { useTranslation } from "react-i18next"
-import { buildNotesHeaderRightItems, type NotesViewMode } from "@/features/notes/components/notesHeaderMenuBuilders"
+import { buildNotesHeaderRightItems } from "@/features/notes/components/notesHeaderMenuBuilders"
+import { NOTES_VIEW_MODES, type NotesViewMode } from "@/features/notes/notesViewModes"
 import { useNotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import { type DataItem as NoteDataItem } from "@/features/notes/components/note"
 import { type NoteTag } from "@/types"
@@ -135,7 +136,8 @@ export const Header = ({
 	const title = (() => {
 		// `!== "tags"` rather than a positive list: adding a member to a ===-compared union produces no
 		// type error anywhere, so a positive list silently stops matching a new view while a negative
-		// one keeps working. That is exactly how the offline view lost its header menu.
+		// one keeps working. That is exactly how the offline view lost its header menu. The per-view
+		// title now comes from the exhaustive table instead, which makes the same mistake a build error.
 		if (viewMode !== "tags") {
 			if (selectedNotes.length > 0) {
 				return t("selected", { count: selectedNotes.length })
@@ -145,13 +147,13 @@ export const Header = ({
 				return tag.name ?? tag.uuid
 			}
 
-			return viewMode === "offline" ? t("offline_view") : t("notes")
+			return t(NOTES_VIEW_MODES[viewMode].titleKey)
 		} else {
 			if (selectedTags.length > 0) {
 				return t("selected", { count: selectedTags.length })
 			}
 
-			return t("tags")
+			return t(NOTES_VIEW_MODES.tags.titleKey)
 		}
 	})()
 
