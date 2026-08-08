@@ -234,6 +234,8 @@ const drive = {
 					unwrappedFileIntoDriveItem(
 						unwrapFileMeta({
 							...result.data,
+							// No whole-life id on a public link — see linkedFileIntoDriveItem.
+							stableUuid: undefined,
 							meta: new FileMeta.Decoded({
 								name:
 									result.data.name.tag === MaybeEncryptedUniffi_Tags.Decrypted

@@ -47,6 +47,8 @@ vi.mock("@filen/sdk-rs", () => {
 		EmailOrPasswordWrong: "EmailOrPasswordWrong",
 		Enter2fa: "Enter2fa",
 		Wrong2fa: "Wrong2fa",
+		StaleState: "StaleState",
+		MissingStableUuid: "MissingStableUuid",
 		// HeifError is referenced in the utils.ts switch but absent from the SDK published type union.
 		// We set it to "HeifError" so the mock property resolves; whether the SDK emits this value
 		// at runtime is the open question flagged in the deferred section.

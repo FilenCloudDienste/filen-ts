@@ -695,6 +695,10 @@ export function linkedFileIntoDriveItem(file: LinkedFile): DriveItem {
 	return unwrappedFileIntoDriveItem(
 		unwrapFileMeta({
 			uuid: file.uuid,
+			// A public link reports no whole-life id, and the SDK models that absence rather than
+			// inventing one: such a file is readable (download, thumbnail, media URL) but is rejected
+			// by any drive operation with ErrorKind.MissingStableUuid. That is the correct shape here.
+			stableUuid: undefined,
 			timestamp: file.timestamp,
 			size: file.size,
 			region: file.region,

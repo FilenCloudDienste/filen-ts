@@ -141,6 +141,14 @@ export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): stri
 				return "fs_directory_walk_error" as const
 			}
 
+			case ErrorKind.StaleState: {
+				return "stale_state" as const
+			}
+
+			case ErrorKind.MissingStableUuid: {
+				return "item_not_modifiable" as const
+			}
+
 			default: {
 				return "error_generic" as const
 			}

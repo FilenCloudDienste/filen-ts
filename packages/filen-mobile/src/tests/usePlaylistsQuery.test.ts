@@ -1,7 +1,8 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { mockCacheSet, mockQueryUpdaterSet } = vi.hoisted(() => ({
+const { mockCacheSet, mockCacheHas, mockQueryUpdaterSet } = vi.hoisted(() => ({
 	mockCacheSet: vi.fn(),
+	mockCacheHas: vi.fn(() => false),
 	mockQueryUpdaterSet: vi.fn((_key: unknown, updater: unknown) =>
 		typeof updater === "function" ? (updater as (prev: unknown) => unknown)(undefined) : updater
 	)
@@ -16,7 +17,7 @@ vi.mock("@/features/audio/audio", () => ({ default: { getPlaylists: vi.fn() } })
 
 vi.mock("@/lib/cache", () => ({
 	default: {
-		uuidToAnyDriveItem: { get: vi.fn(), set: mockCacheSet }
+		uuidToAnyDriveItem: { get: vi.fn(), set: mockCacheSet, has: mockCacheHas }
 	}
 }))
 
@@ -35,6 +36,8 @@ describe("playlistsQueryUpdate cache sync", () => {
 	beforeEach(() => {
 		mockCacheSet.mockClear()
 		mockQueryUpdaterSet.mockClear()
+		mockCacheHas.mockClear()
+		mockCacheHas.mockReturnValue(false)
 	})
 
 	it("seeds cache.uuidToAnyDriveItem for every file in every playlist", () => {
@@ -48,5 +51,16 @@ describe("playlistsQueryUpdate cache sync", () => {
 		playlistsQueryUpdate({ updater: ((prev: unknown[]) => [...prev, makePlaylist(["x"])]) as unknown as Updater })
 
 		expect(mockCacheSet).toHaveBeenCalledWith("x", { data: { uuid: "x" } })
+	})
+
+	it("never displaces an already-cached item — a track carries no whole-life id", () => {
+		// A playlist track is rebuilt from the playlist file and so has no stableUuid. Overwriting a
+		// real listing entry with it would leave every cache reader holding an item the SDK refuses to
+		// mutate — the public-link screen prefers this cache over its own route item.
+		mockCacheHas.mockReturnValue(true)
+
+		playlistsQueryUpdate({ updater: [makePlaylist(["already-cached"])] as unknown as Updater })
+
+		expect(mockCacheSet).not.toHaveBeenCalled()
 	})
 })

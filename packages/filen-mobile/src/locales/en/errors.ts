@@ -51,6 +51,10 @@ export const errors = {
 	unauthenticated: "You're not logged in. Please log in again.",
 	/** SDK error: walking a local directory tree failed */
 	fs_directory_walk_error: "Could not read the contents of a directory on your device.",
+	/** SDK error: the client's copy of the item was out of date for the attempted operation */
+	stale_state: "This item has changed since it was loaded. Refresh and try again.",
+	/** SDK error: the item carries no whole-life id (public link / shared-in), so it is read-only here */
+	item_not_modifiable: "This file can only be opened or downloaded, not changed.",
 	/** Generic fallback for an unknown / unmapped SDK error kind */
 	error_generic: "Something went wrong. Please try again."
 } as const

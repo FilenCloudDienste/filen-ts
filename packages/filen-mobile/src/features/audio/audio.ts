@@ -1213,6 +1213,12 @@ export class Audio {
 			type: "file",
 			data: {
 				uuid: file.uuid,
+				// PlaylistFileSchema is the on-drive playlist format and stores no whole-life id, so a
+				// track rebuilt from it cannot be the target of a drive operation (the SDK rejects that
+				// with ErrorKind.MissingStableUuid). The track's own menu only plays it or moves it
+				// between playlists, and usePlaylists.query seeds this into the shared uuid cache ONLY
+				// where nothing is cached yet — so it can never displace a real, mutable listing item.
+				stableUuid: undefined,
 				meta: new FileMeta.Decoded(meta),
 				parent: new ParentUuid.Uuid(file.uuid),
 				size: BigInt(file.size),

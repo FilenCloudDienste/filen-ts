@@ -2,17 +2,33 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import audio from "@/features/audio/audio"
 import cache from "@/lib/cache"
+import { type DriveItemFileExtracted } from "@/types"
 
 export const BASE_QUERY_KEY = "usePlaylistsQuery"
+
+/**
+ * Seeds a playlist track so the audioMetadata query — which resolves each file by uuid FROM this
+ * cache — can find it.
+ *
+ * Only fills a GAP. A playlist track is rebuilt from the playlist file itself (see
+ * playlistFileToDriveItem), so it carries no whole-life id; letting it overwrite an entry that came
+ * from a real listing would hand every cache reader an item the SDK refuses to mutate
+ * (ErrorKind.MissingStableUuid) — the public-link screen prefers this cache over its own route item.
+ */
+function seedTrackIfUncached(item: DriveItemFileExtracted): void {
+	if (cache.uuidToAnyDriveItem.has(item.data.uuid)) {
+		return
+	}
+
+	cache.uuidToAnyDriveItem.set(item.data.uuid, item)
+}
 
 export async function fetchData(params?: { signal?: AbortSignal }) {
 	const playlists = await audio.getPlaylists(params?.signal)
 
 	for (const playlist of playlists) {
 		for (const { item } of playlist.files) {
-			// We need to cache it here for the audioMetadata query to work later, since it relies on the cache
-
-			cache.uuidToAnyDriveItem.set(item.data.uuid, item)
+			seedTrackIfUncached(item)
 		}
 	}
 
@@ -50,7 +66,7 @@ export function playlistsQueryUpdate({
 		// playlist's files must be seeded here too, not only on the next refetch.
 		for (const playlist of next) {
 			for (const { item } of playlist.files ?? []) {
-				cache.uuidToAnyDriveItem.set(item.data.uuid, item)
+				seedTrackIfUncached(item)
 			}
 		}
 
