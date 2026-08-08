@@ -1082,6 +1082,12 @@ const Dom = ({
 				width: "100%",
 				height: "100%",
 				overflow: "auto",
+				// border-box, because this element carries BOTH the viewport height and the safe-area
+				// padding. Under the default content-box the two add up, so the box stands taller than
+				// the root the viewport reset clips at (html/body are overflow:hidden) and the last
+				// paddingTop+paddingBottom of the document sits below the cut — reachable only as a
+				// rubber-band that springs back. Same rule the editors state for .cm-content/.ql-editor.
+				boxSizing: "border-box",
 				background: background ? background : "#1c1c1e",
 				paddingTop: paddingTop ? `${paddingTop}px` : undefined,
 				paddingBottom: paddingBottom ? `${paddingBottom}px` : undefined,

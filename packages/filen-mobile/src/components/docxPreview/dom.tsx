@@ -277,6 +277,8 @@ const Dom = ({
 					display: "flex",
 					alignItems: "center",
 					justifyContent: "center",
+					// Same reason as the viewer box below: height + padding must not exceed the clipped root.
+					boxSizing: "border-box",
 					paddingTop: paddingTop ? `${paddingTop}px` : undefined,
 					paddingBottom: paddingBottom ? `${paddingBottom}px` : undefined
 				}}
@@ -293,6 +295,12 @@ const Dom = ({
 				width: "100%",
 				height: "100%",
 				overflow: "auto",
+				// border-box, because this element carries BOTH the viewport height and the safe-area
+				// padding. Under the default content-box the two add up, so the box stands taller than
+				// the root the viewport reset clips at (html/body are overflow:hidden) and the last
+				// paddingTop+paddingBottom of the document sits below the cut — reachable only as a
+				// rubber-band that springs back. Same rule the editors state for .cm-content/.ql-editor.
+				boxSizing: "border-box",
 				paddingTop: paddingTop ? `${paddingTop}px` : undefined,
 				paddingBottom: paddingBottom ? `${paddingBottom}px` : undefined,
 				// With inWrapper: false the library's white-page rule (.docx-wrapper>section.docx)
