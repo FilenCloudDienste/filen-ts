@@ -20,6 +20,7 @@ import { useResolveClassNames } from "uniwind"
 import Menu from "@/components/ui/menu"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 import SafeAreaView from "@/components/ui/safeAreaView"
+import HeaderScrim, { drivePreviewHeaderNeedsScrim } from "@/components/drivePreview/headerScrim"
 import logger from "@/lib/logger"
 
 const GalleryHeader = ({
@@ -58,6 +59,14 @@ const GalleryHeader = ({
 		default: currentItemPreviewType === "docx" || currentItemPreviewType === "pdf" || currentItemPreviewType === "video"
 	})
 
+	// The previews that stay transparent AND scroll text under this header need a backdrop, or the
+	// title competes with whatever line is behind it — see headerScrim.
+	const needsScrim = drivePreviewHeaderNeedsScrim({
+		previewType: currentItemPreviewType,
+		solidHeader: solidHeader ?? false
+	})
+	const bgBackground = useResolveClassNames("bg-background")
+
 	const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery(
 		{
 			uuid: currentItem && currentItem.type === "drive" ? currentItem.data.data.uuid : "",
@@ -68,13 +77,12 @@ const GalleryHeader = ({
 		}
 	)
 
+	// The full height this header occupies, on both platforms: the measured row PLUS the top inset its
+	// SafeAreaView puts above it. Consumers overlay content under the header and offset by this, so a
+	// per-platform meaning meant every one of them had to re-add the inset on iOS — and each did it
+	// differently, or not at all.
 	useEffect(() => {
-		useDrivePreviewStore.getState().setHeaderHeight(
-			Platform.select({
-				ios: layout.height,
-				default: layout.height + insets.top // Adjust for Android status bar
-			})
-		)
+		useDrivePreviewStore.getState().setHeaderHeight(layout.height + insets.top)
 	}, [layout.height, insets.top])
 
 	return (
@@ -83,6 +91,7 @@ const GalleryHeader = ({
 			style={animatedStyle}
 			pointerEvents={pointerEvents}
 		>
+			{needsScrim && <HeaderScrim color={bgBackground.backgroundColor as string} />}
 			<SafeAreaView
 				edges={["top", "left", "right"]}
 				className="bg-transparent"

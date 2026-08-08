@@ -11,26 +11,47 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 import { createElement } from "react"
 import { render } from "@testing-library/react"
 
-const { keyboardHostSpy } = vi.hoisted(() => ({
-	keyboardHostSpy: vi.fn()
+const { keyboardHostSpy, domPropsSpy } = vi.hoisted(() => ({
+	keyboardHostSpy: vi.fn(),
+	domPropsSpy: vi.fn()
 }))
 
 // ─── Module boundary mocks (the editors themselves render nothing) ───────────
 
-vi.mock("@/components/domKeyboardHost", () => ({
-	default: (props: { children?: unknown }) => {
-		keyboardHostSpy()
+// DomKeyboardHost reads the horizontal safe area to stop the WebView short of the sensor housing.
+vi.mock("react-native-safe-area-context", () => ({
+	useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 })
+}))
 
-		return props.children ?? null
+// Partially mocked: DOM_HOST_WEBVIEW_PROPS is the real object, since what the tests below check is
+// that the editors actually forward it to the WebView.
+vi.mock("@/components/domKeyboardHost", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/components/domKeyboardHost")>()
+
+	return {
+		...actual,
+		default: (props: { children?: unknown }) => {
+			keyboardHostSpy()
+
+			return props.children ?? null
+		}
+	}
+})
+
+vi.mock("@/components/textEditor/dom", () => ({
+	default: (props: { dom?: unknown }) => {
+		domPropsSpy(props.dom)
+
+		return null
 	}
 }))
 
-vi.mock("@/components/textEditor/dom", () => ({
-	default: () => null
-}))
-
 vi.mock("@/components/textEditor/richText/dom", () => ({
-	default: () => null
+	default: (props: { dom?: unknown }) => {
+		domPropsSpy(props.dom)
+
+		return null
+	}
 }))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
@@ -112,6 +133,7 @@ import { TextEditor, type TextEditorType } from "@/components/textEditor"
 describe("TextEditor keyboard host (#102)", () => {
 	beforeEach(() => {
 		keyboardHostSpy.mockClear()
+		domPropsSpy.mockClear()
 	})
 
 	const types: TextEditorType[] = ["text", "code", "markdown", "richtext"]
@@ -121,6 +143,17 @@ describe("TextEditor keyboard host (#102)", () => {
 			render(createElement(TextEditor, { initialValue: "hello", type }))
 
 			expect(keyboardHostSpy).toHaveBeenCalled()
+		})
+
+		it(`lets type="${type}" run edge to edge instead of inside the safe area`, () => {
+			// iOS insets a WKWebView's scroll content by the safe area unless told otherwise, which put
+			// bands above and below every preview that Android never had — and stacked with the page
+			// padding these components already apply. The editors keep their content clear of the safe
+			// area through that padding, which is also the only form of it content can scroll UNDER the
+			// overlaid header.
+			render(createElement(TextEditor, { initialValue: "hello", type }))
+
+			expect(domPropsSpy).toHaveBeenCalledWith(expect.objectContaining({ contentInsetAdjustmentBehavior: "never" }))
 		})
 	}
 })

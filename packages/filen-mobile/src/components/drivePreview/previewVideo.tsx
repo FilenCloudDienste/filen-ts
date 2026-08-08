@@ -199,7 +199,7 @@ const PreviewVideo = ({ cacheKey, fileUrl }: { cacheKey: string; fileUrl: string
 	const videoViewStyle: ViewStyle = {
 		width: dimensions.width,
 		height: dimensions.height,
-		paddingTop: !isLandscape && headerHeight ? headerHeight + insets.top : 0,
+		paddingTop: !isLandscape ? headerHeight : 0,
 		paddingBottom: isLandscape ? 0 : insets.bottom,
 		paddingLeft: isLandscape ? 0 : insets.left,
 		paddingRight: isLandscape ? 0 : insets.right

@@ -15,8 +15,14 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 import { createElement } from "react"
 import { render } from "@testing-library/react"
 
-const { keyboardAvoidingViewPropsSpy } = vi.hoisted(() => ({
-	keyboardAvoidingViewPropsSpy: vi.fn()
+const { keyboardAvoidingViewPropsSpy, insets } = vi.hoisted(() => ({
+	keyboardAvoidingViewPropsSpy: vi.fn(),
+	insets: { top: 0, bottom: 0, left: 0, right: 0 }
+}))
+
+// DomKeyboardHost reads the horizontal safe area to stop the WebView short of the sensor housing.
+vi.mock("react-native-safe-area-context", () => ({
+	useSafeAreaInsets: () => insets
 }))
 
 vi.mock("@/components/ui/view", () => ({
@@ -39,6 +45,8 @@ function hostProps(): Record<string, unknown> {
 describe("DomKeyboardHost", () => {
 	beforeEach(() => {
 		keyboardAvoidingViewPropsSpy.mockClear()
+		insets.left = 0
+		insets.right = 0
 	})
 
 	it("arms a real avoidance behavior", () => {
@@ -65,5 +73,37 @@ describe("DomKeyboardHost", () => {
 
 		expect(className).toContain("flex-1")
 		expect(className).toContain("bg-background")
+	})
+
+	it("stops the view short of the horizontal safe area", () => {
+		// Landscape on a notched phone: that inset IS the sensor housing, and unlike the vertical ones
+		// there is nothing to scroll under it. Insetting the VIEW rather than the page is what keeps the
+		// docx viewer's white paper from rendering beneath the cutout — page padding leaves it there.
+		insets.left = 59
+		insets.right = 21
+
+		const style = hostProps()["style"] as Record<string, number>
+
+		expect(style["paddingLeft"]).toBe(59)
+		expect(style["paddingRight"]).toBe(21)
+	})
+
+	it("costs nothing in portrait, where those insets are zero", () => {
+		const style = hostProps()["style"] as Record<string, number>
+
+		expect(style["paddingLeft"]).toBe(0)
+		expect(style["paddingRight"]).toBe(0)
+	})
+
+	it("never insets vertically — that is what page padding is for", () => {
+		// The whole point of the change: these hosts run edge to edge top-to-bottom so content can
+		// scroll UNDER the overlaid header. A vertical view inset cannot express that.
+		insets.left = 59
+		insets.right = 21
+
+		const style = hostProps()["style"] as Record<string, number | undefined>
+
+		expect(style["paddingTop"]).toBeUndefined()
+		expect(style["paddingBottom"]).toBeUndefined()
 	})
 })

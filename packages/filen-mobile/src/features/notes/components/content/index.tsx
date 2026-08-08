@@ -6,7 +6,7 @@ import Checklist from "@/features/notes/components/content/checklist"
 import { noteCodeTitleExtension, noteTypeToEditorType } from "@/features/notes/utils"
 import { FadeOut } from "react-native-reanimated"
 import { AnimatedView } from "@/components/ui/animated"
-import { ActivityIndicator } from "react-native"
+import { ActivityIndicator, Platform } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import TextEditor from "@/components/textEditor"
 import { useStringifiedClient } from "@/lib/auth"
@@ -22,6 +22,7 @@ import i18n from "@/lib/i18n"
 import prompts from "@/lib/prompts"
 import { sync, hashNoteContent } from "@/features/notes/components/sync"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
+import { useHeaderHeight } from "expo-router/react-navigation"
 import useIsOnline from "@/hooks/useIsOnline"
 import logger from "@/lib/logger"
 import { useTranslation } from "react-i18next"
@@ -195,6 +196,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	const { t } = useTranslation()
 	const stringifiedClient = useStringifiedClient()
 	const insets = useSafeAreaInsets()
+	const headerHeight = useHeaderHeight()
 	const isOnline = useIsOnline()
 	const hasInflightContent = useNotesInflightStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
 	const [hideCompleted] = useChecklistHideCompleted(note.uuid)
@@ -524,6 +526,15 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 					// WebView side validates against the known language set (loadLanguage).
 					fileName={note.noteType === NoteType.Code && noteCodeTitleExtension(note.title) !== null ? note.title : undefined}
 					id={`note:${note.uuid}`}
+					// iOS lays this editor out UNDER its translucent header, and the WebView no longer
+					// insets its own content by the safe area (see DOM_HOST_WEBVIEW_PROPS) — so the offset
+					// has to be stated, exactly as the checklist editor states it. Android's header is
+					// opaque and the editor already starts below it, so the padding must not apply there.
+					//
+					// `+ 16` for the same reason the checklist adds it: this REPLACES the editor's own top
+					// padding rather than adding to it, so without it the first line sits flush against the
+					// header — which on a note opening with an H1 reads as touching it.
+					paddingTop={Platform.OS === "ios" ? headerHeight + 16 : undefined}
 					paddingBottom={insets.bottom}
 				/>
 			)}

@@ -1,5 +1,5 @@
 import Dom from "@/components/docxPreview/dom"
-import DomKeyboardHost from "@/components/domKeyboardHost"
+import DomKeyboardHost, { DOM_HOST_WEBVIEW_PROPS } from "@/components/domKeyboardHost"
 import { forwardDomConsoleLog } from "@/hooks/useDomEvents/forwardDomLog"
 import { parseDocxExternalLink } from "@/components/docxPreview/linkSafety"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"
@@ -28,8 +28,8 @@ const DocxPreview = ({
 				paddingTop={paddingTop}
 				paddingBottom={paddingBottom}
 				dom={{
+					...DOM_HOST_WEBVIEW_PROPS,
 					overScrollMode: "never",
-					bounces: false,
 					onMessage: (event: WebViewMessageEvent) => {
 						// Two message kinds share this channel: the WebView console proxy, and a tap on a
 						// link inside the rendered document. Each carries its own envelope key, so they are

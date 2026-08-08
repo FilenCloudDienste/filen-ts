@@ -43,6 +43,12 @@ vi.mock("react-native-reanimated", () => ({
 	default: {}
 }))
 
+// The editor reads its iOS header offset from here (it lays out under a translucent header); the
+// package ships untranspiled ESM that Node cannot load.
+vi.mock("expo-router/react-navigation", () => ({
+	useHeaderHeight: () => 0
+}))
+
 vi.mock("react-native-safe-area-context", () => ({
 	useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 })
 }))

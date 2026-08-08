@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { run } from "@filen/utils"
 import Dom from "@/components/pdfPreview/dom"
-import DomKeyboardHost from "@/components/domKeyboardHost"
+import DomKeyboardHost, { DOM_HOST_WEBVIEW_PROPS } from "@/components/domKeyboardHost"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import View from "@/components/ui/view"
@@ -253,8 +253,8 @@ const PdfPreview = ({
 				paddingRight={paddingRight}
 				background={bgBackground.backgroundColor as string}
 				dom={{
+					...DOM_HOST_WEBVIEW_PROPS,
 					overScrollMode: "never",
-					bounces: false,
 					// Overrides Expo's defaults, which reload the WebView when its renderer dies. A reload
 					// restarts the document from nothing, and whatever killed the renderer — an enormous
 					// page, a pathological image — is usually deterministic, so it would loop. Refuse

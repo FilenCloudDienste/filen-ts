@@ -3,7 +3,7 @@ import TextEditorDOM from "@/components/textEditor/dom"
 import RichTextEditorDOM, { type QuillFormats, type HeaderLevel } from "@/components/textEditor/richText/dom"
 import { encodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
 import View from "@/components/ui/view"
-import DomKeyboardHost from "@/components/domKeyboardHost"
+import DomKeyboardHost, { DOM_HOST_WEBVIEW_PROPS } from "@/components/domKeyboardHost"
 import { useNativeDomEvents, type DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
 import { AppState, Platform } from "react-native"
 import { useNavigation } from "expo-router"
@@ -499,8 +499,8 @@ export const TextEditor = ({
 					<RichTextEditorDOM
 						ref={ref}
 						dom={{
-							onMessage: onDomMessage,
-							bounces: false
+							...DOM_HOST_WEBVIEW_PROPS,
+							onMessage: onDomMessage
 						}}
 						onValueChange={onValueChange}
 						darkMode={theme === "dark"}
@@ -559,8 +559,8 @@ export const TextEditor = ({
 							fileSize={chunked ? fileSize : undefined}
 							writeChunk={chunked ? writeTarget.writeChunk : undefined}
 							dom={{
-								onMessage: onDomMessage,
-								bounces: false
+								...DOM_HOST_WEBVIEW_PROPS,
+								onMessage: onDomMessage
 							}}
 							font={{
 								family: text.fontFamily as string,

@@ -18,6 +18,11 @@ const { domPropsSpy, nativePostMessageSpy, appStateListeners } = vi.hoisted(() =
 	appStateListeners: [] as Array<(state: string) => void>
 }))
 
+// DomKeyboardHost reads the horizontal safe area to stop the WebView short of the sensor housing.
+vi.mock("react-native-safe-area-context", () => ({
+	useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 })
+}))
+
 vi.mock("@/components/textEditor/dom", () => ({
 	default: (props: Record<string, unknown>) => {
 		domPropsSpy(props)
