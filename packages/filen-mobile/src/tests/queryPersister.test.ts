@@ -337,6 +337,32 @@ describe("QueryPersisterKv", () => {
 			expect(kv.keys().sort()).toEqual(["query-a", "query-b"])
 		})
 
+		it("prunes the rows left by superseded persister versions, and nothing else", async () => {
+			// The kv is shared with the camera-upload ledger, so the prune has to be a RANGE over the
+			// abandoned prefix — a `LIKE 'reactQuery_v%'` would also be a full scan (see prefixUpperBound).
+			// A range that reached past ':' would take the live prefix or another tenant's rows with it.
+			mockDb.execute.mockClear()
+
+			const kv = new QueryPersisterKv()
+			await kv.restore()
+
+			// The prune is deliberately not awaited by restore(); let its chain settle.
+			for (let tick = 0; tick < 20; tick++) {
+				await Promise.resolve()
+			}
+
+			const deletes = mockDb.execute.mock.calls.filter(call => String(call[0]).startsWith("DELETE FROM kv"))
+
+			expect(deletes).toHaveLength(1)
+			// ';' is ':' + 1 — the exclusive upper bound that stops at the end of the v1 namespace.
+			expect(deletes[0]?.[1]).toEqual(["reactQuery_v1:", "reactQuery_v1;"])
+
+			const bounds = deletes.flatMap(call => call[1] as string[])
+
+			expect(bounds.some(bound => bound.startsWith("cameraUpload"))).toBe(false)
+			expect(bounds).not.toContain(`${QUERY_CLIENT_PERSISTER_PREFIX}:`)
+		})
+
 		it("handles empty SQLite gracefully", async () => {
 			const kv = new QueryPersisterKv()
 			await kv.restore()

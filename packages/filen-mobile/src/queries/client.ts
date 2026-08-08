@@ -1,7 +1,7 @@
 import { QueryClient, QueryCache, onlineManager, notifyManager, type UseQueryOptions } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
 import sqlite from "@/lib/sqlite"
-import { forEachKvRowByPrefix } from "@/lib/kvScan"
+import { forEachKvRowByPrefix, prefixUpperBound } from "@/lib/kvScan"
 import alerts from "@/lib/alerts"
 import { serialize, deserialize } from "@/lib/serializer"
 import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
@@ -12,7 +12,12 @@ import useAppStore from "@/stores/useApp.store"
 import logger from "@/lib/logger"
 
 // Critical: When changing anything related to query persistence, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
-export const VERSION = 1
+// v2: the SDK's File gained `stableUuid`, and a drive mutation now REFUSES a file that lacks one
+// (ErrorKind.MissingStableUuid — see TryFrom<File> for RemoteFile). Rows persisted by an older build
+// carry no such field, so replaying them would hand every listing an item that cannot be renamed,
+// favorited or trashed until its listing happened to refetch. Dropping them is the only shape-safe
+// migration; restoreQueries prunes the abandoned range.
+export const VERSION = 2
 export const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
 // 365 days. Drives gcTime + the persister maxAge + the boot restore-drop (an entry is evicted at
 // restore when dataUpdatedAt + this < now). dataUpdatedAt = last online view OR optimistic touch
@@ -338,6 +343,13 @@ export class QueryPersisterKv {
 
 		this.restoredOnce = true
 
+		// Rows written under an older VERSION are never read again — the walk above is scoped to the
+		// current prefix — so without this they sit in the kv forever, tens of MB on a large account.
+		// Deliberately not awaited: nothing downstream depends on it, and the one launch that finds a
+		// full previous cache would otherwise pay the whole delete before boot continues. An
+		// interrupted run just finishes next launch.
+		void this.prunePreviousVersions()
+
 		const payload = {
 			count: this.buffer.size,
 			ms: (performance.now() - now).toFixed(2)
@@ -347,6 +359,25 @@ export class QueryPersisterKv {
 			logger.warn("queries-restore", "Persisted query row scan was slow", payload)
 		} else {
 			logger.debug("queries-restore", "Restored persisted query rows", payload)
+		}
+	}
+
+	/**
+	 * Deletes the kv rows left behind by every superseded persister VERSION. Ranged rather than
+	 * `LIKE`, which cannot use the primary-key index (see prefixUpperBound). Never throws — this is
+	 * housekeeping, and a failed run costs disk, not correctness.
+	 */
+	private async prunePreviousVersions(): Promise<void> {
+		try {
+			const db = await sqlite.openDb()
+
+			for (let version = 1; version < VERSION; version++) {
+				const prefix = `reactQuery_v${version}:`
+
+				await db.execute("DELETE FROM kv WHERE key >= ? AND key < ?", [prefix, prefixUpperBound(prefix)])
+			}
+		} catch (err) {
+			logger.warn("queries-restore", "Failed to prune superseded persisted query rows", { error: err })
 		}
 	}
 
