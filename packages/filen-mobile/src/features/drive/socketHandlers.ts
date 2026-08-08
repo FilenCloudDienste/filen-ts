@@ -313,20 +313,26 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 					})
 				}
 
-				const item = unwrappedFileIntoDriveItem(unwrapFileMeta(fromCache))
+				// `newUuid` means this uuid was superseded by an edit on a versioning-disabled account,
+				// NOT a user trash action — the server retires the old version through the same event.
+				// Dropping the superseded row above is right either way; showing it in Trash is not,
+				// and would make every save on such an account look like the file was thrown away.
+				if (!inner.newUuid) {
+					const item = unwrappedFileIntoDriveItem(unwrapFileMeta(fromCache))
 
-				// Do NOT re-add to recents: the global removal above already
-				// removed the item from every listing including recents, which is
-				// correct — trashed files must not appear there.
-				driveItemsQueryUpdate({
-					params: {
-						path: {
-							type: "trash",
-							uuid: null
-						}
-					},
-					updater: prev => [...prev.filter(i => i.data.uuid !== fromCache.uuid), item]
-				})
+					// Do NOT re-add to recents: the global removal above already
+					// removed the item from every listing including recents, which is
+					// correct — trashed files must not appear there.
+					driveItemsQueryUpdate({
+						params: {
+							path: {
+								type: "trash",
+								uuid: null
+							}
+						},
+						updater: prev => [...prev.filter(i => i.data.uuid !== fromCache.uuid), item]
+					})
+				}
 			}
 
 			break

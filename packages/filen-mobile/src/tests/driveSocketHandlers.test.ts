@@ -179,9 +179,10 @@ function makeFolderMetadataChangedEvent(uuid: string, meta: unknown): DriveSocke
 	return makeEvent(DriveEvent_Tags.FolderMetadataChanged, { uuid, meta })
 }
 
-// fileTrash / folderTrash — inner.uuid
-function makeFileTrashEvent(uuid: string): DriveSocketEvent {
-	return makeEvent(DriveEvent_Tags.FileTrash, { uuid })
+// fileTrash / folderTrash — inner.uuid. `newUuid` (SDK 0.4.37+) marks the payload as an edit that
+// superseded `uuid` on a versioning-disabled account rather than a user trash action.
+function makeFileTrashEvent(uuid: string, newUuid?: string): DriveSocketEvent {
+	return makeEvent(DriveEvent_Tags.FileTrash, { uuid, newUuid })
 }
 
 // folderTrash — inner.parent (old parent uuid) + inner.uuid; the SDK payload carries the full pair.
@@ -863,6 +864,35 @@ describe("handleDriveEvent — drive socket handler", () => {
 			await handleDriveEvent({ event: makeFileTrashEvent("file-not-cached") })
 
 			expect(mockRemoveFromSelection).toHaveBeenCalledWith(["file-not-cached"])
+		})
+
+		it("does NOT add to trash when the payload carries newUuid — that is an edit, not a trash", async () => {
+			// A versioning-disabled account retires the superseded version through this same event, so
+			// every save (the text/pdf editors re-upload) would otherwise drop the old copy into Trash
+			// and make the user's own edit look like a deletion.
+			const rawFile = { uuid: "file-edited", parent: {} }
+
+			mockCacheFileUuidToNormalFileGet.mockReturnValue(rawFile)
+			mockUnwrapFileMeta.mockReturnValue({ file: rawFile, meta: null })
+			mockUnwrappedFileIntoDriveItem.mockReturnValue({ type: "file", data: { uuid: "file-edited" } })
+
+			await handleDriveEvent({ event: makeFileTrashEvent("file-edited", "file-edited-v2") })
+
+			expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
+		})
+
+		it("still drops the superseded uuid from its parent listing when newUuid is set", async () => {
+			// The old uuid genuinely stopped being the live file, so its row must go — only the trash
+			// half is wrong for an edit.
+			const rawFile = { uuid: "file-edited", parent: {} }
+
+			mockCacheFileUuidToNormalFileGet.mockReturnValue(rawFile)
+			mockUnwrapFileMeta.mockReturnValue({ file: rawFile, meta: null })
+
+			await handleDriveEvent({ event: makeFileTrashEvent("file-edited", "file-edited-v2") })
+
+			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledWith(expect.objectContaining({ parentUuid: "parent-1" }))
+			expect(mockRemoveFromSelection).toHaveBeenCalledWith(["file-edited"])
 		})
 	})
 
