@@ -6,6 +6,7 @@ import auth from "@/lib/auth"
 import secureStore from "@/lib/secureStore"
 import logger from "@/lib/logger"
 import { getOrCreateAuthDek, purgeAuthDek, sealAuthFile, openAuthFile } from "@/features/settings/authFileKey"
+import { atomicWrite } from "@/lib/fsAtomic"
 import { registerDomain, unregisterDomain } from "@/modules/file-provider-domain"
 
 // Safety floor for cache budgets. Below this the extension would thrash —
@@ -268,13 +269,13 @@ class FileProvider {
 	// hold writeMutex — this never acquires it, so it can be reused inside a longer locked transaction
 	// (e.g. enable()) without deadlocking the single-permit Semaphore.
 	private writeUnlocked(data: AuthFileSchema, dek: Uint8Array): void {
-		if (AUTH_FILE.exists) {
-			AUTH_FILE.delete()
-		}
-
-		AUTH_FILE.create()
-
-		AUTH_FILE.write(sealAuthFile(JSON.stringify(data, null, 4), dek))
+		// Write-temp-then-move instead of the old delete → create → write-in-place: the file
+		// provider extension reads this file on its own schedule from another process, and the
+		// in-place rewrite left a window where auth.json was missing or partial — states the
+		// extension cannot tell apart from a disable/corruption. (The move is still not
+		// crash-atomic — see fsAtomic — but the extension additionally re-confirms a disable
+		// before acting destructively on one.)
+		atomicWrite(AUTH_FILE, sealAuthFile(JSON.stringify(data, null, 4), dek))
 
 		logger.info("file-provider", "auth.json written (encrypted)", { providerEnabled: data.providerEnabled, hasSdkConfig: data.sdkConfig !== null, maxCacheFilesBudget: data.maxCacheFilesBudget ?? null, maxThumbnailFilesBudget: data.maxThumbnailFilesBudget ?? null })
 	}
