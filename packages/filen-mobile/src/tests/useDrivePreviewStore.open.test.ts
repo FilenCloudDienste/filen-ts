@@ -753,4 +753,30 @@ describe("useDrivePreviewStore.open — navigation identity", () => {
 		expect(second?.[0]).toMatchObject({ pathname: "/drivePreview" })
 		expect(JSON.stringify(first?.[0])).not.toBe(JSON.stringify(second?.[0]))
 	})
+
+	describe("contentScrolled (header scrim)", () => {
+		it("starts unscrolled, so the scrim is not painted before the document has moved", () => {
+			expect(useDrivePreviewStore.getState().contentScrolled).toBe(false)
+		})
+
+		it("clears on reset, so the next preview does not open behind a stale scrim", () => {
+			useDrivePreviewStore.getState().setContentScrolled(true)
+
+			expect(useDrivePreviewStore.getState().contentScrolled).toBe(true)
+
+			useDrivePreviewStore.getState().reset()
+
+			expect(useDrivePreviewStore.getState().contentScrolled).toBe(false)
+		})
+
+		it("clears when the gallery unmounts, which is the path a real close takes", () => {
+			// endSession() is what the gallery calls on unmount; it resets and replays any parked open.
+			// A flag surviving THAT is what would carry a scrim from a scrolled file onto the next one.
+			useDrivePreviewStore.getState().setContentScrolled(true)
+
+			useDrivePreviewStore.getState().endSession()
+
+			expect(useDrivePreviewStore.getState().contentScrolled).toBe(false)
+		})
+	})
 })

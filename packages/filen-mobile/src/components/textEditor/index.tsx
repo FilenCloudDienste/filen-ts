@@ -96,6 +96,18 @@ export type TextEditorEvents =
 			type: "externalLinkClicked"
 			data: string
 	  }
+	| {
+			// DOM → native: the scroller crossed the "content is under the header" threshold.
+			//
+			// A CROSSING, not a stream. The only consumer is the drive preview's header scrim, which
+			// needs a boolean, and this bridge already carries the document — see the note on
+			// contentEdited about what per-event traffic costs here. The DOM side dedupes, so this
+			// arrives once per state change rather than once per scroll event.
+			type: "scrolled"
+			data: {
+				scrolled: boolean
+			}
+	  }
 	// ── Chunked-document mode (drive file preview) ────────────────────────────
 	// The document is pulled and pushed through bounded RPCs rather than carried in props and
 	// messages, so these carry no content — only which document-sized thing happened.
@@ -195,6 +207,7 @@ export const TextEditor = ({
 	saveHandleRef,
 	onDocumentEditedChange,
 	onDocumentStatus,
+	onScrolledChange,
 	paddingTop,
 	paddingBottom
 }: {
@@ -229,6 +242,8 @@ export const TextEditor = ({
 	saveHandleRef?: { current: (() => Promise<File | null>) | null }
 	onDocumentEditedChange?: (edited: boolean) => void
 	onDocumentStatus?: (status: TextEditorDocumentStatus) => void
+	/** Fires when the document crosses the scrolled threshold, once per change — see the `scrolled` event. */
+	onScrolledChange?: (scrolled: boolean) => void
 	paddingTop?: number
 	paddingBottom?: number
 }) => {
@@ -296,6 +311,12 @@ export const TextEditor = ({
 
 				case "contentEdited": {
 					onDocumentEditedChange?.(true)
+
+					break
+				}
+
+				case "scrolled": {
+					onScrolledChange?.(message.data.scrolled)
 
 					break
 				}

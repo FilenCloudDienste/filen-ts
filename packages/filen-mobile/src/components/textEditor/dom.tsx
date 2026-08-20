@@ -24,6 +24,7 @@ import {
 } from "@/components/textEditor/codeMirrorLayout"
 import { decodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
 import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
+import { isScrolled } from "@/components/textEditor/scrollReporting"
 import { readAllText, writeAllBytes, type ChunkWriter, type RangeReader } from "@/lib/rangeTransfer"
 import { isProbablyBinaryText } from "@/lib/previewType"
 import MDEditor from "@uiw/react-md-editor"
@@ -148,6 +149,14 @@ const TextEditorDOM = ({
 }) => {
 	const [value, setValue] = useState<string>(() => decodeEditorInitialValue(initialValue ?? ""))
 	const codeMirrorRef = useRef<ReactCodeMirrorRef>(null)
+	// The CodeMirror view, held in STATE rather than read off the ref, so the scroll effect below
+	// re-runs once the editor exists. Its scroller (.cm-scroller) is created with the view, not with
+	// this component.
+	const [editorView, setEditorView] = useState<EditorView | null>(null)
+	// Markdown preview mode renders a different scroller entirely (see the early return below) and
+	// does not mount CodeMirror at all, so it needs its own handle.
+	const previewScrollRef = useRef<HTMLDivElement>(null)
+	const scrolledReportedRef = useRef<boolean>(false)
 	// Chunked mode reports only that the document changed, never the document itself — see onChange.
 	const chunked = readRange !== undefined && fileSize !== undefined
 	const editedReportedRef = useRef<boolean>(false)
@@ -517,9 +526,60 @@ const TextEditorDOM = ({
 		}
 	}, [])
 
+	// Report whether the document is scrolled, for the drive preview's header scrim.
+	//
+	// Which element scrolls depends on the mode: CodeMirror's own .cm-scroller in the editor, and the
+	// overflow container of the markdown preview, which replaces the editor outright rather than
+	// wrapping it. Both are resolved here so the report does not go dead the moment the preview button
+	// is pressed.
+	//
+	// Only CROSSINGS are posted. A scroll listener fires per frame while a finger is down, and this
+	// bridge already carries the document — see the note on the chunked onChange path.
+	useEffect(() => {
+		const scroller = markdownPreviewActive && type === "markdown" ? previewScrollRef.current : (editorView?.scrollDOM ?? null)
+
+		const report = (scrolled: boolean) => {
+			if (scrolledReportedRef.current === scrolled) {
+				return
+			}
+
+			scrolledReportedRef.current = scrolled
+
+			postMessageRef.current({
+				type: "scrolled",
+				data: {
+					scrolled
+				}
+			})
+		}
+
+		if (!scroller) {
+			report(false)
+
+			return
+		}
+
+		const onScroll = () => report(isScrolled(scroller.scrollTop))
+
+		// The two modes keep INDEPENDENT scroll positions, so a flag set in one must not carry into the
+		// other: switching to a preview that sits at the top has to clear it, and switching back to an
+		// editor that was left scrolled has to re-assert it. Reporting the new scroller's actual state
+		// on attach covers both, and is a no-op on first mount (nothing has been reported yet).
+		onScroll()
+
+		scroller.addEventListener("scroll", onScroll, {
+			passive: true
+		})
+
+		return () => {
+			scroller.removeEventListener("scroll", onScroll)
+		}
+	}, [editorView, markdownPreviewActive, type])
+
 	if (markdownPreviewActive && type === "markdown") {
 		return (
 			<div
+				ref={previewScrollRef}
 				style={{
 					overflowX: "hidden",
 					overflowY: "auto",
@@ -561,6 +621,7 @@ const TextEditorDOM = ({
 	return (
 		<CodeMirror
 			ref={codeMirrorRef}
+			onCreateEditor={setEditorView}
 			value={value}
 			// A definite height, never a minimum — see CODE_MIRROR_DIMENSIONS.
 			{...CODE_MIRROR_DIMENSIONS}

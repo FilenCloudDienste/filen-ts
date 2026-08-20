@@ -39,6 +39,7 @@ const PreviewTextInner = ({
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
+	const setContentScrolled = useDrivePreviewStore(useShallow(state => state.setContentScrolled))
 	const insets = useSafeAreaInsets()
 	const [hasEdits, setHasEdits] = useRecyclingState<boolean>(false, [galleryItemKey(item)])
 	const [status, setStatus] = useRecyclingState<TextEditorDocumentStatus | "loading">("loading", [galleryItemKey(item)])
@@ -200,6 +201,7 @@ const PreviewTextInner = ({
 				key={galleryItemKey(item)}
 				onDocumentEditedChange={setHasEdits}
 				onDocumentStatus={setStatus}
+				onScrolledChange={setContentScrolled}
 				readRange={source.readRange}
 				fileSize={source.size}
 				saveHandleRef={saveHandleRef}

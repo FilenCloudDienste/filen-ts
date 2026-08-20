@@ -2,6 +2,15 @@ import { StyleSheet } from "react-native"
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg"
 
 /**
+ * How long the scrim takes to fade in once the document starts scrolling, and out again at the top.
+ *
+ * The signal behind it is a threshold crossing, not a scroll offset (see scrollReporting), so this
+ * is what supplies the motion — short enough to feel attached to the gesture, long enough not to
+ * read as a hard cut.
+ */
+export const SCRIM_FADE_DURATION_MS = 200
+
+/**
  * Backdrop for the preview header where it stays transparent over scrolling content.
  *
  * The WebView previews extend edge to edge (see domKeyboardHost's DOM_HOST_WEBVIEW_PROPS), so their
@@ -30,12 +39,12 @@ export function HeaderScrim({ color }: { color: string }) {
 					<Stop
 						offset="0"
 						stopColor={color}
-						stopOpacity={1}
+						stopOpacity={0.75}
 					/>
 					<Stop
 						offset="0.65"
 						stopColor={color}
-						stopOpacity={0.75}
+						stopOpacity={0.35}
 					/>
 					<Stop
 						offset="1"

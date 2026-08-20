@@ -1,6 +1,6 @@
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
-import { useAnimatedStyle } from "react-native-reanimated"
+import { useAnimatedStyle, withTiming } from "react-native-reanimated"
 import Text from "@/components/ui/text"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { PressableScale } from "@/components/ui/pressables"
@@ -9,7 +9,7 @@ import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import useViewLayout from "@/hooks/useViewLayout"
 import { useRef, useEffect, Fragment } from "react"
 import { useTranslation } from "react-i18next"
-import { type View as TView, Platform } from "react-native"
+import { type View as TView, Platform, StyleSheet } from "react-native"
 import DriveItemMenu from "@/features/drive/components/item/menu"
 import useDriveItemStoredOfflineQuery from "@/features/drive/queries/useDriveItemStoredOffline.query"
 import { useShallow } from "zustand/shallow"
@@ -20,7 +20,7 @@ import { useResolveClassNames } from "uniwind"
 import Menu from "@/components/ui/menu"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 import SafeAreaView from "@/components/ui/safeAreaView"
-import HeaderScrim, { drivePreviewHeaderNeedsScrim } from "@/components/drivePreview/headerScrim"
+import HeaderScrim, { drivePreviewHeaderNeedsScrim, SCRIM_FADE_DURATION_MS } from "@/components/drivePreview/headerScrim"
 import logger from "@/lib/logger"
 
 const GalleryHeader = ({
@@ -66,6 +66,19 @@ const GalleryHeader = ({
 		solidHeader: solidHeader ?? false
 	})
 	const bgBackground = useResolveClassNames("bg-background")
+	const contentScrolled = useDrivePreviewStore(useShallow(state => state.contentScrolled))
+
+	// The scrim earns its place only once content is actually behind the title, so it fades in on
+	// the scrolled crossing rather than being painted from the first frame. Applied to a wrapper
+	// NESTED inside the header's own animated opacity, so the two multiply: a header hidden for
+	// immersive video (#53) cannot show a visible scrim through it.
+	const scrimAnimatedStyle = useAnimatedStyle(() => {
+		return {
+			opacity: withTiming(contentScrolled ? 1 : 0, {
+				duration: SCRIM_FADE_DURATION_MS
+			})
+		}
+	}, [contentScrolled])
 
 	const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery(
 		{
@@ -91,7 +104,14 @@ const GalleryHeader = ({
 			style={animatedStyle}
 			pointerEvents={pointerEvents}
 		>
-			{needsScrim && <HeaderScrim color={bgBackground.backgroundColor as string} />}
+			{needsScrim && (
+				<AnimatedView
+					style={[StyleSheet.absoluteFill, scrimAnimatedStyle]}
+					pointerEvents="none"
+				>
+					<HeaderScrim color={bgBackground.backgroundColor as string} />
+				</AnimatedView>
+			)}
 			<SafeAreaView
 				edges={["top", "left", "right"]}
 				className="bg-transparent"

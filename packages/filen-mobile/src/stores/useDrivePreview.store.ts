@@ -53,6 +53,14 @@ export type DrivePreviewStore = {
 	// leave), false if it could not save (e.g. offline) — in which case the guard keeps the user put.
 	saveEdits: (() => Promise<boolean>) | null
 	setSaveEdits: (fn: (() => Promise<boolean>) | null) => void
+	// Whether the open text/code preview's document is scrolled far enough for its content to sit under
+	// the transparent header. Drives the header scrim's fade — see headerScrim.
+	//
+	// A single flag rather than one per item because a text/code preview is ALWAYS a single-item
+	// gallery: open() collapses those types to just the tapped file, so there is no page to swipe to
+	// and no second document whose scroll position could be confused with this one.
+	contentScrolled: boolean
+	setContentScrolled: (value: boolean) => void
 }
 
 export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
@@ -78,7 +86,8 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 			hasUnsavedEdits: false,
 			saveEdits: null,
 			isLeaving: false,
-			pendingOpen: null
+			pendingOpen: null,
+			contentScrolled: false
 		})
 	},
 	isLeaving: false,
@@ -132,6 +141,12 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 	setSaveEdits(fn) {
 		set({
 			saveEdits: fn
+		})
+	},
+	contentScrolled: false,
+	setContentScrolled(value) {
+		set({
+			contentScrolled: value
 		})
 	},
 	open({ items, initialItem }) {
