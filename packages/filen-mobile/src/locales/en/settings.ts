@@ -72,6 +72,13 @@ export const settings = {
 	/** Confirm dialog message: the native provider bypasses the in-app biometric gate, so enabling it disables biometric lock */
 	file_provider_disables_biometric_message:
 		"The provider lets the system access your files directly, bypassing the in-app biometric lock. Enabling it will turn off biometric lock. Do you want to continue?",
+	/** Info dialog title after the file provider domain was registered for the first time (iOS adds it disabled) */
+	file_provider_enable_in_files_app_title: "One more step",
+	/** Info dialog message: a freshly registered file provider location starts disabled in the Files app */
+	file_provider_enable_in_files_app_message:
+		"iOS adds new locations to the Files app switched off. Open the Files app, go to Browse → Locations, tap Edit and switch on Filen.",
+	/** Toast shown when the file provider domain had to be re-registered at startup (it starts disabled in Files.app) */
+	file_provider_enable_in_files_app: "To use the Filen file provider, switch on Filen under Browse → Locations in the Files app.",
 
 	// ── Account screen ────────────────────────────────────────────────────────
 	/** Account screen — header title */

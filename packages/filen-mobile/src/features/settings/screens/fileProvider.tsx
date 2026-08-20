@@ -8,7 +8,7 @@ import SettingsHeader from "@/components/ui/settingsHeader"
 import { Platform } from "react-native"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
-import { useSecureStore } from "@/lib/secureStore"
+import secureStore, { useSecureStore } from "@/lib/secureStore"
 import fileProvider, { FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/features/settings/fileProvider"
 import { type Biometric } from "@/features/settings/screens/biometric"
 import Text from "@/components/ui/text"
@@ -100,27 +100,74 @@ function FileProviderSettings() {
 						}
 					}
 
-					// Enable the provider FIRST — only commit the biometric teardown
-					// once we know the enable succeeded, so a disk/SDK failure does not
-					// silently disable biometric without turning the provider on.
+					// The consented biometric teardown lands FIRST — enable() itself refuses to
+					// run while biometric lock is on (the single gate covering every enable
+					// path), so the persisted value must be off before the call. Written through
+					// secureStore directly: the hook setter persists asynchronously, and
+					// enable() reads the store. Restored if enable() fails, so a disk/SDK
+					// failure does not silently strip biometric without turning the provider on.
+					const previousBiometric = biometric
+
+					if (biometric.enabled) {
+						await secureStore.set("biometric", { enabled: false } satisfies Biometric)
+						setBiometric({
+							enabled: false
+						})
+					}
+
 					const enableResult = await run(async () => {
-						await fileProvider.enable()
+						return await fileProvider.enable()
 					})
 
 					if (!enableResult.success) {
+						// enable() can fail AFTER its auth.json write (registerDomain rejection or
+						// timeout). Restoring biometric on top of that would durably violate the
+						// exclusivity invariant — both toggles on, credentials at rest, and the
+						// startup reconcile's biometric arm never repairs auth.json. Roll the
+						// provider all the way off before giving biometric back.
+						const rollbackResult = await run(async () => {
+							await fileProvider.disable()
+						})
+
+						if (!rollbackResult.success) {
+							// The rollback is what makes restoring biometric safe: it failed, so
+							// auth.json is still on disk with providerEnabled:true and real
+							// credentials. Turning biometric back on here would put both toggles
+							// on at once — the exact state the exclusivity invariant forbids, and
+							// one the startup reconcile cannot repair (it unregisters the domain
+							// but never deletes auth.json, and enabled() re-syncs the mirror to
+							// true). Leave biometric off and surface the failure instead.
+							logger.error("file-provider", "enable() rollback disable() failed; leaving biometric off to preserve the provider/biometric exclusivity invariant", { error: rollbackResult.error })
+							alerts.error(enableResult.error)
+
+							return
+						}
+
+						if (previousBiometric.enabled) {
+							await secureStore.set("biometric", previousBiometric)
+							setBiometric(previousBiometric)
+						}
+
 						logger.error("file-provider", "enable() failed", { error: enableResult.error })
 						alerts.error(enableResult.error)
 
 						return
 					}
 
-					if (biometric.enabled) {
-						setBiometric({
-							enabled: false
+					setEnabled(true)
+
+					if (enableResult.data.freshlyRegistered) {
+						// A freshly registered domain lands disabled in Files.app — without this
+						// hint nothing appears until the user finds the Locations toggle themselves.
+						await run(async () => {
+							return await prompts.alert({
+								title: t("file_provider_enable_in_files_app_title"),
+								message: t("file_provider_enable_in_files_app_message"),
+								okText: t("ok"),
+								singleButton: true
+							})
 						})
 					}
-
-					setEnabled(true)
 				}
 			}
 		}

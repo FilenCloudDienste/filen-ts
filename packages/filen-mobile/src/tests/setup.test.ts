@@ -47,7 +47,7 @@ const {
 		mockSweepStrayDownloadFiles: vi.fn(),
 		mockForegroundService: { init: vi.fn() },
 		mockOffline: { updateIndex: vi.fn(), sync: vi.fn() },
-		mockAlerts: { error: vi.fn() },
+		mockAlerts: { error: vi.fn(), normal: vi.fn() },
 		mockFileCache: { gc: vi.fn() },
 		mockAudioCache: { gc: vi.fn() },
 		mockInitI18n: vi.fn(),
@@ -103,8 +103,13 @@ vi.mock("@/features/offline/offline", () => ({ default: mockOffline }))
 vi.mock("@/lib/alerts", () => ({ default: mockAlerts }))
 vi.mock("@/features/transfers/foregroundService", () => ({ default: mockForegroundService }))
 // fileProvider pulls in native modules (expo-secure-store, the Android Keystore module) via authFileKey;
-// setup() only fire-and-forgets ensureEncrypted(), so a thin stub is enough.
-vi.mock("@/features/settings/fileProvider", () => ({ default: { ensureEncrypted: vi.fn(async () => {}) } }))
+// setup() only fire-and-forgets ensureEncrypted() + reconcileDomainRegistration(), so thin stubs are enough.
+vi.mock("@/features/settings/fileProvider", () => ({
+	default: {
+		ensureEncrypted: vi.fn(async () => ({ freshlyRegistered: false })),
+		reconcileDomainRegistration: vi.fn(async () => ({ freshlyRegistered: false }))
+	}
+}))
 vi.mock("@/features/drive/driveSearch", () => ({
 	default: { init: vi.fn(async () => {}), closeActive: vi.fn(async () => {}), teardownOnLogout: vi.fn(async () => {}) }
 }))
@@ -114,11 +119,15 @@ vi.mock("@/lib/reconnect", () => ({ startReconnectListener: mockStartReconnectLi
 vi.mock("@/lib/fileCache", () => ({ default: mockFileCache }))
 vi.mock("@/lib/logger", () => ({ default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 vi.mock("@/features/audio/audioCache", () => ({ default: mockAudioCache }))
-vi.mock("@/lib/i18n", () => ({ initI18n: mockInitI18n }))
+// `t` too, not just initI18n: setup's Files.app hint calls it, and without it
+// the call threw into the chain's trailing catch — silently skipping the toast
+// in every test that thought it was covering this path.
+vi.mock("@/lib/i18n", () => ({ initI18n: mockInitI18n, t: (key: string) => key }))
 vi.mock("@/lib/theme", () => ({ initTheme: mockInitTheme }))
 
 import setup from "@/lib/setup"
 import logger from "@/lib/logger"
+import fileProvider from "@/features/settings/fileProvider"
 
 const STRINGIFIED_CLIENT = { rootUuid: "root-uuid-1" } as any
 
@@ -150,6 +159,49 @@ beforeEach(() => {
 })
 
 describe("setup.setup", () => {
+	// The Files.app hint is the whole point of the reconcile chain, and until
+	// now nothing asserted it fired — both stubs were pinned to false, so the
+	// toast path was never taken by any test.
+	it("shows the Files.app hint when the startup reconcile registers the domain", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
+		vi.mocked(fileProvider.reconcileDomainRegistration).mockResolvedValueOnce({ freshlyRegistered: true })
+
+		await setup.setup()
+		// The reconcile chain is fire-and-forget: let its promise links settle.
+		for (let i = 0; i < 10; i++) {
+			await new Promise(resolve => setTimeout(resolve, 0))
+		}
+
+		expect(mockAlerts.normal).toHaveBeenCalled()
+	})
+
+	// The migration cohort registers inside ensureEncrypted(), so the reconcile
+	// that follows reports false — the hint must still fire for them.
+	it("shows the Files.app hint when the encryption migration registers the domain", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
+		vi.mocked(fileProvider.ensureEncrypted).mockResolvedValueOnce({ freshlyRegistered: true })
+
+		await setup.setup()
+		// The reconcile chain is fire-and-forget: let its promise links settle.
+		for (let i = 0; i < 10; i++) {
+			await new Promise(resolve => setTimeout(resolve, 0))
+		}
+
+		expect(mockAlerts.normal).toHaveBeenCalled()
+	})
+
+	it("shows no hint when nothing was newly registered", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
+
+		await setup.setup()
+		// The reconcile chain is fire-and-forget: let its promise links settle.
+		for (let i = 0; i < 10; i++) {
+			await new Promise(resolve => setTimeout(resolve, 0))
+		}
+
+		expect(mockAlerts.normal).not.toHaveBeenCalled()
+	})
+
 	it("returns { isAuthed: false } when not authenticated", async () => {
 		mockAuth.isAuthed.mockResolvedValue({ isAuthed: false })
 

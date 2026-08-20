@@ -70,7 +70,24 @@ vi.mock("@/features/settings/authFileKey", () => ({
 // fileProvider.test.ts is the only suite that loads the real fileProvider module.
 vi.mock("@/modules/file-provider-domain", () => ({
 	registerDomain: vi.fn(async () => {}),
-	unregisterDomain: vi.fn(async () => {})
+	unregisterDomain: vi.fn(async () => {}),
+	isDomainRegistered: vi.fn(async () => false)
+}))
+
+// fsAtomic pulls in expo-crypto (randomUUID) and the tmp helpers, which are unloadable in the node
+// test env. The mock preserves the observable contract writeUnlocked relies on: the destination
+// ends up holding exactly the sealed payload.
+vi.mock("@/lib/fsAtomic", () => ({
+	atomicWrite: (file: { exists: boolean; delete: () => void; create: () => void; write: (data: unknown) => void }, data: unknown) => {
+		if (file.exists) {
+			file.delete()
+		}
+
+		file.create()
+		file.write(data)
+
+		return file
+	}
 }))
 
 import fileProvider, {
@@ -82,7 +99,7 @@ import fileProvider, {
 import { fs } from "@/tests/mocks/expoFileSystem"
 import auth from "@/lib/auth"
 import { Platform } from "@/tests/mocks/reactNative"
-import { registerDomain, unregisterDomain } from "@/modules/file-provider-domain"
+import { registerDomain, unregisterDomain, isDomainRegistered } from "@/modules/file-provider-domain"
 
 beforeEach(() => {
 	fs.clear()
@@ -428,14 +445,27 @@ describe("fileProvider", () => {
 			expect(AUTH_FILE.exists).toBe(false)
 		})
 
-		it("a failed registration does not fail enable()", async () => {
+		it("a failed registration fails enable(), leaving auth.json for the startup reconcile", async () => {
 			vi.mocked(registerDomain).mockRejectedValueOnce(new Error("NSFileProviderErrorDomain -2011"))
 
-			await expect(fileProvider.enable()).resolves.toBeUndefined()
+			await expect(fileProvider.enable()).rejects.toThrow()
 
-			// The provider degrades to "not registered": auth.json and the UI flag still land.
+			// Swallowing the failure reported the provider as enabled while no domain existed and
+			// nothing ever showed up in Files.app. auth.json deliberately stays enabled so
+			// reconcileDomainRegistration() retries the registration on every authed launch — but
+			// the caller must see the failure, and the UI flag must not flip on this call.
 			expect(AUTH_FILE.exists).toBe(true)
-			expect(mockSecureStoreData.get(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY)).toBe(true)
+			expect(mockSecureStoreData.get(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY)).toBeUndefined()
+		})
+
+		it("reports freshlyRegistered exactly when the domain was not registered before", async () => {
+			vi.mocked(isDomainRegistered).mockResolvedValueOnce(false)
+
+			await expect(fileProvider.enable()).resolves.toEqual({ freshlyRegistered: true })
+
+			vi.mocked(isDomainRegistered).mockResolvedValueOnce(true)
+
+			await expect(fileProvider.enable()).resolves.toEqual({ freshlyRegistered: false })
 		})
 
 		it("a failed unregistration still clears the credentials", async () => {
@@ -456,6 +486,214 @@ describe("fileProvider", () => {
 			await fileProvider.disable()
 
 			expect(registerDomain).not.toHaveBeenCalled()
+			expect(unregisterDomain).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("reconcileDomainRegistration", () => {
+		it("registers a missing domain while the provider is enabled", async () => {
+			await fileProvider.enable()
+			vi.mocked(registerDomain).mockClear()
+			vi.mocked(isDomainRegistered).mockResolvedValueOnce(false)
+
+			await expect(fileProvider.reconcileDomainRegistration()).resolves.toEqual({ freshlyRegistered: true })
+
+			expect(registerDomain).toHaveBeenCalledWith(FILE_PROVIDER_DOMAIN_IDENTIFIER, FILE_PROVIDER_DOMAIN_DISPLAY_NAME)
+		})
+
+		it("does nothing when the domain is already registered", async () => {
+			await fileProvider.enable()
+			vi.mocked(registerDomain).mockClear()
+			vi.mocked(isDomainRegistered).mockResolvedValueOnce(true)
+
+			await expect(fileProvider.reconcileDomainRegistration()).resolves.toEqual({ freshlyRegistered: false })
+
+			expect(registerDomain).not.toHaveBeenCalled()
+		})
+
+		it("does nothing when the provider is disabled", async () => {
+			await expect(fileProvider.reconcileDomainRegistration()).resolves.toEqual({ freshlyRegistered: false })
+
+			expect(registerDomain).not.toHaveBeenCalled()
+		})
+
+		it("enable() itself refuses to run while biometric lock is on", async () => {
+			// The single gate covering every enable path — the settings screen (which collects
+			// consent and flips biometric off first) AND the unattended ensureEncrypted
+			// migration, which previously registered the domain ungated.
+			mockSecureStoreData.set("biometric", { enabled: true })
+
+			await expect(fileProvider.enable()).rejects.toThrow(/biometric/)
+
+			expect(registerDomain).not.toHaveBeenCalled()
+			expect(AUTH_FILE.exists).toBe(false)
+		})
+
+		it("removes a domain that landed while biometric lock is on", async () => {
+			// A timed-out enable()'s uncancelled native registration can land AFTER the failure
+			// was reported: biometric still on, domain registered. The reconcile repairs the
+			// exclusivity invariant instead of ratifying it via the already-registered
+			// early-return.
+			await fileProvider.enable()
+			vi.mocked(registerDomain).mockClear()
+			mockSecureStoreData.set("biometric", { enabled: true })
+			vi.mocked(isDomainRegistered).mockResolvedValueOnce(true)
+
+			await expect(fileProvider.reconcileDomainRegistration()).resolves.toEqual({ freshlyRegistered: false })
+
+			expect(unregisterDomain).toHaveBeenCalledWith(FILE_PROVIDER_DOMAIN_IDENTIFIER)
+			expect(registerDomain).not.toHaveBeenCalled()
+		})
+
+		it("removes an orphan domain when the provider is disabled", async () => {
+			// A failed or timed-out unregister during disable/logout leaves a dead domain
+			// serving notAuthenticated forever; the reconcile is the only thing that ever
+			// repairs it.
+			vi.mocked(isDomainRegistered).mockResolvedValueOnce(true)
+
+			await expect(fileProvider.reconcileDomainRegistration()).resolves.toEqual({ freshlyRegistered: false })
+
+			expect(unregisterDomain).toHaveBeenCalledWith(FILE_PROVIDER_DOMAIN_IDENTIFIER)
+			expect(registerDomain).not.toHaveBeenCalled()
+		})
+
+		it("leaves the domain unregistered while biometric lock is on", async () => {
+			// Registering arms Files.app to bypass the in-app biometric gate — the trade the
+			// settings screen collects explicit consent for. The unattended startup reconcile
+			// must never complete it silently.
+			await fileProvider.enable()
+			vi.mocked(registerDomain).mockClear()
+			vi.mocked(isDomainRegistered).mockResolvedValueOnce(false)
+			mockSecureStoreData.set("biometric", { enabled: true })
+
+			await expect(fileProvider.reconcileDomainRegistration()).resolves.toEqual({ freshlyRegistered: false })
+
+			expect(registerDomain).not.toHaveBeenCalled()
+		})
+
+		it("a stalled orphan probe does not unregister the domain a concurrent enable() registered", async () => {
+			// The probes run outside writeMutex and can stall up to 15s. The probe result is
+			// only a hint: the destructive call re-reads app state under the mutex, so an
+			// enable() that completed in the stall window keeps its freshly registered domain.
+			let probeStarted!: () => void
+			const probeInFlight = new Promise<void>(resolve => {
+				probeStarted = resolve
+			})
+			let resolveProbe!: (value: boolean) => void
+
+			vi.mocked(isDomainRegistered).mockImplementationOnce(() => {
+				probeStarted()
+
+				return new Promise<boolean>(resolve => {
+					resolveProbe = resolve
+				})
+			})
+
+			// Provider disabled, stale domain apparently present — the orphan-repair shape.
+			const reconcile = fileProvider.reconcileDomainRegistration()
+
+			await probeInFlight
+			await fileProvider.enable()
+
+			resolveProbe(true)
+
+			await expect(reconcile).resolves.toEqual({ freshlyRegistered: false })
+
+			expect(unregisterDomain).not.toHaveBeenCalled()
+			expect(await fileProvider.enabled()).toBe(true)
+		})
+
+		it("a stalled missing-domain probe does not re-register a domain a concurrent disable() removed", async () => {
+			// The inverse race: the enabled-arm's probe stalls, a logout's disable() completes,
+			// and a late registration would resurrect a domain with no credentials behind it —
+			// a dead notAuthenticated location in Files.app.
+			await fileProvider.enable()
+			vi.mocked(registerDomain).mockClear()
+			vi.mocked(unregisterDomain).mockClear()
+
+			let probeStarted!: () => void
+			const probeInFlight = new Promise<void>(resolve => {
+				probeStarted = resolve
+			})
+			let resolveProbe!: (value: boolean) => void
+
+			vi.mocked(isDomainRegistered).mockImplementationOnce(() => {
+				probeStarted()
+
+				return new Promise<boolean>(resolve => {
+					resolveProbe = resolve
+				})
+			})
+
+			const reconcile = fileProvider.reconcileDomainRegistration()
+
+			await probeInFlight
+			await fileProvider.disable()
+
+			resolveProbe(false)
+
+			await expect(reconcile).resolves.toEqual({ freshlyRegistered: false })
+
+			expect(registerDomain).not.toHaveBeenCalled()
+			expect(AUTH_FILE.exists).toBe(false)
+		})
+	})
+
+	describe("ensureEncrypted", () => {
+		it("reports the migration's first registration so the Files.app hint can fire", async () => {
+			// The migration cohort's enable() IS the first registration; the later reconcile
+			// early-returns freshlyRegistered:false because the domain now exists. Swallowing
+			// the flag here would permanently skip the hint for exactly that cohort.
+			AUTH_FILE.create()
+			AUTH_FILE.write("legacy-plaintext-not-decryptable")
+
+			await expect(fileProvider.ensureEncrypted()).resolves.toEqual({ freshlyRegistered: true })
+
+			expect(registerDomain).toHaveBeenCalledWith(FILE_PROVIDER_DOMAIN_IDENTIFIER, FILE_PROVIDER_DOMAIN_DISPLAY_NAME)
+		})
+
+		it("reports false when auth.json is already encrypted", async () => {
+			await fileProvider.enable()
+			vi.mocked(registerDomain).mockClear()
+
+			await expect(fileProvider.ensureEncrypted()).resolves.toEqual({ freshlyRegistered: false })
+
+			expect(registerDomain).not.toHaveBeenCalled()
+		})
+
+		it("reports false when the migration enable() fails", async () => {
+			AUTH_FILE.create()
+			AUTH_FILE.write("legacy-plaintext-not-decryptable")
+			vi.mocked(registerDomain).mockRejectedValueOnce(new Error("fileproviderd wedged"))
+
+			await expect(fileProvider.ensureEncrypted()).resolves.toEqual({ freshlyRegistered: false })
+		})
+
+		it("deletes an unreadable auth.json rather than leaving plaintext credentials at rest under a biometric lock", async () => {
+			// enable() refuses while the biometric lock is on, and that refusal
+			// never clears by itself — so a legacy plaintext auth.json would be
+			// warn-and-retried every launch with apiKey/masterKeys in cleartext
+			// inside a backed-up App Group container. Fail closed instead.
+			AUTH_FILE.create()
+			AUTH_FILE.write("legacy-plaintext-not-decryptable")
+			mockSecureStoreData.set("biometric", { enabled: true })
+
+			await expect(fileProvider.ensureEncrypted()).resolves.toEqual({ freshlyRegistered: false })
+
+			expect(AUTH_FILE.exists).toBe(false)
+			expect(unregisterDomain).toHaveBeenCalledWith(FILE_PROVIDER_DOMAIN_IDENTIFIER)
+		})
+
+		it("leaves a decryptable auth.json alone even when biometric is on", async () => {
+			// The fail-closed path must be scoped to files that cannot be read;
+			// a healthy provider config is not evidence of anything wrong.
+			await fileProvider.enable()
+			mockSecureStoreData.set("biometric", { enabled: true })
+			vi.mocked(unregisterDomain).mockClear()
+
+            await expect(fileProvider.ensureEncrypted()).resolves.toEqual({ freshlyRegistered: false })
+
+			expect(AUTH_FILE.exists).toBe(true)
 			expect(unregisterDomain).not.toHaveBeenCalled()
 		})
 	})

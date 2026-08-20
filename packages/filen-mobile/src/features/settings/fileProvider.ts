@@ -7,7 +7,7 @@ import secureStore from "@/lib/secureStore"
 import logger from "@/lib/logger"
 import { getOrCreateAuthDek, purgeAuthDek, sealAuthFile, openAuthFile } from "@/features/settings/authFileKey"
 import { atomicWrite } from "@/lib/fsAtomic"
-import { registerDomain, unregisterDomain } from "@/modules/file-provider-domain"
+import { registerDomain, unregisterDomain, isDomainRegistered } from "@/modules/file-provider-domain"
 
 // Safety floor for cache budgets. Below this the extension would thrash —
 // thumbnails alone need ~32 MiB to be useful.
@@ -23,6 +23,29 @@ export const FILE_PROVIDER_ENABLED_SECURE_STORE_KEY = "fileProviderEnabled"
 // modules/file-provider-domain/README.md.
 export const FILE_PROVIDER_DOMAIN_IDENTIFIER = "io.filen.drive"
 export const FILE_PROVIDER_DOMAIN_DISPLAY_NAME = "Filen"
+
+// NSFileProviderManager.add/remove can hang outright (a crash-looping extension, fileproviderd
+// under load, first-registration indexing). Both run inside writeMutex, so an unbounded hang
+// would block every later enable()/disable() — including the disable() logout awaits. The mutex
+// must never be held longer than this.
+const DOMAIN_CALL_TIMEOUT_MS = 15_000
+
+async function withDomainCallTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined
+
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => {
+					reject(new Error(`${label} timed out after ${DOMAIN_CALL_TIMEOUT_MS}ms`))
+				}, DOMAIN_CALL_TIMEOUT_MS)
+			})
+		])
+	} finally {
+		clearTimeout(timer)
+	}
+}
 
 export const AUTH_FILE = new FileSystem.File(
 	FileSystem.Paths.join(
@@ -135,21 +158,24 @@ class FileProvider {
 	}
 
 	public async disable(): Promise<void> {
-		// Before the delete (and therefore outside writeMutex — this is a slow system call, not a
-		// write), so the extension is never asked to serve a domain it can no longer authenticate for.
-		if (Platform.OS === "ios") {
-			try {
-				await unregisterDomain(FILE_PROVIDER_DOMAIN_IDENTIFIER)
-			} catch (e) {
-				// A stuck domain is a stale Files.app location, not a broken app — keep going and
-				// still clear the credentials.
-				logger.warn("file-provider", "file provider domain unregistration failed", { identifier: FILE_PROVIDER_DOMAIN_IDENTIFIER, error: e })
-			}
-		}
-
+		// Inside writeMutex even though it is a slow system call: an enable() running concurrently
+		// registers the domain inside its own critical section, so serializing on the mutex is what
+		// guarantees no interleaving can leave the domain registered after this disable() deleted
+		// the credentials (or vice versa). Unregistration comes before the delete so the extension
+		// is never asked to serve a domain it can no longer authenticate for.
 		await this.writeMutex.acquire()
 
 		try {
+			if (Platform.OS === "ios") {
+				try {
+					await withDomainCallTimeout(unregisterDomain(FILE_PROVIDER_DOMAIN_IDENTIFIER), "unregisterDomain")
+				} catch (e) {
+					// A stuck domain is a stale Files.app location, not a broken app — keep going and
+					// still clear the credentials.
+					logger.warn("file-provider", "file provider domain unregistration failed", { identifier: FILE_PROVIDER_DOMAIN_IDENTIFIER, error: e })
+				}
+			}
+
 			if (AUTH_FILE.exists) {
 				AUTH_FILE.delete()
 			}
@@ -162,16 +188,39 @@ class FileProvider {
 		await secureStore.set(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, false)
 	}
 
-	public async enable(): Promise<void> {
-		// Hold writeMutex across the entire read -> getSdkClients -> write
+	// Returns whether this call registered the domain for the first time (as opposed to it already
+	// being registered): a freshly added NSFileProviderDomain lands disabled in Files.app, so callers
+	// must surface the "enable Filen under Browse → Locations" step to the user exactly then.
+	public async enable(): Promise<{ freshlyRegistered: boolean }> {
+		// Hold writeMutex across the entire read -> getSdkClients -> write -> register
 		// transaction. getSdkClients() is a real suspension point (slow on cold
 		// start); without the lock a concurrent disable() or setCacheBudget()
 		// could complete inside that await window and then be clobbered when
 		// enable() resumes its write — re-creating auth.json after disable()
 		// deleted it (provider silently re-enabled) or dropping a fresh budget.
+		// Registration sits inside the critical section too: outside it, a
+		// disable() could unregister-and-delete between our write and our
+		// registration, and the registration would then resurrect a domain with
+		// no credentials behind it.
 		await this.writeMutex.acquire()
 
+		let freshlyRegistered = false
+
 		try {
+			// The provider and biometric lock are mutually exclusive: the extension reads
+			// auth.json directly, bypassing the in-app biometric gate. EVERY enable path funnels
+			// through here (the settings screen, the ensureEncrypted migration), so this is the
+			// single gate — callers that have collected consent turn biometric off FIRST (and
+			// restore it if this call fails). Read INSIDE the mutex: enableBiometric()'s own
+			// teardown calls disable() under this same mutex before it flips the flag, so a
+			// pre-mutex read could pass the gate on a value a concurrent biometric enable was
+			// about to change; under the mutex both orderings converge.
+			const biometric = await secureStore.get<{ enabled: boolean }>("biometric")
+
+			if (biometric?.enabled) {
+				throw new Error("cannot enable the file provider while biometric lock is on")
+			}
+
 			const current = await this.read()
 			const { authedSdkClient } = await auth.getSdkClients()
 			const sdkConfig = authedSdkClient.toSdkConfig()
@@ -201,24 +250,150 @@ class FileProvider {
 					connectToSocket: sdkConfig.connectToSocket
 				}
 			} satisfies AuthFileSchema, dek)
+
+			// After the write, so the extension finds credentials the moment the system brings it
+			// up. A failure here propagates: swallowing it would report the provider as enabled
+			// while no domain exists and nothing ever shows up in Files.app. auth.json stays
+			// providerEnabled=true on purpose — reconcileDomainRegistration() retries the
+			// registration on every authed startup until it sticks.
+			if (Platform.OS === "ios") {
+				// Under the same timeout as the register call: this is a fileproviderd XPC round
+				// trip too, and it runs inside writeMutex — a wedged daemon here blocked every
+				// later disable(), including the one logout awaits.
+				freshlyRegistered = !(await withDomainCallTimeout(
+					isDomainRegistered(FILE_PROVIDER_DOMAIN_IDENTIFIER),
+					"isDomainRegistered"
+				))
+
+				await withDomainCallTimeout(
+					registerDomain(FILE_PROVIDER_DOMAIN_IDENTIFIER, FILE_PROVIDER_DOMAIN_DISPLAY_NAME),
+					"registerDomain"
+				)
+			}
 		} finally {
 			this.writeMutex.release()
 		}
 
-		// After the write succeeded (and after the mutex is released — registration is a slow system
-		// call, not a write), so the extension finds credentials the moment the system brings it up.
-		// Registering an already-registered domain is a no-op, so repeated enables are fine.
-		if (Platform.OS === "ios") {
-			try {
-				await registerDomain(FILE_PROVIDER_DOMAIN_IDENTIFIER, FILE_PROVIDER_DOMAIN_DISPLAY_NAME)
-			} catch (e) {
-				// Degrading the provider to unregistered is not a reason to fail enable() — the setting
-				// stays on, the location just does not show up until the next enable.
-				logger.warn("file-provider", "file provider domain registration failed", { identifier: FILE_PROVIDER_DOMAIN_IDENTIFIER, error: e })
-			}
+		await secureStore.set(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, true)
+
+		return { freshlyRegistered }
+	}
+
+	// Runs `action` under writeMutex with app state re-read inside the critical section. The
+	// reconcile's domain probes run OUTSIDE the mutex (each can stall up to 15s; holding the mutex
+	// across all of them would block a logout's disable() for ~45s), so by the time an action fires
+	// its probe result may predate a concurrent enable()/disable() that held the mutex in between —
+	// a stalled probe must not unregister the domain a fresh enable() just registered, nor
+	// re-register one a disable() just removed. The probe is only a hint; `action` decides from the
+	// re-read state, which no enable()/disable() can change until the mutex is released.
+	private async withRecheckedState<T>(action: (state: { enabled: boolean; biometricOn: boolean }) => Promise<T>): Promise<T> {
+		await this.writeMutex.acquire()
+
+		try {
+			const enabled = await this.enabled()
+			const biometric = await secureStore.get<{ enabled: boolean }>("biometric")
+
+			return await action({
+				enabled,
+				biometricOn: biometric?.enabled === true
+			})
+		} finally {
+			this.writeMutex.release()
+		}
+	}
+
+	// The registered domain is one-shot state the system can lose (crash-loop pause, system-side
+	// removal), and the pre-replicated -> replicated update path never runs enable() at all when
+	// auth.json is already readable — leaving the provider reported as enabled with no domain and,
+	// before this existed, no retry path ever. Called on every authed startup: enabled but
+	// unregistered -> register. Returns whether a fresh registration happened so the caller can
+	// surface the Files.app enable step (a freshly added domain lands disabled there).
+	public async reconcileDomainRegistration(): Promise<{ freshlyRegistered: boolean }> {
+		if (Platform.OS !== "ios") {
+			return { freshlyRegistered: false }
 		}
 
-		await secureStore.set(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, true)
+		if (!(await this.enabled())) {
+			// Repair the inverse desync too: a failed or timed-out unregister during
+			// disable/logout leaves an orphan domain serving notAuthenticated forever — a dead
+			// Files.app location nothing else ever removes.
+			if (await withDomainCallTimeout(isDomainRegistered(FILE_PROVIDER_DOMAIN_IDENTIFIER), "isDomainRegistered")) {
+				try {
+					await this.withRecheckedState(async ({ enabled }) => {
+						if (enabled) {
+							// An enable() completed since the probe — the "orphan" is its
+							// freshly registered domain. Leave it alone.
+							return
+						}
+
+						logger.warn("file-provider", "provider disabled but the domain is still registered; removing it")
+
+						await withDomainCallTimeout(unregisterDomain(FILE_PROVIDER_DOMAIN_IDENTIFIER), "unregisterDomain")
+					})
+				} catch (e) {
+					logger.warn("file-provider", "orphan domain removal failed", { identifier: FILE_PROVIDER_DOMAIN_IDENTIFIER, error: e })
+				}
+			}
+
+			return { freshlyRegistered: false }
+		}
+
+		// Registering the domain arms Files.app to read auth.json directly, which bypasses the
+		// in-app biometric gate — the trade the settings screen collects explicit consent for
+		// before enable(). This unattended path must not complete it silently, so the gate runs
+		// BEFORE the already-registered early-return: a timed-out enable() whose uncancelled
+		// native registration landed late is exactly the state where biometric is still on AND
+		// the domain exists — that mismatch is repaired here by removing the domain, not ratified
+		// by returning early. The settings screen's own consent flow is the way back in.
+		const biometric = await secureStore.get<{ enabled: boolean }>("biometric")
+
+		if (biometric?.enabled) {
+			if (await withDomainCallTimeout(isDomainRegistered(FILE_PROVIDER_DOMAIN_IDENTIFIER), "isDomainRegistered")) {
+				try {
+					await this.withRecheckedState(async ({ biometricOn }) => {
+						if (!biometricOn) {
+							// The consent flow turned biometric off since the probe — the domain
+							// belongs to the enable() that owns (or is about to own) it.
+							return
+						}
+
+						logger.warn("file-provider", "domain registered while biometric lock is on; removing it to restore the exclusivity invariant")
+
+						await withDomainCallTimeout(unregisterDomain(FILE_PROVIDER_DOMAIN_IDENTIFIER), "unregisterDomain")
+					})
+				} catch (e) {
+					logger.warn("file-provider", "invariant-repair unregistration failed", { identifier: FILE_PROVIDER_DOMAIN_IDENTIFIER, error: e })
+				}
+			} else {
+				logger.warn("file-provider", "provider enabled but biometric lock is on; leaving the domain unregistered until it is re-enabled with consent")
+			}
+
+			return { freshlyRegistered: false }
+		}
+
+		if (await withDomainCallTimeout(isDomainRegistered(FILE_PROVIDER_DOMAIN_IDENTIFIER), "isDomainRegistered")) {
+			return { freshlyRegistered: false }
+		}
+
+		const registered = await this.withRecheckedState(async ({ enabled, biometricOn }) => {
+			if (!enabled || biometricOn) {
+				// A disable() or a biometric enable completed since the checks above —
+				// registering now would resurrect a domain with no credentials behind it.
+				return false
+			}
+
+			await withDomainCallTimeout(registerDomain(FILE_PROVIDER_DOMAIN_IDENTIFIER, FILE_PROVIDER_DOMAIN_DISPLAY_NAME), "registerDomain")
+
+			return true
+		})
+
+		if (!registered) {
+			return { freshlyRegistered: false }
+		}
+
+		logger.info("file-provider", "file provider domain was missing while enabled — re-registered", { identifier: FILE_PROVIDER_DOMAIN_IDENTIFIER })
+
+		return { freshlyRegistered: true }
 	}
 
 	// Purges the auth.json DEK from the platform key store. Called on logout (after disable() deletes
@@ -234,22 +409,50 @@ class FileProvider {
 	// One-time beta migration: if the provider is enabled but auth.json isn't a readable encrypted file
 	// (legacy plaintext from before encryption, or a lost DEK), re-provision by re-running enable(),
 	// which writes a fresh encrypted auth.json. Safe to call on every launch — no-ops when auth.json is
-	// absent or already decryptable.
-	public async ensureEncrypted(): Promise<void> {
+	// absent or already decryptable. Passes enable()'s freshlyRegistered through: for the migration
+	// cohort this call IS the first registration, and the later reconcile's already-registered
+	// early-return reports false — swallowing it here would permanently skip the Files.app hint for
+	// exactly the users the hint was built for.
+	public async ensureEncrypted(): Promise<{ freshlyRegistered: boolean }> {
 		if (!AUTH_FILE.exists) {
-			return
+			return { freshlyRegistered: false }
 		}
 
 		if ((await this.read()) !== null) {
-			return
+			return { freshlyRegistered: false }
 		}
 
 		try {
-			await this.enable()
+			const { freshlyRegistered } = await this.enable()
 
 			logger.info("file-provider", "auth.json migrated to encrypted format")
+
+			return { freshlyRegistered }
 		} catch (e) {
+			// The biometric gate is the one failure that never clears by itself:
+			// enable() refuses while the lock is on, so an unreadable (legacy
+			// plaintext) auth.json would sit there being warn-and-retried every
+			// launch, with apiKey/masterKeys/privateKey in cleartext inside a
+			// backed-up App Group container. Fail CLOSED instead — drop the file
+			// and the domain. Re-enabling is a deliberate act with consent; the
+			// provider being off is the safe half of that trade.
+			const biometric = await secureStore.get<{ enabled: boolean }>("biometric")
+
+			if (biometric?.enabled) {
+				logger.warn("file-provider", "cannot migrate auth.json while biometric lock is on — deleting the unreadable file rather than leaving credentials at rest", { error: e })
+
+				try {
+					await this.disable()
+				} catch (disableError) {
+					logger.error("file-provider", "failed to delete the unreadable auth.json", { error: disableError })
+				}
+
+				return { freshlyRegistered: false }
+			}
+
 			logger.warn("file-provider", "auth.json encryption migration failed — will retry next launch", { error: e })
+
+			return { freshlyRegistered: false }
 		}
 	}
 

@@ -10,7 +10,8 @@ import driveSearch from "@/features/drive/driveSearch"
 import { warmSeedDriveCaches } from "@/features/drive/driveWarmSeed"
 import fileProvider from "@/features/settings/fileProvider"
 import { startReconnectListener } from "@/lib/reconnect"
-import { initI18n } from "@/lib/i18n"
+import { initI18n, t } from "@/lib/i18n"
+import alerts from "@/lib/alerts"
 import { initTheme } from "@/lib/theme"
 import { Image } from "expo-image"
 import { Platform } from "react-native"
@@ -198,9 +199,34 @@ const setup = {
 
 				// One-time (per launch) beta migration: re-encrypt a legacy plaintext auth.json if the
 				// provider is enabled. No-op once auth.json is already encrypted or the provider is off.
-				fileProvider.ensureEncrypted().catch(e => {
-					logger.error("setup", "fileProvider.ensureEncrypted failed", { error: e })
-				})
+				// Then reconcile the domain: "provider enabled" and "domain registered" are separate
+				// one-shot states, and the update path from the pre-replicated build (readable
+				// auth.json, so ensureEncrypted no-ops) otherwise never registers the new domain —
+				// the Filen location silently vanishes from Files.app while the app reports the
+				// provider as enabled. Sequenced after ensureEncrypted so a just-migrated auth.json
+				// is what the reconcile reads.
+				fileProvider
+					.ensureEncrypted()
+					.catch(e => {
+						logger.error("setup", "fileProvider.ensureEncrypted failed", { error: e })
+
+						return { freshlyRegistered: false }
+					})
+					.then(async ({ freshlyRegistered: migrationRegistered }) => {
+						const { freshlyRegistered } = await fileProvider.reconcileDomainRegistration()
+
+						// The migration's enable() may have done the first registration itself, in
+						// which case the reconcile's already-registered early-return reports false —
+						// the hint must fire for either.
+						if (migrationRegistered || freshlyRegistered) {
+							// A freshly added domain lands disabled in Files.app; without this hint the
+							// user has to discover the Browse → Locations toggle themselves.
+							alerts.normal(t("file_provider_enable_in_files_app"))
+						}
+					})
+					.catch(e => {
+						logger.error("setup", "fileProvider.reconcileDomainRegistration failed", { error: e })
+					})
 
 				// globalThis read, not bare __DEV__ — undefined-at-eval in the test runner (see the
 				// console polyfill's module-eval gate). Tests (undefined) skip it like production.
