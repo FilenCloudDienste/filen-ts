@@ -172,10 +172,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 					enableShrinkResourcesInReleaseBuilds: false,
 					enableBundleCompression: false,
 					useLegacyPackaging: false,
-					enablePngCrunchInReleaseBuilds: false,
-					packagingOptions: {
-						pickFirst: ["**/libcrypto.so"]
-					}
+					enablePngCrunchInReleaseBuilds: false
 				},
 				ios: {
 					deploymentTarget: IOS_DEPLOYMENT_TARGET,
