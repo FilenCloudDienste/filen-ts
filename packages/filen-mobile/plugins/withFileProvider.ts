@@ -84,7 +84,13 @@ export const getFileProviderEntitlementsContent = (appIdentifier: string, parame
 export const getFileProviderInfoContent = (appName: string, appIdentifier: string, parameters: FileProviderPluginProps) => {
 	return build({
 		AppGroup: getAppGroup(appIdentifier, parameters),
-		NSExtensionFileProviderDocumentGroup: getAppGroup(appIdentifier, parameters),
+		// NSExtensionFileProviderDocumentGroup is deliberately ABSENT (both here and inside
+		// NSExtension below): it is the non-replicated-era declaration that invites the system
+		// to spin up a legacy default-domain instance of the extension alongside the replicated
+		// domain — two cache states racing over shared files. The extension reads the app-group
+		// container directly and no longer derives anything from this key. This plist is
+		// regenerated from THIS function on every prebuild, so removing the key in the
+		// submodule's checked-in Info.plist alone changes nothing in production.
 		CFBundleName: "$(PRODUCT_NAME)",
 		CFBundleDisplayName: parameters.iosFileProviderName || `${appName} - File Provider`,
 		CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)",
@@ -97,7 +103,6 @@ export const getFileProviderInfoContent = (appName: string, appIdentifier: strin
 			// matches filen-ios-file-provider 99f4a72 — without this the extension is
 			// greyed out in other apps' folder pickers (e.g. Cryptomator vault location)
 			NSExtensionFileProviderSupportsPickingFolders: true,
-			NSExtensionFileProviderDocumentGroup: getAppGroup(appIdentifier, parameters),
 			NSExtensionPointIdentifier: "com.apple.fileprovider-nonui",
 			NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).FileProviderExtension"
 		}
