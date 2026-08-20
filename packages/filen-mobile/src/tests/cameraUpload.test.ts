@@ -302,7 +302,21 @@ vi.mock("@/lib/paths", () => ({
 
 		return pathModule.posix.normalize(normalizedPath)
 	},
-	normalizeFilePathForExpo: (p: string) => p
+	normalizeFilePathForExpo: (p: string) => p,
+	// REAL behaviour, not an identity stub: this is what reduces Asset.getUri()'s URL to a path
+	// before the hash. Stubbed to identity, an AVFoundation fragment survives into the path and
+	// every immersive-video asset ENOENTs — the exact bug the suite below pins.
+	stripUriFragmentAndQuery: (uri: string): string => {
+		if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(uri)) {
+			return uri
+		}
+
+		const fragmentIndex = uri.indexOf("#")
+		const withoutFragment = fragmentIndex === -1 ? uri : uri.slice(0, fragmentIndex)
+		const queryIndex = withoutFragment.indexOf("?")
+
+		return queryIndex === -1 ? withoutFragment : withoutFragment.slice(0, queryIndex)
+	}
 }))
 
 vi.mock("@/lib/signals", () => ({
@@ -1093,6 +1107,42 @@ describe("sync flow", () => {
 
 			await cameraUpload.sync()
 
+			expect(transfers.upload).toHaveBeenCalledTimes(1)
+			expect(mockSetErrors).not.toHaveBeenCalled()
+		})
+
+		it("hashes a video whose getUri() carries an AVFoundation fragment", async () => {
+			// iOS `Asset.getUri()` returns `AVURLAsset.url.absoluteString`, and for an HDR/immersive
+			// variant AVFoundation appends a fragment holding a base64 property list of playback hints
+			// ({ RecommendedForImmersiveMode: 0 }). A URI is not a path: left in place,
+			// normalizeFilePathForExpo encodes that "#" to "%23", the native decodes it back INTO the
+			// path, and the asset ENOENTs. Permanently — the shield entry is only written after a
+			// successful hash, so the delta recomputes identically and the asset fails every pass.
+			//
+			// `exists` does NOT catch it: the expo File API resolves the URI through `URL(string:).path`,
+			// which excludes the fragment, so the guard above the hash passes and only the hash fails.
+			const uri = "file:///media/IMG_1840.medium-hdr.MOV"
+			const fragment =
+				"#YnBsaXN0MDDRAQJfEBtSZWNvbW1lbmRlZEZvckltbWVyc2l2ZU1vZGUQAAgLKQAAAAAAAAEBAAAAAAAAAMAAAAAAAAAAAAAAAAAAAAr"
+
+			vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, includeVideos: true })
+
+			ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+			ml.addAsset({
+				id: "a1",
+				filename: "IMG_1840.medium-hdr.MOV",
+				uri: `${uri}${fragment}`,
+				mediaType: MediaType.VIDEO,
+				creationTime: 1000,
+				modificationTime: 2000
+			})
+
+			// The file exists at the real path only — the fragment is not part of any filename.
+			fs.set(uri, new Uint8Array([1, 2, 3]))
+
+			await cameraUpload.sync()
+
+			expect(mockFileHash).toHaveBeenCalledWith(uri, expect.objectContaining({ algorithm: "MD5" }))
 			expect(transfers.upload).toHaveBeenCalledTimes(1)
 			expect(mockSetErrors).not.toHaveBeenCalled()
 		})

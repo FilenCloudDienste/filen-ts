@@ -13,7 +13,7 @@ import {
 } from "@filen/sdk-rs"
 import { normalizeModificationTimestampForComparison } from "@/lib/utils"
 import { type UnwrapFileMetaResult, unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
-import { normalizeFilePathForExpo } from "@/lib/paths"
+import { normalizeFilePathForExpo, stripUriFragmentAndQuery } from "@/lib/paths"
 import { isConvertHeicToJpgEnabled, convertHeicToJpg } from "@/lib/imageConversion"
 import { transplantMetadata } from "@/modules/filen-exif"
 import { PauseSignal } from "@/lib/signals"
@@ -1719,11 +1719,17 @@ class CameraUpload {
 								// Reconstruct the Asset on demand (synchronous constructor — race-free)
 								// instead of holding a shared object per pending delta across the whole
 								// sync; the retry shields the one remaining async shared-object call (#40).
-								const uri = await withReleasedSharedObjectRetry(() => new MediaLibrary.Asset(delta.file.info.id).getUri())
+								const assetUri = await withReleasedSharedObjectRetry(() => new MediaLibrary.Asset(delta.file.info.id).getUri())
 
-								if (!uri) {
+								if (!assetUri) {
 									throw new Error(i18n.t("camera_upload_file_missing"))
 								}
+
+								// getUri() hands back a URL, not a path. Reduce it to one here, at the single
+								// point where a platform URI enters the pipeline, so everything downstream deals
+								// only in paths — see stripUriFragmentAndQuery for why the two cannot be treated
+								// alike, and why this belongs here rather than in the normalize helpers.
+								const uri = stripUriFragmentAndQuery(assetUri)
 
 								const assetFile = new FileSystem.File(uri)
 

@@ -274,7 +274,10 @@ vi.mock("@/lib/paths", async () => {
 
 	return {
 		normalizeFilePathForSdk: actual.normalizeFilePathForSdk,
-		normalizeFilePathForExpo: (p: string) => p
+		normalizeFilePathForExpo: (p: string) => p,
+		// Also REAL: it is what reduces Asset.getUri()'s URL to a path before the hash, and an
+		// identity stub would ENOENT every asset whose uri carries a fragment.
+		stripUriFragmentAndQuery: actual.stripUriFragmentAndQuery
 	}
 })
 

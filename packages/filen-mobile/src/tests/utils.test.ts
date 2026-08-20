@@ -175,7 +175,7 @@ import {
 	convertBigInts
 } from "@/lib/utils"
 import { makeDriveItemPublicLink, unwrapParentUuid } from "@/lib/sdkUnwrap"
-import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
+import { normalizeFilePathForSdk, normalizeFilePathForExpo, stripUriFragmentAndQuery } from "@/lib/paths"
 import { getPreviewType } from "@/lib/previewType"
 import { extractLinks, trimUnbalanced, safeParseUrl } from "@/lib/linkParser"
 import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
@@ -364,6 +364,72 @@ describe("normalizeFilePathForExpo", () => {
 
 	it("handles root path '/' → 'file:///'", () => {
 		expect(normalizeFilePathForExpo("file:///")).toBe("file:///")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// stripUriFragmentAndQuery
+// ---------------------------------------------------------------------------
+
+describe("stripUriFragmentAndQuery", () => {
+	// The exact URI iOS returned for an HDR/immersive video, whose fragment is a base64 binary
+	// plist ({ RecommendedForImmersiveMode: 0 }). Left un-stripped, normalizeFilePathForExpo
+	// encodes the "#" to "%23", the native hasher decodes it back into the path, and the asset
+	// ENOENTs on every sync pass forever.
+	const immersiveVideoUri =
+		"file:///var/mobile/Media/PhotoData/Metadata/DCIM/111APPLE/IMG_1840.medium-hdr.MOV" +
+		"#YnBsaXN0MDDRAQJfEBtSZWNvbW1lbmRlZEZvckltbWVyc2l2ZU1vZGUQAAgLKQAAAAAAAAEBAAAAAAAAAMAAAAAAAAAAAAAAAAAAAAr"
+
+	it("drops an AVFoundation fragment from a media-library uri", () => {
+		expect(stripUriFragmentAndQuery(immersiveVideoUri)).toBe(
+			"file:///var/mobile/Media/PhotoData/Metadata/DCIM/111APPLE/IMG_1840.medium-hdr.MOV"
+		)
+	})
+
+	it("leaves the stripped uri hashable — no %23 survives into the encoded path", () => {
+		const encoded = normalizeFilePathForExpo(stripUriFragmentAndQuery(immersiveVideoUri))
+
+		expect(encoded).toBe("file:///var/mobile/Media/PhotoData/Metadata/DCIM/111APPLE/IMG_1840.medium-hdr.MOV")
+		expect(encoded).not.toContain("%23")
+	})
+
+	it("without the strip, the fragment is promoted to a literal path character (the bug)", () => {
+		expect(normalizeFilePathForExpo(immersiveVideoUri)).toContain("%23")
+	})
+
+	it("drops a query as well as a fragment", () => {
+		expect(stripUriFragmentAndQuery("file:///foo/bar.mov?version=original")).toBe("file:///foo/bar.mov")
+	})
+
+	it("drops a query that sits before a fragment", () => {
+		expect(stripUriFragmentAndQuery("file:///foo/bar.mov?a=1#frag")).toBe("file:///foo/bar.mov")
+	})
+
+	it("removes the fragment before any '/' in its base64 payload can read as path segments", () => {
+		const withSlashInFragment = "file:///foo/bar.mov#YnBs/aXN0MDD"
+
+		expect(stripUriFragmentAndQuery(withSlashInFragment)).toBe("file:///foo/bar.mov")
+		expect(normalizeFilePathForExpo(stripUriFragmentAndQuery(withSlashInFragment))).toBe("file:///foo/bar.mov")
+	})
+
+	it("leaves a percent-encoded '#' alone — that one belongs to the filename", () => {
+		// Both platforms encode a filename's own "#", so only a delimiter is ever bare.
+		expect(stripUriFragmentAndQuery("file:///foo/notes%232.txt")).toBe("file:///foo/notes%232.txt")
+	})
+
+	it("does NOT truncate a plain path, where '#' and '?' are ordinary characters", () => {
+		expect(stripUriFragmentAndQuery("/foo/notes#2.txt")).toBe("/foo/notes#2.txt")
+		expect(stripUriFragmentAndQuery("/foo/what?.txt")).toBe("/foo/what?.txt")
+	})
+
+	it("is a no-op for a uri with neither a fragment nor a query", () => {
+		expect(stripUriFragmentAndQuery("file:///foo/bar.mov")).toBe("file:///foo/bar.mov")
+	})
+
+	it("handles a content:// uri (scheme-agnostic by RFC 3986)", () => {
+		expect(stripUriFragmentAndQuery("content://media/external/video/media/42#frag")).toBe(
+			"content://media/external/video/media/42"
+		)
 	})
 })
 

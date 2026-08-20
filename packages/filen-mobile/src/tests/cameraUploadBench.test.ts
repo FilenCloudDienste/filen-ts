@@ -392,7 +392,20 @@ vi.mock("@/lib/paths", () => ({
 				}
 			})
 			.join("/"),
-	normalizeFilePathForExpo: (p: string) => p
+	normalizeFilePathForExpo: (p: string) => p,
+	// Real behaviour — see src/lib/paths.ts. An identity stub would let a URL fragment through into
+	// the path and ENOENT every asset carrying one.
+	stripUriFragmentAndQuery: (uri: string): string => {
+		if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(uri)) {
+			return uri
+		}
+
+		const fragmentIndex = uri.indexOf("#")
+		const withoutFragment = fragmentIndex === -1 ? uri : uri.slice(0, fragmentIndex)
+		const queryIndex = withoutFragment.indexOf("?")
+
+		return queryIndex === -1 ? withoutFragment : withoutFragment.slice(0, queryIndex)
+	}
 }))
 
 vi.mock("@/lib/signals", () => ({
