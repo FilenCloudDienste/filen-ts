@@ -22,6 +22,7 @@ import {
 	CODE_MIRROR_HEIGHT,
 	CODE_MIRROR_WIDTH
 } from "@/components/textEditor/codeMirrorLayout"
+import { proseContentAttributes } from "@/components/textEditor/inputAttributes"
 import { decodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
 import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
 import { isScrolled } from "@/components/textEditor/scrollReporting"
@@ -351,9 +352,15 @@ const TextEditorDOM = ({
 	})()
 
 	const extensions = (() => {
+		// CodeMirror sets these attributes on its contenteditable itself, so the only way to hand
+		// them back to the platform is this facet — which is what upstream points at for exactly
+		// this. Props on the React wrapper land on an outer div and never reach the editor.
+		const prose = proseContentAttributes(type)
+
 		const base = [
 			EditorView.lineWrapping,
 			keepCaretVisible,
+			...(prose ? [EditorView.contentAttributes.of(prose)] : []),
 			EditorView.theme(
 				createLayoutThemeSpec({
 					type,
@@ -631,10 +638,6 @@ const TextEditorDOM = ({
 			placeholder={placeholder}
 			indentWithTab={true}
 			theme={theme}
-			autoCapitalize="off"
-			autoCorrect="off"
-			autoSave="off"
-			spellCheck={false}
 			autoFocus={autoFocus}
 			style={{
 				width: CODE_MIRROR_WIDTH,
