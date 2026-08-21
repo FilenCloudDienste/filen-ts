@@ -74,6 +74,13 @@ export const media = {
 	low_battery: "Power saving mode",
 	/** Camera upload settings — subtitle under the power-saving-mode toggle */
 	low_battery_description: "Pause syncing while Battery Saver or Low Power Mode is on.",
+	/** Camera upload settings (Android only) — row title shown when the system is battery-optimizing the app, which throttles background sync */
+	battery_optimization: "Battery optimization is on",
+	/** Camera upload settings (Android only) — subtitle explaining why background sync is unreliable while optimized */
+	battery_optimization_description:
+		"Android limits how often optimized apps may run in the background, and can block their network access entirely. Allow Filen to run unrestricted for reliable background uploads.",
+	/** Camera upload settings (Android only) — button opening the system battery-optimization settings screen */
+	battery_optimization_action: "Open battery settings",
 	/** Camera upload settings — row title for the compress-before-upload toggle */
 	compress: "Compress",
 	/** Camera upload settings — subtitle under the compress toggle */

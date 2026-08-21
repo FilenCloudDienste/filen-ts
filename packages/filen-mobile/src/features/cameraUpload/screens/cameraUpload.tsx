@@ -28,6 +28,8 @@ import { resolveSelectedDriveItemToAnyNormalDir } from "@/features/drive/driveSe
 import useIsOnline from "@/hooks/useIsOnline"
 import { useTranslation } from "react-i18next"
 import ListEmpty from "@/components/ui/listEmpty"
+import useIsBatteryOptimized from "@/hooks/useIsBatteryOptimized"
+import batteryOptimization from "@/lib/batteryOptimization"
 
 type BooleanConfigKey = {
 	[K in keyof Config]: Config[K] extends boolean ? K : never
@@ -47,6 +49,12 @@ const CameraUpload = () => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const isOnline = useIsOnline()
+
+	// Android throttles background jobs for apps it is battery-optimizing, down to disabling their
+	// network access entirely in the lower standby buckets — which is what makes background upload
+	// unreliable for users who rarely open the app. Surface it only where it is actionable (below,
+	// gated on background sync being ON); always false on iOS.
+	const isBatteryOptimized = useIsBatteryOptimized()
 
 	// Camera upload syncs the photo library — it NEVER uses the camera. Scope the
 	// permission check to the library so a user who grants full photo access but
@@ -401,6 +409,25 @@ const CameraUpload = () => {
 										}
 									]}
 								/>
+								{config.background && isBatteryOptimized && (
+									<Group
+										className="bg-background-tertiary"
+										buttons={[
+											{
+												icon: "battery-charging-outline",
+												title: t("battery_optimization"),
+												subTitle: t("battery_optimization_description"),
+												onPress: () => {
+													void batteryOptimization.openSettings()
+												},
+												rightItem: {
+													type: "text",
+													value: t("battery_optimization_action")
+												}
+											}
+										]}
+									/>
+								)}
 							</Fragment>
 						)}
 					</SettingsScrollView>
