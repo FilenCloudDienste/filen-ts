@@ -94,8 +94,14 @@ vi.mock("@/features/cameraUpload/backgroundRunLog", () => ({
 // ─── Static import of module under test ──────────────────────────────────────
 // Must be a static import so the module-level defineTask call is intercepted by
 // mockTaskManager.defineTask, which captures the callback into capturedTaskCallback.
-import { registerBackgroundSync, unregisterBackgroundSync } from "@/features/cameraUpload/backgroundTask"
+import {
+	registerBackgroundSync,
+	unregisterBackgroundSync,
+	BACKGROUND_RUN_BUDGET_MS,
+	CAMERA_PHASE_RESERVE_MS
+} from "@/features/cameraUpload/backgroundTask"
 import { Platform } from "react-native"
+import backgroundRunLog from "@/features/cameraUpload/backgroundRunLog"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -248,13 +254,64 @@ describe("background task callback (defineTask body)", () => {
 		expect(mockCameraUpload.sync).not.toHaveBeenCalled()
 	})
 
-	it("calls cameraUpload.sync with {maxUploads:3, background:true} when authed", async () => {
+	it("drives the camera phase with a soft deadline and no per-fire file cap when authed", async () => {
 		mockSetup.setup.mockResolvedValue({ isAuthed: true })
 
 		await runTask()
 
-		expect(mockCameraUpload.sync).toHaveBeenCalledWith({ maxUploads: 3, background: true })
 		expect(mockCameraUpload.sync).toHaveBeenCalledTimes(1)
+
+		const params = mockCameraUpload.sync.mock.calls[0]?.[0] as { background?: boolean; maxUploads?: number; deadlineAt?: number }
+
+		expect(params.background).toBe(true)
+		// The window is the budget. A fixed cap here is what limited background backup to a handful of
+		// photos a day while the uncapped foreground pass did the real work.
+		expect(params.maxUploads).toBeUndefined()
+
+		const deadlineAt = params.deadlineAt
+
+		expect(typeof deadlineAt).toBe("number")
+
+		// Bounded on BOTH sides deliberately. An upper bound alone is satisfied by 0, by a past
+		// timestamp, or by a sign-flipped `startedAt - RESERVE` — each of which would make the camera
+		// phase stop before uploading anything, i.e. reintroduce the very bug this change fixes.
+		expect(deadlineAt as number).toBeGreaterThan(Date.now())
+		// Leaves the reserve so in-flight transfers land before the hard abort, which would otherwise
+		// persist a background-abort against every one of them.
+		expect((deadlineAt as number) - Date.now()).toBeLessThanOrEqual(BACKGROUND_RUN_BUDGET_MS - CAMERA_PHASE_RESERVE_MS)
+	})
+
+	it("records what the camera phase actually did in the run breadcrumb", async () => {
+		// Both schedulers discard the task's return value, so this row is the only evidence a headless
+		// run leaves. Recording "success" without saying whether anything uploaded — or why not — is
+		// what made field reports of "background upload never works" unanswerable.
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+		mockCameraUpload.sync.mockResolvedValue({ success: true, uploaded: 0, skipped: "lowPower" })
+
+		await runTask()
+
+		expect(backgroundRunLog.append).toHaveBeenCalledWith(
+			expect.objectContaining({
+				result: "success",
+				cameraUploaded: 0,
+				cameraSkipReason: "lowPower"
+			})
+		)
+	})
+
+	it("records the upload count for a run that did work", async () => {
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+		mockCameraUpload.sync.mockResolvedValue({ success: true, uploaded: 17 })
+
+		await runTask()
+
+		expect(backgroundRunLog.append).toHaveBeenCalledWith(expect.objectContaining({ cameraUploaded: 17 }))
+
+		// Asserted by key ABSENCE, not `cameraSkipReason: undefined` — objectContaining ignores keys
+		// whose expected value is undefined, so that form asserts nothing at all.
+		const entry = vi.mocked(backgroundRunLog.append).mock.calls[0]?.[0] as Record<string, unknown>
+
+		expect(entry["cameraSkipReason"]).toBeUndefined()
 	})
 
 	describe("iOS expiration listener (Platform.OS === 'ios')", () => {

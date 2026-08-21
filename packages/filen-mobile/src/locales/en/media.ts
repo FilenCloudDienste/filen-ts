@@ -65,10 +65,15 @@ export const media = {
 	background: "Background",
 	/** Camera upload settings — subtitle under the background toggle */
 	background_description: "Continue syncing when the app is in the background. Only photos are uploaded in the background.",
-	/** Camera upload settings — row title for the pause-on-low-battery toggle */
-	low_battery: "Low battery",
-	/** Camera upload settings — subtitle under the low-battery toggle */
-	low_battery_description: "Pause syncing when the battery is low.",
+	/**
+	 * Camera upload settings — row title for the pause-in-power-saving-mode toggle. Titled for the MODE,
+	 * not a charge level: the check is Android Battery Saver / iOS Low Power Mode, either of which can be
+	 * on at full charge, and neither of which a merely low battery implies. (The key keeps its original
+	 * name to avoid churning the config field it belongs to.)
+	 */
+	low_battery: "Power saving mode",
+	/** Camera upload settings — subtitle under the power-saving-mode toggle */
+	low_battery_description: "Pause syncing while Battery Saver or Low Power Mode is on.",
 	/** Camera upload settings — row title for the compress-before-upload toggle */
 	compress: "Compress",
 	/** Camera upload settings — subtitle under the compress toggle */

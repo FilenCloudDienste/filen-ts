@@ -1,5 +1,6 @@
 import * as MediaLibrary from "expo-media-library/next"
 import * as MediaLibraryLegacy from "expo-media-library/legacy"
+import { AppState } from "react-native"
 import logger from "@/lib/logger"
 import auth from "@/lib/auth"
 import {
@@ -176,6 +177,27 @@ type AlbumEntry = {
 	title: string
 }
 
+/**
+ * Why a sync pass ended before reaching the upload pipeline.
+ *
+ * Every gate in sync() returns bare, publishes no UI state (setSyncing runs AFTER all of them) and
+ * logs nothing, so a run that uploaded nothing was indistinguishable from one that had nothing to
+ * do — including in the background run log, which recorded "success" either way. Field reports of
+ * "background upload does nothing" were undiagnosable for exactly this reason. The reason is
+ * surfaced through sync()'s result so the headless task can persist it as a breadcrumb.
+ */
+export type CameraUploadSkipReason =
+	| "alreadySyncing"
+	| "coalesced"
+	| "notConfigured"
+	| "backgroundDisabled"
+	| "paused"
+	| "noPermissions"
+	| "offline"
+	| "cellularBlocked"
+	| "lowPower"
+	| "destinationMissing"
+
 export const MAX_UPLOAD_FAILURES = 3
 // Background runs skip assets with this many persisted budget-aborts (audit B4) — they
 // upload on the next FOREGROUND sync, which has no run budget. Cleared on success.
@@ -199,6 +221,20 @@ export const AUTO_SYNC_MIN_INTERVAL_MS = 60_000
 // instead of O(deltas) — the mutex itself remains the binding bound for
 // staged-on-disk bytes (#B5).
 const UPLOAD_PIPELINE_CONCURRENCY = 16
+
+// Narrower pool for BACKGROUND passes, matching stagingMutex(4) exactly so no worker ever parks on
+// the mutex. Two reasons, both specific to a background window:
+//
+// `getUri()` takes no abort signal and, on an iCloud-optimized library, re-downloads the original —
+// so it can outlast even the hard abort. While the per-fire cap was 3, at most 3 could be in that
+// state; at the foreground width of 16 a background fire could pin sixteen non-abortable downloads
+// open past the end of its window and starve the phases that follow it. And a worker parked on the
+// mutex is the one place a deadline/cancel cannot reach it — sizing the pool to the mutex removes
+// the queue rather than policing it.
+//
+// Costs little: staging, and therefore every transfer, was already serialised four at a time, so the
+// wider pool only bought deeper hash pipelining ahead of a bound that has not moved.
+const BACKGROUND_UPLOAD_PIPELINE_CONCURRENCY = 4
 
 // listRemote unwraps every listed file once for its pre-sort pass; deltas() needs
 // the same unwrap again for every matched path. Cache the result per file object
@@ -336,7 +372,7 @@ class CameraUpload {
 	// Only stamped after a pass reaches the upload pipeline (not on early skips) so a sync that
 	// bailed (offline/disabled/paused) never suppresses a retry once conditions improve.
 	private lastCompletedAt: number = 0
-	// BG-03: whether the in-flight pass is a budgeted BACKGROUND pass (maxUploads-capped), and whether a
+	// BG-03: whether the in-flight pass is a budgeted BACKGROUND pass (deadline-bounded), and whether a
 	// foreground sync arrived and was dropped by the in-flight guard while one was running — so the
 	// background pass can re-fire a full foreground pass on completion instead of silently swallowing it.
 	private syncingBackground: boolean = false
@@ -1139,9 +1175,8 @@ class CameraUpload {
 				// verified THIS modification time the delta is known to be a no-op, so it is never made.
 				//
 				// The cost is not just wasted work. A background pass sorts by modificationTime
-				// DESCENDING and takes maxUploads(3), so freshly-viewed photos sort to the FRONT and
-				// consume the whole budget before being skipped — browsing the library could starve the
-				// real backlog run after run.
+				// DESCENDING, so freshly-viewed photos sort to the FRONT and consume the run's window
+				// before being skipped — browsing the library could starve the real backlog run after run.
 				//
 				// Deliberately confined to this branch. A delta from the branch above (nothing at that
 				// remote path) must still be produced and left to the upload gate, which shields it on
@@ -1291,22 +1326,43 @@ class CameraUpload {
 		maxUploads?: number
 		background?: boolean
 		manual?: boolean
-	}): Promise<{ success: boolean; error?: unknown }> {
+		/**
+		 * Wall-clock instant (Date.now()) after which the pass must stop picking up NEW work.
+		 *
+		 * A budgeted background run previously relied solely on the abort that fires at the run
+		 * deadline. Aborting mid-transfer is expensive: every asset in flight gets a persisted
+		 * background-abort recorded, and MAX_BACKGROUND_UPLOAD_ABORTS of those exile it from
+		 * background runs entirely. With the per-run file cap gone a pass works through the whole
+		 * delta set instead of three files, so a hard abort no longer costs at most three assets — it
+		 * costs everything the pass had open (BACKGROUND_UPLOAD_PIPELINE_CONCURRENCY workers, sized to
+		 * stagingMutex so none of them parks on it). The soft stop is therefore checked at three
+		 * points, each guarding a different way a worker can find itself still running after the
+		 * window shut: at the loop top, which stops new pickups; before the expensive block, since
+		 * every worker already past the loop top would otherwise hash, stage, transform and upload a
+		 * whole delta regardless; and once the staging permit is in hand, which is the moment the work
+		 * would really start. That leaves the hard abort as the backstop it was meant to be.
+		 */
+		deadlineAt?: number
+	}): Promise<{ success: boolean; error?: unknown; skipped?: CameraUploadSkipReason; uploaded?: number }> {
 		// Capture both signals once so that cancel() — which aborts the current
 		// controller and creates fresh instances for future syncs — reliably
 		// stops every operation in this sync via the captured references,
 		// regardless of when during execution cancel() fires.
 		const abortController = this.globalAbortController
 		const pauseSignal = this.globalPauseSignal
+		let skipped: CameraUploadSkipReason | undefined = undefined
+		let uploaded = 0
 
 		const result = await run(async defer => {
 			if (this.syncing) {
 				// BG-03: a foreground sync arriving while a budgeted BACKGROUND pass is in flight would be
-				// silently dropped here — but the background pass only uploads up to maxUploads, so the
-				// user's foreground request still has work to do. Remember to re-fire it on completion.
+				// silently dropped here — but the background pass still has a bounded window, so the
+				// user's foreground request may still have work to do. Remember to re-fire it on completion.
 				if (this.syncingBackground && !params?.background) {
 					this.foregroundRerunRequested = true
 				}
+
+				skipped = "alreadySyncing"
 
 				return
 			}
@@ -1324,16 +1380,22 @@ class CameraUpload {
 			// stamped after a real pass (below), so this never suppresses a retry after an early skip,
 			// and manual syncs always bypass.
 			if (!params?.manual && Date.now() - this.lastCompletedAt < AUTO_SYNC_MIN_INTERVAL_MS) {
+				skipped = "coalesced"
+
 				return
 			}
 
 			const config = await this.getConfig()
 
 			if (!config.enabled || config.albumIds.length === 0 || !config.remoteDir) {
+				skipped = "notConfigured"
+
 				return
 			}
 
 			if (params?.background && !config.background) {
+				skipped = "backgroundDisabled"
+
 				return
 			}
 
@@ -1342,6 +1404,8 @@ class CameraUpload {
 			// on it until the run-budget deadline — a whole OS window wasted, reported as
 			// Success. The user asked for uploads to pause; skip, never auto-resume.
 			if (params?.background && this.globalPauseSignal.isPaused()) {
+				skipped = "paused"
+
 				return
 			}
 
@@ -1351,35 +1415,65 @@ class CameraUpload {
 			])
 
 			if (!permissions) {
+				skipped = "noPermissions"
+
 				return
 			}
 
 			// Camera upload requires server reachability for listing + uploading.
 			// Without it, every listRemote / createDir / transfers.upload call
-			// fails into useCameraUploadStore.errors and surfaces banners. Bail
-			// silently when offline; the next AppState→active wake-up (which
-			// happens after reconnect) retries cleanly.
-			if (!netState.isConnected || !netState.isInternetReachable) {
+			// fails into useCameraUploadStore.errors and surfaces banners.
+			//
+			// Only a DEFINITIVE `false` bails. `isInternetReachable` is `boolean | null`, and on iOS it
+			// is null for a window at the start of EVERY process: the native module there reports only
+			// type/isConnected/details, so NetInfo falls back to its own probe (gateway.filen.io, ours
+			// via NETINFO_CONFIG) and reports null until that probe first settles — while fetch() returns
+			// the cached state without waiting for it. Treating null as offline therefore skipped whole
+			// headless runs whenever the probe lost the race against setup(), which is exactly what a
+			// woken radio makes likely. It also disagreed with computeOnline() in queries/onlineStatus,
+			// the app's declared source of truth, which counts null as online.
+			//
+			// The trade this accepts: null only ever co-occurs with isConnected === true (a
+			// no-connection state resolves to false), so a device with no link still bails here — but a
+			// CONNECTED-yet-unreachable one (captive portal, dead gateway) whose probe has not settled
+			// now proceeds, and its listings/uploads fail into the error store instead. That is the same
+			// outcome the paragraph above describes avoiding, traded knowingly: it is bounded by the run
+			// budget and self-heals on the next pass, whereas the old reading silently forfeited an
+			// entire OS window on every cold start.
+			if (!netState.isConnected || netState.isInternetReachable === false) {
+				skipped = "offline"
+
 				return
 			}
 
 			if (!config.cellular && netState.type === "cellular") {
+				skipped = "cellularBlocked"
+
 				return
 			}
 
-			if (!config.lowBattery) {
+			// The toggle reads "Pause syncing when the battery is low", so ON must PAUSE. It used to be
+			// enforced inverted — `!config.lowBattery` ran the check — which meant the default (false)
+			// silently no-oped every sync, foreground and manual included, whenever Battery Saver / Low
+			// Power Mode was on, while switching it on made pausing impossible. Note this is a MODE
+			// check, not a battery level one: both platforms can report it at any charge level.
+			if (config.lowBattery) {
 				const lowPowerMode = await Battery.isLowPowerModeEnabledAsync()
 
 				if (lowPowerMode) {
+					skipped = "lowPower"
+
 					return
 				}
 			}
 
 			// Destination-existence gate: if the configured remote directory was deleted or moved
 			// to the trash on the server, every listRemote / createDir / upload below would fail
-			// into the error store and surface banners forever. Exit early and silently — same
-			// shape as the `!config.remoteDir` bail above (the setSyncing-false defer is not armed
-			// yet). Only a DEFINITIVE verdict bails: undefined (deleted) or a Trash-parented Dir.
+			// into the error store and surface banners forever. Exit early and silently — same shape as
+			// the `!config.remoteDir` bail above: every gate here returns before setSyncing(true) is ever
+			// published, so nothing flickers in the UI. (The skip REASON is surfaced through sync()'s
+			// result instead, which is what the background run log records.) Only a DEFINITIVE verdict
+			// bails: undefined (deleted) or a Trash-parented Dir.
 			// The account root can never be deleted/trashed, so it needs no request. A TRANSIENT
 			// getDirOptional failure (network) must NOT bail — fall through to the normal pipeline,
 			// which already tolerates a degraded remote listing; the md5 cache shields re-uploads.
@@ -1400,6 +1494,8 @@ class CameraUpload {
 					logger.warn("cameraUpload", "Remote destination is unusable (deleted or trashed), skipping sync", {
 						remoteDirUuid: remoteDir.inner[0].uuid
 					})
+
+					skipped = "destinationMissing"
 
 					return
 				}
@@ -1589,15 +1685,25 @@ class CameraUpload {
 				}
 			}
 
-			// When maxUploads is set (e.g. background sync), sort newest-modified files first so the most
-			// recently captured media is prioritised within the limited OS execution window, then cap the
-			// list. Without maxUploads (foreground sync) we use the full delta set as-is.
+			// A background pass sorts newest-modified first so the most recently captured media is
+			// prioritised within the limited OS execution window. It no longer takes a small fixed slice:
+			// the window itself is the budget. A fixed cap of 3 meant a fire finished its three parallel
+			// uploads in seconds and then exited, leaving most of a granted window unused, while the
+			// foreground pass (uncapped) did all the real work — which is why background backup only ever
+			// moved a handful of photos a day. `deadlineAt` now bounds the pass instead (see the worker
+			// loop), so it drains for as long as the OS actually granted. maxUploads stays supported as an
+			// explicit ceiling for any caller that wants one — passing it opts into the same sort-then-cap
+			// treatment, on a foreground pass too. Only a foreground pass with NO ceiling takes the set
+			// as-is (no caller does today).
 			//
 			// Background picks also skip assets whose uploads already burned >= MAX_BACKGROUND_UPLOAD_ABORTS
 			// run budgets (audit B4): without the persisted skip, an asset too large for the OS window is
 			// re-picked every run forever — partial-upload data + battery with zero forward progress. The
 			// skip is silent and background-only; the asset uploads on the next unbudgeted foreground sync.
-			const deltas = params?.maxUploads
+			// Explicit rather than truthiness: `maxUploads: 0` is a real (if unused) ceiling meaning
+			// "upload nothing", and a truthy test would silently widen it to the whole set.
+			const prioritised = params?.background === true || params?.maxUploads !== undefined
+			const deltas = prioritised
 				? allDeltas
 						.filter(
 							delta =>
@@ -1608,7 +1714,7 @@ class CameraUpload {
 								(b.file.info.modificationTime ?? b.file.info.creationTime ?? 0) -
 								(a.file.info.modificationTime ?? a.file.info.creationTime ?? 0)
 						)
-						.slice(0, params.maxUploads)
+						.slice(0, params?.maxUploads ?? allDeltas.length)
 				: allDeltas
 
 			// BACKGROUND mirror mode: drop the shield ONLY for the picked deltas whose tree key is
@@ -1662,11 +1768,27 @@ class CameraUpload {
 				return remoteContentHashes.get(parentTreePath(treePath))?.get(size) ?? NO_REMOTE_CONTENT_HASHES
 			}
 
+			// One definition for all three soft-stop checkpoints below (see deadlineAt on sync()). A pass
+			// given no deadline — every foreground pass — is never window-bound, so this is always false
+			// for it.
+			const windowSpent = (): boolean => params?.deadlineAt !== undefined && Date.now() >= params.deadlineAt
+
 			const uploadWorker = async (): Promise<void> => {
 				while (true) {
 					const index = nextDeltaIndex++
 
 					if (index >= deltas.length || abortController.signal.aborted) {
+						return
+					}
+
+					// Soft stop, checkpoint 1 of 3 (see deadlineAt on sync()): stop picking up NEW work once
+					// the run's window is spent, so what is already in flight can finish rather than being
+					// killed by the hard abort. That abort records a persisted background-abort per
+					// in-flight asset, and MAX_BACKGROUND_UPLOAD_ABORTS of them exile an asset from
+					// background runs entirely — with the pipeline draining a whole window rather than
+					// three files, a deadline landing mid-batch would exile a batch at a time. Cheapest of
+					// the three checks and the only one that also avoids the per-delta shield read below.
+					if (windowSpent()) {
 						return
 					}
 
@@ -1711,6 +1833,18 @@ class CameraUpload {
 						shieldSkips++
 
 						continue
+					}
+
+					// Primary soft stop. Placed HERE, past the mtime-shield fast path but before anything
+					// expensive, because everything below is expensive: getUri, a full-file MD5, often a
+					// second full-file BLAKE3 for the destination check, staging, transform, upload. The
+					// loop-top check alone was not enough — every worker already past it would still run
+					// this entire block after the window closed. The shield skip above stays outside the
+					// gate deliberately: it is a cheap decision on an entry already fetched (see #B6 — the
+					// fetch is an in-memory index read on foreground, one kv point get on background), and
+					// gating it would make the run re-consider those assets next time for nothing.
+					if (windowSpent()) {
+						return
 					}
 
 					const result = await run(async defer => {
@@ -1840,6 +1974,28 @@ class CameraUpload {
 									this.stagingMutex.release()
 								})
 
+								// Last soft-stop checkpoint, and deliberately AFTER the acquire rather than
+								// before it. This mutex serialises the pipeline, so waiting on it is where a
+								// worker spends the most wall-clock without doing anything interruptible:
+								// checking before the wait would let a worker that queued microseconds inside
+								// the window go on to stage, transform and upload long after it closed.
+								// Checking once the permit is actually in hand measures the moment the work
+								// would really start. The release defer is already armed above, so breaking
+								// here hands the slot straight to the next waiter instead of stranding it.
+								//
+								// The ABORT arm is the live one here, and it is a foreground concern. A
+								// background pass sizes its pool to the mutex so nothing ever parks, which
+								// makes the window arm belt-and-braces (kept so the invariant does not
+								// depend on those two constants staying equal). A FOREGROUND pass has the
+								// wide pool and no deadline at all, so parking is normal — and on cancel()
+								// (logout, or a newer sync superseding this one) a parked worker would
+								// otherwise wake, copy the asset and run the full HEIC/compress transform,
+								// none of it abort-aware, before no-oping at the upload. That is a whole
+								// batch of pointless IO in front of logout's cancel-then-wipe.
+								if (windowSpent() || abortController.signal.aborted) {
+									break
+								}
+
 								// Create the staging tmp file WITH the original extension so that
 								// compress() can pass the supported-extension gate (it checks
 								// extname(file.uri) — a bare UUID with no extension always fails).
@@ -1959,6 +2115,8 @@ class CameraUpload {
 								// background-abort history (audit B4).
 								await cameraUploadState.deleteAbort(assetId)
 
+								uploaded++
+
 								break
 							}
 
@@ -2002,7 +2160,10 @@ class CameraUpload {
 			}
 
 			const uploadWorkers: Promise<void>[] = []
-			const uploadWorkerCount = Math.min(UPLOAD_PIPELINE_CONCURRENCY, deltas.length)
+			const uploadWorkerCount = Math.min(
+				params?.background ? BACKGROUND_UPLOAD_PIPELINE_CONCURRENCY : UPLOAD_PIPELINE_CONCURRENCY,
+				deltas.length
+			)
 			const pipelineStart = performance.now()
 
 			for (let workerIndex = 0; workerIndex < uploadWorkerCount; workerIndex++) {
@@ -2036,7 +2197,7 @@ class CameraUpload {
 			}
 
 			// BG-05: stamp completion of a real FOREGROUND pass (one that reached the upload pipeline).
-			// Background passes are partial (maxUploads-bounded) so they must NOT stamp — else they'd
+			// Background passes are partial (bounded by the run's window) so they must NOT stamp — else they'd
 			// suppress the next foreground pass that would finish the remaining uploads (mirrors
 			// offlineSync, which only stamps non-background passes).
 			if (!params?.background) {
@@ -2047,16 +2208,26 @@ class CameraUpload {
 		// BG-03: a foreground sync was requested (and dropped by the in-flight guard) while THIS background
 		// pass ran — re-fire it now (fire-and-forget) so the user's foreground request isn't lost to the
 		// single dropped AppState→active edge. Only the background pass that absorbed the request re-fires.
+		//
+		// Gated on the app ACTUALLY being active, which is the premise the re-fire rests on: it exists to
+		// serve a user who is looking at the app, and it deliberately runs unbudgeted and uncapped. In a
+		// headless wake there is no such user — the request can only have come from a foreground edge the
+		// user has since left — and firing it there launches an unbounded pass with whatever is left of
+		// the OS window, racing the offline phases for the reserve and getting cut mid-transfer. The flag
+		// is cleared either way, so a stale request cannot leak into a later run; the next real
+		// AppState→active edge re-triggers a foreground sync anyway.
 		if (params?.background && this.foregroundRerunRequested) {
 			this.foregroundRerunRequested = false
 
-			this.sync().catch(e => logger.warn("cameraUpload", "deferred foreground sync after background pass failed", { error: e }))
+			if (AppState.currentState === "active") {
+				this.sync().catch(e => logger.warn("cameraUpload", "deferred foreground sync after background pass failed", { error: e }))
+			}
 		}
 
 		if (!result.success) {
 			if (abortController.signal.aborted) {
 				// Cancellation (deadline / user) is not a failure.
-				return { success: true }
+				return { success: true, uploaded }
 			}
 
 			logger.error("cameraUpload", "Sync run failed unexpectedly", { error: result.error })
@@ -2073,10 +2244,10 @@ class CameraUpload {
 			// BG-01: surface the swallowed failure so the headless background task can record a camera-
 			// phase failure in its run log instead of reporting Success (the OS discards the return, but
 			// the persisted breadcrumb is the only field-diagnosable trace of a headless run).
-			return { success: false, error: result.error }
+			return { success: false, error: result.error, uploaded }
 		}
 
-		return { success: true }
+		return { success: true, skipped, uploaded }
 	}
 }
 

@@ -456,7 +456,8 @@ const BENCH_CONFIG: Config = {
 	includeVideos: true,
 	cellular: true,
 	background: true,
-	lowBattery: true,
+	// false = never consult the power mode, i.e. keep this gate out of the way of the bench.
+	lowBattery: false,
 	compress: false
 }
 

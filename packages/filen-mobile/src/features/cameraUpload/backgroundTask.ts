@@ -5,7 +5,7 @@ import { Platform } from "react-native"
 import logger from "@/lib/logger"
 import { run } from "@filen/utils"
 import setup from "@/lib/setup"
-import cameraUpload from "@/features/cameraUpload/cameraUpload"
+import cameraUpload, { type CameraUploadSkipReason } from "@/features/cameraUpload/cameraUpload"
 import offlineSync from "@/features/offline/offlineSync"
 import notesOffline from "@/features/notes/notesOffline"
 import secureStore from "@/lib/secureStore"
@@ -15,21 +15,38 @@ import backgroundRunLog, { type BackgroundRunPhase } from "@/features/cameraUplo
 
 const TASK_NAME = "filen-camera-upload-sync"
 
-// Soft deadline for ONE background run, covering camera upload AND the optional offline
-// pass together. Platform context: iOS schedules this as a BGProcessingTask (minutes-class
-// windows, expiration listener below is the authoritative kill signal); Android runs it as
-// a WorkManager worker with a HARD 10-minute stop and NO expiration callback — the soft
-// deadline is what keeps Android runs from being hard-killed mid-write. 2 minutes leaves
-// generous headroom under both platforms' real limits.
+// Soft deadline for ONE background run, shared by every phase it drives (camera upload, the optional
+// offline-files pass, and the offline-notes refresh). Platform context: iOS schedules this as a
+// BGProcessingTask, which Apple documents as running "only when the device is idle" and terminating
+// "any background processing tasks running when the user starts using the device"; Android runs it
+// as a WorkManager worker, whose ListenableWorker contract gives "a maximum of ten minutes to
+// finish its execution" before the future is cancelled and the result ignored.
+//
+// This deliberately stays at 2 minutes rather than growing toward those ceilings. Android
+// meters background work by DURATION through App Standby Buckets — the documented regular-job
+// quotas are 10 minutes per rolling 4h (working set) and per rolling 12h (frequent) — so at the
+// 3-hourly cadence below a longer run would simply exhaust the quota and starve later fires:
+// 120s x 4 runs = 480s fits inside a frequent-bucket window, 480s x 4 would not. The throughput
+// fix is to USE this window (see the camera phase's deadlineAt), not to widen it.
 export const BACKGROUND_RUN_BUDGET_MS = 120_000
+
+// Head-room subtracted from the run budget for the camera phase's soft stop. Covers two things:
+// transfers already in flight when the phase stops taking on new work need time to land (the
+// alternative is the hard abort, which persists a background-abort against every one of them), and
+// the two phases that follow need a window to clear their own floors below.
+//
+// It is head-room, not a hard guarantee — a single large video still in flight can outlast it — but
+// it is a credible one now that the camera phase releases the window at three checkpoints instead of
+// running a whole pipeline past the deadline.
+export const CAMERA_PHASE_RESERVE_MS = 30_000
 
 // Don't bother starting the offline pass when less than this remains of the run budget —
 // a pass that gets aborted moments after its first listings is pure wasted network.
 export const OFFLINE_BACKGROUND_MIN_REMAINING_MS = 15_000
 
-// The offline-notes pass is far cheaper than the offline-files one: one listNotes call, then a body
-// fetch only for notes actually edited since the last pass (usually none). A smaller floor lets it
-// still run in the tail of a budget the earlier phases mostly consumed.
+// The offline-notes pass is usually far cheaper than the offline-files one: one listNotes call, then
+// a body fetch per marked note that is stale OR missing from the cache. A smaller floor lets it still
+// run in the tail of a budget the earlier phases mostly consumed.
 export const NOTES_OFFLINE_BACKGROUND_MIN_REMAINING_MS = 5_000
 
 function cancelBackgroundWork(): void {
@@ -57,9 +74,9 @@ function cancelBackgroundWork(): void {
 TaskManager.defineTask(TASK_NAME, async () => {
 	const startedAt = Date.now()
 
-	// Run-log state, written as ONE breadcrumb after the run settles (audit B6): release
-	// builds no-op console.* and both OS schedulers discard the returned result, so the
-	// persisted entry is the only field-diagnosable trace of this run.
+	// Run-log state, written as ONE breadcrumb after the run settles (audit B6). Neither OS scheduler
+	// sees the value this task returns, and a run that skips at a gate logs nothing, so the persisted
+	// entry is the only guaranteed field-diagnosable trace of this run.
 	let phase: BackgroundRunPhase = "setup"
 	let cancelled = false
 	// BG-01: cameraUpload.sync() never rejects (it swallows + store-logs its own failures), so a camera-
@@ -68,6 +85,10 @@ TaskManager.defineTask(TASK_NAME, async () => {
 	// result so the breadcrumb + return reflect a camera failure symmetrically with the offline phase.
 	let cameraFailed = false
 	let cameraError: unknown = undefined
+	// What the camera phase actually did, so the breadcrumb can tell "the OS never ran us" apart from
+	// "we ran and a gate skipped us" apart from "we ran and uploaded".
+	let cameraUploaded: number | undefined = undefined
+	let cameraSkipReason: CameraUploadSkipReason | undefined = undefined
 
 	const result = await run(async defer => {
 		// Persist-before-suspend: the storedOffline query broadcasts still debounce through
@@ -101,6 +122,11 @@ TaskManager.defineTask(TASK_NAME, async () => {
 		})
 
 		if (Platform.OS === "ios") {
+			// Only works because of patches/expo-background-task+57.0.11.patch. Upstream's observer
+			// guards on a userInfo["url"] that the poster never sets, so this event has never been
+			// emitted in any released version and iOS expiration reached JS nowhere — the timer above
+			// was the only bound. Do not drop that patch: with the camera phase now draining a whole
+			// window, an unnoticed expiration means transfers cut mid-flight and no run breadcrumb.
 			const expirationListener = BackgroundTask.addExpirationListener(cancelRun)
 
 			defer(() => {
@@ -119,12 +145,18 @@ TaskManager.defineTask(TASK_NAME, async () => {
 		phase = "camera"
 
 		const cameraResult = await cameraUpload.sync({
-			// Best-effort per fire: staging runs up to Semaphore(4) concurrent with per-decode
-			// release, and the run budget + expiration abort naturally cap it — a slow connection
-			// just uploads 1-2 and the rest roll to the next fire.
-			maxUploads: 3,
+			// No per-fire file cap: the window IS the budget. The phase drains newest-first until its
+			// soft stop, then lets whatever is in flight land inside the reserve. A fixed cap of 3 used
+			// to finish in seconds and hand the rest of the window back unused, which is why background
+			// backup moved only a handful of photos a day while the uncapped foreground pass did the
+			// real work. Staging stays bounded by the engine's Semaphore(4) regardless of how many
+			// deltas the pass picks up, so draining longer costs window, not memory or disk.
+			deadlineAt: startedAt + BACKGROUND_RUN_BUDGET_MS - CAMERA_PHASE_RESERVE_MS,
 			background: true
 		})
+
+		cameraUploaded = cameraResult.uploaded
+		cameraSkipReason = cameraResult.skipped
 
 		if (!cameraResult.success) {
 			cameraFailed = true
@@ -135,8 +167,8 @@ TaskManager.defineTask(TASK_NAME, async () => {
 			return
 		}
 
-		// Optional second phase: the budgeted offline FILES pass (default off; offline settings
-		// screen). Skipped when the camera phase consumed the run budget.
+		// Second phase: the budgeted offline FILES pass (default off; offline settings screen).
+		// Skipped when the camera phase consumed the run budget.
 		const offlineEnabled = (await secureStore.get<boolean>(OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY)) === true
 
 		if (offlineEnabled && !cancelled && BACKGROUND_RUN_BUDGET_MS - (Date.now() - startedAt) >= OFFLINE_BACKGROUND_MIN_REMAINING_MS) {
@@ -151,14 +183,22 @@ TaskManager.defineTask(TASK_NAME, async () => {
 			return
 		}
 
-		// Third phase: refresh the bodies of notes marked available offline. Intentionally NOT behind
-		// a settings toggle — marking a note IS the opt-in, and a pass with an empty ledger costs one
-		// indexed kv range scan and returns before touching the network. It also runs whether or not
-		// the offline-FILES pass above was enabled: the two are unrelated opt-ins.
+		// Third phase: refresh the bodies of notes marked available offline. Intentionally NOT behind a
+		// settings toggle — marking a note IS the opt-in — and it runs whether or not the offline-FILES
+		// pass above was enabled: the two are unrelated opt-ins. This is the only trigger that reaches a
+		// user who never opens the app while online, which is exactly the user the feature is for.
 		//
-		// This is the only trigger that reaches a user who never opens the app while online, which is
-		// exactly the user the feature is for. notesOffline.sync() never rejects, so a failure here
-		// degrades to a logged warning and the next run retries rather than failing the whole run.
+		// It stays LAST despite that, because it cannot be bounded from here. notesOffline.sync() takes
+		// no deadline, and its plan re-fetches every marked note whose cached body is MISSING, not only
+		// those edited since the last pass — after a cache eviction that is the whole marked set. Ahead
+		// of the camera phase it could therefore consume the entire window and starve photo backup, the
+		// primary job; behind it, the worst case is that its own refresh waits for the next fire. What
+		// protects it here is the camera phase's soft stop, which now releases the window at three
+		// checkpoints rather than running a full pipeline past the deadline, so CAMERA_PHASE_RESERVE_MS
+		// is a reserve the later phases can actually use.
+		//
+		// notesOffline.sync() never rejects, so a failure degrades to a logged warning and the next run
+		// retries rather than failing the whole run.
 		if (!cancelled && BACKGROUND_RUN_BUDGET_MS - (Date.now() - startedAt) >= NOTES_OFFLINE_BACKGROUND_MIN_REMAINING_MS) {
 			phase = "notesOffline"
 
@@ -190,7 +230,9 @@ TaskManager.defineTask(TASK_NAME, async () => {
 			phase,
 			cancelled,
 			result: runFailed ? "failed" : "success",
-			errorMessage: runFailed ? (runError instanceof Error ? runError.message : String(runError)) : undefined
+			errorMessage: runFailed ? (runError instanceof Error ? runError.message : String(runError)) : undefined,
+			cameraUploaded,
+			cameraSkipReason
 		})
 		.catch(err => {
 			logger.warn("cameraUpload", "Failed to write background run log entry", { error: err })
@@ -223,10 +265,17 @@ export async function registerBackgroundSync(): Promise<void> {
 		}
 
 		await BackgroundTask.registerTaskAsync(TASK_NAME, {
-			// Minutes. Each fire pays a full bundle eval + cache/query restore, so keep fires rare
-			// (~8/day) and let each drain up to maxUploads photos above — same daily throughput as
-			// a 1h/1-upload cadence at a third of the cost. iOS throttles background wakes far below
-			// this regardless, and the foreground drain stays the primary path.
+			// Minutes. Two independent reasons this stays at 3 hours rather than going shorter:
+			//
+			// Each fire pays a full bundle eval + cache/query restore, so rare fires that each drain a
+			// whole window beat frequent fires that each pay that overhead for a few photos. And Android
+			// meters jobs by DURATION, not by count — against the documented frequent-bucket quota of 10
+			// minutes per rolling 12h, this cadence at BACKGROUND_RUN_BUDGET_MS costs 4 x 120s = 480s and
+			// fits; at 2h it would be 6 x 120s = 720s and the OS would start refusing fires.
+			//
+			// iOS throttles background wakes far below this regardless (BGProcessingTask runs only when
+			// the device is idle, at a time the system picks), and the foreground drain — uncapped and
+			// unbudgeted — stays the primary path on both platforms.
 			minimumInterval: 180
 		})
 

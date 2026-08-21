@@ -345,7 +345,8 @@ vi.mock("@/lib/signals", () => ({
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 import cameraUploadState from "@/features/cameraUpload/cameraUploadState"
-import cameraUpload, { type Config, canonicalRemoteName } from "@/features/cameraUpload/cameraUpload"
+import cameraUpload, { type Config, canonicalRemoteName, MAX_BACKGROUND_UPLOAD_ABORTS } from "@/features/cameraUpload/cameraUpload"
+import { AppState } from "react-native"
 import {
 	modifyAssetPathOnCollision,
 	effectiveCreationTimestamp,
@@ -389,7 +390,10 @@ const ENABLED_CONFIG: Config & { enabled: true } = {
 	includeVideos: true,
 	cellular: true,
 	background: true,
-	lowBattery: true,
+	// false = "do not pause during Battery Saver / Low Power Mode", so the shared fixture never trips
+	// the power gate. The field is an opt-IN to pausing (it reads "Pause syncing when the battery is
+	// low"), not a permission to sync.
+	lowBattery: false,
 	compress: false
 }
 
@@ -844,31 +848,40 @@ describe("sync pre-flight checks", () => {
 		expect(mockSetSyncing).not.toHaveBeenCalled()
 	})
 
-	it("skips when isInternetReachable is null (platform unable to determine reachability)", async () => {
+	it("proceeds when isInternetReachable is null (reachability not determined yet)", async () => {
+		// iOS reports null for a window at the start of every process: its native module supplies no
+		// isInternetReachable, so NetInfo falls back to a probe and serves null from cache until that
+		// probe first settles. Treating null as offline skipped whole headless runs — and disagreed
+		// with computeOnline() in queries/onlineStatus, which counts null as online. isConnected is
+		// still authoritative, so a genuinely offline device (below) is unaffected.
 		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, cellular: true })
 		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "wifi", isConnected: true, isInternetReachable: null } as any)
 
 		await cameraUpload.sync()
 
-		expect(mockSetSyncing).not.toHaveBeenCalled()
+		expect(mockSetSyncing).toHaveBeenCalledWith(true)
 	})
 
-	it("skips on low battery when config.lowBattery is false", async () => {
-		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, lowBattery: false })
-		vi.mocked(Battery.isLowPowerModeEnabledAsync).mockResolvedValueOnce(true)
-
-		await cameraUpload.sync()
-
-		expect(mockSetSyncing).not.toHaveBeenCalled()
-	})
-
-	it("proceeds on low battery when config.lowBattery is true", async () => {
+	it("skips on low battery when config.lowBattery is true", async () => {
+		// ON means "pause syncing when the battery is low", matching the toggle's own description.
 		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, lowBattery: true })
 		vi.mocked(Battery.isLowPowerModeEnabledAsync).mockResolvedValueOnce(true)
 
 		await cameraUpload.sync()
 
+		expect(mockSetSyncing).not.toHaveBeenCalled()
+	})
+
+	it("proceeds on low battery when config.lowBattery is false", async () => {
+		// OFF (the default) must never consult the power mode at all — it used to, which silently
+		// no-oped every sync, manual ones included, whenever Battery Saver was on.
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, lowBattery: false })
+		vi.mocked(Battery.isLowPowerModeEnabledAsync).mockResolvedValueOnce(true)
+
+		await cameraUpload.sync()
+
 		expect(mockSetSyncing).toHaveBeenCalledWith(true)
+		expect(Battery.isLowPowerModeEnabledAsync).not.toHaveBeenCalled()
 	})
 
 	it("skips background sync when config.background is false", async () => {
@@ -885,6 +898,394 @@ describe("sync pre-flight checks", () => {
 		await cameraUpload.sync({ background: true })
 
 		expect(mockSetSyncing).toHaveBeenCalledWith(true)
+	})
+
+	it("reports WHY it skipped, so a headless run leaves more than 'success'", async () => {
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, lowBattery: true })
+		vi.mocked(Battery.isLowPowerModeEnabledAsync).mockResolvedValueOnce(true)
+
+		const result = await cameraUpload.sync()
+
+		expect(result.success).toBe(true)
+		expect(result.skipped).toBe("lowPower")
+		expect(result.uploaded).toBe(0)
+	})
+
+	it("reports no skip reason for a pass that actually ran", async () => {
+		const result = await cameraUpload.sync()
+
+		expect(result.success).toBe(true)
+		expect(result.skipped).toBeUndefined()
+	})
+
+	it("reports the offline reason, the one a headless run hits most", async () => {
+		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "wifi", isConnected: false, isInternetReachable: false } as any)
+
+		const result = await cameraUpload.sync()
+
+		expect(result.skipped).toBe("offline")
+	})
+
+	it("reports the cellular reason", async () => {
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, cellular: false })
+		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "cellular", isConnected: true, isInternetReachable: true } as any)
+
+		const result = await cameraUpload.sync()
+
+		expect(result.skipped).toBe("cellularBlocked")
+	})
+
+	it("reports the not-configured reason", async () => {
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, albumIds: [] })
+
+		const result = await cameraUpload.sync()
+
+		expect(result.skipped).toBe("notConfigured")
+	})
+
+	it("reports the background-disabled reason", async () => {
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, background: false })
+
+		const result = await cameraUpload.sync({ background: true })
+
+		expect(result.skipped).toBe("backgroundDisabled")
+	})
+
+	it("reports the coalesced reason after a completed foreground pass", async () => {
+		// The only gate reachable purely by timing, and previously untested end to end.
+		await cameraUpload.sync()
+
+		const result = await cameraUpload.sync()
+
+		expect(result.skipped).toBe("coalesced")
+	})
+})
+
+// ─── Background window ───────────────────────────────────────────────────────
+
+describe("background run window", () => {
+	function seedAssets(count: number): void {
+		const ids = Array.from({ length: count }, (_, i) => `bg-${i}`)
+
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ids })
+
+		ids.forEach((id, i) => {
+			const uri = `file:///media/${id}.jpg`
+
+			ml.addAsset({
+				id,
+				filename: `${id}.jpg`,
+				uri,
+				mediaType: MediaType.IMAGE,
+				creationTime: 1000 + i,
+				modificationTime: 2000 + i
+			})
+
+			fs.set(uri, new Uint8Array([i + 1]))
+		})
+	}
+
+	it("counts every upload in an uncapped background pass", async () => {
+		// Note the engine has always taken `allDeltas` for a background call with no maxUploads — the
+		// cap lived in the CALLER (backgroundTask), which is where its removal is pinned. What is new
+		// here is the reported count.
+		seedAssets(8)
+
+		const result = await cameraUpload.sync({ background: true })
+
+		expect(transfers.upload).toHaveBeenCalledTimes(8)
+		expect(result.uploaded).toBe(8)
+	})
+
+	it("still skips abort-blacklisted assets in an uncapped background pass", async () => {
+		// The abort filter and the newest-first ordering used to live INSIDE the maxUploads branch, so
+		// dropping the per-fire cap would have quietly stopped applying both to background runs — and
+		// an asset too large for any window would be retried forever instead of deferred to foreground.
+		seedAssets(4)
+		cameraUploadState.aborts.set("bg-0", MAX_BACKGROUND_UPLOAD_ABORTS)
+		cameraUploadState.aborts.set("bg-1", MAX_BACKGROUND_UPLOAD_ABORTS + 1)
+
+		const result = await cameraUpload.sync({ background: true })
+
+		expect(result.uploaded).toBe(2)
+
+		const uploadedNames = vi.mocked(transfers.upload).mock.calls.map(call => (call[0] as { name: string }).name)
+
+		expect(uploadedNames).not.toContain("bg-0.jpg")
+		expect(uploadedNames).not.toContain("bg-1.jpg")
+	})
+
+	it("orders an uncapped background pass newest-first", async () => {
+		// Newest media matters most when the window can end at any moment, and the OS decides when.
+		seedAssets(4)
+
+		await cameraUpload.sync({ background: true })
+
+		const uploadedNames = vi.mocked(transfers.upload).mock.calls.map(call => (call[0] as { name: string }).name)
+
+		expect(uploadedNames[0]).toBe("bg-3.jpg")
+		expect(uploadedNames[uploadedNames.length - 1]).toBe("bg-0.jpg")
+	})
+
+	it("applies an explicit maxUploads ceiling AFTER the newest-first sort", async () => {
+		seedAssets(8)
+
+		await cameraUpload.sync({ background: true, maxUploads: 2 })
+
+		expect(transfers.upload).toHaveBeenCalledTimes(2)
+
+		// Asserting WHICH two, not just how many: a cap applied before the sort would pass a count-only
+		// check while quietly backing up the oldest media first.
+		const uploadedNames = vi.mocked(transfers.upload).mock.calls.map(call => (call[0] as { name: string }).name)
+
+		expect(uploadedNames.sort()).toEqual(["bg-6.jpg", "bg-7.jpg"])
+	})
+
+	it("stops picking up new work once the soft deadline has passed", async () => {
+		// Soft stop, not abort: the hard abort is what records a persisted background-abort against
+		// every in-flight asset, and MAX_BACKGROUND_UPLOAD_ABORTS of those exile it from background runs.
+		seedAssets(8)
+
+		const result = await cameraUpload.sync({ background: true, deadlineAt: Date.now() - 1 })
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+		expect(result.uploaded).toBe(0)
+		// A spent window is not a failure, and must not be recorded as one.
+		expect(result.success).toBe(true)
+		// And nothing EXPENSIVE ran either. Hashing is a full-file read per asset, so a gate placed
+		// after it would still burn the disk (and the battery) for every queued delta once the window
+		// had already closed. Pins the checkpoint ahead of the hash, not merely ahead of the upload.
+		expect(mockFileHash).not.toHaveBeenCalled()
+	})
+
+	it("does not apply a deadline to a foreground pass that was given none", async () => {
+		seedAssets(4)
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(4)
+	})
+
+	it("re-fires the dropped foreground pass — uncapped and undeadlined — when the app is actually active", async () => {
+		seedAssets(1)
+		;(cameraUpload as unknown as { foregroundRerunRequested: boolean }).foregroundRerunRequested = true
+		AppState.currentState = "active"
+
+		// The OUTER call runs for real; the re-fire is stubbed. The re-fire is fire-and-forget
+		// (`this.sync().catch(...)`, never awaited), so letting the spy call through would leave a live
+		// foreground pass running past the end of this test and into the next one's mock counts.
+		const syncSpy = vi
+			.spyOn(cameraUpload, "sync")
+			.mockImplementationOnce(params => Object.getPrototypeOf(cameraUpload).sync.call(cameraUpload, params))
+			.mockResolvedValue({ success: true })
+
+		try {
+			await cameraUpload.sync({ background: true })
+
+			expect(syncSpy).toHaveBeenCalledTimes(2)
+
+			// The re-fire exists to serve a user looking at the app, so it must inherit NONE of the
+			// background pass's bounds — a leaked deadline or cap here would silently truncate the
+			// user's own sync.
+			expect(syncSpy.mock.calls[1]?.[0]).toBeUndefined()
+		} finally {
+			syncSpy.mockRestore()
+		}
+	})
+
+	it("does NOT re-fire an unbounded foreground pass from a headless run", async () => {
+		// The re-fire runs uncapped and un-deadlined by design — it exists for a user looking at the
+		// app. In a headless wake there is no such user, and firing it there launches an unbounded pass
+		// into whatever is left of the OS window, racing the later phases for the reserve and getting
+		// cut mid-transfer.
+		seedAssets(1)
+		;(cameraUpload as unknown as { foregroundRerunRequested: boolean }).foregroundRerunRequested = true
+		AppState.currentState = "background"
+
+		const syncSpy = vi.spyOn(cameraUpload, "sync")
+
+		try {
+			await cameraUpload.sync({ background: true })
+
+			expect(syncSpy).toHaveBeenCalledTimes(1)
+			// Cleared regardless, so a stale request cannot leak into a later run.
+			expect((cameraUpload as unknown as { foregroundRerunRequested: boolean }).foregroundRerunRequested).toBe(false)
+		} finally {
+			syncSpy.mockRestore()
+
+			AppState.currentState = "active"
+		}
+	})
+
+	it("runs a narrower worker pool in background than in foreground", async () => {
+		// Measured at HASHING, not at upload: staging already serialises uploads four at a time, so
+		// upload concurrency is identical under both widths and would pin nothing. Hashing runs BEFORE
+		// the mutex, so it is where the pool width is actually observable — and it is the same stretch
+		// where the non-abortable getUri() lives, which is the reason background runs narrow.
+		const peakOf = async (params?: Parameters<typeof cameraUpload.sync>[0]): Promise<number> => {
+			let concurrent = 0
+			let peak = 0
+
+			mockFileHash.mockImplementation(async (...args: Parameters<typeof fileHashImplementation>) => {
+				concurrent++
+				peak = Math.max(peak, concurrent)
+
+				await Promise.resolve()
+
+				concurrent--
+
+				return await fileHashImplementation(...args)
+			})
+
+			await cameraUpload.sync(params)
+
+			return peak
+		}
+
+		seedAssets(12)
+
+		const backgroundPeak = await peakOf({ background: true })
+
+		// Reset the ledger so the same assets are deltas again for the foreground pass.
+		cameraUploadState.hashes.clear()
+		cameraUpload.cancel()
+
+		const foregroundPeak = await peakOf({ manual: true })
+
+		// Sized to stagingMutex(4) so no background worker ever parks on the mutex — the one place a
+		// deadline or a cancel cannot reach it.
+		expect(backgroundPeak).toBeLessThanOrEqual(4)
+		// Foreground keeps the wide pool: it has no window to overrun.
+		expect(foregroundPeak).toBeGreaterThan(backgroundPeak)
+	})
+
+	it("drops a worker that only won its staging permit after a cancel", async () => {
+		// Discriminates the LAST checkpoint — the one after stagingMutex.acquire(). Waiting on that
+		// mutex is the one stretch a worker cannot be interrupted in, so without a gate on the far side
+		// of the wait a parked worker wakes up after the cancel and still copies the asset and runs the
+		// full transform chain (none of it abort-aware) before no-oping at the upload.
+		//
+		// Uses a FOREGROUND pass on purpose: it has the wide pool against stagingMutex(4), so most
+		// workers genuinely park. (A background pass sizes its pool to the mutex precisely so nothing
+		// parks, which is why the deadline arm of this checkpoint is belt-and-braces there.)
+		seedAssets(12)
+
+		vi.mocked(transfers.upload).mockImplementation(async () => {
+			cameraUpload.cancel()
+
+			return null as any
+		})
+
+		await cameraUpload.sync({ manual: true })
+
+		// Only the workers holding permits when the cancel landed reach the upload; the parked ones
+		// break on the far side of the acquire. Without the checkpoint every one of the 12 wakes and
+		// walks the whole staging/transform path first.
+		expect(vi.mocked(transfers.upload).mock.calls.length).toBeLessThanOrEqual(4)
+	})
+
+	it("keeps the abort blacklist background-only, even for a capped foreground pass", async () => {
+		// A capped FOREGROUND pass takes the same sort-and-slice path as a background one, so the
+		// blacklist filter sits on a shared branch. It must still not apply: the blacklist exists to
+		// defer assets that cannot fit an OS WINDOW, and a foreground pass has none — filtering there
+		// would strand an asset with no path back.
+		seedAssets(4)
+		cameraUploadState.aborts.set("bg-3", MAX_BACKGROUND_UPLOAD_ABORTS + 1)
+
+		await cameraUpload.sync({ manual: true, maxUploads: 4 })
+
+		const uploadedNames = vi.mocked(transfers.upload).mock.calls.map(call => (call[0] as { name: string }).name)
+
+		expect(uploadedNames).toContain("bg-3.jpg")
+	})
+
+	it("uploads nothing for an explicit maxUploads of 0", async () => {
+		// Boundary: 0 is a real ceiling meaning "upload nothing", not an absent one. A truthiness test
+		// would widen it to the whole set.
+		seedAssets(4)
+
+		const result = await cameraUpload.sync({ background: true, maxUploads: 0 })
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+		expect(result.uploaded).toBe(0)
+	})
+
+	it("forgets an asset's abort history once it finally uploads", async () => {
+		// Without this the counter only ever climbs, so an asset that failed twice on slow windows
+		// stays one strike from permanent background exile forever, however many times it later
+		// succeeds.
+		seedAssets(1)
+		cameraUploadState.aborts.set("bg-0", MAX_BACKGROUND_UPLOAD_ABORTS - 1)
+
+		const result = await cameraUpload.sync({ background: true })
+
+		expect(result.uploaded).toBe(1)
+		expect(cameraUploadState.aborts.has("bg-0")).toBe(false)
+	})
+
+	it("records a persisted background-abort when the window is cut short mid-transfer", async () => {
+		// The WRITE end of the exile mechanism the blacklist test above consumes. A hard abort is what
+		// the soft stop exists to avoid; when it does happen, the asset must be counted so an item too
+		// large for any window stops being retried forever.
+		seedAssets(3)
+
+		vi.mocked(transfers.upload).mockImplementation(async () => {
+			// Simulate the run budget expiring mid-flight: the engine aborts, and the transfer resolves
+			// null, which is the SDK's "aborted" signal.
+			cameraUpload.cancel()
+
+			return null as any
+		})
+
+		const result = await cameraUpload.sync({ background: true })
+
+		expect(result.success).toBe(true)
+		expect(result.uploaded).toBe(0)
+
+		// By identity and by value, not just "something was written": the counter is what
+		// MAX_BACKGROUND_UPLOAD_ABORTS counts against, so an off-by-one or a write against the wrong
+		// asset would exile the wrong photo — or exile one two runs early.
+		expect(cameraUploadState.aborts.size).toBeGreaterThan(0)
+
+		for (const [assetId, count] of cameraUploadState.aborts) {
+			expect(assetId).toMatch(/^bg-\d+$/)
+			expect(count).toBe(1)
+		}
+	})
+
+	it("stops part-way through a batch once the window is spent, without aborting", async () => {
+		// The real case, and the one a past-deadline test cannot reach: the pass starts, does work, and
+		// runs out of window with deltas still queued. Needs more deltas than UPLOAD_PIPELINE_CONCURRENCY
+		// so the workers loop for a second item and re-check the deadline. Time is driven by the upload
+		// mock rather than the wall clock so this cannot flake.
+		seedAssets(24)
+
+		const base = Date.now()
+		let clock = base
+
+		const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock)
+
+		vi.mocked(transfers.upload).mockImplementation(async () => {
+			clock += 1_000
+
+			return { files: [] } as any
+		})
+
+		try {
+			const result = await cameraUpload.sync({ background: true, deadlineAt: base + 5_000 })
+
+			// Did real work...
+			expect(result.uploaded).toBeGreaterThan(0)
+			// ...but did NOT drain the whole set: the window ran out first.
+			expect(result.uploaded).toBeLessThan(24)
+			expect(vi.mocked(transfers.upload).mock.calls.length).toBeLessThan(24)
+			// A spent window is an ordinary outcome, not a failure, and nothing was aborted — so no asset
+			// earns a persisted background-abort from it.
+			expect(result.success).toBe(true)
+			expect(cameraUploadState.aborts.size).toBe(0)
+		} finally {
+			nowSpy.mockRestore()
+		}
 	})
 })
 

@@ -316,7 +316,9 @@ const ENABLED_CONFIG: Config = {
 	includeVideos: true,
 	cellular: true,
 	background: true,
-	lowBattery: true,
+	// false = never consult the power mode, i.e. keep this gate out of the way of these tests. The
+	// field is an opt-IN to pausing; `true` here would mean "pause during Battery Saver".
+	lowBattery: false,
 	compress: false
 }
 

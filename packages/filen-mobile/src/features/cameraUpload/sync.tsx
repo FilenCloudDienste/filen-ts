@@ -91,7 +91,7 @@ const CameraUploadSync = () => {
 	useEffect(() => {
 		// Mount ≠ foreground: an iOS cold background launch (BGProcessingTask) mounts the
 		// tree with AppState "background" — this unbudgeted sync would race the budgeted
-		// background-task sync (maxUploads: 1) for the engine's syncing flag. The listener
+		// background-task sync (deadline-bounded) for the engine's syncing flag. The listener
 		// below covers the deferred first sync on the real "active" transition.
 		if (AppState.currentState === "active") {
 			cameraUpload.sync().catch(err => logger.warn("cameraUpload", "Mount sync failed", { error: err }))

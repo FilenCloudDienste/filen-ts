@@ -5,6 +5,7 @@ import * as FileSystem from "expo-file-system"
 import logger from "@/lib/logger"
 import { newTmpFile } from "@/lib/tmp"
 import i18n from "@/lib/i18n"
+import backgroundRunLog from "@/features/cameraUpload/backgroundRunLog"
 
 export type PreparedLogsExport =
 	| {
@@ -44,13 +45,29 @@ const diagnostics = {
 
 		const files = logger.listLogFiles()
 
-		if (files.length === 0) {
+		// A quiet background run leaves no trace in the NDJSON files: the camera-upload gates that skip a
+		// pass return silently, so nothing marks that the run happened or why it did nothing. (Some runs
+		// DO log — the destination gates warn, as do slow listings and outsized hash counts — but none of
+		// those fire on the ordinary case a report is usually about.) The kv breadcrumb is the only
+		// GUARANTEED record of a run and what it did, so a report about background syncing is
+		// unanswerable without it. Never fails the export — a broken kv read just omits it.
+		const backgroundRuns = await backgroundRunLog.list().catch(err => {
+			logger.warn("settings", "Failed to read background run log for export", { error: err })
+
+			return []
+		})
+
+		if (files.length === 0 && backgroundRuns.length === 0) {
 			return "no-logs"
 		}
 
 		const zip = new JSZip()
 
 		zip.file("device-info.json", JSON.stringify(buildDeviceInfo(), null, 2))
+
+		if (backgroundRuns.length > 0) {
+			zip.file("background-runs.json", JSON.stringify(backgroundRuns, null, 2))
+		}
 
 		for (const file of files) {
 			try {

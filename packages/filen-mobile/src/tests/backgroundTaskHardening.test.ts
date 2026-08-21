@@ -240,6 +240,18 @@ describe("hardening — budgeted offline phase wiring", () => {
 		expect(mockOfflineSync.sync).not.toHaveBeenCalled()
 		expect(mockNotesOffline.sync).toHaveBeenCalledTimes(1)
 		expect(mockNotesOffline.sync).toHaveBeenCalledWith({ background: true })
+	})
+
+	it("runs the offline-notes pass AFTER the camera phase", async () => {
+		// Sequencing is load-bearing, not incidental. The notes pass takes no deadline and its plan
+		// re-fetches every marked note whose cached body is MISSING (not only those edited since the
+		// last pass), which after a cache eviction is the whole marked set — ahead of the camera phase
+		// it could consume the entire window and starve photo backup, the primary job. Behind it, the
+		// worst case is that its own refresh waits for the next fire.
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+		mockSecureStoreGet.mockResolvedValue(null)
+
+		await runTask()
 
 		const cameraOrder = mockCameraUpload.sync.mock.invocationCallOrder[0] as number
 		const notesOrder = mockNotesOffline.sync.mock.invocationCallOrder[0] as number
@@ -309,31 +321,6 @@ describe("hardening — budgeted offline phase wiring", () => {
 		}
 	})
 
-	it("an expiration during the camera phase prevents the offline-notes phase from STARTING", async () => {
-		;(Platform as { OS: string }).OS = "ios"
-		mockSetup.setup.mockResolvedValue({ isAuthed: true })
-
-		let expirationCallback: (() => void) | null = null
-
-		mockBackgroundTask.addExpirationListener.mockImplementation((cb: () => void) => {
-			expirationCallback = cb
-
-			return { remove: mockRemoveListener }
-		})
-
-		mockCameraUpload.sync.mockImplementation(async () => {
-			expirationCallback?.()
-
-			return { success: true }
-		})
-
-		await runTask()
-
-		expect(mockNotesOffline.sync).not.toHaveBeenCalled()
-	})
-
-	// The pass writes bodies through the query persister's debounce, so the run must not report
-	// completion until the flush that follows it has settled.
 	it("flushes the query persister after the offline-notes phase", async () => {
 		mockSetup.setup.mockResolvedValue({ isAuthed: true })
 
@@ -443,7 +430,35 @@ describe("hardening — budgeted offline phase wiring", () => {
 		expect(mockNotesOffline.cancel).toHaveBeenCalledTimes(1)
 	})
 
-	it("an expiration during the camera phase prevents the offline phase from STARTING (cancel() swaps in a fresh AbortController)", async () => {
+	it("an expiration during the offline-FILES phase prevents the notes phase from STARTING", async () => {
+		// The symmetric seam one phase later, and the last unpinned one. Structurally identical to the
+		// camera seam above, but worth its own test because notes is the phase with no successor to
+		// notice it was skipped — a regression here is invisible in the breadcrumb except as a phase
+		// that never advances past "offline".
+		;(Platform as { OS: string }).OS = "ios"
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+		mockSecureStoreGet.mockResolvedValue(true)
+
+		let expirationCallback: (() => void) | null = null
+
+		mockBackgroundTask.addExpirationListener.mockImplementation((cb: () => void) => {
+			expirationCallback = cb
+
+			return { remove: mockRemoveListener }
+		})
+
+		mockOfflineSync.sync.mockImplementation(async () => {
+			expirationCallback?.()
+		})
+
+		await runTask()
+
+		expect(mockOfflineSync.sync).toHaveBeenCalledTimes(1)
+		expect(mockNotesOffline.sync).not.toHaveBeenCalled()
+		expect(mockRunLogAppend).toHaveBeenCalledWith(expect.objectContaining({ phase: "offline", cancelled: true }))
+	})
+
+	it("an expiration during the camera phase prevents the LATER phases from STARTING (cancel() swaps in a fresh AbortController)", async () => {
 		// Both engines' cancel() abort the CURRENT controller and immediately swap in a
 		// fresh one for the next run — so a cancel landing between phases aborts nothing.
 		// Without a run-local cancelled flag, an iOS expiration at t=30s would leave
@@ -471,6 +486,8 @@ describe("hardening — budgeted offline phase wiring", () => {
 
 		expect(mockOfflineSync.cancel).toHaveBeenCalledTimes(1)
 		expect(mockOfflineSync.sync).not.toHaveBeenCalled()
+		// Both remaining phases, not just the next one — the run-local flag gates every one of them.
+		expect(mockNotesOffline.sync).not.toHaveBeenCalled()
 	})
 
 	it("an expiration during setup prevents the camera phase from STARTING", async () => {
