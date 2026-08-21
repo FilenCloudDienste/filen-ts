@@ -2,7 +2,7 @@
 
 `translate-i18n.ts` fills the eight target-language catalogs
 (`src/locales/<lang>.json`) from the English source catalog
-(`src/locales/en/*.ts`) using the Anthropic Messages API (`claude-opus-4-8`).
+(`src/locales/en/*.ts`) using the Anthropic Messages API (`claude-opus-5`).
 
 English is the single source of truth. Every other language is machine-translated
 and **always needs human review** before it ships.

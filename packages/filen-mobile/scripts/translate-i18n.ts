@@ -41,7 +41,7 @@ import { SUPPORTED_LANGUAGES } from "@/locales/languages"
 // Paths & constants
 // ---------------------------------------------------------------------------
 
-const MODEL = "claude-opus-4-8"
+const MODEL = "claude-opus-5"
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 const PACKAGE_DIR = join(SCRIPT_DIR, "..")
 const EN_SOURCE_DIR = join(PACKAGE_DIR, "src", "locales", "en")
