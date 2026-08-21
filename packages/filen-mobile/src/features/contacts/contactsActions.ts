@@ -17,7 +17,8 @@ export async function addContactFlow({ t }: { t: TFunction }): Promise<void> {
 			title: t("add_contact"),
 			message: t("enter_contact_filen_email"),
 			cancelText: t("cancel"),
-			okText: t("add")
+			okText: t("add"),
+			keyboardType: "email-address"
 		})
 	})
 

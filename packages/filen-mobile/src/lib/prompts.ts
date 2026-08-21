@@ -59,6 +59,12 @@ export type InputPromptOptions = {
 	cancelText?: string
 	placeholder?: string
 	destructive?: boolean
+	/**
+	 * Field semantics for the keyboard. A plain-text prompt otherwise capitalizes the first letter,
+	 * which is right for the names these prompts mostly collect and wrong for an address — so an
+	 * address says so, and gets the address keyboard on both platforms into the bargain.
+	 */
+	keyboardType?: "default" | "email-address"
 }
 
 // Serializes native dialogs (one at a time) so concurrent callers do not stack alerts.
@@ -297,7 +303,7 @@ const prompts = {
 					],
 					options?.inputType ?? "plain-text",
 					options?.defaultValue,
-					undefined,
+					options?.keyboardType,
 					{
 						cancelable: options?.cancellable ?? true,
 						onDismiss: () => {

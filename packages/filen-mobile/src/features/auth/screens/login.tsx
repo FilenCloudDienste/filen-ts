@@ -188,7 +188,8 @@ const Login = () => {
 				placeholder: t("email_placeholder_hint"),
 				cancelText: t("cancel"),
 				okText: t("send"),
-				defaultValue: email.trim()
+				defaultValue: email.trim(),
+				keyboardType: "email-address"
 			})
 		})
 

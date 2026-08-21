@@ -299,7 +299,8 @@ export function buildProfileButtons({
 						title: t("change_email_address"),
 						message: t("enter_new_email_address"),
 						cancelText: t("cancel"),
-						okText: t("next")
+						okText: t("next"),
+						keyboardType: "email-address"
 					})
 				})
 
@@ -325,7 +326,8 @@ export function buildProfileButtons({
 						title: t("change_email_address"),
 						message: t("confirm_new_email_address"),
 						cancelText: t("cancel"),
-						okText: t("next")
+						okText: t("next"),
+						keyboardType: "email-address"
 					})
 				})
 
