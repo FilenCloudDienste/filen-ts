@@ -1,0 +1,19 @@
+diff --git a/node_modules/expo-background-task/ios/BackgroundTaskModule.swift b/node_modules/expo-background-task/ios/BackgroundTaskModule.swift
+index f0f4e41..8a7c11f 100644
+--- a/node_modules/expo-background-task/ios/BackgroundTaskModule.swift
++++ b/node_modules/expo-background-task/ios/BackgroundTaskModule.swift
+@@ -72,9 +72,11 @@ public class BackgroundTaskModule: Module {
+   }
+ 
+   @objc func handleTasksExpiredNotification(_ notification: Notification) {
+-    guard let url = notification.userInfo?["url"] as? URL else {
+-      return
+-    }
++    // Upstream guarded this on notification.userInfo["url"], but the only poster of this
++    // notification (BackgroundTaskAppDelegate's BGTask expirationHandler) posts userInfo: [:],
++    // so the guard always returned and the event was never emitted — addExpirationListener has
++    // never fired in any released version. The url was unused after the guard. The payload is
++    // [:] and needs nothing from userInfo, and sendEvent with no JS listeners is a no-op.
+     self.sendEvent(onTasksExpired, [:])
+   }
+ }
