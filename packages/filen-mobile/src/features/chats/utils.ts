@@ -1,7 +1,7 @@
 import { AnyFile, MaybeEncryptedUniffi_Tags } from "@filen/sdk-rs"
 import { type Chat, type ChatMessage } from "@/types"
 import { type LinkResult } from "@/features/chats/queries/useChatMessageLinks.query"
-import { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
+import { type ChatMessageWithInflightId, type Suggestions } from "@/features/chats/store/useChats.store"
 import { linkedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { contactDisplayName } from "@/lib/utils"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
@@ -70,6 +70,17 @@ export function composeMessageList({
  * when the sender is no longer present in chat.participants (e.g. they left the chat).
  * Prefers nickName → email → fallback (usually the i18n "unknown" string).
  */
+/**
+ * Whether the keyboard's own prediction strip should be suppressed, given what the input is showing.
+ *
+ * Only the @mention and :emoji pickers are lists the user picks from, so only they compete with the
+ * keyboard's suggestions. A reply banner is not such a list, and it used to be lumped in here —
+ * which silently disabled autocorrect and spellcheck for the whole of every reply.
+ */
+export function shouldSuppressKeyboardSuggestions(suggestionsVisible: readonly Suggestions[]): boolean {
+	return suggestionsVisible.some(suggestion => suggestion === "mentions" || suggestion === "emojis")
+}
+
 export function resolveReplySenderDisplayName(senderNickName: string | undefined, senderEmail: string | undefined, fallback: string): string {
 	if (senderNickName && senderNickName.length > 0) {
 		return senderNickName

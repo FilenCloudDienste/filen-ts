@@ -27,6 +27,7 @@ import i18n from "@/lib/i18n"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import events from "@/lib/events"
 import { chatMessagesQueryUpdate } from "@/features/chats/queries/useChatMessages.query"
+import { shouldSuppressKeyboardSuggestions } from "@/features/chats/utils"
 import Menu from "@/components/ui/menu"
 import { pickDocuments } from "@/lib/documentPicker"
 import * as ImagePicker from "expo-image-picker"
@@ -66,7 +67,9 @@ const ChatTextInput = ({
 }: ChatTextInputProps) => {
 	const { t } = useTranslation()
 	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
-	const disableAssist = suggestionsVisible.length > 0 || chatInputValue.length === 0
+	// Capitalization is left to the keyboard entirely: it was this condition's former empty-input arm
+	// that stopped the first letter of every message from being capitalized.
+	const autocompleteOpen = shouldSuppressKeyboardSuggestions(suggestionsVisible)
 
 	return (
 		<CrossGlassContainerView className="flex-1 rounded-3xl min-h-11">
@@ -81,10 +84,9 @@ const ChatTextInput = ({
 					multiline={true}
 					scrollEnabled={true}
 					autoFocus={false}
-					autoCapitalize={disableAssist ? "none" : undefined}
-					autoComplete={disableAssist ? "off" : undefined}
-					autoCorrect={disableAssist ? false : undefined}
-					spellCheck={disableAssist ? false : undefined}
+					autoComplete={autocompleteOpen ? "off" : undefined}
+					autoCorrect={autocompleteOpen ? false : undefined}
+					spellCheck={autocompleteOpen ? false : undefined}
 					keyboardType="default"
 					returnKeyType="default"
 					enterKeyHint="enter"

@@ -46,6 +46,7 @@ import {
 	resolveReplySenderDisplayName,
 	messageSenderLabel,
 	composeMessageList,
+	shouldSuppressKeyboardSuggestions,
 	type SuccessfulLink
 } from "@/features/chats/utils"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
@@ -414,5 +415,31 @@ describe("composeMessageList", () => {
 		})
 
 		expect(result.map(m => m.inflightId)).toEqual(["ifl-2", "ifl-1"])
+	})
+})
+
+describe("shouldSuppressKeyboardSuggestions", () => {
+	it("suppresses while the mention picker is open — it competes with the keyboard's own list", () => {
+		expect(shouldSuppressKeyboardSuggestions(["mentions"])).toBe(true)
+	})
+
+	it("suppresses while the emoji picker is open", () => {
+		expect(shouldSuppressKeyboardSuggestions(["emojis"])).toBe(true)
+	})
+
+	// Regression: "reply" shares the suggestions list but is a banner, not a list to pick from.
+	// Treating it as one disabled autocorrect and spellcheck for the whole of every reply.
+	it("does not suppress for a reply banner", () => {
+		expect(shouldSuppressKeyboardSuggestions(["reply"])).toBe(false)
+	})
+
+	it("still suppresses when a picker is open alongside a reply banner", () => {
+		expect(shouldSuppressKeyboardSuggestions(["reply", "mentions"])).toBe(true)
+	})
+
+	// Regression: an empty input used to suppress too, which is precisely when the first character
+	// of a message is typed — so no message could ever start with a capital letter.
+	it("does not suppress when nothing is open", () => {
+		expect(shouldSuppressKeyboardSuggestions([])).toBe(false)
 	})
 })
