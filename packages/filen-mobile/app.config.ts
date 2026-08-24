@@ -287,6 +287,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		],
 		"./plugins/withAndroidNetworkSecurityConfig",
 		"./plugins/withAndroidLargeHeapAndHardwareAcceleration",
+		// Debug builds install as io.filen.app.debug so a dev build and the Play-Store app can
+		// coexist on one device — release builds are untouched.
+		"./plugins/withAndroidDebugSuffix",
 		[
 			"./plugins/withAndroidManifestPolicies",
 			{

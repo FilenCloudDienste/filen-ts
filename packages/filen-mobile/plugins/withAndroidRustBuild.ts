@@ -45,7 +45,10 @@ export const withAndroidRustBuild: ConfigPlugin<AndroidRustBuildPluginProps> = (
 		const provider: ManifestProvider = {
 			$: {
 				"android:name": `${config.android?.package}.FilenDocumentsProvider`,
-				"android:authorities": `${config.android?.package}.documentsprovider`,
+				// A gradle manifest placeholder, not the configured package: a debug build adds an
+				// applicationIdSuffix, and a literal authority collides with the release app's
+				// provider so the two cannot be installed side by side.
+				"android:authorities": "${applicationId}.documentsprovider",
 				"android:exported": true,
 				"android:grantUriPermissions": true,
 				"android:permission": "android.permission.MANAGE_DOCUMENTS"
