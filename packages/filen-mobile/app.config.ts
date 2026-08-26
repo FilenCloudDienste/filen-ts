@@ -5,7 +5,7 @@ import type { ExpoConfig, ConfigContext } from "expo/config"
 import { SUPPORTED_LANGUAGES } from "./src/locales/languages"
 import { EXTERNAL_LINK_PROTOCOLS } from "./src/components/textEditor/linkUtils"
 
-const VERSION: string = "4.0.15"
+const VERSION: string = "4.0.16"
 
 const APPLE_TEAM_ID: string = "7YTW5D2K7P"
 const IOS_APP_GROUP_ID: string = "group.io.filen.app"
