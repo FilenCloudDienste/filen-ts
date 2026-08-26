@@ -84,13 +84,6 @@ export const getFileProviderEntitlementsContent = (appIdentifier: string, parame
 export const getFileProviderInfoContent = (appName: string, appIdentifier: string, parameters: FileProviderPluginProps) => {
 	return build({
 		AppGroup: getAppGroup(appIdentifier, parameters),
-		// NSExtensionFileProviderDocumentGroup is deliberately ABSENT (both here and inside
-		// NSExtension below): it is the non-replicated-era declaration that invites the system
-		// to spin up a legacy default-domain instance of the extension alongside the replicated
-		// domain — two cache states racing over shared files. The extension reads the app-group
-		// container directly and no longer derives anything from this key. This plist is
-		// regenerated from THIS function on every prebuild, so removing the key in the
-		// submodule's checked-in Info.plist alone changes nothing in production.
 		CFBundleName: "$(PRODUCT_NAME)",
 		CFBundleDisplayName: parameters.iosFileProviderName || `${appName} - File Provider`,
 		CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)",
@@ -99,6 +92,18 @@ export const getFileProviderInfoContent = (appName: string, appIdentifier: strin
 		CFBundleInfoDictionaryVersion: "6.0",
 		CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)",
 		NSExtension: {
+			// App Store validation rejects a com.apple.fileprovider-nonui extension without this
+			// key (ITMS-90360), so it is not optional however replicated the extension is.
+			//
+			// It was removed once, to stop the system inviting a legacy default-domain instance
+			// alongside the replicated domain: two instances raced init_db's unlink-and-recreate
+			// against each other's live WAL connection. What actually fixed that was keying the
+			// database directory by domain identifier, which the extension now does — a second
+			// instance would get its own directory rather than fight over one. Nothing is derived
+			// from this key either: the content cache spells out its app-group path literally.
+			// Replicated providers on the App Store ship it (nextcloud/apple-clients declares it
+			// beside an NSFileProviderReplicatedExtension principal class).
+			NSExtensionFileProviderDocumentGroup: getAppGroup(appIdentifier, parameters),
 			NSExtensionFileProviderSupportsEnumeration: true,
 			// matches filen-ios-file-provider 99f4a72 — without this the extension is
 			// greyed out in other apps' folder pickers (e.g. Cryptomator vault location)
