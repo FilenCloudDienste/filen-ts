@@ -92,18 +92,19 @@ export const getFileProviderInfoContent = (appName: string, appIdentifier: strin
 		CFBundleInfoDictionaryVersion: "6.0",
 		CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)",
 		NSExtension: {
-			// App Store validation rejects a com.apple.fileprovider-nonui extension without this
-			// key (ITMS-90360), so it is not optional however replicated the extension is.
+			// NSExtensionFileProviderDocumentGroup is deliberately ABSENT, and belongs with the
+			// replicated principal class below rather than being weighed on its own. Setting it
+			// makes iOS create a legacy default domain; a replicated provider cannot service one,
+			// so the system routes that domain's mutations into its own FPXFakeDefaultDomainExtension
+			// shim, whose modifyItem: hits an assert and aborts the extension — a C assert, so the
+			// FPExceptionToErrorProxy wrapping the call cannot turn it back into an error. The app
+			// registers its one real domain through NSFileProviderManager instead, and while the key
+			// was harmless under the pre-replicated extension (a second instance of our own class
+			// served the default domain), pairing it with this principal class is what crashes.
 			//
-			// It was removed once, to stop the system inviting a legacy default-domain instance
-			// alongside the replicated domain: two instances raced init_db's unlink-and-recreate
-			// against each other's live WAL connection. What actually fixed that was keying the
-			// database directory by domain identifier, which the extension now does — a second
-			// instance would get its own directory rather than fight over one. Nothing is derived
-			// from this key either: the content cache spells out its app-group path literally.
-			// Replicated providers on the App Store ship it (nextcloud/apple-clients declares it
-			// beside an NSFileProviderReplicatedExtension principal class).
-			NSExtensionFileProviderDocumentGroup: getAppGroup(appIdentifier, parameters),
+			// The cost of leaving it out is an ITMS-90360 validation WARNING on upload, which is
+			// accepted: the build still processes and ships. Nothing derives from the key either —
+			// the content cache spells out its app-group path literally.
 			NSExtensionFileProviderSupportsEnumeration: true,
 			// matches filen-ios-file-provider 99f4a72 — without this the extension is
 			// greyed out in other apps' folder pickers (e.g. Cryptomator vault location)
