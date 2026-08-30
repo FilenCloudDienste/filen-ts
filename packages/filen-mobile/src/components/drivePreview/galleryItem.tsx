@@ -127,19 +127,26 @@ const GalleryItem = ({
 			// Rendered via react-native-svg rather than expo-image — expo-image decodes SVG
 			// through the unmaintained androidsvg 1.4 on Android, which can recurse into an
 			// uncatchable native OOM abort on adversarial/complex SVGs. See PreviewSvg.
+			//
+			// Gated on focus like the other heavy types: react-native-svg draws on the UI thread,
+			// and FlashList lays out a screen-width of neighbours ahead of the viewport, so an
+			// unfocused SVG would otherwise run a full native draw pass for a page the reader has
+			// not opened — paying its cost, and taking any native draw fault, on the way past.
 			return (
 				<View
 					className="bg-transparent"
 					style={itemStyle}
 				>
-					<PreviewSvg
-						item={info.item}
-						zoomScale={galleryZoomScale}
-						onPinchDismiss={goBack}
-						onZoomChange={onZoomChange}
-						onSingleTap={onSingleTap}
-						onPinchActiveChange={onPinchActiveChange}
-					/>
+					<PreviewSlot isActive={isActive}>
+						<PreviewSvg
+							item={info.item}
+							zoomScale={galleryZoomScale}
+							onPinchDismiss={goBack}
+							onZoomChange={onZoomChange}
+							onSingleTap={onSingleTap}
+							onPinchActiveChange={onPinchActiveChange}
+						/>
+					</PreviewSlot>
 				</View>
 			)
 		}

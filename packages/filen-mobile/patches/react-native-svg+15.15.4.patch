@@ -1,0 +1,99 @@
+diff --git a/node_modules/react-native-svg/android/src/main/java/com/horcrux/svg/MarkerView.java b/node_modules/react-native-svg/android/src/main/java/com/horcrux/svg/MarkerView.java
+index 8c79623..31368f1 100644
+--- a/node_modules/react-native-svg/android/src/main/java/com/horcrux/svg/MarkerView.java
++++ b/node_modules/react-native-svg/android/src/main/java/com/horcrux/svg/MarkerView.java
+@@ -16,6 +16,7 @@ import android.graphics.RectF;
+ import android.view.View;
+ import com.facebook.react.bridge.Dynamic;
+ import com.facebook.react.bridge.ReactContext;
++import java.util.regex.Pattern;
+ 
+ @SuppressLint("ViewConstructor")
+ class MarkerView extends GroupView {
+@@ -114,6 +115,75 @@ class MarkerView extends GroupView {
+     }
+   }
+ 
++  private static final String ORIENT_AUTO = "auto";
++  private static final String ORIENT_AUTO_START_REVERSE = "auto-start-reverse";
++
++  // An SVG number, which is narrower than what Double.parseDouble accepts: the Java grammar also
++  // takes "NaN", "Infinity", hex floats and d/f suffixes, none of which are valid here and all of
++  // which would reach Matrix.preRotate() as a nonsense angle.
++  private static final Pattern SVG_NUMBER =
++      Pattern.compile("[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?");
++
++  /**
++   * Parses the {@code orient} attribute of a {@code <marker>}. Per the SVG spec this is {@code
++   * auto}, {@code auto-start-reverse}, or an {@code <angle>} that may carry a unit (deg/grad/rad/
++   * turn). Returns {@code null} for the automatic modes, whose angle comes from the path instead.
++   *
++   * <p>Never throws: this runs inside the native draw pass, where an exception is fatal and cannot
++   * be caught by JS. An unparseable value degrades to the automatic angle rather than aborting.
++   */
++  private static Double parseOrient(String orient) {
++    if (orient == null
++        || ORIENT_AUTO.equals(orient)
++        || ORIENT_AUTO_START_REVERSE.equals(orient)) {
++      return null;
++    }
++
++    String value = orient.trim();
++    double toDegrees = 1;
++
++    if (value.endsWith("deg")) {
++      value = value.substring(0, value.length() - 3);
++    } else if (value.endsWith("grad")) {
++      value = value.substring(0, value.length() - 4);
++      toDegrees = 0.9;
++    } else if (value.endsWith("rad")) {
++      value = value.substring(0, value.length() - 3);
++      toDegrees = 180 / Math.PI;
++    } else if (value.endsWith("turn")) {
++      value = value.substring(0, value.length() - 4);
++      toDegrees = 360;
++    }
++
++    value = value.trim();
++
++    if (!SVG_NUMBER.matcher(value).matches()) {
++      return null;
++    }
++
++    try {
++      double degrees = Double.parseDouble(value) * toDegrees;
++
++      return Double.isFinite(degrees) ? degrees : null;
++    } catch (NumberFormatException e) {
++      return null;
++    }
++  }
++
++  /**
++   * The angle for the automatic orientations. {@code auto-start-reverse} matches {@code auto}
++   * everywhere except the start marker, which points back along the path so a double-ended arrow
++   * can reuse one marker definition.
++   */
++  private double autoAngle(RNSVGMarkerPosition position) {
++    if (ORIENT_AUTO_START_REVERSE.equals(mOrient)
++        && position.type == RNSVGMarkerType.kStartMarker) {
++      return position.angle + 180;
++    }
++
++    return position.angle;
++  }
++
+   void renderMarker(
+       Canvas canvas, Paint paint, float opacity, RNSVGMarkerPosition position, float strokeWidth) {
+     int count = saveAndSetupCanvas(canvas, mCTM);
+@@ -122,8 +192,8 @@ class MarkerView extends GroupView {
+     Point origin = position.origin;
+     markerTransform.setTranslate((float) origin.x, (float) origin.y);
+ 
+-    double markerAngle = "auto".equals(mOrient) ? -1 : Double.parseDouble(mOrient);
+-    float degrees = 180 + (float) (markerAngle == -1 ? position.angle : markerAngle);
++    Double markerAngle = parseOrient(mOrient);
++    float degrees = 180 + (float) (markerAngle == null ? autoAngle(position) : markerAngle);
+     markerTransform.preRotate(degrees);
+ 
+     boolean useStrokeWidth = "strokeWidth".equals(mMarkerUnits);
