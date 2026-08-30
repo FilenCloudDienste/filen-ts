@@ -331,6 +331,64 @@ describe("foregroundService", () => {
 		expect(fgs.isRunning()).toBe(false)
 	})
 
+	it("TC-12: the OS timing the foreground service out clears running, so no start is issued from the background", async () => {
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0.25, speed: 512 })
+
+		expect(fgs.isRunning()).toBe(true)
+
+		// Android 15+ caps a dataSync foreground service at 6h per 24h, stops it, and then REJECTS
+		// further starts until the app is foregrounded — fatally, from a system thread. notifee
+		// reports the teardown as a raw type id (9); its own EventType enum stops at 8.
+		const onForegroundEvent = mockNotifee.onForegroundEvent.mock.calls[0]?.[0] as (event: { type: number }) => void
+
+		expect(onForegroundEvent).toBeTypeOf("function")
+
+		onForegroundEvent({ type: 9 })
+
+		expect(fgs.isRunning()).toBe(false)
+
+		// A cleared mirror must actually stop the update loop — that is the whole point of observing
+		// the timeout, since each further update would ask notifee to start a fresh service.
+		mockNotifee.displayNotification.mockClear()
+
+		await fgs.update({ count: 1, progress: 0.5, speed: 1024 })
+
+		expect(mockNotifee.displayNotification).not.toHaveBeenCalled()
+	})
+
+	it("TC-12: the timeout is also observed while backgrounded, where it actually fires", async () => {
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0.25, speed: 512 })
+
+		const onBackgroundEvent = mockNotifee.onBackgroundEvent.mock.calls[0]?.[0] as (event: { type: number }) => Promise<void>
+
+		expect(onBackgroundEvent).toBeTypeOf("function")
+
+		appStateMock.currentState = "background"
+
+		await onBackgroundEvent({ type: 9 })
+
+		expect(fgs.isRunning()).toBe(false)
+	})
+
+	it("TC-12: unrelated notifee events leave the mirror alone", async () => {
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0.25, speed: 512 })
+
+		const onForegroundEvent = mockNotifee.onForegroundEvent.mock.calls[0]?.[0] as (event: { type: number }) => void
+
+		// 0 = DISMISSED, 3 = DELIVERED, 8 = FG_ALREADY_EXIST. None of these mean the service died.
+		for (const type of [0, 3, 8]) {
+			onForegroundEvent({ type })
+		}
+
+		expect(fgs.isRunning()).toBe(true)
+	})
+
 	it("getStatus reports the correct status", async () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 

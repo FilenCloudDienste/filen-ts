@@ -35,10 +35,10 @@ function ForegroundService() {
 		const attemptStart = (snapshot: { count: number; progress: number; speed: number }): void => {
 			// Only START from the foreground. Calling startForegroundService() while the app is
 			// backgrounded/frozen risks ForegroundServiceDidNotStartInTimeException — an UNCATCHABLE
-			// async system kill fired when the frozen process misses the ~5s startForeground()
-			// deadline. A transfer that begins while backgrounded (reconnect → camera-upload/offline
-			// sync enqueues) defers here; the AppState→active listener below re-attempts once
-			// foreground, where promotion is safe.
+			// async system kill fired when a frozen process fails to run onStartCommand before the
+			// OS promotion deadline (30s, plus a 10s ANR grace). A transfer that begins while
+			// backgrounded (reconnect → camera-upload/offline sync enqueues) defers here; the
+			// AppState→active listener below re-attempts once foreground, where promotion is safe.
 			if (snapshot.count === 0 || pendingStart || foregroundService.isRunning() || AppState.currentState !== "active") {
 				return
 			}

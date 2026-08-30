@@ -9,6 +9,13 @@ import logger from "@/lib/logger"
 const CHANNEL_ID = "transfers"
 const NOTIFICATION_ID = "filen-transfers-fgs"
 
+// notifee posts this when Android tears the foreground service down for exceeding its type's time
+// budget — on Android 15+ dataSync is capped at 6 hours per 24, after which the OS both stops the
+// service and REJECTS further starts until the app is foregrounded again. It arrives as a raw type
+// id because notifee's own EventType enum stops at FG_ALREADY_EXIST (8), so it is matched
+// numerically. Without it `running` would keep claiming a service that no longer exists.
+const FOREGROUND_SERVICE_TIMEOUT_EVENT_TYPE = 9
+
 // secureStore key for the "Background transfers" setting (Android only). Boolean; absent →
 // DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED (on). When off, start() never displays the
 // foreground-service notification, so the OS no longer keeps backgrounded transfers alive.
@@ -64,15 +71,14 @@ class ForegroundService {
 			})
 
 			// The ongoing transfers notification emits events (e.g. dismissal) while the app is backgrounded.
-			// notifee requires a background-event handler for these or it logs a warning and drops them. Our
-			// notification has no actions, so there is nothing to act on — this empty handler just silences the
-			// warning and lets the foreground service run cleanly.
-			notifee.onBackgroundEvent(async () => {
-				// Nothing to handle: the transfers notification has no actions.
+			// notifee requires a background-event handler for these or it logs a warning and drops them. The
+			// notification has no actions, so the only event worth acting on is the service timing out.
+			notifee.onBackgroundEvent(async ({ type }) => {
+				this.handleNotifeeEvent(type)
 			})
 
-			notifee.onForegroundEvent(async () => {
-				// Nothing to handle: the transfers notification has no actions.
+			notifee.onForegroundEvent(({ type }) => {
+				this.handleNotifeeEvent(type)
 			})
 
 			await notifee.createChannel({
@@ -142,11 +148,11 @@ class ForegroundService {
 
 		// The app may have backgrounded during the awaits above (isEnabled / init / requestPermission).
 		// Starting the foreground service from the background risks the UNCATCHABLE
-		// ForegroundServiceDidNotStartInTimeException — the frozen process misses the ~5s
-		// startForeground() promotion deadline and the OS kills it asynchronously (no try/catch can
-		// intercept it). Bail if we're no longer active; the host's AppState→active handler re-attempts
-		// start() on the next foreground, where promotion is safe. This is the last line of defense
-		// even if a caller forgets to gate on foreground.
+		// ForegroundServiceDidNotStartInTimeException — a frozen process never runs onStartCommand
+		// before the OS promotion deadline (30s, plus a 10s ANR grace) and is then killed
+		// asynchronously, where no try/catch can intercept it. Bail if we're no longer active; the
+		// host's AppState→active handler re-attempts start() on the next foreground, where promotion
+		// is safe. This is the last line of defense even if a caller forgets to gate on foreground.
 		if (AppState.currentState !== "active") {
 			return
 		}
@@ -164,14 +170,18 @@ class ForegroundService {
 		return this.running
 	}
 
-	// `running` is a best-effort JS mirror of the OS foreground-service state, not a perfect one:
-	// notifee's displayNotification resolving only means the start Intent was dispatched, and the OS
-	// can tear the service down on its own (the DATA_SYNC FGS type timeout on a multi-hour transfer),
-	// so the mirror can drift from reality in either direction (TC-11). The JS FSM can't observe those
-	// native transitions, but it can stay resilient to its own failures: update() self-heals on a
-	// rejected display (treats it as a dead/desynced service and clears `running` so the host's count
-	// edge re-arms a fresh start()), and stop() always clears `running` even if the native teardown
-	// throws, so a transient failure can never strand a permanent zombie that blocks future starts.
+	// `running` mirrors the OS foreground-service state across three signals, because a display
+	// resolving only means the start Intent was dispatched — it never proves the service is alive:
+	//   - the OS timing the DATA_SYNC type out is observed via handleNotifeeEvent, the one teardown
+	//     the platform actually announces;
+	//   - a rejected display is treated as a dead/desynced service here, clearing `running` so the
+	//     host's count edge re-arms a fresh start();
+	//   - stop() clears `running` even if the native teardown throws, so a transient failure can
+	//     never strand a zombie that blocks every future start.
+	// Displays against a LIVE service no longer re-enter startForegroundService() at all — the
+	// react-native-notify-kit patch refreshes the notification in place — so an update can only
+	// reach a start once the service is already gone, which is exactly what the signals above
+	// prevent while backgrounded.
 	public async update(progress: TransferProgressSnapshot): Promise<void> {
 		if (Platform.OS !== "android" || !this.running) {
 			return
@@ -208,6 +218,22 @@ class ForegroundService {
 				error: err
 			})
 		}
+	}
+
+	// The one notifee event this service acts on: Android timing the foreground service out. The OS
+	// has already stopped the service by the time this arrives, so the mirror must drop with it —
+	// otherwise update() would keep displaying against a dead service, and each of those displays
+	// would ask notifee to start a fresh one from the background, which Android answers by killing
+	// the process. Clearing here lets the host re-arm from the foreground instead, where a start is
+	// both permitted and resets the OS time budget.
+	private handleNotifeeEvent(type: number): void {
+		if (type !== FOREGROUND_SERVICE_TIMEOUT_EVENT_TYPE || !this.running) {
+			return
+		}
+
+		logger.warn("transfers-fgs", "Android timed the foreground service out; clearing running state to allow re-arm")
+
+		this.running = false
 	}
 
 	// Whether the user has the "Background transfers" setting enabled. Absent → on by default,

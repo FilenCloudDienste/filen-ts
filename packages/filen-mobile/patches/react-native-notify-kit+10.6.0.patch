@@ -1,0 +1,115 @@
+diff --git a/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/ForegroundService.java b/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/ForegroundService.java
+index bda1ee4..af4394e 100644
+--- a/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/ForegroundService.java
++++ b/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/ForegroundService.java
+@@ -94,6 +94,49 @@ public class ForegroundService extends Service {
+     }
+   }
+ 
++  /**
++   * Refreshes the notification of an already-running foreground service in place.
++   *
++   * <p>Returns false when this notification is not the one the service is currently serving, or
++   * when the requested foreground-service type differs from the promoted one — both need a real
++   * {@code startForeground()} and must go through {@link #start}.
++   *
++   * <p>Exists so that repeated {@code displayNotification()} calls for a live foreground service
++   * (progress updates) stop issuing redundant {@code startForegroundService()} intents.
++   */
++  @SuppressLint("MissingPermission")
++  static boolean updateIfActive(NotificationModel model, int hashCode, Notification notification) {
++    Context context = ContextHolder.getApplicationContext();
++    if (context == null) {
++      return false;
++    }
++
++    // Resolve the type before taking sLock: it may perform PackageManager IPC.
++    int resolvedType = ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE;
++    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
++      resolvedType = model.getAndroid().getForegroundServiceType();
++      if (resolvedType == ServiceInfo.FOREGROUND_SERVICE_TYPE_MANIFEST) {
++        resolvedType = resolveManifestServiceType();
++      }
++    }
++
++    synchronized (sLock) {
++      if (mCurrentNotificationId == null || !mCurrentNotificationId.equals(model.getId())) {
++        return false;
++      }
++      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
++          && resolvedType != mCurrentForegroundServiceType) {
++        return false;
++      }
++      mCurrentNotification = notification;
++      mCurrentNotificationBundle = model.toBundle();
++      mCurrentHashCode = hashCode;
++    }
++
++    NotificationManagerCompat.from(context).notify(hashCode, notification);
++    return true;
++  }
++
+   static void start(int hashCode, Notification notification, Bundle notificationBundle) {
+     Context context = ContextHolder.getApplicationContext();
+     if (context == null) {
+@@ -326,6 +369,31 @@ public class ForegroundService extends Service {
+     return null;
+   }
+ 
++  /**
++   * Clears the process-wide notification state when this service instance goes away.
++   *
++   * <p>The state below is static, so a teardown that does not run through the STOP action, the
++   * headless-task callback or {@link #handleTimeout} would leave it pointing at a service that no
++   * longer exists. The next start would then take the "already running" path in {@link
++   * #onStartCommand} and never call {@code startForeground()}, which Android punishes with
++   * ForegroundServiceDidNotStartInTimeException. Android destroys a service instance before
++   * creating its replacement, so clearing here cannot discard a newer instance's state.
++   */
++  @Override
++  public void onDestroy() {
++    if (mStartForegroundCalled) {
++      synchronized (sLock) {
++        mCurrentNotificationId = null;
++        mCurrentForegroundServiceType = -1;
++        mCurrentNotificationBundle = null;
++        mCurrentNotification = null;
++        mCurrentHashCode = 0;
++      }
++    }
++
++    super.onDestroy();
++  }
++
+   /**
+    * Called by the system on API 34 (Android 14) when a foreground service of type {@code
+    * shortService} exceeds its timeout. Stops the service gracefully to prevent ANR.
+diff --git a/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/NotificationManager.java b/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/NotificationManager.java
+index 1549dce..23757f6 100644
+--- a/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/NotificationManager.java
++++ b/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/NotificationManager.java
+@@ -705,11 +705,19 @@ class NotificationManager {
+                 }
+ 
+                 if (androidBundle.getAsForegroundService()) {
+-                  Trace.beginSection("notifee:startForegroundService");
+-                  try {
+-                    ForegroundService.start(hashCode, notification, notificationModel.toBundle());
+-                  } finally {
+-                    Trace.endSection();
++                  // Updating an ongoing foreground-service notification (progress, text) is the
++                  // common case and must NOT re-enter startForegroundService(): every such call
++                  // re-arms Android's startForeground() deadline, and on Android 15+ it is
++                  // rejected outright once the service type's time budget is spent. Both outcomes
++                  // kill the process from a system thread, where no JS handler can intercept them.
++                  // Refresh the notification directly when the service is already serving it.
++                  if (!ForegroundService.updateIfActive(notificationModel, hashCode, notification)) {
++                    Trace.beginSection("notifee:startForegroundService");
++                    try {
++                      ForegroundService.start(hashCode, notification, notificationModel.toBundle());
++                    } finally {
++                      Trace.endSection();
++                    }
+                   }
+                 } else {
+                   Context context = getApplicationContext();
