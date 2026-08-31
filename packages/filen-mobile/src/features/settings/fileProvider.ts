@@ -13,6 +13,16 @@ import { registerDomain, unregisterDomain, isDomainRegistered } from "@/modules/
 // thumbnails alone need ~32 MiB to be useful.
 const MIN_CACHE_BUDGET_BYTES = 64 * 1024 * 1024
 
+// Ceiling on the memory ONE thumbnail decode may peak at, per platform. Not to be
+// confused with maxThumbnailFilesBudget, which is disk for cached thumbnail files.
+// Rust picks 12 MiB when this is absent, because that is what an iOS file provider
+// extension survives: it has ~20 MiB before jetsam. Android's DocumentsProvider
+// declares no android:process, so it runs in the app's own process with a normal
+// heap and can afford the SDK's whole-process preset — without this it would inherit
+// the extension's ceiling and refuse large HEIC/AVIF and wide PNGs it could decode
+// comfortably. Mirrors microthumb's DEFAULT_MEM_BUDGET / APP_PROCESS_MEM_BUDGET.
+const THUMBNAIL_MEM_BUDGET_BYTES = Platform.OS === "ios" ? 12 * 1024 * 1024 : 64 * 1024 * 1024
+
 // secureStore key mirroring auth.json's `providerEnabled` field for fast,
 // reactive UI reads via useSecureStore. enable() / disable() keep it in sync;
 // the source of truth for the native extensions is still auth.json itself.
@@ -85,6 +95,7 @@ export type AuthFileSchema = {
 	sdkConfig: TsSdkConfig | null
 	maxThumbnailFilesBudget?: number | null
 	maxCacheFilesBudget?: number | null
+	thumbnailMemBudget?: number | null
 }
 
 class FileProvider {
@@ -231,6 +242,7 @@ class FileProvider {
 			this.writeUnlocked({
 				...(current ? current : {}),
 				providerEnabled: true,
+				thumbnailMemBudget: THUMBNAIL_MEM_BUDGET_BYTES,
 				sdkConfig: {
 					email: sdkConfig.email,
 					// The extension never re-authenticates from password/2FA — it only uses apiKey + masterKeys.
