@@ -18,6 +18,10 @@ The iOS File Provider Extension and the Android Documents Provider are wired in 
     ```bash
     cargo install --version 4.1.2 cargo-ndk
     ```
+- **meson, ninja, nasm** — filen-rs's `heif-decoder` builds its vendored dav1d (AVIF) with meson + ninja on every target, and nasm assembles the x86_64 Android slice's SIMD; prebuild fails inside its `build.rs` without them:
+    ```bash
+    brew install meson ninja nasm
+    ```
 - **Rust targets** for the file/documents provider native build:
     ```bash
     rustup target add aarch64-apple-ios

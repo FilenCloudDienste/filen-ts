@@ -92,6 +92,11 @@ jobs:
           components: rust-src
           targets: aarch64-linux-android,x86_64-linux-android
 
+      # filen-rs heif-decoder builds its vendored dav1d with meson + ninja; nasm
+      # assembles the x86_64 slice's SIMD (prebuild builds x86_64 + arm64-v8a).
+      - name: Install build tools for heif-decoder's vendored dav1d
+        run: brew install meson ninja nasm
+
       - name: Install cargo-ndk
         uses: taiki-e/cache-cargo-install-action@v2
         with:

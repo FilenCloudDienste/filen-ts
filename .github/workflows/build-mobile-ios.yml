@@ -109,6 +109,10 @@ jobs:
           components: rust-src
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
 
+      # filen-rs heif-decoder builds its vendored dav1d with meson + ninja.
+      - name: Install build tools for heif-decoder's vendored dav1d
+        run: brew install meson ninja
+
       - name: Install dependencies
         run: npm install --force --include=dev && npx -y patch-package --patch-dir ./patches
 
