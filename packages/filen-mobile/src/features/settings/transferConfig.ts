@@ -104,7 +104,11 @@ export function buildJsClientConfig(resolved: ResolvedTransferConfig): JsClientC
 		uploadBandwidthKilobytesPerSec: resolved.uploadKbps,
 		downloadBandwidthKilobytesPerSec: resolved.downloadKbps,
 		logLevel: LogLevel.Info,
-		fileIoMemoryBudget: resolved.fileIoMemoryBudget
+		fileIoMemoryBudget: resolved.fileIoMemoryBudget,
+		// The app generates its own thumbnails and never asks the SDK for them; the provider extensions get their thumbnail policy via auth.json.
+		thumbnailMemBudget: undefined,
+		thumbnailMaxSourceBytes: undefined,
+		thumbnailDecodeConcurrency: undefined
 	}
 }
 
