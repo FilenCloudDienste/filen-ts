@@ -83,6 +83,9 @@ const FileThumbnailWithGenerate = ({
 			target !== "Cell" ||
 			localPathRef.current ||
 			failedPermanentlyRef.current ||
+			// Settled by the lib for this session — a sync Set read; the verdict disappears on the
+			// online flip, after which the next entry point regenerates.
+			thumbnails.isUnavailable(item.data.uuid) ||
 			!thumbnails.canGenerate(item) ||
 			AppState.currentState !== "active"
 		) {
@@ -127,6 +130,13 @@ const FileThumbnailWithGenerate = ({
 				}
 
 				if (result.success) {
+					if (result.data === null) {
+						// Settled by the lib: the icon stays and no retry iteration runs. Deliberately NOT
+						// latched here — the lib's Set is consulted again on the next entry point, so a
+						// session verdict cleared on the online flip regenerates.
+						return
+					}
+
 					setLocalPath(result.data)
 
 					return
@@ -332,6 +342,19 @@ const FileThumbnail = ({
 				cachePolicy="none"
 				onError={() => setDidFail(true)}
 				recyclingKey={`thumbnail-${item.data.uuid}`}
+			/>
+		)
+	}
+
+	// A session verdict (until the next online flip): the static icon, with no generator mounted —
+	// its effects would only call generate() to be told null again.
+	if (thumbnails.isUnavailable(item.data.uuid)) {
+		return (
+			<FileIcon
+				name={item.data.decryptedMeta?.name ?? ""}
+				width={size.icon}
+				height={size.icon}
+				className={className}
 			/>
 		)
 	}
