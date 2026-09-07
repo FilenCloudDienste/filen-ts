@@ -91,6 +91,7 @@ const UNCACHED_QUERY_KEYS = new Map<string, true>([
 	["useFileBase64Query", true],
 	["useFileUriQuery", true],
 	["useFileUrlQuery", true],
+	["useRawPreviewQuery", true],
 	["useMediaPermissionsQuery", true],
 	["useCameraUploadAlbumsQuery", true],
 	["useCameraUploadAlbumLatestPhotoQuery", true],
@@ -815,6 +816,12 @@ export function decideQueryErrorAction(
 	}
 
 	const unwrappedSdkError = deps.unwrapSdkError(err)
+
+	// A cancelled SDK future is the caller's own doing — a ManagedFuture aborted because its query
+	// lost its subscriber (a RAW preview page swiped away mid-extraction). Never a banner.
+	if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.Cancelled) {
+		return "suppress"
+	}
 
 	if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.Unauthenticated) {
 		// Auth failures while offline are indistinguishable from network failures;

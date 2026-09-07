@@ -71,7 +71,8 @@ vi.mock("@filen/sdk-rs", () => ({
 		Unauthenticated: "Unauthenticated",
 		Reqwest: "Reqwest",
 		Response: "Response",
-		RetryFailed: "RetryFailed"
+		RetryFailed: "RetryFailed",
+		Cancelled: "Cancelled"
 	}
 }))
 
@@ -190,6 +191,12 @@ describe("shouldPersistQuery", () => {
 
 	it("returns false when queryKey is useCameraUploadAlbumsQuery", () => {
 		const query = makePersistedQuery(["useCameraUploadAlbumsQuery"])
+
+		expect(shouldPersistQuery(query)).toBe(false)
+	})
+
+	it("returns false when queryKey is useRawPreviewQuery (session-scoped file URIs)", () => {
+		const query = makePersistedQuery(["useRawPreviewQuery", { type: "drive", data: { uuid: "raw-uuid" } }])
 
 		expect(shouldPersistQuery(query)).toBe(false)
 	})
@@ -350,6 +357,13 @@ describe("decideQueryErrorAction", () => {
 		mockIsOnline.mockReturnValue(true)
 
 		expect(decideQueryErrorAction(new Error("sdk"), baseDeps)).toBe("alert")
+	})
+
+	it("suppresses a Cancelled SDK error even while online (a ManagedFuture the caller aborted — e.g. a RAW preview page swiped away)", () => {
+		mockUnwrapSdkError.mockReturnValue({ kind: () => ErrorKind.Cancelled })
+		mockIsOnline.mockReturnValue(true)
+
+		expect(decideQueryErrorAction(new Error("cancelled"), baseDeps)).toBe("suppress")
 	})
 
 	it("alerts for a plain JS error (no SDK inner, not network class)", () => {
