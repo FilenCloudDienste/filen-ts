@@ -381,6 +381,49 @@ describe("RawPreviewCache", () => {
 			expect(fs.has(`${DIR}/stray.tmp`)).toBe(false)
 		})
 
+		it("keeps an entry a concurrent get() refilled between the two passes", async () => {
+			const cache = await createCache()
+			const item = makeItem("u1")
+			let finishExtraction!: () => void
+
+			mockWriteEmbeddedPreviewToPath.mockImplementationOnce(
+				(_file: unknown, sdkPath: string) =>
+					new Promise(resolve => {
+						finishExtraction = () => {
+							fs.set(`file://${sdkPath}`, new Uint8Array([0xff, 0xd8, 0xff, 0xe1]))
+
+							// The move stamps the destination — the refill is now the newest entry.
+							setMtime(`${DIR}/u1.jpg`, Date.now())
+
+							resolve({ tag: "Preview", inner: { width: 1, height: 1, orientation: 1, bytes: 4n } })
+						}
+					})
+			)
+
+			// get() holds the u1 mutex across the extraction, so gc's pass 2 queues behind the refill.
+			const getPromise = cache.get({ item })
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// What gc's mutex-less pass 1 sees on disk: long expired, so u1.jpg is selected for deletion.
+			writePreview("u1", new Uint8Array(60))
+			setMtime(`${DIR}/u1.jpg`, Date.now() - 25 * 60 * 60 * 1000)
+
+			const gcPromise = cache.gc()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			finishExtraction()
+
+			await expect(getPromise).resolves.toEqual({ kind: "uri", uri: `${DIR}/u1.jpg` })
+			await gcPromise
+
+			// Pass 2 re-reads under the mutex: the refilled preview is fresh and non-empty, so the
+			// uri get() just handed out still resolves.
+			expect(fs.has(`${DIR}/u1.jpg`)).toBe(true)
+			expect(Array.from(fs.get(`${DIR}/u1.jpg`) as Uint8Array)).toEqual([0xff, 0xd8, 0xff, 0xe1])
+		})
+
 		it("returns immediately when the directory does not exist", async () => {
 			const cache = await createCache()
 

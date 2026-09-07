@@ -313,12 +313,24 @@ export class RawPreviewCache {
 						return
 					}
 
-					// A cap eviction only fires if the entry is untouched since planning — a concurrent
-					// get() that re-extracted it made it the newest and it must be kept.
+					// Re-check under the mutex: pass 1 ran without it, so a concurrent get() may have
+					// refilled this entry since — and a refill makes it the newest, which must be kept.
 					const plannedCachedAt = capCachedAt.get(name)
 
-					if (plannedCachedAt !== undefined && (file.lastModified ?? 0) !== plannedCachedAt) {
-						return
+					if (plannedCachedAt !== undefined) {
+						// Cap eviction: only fires while the entry is untouched since planning.
+						if ((file.lastModified ?? 0) !== plannedCachedAt) {
+							return
+						}
+					} else {
+						// TTL / 0-byte candidate: only fires while it is still stale or still empty. A
+						// stray (non-.jpg) has no writer at all, so it always goes.
+						const stillStale =
+							!name.endsWith(PREVIEW_EXTENSION) || (file.size ?? 0) === 0 || now >= (file.lastModified ?? 0) + GC_AGE_MS
+
+						if (!stillStale) {
+							return
+						}
 					}
 
 					file.delete()
