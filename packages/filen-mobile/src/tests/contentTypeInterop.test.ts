@@ -12,8 +12,8 @@ import { createRequire } from "node:module"
 //
 // Node's (and therefore vitest's) interop binds the default to the whole `module.exports`, so a plain
 // `import` here would hide the bug. We reproduce Metro's interop explicitly so this fails in CI if
-// content-type ever ships that broken shape again (it did at 2.0.0; patched in
-// patches/content-type+2.0.0.patch).
+// content-type ever ships that broken shape again (it did at 2.0.0; see the content-type
+// patch in patches/).
 const require = createRequire(import.meta.url)
 
 // Exactly what Babel/Metro emit for `import X from "mod"`.

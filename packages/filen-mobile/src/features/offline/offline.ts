@@ -1209,7 +1209,7 @@ export class Offline {
 			const liveDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY_URI, topLevelUuid))
 			// CRITICAL encoding contract: every disk access that carries a RAW entry path MUST pass
 			// that path as a SEPARATE Paths.join / File / Directory constructor argument. expo's
-			// (patched — see patches/expo-file-system+56.0.7.patch) encodePathChars runs ONLY on
+			// (patched — see the expo-file-system patch in patches/) encodePathChars runs ONLY on
 			// rest arguments; pre-joining a raw name into one string bypasses it, so names with
 			// `[ ] ^ |` reach the native layer raw and every stat misses ("Missing on disk after
 			// sync" — regression 2026-06-11, guarded by offlineUriEncoding.test.ts). Direct

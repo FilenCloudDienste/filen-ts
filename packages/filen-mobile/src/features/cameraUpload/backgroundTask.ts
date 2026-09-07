@@ -122,7 +122,7 @@ TaskManager.defineTask(TASK_NAME, async () => {
 		})
 
 		if (Platform.OS === "ios") {
-			// Only works because of patches/expo-background-task+57.0.11.patch. Upstream's observer
+			// Only works because of the expo-background-task patch in patches/. Upstream's observer
 			// guards on a userInfo["url"] that the poster never sets, so this event has never been
 			// emitted in any released version and iOS expiration reached JS nowhere — the timer above
 			// was the only bound. Do not drop that patch: with the camera phase now draining a whole

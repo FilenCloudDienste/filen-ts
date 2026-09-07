@@ -6,11 +6,11 @@
  * (regression 2026-06-11: replacing `Paths.join(base, rawName)` with `base + rawName` string
  * concatenation broke every filename containing `[ ] ^ |` on device).
  *
- * This mock reproduces the REAL (patched) expo-file-system 56.0.7 semantics:
+ * This mock reproduces the REAL (patched) expo-file-system semantics:
  *
  * 1. `Paths.join(first, ...rest)` — and therefore the File/Directory constructors, which are
  *    `super(Paths.join(...uris))` upstream — run every REST argument through the PATCHED
- *    `encodePathChars` (space→%20, %→%25, and — via patches/expo-file-system+56.0.7.patch —
+ *    `encodePathChars` (space→%20, %→%25, and — via the expo-file-system patch in patches/ —
  *    `" < > ` { } [ ] ^ |` + control chars). See node_modules/expo-file-system/src/
  *    pathUtilities/{index,url}.ts.
  * 2. A SINGLE-string `file://` input is parsed like a WHATWG URL: the WHATWG path

@@ -2,7 +2,7 @@
  * URI-encoding regression suite for the offline lib.
  *
  * Guards the class of bug where disk addressing bypasses expo-file-system's encoding
- * pipeline: the (patched — see patches/expo-file-system+56.0.7.patch) `encodePathChars`
+ * pipeline: the (patched — see the expo-file-system patch in patches/) `encodePathChars`
  * runs ONLY on Paths.join / File-Directory-constructor REST arguments. Pre-joining a raw
  * decrypted name into a single string (`base + rawPath`) skips it, so names containing
  * `[ ] ^ |` (and friends) reach the native layer raw and every stat misses — the
