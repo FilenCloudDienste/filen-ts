@@ -1,8 +1,9 @@
 import * as FileSystem from "expo-file-system"
 import { AnyFile } from "@filen/sdk-rs"
-import type { DriveItem } from "@/types"
+import { type DriveItem } from "@/types"
 import useHttpStore from "@/stores/useHttp.store"
 import { THUMBNAILS_DIRECTORY as DIRECTORY } from "@/lib/storageRoots"
+import { getPreviewType } from "@/lib/previewType"
 
 export function abortError(signal?: AbortSignal): Error {
 	const reason = signal?.reason
@@ -16,6 +17,14 @@ export function abortError(signal?: AbortSignal): Error {
 	}
 
 	return new Error("Aborted")
+}
+
+// The uniffi bindings reject a cancelled Rust future with their own AbortError — `name` is
+// "AbortError" and it is NOT a FilenSdkError (unwrapSdkError never matches it); a DOM AbortSignal's
+// default reason carries the same name. Detected by name, never by instanceof: the class is
+// internal to the bindings and a DOMException is not an Error subclass on every runtime.
+export function isAbortError(error: unknown): boolean {
+	return typeof error === "object" && error !== null && (error as { name?: unknown }).name === "AbortError"
 }
 
 export class OfflineAbortError extends Error {
@@ -61,6 +70,45 @@ export function driveItemToAnyFile(item: DriveItem): AnyFile | null {
 		case "sharedFile":
 		case "sharedRootFile": {
 			return new AnyFile.Shared(item.data)
+		}
+
+		default: {
+			return null
+		}
+	}
+}
+
+export type ThumbnailKind = "image" | "video"
+
+// Two gates, both required for an image: DISPLAYABILITY — the gallery can open it on this
+// platform, decided by the one classifier the gallery uses — and the SDK's own per-file verdict
+// `canMakeThumbnail` (computed in Rust from decrypted name + mime, carried on every File /
+// SharedFile / LinkedFile since 0.4.42 and copied onto the hand-built records). The flag is the
+// contract: `false` means the SDK will not thumbnail this file, so it is never asked, and formats
+// the SDK learns later light up on their own — no format list for SDK support lives here.
+// image | rawImage → the image path (local manipulator or SDK); video → the JS frame extractor
+// (the SDK flag is about images and does not apply). svg is excluded on purpose: resvg renders
+// <text> and raster <image> as nothing, and a transparent tile on the OLED-black theme is worse
+// than the icon.
+export function getThumbnailKind(item: DriveItem): ThumbnailKind | null {
+	if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+		return null
+	}
+
+	const name = item.data.decryptedMeta?.name
+
+	if (!name) {
+		return null
+	}
+
+	switch (getPreviewType(name)) {
+		case "image":
+		case "rawImage": {
+			return item.data.canMakeThumbnail === true ? "image" : null
+		}
+
+		case "video": {
+			return "video"
 		}
 
 		default: {

@@ -8,12 +8,11 @@ const {
 	mockManipulate,
 	mockRelease,
 	mockGetThumbnailAsync,
-	mockDownloadFileToPath,
+	mockMakeThumbnailInMemory,
 	mockGetSdkClients,
 	mockGetFileUrl,
 	mockHttpStoreState,
 	mockHttpStoreSubscribers,
-	mockRandomUUID,
 	mockIsOnline,
 	mockOnlineSubscribers
 } = vi.hoisted(() => {
@@ -31,10 +30,10 @@ const {
 
 	const mockGetThumbnailAsync = vi.fn().mockResolvedValue({ uri: "file:///cache/vidframe.jpg", width: 1920, height: 1080 })
 
-	const mockDownloadFileToPath = vi.fn().mockResolvedValue(undefined)
+	const mockMakeThumbnailInMemory = vi.fn()
 	const mockGetSdkClients = vi.fn().mockResolvedValue({
 		authedSdkClient: {
-			downloadFileToPath: mockDownloadFileToPath
+			makeThumbnailInMemory: mockMakeThumbnailInMemory
 		}
 	})
 
@@ -52,7 +51,6 @@ const {
 
 	const mockHttpStoreSubscribers = new Set<(state: any) => void>()
 
-	const mockRandomUUID = vi.fn(() => "mock-uuid-1234")
 	const mockIsOnline = vi.fn(() => true)
 	const mockOnlineSubscribers = new Set<(online: boolean) => void>()
 
@@ -64,12 +62,11 @@ const {
 		mockManipulate,
 		mockRelease,
 		mockGetThumbnailAsync,
-		mockDownloadFileToPath,
+		mockMakeThumbnailInMemory,
 		mockGetSdkClients,
 		mockGetFileUrl,
 		mockHttpStoreState,
 		mockHttpStoreSubscribers,
-		mockRandomUUID,
 		mockIsOnline,
 		mockOnlineSubscribers
 	}
@@ -96,6 +93,8 @@ vi.mock("expo-video-thumbnails", () => ({
 	getThumbnailAsync: mockGetThumbnailAsync
 }))
 
+// Mirrors the generated bindings: AnyFile variants are classes with `tag` + `inner`, the result
+// enum's tags are string-valued (filen_sdk_rs.ts:12241-12246).
 vi.mock("@filen/sdk-rs", () => {
 	class TaggedUnion {
 		tag: string
@@ -119,8 +118,11 @@ vi.mock("@filen/sdk-rs", () => {
 				}
 			}
 		},
-		ManagedFuture: {
-			new: vi.fn(() => ({}))
+		MakeThumbnailInMemoryResult_Tags: {
+			Thumbnail: "Thumbnail",
+			Unsupported: "Unsupported",
+			OverBudget: "OverBudget",
+			Corrupt: "Corrupt"
 		}
 	}
 })
@@ -175,8 +177,7 @@ vi.mock("@/lib/paths", () => ({
 }))
 
 vi.mock("@/lib/signals", () => ({
-	wrapAbortSignalForSdk: vi.fn(() => ({})),
-	disposeSdkAbortSignal: vi.fn()
+	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined)
 }))
 
 vi.mock("@/features/offline/offline", () => ({
@@ -192,10 +193,11 @@ vi.mock("@/lib/fileCache", () => ({
 	}
 }))
 
-vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
-
-vi.mock("expo-crypto", () => ({
-	randomUUID: mockRandomUUID
+// The shared mock (untouched) lacks the audio set that previewType.ts now reaches through
+// thumbnailsHelpers.getThumbnailKind — spread it in here rather than widening the shared file.
+vi.mock("@/constants", async () => ({
+	...(await import("@/tests/mocks/constants")),
+	EXPO_AUDIO_SUPPORTED_EXTENSIONS: new Set([".mp3", ".m4a", ".wav"])
 }))
 
 vi.mock("@tanstack/react-query", () => ({
@@ -216,23 +218,64 @@ import { fs, Directory, Paths } from "@/tests/mocks/expoFileSystem"
 
 const THUMBNAILS_DIR = `file:///shared/group.io.filen.app/thumbnails/v${VERSION}`
 
-function makeFileItem(uuid: string, name: string): any {
+// A lossless-WebP payload stands in for whatever the SDK encoded; only the bytes' identity matters here.
+const WEBP_BYTES = [0x52, 0x49, 0x46, 0x46, 0x57, 0x45, 0x42, 0x50]
+
+function thumbnailVerdict(bytes: number[] = WEBP_BYTES) {
+	return {
+		tag: "Thumbnail",
+		inner: {
+			thumbnail: {
+				webpData: new Uint8Array(bytes).buffer,
+				width: 256,
+				height: 192,
+				fromEmbeddedPreview: false
+			}
+		}
+	}
+}
+
+const UNSUPPORTED_VERDICT = { tag: "Unsupported" }
+const OVER_BUDGET_VERDICT = { tag: "OverBudget" }
+const CORRUPT_VERDICT = { tag: "Corrupt", inner: { message: "bad huffman table" } }
+
+// What the uniffi bindings reject with when the signal aborts the Rust future (errors.ts:104-108).
+function uniffiAbortError(): { name: string; message: string } {
+	return { name: "AbortError", message: "A Rust future was aborted" }
+}
+
+// canMakeThumbnail defaults to true: the SDK's gate is open unless a test closes it on purpose.
+function makeFileItem(uuid: string, name: string, canMakeThumbnail: boolean = true): any {
 	return {
 		type: "file" as const,
 		data: {
 			uuid,
 			size: 1024n,
+			canMakeThumbnail,
 			decryptedMeta: { name }
 		}
 	}
 }
 
-function makeSharedFileItem(uuid: string, name: string): any {
+function makeSharedFileItem(uuid: string, name: string, canMakeThumbnail: boolean = true): any {
 	return {
 		type: "sharedFile" as const,
 		data: {
 			uuid,
 			size: 1024n,
+			canMakeThumbnail,
+			decryptedMeta: { name }
+		}
+	}
+}
+
+function makeSharedRootFileItem(uuid: string, name: string, canMakeThumbnail: boolean = true): any {
+	return {
+		type: "sharedRootFile" as const,
+		data: {
+			uuid,
+			size: 1024n,
+			canMakeThumbnail,
 			decryptedMeta: { name }
 		}
 	}
@@ -249,6 +292,15 @@ function makeDirItem(uuid: string, name: string): any {
 	}
 }
 
+type ThumbnailsInternals = {
+	restored: boolean
+	available: Set<string>
+	unavailable: Set<string>
+	semaphore: { acquire: () => Promise<void>; release: () => void }
+}
+
+const internals = thumbnails as unknown as ThumbnailsInternals
+
 describe("Thumbnails", () => {
 	// Tripwire for the on-disk format invariant (see thumbnails.ts): the cached thumbnail format
 	// (width/quality) is versioned by THUMBNAILS_VERSION so a format change invalidates stale caches.
@@ -264,12 +316,11 @@ describe("Thumbnails", () => {
 		vi.clearAllMocks()
 		mockHttpStoreSubscribers.clear()
 
-		// The Thumbnails singleton persists across tests — reset its disk-derived availability Set and the
-		// once-per-process restore flag so each test starts from a clean slate.
-		const internals = thumbnails as unknown as { restored: boolean; available: Set<string> }
-
+		// The Thumbnails singleton persists across tests — reset its Sets and the once-per-process
+		// restore flag so each test starts from a clean slate.
 		internals.restored = false
 		internals.available.clear()
+		internals.unavailable.clear()
 
 		mockSaveAsync.mockImplementation(async () => {
 			const uri = "file:///cache/manipulated.jpg"
@@ -290,9 +341,7 @@ describe("Thumbnails", () => {
 		mockRotate.mockReturnValue(manipulatorResult)
 		mockManipulate.mockReturnValue(manipulatorResult)
 
-		mockDownloadFileToPath.mockImplementation(async (_file: unknown, path: string) => {
-			fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
-		})
+		mockMakeThumbnailInMemory.mockResolvedValue(thumbnailVerdict())
 
 		mockGetThumbnailAsync.mockResolvedValue({ uri: "file:///cache/vidframe.jpg", width: 1920, height: 1080 })
 
@@ -302,178 +351,390 @@ describe("Thumbnails", () => {
 		mockIsOnline.mockReturnValue(true)
 	})
 
-	describe("generate — image thumbnails", () => {
-		it("generates thumbnail for a .jpg file", async () => {
+	describe("generate — SDK image thumbnails (no local bytes)", () => {
+		it("asks the SDK with the AnyFile and writes the WebP; the manipulator is never involved", async () => {
 			const item = makeFileItem("test-uuid", "photo.jpg")
 			const result = await thumbnails.generate({ item })
 
-			expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
-			expect(mockDownloadFileToPath).toHaveBeenCalledWith(
-				expect.objectContaining({ tag: "File", inner: [item.data] }),
-				expect.stringContaining("source.jpg"),
-				undefined,
-				expect.any(Object),
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledTimes(1)
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledWith(
+				{ file: expect.objectContaining({ tag: "File", inner: [item.data] }), maxWidth: 256, maxHeight: 512 },
 				undefined
 			)
 
-			expect(mockManipulate).toHaveBeenCalledTimes(1)
-			expect(mockResize).toHaveBeenCalledWith({
-				width: DEFAULT_WIDTH
-			})
-			expect(mockRenderAsync).toHaveBeenCalledTimes(1)
-			expect(mockSaveAsync).toHaveBeenCalledWith({
-				compress: 0.9,
-				format: "webp",
-				base64: false
-			})
-
-			// Regression guard: the native SharedObjects (Context + rendered ImageRef) must be released
-			// after generation, or their decoded bitmaps accumulate and OOM-kill the app on bulk uploads.
-			expect(mockRelease).toHaveBeenCalled()
-
 			expect(result).toBe(`${THUMBNAILS_DIR}/test-uuid.webp`)
-		})
-
-		it("uses custom width/quality when specified", async () => {
-			const item = makeFileItem("custom-uuid", "photo.jpg")
-			await thumbnails.generate({
-				item,
-				width: 512,
-				quality: 0.5
-			})
-
-			expect(mockResize).toHaveBeenCalledWith({
-				width: 512
-			})
-			expect(mockSaveAsync).toHaveBeenCalledWith(
-				expect.objectContaining({
-					compress: 0.5
-				})
-			)
-		})
-
-		it("returns cached path when thumbnail already exists on disk", async () => {
-			const outputPath = `${THUMBNAILS_DIR}/cached-uuid.webp`
-			fs.set(outputPath, new Uint8Array([0xff, 0xd8]))
-
-			const item = makeFileItem("cached-uuid", "photo.jpg")
-			const result = await thumbnails.generate({ item })
-
-			expect(result).toBe(outputPath)
-			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+			expect(Array.from(fs.get(`${THUMBNAILS_DIR}/test-uuid.webp`) as Uint8Array)).toEqual(WEBP_BYTES)
+			expect(fs.has(`${THUMBNAILS_DIR}/test-uuid.webp.tmp`)).toBe(false)
+			expect(thumbnails.hasThumbnail("test-uuid")).toBe(true)
 			expect(mockManipulate).not.toHaveBeenCalled()
 		})
 
-		it("uses offline-stored file when available, skipping download", async () => {
+		it("passes the JS AbortSignal straight into asyncOpts", async () => {
+			const controller = new AbortController()
+
+			await thumbnails.generate({ item: makeFileItem("signal-uuid", "photo.jpg"), signal: controller.signal })
+
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledWith(expect.objectContaining({ maxWidth: 256 }), {
+				signal: controller.signal
+			})
+		})
+
+		it("returns the cached path when the thumbnail already exists on disk", async () => {
+			const outputPath = `${THUMBNAILS_DIR}/cached-uuid.webp`
+			fs.set(outputPath, new Uint8Array([0xff, 0xd8]))
+
+			await expect(thumbnails.generate({ item: makeFileItem("cached-uuid", "photo.jpg") })).resolves.toBe(outputPath)
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
+		})
+
+		it("sends RAW and every displayable raster (avif included) through the SDK", async () => {
+			await thumbnails.generate({ item: makeFileItem("raw-uuid", "shot.cr2") })
+			await thumbnails.generate({ item: makeFileItem("avif-uuid", "shot.avif") })
+
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledTimes(2)
+			expect(thumbnails.hasThumbnail("raw-uuid")).toBe(true)
+			expect(thumbnails.hasThumbnail("avif-uuid")).toBe(true)
+		})
+
+		it("honours the SDK's veto: canMakeThumbnail === false throws 'Unsupported file type' without any SDK call", async () => {
+			await expect(thumbnails.generate({ item: makeFileItem("veto-uuid", "photo.jpg", false) })).rejects.toThrow(
+				"Unsupported file type"
+			)
+			await expect(thumbnails.generate({ item: makeFileItem("veto-raw-uuid", "shot.cr2", false) })).rejects.toThrow(
+				"Unsupported file type"
+			)
+
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
+			expect(thumbnails.canGenerate(makeFileItem("veto-uuid", "photo.jpg", false))).toBe(false)
+		})
+
+		it("throws 'Unsupported file type' for svg, non-previewable files, directories and undecrypted names without calling the SDK", async () => {
+			await expect(thumbnails.generate({ item: makeFileItem("svg-uuid", "logo.svg") })).rejects.toThrow("Unsupported file type")
+			await expect(thumbnails.generate({ item: makeFileItem("pdf-uuid", "document.pdf") })).rejects.toThrow("Unsupported file type")
+			await expect(thumbnails.generate({ item: makeDirItem("dir-uuid", "my-folder") })).rejects.toThrow("Unsupported file type")
+			await expect(
+				thumbnails.generate({
+					item: {
+						type: "file",
+						data: { uuid: "no-meta-uuid", size: 1024n, canMakeThumbnail: true, decryptedMeta: { name: undefined } }
+					} as any
+				})
+			).rejects.toThrow("Unsupported file type")
+
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
+		})
+
+		it("throws when the SDK call fails (transport error stays retryable) and leaves nothing behind", async () => {
+			mockMakeThumbnailInMemory.mockRejectedValueOnce(new Error("network error"))
+
+			await expect(thumbnails.generate({ item: makeFileItem("fail-uuid", "photo.jpg") })).rejects.toThrow("network error")
+			expect(fs.has(`${THUMBNAILS_DIR}/fail-uuid.webp`)).toBe(false)
+			expect(thumbnails.hasThumbnail("fail-uuid")).toBe(false)
+		})
+
+		it("throws OfflineAbortError without counting a failure when offline and no local bytes exist", async () => {
+			mockIsOnline.mockReturnValue(false)
+
+			const item = makeFileItem("offline-img-uuid", "photo.jpg")
+
+			await expect(thumbnails.generate({ item })).rejects.toThrow("Offline")
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
+
+			mockIsOnline.mockReturnValue(true)
+
+			await expect(thumbnails.generate({ item })).resolves.toBe(`${THUMBNAILS_DIR}/offline-img-uuid.webp`)
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledTimes(1)
+		})
+
+		it("regenerates when the existing thumbnail is 0 bytes", async () => {
+			const outputPath = `${THUMBNAILS_DIR}/zero-byte-img-uuid.webp`
+			fs.set(outputPath, new Uint8Array(0))
+
+			await expect(thumbnails.generate({ item: makeFileItem("zero-byte-img-uuid", "photo.jpg") })).resolves.toBe(outputPath)
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledTimes(1)
+			expect((fs.get(outputPath) as Uint8Array).length).toBeGreaterThan(0)
+		})
+
+		it("does NOT take the JS semaphore for the SDK path (the client owns decode concurrency), but does for video", async () => {
+			const acquireSpy = vi.spyOn(internals.semaphore, "acquire")
+
+			await thumbnails.generate({ item: makeFileItem("no-sem-uuid", "photo.jpg") })
+
+			expect(acquireSpy).not.toHaveBeenCalled()
+
+			await thumbnails.generate({ item: makeFileItem("sem-vid-uuid", "clip.mp4") })
+
+			expect(acquireSpy).toHaveBeenCalledTimes(1)
+
+			acquireSpy.mockRestore()
+		})
+	})
+
+	describe("generate — local bytes first (manipulator, zero network)", () => {
+		it("uses the offline copy through the manipulator and never calls the SDK, even offline", async () => {
 			const { File } = await import("@/tests/mocks/expoFileSystem")
 			const offlineMod = await import("@/features/offline/offline")
 
+			mockIsOnline.mockReturnValue(false)
+
 			const offlineFileUri = "file:///offline/photo.jpg"
-			const offlineFile = new File(offlineFileUri)
 
 			fs.set(offlineFileUri, new Uint8Array([1, 2, 3]))
-			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(
-				offlineFile as unknown as Awaited<ReturnType<typeof offlineMod.default.getLocalFile>>
-			)
+			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(new File(offlineFileUri) as never)
 
-			const item = makeFileItem("offline-hit-uuid", "photo.jpg")
-			const result = await thumbnails.generate({ item })
+			const result = await thumbnails.generate({ item: makeFileItem("offline-hit-uuid", "photo.jpg") })
 
-			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
 			expect(mockManipulate).toHaveBeenCalledWith(offlineFileUri)
+			expect(mockResize).toHaveBeenCalledWith({ width: DEFAULT_WIDTH })
 			expect(result).toBe(`${THUMBNAILS_DIR}/offline-hit-uuid.webp`)
 		})
 
-		it("uses fileCache hit when offline file not available, skipping download", async () => {
+		it("uses a file-cache hit through the manipulator and never calls the SDK", async () => {
 			const { File } = await import("@/tests/mocks/expoFileSystem")
 			const fileCacheMod = await import("@/lib/fileCache")
 
 			const cachedFileUri = "file:///fileCache/photo.jpg"
-			const cachedFile = new File(cachedFileUri)
 
 			fs.set(cachedFileUri, new Uint8Array([1, 2, 3]))
 			vi.mocked(fileCacheMod.default.has).mockResolvedValueOnce(true)
-			vi.mocked(fileCacheMod.default.get).mockResolvedValueOnce(
-				cachedFile as unknown as Awaited<ReturnType<typeof fileCacheMod.default.get>>
-			)
+			vi.mocked(fileCacheMod.default.get).mockResolvedValueOnce(new File(cachedFileUri) as never)
 
-			const item = makeFileItem("filecache-hit-uuid", "photo.jpg")
-			const result = await thumbnails.generate({ item })
+			const result = await thumbnails.generate({ item: makeFileItem("filecache-hit-uuid", "photo.jpg") })
 
-			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
 			expect(mockManipulate).toHaveBeenCalledWith(cachedFileUri)
 			expect(result).toBe(`${THUMBNAILS_DIR}/filecache-hit-uuid.webp`)
 		})
 
-		it("throws for unsupported extensions", async () => {
-			const item = makeFileItem("pdf-uuid", "document.pdf")
+		it("takes the local path behind the semaphore", async () => {
+			const { File } = await import("@/tests/mocks/expoFileSystem")
+			const offlineMod = await import("@/features/offline/offline")
+			const acquireSpy = vi.spyOn(internals.semaphore, "acquire")
 
-			await expect(thumbnails.generate({ item })).rejects.toThrow("Unsupported file type")
-			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+			fs.set("file:///offline/photo.jpg", new Uint8Array([1]))
+			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(new File("file:///offline/photo.jpg") as never)
+
+			await thumbnails.generate({ item: makeFileItem("local-sem-uuid", "photo.jpg") })
+
+			expect(acquireSpy).toHaveBeenCalledTimes(1)
+
+			acquireSpy.mockRestore()
 		})
 
-		it("throws for directory items", async () => {
-			const item = makeDirItem("dir-uuid", "my-folder")
+		it("ignores a local copy the manipulator cannot decode (RAW) and goes to the SDK", async () => {
+			const { File } = await import("@/tests/mocks/expoFileSystem")
+			const offlineMod = await import("@/features/offline/offline")
 
-			await expect(thumbnails.generate({ item })).rejects.toThrow("File has no extension")
+			fs.set("file:///offline/shot.cr2", new Uint8Array([1]))
+			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(new File("file:///offline/shot.cr2") as never)
+
+			await thumbnails.generate({ item: makeFileItem("raw-local-uuid", "shot.cr2") })
+
+			expect(mockManipulate).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledTimes(1)
 		})
 
-		it("throws for items without decryptedMeta name", async () => {
-			const item: any = {
-				type: "file" as const,
-				data: {
-					uuid: "no-meta-uuid",
-					size: 1024n,
-					decryptedMeta: { name: undefined }
-				}
-			}
+		it("the SDK veto applies to the local path too (a listed .ico with canMakeThumbnail false shows an icon)", async () => {
+			const { File } = await import("@/tests/mocks/expoFileSystem")
+			const offlineMod = await import("@/features/offline/offline")
 
-			await expect(thumbnails.generate({ item })).rejects.toThrow("File has no extension")
-		})
+			fs.set("file:///offline/icon.png", new Uint8Array([1]))
+			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(new File("file:///offline/icon.png") as never)
 
-		it("throws when download fails", async () => {
-			mockDownloadFileToPath.mockRejectedValueOnce(new Error("network error"))
-
-			const item = makeFileItem("fail-dl-uuid", "photo.jpg")
-
-			await expect(thumbnails.generate({ item })).rejects.toThrow("network error")
-		})
-
-		it("throws when manipulator fails", async () => {
-			mockRenderAsync.mockRejectedValueOnce(new Error("manipulator error"))
-
-			const item = makeFileItem("fail-manip-uuid", "photo.jpg")
-
-			await expect(thumbnails.generate({ item })).rejects.toThrow("manipulator error")
-		})
-
-		it("cleans up temp directory on success", async () => {
-			const item = makeFileItem("cleanup-ok-uuid", "photo.jpg")
-			await thumbnails.generate({ item })
-
-			const tempDirUri = `${THUMBNAILS_DIR}/thumb_tmp_mock-uuid-1234`
-			expect(fs.has(tempDirUri)).toBe(false)
-		})
-
-		it("cleans up temp directory on failure", async () => {
-			mockDownloadFileToPath.mockRejectedValueOnce(new Error("fail"))
-
-			const item = makeFileItem("cleanup-fail-uuid", "photo.jpg")
-
-			await expect(thumbnails.generate({ item })).rejects.toThrow("fail")
-
-			const tempDirUri = `${THUMBNAILS_DIR}/thumb_tmp_mock-uuid-1234`
-			expect(fs.has(tempDirUri)).toBe(false)
+			await expect(thumbnails.generate({ item: makeFileItem("veto-local-uuid", "icon.png", false) })).rejects.toThrow(
+				"Unsupported file type"
+			)
+			expect(mockManipulate).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
 		})
 	})
 
-	describe("generate — no manual rotation", () => {
-		it("does not call rotate for any image", async () => {
-			const item = makeFileItem("norot-uuid", "photo.jpg")
+	describe("generate — session verdicts (no marker files)", () => {
+		it.each([
+			["Unsupported", UNSUPPORTED_VERDICT],
+			["OverBudget", OVER_BUDGET_VERDICT],
+			["Corrupt", CORRUPT_VERDICT]
+		])("%s resolves null, writes nothing to disk, and is not asked again this session", async (tag, verdict) => {
+			mockMakeThumbnailInMemory.mockResolvedValueOnce(verdict)
+
+			const item = makeFileItem(`settled-${tag}`, "photo.jpg")
+
+			await expect(thumbnails.generate({ item })).resolves.toBeNull()
+
+			expect(fs.has(`${THUMBNAILS_DIR}/settled-${tag}.webp`)).toBe(false)
+			expect(fs.has(`${THUMBNAILS_DIR}/settled-${tag}.none`)).toBe(false)
+			expect([...fs.keys()].filter(k => k.startsWith(THUMBNAILS_DIR) && k !== THUMBNAILS_DIR)).toEqual([])
+			expect(thumbnails.hasThumbnail(`settled-${tag}`)).toBe(false)
+			expect(thumbnails.isUnavailable(`settled-${tag}`)).toBe(true)
+
+			await expect(thumbnails.generate({ item })).resolves.toBeNull()
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledTimes(1)
+		})
+
+		it.each([
+			["Unsupported", UNSUPPORTED_VERDICT],
+			["OverBudget", OVER_BUDGET_VERDICT],
+			["Corrupt", CORRUPT_VERDICT]
+		])("%s is forgotten on the online flip and the file is asked again", async (tag, verdict) => {
+			mockMakeThumbnailInMemory.mockResolvedValueOnce(verdict)
+
+			const item = makeFileItem(`flip-${tag}`, "photo.jpg")
+
+			await expect(thumbnails.generate({ item })).resolves.toBeNull()
+
+			for (const listener of mockOnlineSubscribers) {
+				listener(true)
+			}
+
+			expect(thumbnails.isUnavailable(`flip-${tag}`)).toBe(false)
+
+			await expect(thumbnails.generate({ item })).resolves.toBe(`${THUMBNAILS_DIR}/flip-${tag}.webp`)
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledTimes(2)
+		})
+
+		it("a settled verdict is not a failure (the ledger stays untouched)", async () => {
+			mockMakeThumbnailInMemory.mockResolvedValueOnce(CORRUPT_VERDICT)
+
+			const item = makeFileItem("settled-not-failure", "photo.jpg")
+
+			await expect(thumbnails.generate({ item })).resolves.toBeNull()
+
+			for (const listener of mockOnlineSubscribers) {
+				listener(true)
+			}
+
+			mockMakeThumbnailInMemory
+				.mockRejectedValueOnce(new Error("io"))
+				.mockRejectedValueOnce(new Error("io"))
+				.mockRejectedValueOnce(new Error("io"))
+
+			for (let i = 0; i < 3; i++) {
+				await expect(thumbnails.generate({ item })).rejects.toThrow("io")
+			}
+
+			// Exactly three real failures reached the cap — the earlier verdict did not count as one.
+			await expect(thumbnails.generate({ item })).rejects.toThrow("Max thumbnail generation failures reached")
+		})
+
+		it("a verdict does not survive a restart (nothing on disk to seed it from)", async () => {
+			mockMakeThumbnailInMemory.mockResolvedValueOnce(UNSUPPORTED_VERDICT)
+
+			await thumbnails.generate({ item: makeFileItem("restart-uuid", "photo.jpg") })
+
+			expect(thumbnails.isUnavailable("restart-uuid")).toBe(true)
+
+			// Simulate a fresh process: the Sets are empty and restore() finds only .webp files.
+			internals.unavailable.clear()
+			internals.restored = false
+
+			thumbnails.restore()
+
+			expect(thumbnails.isUnavailable("restart-uuid")).toBe(false)
+		})
+
+		it("serves an on-disk thumbnail even for a settled or vetoed uuid (disk wins, and repairs the availability Set)", async () => {
+			mockMakeThumbnailInMemory.mockResolvedValueOnce(UNSUPPORTED_VERDICT)
+
+			const item = makeFileItem("disk-first-uuid", "photo.jpg")
+
+			await expect(thumbnails.generate({ item })).resolves.toBeNull()
+
+			// A thumbnail lands on disk for the uuid behind the verdict.
+			const outputPath = `${THUMBNAILS_DIR}/disk-first-uuid.webp`
+			fs.set(outputPath, new Uint8Array([0xff, 0xd8]))
+
+			await expect(thumbnails.generate({ item })).resolves.toBe(outputPath)
+			expect(thumbnails.hasThumbnail("disk-first-uuid")).toBe(true)
+
+			// The veto is checked after the disk too.
+			const vetoed = makeFileItem("disk-first-uuid", "photo.jpg", false)
+
+			await expect(thumbnails.generate({ item: vetoed })).resolves.toBe(outputPath)
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	describe("isUnavailable", () => {
+		it("is false for an unknown uuid and true after a settle", async () => {
+			expect(thumbnails.isUnavailable("nobody")).toBe(false)
+
+			mockMakeThumbnailInMemory.mockResolvedValueOnce(OVER_BUDGET_VERDICT)
+
+			await thumbnails.generate({ item: makeFileItem("session", "b.jpg") })
+
+			expect(thumbnails.isUnavailable("session")).toBe(true)
+		})
+
+		it("invalidateFile leaves the settled Set alone", async () => {
+			mockMakeThumbnailInMemory.mockResolvedValueOnce(UNSUPPORTED_VERDICT)
+
+			const item = makeFileItem("inv-settled", "a.jpg")
+
 			await thumbnails.generate({ item })
 
-			expect(mockRotate).not.toHaveBeenCalled()
-			expect(mockResize).toHaveBeenCalledWith({ width: DEFAULT_WIDTH })
+			thumbnails.invalidateFile(item)
+
+			expect(thumbnails.isUnavailable("inv-settled")).toBe(true)
+		})
+	})
+
+	describe("generate — shared files", () => {
+		it("hands a sharedFile to the SDK as AnyFile.Shared (driveItemToAnyFile maps both shared types to Shared, like fileCache)", async () => {
+			const item = makeSharedFileItem("shared-uuid", "shared-photo.jpg")
+
+			await expect(thumbnails.generate({ item })).resolves.toBe(`${THUMBNAILS_DIR}/shared-uuid.webp`)
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledWith(
+				expect.objectContaining({ file: expect.objectContaining({ tag: "Shared", inner: [item.data] }) }),
+				undefined
+			)
+		})
+
+		it("hands a sharedRootFile to the SDK as AnyFile.Shared — no adapter", async () => {
+			const item = makeSharedRootFileItem("shared-root-uuid", "shared-root.jpg")
+
+			await expect(thumbnails.generate({ item })).resolves.toBe(`${THUMBNAILS_DIR}/shared-root-uuid.webp`)
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledWith(
+				expect.objectContaining({ file: expect.objectContaining({ tag: "Shared", inner: [item.data] }) }),
+				undefined
+			)
+		})
+
+		it("honours the veto on a shared record too", async () => {
+			await expect(thumbnails.generate({ item: makeSharedRootFileItem("shared-veto", "photo.jpg", false) })).rejects.toThrow(
+				"Unsupported file type"
+			)
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("generate — deduplication", () => {
+		it("returns the same result for concurrent calls with the same UUID and calls the SDK once", async () => {
+			let resolveSdk!: () => void
+			const sdkStarted = new Promise<void>(started => {
+				mockMakeThumbnailInMemory.mockImplementationOnce(
+					() =>
+						new Promise(resolve => {
+							resolveSdk = () => resolve(thumbnailVerdict())
+
+							started()
+						})
+				)
+			})
+
+			const item = makeFileItem("dedup-uuid", "photo.jpg")
+
+			const promise1 = thumbnails.generate({ item })
+			const promise2 = thumbnails.generate({ item })
+
+			await sdkStarted
+
+			resolveSdk()
+
+			const [result1, result2] = await Promise.all([promise1, promise2])
+
+			expect(result1).toBe(result2)
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledTimes(1)
 		})
 	})
 
@@ -578,98 +839,7 @@ describe("Thumbnails", () => {
 		})
 	})
 
-	describe("generate — shared files", () => {
-		it("generates thumbnail for shared file items", async () => {
-			const item = makeSharedFileItem("shared-uuid", "shared-photo.jpg")
-			const result = await thumbnails.generate({ item })
-
-			expect(mockDownloadFileToPath).toHaveBeenCalledWith(
-				expect.objectContaining({ tag: "Shared", inner: [item.data] }),
-				expect.stringContaining("source.jpg"),
-				undefined,
-				expect.any(Object),
-				undefined
-			)
-			expect(result).toBe(`${THUMBNAILS_DIR}/shared-uuid.webp`)
-		})
-
-		it("works with sharedRootFile type", async () => {
-			const item = {
-				type: "sharedRootFile" as const,
-				data: {
-					uuid: "shared-root-uuid",
-					size: 1024n,
-					decryptedMeta: { name: "shared-root.jpg" }
-				}
-			} as any
-
-			const result = await thumbnails.generate({ item })
-
-			expect(mockDownloadFileToPath).toHaveBeenCalledWith(
-				expect.objectContaining({ tag: "Shared", inner: [item.data] }),
-				expect.stringContaining("source.jpg"),
-				undefined,
-				expect.any(Object),
-				undefined
-			)
-			expect(result).toBe(`${THUMBNAILS_DIR}/shared-root-uuid.webp`)
-		})
-	})
-
-	describe("generate — deduplication", () => {
-		it("returns same promise for concurrent calls with same UUID", async () => {
-			let resolveDownload!: () => void
-			const downloadStarted = new Promise<void>(started => {
-				mockDownloadFileToPath.mockImplementationOnce(
-					(_file: unknown, path: string) =>
-						new Promise<void>(resolve => {
-							resolveDownload = () => {
-								fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
-								resolve()
-							}
-
-							started()
-						})
-				)
-			})
-
-			const item = makeFileItem("dedup-uuid", "photo.jpg")
-
-			const promise1 = thumbnails.generate({ item })
-			const promise2 = thumbnails.generate({ item })
-
-			await downloadStarted
-
-			resolveDownload()
-
-			const [result1, result2] = await Promise.all([promise1, promise2])
-
-			expect(result1).toBe(result2)
-			expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
-		})
-	})
-
 	describe("generate — abort signal", () => {
-		it("image: passes signal through generate() to ManagedFuture", async () => {
-			const { ManagedFuture } = await import("@filen/sdk-rs")
-			const { wrapAbortSignalForSdk } = await import("@/lib/signals")
-
-			const controller = new AbortController()
-			const item = makeFileItem("abort-img-uuid", "photo.jpg")
-
-			await thumbnails.generate({
-				item,
-				signal: controller.signal
-			})
-
-			expect(wrapAbortSignalForSdk).toHaveBeenCalledWith(controller.signal)
-			expect(ManagedFuture.new).toHaveBeenCalledWith(
-				expect.objectContaining({
-					abortSignal: expect.any(Object)
-				})
-			)
-		})
-
 		it("video: throws when signal is already aborted before generation", async () => {
 			const controller = new AbortController()
 			controller.abort()
@@ -686,64 +856,6 @@ describe("Thumbnails", () => {
 			expect(mockGetThumbnailAsync).not.toHaveBeenCalled()
 		})
 
-		it("does not pass signal when not provided", async () => {
-			const { ManagedFuture } = await import("@filen/sdk-rs")
-
-			const item = makeFileItem("no-signal-uuid", "photo.jpg")
-
-			await thumbnails.generate({ item })
-
-			expect(ManagedFuture.new).toHaveBeenCalledWith(
-				expect.objectContaining({
-					abortSignal: undefined
-				})
-			)
-		})
-
-		it("image: aborts between download and manipulate", async () => {
-			const controller = new AbortController()
-
-			mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
-				fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
-
-				// Abort after download completes but before manipulate runs
-				controller.abort()
-			})
-
-			const item = makeFileItem("abort-post-dl-uuid", "photo.jpg")
-
-			await expect(
-				thumbnails.generate({
-					item,
-					signal: controller.signal
-				})
-			).rejects.toThrow()
-
-			expect(mockManipulate).not.toHaveBeenCalled()
-		})
-
-		it("image: aborts between renderAsync and saveAsync", async () => {
-			const controller = new AbortController()
-
-			mockRenderAsync.mockImplementationOnce(async () => {
-				// Abort after render completes but before save runs
-				controller.abort()
-
-				return { saveAsync: mockSaveAsync }
-			})
-
-			const item = makeFileItem("abort-post-render-uuid", "photo.jpg")
-
-			await expect(
-				thumbnails.generate({
-					item,
-					signal: controller.signal
-				})
-			).rejects.toThrow()
-
-			expect(mockSaveAsync).not.toHaveBeenCalled()
-		})
-
 		it("throws immediately when signal is already aborted before semaphore releases", async () => {
 			const controller = new AbortController()
 			controller.abort()
@@ -757,7 +869,7 @@ describe("Thumbnails", () => {
 				})
 			).rejects.toThrow()
 
-			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
 			expect(mockGetThumbnailAsync).not.toHaveBeenCalled()
 		})
 
@@ -782,7 +894,7 @@ describe("Thumbnails", () => {
 
 	describe("generate — failure tracking", () => {
 		it("throws after MAX_FAILURES (3) consecutive failures for the same item", async () => {
-			mockDownloadFileToPath.mockRejectedValue(new Error("corrupt file"))
+			mockMakeThumbnailInMemory.mockRejectedValue(new Error("corrupt file"))
 
 			const item = makeFileItem("fail-track-uuid", "photo.jpg")
 
@@ -791,17 +903,17 @@ describe("Thumbnails", () => {
 				await expect(thumbnails.generate({ item })).rejects.toThrow("corrupt file")
 			}
 
-			expect(mockDownloadFileToPath).toHaveBeenCalledTimes(3)
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledTimes(3)
 
 			// 4th attempt should be skipped entirely — throws without trying
-			mockDownloadFileToPath.mockClear()
+			mockMakeThumbnailInMemory.mockClear()
 
 			await expect(thumbnails.generate({ item })).rejects.toThrow("Max thumbnail generation failures reached")
-			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
 		})
 
 		it("does not affect other items when one item hits the failure limit", async () => {
-			mockDownloadFileToPath.mockRejectedValue(new Error("corrupt"))
+			mockMakeThumbnailInMemory.mockRejectedValue(new Error("corrupt"))
 
 			const failItem = makeFileItem("fail-item-uuid", "bad.jpg")
 
@@ -810,9 +922,7 @@ describe("Thumbnails", () => {
 			}
 
 			// Restore normal behavior for the good item
-			mockDownloadFileToPath.mockImplementation(async (_file: unknown, path: string) => {
-				fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
-			})
+			mockMakeThumbnailInMemory.mockResolvedValue(thumbnailVerdict())
 
 			const goodItem = makeFileItem("good-item-uuid", "good.jpg")
 			const result = await thumbnails.generate({ item: goodItem })
@@ -821,7 +931,7 @@ describe("Thumbnails", () => {
 		})
 
 		it("resets failure count when clear() is called", async () => {
-			mockDownloadFileToPath.mockRejectedValue(new Error("corrupt"))
+			mockMakeThumbnailInMemory.mockRejectedValue(new Error("corrupt"))
 
 			const item = makeFileItem("reset-fail-uuid", "photo.jpg")
 
@@ -830,34 +940,31 @@ describe("Thumbnails", () => {
 			}
 
 			// Confirm it's blocked
-			mockDownloadFileToPath.mockClear()
+			mockMakeThumbnailInMemory.mockClear()
 			await expect(thumbnails.generate({ item })).rejects.toThrow("Max thumbnail generation failures reached")
-			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
 
 			// Clear resets failures
 			await thumbnails.clear()
 
 			// Restore working download
-			mockDownloadFileToPath.mockImplementation(async (_file: unknown, path: string) => {
-				fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
-			})
+			mockMakeThumbnailInMemory.mockResolvedValue(thumbnailVerdict())
 
 			const result = await thumbnails.generate({ item })
-			expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledTimes(1)
 			expect(result).toBe(`${THUMBNAILS_DIR}/reset-fail-uuid.webp`)
 		})
 
-		it("does not count aborts toward the failure limit", async () => {
+		it("does not count the bindings' AbortError toward the failure limit (detected by name, with the signal aborted)", async () => {
 			const item = makeFileItem("abort-no-fail-uuid", "photo.jpg")
 
-			// Abort 3 times — should NOT hit the failure limit
 			for (let i = 0; i < 3; i++) {
 				const controller = new AbortController()
 
-				mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
-					fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
-
+				mockMakeThumbnailInMemory.mockImplementationOnce(async () => {
 					controller.abort()
+
+					throw uniffiAbortError()
 				})
 
 				await expect(
@@ -868,13 +975,23 @@ describe("Thumbnails", () => {
 				).rejects.toThrow()
 			}
 
-			// Should still be able to generate — aborts didn't count as failures
-			mockDownloadFileToPath.mockImplementation(async (_file: unknown, path: string) => {
-				fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
-			})
+			mockMakeThumbnailInMemory.mockResolvedValue(thumbnailVerdict())
 
-			const result = await thumbnails.generate({ item })
-			expect(result).toBe(`${THUMBNAILS_DIR}/abort-no-fail-uuid.webp`)
+			await expect(thumbnails.generate({ item })).resolves.toBe(`${THUMBNAILS_DIR}/abort-no-fail-uuid.webp`)
+		})
+
+		it("does not count an AbortError toward the failure limit even when no JS signal was involved", async () => {
+			const item = makeFileItem("abort-name-only-uuid", "photo.jpg")
+
+			for (let i = 0; i < 3; i++) {
+				mockMakeThumbnailInMemory.mockRejectedValueOnce(uniffiAbortError())
+
+				await expect(thumbnails.generate({ item })).rejects.toMatchObject({ name: "AbortError" })
+			}
+
+			mockMakeThumbnailInMemory.mockResolvedValue(thumbnailVerdict())
+
+			await expect(thumbnails.generate({ item })).resolves.toBe(`${THUMBNAILS_DIR}/abort-name-only-uuid.webp`)
 		})
 
 		it("does not count video aborts toward the failure limit", async () => {
@@ -907,12 +1024,10 @@ describe("Thumbnails", () => {
 
 		it("allows retries up to the limit", async () => {
 			// Fail twice, succeed on third
-			mockDownloadFileToPath
+			mockMakeThumbnailInMemory
 				.mockRejectedValueOnce(new Error("fail 1"))
 				.mockRejectedValueOnce(new Error("fail 2"))
-				.mockImplementationOnce(async (_file: unknown, path: string) => {
-					fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
-				})
+				.mockResolvedValueOnce(thumbnailVerdict())
 
 			const item = makeFileItem("retry-uuid", "photo.jpg")
 
@@ -925,39 +1040,45 @@ describe("Thumbnails", () => {
 	})
 
 	describe("canGenerate", () => {
-		it("returns true for supported image extensions", () => {
+		it("is true for every displayable raster format and for RAW when the SDK gate is open", () => {
 			expect(thumbnails.canGenerate(makeFileItem("uuid", "photo.jpg"))).toBe(true)
 			expect(thumbnails.canGenerate(makeFileItem("uuid", "photo.png"))).toBe(true)
-			expect(thumbnails.canGenerate(makeFileItem("uuid", "photo.webp"))).toBe(true)
+			expect(thumbnails.canGenerate(makeFileItem("uuid", "photo.gif"))).toBe(true)
+			expect(thumbnails.canGenerate(makeFileItem("uuid", "photo.avif"))).toBe(true)
+			expect(thumbnails.canGenerate(makeFileItem("uuid", "shot.cr2"))).toBe(true)
+			expect(thumbnails.canGenerate(makeFileItem("uuid", "shot.raf"))).toBe(true)
 		})
 
-		it("returns true for supported video extensions", () => {
-			expect(thumbnails.canGenerate(makeFileItem("uuid", "clip.mp4"))).toBe(true)
+		it("is false when the SDK says canMakeThumbnail is false (its own gate is trusted)", () => {
+			expect(thumbnails.canGenerate(makeFileItem("uuid", "photo.jpg", false))).toBe(false)
+			expect(thumbnails.canGenerate(makeFileItem("uuid", "favicon.ico", false))).toBe(false)
+			expect(thumbnails.canGenerate(makeSharedRootFileItem("uuid", "shot.cr2", false))).toBe(false)
+		})
+
+		it("is true for supported video extensions regardless of the SDK flag", () => {
+			expect(thumbnails.canGenerate(makeFileItem("uuid", "clip.mp4", false))).toBe(true)
 			expect(thumbnails.canGenerate(makeFileItem("uuid", "clip.mov"))).toBe(true)
 			expect(thumbnails.canGenerate(makeFileItem("uuid", "clip.mkv"))).toBe(true)
 		})
 
-		it("returns false for unsupported extensions", () => {
+		it("is false for svg (previewable, deliberately not thumbnailed)", () => {
+			expect(thumbnails.canGenerate(makeFileItem("uuid", "logo.svg"))).toBe(false)
+		})
+
+		it("is false for non-previewable extensions", () => {
 			expect(thumbnails.canGenerate(makeFileItem("uuid", "document.pdf"))).toBe(false)
 			expect(thumbnails.canGenerate(makeFileItem("uuid", "archive.zip"))).toBe(false)
 			expect(thumbnails.canGenerate(makeFileItem("uuid", "notes.txt"))).toBe(false)
 		})
 
-		it("returns false for directory items", () => {
+		it("is false for directory items and items without a decrypted name", () => {
 			expect(thumbnails.canGenerate(makeDirItem("uuid", "folder"))).toBe(false)
-		})
-
-		it("returns false for items without decryptedMeta name", () => {
-			const item: any = {
-				type: "file" as const,
-				data: {
-					uuid: "uuid",
-					size: 1024n,
-					decryptedMeta: { name: undefined }
-				}
-			}
-
-			expect(thumbnails.canGenerate(item)).toBe(false)
+			expect(
+				thumbnails.canGenerate({
+					type: "file",
+					data: { uuid: "uuid", size: 1024n, canMakeThumbnail: true, decryptedMeta: { name: undefined } }
+				} as any)
+			).toBe(false)
 		})
 	})
 
@@ -996,6 +1117,17 @@ describe("Thumbnails", () => {
 			expect(fs.has(`${THUMBNAILS_DIR}/a.webp`)).toBe(false)
 			expect(fs.get(THUMBNAILS_DIR)).toBe("dir")
 			expect(thumbnails.hasThumbnail("a")).toBe(false)
+		})
+		it("wipes the settled Set with the directory", async () => {
+			mockMakeThumbnailInMemory.mockResolvedValueOnce(CORRUPT_VERDICT)
+
+			await thumbnails.generate({ item: makeFileItem("session", "b.jpg") })
+
+			expect(thumbnails.isUnavailable("session")).toBe(true)
+
+			await thumbnails.clear()
+
+			expect(thumbnails.isUnavailable("session")).toBe(false)
 		})
 	})
 
@@ -1043,7 +1175,7 @@ describe("Thumbnails", () => {
 
 			expect(result).toBe(`${THUMBNAILS_DIR}/local-img-uuid.webp`)
 			expect(mockManipulate).toHaveBeenCalledWith("file:///local/photo.jpg")
-			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
 		})
 
 		it("generates thumbnail from a local video path", async () => {
@@ -1166,28 +1298,6 @@ describe("Thumbnails", () => {
 	})
 
 	describe("generate — OfflineAbortError branch", () => {
-		it("image: throws without counting as a failure when offline and no local copy", async () => {
-			mockIsOnline.mockReturnValue(false)
-
-			const item = makeFileItem("offline-img-uuid", "photo.jpg")
-
-			// Should reject (OfflineAbortError propagates as a real throw) but NOT increment failures
-			await expect(thumbnails.generate({ item })).rejects.toThrow("Offline")
-
-			// Because it's an OfflineAbortError the failures map must NOT be incremented —
-			// a subsequent call after coming back online must proceed without hitting the limit.
-			mockIsOnline.mockReturnValue(true)
-			mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
-				fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
-			})
-
-			const result = await thumbnails.generate({ item })
-
-			expect(result).toBe(`${THUMBNAILS_DIR}/offline-img-uuid.webp`)
-			// Download was called once — offline path short-circuited it, online path used it
-			expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
-		})
-
 		it("video: throws without counting as a failure when offline and no offline file", async () => {
 			mockIsOnline.mockReturnValue(false)
 
@@ -1206,48 +1316,9 @@ describe("Thumbnails", () => {
 			expect(result).toBe(`${THUMBNAILS_DIR}/offline-vid-uuid.webp`)
 			expect(mockGetThumbnailAsync).toHaveBeenCalledTimes(1)
 		})
-
-		it("image: offline path is NOT taken when an offline-cached file exists", async () => {
-			const { File } = await import("@/tests/mocks/expoFileSystem")
-			const offlineMod = await import("@/features/offline/offline")
-
-			mockIsOnline.mockReturnValue(false)
-
-			const offlineFileUri = "file:///offline/photo.jpg"
-			const offlineFile = new File(offlineFileUri)
-
-			fs.set(offlineFileUri, new Uint8Array([1, 2, 3]))
-			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(
-				offlineFile as unknown as Awaited<ReturnType<typeof offlineMod.default.getLocalFile>>
-			)
-
-			const item = makeFileItem("offline-img-cached-uuid", "photo.jpg")
-			const result = await thumbnails.generate({ item })
-
-			// Proceeds without network because the offline copy exists
-			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
-			expect(result).toBe(`${THUMBNAILS_DIR}/offline-img-cached-uuid.webp`)
-		})
 	})
 
 	describe("generate — 0-byte output file integrity check", () => {
-		it("image: regenerates when existing thumbnail is 0 bytes", async () => {
-			const outputPath = `${THUMBNAILS_DIR}/zero-byte-img-uuid.webp`
-			// Seed a corrupt 0-byte file
-			fs.set(outputPath, new Uint8Array(0))
-
-			const item = makeFileItem("zero-byte-img-uuid", "photo.jpg")
-			const result = await thumbnails.generate({ item })
-
-			// Generation must have proceeded (0-byte cache skipped, not returned as hit)
-			expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
-			expect(result).toBe(`${THUMBNAILS_DIR}/zero-byte-img-uuid.webp`)
-			// Final output must be non-empty (the mock saveAsync writes [0xff, 0xd8])
-			const finalFile = fs.get(outputPath)
-
-			expect(finalFile instanceof Uint8Array && finalFile.length > 0).toBe(true)
-		})
-
 		it("generateFromLocalFile: regenerates when existing thumbnail is 0 bytes", async () => {
 			const outputPath = `${THUMBNAILS_DIR}/zero-byte-local-uuid.webp`
 			fs.set(outputPath, new Uint8Array(0))
@@ -1265,35 +1336,6 @@ describe("Thumbnails", () => {
 	})
 
 	describe("generate — savedFile.move() failure path", () => {
-		it("image: throws wrapped error and cleans up when move fails", async () => {
-			const { File: MockFile } = await import("@/tests/mocks/expoFileSystem")
-
-			// Make saveAsync produce a file whose move() throws
-			mockSaveAsync.mockImplementationOnce(async () => {
-				const uri = "file:///cache/manipulated-movefail.jpg"
-
-				// Seed both the saved file and its would-be destination
-				fs.set(uri, new Uint8Array([0xff, 0xd8]))
-
-				// Patch the File class for this one call: after saveAsync returns, the source
-				// savedFile has the right uri but we need move() to throw. We swap in a
-				// custom implementation for the one File that gets created for savedFile.
-				const OrigFile = MockFile
-				const moveSpy = vi.spyOn(OrigFile.prototype, "move").mockImplementationOnce(() => {
-					throw new Error("EACCES permission denied")
-				})
-
-				// Store spy ref so we can restore later (test teardown handled by vi.clearAllMocks)
-				void moveSpy
-
-				return { uri }
-			})
-
-			const item = makeFileItem("move-fail-img-uuid", "photo.jpg")
-
-			await expect(thumbnails.generate({ item })).rejects.toThrow("Failed to move thumbnail to output path: EACCES permission denied")
-		})
-
 		it("video: throws wrapped error and cleans up when move fails", async () => {
 			const { File: MockFile } = await import("@/tests/mocks/expoFileSystem")
 
@@ -1421,7 +1463,7 @@ describe("Thumbnails", () => {
 
 		it("clears the failure counter when connectivity returns (onlineManager false→true recovery)", async () => {
 			// Drive a genuine content failure to the MAX_FAILURES cap.
-			mockDownloadFileToPath.mockRejectedValue(new Error("corrupt file"))
+			mockMakeThumbnailInMemory.mockRejectedValue(new Error("corrupt file"))
 
 			const item = makeFileItem("recovery-online-uuid", "photo.jpg")
 
@@ -1430,9 +1472,9 @@ describe("Thumbnails", () => {
 			}
 
 			// Confirm it is now blacklisted for the session.
-			mockDownloadFileToPath.mockClear()
+			mockMakeThumbnailInMemory.mockClear()
 			await expect(thumbnails.generate({ item })).rejects.toThrow("Max thumbnail generation failures reached")
-			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
 
 			// Simulate connectivity returning: the recovery subscription clears this.failures.
 			expect(mockOnlineSubscribers.size).toBeGreaterThan(0)
@@ -1442,13 +1484,11 @@ describe("Thumbnails", () => {
 			}
 
 			// Restore a working download — the item must now generate again (counter was cleared).
-			mockDownloadFileToPath.mockImplementation(async (_file: unknown, path: string) => {
-				fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
-			})
+			mockMakeThumbnailInMemory.mockResolvedValue(thumbnailVerdict())
 
 			const result = await thumbnails.generate({ item })
 
-			expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledTimes(1)
 			expect(result).toBe(`${THUMBNAILS_DIR}/recovery-online-uuid.webp`)
 		})
 	})
@@ -1485,7 +1525,7 @@ describe("Thumbnails", () => {
 		})
 
 		it("does NOT reset the failure counter (unlike remove)", async () => {
-			mockDownloadFileToPath.mockRejectedValue(new Error("corrupt"))
+			mockMakeThumbnailInMemory.mockRejectedValue(new Error("corrupt"))
 
 			const item = makeFileItem("invalidate-keep-failures-uuid", "photo.jpg")
 
@@ -1498,9 +1538,9 @@ describe("Thumbnails", () => {
 			// stays blacklisted. (remove() would have uncapped it; that distinction is the fix.)
 			thumbnails.invalidateFile(item)
 
-			mockDownloadFileToPath.mockClear()
+			mockMakeThumbnailInMemory.mockClear()
 			await expect(thumbnails.generate({ item })).rejects.toThrow("Max thumbnail generation failures reached")
-			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
 		})
 
 		it("no-op when the file does not exist", () => {
@@ -1517,11 +1557,11 @@ describe("Thumbnails", () => {
 	// the thumbnails directory listing; every generate/invalidate/remove/clear path keeps it coherent.
 	// ---------------------------------------------------------------------------
 	describe("restore / availability Set", () => {
-		it("indexes only <uuid>.webp basenames, skipping subdirs and stray files", () => {
+		it("indexes only <uuid>.webp basenames into the availability Set, skipping subdirs, .webp.tmp and stray files", () => {
 			fs.set(THUMBNAILS_DIR, "dir")
 			fs.set(`${THUMBNAILS_DIR}/uuid-a.webp`, new Uint8Array([1]))
 			fs.set(`${THUMBNAILS_DIR}/uuid-b.webp`, new Uint8Array([2]))
-			// A generation-pipeline temp subdir (+ its contents) and a stray partial download must be ignored.
+			fs.set(`${THUMBNAILS_DIR}/uuid-d.webp.tmp`, new Uint8Array([3]))
 			fs.set(`${THUMBNAILS_DIR}/thumb_tmp_x`, "dir")
 			fs.set(`${THUMBNAILS_DIR}/thumb_tmp_x/source.jpg`, new Uint8Array([3]))
 			fs.set(`${THUMBNAILS_DIR}/partial.filendl`, new Uint8Array([4]))
@@ -1530,9 +1570,11 @@ describe("Thumbnails", () => {
 
 			expect(thumbnails.hasThumbnail("uuid-a")).toBe(true)
 			expect(thumbnails.hasThumbnail("uuid-b")).toBe(true)
+			expect(thumbnails.hasThumbnail("uuid-d")).toBe(false)
+			expect(thumbnails.hasThumbnail("uuid-d.webp")).toBe(false)
 			expect(thumbnails.hasThumbnail("thumb_tmp_x")).toBe(false)
 			expect(thumbnails.hasThumbnail("partial")).toBe(false)
-			expect(thumbnails.hasThumbnail("uuid-missing")).toBe(false)
+			expect(thumbnails.isUnavailable("uuid-a")).toBe(false)
 		})
 
 		it("hasThumbnail is false before restore and true after", () => {

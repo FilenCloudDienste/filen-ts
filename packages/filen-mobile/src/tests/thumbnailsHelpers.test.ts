@@ -52,7 +52,16 @@ vi.mock("@/stores/useHttp.store", () => ({
 	}
 }))
 
-import { abortError, OfflineAbortError, getPath, ensureDirectory, driveItemToAnyFile, getExtension } from "@/lib/thumbnailsHelpers"
+import {
+	abortError,
+	isAbortError,
+	OfflineAbortError,
+	getPath,
+	ensureDirectory,
+	driveItemToAnyFile,
+	getExtension,
+	getThumbnailKind
+} from "@/lib/thumbnailsHelpers"
 import { AnyFile } from "@filen/sdk-rs"
 import { fs } from "@/tests/mocks/expoFileSystem"
 
@@ -368,5 +377,81 @@ describe("getExtension", () => {
 
 		// extname returns "" for no extension; toLowerCase().trim() of "" is ""
 		expect(getExtension(item as any)).toBe("")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// getThumbnailKind — displayability (getPreviewType) AND the SDK's own per-file gate
+// (canMakeThumbnail, computed in Rust from decrypted name + mime). image | rawImage → "image"
+// only when the SDK says it can; video → "video" regardless (the JS path). svg is NOT thumbnailable:
+// resvg renders <text> and raster <image> as nothing.
+// ---------------------------------------------------------------------------
+
+describe("getThumbnailKind", () => {
+	const fileItem = (
+		name: string | undefined,
+		canMakeThumbnail: boolean = true,
+		type: "file" | "sharedFile" | "sharedRootFile" = "file"
+	) =>
+		({
+			type,
+			data: {
+				uuid: "u",
+				size: 1n,
+				canMakeThumbnail,
+				decryptedMeta: name === undefined ? null : { name }
+			}
+		}) as never
+
+	it("maps expo-image formats and RAW to the image path when the SDK gate is open", () => {
+		expect(getThumbnailKind(fileItem("photo.jpg"))).toBe("image")
+		expect(getThumbnailKind(fileItem("shot.cr2"))).toBe("image")
+		expect(getThumbnailKind(fileItem("shot.avif", true, "sharedFile"))).toBe("image")
+		expect(getThumbnailKind(fileItem("shot.png", true, "sharedRootFile"))).toBe("image")
+	})
+
+	it("vetoes an image the SDK says it cannot thumbnail (a listed .ico, a .jxl, a .cr2 it does not decode)", () => {
+		expect(getThumbnailKind(fileItem("favicon.ico", false))).toBeNull()
+		expect(getThumbnailKind(fileItem("photo.jpg", false))).toBeNull()
+		expect(getThumbnailKind(fileItem("shot.cr2", false))).toBeNull()
+	})
+
+	it("maps video to the JS path regardless of the SDK flag", () => {
+		expect(getThumbnailKind(fileItem("clip.mp4", false))).toBe("video")
+		expect(getThumbnailKind(fileItem("clip.mp4", true))).toBe("video")
+	})
+
+	it("is null for svg (a transparent tile is worse than the icon)", () => {
+		expect(getThumbnailKind(fileItem("logo.svg", true))).toBeNull()
+	})
+
+	it("is null for non-previewable files, directories and undecrypted names", () => {
+		expect(getThumbnailKind(fileItem("doc.pdf"))).toBeNull()
+		expect(getThumbnailKind(fileItem("archive.zip"))).toBeNull()
+		expect(getThumbnailKind(fileItem(undefined))).toBeNull()
+		expect(
+			getThumbnailKind({ type: "directory", data: { uuid: "d", size: 0n, decryptedMeta: { name: "photos.jpg" } } } as never)
+		).toBeNull()
+	})
+})
+
+describe("isAbortError", () => {
+	it("recognises the uniffi bindings' AbortError by name (never by instanceof)", () => {
+		expect(isAbortError({ name: "AbortError", message: "A Rust future was aborted" })).toBe(true)
+	})
+
+	it("recognises a DOM AbortSignal reason (name AbortError)", () => {
+		const controller = new AbortController()
+
+		controller.abort()
+
+		expect(isAbortError(controller.signal.reason)).toBe(true)
+	})
+
+	it("is false for other errors and non-errors", () => {
+		expect(isAbortError(new Error("network"))).toBe(false)
+		expect(isAbortError("AbortError")).toBe(false)
+		expect(isAbortError(null)).toBe(false)
+		expect(isAbortError(undefined)).toBe(false)
 	})
 })

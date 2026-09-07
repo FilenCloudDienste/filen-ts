@@ -1,5 +1,5 @@
 import * as FileSystem from "expo-file-system"
-import type { DriveItem } from "@/types"
+import { type DriveItem } from "@/types"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { normalizeFilePathForExpo } from "@/lib/paths"
 import { run, Semaphore } from "@filen/utils"
@@ -9,17 +9,22 @@ import useHttpStore from "@/stores/useHttp.store"
 import { onlineManager } from "@tanstack/react-query"
 import { THUMBNAILS_VERSION, THUMBNAILS_DIRECTORY } from "@/lib/storageRoots"
 import {
+	type ThumbnailKind,
 	abortError,
+	isAbortError,
 	OfflineAbortError,
 	ProviderUnavailableError,
 	getPath,
 	ensureDirectory,
 	driveItemToAnyFile,
 	getExtension,
+	getThumbnailKind,
 	waitForHttpProvider
 } from "@/lib/thumbnailsHelpers"
 import offline from "@/features/offline/offline"
+import fileCache from "@/lib/fileCache"
 import { generateImage } from "@/lib/thumbnailsImage"
+import { generateImageViaSdk } from "@/lib/thumbnailsSdk"
 import { generateVideo } from "@/lib/thumbnailsVideo"
 import logger from "@/lib/logger"
 
@@ -31,9 +36,14 @@ export type ThumbnailParams = {
 	signal?: AbortSignal
 }
 
+// Resize width + WebP quality of the manipulator paths (local bytes, post-upload, video frames).
+// The SDK path has its own request box (thumbnailsSdk.ts) and encodes lossless.
 export const DEFAULT_WIDTH = 256
 export const DEFAULT_QUALITY = 0.9
 export const DEFAULT_VIDEO_TIMESTAMP = 1.0
+// Bounds the JS-side native work only: video frame extraction and the manipulator paths. SDK image
+// thumbnails are NOT behind it — the client owns decode concurrency and memory, a parked call
+// holds no buffers, and cancelling it dequeues it.
 export const MAX_CONCURRENT = Platform.select({
 	ios: 3,
 	android: 2,
@@ -50,7 +60,7 @@ export const VERSION = THUMBNAILS_VERSION
 export const DIRECTORY = THUMBNAILS_DIRECTORY
 
 class Thumbnails {
-	private readonly pending = new Map<string, Promise<string>>()
+	private readonly pending = new Map<string, Promise<string | null>>()
 	private readonly failures = new Map<string, number>()
 	private readonly semaphore = new Semaphore(MAX_CONCURRENT)
 	private readonly clearBarrier = new ClearBarrier()
@@ -59,6 +69,13 @@ class Thumbnails {
 	// Seeded once by restore() at boot and kept coherent by every generate/invalidate/clear
 	// path, so "file on disk ⇒ in Set" holds for any caller (drive rows read it synchronously).
 	private readonly available = new Set<string>()
+
+	// SESSION "no thumbnail" verdicts: the SDK's Unsupported / OverBudget / Corrupt. Never written
+	// to disk — behind the canMakeThumbnail gate Unsupported is a rare magic-byte mismatch, a
+	// persisted marker would go stale when the SDK learns new formats, and OverBudget / Corrupt may
+	// be a transport blip wearing a verdict's hat — so a verdict lasts until the next online flip
+	// (subscribeRecovery) or clear(), and never counts as a failure.
+	private readonly unavailable = new Set<string>()
 	private restored = false
 
 	public constructor() {
@@ -119,8 +136,8 @@ class Thumbnails {
 
 				const basename = this.basenameOf(record.uri)
 
-				// The Set holds ONLY <uuid>.webp basenames — the generation pipeline also leaves
-				// thumb_tmp_* subdirectories and transient files in DIRECTORY; those must never enter it.
+				// The Set holds ONLY <uuid>.webp basenames — an in-flight `<uuid>.webp.tmp` and any other
+				// transient file in DIRECTORY must never enter it.
 				if (!basename.endsWith(".webp")) {
 					continue
 				}
@@ -152,10 +169,19 @@ class Thumbnails {
 		return this.available.has(uuid)
 	}
 
-	// A provider-not-ready (ProviderUnavailableError) or transient decode failure can drive an item
+	// Settled "no thumbnail" for this session. Rows read it synchronously to skip mounting the
+	// generator; generate() resolves null for it without touching the SDK. It empties on the next
+	// online flip, so a row that asks again then regenerates.
+	public isUnavailable(uuid: string): boolean {
+		return this.unavailable.has(uuid)
+	}
+
+	// A provider-not-ready (ProviderUnavailableError) or transient transport failure can drive an item
 	// to the MAX_FAILURES blacklist for the rest of the session. Clear the in-memory failure counters
 	// whenever the underlying infrastructure recovers — the HTTP provider booting (port null→non-null)
 	// or connectivity returning (offline→online) — so previously-blacklisted items get a fresh chance.
+	// The online flip also drops the session verdicts: a Corrupt that was really a transport blip
+	// inside the decoder heals on reconnect.
 	private subscribeRecovery(): void {
 		useHttpStore.subscribe(
 			state => state.port,
@@ -169,24 +195,46 @@ class Thumbnails {
 		onlineManager.subscribe(isOnline => {
 			if (isOnline) {
 				this.failures.clear()
+				this.unavailable.clear()
 			}
 		})
 	}
 
 	public canGenerate(item: DriveItem): boolean {
-		const ext = getExtension(item)
-
-		if (!ext) {
-			return false
-		}
-
-		const isImage = EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(ext)
-		const isVideo = EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(ext)
-
-		return isImage || isVideo
+		return getThumbnailKind(item) !== null
 	}
 
-	public async generate(params: ThumbnailParams): Promise<string> {
+	// An existing `<uuid>.webp` is served as is and repairs `available`; a 0-byte file is a
+	// crashed/interrupted write that would loop the consumer forever, so it is deleted and reported
+	// absent. The one integrity check, shared by generate() and generateFromLocalFile().
+	private readExistingThumbnail(uuid: string, outputPath: string): string | null {
+		const outputFile = new FileSystem.File(outputPath)
+
+		if (!outputFile.exists) {
+			return null
+		}
+
+		if (outputFile.size > 0) {
+			this.available.add(uuid)
+
+			return normalizeFilePathForExpo(outputPath)
+		}
+
+		try {
+			outputFile.delete()
+		} catch {
+			// Best-effort cleanup of the corrupt cache entry; if delete fails we'll regenerate anyway.
+		}
+
+		return null
+	}
+
+	// Resolves the file:// URI of the WebP, or null when this file has no thumbnail by verdict
+	// (settled for the session — never retried by the caller). Throws for transient failures
+	// (transport, provider, offline, abort) — those keep the failure ledger and the caller's retry.
+	// Order: what is on disk wins (served even for a settled or vetoed uuid), then the session
+	// verdict, then the eligibility gate and the failure ledger.
+	public async generate(params: ThumbnailParams): Promise<string | null> {
 		const result = await run(async defer => {
 			await this.clearBarrier.enter()
 
@@ -199,39 +247,26 @@ class Thumbnails {
 			}
 
 			const uuid = params.item.data.uuid
-			const ext = getExtension(params.item)
+			const outputPath = getPath(params.item)
+			const existing = this.readExistingThumbnail(uuid, outputPath)
 
-			if (!ext) {
-				throw new Error("File has no extension")
+			if (existing !== null) {
+				return existing
 			}
 
-			const isImage = EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(ext)
-			const isVideo = EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(ext)
+			// A settled verdict is final for the session: no SDK call, no failure count, no retry.
+			if (this.unavailable.has(uuid)) {
+				return null
+			}
 
-			if (!isImage && !isVideo) {
+			const kind = getThumbnailKind(params.item)
+
+			if (!kind) {
 				throw new Error("Unsupported file type")
 			}
 
 			if ((this.failures.get(uuid) ?? 0) >= MAX_FAILURES) {
 				throw new Error("Max thumbnail generation failures reached")
-			}
-
-			const outputPath = getPath(params.item)
-			const outputFile = new FileSystem.File(outputPath)
-
-			if (outputFile.exists) {
-				// Validate integrity — a 0-byte file is the result of a crashed/interrupted write and would loop the consumer forever.
-				if (outputFile.size > 0) {
-					this.available.add(uuid)
-
-					return normalizeFilePathForExpo(outputPath)
-				}
-
-				try {
-					outputFile.delete()
-				} catch {
-					// Best-effort cleanup of the corrupt cache entry; if delete fails we'll regenerate anyway.
-				}
 			}
 
 			const pendingPromise = this.pending.get(uuid)
@@ -243,9 +278,7 @@ class Thumbnails {
 			const promise = this.doGenerate({
 				item: params.item,
 				uuid,
-				ext,
-				isImage,
-				isVideo,
+				kind,
 				outputPath,
 				width: params.width ?? DEFAULT_WIDTH,
 				quality: params.quality ?? DEFAULT_QUALITY,
@@ -284,14 +317,178 @@ class Thumbnails {
 	private async doGenerate(params: {
 		item: DriveItem
 		uuid: string
-		ext: string
-		isImage: boolean
-		isVideo: boolean
+		kind: ThumbnailKind
 		outputPath: string
 		signal?: AbortSignal
 		width: number
 		quality: number
 		videoTimestamp: number
+	}): Promise<string | null> {
+		const result = await run(async () => {
+			ensureDirectory()
+
+			if (params.kind === "image") {
+				return await this.generateImageThumbnail(params)
+			}
+
+			return await this.generateVideoThumbnail(params)
+		})
+
+		if (!result.success) {
+			// Aborts (the JS signal, or the bindings' AbortError by name), offline and a provider that
+			// never came up are not verdicts about the file — only a real failure counts toward the
+			// blacklist, and only that one is logged at error.
+			if (
+				!params.signal?.aborted &&
+				!isAbortError(result.error) &&
+				!(result.error instanceof OfflineAbortError) &&
+				!(result.error instanceof ProviderUnavailableError)
+			) {
+				logger.error("thumbnails", "generation failed", {
+					uuid: params.uuid,
+					kind: params.kind,
+					platform: Platform.OS,
+					error: String(result.error)
+				})
+
+				this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
+			}
+
+			for (const path of [params.outputPath, `${params.outputPath}.tmp`]) {
+				const partial = new FileSystem.File(path)
+
+				if (partial.exists) {
+					try {
+						partial.delete()
+					} catch {
+						// Best-effort cleanup of partial output
+					}
+				}
+			}
+
+			throw result.error
+		}
+
+		if (result.data !== null) {
+			this.available.add(params.uuid)
+		}
+
+		return result.data
+	}
+
+	// Local bytes first, zero network: an offline copy or a file-cache hit the manipulator can
+	// decode goes through the manipulator behind the semaphore. Otherwise the SDK — after the
+	// offline guard, and NOT behind the semaphore (see MAX_CONCURRENT). Both gates
+	// (displayability + canMakeThumbnail) were applied by getThumbnailKind before this runs.
+	private async generateImageThumbnail(params: {
+		item: DriveItem
+		uuid: string
+		outputPath: string
+		width: number
+		quality: number
+		signal?: AbortSignal
+	}): Promise<string | null> {
+		const ext = getExtension(params.item)
+		const localSourcePath =
+			ext !== null && EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(ext)
+				? await this.resolveLocalSourcePath(params.item, params.signal)
+				: null
+
+		if (params.signal?.aborted) {
+			throw abortError(params.signal)
+		}
+
+		if (localSourcePath !== null) {
+			await this.semaphore.acquire()
+
+			try {
+				await generateImage({
+					localSourcePath,
+					outputPath: params.outputPath,
+					width: params.width,
+					quality: params.quality,
+					signal: params.signal
+				})
+
+				return normalizeFilePathForExpo(params.outputPath)
+			} finally {
+				this.semaphore.release()
+			}
+		}
+
+		// The SDK reads the bytes over the network. Offline it would fail with a transport error and
+		// poison the failure counter for something that is not the file's fault — bail the same
+		// abort-flavoured way the video path does (not counted, not logged at error).
+		if (!onlineManager.isOnline()) {
+			throw new OfflineAbortError()
+		}
+
+		const file = driveItemToAnyFile(params.item)
+
+		if (!file) {
+			throw new Error("Unsupported item type")
+		}
+
+		const outcome = await generateImageViaSdk({
+			file,
+			uuid: params.uuid,
+			outputPath: params.outputPath,
+			signal: params.signal
+		})
+
+		switch (outcome) {
+			case "written": {
+				return normalizeFilePathForExpo(params.outputPath)
+			}
+
+			case "settled": {
+				this.unavailable.add(params.uuid)
+
+				return null
+			}
+		}
+	}
+
+	// The offline store or the file cache holds the bytes already — no network, no SDK.
+	private async resolveLocalSourcePath(item: DriveItem, signal?: AbortSignal): Promise<string | null> {
+		const offlineFile = await offline.getLocalFile(item)
+
+		if (offlineFile?.exists) {
+			return normalizeFilePathForExpo(offlineFile.uri)
+		}
+
+		if (
+			await fileCache.has({
+				type: "drive",
+				data: item
+			})
+		) {
+			const cachedFile = await fileCache.get({
+				item: {
+					type: "drive",
+					data: item
+				},
+				signal
+			})
+
+			return normalizeFilePathForExpo(cachedFile.uri)
+		}
+
+		return null
+	}
+
+	// Video: the frame comes from expo-video-thumbnails over the local HTTP provider (or an offline
+	// copy) and is resized/encoded by the manipulator — real native work, so it stays behind the
+	// semaphore. The source URL is resolved BEFORE the slot is taken: the provider boots
+	// asynchronously and the wait can take up to 30s; holding a finite slot during that idle wait
+	// would head-of-line-block every other thumbnail.
+	private async generateVideoThumbnail(params: {
+		item: DriveItem
+		outputPath: string
+		width: number
+		quality: number
+		videoTimestamp: number
+		signal?: AbortSignal
 	}): Promise<string> {
 		const file = driveItemToAnyFile(params.item)
 
@@ -299,100 +496,42 @@ class Thumbnails {
 			throw new Error("Unsupported item type")
 		}
 
-		// Resolve the video source URL (offline lookup / online guard / HTTP-provider readiness)
-		// BEFORE acquiring the concurrency slot. The provider boots asynchronously and the wait can
-		// take up to 30s; holding a finite semaphore slot during that idle wait head-of-line-blocks
-		// ALL thumbnail generation (including images). Doing it here means the slot only ever covers
-		// real extract/encode work.
-		let videoSourceUrl: string | null = null
+		let videoSourceUrl: string
 
-		if (params.isVideo) {
-			const offlineFile = await offline.getLocalFile(params.item)
+		const offlineFile = await offline.getLocalFile(params.item)
 
-			if (offlineFile?.exists) {
-				videoSourceUrl = normalizeFilePathForExpo(offlineFile.uri)
-			} else {
-				// Video thumbnails stream via the local HTTP provider, which internally streams from
-				// Filen servers via the SDK. Offline would stall. Throw abort-flavoured so the failures
-				// map isn't poisoned (see generateImage for the same reasoning).
-				if (!onlineManager.isOnline()) {
-					throw new OfflineAbortError()
-				}
-
-				const getFileUrl = await waitForHttpProvider(params.signal)
-
-				videoSourceUrl = getFileUrl(file)
+		if (offlineFile?.exists) {
+			videoSourceUrl = normalizeFilePathForExpo(offlineFile.uri)
+		} else {
+			// Video thumbnails stream via the local HTTP provider, which internally streams from
+			// Filen servers via the SDK. Offline would stall. Throw abort-flavoured so the failures
+			// map isn't poisoned.
+			if (!onlineManager.isOnline()) {
+				throw new OfflineAbortError()
 			}
+
+			const getFileUrl = await waitForHttpProvider(params.signal)
+
+			videoSourceUrl = getFileUrl(file)
 		}
 
 		if (params.signal?.aborted) {
 			throw abortError(params.signal)
 		}
 
-		// Acquire here (not in generate()) so concurrent callers waiting on the same in-flight pending promise don't each occupy a slot while idle.
 		await this.semaphore.acquire()
 
 		try {
-			const result = await run(async () => {
-				ensureDirectory()
-
-				if (params.isImage) {
-					await generateImage({
-						file,
-						item: params.item,
-						outputPath: params.outputPath,
-						width: params.width,
-						quality: params.quality,
-						signal: params.signal
-					})
-				} else if (params.isVideo && videoSourceUrl !== null) {
-					await generateVideo({
-						sourceUrl: videoSourceUrl,
-						outputPath: params.outputPath,
-						width: params.width,
-						quality: params.quality,
-						timestamp: params.videoTimestamp,
-						signal: params.signal
-					})
-				}
-
-				return normalizeFilePathForExpo(params.outputPath)
+			await generateVideo({
+				sourceUrl: videoSourceUrl,
+				outputPath: params.outputPath,
+				width: params.width,
+				quality: params.quality,
+				timestamp: params.videoTimestamp,
+				signal: params.signal
 			})
 
-			if (!result.success) {
-				if (
-					!params.signal?.aborted &&
-					!(result.error instanceof OfflineAbortError) &&
-					!(result.error instanceof ProviderUnavailableError)
-				) {
-					logger.error("thumbnails", "generation failed", {
-						uuid: params.uuid,
-						ext: params.ext,
-						isImage: params.isImage,
-						isVideo: params.isVideo,
-						platform: Platform.OS,
-						error: String(result.error)
-					})
-
-					this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
-				}
-
-				const outputFile = new FileSystem.File(params.outputPath)
-
-				if (outputFile.exists) {
-					try {
-						outputFile.delete()
-					} catch {
-						// Best-effort cleanup of partial output
-					}
-				}
-
-				throw result.error
-			}
-
-			this.available.add(params.uuid)
-
-			return result.data
+			return normalizeFilePathForExpo(params.outputPath)
 		} finally {
 			this.semaphore.release()
 		}
@@ -416,6 +555,9 @@ class Thumbnails {
 		}
 	}
 
+	// Post-upload hook (transferCore): the device just uploaded these bytes, so decode them locally
+	// with the manipulator instead of fetching them back through the SDK. Gated on what the
+	// manipulator can decode (MANIPULATOR ∪ VIDEO) — a different set from canGenerate on purpose.
 	private async generateFromLocalFileImpl(params: {
 		localPath: string
 		uuid: string
@@ -444,21 +586,10 @@ class Thumbnails {
 		}
 
 		const outputPath = FileSystem.Paths.join(DIRECTORY.uri, `${params.uuid}.webp`)
-		const outputFile = new FileSystem.File(outputPath)
+		const existing = this.readExistingThumbnail(params.uuid, outputPath)
 
-		if (outputFile.exists) {
-			// Validate integrity — a 0-byte file is the result of a crashed/interrupted write and would loop the consumer forever.
-			if (outputFile.size > 0) {
-				this.available.add(params.uuid)
-
-				return normalizeFilePathForExpo(outputPath)
-			}
-
-			try {
-				outputFile.delete()
-			} catch {
-				// Best-effort cleanup of the corrupt cache entry; if delete fails we'll regenerate anyway.
-			}
+		if (existing !== null) {
+			return existing
 		}
 
 		const pendingPromise = this.pending.get(params.uuid)
@@ -512,9 +643,11 @@ class Thumbnails {
 					this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
 				}
 
-				if (outputFile.exists) {
+				const partial = new FileSystem.File(outputPath)
+
+				if (partial.exists) {
 					try {
-						outputFile.delete()
+						partial.delete()
 					} catch {
 						// Best-effort cleanup of partial output
 					}
@@ -539,10 +672,10 @@ class Thumbnails {
 		return result.data
 	}
 
-	// Invalidate a cached thumbnail WITHOUT resetting its failure counter. Used when a render-time
-	// decode failure (e.g. an undecodable-but-nonzero .webp) means the on-disk artifact must be
-	// discarded, but the failure history must be preserved so the consumer can give up permanently
-	// once MAX_ERROR_RETRIES is exhausted instead of looping generate-on-error forever.
+	// Invalidate a cached thumbnail WITHOUT resetting its failure counter or the session verdicts.
+	// Used when a render-time decode failure (e.g. an undecodable-but-nonzero .webp) means the
+	// on-disk artifact must be discarded, but the failure history must be preserved so the consumer
+	// can give up permanently once MAX_ERROR_RETRIES is exhausted instead of looping generate-on-error forever.
 	public invalidateFile(item: DriveItem): void {
 		const file = new FileSystem.File(getPath(item))
 
@@ -561,6 +694,7 @@ class Thumbnails {
 		await this.clearBarrier.runExclusive(() => {
 			this.failures.clear()
 			this.available.clear()
+			this.unavailable.clear()
 
 			if (DIRECTORY.exists) {
 				DIRECTORY.delete()
