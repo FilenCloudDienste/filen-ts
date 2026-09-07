@@ -105,7 +105,11 @@ export function buildJsClientConfig(resolved: ResolvedTransferConfig): JsClientC
 		downloadBandwidthKilobytesPerSec: resolved.downloadKbps,
 		logLevel: LogLevel.Info,
 		fileIoMemoryBudget: resolved.fileIoMemoryBudget,
-		// The app generates its own thumbnails and never asks the SDK for them; the provider extensions get their thumbnail policy via auth.json.
+		// Left undefined on purpose: the app's own thumbnail pipeline runs under the SDK's defaults —
+		// 64 MiB per decode, 64 MiB max source, 2 concurrent decodes — which are the single source of
+		// truth for an app process (the manipulator path decodes whole images through UIImage/Glide,
+		// far above that). The provider extensions receive an explicit per-host budget through
+		// auth.json (fileProvider.ts).
 		thumbnailMemBudget: undefined,
 		thumbnailMaxSourceBytes: undefined,
 		thumbnailDecodeConcurrency: undefined
