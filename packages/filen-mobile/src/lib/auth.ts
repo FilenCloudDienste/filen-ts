@@ -28,6 +28,7 @@ import notesOffline from "@/features/notes/notesOffline"
 import cache from "@/lib/cache"
 import { clearSortCaches } from "@/lib/sort"
 import fileCache from "@/lib/fileCache"
+import rawPreviewCache from "@/lib/rawPreviewCache"
 import audioCache from "@/features/audio/audioCache"
 import thumbnails from "@/lib/thumbnails"
 import sandboxCache from "@/lib/sandboxCache"
@@ -520,12 +521,13 @@ class Auth {
 			sqlite.clearAsync(),
 			offline.clearAll(),
 			fileCache.clear(),
+			rawPreviewCache.clear(),
 			audioCache.clear(),
 			thumbnails.clear(),
 			sandboxCache.clear()
 		])
 
-		const WIPE_OPS = ["secureStore", "sqlite", "offline", "fileCache", "audioCache", "thumbnails", "sandboxCache"]
+		const WIPE_OPS = ["secureStore", "sqlite", "offline", "fileCache", "rawPreviewCache", "audioCache", "thumbnails", "sandboxCache"]
 
 		// Logging past this point uses console.error, NOT the logger: logger.purge() above disabled the
 		// logger and wiped its dir, so logger.* is a no-op here (and forcing it would recreate the

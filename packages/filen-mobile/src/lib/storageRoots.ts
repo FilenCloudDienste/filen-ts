@@ -65,6 +65,15 @@ export const THUMBNAILS_DIRECTORY = new FileSystem.Directory(
 	FileSystem.Paths.join(BASE_DIRECTORY_URI, "thumbnails", `v${THUMBNAILS_VERSION}`)
 )
 
+// SDK-extracted RAW previews (rawPreviewCache.ts): `<uuid>.jpg`, the JPEG the camera embedded in a
+// RAW container, written verbatim by writeEmbeddedPreviewToPath. The uuid is the whole identity (it
+// rotates on every content change), so there is no sidecar; the file's lastModified is its cachedAt.
+// Bump on any layout change.
+export const RAW_PREVIEW_CACHE_VERSION = 1
+export const RAW_PREVIEW_CACHE_DIRECTORY = new FileSystem.Directory(
+	FileSystem.Paths.join(BASE_DIRECTORY_URI, "rawPreviews", `v${RAW_PREVIEW_CACHE_VERSION}`)
+)
+
 export const SQLITE_VERSION = 1
 export const SQLITE_DB_FILE_NAME = "sqlite.db"
 export const SQLITE_DB_FILE_DIRECTORY = new FileSystem.Directory(

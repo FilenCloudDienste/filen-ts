@@ -2,6 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { queryClient } from "@/queries/client"
 import thumbnails from "@/lib/thumbnails"
 import fileCache from "@/lib/fileCache"
+import rawPreviewCache from "@/lib/rawPreviewCache"
 import audioCache from "@/features/audio/audioCache"
 import sandboxCache from "@/lib/sandboxCache"
 import offline from "@/features/offline/offline"
@@ -13,6 +14,9 @@ export const BASE_QUERY_KEY = "useCacheSizes"
 export type CacheSizes = {
 	thumbnails: number
 	fileCache: number
+	// SDK-extracted RAW previews (rawPreviewCache.ts) — shown and cleared together with fileCache
+	// as "preview cache".
+	rawPreviews: number
 	audioCache: number
 	sandbox: number
 	// On-disk size of the SDK search index DB. Display-only — never user-clearable
@@ -47,6 +51,9 @@ export async function fetchData(): Promise<CacheSizes> {
 	const fileCacheSize = fileCache.size()
 	await yieldToUI()
 
+	const rawPreviewsSize = rawPreviewCache.size()
+	await yieldToUI()
+
 	const audioCacheSize = audioCache.size()
 	await yieldToUI()
 
@@ -58,6 +65,7 @@ export async function fetchData(): Promise<CacheSizes> {
 	return {
 		thumbnails: thumbnailsSize,
 		fileCache: fileCacheSize,
+		rawPreviews: rawPreviewsSize,
 		audioCache: audioCacheSize,
 		sandbox: sandboxSize,
 		sdkCache: sdkCacheSize,

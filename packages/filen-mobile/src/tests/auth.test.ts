@@ -189,6 +189,15 @@ vi.mock("@/lib/fileCache", () => ({
 	}
 }))
 
+// Stubbed like fileCache: the real module reaches tmp.ts → expo-crypto, unloadable in the node env.
+vi.mock("@/lib/rawPreviewCache", () => ({
+	default: {
+		clear: vi.fn(async () => {
+			callLog.push("rawPreviewCache.clear")
+		})
+	}
+}))
+
 // Stubbed (like fileCache) so auth.ts's import chain doesn't load the real audioCache —
 // it pulls expo-image + expo-file-system, which are unloadable in the node test env.
 vi.mock("@/features/audio/audioCache", () => ({
@@ -526,6 +535,7 @@ describe("auth.logout", () => {
 		// All decrypted-at-rest stores are wiped — including the diagnostic logs (file/dir names).
 		expect(callLog).toContain("offline.clearAll")
 		expect(callLog).toContain("fileCache.clear")
+		expect(callLog).toContain("rawPreviewCache.clear")
 		expect(callLog).toContain("audioCache.clear")
 		expect(callLog).toContain("thumbnails.clear")
 		expect(callLog).toContain("sandboxCache.clear")

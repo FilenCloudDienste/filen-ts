@@ -14,6 +14,7 @@ import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import thumbnails from "@/lib/thumbnails"
 import fileCache from "@/lib/fileCache"
+import rawPreviewCache from "@/lib/rawPreviewCache"
 import audioCache from "@/features/audio/audioCache"
 import sandboxCache from "@/lib/sandboxCache"
 import offline from "@/features/offline/offline"
@@ -438,7 +439,10 @@ function Advanced() {
 									actionSheet.show({
 										buttons: [
 											...TRANSFER_PERFORMANCE_PRESETS.map(preset => ({
-												title: preset === transferPreset ? `${presetLabels[preset]} (${t("current")})` : presetLabels[preset],
+												title:
+													preset === transferPreset
+														? `${presetLabels[preset]} (${t("current")})`
+														: presetLabels[preset],
 												onPress: () => {
 													if (preset === transferPreset) {
 														return
@@ -486,13 +490,14 @@ function Advanced() {
 							{
 								icon: "film-outline",
 								title: t("clear_preview_cache"),
-								subTitle: formatSize(sizes?.fileCache),
+								subTitle: formatSize(sizes ? sizes.fileCache + sizes.rawPreviews : undefined),
 								onPress: () => {
 									confirmAndRun({
 										title: t("clear_preview_cache"),
 										message: t("clear_preview_cache_description"),
 										action: async () => {
-											await fileCache.clear()
+											// The RAW previews are previews too — one action, one size.
+											await Promise.all([fileCache.clear(), rawPreviewCache.clear()])
 
 											await clearExpoImageCache()
 										},
@@ -544,6 +549,7 @@ function Advanced() {
 											const results = await Promise.allSettled([
 												thumbnails.clear(),
 												fileCache.clear(),
+												rawPreviewCache.clear(),
 												audioCache.clear(),
 												sandboxCache.clear()
 											])
@@ -626,27 +632,27 @@ function Advanced() {
 							}
 						]}
 					/>
-						<Group
-							className="bg-background-tertiary"
-							buttons={[
-								{
-									icon: "list-outline",
-									title: t("view_logs"),
-									subTitle: t("view_logs_description"),
-									onPress: () => {
-										router.push("/logViewer")
-									}
-								},
-								{
-									icon: "document-text-outline",
-									title: t("export_logs"),
-									subTitle: t("export_logs_description"),
-									onPress: () => {
-										exportLogs()
-									}
+					<Group
+						className="bg-background-tertiary"
+						buttons={[
+							{
+								icon: "list-outline",
+								title: t("view_logs"),
+								subTitle: t("view_logs_description"),
+								onPress: () => {
+									router.push("/logViewer")
 								}
-							]}
-						/>
+							},
+							{
+								icon: "document-text-outline",
+								title: t("export_logs"),
+								subTitle: t("export_logs_description"),
+								onPress: () => {
+									exportLogs()
+								}
+							}
+						]}
+					/>
 				</SettingsScrollView>
 			</SafeAreaView>
 		</Fragment>

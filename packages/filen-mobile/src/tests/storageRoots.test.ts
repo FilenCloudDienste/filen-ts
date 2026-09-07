@@ -72,6 +72,13 @@ describe("version segments embedded in paths", () => {
 		expect(SQLITE_VERSION).toBe(1)
 		expect(SQLITE_DB_FILE_DIRECTORY.uri).toContain(`sqlite/v${SQLITE_VERSION}`)
 	})
+
+	it("RAW_PREVIEW_CACHE_DIRECTORY.uri contains 'rawPreviews/v1' (RAW_PREVIEW_CACHE_VERSION=1)", async () => {
+		const { RAW_PREVIEW_CACHE_DIRECTORY, RAW_PREVIEW_CACHE_VERSION } = await importRoots("android")
+
+		expect(RAW_PREVIEW_CACHE_VERSION).toBe(1)
+		expect(RAW_PREVIEW_CACHE_DIRECTORY.uri).toContain(`rawPreviews/v${RAW_PREVIEW_CACHE_VERSION}`)
+	})
 })
 
 describe("directory hierarchy", () => {

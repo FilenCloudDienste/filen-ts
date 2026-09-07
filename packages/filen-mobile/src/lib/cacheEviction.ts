@@ -11,6 +11,10 @@
 // SDWebImage store is otherwise only age-bounded at 1 week, hence the buildup).
 export const CACHE_MAX_SIZE_BYTES = 250 * 1024 * 1024
 
+// 128MB for the RAW preview cache (rawPreviewCache.ts): a full-size embedded JPEG is 2–25 MB, so
+// this keeps roughly the last dozen opened RAW shots — a browsing session, not an archive.
+export const RAW_PREVIEW_CACHE_MAX_SIZE_BYTES = 128 * 1024 * 1024
+
 export function planSizeCapEviction(entries: { key: string; cachedAt: number; size: number }[], maxBytes: number): string[] {
 	let total = 0
 
