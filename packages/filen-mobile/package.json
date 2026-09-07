@@ -60,7 +60,7 @@
 		"@expo/react-native-action-sheet": "^4.1.1",
 		"@expo/ui": "~57.0.16",
 		"@expo/vector-icons": "^15.1.1",
-		"@filen/sdk-rs": "0.4.41",
+		"@filen/sdk-rs": "0.4.42",
 		"@filen/utils": "^0.0.12",
 		"@op-engineering/op-sqlite": "^18.2.0",
 		"@preeternal/react-native-file-hash": "^3.0.0",
