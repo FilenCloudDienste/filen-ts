@@ -204,7 +204,9 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 
 					return (
 						(isImagePreviewType(previewType) || previewType === "video") &&
-						(isImagePreviewType(previewType)
+						// The expo-image allowlist applies to what expo-image renders; a RAW file's
+						// extension is never in that set and its preview is the SDK-extracted JPEG.
+						(previewType === "image" || previewType === "svg"
 							? EXPO_IMAGE_SUPPORTED_EXTENSIONS.has(Paths.extname(item.data.data.decryptedMeta.name).toLowerCase())
 							: true)
 					)

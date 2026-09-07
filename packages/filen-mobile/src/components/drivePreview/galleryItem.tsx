@@ -1,12 +1,13 @@
-import { useTranslation } from "react-i18next"
 import { getPreviewType } from "@/lib/previewType"
 import { useWindowDimensions, ActivityIndicator } from "react-native"
 import { type SharedValue } from "react-native-reanimated"
 import PreviewImage from "@/components/drivePreview/previewImage"
+import PreviewRawImage from "@/components/drivePreview/previewRawImage"
 import PreviewSvg from "@/components/drivePreview/previewSvg"
 import PreviewVideo from "@/components/drivePreview/previewVideo"
 import PreviewAudio from "@/components/drivePreview/previewAudio"
 import PreviewText from "@/components/drivePreview/previewText"
+import UnavailableOfflineNotice from "@/components/drivePreview/unavailableOfflineNotice"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import useFileUrlQuery from "@/queries/useFileUrl.query"
@@ -14,8 +15,6 @@ import PreviewPdf from "@/components/drivePreview/previewPdf"
 import PreviewDocx from "@/components/drivePreview/previewDocx"
 import PreviewSlot from "@/components/drivePreview/previewSlot"
 import View from "@/components/ui/view"
-import Text from "@/components/ui/text"
-import Ionicons from "@expo/vector-icons/Ionicons"
 import { type ListRenderItemInfo } from "@shopify/flash-list"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
 
@@ -34,7 +33,6 @@ const GalleryItem = ({
 	onSingleTap?: () => void
 	onPinchActiveChange?: (active: boolean) => void
 }) => {
-	const { t } = useTranslation()
 	const dimensions = useWindowDimensions()
 	const isActive = useDrivePreviewStore(useShallow(state => state.currentIndex === info.index))
 
@@ -57,7 +55,13 @@ const GalleryItem = ({
 						url: info.item.data.url,
 						name: info.item.data.name
 					}
-				}
+				},
+		{
+			// A RAW file's bytes are never rendered (PreviewRawImage shows the SDK-extracted JPEG):
+			// resolving a URL for them would block on the HTTP provider and report "unavailable
+			// offline" even when a preview is cached.
+			enabled: previewType !== "rawImage"
+		}
 	)
 
 	const fileUrl = fileUrlQuery.status === "success" ? fileUrlQuery.data : null
@@ -67,28 +71,36 @@ const GalleryItem = ({
 		height: dimensions.height
 	}
 
-	// Resolver succeeded but produced no URL — happens when the device is
-	// offline AND the item is in neither the offline store nor the file cache.
-	// Render an explicit "unavailable offline" state instead of an indefinite spinner.
-	if (fileUrlQuery.status === "success" && fileUrl === null && previewType !== "unknown") {
+	if (previewType === "rawImage" && info.item.type === "drive") {
+		// Inside PreviewSlot so a neighbouring page never triggers a 2–10 MB extraction.
 		return (
 			<View
 				className="bg-transparent"
 				style={itemStyle}
 			>
-				<View className="bg-transparent flex-1 items-center justify-center px-8">
-					<Ionicons
-						name="cloud-offline-outline"
-						size={48}
-						color="#9ca3af"
+				<PreviewSlot isActive={isActive}>
+					<PreviewRawImage
+						item={info.item.data}
+						isActive={isActive}
+						zoomScale={galleryZoomScale}
+						onPinchDismiss={goBack}
+						onZoomChange={onZoomChange}
+						onSingleTap={onSingleTap}
+						onPinchActiveChange={onPinchActiveChange}
 					/>
-					<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">{t("unavailable_offline")}</Text>
-				</View>
+				</PreviewSlot>
 			</View>
 		)
 	}
 
-	if (!fileUrl || previewType === "unknown") {
+	// Resolver succeeded but produced no URL — happens when the device is
+	// offline AND the item is in neither the offline store nor the file cache.
+	// Render an explicit "unavailable offline" state instead of an indefinite spinner.
+	if (fileUrlQuery.status === "success" && fileUrl === null && previewType !== "unknown") {
+		return <UnavailableOfflineNotice style={itemStyle} />
+	}
+
+	if (!fileUrl || previewType === "unknown" || previewType === "rawImage") {
 		return (
 			<View
 				className="bg-transparent"
@@ -224,12 +236,9 @@ const GalleryItem = ({
 		}
 
 		default: {
-			return (
-				<View
-					className="bg-transparent"
-					style={itemStyle}
-				/>
-			)
+			// Every PreviewType has a renderer above; a new member fails to compile here rather than
+			// rendering an empty page.
+			return previewType satisfies never
 		}
 	}
 }

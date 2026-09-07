@@ -22,6 +22,7 @@ import { useRecyclingState } from "@shopify/flash-list"
 import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
 import useEditableTarget from "@/components/drivePreview/useEditableTarget"
+import PreviewLoadFailedNotice from "@/components/drivePreview/previewLoadFailedNotice"
 import useIsOnline from "@/hooks/useIsOnline"
 import logger from "@/lib/logger"
 import type { File } from "expo-file-system"
@@ -310,24 +311,10 @@ const PreviewText = ({ item }: { item: GalleryItemTagged }) => {
 
 	if (query.status === "error") {
 		return (
-			<View
-				className="flex-1 items-center justify-center px-8"
+			<PreviewLoadFailedNotice
 				style={containerStyle}
-			>
-				<Ionicons
-					name="warning-outline"
-					size={48}
-					color="#9ca3af"
-				/>
-				<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">{t("preview_load_failed")}</Text>
-				<PressableScale
-					className="mt-4"
-					onPress={() => query.refetch()}
-					hitSlop={10}
-				>
-					<Text className="text-sm leading-5 text-primary">{t("retry")}</Text>
-				</PressableScale>
-			</View>
+				onRetry={() => query.refetch()}
+			/>
 		)
 	}
 

@@ -209,6 +209,10 @@ describe("isImagePreviewType", () => {
 		expect(isImagePreviewType("svg")).toBe(true)
 	})
 
+	it("is true for 'rawImage' (previewed through the SDK-extracted JPEG)", () => {
+		expect(isImagePreviewType("rawImage")).toBe(true)
+	})
+
 	it("is false for non-image types", () => {
 		expect(isImagePreviewType("video")).toBe(false)
 		expect(isImagePreviewType("audio")).toBe(false)

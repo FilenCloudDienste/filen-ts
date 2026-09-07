@@ -27,13 +27,17 @@ vi.mock("@/lib/previewType", async () => {
 
 	return {
 		isImagePreviewType(previewType: string): boolean {
-			return previewType === "image" || previewType === "svg"
+			return previewType === "image" || previewType === "svg" || previewType === "rawImage"
 		},
 		getPreviewType(name: string): string {
 			const ext = actual.Paths.extname(name.trim().toLowerCase())
 
 			if (ext === ".svg") {
 				return "svg"
+			}
+
+			if ([".cr2", ".nef", ".dng"].includes(ext)) {
+				return "rawImage"
 			}
 
 			if ([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".heic", ".heif", ".webp", ".avif"].includes(ext)) {
@@ -416,6 +420,74 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 			// .bmp is classified as "image" but is not in EXPO_IMAGE_SUPPORTED_EXTENSIONS
 			expect(uuids).not.toContain("bmp1")
 			expect(uuids).toContain("jpg1")
+		})
+	})
+
+	// RAW camera files carry an extension the expo-image set does NOT contain; they are admitted on
+	// the strength of their "rawImage" classification alone (the preview is the SDK-extracted JPEG).
+	describe("rawImage admission", () => {
+		it("keeps a .cr2 in the photos gallery even though .cr2 is absent from EXPO_IMAGE_SUPPORTED_EXTENSIONS", () => {
+			const photosDrivePath = makeDrivePath("photos")
+
+			useDrivePreviewStore.getState().open({
+				items: [makeDriveGalleryItem("raw1", "shot.cr2"), makeDriveGalleryItem("jpg1", "photo.jpg")],
+				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", photosDrivePath)
+			})
+
+			const uuids = useDrivePreviewStore
+				.getState()
+				.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
+
+			expect(uuids).toContain("raw1")
+			expect(uuids).toContain("jpg1")
+		})
+
+		it("keeps a .nef in the regular drive gallery and can open ON it", () => {
+			useDrivePreviewStore.getState().open({
+				items: [makeDriveGalleryItem("jpg1", "photo.jpg"), makeDriveGalleryItem("raw1", "shot.nef")],
+				initialItem: makeInitialDriveItem("raw1", "shot.nef", makeDrivePath("drive"))
+			})
+
+			const state = useDrivePreviewStore.getState()
+
+			expect(state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)).toEqual(["jpg1", "raw1"])
+			expect(state.currentIndex).toBe(1)
+			expect(mockRouterPush).toHaveBeenCalledTimes(1)
+		})
+
+		it("opens a chat RAW attachment (linked drive path, single item) into the gallery", () => {
+			// internalAttachment.tsx routes only "unknown" to openLinkedFile; a rawImage attachment
+			// goes through linkedFileIntoDriveItem → open() with a `linked` drive path.
+			useDrivePreviewStore.getState().open({
+				items: [makeDriveGalleryItem("raw1", "shot.dng")],
+				initialItem: makeInitialDriveItem("raw1", "shot.dng", { type: "linked", uuid: null } as DrivePath)
+			})
+
+			const state = useDrivePreviewStore.getState()
+
+			expect(state.items).toHaveLength(1)
+			expect(state.currentIndex).toBe(0)
+			expect(mockRouterPush).toHaveBeenCalledTimes(1)
+		})
+
+		it("still excludes an image whose extension is outside the expo-image set (the gate stays for image/svg)", () => {
+			const photosDrivePath = makeDrivePath("photos")
+
+			useDrivePreviewStore.getState().open({
+				items: [
+					makeDriveGalleryItem("bmp1", "photo.bmp"),
+					makeDriveGalleryItem("raw1", "shot.dng"),
+					makeDriveGalleryItem("jpg1", "photo.jpg")
+				],
+				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", photosDrivePath)
+			})
+
+			const uuids = useDrivePreviewStore
+				.getState()
+				.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
+
+			expect(uuids).not.toContain("bmp1")
+			expect(uuids).toContain("raw1")
 		})
 	})
 

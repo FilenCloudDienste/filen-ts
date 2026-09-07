@@ -27,13 +27,13 @@ function extnameOf(name: string): string {
 }
 
 // RAW camera containers whose embedded JPEG @filen/sdk-rs 0.4.42 can locate (writeEmbeddedPreviewToPath):
-// the TIFF-layout families CR2, NEF, ARW, DNG, SRW, PEF, RW2, ORF (microthumb/src/formats/tiff.rs),
-// Fuji RAF (formats/raf.rs) and Canon CR3 (formats/cr3.rs) — unchanged since the filen-js@0.4.41 tag the
-// filen-rs submodule sits on. Platform-independent — the preview is a JPEG; the platform never decodes
-// the RAW. Classified "rawImage" below: previewable (extracted JPEG) and thumbnailable (SDK), never an
-// expo-image or manipulator input, so it stays disjoint from both expo-image sets in constants.ts. Lives
-// beside the classifier rather than in constants.ts so the many suites that mock @/constants with
-// hand-picked exports need nothing new.
+// the TIFF-layout families CR2, NEF, ARW, DNG, SRW, PEF, RW2, ORF (located by microthumb/src/formats/raw.rs,
+// the IFD walker that formats/tiff.rs sniffs into), Fuji RAF (formats/raf.rs) and Canon CR3 (formats/cr3.rs)
+// — unchanged since the filen-js@0.4.41 tag the filen-rs submodule sits on. Platform-independent — the
+// preview is a JPEG; the platform never decodes the RAW. Classified "rawImage" below: previewable
+// (extracted JPEG) and thumbnailable (SDK), never an expo-image or manipulator input, so it stays disjoint
+// from both expo-image sets in constants.ts. Lives beside the classifier rather than in constants.ts so the
+// many suites that mock @/constants with hand-picked exports need nothing new.
 export const SDK_RAW_PREVIEW_EXTENSIONS = new Set<string>([".cr2", ".cr3", ".nef", ".arw", ".dng", ".srw", ".pef", ".rw2", ".orf", ".raf"])
 
 export function getPreviewType(name: string): PreviewType {
@@ -147,15 +147,15 @@ export function getPreviewType(name: string): PreviewType {
 	}
 }
 
-// SVG previews render via react-native-svg but are image-equivalent for classification
-// (gallery / photos membership, icon selection, save-to-photos, size caps). Use this instead
-// of `previewType === "image"` at any eligibility site so SVGs keep behaving like images; the
-// only places that keep the literal `"image"` are the actual render sinks (which route `"svg"`
-// to PreviewSvg), and the chat inline-attachment gate (which deliberately drops `"svg"` OUT of
-// the inline-image path — internal link → file chip, external link → plain link — rather than
-// decoding an untrusted SVG inline via expo-image).
-export function isImagePreviewType(previewType: PreviewType): previewType is "image" | "svg" {
-	return previewType === "image" || previewType === "svg"
+// SVG previews render via react-native-svg and RAW camera files via the SDK-extracted JPEG, but
+// both are image-equivalent for classification (gallery / photos membership, icon selection, size
+// caps). Use this instead of `previewType === "image"` at any eligibility site; the places that
+// keep the literal `"image"` are the render sinks (which route `"svg"` to PreviewSvg and
+// `"rawImage"` to PreviewRawImage), the chat inline-attachment gate (which drops both OUT of the
+// inline-image path rather than decoding untrusted or undisplayable bytes inline via expo-image)
+// and save-to-photos (RAW excluded — product decision, see menuActionsDownload.ts).
+export function isImagePreviewType(previewType: PreviewType): previewType is "image" | "svg" | "rawImage" {
+	return previewType === "image" || previewType === "svg" || previewType === "rawImage"
 }
 
 // Whether lossily-decoded file content is more plausibly binary than text. Catches files

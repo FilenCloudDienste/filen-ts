@@ -6,8 +6,9 @@ import { type PreviewType } from "@/lib/previewType"
  *
  * Keeps only image / video files whose extension is renderable. Directories,
  * items without decrypted metadata and non-(shared-)file types are dropped.
- * Images additionally require their extension to be in the supported-image set
- * (videos are accepted unconditionally). All heavy/native dependencies
+ * Images expo-image renders additionally require their extension to be in the
+ * supported-image set (videos and RAW are accepted unconditionally, since
+ * neither is an expo-image input). All heavy/native dependencies
  * (`getPreviewType`, the supported-extension set and `extname`) are injected so
  * the predicate stays side-effect-free and trivially testable.
  */
@@ -27,14 +28,17 @@ export function isPhotoGridItem({
 	}
 
 	const previewType = getPreviewType(item.data.decryptedMeta.name)
-	// `svg` is image-equivalent for grid eligibility (it renders via react-native-svg, not
-	// expo-image — see PreviewSvg). Inlined rather than importing isImagePreviewType to keep this
-	// predicate free of runtime @/lib deps (getPreviewType is injected for the same reason).
-	const isImage = previewType === "image" || previewType === "svg"
+	// `svg` and `rawImage` are image-equivalent for grid eligibility (svg renders via
+	// react-native-svg, rawImage via the SDK-extracted JPEG — neither goes through expo-image, so
+	// only `image`/`svg` are gated on the expo-image extension set). Inlined rather than importing
+	// isImagePreviewType to keep this predicate free of runtime @/lib deps (getPreviewType is
+	// injected for the same reason).
+	const isImage = previewType === "image" || previewType === "svg" || previewType === "rawImage"
+	const needsExpoImageExtension = previewType === "image" || previewType === "svg"
 
 	return (
 		(isImage || previewType === "video") &&
-		(isImage ? supportedImageExtensions.has(extname(item.data.decryptedMeta.name).toLowerCase()) : true)
+		(needsExpoImageExtension ? supportedImageExtensions.has(extname(item.data.decryptedMeta.name).toLowerCase()) : true)
 	)
 }
 

@@ -57,15 +57,16 @@ export const NETINFO_CONFIG: NetInfoConfiguration = {
 // lists are only the entry gate. Keep each platform's list a subset of
 // EXPO_IMAGE_SUPPORTED_EXTENSIONS so nothing thumbnails without also being openable.
 // Deliberately excluded: RAW camera files (.dng included) — they are their own preview type
-// ("rawImage", SDK_RAW_PREVIEW_EXTENSIONS in previewType.ts) because expo-image cannot decode them
-// and this list also gates camera-upload compression (full-RAW developing inside the background
-// task risks an OOM kill). iPhone ProRAW camera uploads are .dng: they are never compressed or
-// locally thumbnailed, so each shot's tile pulls its embedded full-size JPEG back through the SDK
-// once. Also excluded: .cur/.heics (near-zero prevalence); .svg (no bitmap decode path on either
-// platform — render-only, via react-native-svg / PreviewSvg). Formats listed here that the SDK's
-// remote thumbnail path does not decode (.ico, .jxl, .apng; .icns was never thumbnailed) only
-// thumbnail through this local manipulator path (a freshly uploaded file) — a listed one shows an
-// icon (its SDK `canMakeThumbnail` is false); accepted.
+// ("rawImage", SDK_RAW_PREVIEW_EXTENSIONS in previewType.ts), served on both platforms through the
+// JPEG the SDK extracts from the container, so the manipulator never sees RAW bytes whatever
+// ImageIO could decode on iOS. This list also gates camera-upload compression, where developing a
+// full RAW inside the background task risks an OOM kill. iPhone ProRAW camera uploads are .dng:
+// they are never compressed or locally thumbnailed, so each shot's tile pulls its embedded
+// full-size JPEG back through the SDK once. Also excluded: .cur/.heics (near-zero prevalence);
+// .svg (no bitmap decode path on either platform — render-only, via react-native-svg / PreviewSvg).
+// Formats listed here that the SDK's remote thumbnail path does not decode (.ico, .jxl, .apng;
+// .icns was never thumbnailed) only thumbnail through this local manipulator path (a freshly
+// uploaded file) — a listed one shows an icon (its SDK `canMakeThumbnail` is false); accepted.
 export const EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS = new Set<string>(
 	Platform.select({
 		ios: [
@@ -187,12 +188,14 @@ export const AUDIO_METADATA_MAX_CONCURRENT_PARSES = 1
 // getPreviewType returns "svg" and the gallery renders it through react-native-svg (PreviewSvg),
 // NOT expo-image: on Android expo-image decodes SVG via the unmaintained androidsvg 1.4, whose
 // pattern rendering can recurse into an uncatchable native OOM abort on adversarial SVGs.
-// Deliberately excluded: RAW camera files (.dng included) — expo-image cannot decode them; they are
-// classified "rawImage" (SDK_RAW_PREVIEW_EXTENSIONS in previewType.ts) and previewed through the
-// JPEG the SDK extracts, so they DO appear in the photos tab; .psd/.heics on iOS (flattened PSD
-// preview / HEIF sequences), .cur (zero prevalence). HEIC on an Android device without an HEVC
-// decoder is the one known hole in "thumbnail ⇒ previewable" (the SDK thumbnails it via libheif;
-// expo-image cannot decode it there) — pre-existing preview limitation, rare on API 31+, accepted.
+// Deliberately excluded: RAW camera files (.dng included) — they are classified "rawImage"
+// (SDK_RAW_PREVIEW_EXTENSIONS in previewType.ts) and served on both platforms through the JPEG the
+// SDK extracts from the container, so expo-image never sees RAW bytes whatever ImageIO could decode
+// on iOS. They DO appear in the photos tab, admitted on that classification rather than this set.
+// Also excluded: .psd/.heics on iOS (flattened PSD preview / HEIF sequences), .cur (zero prevalence).
+// HEIC on an Android device without an HEVC decoder is the one known hole in "thumbnail ⇒
+// previewable" (the SDK thumbnails it via libheif; expo-image cannot decode it there) —
+// pre-existing preview limitation, rare on API 31+, accepted.
 export const EXPO_IMAGE_SUPPORTED_EXTENSIONS = new Set<string>(
 	Platform.select({
 		ios: [

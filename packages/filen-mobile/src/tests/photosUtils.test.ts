@@ -29,6 +29,10 @@ function getPreviewType(name: string): PreviewType {
 		return "image"
 	}
 
+	if ([".cr2", ".dng"].includes(ext)) {
+		return "rawImage"
+	}
+
 	if ([".mp4", ".mov", ".mkv"].includes(ext)) {
 		return "video"
 	}
@@ -69,6 +73,16 @@ describe("isPhotoGridItem", () => {
 		expect(
 			isPhotoGridItem({
 				item: makeItem({ type: "file", name: "clip.mp4" }),
+				...deps
+			})
+		).toBe(true)
+	})
+
+	it("accepts a RAW camera file regardless of the supported-image set (previewed via the SDK-extracted JPEG)", () => {
+		// .cr2 is deliberately NOT in supportedImageExtensions — that set gates expo-image inputs only.
+		expect(
+			isPhotoGridItem({
+				item: makeItem({ type: "file", name: "shot.cr2" }),
 				...deps
 			})
 		).toBe(true)
@@ -131,6 +145,7 @@ describe("filterPhotoGridItems", () => {
 		const items = [
 			makeItem({ type: "file", name: "photo.jpg" }),
 			makeItem({ type: "file", name: "clip.mp4" }),
+			makeItem({ type: "file", name: "shot.dng" }),
 			makeItem({ type: "directory", name: "album.jpg" }),
 			makeItem({ type: "file", name: "scan.tiff" }),
 			makeItem({ type: "file", name: "document.pdf" }),
@@ -143,7 +158,7 @@ describe("filterPhotoGridItems", () => {
 			...deps
 		})
 
-		expect(result.map(item => item.data.decryptedMeta?.name)).toEqual(["photo.jpg", "clip.mp4", "shared.png"])
+		expect(result.map(item => item.data.decryptedMeta?.name)).toEqual(["photo.jpg", "clip.mp4", "shot.dng", "shared.png"])
 	})
 
 	it("returns an empty array when nothing matches", () => {
