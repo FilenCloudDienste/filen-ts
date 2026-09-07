@@ -2,7 +2,7 @@ import { useQuery, onlineManager, type UseQueryOptions, type UseQueryResult } fr
 import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import cache from "@/lib/cache"
-import rawPreviewCache from "@/lib/rawPreviewCache"
+import rawPreviewCache, { type RawPreviewResult } from "@/lib/rawPreviewCache"
 import offline from "@/features/offline/offline"
 import { type FileSource, fileSourceKey } from "@/queries/fileSource"
 
@@ -11,17 +11,7 @@ export const BASE_QUERY_KEY = "useRawPreviewQuery"
 // Only a drive file can be RAW (an external item is a local file the OS handed us).
 export type UseRawPreviewQueryParams = Extract<FileSource, { type: "drive" }>
 
-export type RawPreviewQueryResult =
-	| {
-			kind: "uri"
-			uri: string
-	  }
-	| {
-			kind: "noPreview"
-	  }
-	| {
-			kind: "offline"
-	  }
+export type RawPreviewQueryResult = RawPreviewResult | { kind: "offline" }
 
 // Order mirrors useFileUrl.query.ts: a cached preview is served offline too; a miss while offline
 // is `offline` — unless the RAW itself is stored offline, in which case the bytes ARE on disk and

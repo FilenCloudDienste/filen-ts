@@ -816,14 +816,15 @@ export function decideQueryErrorAction(
 	}
 
 	const unwrappedSdkError = deps.unwrapSdkError(err)
+	const sdkErrorKind = unwrappedSdkError?.kind()
 
 	// A cancelled SDK future is the caller's own doing — a ManagedFuture aborted because its query
 	// lost its subscriber (a RAW preview page swiped away mid-extraction). Never a banner.
-	if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.Cancelled) {
+	if (sdkErrorKind === ErrorKind.Cancelled) {
 		return "suppress"
 	}
 
-	if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.Unauthenticated) {
+	if (sdkErrorKind === ErrorKind.Unauthenticated) {
 		// Auth failures while offline are indistinguishable from network failures;
 		// don't kick the user out — the next online query will surface a real Unauthenticated.
 		if (!deps.isOnline()) {

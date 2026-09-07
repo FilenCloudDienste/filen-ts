@@ -228,6 +228,7 @@ class Thumbnails {
 
 		if (outputFile.size > 0) {
 			this.available.add(uuid)
+			this.unavailable.delete(uuid)
 
 			return normalizeFilePathForExpo(outputPath)
 		}

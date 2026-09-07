@@ -1,5 +1,5 @@
 // Shared, pure size-cap eviction planner for the on-disk byte caches (fileCache,
-// audioCache) and the expo-image disk-cap constant.
+// audioCache, rawPreviewCache) and the expo-image disk-cap constant.
 //
 // The cap is SOFT and AGGREGATE: evict the OLDEST entries (by cachedAt) first until
 // the combined size is within `maxBytes`, but NEVER the newest entry — that's the

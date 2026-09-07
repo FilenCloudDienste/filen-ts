@@ -659,6 +659,7 @@ describe("Thumbnails", () => {
 
 			await expect(thumbnails.generate({ item })).resolves.toBe(outputPath)
 			expect(thumbnails.hasThumbnail("disk-first-uuid")).toBe(true)
+			expect(thumbnails.isUnavailable("disk-first-uuid")).toBe(false)
 
 			// The veto is checked after the disk too.
 			const vetoed = makeFileItem("disk-first-uuid", "photo.jpg", false)

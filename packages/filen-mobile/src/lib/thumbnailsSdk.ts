@@ -57,7 +57,7 @@ export async function generateImageViaSdk(params: {
 	switch (result.tag) {
 		case MakeThumbnailInMemoryResult_Tags.Thumbnail: {
 			// Write beside the destination and rename into place so a crash never leaves a torn
-			// .webp for the rows to render (restore() ignores .tmp; generate() treats 0 bytes as absent).
+			// .webp for the rows to render (restore() sweeps .tmp; generate() treats 0 bytes as absent).
 			// expo-file-system rebinds a handle to its destination as the LAST step of moveSync (both
 			// platforms), so `tmpFile` is only ever touched in the catch below — i.e. before any rebind
 			// could have happened; once the rename has run, this handle IS the .webp and must not be deleted.
