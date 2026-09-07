@@ -42,7 +42,7 @@ vi.mock("@/lib/signals", () => ({
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-import { generateImageViaSdk, THUMBNAIL_MAX_WIDTH, THUMBNAIL_MAX_HEIGHT } from "@/lib/thumbnailsSdk"
+import { generateImageViaSdk } from "@/lib/thumbnailsSdk"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
 
 const OUTPUT_PATH = "file:///shared/group.io.filen.app/thumbnails/v3/uuid-1.webp"
@@ -71,10 +71,6 @@ describe("generateImageViaSdk", () => {
 		vi.clearAllMocks()
 		fs.set("file:///shared/group.io.filen.app/thumbnails/v3", "dir")
 		mockMakeThumbnailInMemory.mockResolvedValue(thumbnailVerdict())
-	})
-
-	it("pins the request box the tiles are cut for", () => {
-		expect(`${THUMBNAIL_MAX_WIDTH}x${THUMBNAIL_MAX_HEIGHT}`).toBe("256x512")
 	})
 
 	it("asks for a 256×512 contain thumbnail of the AnyFile with the JS AbortSignal as the uniffi cancellation handle", async () => {

@@ -81,12 +81,15 @@ export async function generateImageViaSdk(params: {
 				throw error
 			}
 
-			logger.debug("thumbnails", "sdk thumbnail written", {
-				uuid: params.uuid,
-				width: result.inner.thumbnail.width,
-				height: result.inner.thumbnail.height,
-				fromEmbeddedPreview: result.inner.thumbnail.fromEmbeddedPreview
-			})
+			// One breadcrumb per tile evicts the ring on a single grid scroll, so only the embedded-preview
+			// case is logged — that one says the SDK served a stored preview instead of a full decode.
+			if (result.inner.thumbnail.fromEmbeddedPreview) {
+				logger.debug("thumbnails", "sdk thumbnail from embedded preview", {
+					uuid: params.uuid,
+					width: result.inner.thumbnail.width,
+					height: result.inner.thumbnail.height
+				})
+			}
 
 			return "written"
 		}

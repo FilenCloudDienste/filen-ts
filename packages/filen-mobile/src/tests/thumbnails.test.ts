@@ -507,6 +507,19 @@ describe("Thumbnails", () => {
 			expect(result).toBe(`${THUMBNAILS_DIR}/filecache-hit-uuid.webp`)
 		})
 
+		it("passes a caller-supplied width and quality straight to the manipulator", async () => {
+			const { File } = await import("@/tests/mocks/expoFileSystem")
+			const offlineMod = await import("@/features/offline/offline")
+
+			fs.set("file:///offline/photo.jpg", new Uint8Array([1]))
+			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(new File("file:///offline/photo.jpg") as never)
+
+			await thumbnails.generate({ item: makeFileItem("custom-size-uuid", "photo.jpg"), width: 512, quality: 0.5 })
+
+			expect(mockResize).toHaveBeenCalledWith({ width: 512 })
+			expect(mockSaveAsync).toHaveBeenCalledWith(expect.objectContaining({ compress: 0.5 }))
+		})
+
 		it("takes the local path behind the semaphore", async () => {
 			const { File } = await import("@/tests/mocks/expoFileSystem")
 			const offlineMod = await import("@/features/offline/offline")
@@ -676,6 +689,27 @@ describe("Thumbnails", () => {
 			thumbnails.invalidateFile(item)
 
 			expect(thumbnails.isUnavailable("inv-settled")).toBe(true)
+		})
+
+		it("a later local-file generation clears the verdict (fresh bytes on disk outrank it)", async () => {
+			mockMakeThumbnailInMemory.mockResolvedValueOnce(UNSUPPORTED_VERDICT)
+
+			await expect(thumbnails.generate({ item: makeFileItem("settled-then-local", "photo.jpg") })).resolves.toBeNull()
+			expect(thumbnails.isUnavailable("settled-then-local")).toBe(true)
+
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set("file:///local/photo.jpg", new Uint8Array([1, 2, 3]))
+
+			await expect(
+				thumbnails.generateFromLocalFile({
+					localPath: "file:///local/photo.jpg",
+					uuid: "settled-then-local",
+					name: "photo.jpg"
+				})
+			).resolves.toBe(`${THUMBNAILS_DIR}/settled-then-local.webp`)
+
+			expect(thumbnails.isUnavailable("settled-then-local")).toBe(false)
+			expect(thumbnails.hasThumbnail("settled-then-local")).toBe(true)
 		})
 	})
 
@@ -1118,6 +1152,7 @@ describe("Thumbnails", () => {
 			expect(fs.get(THUMBNAILS_DIR)).toBe("dir")
 			expect(thumbnails.hasThumbnail("a")).toBe(false)
 		})
+
 		it("wipes the settled Set with the directory", async () => {
 			mockMakeThumbnailInMemory.mockResolvedValueOnce(CORRUPT_VERDICT)
 
@@ -1575,6 +1610,17 @@ describe("Thumbnails", () => {
 			expect(thumbnails.hasThumbnail("thumb_tmp_x")).toBe(false)
 			expect(thumbnails.hasThumbnail("partial")).toBe(false)
 			expect(thumbnails.isUnavailable("uuid-a")).toBe(false)
+		})
+
+		it("deletes an orphaned <uuid>.webp.tmp rather than only skipping it", () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set(`${THUMBNAILS_DIR}/x.webp.tmp`, new Uint8Array([1]))
+
+			thumbnails.restore()
+
+			expect(fs.has(`${THUMBNAILS_DIR}/x.webp.tmp`)).toBe(false)
+			expect(thumbnails.hasThumbnail("x")).toBe(false)
+			expect(thumbnails.hasThumbnail("x.webp")).toBe(false)
 		})
 
 		it("hasThumbnail is false before restore and true after", () => {

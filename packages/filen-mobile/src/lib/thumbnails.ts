@@ -136,8 +136,20 @@ class Thumbnails {
 
 				const basename = this.basenameOf(record.uri)
 
-				// The Set holds ONLY <uuid>.webp basenames — an in-flight `<uuid>.webp.tmp` and any other
-				// transient file in DIRECTORY must never enter it.
+				// A `<uuid>.webp.tmp` seen at boot is an orphan of a write a kill interrupted — nothing
+				// will ever rename it into place, so sweep it instead of leaving it to hold disk forever.
+				if (basename.endsWith(".webp.tmp")) {
+					try {
+						new FileSystem.File(record.uri).delete()
+					} catch {
+						// Best-effort sweep; a surviving .tmp is inert (it is never read, only overwritten).
+					}
+
+					continue
+				}
+
+				// The Set holds ONLY <uuid>.webp basenames — any other transient file in DIRECTORY must
+				// never enter it.
 				if (!basename.endsWith(".webp")) {
 					continue
 				}
@@ -371,6 +383,9 @@ class Thumbnails {
 
 		if (result.data !== null) {
 			this.available.add(params.uuid)
+
+			// Bytes on disk outrank any earlier session verdict for this uuid.
+			this.unavailable.delete(params.uuid)
 		}
 
 		return result.data
@@ -627,6 +642,9 @@ class Thumbnails {
 				}
 
 				this.available.add(params.uuid)
+
+				// Bytes on disk outrank any earlier session verdict for this uuid.
+				this.unavailable.delete(params.uuid)
 
 				return normalizeFilePathForExpo(outputPath)
 			} catch (error) {
