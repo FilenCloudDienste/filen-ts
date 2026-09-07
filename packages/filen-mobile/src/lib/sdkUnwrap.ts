@@ -715,7 +715,8 @@ export function linkedFileIntoDriveItem(file: LinkedFile): DriveItem {
 				hash: undefined
 			}),
 			parent: new ParentUuid.Uuid(file.uuid),
-			canMakeThumbnail: false,
+			// The SDK's own gate (decrypted name + mime, 0.4.42+) — thumbnails.canGenerate trusts it.
+			canMakeThumbnail: file.canMakeThumbnail,
 			favorited: false
 		} satisfies File)
 	)

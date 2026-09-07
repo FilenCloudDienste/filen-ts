@@ -137,7 +137,6 @@ import { type Chat } from "@/types"
 // Helper: build a minimal Response-like object
 // ---------------------------------------------------------------------------
 
-
 describe("fetchData (useChatMessageLinks)", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks()
@@ -266,7 +265,8 @@ describe("fetchData (useChatMessageLinks)", () => {
 			uuid: "file-uuid",
 			size: BigInt(1024),
 			name: { tag: "Decrypted", inner: ["photo.jpg"] },
-			fileKey: "file-key"
+			fileKey: "file-key",
+			canMakeThumbnail: true
 		})
 
 		const result = await fetchChatMessageLinks({
@@ -277,7 +277,7 @@ describe("fetchData (useChatMessageLinks)", () => {
 		expect(result[0]).toMatchObject({
 			type: "internal",
 			success: true,
-			data: { type: "file", linkUuid: "file-uuid", fileKey: "file-key" }
+			data: { type: "file", linkUuid: "file-uuid", fileKey: "file-key", file: { canMakeThumbnail: true } }
 		})
 	})
 })
@@ -605,7 +605,6 @@ describe("fetchData (useChats)", () => {
 		expect(result).toHaveLength(1)
 		expect(result[0]).toMatchObject({ undecryptable: true })
 	})
-
 })
 
 // ---------------------------------------------------------------------------

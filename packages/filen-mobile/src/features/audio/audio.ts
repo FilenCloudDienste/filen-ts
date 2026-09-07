@@ -1227,6 +1227,8 @@ export class Audio {
 				bucket: file.bucket,
 				timestamp: BigInt(now),
 				chunks: BigInt(file.chunks),
+				// PlaylistFileSchema (the on-drive playlist JSON) carries no SDK flag, and the SDK never
+				// thumbnails audio, so the veto is the correct value — not a placeholder.
 				canMakeThumbnail: false,
 				decryptedMeta: meta,
 				undecryptable: false

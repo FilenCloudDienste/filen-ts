@@ -253,7 +253,8 @@ const drive = {
 								hash: undefined
 							}),
 							parent: new ParentUuid.Uuid(result.data.uuid),
-							canMakeThumbnail: false,
+							// The SDK's own gate (0.4.42+) — see linkedFileIntoDriveItem.
+							canMakeThumbnail: result.data.canMakeThumbnail,
 							favorited: false
 						} satisfies File)
 					)
