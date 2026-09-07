@@ -176,6 +176,16 @@ describe("resolveLinkMedia", () => {
 			expect(media.linked).toBe((link as { data: unknown }).data)
 		})
 
+		it("does NOT inline a RAW camera file (rawImage) — the raw bytes are not expo-image displayable, same rule as svg", () => {
+			getFileUrl.mockClear()
+
+			const media = resolveLinkMedia(internalFileLink("rawImage", "shot.cr2"), getFileUrl)
+
+			expect(media.type).not.toBe("image")
+			expect(media.type).not.toBe("video")
+			expect(getFileUrl).not.toHaveBeenCalled()
+		})
+
 		it("classifies a non-previewable internal file (unknown) as internal", () => {
 			const link = internalFileLink("unknown", "archive.zip")
 			const media = resolveLinkMedia(link, getFileUrl)

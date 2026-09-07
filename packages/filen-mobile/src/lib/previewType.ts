@@ -4,7 +4,7 @@ import * as FileSystem from "expo-file-system"
 import pathModule from "path"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 
-export type PreviewType = "image" | "svg" | "video" | "unknown" | "pdf" | "text" | "code" | "audio" | "docx"
+export type PreviewType = "image" | "svg" | "rawImage" | "video" | "unknown" | "pdf" | "text" | "code" | "audio" | "docx"
 
 /**
  * `FileSystem.Paths.extname` without the thrown exception.
@@ -26,6 +26,16 @@ function extnameOf(name: string): string {
 	return name.includes(":") ? FileSystem.Paths.extname(name) : pathModule.posix.extname(name)
 }
 
+// RAW camera containers whose embedded JPEG @filen/sdk-rs 0.4.42 can locate (writeEmbeddedPreviewToPath):
+// the TIFF-layout families CR2, NEF, ARW, DNG, SRW, PEF, RW2, ORF (microthumb/src/formats/tiff.rs),
+// Fuji RAF (formats/raf.rs) and Canon CR3 (formats/cr3.rs) — unchanged since the filen-js@0.4.41 tag the
+// filen-rs submodule sits on. Platform-independent — the preview is a JPEG; the platform never decodes
+// the RAW. Classified "rawImage" below: previewable (extracted JPEG) and thumbnailable (SDK), never an
+// expo-image or manipulator input, so it stays disjoint from both expo-image sets in constants.ts. Lives
+// beside the classifier rather than in constants.ts so the many suites that mock @/constants with
+// hand-picked exports need nothing new.
+export const SDK_RAW_PREVIEW_EXTENSIONS = new Set<string>([".cr2", ".cr3", ".nef", ".arw", ".dng", ".srw", ".pef", ".rw2", ".orf", ".raf"])
+
 export function getPreviewType(name: string): PreviewType {
 	const extname = extnameOf(name.trim().toLowerCase())
 
@@ -42,6 +52,13 @@ export function getPreviewType(name: string): PreviewType {
 
 	if (EXPO_IMAGE_SUPPORTED_EXTENSIONS.has(extname)) {
 		return "image"
+	}
+
+	// RAW camera files: image-equivalent for classification, but the bytes are never handed to
+	// expo-image — the gallery renders the JPEG the SDK extracts from the container
+	// (useRawPreviewQuery) and the list thumbnail comes from the SDK decode.
+	if (SDK_RAW_PREVIEW_EXTENSIONS.has(extname)) {
+		return "rawImage"
 	}
 
 	if (EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(extname)) {

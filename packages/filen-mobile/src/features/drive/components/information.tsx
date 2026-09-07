@@ -92,7 +92,8 @@ function useDriveItemInfoRows(
 									}
 
 									case "image":
-									case "svg": {
+									case "svg":
+									case "rawImage": {
 										return t("preview_type_image")
 									}
 
@@ -106,6 +107,10 @@ function useDriveItemInfoRows(
 
 									case "unknown": {
 										return t("preview_type_unknown")
+									}
+
+									default: {
+										return previewType satisfies never
 									}
 								}
 							})()

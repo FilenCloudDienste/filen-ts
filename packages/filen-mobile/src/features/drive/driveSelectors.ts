@@ -4,8 +4,9 @@ import type { PreviewType } from "@/lib/previewType"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { serialize } from "@/lib/serializer"
 
-// Local extension check — kept inline (rather than calling getPreviewType
-// from src/lib/utils) so this module doesn't pull in the SDK at test time.
+// Local extension check — kept inline (rather than calling getPreviewType from
+// src/lib/previewType) so this module doesn't pull in the SDK at test time. IMAGE ∪ VIDEO only:
+// RAW camera files ("rawImage") stay out of bulk save-to-photos — see menuActionsDownload.ts.
 function isImageOrVideoExtension(name: string): boolean {
 	const trimmed = name.trim().toLowerCase()
 	const dot = trimmed.lastIndexOf(".")

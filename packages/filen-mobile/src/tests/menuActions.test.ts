@@ -733,6 +733,17 @@ describe("buildDownloadSubButtons (#35)", () => {
 			expect(ids).toContain("saveToPhotos")
 		})
 
+		it("omits saveToPhotos for a RAW camera file (previewType=rawImage) — product decision", () => {
+			const buttons = buildDownloadSubButtons({
+				...baseDownloadArgs,
+				item: makeFile({ name: "shot.cr2" }),
+				previewType: "rawImage"
+			})
+			const ids = buttons.map(b => b.id)
+
+			expect(ids).not.toContain("saveToPhotos")
+		})
+
 		it("omits saveToPhotos when previewType='text'", () => {
 			const buttons = buildDownloadSubButtons({
 				...baseDownloadArgs,

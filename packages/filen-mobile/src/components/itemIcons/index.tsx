@@ -40,7 +40,8 @@ export const FileIcon = ({ name, width, height, className }: { name: string; wid
 			}
 
 			case "image":
-			case "svg": {
+			case "svg":
+			case "rawImage": {
 				return FILE_ICONS.image
 			}
 

@@ -14,7 +14,7 @@ vi.mock("@/constants", () => {
 	}
 })
 
-import { getPreviewType, isImagePreviewType, isProbablyBinaryText } from "@/lib/previewType"
+import { getPreviewType, isImagePreviewType, isProbablyBinaryText, SDK_RAW_PREVIEW_EXTENSIONS } from "@/lib/previewType"
 import { Paths } from "@/tests/mocks/expoFileSystem"
 
 // ---------------------------------------------------------------------------
@@ -57,6 +57,39 @@ describe("getPreviewType", () => {
 
 		it("normalises uppercase .SVG", () => {
 			expect(getPreviewType("LOGO.SVG")).toBe("svg")
+		})
+	})
+
+	describe("rawImage", () => {
+		// RAW camera containers are previewed through the JPEG the SDK extracts (useRawPreviewQuery),
+		// never decoded by expo-image, so they are their own type. The set has no Platform.select: it
+		// is the same list on iOS and Android by construction.
+		it("exports exactly the ten SDK preview families", () => {
+			expect([...SDK_RAW_PREVIEW_EXTENSIONS].sort()).toEqual([
+				".arw",
+				".cr2",
+				".cr3",
+				".dng",
+				".nef",
+				".orf",
+				".pef",
+				".raf",
+				".rw2",
+				".srw"
+			])
+		})
+
+		it.each([".cr2", ".cr3", ".nef", ".arw", ".dng", ".srw", ".pef", ".rw2", ".orf", ".raf"])("returns 'rawImage' for %s", ext => {
+			expect(getPreviewType(`shot${ext}`)).toBe("rawImage")
+		})
+
+		it("normalises uppercase and whitespace-padded RAW names", () => {
+			expect(getPreviewType("IMG_0001.CR2")).toBe("rawImage")
+			expect(getPreviewType("  DSC_0001.NEF  ")).toBe("rawImage")
+		})
+
+		it("never wins over the expo-image set (image is checked first)", () => {
+			expect(getPreviewType("photo.jpg")).toBe("image")
 		})
 	})
 

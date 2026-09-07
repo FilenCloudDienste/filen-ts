@@ -121,6 +121,9 @@ export function buildDownloadSubButtons({
 		})
 	}
 
+	// Literal types on purpose: "rawImage" is excluded from save-to-photos (product decision — the OS
+	// photo libraries accept DNG but not every RAW family, and the app cannot verify per format).
+	// The bulk action (driveSelectors.isImageOrVideoExtension) matches.
 	if (isFileItem(item) && (previewType === "image" || previewType === "svg" || previewType === "video") && item.data.decryptedMeta) {
 		downloadSubButtons.push({
 			id: "saveToPhotos",

@@ -247,6 +247,12 @@ describe("aggregateDriveSelectionFlags", () => {
 		expect(aggregateDriveSelectionFlags([]).everyImageOrVideoFile).toBe(false)
 	})
 
+	it("everyImageOrVideoFile false for a RAW camera file — bulk save-to-photos stays on the expo-image ∪ video sets", () => {
+		expect(aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), file("b", false, "shot.cr2")]).everyImageOrVideoFile).toBe(
+			false
+		)
+	})
+
 	// -------------------------------------------------------------------------
 	// includesUndecryptable
 	// -------------------------------------------------------------------------
