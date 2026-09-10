@@ -6,6 +6,11 @@ describe("fileIconKey", () => {
 		expect(fileIconKey("photo.PNG")).toBe("image")
 		expect(fileIconKey("vector.svg")).toBe("image")
 		expect(fileIconKey("raw.heic")).toBe("image")
+		// Camera RAW shares the plain image glyph on purpose: FileIconKey is an exhaustive Record keyed
+		// to concrete SVG assets, so a distinct "raw" key would mean shipping a new one.
+		expect(fileIconKey("shot.NEF")).toBe("image")
+		expect(fileIconKey("shot.cr3")).toBe("image")
+		expect(fileIconKey("shot.dng")).toBe("image")
 		expect(fileIconKey("clip.mp4")).toBe("video")
 		expect(fileIconKey("song.mp3")).toBe("audio")
 	})

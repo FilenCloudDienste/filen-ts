@@ -19,7 +19,7 @@ describe("previewKindLabelKey", () => {
 	})
 
 	it("covers every PreviewCategory (no unmapped arm slips through)", () => {
-		const categories: PreviewCategory[] = ["image", "video", "audio", "pdf", "docx", "text", "code", "markdown", "other"]
+		const categories: PreviewCategory[] = ["image", "rawImage", "video", "audio", "pdf", "docx", "text", "code", "markdown", "other"]
 
 		for (const category of categories) {
 			const key = previewKindLabelKey(category)

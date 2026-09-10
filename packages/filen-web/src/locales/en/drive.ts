@@ -478,6 +478,8 @@ export const drive = {
 	driveItemTypeDirectory: "Directory",
 	/** Info panel — Kind row value: an image file */
 	drivePreviewKindImage: "Image",
+	/** Info panel — Kind row value: an undeveloped camera RAW file (NEF, CR3, ARW, DNG, …) */
+	drivePreviewKindRawImage: "RAW image",
 	/** Info panel — Kind row value: a video file */
 	drivePreviewKindVideo: "Video",
 	/** Info panel — Kind row value: an audio file */

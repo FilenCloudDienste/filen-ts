@@ -4,7 +4,7 @@ import { clampListboxIndex } from "@/features/drive/lib/listbox"
 
 // Every previewable file resolves to one of these; "other" is the download-only fallback (no viewer,
 // ever — canPreview excludes it unconditionally).
-export type PreviewCategory = "image" | "video" | "audio" | "pdf" | "docx" | "text" | "code" | "markdown" | "other"
+export type PreviewCategory = "image" | "rawImage" | "video" | "audio" | "pdf" | "docx" | "text" | "code" | "markdown" | "other"
 
 // Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): pdf/docx/text/code/
 // markdown download fully into RAM before rendering, so an oversize file is excluded from canPreview
@@ -13,6 +13,10 @@ export type PreviewCategory = "image" | "video" | "audio" | "pdf" | "docx" | "te
 // (dev / SW absent / stream registration failure) that this cap does not gate either, since the SW's
 // own availability isn't known at gating time; an oversize image on that fallback path is an accepted,
 // deliberate tradeoff of joining the streamed set, not a regression this cap is meant to catch.
+// rawImage is exempt for a different reason again: nothing on the JS side ever holds a RAW file's
+// bytes — the SDK reads the ranges it needs itself (an embedded-preview probe first, at worst a
+// whole-file stream inside wasm), so a 90 MB NEF costs this heap nothing and has no reason to be
+// gated by a JS-memory ceiling.
 export const PREVIEW_MAX_BYTES = 268_435_456n // 256 MiB
 
 // Exported so icon.logic's file-type routing classifies image/video/audio identically to preview — a
@@ -23,6 +27,35 @@ export const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "s
 // buffered download + a client-side transform (features/preview/lib/heicTransform.ts) instead of the SW's
 // streamed route every other image extension uses.
 export const HEIC_EXTENSIONS = new Set(["heic", "heif"])
+// The camera-RAW families the Rust SDK's own decoder recognizes, listed here so this app's category
+// map, icon routing and photos predicate agree with what `canMakeThumbnail` will actually say for
+// them. Their own category ("rawImage") rather than "image": no browser decodes a RAW container, so
+// every browser-owned image path (the SW's inline Range route, <img>, createImageBitmap) is wrong for
+// them — only the SDK can turn one into pixels. Exported for icon.logic's file-type routing, the same
+// way IMAGE_EXTENSIONS is.
+export const RAW_IMAGE_EXTENSIONS = new Set([
+	"3fr",
+	"arw",
+	"cr2",
+	"cr3",
+	"dng",
+	"erf",
+	"iiq",
+	"kdc",
+	"mos",
+	"mrw",
+	"nef",
+	"nrw",
+	"orf",
+	"pef",
+	"raf",
+	"raw",
+	"rw2",
+	"rwl",
+	"srf",
+	"srw",
+	"x3f"
+])
 export const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mkv", "mov", "m4v"])
 export const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "wav", "ogg", "flac", "opus"])
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown"])
@@ -98,6 +131,13 @@ export function extensionOf(name: string): string {
 function categoryForExtension(ext: string): PreviewCategory | null {
 	if (IMAGE_EXTENSIONS.has(ext) || HEIC_EXTENSIONS.has(ext)) {
 		return "image"
+	}
+
+	// AFTER the image/heic branch on purpose: the two sets are disjoint today, but if a RAW family ever
+	// gained a browser-decodable sibling extension the browser-decodable answer must win — "image" has
+	// real viewers behind it, "rawImage" currently has none.
+	if (RAW_IMAGE_EXTENSIONS.has(ext)) {
+		return "rawImage"
 	}
 
 	if (VIDEO_EXTENSIONS.has(ext)) {
@@ -202,6 +242,8 @@ export function previewCategoryForName(name: string): PreviewCategory {
 // failure) — see PREVIEW_MAX_BYTES's own comment on the tradeoff that fallback accepts. HEIC/HEIF are
 // the one "image" exception: needsImageTransform below excludes them from ever attempting the
 // streamed route at all — canPreview applies the whole-buffer cap to them instead, same as pdf/docx.
+// rawImage is deliberately NOT a member: no browser decodes a RAW container, so handing one to the
+// SW's inline route would serve bytes nothing can render (mediaType.ts refuses it independently).
 const STREAMED_CATEGORIES = new Set<PreviewCategory>(["video", "audio", "image"])
 
 // True for HEIC/HEIF — an "image"-category item that still can't stream, since no browser decodes it
@@ -243,6 +285,13 @@ export function canPreview(item: DriveItem, variant: DriveVariant): boolean {
 	}
 
 	if (STREAMED_CATEGORIES.has(category) && !needsImageTransform(item)) {
+		return true
+	}
+
+	// rawImage is uncapped for the opposite reason to a streamed category: it is not streamed to the
+	// page at all. The SDK reads whatever ranges it needs inside wasm and hands back only a small
+	// decoded result, so the file never enters JS memory and PREVIEW_MAX_BYTES has nothing to protect.
+	if (category === "rawImage") {
 		return true
 	}
 

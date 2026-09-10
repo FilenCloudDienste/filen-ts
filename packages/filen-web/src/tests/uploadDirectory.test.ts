@@ -67,6 +67,7 @@ function mockDir(overrides: Partial<Dir> = {}): Dir {
 function mockSdkFile(overrides: Partial<SdkFile> = {}): SdkFile {
 	return {
 		uuid: testUuid("uploaded"),
+		stableUUID: undefined,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,

@@ -17,6 +17,7 @@ function testUuid(label: string): UuidStr {
 function mockFile(uuid: UuidStr): File {
 	return {
 		uuid,
+		stableUUID: undefined,
 		parent: testUuid("root"),
 		size: 1_024n,
 		favorited: false,

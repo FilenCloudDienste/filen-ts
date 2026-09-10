@@ -70,6 +70,7 @@ function fileItem(
 		type: "file",
 		data: {
 			uuid,
+			stableUUID: undefined,
 			parent: PARENT_UUID,
 			size,
 			favorited: false,

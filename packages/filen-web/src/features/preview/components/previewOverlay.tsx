@@ -5,6 +5,7 @@ import {
 	lazy,
 	Suspense,
 	Component,
+	type FocusEvent as ReactFocusEvent,
 	type KeyboardEvent,
 	type MouseEvent as ReactMouseEvent,
 	type ReactNode,
@@ -702,6 +703,31 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 		}
 	}
 
+	// Base UI's focus trap does not cover focus lost because the focused control DISABLED ITSELF: paging
+	// to either end disables the very pager button that was just clicked, and the browser then drops
+	// focus on the floor (document.body) rather than moving it anywhere. Because Base UI stops composite
+	// keys from reaching the document (see handleKeyDown below), the popup's own handler is the ONLY
+	// route to the pager — so once focus lands outside, arrow paging is silently dead until the user
+	// clicks back in. Pull it back to the popup, which is focusable (tabIndex -1).
+	//
+	// Deliberately narrow: only when focus actually fell to <body>. A Base UI menu/dialog opened from the
+	// preview header portals OUTSIDE this popup's subtree and legitimately takes focus with it — that
+	// lands on a real element, never body, so this never fights it.
+	function handlePopupBlur(event: ReactFocusEvent<HTMLDivElement>): void {
+		if (event.relatedTarget !== null) {
+			return
+		}
+
+		// focusout runs BEFORE the browser settles the new focus target; read it a microtask later.
+		queueMicrotask(() => {
+			const popup = popupRef.current
+
+			if (popup !== null && popup.isConnected && document.activeElement === document.body) {
+				popup.focus()
+			}
+		})
+	}
+
 	// Base UI's DialogPopup calls event.stopPropagation() for every composite key (Arrow*/Home/End) in
 	// its own onKeyDown (dialog/popup/DialogPopup.js + internals/composite/composite.js's
 	// COMPOSITE_KEYS, verified against the installed package) before it can bubble to the document-level
@@ -783,6 +809,7 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 				<DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-background duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
 				<DialogPrimitive.Popup
 					ref={popupRef}
+					onBlur={handlePopupBlur}
 					onKeyDown={handleKeyDown}
 					className="fixed inset-0 z-50 flex flex-col bg-background duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
 				>
@@ -1020,7 +1047,10 @@ function ExternalPreviewBody({ url, name }: { url: string; name: string }) {
 // `editable`/`onDirtyChange`/`contentRef` only ever reach a CodeMirror surface: the "text"/"code"
 // case's TextViewer, and the "markdown" case's own source-mode TextViewer — every other category
 // ignores them.
-function PreviewBody({ source, editable, onDirtyChange, contentRef }: PreviewBodyProps) {
+//
+// A missing category arm cannot ship as a silently blank overlay: the `default` arm at the bottom of
+// the switch is the guard (a return-type annotation is not — `ReactNode` includes `undefined`).
+function PreviewBody({ source, editable, onDirtyChange, contentRef }: PreviewBodyProps): ReactNode {
 	const { t } = useTranslation("preview")
 
 	if (source.type === "external") {
@@ -1134,13 +1164,25 @@ function PreviewBody({ source, editable, onDirtyChange, contentRef }: PreviewBod
 					/>
 				</Suspense>
 			)
-		// No viewer exists for "other" — canPreview already excludes it from ever reaching the overlay
-		// at all (it's unreachable here in practice), kept as the exhaustive switch's required fallback.
+		// "rawImage" is genuinely reachable (canPreview admits it — see preview.logic.ts) and shows the
+		// same labeled unsupported state until a real RAW viewer exists; the thumbnail grid already
+		// renders these via the SDK, so the overlay is the only surface still missing pixels. "other"
+		// is the opposite case: canPreview excludes it from ever reaching the overlay, and it stays
+		// only as the exhaustive switch's required fallback.
+		case "rawImage":
 		case "other":
 			return (
 				<div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
 					{t("previewUnsupportedType")}
 				</div>
 			)
+		// Unreachable by construction, and that is the point: `category` narrows to `never` here only
+		// while every PreviewCategory has an arm above, so adding one without a viewer is a compile error
+		// on this assignment instead of an overlay that renders nothing.
+		default: {
+			const unhandled: never = category
+
+			return unhandled
+		}
 	}
 }

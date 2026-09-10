@@ -16,6 +16,7 @@ function testUuid(label: string): UuidStr {
 function photoItem(uuid: string): PhotoItem {
 	const item = narrowItem({
 		uuid: testUuid(uuid),
+		stableUUID: undefined,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,

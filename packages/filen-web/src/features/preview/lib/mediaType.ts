@@ -15,6 +15,10 @@ import { isAllowedInlineContentType } from "@/lib/sw/protocol"
 export function allowedMediaContentType(item: DriveItem): string | null {
 	const category = previewType(item)
 
+	// "rawImage" is excluded by this same allowlist-of-three: a RAW container has no browser decoder,
+	// so serving one inline would hand the page bytes nothing can render, and a camera's RAW mime
+	// (image/x-nikon-nef and friends) must never be treated as a streamable image just because it
+	// starts with "image/".
 	if (category !== "video" && category !== "audio" && category !== "image") {
 		return null
 	}

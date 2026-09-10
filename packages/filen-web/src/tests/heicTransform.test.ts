@@ -79,15 +79,15 @@ describe("transformHeicBytes", () => {
 		expect(wrap).toHaveBeenCalledTimes(1)
 	})
 
-	it("forwards opts through untouched, and omits them when the caller passes none", async () => {
+	// The worker call takes bytes and nothing else: the encode-variant option existed only for the old
+	// HEIC thumbnail generator, and thumbnails are the SDK's job now.
+	it("passes nothing beyond the bytes", async () => {
 		const { transformHeicBytes } = await freshModule()
 		transformMock.mockResolvedValue(new Blob())
 
 		await transformHeicBytes(new Uint8Array([1]))
-		await transformHeicBytes(new Uint8Array([1]), { maxDimension: 512 })
 
 		expect(transformMock.mock.calls[0]?.[1]).toBeUndefined()
-		expect(transformMock.mock.calls[1]?.[1]).toEqual({ maxDimension: 512 })
 	})
 
 	it("marks the input as transferred (its own buffer, not a clone) and forwards the same reference", async () => {

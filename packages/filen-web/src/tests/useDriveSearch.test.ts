@@ -23,6 +23,7 @@ function mockDir(overrides: Partial<Dir> = {}): Dir {
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: testUuid("file"),
+		stableUUID: undefined,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,

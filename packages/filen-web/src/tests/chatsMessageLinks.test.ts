@@ -32,6 +32,7 @@ function mockLinkedFile(overrides: Partial<LinkedFile> = {}): LinkedFile {
 		timestamp: 0n,
 		fileKey: KEY_PLAINTEXT,
 		linkedTag: true,
+		canMakeThumbnail: false,
 		...overrides
 	}
 }
@@ -56,7 +57,7 @@ function mockDirPublicInfo(name: string | null, overrides: { timestamp?: bigint;
 			linkUuid: UUID,
 			linkKey: KEY_PLAINTEXT,
 			linkKeyVersion: 1,
-			password: undefined,
+			password: { type: "none" },
 			enableDownload: true,
 			salt: ""
 		},

@@ -1,5 +1,4 @@
 import { log } from "@/lib/log"
-import { fitWithin, encodeCanvasThumb } from "@/features/drive/lib/thumbGenerators.logic"
 
 // Pure decode (HEIC/HEIF bytes -> RGBA) + encode (RGBA -> JPEG Blob) logic, dependency-injected so
 // runHeicTransform below runs in node against a fake decoder (see heicCodec.test.ts) with no WASM and
@@ -47,12 +46,6 @@ export interface HeicDecoderModule {
 	ready?: Promise<void>
 }
 
-// Threaded through runHeicTransform below to switch it from the preview path (full-resolution,
-// always-JPEG, byte-for-byte unchanged when omitted) to the thumbnail path (downscaled, webp-first).
-export interface HeicTransformOpts {
-	maxDimension?: number
-}
-
 export interface HeicTransformDeps {
 	// Production resolves the real WASM module (initLibheifDecoder below); tests supply a fake so
 	// getSharedDecoder/runHeicTransform's memoization + error-mapping run with no WASM involved — actual
@@ -60,8 +53,6 @@ export interface HeicTransformDeps {
 	getDecoder: () => Promise<HeicDecoderModule>
 	// Production encodes via OffscreenCanvas (encodeJpegReal below); tests supply a fake.
 	encodeJpeg: (pixels: DecodedHeicImage, quality: number) => Promise<Blob>
-	// Only reached when opts.maxDimension is set (encodeThumbReal below); tests supply a fake.
-	encodeThumb: (pixels: DecodedHeicImage, maxDimension: number) => Promise<Blob>
 }
 
 let sharedDecoderPromise: Promise<HeicDecoderModule> | null = null
@@ -170,54 +161,27 @@ async function encodeJpegReal(pixels: DecodedHeicImage, quality: number): Promis
 	return await canvas.convertToBlob({ type: "image/jpeg", quality })
 }
 
-// Thumbnail encode path: downscales to maxDimension first (a no-op draw when the source is already
-// at or under it — decodeHeic's own RGBA is used as-is, matching encodeJpegReal's full-resolution
-// draw) then hands off to the same webp-first/jpeg-fallback policy every other thumbnail generator
-// shares (thumbGenerators.logic.ts) — unlike encodeJpegReal, this never re-encodes at the source's
-// full resolution, since a thumbnail's whole point is the smaller target size.
-async function encodeThumbReal(pixels: DecodedHeicImage, maxDimension: number): Promise<Blob> {
-	const { width, height } = fitWithin(pixels.width, pixels.height, maxDimension)
-	const canvas = new OffscreenCanvas(width, height)
-	const ctx = canvas.getContext("2d")
-
-	if (ctx === null) {
-		throw new Error("could not create an OffscreenCanvas 2D context")
-	}
-
-	if (width === pixels.width && height === pixels.height) {
-		ctx.putImageData(new ImageData(pixels.data, pixels.width, pixels.height), 0, 0)
-	} else {
-		const bitmap = await createImageBitmap(new ImageData(pixels.data, pixels.width, pixels.height))
-
-		ctx.drawImage(bitmap, 0, 0, width, height)
-		bitmap.close()
-	}
-
-	return await encodeCanvasThumb(canvas)
-}
-
-// heic.worker.ts's only wiring: the real decoder + real encoders, handed to runHeicTransform below.
+// heic.worker.ts's only wiring: the real decoder + real encoder, handed to runHeicTransform below.
 export const productionDeps: HeicTransformDeps = {
 	getDecoder: initLibheifDecoder,
-	encodeJpeg: encodeJpegReal,
-	encodeThumb: encodeThumbReal
+	encodeJpeg: encodeJpegReal
 }
 
 // DI'd core: heic.worker.ts wires productionDeps for the real path; tests inject fakes so the
 // memoization + error-mapping below run with no WASM/OffscreenCanvas involved. This is also the
 // boundary every failure mode gets normalized at, before a thrown value has any chance to cross the
 // worker's postMessage hop back to its caller (see heic.worker.test.ts for why that ordering matters).
-// `opts` is omitted by every preview caller (imageViewer.tsx via heicTransform.ts) — the
-// full-resolution, always-JPEG behavior above is byte-for-byte unchanged from before opts existed.
-// Only the thumbnail generator (thumbGenerators.ts) passes maxDimension, switching the encode step
-// to the downscaled, webp-first path instead.
-export async function runHeicTransform(bytes: Uint8Array, deps: HeicTransformDeps, opts?: HeicTransformOpts): Promise<Blob> {
+// Always full-resolution JPEG, and NOT preview-only: heicTransform.ts feeds this same worker path both
+// imageViewer.tsx and convert-on-upload (heicUpload.ts's defaultHeicUploadConvertDeps), so JPEG_QUALITY
+// and the always-JPEG rule decide the bytes an upload STORES on the user's drive, not just what a
+// preview shows. The downscaled webp-first encode this once offered behind a maxDimension option is
+// gone — HEIC thumbnails are the SDK's job now (it decodes HEIC itself).
+export async function runHeicTransform(bytes: Uint8Array, deps: HeicTransformDeps): Promise<Blob> {
 	try {
 		const lib = await getSharedDecoder(deps.getDecoder)
 		const decoded = await decodeHeic(bytes, lib)
-		const maxDimension = opts?.maxDimension
 
-		return maxDimension === undefined ? await deps.encodeJpeg(decoded, JPEG_QUALITY) : await deps.encodeThumb(decoded, maxDimension)
+		return await deps.encodeJpeg(decoded, JPEG_QUALITY)
 	} catch (e) {
 		// Never a throw-through: a WASM abort/trap can reject with a bare string or some other non-Error
 		// shape. Logged here — the only place the raw detail is available — before normalizing to a real

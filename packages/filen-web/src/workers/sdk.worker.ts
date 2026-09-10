@@ -42,6 +42,7 @@ import init, {
 	type NoteType,
 	type DuplicateNoteResponse,
 	type AddTagToNoteResponse,
+	type MakeThumbnailInMemoryResult,
 	type SocketEvent,
 	type ListenerHandle,
 	type Chat,
@@ -167,16 +168,17 @@ async function withPauseSignal<T>(
 // rather than borrowing that one.
 const previewAborts = new Map<string, AbortController>()
 
-// Fires sweepThumbs and removeStaleThumbGenerations at most once per worker lifetime (this worker's
-// own first storeThumbnail call, see armThumbSweep below), never re-armed — a long-lived tab's OPFS
-// thumbnail cache still gets cap-enforced and stale generations still get reclaimed without every
-// generation paying for a listing pass.
+// Latched by armThumbSweep below, never reset.
 let thumbsSweptThisSession = false
 
-// Arms the once-per-session eviction sweep — called from storeThumbnail, the single persist path every
-// client-side generator (image/heic/video/pdf) routes its bytes through. Fire-and-forget, both passes:
-// eviction and stale-generation cleanup are housekeeping, never something a thumbnail request should
-// wait on.
+// Fires sweepThumbs and removeStaleThumbGenerations at most once per worker lifetime — a long-lived
+// tab's OPFS thumbnail cache still gets cap-enforced and stale generations still get reclaimed without
+// every generation paying for a listing pass. Called from storeThumbnail (every persist) AND from both
+// SDK thumbnail ops, because those two can settle WITHOUT producing bytes: an "unsupported" /
+// "overBudget" / "corrupt" verdict persists nothing, so a session whose only thumbnail work is
+// settled-verdict misses would never reach storeThumbnail and would leave the cap unenforced and the
+// stale generations unreclaimed for the tab's whole lifetime. Fire-and-forget, both passes: eviction
+// and stale-generation cleanup are housekeeping, never something a thumbnail request should wait on.
 function armThumbSweep(): void {
 	if (thumbsSweptThisSession) {
 		return
@@ -363,6 +365,33 @@ function sharedPathDeps(c: Client, variant: "sharedIn" | "sharedOut"): SharedPat
 // only occupies the type namespace, so the VALUE binding `File` (never imported) still resolves to
 // the global constructor, and this alias recovers its instance type for the one op that needs it.
 type BrowserFile = InstanceType<typeof File>
+
+// The plain-object mirror of the SDK's MakeThumbnailInMemoryResult, minus the wasm-side
+// InMemoryThumbnail wrapper: `webpData` is lifted to a top-level `bytes` so a caller's transfer list
+// is derivable without reaching through a nested object. The three byte-less arms stay DISTINCT
+// rather than collapsing to null — each is a SETTLED verdict about the file itself (no decoder for
+// this format / past the decode memory budget / these bytes are damaged) that no amount of retrying
+// changes, unlike a network or worker failure, which is worth retrying. features/drive/lib/thumbnails.ts
+// keys its session-only `unavailable` set off exactly that distinction.
+export type SdkThumbnailResult =
+	| { type: "thumbnail"; bytes: Uint8Array; width: number; height: number; fromEmbeddedPreview: boolean }
+	| { type: "unsupported" }
+	| { type: "overBudget" }
+	| { type: "corrupt"; message: string }
+
+// Lifts one SDK result into the DTO above. The single arm carrying bytes transfers its buffer out
+// rather than cloning it (same rule as downloadFileBytes): Comlink.transfer marks the OUTER object
+// with the nested buffer in the transfer list. The byte-less arms are already structurally identical
+// to their DTO counterparts, so they pass straight through as ordinary structured clones.
+function asThumbnailResult(result: MakeThumbnailInMemoryResult): SdkThumbnailResult {
+	if (result.type !== "thumbnail") {
+		return result
+	}
+
+	const { webpData, width, height, fromEmbeddedPreview } = result.thumbnail
+
+	return Comlink.transfer({ type: "thumbnail", bytes: webpData, width, height, fromEmbeddedPreview }, [webpData.buffer])
+}
 
 const api = {
 	async boot({ threads }: { threads: number }): Promise<BootResult> {
@@ -643,12 +672,13 @@ const api = {
 	// The one seam a browser File and its stream cross into this worker. Parent resolves worker-side
 	// (mirror createDirectory); file.stream() is called HERE, not on the main thread — a real Blob
 	// stream (Blob.prototype.stream() is available in worker scope), never a hand-rolled one. progress
-	// is passed unconditionally: the wasm layer rejects with "missing field 'progress'" if it's
-	// omitted, despite `progress?:` in the .d.ts, and — same as downloadFileToWriter — must stay a
-	// plain worker-side fn wrapping the caller's Comlink proxy, never the proxy object itself (still
-	// serde-rejected). managedFuture.abortSignal now deserializes here too: 0.4.33 stopped burying
-	// managed_future under serde(flatten), so a per-transfer AbortController gives cancelUpload a real
-	// cancel, same as downloadFileToWriter's own.
+	// is passed because every upload here reports bytes, not because the boundary demands it — the Rust
+	// field is `#[serde(default, with = "serde_wasm_bindgen::preserve")]` and the SDK branches on
+	// `progress.is_undefined()`, so the key itself is droppable. Its SHAPE is not: same as
+	// downloadFileToWriter, it must stay a plain worker-side fn wrapping the caller's Comlink proxy,
+	// never the proxy object itself (serde-rejected). managedFuture.abortSignal now deserializes here
+	// too: 0.4.33 stopped burying managed_future under serde(flatten), so a per-transfer AbortController
+	// gives cancelUpload a real cancel, same as downloadFileToWriter's own.
 	async uploadFile(parentUuid: string | null, transferId: string, file: BrowserFile, onProgress: (bytes: bigint) => void): Promise<File> {
 		const c = requireClient()
 		const controller = new AbortController()
@@ -1375,13 +1405,50 @@ const api = {
 		return requireClient().removeSharedItem(item)
 	},
 	// ── Thumbnails ───────────────────────────────────────────────────────────
-	// Persists thumbnail bytes a CLIENT-side generator produced outside this worker — every thumbnail
-	// category (image/heic/video/pdf) now decodes on the main thread or in its own decode worker and
-	// routes its result through here; no thumbnail is ever decoded by the SDK. Callers Comlink.transfer
-	// the buffer in, never clone; rejection is the caller's own to handle (mirrors writeThumb's own
-	// propagation past the second-open collision it already swallows). Also arms the once-per-session
-	// cache sweep (see armThumbSweep) — this is now the only arming call site, so a session that ever
-	// produces a thumbnail sweeps exactly once.
+	// The SDK decodes every STILL image on the drive — plain raster, HEIC and camera RAW alike — for
+	// one already-fetched file (the caller's own DriveItem file-arm data, structurally a File: the
+	// same held-item convention renameFile/trashFile above use). Nothing is downloaded into JS: the
+	// SDK reads the ranges it needs itself (an embedded-preview probe first, at worst a whole-file
+	// range read), and only the small webp result crosses back. Video and pdf are NOT here — Rust
+	// decodes neither, so those keep their own client-side generators (thumbGenerators.ts).
+	// Persisting is the CALLER's job (features/drive/lib/thumbnails.ts stores whatever any generator
+	// returns, uniformly) — a persist here would double-write the same uuid.
+	async makeSdkThumbnail(file: AnyFile, maxWidth: number, maxHeight: number): Promise<SdkThumbnailResult> {
+		armThumbSweep()
+
+		return asThumbnailResult(await requireClient().makeThumbnailInMemory({ file, maxWidth, maxHeight }))
+	},
+	// The same decode for bytes that are NOT on the drive yet — what the upload path hands over the
+	// moment an upload lands, so the client never re-downloads a file it just sent. The browser File
+	// crosses Comlink as a structured clone, which for a Blob is a cheap handle onto the same
+	// underlying storage rather than a byte copy, and `.stream()` is called HERE, in the realm that
+	// consumes it — exactly what uploadFile above already does. That is also what keeps a retry safe:
+	// every call gets a FRESH reader off the same File, where a transferred ReadableStream would be
+	// one-shot and dead the moment anything needed a second attempt.
+	async makeSdkThumbnailFromFile(file: BrowserFile, maxWidth: number, maxHeight: number): Promise<SdkThumbnailResult> {
+		armThumbSweep()
+
+		// `managedFuture` is omissible because the Rust field carries `#[serde(default)]`
+		// (filen-sdk-rs/src/thumbnail.rs) and `ManagedFuture` derives `Default`, so a missing key
+		// deserialises to the default instead of failing the boundary. That serde attribute, not the `?:`
+		// in the generated .d.ts, is what makes a key droppable at this boundary. Omitted rather than fed
+		// a controller nothing ever aborts, so the signature does not imply a cancellation path that no
+		// caller has.
+		return asThumbnailResult(
+			await requireClient().makeThumbnailFromStream({
+				reader: file.stream(),
+				maxWidth,
+				maxHeight,
+				knownSize: file.size
+			})
+		)
+	},
+	// Persists thumbnail bytes a CLIENT-side generator produced outside this worker — the video and
+	// pdf generators decode on the main thread and route their result through here, and the upload
+	// path stores what makeSdkThumbnailFromFile handed it. Callers Comlink.transfer the buffer in,
+	// never clone; rejection is the caller's own to handle (mirrors writeThumb's own propagation past
+	// the second-open collision it already swallows). Arms the once-per-session cache sweep too (see
+	// armThumbSweep).
 	async storeThumbnail(uuid: string, bytes: Uint8Array): Promise<void> {
 		armThumbSweep()
 		await writeThumb(uuid, bytes)

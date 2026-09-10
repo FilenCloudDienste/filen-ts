@@ -1,20 +1,59 @@
 import { type DriveItem } from "@/features/drive/lib/item"
 import { extensionOf } from "@/features/drive/lib/preview.logic"
 
-// Every category this app can produce a cached thumbnail for; "none" covers every non-"file" arm
-// (directory, every shared arm — out of scope here), an undecryptable file, an unrecognized
-// extension, and a whole-buffer category over the size gate.
-export type ThumbnailCategory = "image" | "heic" | "video" | "pdf" | "none"
+// Every category this app can produce a cached thumbnail for. "sdk" is every STILL image — plain
+// raster, HEIC and camera RAW alike — decoded by the Rust SDK, which is the only decoder any of them
+// ever sees now. "video" and "pdf" stay client-side because Rust decodes neither. "none" covers every
+// non-"file" arm (directory, every shared arm — out of scope here), an undecryptable file, svg, a pdf
+// over the size gate, and anything the SDK itself says it cannot thumbnail.
+export type ThumbnailCategory = "sdk" | "video" | "pdf" | "none"
 
-// Square thumbnail bound (both dimensions) fed to every client-side generator — one shared target
-// keeps every cached .thumb file roughly the same size.
+// The thumbnail's width bound, shared by every producer — one target keeps every cached .thumb file
+// roughly the same size. The video and pdf generators use it for both dimensions (a square fit); the
+// SDK arm pairs it with THUMB_SDK_MAX_HEIGHT below instead, for the reason documented there.
 export const THUMB_MAX_DIM = 256
 
-// Whole-buffer decode/generate ceiling (64 MiB) for the categories that pull the ENTIRE file into
-// memory to produce a thumbnail (image, heic, pdf) — an oversize file skips thumbnailing entirely
-// rather than risking a tab-crashing allocation for a preview-sized image. video is exempt: its
-// generator only ever reads a single frame off a stream, never the whole file.
+// The SDK's own thumbnail request is 256x512, NOT square, and the asymmetry is deliberate. The SDK
+// accepts an image's embedded preview (an EXIF IFD1 stamp, a HEIF `thmb` item) instead of decoding
+// the full frame when `preview_long_side * 2 >= max(maxWidth, maxHeight)` — so asking for a square
+// 256 would accept a 128px stamp, which is mush once a 176px tile renders it at 2x DPR. Raising only
+// the height to 512 raises that acceptance bar to a 256px preview without changing what the result
+// actually gets scaled to: nothing is ever upscaled, and fitting a landscape photo inside 256x512
+// still lands on a 256px-wide thumbnail.
+export const THUMB_SDK_MAX_HEIGHT = THUMB_MAX_DIM * 2
+
+// Whole-buffer decode/generate ceiling (64 MiB) for the ONE remaining category that pulls the entire
+// file into JS memory to produce a thumbnail: pdf. An oversize file skips thumbnailing rather than
+// risking a tab-crashing allocation for a preview-sized image. video is exempt (its generator only
+// ever reads a single frame off a stream), and so is "sdk" — the SDK enforces its own byte ceiling
+// (`max_source_bytes`, 64 MiB by default, byte-identical to this) internally, and still runs the cheap
+// embedded-preview probe ABOVE it. Applying this gate to the sdk arm would therefore change nothing
+// except to throw away the one case that matters most: a 90 MB RAW whose camera already embedded a
+// full-size JPEG the SDK can lift out with a couple of range reads.
 export const THUMB_SIZE_GATE = 67_108_864n
+
+// The working memory the SDK allots one thumbnail decode (microthumb's APP_PROCESS_MEM_BUDGET). A
+// different axis from THUMB_SIZE_GATE above — bytes of MEMORY, not bytes of source — that happens to
+// default to the same 64 MiB. This app configures neither.
+const THUMB_SDK_MEM_BUDGET = 67_108_864n
+
+// microthumb prices a decode target at 40 bytes for every pixel of the square it would have to hold:
+// `affordable_target(budget) = sqrt(budget / 40)`. Both requested dimensions are clamped to that
+// affordable target BEFORE a decoder commits to an output size, and nothing is upscaled afterwards, so
+// a request survives at the size it asked for only while the budget can still afford its LONGEST side.
+const THUMB_TARGET_BUDGET_BYTES_PER_PX = 40n
+
+// What must remain of the budget for a whole 256x512 request to come back unclamped: 512^2 * 40, 10 MiB.
+const THUMB_FULL_TARGET_BUDGET = BigInt(THUMB_SDK_MAX_HEIGHT) * BigInt(THUMB_SDK_MAX_HEIGHT) * THUMB_TARGET_BUDGET_BYTES_PER_PX
+
+// Ceiling (54 MiB) on a LOCAL source handed to the SDK's from-stream thumbnail path, which buffers the
+// source whole and takes its length off the decode budget above. Past this what is left can no longer
+// afford the full 256x512 request, so that path does not fail — it quietly returns a SMALLER thumbnail
+// (a 63 MiB source leaves ~1 MiB, good for ~160px). The drive-side path pays a constant 2 MiB for its
+// resident chunk slots instead, so its budget never shrinks with the file; past this gate it is simply
+// the better producer. Below THUMB_SIZE_GATE, so it also covers the from-stream path's outright refusal
+// of a source over `max_source_bytes`.
+export const THUMB_WARM_SIZE_GATE = THUMB_SDK_MEM_BUDGET - THUMB_FULL_TARGET_BUDGET
 
 // On-disk cache ceiling (256 MiB) — sweepThumbs evicts the oldest entries once the store exceeds
 // this, so a long-lived session's thumbnail cache never grows unbounded.
@@ -26,32 +65,39 @@ export const THUMB_CACHE_CAP = 268_435_456
 export const THUMB_DIR_ROOT = ["thumbnails"]
 
 // Bumped whenever the cached bytes themselves change shape (a different max dimension, a different
-// encode) — "v1" -> "v2" here for the 512 -> 256 THUMB_MAX_DIM drop above, so a stale 512px file can
-// never serve under the new code; the store starts empty and the old generation gets swept.
-export const THUMB_GENERATION = "v2"
+// encode, a different PRODUCER) — "v1" -> "v2" was the 512 -> 256 THUMB_MAX_DIM drop; "v2" -> "v3" is
+// the still-image producer changing from a browser createImageBitmap decode to the SDK's own webp
+// encode. A stale generation can never serve under the new code, and removeStaleThumbGenerations
+// reclaims v2's bytes on the next sweep rather than leaking them.
+export const THUMB_GENERATION = "v3"
 
 // OPFS path segments under the origin's private root for the live generation's own cache tree.
 export const THUMB_DIR = [...THUMB_DIR_ROOT, THUMB_GENERATION]
 
 export const THUMB_EXT = ".thumb"
 
-// Raster extensions the "image" category CANDIDATES for a client-side createImageBitmap decode. This
-// is a candidacy list, NOT a support claim: whether the browser can actually decode a given format is
-// proven per-file at decode time (createImageBitmap either yields a bitmap or throws), and a decode
-// failure falls through to the service's own 3-strike blacklist rather than a hardcoded per-format
-// gate here — so a format an older browser can't decode simply blacklists after three tries instead
-// of pretending support up front. bmp and avif join the SDK-era set (jpg/jpeg/png/gif/webp) now that
-// the browser, not the wasm decoder, owns decode; the item's own canMakeThumbnail flag no longer
-// gates this arm for the same reason (it only ever described SDK-side decodability). svg stays
-// EXCLUDED on purpose (sanitization posture — an untrusted svg is never fed to a decoder).
-const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"])
-const HEIC_EXTENSIONS = new Set(["heic", "heif"])
 const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "webm", "m4v", "mkv"])
 
-// Extension-first category routing, "file" arm only — a directory or any shared arm (shared items
-// are out of scope here) always resolves "none", same as an undecryptable file (no name to route
-// on). Every whole-buffer category (image, heic, pdf) additionally requires the file to be at or
-// under THUMB_SIZE_GATE — video is exempt, its generator never buffers the whole file.
+// Category routing, "file" arm only — a directory or any shared arm (shared items are out of scope
+// here) always resolves "none", same as an undecryptable file.
+//
+// The ORDER below is load-bearing, not cosmetic. Video and pdf both carry `canMakeThumbnail: false`
+// (the SDK decodes neither), so if the sdk arm were checked first they would fall to "none" and lose
+// the client-side generators that DO handle them — they have to be claimed by extension first.
+//
+//   1. non-file / undecryptable  -> none   (nothing to route on)
+//   2. svg                       -> none   (defense in depth; the wasm build has no SVG rasteriser
+//                                           either way, so this is belt-and-braces on the long-standing
+//                                           "never feed an untrusted svg to a decoder" posture)
+//   3. video extension           -> video  (client-side: one frame off the SW's Range stream)
+//   4. pdf, at/under the gate    -> pdf    (client-side: pdf.js, the one whole-buffer decode left)
+//   5. canMakeThumbnail === true -> sdk    (every still image; the SDK's own answer, never guessed)
+//   6. everything else           -> none
+//
+// Step 5 is the SINGLE SOURCE OF TRUTH for SDK thumbnailability — there is deliberately no extension
+// allowlist mirroring it here. The flag comes off the file the SDK itself decrypted, so it already
+// accounts for formats this app has never heard of, and duplicating it as a JS list would only create
+// a second answer that can drift.
 export function thumbnailCategory(item: DriveItem): ThumbnailCategory {
 	if (item.type !== "file" || item.data.undecryptable) {
 		return "none"
@@ -60,12 +106,8 @@ export function thumbnailCategory(item: DriveItem): ThumbnailCategory {
 	const name = item.data.decryptedMeta?.name
 	const ext = name !== undefined ? extensionOf(name) : ""
 
-	if (IMAGE_EXTENSIONS.has(ext)) {
-		return item.data.size <= THUMB_SIZE_GATE ? "image" : "none"
-	}
-
-	if (HEIC_EXTENSIONS.has(ext)) {
-		return item.data.size <= THUMB_SIZE_GATE ? "heic" : "none"
+	if (ext === "svg") {
+		return "none"
 	}
 
 	if (VIDEO_EXTENSIONS.has(ext)) {
@@ -76,7 +118,7 @@ export function thumbnailCategory(item: DriveItem): ThumbnailCategory {
 		return item.data.size <= THUMB_SIZE_GATE ? "pdf" : "none"
 	}
 
-	return "none"
+	return item.data.canMakeThumbnail ? "sdk" : "none"
 }
 
 // name/size/lastModified projection of one cached .thumb file — thumbStore.ts's listThumbs() own

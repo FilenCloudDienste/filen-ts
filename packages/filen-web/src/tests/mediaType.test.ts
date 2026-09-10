@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { RAW_IMAGE_EXTENSIONS } from "@/features/drive/lib/preview.logic"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 
 // Mirrors preview.logic.test.ts's own testUuid/mockFile/mockDir fixtures — each test file here owns
@@ -12,6 +13,7 @@ function testUuid(label: string): UuidStr {
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: "33333333-3333-3333-3333-333333333333",
+		stableUUID: undefined,
 		parent: "22222222-2222-2222-2222-222222222222",
 		size: 1_024n,
 		favorited: false,
@@ -110,6 +112,15 @@ describe("allowedMediaContentType", () => {
 
 	it("rejects a HEIC file even with a spoofed, otherwise-allowlisted mime", () => {
 		expect(allowedMediaContentType(fileNamed("photo.heic", "image/jpeg"))).toBeNull()
+	})
+
+	// Camera RAW resolves its own "rawImage" category, which this module's allowlist-of-three excludes
+	// outright — no browser decodes a RAW container, so serving one inline would hand the page bytes
+	// nothing can render. Pinned per-family because a camera's real RAW mime starts with "image/" and
+	// would otherwise look streamable to anything reading mime alone.
+	it.each([...RAW_IMAGE_EXTENSIONS])("rejects a camera RAW file (%s), even with an image/* mime", ext => {
+		expect(allowedMediaContentType(fileNamed(`shot.${ext}`, "image/jpeg"))).toBeNull()
+		expect(allowedMediaContentType(fileNamed(`shot.${ext}`, `image/x-raw-${ext}`))).toBeNull()
 	})
 
 	it("rejects a directory", () => {

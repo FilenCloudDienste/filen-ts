@@ -9,6 +9,7 @@ import { narrowItem, upsertDriveItem } from "@/features/drive/lib/item"
 import { driveListingQueryUpdate, invalidateDirectorySize } from "@/features/drive/queries/drive"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { defaultHeicUploadDeps, heicUploadConversionEnabled, maybeConvertHeicUpload } from "@/features/drive/lib/heicUpload"
+import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
 
 // Leading+trailing throttle, written locally rather than pulling a dependency — no throttle/debounce
 // util exists in src/lib yet. The leading edge invokes immediately so the first progress
@@ -73,6 +74,10 @@ export interface RunUploadDeps {
 	// recursive size (see queries/drive.ts's invalidateDirectorySize) — real wiring always supplies it,
 	// tests that don't care about the size-sort path simply omit it.
 	invalidateDirectorySize?: typeof invalidateDirectorySize
+	// Optional for the same DI reason as the two above: turns the bytes still in hand into this file's
+	// thumbnail instead of letting the listing download them straight back. Synchronous and
+	// fire-and-forget by contract — see warmUploadThumbnail (thumbGenerators.ts) for why.
+	warmThumbnail?: (uploaded: SdkFile, file: File) => void
 }
 
 // One upload attempt: register it in the transfers store, stream it through the injected `upload` op
@@ -123,6 +128,13 @@ export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string 
 	}
 
 	deps.store.settle(id, "done")
+	// BEFORE the listing patch, and that ordering is the whole point: patching the row in makes its
+	// tile ask for a thumbnail on the very next commit, so the warm has to have claimed the uuid by
+	// then or the tile starts downloading the file this upload just sent. Sequenced after the upload
+	// itself resolved (never overlapped with it) — both read the same browser File, and while
+	// Blob.stream() does hand out a fresh reader per call, there is no reason to have the SDK read the
+	// same local file twice at once.
+	deps.warmThumbnail?.(uploaded, file)
 	deps.patchListing(parentUuid, prev => upsertDriveItem(prev, narrowItem(uploaded)))
 	deps.invalidateDirectorySize?.(parentUuid)
 
@@ -146,7 +158,8 @@ export const defaultUploadDeps: RunUploadDeps = {
 	},
 	store: useTransfersStore.getState(),
 	patchListing: driveListingQueryUpdate,
-	invalidateDirectorySize
+	invalidateDirectorySize,
+	warmThumbnail: warmUploadThumbnail
 }
 
 // Fan out every file in parallel — no JS queue/semaphore: the SDK's own Tower layer throttles actual

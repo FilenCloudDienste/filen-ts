@@ -17,10 +17,15 @@ function testUuid(label: string): UuidStr {
 }
 
 const ROOT_UUID = "root-uuid"
+// The fixture file's whole-life id, and the uuid a content edit rotates the lineage onto (what `newUUID`
+// announces on fileArchived; a user trash leaves it undefined).
+const STABLE_FILE = testUuid("stable-file")
+const NEW_FILE = testUuid("new-file")
 
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: testUuid("file"),
+		stableUUID: STABLE_FILE,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,
@@ -72,13 +77,13 @@ describe("handleDriveEvent — coarse photos invalidation", () => {
 		["fileNew", () => driveEvt({ type: "fileNew", file: mockFile() })],
 		["fileMove", () => driveEvt({ type: "fileMove", file: mockFile() })],
 		["folderMove", () => driveEvt({ type: "folderMove", dir: mockDir() })],
-		["fileTrash", () => driveEvt({ type: "fileTrash", uuid: testUuid("file") })],
+		["fileTrash", () => driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined })],
 		["folderTrash", () => driveEvt({ type: "folderTrash", parent: testUuid("parent"), uuid: testUuid("dir") })],
 		["fileRestore", () => driveEvt({ type: "fileRestore", file: mockFile() })],
 		["folderRestore", () => driveEvt({ type: "folderRestore", dir: mockDir() })],
-		["fileArchived", () => driveEvt({ type: "fileArchived", uuid: testUuid("file") })],
+		["fileArchived", () => driveEvt({ type: "fileArchived", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: NEW_FILE })],
 		["fileArchiveRestored", () => driveEvt({ type: "fileArchiveRestored", currentUuid: testUuid("old"), file: mockFile() })],
-		["fileDeletedPermanent", () => driveEvt({ type: "fileDeletedPermanent", uuid: testUuid("file") })],
+		["fileDeletedPermanent", () => driveEvt({ type: "fileDeletedPermanent", uuid: testUuid("file"), stableUUID: STABLE_FILE })],
 		["folderDeletedPermanent", () => driveEvt({ type: "folderDeletedPermanent", uuid: testUuid("dir") })],
 		[
 			"fileMetadataChanged",

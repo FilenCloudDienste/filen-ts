@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { thumbnailCategory, pickEvictions, THUMB_SIZE_GATE, type ThumbCacheEntry } from "@/features/drive/lib/thumbnails.logic"
+import { RAW_IMAGE_EXTENSIONS } from "@/features/drive/lib/preview.logic"
+import {
+	thumbnailCategory,
+	pickEvictions,
+	THUMB_MAX_DIM,
+	THUMB_SDK_MAX_HEIGHT,
+	THUMB_SIZE_GATE,
+	type ThumbCacheEntry
+} from "@/features/drive/lib/thumbnails.logic"
 
 // Mirrors item.test.ts's own fixture helpers — this file needs the same six-arm coverage to prove
 // thumbnailCategory routes the "file" arm only.
@@ -12,6 +20,7 @@ function testUuid(label: string): UuidStr {
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: testUuid("file"),
+		stableUUID: undefined,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,
@@ -70,6 +79,7 @@ function mockSharedFile(overrides: Partial<SharedFile> = {}): SharedFile {
 		bucket: "filen-1",
 		chunks: 2n,
 		timestamp: 1_700_000_000_000n,
+		canMakeThumbnail: false,
 		meta: {
 			type: "decoded",
 			data: { name: "shared.jpg", mime: "image/jpeg", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
@@ -99,76 +109,90 @@ function fileNamed(name: string, options: { canMakeThumbnail?: boolean; size?: b
 }
 
 describe("thumbnailCategory", () => {
-	// The client-side createImageBitmap decode owns the format list now, not the SDK's wasm decoder —
-	// bmp and avif join the raster set the browser can decode.
-	it.each(["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"])("%s -> image when under the size gate", ext => {
-		expect(thumbnailCategory(fileNamed(`photo.${ext}`))).toBe("image")
+	// The SDK owns every still image now — plain raster, HEIC and camera RAW alike — and its own
+	// canMakeThumbnail flag is the only thing consulted. There is deliberately no extension allowlist
+	// mirroring it here, so these cases prove the routing, not a format list.
+	it.each(["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif", "heic", "heif"])("%s -> sdk when canMakeThumbnail is true", ext => {
+		expect(thumbnailCategory(fileNamed(`photo.${ext}`))).toBe("sdk")
 	})
 
-	// canMakeThumbnail is an SDK-decodability flag; the JS decode path no longer consults it, so a
-	// decodable extension routes to "image" regardless of the flag's value.
-	it("routes to image even when canMakeThumbnail is false — the flag no longer gates the JS decode", () => {
-		expect(thumbnailCategory(fileNamed("photo.jpg", { canMakeThumbnail: false }))).toBe("image")
+	it.each([...RAW_IMAGE_EXTENSIONS])("camera RAW %s -> sdk when canMakeThumbnail is true", ext => {
+		expect(thumbnailCategory(fileNamed(`shot.${ext}`))).toBe("sdk")
 	})
 
-	// svg is deliberately excluded (sanitization posture — never fed to a decoder), unlike every other
-	// raster extension above.
-	it("svg -> none — excluded on purpose, never decoded", () => {
-		expect(thumbnailCategory(fileNamed("vector.svg"))).toBe("none")
+	// The inverse of what this file used to pin. The browser decode that ignored this flag is gone;
+	// the SDK is the only producer for a still image, so its own "I cannot thumbnail this" is final.
+	it("routes to none when canMakeThumbnail is false — the SDK's own answer is the gate", () => {
+		expect(thumbnailCategory(fileNamed("photo.jpg", { canMakeThumbnail: false }))).toBe("none")
+	})
+
+	// No extension allowlist stands between the flag and the sdk arm: a format this app has never
+	// heard of still thumbnails if the SDK says it can, which is exactly why the flag is the single
+	// source of truth rather than a JS list that would drift from it.
+	it("routes an unfamiliar extension to sdk purely on the flag", () => {
+		expect(thumbnailCategory(fileNamed("mystery.qoi"))).toBe("sdk")
 	})
 
 	it("is case-insensitive on the extension", () => {
-		expect(thumbnailCategory(fileNamed("PHOTO.JPG"))).toBe("image")
+		expect(thumbnailCategory(fileNamed("PHOTO.JPG"))).toBe("sdk")
+		expect(thumbnailCategory(fileNamed("SHOT.NEF"))).toBe("sdk")
 	})
 
-	it.each(["heic", "heif"])("%s -> heic when under the size gate", ext => {
-		expect(thumbnailCategory(fileNamed(`photo.${ext}`))).toBe("heic")
+	// svg is refused even when the flag says otherwise — defense in depth on the long-standing
+	// "never feed an untrusted svg to a decoder" posture (the wasm build has no SVG rasteriser
+	// anyway, so this can only ever be belt-and-braces).
+	it("svg -> none even with canMakeThumbnail true", () => {
+		expect(thumbnailCategory(fileNamed("vector.svg"))).toBe("none")
+		expect(thumbnailCategory(fileNamed("vector.svg", { canMakeThumbnail: false }))).toBe("none")
 	})
 
-	it.each(["mp4", "mov", "webm", "m4v", "mkv"])("%s -> video, unconditionally (size-gate exempt)", ext => {
-		expect(thumbnailCategory(fileNamed(`clip.${ext}`, { size: THUMB_SIZE_GATE + 1n }))).toBe("video")
+	// Order guard: video and pdf both carry canMakeThumbnail false (Rust decodes neither), so they
+	// have to be claimed by extension BEFORE the flag check or they would fall to "none" and lose the
+	// client-side generators that do handle them.
+	it.each(["mp4", "mov", "webm", "m4v", "mkv"])("%s -> video despite canMakeThumbnail false, and size-gate exempt", ext => {
+		expect(thumbnailCategory(fileNamed(`clip.${ext}`, { canMakeThumbnail: false, size: THUMB_SIZE_GATE + 1n }))).toBe("video")
 	})
 
-	it("pdf -> pdf when under the size gate", () => {
-		expect(thumbnailCategory(fileNamed("doc.pdf"))).toBe("pdf")
+	it("pdf -> pdf despite canMakeThumbnail false", () => {
+		expect(thumbnailCategory(fileNamed("doc.pdf", { canMakeThumbnail: false }))).toBe("pdf")
 	})
 
-	it.each(["exe", "zip", "txt", "psd"])("%s -> none — unrecognized extension", ext => {
-		expect(thumbnailCategory(fileNamed(`file.${ext}`))).toBe("none")
+	it.each(["exe", "zip", "txt", "psd"])("%s -> none when the SDK cannot thumbnail it", ext => {
+		expect(thumbnailCategory(fileNamed(`file.${ext}`, { canMakeThumbnail: false }))).toBe("none")
 	})
 
-	it("a dotfile with no real extension resolves none", () => {
-		expect(thumbnailCategory(fileNamed(".gitignore"))).toBe("none")
+	it("a dotfile with no real extension still routes on the flag alone", () => {
+		expect(thumbnailCategory(fileNamed(".gitignore", { canMakeThumbnail: false }))).toBe("none")
+		expect(thumbnailCategory(fileNamed(".gitignore"))).toBe("sdk")
 	})
 
-	describe("whole-buffer size gate (image, heic, pdf)", () => {
-		it("is image exactly at the size gate", () => {
-			expect(thumbnailCategory(fileNamed("photo.jpg", { size: THUMB_SIZE_GATE }))).toBe("image")
+	// pdf is the ONE category left that buffers a whole file in JS memory, so it is the only one this
+	// gate still applies to.
+	describe("whole-buffer size gate (pdf only)", () => {
+		it("is pdf exactly at the size gate", () => {
+			expect(thumbnailCategory(fileNamed("doc.pdf", { canMakeThumbnail: false, size: THUMB_SIZE_GATE }))).toBe("pdf")
 		})
 
 		it("is none one byte over the size gate", () => {
-			expect(thumbnailCategory(fileNamed("photo.jpg", { size: THUMB_SIZE_GATE + 1n }))).toBe("none")
-		})
-
-		it("is heic exactly at the size gate", () => {
-			expect(thumbnailCategory(fileNamed("photo.heic", { size: THUMB_SIZE_GATE }))).toBe("heic")
-		})
-
-		it("is none one byte over the size gate for heic", () => {
-			expect(thumbnailCategory(fileNamed("photo.heic", { size: THUMB_SIZE_GATE + 1n }))).toBe("none")
-		})
-
-		it("is pdf exactly at the size gate", () => {
-			expect(thumbnailCategory(fileNamed("doc.pdf", { size: THUMB_SIZE_GATE }))).toBe("pdf")
-		})
-
-		it("is none one byte over the size gate for pdf", () => {
-			expect(thumbnailCategory(fileNamed("doc.pdf", { size: THUMB_SIZE_GATE + 1n }))).toBe("none")
+			expect(thumbnailCategory(fileNamed("doc.pdf", { canMakeThumbnail: false, size: THUMB_SIZE_GATE + 1n }))).toBe("none")
 		})
 	})
 
-	describe("undecryptable — no name to route on", () => {
-		it("resolves none regardless of extension-bearing history", () => {
+	// The point of dropping the gate from the sdk arm: a 90 MB RAW is precisely the file whose camera
+	// already embedded a full-size JPEG the SDK can lift out with a couple of range reads, and the SDK
+	// enforces its own byte ceiling internally either way.
+	describe("the sdk arm is NOT size-gated", () => {
+		it("a large still image still routes to sdk", () => {
+			expect(thumbnailCategory(fileNamed("photo.jpg", { size: THUMB_SIZE_GATE + 1n }))).toBe("sdk")
+		})
+
+		it("a 90 MB RAW still routes to sdk", () => {
+			expect(thumbnailCategory(fileNamed("shot.nef", { size: 94_371_840n }))).toBe("sdk")
+		})
+	})
+
+	describe("undecryptable — no metadata to route on", () => {
+		it("resolves none regardless of extension-bearing history or the flag", () => {
 			expect(thumbnailCategory(fileNamed("photo.jpg", { undecryptable: true }))).toBe("none")
 		})
 	})
@@ -199,6 +223,17 @@ describe("thumbnailCategory", () => {
 			})
 			expect(thumbnailCategory(item)).toBe("none")
 		})
+	})
+})
+
+describe("THUMB_SDK_MAX_HEIGHT", () => {
+	// Pinned because the asymmetry is the whole point: the SDK accepts an embedded preview when
+	// preview_long_side * 2 >= max(maxWidth, maxHeight), so a square 256 request would accept a 128px
+	// EXIF stamp — mush in a 176px tile at 2x DPR. Doubling only the height raises that bar to 256px
+	// without changing what the result is scaled to.
+	it("is twice THUMB_MAX_DIM, never equal to it", () => {
+		expect(THUMB_SDK_MAX_HEIGHT).toBe(THUMB_MAX_DIM * 2)
+		expect(THUMB_SDK_MAX_HEIGHT).toBe(512)
 	})
 })
 

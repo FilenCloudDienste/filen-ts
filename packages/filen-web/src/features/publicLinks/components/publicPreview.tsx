@@ -1,4 +1,5 @@
-import { lazy, Suspense } from "react"
+import { lazy, Suspense, type ReactNode } from "react"
+import { useTranslation } from "react-i18next"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { previewType } from "@/features/drive/lib/preview.logic"
 import { PreviewAccessModeProvider } from "@/features/preview/lib/accessMode"
@@ -49,7 +50,11 @@ export function PublicPreview({ item }: { item: DriveItem }) {
 	)
 }
 
-function PublicPreviewBody({ item, category, alt }: { item: DriveItem; category: ReturnType<typeof previewType>; alt: string }) {
+// Guarded against a missing category arm by the `default` arm at the bottom, the same way
+// previewOverlay's own PreviewBody is.
+function PublicPreviewBody({ item, category, alt }: { item: DriveItem; category: ReturnType<typeof previewType>; alt: string }): ReactNode {
+	const { t } = useTranslation("preview")
+
 	switch (category) {
 		case "image":
 			return (
@@ -104,7 +109,26 @@ function PublicPreviewBody({ item, category, alt }: { item: DriveItem; category:
 					/>
 				</Suspense>
 			)
+		// Reachable, unlike "other": anonPreviewability admits rawImage (previewType resolves a real
+		// category for it), so this arm must render the labeled unsupported state rather than the
+		// `null` below — a blank pane with a "Hide preview" button over it reads as a broken viewer.
+		// Reuses the authed overlay's own preview:previewUnsupportedType copy, not a second string.
+		case "rawImage":
+			return (
+				<div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+					{t("previewUnsupportedType")}
+				</div>
+			)
+		// Unreachable: anonPreviewability (download.logic.ts) refuses an "other" item before FileHero
+		// ever renders a preview pane for it.
 		case "other":
 			return null
+		// `category` narrows to `never` here only while every PreviewCategory has an arm above, so adding
+		// one without a viewer is a compile error on this assignment instead of a blank pane.
+		default: {
+			const unhandled: never = category
+
+			return unhandled
+		}
 	}
 }

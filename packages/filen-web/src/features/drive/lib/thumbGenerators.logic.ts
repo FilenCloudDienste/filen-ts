@@ -1,7 +1,6 @@
-// Pure sizing/encoding helpers shared by every thumbnail generator, including heicCodec.ts's own
-// thumbnail-encode path — that file imports this one (lib/preview -> lib/drive, an already-
-// established direction, see mediaType.ts/previewStream.ts) rather than duplicating the math,
-// since this module has zero dependencies of its own and so creates no import cycle back into it.
+// Pure sizing/encoding helpers shared by the client-side thumbnail generators (video, pdf) — the two
+// categories the Rust SDK cannot decode and this app therefore still draws to a canvas itself. Zero
+// dependencies of its own, so it can be imported from anywhere without risking a cycle.
 
 // Aspect-preserving max-dimension fit, never upscaling — a source already at or under maxDim in both
 // dimensions returns its own size unchanged (scale clamped to 1).
@@ -52,8 +51,8 @@ async function attemptEncode(canvas: OffscreenCanvas | HTMLCanvasElement, type: 
 	})
 }
 
-// webp-first, jpeg-0.85 fallback — the one on-disk thumbnail format policy every generator shares
-// (the client-side ones in thumbGenerators.ts, and heicCodec.ts's own downscale-to-thumbnail path).
+// webp-first, jpeg-0.85 fallback — the on-disk format policy the canvas-drawing generators share. The
+// SDK arm needs none of this: it encodes webp itself, inside wasm.
 export async function encodeCanvasThumb(canvas: OffscreenCanvas | HTMLCanvasElement): Promise<Blob> {
 	const webp = await attemptEncode(canvas, "image/webp")
 

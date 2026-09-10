@@ -38,6 +38,7 @@ import {
 } from "@/features/drive/queries/drive"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { ROW_HEIGHT, TILE_ROW_HEIGHT, TILE_WIDTH } from "@/features/drive/lib/gridLayout"
+import { isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
 import { cn } from "@/lib/utils"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { useAction } from "@/lib/keymap/useAction"
@@ -424,11 +425,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	// Registered above at module scope. No preventDefault — bare Escape has no disruptive browser
 	// default, matching the hand-rolled handler this replaced. Guarded on isDialogOpen so Escape closes
-	// the dialog (its own onOpenChange handling) without also clearing the background selection.
+	// the dialog (its own onOpenChange handling) without also clearing the background selection, and on
+	// an open menu for the same reason — a bulk context menu whose selection vanishes mid-open swaps its
+	// content component underneath Base UI and is then stuck open.
 	useAction(
 		"drive.clearSelection",
 		() => {
-			if (isDialogOpen) {
+			if (isDialogOpen || isAnyMenuOpen()) {
 				return
 			}
 

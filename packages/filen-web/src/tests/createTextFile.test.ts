@@ -13,6 +13,7 @@ function testUuid(label: string): UuidStr {
 function mockFile(overrides: Partial<SdkFile> = {}): SdkFile {
 	return {
 		uuid: "11111111-1111-1111-1111-111111111111",
+		stableUUID: undefined,
 		parent: "22222222-2222-2222-2222-222222222222",
 		chunks: 0n,
 		size: 0n,

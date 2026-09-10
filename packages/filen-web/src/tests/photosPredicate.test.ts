@@ -22,6 +22,7 @@ function mockDir(overrides: Partial<Dir> = {}): Dir {
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: testUuid("file"),
+		stableUUID: undefined,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,
@@ -55,6 +56,15 @@ describe("isPhotoItem", () => {
 		expect(isPhotoItem(fileNamed("beach.jpg"))).toBe(true)
 		expect(isPhotoItem(fileNamed("beach.png"))).toBe(true)
 		expect(isPhotoItem(fileNamed("beach.webp"))).toBe(true)
+	})
+
+	// A camera RAW is a photo by any user's reckoning, and the grid tile is thumbnail-driven — the SDK
+	// produces those for RAW (usually straight off the embedded preview), so the row renders normally
+	// even though no full-size viewer exists yet.
+	it("keeps a camera RAW file", () => {
+		expect(isPhotoItem(fileNamed("shot.nef"))).toBe(true)
+		expect(isPhotoItem(fileNamed("shot.CR3"))).toBe(true)
+		expect(isPhotoItem(fileNamed("shot.dng"))).toBe(true)
 	})
 
 	it("keeps a video file unconditionally (mobile parity: videos pass with no extension gate)", () => {

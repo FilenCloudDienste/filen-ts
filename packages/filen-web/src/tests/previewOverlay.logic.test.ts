@@ -86,6 +86,7 @@ function mockDir(overrides: Partial<Dir> = {}): Dir {
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: "33333333-3333-3333-3333-333333333333",
+		stableUUID: undefined,
 		parent: "22222222-2222-2222-2222-222222222222",
 		size: 1_024n,
 		favorited: false,
@@ -163,7 +164,8 @@ describe("previewMenuVisible (drive-sourced items only)", () => {
 			version: 2,
 			timestamp: 1_700_000_000_000n,
 			fileKey: "key",
-			linkedTag: true
+			linkedTag: true,
+			canMakeThumbnail: false
 		})
 
 		expect(previewMenuVisible({ type: "drive", item: linkedItem })).toBe(false)

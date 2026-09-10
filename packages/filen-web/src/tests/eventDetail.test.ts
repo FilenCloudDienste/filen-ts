@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { TFunction } from "i18next"
-import type { UserEvent, UserEventKind } from "@filen/sdk-rs"
+import type { UserEvent, UserEventFileInfo, UserEventKind } from "@filen/sdk-rs"
 import { buildEventDetailRows } from "@/features/settings/lib/eventDetail"
 
 // Identity translator: every key buildEventDetailRows resolves through `t()` in these tests is a
@@ -10,6 +10,23 @@ const t = ((key: string) => key) as unknown as TFunction<"settings">
 
 function event(kind: UserEventKind): UserEvent {
 	return { id: 1n, timestamp: 1_700_000_000_000n, uuid: "11111111-1111-1111-1111-111111111111", kind }
+}
+
+// The wire fields a file-shaped user event carries beyond ip/userAgent/metadata. buildEventDetailRows
+// reads none of them — they only satisfy the payload shape.
+const fileEventFields: Omit<UserEventFileInfo, "ip" | "userAgent" | "metadata"> = {
+	uuid: "33333333-3333-3333-3333-333333333333",
+	stableUuid: "44444444-4444-4444-4444-444444444444",
+	newUuid: undefined,
+	parent: "55555555-5555-5555-5555-555555555555",
+	bucket: "filen-1",
+	region: "de-1",
+	rm: undefined,
+	chunks: 1n,
+	version: 1,
+	favorited: false,
+	timestamp: 1_700_000_000_000n,
+	currentUuid: undefined
 }
 
 function decodedFileMeta(name: string) {
@@ -43,7 +60,9 @@ describe("buildEventDetailRows", () => {
 				ip: "1.2.3.4",
 				userAgent: "ua",
 				metadata: decodedFileMeta("new.txt"),
-				oldMetadata: decodedFileMeta("old.txt")
+				oldMetadata: decodedFileMeta("old.txt"),
+				uuid: "33333333-3333-3333-3333-333333333333",
+				stableUuid: "44444444-4444-4444-4444-444444444444"
 			}),
 			t
 		)
@@ -54,7 +73,13 @@ describe("buildEventDetailRows", () => {
 
 	it("an undecoded (encrypted) file meta falls back to the encrypted label instead of crashing", () => {
 		const rows = buildEventDetailRows(
-			event({ type: "fileUploaded", ip: "1.2.3.4", userAgent: "ua", metadata: { type: "encrypted", data: "cipher" } }),
+			event({
+				type: "fileUploaded",
+				ip: "1.2.3.4",
+				userAgent: "ua",
+				metadata: { type: "encrypted", data: "cipher" },
+				...fileEventFields
+			}),
 			t
 		)
 
@@ -68,7 +93,10 @@ describe("buildEventDetailRows", () => {
 				ip: "1.2.3.4",
 				userAgent: "ua",
 				metadata: { type: "decryptedUTF8", data: JSON.stringify({ name: "My Folder" }) },
-				value: true
+				value: true,
+				uuid: "33333333-3333-3333-3333-333333333333",
+				stableUuid: "44444444-4444-4444-4444-444444444444",
+				itemType: "folder"
 			}),
 			t
 		)
@@ -84,7 +112,9 @@ describe("buildEventDetailRows", () => {
 				ip: "1.2.3.4",
 				userAgent: "ua",
 				name: decodedDirMeta("Shared Dir"),
-				receiverEmail: "friend@example.com"
+				receiverEmail: "friend@example.com",
+				uuid: "33333333-3333-3333-3333-333333333333",
+				parent: "55555555-5555-5555-5555-555555555555"
 			}),
 			t
 		)
@@ -123,7 +153,13 @@ describe("buildEventDetailRows", () => {
 
 	it("folderLinkEdited marks the link uuid row opaque, for middle-ellipsis rendering", () => {
 		const rows = buildEventDetailRows(
-			event({ type: "folderLinkEdited", ip: "1.2.3.4", userAgent: "ua", linkUuid: "22222222-2222-2222-2222-222222222222" }),
+			event({
+				type: "folderLinkEdited",
+				ip: "1.2.3.4",
+				userAgent: "ua",
+				linkUuid: "22222222-2222-2222-2222-222222222222",
+				uuid: "33333333-3333-3333-3333-333333333333"
+			}),
 			t
 		)
 
@@ -136,7 +172,7 @@ describe("buildEventDetailRows", () => {
 
 	it("a non-opaque row (a resolved name) carries no opaque flag", () => {
 		const rows = buildEventDetailRows(
-			event({ type: "fileUploaded", ip: "1.2.3.4", userAgent: "ua", metadata: decodedFileMeta("report.pdf") }),
+			event({ type: "fileUploaded", ip: "1.2.3.4", userAgent: "ua", metadata: decodedFileMeta("report.pdf"), ...fileEventFields }),
 			t
 		)
 

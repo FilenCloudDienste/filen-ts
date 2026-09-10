@@ -47,6 +47,7 @@ function mockBrowserFile(name = "photo.jpg", size = 1_024): File {
 function mockSdkFile(overrides: Partial<SdkFile> = {}): SdkFile {
 	return {
 		uuid: testUuid("uploaded"),
+		stableUUID: undefined,
 		parent: testUuid("chat-uploads"),
 		size: 1_024n,
 		favorited: false,

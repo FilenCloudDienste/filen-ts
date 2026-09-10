@@ -37,6 +37,7 @@ const { pickerContact, versionedFile, olderVersion } = vi.hoisted(() => {
 
 	const file = {
 		uuid: "22222222-2222-2222-2222-222222222222",
+		stableUUID: undefined,
 		parent: "33333333-3333-3333-3333-333333333333",
 		size: 1_024n,
 		favorited: false,
@@ -55,6 +56,8 @@ const { pickerContact, versionedFile, olderVersion } = vi.hoisted(() => {
 	// aria-label queries below ambiguous.
 	const version = {
 		uuid: "44444444-4444-4444-4444-444444444444",
+		// The FILE's whole-life id (matches `file` above), identical for every version of it.
+		stableUUID: "22222222-2222-2222-2222-222222222222",
 		region: "de-1",
 		bucket: "filen-1",
 		chunks: 1n,

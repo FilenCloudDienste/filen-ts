@@ -155,6 +155,7 @@ function mockDir(name: string, uuid = testUuid(name)): Dir {
 function mockFile(name: string, uuid = testUuid(name)): File {
 	return {
 		uuid,
+		stableUUID: undefined,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,
@@ -191,7 +192,8 @@ function mockSharedFile(name: string, role: SharingRole): SharedFile {
 			data: { name, mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
 		},
 		sharingRole: role,
-		sharedTag: true
+		sharedTag: true,
+		canMakeThumbnail: false
 	}
 }
 

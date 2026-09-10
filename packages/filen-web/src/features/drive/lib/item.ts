@@ -109,15 +109,19 @@ export function narrowItem(raw: NarrowItemInput): DriveItem {
 function narrowFile(raw: NarrowableFileInput): DriveItem {
 	if (!("favorited" in raw)) {
 		const decryptedMeta = raw.meta.type === "decoded" ? raw.meta.data : null
-		// SharedFile lacks a normal item's `parent`/`favorited`/`canMakeThumbnail`; a shared-root file
-		// has no navigable normal parent and is never favorited/thumbnailed through this arm, so those
-		// are synthesized inert (self-uuid parent, false flags) purely to keep the base File shape whole.
+		// SharedFile lacks a normal item's `parent`/`favorited`; a shared-root file has no navigable
+		// normal parent and is never favorited through this arm, so those are synthesized inert
+		// (self-uuid parent, false flag) purely to keep the base File shape whole. `canMakeThumbnail`
+		// is the SDK's own per-file verdict — carried through, never synthesized, since it is the only
+		// thing that decides whether the SDK will thumbnail this file. `stableUUID` is undefined by
+		// contract: a shared-in file reports no whole-life id.
 		// `shareSource` retains the untouched raw SharedFile (see the union's own doc comment above) —
 		// removeSharedItem needs the genuine wasm value, never this synthesized shape.
 		return {
 			type: "sharedRootFile",
 			data: {
 				uuid: raw.uuid,
+				stableUUID: undefined,
 				meta: raw.meta,
 				parent: raw.uuid,
 				size: raw.size,
@@ -126,7 +130,7 @@ function narrowFile(raw: NarrowableFileInput): DriveItem {
 				bucket: raw.bucket,
 				timestamp: raw.timestamp,
 				chunks: raw.chunks,
-				canMakeThumbnail: false,
+				canMakeThumbnail: raw.canMakeThumbnail,
 				undecryptable: decryptedMeta === null,
 				decryptedMeta,
 				sharedTag: raw.sharedTag,
@@ -212,7 +216,8 @@ function narrowDir(raw: NarrowableDirInput): DriveItem {
 // machinery (previewType, PreviewOverlay's "drive" arm, download) every owned file already uses — no
 // second, external-only viewer path. Mirrors filen-mobile's lib/sdkUnwrap.ts::linkedFileIntoDriveItem
 // field-for-field (decoded FileMeta built from the linked file's own name/mime/size/timestamp/key,
-// self-parented, canMakeThumbnail false), but routes the fabricated wasm `File` through narrowItem —
+// self-parented, the SDK's own canMakeThumbnail carried through), but routes the fabricated wasm
+// `File` through narrowItem —
 // the SAME narrowing every owned file already goes through — rather than hand-building the DriveItem
 // union arm a second time. The wasm SDK's AnyFile union is `LinkedFile | SharedFile | File`, so every
 // downstream consumer that narrows this item back to an AnyFile (narrowToAnyFile, previewStreamUrl,
@@ -225,6 +230,7 @@ export function linkedFileIntoDriveItem(file: LinkedFile): DriveItem {
 
 	return narrowItem({
 		uuid: file.uuid,
+		stableUUID: undefined,
 		meta: {
 			type: "decoded",
 			data: {
@@ -244,7 +250,10 @@ export function linkedFileIntoDriveItem(file: LinkedFile): DriveItem {
 		bucket: file.bucket,
 		timestamp: file.timestamp,
 		chunks: file.chunks,
-		canMakeThumbnail: false
+		// The SDK's own per-file verdict, carried through rather than synthesized — it is the only
+		// gate on whether a thumbnail can be made. `stableUUID` stays undefined by contract: a
+		// public link reports no whole-life id, so any drive operation on this item is rejected.
+		canMakeThumbnail: file.canMakeThumbnail
 	})
 }
 

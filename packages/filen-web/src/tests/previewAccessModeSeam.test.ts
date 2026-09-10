@@ -30,7 +30,8 @@ const item = linkedFileIntoDriveItem({
 	version: 2,
 	timestamp: 0n,
 	fileKey: "k",
-	linkedTag: true
+	linkedTag: true,
+	canMakeThumbnail: false
 })
 
 describe("usePreviewBytes access-mode seam", () => {

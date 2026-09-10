@@ -75,8 +75,7 @@ function fakeLib(decodeThrows?: unknown): HeicDecoderModule {
 function depsFor(lib: HeicDecoderModule): HeicTransformDeps {
 	return {
 		getDecoder: () => Promise.resolve(lib),
-		encodeJpeg: () => Promise.resolve(new Blob(["jpeg"], { type: "image/jpeg" })),
-		encodeThumb: () => Promise.resolve(new Blob(["thumb"], { type: "image/webp" }))
+		encodeJpeg: () => Promise.resolve(new Blob(["jpeg"], { type: "image/jpeg" }))
 	}
 }
 

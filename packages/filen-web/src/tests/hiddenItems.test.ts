@@ -40,6 +40,7 @@ function undecryptableItem(uuid = testUuid("opaque")): DriveItem {
 function fileItem(name: string, uuid = testUuid("file")): DriveItem {
 	const file: File = {
 		uuid,
+		stableUUID: undefined,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,

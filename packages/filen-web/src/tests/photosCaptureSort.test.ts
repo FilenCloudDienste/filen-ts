@@ -10,6 +10,7 @@ function testUuid(label: string): UuidStr {
 function photo(uuid: string, timestamp: bigint, created?: bigint, modified?: bigint): PhotoItem {
 	const item = narrowItem({
 		uuid: testUuid(uuid),
+		stableUUID: undefined,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,

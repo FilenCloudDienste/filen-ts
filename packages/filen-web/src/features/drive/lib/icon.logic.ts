@@ -1,5 +1,12 @@
 import type { DirColor } from "@filen/sdk-rs"
-import { extensionOf, IMAGE_EXTENSIONS, HEIC_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } from "@/features/drive/lib/preview.logic"
+import {
+	extensionOf,
+	IMAGE_EXTENSIONS,
+	HEIC_EXTENSIONS,
+	RAW_IMAGE_EXTENSIONS,
+	VIDEO_EXTENSIONS,
+	AUDIO_EXTENSIONS
+} from "@/features/drive/lib/preview.logic"
 import { dirColorHex } from "@/features/drive/lib/dirColor"
 
 // The concrete file-type glyphs in src/assets/file-icons/ (byte-identical to filen-mobile's set) a
@@ -93,7 +100,10 @@ const ARCHIVE_EXTENSIONS = new Set(["pkg", "rar", "tar", "zip", "7zip"])
 export function fileIconKey(name: string): FileIconKey {
 	const ext = extensionOf(name)
 
-	if (IMAGE_EXTENSIONS.has(ext) || HEIC_EXTENSIONS.has(ext)) {
+	// Camera RAW shares the plain "image" glyph deliberately: FileIconKey is an exhaustive Record in
+	// itemIcon.tsx keyed to the concrete SVGs in src/assets/file-icons/, so a distinct "raw" key would
+	// mean a new asset. A RAW file reads as an image to a user either way.
+	if (IMAGE_EXTENSIONS.has(ext) || HEIC_EXTENSIONS.has(ext) || RAW_IMAGE_EXTENSIONS.has(ext)) {
 		return "image"
 	}
 

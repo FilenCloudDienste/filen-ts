@@ -86,12 +86,11 @@ function fakeLib(options: { width?: number; height?: number; displayResult?: unk
 	return { lib, freeCalls, contextFreeCalls }
 }
 
-function depsFor(lib: HeicDecoderModule, encodeJpeg?: HeicTransformDeps["encodeJpeg"], encodeThumb?: HeicTransformDeps["encodeThumb"]) {
+function depsFor(lib: HeicDecoderModule, encodeJpeg?: HeicTransformDeps["encodeJpeg"]) {
 	const getDecoderSpy = vi.fn(() => Promise.resolve(lib))
 	const deps: HeicTransformDeps = {
 		getDecoder: getDecoderSpy,
-		encodeJpeg: encodeJpeg ?? (() => Promise.resolve(new Blob(["jpeg"], { type: "image/jpeg" }))),
-		encodeThumb: encodeThumb ?? (() => Promise.resolve(new Blob(["thumb"], { type: "image/webp" })))
+		encodeJpeg: encodeJpeg ?? (() => Promise.resolve(new Blob(["jpeg"], { type: "image/jpeg" })))
 	}
 
 	return { deps, getDecoderSpy }
@@ -130,40 +129,27 @@ describe("runHeicTransform — happy path", () => {
 	})
 })
 
-describe("runHeicTransform — thumbnail opts", () => {
-	it("with no opts, calls encodeJpeg and never encodeThumb (the frozen default path)", async () => {
-		const { runHeicTransform } = await freshModule()
-		const { lib } = fakeLib()
-		const encodeJpeg = vi.fn((): Promise<Blob> => Promise.resolve(new Blob(["jpeg"])))
-		const encodeThumb = vi.fn((): Promise<Blob> => Promise.resolve(new Blob(["thumb"])))
-		const { deps } = depsFor(lib, encodeJpeg, encodeThumb)
-
-		await runHeicTransform(BYTES, deps)
-
-		expect(encodeJpeg).toHaveBeenCalledTimes(1)
-		expect(encodeThumb).not.toHaveBeenCalled()
-	})
-
-	it("with opts.maxDimension set, calls encodeThumb with the decoded pixels and that maxDimension, never encodeJpeg", async () => {
+// The encode step has exactly one shape now: HEIC thumbnails moved to the SDK, taking the
+// maxDimension/encodeThumb variant with them, so preview's full-resolution JPEG is all that is left.
+describe("runHeicTransform — encode", () => {
+	it("always calls encodeJpeg with the decoded pixels and the frozen quality", async () => {
 		const { runHeicTransform } = await freshModule()
 		const { lib } = fakeLib({ width: 4, height: 3 })
 		const encodeJpeg = vi.fn((): Promise<Blob> => Promise.resolve(new Blob(["jpeg"])))
-		const encodeThumb = vi.fn((): Promise<Blob> => Promise.resolve(new Blob(["thumb"])))
-		const { deps } = depsFor(lib, encodeJpeg, encodeThumb)
+		const { deps } = depsFor(lib, encodeJpeg)
 
-		await runHeicTransform(BYTES, deps, { maxDimension: 512 })
+		await runHeicTransform(BYTES, deps)
 
-		expect(encodeThumb).toHaveBeenCalledWith(expect.objectContaining({ width: 4, height: 3 }), 512)
-		expect(encodeJpeg).not.toHaveBeenCalled()
+		expect(encodeJpeg).toHaveBeenCalledWith(expect.objectContaining({ width: 4, height: 3 }), 0.85)
 	})
 
-	it("resolves with the exact Blob encodeThumb produced", async () => {
+	it("resolves with the exact Blob encodeJpeg produced", async () => {
 		const { runHeicTransform } = await freshModule()
 		const { lib } = fakeLib()
-		const producedBlob = new Blob(["thumb-bytes"], { type: "image/webp" })
-		const { deps } = depsFor(lib, undefined, () => Promise.resolve(producedBlob))
+		const producedBlob = new Blob(["jpeg-bytes"], { type: "image/jpeg" })
+		const { deps } = depsFor(lib, () => Promise.resolve(producedBlob))
 
-		await expect(runHeicTransform(BYTES, deps, { maxDimension: 512 })).resolves.toBe(producedBlob)
+		await expect(runHeicTransform(BYTES, deps)).resolves.toBe(producedBlob)
 	})
 })
 
@@ -200,8 +186,7 @@ describe("runHeicTransform — decoder memoization", () => {
 		})
 		const deps: HeicTransformDeps = {
 			getDecoder: getDecoderSpy,
-			encodeJpeg: () => Promise.resolve(new Blob(["jpeg"])),
-			encodeThumb: () => Promise.resolve(new Blob(["thumb"]))
+			encodeJpeg: () => Promise.resolve(new Blob(["jpeg"]))
 		}
 
 		await expect(runHeicTransform(BYTES, deps)).rejects.toThrow()

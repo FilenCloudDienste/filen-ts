@@ -25,6 +25,7 @@ function testUuid(label: string): UuidStr {
 function photoItem(label: string): PhotoItem {
 	const file: File = {
 		uuid: testUuid(label),
+		stableUUID: undefined,
 		parent: testUuid("root"),
 		size: 1_024n,
 		favorited: false,

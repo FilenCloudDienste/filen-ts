@@ -46,6 +46,7 @@ function sdkDto(kind: string): ErrorDTO {
 function testFile(overrides: Partial<AnyFile> = {}): AnyFile {
 	return {
 		uuid: testUuid("src"),
+		stableUUID: undefined,
 		meta: { type: "encrypted", data: "ciphertext" },
 		parent: testUuid("parent"),
 		size: 1_024n,
@@ -84,6 +85,7 @@ function dirItem(overrides: Partial<Dir> = {}): Extract<DriveItem, { type: "dire
 function fileItem(overrides: Partial<import("@filen/sdk-rs").File> = {}): DriveItem {
 	return narrowItem({
 		uuid: testUuid("file"),
+		stableUUID: undefined,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,
@@ -102,6 +104,7 @@ function nestedFile(name: string, path: string): { path: string; file: import("@
 		path,
 		file: {
 			uuid: testUuid(name),
+			stableUUID: undefined,
 			parent: testUuid("parent"),
 			size: 512n,
 			favorited: false,

@@ -8,6 +8,8 @@ export function previewKindLabelKey(category: PreviewCategory): DriveKey | null 
 	switch (category) {
 		case "image":
 			return "drivePreviewKindImage"
+		case "rawImage":
+			return "drivePreviewKindRawImage"
 		case "video":
 			return "drivePreviewKindVideo"
 		case "audio":

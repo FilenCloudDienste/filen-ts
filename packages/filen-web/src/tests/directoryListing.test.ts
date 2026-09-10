@@ -41,6 +41,7 @@ function mockDir(overrides: Partial<Dir> = {}): Dir {
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: testUuid("file"),
+		stableUUID: undefined,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,
@@ -78,7 +79,8 @@ function mockSharedFile(uuid: UuidStr, role: SharingRole): SharedFile {
 			data: { name: "shared.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
 		},
 		sharingRole: role,
-		sharedTag: true
+		sharedTag: true,
+		canMakeThumbnail: false
 	}
 }
 

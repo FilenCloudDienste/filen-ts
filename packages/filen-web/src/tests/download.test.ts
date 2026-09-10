@@ -72,6 +72,7 @@ function fileItem(params: { uuid?: UuidStr; name?: string; size?: bigint } = {})
 		type: "file",
 		data: {
 			uuid,
+			stableUUID: undefined,
 			parent: PARENT_UUID,
 			size,
 			favorited: false,
@@ -110,6 +111,7 @@ function dirItem(params: { uuid?: UuidStr; name?: string } = {}): DriveItem {
 function testFile(overrides: Partial<AnyFile> = {}): AnyFile {
 	return {
 		uuid: nextUuid(),
+		stableUUID: undefined,
 		meta: { type: "encrypted", data: "ciphertext" },
 		parent: PARENT_UUID,
 		size: 1_024n,

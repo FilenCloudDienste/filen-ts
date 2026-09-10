@@ -15,6 +15,7 @@ import {
 function makeFile(uuid: `${string}-${string}-${string}-${string}`, name: string, size: bigint, modified: bigint): SdkFile {
 	return {
 		uuid,
+		stableUUID: undefined,
 		meta: { type: "decoded", data: { name, mime: "application/octet-stream", size, key: "k", version: 2, modified } },
 		parent: "00000000-0000-0000-0000-000000000000",
 		size,
@@ -63,7 +64,7 @@ const info: DirPublicInfo = {
 		linkUuid: "c0000000-0000-0000-0000-000000000001",
 		linkKey: "kk",
 		linkKeyVersion: 2,
-		password: undefined,
+		password: { type: "none" },
 		enableDownload: true,
 		salt: "salt"
 	},

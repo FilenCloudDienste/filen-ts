@@ -47,6 +47,7 @@ vi.mock("@/features/drive/lib/heicUpload", async importOriginal => {
 })
 
 import { runUpload, startUploads, throttle, defaultUploadDeps, type RunUploadDeps } from "@/features/drive/lib/upload"
+import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
@@ -62,6 +63,7 @@ function mockBrowserFile(name = "report.pdf", size = 1_024): File {
 function mockSdkFile(overrides: Partial<SdkFile> = {}): SdkFile {
 	return {
 		uuid: testUuid("uploaded"),
+		stableUUID: undefined,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,
@@ -108,8 +110,15 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		const remove = vi.fn<(id: string) => void>()
 		const patchListing = vi.fn<(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void>()
 		const invalidateDirectorySize = vi.fn<(parentUuid: string | null) => void>()
-		const deps: RunUploadDeps = { upload, store: { add, setProgress, settle, remove }, patchListing, invalidateDirectorySize }
-		return { deps, upload, add, setProgress, settle, remove, patchListing, invalidateDirectorySize }
+		const warmThumbnail = vi.fn<(uploaded: SdkFile, file: File) => void>()
+		const deps: RunUploadDeps = {
+			upload,
+			store: { add, setProgress, settle, remove },
+			patchListing,
+			invalidateDirectorySize,
+			warmThumbnail
+		}
+		return { deps, upload, add, setProgress, settle, remove, patchListing, invalidateDirectorySize, warmThumbnail }
 	}
 
 	it("adds an uploading transfer before calling upload", async () => {
@@ -154,6 +163,67 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		// narrowItem routes the uploaded SDK file to the plain "file" arm (has `chunks`, and carries
 		// `favorited` — see features/drive/lib/item.ts's narrowFile).
 		expect(patched[0]).toMatchObject({ type: "file", data: { uuid: testUuid("new") } })
+	})
+
+	// The upload's own bytes are the cheapest thumbnail source there will ever be — handing them over
+	// is what stops the freshly-patched listing row from downloading the file straight back.
+	it("hands the uploaded file and the local bytes to warmThumbnail on success", async () => {
+		const h = makeHarness()
+		const uploaded = mockSdkFile({ uuid: testUuid("new") })
+		const file = mockBrowserFile("photo.jpg")
+		h.upload.mockResolvedValue(uploaded)
+
+		await runUpload(h.deps, { parentUuid: "parent-uuid", file })
+
+		expect(h.warmThumbnail).toHaveBeenCalledWith(uploaded, file)
+	})
+
+	// Ordering pin, and the whole reason the call sits where it does: patching the row in makes its
+	// tile ask for a thumbnail on the next commit, so the warm has to have claimed the uuid by then or
+	// the tile starts downloading the file this upload just sent.
+	it("warms BEFORE patching the listing", async () => {
+		const h = makeHarness()
+		const order: string[] = []
+		h.upload.mockResolvedValue(mockSdkFile())
+		h.warmThumbnail.mockImplementation(() => {
+			order.push("warm")
+		})
+		h.patchListing.mockImplementation(() => {
+			order.push("patch")
+		})
+
+		await runUpload(h.deps, { parentUuid: null, file: mockBrowserFile() })
+
+		expect(order).toEqual(["warm", "patch"])
+	})
+
+	it("never warms when the upload fails", async () => {
+		const h = makeHarness()
+		h.upload.mockRejectedValue(sdkDto("UploadFailed"))
+
+		await runUpload(h.deps, { parentUuid: null, file: mockBrowserFile() })
+
+		expect(h.warmThumbnail).not.toHaveBeenCalled()
+	})
+
+	it("never warms when the upload is cancelled", async () => {
+		const h = makeHarness()
+		h.upload.mockRejectedValue(sdkDto("Cancelled"))
+
+		await runUpload(h.deps, { parentUuid: null, file: mockBrowserFile() })
+
+		expect(h.warmThumbnail).not.toHaveBeenCalled()
+	})
+
+	// Optional in the same DI sense as `cancel` and `invalidateDirectorySize` — a harness that does not
+	// care about the thumbnail path simply omits it, and the upload still completes.
+	it("completes cleanly when no warmThumbnail is wired", async () => {
+		const h = makeHarness()
+		h.upload.mockResolvedValue(mockSdkFile())
+		delete h.deps.warmThumbnail
+
+		await expect(runUpload(h.deps, { parentUuid: null, file: mockBrowserFile() })).resolves.toEqual({ status: "success" })
+		expect(h.patchListing).toHaveBeenCalled()
 	})
 
 	it("uploads at the drive root when parentUuid is null", async () => {
@@ -493,5 +563,11 @@ describe("defaultUploadDeps.cancel", () => {
 		defaultUploadDeps.cancel?.("transfer-id")
 
 		expect(cancelUpload).toHaveBeenCalledWith("transfer-id")
+	})
+})
+
+describe("defaultUploadDeps.warmThumbnail", () => {
+	it("is wired to the real warmUploadThumbnail", () => {
+		expect(defaultUploadDeps.warmThumbnail).toBe(warmUploadThumbnail)
 	})
 })

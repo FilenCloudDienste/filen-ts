@@ -43,6 +43,7 @@ function undecryptableDirectoryItem(uuid: UuidStr): DriveItem {
 function fileItem(uuid: UuidStr): DriveItem {
 	const file: File = {
 		uuid,
+		stableUUID: undefined,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,
@@ -94,7 +95,8 @@ function sharedFileItem(uuid: UuidStr): DriveItem {
 			data: { name: "shared.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "key", version: 2 }
 		},
 		sharingRole: { Receiver: { email: "receiver@filen.io", id: 7 } },
-		sharedTag: true
+		sharedTag: true,
+		canMakeThumbnail: false
 	}
 	return narrowItem(sharedFile)
 }

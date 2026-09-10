@@ -32,6 +32,7 @@ function mockDir(overrides: Partial<Dir> = {}): Dir {
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: "33333333-3333-3333-3333-333333333333",
+		stableUUID: undefined,
 		parent: "22222222-2222-2222-2222-222222222222",
 		size: 1_024n,
 		favorited: false,
@@ -148,6 +149,7 @@ function mockLinkedFile(overrides: Partial<LinkedFile> = {}): LinkedFile {
 		timestamp: 1_700_000_000_000n,
 		fileKey: "the-file-key",
 		linkedTag: true,
+		canMakeThumbnail: true,
 		...overrides
 	}
 }
@@ -166,7 +168,7 @@ describe("linkedFileIntoDriveItem", () => {
 		expect(item.data.region).toBe("de-1")
 		expect(item.data.bucket).toBe("filen-1")
 		expect(item.data.chunks).toBe(2n)
-		expect(item.data.canMakeThumbnail).toBe(false)
+		expect(item.data.canMakeThumbnail).toBe(true)
 		expect(item.data.favorited).toBe(false)
 		expect(item.data.undecryptable).toBe(false)
 		expect(item.data.decryptedMeta).toEqual({
@@ -192,6 +194,18 @@ describe("linkedFileIntoDriveItem", () => {
 		expect(item.data.undecryptable).toBe(false)
 		expect(item.data.decryptedMeta?.name).toBe("55555555-5555-5555-5555-555555555555")
 		expect(item.data.decryptedMeta?.mime).toBe("application/octet-stream")
+	})
+
+	// Asserted in BOTH directions so neither a hardcoded `false` nor a hardcoded `true` can pass: the
+	// SDK's per-file verdict is the only gate on whether a thumbnail is attempted.
+	it.each([true, false])("carries the link's own canMakeThumbnail verdict through unchanged (%s)", canMakeThumbnail => {
+		const item = linkedFileIntoDriveItem(mockLinkedFile({ canMakeThumbnail }))
+
+		if (item.type !== "file") {
+			throw new Error("expected a file arm")
+		}
+
+		expect(item.data.canMakeThumbnail).toBe(canMakeThumbnail)
 	})
 
 	it("preserves bigint fields exactly, including magnitudes beyond Number.MAX_SAFE_INTEGER", () => {
@@ -397,6 +411,7 @@ function mockSharedFile(overrides: Partial<SharedFile> = {}): SharedFile {
 		},
 		sharingRole: receiverRole(7, "receiver@filen.io"),
 		sharedTag: true,
+		canMakeThumbnail: true,
 		...overrides
 	}
 }
@@ -437,9 +452,22 @@ describe("narrowItem — shared arms", () => {
 		expect(item.data.decryptedMeta?.mime).toBe("application/pdf")
 		expect(item.data.sharingRole).toEqual(receiverRole(7, "receiver@filen.io"))
 		expect(item.data.favorited).toBe(false)
-		expect(item.data.canMakeThumbnail).toBe(false)
+		expect(item.data.canMakeThumbnail).toBe(true)
 		// shareSource is the untouched raw SharedFile (same reference) — what removeSharedItem needs.
 		expect(item.data.shareSource).toBe(raw)
+	})
+
+	// Asserted in BOTH directions so neither a hardcoded `false` nor a hardcoded `true` can pass. The
+	// value is inert downstream today (thumbnailCategory short-circuits every non-"file" arm to
+	// "none"), but pinning the passthrough is what stops the hardcode coming back.
+	it.each([true, false])("carries a SharedFile's own canMakeThumbnail verdict through unchanged (%s)", canMakeThumbnail => {
+		const item = narrowItem(mockSharedFile({ canMakeThumbnail }))
+
+		if (item.type !== "sharedRootFile") {
+			throw new Error("expected a sharedRootFile arm")
+		}
+
+		expect(item.data.canMakeThumbnail).toBe(canMakeThumbnail)
 	})
 
 	it("context-tags a nested SharedDir (parent role spread on) into a sharedDirectory, retaining the raw as shareSource", () => {

@@ -16,6 +16,7 @@ const OTHER_PARENT_UUID = testUuid("other-parent")
 function mockFile(overrides: Partial<SdkFile> = {}): SdkFile {
 	return {
 		uuid: testUuid("file"),
+		stableUUID: undefined,
 		parent: OTHER_PARENT_UUID,
 		size: 1_024n,
 		favorited: false,

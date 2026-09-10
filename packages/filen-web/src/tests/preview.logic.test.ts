@@ -11,7 +11,8 @@ import {
 	extensionOf,
 	codeMirrorLanguageFor,
 	decodeUtf8,
-	PREVIEW_MAX_BYTES
+	PREVIEW_MAX_BYTES,
+	RAW_IMAGE_EXTENSIONS
 } from "@/features/drive/lib/preview.logic"
 
 // Mirrors contactPickerDialog.logic.test.ts's own testUuid helper — UuidStr is a branded template
@@ -25,6 +26,7 @@ function testUuid(label: string): UuidStr {
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: "33333333-3333-3333-3333-333333333333",
+		stableUUID: undefined,
 		parent: "22222222-2222-2222-2222-222222222222",
 		size: 1_024n,
 		favorited: false,
@@ -75,6 +77,31 @@ function dirItem(overrides: Partial<Dir> = {}): DriveItem {
 }
 
 describe("previewType — extension category map", () => {
+	it.each([...RAW_IMAGE_EXTENSIONS])("camera RAW %s -> rawImage, its own category", ext => {
+		expect(previewType(fileNamed(`shot.${ext}`))).toBe("rawImage")
+	})
+
+	// The RAW set has 21 families and none of them may collide with a browser-decodable extension —
+	// "image" has real viewers behind it, "rawImage" currently has none, so an overlap would silently
+	// demote a previewable file.
+	it("has 21 RAW families, disjoint from the browser-decodable image set", () => {
+		expect(RAW_IMAGE_EXTENSIONS.size).toBe(21)
+		for (const ext of RAW_IMAGE_EXTENSIONS) {
+			expect(previewType(fileNamed(`shot.${ext}`))).toBe("rawImage")
+		}
+	})
+
+	it("is case-insensitive on a RAW extension", () => {
+		expect(previewType(fileNamed("SHOT.NEF"))).toBe("rawImage")
+	})
+
+	// A camera's own RAW mime starts with "image/", so the mime fallback would call it "image" — the
+	// extension map runs first and must win, or a RAW file would be handed to a browser decoder.
+	it("a RAW extension beats a spoofed or genuine image/* mime", () => {
+		expect(previewType(fileNamed("shot.cr3", { mime: "image/jpeg" }))).toBe("rawImage")
+		expect(previewType(fileNamed("shot.arw", { mime: "image/x-sony-arw" }))).toBe("rawImage")
+	})
+
 	it.each(["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico", "apng", "avif"])("%s -> image", ext => {
 		expect(previewType(fileNamed(`photo.${ext}`))).toBe("image")
 	})
@@ -295,6 +322,17 @@ describe("canPreview", () => {
 
 	it("is true for a HEIC file at or under the size cap", () => {
 		expect(canPreview(fileNamed("photo.heic", { size: PREVIEW_MAX_BYTES }), "drive")).toBe(true)
+	})
+
+	// rawImage is uncapped for the opposite reason to a streamed category: it is not streamed to the
+	// page at all — the SDK reads whatever ranges it needs inside wasm, so the file never enters JS
+	// memory and there is nothing for PREVIEW_MAX_BYTES to protect.
+	it("is true for a RAW file far past the whole-buffer size cap — the bytes never enter JS memory", () => {
+		expect(canPreview(fileNamed("shot.nef", { size: PREVIEW_MAX_BYTES * 4n }), "drive")).toBe(true)
+	})
+
+	it("is still false for an undecryptable RAW file", () => {
+		expect(canPreview(fileNamed("shot.nef", { undecryptable: true }), "drive")).toBe(false)
 	})
 
 	it("does NOT exclude trash — a trashed file still previews, read-only, mirroring mobile", () => {

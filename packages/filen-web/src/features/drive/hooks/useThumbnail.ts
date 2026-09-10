@@ -3,8 +3,8 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { getThumbnailUrl } from "@/features/drive/lib/thumbnails"
 import { thumbnailCategory } from "@/features/drive/lib/thumbnails.logic"
 
-// side-effect: registers the heic/video/pdf client generators against the thumbnail service —
-// nothing else in production imports thumbGenerators.ts, and an unregistered category would
+// side-effect: registers the sdk/video/pdf generators against the thumbnail service — upload.ts is
+// the only other production importer (for its own warm path), and an unregistered category would
 // otherwise silently resolve no thumbnail forever (getThumbnailUrl's own unregistered-generator path
 // is a clean null, never a throw).
 import "@/features/drive/lib/thumbGenerators"

@@ -19,6 +19,7 @@ function testUuid(label: string): UuidStr {
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: testUuid("file"),
+		stableUUID: undefined,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,
@@ -55,6 +56,8 @@ function mockVersion(overrides: Partial<FileVersion> = {}): FileVersion {
 		},
 		timestamp: 1_600_000_000_000n,
 		uuid: testUuid("version"),
+		// The FILE's whole-life id, identical for every version of it — never the version's own uuid.
+		stableUUID: testUuid("file"),
 		...overrides
 	}
 }

@@ -133,16 +133,17 @@ function ItemMenuEntries({
 
 	// Copy-link's own dispatch — intercepted here, BEFORE the run==="dialog" branch below, since its
 	// real behavior (copy straight to the clipboard when a link already exists) depends on data this
-	// synchronous click handler doesn't have yet. `ensureQueryData` reuses the link dialog's own cache
-	// entry (same query key) rather than always re-fetching — opening the dialog moments earlier for
+	// synchronous click handler doesn't have yet. `staleTime: "static"` reuses the link dialog's own
+	// cache entry (same query key) rather than always re-fetching — opening the dialog moments earlier for
 	// this same item already primed it. A free-tier account can never have an existing link (public
 	// links are premium-only), so `status` naturally resolves null there too — no separate premium
 	// check needed, it degrades to `onItemAction("link", item)` exactly like an item with no link at
 	// all, which is where the dialog's own subscription gate lives (see linkDialog.tsx).
 	async function runCopyLink(): Promise<void> {
-		const status = await queryClient.ensureQueryData({
+		const status = await queryClient.query({
 			queryKey: driveItemLinkStatusQueryKey(item.data.uuid),
-			queryFn: () => fetchDriveItemLinkStatus(item)
+			queryFn: () => fetchDriveItemLinkStatus(item),
+			staleTime: "static"
 		})
 		const outcome = await resolveCopyLinkAction(item, status, url => navigator.clipboard.writeText(url))
 

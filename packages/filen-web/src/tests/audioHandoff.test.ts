@@ -19,6 +19,7 @@ function fileNamed(name: string, options: { mime?: string; undecryptable?: boole
 
 	const raw: File = {
 		uuid: testUuid(name),
+		stableUUID: undefined,
 		parent: "22222222-2222-2222-2222-222222222222",
 		size: 2_048n,
 		favorited: false,

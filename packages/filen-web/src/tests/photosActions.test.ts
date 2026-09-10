@@ -35,6 +35,7 @@ const ROOT_UUID = "root-uuid"
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: testUuid("photo"),
+		stableUUID: undefined,
 		parent: testUuid("root"),
 		size: 1_024n,
 		favorited: false,

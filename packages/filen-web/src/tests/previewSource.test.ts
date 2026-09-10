@@ -18,6 +18,7 @@ function testUuid(label: string): UuidStr {
 function fileNamed(name: string, uuid: UuidStr = testUuid(name)): DriveItem {
 	return narrowItem({
 		uuid,
+		stableUUID: undefined,
 		parent: "22222222-2222-2222-2222-222222222222",
 		size: 1_024n,
 		favorited: false,
