@@ -9,55 +9,49 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as RegisterRouteImport } from './routes/register'
-import { Route as NoOpfsRouteImport } from './routes/no-opfs'
-import { Route as NoCoiRouteImport } from './routes/no-coi'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as AppRouteRouteImport } from './routes/_app/route'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ResetTokenRouteImport } from './routes/reset.$token'
-import { Route as FUuidRouteImport } from './routes/f.$uuid'
-import { Route as DUuidRouteImport } from './routes/d.$uuid'
-import { Route as AppTrashRouteImport } from './routes/_app/trash'
-import { Route as AppTransfersRouteImport } from './routes/_app/transfers'
-import { Route as AppRecentsRouteImport } from './routes/_app/recents'
-import { Route as AppPlaylistsRouteImport } from './routes/_app/playlists'
-import { Route as AppPhotosRouteImport } from './routes/_app/photos'
-import { Route as AppNotesRouteImport } from './routes/_app/notes'
-import { Route as AppLinksRouteImport } from './routes/_app/links'
-import { Route as AppFavoritesRouteImport } from './routes/_app/favorites'
-import { Route as AppContactsRouteImport } from './routes/_app/contacts'
+import { Route as AppRouteRouteImport } from './routes/_app/route'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as NoCoiRouteImport } from './routes/no-coi'
+import { Route as NoOpfsRouteImport } from './routes/no-opfs'
+import { Route as RegisterRouteImport } from './routes/register'
 import { Route as AppChatsRouteImport } from './routes/_app/chats'
+import { Route as AppContactsRouteImport } from './routes/_app/contacts'
+import { Route as AppFavoritesRouteImport } from './routes/_app/favorites'
+import { Route as AppLinksRouteImport } from './routes/_app/links'
+import { Route as AppNotesRouteImport } from './routes/_app/notes'
+import { Route as AppPhotosRouteImport } from './routes/_app/photos'
+import { Route as AppPlaylistsRouteImport } from './routes/_app/playlists'
+import { Route as AppRecentsRouteImport } from './routes/_app/recents'
 import { Route as AppSettingsRouteRouteImport } from './routes/_app/settings/route'
-import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
-import { Route as AppNotesIndexRouteImport } from './routes/_app/notes.index'
+import { Route as AppTransfersRouteImport } from './routes/_app/transfers'
+import { Route as AppTrashRouteImport } from './routes/_app/trash'
+import { Route as DUuidRouteImport } from './routes/d.$uuid'
+import { Route as FUuidRouteImport } from './routes/f.$uuid'
+import { Route as ResetTokenRouteImport } from './routes/reset.$token'
 import { Route as AppChatsIndexRouteImport } from './routes/_app/chats.index'
-import { Route as AppSharedOutSplatRouteImport } from './routes/_app/shared-out.$'
-import { Route as AppSharedInSplatRouteImport } from './routes/_app/shared-in.$'
-import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/security'
-import { Route as AppSettingsKeyboardRouteImport } from './routes/_app/settings/keyboard'
-import { Route as AppSettingsEventsRouteImport } from './routes/_app/settings/events'
-import { Route as AppSettingsBillingRouteImport } from './routes/_app/settings/billing'
-import { Route as AppSettingsAppearanceRouteImport } from './routes/_app/settings/appearance'
-import { Route as AppSettingsAdvancedRouteImport } from './routes/_app/settings/advanced'
-import { Route as AppSettingsAccountRouteImport } from './routes/_app/settings/account'
-import { Route as AppNotesUuidRouteImport } from './routes/_app/notes.$uuid'
-import { Route as AppDriveSplatRouteImport } from './routes/_app/drive.$'
 import { Route as AppChatsUuidRouteImport } from './routes/_app/chats.$uuid'
+import { Route as AppDriveSplatRouteImport } from './routes/_app/drive.$'
+import { Route as AppNotesIndexRouteImport } from './routes/_app/notes.index'
+import { Route as AppNotesUuidRouteImport } from './routes/_app/notes.$uuid'
+import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
+import { Route as AppSettingsAccountRouteImport } from './routes/_app/settings/account'
+import { Route as AppSettingsAdvancedRouteImport } from './routes/_app/settings/advanced'
+import { Route as AppSettingsAppearanceRouteImport } from './routes/_app/settings/appearance'
+import { Route as AppSettingsBillingRouteImport } from './routes/_app/settings/billing'
+import { Route as AppSettingsEventsRouteImport } from './routes/_app/settings/events'
+import { Route as AppSettingsKeyboardRouteImport } from './routes/_app/settings/keyboard'
+import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/security'
+import { Route as AppSharedInSplatRouteImport } from './routes/_app/shared-in.$'
+import { Route as AppSharedOutSplatRouteImport } from './routes/_app/shared-out.$'
 
-const RegisterRoute = RegisterRouteImport.update({
-  id: '/register',
-  path: '/register',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const NoOpfsRoute = NoOpfsRouteImport.update({
-  id: '/no-opfs',
-  path: '/no-opfs',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const NoCoiRoute = NoCoiRouteImport.update({
-  id: '/no-coi',
-  path: '/no-coi',
+const AppRouteRoute = AppRouteRouteImport.update({
+  id: '/_app',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -65,68 +59,24 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppRouteRoute = AppRouteRouteImport.update({
-  id: '/_app',
+const NoCoiRoute = NoCoiRouteImport.update({
+  id: '/no-coi',
+  path: '/no-coi',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const NoOpfsRoute = NoOpfsRouteImport.update({
+  id: '/no-opfs',
+  path: '/no-opfs',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ResetTokenRoute = ResetTokenRouteImport.update({
-  id: '/reset/$token',
-  path: '/reset/$token',
+const RegisterRoute = RegisterRouteImport.update({
+  id: '/register',
+  path: '/register',
   getParentRoute: () => rootRouteImport,
 } as any)
-const FUuidRoute = FUuidRouteImport.update({
-  id: '/f/$uuid',
-  path: '/f/$uuid',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DUuidRoute = DUuidRouteImport.update({
-  id: '/d/$uuid',
-  path: '/d/$uuid',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppTrashRoute = AppTrashRouteImport.update({
-  id: '/trash',
-  path: '/trash',
-  getParentRoute: () => AppRouteRoute,
-} as any)
-const AppTransfersRoute = AppTransfersRouteImport.update({
-  id: '/transfers',
-  path: '/transfers',
-  getParentRoute: () => AppRouteRoute,
-} as any)
-const AppRecentsRoute = AppRecentsRouteImport.update({
-  id: '/recents',
-  path: '/recents',
-  getParentRoute: () => AppRouteRoute,
-} as any)
-const AppPlaylistsRoute = AppPlaylistsRouteImport.update({
-  id: '/playlists',
-  path: '/playlists',
-  getParentRoute: () => AppRouteRoute,
-} as any)
-const AppPhotosRoute = AppPhotosRouteImport.update({
-  id: '/photos',
-  path: '/photos',
-  getParentRoute: () => AppRouteRoute,
-} as any)
-const AppNotesRoute = AppNotesRouteImport.update({
-  id: '/notes',
-  path: '/notes',
-  getParentRoute: () => AppRouteRoute,
-} as any)
-const AppLinksRoute = AppLinksRouteImport.update({
-  id: '/links',
-  path: '/links',
-  getParentRoute: () => AppRouteRoute,
-} as any)
-const AppFavoritesRoute = AppFavoritesRouteImport.update({
-  id: '/favorites',
-  path: '/favorites',
+const AppChatsRoute = AppChatsRouteImport.update({
+  id: '/chats',
+  path: '/chats',
   getParentRoute: () => AppRouteRoute,
 } as any)
 const AppContactsRoute = AppContactsRouteImport.update({
@@ -134,9 +84,34 @@ const AppContactsRoute = AppContactsRouteImport.update({
   path: '/contacts',
   getParentRoute: () => AppRouteRoute,
 } as any)
-const AppChatsRoute = AppChatsRouteImport.update({
-  id: '/chats',
-  path: '/chats',
+const AppFavoritesRoute = AppFavoritesRouteImport.update({
+  id: '/favorites',
+  path: '/favorites',
+  getParentRoute: () => AppRouteRoute,
+} as any)
+const AppLinksRoute = AppLinksRouteImport.update({
+  id: '/links',
+  path: '/links',
+  getParentRoute: () => AppRouteRoute,
+} as any)
+const AppNotesRoute = AppNotesRouteImport.update({
+  id: '/notes',
+  path: '/notes',
+  getParentRoute: () => AppRouteRoute,
+} as any)
+const AppPhotosRoute = AppPhotosRouteImport.update({
+  id: '/photos',
+  path: '/photos',
+  getParentRoute: () => AppRouteRoute,
+} as any)
+const AppPlaylistsRoute = AppPlaylistsRouteImport.update({
+  id: '/playlists',
+  path: '/playlists',
+  getParentRoute: () => AppRouteRoute,
+} as any)
+const AppRecentsRoute = AppRecentsRouteImport.update({
+  id: '/recents',
+  path: '/recents',
   getParentRoute: () => AppRouteRoute,
 } as any)
 const AppSettingsRouteRoute = AppSettingsRouteRouteImport.update({
@@ -144,59 +119,59 @@ const AppSettingsRouteRoute = AppSettingsRouteRouteImport.update({
   path: '/settings',
   getParentRoute: () => AppRouteRoute,
 } as any)
-const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AppSettingsRouteRoute,
+const AppTransfersRoute = AppTransfersRouteImport.update({
+  id: '/transfers',
+  path: '/transfers',
+  getParentRoute: () => AppRouteRoute,
 } as any)
-const AppNotesIndexRoute = AppNotesIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AppNotesRoute,
+const AppTrashRoute = AppTrashRouteImport.update({
+  id: '/trash',
+  path: '/trash',
+  getParentRoute: () => AppRouteRoute,
+} as any)
+const DUuidRoute = DUuidRouteImport.update({
+  id: '/d/$uuid',
+  path: '/d/$uuid',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FUuidRoute = FUuidRouteImport.update({
+  id: '/f/$uuid',
+  path: '/f/$uuid',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetTokenRoute = ResetTokenRouteImport.update({
+  id: '/reset/$token',
+  path: '/reset/$token',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AppChatsIndexRoute = AppChatsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppChatsRoute,
 } as any)
-const AppSharedOutSplatRoute = AppSharedOutSplatRouteImport.update({
-  id: '/shared-out/$',
-  path: '/shared-out/$',
+const AppChatsUuidRoute = AppChatsUuidRouteImport.update({
+  id: '/$uuid',
+  path: '/$uuid',
+  getParentRoute: () => AppChatsRoute,
+} as any)
+const AppDriveSplatRoute = AppDriveSplatRouteImport.update({
+  id: '/drive/$',
+  path: '/drive/$',
   getParentRoute: () => AppRouteRoute,
 } as any)
-const AppSharedInSplatRoute = AppSharedInSplatRouteImport.update({
-  id: '/shared-in/$',
-  path: '/shared-in/$',
-  getParentRoute: () => AppRouteRoute,
+const AppNotesIndexRoute = AppNotesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppNotesRoute,
 } as any)
-const AppSettingsSecurityRoute = AppSettingsSecurityRouteImport.update({
-  id: '/security',
-  path: '/security',
-  getParentRoute: () => AppSettingsRouteRoute,
+const AppNotesUuidRoute = AppNotesUuidRouteImport.update({
+  id: '/$uuid',
+  path: '/$uuid',
+  getParentRoute: () => AppNotesRoute,
 } as any)
-const AppSettingsKeyboardRoute = AppSettingsKeyboardRouteImport.update({
-  id: '/keyboard',
-  path: '/keyboard',
-  getParentRoute: () => AppSettingsRouteRoute,
-} as any)
-const AppSettingsEventsRoute = AppSettingsEventsRouteImport.update({
-  id: '/events',
-  path: '/events',
-  getParentRoute: () => AppSettingsRouteRoute,
-} as any)
-const AppSettingsBillingRoute = AppSettingsBillingRouteImport.update({
-  id: '/billing',
-  path: '/billing',
-  getParentRoute: () => AppSettingsRouteRoute,
-} as any)
-const AppSettingsAppearanceRoute = AppSettingsAppearanceRouteImport.update({
-  id: '/appearance',
-  path: '/appearance',
-  getParentRoute: () => AppSettingsRouteRoute,
-} as any)
-const AppSettingsAdvancedRoute = AppSettingsAdvancedRouteImport.update({
-  id: '/advanced',
-  path: '/advanced',
+const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => AppSettingsRouteRoute,
 } as any)
 const AppSettingsAccountRoute = AppSettingsAccountRouteImport.update({
@@ -204,20 +179,45 @@ const AppSettingsAccountRoute = AppSettingsAccountRouteImport.update({
   path: '/account',
   getParentRoute: () => AppSettingsRouteRoute,
 } as any)
-const AppNotesUuidRoute = AppNotesUuidRouteImport.update({
-  id: '/$uuid',
-  path: '/$uuid',
-  getParentRoute: () => AppNotesRoute,
+const AppSettingsAdvancedRoute = AppSettingsAdvancedRouteImport.update({
+  id: '/advanced',
+  path: '/advanced',
+  getParentRoute: () => AppSettingsRouteRoute,
 } as any)
-const AppDriveSplatRoute = AppDriveSplatRouteImport.update({
-  id: '/drive/$',
-  path: '/drive/$',
+const AppSettingsAppearanceRoute = AppSettingsAppearanceRouteImport.update({
+  id: '/appearance',
+  path: '/appearance',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
+const AppSettingsBillingRoute = AppSettingsBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
+const AppSettingsEventsRoute = AppSettingsEventsRouteImport.update({
+  id: '/events',
+  path: '/events',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
+const AppSettingsKeyboardRoute = AppSettingsKeyboardRouteImport.update({
+  id: '/keyboard',
+  path: '/keyboard',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
+const AppSettingsSecurityRoute = AppSettingsSecurityRouteImport.update({
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
+const AppSharedInSplatRoute = AppSharedInSplatRouteImport.update({
+  id: '/shared-in/$',
+  path: '/shared-in/$',
   getParentRoute: () => AppRouteRoute,
 } as any)
-const AppChatsUuidRoute = AppChatsUuidRouteImport.update({
-  id: '/$uuid',
-  path: '/$uuid',
-  getParentRoute: () => AppChatsRoute,
+const AppSharedOutSplatRoute = AppSharedOutSplatRouteImport.update({
+  id: '/shared-out/$',
+  path: '/shared-out/$',
+  getParentRoute: () => AppRouteRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -450,32 +450,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/register': {
-      id: '/register'
-      path: '/register'
-      fullPath: '/register'
-      preLoaderRoute: typeof RegisterRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/no-opfs': {
-      id: '/no-opfs'
-      path: '/no-opfs'
-      fullPath: '/no-opfs'
-      preLoaderRoute: typeof NoOpfsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/no-coi': {
-      id: '/no-coi'
-      path: '/no-coi'
-      fullPath: '/no-coi'
-      preLoaderRoute: typeof NoCoiRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app': {
@@ -485,88 +464,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/reset/$token': {
-      id: '/reset/$token'
-      path: '/reset/$token'
-      fullPath: '/reset/$token'
-      preLoaderRoute: typeof ResetTokenRouteImport
+    '/no-coi': {
+      id: '/no-coi'
+      path: '/no-coi'
+      fullPath: '/no-coi'
+      preLoaderRoute: typeof NoCoiRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/f/$uuid': {
-      id: '/f/$uuid'
-      path: '/f/$uuid'
-      fullPath: '/f/$uuid'
-      preLoaderRoute: typeof FUuidRouteImport
+    '/no-opfs': {
+      id: '/no-opfs'
+      path: '/no-opfs'
+      fullPath: '/no-opfs'
+      preLoaderRoute: typeof NoOpfsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/d/$uuid': {
-      id: '/d/$uuid'
-      path: '/d/$uuid'
-      fullPath: '/d/$uuid'
-      preLoaderRoute: typeof DUuidRouteImport
+    '/register': {
+      id: '/register'
+      path: '/register'
+      fullPath: '/register'
+      preLoaderRoute: typeof RegisterRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_app/trash': {
-      id: '/_app/trash'
-      path: '/trash'
-      fullPath: '/trash'
-      preLoaderRoute: typeof AppTrashRouteImport
-      parentRoute: typeof AppRouteRoute
-    }
-    '/_app/transfers': {
-      id: '/_app/transfers'
-      path: '/transfers'
-      fullPath: '/transfers'
-      preLoaderRoute: typeof AppTransfersRouteImport
-      parentRoute: typeof AppRouteRoute
-    }
-    '/_app/recents': {
-      id: '/_app/recents'
-      path: '/recents'
-      fullPath: '/recents'
-      preLoaderRoute: typeof AppRecentsRouteImport
-      parentRoute: typeof AppRouteRoute
-    }
-    '/_app/playlists': {
-      id: '/_app/playlists'
-      path: '/playlists'
-      fullPath: '/playlists'
-      preLoaderRoute: typeof AppPlaylistsRouteImport
-      parentRoute: typeof AppRouteRoute
-    }
-    '/_app/photos': {
-      id: '/_app/photos'
-      path: '/photos'
-      fullPath: '/photos'
-      preLoaderRoute: typeof AppPhotosRouteImport
-      parentRoute: typeof AppRouteRoute
-    }
-    '/_app/notes': {
-      id: '/_app/notes'
-      path: '/notes'
-      fullPath: '/notes'
-      preLoaderRoute: typeof AppNotesRouteImport
-      parentRoute: typeof AppRouteRoute
-    }
-    '/_app/links': {
-      id: '/_app/links'
-      path: '/links'
-      fullPath: '/links'
-      preLoaderRoute: typeof AppLinksRouteImport
-      parentRoute: typeof AppRouteRoute
-    }
-    '/_app/favorites': {
-      id: '/_app/favorites'
-      path: '/favorites'
-      fullPath: '/favorites'
-      preLoaderRoute: typeof AppFavoritesRouteImport
+    '/_app/chats': {
+      id: '/_app/chats'
+      path: '/chats'
+      fullPath: '/chats'
+      preLoaderRoute: typeof AppChatsRouteImport
       parentRoute: typeof AppRouteRoute
     }
     '/_app/contacts': {
@@ -576,11 +506,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppContactsRouteImport
       parentRoute: typeof AppRouteRoute
     }
-    '/_app/chats': {
-      id: '/_app/chats'
-      path: '/chats'
-      fullPath: '/chats'
-      preLoaderRoute: typeof AppChatsRouteImport
+    '/_app/favorites': {
+      id: '/_app/favorites'
+      path: '/favorites'
+      fullPath: '/favorites'
+      preLoaderRoute: typeof AppFavoritesRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
+    '/_app/links': {
+      id: '/_app/links'
+      path: '/links'
+      fullPath: '/links'
+      preLoaderRoute: typeof AppLinksRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
+    '/_app/notes': {
+      id: '/_app/notes'
+      path: '/notes'
+      fullPath: '/notes'
+      preLoaderRoute: typeof AppNotesRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
+    '/_app/photos': {
+      id: '/_app/photos'
+      path: '/photos'
+      fullPath: '/photos'
+      preLoaderRoute: typeof AppPhotosRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
+    '/_app/playlists': {
+      id: '/_app/playlists'
+      path: '/playlists'
+      fullPath: '/playlists'
+      preLoaderRoute: typeof AppPlaylistsRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
+    '/_app/recents': {
+      id: '/_app/recents'
+      path: '/recents'
+      fullPath: '/recents'
+      preLoaderRoute: typeof AppRecentsRouteImport
       parentRoute: typeof AppRouteRoute
     }
     '/_app/settings': {
@@ -590,19 +555,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsRouteRouteImport
       parentRoute: typeof AppRouteRoute
     }
-    '/_app/settings/': {
-      id: '/_app/settings/'
-      path: '/'
-      fullPath: '/settings/'
-      preLoaderRoute: typeof AppSettingsIndexRouteImport
-      parentRoute: typeof AppSettingsRouteRoute
+    '/_app/transfers': {
+      id: '/_app/transfers'
+      path: '/transfers'
+      fullPath: '/transfers'
+      preLoaderRoute: typeof AppTransfersRouteImport
+      parentRoute: typeof AppRouteRoute
     }
-    '/_app/notes/': {
-      id: '/_app/notes/'
-      path: '/'
-      fullPath: '/notes/'
-      preLoaderRoute: typeof AppNotesIndexRouteImport
-      parentRoute: typeof AppNotesRoute
+    '/_app/trash': {
+      id: '/_app/trash'
+      path: '/trash'
+      fullPath: '/trash'
+      preLoaderRoute: typeof AppTrashRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
+    '/d/$uuid': {
+      id: '/d/$uuid'
+      path: '/d/$uuid'
+      fullPath: '/d/$uuid'
+      preLoaderRoute: typeof DUuidRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/f/$uuid': {
+      id: '/f/$uuid'
+      path: '/f/$uuid'
+      fullPath: '/f/$uuid'
+      preLoaderRoute: typeof FUuidRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset/$token': {
+      id: '/reset/$token'
+      path: '/reset/$token'
+      fullPath: '/reset/$token'
+      preLoaderRoute: typeof ResetTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_app/chats/': {
       id: '/_app/chats/'
@@ -611,60 +597,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppChatsIndexRouteImport
       parentRoute: typeof AppChatsRoute
     }
-    '/_app/shared-out/$': {
-      id: '/_app/shared-out/$'
-      path: '/shared-out/$'
-      fullPath: '/shared-out/$'
-      preLoaderRoute: typeof AppSharedOutSplatRouteImport
+    '/_app/chats/$uuid': {
+      id: '/_app/chats/$uuid'
+      path: '/$uuid'
+      fullPath: '/chats/$uuid'
+      preLoaderRoute: typeof AppChatsUuidRouteImport
+      parentRoute: typeof AppChatsRoute
+    }
+    '/_app/drive/$': {
+      id: '/_app/drive/$'
+      path: '/drive/$'
+      fullPath: '/drive/$'
+      preLoaderRoute: typeof AppDriveSplatRouteImport
       parentRoute: typeof AppRouteRoute
     }
-    '/_app/shared-in/$': {
-      id: '/_app/shared-in/$'
-      path: '/shared-in/$'
-      fullPath: '/shared-in/$'
-      preLoaderRoute: typeof AppSharedInSplatRouteImport
-      parentRoute: typeof AppRouteRoute
+    '/_app/notes/': {
+      id: '/_app/notes/'
+      path: '/'
+      fullPath: '/notes/'
+      preLoaderRoute: typeof AppNotesIndexRouteImport
+      parentRoute: typeof AppNotesRoute
     }
-    '/_app/settings/security': {
-      id: '/_app/settings/security'
-      path: '/security'
-      fullPath: '/settings/security'
-      preLoaderRoute: typeof AppSettingsSecurityRouteImport
-      parentRoute: typeof AppSettingsRouteRoute
+    '/_app/notes/$uuid': {
+      id: '/_app/notes/$uuid'
+      path: '/$uuid'
+      fullPath: '/notes/$uuid'
+      preLoaderRoute: typeof AppNotesUuidRouteImport
+      parentRoute: typeof AppNotesRoute
     }
-    '/_app/settings/keyboard': {
-      id: '/_app/settings/keyboard'
-      path: '/keyboard'
-      fullPath: '/settings/keyboard'
-      preLoaderRoute: typeof AppSettingsKeyboardRouteImport
-      parentRoute: typeof AppSettingsRouteRoute
-    }
-    '/_app/settings/events': {
-      id: '/_app/settings/events'
-      path: '/events'
-      fullPath: '/settings/events'
-      preLoaderRoute: typeof AppSettingsEventsRouteImport
-      parentRoute: typeof AppSettingsRouteRoute
-    }
-    '/_app/settings/billing': {
-      id: '/_app/settings/billing'
-      path: '/billing'
-      fullPath: '/settings/billing'
-      preLoaderRoute: typeof AppSettingsBillingRouteImport
-      parentRoute: typeof AppSettingsRouteRoute
-    }
-    '/_app/settings/appearance': {
-      id: '/_app/settings/appearance'
-      path: '/appearance'
-      fullPath: '/settings/appearance'
-      preLoaderRoute: typeof AppSettingsAppearanceRouteImport
-      parentRoute: typeof AppSettingsRouteRoute
-    }
-    '/_app/settings/advanced': {
-      id: '/_app/settings/advanced'
-      path: '/advanced'
-      fullPath: '/settings/advanced'
-      preLoaderRoute: typeof AppSettingsAdvancedRouteImport
+    '/_app/settings/': {
+      id: '/_app/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppSettingsRouteRoute
     }
     '/_app/settings/account': {
@@ -674,26 +639,61 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsAccountRouteImport
       parentRoute: typeof AppSettingsRouteRoute
     }
-    '/_app/notes/$uuid': {
-      id: '/_app/notes/$uuid'
-      path: '/$uuid'
-      fullPath: '/notes/$uuid'
-      preLoaderRoute: typeof AppNotesUuidRouteImport
-      parentRoute: typeof AppNotesRoute
+    '/_app/settings/advanced': {
+      id: '/_app/settings/advanced'
+      path: '/advanced'
+      fullPath: '/settings/advanced'
+      preLoaderRoute: typeof AppSettingsAdvancedRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
     }
-    '/_app/drive/$': {
-      id: '/_app/drive/$'
-      path: '/drive/$'
-      fullPath: '/drive/$'
-      preLoaderRoute: typeof AppDriveSplatRouteImport
+    '/_app/settings/appearance': {
+      id: '/_app/settings/appearance'
+      path: '/appearance'
+      fullPath: '/settings/appearance'
+      preLoaderRoute: typeof AppSettingsAppearanceRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
+    '/_app/settings/billing': {
+      id: '/_app/settings/billing'
+      path: '/billing'
+      fullPath: '/settings/billing'
+      preLoaderRoute: typeof AppSettingsBillingRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
+    '/_app/settings/events': {
+      id: '/_app/settings/events'
+      path: '/events'
+      fullPath: '/settings/events'
+      preLoaderRoute: typeof AppSettingsEventsRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
+    '/_app/settings/keyboard': {
+      id: '/_app/settings/keyboard'
+      path: '/keyboard'
+      fullPath: '/settings/keyboard'
+      preLoaderRoute: typeof AppSettingsKeyboardRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
+    '/_app/settings/security': {
+      id: '/_app/settings/security'
+      path: '/security'
+      fullPath: '/settings/security'
+      preLoaderRoute: typeof AppSettingsSecurityRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
+    '/_app/shared-in/$': {
+      id: '/_app/shared-in/$'
+      path: '/shared-in/$'
+      fullPath: '/shared-in/$'
+      preLoaderRoute: typeof AppSharedInSplatRouteImport
       parentRoute: typeof AppRouteRoute
     }
-    '/_app/chats/$uuid': {
-      id: '/_app/chats/$uuid'
-      path: '/$uuid'
-      fullPath: '/chats/$uuid'
-      preLoaderRoute: typeof AppChatsUuidRouteImport
-      parentRoute: typeof AppChatsRoute
+    '/_app/shared-out/$': {
+      id: '/_app/shared-out/$'
+      path: '/shared-out/$'
+      fullPath: '/shared-out/$'
+      preLoaderRoute: typeof AppSharedOutSplatRouteImport
+      parentRoute: typeof AppRouteRoute
     }
   }
 }
