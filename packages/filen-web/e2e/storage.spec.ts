@@ -9,8 +9,15 @@ test.describe("storage", () => {
 		await page.waitForFunction(() => "__filenE2E" in window)
 
 		await page.evaluate(() => window.__filenE2E.kvSet("e2e.storage.persist", "persisted-value"))
-		await page.reload()
-		await page.waitForFunction(() => "__filenE2E" in window)
+
+		// Retried because Playwright-firefox aborts a reload issued while the first load still has a
+		// request in flight (NS_BINDING_ABORTED) — the boot fires several, so on a slow runner the race
+		// is ordinary rather than exceptional. Re-reloading is safe: the value under test is already
+		// written, and the assertion below is what proves the reload happened at all.
+		await expect(async () => {
+			await page.reload()
+			await page.waitForFunction(() => "__filenE2E" in window, undefined, { timeout: 15_000 })
+		}).toPass({ timeout: 60_000 })
 
 		const value = await page.evaluate(() => window.__filenE2E.kvGet("e2e.storage.persist"))
 		expect(value).toBe("persisted-value")

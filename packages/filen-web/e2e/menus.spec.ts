@@ -7,7 +7,8 @@ import {
 	trashScratchDirectory,
 	descendInto,
 	createDirectoryViaDialog,
-	LIVE_WRITE_TIMEOUT_MS
+	LIVE_WRITE_TIMEOUT_MS,
+	BOOT_SETTLE_TIMEOUT_MS
 } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
@@ -239,7 +240,7 @@ test.describe("context menus", () => {
 			// reload before its own final cleanup assertion.
 			await expect(async () => {
 				await page.reload()
-				await waitForListingSettled(page)
+				await waitForListingSettled(page, BOOT_SETTLE_TIMEOUT_MS)
 				await expect(dirRow).toHaveCount(0)
 			}).toPass({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
@@ -258,11 +259,28 @@ test.describe("context menus", () => {
 			const trashListing = await waitForListingSettled(page)
 			await expect(page.getByRole("button", { name: "Empty trash", exact: true })).toBeVisible()
 
-			await page.getByRole("button", { name: "Sort by", exact: true }).click()
+			// Re-opened per attempt rather than clicked once: a menu item can be reported visible, enabled
+			// and stable while its popup is still finishing its enter transition, and a click that lands
+			// in that window is swallowed. Nothing here used to notice — the radios went unchecked, the
+			// sort never changed, and the row assertion below failed 15s later looking like a listing
+			// problem. Each attempt now proves both radios took before leaving the menu.
 			const sortMenu = page.getByRole("menu")
-			await expect(sortMenu).toBeVisible()
-			await sortMenu.getByRole("menuitemradio", { name: "Upload date", exact: true }).click()
-			await page.getByRole("menuitemradio", { name: "Descending", exact: true }).click()
+
+			await expect(async () => {
+				if ((await sortMenu.count()) === 0) {
+					await page.getByRole("button", { name: "Sort by", exact: true }).click()
+					await expect(sortMenu).toBeVisible()
+				}
+
+				const uploadDate = sortMenu.getByRole("menuitemradio", { name: "Upload date", exact: true })
+				const descending = sortMenu.getByRole("menuitemradio", { name: "Descending", exact: true })
+
+				await uploadDate.click()
+				await expect(uploadDate).toHaveAttribute("aria-checked", "true")
+				await descending.click()
+				await expect(descending).toHaveAttribute("aria-checked", "true")
+			}).toPass({ timeout: 60_000 })
+
 			await page.keyboard.press("Escape")
 			await expect(sortMenu).toHaveCount(0)
 

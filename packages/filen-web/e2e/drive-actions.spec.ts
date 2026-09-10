@@ -5,7 +5,8 @@ import {
 	descendInto,
 	createDirectoryViaDialog,
 	enterScratchDirectory,
-	LIVE_WRITE_TIMEOUT_MS
+	LIVE_WRITE_TIMEOUT_MS,
+	BOOT_SETTLE_TIMEOUT_MS
 } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
@@ -353,7 +354,7 @@ test.describe("drive bulk actions", () => {
 		// removal with a stale "still there" read on THIS page, without anything ever being wrong
 		// server-side. A fresh boot re-fetches once, for real, independent of that page's prior state.
 		await page.reload()
-		const rootAfterFinalCleanup = await waitForListingSettled(page)
+		const rootAfterFinalCleanup = await waitForListingSettled(page, BOOT_SETTLE_TIMEOUT_MS)
 		await expect(rootAfterFinalCleanup.listbox.getByRole("option", { name: scratchName })).toHaveCount(0)
 	})
 })

@@ -210,10 +210,10 @@ export default defineConfig({
 			// burn on a contended account (helpers/listing.ts). Counting only the waits pinned at their own
 			// call sites there:
 			//
-			//   create retry loop  315s = attempt 1 47s (15s reminder dismissal + 3s storage reminder
-			//                             + 10s settle + 15s pinned create wait + 4s dialog probes)
-			//                             + 4 x 52s (the same, plus the 5s adopt poll, which is gated on
-			//                             attempt > 1) + 4 x 15s reload. Every reload RE-ARMS the startup
+			//   create retry loop  291s = attempt 1 77s (15s reminder dismissal + 3s storage reminder
+			//                             + 10s settle + 45s pinned create wait + 4s dialog probes)
+			//                             + 2 x 92s (the same, plus the 15s adopt poll, which is gated on
+			//                             attempt > 1) + 2 x 15s reload. Every reload RE-ARMS the startup
 			//                             reminders, so the 15s dismissal recurs per attempt rather than
 			//                             being paid once.
 			//   descent             70s = 10s row + 30s descendInto retry envelope + 10s breadcrumb
@@ -223,7 +223,7 @@ export default defineConfig({
 			//                             selectAndTrashRow envelope (40s interaction + 60s confirm
 			//                             + 10s trailing row)
 			//   -----------------------
-			//                      583s, and all of it is reachable on a run that still PASSES: each of
+			//                      559s, and all of it is reachable on a run that still PASSES: each of
 			//                      those loops retries, so burning the whole envelope is a slow success,
 			//                      not a failure.
 			//
@@ -238,7 +238,7 @@ export default defineConfig({
 			// The old 120s held neither end, and the end it cut was the teardown — leaking the scratch
 			// directory onto the shared account and reporting a timeout instead of the real failure; 300s
 			// and then 480s held the brackets only by understating them (the latter still carried a 3-
-			// attempt figure after the loop went to 5). What is left over above 583s is the test body's,
+			// attempt figure after a loop change). What is left over above 559s is the test body's,
 			// and a body whose own pinned waits need more than that says so with test.slow /
 			// test.setTimeout, where the cost is visible in the file.
 			timeout: 720_000

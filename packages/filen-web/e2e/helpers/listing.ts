@@ -99,9 +99,16 @@ export async function waitForListingSettled(
 // Assertions that are genuinely about UI responsiveness keep the tight default.
 export const LIVE_WRITE_TIMEOUT_MS = 60_000
 
+// Settle budget for the first listing after a full document load, where the wait covers a COLD BOOT
+// (wasm init, the SDK's thread pool, OPFS open) rather than UI responsiveness — the same cost
+// playwright.config.ts sizes its navigationTimeout for. The expect default is right everywhere the
+// app is already running and wrong here, which on a loaded CI runner reads as a listing that never
+// rendered.
+export const BOOT_SETTLE_TIMEOUT_MS = 30_000
+
 // Bounded poll for a create that landed after its attempt gave up. Short: it only has to outlast the
 // restored snapshot's background refetch, not a write.
-const ADOPT_POLL_TIMEOUT_MS = 5_000
+const ADOPT_POLL_TIMEOUT_MS = 15_000
 
 // The storage reminder mounts only after the keys one closes, and only when the account is over its
 // limit — so this waits briefly rather than snapshotting, and costs that much only when it is absent.
@@ -222,22 +229,24 @@ export async function createDirectoryViaDialog(
 // fails on an assertion's own pin unwinds cleanly, so every wait on this path has to be able to expire
 // before the lane's own ceiling does. A failing attempt costs 15s (dismissStartupReminders' own click
 // wait, re-armed by every reload, so it recurs on every attempt rather than being paid once) + 3s (the
-// storage reminder wait) + 10s (listing settle) + 15s (the pinned create wait) + 4s (the two dialog
-// probes above) = 47s, plus 5s for the adopt poll on attempts 2 and up. So the loop's ceiling is
-// 47s + 4 x 52s + 4 x 15s reload = 315s. That counts only the PINNED waits: createDirectoryViaDialog's
+// storage reminder wait) + 10s (listing settle) + 45s (the pinned create wait) + 4s (the two dialog
+// probes above) = 77s, plus 15s for the adopt poll on attempts 2 and up. So the loop's ceiling is
+// 77s + 2 x 92s + 2 x 15s reload = 291s. That counts only the PINNED waits: createDirectoryViaDialog's
 // button click, name fill and Create click each inherit the 15s actionTimeout and its dialog
 // toBeVisible the 10s expect default, another 55s per attempt if they were all to expire. All of the
-// 315s is reachable on a run that still PASSES, since the loop retries — so the lane ceiling has to
+// 291s is reachable on a run that still PASSES, since the loop retries — so the lane ceiling has to
 // clear it with the teardown on top. playwright.config.ts's chromium-write note carries the rest of
 // that arithmetic.
-// Five attempts, not three. A lease left behind by a context torn down mid-write survives its full 30s
-// TTL, and an attempt that starts inside that window is spent for nothing — three of them can be
-// swallowed by one orphaned lease plus the queue draining behind it. What has to exceed the hold is the
-// time actually spent PROBING, so the count carries that, not a longer per-attempt wait: 15s stays
-// deliberately under the SDK backoff's 22s blind spot, and a reload is what buys a fresh client that
-// probes from zero again.
-const SCRATCH_CREATE_ATTEMPTS = 5
-const SCRATCH_CREATE_ATTEMPT_TIMEOUT_MS = 15_000
+//
+// The per-attempt wait is sized to OUTLAST a hold, not to duck under the SDK's 22s backoff blind spot.
+// That earlier sizing answered sibling starvation, which the lane's single worker has since made
+// impossible: the only hold left is an orphaned lease's own 30s TTL, and 45s rides that out where 15s
+// abandoned a create that was going to land. Abandoning is not free — it costs a reload, a re-boot and
+// a re-settle before the next probe, so a create merely slower than the budget was paying ~24s twice
+// over to reach the same directory. Three attempts, because an attempt now outlives the longest hold
+// there is; a lease that survives three of them is not transient and the failure should say so.
+const SCRATCH_CREATE_ATTEMPTS = 3
+const SCRATCH_CREATE_ATTEMPT_TIMEOUT_MS = 45_000
 // Pinned below the 30s navigationTimeout default: this only has to reach the document's load event, and
 // the app's own boot is waited for by the listing settle at the top of the next attempt.
 const SCRATCH_CREATE_RELOAD_TIMEOUT_MS = 15_000
@@ -562,7 +571,15 @@ export async function trashScratchDirectory(page: Page, name: string, confirmTim
 			await dismissStartupReminders(page)
 		}
 
-		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
+		// Retried until the URL proves the route actually changed. A sidebar click can silently fail to
+		// commit under suite load — menus.spec.ts documents the same thing for its own nav — and every
+		// caller reaches here from INSIDE its scratch directory, so an uncommitted click leaves this
+		// looking for a root row while still in the child listing. That read as "not reachable, leaked"
+		// and returned without trashing, which leaked the directory for real.
+		await expect(async () => {
+			await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
+			await expect(page).toHaveURL(/\/drive$/, { timeout: 5_000 })
+		}).toPass({ timeout: 30_000 })
 
 		listbox = (await waitForListingSettled(page)).listbox
 
