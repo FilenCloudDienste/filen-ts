@@ -97,3 +97,90 @@ describe("isMediaStreamAvailable", () => {
 		expect(isMediaStreamAvailable()).toBe(false)
 	})
 })
+
+describe("waitForMediaStream", () => {
+	it("true immediately when a worker already controls the tab, without consulting the registration", async () => {
+		const getRegistration = vi.fn()
+
+		vi.stubGlobal("navigator", { serviceWorker: { controller: {}, getRegistration } })
+
+		const { waitForMediaStream } = await import("@/features/preview/lib/previewStream")
+
+		await expect(waitForMediaStream(50)).resolves.toBe(true)
+		expect(getRegistration).not.toHaveBeenCalled()
+	})
+
+	it("false immediately when nothing is registered — dev registers none, so there is no 'yet' to wait for", async () => {
+		const addEventListener = vi.fn()
+
+		vi.stubGlobal("navigator", {
+			serviceWorker: { controller: null, getRegistration: vi.fn().mockResolvedValue(undefined), addEventListener }
+		})
+
+		const { waitForMediaStream } = await import("@/features/preview/lib/previewStream")
+
+		await expect(waitForMediaStream(50)).resolves.toBe(false)
+		// The point of the early return: nothing subscribes, so a caller in dev pays no timeout per item.
+		expect(addEventListener).not.toHaveBeenCalled()
+	})
+
+	it("waits for a registered worker to take control rather than reporting it absent", async () => {
+		const serviceWorker: Record<string, unknown> = {
+			controller: null,
+			getRegistration: vi.fn().mockResolvedValue({}),
+			addEventListener: vi.fn((_: string, handler: () => void) => {
+				// Control lands a tick after the caller subscribes — the ordinary first-load sequence.
+				setTimeout(() => {
+					serviceWorker["controller"] = {}
+					handler()
+				}, 5)
+			}),
+			removeEventListener: vi.fn()
+		}
+
+		vi.stubGlobal("navigator", { serviceWorker })
+
+		const { waitForMediaStream } = await import("@/features/preview/lib/previewStream")
+
+		await expect(waitForMediaStream(1_000)).resolves.toBe(true)
+		expect(serviceWorker["removeEventListener"]).toHaveBeenCalled()
+	})
+
+	it("false once the wait expires, and unsubscribes so a later controllerchange settles nothing", async () => {
+		const removeEventListener = vi.fn()
+
+		vi.stubGlobal("navigator", {
+			serviceWorker: {
+				controller: null,
+				getRegistration: vi.fn().mockResolvedValue({}),
+				addEventListener: vi.fn(),
+				removeEventListener
+			}
+		})
+
+		const { waitForMediaStream } = await import("@/features/preview/lib/previewStream")
+
+		await expect(waitForMediaStream(20)).resolves.toBe(false)
+		expect(removeEventListener).toHaveBeenCalled()
+	})
+
+	it("settles on control that lands between the early check and the subscription", async () => {
+		const serviceWorker: Record<string, unknown> = {
+			controller: null,
+			// Resolving the registration is the await that opens that gap; control arrives inside it.
+			getRegistration: vi.fn().mockImplementation(() => {
+				serviceWorker["controller"] = {}
+
+				return Promise.resolve({})
+			}),
+			addEventListener: vi.fn(),
+			removeEventListener: vi.fn()
+		}
+
+		vi.stubGlobal("navigator", { serviceWorker })
+
+		const { waitForMediaStream } = await import("@/features/preview/lib/previewStream")
+
+		await expect(waitForMediaStream(20)).resolves.toBe(true)
+	})
+})

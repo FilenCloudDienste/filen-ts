@@ -41,13 +41,13 @@ const { narrowToAnyFileMock } = vi.hoisted(() => ({ narrowToAnyFileMock: vi.fn((
 
 vi.mock("@/features/drive/lib/download", () => ({ narrowToAnyFile: narrowToAnyFileMock }))
 
-const { isMediaStreamAvailableMock, previewStreamUrlMock } = vi.hoisted(() => ({
-	isMediaStreamAvailableMock: vi.fn<() => boolean>(),
+const { waitForMediaStreamMock, previewStreamUrlMock } = vi.hoisted(() => ({
+	waitForMediaStreamMock: vi.fn<() => Promise<boolean>>(),
 	previewStreamUrlMock: vi.fn<(file: unknown, name: string, contentType: string) => Promise<string>>()
 }))
 
 vi.mock("@/features/preview/lib/previewStream", () => ({
-	isMediaStreamAvailable: isMediaStreamAvailableMock,
+	waitForMediaStream: waitForMediaStreamMock,
 	previewStreamUrl: previewStreamUrlMock
 }))
 
@@ -357,15 +357,15 @@ describe("warmUploadThumbnail", () => {
 })
 
 describe("generateVideoThumb — early gates (no DOM element ever created)", () => {
-	it("fails without calling previewStreamUrl when the SW isn't controlling the tab", async () => {
-		isMediaStreamAvailableMock.mockReturnValue(false)
+	it("fails without calling previewStreamUrl when no worker will ever control the tab", async () => {
+		waitForMediaStreamMock.mockResolvedValue(false)
 
 		await expect(generateVideoThumb(videoItem())).resolves.toEqual({ type: "failed" })
 		expect(previewStreamUrlMock).not.toHaveBeenCalled()
 	})
 
 	it("fails without calling previewStreamUrl when the item's content type isn't inline-allowlisted", async () => {
-		isMediaStreamAvailableMock.mockReturnValue(true)
+		waitForMediaStreamMock.mockResolvedValue(true)
 		allowedMediaContentTypeMock.mockReturnValue(null)
 
 		await expect(generateVideoThumb(videoItem())).resolves.toEqual({ type: "failed" })
@@ -373,7 +373,7 @@ describe("generateVideoThumb — early gates (no DOM element ever created)", () 
 	})
 
 	it("fails when previewStreamUrl itself rejects, before any DOM element is created", async () => {
-		isMediaStreamAvailableMock.mockReturnValue(true)
+		waitForMediaStreamMock.mockResolvedValue(true)
 		allowedMediaContentTypeMock.mockReturnValue("video/mp4")
 		previewStreamUrlMock.mockRejectedValue(new Error("registration failed"))
 

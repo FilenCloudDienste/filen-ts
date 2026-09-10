@@ -7,7 +7,7 @@ import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { registerThumbGenerator, seedThumbnail, type ThumbGenerationResult, type ThumbGenerator } from "@/features/drive/lib/thumbnails"
 import { THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_WARM_SIZE_GATE, thumbnailCategory } from "@/features/drive/lib/thumbnails.logic"
 import { fitWithin, encodeCanvasThumb } from "@/features/drive/lib/thumbGenerators.logic"
-import { previewStreamUrl, isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
+import { previewStreamUrl, waitForMediaStream } from "@/features/preview/lib/previewStream"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { narrowItem, type BaseFileItem } from "@/features/drive/lib/item"
 import type { SdkThumbnailResult } from "@/workers/sdk.worker"
@@ -144,7 +144,14 @@ const VIDEO_GENERATE_TIMEOUT_MS = 15_000
 // item whose own mime never clears the inline allowlist) fails instantly instead of occupying a
 // semaphore slot for the full 15s ceiling for no reason.
 export const generateVideoThumb: ThumbGenerator = async item => {
-	if (!isMediaStreamAvailable()) {
+	// Awaited rather than sampled: this frame comes off the SW's Range stream, and a page is
+	// uncontrolled for a moment after every worker install or update — the ordinary state of a first
+	// load. Sampling it there returned "failed", which counts toward the blacklist, so scrolling a
+	// directory of videos in that window could spend all three strikes and leave them blank for the
+	// rest of the session even once the worker took control. Where no worker is registered at all
+	// this still returns immediately (dev registers none), so nothing waits for a stream that is
+	// never coming.
+	if (!(await waitForMediaStream())) {
 		return { type: "failed" }
 	}
 
