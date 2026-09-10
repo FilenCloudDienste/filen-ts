@@ -170,7 +170,9 @@ describe("useRawPreviewQuery — fetchData", () => {
 		expect(mockGet).not.toHaveBeenCalled()
 	})
 
-	it("returns noPreview on a miss while offline when the RAW itself is stored offline (the bytes ARE on disk; the extraction is remote-only)", async () => {
+	// The cache extracts from a stored-offline container itself, so this must reach it rather than
+	// short-circuiting to "not available offline" while the bytes sit on disk.
+	it("asks the cache on a miss while offline when the RAW itself is stored offline", async () => {
 		mockIsOnline.mockReturnValue(false)
 		mockHas.mockReturnValue(false)
 
@@ -178,11 +180,13 @@ describe("useRawPreviewQuery — fetchData", () => {
 
 		fs.set(offlineUri, new Uint8Array([1]))
 		mockOfflineGetLocalFile.mockResolvedValueOnce(new MockFile(offlineUri))
+		mockGet.mockResolvedValueOnce({ kind: "uri", uri: PREVIEW_URI })
 
 		await expect(fetchData({ type: "drive", data: { uuid: "raw-uuid", item: makeRawItem() as never } })).resolves.toEqual({
-			kind: "noPreview"
+			kind: "uri",
+			uri: PREVIEW_URI
 		})
-		expect(mockGet).not.toHaveBeenCalled()
+		expect(mockGet).toHaveBeenCalledTimes(1)
 	})
 
 	it("rethrows a transport error (query error → overlay with Retry)", async () => {

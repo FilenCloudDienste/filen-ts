@@ -47,7 +47,7 @@ vi.mock("@/lib/thumbnails", () => ({
 		isUnavailable: mockIsUnavailable,
 		invalidateFile: mockInvalidateFile
 	},
-	DIRECTORY: { uri: "file:///shared/group.io.filen.app/thumbnails/v3" }
+	DIRECTORY: { uri: "file:///shared/group.io.filen.app/thumbnails/v4" }
 }))
 
 vi.mock("@filen/sdk-rs", () => ({
@@ -179,7 +179,7 @@ describe("drive Thumbnail — settled contract", () => {
 
 		// subscribeRecovery() cleared the session Set on reconnect — the next entry point regenerates.
 		mockIsUnavailable.mockReturnValue(false)
-		mockGenerate.mockResolvedValue("file:///shared/group.io.filen.app/thumbnails/v3/raw-uuid.webp")
+		mockGenerate.mockResolvedValue("file:///shared/group.io.filen.app/thumbnails/v4/raw-uuid.webp")
 
 		await fireAppStateActive()
 
@@ -188,14 +188,14 @@ describe("drive Thumbnail — settled contract", () => {
 	}, 5000)
 
 	it("renders the Image when generate() resolves a path", async () => {
-		mockGenerate.mockResolvedValue("file:///shared/group.io.filen.app/thumbnails/v3/raw-uuid.webp")
+		mockGenerate.mockResolvedValue("file:///shared/group.io.filen.app/thumbnails/v4/raw-uuid.webp")
 
 		const { container } = renderThumbnail()
 
 		await waitFor(() => expect(container.querySelector("[data-testid='thumbnail-image']")).not.toBeNull())
 
 		expect(container.querySelector("[data-testid='thumbnail-image']")?.getAttribute("src")).toBe(
-			"file:///shared/group.io.filen.app/thumbnails/v3/raw-uuid.webp"
+			"file:///shared/group.io.filen.app/thumbnails/v4/raw-uuid.webp"
 		)
 		expect(mockGenerate).toHaveBeenCalledTimes(1)
 	})
@@ -203,7 +203,7 @@ describe("drive Thumbnail — settled contract", () => {
 	it("still retries a thrown (transient) error", async () => {
 		mockGenerate
 			.mockRejectedValueOnce(new Error("network"))
-			.mockResolvedValue("file:///shared/group.io.filen.app/thumbnails/v3/raw-uuid.webp")
+			.mockResolvedValue("file:///shared/group.io.filen.app/thumbnails/v4/raw-uuid.webp")
 
 		const { container } = renderThumbnail()
 

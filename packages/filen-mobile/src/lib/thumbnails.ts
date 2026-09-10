@@ -1,7 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { type DriveItem } from "@/types"
-import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
-import { normalizeFilePathForExpo } from "@/lib/paths"
+import { normalizeFilePathForExpo, normalizeFilePathForSdk } from "@/lib/paths"
 import { run, Semaphore } from "@filen/utils"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { Platform } from "react-native"
@@ -17,14 +16,14 @@ import {
 	getPath,
 	ensureDirectory,
 	driveItemToAnyFile,
-	getExtension,
 	getThumbnailKind,
+	getThumbnailKindForName,
 	waitForHttpProvider
 } from "@/lib/thumbnailsHelpers"
 import offline from "@/features/offline/offline"
 import fileCache from "@/lib/fileCache"
-import { generateImage } from "@/lib/thumbnailsImage"
-import { generateImageViaSdk } from "@/lib/thumbnailsSdk"
+import { generateImageViaSdk, generateImageFromPathViaSdk, type SdkThumbnailOutcome } from "@/lib/thumbnailsSdk"
+import { sweepStaleThumbnailVersions } from "@/lib/thumbnailsVersionSweep"
 import { generateVideo } from "@/lib/thumbnailsVideo"
 import logger from "@/lib/logger"
 
@@ -36,14 +35,14 @@ export type ThumbnailParams = {
 	signal?: AbortSignal
 }
 
-// Resize width + WebP quality of the manipulator paths (local bytes, post-upload, video frames).
-// The SDK path has its own request box (thumbnailsSdk.ts) and encodes lossless.
+// Resize width + WebP quality of the ONE remaining manipulator path: the extracted video frame.
+// Every image thumbnail is an SDK decode with its own request box (thumbnailsSdk.ts), lossless.
 export const DEFAULT_WIDTH = 256
 export const DEFAULT_QUALITY = 0.9
 export const DEFAULT_VIDEO_TIMESTAMP = 1.0
-// Bounds the JS-side native work only: video frame extraction and the manipulator paths. SDK image
-// thumbnails are NOT behind it — the client owns decode concurrency and memory, a parked call
-// holds no buffers, and cancelling it dequeues it.
+// Bounds the JS-side native work only: video frame extraction and its manipulator resize. NO image
+// thumbnail is behind it any more — remote and local alike are SDK decodes, and the client owns
+// decode concurrency and memory: a parked call holds no buffers, and cancelling it dequeues it.
 export const MAX_CONCURRENT = Platform.select({
 	ios: 3,
 	android: 2,
@@ -125,6 +124,10 @@ class Thumbnails {
 		let scanned = 0
 
 		try {
+			// A version bump strands the previous tree — nothing else on disk reaches it, and it is
+			// invisible to both clear() and size(), which only ever walk the current version.
+			sweepStaleThumbnailVersions()
+
 			ensureDirectory()
 
 			for (const record of this.listThumbnailRecords()) {
@@ -348,9 +351,12 @@ class Thumbnails {
 		})
 
 		if (!result.success) {
-			// Aborts (the JS signal, or the bindings' AbortError by name), offline and a provider that
-			// never came up are not verdicts about the file — only a real failure counts toward the
-			// blacklist, and only that one is logged at error.
+			// Aborts, offline and a provider that never came up are not verdicts about the file — only a
+			// real failure counts toward the blacklist, and only that one is logged at error. An abort
+			// has TWO possible flavours on the from-path call, which carries both cancellation channels:
+			// the bindings' AbortError, or a FilenSdkError Cancelled that isAbortError does NOT match.
+			// Testing `params.signal?.aborted` FIRST is therefore load-bearing, not a shortcut — it is
+			// what makes the flavour irrelevant. Keep it first.
 			if (
 				!params.signal?.aborted &&
 				!isAbortError(result.error) &&
@@ -392,65 +398,55 @@ class Thumbnails {
 		return result.data
 	}
 
-	// Local bytes first, zero network: an offline copy or a file-cache hit the manipulator can
-	// decode goes through the manipulator behind the semaphore. Otherwise the SDK — after the
-	// offline guard, and NOT behind the semaphore (see MAX_CONCURRENT). Both gates
-	// (displayability + canMakeThumbnail) were applied by getThumbnailKind before this runs.
+	// Local bytes first, zero network: an offline copy or a file-cache hit is decoded by the SDK
+	// straight from its path; otherwise the SDK reads the file over the network, after the offline
+	// guard. Both gates (displayability + canMakeThumbnail) were applied by getThumbnailKind before
+	// this runs, and no format list gates the local lookup any more — the same decoder answers both
+	// branches, so a local copy is worth looking for exactly when a remote decode would be. That is
+	// how RAW gained an offline thumbnail: its offline copy used to be skipped because the manipulator
+	// could not read it. Neither branch takes the semaphore (see MAX_CONCURRENT).
 	private async generateImageThumbnail(params: {
 		item: DriveItem
 		uuid: string
 		outputPath: string
-		width: number
-		quality: number
 		signal?: AbortSignal
 	}): Promise<string | null> {
-		const ext = getExtension(params.item)
-		const localSourcePath =
-			ext !== null && EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(ext)
-				? await this.resolveLocalSourcePath(params.item, params.signal)
-				: null
+		const localSourcePath = await this.resolveLocalSourcePath(params.item, params.signal)
 
 		if (params.signal?.aborted) {
 			throw abortError(params.signal)
 		}
 
+		let outcome: SdkThumbnailOutcome
+
 		if (localSourcePath !== null) {
-			await this.semaphore.acquire()
-
-			try {
-				await generateImage({
-					localSourcePath,
-					outputPath: params.outputPath,
-					width: params.width,
-					quality: params.quality,
-					signal: params.signal
-				})
-
-				return normalizeFilePathForExpo(params.outputPath)
-			} finally {
-				this.semaphore.release()
+			outcome = await generateImageFromPathViaSdk({
+				localPath: localSourcePath,
+				uuid: params.uuid,
+				outputPath: params.outputPath,
+				signal: params.signal
+			})
+		} else {
+			// The SDK reads the bytes over the network. Offline it would fail with a transport error and
+			// poison the failure counter for something that is not the file's fault — bail the same
+			// abort-flavoured way the video path does (not counted, not logged at error).
+			if (!onlineManager.isOnline()) {
+				throw new OfflineAbortError()
 			}
+
+			const file = driveItemToAnyFile(params.item)
+
+			if (!file) {
+				throw new Error("Unsupported item type")
+			}
+
+			outcome = await generateImageViaSdk({
+				file,
+				uuid: params.uuid,
+				outputPath: params.outputPath,
+				signal: params.signal
+			})
 		}
-
-		// The SDK reads the bytes over the network. Offline it would fail with a transport error and
-		// poison the failure counter for something that is not the file's fault — bail the same
-		// abort-flavoured way the video path does (not counted, not logged at error).
-		if (!onlineManager.isOnline()) {
-			throw new OfflineAbortError()
-		}
-
-		const file = driveItemToAnyFile(params.item)
-
-		if (!file) {
-			throw new Error("Unsupported item type")
-		}
-
-		const outcome = await generateImageViaSdk({
-			file,
-			uuid: params.uuid,
-			outputPath: params.outputPath,
-			signal: params.signal
-		})
 
 		switch (outcome) {
 			case "written": {
@@ -465,12 +461,14 @@ class Thumbnails {
 		}
 	}
 
-	// The offline store or the file cache holds the bytes already — no network, no SDK.
+	// The offline store or the file cache holds the bytes already — no network, no SDK download. The
+	// path comes back DECODED and plain (normalizeFilePathForSdk) because its only consumer is the SDK,
+	// which opens it verbatim: a percent-encoded URI would ENOENT on any name carrying a space.
 	private async resolveLocalSourcePath(item: DriveItem, signal?: AbortSignal): Promise<string | null> {
 		const offlineFile = await offline.getLocalFile(item)
 
 		if (offlineFile?.exists) {
-			return normalizeFilePathForExpo(offlineFile.uri)
+			return normalizeFilePathForSdk(offlineFile.uri)
 		}
 
 		if (
@@ -487,7 +485,7 @@ class Thumbnails {
 				signal
 			})
 
-			return normalizeFilePathForExpo(cachedFile.uri)
+			return normalizeFilePathForSdk(cachedFile.uri)
 		}
 
 		return null
@@ -554,47 +552,53 @@ class Thumbnails {
 	}
 
 	public async generateFromLocalFile(params: {
-		localPath: string
+		localUri: string
 		uuid: string
 		name: string
+		canMakeThumbnail: boolean
 		width?: number
 		quality?: number
 		videoTimestamp?: number
 		signal?: AbortSignal
 	}): Promise<string | null> {
+		// Ahead of the barrier: a file that gets no thumbnail must not wait out a cache clear to be told so.
+		const kind = getThumbnailKindForName(params.name, params.canMakeThumbnail)
+
+		if (kind === null) {
+			return null
+		}
+
 		await this.clearBarrier.enter()
 
 		try {
-			return await this.generateFromLocalFileImpl(params)
+			return await this.generateFromLocalFileImpl(params, kind)
 		} finally {
 			this.clearBarrier.leave()
 		}
 	}
 
-	// Post-upload hook (transferCore): the device just uploaded these bytes, so decode them locally
-	// with the manipulator instead of fetching them back through the SDK. Gated on what the
-	// manipulator can decode (MANIPULATOR ∪ VIDEO) — a different set from canGenerate on purpose.
-	private async generateFromLocalFileImpl(params: {
-		localPath: string
-		uuid: string
-		name: string
-		width?: number
-		quality?: number
-		videoTimestamp?: number
-		signal?: AbortSignal
-	}): Promise<string | null> {
-		const ext = FileSystem.Paths.extname(params.name).toLowerCase().trim()
-
-		if (!ext) {
-			return null
-		}
-
-		const isImage = EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(ext)
-		const isVideo = EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(ext)
-
-		if (!isImage && !isVideo) {
-			return null
-		}
+	// Post-upload hook (transferCore): the device just uploaded these bytes, so thumbnail them from the
+	// local copy instead of fetching them back over the network. `localUri` is the percent-ENCODED expo
+	// URI, the one form both branches can derive theirs from: the SDK image decode takes the decoded
+	// plain path it opens verbatim, and the video extractor takes the URI unchanged. Deriving runs one
+	// way only — normalizeFilePathForExpo decodes before it encodes, so handing it an already-decoded
+	// path decodes a name's literal `%20` a second time and addresses a file that does not exist.
+	// `width`/`quality` reach the video branch only: the SDK owns its own request box, so an image
+	// ignores them.
+	private async generateFromLocalFileImpl(
+		params: {
+			localUri: string
+			uuid: string
+			name: string
+			canMakeThumbnail: boolean
+			width?: number
+			quality?: number
+			videoTimestamp?: number
+			signal?: AbortSignal
+		},
+		kind: ThumbnailKind
+	): Promise<string | null> {
+		const isImage = kind === "image"
 
 		if ((this.failures.get(params.uuid) ?? 0) >= MAX_FAILURES) {
 			logger.warn("thumbnails", "thumbnail generation blacklisted (max failures reached)", { uuid: params.uuid })
@@ -617,29 +621,43 @@ class Thumbnails {
 		const width = params.width ?? DEFAULT_WIDTH
 		const quality = params.quality ?? DEFAULT_QUALITY
 
-		const promise = (async (): Promise<string> => {
-			await this.semaphore.acquire()
-
+		const promise = (async (): Promise<string | null> => {
 			try {
 				ensureDirectory()
 
 				if (isImage) {
-					await generateImage({
-						localSourcePath: params.localPath,
+					// An SDK decode on the client's own gate — NOT behind the semaphore, exactly like the
+					// remote path (see MAX_CONCURRENT).
+					const outcome = await generateImageFromPathViaSdk({
+						localPath: normalizeFilePathForSdk(params.localUri),
+						uuid: params.uuid,
 						outputPath,
-						width,
-						quality,
 						signal: params.signal
 					})
+
+					// A verdict is not a failure: it settles the uuid for this session the way generate()
+					// does and leaves the ledger untouched, so the next online flip lets a row ask again.
+					if (outcome === "settled") {
+						this.unavailable.add(params.uuid)
+
+						return null
+					}
 				} else {
-					await generateVideo({
-						localSourcePath: params.localPath,
-						outputPath,
-						width,
-						quality,
-						timestamp: params.videoTimestamp ?? DEFAULT_VIDEO_TIMESTAMP,
-						signal: params.signal
-					})
+					// Real JS-side native work (frame extraction + manipulator resize) — behind the semaphore.
+					await this.semaphore.acquire()
+
+					try {
+						await generateVideo({
+							localSourceUri: params.localUri,
+							outputPath,
+							width,
+							quality,
+							timestamp: params.videoTimestamp ?? DEFAULT_VIDEO_TIMESTAMP,
+							signal: params.signal
+						})
+					} finally {
+						this.semaphore.release()
+					}
 				}
 
 				this.available.add(params.uuid)
@@ -649,12 +667,20 @@ class Thumbnails {
 
 				return normalizeFilePathForExpo(outputPath)
 			} catch (error) {
-				if (!params.signal?.aborted && !(error instanceof OfflineAbortError) && !(error instanceof ProviderUnavailableError)) {
+				// Same exemptions as doGenerate, and for the same reason the signal test comes first:
+				// the from-path call carries both cancellation channels, so an abort arrives as either
+				// the bindings' AbortError or a FilenSdkError Cancelled. isAbortError was missing here
+				// while its sibling had it, which counted a cancelled upload as a real failure.
+				if (
+					!params.signal?.aborted &&
+					!isAbortError(error) &&
+					!(error instanceof OfflineAbortError) &&
+					!(error instanceof ProviderUnavailableError)
+				) {
 					logger.error("thumbnails", "generateFromLocalFile failed", {
 						uuid: params.uuid,
-						ext,
-						isImage,
-						isVideo,
+						ext: FileSystem.Paths.extname(params.name).toLowerCase().trim(),
+						kind,
 						platform: Platform.OS,
 						error: String(error)
 					})
@@ -662,19 +688,20 @@ class Thumbnails {
 					this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
 				}
 
-				const partial = new FileSystem.File(outputPath)
+				for (const path of [outputPath, `${outputPath}.tmp`]) {
+					const partial = new FileSystem.File(path)
 
-				if (partial.exists) {
-					try {
-						partial.delete()
-					} catch {
-						// Best-effort cleanup of partial output
+					if (partial.exists) {
+						try {
+							partial.delete()
+						} catch {
+							// Best-effort cleanup of partial output
+						}
 					}
 				}
 
 				throw error
 			} finally {
-				this.semaphore.release()
 				this.pending.delete(params.uuid)
 			}
 		})()

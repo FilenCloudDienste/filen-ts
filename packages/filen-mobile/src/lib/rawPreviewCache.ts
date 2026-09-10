@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { AppState } from "react-native"
-import { ManagedFuture, EmbeddedPreviewResult_Tags } from "@filen/sdk-rs"
+import { ManagedFuture, EmbeddedPreviewResult_Tags, type EmbeddedPreviewResult } from "@filen/sdk-rs"
 import { Semaphore, run } from "@filen/utils"
 import { debounce } from "es-toolkit/function"
 import { type DriveItemFileExtracted } from "@/types"
@@ -8,6 +8,7 @@ import auth from "@/lib/auth"
 import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
 import { wrapAbortSignalForSdk, disposeSdkAbortSignal, toSignalOpts } from "@/lib/signals"
 import { driveItemToAnyFile } from "@/lib/thumbnailsHelpers"
+import offline from "@/features/offline/offline"
 import { newTmpFile } from "@/lib/tmp"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { RAW_PREVIEW_CACHE_DIRECTORY } from "@/lib/storageRoots"
@@ -16,7 +17,9 @@ import logger from "@/lib/logger"
 
 // `uri` = file:// URI of the JPEG the SDK extracted from the RAW container; `noPreview` = the SDK's
 // verdict that the container embeds no JPEG a viewer could show (≥ 512 px long side). Nothing is
-// stored for noPreview: it is re-probed on the next open (one chunk + a decode-gate slot — rare).
+// stored for noPreview, so the next open re-probes: a decode-gate slot either way, plus the locate's
+// two to four bounded reads — chunk fetches for a remote container, local disk reads for a
+// stored-offline one, which reaches the network for nothing.
 export type RawPreviewResult =
 	| {
 			kind: "uri"
@@ -137,13 +140,12 @@ export class RawPreviewCache {
 
 			this.ensureDirectory()
 
-			// The one AnyFile mapping site in the app (file → File; sharedFile and sharedRootFile →
-			// Shared); null only for directories, which the parameter type already excludes.
-			const anyFile = driveItemToAnyFile(item)
-
-			if (!anyFile) {
-				throw new Error("Unsupported item type")
-			}
+			// A stored-offline RAW already has its container on this device, and the JPEG lives inside
+			// that container — so extract from the local copy and touch the network for nothing. This is
+			// also what makes a RAW preview work at all while offline.
+			const offlineFile = await offline.getLocalFile(item)
+			// DECODED plain path: the SDK opens it verbatim, so a percent-encoded URI would ENOENT.
+			const localSourcePath = offlineFile?.exists ? normalizeFilePathForSdk(offlineFile.uri) : null
 
 			// Authed client only — no RAW preview is reachable logged out (the gallery sits behind
 			// the authed shell and drive.openLinkedFile itself needs the authed client).
@@ -178,18 +180,36 @@ export class RawPreviewCache {
 				}
 			})
 
-			// Extraction only — the SDK copies the container's embedded JPEG out through the ranged
-			// reader without decoding the RAW; on NoPreview nothing exists at the path. Cancel via the
-			// ManagedFuture abort → FilenSdkError Cancelled (suppressed by decideQueryErrorAction).
-			const outcome = await authedSdkClient.writeEmbeddedPreviewToPath(
-				anyFile,
-				normalizeFilePathForSdk(tmpUri),
-				ManagedFuture.new({
-					pauseSignal: undefined,
-					abortSignal: wrappedSignal
-				}),
-				toSignalOpts(signal)
-			)
+			// Extraction only — the SDK copies the container's embedded JPEG out without decoding the
+			// RAW, from the local file when we have one and otherwise through the ranged reader; on
+			// NoPreview nothing exists at the path. Cancel via the ManagedFuture abort → FilenSdkError
+			// Cancelled (suppressed by decideQueryErrorAction).
+			const managedFuture = ManagedFuture.new({
+				pauseSignal: undefined,
+				abortSignal: wrappedSignal
+			})
+			const previewPath = normalizeFilePathForSdk(tmpUri)
+
+			let outcome: EmbeddedPreviewResult
+
+			if (localSourcePath !== null) {
+				outcome = await authedSdkClient.writeEmbeddedPreviewFromPath(
+					localSourcePath,
+					previewPath,
+					managedFuture,
+					toSignalOpts(signal)
+				)
+			} else {
+				// The one AnyFile mapping site in the app (file → File; sharedFile and sharedRootFile →
+				// Shared); null only for directories, which the parameter type already excludes.
+				const anyFile = driveItemToAnyFile(item)
+
+				if (!anyFile) {
+					throw new Error("Unsupported item type")
+				}
+
+				outcome = await authedSdkClient.writeEmbeddedPreviewToPath(anyFile, previewPath, managedFuture, toSignalOpts(signal))
+			}
 
 			if (outcome.tag === EmbeddedPreviewResult_Tags.NoPreview) {
 				logger.debug("rawPreviewCache", "no embedded preview", { uuid })
@@ -209,6 +229,7 @@ export class RawPreviewCache {
 
 			logger.debug("rawPreviewCache", "preview extracted", {
 				uuid,
+				local: localSourcePath !== null,
 				width: outcome.inner.width,
 				height: outcome.inner.height,
 				orientation: outcome.inner.orientation,

@@ -1,7 +1,8 @@
 import * as FileSystem from "expo-file-system"
-import { MakeThumbnailInMemoryResult_Tags, type AnyFile } from "@filen/sdk-rs"
+import { MakeThumbnailInMemoryResult_Tags, ManagedFuture, type AnyFile, type MakeThumbnailInMemoryResult } from "@filen/sdk-rs"
+import { run } from "@filen/utils"
 import auth from "@/lib/auth"
-import { toSignalOpts } from "@/lib/signals"
+import { toSignalOpts, wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
 import { abortError } from "@/lib/thumbnailsHelpers"
 import logger from "@/lib/logger"
 
@@ -23,37 +24,17 @@ export const THUMBNAIL_MAX_HEIGHT = 512
 //           caller forgets the verdict on the next online flip.
 export type SdkThumbnailOutcome = "written" | "settled"
 
-// Remote image thumbnails: the SDK decodes from ranged reads of the encrypted file (1 MiB chunks,
-// nothing persisted, format decided from magic bytes) and hands back a lossless WebP no larger than
-// the request, orientation applied. The caller has already applied both gates (displayability and
-// canMakeThumbnail), ruled out local bytes and the offline case, and does NOT hold the JS semaphore:
-// the client owns decode concurrency and memory, a parked call holds no buffers, and cancelling
-// dequeues it. Authed client only — no thumbnail-bearing screen is reachable logged out.
-export async function generateImageViaSdk(params: {
-	file: AnyFile
-	uuid: string
-	outputPath: string
-	signal?: AbortSignal
-}): Promise<SdkThumbnailOutcome> {
-	const { authedSdkClient } = await auth.getSdkClients()
-
-	// The JS AbortSignal is the uniffi cancellation handle itself (this call takes no
-	// ManagedFuture): aborting drops the Rust future, which stops the chunk reads at chunk
-	// granularity and dequeues a call still parked on the decode gate. The rejection carries
-	// name "AbortError" — exempted from the failure count in thumbnails.ts.
-	const result = await authedSdkClient.makeThumbnailInMemory(
-		{
-			file: params.file,
-			maxWidth: THUMBNAIL_MAX_WIDTH,
-			maxHeight: THUMBNAIL_MAX_HEIGHT
-		},
-		toSignalOpts(params.signal)
-	)
-
-	if (params.signal?.aborted) {
-		throw abortError(params.signal)
+// The single place an SDK verdict becomes (or does not become) a file on disk. Both entry points below
+// return the same union and differ only in where the bytes came from — ranged reads of the encrypted
+// remote file, or a path on this device — so the write, the tmp-rename and the 4-arm mapping live here
+// once rather than twice.
+function handleThumbnailResult(
+	result: MakeThumbnailInMemoryResult,
+	params: {
+		uuid: string
+		outputPath: string
 	}
-
+): SdkThumbnailOutcome {
 	switch (result.tag) {
 		case MakeThumbnailInMemoryResult_Tags.Thumbnail: {
 			// Write beside the destination and rename into place so a crash never leaves a torn
@@ -112,4 +93,98 @@ export async function generateImageViaSdk(params: {
 			return "settled"
 		}
 	}
+}
+
+// Remote image thumbnails: the SDK decodes from ranged reads of the encrypted file (1 MiB chunks,
+// nothing persisted, format decided from magic bytes) and hands back a lossless WebP no larger than
+// the request, orientation applied. The caller has already applied both gates (displayability and
+// canMakeThumbnail), ruled out local bytes and the offline case, and does NOT hold the JS semaphore:
+// the client owns decode concurrency and memory, a parked call holds no buffers, and cancelling
+// dequeues it. Authed client only — no thumbnail-bearing screen is reachable logged out.
+export async function generateImageViaSdk(params: {
+	file: AnyFile
+	uuid: string
+	outputPath: string
+	signal?: AbortSignal
+}): Promise<SdkThumbnailOutcome> {
+	const { authedSdkClient } = await auth.getSdkClients()
+
+	// The JS AbortSignal is the uniffi cancellation handle itself (this call takes no
+	// ManagedFuture): aborting drops the Rust future, which stops the chunk reads at chunk
+	// granularity and dequeues a call still parked on the decode gate. The rejection carries
+	// name "AbortError" — exempted from the failure count in thumbnails.ts.
+	const result = await authedSdkClient.makeThumbnailInMemory(
+		{
+			file: params.file,
+			maxWidth: THUMBNAIL_MAX_WIDTH,
+			maxHeight: THUMBNAIL_MAX_HEIGHT
+		},
+		toSignalOpts(params.signal)
+	)
+
+	if (params.signal?.aborted) {
+		throw abortError(params.signal)
+	}
+
+	return handleThumbnailResult(result, params)
+}
+
+// Local image thumbnails: the bytes are already on this device — an offline copy, a file-cache hit, or
+// the file the caller just uploaded — so the SDK decodes them in place instead of pulling them back
+// through the network. Same decode gate and memory budget as the remote path (the client owns both),
+// so this is NOT behind the JS semaphore either. Authed client only, mirroring the remote path.
+//
+// `localPath` MUST be a DECODED plain filesystem path (normalizeFilePathForSdk), never a
+// percent-encoded file:// URI: the SDK opens it verbatim, so a `%20` from any name with a space would
+// ENOENT and silently produce no thumbnail. Normalizing here instead of at the call sites is NOT the
+// fix — a second decode would turn a file literally named `a%20b.jpg` into `a b.jpg`.
+export async function generateImageFromPathViaSdk(params: {
+	localPath: string
+	uuid: string
+	outputPath: string
+	signal?: AbortSignal
+}): Promise<SdkThumbnailOutcome> {
+	const result = await run(async defer => {
+		const { authedSdkClient } = await auth.getSdkClients()
+
+		// wrapAbortSignalForSdk allocates TWO uniffi (Rust Arc-backed) handles that nothing GCs. Arm
+		// the disposal defer() BEFORE the fallible allocation (its `new ManagedAbortController()` can
+		// throw under memory pressure) so an early throw can never bypass it — a missed disposal leaks
+		// two handles per file during a camera-upload backfill. null-init, assign once armed.
+		let wrappedSignal: ReturnType<typeof wrapAbortSignalForSdk> | null = null
+
+		defer(() => {
+			disposeSdkAbortSignal(wrappedSignal)
+		})
+
+		wrappedSignal = params.signal ? wrapAbortSignalForSdk(params.signal) : null
+
+		const outcome = await authedSdkClient.makeThumbnailFromPath(
+			params.localPath,
+			THUMBNAIL_MAX_WIDTH,
+			THUMBNAIL_MAX_HEIGHT,
+			// A thumbnail extraction is not a user-pausable transfer, so only the abort channel is wired.
+			ManagedFuture.new({
+				pauseSignal: undefined,
+				abortSignal: wrappedSignal ?? undefined
+			}),
+			toSignalOpts(params.signal)
+		)
+
+		// This call carries BOTH cancellation channels (the ManagedFuture and asyncOpts), so an abort
+		// races: it surfaces either as the bindings' AbortError or as a FilenSdkError Cancelled,
+		// whichever wins. Testing the JS signal FIRST — here and again in thumbnails.ts — makes the
+		// flavour irrelevant to the caller's failure ledger.
+		if (params.signal?.aborted) {
+			throw abortError(params.signal)
+		}
+
+		return handleThumbnailResult(outcome, params)
+	})
+
+	if (!result.success) {
+		throw result.error
+	}
+
+	return result.data
 }

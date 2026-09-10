@@ -1,8 +1,15 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { mockWriteEmbeddedPreviewToPath } = vi.hoisted(() => ({
-	mockWriteEmbeddedPreviewToPath: vi.fn()
-}))
+const { mockWriteEmbeddedPreviewToPath, mockWriteEmbeddedPreviewFromPath, mockOfflineGetLocalFile, mockManagedFutureNew } = vi.hoisted(
+	() => ({
+		mockWriteEmbeddedPreviewToPath: vi.fn(),
+		mockWriteEmbeddedPreviewFromPath: vi.fn(),
+		mockOfflineGetLocalFile: vi.fn().mockResolvedValue(null),
+		// A distinct handle per call: the SDK-call assertions compare by identity, which a shared
+		// return value would make blind to a second ManagedFuture being built and threaded instead.
+		mockManagedFutureNew: vi.fn((args: unknown) => ({ managedFuture: args }))
+	})
+)
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
@@ -30,7 +37,7 @@ vi.mock("@filen/sdk-rs", () => ({
 		}
 	},
 	ManagedFuture: {
-		new: vi.fn().mockReturnValue({})
+		new: mockManagedFutureNew
 	},
 	EmbeddedPreviewResult_Tags: {
 		Preview: "Preview",
@@ -97,19 +104,38 @@ vi.mock("@/lib/auth", () => ({
 	default: {
 		getSdkClients: vi.fn().mockResolvedValue({
 			authedSdkClient: {
-				writeEmbeddedPreviewToPath: mockWriteEmbeddedPreviewToPath
+				writeEmbeddedPreviewToPath: mockWriteEmbeddedPreviewToPath,
+				writeEmbeddedPreviewFromPath: mockWriteEmbeddedPreviewFromPath
 			}
 		})
 	}
 }))
 
+// ForSdk strips the scheme AND percent-DECODES every segment — the form the SDK opens verbatim. The
+// stub decodes for real, or a `%20` would slip past the path assertions unnoticed.
 vi.mock("@/lib/paths", () => ({
-	normalizeFilePathForSdk: (p: string) => p.trim().replace(/^file:\/+/, "/"),
+	normalizeFilePathForSdk: (p: string) =>
+		p
+			.trim()
+			.replace(/^file:\/+/, "/")
+			.split("/")
+			.map(segment => {
+				try {
+					return decodeURIComponent(segment)
+				} catch {
+					return segment
+				}
+			})
+			.join("/"),
 	normalizeFilePathForExpo: (p: string) => (p.startsWith("file://") ? p : `file://${p}`)
 }))
 
+// The real wrapAbortSignalForSdk returns a NEW ManagedAbortSignal (a uniffi handle), never its
+// argument — so the stub must return something distinguishable from the DOM signal, or every
+// assertion below naming the wrapped handle would also pass on the raw one. Same shape as
+// thumbnailsSdk.test.ts.
 vi.mock("@/lib/signals", () => ({
-	wrapAbortSignalForSdk: vi.fn(s => s),
+	wrapAbortSignalForSdk: vi.fn((signal: AbortSignal) => ({ wrapped: signal })),
 	disposeSdkAbortSignal: vi.fn(),
 	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined)
 }))
@@ -120,11 +146,16 @@ vi.mock("@/lib/cacheEviction", async importOriginal => ({
 	RAW_PREVIEW_CACHE_MAX_SIZE_BYTES: 100
 }))
 
+vi.mock("@/features/offline/offline", () => ({
+	default: {
+		getLocalFile: mockOfflineGetLocalFile
+	}
+}))
+
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-import { fs, setMtime, clearMtimes } from "@/tests/mocks/expoFileSystem"
+import { fs, setMtime, clearMtimes, File as MockFile } from "@/tests/mocks/expoFileSystem"
 import { wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
-import { ManagedFuture } from "@filen/sdk-rs"
 import { type DriveItemFileExtracted } from "@/types"
 
 const DIR = "file:///shared/group.io.filen.app/rawPreviews/v1"
@@ -155,6 +186,15 @@ function previewWriter(bytes: number[] = [0xff, 0xd8, 0xff, 0xe1]) {
 	}
 }
 
+// Same shape as previewWriter, for the from-path signature: (sourcePath, previewPath, ...).
+function localPreviewWriter(bytes: number[] = [0xff, 0xd8, 0xff, 0xe1]) {
+	return async (_sourcePath: string, previewPath: string) => {
+		fs.set(`file://${previewPath}`, new Uint8Array(bytes))
+
+		return { tag: "Preview", inner: { width: 6000, height: 4000, orientation: 1, bytes: BigInt(bytes.length) } }
+	}
+}
+
 function stagingLeftovers(): string[] {
 	return [...fs.keys()].filter(k => k.startsWith("file:///cache/filen-tmp/") && fs.get(k) !== "dir")
 }
@@ -170,6 +210,8 @@ beforeEach(() => {
 	clearMtimes()
 	vi.clearAllMocks()
 	mockWriteEmbeddedPreviewToPath.mockReset().mockResolvedValue({ tag: "NoPreview" })
+	mockWriteEmbeddedPreviewFromPath.mockReset().mockResolvedValue({ tag: "NoPreview" })
+	mockOfflineGetLocalFile.mockReset().mockResolvedValue(null)
 })
 
 describe("RawPreviewCache", () => {
@@ -235,7 +277,10 @@ describe("RawPreviewCache", () => {
 			expect(anyFile.inner[0]).toBe(item.data)
 			expect(sdkPath.startsWith("/cache/filen-tmp/")).toBe(true)
 			expect(sdkPath.startsWith("file://")).toBe(false)
-			expect(managedFuture).toEqual({})
+			expect(mockManagedFutureNew).toHaveBeenCalledTimes(1)
+			expect(managedFuture).toBe(mockManagedFutureNew.mock.results[0]?.value)
+			// No caller signal: nothing to wrap, so no uniffi handle is allocated for this call.
+			expect(wrapAbortSignalForSdk).not.toHaveBeenCalled()
 			expect(asyncOpts).toBeUndefined()
 			expect(stagingLeftovers()).toEqual([])
 		})
@@ -302,10 +347,22 @@ describe("RawPreviewCache", () => {
 
 			await cache.get({ item: makeItem("u1"), signal: controller.signal })
 
+			const wrapped = vi.mocked(wrapAbortSignalForSdk).mock.results[0]?.value
+			const [futureArgs] = mockManagedFutureNew.mock.calls[0] as [{ pauseSignal: unknown; abortSignal: unknown }]
+			const asyncOpts = mockWriteEmbeddedPreviewToPath.mock.calls[0]?.[3] as { signal: AbortSignal } | undefined
+
+			expect(wrapAbortSignalForSdk).toHaveBeenCalledTimes(1)
 			expect(wrapAbortSignalForSdk).toHaveBeenCalledWith(controller.signal)
-			expect(ManagedFuture.new).toHaveBeenCalledWith({ pauseSignal: undefined, abortSignal: controller.signal })
-			expect(mockWriteEmbeddedPreviewToPath.mock.calls[0]?.[3]).toEqual({ signal: controller.signal })
-			expect(disposeSdkAbortSignal).toHaveBeenCalledWith(controller.signal)
+			expect(mockManagedFutureNew).toHaveBeenCalledTimes(1)
+			expect(futureArgs.pauseSignal).toBeUndefined()
+			// Identity throughout: the SDK must get the WRAPPED uniffi handle, not the DOM signal it
+			// was made from — lowering a DOM AbortSignal into the bindings has no pointer to lower.
+			expect(futureArgs.abortSignal).toBe(wrapped)
+			expect(mockWriteEmbeddedPreviewToPath.mock.calls[0]?.[2]).toBe(mockManagedFutureNew.mock.results[0]?.value)
+			// asyncOpts carries the RAW signal: it is the JS-side cancellation, not the SDK's.
+			expect(asyncOpts?.signal).toBe(controller.signal)
+			expect(disposeSdkAbortSignal).toHaveBeenCalledTimes(1)
+			expect(disposeSdkAbortSignal).toHaveBeenCalledWith(wrapped)
 		})
 
 		it("rethrows a transport error and leaves no staging file behind", async () => {
@@ -332,6 +389,107 @@ describe("RawPreviewCache", () => {
 
 			expect(a).toEqual(b)
 			expect(mockWriteEmbeddedPreviewToPath).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	// A stored-offline RAW already holds its embedded JPEG on disk; pulling the container back over the
+	// ranged reader to extract it would be pointless, and impossible while offline.
+	describe("get — local copy first", () => {
+		function offlineCopy(uri = "file:///document/offline/v2/files/u1.cr2"): string {
+			fs.set(uri, new Uint8Array([1, 2, 3]))
+			mockOfflineGetLocalFile.mockResolvedValueOnce(new MockFile(uri))
+
+			return uri
+		}
+
+		it("extracts from the offline copy and never touches the remote call", async () => {
+			const cache = await createCache()
+			const item = makeItem("u1")
+
+			offlineCopy()
+			mockWriteEmbeddedPreviewFromPath.mockImplementationOnce(localPreviewWriter())
+
+			await expect(cache.get({ item })).resolves.toEqual({ kind: "uri", uri: `${DIR}/u1.jpg` })
+
+			expect(mockWriteEmbeddedPreviewToPath).not.toHaveBeenCalled()
+			expect(mockWriteEmbeddedPreviewFromPath).toHaveBeenCalledTimes(1)
+			expect(Array.from(fs.get(`${DIR}/u1.jpg`) as Uint8Array)).toEqual([0xff, 0xd8, 0xff, 0xe1])
+			expect(stagingLeftovers()).toEqual([])
+		})
+
+		// The SDK opens both paths verbatim — a percent-encoded URI is an ENOENT, not a preview.
+		it("passes DECODED plain paths for both the source and the destination", async () => {
+			const cache = await createCache()
+
+			offlineCopy("file:///document/offline/v2/files/IMG%201234.cr2")
+			mockWriteEmbeddedPreviewFromPath.mockImplementationOnce(localPreviewWriter())
+
+			await cache.get({ item: makeItem("u1") })
+
+			const [sourcePath, previewPath] = mockWriteEmbeddedPreviewFromPath.mock.calls[0] as [string, string]
+
+			expect(sourcePath).toBe("/document/offline/v2/files/IMG 1234.cr2")
+			expect(previewPath.startsWith("/cache/filen-tmp/")).toBe(true)
+			expect(previewPath.startsWith("file://")).toBe(false)
+		})
+
+		it("threads the same ManagedFuture and asyncOpts through the local call, and disposes the signal", async () => {
+			const cache = await createCache()
+			const controller = new AbortController()
+
+			offlineCopy()
+			mockWriteEmbeddedPreviewFromPath.mockImplementationOnce(localPreviewWriter())
+
+			await cache.get({ item: makeItem("u1"), signal: controller.signal })
+
+			const wrapped = vi.mocked(wrapAbortSignalForSdk).mock.results[0]?.value
+			const [futureArgs] = mockManagedFutureNew.mock.calls[0] as [{ pauseSignal: unknown; abortSignal: unknown }]
+			const asyncOpts = mockWriteEmbeddedPreviewFromPath.mock.calls[0]?.[3] as { signal: AbortSignal } | undefined
+
+			expect(wrapAbortSignalForSdk).toHaveBeenCalledTimes(1)
+			expect(wrapAbortSignalForSdk).toHaveBeenCalledWith(controller.signal)
+			expect(mockManagedFutureNew).toHaveBeenCalledTimes(1)
+			expect(futureArgs.pauseSignal).toBeUndefined()
+			expect(futureArgs.abortSignal).toBe(wrapped)
+			expect(mockWriteEmbeddedPreviewFromPath.mock.calls[0]?.[2]).toBe(mockManagedFutureNew.mock.results[0]?.value)
+			expect(asyncOpts?.signal).toBe(controller.signal)
+			expect(disposeSdkAbortSignal).toHaveBeenCalledTimes(1)
+			expect(disposeSdkAbortSignal).toHaveBeenCalledWith(wrapped)
+		})
+
+		it("answers noPreview from the local copy without falling back to the network", async () => {
+			const cache = await createCache()
+
+			offlineCopy()
+
+			await expect(cache.get({ item: makeItem("u1") })).resolves.toEqual({ kind: "noPreview" })
+			expect(mockWriteEmbeddedPreviewToPath).not.toHaveBeenCalled()
+		})
+
+		it("uses the remote call when the offline entry has no bytes on disk", async () => {
+			const cache = await createCache()
+
+			// The index still names the file but its data is gone — `exists` is the only trusted check.
+			mockOfflineGetLocalFile.mockResolvedValueOnce(new MockFile("file:///document/offline/v2/files/u1.cr2"))
+			mockWriteEmbeddedPreviewToPath.mockImplementationOnce(previewWriter())
+
+			await expect(cache.get({ item: makeItem("u1") })).resolves.toEqual({ kind: "uri", uri: `${DIR}/u1.jpg` })
+			expect(mockWriteEmbeddedPreviewFromPath).not.toHaveBeenCalled()
+		})
+
+		it("rethrows a local extraction error and leaves no staging file behind", async () => {
+			const cache = await createCache()
+
+			offlineCopy()
+			mockWriteEmbeddedPreviewFromPath.mockImplementationOnce(async (_source: unknown, previewPath: string) => {
+				fs.set(`file://${previewPath}`, new Uint8Array([1]))
+
+				throw new Error("decode failed")
+			})
+
+			await expect(cache.get({ item: makeItem("u1") })).rejects.toThrow("decode failed")
+			expect(stagingLeftovers()).toEqual([])
+			expect(fs.has(`${DIR}/u1.jpg`)).toBe(false)
 		})
 	})
 

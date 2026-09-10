@@ -9,12 +9,18 @@ const {
 	mockRelease,
 	mockGetThumbnailAsync,
 	mockMakeThumbnailInMemory,
+	mockMakeThumbnailFromPath,
+	mockManagedFutureNew,
+	mockWrapAbortSignalForSdk,
+	mockDisposeSdkAbortSignal,
 	mockGetSdkClients,
 	mockGetFileUrl,
 	mockHttpStoreState,
 	mockHttpStoreSubscribers,
 	mockIsOnline,
-	mockOnlineSubscribers
+	mockOnlineSubscribers,
+	mockSweepStaleThumbnailVersions,
+	mockEnsureDirectory
 } = vi.hoisted(() => {
 	const mockRelease = vi.fn()
 	const mockSaveAsync = vi.fn().mockResolvedValue({ uri: "file:///cache/manipulated.jpg" })
@@ -31,11 +37,17 @@ const {
 	const mockGetThumbnailAsync = vi.fn().mockResolvedValue({ uri: "file:///cache/vidframe.jpg", width: 1920, height: 1080 })
 
 	const mockMakeThumbnailInMemory = vi.fn()
+	const mockMakeThumbnailFromPath = vi.fn()
 	const mockGetSdkClients = vi.fn().mockResolvedValue({
 		authedSdkClient: {
-			makeThumbnailInMemory: mockMakeThumbnailInMemory
+			makeThumbnailInMemory: mockMakeThumbnailInMemory,
+			makeThumbnailFromPath: mockMakeThumbnailFromPath
 		}
 	})
+
+	const mockManagedFutureNew = vi.fn((args: unknown) => ({ managedFuture: args }))
+	const mockWrapAbortSignalForSdk = vi.fn((signal: AbortSignal) => ({ wrapped: signal }))
+	const mockDisposeSdkAbortSignal = vi.fn()
 
 	const mockGetFileUrl = vi.fn(
 		(file: { inner?: [{ uuid?: string }] }) => `http://localhost:8080/file/${file.inner?.[0]?.uuid ?? "unknown"}`
@@ -54,6 +66,9 @@ const {
 	const mockIsOnline = vi.fn(() => true)
 	const mockOnlineSubscribers = new Set<(online: boolean) => void>()
 
+	const mockSweepStaleThumbnailVersions = vi.fn()
+	const mockEnsureDirectory = vi.fn()
+
 	return {
 		mockSaveAsync,
 		mockRenderAsync,
@@ -63,12 +78,18 @@ const {
 		mockRelease,
 		mockGetThumbnailAsync,
 		mockMakeThumbnailInMemory,
+		mockMakeThumbnailFromPath,
+		mockManagedFutureNew,
+		mockWrapAbortSignalForSdk,
+		mockDisposeSdkAbortSignal,
 		mockGetSdkClients,
 		mockGetFileUrl,
 		mockHttpStoreState,
 		mockHttpStoreSubscribers,
 		mockIsOnline,
-		mockOnlineSubscribers
+		mockOnlineSubscribers,
+		mockSweepStaleThumbnailVersions,
+		mockEnsureDirectory
 	}
 })
 
@@ -123,6 +144,10 @@ vi.mock("@filen/sdk-rs", () => {
 			Unsupported: "Unsupported",
 			OverBudget: "OverBudget",
 			Corrupt: "Corrupt"
+		},
+		// A plain record, not a uniffi handle — nothing to dispose.
+		ManagedFuture: {
+			new: mockManagedFutureNew
 		}
 	}
 })
@@ -171,13 +196,42 @@ vi.mock("@/stores/useHttp.store", () => ({
 
 vi.mock("@/lib/utils", () => ({}))
 
-vi.mock("@/lib/paths", () => ({
-	normalizeFilePathForExpo: vi.fn((path: string) => (path.startsWith("file://") ? path : `file://${path}`)),
-	normalizeFilePathForSdk: vi.fn((path: string) => path.replace("file://", ""))
-}))
+// Faithful on the one axis these tests assert: ForSdk strips the scheme AND percent-DECODES every
+// segment, which is the form the SDK opens verbatim. A stub that only stripped "file://" would let a
+// `%20` through unnoticed — the exact silent-ENOENT this pipeline has to avoid. ForExpo is the same
+// decode followed by an encode, NOT an encode alone: an encoded URI is its fixed point, while a
+// decoded path carrying a literal `%20` decodes a second time. A stub that only added the scheme
+// could not express that, so it could not catch it either.
+vi.mock("@/lib/paths", () => {
+	const forSdk = (path: string) =>
+		path
+			.replace(/^file:\/+/, "/")
+			.split("/")
+			.map(segment => {
+				try {
+					return decodeURIComponent(segment)
+				} catch {
+					return segment
+				}
+			})
+			.join("/")
+
+	return {
+		normalizeFilePathForExpo: vi.fn(
+			(path: string) =>
+				`file://${forSdk(path)
+					.split("/")
+					.map(segment => (segment.length > 0 ? encodeURIComponent(segment) : segment))
+					.join("/")}`
+		),
+		normalizeFilePathForSdk: vi.fn(forSdk)
+	}
+})
 
 vi.mock("@/lib/signals", () => ({
-	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined)
+	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined),
+	wrapAbortSignalForSdk: mockWrapAbortSignalForSdk,
+	disposeSdkAbortSignal: mockDisposeSdkAbortSignal
 }))
 
 vi.mock("@/features/offline/offline", () => ({
@@ -191,6 +245,26 @@ vi.mock("@/lib/fileCache", () => ({
 		has: vi.fn().mockResolvedValue(false),
 		get: vi.fn().mockResolvedValue(null)
 	}
+}))
+
+// Partial on purpose: every other helper stays the real one (the error classes keep their identity,
+// so `instanceof` still holds), and ensureDirectory keeps creating the directory — the spy exists
+// only to observe WHEN restore() reaches it relative to the version sweep.
+vi.mock("@/lib/thumbnailsHelpers", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/lib/thumbnailsHelpers")>()
+
+	mockEnsureDirectory.mockImplementation(actual.ensureDirectory)
+
+	return {
+		...actual,
+		ensureDirectory: mockEnsureDirectory
+	}
+})
+
+// The real sweep carries its own once-per-process flag, which would make it unobservable after the
+// first test in any file that imports it.
+vi.mock("@/lib/thumbnailsVersionSweep", () => ({
+	sweepStaleThumbnailVersions: mockSweepStaleThumbnailVersions
 }))
 
 // The shared mock (untouched) lacks the audio set that previewType.ts now reaches through
@@ -214,6 +288,7 @@ vi.mock("@tanstack/react-query", () => ({
 }))
 
 import thumbnails, { DEFAULT_WIDTH, DEFAULT_QUALITY, VERSION } from "@/lib/thumbnails"
+import { THUMBNAIL_MAX_WIDTH, THUMBNAIL_MAX_HEIGHT } from "@/lib/thumbnailsSdk"
 import { fs, Directory, Paths } from "@/tests/mocks/expoFileSystem"
 
 const THUMBNAILS_DIR = `file:///shared/group.io.filen.app/thumbnails/v${VERSION}`
@@ -302,13 +377,16 @@ type ThumbnailsInternals = {
 const internals = thumbnails as unknown as ThumbnailsInternals
 
 describe("Thumbnails", () => {
-	// Tripwire for the on-disk format invariant (see thumbnails.ts): the cached thumbnail format
-	// (width/quality) is versioned by THUMBNAILS_VERSION so a format change invalidates stale caches.
-	// If you change DEFAULT_WIDTH or DEFAULT_QUALITY, bump THUMBNAILS_VERSION in storageRoots.ts so
-	// existing installs regenerate — then update this fingerprint. (128→256 once shipped without the
-	// bump, leaving installs on stale 128px thumbnails.)
+	// Tripwire for the on-disk format invariant (see thumbnails.ts): what the cached `<uuid>.webp`
+	// holds is versioned by THUMBNAILS_VERSION, because readExistingThumbnail serves any non-zero file
+	// unconditionally — an install whose directory is not repointed keeps its old output forever. Bump
+	// THUMBNAILS_VERSION in storageRoots.ts on ANY output change, then update this fingerprint.
+	// (128→256 once shipped without the bump, leaving installs on stale 128px thumbnails; v4 is the
+	// move of every image thumbnail from the manipulator to the SDK's lossless contain box, after
+	// which DEFAULT_WIDTH/DEFAULT_QUALITY describe the video frame alone.)
 	it("keeps the thumbnail format fingerprint in sync with THUMBNAILS_VERSION", () => {
-		expect(`w${DEFAULT_WIDTH}:q${DEFAULT_QUALITY}:v${VERSION}`).toBe("w256:q0.9:v3")
+		expect(`w${DEFAULT_WIDTH}:q${DEFAULT_QUALITY}:v${VERSION}`).toBe("w256:q0.9:v4")
+		expect(`${THUMBNAIL_MAX_WIDTH}x${THUMBNAIL_MAX_HEIGHT}`).toBe("256x512")
 	})
 
 	beforeEach(() => {
@@ -342,6 +420,7 @@ describe("Thumbnails", () => {
 		mockManipulate.mockReturnValue(manipulatorResult)
 
 		mockMakeThumbnailInMemory.mockResolvedValue(thumbnailVerdict())
+		mockMakeThumbnailFromPath.mockResolvedValue(thumbnailVerdict())
 
 		mockGetThumbnailAsync.mockResolvedValue({ uri: "file:///cache/vidframe.jpg", width: 1920, height: 1080 })
 
@@ -470,8 +549,8 @@ describe("Thumbnails", () => {
 		})
 	})
 
-	describe("generate — local bytes first (manipulator, zero network)", () => {
-		it("uses the offline copy through the manipulator and never calls the SDK, even offline", async () => {
+	describe("generate — local bytes first (SDK from path, zero network)", () => {
+		it("decodes the offline copy from its path and never reaches the network, even offline", async () => {
 			const { File } = await import("@/tests/mocks/expoFileSystem")
 			const offlineMod = await import("@/features/offline/offline")
 
@@ -485,12 +564,120 @@ describe("Thumbnails", () => {
 			const result = await thumbnails.generate({ item: makeFileItem("offline-hit-uuid", "photo.jpg") })
 
 			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
-			expect(mockManipulate).toHaveBeenCalledWith(offlineFileUri)
-			expect(mockResize).toHaveBeenCalledWith({ width: DEFAULT_WIDTH })
+			expect(mockManipulate).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailFromPath).toHaveBeenCalledWith(
+				"/offline/photo.jpg",
+				THUMBNAIL_MAX_WIDTH,
+				THUMBNAIL_MAX_HEIGHT,
+				expect.anything(),
+				undefined
+			)
 			expect(result).toBe(`${THUMBNAILS_DIR}/offline-hit-uuid.webp`)
 		})
 
-		it("uses a file-cache hit through the manipulator and never calls the SDK", async () => {
+		// The SDK opens the path verbatim, so a percent-encoded URI ENOENTs on any name with a space or
+		// a non-ASCII character — a silent "no thumbnail" for a whole class of camera-roll names.
+		it("hands the SDK a DECODED path, never the percent-encoded expo URI", async () => {
+			const { File } = await import("@/tests/mocks/expoFileSystem")
+			const offlineMod = await import("@/features/offline/offline")
+
+			const offlineFileUri = "file:///offline/IMG%201234%20(1).jpg"
+
+			fs.set(offlineFileUri, new Uint8Array([1, 2, 3]))
+			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(new File(offlineFileUri) as never)
+
+			await thumbnails.generate({ item: makeFileItem("encoded-name-uuid", "IMG 1234 (1).jpg") })
+
+			expect(mockMakeThumbnailFromPath).toHaveBeenCalledWith(
+				"/offline/IMG 1234 (1).jpg",
+				THUMBNAIL_MAX_WIDTH,
+				THUMBNAIL_MAX_HEIGHT,
+				expect.anything(),
+				undefined
+			)
+		})
+
+		// Both keys are required by the bindings, and a thumbnail extraction is not user-pausable.
+		it("builds the ManagedFuture with the wrapped abort signal and no pause signal, and disposes it once", async () => {
+			const { File } = await import("@/tests/mocks/expoFileSystem")
+			const offlineMod = await import("@/features/offline/offline")
+			const controller = new AbortController()
+
+			fs.set("file:///offline/photo.jpg", new Uint8Array([1]))
+			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(new File("file:///offline/photo.jpg") as never)
+
+			await thumbnails.generate({ item: makeFileItem("managed-future-uuid", "photo.jpg"), signal: controller.signal })
+
+			const wrapped = mockWrapAbortSignalForSdk.mock.results[0]?.value
+
+			expect(mockWrapAbortSignalForSdk).toHaveBeenCalledWith(controller.signal)
+			expect(mockManagedFutureNew).toHaveBeenCalledWith({ pauseSignal: undefined, abortSignal: wrapped })
+			expect(mockMakeThumbnailFromPath).toHaveBeenCalledWith(
+				"/offline/photo.jpg",
+				THUMBNAIL_MAX_WIDTH,
+				THUMBNAIL_MAX_HEIGHT,
+				mockManagedFutureNew.mock.results[0]?.value,
+				{ signal: controller.signal }
+			)
+			expect(mockDisposeSdkAbortSignal).toHaveBeenCalledTimes(1)
+			expect(mockDisposeSdkAbortSignal).toHaveBeenCalledWith(wrapped)
+		})
+
+		// The two Arc-backed handles wrapAbortSignalForSdk allocates have no GC: every exit has to free
+		// them, or a camera-upload backfill leaks two per file.
+		it("disposes the wrapped signal exactly once after a settled verdict", async () => {
+			const { File } = await import("@/tests/mocks/expoFileSystem")
+			const offlineMod = await import("@/features/offline/offline")
+
+			fs.set("file:///offline/photo.jpg", new Uint8Array([1]))
+			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(new File("file:///offline/photo.jpg") as never)
+			mockMakeThumbnailFromPath.mockResolvedValueOnce(UNSUPPORTED_VERDICT)
+
+			await expect(
+				thumbnails.generate({ item: makeFileItem("dispose-settled-uuid", "photo.jpg"), signal: new AbortController().signal })
+			).resolves.toBeNull()
+
+			expect(mockDisposeSdkAbortSignal).toHaveBeenCalledTimes(1)
+		})
+
+		it("disposes the wrapped signal exactly once after a thrown transport error", async () => {
+			const { File } = await import("@/tests/mocks/expoFileSystem")
+			const offlineMod = await import("@/features/offline/offline")
+
+			fs.set("file:///offline/photo.jpg", new Uint8Array([1]))
+			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(new File("file:///offline/photo.jpg") as never)
+			mockMakeThumbnailFromPath.mockRejectedValueOnce(new Error("io"))
+
+			await expect(
+				thumbnails.generate({ item: makeFileItem("dispose-throw-uuid", "photo.jpg"), signal: new AbortController().signal })
+			).rejects.toThrow("io")
+
+			expect(mockDisposeSdkAbortSignal).toHaveBeenCalledTimes(1)
+		})
+
+		it("disposes the wrapped signal exactly once when the call is aborted mid-flight", async () => {
+			const { File } = await import("@/tests/mocks/expoFileSystem")
+			const offlineMod = await import("@/features/offline/offline")
+			const controller = new AbortController()
+
+			fs.set("file:///offline/photo.jpg", new Uint8Array([1]))
+			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(new File("file:///offline/photo.jpg") as never)
+
+			mockMakeThumbnailFromPath.mockImplementationOnce(async () => {
+				controller.abort()
+
+				return thumbnailVerdict()
+			})
+
+			await expect(
+				thumbnails.generate({ item: makeFileItem("abort-dispose-uuid", "photo.jpg"), signal: controller.signal })
+			).rejects.toThrow()
+
+			expect(mockDisposeSdkAbortSignal).toHaveBeenCalledTimes(1)
+			expect(fs.has(`${THUMBNAILS_DIR}/abort-dispose-uuid.webp`)).toBe(false)
+		})
+
+		it("decodes a file-cache hit from its path and never reaches the network", async () => {
 			const { File } = await import("@/tests/mocks/expoFileSystem")
 			const fileCacheMod = await import("@/lib/fileCache")
 
@@ -503,11 +690,17 @@ describe("Thumbnails", () => {
 			const result = await thumbnails.generate({ item: makeFileItem("filecache-hit-uuid", "photo.jpg") })
 
 			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
-			expect(mockManipulate).toHaveBeenCalledWith(cachedFileUri)
+			expect(mockMakeThumbnailFromPath).toHaveBeenCalledWith(
+				"/fileCache/photo.jpg",
+				THUMBNAIL_MAX_WIDTH,
+				THUMBNAIL_MAX_HEIGHT,
+				expect.anything(),
+				undefined
+			)
 			expect(result).toBe(`${THUMBNAILS_DIR}/filecache-hit-uuid.webp`)
 		})
 
-		it("passes a caller-supplied width and quality straight to the manipulator", async () => {
+		it("ignores a caller-supplied width and quality — the SDK owns its request box", async () => {
 			const { File } = await import("@/tests/mocks/expoFileSystem")
 			const offlineMod = await import("@/features/offline/offline")
 
@@ -516,11 +709,17 @@ describe("Thumbnails", () => {
 
 			await thumbnails.generate({ item: makeFileItem("custom-size-uuid", "photo.jpg"), width: 512, quality: 0.5 })
 
-			expect(mockResize).toHaveBeenCalledWith({ width: 512 })
-			expect(mockSaveAsync).toHaveBeenCalledWith(expect.objectContaining({ compress: 0.5 }))
+			expect(mockResize).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailFromPath).toHaveBeenCalledWith(
+				"/offline/photo.jpg",
+				THUMBNAIL_MAX_WIDTH,
+				THUMBNAIL_MAX_HEIGHT,
+				expect.anything(),
+				undefined
+			)
 		})
 
-		it("takes the local path behind the semaphore", async () => {
+		it("does NOT take the JS semaphore for the local path either (same decode gate as the remote call)", async () => {
 			const { File } = await import("@/tests/mocks/expoFileSystem")
 			const offlineMod = await import("@/features/offline/offline")
 			const acquireSpy = vi.spyOn(internals.semaphore, "acquire")
@@ -530,36 +729,55 @@ describe("Thumbnails", () => {
 
 			await thumbnails.generate({ item: makeFileItem("local-sem-uuid", "photo.jpg") })
 
-			expect(acquireSpy).toHaveBeenCalledTimes(1)
+			expect(acquireSpy).not.toHaveBeenCalled()
 
 			acquireSpy.mockRestore()
 		})
 
-		it("ignores a local copy the manipulator cannot decode (RAW) and goes to the SDK", async () => {
+		// The manipulator could not read RAW, so its offline copy used to be skipped and the tile pulled
+		// the whole container back over the network. The SDK reads it, so the local copy now wins.
+		it("uses a local RAW copy instead of the network (no format list gates the lookup any more)", async () => {
 			const { File } = await import("@/tests/mocks/expoFileSystem")
 			const offlineMod = await import("@/features/offline/offline")
 
+			mockIsOnline.mockReturnValue(false)
 			fs.set("file:///offline/shot.cr2", new Uint8Array([1]))
 			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(new File("file:///offline/shot.cr2") as never)
 
-			await thumbnails.generate({ item: makeFileItem("raw-local-uuid", "shot.cr2") })
+			await expect(thumbnails.generate({ item: makeFileItem("raw-local-uuid", "shot.cr2") })).resolves.toBe(
+				`${THUMBNAILS_DIR}/raw-local-uuid.webp`
+			)
 
 			expect(mockManipulate).not.toHaveBeenCalled()
-			expect(mockMakeThumbnailInMemory).toHaveBeenCalledTimes(1)
+			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailFromPath).toHaveBeenCalledTimes(1)
 		})
 
-		it("the SDK veto applies to the local path too (a listed .ico with canMakeThumbnail false shows an icon)", async () => {
-			const { File } = await import("@/tests/mocks/expoFileSystem")
+		// No local-copy stub here on purpose: the veto is checked before resolveLocalSourcePath runs, so
+		// a queued mockResolvedValueOnce would go unconsumed and leak into the next test.
+		it("the SDK veto applies to the local path too (canMakeThumbnail false shows an icon)", async () => {
 			const offlineMod = await import("@/features/offline/offline")
-
-			fs.set("file:///offline/icon.png", new Uint8Array([1]))
-			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(new File("file:///offline/icon.png") as never)
 
 			await expect(thumbnails.generate({ item: makeFileItem("veto-local-uuid", "icon.png", false) })).rejects.toThrow(
 				"Unsupported file type"
 			)
-			expect(mockManipulate).not.toHaveBeenCalled()
+			expect(offlineMod.default.getLocalFile).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailFromPath).not.toHaveBeenCalled()
 			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
+		})
+
+		it("a settled verdict from the local path settles the uuid without counting a failure", async () => {
+			const { File } = await import("@/tests/mocks/expoFileSystem")
+			const offlineMod = await import("@/features/offline/offline")
+
+			fs.set("file:///offline/photo.jpg", new Uint8Array([1]))
+			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(new File("file:///offline/photo.jpg") as never)
+			mockMakeThumbnailFromPath.mockResolvedValueOnce(CORRUPT_VERDICT)
+
+			await expect(thumbnails.generate({ item: makeFileItem("local-settled-uuid", "photo.jpg") })).resolves.toBeNull()
+
+			expect(thumbnails.isUnavailable("local-settled-uuid")).toBe(true)
+			expect(fs.has(`${THUMBNAILS_DIR}/local-settled-uuid.webp`)).toBe(false)
 		})
 	})
 
@@ -703,9 +921,10 @@ describe("Thumbnails", () => {
 
 			await expect(
 				thumbnails.generateFromLocalFile({
-					localPath: "file:///local/photo.jpg",
+					localUri: "file:///local/photo.jpg",
 					uuid: "settled-then-local",
-					name: "photo.jpg"
+					name: "photo.jpg",
+					canMakeThumbnail: true
 				})
 			).resolves.toBe(`${THUMBNAILS_DIR}/settled-then-local.webp`)
 
@@ -1199,19 +1418,65 @@ describe("Thumbnails", () => {
 	})
 
 	describe("generateFromLocalFile", () => {
-		it("generates thumbnail from a local image path", async () => {
+		it("generates thumbnail from a local image path through the SDK, never the manipulator", async () => {
 			fs.set(THUMBNAILS_DIR, "dir")
 			fs.set("file:///local/photo.jpg", new Uint8Array([1, 2, 3]))
 
 			const result = await thumbnails.generateFromLocalFile({
-				localPath: "file:///local/photo.jpg",
+				localUri: "file:///local/photo.jpg",
 				uuid: "local-img-uuid",
-				name: "photo.jpg"
+				name: "photo.jpg",
+				canMakeThumbnail: true
 			})
 
 			expect(result).toBe(`${THUMBNAILS_DIR}/local-img-uuid.webp`)
-			expect(mockManipulate).toHaveBeenCalledWith("file:///local/photo.jpg")
+			expect(mockMakeThumbnailFromPath).toHaveBeenCalledWith(
+				"/local/photo.jpg",
+				THUMBNAIL_MAX_WIDTH,
+				THUMBNAIL_MAX_HEIGHT,
+				expect.anything(),
+				undefined
+			)
+			expect(mockManipulate).not.toHaveBeenCalled()
 			expect(mockMakeThumbnailInMemory).not.toHaveBeenCalled()
+		})
+
+		// Both ManagedFuture keys are required by the bindings; a post-upload thumbnail is not a
+		// user-pausable transfer, so only the abort channel is wired.
+		it("builds the ManagedFuture with the wrapped abort signal and no pause signal, and disposes it once", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+
+			const controller = new AbortController()
+
+			await thumbnails.generateFromLocalFile({
+				localUri: "file:///local/photo.jpg",
+				uuid: "local-managed-future-uuid",
+				name: "photo.jpg",
+				canMakeThumbnail: true,
+				signal: controller.signal
+			})
+
+			const wrapped = mockWrapAbortSignalForSdk.mock.results[0]?.value
+
+			expect(mockManagedFutureNew).toHaveBeenCalledWith({ pauseSignal: undefined, abortSignal: wrapped })
+			expect(mockDisposeSdkAbortSignal).toHaveBeenCalledTimes(1)
+			expect(mockDisposeSdkAbortSignal).toHaveBeenCalledWith(wrapped)
+		})
+
+		// A .dng is deliberately absent from the manipulator list (developing a RAW in the background
+		// task risks an OOM kill), so an iPhone ProRAW shot used to upload with no thumbnail at all.
+		it("thumbnails a freshly uploaded .dng, which the manipulator gate excluded", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+
+			const result = await thumbnails.generateFromLocalFile({
+				localUri: "file:///local/IMG_0001.dng",
+				uuid: "dng-uuid",
+				name: "IMG_0001.dng",
+				canMakeThumbnail: true
+			})
+
+			expect(result).toBe(`${THUMBNAILS_DIR}/dng-uuid.webp`)
+			expect(mockMakeThumbnailFromPath).toHaveBeenCalledTimes(1)
 		})
 
 		it("generates thumbnail from a local video path", async () => {
@@ -1219,34 +1484,131 @@ describe("Thumbnails", () => {
 			fs.set("file:///local/video.mp4", new Uint8Array([1, 2, 3]))
 
 			const result = await thumbnails.generateFromLocalFile({
-				localPath: "file:///local/video.mp4",
+				localUri: "file:///local/video.mp4",
 				uuid: "local-vid-uuid",
-				name: "video.mp4"
+				name: "video.mp4",
+				canMakeThumbnail: false
 			})
 
 			expect(result).toBe(`${THUMBNAILS_DIR}/local-vid-uuid.webp`)
+			// The URI reaches the extractor as handed in — generateVideo re-normalizing it is a no-op.
 			expect(mockGetThumbnailAsync).toHaveBeenCalledWith("file:///local/video.mp4", {
 				time: 1000,
 				quality: 1
 			})
+			expect(mockMakeThumbnailFromPath).not.toHaveBeenCalled()
 		})
 
-		it("returns null for unsupported extensions", async () => {
+		// The extractor is fed through normalizeFilePathForExpo, which DECODES before it encodes. Hand
+		// it a path that was already decoded and a name's literal `%20` decodes a second time, so the
+		// frame is pulled from `/local/clip one.mov` — a file that does not exist. It ENOENTs, and the
+		// failure lands on the ledger as if the video were broken.
+		it("keeps a name's literal percent-escape intact on the way to the frame extractor", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set("file:///local/clip%2520one.mov", new Uint8Array([1, 2, 3]))
+
 			const result = await thumbnails.generateFromLocalFile({
-				localPath: "file:///local/doc.pdf",
-				uuid: "pdf-uuid",
-				name: "doc.pdf"
+				localUri: "file:///local/clip%2520one.mov",
+				uuid: "escaped-vid-uuid",
+				name: "clip%20one.mov",
+				canMakeThumbnail: false
+			})
+
+			expect(result).toBe(`${THUMBNAILS_DIR}/escaped-vid-uuid.webp`)
+
+			const passedUri = mockGetThumbnailAsync.mock.calls[0]?.[0] as string
+
+			// Decoded ONCE, the URI has to name the file that was uploaded.
+			expect(decodeURIComponent(passedUri.replace(/^file:\/\//, ""))).toBe("/local/clip%20one.mov")
+		})
+
+		// Mirror image: the SDK opens the path verbatim, so this branch owes it exactly one decode.
+		it("hands the SDK the once-decoded path for a name carrying a literal percent-escape", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+
+			await thumbnails.generateFromLocalFile({
+				localUri: "file:///local/IMG%2520001.jpg",
+				uuid: "escaped-img-uuid",
+				name: "IMG%20001.jpg",
+				canMakeThumbnail: true
+			})
+
+			expect(mockMakeThumbnailFromPath).toHaveBeenCalledWith(
+				"/local/IMG%20001.jpg",
+				THUMBNAIL_MAX_WIDTH,
+				THUMBNAIL_MAX_HEIGHT,
+				expect.anything(),
+				undefined
+			)
+		})
+
+		// The SDK thumbnails SVG on native, but resvg draws <text> and raster <image> as nothing, so the
+		// app refuses it at every other entry point. On the flag alone, uploading one wrote a transparent
+		// tile that only the uploading device ever saw.
+		it("makes no thumbnail for an uploaded .svg the SDK says it can decode", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+
+			const result = await thumbnails.generateFromLocalFile({
+				localUri: "file:///local/logo.svg",
+				uuid: "svg-uuid",
+				name: "logo.svg",
+				canMakeThumbnail: true
 			})
 
 			expect(result).toBeNull()
+			expect(mockMakeThumbnailFromPath).not.toHaveBeenCalled()
+			expect(thumbnails.hasThumbnail("svg-uuid")).toBe(false)
+		})
+
+		// Same divergence, blunter: the Rust table admits formats this app never displays (.qoi, .jfif,
+		// the RAW tail). Thumbnailing them only on the uploading device is the inconsistency.
+		it("makes no thumbnail for a format the SDK admits but the app cannot display", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+
+			const result = await thumbnails.generateFromLocalFile({
+				localUri: "file:///local/sprite.qoi",
+				uuid: "qoi-uuid",
+				name: "sprite.qoi",
+				canMakeThumbnail: true
+			})
+
+			expect(result).toBeNull()
+			expect(mockMakeThumbnailFromPath).not.toHaveBeenCalled()
+		})
+
+		it("makes no SDK call at all when the uploaded record says canMakeThumbnail is false", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+
+			const result = await thumbnails.generateFromLocalFile({
+				localUri: "file:///local/icon.ico",
+				uuid: "ico-uuid",
+				name: "icon.ico",
+				canMakeThumbnail: false
+			})
+
+			expect(result).toBeNull()
+			expect(mockMakeThumbnailFromPath).not.toHaveBeenCalled()
 			expect(mockManipulate).not.toHaveBeenCalled()
 		})
 
-		it("returns null for files without extension", async () => {
+		it("returns null for a non-image, non-video upload", async () => {
 			const result = await thumbnails.generateFromLocalFile({
-				localPath: "file:///local/noext",
+				localUri: "file:///local/doc.pdf",
+				uuid: "pdf-uuid",
+				name: "doc.pdf",
+				canMakeThumbnail: false
+			})
+
+			expect(result).toBeNull()
+			expect(mockMakeThumbnailFromPath).not.toHaveBeenCalled()
+		})
+
+		it("returns null for files without extension whose SDK gate is closed", async () => {
+			const result = await thumbnails.generateFromLocalFile({
+				localUri: "file:///local/noext",
 				uuid: "noext-uuid",
-				name: "noext"
+				name: "noext",
+				canMakeThumbnail: false
 			})
 
 			expect(result).toBeNull()
@@ -1257,25 +1619,25 @@ describe("Thumbnails", () => {
 			fs.set(`${THUMBNAILS_DIR}/existing-uuid.webp`, new Uint8Array([0xff]))
 
 			const result = await thumbnails.generateFromLocalFile({
-				localPath: "file:///local/photo.jpg",
+				localUri: "file:///local/photo.jpg",
 				uuid: "existing-uuid",
-				name: "photo.jpg"
+				name: "photo.jpg",
+				canMakeThumbnail: true
 			})
 
 			expect(result).toBe(`${THUMBNAILS_DIR}/existing-uuid.webp`)
-			expect(mockManipulate).not.toHaveBeenCalled()
+			expect(mockMakeThumbnailFromPath).not.toHaveBeenCalled()
 		})
 
 		it("returns null on generation failure instead of throwing", async () => {
 			fs.set(THUMBNAILS_DIR, "dir")
-			mockManipulate.mockImplementationOnce(() => {
-				throw new Error("Manipulator crashed")
-			})
+			mockMakeThumbnailFromPath.mockRejectedValueOnce(new Error("decoder crashed"))
 
 			const result = await thumbnails.generateFromLocalFile({
-				localPath: "file:///local/photo.jpg",
+				localUri: "file:///local/photo.jpg",
 				uuid: "fail-uuid",
-				name: "photo.jpg"
+				name: "photo.jpg",
+				canMakeThumbnail: true
 			})
 
 			expect(result).toBeNull()
@@ -1283,26 +1645,101 @@ describe("Thumbnails", () => {
 
 		it("increments failure count on error", async () => {
 			fs.set(THUMBNAILS_DIR, "dir")
-			mockManipulate.mockImplementation(() => {
-				throw new Error("fail")
-			})
+			mockMakeThumbnailFromPath.mockRejectedValue(new Error("fail"))
 
-			for (let i = 0; i < 3; i++) {
+			for (let i = 0; i < 4; i++) {
 				await thumbnails.generateFromLocalFile({
-					localPath: "file:///local/photo.jpg",
+					localUri: "file:///local/photo.jpg",
 					uuid: "repeat-fail-uuid",
-					name: "photo.jpg"
+					name: "photo.jpg",
+					canMakeThumbnail: true
 				})
 			}
 
-			const result = await thumbnails.generateFromLocalFile({
-				localPath: "file:///local/photo.jpg",
-				uuid: "repeat-fail-uuid",
-				name: "photo.jpg"
+			// The fourth call is blacklisted before the SDK is reached.
+			expect(mockMakeThumbnailFromPath).toHaveBeenCalledTimes(3)
+		})
+
+		// A verdict is the SDK saying "not this file", not a failure — counting it would burn the
+		// blacklist on three uploads of the same unsupported format.
+		it("a settled verdict feeds the unavailable Set and leaves the failure ledger untouched", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			mockMakeThumbnailFromPath.mockResolvedValueOnce(UNSUPPORTED_VERDICT)
+
+			await expect(
+				thumbnails.generateFromLocalFile({
+					localUri: "file:///local/photo.jpg",
+					uuid: "local-verdict-uuid",
+					name: "photo.jpg",
+					canMakeThumbnail: true
+				})
+			).resolves.toBeNull()
+
+			expect(thumbnails.isUnavailable("local-verdict-uuid")).toBe(true)
+			expect(thumbnails.hasThumbnail("local-verdict-uuid")).toBe(false)
+			expect(fs.has(`${THUMBNAILS_DIR}/local-verdict-uuid.webp`)).toBe(false)
+
+			// Three REAL failures still fit before the blacklist closes — the verdict was not one of them.
+			mockMakeThumbnailFromPath.mockRejectedValue(new Error("io"))
+
+			for (let i = 0; i < 4; i++) {
+				await thumbnails.generateFromLocalFile({
+					localUri: "file:///local/photo.jpg",
+					uuid: "local-verdict-uuid",
+					name: "photo.jpg",
+					canMakeThumbnail: true
+				})
+			}
+
+			expect(mockMakeThumbnailFromPath).toHaveBeenCalledTimes(4)
+		})
+
+		// The from-path call carries both cancellation channels, so an abort arrives either as the
+		// bindings' AbortError or as a FilenSdkError Cancelled — neither is the file's fault.
+		it("does not count a failure when an abort surfaces as a FilenSdkError Cancelled", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+
+			const controller = new AbortController()
+
+			mockMakeThumbnailFromPath.mockImplementation(async () => {
+				controller.abort()
+
+				throw new Error("Cancelled")
 			})
 
-			expect(result).toBeNull()
-			expect(mockManipulate).toHaveBeenCalledTimes(3)
+			for (let i = 0; i < 4; i++) {
+				await thumbnails.generateFromLocalFile({
+					localUri: "file:///local/photo.jpg",
+					uuid: "sdk-cancelled-uuid",
+					name: "photo.jpg",
+					canMakeThumbnail: true,
+					signal: controller.signal
+				})
+			}
+
+			// Never blacklisted: all four attempts reached the SDK.
+			expect(mockMakeThumbnailFromPath).toHaveBeenCalledTimes(4)
+		})
+
+		it("does not count a failure when the bindings reject with their own AbortError", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+
+			const abortError = new Error("The operation was aborted")
+
+			abortError.name = "AbortError"
+
+			mockMakeThumbnailFromPath.mockRejectedValue(abortError)
+
+			for (let i = 0; i < 4; i++) {
+				await thumbnails.generateFromLocalFile({
+					localUri: "file:///local/photo.jpg",
+					uuid: "bindings-abort-uuid",
+					name: "photo.jpg",
+					canMakeThumbnail: true
+				})
+			}
+
+			expect(mockMakeThumbnailFromPath).toHaveBeenCalledTimes(4)
 		})
 
 		it("does not use HTTP provider for local video", async () => {
@@ -1311,9 +1748,10 @@ describe("Thumbnails", () => {
 			mockHttpStoreState.getFileUrl = null
 
 			const result = await thumbnails.generateFromLocalFile({
-				localPath: "file:///local/video.mp4",
+				localUri: "file:///local/video.mp4",
 				uuid: "local-vid-no-http-uuid",
-				name: "video.mp4"
+				name: "video.mp4",
+				canMakeThumbnail: false
 			})
 
 			expect(result).toBe(`${THUMBNAILS_DIR}/local-vid-no-http-uuid.webp`)
@@ -1324,9 +1762,10 @@ describe("Thumbnails", () => {
 			fs.set(THUMBNAILS_DIR, "dir")
 
 			await thumbnails.generateFromLocalFile({
-				localPath: "file:///local/photo.jpg",
+				localUri: "file:///local/photo.jpg",
 				uuid: "cache-uuid",
-				name: "photo.jpg"
+				name: "photo.jpg",
+				canMakeThumbnail: true
 			})
 
 			expect(thumbnails.hasThumbnail("cache-uuid")).toBe(true)
@@ -1361,12 +1800,13 @@ describe("Thumbnails", () => {
 			fs.set("file:///local/photo.jpg", new Uint8Array([1, 2, 3]))
 
 			const result = await thumbnails.generateFromLocalFile({
-				localPath: "file:///local/photo.jpg",
+				localUri: "file:///local/photo.jpg",
 				uuid: "zero-byte-local-uuid",
-				name: "photo.jpg"
+				name: "photo.jpg",
+				canMakeThumbnail: true
 			})
 
-			expect(mockManipulate).toHaveBeenCalledTimes(1)
+			expect(mockMakeThumbnailFromPath).toHaveBeenCalledTimes(1)
 			expect(result).toBe(`${THUMBNAILS_DIR}/zero-byte-local-uuid.webp`)
 		})
 	})
@@ -1650,9 +2090,10 @@ describe("Thumbnails", () => {
 			fs.set(THUMBNAILS_DIR, "dir")
 
 			await thumbnails.generateFromLocalFile({
-				localPath: "file:///local/photo.jpg",
+				localUri: "file:///local/photo.jpg",
 				uuid: "local-mark-uuid",
-				name: "photo.jpg"
+				name: "photo.jpg",
+				canMakeThumbnail: true
 			})
 
 			expect(thumbnails.hasThumbnail("local-mark-uuid")).toBe(true)
@@ -1672,6 +2113,37 @@ describe("Thumbnails", () => {
 			thumbnails.restore()
 
 			expect(thumbnails.hasThumbnail("second-uuid")).toBe(false)
+		})
+
+		// A THUMBNAILS_VERSION bump strands the whole previous tree: clear() and size() both root at the
+		// CURRENT version directory, so nothing on disk reaches those bytes again. restore() is the only
+		// caller, and without this the call can be deleted with the rest of the suite still green.
+		it("sweeps the stale version directories on the boot path", () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+
+			thumbnails.restore()
+
+			expect(mockSweepStaleThumbnailVersions).toHaveBeenCalledTimes(1)
+		})
+
+		// Load-bearing order, not incidental: an upgrade must free the previous version's bytes before
+		// it starts writing new ones into the current version, not after.
+		it("sweeps BEFORE the current version directory is ensured", () => {
+			thumbnails.restore()
+
+			const sweepOrder = mockSweepStaleThumbnailVersions.mock.invocationCallOrder[0] ?? Infinity
+			const ensureOrder = mockEnsureDirectory.mock.invocationCallOrder[0] ?? -Infinity
+
+			expect(sweepOrder).toBeLessThan(ensureOrder)
+		})
+
+		it("does not sweep again on a second restore() — the once-per-process guard covers it", () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+
+			thumbnails.restore()
+			thumbnails.restore()
+
+			expect(mockSweepStaleThumbnailVersions).toHaveBeenCalledTimes(1)
 		})
 
 		it("leaves the Set empty when the directory listing throws (self-heals via per-item generate)", () => {

@@ -106,10 +106,11 @@ export function buildJsClientConfig(resolved: ResolvedTransferConfig): JsClientC
 		logLevel: LogLevel.Info,
 		fileIoMemoryBudget: resolved.fileIoMemoryBudget,
 		// Left undefined on purpose: the app's own thumbnail pipeline runs under the SDK's defaults —
-		// 64 MiB per decode, 64 MiB max source, 2 concurrent decodes — which are the single source of
-		// truth for an app process (the manipulator path decodes whole images through UIImage/Glide,
-		// far above that). The provider extensions receive an explicit per-host budget through
-		// auth.json (fileProvider.ts).
+		// 64 MiB per decode, 64 MiB max source, 2 concurrent decodes — and since every image thumbnail
+		// is now an SDK decode (remote or from a local path), those defaults really are the single
+		// source of truth for an app process. Only the video frame still goes through the manipulator,
+		// which decodes whole images through UIImage/Glide, far above that. The provider extensions
+		// receive an explicit per-host budget through auth.json (fileProvider.ts).
 		thumbnailMemBudget: undefined,
 		thumbnailMaxSourceBytes: undefined,
 		thumbnailDecodeConcurrency: undefined

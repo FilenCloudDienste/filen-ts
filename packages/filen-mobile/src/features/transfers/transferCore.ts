@@ -23,7 +23,7 @@ import {
 import useTransfersStore, { type Transfer, type FinishedTransfer } from "@/features/transfers/store/useTransfers.store"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { driveItemDisplayName } from "@/lib/decryption"
-import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
+import { normalizeFilePathForExpo, normalizeFilePathForSdk } from "@/lib/paths"
 import {
 	wrapAbortSignalForSdk,
 	disposeSdkAbortSignal,
@@ -41,7 +41,7 @@ import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
 import drive from "@/features/drive/drive"
 import thumbnails from "@/lib/thumbnails"
-import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
+import { EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { randomUUID } from "expo-crypto"
 
 // Registers pause/resume event listeners on both the per-transfer and global PauseSignals,
@@ -878,9 +878,14 @@ export async function uploadCore(
 	}
 
 	const uploadedFileName = name ?? localFileOrDir.name ?? ""
-	const ext = FileSystem.Paths.extname(uploadedFileName).toLowerCase()
+	const ext = FileSystem.Paths.extname(uploadedFileName).toLowerCase().trim()
+	const canMakeThumbnail = result.data.canMakeThumbnail === true
 
-	if (EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(ext) || EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(ext)) {
+	// A cheap superset of the real gate, not a second definition of it: either half can still admit
+	// this file, so it is worth waking the thumbnailer, which decides for real against the same
+	// name classifier every drive row uses. Anything the real gate accepts passes this one — an image
+	// only qualifies there with the flag set, and a video only with an extension from this set.
+	if (canMakeThumbnail || EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(ext)) {
 		// TC-02: thumbnail generation runs AFTER the run() above settles, but run()'s finally already
 		// disposed compositeAbortSignal — and createCompositeAbortSignal.dispose() detaches its parent
 		// listeners, so the disposed composite can never transition to aborted again (the thumbnail would
@@ -893,9 +898,15 @@ export async function uploadCore(
 
 		await thumbnails
 			.generateFromLocalFile({
-				localPath: normalizeFilePathForExpo(localFileOrDir.uri),
+				// The percent-ENCODED expo URI, which is what `File.uri` already is — the form each
+				// branch derives its own from (the SDK decode wants the path decoded, the video
+				// extractor wants the URI). Decoding here instead would strand the video branch: the
+				// helper it re-normalizes with decodes before it encodes, so a name holding a literal
+				// `%20` would decode twice and address a file that does not exist.
+				localUri: normalizeFilePathForExpo(localFileOrDir.uri),
 				uuid: result.data.uuid,
 				name: uploadedFileName,
+				canMakeThumbnail,
 				signal: thumbnailAbortSignal
 			})
 			.catch(err => {

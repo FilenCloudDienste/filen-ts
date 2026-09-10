@@ -59,7 +59,6 @@ import {
 	getPath,
 	ensureDirectory,
 	driveItemToAnyFile,
-	getExtension,
 	getThumbnailKind
 } from "@/lib/thumbnailsHelpers"
 import { AnyFile } from "@filen/sdk-rs"
@@ -289,94 +288,6 @@ describe("driveItemToAnyFile", () => {
 		}
 
 		expect(driveItemToAnyFile(item as any)).toBeNull()
-	})
-})
-
-// ---------------------------------------------------------------------------
-// getExtension — returns lowercase extension or null
-// ---------------------------------------------------------------------------
-
-describe("getExtension", () => {
-	it("returns the lowercase extension for a file item", () => {
-		const item = {
-			type: "file" as const,
-			data: { uuid: "u1", size: 1n, decryptedMeta: { name: "Photo.JPG" } }
-		}
-
-		expect(getExtension(item as any)).toBe(".jpg")
-	})
-
-	it("returns the extension for a sharedFile item", () => {
-		const item = {
-			type: "sharedFile" as const,
-			data: { uuid: "u2", size: 1n, decryptedMeta: { name: "video.MP4" } }
-		}
-
-		expect(getExtension(item as any)).toBe(".mp4")
-	})
-
-	it("returns the extension for a sharedRootFile item", () => {
-		const item = {
-			type: "sharedRootFile" as const,
-			data: { uuid: "u3", size: 1n, decryptedMeta: { name: "audio.OGG" } }
-		}
-
-		expect(getExtension(item as any)).toBe(".ogg")
-	})
-
-	it("returns null when decryptedMeta is null", () => {
-		const item = {
-			type: "file" as const,
-			data: { uuid: "u4", size: 1n, decryptedMeta: null }
-		}
-
-		expect(getExtension(item as any)).toBeNull()
-	})
-
-	it("returns null when decryptedMeta.name is empty string (falsy)", () => {
-		const item = {
-			type: "file" as const,
-			data: { uuid: "u5", size: 1n, decryptedMeta: { name: "" } }
-		}
-
-		expect(getExtension(item as any)).toBeNull()
-	})
-
-	it("returns null for a directory item", () => {
-		const item = {
-			type: "directory" as const,
-			data: { uuid: "d1", size: 0n, decryptedMeta: { name: "folder" } }
-		}
-
-		expect(getExtension(item as any)).toBeNull()
-	})
-
-	it("returns null for a sharedDirectory item", () => {
-		const item = {
-			type: "sharedDirectory" as const,
-			data: { uuid: "d2", size: 0n, decryptedMeta: { name: "shared" } }
-		}
-
-		expect(getExtension(item as any)).toBeNull()
-	})
-
-	it("returns null for a sharedRootDirectory item", () => {
-		const item = {
-			type: "sharedRootDirectory" as const,
-			data: { uuid: "d3", size: 0n, decryptedMeta: { name: "root" } }
-		}
-
-		expect(getExtension(item as any)).toBeNull()
-	})
-
-	it("returns an empty string for a file with no extension (trims the result)", () => {
-		const item = {
-			type: "file" as const,
-			data: { uuid: "u6", size: 1n, decryptedMeta: { name: "noextension" } }
-		}
-
-		// extname returns "" for no extension; toLowerCase().trim() of "" is ""
-		expect(getExtension(item as any)).toBe("")
 	})
 })
 

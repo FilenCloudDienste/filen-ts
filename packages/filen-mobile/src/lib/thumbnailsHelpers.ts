@@ -86,25 +86,15 @@ export type ThumbnailKind = "image" | "video"
 // SharedFile / LinkedFile since 0.4.42 and copied onto the hand-built records). The flag is the
 // contract: `false` means the SDK will not thumbnail this file, so it is never asked, and formats
 // the SDK learns later light up on their own — no format list for SDK support lives here.
-// image | rawImage → the image path (local manipulator or SDK); video → the JS frame extractor
-// (the SDK flag is about images and does not apply). svg is excluded on purpose: resvg renders
+// image | rawImage → the SDK, from a local copy's path or over the network; video → the JS frame
+// extractor (the SDK flag is about images and does not apply). svg is excluded on purpose: resvg renders
 // <text> and raster <image> as nothing, and a transparent tile on the OLED-black theme is worse
 // than the icon.
-export function getThumbnailKind(item: DriveItem): ThumbnailKind | null {
-	if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
-		return null
-	}
-
-	const name = item.data.decryptedMeta?.name
-
-	if (!name) {
-		return null
-	}
-
+export function getThumbnailKindForName(name: string, canMakeThumbnail: boolean): ThumbnailKind | null {
 	switch (getPreviewType(name)) {
 		case "image":
 		case "rawImage": {
-			return item.data.canMakeThumbnail === true ? "image" : null
+			return canMakeThumbnail ? "image" : null
 		}
 
 		case "video": {
@@ -117,24 +107,21 @@ export function getThumbnailKind(item: DriveItem): ThumbnailKind | null {
 	}
 }
 
-export function getExtension(item: DriveItem): string | null {
-	switch (item.type) {
-		case "file":
-		case "sharedFile":
-		case "sharedRootFile": {
-			const name = item.data.decryptedMeta?.name
-
-			if (!name) {
-				return null
-			}
-
-			return FileSystem.Paths.extname(name).toLowerCase().trim()
-		}
-
-		default: {
-			return null
-		}
+// The upload path knows a name and a flag but has no DriveItem yet, so it calls
+// getThumbnailKindForName directly. Both entry points must answer identically: a format that
+// thumbnails only on the device that uploaded it is worse than one that never does.
+export function getThumbnailKind(item: DriveItem): ThumbnailKind | null {
+	if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+		return null
 	}
+
+	const name = item.data.decryptedMeta?.name
+
+	if (!name) {
+		return null
+	}
+
+	return getThumbnailKindForName(name, item.data.canMakeThumbnail === true)
 }
 
 export function waitForHttpProvider(signal?: AbortSignal): Promise<(file: AnyFile) => string> {

@@ -23,7 +23,8 @@ const {
 } = vi.hoisted(() => {
 	const mockUploadFile = vi.fn().mockResolvedValue({
 		uuid: "uploaded-file-uuid",
-		parent: { tag: "Uuid", inner: ["parent-uuid"] }
+		parent: { tag: "Uuid", inner: ["parent-uuid"] },
+		canMakeThumbnail: true
 	})
 
 	const mockUploadDirRecursively = vi.fn().mockResolvedValue(undefined)
@@ -312,10 +313,35 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrapParentUuid: mockUnwrapParentUuid
 }))
 
-vi.mock("@/lib/paths", () => ({
-	normalizeFilePathForSdk: vi.fn((path: string) => path.replace("file://", "")),
-	normalizeFilePathForExpo: vi.fn((path: string) => path)
-}))
+// ForSdk strips the scheme AND percent-DECODES every segment — the form the SDK opens verbatim. The
+// stub decodes for real so the post-upload thumbnail's path assertion means something. ForExpo is
+// that same decode followed by an encode, so an already-encoded URI passes through unchanged while a
+// decoded path carrying a literal `%20` decodes again; an identity stub could express neither.
+vi.mock("@/lib/paths", () => {
+	const forSdk = (path: string) =>
+		path
+			.replace(/^file:\/+/, "/")
+			.split("/")
+			.map(segment => {
+				try {
+					return decodeURIComponent(segment)
+				} catch {
+					return segment
+				}
+			})
+			.join("/")
+
+	return {
+		normalizeFilePathForSdk: vi.fn(forSdk),
+		normalizeFilePathForExpo: vi.fn(
+			(path: string) =>
+				`file://${forSdk(path)
+					.split("/")
+					.map(segment => (segment.length > 0 ? encodeURIComponent(segment) : segment))
+					.join("/")}`
+		)
+	}
+})
 
 vi.mock("@/lib/signals", () => ({
 	wrapAbortSignalForSdk: mockWrapAbortSignalForSdk,
@@ -386,7 +412,8 @@ describe("Transfers", () => {
 
 		mockUploadFile.mockResolvedValue({
 			uuid: "uploaded-file-uuid",
-			parent: { tag: "Uuid", inner: ["parent-uuid"] }
+			parent: { tag: "Uuid", inner: ["parent-uuid"] },
+			canMakeThumbnail: true
 		})
 
 		mockUploadDirRecursively.mockResolvedValue(undefined)
@@ -745,7 +772,9 @@ describe("Transfers", () => {
 				expect(finalEntry).toBeUndefined()
 			})
 
-			it("calls thumbnails.generateFromLocalFile for image extensions after a successful upload", async () => {
+			// The image gate is the uploaded record's own canMakeThumbnail, not an extension list — the
+			// SDK decodes this thumbnail, so its verdict on the file it just stored is the honest answer.
+			it("calls thumbnails.generateFromLocalFile when the uploaded record says canMakeThumbnail", async () => {
 				const file = new FsFile("file:///document/photo.jpg")
 				fs.set(file.uri, new Uint8Array([1, 2, 3]))
 				const parent = makeParentDir("parent-uuid")
@@ -760,9 +789,127 @@ describe("Transfers", () => {
 				expect(thumbnails.generateFromLocalFile).toHaveBeenCalledTimes(1)
 				expect(thumbnails.generateFromLocalFile).toHaveBeenCalledWith(
 					expect.objectContaining({
-						uuid: "uploaded-file-uuid"
+						uuid: "uploaded-file-uuid",
+						canMakeThumbnail: true
 					})
 				)
+			})
+
+			// A .dng is absent from the manipulator list, so this upload used to produce no thumbnail.
+			it("thumbnails an uploaded RAW the manipulator list excluded, on the SDK's verdict alone", async () => {
+				const file = new FsFile("file:///document/IMG_0001.dng")
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+				const parent = makeParentDir("parent-uuid")
+
+				const { default: thumbnails } = await import("@/lib/thumbnails")
+
+				await transfers.upload({
+					localFileOrDir: file,
+					parent
+				})
+
+				expect(thumbnails.generateFromLocalFile).toHaveBeenCalledTimes(1)
+			})
+
+			// The percent-ENCODED URI is the only form both branches can derive theirs from: the SDK
+			// decode wants it decoded once, and the video extractor normalizes with a helper that
+			// decodes before it encodes — so a path decoded here would decode twice and address a file
+			// that does not exist.
+			it("hands the thumbnail the ENCODED expo URI, not the decoded plain path", async () => {
+				const file = new FsFile("file:///document/IMG%201234%20(1).jpg")
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+				const parent = makeParentDir("parent-uuid")
+
+				const { default: thumbnails } = await import("@/lib/thumbnails")
+
+				await transfers.upload({
+					localFileOrDir: file,
+					parent,
+					name: "IMG 1234 (1).jpg"
+				})
+
+				expect(thumbnails.generateFromLocalFile).toHaveBeenCalledWith(
+					expect.objectContaining({
+						localUri: "file:///document/IMG%201234%20(1).jpg"
+					})
+				)
+			})
+
+			// A name whose own characters include a percent-escape: `.uri` doubles it, and exactly one
+			// decode has to survive the hand-off or the frame extractor opens `clip one.mov`.
+			it("hands a video's doubly-escaped uri through untouched", async () => {
+				const file = new FsFile("file:///document/clip%2520one.mov")
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+				const parent = makeParentDir("parent-uuid")
+
+				mockUploadFile.mockResolvedValueOnce({
+					uuid: "uploaded-file-uuid",
+					parent: { tag: "Uuid", inner: ["parent-uuid"] },
+					canMakeThumbnail: false
+				})
+
+				const { default: thumbnails } = await import("@/lib/thumbnails")
+
+				await transfers.upload({
+					localFileOrDir: file,
+					parent,
+					name: "clip%20one.mov"
+				})
+
+				expect(thumbnails.generateFromLocalFile).toHaveBeenCalledWith(
+					expect.objectContaining({
+						localUri: "file:///document/clip%2520one.mov"
+					})
+				)
+			})
+
+			// Video keeps its extension gate — that frame comes from the JS extractor, and the SDK flag
+			// is about images.
+			it("still thumbnails a video the SDK vetoes, on the extension gate", async () => {
+				const file = new FsFile("file:///document/clip.mp4")
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+				const parent = makeParentDir("parent-uuid")
+
+				mockUploadFile.mockResolvedValueOnce({
+					uuid: "uploaded-file-uuid",
+					parent: { tag: "Uuid", inner: ["parent-uuid"] },
+					canMakeThumbnail: false
+				})
+
+				const { default: thumbnails } = await import("@/lib/thumbnails")
+
+				await transfers.upload({
+					localFileOrDir: file,
+					parent
+				})
+
+				expect(thumbnails.generateFromLocalFile).toHaveBeenCalledWith(
+					expect.objectContaining({
+						canMakeThumbnail: false
+					})
+				)
+			})
+
+			// .ico is on the manipulator list but the SDK cannot decode it — it now shows an icon.
+			it("makes no thumbnail call for a listed-but-undecodable image the SDK vetoes", async () => {
+				const file = new FsFile("file:///document/icon.ico")
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+				const parent = makeParentDir("parent-uuid")
+
+				mockUploadFile.mockResolvedValueOnce({
+					uuid: "uploaded-file-uuid",
+					parent: { tag: "Uuid", inner: ["parent-uuid"] },
+					canMakeThumbnail: false
+				})
+
+				const { default: thumbnails } = await import("@/lib/thumbnails")
+
+				await transfers.upload({
+					localFileOrDir: file,
+					parent
+				})
+
+				expect(thumbnails.generateFromLocalFile).not.toHaveBeenCalled()
 			})
 
 			// TC-02: the post-upload thumbnail runs AFTER the upload's run() block, whose finally already
@@ -803,10 +950,16 @@ describe("Transfers", () => {
 				expect(thumbnailComposite.value.dispose).toHaveBeenCalledTimes(1)
 			})
 
-			it("does not call thumbnails.generateFromLocalFile for non-image/video extensions", async () => {
+			it("does not call thumbnails.generateFromLocalFile for a vetoed, non-video upload", async () => {
 				const file = new FsFile("file:///document/document.pdf")
 				fs.set(file.uri, new Uint8Array([1, 2, 3]))
 				const parent = makeParentDir("parent-uuid")
+
+				mockUploadFile.mockResolvedValueOnce({
+					uuid: "uploaded-file-uuid",
+					parent: { tag: "Uuid", inner: ["parent-uuid"] },
+					canMakeThumbnail: false
+				})
 
 				const { default: thumbnails } = await import("@/lib/thumbnails")
 

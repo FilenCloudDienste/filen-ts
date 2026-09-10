@@ -13,12 +13,11 @@ export type UseRawPreviewQueryParams = Extract<FileSource, { type: "drive" }>
 
 export type RawPreviewQueryResult = RawPreviewResult | { kind: "offline" }
 
-// Order mirrors useFileUrl.query.ts: a cached preview is served offline too; a miss while offline
-// is `offline` — unless the RAW itself is stored offline, in which case the bytes ARE on disk and
-// only the (remote-only) extraction is missing: `noPreview`, not "not available offline", which
-// would contradict the row's offline badge. Otherwise the SDK answers `uri` or `noPreview`.
-// Transport errors throw so the gallery shows its error state with an explicit Retry (this app
-// wires no refetch-on-focus).
+// Order mirrors useFileUrl.query.ts: a cached preview is served offline too, and a stored-offline RAW
+// is extracted from its own local container — the cache reaches the network for neither. `offline` is
+// therefore only the genuine miss: no cached preview, no local copy, no connection. Otherwise the SDK
+// answers `uri` or `noPreview`. Transport errors throw so the gallery shows its error state with an
+// explicit Retry (this app wires no refetch-on-focus).
 export async function fetchData(
 	params: UseRawPreviewQueryParams & {
 		signal?: AbortSignal
@@ -32,11 +31,12 @@ export async function fetchData(
 		throw new Error("Drive item not found or is not a file")
 	}
 
-	if (!rawPreviewCache.has(item) && !onlineManager.isOnline()) {
-		const offlineFile = await offline.getLocalFile(item)
-
+	// The local-copy probe is what keeps this from short-circuiting a RAW the cache could still answer
+	// from disk; without it a stored-offline container would report "not available offline" while its
+	// own bytes sit right there.
+	if (!rawPreviewCache.has(item) && !onlineManager.isOnline() && !(await offline.getLocalFile(item))?.exists) {
 		return {
-			kind: offlineFile?.exists ? "noPreview" : "offline"
+			kind: "offline"
 		}
 	}
 

@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from "vitest"
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
 // storageRoots.ts constructs module-level constants at import time, relying on
 // Platform.OS and expo-file-system.  We test different platform branches by
@@ -12,6 +12,9 @@ vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 // react-native is globally aliased to the minimal mock — the mock exports a mutable
 // Platform object so we can control Platform.OS per test.
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
+
+// The version sweep warns on a failed removal — stub the sink so the assertions can read it.
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 beforeEach(() => {
 	vi.resetModules()
@@ -59,10 +62,10 @@ describe("version segments embedded in paths", () => {
 		expect(AUDIO_CACHE_PARENT_DIRECTORY.uri).toContain(`audioCache/v${AUDIO_CACHE_VERSION}`)
 	})
 
-	it("THUMBNAILS_DIRECTORY.uri contains 'thumbnails/v3' (THUMBNAILS_VERSION=3)", async () => {
+	it("THUMBNAILS_DIRECTORY.uri contains 'thumbnails/v4' (THUMBNAILS_VERSION=4)", async () => {
 		const { THUMBNAILS_DIRECTORY, THUMBNAILS_VERSION } = await importRoots("android")
 
-		expect(THUMBNAILS_VERSION).toBe(3)
+		expect(THUMBNAILS_VERSION).toBe(4)
 		expect(THUMBNAILS_DIRECTORY.uri).toContain(`thumbnails/v${THUMBNAILS_VERSION}`)
 	})
 
@@ -98,6 +101,13 @@ describe("directory hierarchy", () => {
 		const { OFFLINE_FILES_DIRECTORY, OFFLINE_DIRECTORIES_DIRECTORY } = await importRoots("android")
 
 		expect(OFFLINE_FILES_DIRECTORY.uri).not.toBe(OFFLINE_DIRECTORIES_DIRECTORY.uri)
+	})
+
+	it("THUMBNAILS_DIRECTORY is the current-version child of THUMBNAILS_PARENT_DIRECTORY", async () => {
+		const { THUMBNAILS_PARENT_DIRECTORY, THUMBNAILS_DIRECTORY, THUMBNAILS_VERSION } = await importRoots("android")
+
+		expect(THUMBNAILS_PARENT_DIRECTORY.uri).toMatch(/\/thumbnails$/)
+		expect(THUMBNAILS_DIRECTORY.uri).toBe(`${THUMBNAILS_PARENT_DIRECTORY.uri}/v${THUMBNAILS_VERSION}`)
 	})
 })
 
@@ -152,6 +162,163 @@ describe("private-base derivation helper", () => {
 		// derivation harmless there (still a private container, just not the Library flavor).
 		expect(deriveIosLibraryDirectoryUri("file:///document")).toBe("file:///document")
 		expect(deriveIosLibraryDirectoryUri("file:///data/user/0/io.filen.app/files/")).toBe("file:///data/user/0/io.filen.app/files/")
+	})
+})
+
+// A THUMBNAILS_VERSION bump repoints THUMBNAILS_DIRECTORY at a fresh `v{N}` and the superseded tree
+// becomes unreachable: thumbnails.clear(), thumbnails.size() and sweepStrayDownloadFiles() all root at
+// the CURRENT version, so without this sweep the old bytes are un-clearable AND missing from the
+// user-facing cache-size figure.
+describe("stale thumbnail version sweep", () => {
+	// A failed assertion aborts the test before its inline mockRestore(), so a throwing
+	// Directory spy would leak into the tests that follow and mask what they prove.
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
+
+	async function importSweep() {
+		const { THUMBNAILS_PARENT_DIRECTORY, THUMBNAILS_VERSION } = await importRoots("android")
+		const { sweepStaleThumbnailVersions } = await import("@/lib/thumbnailsVersionSweep")
+		// Reached through the MOCKED specifier, not the mock module path: vi.resetModules() does not
+		// reset the mock registry, so a direct import of the mock file hands back a different in-memory
+		// fs than the one the modules under test are wired to from the second test onwards.
+		const mock = (await import("expo-file-system")) as unknown as typeof import("@/tests/mocks/expoFileSystem")
+		const logger = ((await import("@/lib/logger")) as unknown as typeof import("@/tests/mocks/logger")).default
+
+		mock.fs.clear()
+		logger.warn.mockClear()
+
+		const parent = THUMBNAILS_PARENT_DIRECTORY.uri
+
+		return {
+			parent,
+			current: `v${THUMBNAILS_VERSION}`,
+			sweep: sweepStaleThumbnailVersions,
+			mock,
+			logger,
+			seed(version: string): void {
+				mock.fs.set(parent, "dir")
+				mock.fs.set(`${parent}/${version}`, "dir")
+				mock.fs.set(`${parent}/${version}/thumb.webp`, new Uint8Array([1]))
+			}
+		}
+	}
+
+	it("deletes a superseded version tree", async () => {
+		const { parent, current, sweep, mock, seed } = await importSweep()
+
+		seed("v3")
+		seed(current)
+
+		sweep()
+
+		expect(mock.fs.has(`${parent}/v3`)).toBe(false)
+		expect(mock.fs.has(`${parent}/v3/thumb.webp`)).toBe(false)
+	})
+
+	it("never deletes the current version tree", async () => {
+		const { parent, current, sweep, mock, seed } = await importSweep()
+
+		seed("v3")
+		seed(current)
+
+		sweep()
+
+		expect(mock.fs.has(`${parent}/${current}`)).toBe(true)
+		expect(mock.fs.has(`${parent}/${current}/thumb.webp`)).toBe(true)
+	})
+
+	it("reclaims EVERY non-current version, not only the immediately previous one", async () => {
+		const { parent, current, sweep, mock, seed } = await importSweep()
+
+		// An install that skipped releases carries more than one orphan.
+		seed("v1")
+		seed("v2")
+		seed("v3")
+		seed(current)
+
+		sweep()
+
+		for (const stale of ["v1", "v2", "v3"]) {
+			expect(mock.fs.has(`${parent}/${stale}`)).toBe(false)
+		}
+
+		expect(mock.fs.has(`${parent}/${current}/thumb.webp`)).toBe(true)
+	})
+
+	it("contains a removal failure — the other stale trees still go and nothing throws out", async () => {
+		const { parent, current, sweep, mock, logger, seed } = await importSweep()
+
+		seed("v2")
+		seed("v3")
+		seed(current)
+
+		const realDelete = mock.Directory.prototype.delete
+		const deleteSpy = vi.spyOn(mock.Directory.prototype, "delete").mockImplementation(function (
+			this: InstanceType<typeof mock.Directory>
+		): void {
+			if (this.uri === `${parent}/v2`) {
+				throw new Error("EBUSY")
+			}
+
+			realDelete.call(this)
+		})
+
+		expect(() => sweep()).not.toThrow()
+
+		deleteSpy.mockRestore()
+
+		expect(mock.fs.has(`${parent}/v2`)).toBe(true)
+		expect(mock.fs.has(`${parent}/v3`)).toBe(false)
+		expect(mock.fs.has(`${parent}/${current}/thumb.webp`)).toBe(true)
+		expect(logger.warn).toHaveBeenCalledTimes(1)
+	})
+
+	it("contains a listing failure — the sweep never throws into its caller", async () => {
+		const { sweep, mock, logger, seed } = await importSweep()
+
+		seed("v3")
+
+		const listSpy = vi.spyOn(mock.Directory.prototype, "list").mockImplementation(() => {
+			throw new Error("EIO")
+		})
+
+		expect(() => sweep()).not.toThrow()
+
+		listSpy.mockRestore()
+
+		expect(logger.warn).toHaveBeenCalledTimes(1)
+	})
+
+	it("skips the pass entirely when the thumbnails parent does not exist", async () => {
+		const { sweep, mock } = await importSweep()
+
+		// The native list() throws on a missing directory — the exists guard is what keeps a
+		// first-ever launch (nothing on disk yet) off that path.
+		const listSpy = vi.spyOn(mock.Directory.prototype, "list")
+
+		sweep()
+
+		expect(listSpy).not.toHaveBeenCalled()
+
+		listSpy.mockRestore()
+	})
+
+	it("runs once per process — a tree appearing afterwards waits for the next launch", async () => {
+		const { parent, current, sweep, mock, seed } = await importSweep()
+
+		seed("v3")
+		seed(current)
+
+		sweep()
+
+		expect(mock.fs.has(`${parent}/v3`)).toBe(false)
+
+		seed("v3")
+
+		sweep()
+
+		expect(mock.fs.has(`${parent}/v3`)).toBe(true)
 	})
 })
 

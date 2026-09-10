@@ -49,24 +49,30 @@ export const NETINFO_CONFIG: NetInfoConfiguration = {
 	useNativeReachability: false
 }
 
-// What expo-image-manipulator can decode into a bitmap — gates image thumbnails, camera-upload
-// compression, and avatar upload. iOS loads local files via UIImage(data:), i.e. full ImageIO
+// What expo-image-manipulator can decode into a bitmap — gates camera-upload compression and avatar
+// upload. Thumbnails are NOT on this list any more: every one of them, remote or from a local path,
+// is an SDK decode, gated on the preview classifier plus that file's own `canMakeThumbnail`
+// (getThumbnailKind in thumbnailsHelpers.ts). iOS loads local files via
+// UIImage(data:), i.e. full ImageIO
 // (incl. TIFF/JXL/ICO); Android goes through Glide.asBitmap() on the shared app-wide registry,
 // so expo-image's bundled libavif integration makes AVIF decodable on every supported device
 // (BitmapFactory covers the rest; Android has no TIFF/JXL decoder). Decoders sniff bytes — these
 // lists are only the entry gate. Keep each platform's list a subset of
-// EXPO_IMAGE_SUPPORTED_EXTENSIONS so nothing thumbnails without also being openable.
+// EXPO_IMAGE_SUPPORTED_EXTENSIONS so nothing here is compressed without also being openable.
 // Deliberately excluded: RAW camera files (.dng included) — they are their own preview type
 // ("rawImage", SDK_RAW_PREVIEW_EXTENSIONS in previewType.ts), served on both platforms through the
 // JPEG the SDK extracts from the container, so the manipulator never sees RAW bytes whatever
-// ImageIO could decode on iOS. This list also gates camera-upload compression, where developing a
-// full RAW inside the background task risks an OOM kill. iPhone ProRAW camera uploads are .dng:
-// they are never compressed or locally thumbnailed, so each shot's tile pulls its embedded
-// full-size JPEG back through the SDK once. Also excluded: .cur/.heics (near-zero prevalence);
+// ImageIO could decode on iOS. Compression is where that matters most: developing a full RAW inside
+// the background task risks an OOM kill. iPhone ProRAW camera uploads are .dng and stay uncompressed,
+// but they DO thumbnail now — the SDK reads the embedded JPEG straight out of the container.
+// Also excluded: .cur/.heics (near-zero prevalence);
 // .svg (no bitmap decode path on either platform — render-only, via react-native-svg / PreviewSvg).
-// Formats listed here that the SDK's remote thumbnail path does not decode (.ico, .jxl, .apng;
-// .icns was never thumbnailed) only thumbnail through this local manipulator path (a freshly
-// uploaded file) — a listed one shows an icon (its SDK `canMakeThumbnail` is false); accepted.
+// Formats listed here that the SDK does not decode (.ico, .jxl, .apng; .icns was never thumbnailed)
+// get NO thumbnail on any path and show an icon instead — their `canMakeThumbnail` is false, and the
+// local manipulator path that used to cover a freshly uploaded one is gone; accepted. .tiff/.tif run
+// the other way: the SDK does decode them, so the flag is true and they thumbnail on iOS, the only
+// platform that can display them — Android has them in neither expo-image set, so the classifier
+// half of the gate refuses them there and none is attempted.
 export const EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS = new Set<string>(
 	Platform.select({
 		ios: [

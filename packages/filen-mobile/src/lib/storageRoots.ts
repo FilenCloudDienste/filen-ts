@@ -58,11 +58,17 @@ export const AUDIO_CACHE_PARENT_DIRECTORY = new FileSystem.Directory(
 	FileSystem.Paths.join(BASE_DIRECTORY_URI, "audioCache", `v${AUDIO_CACHE_VERSION}`)
 )
 
-// v3: DEFAULT_WIDTH bumped 128 → 256 (thumbnails.ts). Bumping the version repoints the cache dir so
-// existing installs regenerate at the higher resolution instead of serving stale 128px thumbnails.
-export const THUMBNAILS_VERSION = 3
+// v3: DEFAULT_WIDTH bumped 128 → 256 (thumbnails.ts). v4: image thumbnails moved off the manipulator
+// (256 wide, quality 0.9 lossy WebP) onto the SDK (contain 256×512, LOSSLESS WebP) — a different
+// artefact written to the same `<uuid>.webp` name. readExistingThumbnail serves any non-zero file
+// unconditionally, so without repointing the directory every existing install would keep serving its
+// old output forever. The parent holds one directory per version and is swept (thumbnailsVersionSweep.ts)
+// so a bump reclaims the superseded tree instead of leaking it — nothing else ever reads it, and every
+// user-facing reclaim path (clear, cache size, stray-file cleanup) roots at the CURRENT version only.
+export const THUMBNAILS_VERSION = 4
+export const THUMBNAILS_PARENT_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "thumbnails"))
 export const THUMBNAILS_DIRECTORY = new FileSystem.Directory(
-	FileSystem.Paths.join(BASE_DIRECTORY_URI, "thumbnails", `v${THUMBNAILS_VERSION}`)
+	FileSystem.Paths.join(THUMBNAILS_PARENT_DIRECTORY.uri, `v${THUMBNAILS_VERSION}`)
 )
 
 // SDK-extracted RAW previews (rawPreviewCache.ts): `<uuid>.jpg`, the JPEG the camera embedded in a

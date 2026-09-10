@@ -14,7 +14,12 @@ export async function generateVideo(
 		signal?: AbortSignal
 	} & (
 		| {
-				localSourcePath: string
+				// A local file in expo's percent-ENCODED URI form (`File.uri`, or anything through
+				// normalizeFilePathForExpo). Never a decoded plain path: normalizeFilePathForExpo below
+				// DECODES before it encodes, so a decoded path is encode-only safe by luck — a name
+				// holding a literal `%20` would decode a second time and address a file that does not
+				// exist. An encoded URI is that helper's fixed point, so it survives untouched.
+				localSourceUri: string
 		  }
 		| {
 				// Pre-resolved source URL (local-file URI or the HTTP-provider stream URL). The
@@ -26,7 +31,7 @@ export async function generateVideo(
 	)
 ): Promise<void> {
 	const result = await run(async defer => {
-		const url = "localSourcePath" in params ? normalizeFilePathForExpo(params.localSourcePath) : params.sourceUrl
+		const url = "localSourceUri" in params ? normalizeFilePathForExpo(params.localSourceUri) : params.sourceUrl
 
 		if (params.signal?.aborted) {
 			throw abortError(params.signal)
@@ -73,11 +78,14 @@ export async function generateVideo(
 			throw abortError(params.signal)
 		}
 
-		// Resize + re-encode to WEBP via the same string-URI path the image flow uses.
-		// Hold the Context in a local binding across the await (see generateImage):
-		// expo-image-manipulator's Context cancels its underlying coroutine task on
-		// sharedObjectDidRelease, so letting it become Hermes-GC-eligible during
-		// renderAsync would reject with JobCancellationException.
+		// Resize + re-encode to WEBP. This is the app's LAST manipulator decode in the thumbnail
+		// pipeline — images are SDK decodes now, but Rust decodes no video, so the frame still comes
+		// back through expo and has to be resized here.
+		// Hold the Context in a local binding across the await: expo-image-manipulator's Context
+		// cancels its underlying coroutine task on sharedObjectDidRelease, so letting it become
+		// Hermes-GC-eligible during renderAsync would reject with JobCancellationException. The same
+		// hazard applies wherever a Context crosses an await — cameraUpload's compress,
+		// imageConversion, avatarUpload.
 		const context = ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(thumbnail.uri)).resize({
 			width: params.width
 		})
