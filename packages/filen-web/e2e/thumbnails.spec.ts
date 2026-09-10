@@ -140,3 +140,36 @@ test("png and bmp images render real thumbnails in both listing views, the text/
 
 	expect(cspViolations).toEqual([])
 })
+
+// The video half of the pipeline, which the SDK never touches: a frame is pulled client-side off the
+// service worker's Range stream and encoded in the page. That makes it the one thumbnail path with a
+// hard dependency on a CONTROLLING worker, and the only one with no fallback — mediaViewer drops to a
+// buffered blob when streaming is unavailable, so video PLAYBACK can look healthy while every video
+// thumbnail silently fails. Nothing covered it, which is how exactly that state shipped: the worker was
+// registered only in production builds, so this path could not run in dev at all and the failure showed
+// up as a missing image rather than an error. Asserting the rendered blob is what makes it visible.
+test("a video row renders a real thumbnail off the service worker's stream", async ({ page, injectedSession, browserName }) => {
+	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
+	expect(injectedSession.length).toBeGreaterThan(0)
+
+	const cspViolations = trackCspViolations(page)
+
+	await page.goto("/drive")
+
+	const { listbox } = await enterFixtureDirectory(page, "preview-media")
+	const [, nameMp4] = FIXTURE_FILES["preview-media"]
+	const videoRow = listbox.getByRole("option", { name: nameMp4 })
+
+	await expect(videoRow).toBeVisible({ timeout: 30_000 })
+
+	// Generous because this is a real streamed decode, not a cache read: the worker serves Range
+	// requests for the clip, the page seeks it and paints one frame. The blob: src is the load-bearing
+	// half — an icon-only row also has no img, so presence alone would not distinguish "generated" from
+	// "gave up", which is precisely the state that went unnoticed before.
+	const videoThumb = videoRow.locator("img")
+
+	await expect(videoThumb).toBeVisible({ timeout: 60_000 })
+	await expect(videoThumb).toHaveAttribute("src", /^blob:/)
+
+	expect(cspViolations, `CSP violations: ${JSON.stringify(cspViolations)}`).toHaveLength(0)
+})
