@@ -15,10 +15,6 @@ on:
       - 'packages/filen-mobile/**'
       - 'packages/filen-web/**'
 
-concurrency:
-  group: 'tests'
-  cancel-in-progress: true
-
 jobs:
   changes:
     runs-on: ubuntu-latest
@@ -42,6 +38,12 @@ jobs:
   test-utils:
     needs: changes
     if: needs.changes.outputs.filen-utils == 'true' || github.event_name == 'workflow_dispatch'
+    # A superseded push to the same ref cancels its own in-flight run: this is a cheap unit job
+    # that touches nothing shared, so only the newest commit's result is worth paying for. The web
+    # job deliberately does NOT cancel — see its own concurrency block for why.
+    concurrency:
+      group: filen-utils-tests-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -59,6 +61,12 @@ jobs:
   test-mobile:
     needs: changes
     if: needs.changes.outputs.filen-mobile == 'true' || github.event_name == 'workflow_dispatch'
+    # A superseded push to the same ref cancels its own in-flight run: this is a cheap unit job
+    # that touches nothing shared, so only the newest commit's result is worth paying for. The web
+    # job deliberately does NOT cancel — see its own concurrency block for why.
+    concurrency:
+      group: filen-mobile-tests-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -77,6 +85,22 @@ jobs:
     needs: changes
     if: needs.changes.outputs.filen-web == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # Playwright's globalTimeout bounds the e2e step alone; npm ci, both production builds and the
+    # browser install are unbounded, and a hang in any of them would hold the non-cancelling
+    # `filen-web-e2e` group below for GitHub's 6h job default.
+    timeout-minutes: 150
+    # ONE constant group, and scoped to this job because it is the only one that touches the shared live
+    # Filen test account — there is exactly one, and setup/cleanup.setup.ts trashes then PERMANENTLY
+    # DELETES every row matching the e2e debris prefixes, which includes a concurrently running suite's
+    # live fixture root. A per-ref group does not serialise that at all: `push` and `pull_request` both
+    # fire for a same-repo branch, under two different refs and so in two different groups.
+    # cancel-in-progress stays false because cancelling is the other way to corrupt a run: a context
+    # killed mid-write keeps the account-wide `drive-write` lease it was refreshing until the TTL
+    # expires, blocking every later run. A superseded run therefore queues instead — GitHub only drops
+    # jobs from the group that have not started yet, which by definition hold nothing.
+    concurrency:
+      group: filen-web-e2e
+      cancel-in-progress: false
     env:
       # The Vite production build (SDK wasm + full module graph) needs more than the default heap.
       NODE_OPTIONS: --max-old-space-size=8192
@@ -99,9 +123,34 @@ jobs:
       - name: Unit tests
         working-directory: packages/filen-web
         run: npm run test
+      # The runner image id (ubuntu24, ubuntu26, ...) belongs in the Playwright cache key below, but it
+      # cannot be read there: ImageOS lives in the runner PROCESS's environment, and the `env` context
+      # does not inherit those — `${{ env.ImageOS }}` would silently expand to nothing. Promoting it
+      # into GITHUB_ENV here is what makes it referable.
+      - name: Identify the runner image
+        run: echo "IMAGE_OS=$ImageOS" >> "$GITHUB_ENV"
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          # The arch and image id are in the key because the cached binaries are distro-specific while
+          # the path Playwright installs them to (~/.cache/ms-playwright/<browser>-<revision>) carries
+          # neither. Without them a `ubuntu-latest` rollover still HITS this key, restores binaries
+          # built for the previous distro, and takes the install step's cache-hit branch below — which
+          # only installs system libs and never re-downloads — so every browser launch fails with a
+          # loader error until someone touches the lockfile. Deliberately NO restore-keys: a prefix
+          # restore is that same stale hit, reintroduced on purpose.
+          key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ env.IMAGE_OS }}-${{ hashFiles('packages/filen-web/package-lock.json') }}
       - name: Install Playwright browsers
         working-directory: packages/filen-web
-        run: npx playwright install --with-deps chromium firefox webkit
+        # On a cache hit the binaries are already there and only the system libs are missing.
+        run: |
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium firefox webkit
+          else
+            npx playwright install --with-deps chromium firefox webkit
+          fi
       - name: E2E tests
         working-directory: packages/filen-web
         run: VITE_E2E=1 npm run test:e2e
@@ -109,6 +158,10 @@ jobs:
           FILEN_WEB_E2E_TEST_EMAIL: ${{ secrets.FILEN_WEB_E2E_TEST_EMAIL }}
           FILEN_WEB_E2E_TEST_PASSWORD: ${{ secrets.FILEN_WEB_E2E_TEST_PASSWORD }}
       - name: Assert e2e hooks are absent from a production build
+        # Same reason the report upload below runs unconditionally: this asserts a property of the
+        # BUILD, which an e2e flake says nothing about — without it the check runs only on success()
+        # and any red run silently skips it.
+        if: ${{ !cancelled() }}
         working-directory: packages/filen-web
         run: |
           rm -rf dist && npm run build

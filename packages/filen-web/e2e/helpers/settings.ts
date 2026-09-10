@@ -17,4 +17,9 @@ export async function gotoSettings(page: Page): Promise<void> {
 	await page.getByRole("button", { name: "Account", exact: true }).click()
 	await page.getByRole("menuitem", { name: "Settings", exact: true }).click()
 	await page.waitForURL(/\/settings\/account$/)
+	// The account menu unmounts ~200ms AFTER the navigation resolves, and only then does Base UI
+	// restore focus from the clicked menuitem back to the trigger. A caller that presses a key the
+	// instant this helper returns aims it at a menuitem inside a still-open menu, where no
+	// document-level hotkey fires — so settle the teardown here rather than in every caller.
+	await expect(page.getByRole("menu")).toHaveCount(0)
 }

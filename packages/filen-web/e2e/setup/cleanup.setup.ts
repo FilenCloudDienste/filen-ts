@@ -33,6 +33,11 @@ setup.describe.configure({ retries: 0 })
 // simply leaves the rest for the next run.
 const SWEEP_BUDGET_MS = 150_000
 
+// Far above the expect default the specs use. A root holding a large debris backlog is slow to render
+// precisely because of the backlog, so the assertion budget that is right for a test would time this
+// sweep out on the one state it exists to clear — and every later run would inherit a worse account.
+const SWEEP_SETTLE_TIMEOUT_MS = 60_000
+
 // Defensive bound only — not tuned to any known leftover count. A predicate bug turning this into an
 // unbounded remove-everything loop against the shared live account is the one failure mode this guards.
 const MAX_ROUNDS = 500
@@ -54,7 +59,7 @@ async function sweepListing(page: Page, surface: string, remove: (listbox: Listb
 			return
 		}
 
-		const { listbox, hasItems } = await waitForListingSettled(page)
+		const { listbox, hasItems } = await waitForListingSettled(page, SWEEP_SETTLE_TIMEOUT_MS)
 
 		// Fast path: a clean listing costs exactly this one read, every run.
 		if (!hasItems) {
