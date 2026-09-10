@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { createDirectoryViaDialog, enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // The hide-hidden-items display filter, end to end: the Display menu's checkbox, the listing filter,
@@ -32,17 +32,6 @@ test("Display > Show hidden items filters dot-prefixed rows, counts them in the 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		async function createDirectory(name: string): Promise<void> {
-			// .first(): an empty writable listing renders a second identical button inside its empty-state
-			// "+ Add" affordance; the toolbar's copy is always first in DOM order.
-			await page.getByRole("button", { name: "New directory", exact: true }).first().click()
-			const dialog = page.getByRole("dialog")
-			await expect(dialog).toBeVisible()
-			await page.getByLabel("Name", { exact: true }).fill(name)
-			await page.getByRole("button", { name: "Create", exact: true }).click()
-			await expect(dialog).toHaveCount(0)
-		}
-
 		async function toggleShowHiddenItems(): Promise<void> {
 			await page.getByRole("button", { name: "Display", exact: true }).click()
 			const menu = page.getByRole("menu")
@@ -57,8 +46,8 @@ test("Display > Show hidden items filters dot-prefixed rows, counts them in the 
 			await expect(menu).toHaveCount(0)
 		}
 
-		await createDirectory(hiddenName)
-		await createDirectory(visibleName)
+		await createDirectoryViaDialog(page, hiddenName, listbox)
+		await createDirectoryViaDialog(page, visibleName, listbox)
 
 		const hiddenRow = listbox.getByRole("option", { name: hiddenName })
 		const visibleRow = listbox.getByRole("option", { name: visibleName })
@@ -74,7 +63,9 @@ test("Display > Show hidden items filters dot-prefixed rows, counts them in the 
 
 		// Creating a name the filter will swallow has no other feedback — the row simply never appears —
 		// so the toast is the only thing telling the user what happened.
-		await createDirectory(secondHiddenName)
+		// expectRow: false — the filter is ON at this point, so this name is created successfully and
+		// then deliberately swallowed; the helper's usual "the row appeared" proof cannot apply.
+		await createDirectoryViaDialog(page, secondHiddenName, listbox, { expectRow: false })
 		await expect(page.getByText("Created — it won't be listed until you turn on Show hidden items under Display.")).toBeVisible()
 		await expect(listbox.getByRole("option", { name: secondHiddenName })).toHaveCount(0)
 		await expect(page.getByText("2 hidden items are not shown", { exact: true })).toBeVisible()

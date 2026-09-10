@@ -114,7 +114,13 @@ test.describe("settings", () => {
 		await expect(page.getByText("Delete all versioned files", { exact: true })).toBeVisible()
 		await page.getByRole("button", { name: "Delete versioned files", exact: true }).click()
 
-		const versionsDialog = page.getByRole("alertdialog")
+		// Scoped to the dialog carrying THIS card's own confirm button, never "an alertdialog": the
+		// startup account reminders are alertdialogs too and mount asynchronously, so a bare role lookup
+		// is a strict-mode hazard, aims the gate assertions at whatever dialog happens to be up, and
+		// makes the toHaveCount(0) below fail on a dialog that did close.
+		const versionsDialog = page
+			.getByRole("alertdialog")
+			.filter({ has: page.getByRole("button", { name: "Delete versioned files", exact: true }) })
 		const versionsConfirm = versionsDialog.getByRole("button", { name: "Delete versioned files", exact: true })
 
 		await expect(versionsConfirm).toBeDisabled()
@@ -128,7 +134,10 @@ test.describe("settings", () => {
 		await expect(page.getByText("Delete all files and directories", { exact: true })).toBeVisible()
 		await page.getByRole("button", { name: "Delete everything", exact: true }).click()
 
-		const itemsDialog = page.getByRole("alertdialog")
+		// Same scoping as the versions dialog above.
+		const itemsDialog = page
+			.getByRole("alertdialog")
+			.filter({ has: page.getByRole("button", { name: "Delete everything", exact: true }) })
 		const itemsConfirm = itemsDialog.getByRole("button", { name: "Delete everything", exact: true })
 
 		await expect(itemsConfirm).toBeDisabled()

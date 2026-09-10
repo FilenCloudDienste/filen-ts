@@ -24,9 +24,15 @@ test.describe("narrow viewport", () => {
 		await page.goto("/drive")
 		await waitForListingSettled(page)
 
-		// <aside> is unique to the five module sidebars, so "complementary" means exactly "a module
-		// sidebar is presented". getByRole ignores the `hidden` subtree the closed drawer keeps mounted.
-		await expect(page.getByRole("complementary")).toHaveCount(0)
+		// <aside> is unique to the five module sidebars, so an <aside> inside the shell row means exactly
+		// "a module sidebar sits in the row". Probed as raw elements scoped to the row (the <main>'s own
+		// parent), NOT through getByRole("complementary"): role queries skip anything under an
+		// `aria-hidden` subtree, and Base UI's markOthers stamps exactly that on the whole shell while a
+		// modal is open — a startup reminder that mounts just after its dismissal window would make a
+		// role-based absence check pass without ever looking at the row. The row scope is also what keeps
+		// the drawer's own copy out: appShell mounts the panel in exactly one of the two slots, and on
+		// narrow that slot is the drawer's portal, which hangs off <body> rather than the row.
+		await expect(page.locator("main").locator("xpath=..").locator("aside")).toHaveCount(0)
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
 		// Both drive chrome rows must sit fully inside the viewport, not merely intersect it — the default

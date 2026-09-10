@@ -1,5 +1,12 @@
 import { test, expect } from "./fixtures"
-import { waitForListingSettled, enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import {
+	waitForListingSettled,
+	enterScratchDirectory,
+	trashScratchDirectory,
+	selectAndTrashRow,
+	LIVE_WRITE_TIMEOUT_MS
+} from "./helpers/listing"
+import { TEXT_BYTES } from "./helpers/fixtureBytes"
 import { resolveEditorModKey } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -19,10 +26,6 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // detached from the DOM" for its whole remaining budget). Cross-FILE churn from other specs remains an
 // accepted residual, exactly as drive-actions.spec.ts documents.
 test.describe.configure({ mode: "default" })
-
-// A tiny plain-text fixture — proves the whole-buffer -> decodeUtf8 -> read-only CodeMirror path with
-// no language grammar involved.
-const TEXT_BYTES = Buffer.from("Hello from a tiny text fixture.\nSecond line here.\n", "utf8")
 
 // Many short lines rather than a few long ones — small on the wire (a few KB), but at CodeMirror's
 // default line height, taller in total than any reasonable preview viewport, so the scroll leg below
@@ -55,6 +58,12 @@ test("editable text preview saves via its Save button, persists across reopen, a
 	const scratchName = `e2e-preview-edit-${runId}`
 	const nameTxt = `e2e-preview-edit-${runId}.txt`
 	const modKey = await resolveEditorModKey(page)
+	// EVERY alertdialog in this file is scoped by its title, never by role alone (the convention
+	// downloads.spec.ts and preview-text.spec.ts already follow): the shared account's own startup
+	// reminders are alertdialogs too and can pop asynchronously mid-test, which makes a bare
+	// getByRole("alertdialog") both a strict-mode hazard and — for the negative assertion below — a
+	// false failure.
+	const unsavedPrompt = page.getByRole("alertdialog", { name: "Unsaved changes" })
 
 	await page.goto("/drive")
 
@@ -85,7 +94,8 @@ test("editable text preview saves via its Save button, persists across reopen, a
 		await saveButton.click()
 		// The save clears the dirty bit once it resolves — the Save button (shown only while
 		// editable+dirty) disappearing is the save's own success signal, no separate toast to wait on.
-		await expect(saveButton).toHaveCount(0, { timeout: 15_000 })
+		// It closes on a real uploadFileBytes, so it gets the write budget rather than a UI one.
+		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Escape now closes cleanly (not dirty) — proves the confirm-on-close guard is dirty-gated, not
 		// unconditional.
@@ -110,18 +120,25 @@ test("editable text preview saves via its Save button, persists across reopen, a
 		// Arrow keys move the CodeMirror caret while focus is inside the editor — they must never bubble
 		// to the overlay's own pager key handler, which used to page (or, dirty as here, pop this very
 		// unsaved-changes prompt) on every single press instead of leaving cursor movement to CodeMirror.
+		// The caret's own offset carries the positive half of that: "no prompt appeared" holds just as
+		// well when nothing handled the press at all, so the presses have to be observably CONSUMED.
+		const caretOffset = () => page.evaluate(() => window.getSelection()?.focusOffset ?? -1)
+		const caretAtEnd = await caretOffset()
+		expect(caretAtEnd).toBeGreaterThan(0)
+
 		await page.keyboard.press("ArrowLeft")
+		await expect.poll(caretOffset).toBe(caretAtEnd - 1)
 		await page.keyboard.press("ArrowRight")
-		await expect(page.getByRole("alertdialog")).toHaveCount(0)
+		await expect.poll(caretOffset).toBe(caretAtEnd)
+
+		await expect(unsavedPrompt).toHaveCount(0)
 		await expect(page.getByText("edited content two")).toBeVisible()
 
 		await page.keyboard.press("Escape")
-		const confirmDialog = page.getByRole("alertdialog")
-		await expect(confirmDialog).toBeVisible()
-		await expect(confirmDialog).toContainText("Unsaved changes")
+		await expect(unsavedPrompt).toBeVisible()
 
-		await confirmDialog.getByRole("button", { name: "Discard" }).click()
-		await expect(confirmDialog).toHaveCount(0)
+		await unsavedPrompt.getByRole("button", { name: "Discard" }).click()
+		await expect(unsavedPrompt).toHaveCount(0)
 		await expect(page.locator(".cm-content")).toHaveCount(0)
 	} finally {
 		await trashScratchDirectory(page, scratchName)
@@ -232,12 +249,13 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 		const editor = page.locator(".cm-content")
 		let saveButton = page.getByRole("button", { name: "Save" })
 
-		// First save: rotates A's uuid once.
+		// First save: rotates A's uuid once. The button's disappearance closes on a real uploadFileBytes,
+		// hence the write budget on both saves below.
 		await editor.click()
 		await page.keyboard.press(`${modKey}+a`)
 		await page.keyboard.type("A first save")
 		await saveButton.click()
-		await expect(saveButton).toHaveCount(0, { timeout: 15_000 })
+		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Second save, same slot, no navigation in between: rotates A's uuid again.
 		await editor.click()
@@ -246,7 +264,7 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 		saveButton = page.getByRole("button", { name: "Save" })
 		await expect(saveButton).toBeVisible()
 		await saveButton.click()
-		await expect(saveButton).toHaveCount(0, { timeout: 15_000 })
+		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Page to sibling B (still its original, unedited content)...
 		await page.getByRole("button", { name: "Next file" }).click()
@@ -295,13 +313,10 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 		const row = listbox.getByRole("option", { name: nameTxt })
 		await expect(row).toBeVisible({ timeout: 45_000 })
 
-		await row.click()
-		await page.getByRole("button", { name: "Trash", exact: true }).click()
-		const trashConfirm = page.getByRole("alertdialog")
-		await expect(trashConfirm).toBeVisible()
-		await trashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-		await expect(trashConfirm).toHaveCount(0)
-		await expect(row).toHaveCount(0)
+		// The helper rather than a hand-rolled select/confirm: it clears any lingering toast before the
+		// bulk-bar click (Sonner and the bar share the bottom-right corner, and a fading toast swallows
+		// exactly that click right after an upload), and it waits the confirm out on the write budget.
+		await selectAndTrashRow(page, listbox, nameTxt)
 
 		// An in-app sidebar-link click keeps this a client-side route change on the same booted app
 		// instance — mirrors drive-actions.spec.ts's own identical rationale (a goto reload would race
@@ -317,16 +332,39 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 		// overshoot past a mounted-but-not-yet-checked row), settling briefly so the virtualizer has
 		// rendered before each probe; the real assertion still follows the loop, so a genuine absence
 		// fails loudly rather than silently scrolling forever.
-		await trashListing.listbox.hover()
-		for (let i = 0; i < 30 && !(await trashRow.isVisible()); i++) {
-			await page.mouse.wheel(0, 5000)
-			await page.waitForTimeout(250)
-		}
-		await expect(trashRow).toBeVisible({ timeout: 15_000 })
+		async function scrollTrashRowIntoView(): Promise<void> {
+			await trashListing.listbox.hover()
 
-		await trashRow.dblclick()
+			for (let i = 0; i < 30 && !(await trashRow.isVisible()); i++) {
+				await page.mouse.wheel(0, 5000)
+				await page.waitForTimeout(250)
+			}
+
+			await expect(trashRow).toBeVisible({ timeout: 15_000 })
+		}
+
+		await scrollTrashRowIntoView()
+
+		// Envelope the open, don't just fire it: scrolling a virtualized listing leaves rows re-rendering
+		// underneath the cursor, so the dblclick's two clicks can land on DIFFERENT rows and open a
+		// neighbour's preview (the hazard descendInto documents for the same reason).
+		//
+		// Each attempt re-scrolls, and that is the load-bearing part: closing the overlay returns focus to
+		// a listing that has re-virtualized, so the row this test wants is usually NOT where it was left.
+		// A retry that only re-fired the dblclick kept hitting whatever row happened to be under the old
+		// coordinates, and burned the whole envelope converging on nothing.
 		const line = page.getByRole("dialog").getByText("Hello from a tiny text fixture.")
-		await expect(line).toBeVisible({ timeout: 30_000 })
+
+		await expect(async () => {
+			if (!(await line.isVisible())) {
+				await page.keyboard.press("Escape").catch(() => undefined)
+				await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 10_000 })
+				await scrollTrashRowIntoView()
+				await trashRow.dblclick()
+			}
+
+			await expect(line).toBeVisible({ timeout: 15_000 })
+		}).toPass({ timeout: 90_000 })
 
 		// Read-only: isEditable gates off outside the drive variant, so the Save button (rendered only
 		// while editable, see previewOverlay.tsx) never appears — the trash listing's own item-level
@@ -401,37 +439,56 @@ test("the preview header's own item menu: matches the row menu's set (no Downloa
 		await expect(menu.getByRole("menuitem", { name: "Download", exact: true })).toHaveCount(0)
 		await expect(dialog.getByRole("button", { name: "Download", exact: true })).toBeVisible()
 
-		// Base UI's menu, like its Dialog sibling, stops propagation for composite keys (Arrow*) while
-		// open — live-verified here: ArrowLeft with the menu open must neither page the (single-item-
-		// behind, this account has no prior sibling to land on anyway) pager nor leak out and do
-		// anything else observable; Escape closes just the menu, leaving the preview itself open on A.
-		await page.keyboard.press("ArrowLeft")
+		// An arrow key with this menu open must not page the preview under it: the menu renders for the
+		// CURRENT slot, so a step swaps the item its Trash/Rename/Move act on out from beneath an already
+		// open menu. FORWARD, not back: A sits at pager index 0 and stepPreviewSourceIndex clamps, so a
+		// leaked ArrowLeft is a no-op there and "still on A" would hold with no guard at all — Next is
+		// enabled at index 0, so only a leaked ArrowRight is observable, as B rendering in A's place.
+		// Escape then closes just the menu, leaving the preview itself open on A.
+		//
+		// THIS LEG FAILS against the app as it stands, and is left asserting the contract rather than the
+		// behavior. Menu.Portal is a ReactDOM.createPortal inside the dialog popup's React subtree, so the
+		// keydown reaches previewOverlay.tsx's own handleKeyDown through the REACT tree no matter where the
+		// popup sits in the DOM — measured with focus on a role=menuitem inside the menu, and the pager
+		// still stepped onto B. Base UI contributes no guard: its composite root stopPropagation()s only a
+		// key that actually moves the highlight, and ArrowRight in a vertical menu moves nothing. The guard
+		// has to live in handleKeyDown, which can stand down on isAnyMenuOpen() (lib/keymap/dialogGuard.ts)
+		// exactly as directoryListing.tsx already does for its own keys.
+		await page.keyboard.press("ArrowRight")
 		await expect(dialog.getByText("Preview menu content A")).toBeVisible()
+		await expect(dialog.getByText("Preview menu content B")).toHaveCount(0)
 		await page.keyboard.press("Escape")
 		await expect(menu).toHaveCount(0)
 		await expect(dialog).toBeVisible()
 		await expect(dialog.getByText("Preview menu content A")).toBeVisible()
 
-		// Favorite: direct, no dialog — settles silently, and a reopened menu reflects the new state.
+		// Favorite: direct, no dialog. The menu closes on the click itself (the descriptor runs unawaited,
+		// itemMenu.tsx), so the LABEL FLIP in a reopened menu is the only thing that says the setFavorited
+		// write landed — at the write budget, since it queues on the account-wide drive lease.
 		await menuTrigger.click()
 		await expect(menu).toBeVisible()
 		await menu.getByRole("menuitem", { name: "Favorite", exact: true }).click()
 		await expect(menu).toHaveCount(0)
 		await menuTrigger.click()
-		await expect(menu.getByRole("menuitem", { name: "Unfavorite", exact: true })).toBeVisible()
+		await expect(menu.getByRole("menuitem", { name: "Unfavorite", exact: true })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
-		// Net-zero the favorite before trashing A.
+		// Net-zero the favorite before trashing A, and settle it the same way: starting the trash while the
+		// unfavorite is still in flight queues two writes on that one lease behind a single wait.
 		await menu.getByRole("menuitem", { name: "Unfavorite", exact: true }).click()
 		await expect(menu).toHaveCount(0)
+		await menuTrigger.click()
+		await expect(menu.getByRole("menuitem", { name: "Favorite", exact: true })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Trash A from inside the preview — the confirm nests over the overlay (Base UI dialog stacking).
-		await menuTrigger.click()
 		await menu.getByRole("menuitem", { name: "Trash", exact: true }).click()
-		const trashConfirm = page.getByRole("alertdialog")
+		// Scoped by title, as everywhere else here — a startup reminder can pop as a second alertdialog.
+		const trashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
 		await expect(trashConfirm).toBeVisible()
 		await expect(trashConfirm.getByRole("heading", { name: "Move to trash?", exact: true })).toBeVisible()
+		// handleMenuTrash awaits trashItems before clearing the dialog (previewOverlay.tsx), so unlike the
+		// menu above, THIS close is the write settling — on the write budget for the same lease reason.
 		await trashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-		await expect(trashConfirm).toHaveCount(0)
+		await expect(trashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// The pager steps onto B IN PLACE rather than closing the whole preview — the frozen two-item
 		// snapshot now has one slot left, and A's removed index (0) clamps onto it.

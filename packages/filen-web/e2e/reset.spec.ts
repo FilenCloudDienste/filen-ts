@@ -106,7 +106,8 @@ test.describe("reset", { tag: "@no-sdk" }, () => {
 
 		// The native input is intentionally visually hidden (a styled "Choose file" button drives it) —
 		// setInputFiles targets the element directly and does not require it to be visible. An in-memory
-		// buffer avoids writing any file to disk for this test.
+		// buffer avoids writing any file to disk for this test. It is also not an upload: the file is
+		// read client-side, so this never takes the drive lock the lane split greps setInputFiles for.
 		await page
 			.locator("#master-keys-file")
 			.setInputFiles({ name: "master-keys.txt", mimeType: "text/plain", buffer: Buffer.from("e2e-fake-master-keys") })

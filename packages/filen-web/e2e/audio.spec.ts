@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { enterScratchDirectory, trashScratchDirectory, dismissOverlays, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -119,9 +119,13 @@ test("drive audio double-click hands off to the persistent player and transport 
 		// (playlists moved to their own /playlists screen — see the playlist test below), so opening it
 		// here doubles as proof no tab bar survived: no tablist role, no Playlists tab.
 		await bar.getByRole("button", { name: "Show queue" }).click()
+		// The panel's own content FIRST: both negatives below are vacuously true against a panel that
+		// never opened, so nothing after this is worth anything until the popover is proven mounted.
+		const clearQueue = page.getByRole("button", { name: "Clear queue", exact: true })
+		await expect(clearQueue).toBeVisible()
 		await expect(page.getByRole("tablist")).toHaveCount(0)
 		await expect(page.getByRole("tab", { name: "Playlists" })).toHaveCount(0)
-		await page.getByRole("button", { name: "Clear queue", exact: true }).click()
+		await clearQueue.click()
 		await expect(bar).toHaveCount(0, { timeout: 15_000 })
 
 		expect(cspViolations, `CSP violations: ${JSON.stringify(cspViolations)}`).toHaveLength(0)
@@ -169,14 +173,22 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 			.catch(() => false)
 
 		if (!present) {
+			// Named, not silently skipped: nothing else sweeps `.filen/Playlists`, so a leak that goes
+			// unreported here is invisible until someone reads the next run's account by hand.
+			console.error(
+				`audio: playlist "${playlistName}" is not reachable in the Playlists listing — leaked, left for the next run's sweep`
+			)
+
 			return
 		}
 
 		await playlistRow.getByRole("button", { name: "Playlist options" }).click()
 		await page.getByRole("menuitem", { name: "Delete" }).click()
 		await page.getByRole("alertdialog", { name: "Delete playlist" }).getByRole("button", { name: "Delete", exact: true }).click()
-		await expect(playlistRow).toHaveCount(0, { timeout: 15_000 })
+		await expect(playlistRow).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 	}
+
+	let deleted = false
 
 	await page.goto("/drive")
 
@@ -206,7 +218,9 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		await expect(createDialog).toBeVisible()
 		await createDialog.getByLabel("Name", { exact: true }).fill(playlistName)
 		await createDialog.getByRole("button", { name: "Create", exact: true }).click()
-		await expect(createDialog).toHaveCount(0)
+		// The dialog closes only after the create resolves, and a first playlist in a run is two
+		// createDirectory calls plus the JSON upload — a real write chain on the account-wide lease.
+		await expect(createDialog).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Open the new playlist's detail dialog.
 		await playlistRow.getByRole("button", { name: playlistName }).click()
@@ -224,7 +238,8 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		await pickerRowA.click()
 		await pickerRowB.click()
 		await pickerDialog.getByRole("button", { name: "Add 2 tracks" }).click()
-		await expect(pickerDialog).toHaveCount(0)
+		// Same shape as the create above: the add re-uploads the playlist JSON and the dialog closes on it.
+		await expect(pickerDialog).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		const trackRowA = detailDialog.getByText(nameA)
 		const trackRowB = detailDialog.getByText(nameB)
@@ -234,7 +249,8 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		// Drag B above A — the reordered list feeds "Play" below, proving the reorder actually persisted
 		// (not just a local optimistic reshuffle).
 		await trackRowB.dragTo(trackRowA)
-		await expect(detailDialog.locator("li").first().getByText(nameB)).toBeVisible({ timeout: 15_000 })
+		// The reorder re-uploads the playlist JSON, so this settles on a write, not on a re-render.
+		await expect(detailDialog.locator("li").first().getByText(nameB)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		await detailDialog.getByRole("button", { name: "Play", exact: true }).click()
 
@@ -248,14 +264,21 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		// The row must still be there, so the idempotent delete below cannot no-op into a false pass.
 		await expect(playlistRow).toHaveCount(1)
 		await deleteScratchPlaylist()
+		deleted = true
 
 		// Queue playback is client-only (never persisted server-side, useAudioStore.ts), so leaving it
 		// playing here carries no net-zero cost — nothing left behind to clean up.
 		expect(cspViolations, `CSP violations: ${JSON.stringify(cspViolations)}`).toHaveLength(0)
 	} finally {
-		// Best-effort: a no-op once the delete above already ran, the only teardown otherwise.
-		await page.keyboard.press("Escape").catch(() => undefined)
-		await deleteScratchPlaylist().catch(() => undefined)
+		// Only when the in-body delete did not run: repeating it walks a listing that correctly no longer
+		// has the row and would report a leak that never happened. Every failure path still gets the net,
+		// and it starts by clearing whatever the failure left standing — the rail link it clicks first
+		// does not exist for the role engine while a modal is open. trashScratchDirectory does its own.
+		if (!deleted) {
+			await dismissOverlays(page)
+			await deleteScratchPlaylist().catch(() => undefined)
+		}
+
 		await trashScratchDirectory(page, scratchName)
 	}
 })

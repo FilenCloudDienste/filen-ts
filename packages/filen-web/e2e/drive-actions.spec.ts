@@ -1,5 +1,12 @@
 import { test, expect } from "./fixtures"
-import { waitForListingSettled, descendInto } from "./helpers/listing"
+import { waitForE2eHooks } from "./helpers/e2eHooks"
+import {
+	waitForListingSettled,
+	descendInto,
+	createDirectoryViaDialog,
+	enterScratchDirectory,
+	LIVE_WRITE_TIMEOUT_MS
+} from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -19,14 +26,17 @@ test.describe("drive bulk actions", () => {
 		const { listbox, hasItems } = await waitForListingSettled(page)
 		test.skip(!hasItems, "drive root has no items in this account — nothing to select")
 
-		await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeVisible()
+		// Enabled, not merely visible: every non-writable listing variant still RENDERS this button, just
+		// disabled (directoryListing.tsx's writeDisabled — menus.spec.ts asserts that state directly), so a
+		// visibility check would pass on a dead control and prove nothing about this listing being writable.
+		await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeEnabled()
 
 		await listbox.getByRole("option").first().click()
 
 		// The floating selection bar appears; the toolbar stays put — the two coexist.
 		await expect(page.getByRole("button", { name: "Clear selection", exact: true })).toBeVisible()
 		await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
-		await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeVisible()
+		await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeEnabled()
 
 		// Trash is never gated by undecryptable — always present for a /drive selection regardless of
 		// what this unknown account's first item happens to be.
@@ -38,7 +48,7 @@ test.describe("drive bulk actions", () => {
 		await page.getByRole("button", { name: "Clear selection", exact: true }).click()
 
 		await expect(page.getByText("1 selected", { exact: true })).toHaveCount(0)
-		await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeVisible()
+		await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeEnabled()
 		await expect(page.getByRole("button", { name: "Clear selection", exact: true })).toHaveCount(0)
 	})
 
@@ -78,6 +88,9 @@ test.describe("drive bulk actions", () => {
 		// useIsOnline reads TanStack's onlineManager, which tracks the window online/offline events this
 		// flag fires (precedent: chats.spec.ts). The picker's listing query stays `success` off the warm
 		// cache while offline, so the confirm's own status arm never confounds the assertion.
+		// Barrier before the network dies: the e2e hooks arrive via a fire-and-forget dynamic
+		// import, and a chunk request that is in flight when the page goes offline FAILS PERMANENTLY.
+		await waitForE2eHooks(page)
 		await page.context().setOffline(true)
 		await expect(createButton).toBeDisabled()
 		await expect(dialog.getByRole("button", { name: "Move here", exact: true })).toBeDisabled()
@@ -128,7 +141,10 @@ test.describe("drive bulk actions", () => {
 		await listbox.getByRole("option").first().click()
 		await page.getByRole("button", { name: "Trash", exact: true }).click()
 
-		const dialog = page.getByRole("alertdialog")
+		// Scoped by title, never a bare role: a startup account reminder is an alertdialog too and can pop
+		// asynchronously, which would make an unscoped lookup a strict-mode violation rather than a useful
+		// failure. Base UI wires the accessible name from the dialog's own title (confirmDialog.tsx).
+		const dialog = page.getByRole("alertdialog", { name: "Move to trash?" })
 		await expect(dialog).toBeVisible()
 		await expect(dialog.getByRole("heading", { name: "Move to trash?", exact: true })).toBeVisible()
 
@@ -175,29 +191,18 @@ test.describe("drive bulk actions", () => {
 		const nameA = `e2e-bulk-actions-${suffix}-a`
 		const nameB = `e2e-bulk-actions-${suffix}-b`
 
-		async function createDirectory(name: string): Promise<void> {
-			// .first(): the fresh scratch directory starts empty, so its empty-state "+ Add" affordance
-			// renders a second identical button; the toolbar's is always first in DOM order.
-			await page.getByRole("button", { name: "New directory", exact: true }).first().click()
-			const dialog = page.getByRole("dialog")
-			await expect(dialog).toBeVisible()
-			await page.getByLabel("Name", { exact: true }).fill(name)
-			await page.getByRole("button", { name: "Create", exact: true }).click()
-			await expect(dialog).toHaveCount(0)
-		}
-
 		await page.goto("/drive")
-		const { listbox: rootListbox } = await waitForListingSettled(page)
 
-		await createDirectory(scratchName)
-		// Descend via a real double-click (an in-app client-side route change, same as drive.spec.ts's
-		// own subdirectory-navigation test) — everything below this point, until the final cleanup,
-		// stays inside the scratch directory and never touches the root listing again.
-		await descendInto(page, rootListbox, scratchName)
-		const { listbox } = await waitForListingSettled(page)
+		// Through the shared helper rather than create-then-descend by hand: this is the run's FIRST
+		// write, the one that meets a `drive-write` lease left behind by anything that died holding it,
+		// and the helper is where the retry-with-reload for that lives (see listing.ts). Descending is a
+		// real double-click in there too — an in-app client-side route change, same as drive.spec.ts's
+		// own subdirectory-navigation test. Everything below this point, until the final cleanup, stays
+		// inside the scratch directory and never touches the root listing again.
+		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		await createDirectory(nameA)
-		await createDirectory(nameB)
+		await createDirectoryViaDialog(page, nameA, listbox)
+		await createDirectoryViaDialog(page, nameB, listbox)
 
 		const rowA = listbox.getByRole("option", { name: nameA })
 		const rowB = listbox.getByRole("option", { name: nameB })
@@ -211,17 +216,20 @@ test.describe("drive bulk actions", () => {
 		await rowB.click({ modifiers: [MOD_KEY] })
 		await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
 
+		// The write budget on all four badge assertions, not the expect default: bulk favorite runs through
+		// runBulkFavorite with no dialog of its own (bulkActionBar.tsx), so the badge appearing/disappearing IS
+		// the live write settling on the account-wide lease rather than a React commit after one.
 		await page.getByRole("button", { name: "Favorite", exact: true }).click()
-		await expect(rowA.getByText("Favorited")).toBeVisible()
-		await expect(rowB.getByText("Favorited")).toBeVisible()
+		await expect(rowA.getByText("Favorited")).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(rowB.getByText("Favorited")).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Re-select (a successful bulk favorite prunes the selection) and SET back to unfavorited —
 		// nets out to the exact pre-test state.
 		await rowA.click()
 		await rowB.click({ modifiers: [MOD_KEY] })
 		await page.getByRole("button", { name: "Unfavorite", exact: true }).click()
-		await expect(rowA.getByText("Favorited")).toHaveCount(0)
-		await expect(rowB.getByText("Favorited")).toHaveCount(0)
+		await expect(rowA.getByText("Favorited")).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(rowB.getByText("Favorited")).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Bulk-trash both.
 		await rowA.click()
@@ -229,10 +237,12 @@ test.describe("drive bulk actions", () => {
 		await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
 
 		await page.getByRole("button", { name: "Trash", exact: true }).click()
-		const trashConfirm = page.getByRole("alertdialog")
+		const trashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
 		await expect(trashConfirm).toBeVisible()
 		await trashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-		await expect(trashConfirm).toHaveCount(0)
+		// The write budget, not the expect default: runBulkDialogAction holds this open and pending for the
+		// whole trash, so its close is the live write settling on the account-wide lease.
+		await expect(trashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		await expect(rowA).toHaveCount(0)
 		await expect(rowB).toHaveCount(0)
@@ -253,7 +263,7 @@ test.describe("drive bulk actions", () => {
 		// already-wired typed-confirm dialog and dismisses without ever typing the match phrase — this
 		// spec must never actually empty the shared account's trash.
 		await page.getByRole("button", { name: "Empty trash", exact: true }).click()
-		const emptyTrashConfirm = page.getByRole("alertdialog")
+		const emptyTrashConfirm = page.getByRole("alertdialog", { name: "Empty trash?" })
 		await expect(emptyTrashConfirm).toBeVisible()
 		await expect(emptyTrashConfirm.getByRole("heading", { name: "Empty trash?", exact: true })).toBeVisible()
 		await page.keyboard.press("Escape")
@@ -273,7 +283,9 @@ test.describe("drive bulk actions", () => {
 		// Destructive confirms open with Cancel focused — a blind Enter must never fire an irreversible
 		// delete. Opened and dismissed; this suite never permanently deletes anything.
 		await page.getByRole("button", { name: "Delete permanently", exact: true }).click()
-		const deleteConfirm = page.getByRole("alertdialog")
+		// Scoped by title like every other confirm here — which also makes this the one assertion that the
+		// permanent-delete confirm is the dialog that opened, since no heading check follows it.
+		const deleteConfirm = page.getByRole("alertdialog", { name: "Delete permanently?" })
 		await expect(deleteConfirm).toBeVisible()
 		await expect(deleteConfirm.getByRole("button", { name: "Cancel", exact: true })).toBeFocused()
 		await page.keyboard.press("Escape")
@@ -282,13 +294,15 @@ test.describe("drive bulk actions", () => {
 		// Bulk restore CONFIRMS — the one behavior this task adds (a single item's own restore, from the
 		// per-item menu, stays direct/unconfirmed; only the bulk path opens this dialog).
 		await page.getByRole("button", { name: "Restore", exact: true }).click()
-		const restoreConfirm = page.getByRole("alertdialog")
+		const restoreConfirm = page.getByRole("alertdialog", { name: "Restore items?" })
 		await expect(restoreConfirm).toBeVisible()
 		await expect(restoreConfirm.getByRole("heading", { name: "Restore items?", exact: true })).toBeVisible()
 		// The preserved half of the same tier rule: a reversible confirm still opens on its confirm button.
 		await expect(restoreConfirm.getByRole("button", { name: "Restore", exact: true })).toBeFocused()
 		await restoreConfirm.getByRole("button", { name: "Restore", exact: true }).click()
-		await expect(restoreConfirm).toHaveCount(0)
+		// The write budget, not the expect default: runBulkDialogAction holds this open for the whole
+		// restore, so its close is the live write settling on the account-wide lease, not a UI beat.
+		await expect(restoreConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		await expect(trashRowA).toHaveCount(0)
 		await expect(trashRowB).toHaveCount(0)
@@ -309,10 +323,10 @@ test.describe("drive bulk actions", () => {
 		await restoredRowA.click()
 		await restoredRowB.click({ modifiers: [MOD_KEY] })
 		await page.getByRole("button", { name: "Trash", exact: true }).click()
-		const innerFinalTrashConfirm = page.getByRole("alertdialog")
+		const innerFinalTrashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
 		await expect(innerFinalTrashConfirm).toBeVisible()
 		await innerFinalTrashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-		await expect(innerFinalTrashConfirm).toHaveCount(0)
+		await expect(innerFinalTrashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		await expect(restoredRowA).toHaveCount(0)
 		await expect(restoredRowB).toHaveCount(0)
 
@@ -326,10 +340,10 @@ test.describe("drive bulk actions", () => {
 
 		await finalScratchRow.click()
 		await page.getByRole("button", { name: "Trash", exact: true }).click()
-		const scratchTrashConfirm = page.getByRole("alertdialog")
+		const scratchTrashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
 		await expect(scratchTrashConfirm).toBeVisible()
 		await scratchTrashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-		await expect(scratchTrashConfirm).toHaveCount(0)
+		await expect(scratchTrashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// A reload (not just re-checking the same live query-client state) before this LAST assertion —
 		// the app's queries refetch on window focus (queries/client.ts: staleTime 0 +

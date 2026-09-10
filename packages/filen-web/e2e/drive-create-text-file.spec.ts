@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // "New text file" (Upload menu's third entry, uploadMenu.tsx): create -> row appears instantly ->
@@ -43,18 +43,19 @@ test("New text file: name without an extension defaults to .txt, the row appears
 		await expect(nameDialogHeading).toBeVisible()
 		await page.getByLabel("Name", { exact: true }).fill(baseName)
 		await page.getByRole("button", { name: "Create", exact: true }).click()
-		// The name dialog closes, immediately replaced by the full-screen preview overlay — ALSO a
-		// role="dialog" (see previewOverlay.tsx), so this checks the name dialog's own heading is gone
-		// rather than asserting zero dialogs on screen.
-		await expect(nameDialogHeading).toHaveCount(0)
 
-		// The editor opens automatically (mobile parity) — no double-click needed, unlike every other
-		// preview leg (preview-text.spec.ts, preview-lifecycle.spec.ts). Checked BEFORE the listing row
-		// below: the full-bleed preview overlay is a modal dialog (previewOverlay.tsx) that inerts the
-		// rest of the page while open, so the listbox's own option isn't accessible-queryable until it
-		// closes.
+		// The editor opening IS the outcome, and it is asserted FIRST: runCreateTextFile awaits the real
+		// uploadFileBytes round trip before patching the listing, and the name dialog only closes after
+		// that — asserting the close on the suite's UI-responsiveness budget would make a slow-but-
+		// successful create look like a failure (the same ordering menus.spec.ts already carries).
+		// The editor also has to come before the listing row below: the full-bleed preview overlay is a
+		// modal dialog (previewOverlay.tsx) that inerts the rest of the page while open, so the listbox's
+		// own option isn't accessible-queryable until it closes.
 		const editor = page.locator(".cm-content")
 		await expect(editor).toBeVisible({ timeout: 30_000 })
+		// The name dialog is gone, replaced by that overlay — ALSO a role="dialog" (previewOverlay.tsx),
+		// so this checks the name dialog's own heading rather than asserting zero dialogs on screen.
+		await expect(nameDialogHeading).toHaveCount(0)
 		await expect(page.getByRole("dialog").getByText(nameTxt)).toBeVisible()
 
 		await editor.click()
@@ -64,8 +65,9 @@ test("New text file: name without an extension defaults to .txt, the row appears
 		await expect(saveButton).toBeVisible()
 		await saveButton.click()
 		// The save clears the dirty bit once it resolves — the Save button (shown only while
-		// editable+dirty) disappearing is the save's own success signal.
-		await expect(saveButton).toHaveCount(0, { timeout: 15_000 })
+		// editable+dirty) disappearing is the save's own success signal, and that is a real upload on the
+		// account-wide lease, so it gets the write budget rather than a UI-responsiveness one.
+		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		await page.keyboard.press("Escape")
 		await expect(editor).toHaveCount(0)

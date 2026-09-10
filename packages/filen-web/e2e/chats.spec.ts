@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
+import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { dismissStartupReminders } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -63,24 +64,71 @@ function requireSharedChatUuid(): string {
 
 const CHAT_CREATE_BACKOFF_MS = 5_000
 
+// createTestSelfChat is TWO writes — createChat then renameChat — so a throw between them leaves a
+// conversation that exists but never got its "e2e-chat-" name, which CHAT_DEBRIS_NAME_PREFIXES can
+// never match: permanent debris on the one surface where every extra conversation costs limiter
+// budget. A rename that throws after landing leaves a second sweepable row instead. Neither is visible
+// without bracketing the attempt in the account's own uuid list, which is what this does before
+// handing the caller its retry.
 async function tryCreateSharedChat(page: Page): Promise<string | undefined> {
+	// Both the snapshot and the create reach through window.__filenE2E, and an authed shell is no proof
+	// it is installed on any load past a context's first. Not fatal if the barrier itself times out —
+	// the create below then throws on its own and the caller's 2-attempt rule takes over, which is the
+	// documented behaviour for a create that cannot run.
+	await waitForE2eHooks(page).catch(() => undefined)
+
+	const before = await page
+		.evaluate(() => window.__filenE2E.listTestChatUuids())
+		.then(uuids => new Set(uuids))
+		.catch(() => undefined)
+
 	try {
 		return await page.evaluate(() => window.__filenE2E.createTestSelfChat())
 	} catch {
+		await deleteChatsCreatedSince(page, before)
+
 		return undefined
 	}
 }
 
-function sharedChatRow(page: Page) {
-	return page.getByRole("complementary").getByRole("link", { name: /e2e-chat-/ })
+// Deletes whatever the failed attempt above added. Skipped outright without a pre-attempt snapshot —
+// a missing `before` would make every conversation on the shared account look new to this diff.
+async function deleteChatsCreatedSince(page: Page, before: Set<string> | undefined): Promise<void> {
+	if (before === undefined) {
+		console.log("chats-spec: no pre-attempt conversation snapshot — a partial create is left to the prefix sweep")
+
+		return
+	}
+
+	const after = await page.evaluate(() => window.__filenE2E.listTestChatUuids()).catch(() => [])
+
+	for (const uuid of after) {
+		if (before.has(uuid)) {
+			continue
+		}
+
+		try {
+			await page.evaluate(u => window.__filenE2E.deleteTestChatByUuid(u), uuid)
+			console.log(`chats-spec: removed conversation ${uuid}, left behind by a failed create`)
+		} catch {
+			console.log(`chats-spec: could not remove conversation ${uuid}, left behind by a failed create`)
+		}
+	}
+}
+
+// Keyed on the uuid, never on the name: the shared account can carry other rows (a partially-created
+// conversation sweeps under the same prefix), and the name-regex form carried no .first(), so a single
+// stray row was a strict-mode violation in every test that opens this thread.
+function sharedChatRow(page: Page, uuid: string) {
+	return page.getByRole("complementary").locator(`a[href*="/chats/${uuid}"]`)
 }
 
 // Proves the chats-list query cache is warm (the real listChats() the sidebar fired on mount resolved and
 // included the shared chat) BEFORE a caller drops connectivity — the offline hook-driven tests need the
 // cache-first lookup in enqueueTestChatMessage to hit, since a cache miss would otherwise fall back to a
 // network read that can't succeed offline.
-async function waitForSharedChatRow(page: Page): Promise<void> {
-	await expect(sharedChatRow(page)).toBeVisible({ timeout: 30_000 })
+async function waitForSharedChatRow(page: Page, uuid: string): Promise<void> {
+	await expect(sharedChatRow(page, uuid)).toBeVisible({ timeout: 30_000 })
 }
 
 // Opens the shared conversation via a real sidebar-row click (client-nav; the row only renders once the
@@ -88,8 +136,8 @@ async function waitForSharedChatRow(page: Page): Promise<void> {
 // a lazily-loaded route chunk, and a caller that drops connectivity inside that load window would fail the
 // pending fetch and bounce to a browser error screen.
 async function openSharedChatThread(page: Page, uuid: string): Promise<void> {
-	await waitForSharedChatRow(page)
-	await sharedChatRow(page).click()
+	await waitForSharedChatRow(page, uuid)
+	await sharedChatRow(page, uuid).click()
 	await page.waitForURL(new RegExp(`/chats/${uuid}`))
 	await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible({ timeout: 30_000 })
 }
@@ -212,11 +260,17 @@ test.describe("chats", () => {
 		test.skip(sharedChatUuid === undefined, "shared self-chat unavailable — the setup test's create was blocked")
 		expect(injectedSession.length).toBeGreaterThan(0)
 
+		// Explicit opt-in ABOVE the suite's 120s default, sized off this test's own pinned waits: 30s for
+		// the warm row + 60s for the enqueue envelope + 30s for the delivery poll is already 120s before
+		// the shell load that precedes them. The chats lane runs with retries: 0, and a harness kill here
+		// strands the shared conversation on a create limiter no later test can work around.
+		test.setTimeout(240_000)
+
 		const uuid = requireSharedChatUuid()
 		const text = `outbox-${String(Date.now())}`
 
 		await gotoChats(page)
-		await waitForSharedChatRow(page)
+		await waitForSharedChatRow(page, uuid)
 
 		// The sidebar's a11y contract, asserted where a conversation row is guaranteed to exist (every
 		// test above this one runs before the shared chat is created).
@@ -224,13 +278,36 @@ test.describe("chats", () => {
 		await expect(page.getByRole("complementary").getByRole("option").first()).toBeVisible()
 
 		// Enqueue while OFFLINE: the send can't fire, so the durable persist is observable on its own.
+		// Barrier before the network dies: the e2e hooks arrive via a fire-and-forget dynamic
+		// import, and a chunk request that is in flight when the page goes offline FAILS PERMANENTLY.
+		await waitForE2eHooks(page)
 		await page.context().setOffline(true)
 
-		const flushed = await page.evaluate(([u, t]) => window.__filenE2E.enqueueTestChatMessage(u, t), [uuid, text] as const)
-		expect(flushed).toBe(true)
+		// setOffline can land while the shell is still settling a transition, and an evaluate that races
+		// that navigation dies with "Execution context was destroyed" — inside an expect.poll that
+		// rejection aborts the poll on its first iteration instead of retrying, because the poll awaits
+		// its callback outside its own try. The envelope retries it, and retrying is safe ONLY because
+		// the enqueue is guarded by a read: a blind retry would double-enqueue. Its closing assertion is
+		// also the durable-persist proof this test is here for — the message is on disk (OPFS) before
+		// any send can fire.
+		await expect(async () => {
+			// The hook bundle is installed by the app itself, so a context that navigated a moment ago can
+			// be live with no `__filenE2E` on it yet. Asserted INSIDE the envelope rather than with a hard
+			// wait, which would only turn a recoverable not-ready-yet into its own timeout.
+			expect(await page.evaluate(() => "__filenE2E" in window)).toBe(true)
 
-		// The message is durable on disk (OPFS) BEFORE any send — the survives-window-close guarantee.
-		await expect.poll(() => page.evaluate(u => window.__filenE2E.readPersistedInflightChatMessages(u), uuid)).toContain(text)
+			const before = await page.evaluate(u => window.__filenE2E.readPersistedInflightChatMessages(u), uuid)
+
+			if (before?.includes(text) !== true) {
+				const flushed = await page.evaluate(([u, t]) => window.__filenE2E.enqueueTestChatMessage(u, t), [uuid, text] as const)
+
+				expect(flushed).toBe(true)
+			}
+
+			const after = await page.evaluate(u => window.__filenE2E.readPersistedInflightChatMessages(u), uuid)
+
+			expect(after).toContain(text)
+		}).toPass({ timeout: 60_000 })
 
 		// Reconnect: the outbox's onlineManager trigger flushes the queue → the send commits.
 		await page.context().setOffline(false)
@@ -254,18 +331,46 @@ test.describe("chats", () => {
 		test.skip(sharedChatUuid === undefined, "shared self-chat unavailable — the setup test's create was blocked")
 		expect(injectedSession.length).toBeGreaterThan(0)
 
+		// Explicit opt-in ABOVE the suite's 120s default, sized off this test's own pinned waits: 30s for
+		// the warm row + 60s for the enqueue envelope + 30s for the replay poll is exactly the default,
+		// with the shell load and the reload boot between them unaccounted for. The chats lane runs with
+		// retries: 0, and a harness kill here strands the shared conversation on the create limiter.
+		test.setTimeout(240_000)
+
 		const uuid = requireSharedChatUuid()
 		const text = `killpath-${String(Date.now())}`
 
 		await gotoChats(page)
-		await waitForSharedChatRow(page)
+		await waitForSharedChatRow(page, uuid)
 
 		// Enqueue offline: persisted to disk, never sent before the kill.
+		// Barrier before the network dies: the e2e hooks arrive via a fire-and-forget dynamic
+		// import, and a chunk request that is in flight when the page goes offline FAILS PERMANENTLY.
+		await waitForE2eHooks(page)
 		await page.context().setOffline(true)
 
-		await page.evaluate(([u, t]) => window.__filenE2E.enqueueTestChatMessage(u, t), [uuid, text] as const)
+		// setOffline can land while the shell is still settling a transition, and an evaluate that races
+		// that navigation dies with "Execution context was destroyed". Retrying is safe ONLY because the
+		// enqueue is guarded by a read: this test's whole claim is that the message replays EXACTLY once,
+		// so a blind retry that double-enqueued would quietly invalidate it.
+		await expect(async () => {
+			// The hook bundle is installed by the app itself, so a context that navigated a moment ago can be
+			// live with no `__filenE2E` on it yet — reaching straight for a method threw "Cannot read
+			// properties of undefined". Assert readiness INSIDE the envelope rather than with a hard
+			// waitForFunction: the envelope already owns the retrying, and a nested hard wait just turns a
+			// recoverable not-ready-yet into its own timeout.
+			expect(await page.evaluate(() => "__filenE2E" in window)).toBe(true)
 
-		await expect.poll(() => page.evaluate(u => window.__filenE2E.readPersistedInflightChatMessages(u), uuid)).toContain(text)
+			const before = await page.evaluate(u => window.__filenE2E.readPersistedInflightChatMessages(u), uuid)
+
+			if (before?.includes(text) !== true) {
+				await page.evaluate(([u, t]) => window.__filenE2E.enqueueTestChatMessage(u, t), [uuid, text] as const)
+			}
+
+			const after = await page.evaluate(u => window.__filenE2E.readPersistedInflightChatMessages(u), uuid)
+
+			expect(after).toContain(text)
+		}).toPass({ timeout: 60_000 })
 
 		// Kill the tab. A fresh page + fresh outbox: the only way the message can now reach the server
 		// is the replay of the durable queue on the reloaded shell.
@@ -273,6 +378,10 @@ test.describe("chats", () => {
 		await page.reload()
 		await dismissStartupReminders(page)
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+		// The reloaded shell re-runs the fire-and-forget hook import while bootSdk resumes the session
+		// from kv on its own — an authed shell is therefore no proof the hooks are back. Both reads below
+		// go through them, and the first is an expect.poll, which a rejecting evaluate aborts outright.
+		await waitForE2eHooks(page)
 
 		// Replay delivered it...
 		await expect
@@ -297,6 +406,12 @@ test.describe("chats", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		test.skip(sharedChatUuid === undefined, "shared self-chat unavailable — the setup test's create was blocked")
 		expect(injectedSession.length).toBeGreaterThan(0)
+
+		// Explicit opt-in ABOVE the suite's 120s default, sized off this test's own pinned waits: opening
+		// the thread pins 30s (warm row) + 30s (composer), and the three live-write waits that follow pin
+		// 30s each — 150s before a single unpinned step. The chats lane runs with retries: 0, so a
+		// harness kill here strands the shared conversation on the create limiter.
+		test.setTimeout(240_000)
 
 		const uuid = requireSharedChatUuid()
 		const text = `ui-send-${String(Date.now())}`
@@ -358,23 +473,43 @@ test.describe("chats", () => {
 		test.skip(sharedChatUuid === undefined, "shared self-chat unavailable — the setup test's create was blocked")
 		expect(injectedSession.length).toBeGreaterThan(0)
 
+		// Explicit opt-in ABOVE the suite's 120s default, sized off this test's own pinned waits: opening
+		// the thread pins 30s (warm row) + 30s (composer), the persist envelope 60s and the replay poll
+		// 30s — 150s, with the reload boot on top. The chats lane runs with retries: 0, so a harness kill
+		// here strands the shared conversation on the create limiter.
+		test.setTimeout(240_000)
+
 		const uuid = requireSharedChatUuid()
 		const text = `ui-killpath-${String(Date.now())}`
 
 		await gotoChats(page)
 		await openSharedChatThread(page, uuid)
 
+		// Barrier before the network dies: the e2e hooks arrive via a fire-and-forget dynamic
+		// import, and a chunk request that is in flight when the page goes offline FAILS PERMANENTLY.
+		await waitForE2eHooks(page)
 		await page.context().setOffline(true)
 		await sendViaComposer(page, text)
 
 		// Persisted to disk (OPFS) before any send — the survives-window-close guarantee, from a keystroke.
-		await expect.poll(() => page.evaluate(u => window.__filenE2E.readPersistedInflightChatMessages(u), uuid)).toContain(text)
+		// Enveloped, not polled bare: setOffline can land while the shell is still settling a transition,
+		// and an evaluate that races that navigation dies with "Execution context was destroyed" — which
+		// an expect.poll turns into an immediate abort rather than a retry, since it awaits its callback
+		// outside its own try. Read-only inside, so retrying enqueues nothing and the exactly-once claim
+		// below is untouched; the keystroke stays outside.
+		await expect(async () => {
+			expect(await page.evaluate(() => "__filenE2E" in window)).toBe(true)
+			expect(await page.evaluate(u => window.__filenE2E.readPersistedInflightChatMessages(u), uuid)).toContain(text)
+		}).toPass({ timeout: 60_000 })
 
 		// Kill the tab; only the durable-queue replay on reload can now reach the server.
 		await page.context().setOffline(false)
 		await page.reload()
 		await dismissStartupReminders(page)
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+		// An authed shell is no proof the hooks came back with it — bootSdk resumes from kv on its own,
+		// independently of the fire-and-forget hook import. Both reads below go through them.
+		await waitForE2eHooks(page)
 
 		await expect
 			.poll(() => page.evaluate(u => window.__filenE2E.readTestChatMessageTexts(u), uuid), { timeout: 30_000 })
@@ -491,9 +626,13 @@ test.describe("chats", () => {
 
 		const uuid = requireSharedChatUuid()
 
-		await gotoChats(page)
-
 		try {
+			// Inside the try, not ahead of it: gotoChats ends in a real rail click, and a click that fails
+			// (a startup reminder that outran its dismissal, a slow shell) would otherwise skip the delete
+			// entirely and leave the conversation on an account whose create limiter makes the next run
+			// pay for it.
+			await gotoChats(page)
+			await waitForE2eHooks(page)
 			await page.evaluate(u => window.__filenE2E.deleteTestChatByUuid(u), uuid)
 		} catch {
 			// Best-effort, same rationale as every other teardown in this suite — the prefix sweep backstops it.

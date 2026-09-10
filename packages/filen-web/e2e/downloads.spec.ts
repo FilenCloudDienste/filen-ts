@@ -1,9 +1,8 @@
-import { statSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { statSync } from "node:fs"
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { descendInto, enterScratchDirectory, trashScratchDirectory, waitForListingSettled } from "./helpers/listing"
+import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
+import { DOWNLOAD_FSA_TEXT, DOWNLOAD_SW_TEXT } from "./helpers/fixtureBytes"
 import { MOD_KEY } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -88,60 +87,13 @@ function readSmokeSink(page: Page): Promise<{ bytes: number; first4: number[] }>
 	return page.evaluate(() => window.__smokeSink)
 }
 
-// Fixture files are uploaded through the SAME real UI path a user would use -- the hidden file input
-// uploadMenu.tsx wires up, targeting whatever directory the app is currently navigated into
-// (directoryListing.tsx passes it the current listing's own uuid) -- rather than through the
-// createTestFile e2e hook: that hook's own doc comment says it uploads at the account ROOT with no
-// parentUuid option, which would defeat the whole point of nesting above. Driving the UI instead also
-// means the upload lands through runUpload's own optimistic cache patch (features/drive/lib/upload.ts), so the
-// new row appears in the already-open scratch listing on its own -- no forced refetch needed. Mirrors
-// uploads.spec.ts's own picker-driven test.
-async function uploadTestFiles(page: Page, files: { name: string; content: string }[]): Promise<void> {
-	await page
-		.locator('input[type="file"]')
-		.first()
-		.setInputFiles(files.map(({ name, content }) => ({ name, mimeType: "text/plain", buffer: Buffer.from(content, "utf8") })))
-}
-
-// Same UI path as uploadTestFiles above, but for the cancel test's larger file: the content is written
-// to a REAL temp file on disk first (mirrors uploads.spec.ts's own directory-upload test), then handed
-// to setInputFiles as a path rather than a buffer -- Playwright/CDP reads a path-based file input
-// straight off local disk into the browser, so a several-MiB payload never has to serialize through the
-// Playwright<->driver bridge as a call argument.
-async function uploadLargeTestFile(page: Page, name: string, sizeBytes: number): Promise<void> {
-	const path = join(tmpdir(), name)
-	writeFileSync(path, "x".repeat(sizeBytes))
-
-	await page.locator('input[type="file"]').first().setInputFiles(path)
-}
-
-// A real, UI-driven fixture upload (uploadTestFiles/uploadLargeTestFile above) leaves a FINISHED
-// "upload" transfer row behind in the same store the download flow below reads -- and a transfer row's
-// accessible name is just its bare file name regardless of direction (transferRow.tsx's own
-// `<Progress aria-label={transfer.name} />`), so an upload and a later download of the SAME file
-// collide on every getByRole("progressbar", { name: fileName })/getByText("Done") locator below unless
-// the upload's own row is cleared first. The screen's "Clear finished" button
-// (screens/transfers.tsx) clears every finished row in one click, so this works the same whether one
-// file or several were just uploaded. The rail entry NAVIGATES to /transfers now (no more
-// popover overlaying the drive listing in place), so this returns to wherever the caller was before
-// clearing, restoring the exact drive scratch-directory view every caller here relies on afterwards.
-// Returns there the same way drive-actions.spec.ts's own trash-then-back round trip does -- an in-app
-// sidebar Link click plus a re-descent, never page.goto(): goto is a hard reload that re-runs the whole
-// boot/re-auth sequence, tearing down and rebooting the wasm SDK/OPFS session every caller here relies
-// on staying alive across this round trip.
-async function clearFinishedTransfers(page: Page, listbox: ReturnType<Page["getByRole"]>, scratchName: string): Promise<void> {
-	await page
-		.getByRole("link", { name: /Transfers/i })
-		.first()
-		.click()
-	await page.waitForURL(/\/transfers$/)
-
-	await page.getByRole("button", { name: "Clear finished", exact: true }).click()
-
-	await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
-	await waitForListingSettled(page)
-	await descendInto(page, listbox, scratchName)
-}
+// The files these tests download live in the shared read-only fixture tree the fixtures-setup project
+// builds once per run (helpers/fixtures.ts), so nothing here uploads. That also retires the
+// "Clear finished" round trip every test used to make first: a transfer row's accessible name is just
+// its bare file name regardless of direction (transferRow.tsx), so an upload done IN THIS CONTEXT left
+// a finished row that collided with the download's own row on every progressbar/"Done" locator below.
+// With the upload gone from the context, the transfers list starts empty and the only row that ever
+// appears is the download under test.
 
 test.describe("downloads", () => {
 	test("a single file downloads through the File System Access path and the transfer reaches Done", async ({
@@ -156,40 +108,33 @@ test.describe("downloads", () => {
 
 		await page.goto("/drive")
 
-		const scratchName = `e2e-download-fsa-${crypto.randomUUID()}`
-		const fileName = `e2e-download-fsa-${crypto.randomUUID()}.txt`
-		const content = "filen web e2e download probe"
+		const [fileName] = FIXTURE_FILES["download-fsa"]
 
-		try {
-			const { listbox } = await enterScratchDirectory(page, scratchName)
+		const { listbox } = await enterFixtureDirectory(page, "download-fsa")
 
-			await uploadTestFiles(page, [{ name: fileName, content }])
+		const row = listbox.getByRole("option", { name: fileName })
+		await expect(row).toBeVisible({ timeout: 20_000 })
 
-			const row = listbox.getByRole("option", { name: fileName })
-			await expect(row).toBeVisible({ timeout: 20_000 })
+		await row.click()
+		await page.getByRole("button", { name: "Download", exact: true }).click()
 
-			await clearFinishedTransfers(page, listbox, scratchName)
+		await page
+			.getByRole("link", { name: /Transfers/i })
+			.first()
+			.click()
+		await page.waitForURL(/\/transfers$/)
 
-			await row.click()
-			await page.getByRole("button", { name: "Download", exact: true }).click()
+		// The transfer row's accessible name lives on its progressbar, not the row's outer container --
+		// the Pause/Cancel buttons are exact-named siblings (vs. the screen's own header
+		// "Pause all"/"Cancel all"), located independently below since only one row is ever active here.
+		// The status label is a sibling of that progressbar inside the same row div, so stepping up to the
+		// row pins "Done" to THIS transfer rather than to the first one anywhere on the screen.
+		const progressbar = page.getByRole("progressbar", { name: fileName })
+		await expect(progressbar).toBeVisible()
+		await expect(progressbar.locator("xpath=..").getByText("Done", { exact: true })).toBeVisible({ timeout: 20_000 })
 
-			await page
-				.getByRole("link", { name: /Transfers/i })
-				.first()
-				.click()
-			await page.waitForURL(/\/transfers$/)
-
-			// The transfer row's accessible name lives on its progressbar, not the row's outer container --
-			// the Pause/Cancel buttons are exact-named siblings (vs. the screen's own header
-			// "Pause all"/"Cancel all"), located independently below since only one row is ever active here.
-			await expect(page.getByRole("progressbar", { name: fileName })).toBeVisible()
-			await expect(page.getByText("Done")).toBeVisible({ timeout: 20_000 })
-
-			const sink = await readSmokeSink(page)
-			expect(sink.bytes).toBe(Buffer.byteLength(content, "utf8"))
-		} finally {
-			await trashScratchDirectory(page, scratchName)
-		}
+		const sink = await readSmokeSink(page)
+		expect(sink.bytes).toBe(Buffer.byteLength(DOWNLOAD_FSA_TEXT, "utf8"))
 	})
 
 	test("a multi-select download zips into ONE archive over the File System Access path", async ({
@@ -204,56 +149,46 @@ test.describe("downloads", () => {
 
 		await page.goto("/drive")
 
-		const scratchName = `e2e-download-zip-${crypto.randomUUID()}`
-		const nameA = `e2e-download-zip-a-${crypto.randomUUID()}.txt`
-		const nameB = `e2e-download-zip-b-${crypto.randomUUID()}.txt`
+		const [nameA, nameB] = FIXTURE_FILES["download-zip"]
 
-		try {
-			const { listbox } = await enterScratchDirectory(page, scratchName)
+		const { listbox } = await enterFixtureDirectory(page, "download-zip")
 
-			await uploadTestFiles(page, [
-				{ name: nameA, content: "filen web e2e zip download file a" },
-				{ name: nameB, content: "filen web e2e zip download file b" }
-			])
+		const rowA = listbox.getByRole("option", { name: nameA })
+		const rowB = listbox.getByRole("option", { name: nameB })
+		await expect(rowA).toBeVisible({ timeout: 20_000 })
+		await expect(rowB).toBeVisible({ timeout: 20_000 })
 
-			const rowA = listbox.getByRole("option", { name: nameA })
-			const rowB = listbox.getByRole("option", { name: nameB })
-			await expect(rowA).toBeVisible({ timeout: 20_000 })
-			await expect(rowB).toBeVisible({ timeout: 20_000 })
+		// Click, then modifier-click to add to the selection -- the same mechanism drive-actions.spec.ts's
+		// own bulk tests use.
+		await rowA.click()
+		await rowB.click({ modifiers: [MOD_KEY] })
+		await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
 
-			await clearFinishedTransfers(page, listbox, scratchName)
+		await page.getByRole("button", { name: "Download", exact: true }).click()
 
-			// Click, then modifier-click to add to the selection -- the same mechanism drive-actions.spec.ts's
-			// own bulk tests use.
-			await rowA.click()
-			await rowB.click({ modifiers: [MOD_KEY] })
-			await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
+		await page
+			.getByRole("link", { name: /Transfers/i })
+			.first()
+			.click()
+		await page.waitForURL(/\/transfers$/)
 
-			await page.getByRole("button", { name: "Download", exact: true }).click()
+		// A mixed multi-item selection has no single source name to derive from, so the zip falls back to
+		// the shared generic archive name (downloadZip.ts's resolveSuggestedZipName). exact: true guards
+		// against Playwright's default substring/case-insensitive accessible-name matching picking up an
+		// unrelated row that merely CONTAINS this literal name.
+		const zipProgressbar = page.getByRole("progressbar", { name: "Filen.zip", exact: true })
+		await expect(zipProgressbar).toBeVisible({ timeout: 10_000 })
+		await expect(zipProgressbar).toHaveCount(1)
 
-			await page
-				.getByRole("link", { name: /Transfers/i })
-				.first()
-				.click()
-			await page.waitForURL(/\/transfers$/)
+		// Scoped to the archive's own row (the status label is that progressbar's sibling), not the first
+		// "Done" anywhere on the screen.
+		await expect(zipProgressbar.locator("xpath=..").getByText("Done", { exact: true })).toBeVisible({ timeout: 20_000 })
 
-			// A mixed multi-item selection has no single source name to derive from, so the zip falls back to
-			// the shared generic archive name (downloadZip.ts's resolveSuggestedZipName). exact: true guards
-			// against Playwright's default substring/case-insensitive accessible-name matching picking up an
-			// unrelated row that merely CONTAINS this literal name.
-			await expect(page.getByRole("progressbar", { name: "Filen.zip", exact: true })).toBeVisible({ timeout: 10_000 })
-			await expect(page.getByRole("progressbar", { name: "Filen.zip", exact: true })).toHaveCount(1)
-
-			await expect(page.getByText("Done")).toBeVisible({ timeout: 20_000 })
-
-			const sink = await readSmokeSink(page)
-			// ZIP local-file-header magic (PK\x03\x04) -- proves a real, complete archive streamed through,
-			// not just a registration ack.
-			expect(sink.first4).toEqual([0x50, 0x4b, 0x03, 0x04])
-			expect(sink.bytes).toBeGreaterThan(100)
-		} finally {
-			await trashScratchDirectory(page, scratchName)
-		}
+		const sink = await readSmokeSink(page)
+		// ZIP local-file-header magic (PK\x03\x04) -- proves a real, complete archive streamed through,
+		// not just a registration ack.
+		expect(sink.first4).toEqual([0x50, 0x4b, 0x03, 0x04])
+		expect(sink.bytes).toBeGreaterThan(100)
 	})
 
 	test("a single file downloads through the service-worker path as a real browser download", async ({
@@ -268,45 +203,38 @@ test.describe("downloads", () => {
 
 		await page.goto("/drive")
 
-		const scratchName = `e2e-download-sw-${crypto.randomUUID()}`
-		const fileName = `e2e-download-sw-${crypto.randomUUID()}.txt`
-		const content = "filen web e2e sw download probe"
+		const [fileName] = FIXTURE_FILES["download-sw"]
 
-		try {
-			const { listbox } = await enterScratchDirectory(page, scratchName)
+		const { listbox } = await enterFixtureDirectory(page, "download-sw")
 
-			await uploadTestFiles(page, [{ name: fileName, content }])
+		const row = listbox.getByRole("option", { name: fileName })
+		await expect(row).toBeVisible({ timeout: 20_000 })
 
-			const row = listbox.getByRole("option", { name: fileName })
-			await expect(row).toBeVisible({ timeout: 20_000 })
+		await row.click()
 
-			await clearFinishedTransfers(page, listbox, scratchName)
+		const [download] = await Promise.all([
+			page.waitForEvent("download", { timeout: 15_000 }),
+			page.getByRole("button", { name: "Download", exact: true }).click()
+		])
 
-			await row.click()
+		expect(download.suggestedFilename()).toBe(fileName)
+		expect(statSync(await download.path()).size).toBe(Buffer.byteLength(DOWNLOAD_SW_TEXT, "utf8"))
 
-			const [download] = await Promise.all([
-				page.waitForEvent("download", { timeout: 15_000 }),
-				page.getByRole("button", { name: "Download", exact: true }).click()
-			])
-
-			expect(download.suggestedFilename()).toBe(fileName)
-			expect(statSync(await download.path()).size).toBe(Buffer.byteLength(content, "utf8"))
-
-			// The sw path is fire-and-forget once the navigation triggers (saveDownload.ts's
-			// triggerSwDownload; download.ts's runDownload sw branch has no per-byte progress to report,
-			// unlike the fsa branch) -- live-verified against runDownload's own settle call that the row
-			// still reaches Done for a file this size, so that is what this asserts, not an invented
-			// intermediate state.
-			await page
-				.getByRole("link", { name: /Transfers/i })
-				.first()
-				.click()
-			await page.waitForURL(/\/transfers$/)
-			await expect(page.getByRole("progressbar", { name: fileName })).toBeVisible()
-			await expect(page.getByText("Done")).toBeVisible({ timeout: 20_000 })
-		} finally {
-			await trashScratchDirectory(page, scratchName)
-		}
+		// The sw path is fire-and-forget once the navigation triggers (saveDownload.ts's
+		// triggerSwDownload; download.ts's runDownload sw branch has no per-byte progress to report,
+		// unlike the fsa branch) -- live-verified against runDownload's own settle call that the row
+		// still reaches Done for a file this size, so that is what this asserts, not an invented
+		// intermediate state.
+		await page
+			.getByRole("link", { name: /Transfers/i })
+			.first()
+			.click()
+		await page.waitForURL(/\/transfers$/)
+		// Scoped to this transfer's own row (the status label is the progressbar's sibling), not the first
+		// "Done" anywhere on the screen.
+		const swProgressbar = page.getByRole("progressbar", { name: fileName })
+		await expect(swProgressbar).toBeVisible()
+		await expect(swProgressbar.locator("xpath=..").getByText("Done", { exact: true })).toBeVisible({ timeout: 20_000 })
 	})
 
 	test("cancelling a File System Access download mid-flight removes the row and leaves the source untouched", async ({
@@ -317,6 +245,12 @@ test.describe("downloads", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
+		// The only read-lane test that enters the fixture tree TWICE — once here and again after the
+		// cancel, to prove the listing survived the round trip. Two descents plus this test's own pins
+		// sit above the lane ceiling, so it opts in where that cost is visible rather than widening the
+		// budget for the fourteen read specs that never touch the tree at all.
+		test.setTimeout(600_000)
+
 		// A throttled sink (~75ms per chunk) keeps a large-enough download reliably in-flight long enough
 		// for a real Cancel click to land deterministically, rather than racing a real transfer's own,
 		// unpredictable network speed. Live-verified against this exact SDK/account: a 24 MiB file streams
@@ -326,72 +260,61 @@ test.describe("downloads", () => {
 
 		await page.goto("/drive")
 
-		const scratchName = `e2e-download-cancel-${crypto.randomUUID()}`
-		const fileName = `e2e-download-cancel-${crypto.randomUUID()}.bin`
-		const sizeBytes = 24 * 1024 * 1024
+		const [fileName] = FIXTURE_FILES["download-cancel"]
 
-		try {
-			const { listbox } = await enterScratchDirectory(page, scratchName)
+		const { listbox } = await enterFixtureDirectory(page, "download-cancel")
 
-			await uploadLargeTestFile(page, fileName, sizeBytes)
+		const row = listbox.getByRole("option", { name: fileName })
+		await expect(row).toBeVisible({ timeout: 20_000 })
 
-			const row = listbox.getByRole("option", { name: fileName })
-			await expect(row).toBeVisible({ timeout: 20_000 })
+		await row.click()
+		await page.getByRole("button", { name: "Download", exact: true }).click()
 
-			await clearFinishedTransfers(page, listbox, scratchName)
+		// Snapshot the fixture directory's own option count before leaving for the /transfers screen
+		// (the rail entry navigates there now, rather than overlaying a popover on this same
+		// page) -- race-free here, unlike the identical snapshot-then-assert shape in drive.spec.ts's
+		// own "selection" test: the shared fixture tree is READ-ONLY for the whole run, so nothing
+		// else ever creates/trashes inside it the way concurrent specs do at /drive's shared root.
+		const optionCountBeforeCancel = await listbox.getByRole("option").count()
 
-			await row.click()
-			await page.getByRole("button", { name: "Download", exact: true }).click()
+		await page
+			.getByRole("link", { name: /Transfers/i })
+			.first()
+			.click()
+		await page.waitForURL(/\/transfers$/)
 
-			// Snapshot the scratch directory's own option count before leaving for the /transfers screen
-			// (the rail entry navigates there now, rather than overlaying a popover on this same
-			// page) -- race-free here, unlike the identical snapshot-then-assert shape in drive.spec.ts's
-			// own "selection" test: the scratch directory is this test's private space, so nothing else
-			// ever concurrently creates/trashes inside it the way concurrent specs do at /drive's shared
-			// root.
-			const optionCountBeforeCancel = await listbox.getByRole("option").count()
+		const progressbar = page.getByRole("progressbar", { name: fileName })
+		await expect(progressbar).toBeVisible()
 
-			await page
-				.getByRole("link", { name: /Transfers/i })
-				.first()
-				.click()
-			await page.waitForURL(/\/transfers$/)
+		await page.getByRole("button", { name: "Cancel", exact: true }).click()
 
-			const progressbar = page.getByRole("progressbar", { name: fileName })
-			await expect(progressbar).toBeVisible()
+		// Cancel now gates behind a destructive confirm (it used to fire immediately): the
+		// dialog appears rather than the transfer cancelling on this click alone. Scoped by title, not
+		// just role, since the shared account's own async master-keys reminder can independently pop
+		// up mid-test and also renders as an alertdialog. Not re-asserting the background progressbar
+		// here -- Base UI's modal AlertDialog hides the rest of the page from the accessibility tree
+		// while open (aria-hide-others), so it's intentionally unqueryable, not a sign anything
+		// cancelled yet.
+		const confirmDialog = page.getByRole("alertdialog", { name: "Cancel transfer?" })
+		await expect(confirmDialog).toBeVisible()
+		await confirmDialog.getByRole("button", { name: "Cancel", exact: true }).click()
 
-			await page.getByRole("button", { name: "Cancel", exact: true }).click()
+		// Cancelled transfers keep no history (download.ts's runDownload Cancelled branch settles then
+		// immediately removes the row) -- unlike a finished row, there is no separate Dismiss step.
+		await expect(progressbar).toHaveCount(0)
+		await expect(page.getByText(/failed/i)).toHaveCount(0)
 
-			// Cancel now gates behind a destructive confirm (it used to fire immediately): the
-			// dialog appears rather than the transfer cancelling on this click alone. Scoped by title, not
-			// just role, since the shared account's own async master-keys reminder can independently pop
-			// up mid-test and also renders as an alertdialog. Not re-asserting the background progressbar
-			// here -- Base UI's modal AlertDialog hides the rest of the page from the accessibility tree
-			// while open (aria-hide-others), so it's intentionally unqueryable, not a sign anything
-			// cancelled yet.
-			const confirmDialog = page.getByRole("alertdialog", { name: "Cancel transfer?" })
-			await expect(confirmDialog).toBeVisible()
-			await confirmDialog.getByRole("button", { name: "Cancel", exact: true }).click()
+		// An in-app sidebar Link click plus a re-descent, never page.goto() -- goto is a hard reload
+		// that re-runs the whole boot/re-auth sequence, tearing down and rebooting the wasm SDK/OPFS
+		// session this test relies on staying alive across the round trip.
+		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
+		await enterFixtureDirectory(page, "download-cancel")
 
-			// Cancelled transfers keep no history (download.ts's runDownload Cancelled branch settles then
-			// immediately removes the row) -- unlike a finished row, there is no separate Dismiss step.
-			await expect(progressbar).toHaveCount(0)
-			await expect(page.getByText(/failed/i)).toHaveCount(0)
-
-			// Same in-app round trip as clearFinishedTransfers above, not page.goto() -- a hard reload here
-			// would reboot the wasm SDK/OPFS session mid-test instead of just changing the client-side route.
-			await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
-			await waitForListingSettled(page)
-			await descendInto(page, listbox, scratchName)
-
-			// The source item itself is untouched -- cancelling aborts the in-flight transfer, never the
-			// underlying file, and the listing was never patched by a download in the first place. The
-			// unchanged option count alongside it proves nothing else in the scratch listing shifted either,
-			// not just that this one specific row happens to still be there.
-			await expect(row).toBeVisible()
-			await expect(listbox.getByRole("option")).toHaveCount(optionCountBeforeCancel)
-		} finally {
-			await trashScratchDirectory(page, scratchName)
-		}
+		// The source item itself is untouched -- cancelling aborts the in-flight transfer, never the
+		// underlying file, and the listing was never patched by a download in the first place. The
+		// unchanged option count alongside it proves nothing else in the fixture listing shifted either,
+		// not just that this one specific row happens to still be there.
+		await expect(row).toBeVisible()
+		await expect(listbox.getByRole("option")).toHaveCount(optionCountBeforeCancel)
 	})
 })

@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Transfers-screen-specific affordances (transferRow.tsx/screens/transfers.tsx) that uploads.spec.ts
@@ -30,7 +30,8 @@ test.describe("transfers screen", () => {
 				.first()
 				.setInputFiles({ name: fileName, mimeType: "text/plain", buffer: Buffer.from("e2e transfers screen probe") })
 
-			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible({ timeout: 45_000 })
+			// Cold boot + a real upload round trip, so the write budget rather than a UI-responsiveness one.
+			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// A plain nav link now (mirrors every other rail entry), not a popover trigger.
 			await page
@@ -45,8 +46,11 @@ test.describe("transfers screen", () => {
 			await expect(removeButton).toBeVisible()
 			await expect(page.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0)
 
+			// Enabled, not merely visible: screens/transfers.tsx renders this disabled whenever nothing is
+			// clearable, and a click on a disabled control is a silent no-op — which would surface only as
+			// the row assertion below failing, two steps from the cause.
 			const clearFinished = page.getByRole("button", { name: "Clear finished", exact: true })
-			await expect(clearFinished).toBeVisible()
+			await expect(clearFinished).toBeEnabled()
 			await clearFinished.click()
 
 			// The row (and its Remove control) is gone, and the screen falls back to its empty state — no

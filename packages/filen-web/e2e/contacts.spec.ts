@@ -171,7 +171,11 @@ test.describe("contacts", () => {
 		// The selection model converged on the app-wide one: no mode to enter, and the search box is
 		// never swapped out for a selection bar. Asserted before the content skip so it holds on an
 		// account with no contacts at all.
-		await expect(page.getByRole("button", { name: "Select", exact: true })).toHaveCount(0)
+		//
+		// A raw element probe, not getByRole: role queries skip anything under an `aria-hidden` subtree,
+		// and Base UI's markOthers stamps exactly that on everything outside an open modal — so with a
+		// startup reminder standing, a getByRole absence check passes without ever looking at the shell.
+		await expect(page.locator('button:text-is("Select"), button[aria-label="Select"]')).toHaveCount(0)
 		await expect(page.getByRole("searchbox", { name: "Search contacts" })).toBeVisible()
 
 		test.skip(!hasContacts, "account has no contacts, requests or blocked users to select")
@@ -232,9 +236,12 @@ test.describe("contacts", () => {
 
 		await menu.getByRole("menuitem", { name: "Remove", exact: true }).click()
 
-		const confirm = page.getByRole("alertdialog")
+		// Scoped to THIS confirm's own title rather than "an alertdialog": the startup account reminders
+		// are alertdialogs too and mount asynchronously, so a bare role lookup is a strict-mode hazard,
+		// can aim the Escape below at the wrong dialog, and makes the toHaveCount(0) at the end fail on a
+		// confirm that did close.
+		const confirm = page.getByRole("alertdialog").filter({ has: page.getByRole("heading", { name: "Remove contact?", exact: true }) })
 		await expect(confirm).toBeVisible()
-		await expect(confirm.getByRole("heading", { name: "Remove contact?", exact: true })).toBeVisible()
 
 		// Dismiss without ever pressing the dialog's own "Remove" confirm — removing a contact is
 		// outward-facing (it changes the other person's contact list too), so this suite never mutates it.

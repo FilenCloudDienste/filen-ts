@@ -1,6 +1,13 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { waitForListingSettled, trashScratchDirectory, descendInto, createDirectoryViaDialog } from "./helpers/listing"
+import {
+	waitForListingSettled,
+	trashScratchDirectory,
+	descendInto,
+	createDirectoryViaDialog,
+	enterScratchDirectory,
+	LIVE_WRITE_TIMEOUT_MS
+} from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
@@ -39,18 +46,16 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 	await page.goto("/drive")
 
 	try {
-		// A generous viewport defeats virtualization for the root listing too — the shared account's
-		// root can hold enough items that a specific named row would otherwise never mount.
-		await page.setViewportSize({ width: 1280, height: 8000 })
-		const { listbox: rootListbox } = await waitForListingSettled(page)
-
 		// Build the scratch tree: <scratchName>/<nestedName>/<targetName> — two levels deep, so finding
 		// the file proves real subtree recursion, not just a one-level filter. Both directory names ride
 		// the run's own unique suffix so a search for it also surfaces a directory hit, not only the file.
-		await createDirectory(page, rootListbox, scratchName)
-		await descendInto(page, rootListbox, scratchName)
-
-		const { listbox: scratchListbox } = await waitForListingSettled(page)
+		//
+		// The root hop goes through the shared helper rather than create-then-descend by hand: it is this
+		// run's FIRST write, the one that meets a `drive-write` lease left behind by anything that died
+		// holding it, and the helper owns the retry-with-reload that recovers from it (listing.ts). It
+		// also sets the generous viewport that defeats virtualization for the shared account's root, where
+		// a specific named row could otherwise never mount.
+		const { listbox: scratchListbox } = await enterScratchDirectory(page, scratchName)
 		await createDirectory(page, scratchListbox, nestedName)
 		await descendInto(page, scratchListbox, nestedName)
 
@@ -59,7 +64,8 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 			.locator('input[type="file"]')
 			.first()
 			.setInputFiles({ name: targetName, mimeType: "text/plain", buffer: Buffer.from(targetContent, "utf8") })
-		await expect(nestedListbox.getByRole("option", { name: targetName })).toBeVisible({ timeout: 40_000 })
+		// The write budget: this is a real upload settling on the account-wide lease, not a UI beat.
+		await expect(nestedListbox.getByRole("option", { name: targetName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Back up to the scratch directory's own top (not the account root) via the sidebar link then a
 		// fresh descent — the search below is scoped to THIS run's own small subtree rather than the
@@ -173,8 +179,9 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		expect(cspViolations).toEqual([])
 	} finally {
 		// This scratch directory still holds its own nested subtree (nested/target-*.txt) at cleanup
-		// time, unlike every other spec's flat/already-emptied scratch directory — a generous timeout
-		// covers the larger trash operation rather than the default 15s.
-		await trashScratchDirectory(page, scratchName, 30_000)
+		// time, unlike every other spec's flat/already-emptied scratch directory, so the trash is the
+		// slowest in the suite. The helper's own confirm wait already covers it — an override here only
+		// ever narrowed it.
+		await trashScratchDirectory(page, scratchName)
 	}
 })

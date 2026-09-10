@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test, expect } from "./fixtures"
-import { descendInto, enterScratchDirectory, trashScratchDirectory, waitForListingSettled } from "./helpers/listing"
+import { descendInto, enterScratchDirectory, trashScratchDirectory, waitForListingSettled, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Drag-and-drop upload — both the files dropzone and a dropped directory's FileSystemEntry walk — is
@@ -35,7 +35,8 @@ test.describe("uploads", () => {
 				.setInputFiles({ name: fileName, mimeType: "text/plain", buffer: Buffer.from("e2e upload probe") })
 
 			const row = listbox.getByRole("option", { name: fileName })
-			await expect(row).toBeVisible({ timeout: 45_000 }) // cold boot + a real upload round trip
+			// Cold boot + a real upload round trip, so the write budget rather than a UI-responsiveness one.
+			await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// The rail Transfers entry navigates straight to the /transfers screen (no more popover)
 			// and reflects this same just-finished transfer — runUpload settles the store to "done" before
@@ -46,7 +47,12 @@ test.describe("uploads", () => {
 				.first()
 				.click()
 			await page.waitForURL(/\/transfers$/)
-			await expect(page.getByText("Done")).toBeVisible()
+			// Scoped to THIS transfer's own row rather than the first "Done" anywhere on the screen: the
+			// row is a plain div with no role of its own, so its progressbar (the one element carrying the
+			// transfer's name — transferRow.tsx) is what identifies it, and the status label is that
+			// progressbar's sibling.
+			const transferRow = page.getByRole("progressbar", { name: fileName }).locator("xpath=..")
+			await expect(transferRow.getByText("Done", { exact: true })).toBeVisible()
 		} finally {
 			await trashScratchDirectory(page, scratchName)
 		}

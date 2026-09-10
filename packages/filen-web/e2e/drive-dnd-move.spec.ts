@@ -5,7 +5,8 @@ import {
 	descendInto,
 	enterScratchDirectory,
 	trashScratchDirectory,
-	waitForListingSettled
+	waitForListingSettled,
+	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -47,16 +48,11 @@ async function html5DragMove(page: Page, source: ElementHandle<Element>, target:
 	expect(contract.dropAllowed).toBe(true)
 }
 
-// A row/target element handle for the drag helper — throws (never returns null) so a missing element is
-// a real failure surfaced here, honoring strict null handling.
+// A row/target element handle for the drag helper. Since Playwright 1.63 `elementHandle()` waits for a
+// match rather than resolving null, so a missing element surfaces as its own timeout — no guard left
+// to write.
 async function handleOf(locator: ReturnType<Page["getByRole"]>): Promise<ElementHandle<Element>> {
-	const handle = await locator.elementHandle()
-
-	if (!handle) {
-		throw new Error("expected the locator to resolve to a live element")
-	}
-
-	return handle
+	return await locator.elementHandle()
 }
 
 test.describe("drive drag-to-move", () => {
@@ -92,9 +88,11 @@ test.describe("drive drag-to-move", () => {
 			await expect(targetRow).toBeVisible()
 
 			// 1) Drag the file onto the directory — it leaves the scratch listing (only the directory left).
+			// The write budget on the count: a drop runs moveItems' per-item runOp, so the row leaving is
+			// the live move settling on the account-wide lease, not a React commit after one.
 			await html5DragMove(page, await handleOf(fileRow), await handleOf(targetRow))
 
-			await expect(options).toHaveCount(1, { timeout: 30_000 })
+			await expect(options).toHaveCount(1, { timeout: LIVE_WRITE_TIMEOUT_MS })
 			await expect(listbox.getByRole("option", { name: targetDirName })).toBeVisible()
 			await expect(listbox.getByRole("option", { name: fileName })).toHaveCount(0)
 
@@ -110,7 +108,7 @@ test.describe("drive drag-to-move", () => {
 
 			await html5DragMove(page, await handleOf(nestedFileRow), await handleOf(scratchCrumb))
 
-			await expect(nested.listbox.getByRole("option", { name: fileName })).toHaveCount(0, { timeout: 30_000 })
+			await expect(nested.listbox.getByRole("option", { name: fileName })).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		} finally {
 			await trashScratchDirectory(page, scratchName)
 		}

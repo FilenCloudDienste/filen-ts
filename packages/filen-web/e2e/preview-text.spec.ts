@@ -1,49 +1,70 @@
+import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { enterScratchDirectory, trashScratchDirectory, waitForListingSettled } from "./helpers/listing"
+import { descendInto, enterScratchDirectory, trashScratchDirectory, waitForListingSettled } from "./helpers/listing"
+import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
+import { DOCX_BYTES, TEXT_BYTES } from "./helpers/fixtureBytes"
 import { trackCspViolations } from "./helpers/csp"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Document/text-format preview rendering: docx, plain text, syntax-highlighted code, and GFM markdown
-// — every leg opens a real lazy-loaded viewer chunk against a fixture file inside a per-run scratch
-// directory (mirrors downloads.spec.ts's own enterScratchDirectory/trashScratchDirectory convention)
-// rather than at /drive's root — this suite runs fullyParallel (playwright.config.ts), and a
-// root-level create/trash races drive.spec.ts's own root-listing assertions (see
-// drive-actions.spec.ts's comment for the exact failure this once produced live).
-
+// — every leg opens a real lazy-loaded viewer chunk against a real file.
+//
+// SPLIT PROVISIONING, on purpose. The two read-only legs (docx, code) read the shared read-only
+// fixture tree (helpers/fixtures.ts) and write nothing. The other three still own a per-test scratch
+// directory, and each for a reason the shared tree cannot serve: the markdown leg SAVES its file, and
+// the two navigation-guard legs assert the exact URL a browser back lands on (`/drive`), which is only
+// true when the file sits ONE descent below the root — the fixture tree is two.
+//
 // Sequential within this file (one worker), overriding the config's fullyParallel — the same
 // live-account rationale as drive-actions.spec.ts's own serial mode, but "default" so one test's
-// failure doesn't skip the rest. Every test here creates and trashes a root-level scratch directory;
-// with this file's own tests racing each other across workers, a teardown's root-row click can retry
-// forever against a listing whose rows keep detaching/remounting under the concurrent creates/trashes
-// plus focus-driven refetches (reproduced live: a teardown click stayed "element is not stable /
-// detached from the DOM" for its whole remaining budget). Cross-FILE churn from other specs remains an
-// accepted residual, exactly as drive-actions.spec.ts documents.
+// failure doesn't skip the rest. It is the three scratch-directory tests that need it: with them
+// racing each other across workers, a teardown's root-row click can retry forever against a listing
+// whose rows keep detaching/remounting under the concurrent creates/trashes plus focus-driven
+// refetches (reproduced live: a teardown click stayed "element is not stable / detached from the DOM"
+// for its whole remaining budget). Cross-FILE churn from other specs remains an accepted residual,
+// exactly as drive-actions.spec.ts documents.
 test.describe.configure({ mode: "default" })
-
-// A hand-built, minimal docx: a single paragraph plus only the parts a conformant reader strictly
-// needs ([Content_Types].xml, package rels, the document part and its own rels) — no styles/theme/
-// numbering parts, which docx-preview tolerates (OpenXmlPackage.get returns undefined for an absent
-// part, every caller already guards on that). Structurally validated via JSZip before being
-// embedded here; the full render path is only provable in a real browser (docx-preview's XML
-// parsing uses the native DOMParser, unavailable in node), which this e2e leg is that proof of.
-const DOCX_BYTES = Buffer.from(
-	"UEsDBBQAAAAIABQ76VwXmADX6wAAALIBAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbH1QyU4DMQy98xWRr2gmAweEUKc9sByBQ/kAK/HMRM2mOC3t3+NpoQdUONpvs99itQ9e7aiwS7GHm7YDRdEk6+LYw8f6pbkHxRWjRZ8i9XAghtXyarE+ZGIl4sg9TLXmB63ZTBSQ25QpCjKkErDKWEad0WxwJH3bdXfapFgp1qbOHiBmTzTg1lf1vJf96ZJCnkE9nphzWA+Ys3cGq+B6F+2vmOY7ohXlkcOTy3wtBNCXI2bo74Qf4ZuUU5wl9Y6lvmIQmv5MxWqbzDaItP3f58KlaRicobN+dsslGWKW1oNvz0hAF88f6GPlyy9QSwMEFAAAAAgAFDvpXD+t/vqvAAAALAEAAAsAAABfcmVscy8ucmVsc43POw7CMAwA0J1TRN5pWgaEUEMXhNQVlQNEiZtWNB/F4dPbk4EBKgZG/57tunnaid0x0uidgKoogaFTXo/OCLh0p/UOGCXptJy8QwEzEjSHVX3GSaY8Q8MYiGXEkYAhpbDnnNSAVlLhA7pc6X20MuUwGh6kukqDfFOWWx4/DVigrNUCYqsrYN0c8B/c9/2o8OjVzaJLP3YsOrIso8Ek4OGj5vqdLjILPJ/Dv548vABQSwMEFAAAAAgAFDvpXKv1I8S3AAAA+QAAABEAAAB3b3JkL2RvY3VtZW50LnhtbEWOsU7FMAxFd77Cyk5TGBCq2r4NMTLAB4TEfS9SYkeOH23/nrQDLEfXsnWux8uWE/yg1Mg0maeuN4DkOUS6Tubr8+3x1UBVR8ElJpzMjtVc5odxHQL7e0ZSaAaqwzqZm2oZrK3+htnVjgtS2y0s2Wkb5WpXllCEPdbaCnKyz33/YrOLZE7nN4f9DGVukAM6v2NKDItwBgcaaYdWvcESN70LdqM9jg7KyXIKKnr9ENuy/dPa/6fnX1BLAwQUAAAACAAUO+lcjA6F0H0AAACdAAAAHAAAAHdvcmQvX3JlbHMvZG9jdW1lbnQueG1sLnJlbHNVzEEOwiAQheG9pyCzt6ALY0xpdz2A0QNM6AiNMBCGGL29LHX58ud94/xOUb2oypbZwmEwoIhdXjf2Fu63ZX8GJQ15xZiZLHxIYJ5245Uitv6RsBVRHWGxEForF63FBUooQy7EvTxyTdj6rF4XdE/0pI/GnHT9NaCj+k+dvlBLAQIUAxQAAAAIABQ76VwXmADX6wAAALIBAAATAAAAAAAAAAAAAACAAQAAAABbQ29udGVudF9UeXBlc10ueG1sUEsBAhQDFAAAAAgAFDvpXD+t/vqvAAAALAEAAAsAAAAAAAAAAAAAAIABHAEAAF9yZWxzLy5yZWxzUEsBAhQDFAAAAAgAFDvpXKv1I8S3AAAA+QAAABEAAAAAAAAAAAAAAIAB9AEAAHdvcmQvZG9jdW1lbnQueG1sUEsBAhQDFAAAAAgAFDvpXIwOhdB9AAAAnQAAABwAAAAAAAAAAAAAAIAB2gIAAHdvcmQvX3JlbHMvZG9jdW1lbnQueG1sLnJlbHNQSwUGAAAAAAQABAADAQAAkQMAAAAA",
-	"base64"
-)
-
-// A tiny plain-text fixture — proves the whole-buffer -> decodeUtf8 -> read-only CodeMirror path with
-// no language grammar involved.
-const TEXT_BYTES = Buffer.from("Hello from a tiny text fixture.\nSecond line here.\n", "utf8")
-
-// A tiny TypeScript fixture — same path as TEXT_BYTES, but resolves a language (codeMirrorLanguageFor)
-// and lazy-loads @codemirror/lang-javascript, proving the per-extension highlighting actually engages.
-const CODE_BYTES = Buffer.from("export function add(a: number, b: number): number {\n\treturn a + b\n}\n", "utf8")
 
 // A tiny GFM markdown fixture — a heading (real <h1> once rendered), bold text, and one safe external
 // link (proves the target="_blank"/rel="noreferrer" + urlTransform link-hygiene path renders correctly
 // for a SAFE link; the reject case is covered at the unit level, markdownViewer.logic.test.ts, mirroring
 // docxViewer.logic.test.ts's own precedent).
 const MARKDOWN_BYTES = Buffer.from("# Hello Markdown\n\nThis is **bold** text and a [safe link](https://example.com/safe).\n", "utf8")
+
+// Teardown budget for the unsaved-changes prompt the finally's own Escape raises. Short because it is
+// a local React commit, not a write — but it has to be WAITED for rather than snapshotted: the first
+// test below ends dirty by design, so on a green run the finally's Escape and the prompt's mount are a
+// genuine race, and a lost race means Discard is never clicked and the teardown falls through to
+// trashScratchDirectory's reload recovery.
+const UNSAVED_PROMPT_TIMEOUT_MS = 5_000
+
+// The exact history tail both navigation-guard legs below depend on — […, /favorites, /drive,
+// /drive/<scratch>] — built with in-app clicks inside ONE document, so every back they drive is a real
+// popstate the router's blocker sees. One same-route back (/drive/<scratch> -> /drive, deliberately NOT
+// blocked: there is a single drive route file, routes/_app/drive.$.tsx, so both share routeId
+// "/_app/drive/$") and one leave-route back (/drive -> /favorites, blocked).
+//
+// Built AFTER the scratch directory exists, which is the whole reason this is a separate step:
+// enterScratchDirectory RELOADS the page for a create that does not land (helpers/listing.ts), and every
+// reload re-runs the session-injection seed, whose `router.navigate({ to: "/" })` pushes an entry the
+// route guard then rewrites to /drive. That is one extra /drive entry per reload, so a tail seeded
+// before provisioning has ANOTHER /drive behind /drive on any contended run — a same-routeId back the
+// guard correctly never blocks, leaving the leg to wait out its budget for a prompt that never opens.
+// Reproduced live at 3 failures in 5 runs, each failing run's second back landing on /drive again.
+async function seedLeaveRouteHistory(page: Page, scratchName: string): Promise<void> {
+	const sidebar = page.getByRole("complementary")
+
+	await sidebar.getByRole("link", { name: "Favorites", exact: true }).click()
+	await expect(page).toHaveURL(/\/favorites$/)
+	await waitForListingSettled(page)
+
+	await sidebar.getByRole("link", { name: "Cloud Drive", exact: true }).click()
+	await expect(page).toHaveURL(/\/drive$/)
+
+	const { listbox } = await waitForListingSettled(page)
+
+	await descendInto(page, listbox, scratchName)
+}
 
 // The one live proof the docx-preview path actually works: real JSZip/DOMParser XML parsing (neither
 // is provable in node — DOMParser doesn't exist there) and real DOM rendering into the overlay, in a
@@ -56,41 +77,26 @@ test("docx preview renders document content and closes, no CSP console errors", 
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
-	const runId = crypto.randomUUID()
-	const scratchName = `e2e-preview-docx-${runId}`
-	const nameDocx = `e2e-preview-docx-${runId}.docx`
+	const [nameDocx] = FIXTURE_FILES["preview-docx"]
 
 	const cspViolations = trackCspViolations(page)
 
 	await page.goto("/drive")
 
-	try {
-		const { listbox } = await enterScratchDirectory(page, scratchName)
+	const { listbox } = await enterFixtureDirectory(page, "preview-docx")
 
-		const input = page.locator('input[type="file"]').first()
-		await input.setInputFiles([
-			{
-				name: nameDocx,
-				mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-				buffer: DOCX_BYTES
-			}
-		])
+	const row = listbox.getByRole("option", { name: nameDocx })
+	await expect(row).toBeVisible({ timeout: 45_000 })
 
-		const row = listbox.getByRole("option", { name: nameDocx })
-		await expect(row).toBeVisible({ timeout: 45_000 })
+	// Opens the docx-preview lazy chunk for the first time this run.
+	await row.dblclick()
+	const text = page.getByText("Hello from a tiny docx fixture.")
+	await expect(text).toBeVisible({ timeout: 60_000 })
 
-		// Opens the docx-preview lazy chunk for the first time this run.
-		await row.dblclick()
-		const text = page.getByText("Hello from a tiny docx fixture.")
-		await expect(text).toBeVisible({ timeout: 60_000 })
+	await page.keyboard.press("Escape")
+	await expect(text).toHaveCount(0)
 
-		await page.keyboard.press("Escape")
-		await expect(text).toHaveCount(0)
-
-		expect(cspViolations).toEqual([])
-	} finally {
-		await trashScratchDirectory(page, scratchName)
-	}
+	expect(cspViolations).toEqual([])
 })
 
 // The one live proof the text path actually works: a real lazy CodeMirror chunk, real UTF-8 decode, in
@@ -118,20 +124,14 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 	const dialog = page.getByRole("dialog")
 	const unsavedPrompt = page.getByRole("alertdialog", { name: "Unsaved changes" })
 
-	// History has to be seeded across two DIFFERENT routes: there is exactly one drive route file
-	// (routes/_app/drive.$.tsx), so /drive and /drive/<uuid> share routeId "/_app/drive/$" and a back
-	// between them is deliberately NOT blocked. Loading, then pushing into /drive and on into the
-	// scratch directory, gives the leg one same-route back and one leave-route back, both inside ONE
-	// document so every back is a real popstate the router's blocker sees. This leg never asserts WHICH
-	// route sits behind /drive — the session-injection hook's own seed navigation decides that (see the
-	// discard test below, which builds the stack in-app because it does depend on the destination).
-	await page.goto("/favorites")
+	await page.goto("/drive")
 
 	try {
-		await waitForListingSettled(page)
-		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
-
 		const { listbox } = await enterScratchDirectory(page, scratchName)
+
+		// One same-route back and one leave-route back for the guard legs below — see the helper for why
+		// this cannot run before the scratch directory exists.
+		await seedLeaveRouteHistory(page, scratchName)
 
 		const input = page.locator('input[type="file"]').first()
 		await input.setInputFiles([
@@ -171,7 +171,12 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 		async function dirtyTheBuffer(): Promise<void> {
 			await dialog.locator(".cm-content").click()
 			await page.keyboard.type("x")
-			await expect(saveButton).toBeVisible()
+			// ENABLED, not merely visible: Save is RENDERED only while `editable && dirty`, and disabled
+			// only while `saving` (previewOverlay.tsx), so enabled proves both that the buffer took the edit
+			// and that no save is in flight. A click that failed to focus CodeMirror types into nothing, and
+			// every navigation-guard assertion below would then fail far away from the cause, hunting a
+			// prompt that correctly never opens.
+			await expect(saveButton).toBeEnabled()
 		}
 
 		await dirtyTheBuffer()
@@ -218,7 +223,15 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 		// scratch directory.
 		await page.keyboard.press("Escape").catch(() => undefined)
 
-		if (await unsavedPrompt.isVisible().catch(() => false)) {
+		// waitFor, not isVisible: isVisible answers from the DOM as it stands, while the prompt mounts a
+		// tick after the press it responds to — losing that race leaves the prompt standing, Discard
+		// unclicked, and the trash below on its reload recovery path.
+		const prompted = await unsavedPrompt
+			.waitFor({ state: "visible", timeout: UNSAVED_PROMPT_TIMEOUT_MS })
+			.then(() => true)
+			.catch(() => false)
+
+		if (prompted) {
 			await unsavedPrompt
 				.getByRole("button", { name: "Discard", exact: true })
 				.click()
@@ -235,35 +248,26 @@ test("code preview renders with syntax highlighting, no CSP console errors", asy
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
-	const runId = crypto.randomUUID()
-	const scratchName = `e2e-preview-code-${runId}`
-	const nameCode = `e2e-preview-code-${runId}.ts`
+	const [nameCode] = FIXTURE_FILES["preview-code"]
 
 	const cspViolations = trackCspViolations(page)
 
 	await page.goto("/drive")
 
-	try {
-		const { listbox } = await enterScratchDirectory(page, scratchName)
+	const { listbox } = await enterFixtureDirectory(page, "preview-code")
 
-		const input = page.locator('input[type="file"]').first()
-		await input.setInputFiles([{ name: nameCode, mimeType: "video/mp2t", buffer: CODE_BYTES }])
+	const row = listbox.getByRole("option", { name: nameCode })
+	await expect(row).toBeVisible({ timeout: 45_000 })
 
-		const row = listbox.getByRole("option", { name: nameCode })
-		await expect(row).toBeVisible({ timeout: 45_000 })
+	// Opens the CodeMirror + @codemirror/lang-javascript lazy chunks for the first time this run.
+	await row.dblclick()
+	await expect(page.getByText("export function add")).toBeVisible({ timeout: 30_000 })
+	await expect(page.locator(".cm-line span").first()).toBeVisible({ timeout: 15_000 })
 
-		// Opens the CodeMirror + @codemirror/lang-javascript lazy chunks for the first time this run.
-		await row.dblclick()
-		await expect(page.getByText("export function add")).toBeVisible({ timeout: 30_000 })
-		await expect(page.locator(".cm-line span").first()).toBeVisible({ timeout: 15_000 })
+	await page.keyboard.press("Escape")
+	await expect(page.getByText("export function add")).toHaveCount(0)
 
-		await page.keyboard.press("Escape")
-		await expect(page.getByText("export function add")).toHaveCount(0)
-
-		expect(cspViolations).toEqual([])
-	} finally {
-		await trashScratchDirectory(page, scratchName)
-	}
+	expect(cspViolations).toEqual([])
 })
 
 // Proves the react-markdown + remark-gfm rendered view (a real <h1>, a safe external link with
@@ -352,11 +356,8 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 })
 
 // The blocked pop's DISCARD half — the main test above only proves Cancel/restore. Unlike that leg,
-// this one asserts the destination, so the entry behind /drive has to be a route this test put there:
-// a hard goto to any authed route re-seeds the session and navigates to "/" (src/e2e-hooks/index.ts),
-// so the entry it leaves behind /drive is a guarded one that bounces straight back to /drive — which is
-// what a proceed() onto it looks like. Every hop below is therefore an in-app click with its resulting
-// URL asserted.
+// this one asserts the DESTINATION a proceed() lands on, which is exactly the entry
+// seedLeaveRouteHistory puts behind /drive.
 test("discarding after a cancelled back on the same pop still proceeds to the destination", async ({
 	page,
 	injectedSession,
@@ -372,18 +373,9 @@ test("discarding after a cancelled back on the same pop still proceeds to the de
 	await page.goto("/drive")
 
 	try {
-		await waitForListingSettled(page)
-
-		const sidebar = page.getByRole("complementary")
-
-		await sidebar.getByRole("link", { name: "Favorites", exact: true }).click()
-		await expect(page).toHaveURL(/\/favorites$/)
-		await waitForListingSettled(page)
-
-		await sidebar.getByRole("link", { name: "Cloud Drive", exact: true }).click()
-		await expect(page).toHaveURL(/\/drive$/)
-
 		const { listbox } = await enterScratchDirectory(page, scratchName)
+
+		await seedLeaveRouteHistory(page, scratchName)
 
 		await page
 			.locator('input[type="file"]')
@@ -397,7 +389,9 @@ test("discarding after a cancelled back on the same pop still proceeds to the de
 		await expect(dialog.getByText("Hello from a tiny text fixture.")).toBeVisible({ timeout: 30_000 })
 		await dialog.locator(".cm-content").click()
 		await page.keyboard.type("x")
-		await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeVisible()
+		// Save is rendered only while `editable && dirty` and disabled only while `saving`, so enabled
+		// proves the buffer took the edit with no save in flight — see dirtyTheBuffer's note above.
+		await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeEnabled()
 
 		await page.goBack()
 		await expect(page).toHaveURL(/\/drive$/)
@@ -414,7 +408,15 @@ test("discarding after a cancelled back on the same pop still proceeds to the de
 	} finally {
 		await page.keyboard.press("Escape").catch(() => undefined)
 
-		if (await unsavedPrompt.isVisible().catch(() => false)) {
+		// waitFor, not isVisible: isVisible answers from the DOM as it stands, while the prompt mounts a
+		// tick after the press it responds to — losing that race leaves the prompt standing, Discard
+		// unclicked, and the trash below on its reload recovery path.
+		const prompted = await unsavedPrompt
+			.waitFor({ state: "visible", timeout: UNSAVED_PROMPT_TIMEOUT_MS })
+			.then(() => true)
+			.catch(() => false)
+
+		if (prompted) {
 			await unsavedPrompt
 				.getByRole("button", { name: "Discard", exact: true })
 				.click()

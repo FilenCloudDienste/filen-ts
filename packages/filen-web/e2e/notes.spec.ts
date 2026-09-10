@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs"
 import JSZip from "jszip"
 import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { dismissStartupReminders } from "./helpers/listing"
+import { waitForE2eHooks } from "./helpers/e2eHooks"
+import { dismissStartupReminders, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Notes shell smoke: rail entry → /notes, the contextual sidebar renders, the two-view toggle switches,
@@ -55,6 +56,18 @@ async function gotoNotes(page: Page): Promise<void> {
 	}
 }
 
+// Resolves the ONE dialog carrying this title, never "a dialog". The startup account reminders are
+// alertdialogs too and mount asynchronously on every load (helpers/listing.ts), so a bare role lookup
+// can match a dialog the test never opened: it is a strict-mode hazard, it aims clicks at the wrong
+// surface, and it makes a toHaveCount(0) fail on a dialog that did close. Base UI's Dialog.Title /
+// AlertDialog.Title render the title as a heading, which is what identifies each one here.
+function dialogTitled(page: Page, title: string): Locator {
+	return page
+		.getByRole("dialog")
+		.or(page.getByRole("alertdialog"))
+		.filter({ has: page.getByRole("heading", { name: title, exact: true }) })
+}
+
 // Bounded, self-healing menu interaction. Every await inside carries its own explicit timeout well
 // under the toPass envelope, so a silently-swallowed step (a menu closed from under the click by a
 // concurrent re-render — the header re-renders whenever a mutation's cache patch lands, and popups
@@ -67,7 +80,12 @@ async function gotoNotes(page: Page): Promise<void> {
 // effect landed (click fired but the close-wait lapsed — a sub-second window) finds the item gone
 // and fails the envelope with a clear "menuitem not found" — a diagnosable error, never a hang.
 // Module-scoped (not describe-local) — the participants/history dialogs suite below reuses it too.
-async function runMenuAction(page: Page, trigger: Locator, itemName: string, until: "menuClosed" | "dialogOpen"): Promise<void> {
+async function runMenuAction(
+	page: Page,
+	trigger: Locator,
+	itemName: string,
+	until: "menuClosed" | { dialogTitled: string }
+): Promise<void> {
 	const menu = page.getByRole("menu")
 
 	await expect(async () => {
@@ -84,9 +102,55 @@ async function runMenuAction(page: Page, trigger: Locator, itemName: string, unt
 			// menu, so closure is part of THIS step's completion condition.
 			await expect(menu).toHaveCount(0, { timeout: 10_000 })
 		} else {
-			await expect(page.getByRole("dialog").or(page.getByRole("alertdialog"))).toBeVisible({ timeout: 10_000 })
+			// THIS action's own dialog — see dialogTitled above. A bare role match is satisfied by a
+			// startup reminder that popped mid-attempt, which would end the step with the menu item's
+			// dialog never opened at all.
+			await expect(dialogTitled(page, until.dialogTitled)).toBeVisible({ timeout: 10_000 })
 		}
 	}).toPass({ timeout: 90_000 })
+}
+
+// Every teardown delete in this file goes through these two. A throw inside a `finally` SUPERSEDES the
+// body's real error and destroys it, and in a multi-statement finally the first throw skips every
+// statement after it — one dead page would take the reported failure AND the remaining deletes with
+// it. Each call owns its own try/catch and names what it could not remove, so the next run's
+// cleanup-setup sweep has something to go on.
+async function deleteNoteQuietly(page: Page, uuid: string): Promise<void> {
+	try {
+		await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+	} catch {
+		console.log(`notes-spec teardown: could not delete note ${uuid} — left for the next run's sweep`)
+	}
+}
+
+async function sweepNotesQuietly(page: Page, titlePrefix: string): Promise<void> {
+	try {
+		await page.evaluate(prefix => window.__filenE2E.sweepTestNotesByTitlePrefix(prefix), titlePrefix)
+	} catch {
+		console.log(`notes-spec teardown: could not sweep notes titled "${titlePrefix}…" — left for the next run's sweep`)
+	}
+}
+
+// The uuid DIFF against a pre-test snapshot, swept one uuid at a time. Shared by both leak guards: the
+// listing read is the only step whose failure forfeits the sweep, and it says so rather than failing
+// silently. Without the `before` snapshot the diff would treat every note on the account as new, so
+// there is no defensible fallback — the sweep is skipped instead.
+async function sweepLeakedNotes(page: Page, before: Set<string>): Promise<void> {
+	let after: string[]
+
+	try {
+		after = await page.evaluate(() => window.__filenE2E.listTestNoteUuids())
+	} catch {
+		console.log("notes-spec teardown: could not list notes — any note this test leaked is left for the next run's sweep")
+
+		return
+	}
+
+	for (const uuid of after) {
+		if (!before.has(uuid)) {
+			await deleteNoteQuietly(page, uuid)
+		}
+	}
 }
 
 // Leak guard for tests that create a note THROUGH THE UI: they only learn the new note's uuid from
@@ -95,25 +159,21 @@ async function runMenuAction(page: Page, trigger: Locator, itemName: string, unt
 // can never match by prefix — the exact class that once poisoned the 10-cap account during a live
 // rate-limit episode. Snapshot the account's uuids up front and sweep the DIFF in finally; the file's
 // serial mode guarantees any new uuid belongs to the running test. Best-effort like every teardown
-// here: a page killed by the test budget makes the finally's evaluate throw, and that residue is
-// accepted (rare) rather than masked.
+// here: a page killed by the test budget makes the sweep's evaluate throw, and that residue is
+// reported (rare) rather than masked or allowed to replace the test's real error.
 async function withNoteLeakGuard(page: Page, body: () => Promise<void>): Promise<void> {
+	// The hooks are installed by a fire-and-forget dynamic import, and an authed shell only proves they
+	// arrived on the very first load of a context — every later load can render authed with none. The
+	// snapshot below IS the guard, so it gets the barrier rather than a "cannot read properties of
+	// undefined" the moment it runs a beat early.
+	await waitForE2eHooks(page)
+
 	const before = new Set(await page.evaluate(() => window.__filenE2E.listTestNoteUuids()))
 
 	try {
 		await body()
 	} finally {
-		try {
-			const after = await page.evaluate(() => window.__filenE2E.listTestNoteUuids())
-
-			for (const uuid of after) {
-				if (!before.has(uuid)) {
-					await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
-				}
-			}
-		} catch {
-			// Page already gone — the real failure stays the reported one.
-		}
+		await sweepLeakedNotes(page, before)
 	}
 }
 
@@ -166,15 +226,25 @@ test.describe("notes", () => {
 			const urlBeforeCreate = page.url()
 			await page.getByRole("button", { name: "New note", exact: true }).click()
 
-			// The new note is selected and rendered in the editor card — its titled header (a level-1 heading)
-			// only appears when the $uuid route resolved the note from the list, so this doubles as proof the
-			// created note landed in the cache the sidebar reads from. The SDK assigns a default title, so this
-			// asserts the header exists rather than a specific string.
 			await page.waitForURL(url => url.toString() !== urlBeforeCreate && /\/notes\/[^/]+$/.test(url.pathname))
-			await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toBeVisible()
 
 			const uuid = new URL(page.url()).pathname.split("/").pop() ?? ""
 			expect(uuid.length).toBeGreaterThan(0)
+
+			// Renamed the instant the uuid is known, before any further assertion can fail: a UI-created
+			// note carries the SDK's default title, which NOTE_DEBRIS_TITLE_PREFIXES ("e2e ", "e2e-")
+			// cannot match, so until this lands the ONLY thing that could ever recover it is the leak
+			// guard's own uuid diff — and that diff dies with the page.
+			await page.evaluate(args => window.__filenE2E.renameTestNoteByUuid(args.uuid, args.title), {
+				uuid,
+				title: `e2e created note ${String(Date.now())}`
+			})
+
+			// The new note is selected and rendered in the editor card — its titled header (a level-1 heading)
+			// only appears when the $uuid route resolved the note from the list, so this doubles as proof the
+			// created note landed in the cache the sidebar reads from. Title-agnostic: the header trails the
+			// rename above by however long the cache patch takes.
+			await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toBeVisible()
 		})
 	})
 
@@ -193,11 +263,13 @@ test.describe("notes", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		// Generous budget: this single test drives ~10 real, sequential SDK mutations against the shared
-		// account — well beyond the suite's default 90s if any one of them lands behind the SDK's own
-		// internal rate-limit backoff (CLAUDE.md: retry/backoff is the SDK's job, never re-implemented
-		// here). Live-measured a full run landing right at 180s under real backoff. The per-step toPass
-		// envelopes (runMenuAction) keep any single wedged interaction from consuming this budget whole.
+		// Explicit opt-in ABOVE the suite's 120s default, and the only kind of exception the config
+		// sanctions: this single test drives ~10 real, sequential SDK mutations against the shared
+		// account, and a live run has landed right at 180s when one of them sat behind the SDK's own
+		// rate-limit backoff (CLAUDE.md: retry/backoff is the SDK's job, never re-implemented here).
+		// A typical run is ~4s — the budget is for the backoff tail, not the happy path. The per-step
+		// toPass envelopes (runMenuAction) keep any single wedged interaction from consuming it whole.
+		test.setTimeout(240_000)
 
 		await gotoNotes(page)
 
@@ -208,7 +280,10 @@ test.describe("notes", () => {
 		const tagName = `e2e-tag-${String(Date.now())}`
 		// Snapshot for the finally's diff sweep — the create preamble below runs INSIDE the try, so a
 		// create that succeeds server-side but times out its navigation wait still gets swept even
-		// though no uuid was ever captured (the leak class a live rate-limit episode exposed).
+		// though no uuid was ever captured (the leak class a live rate-limit episode exposed). Barrier
+		// first: the snapshot IS the sweep's only input, so it must not run before the hooks arrive.
+		await waitForE2eHooks(page)
+
 		const uuidsBefore = new Set(await page.evaluate(() => window.__filenE2E.listTestNoteUuids()))
 
 		try {
@@ -222,6 +297,16 @@ test.describe("notes", () => {
 			const uuid = new URL(page.url()).pathname.split("/").pop() ?? ""
 			expect(uuid.length).toBeGreaterThan(0)
 
+			// Sweepable name the instant the uuid is known. A UI-created note carries the SDK's default
+			// title, which NOTE_DEBRIS_TITLE_PREFIXES ("e2e ", "e2e-") cannot match, and the offline gate
+			// below sits between here and the UI rename that would otherwise be the first sweepable name
+			// this note ever gets — a failure in between would leave it recoverable only by the finally's
+			// own diff, which a dead page forfeits.
+			await page.evaluate(args => window.__filenE2E.renameTestNoteByUuid(args.uuid, args.title), {
+				uuid,
+				title: `e2e action note ${String(Date.now())} pending`
+			})
+
 			const row = sidebar.locator(`a[href="/notes/${uuid}"]`)
 
 			// Offline gate: the descriptor's `enabled` flag must reach a genuinely disabled menuitem, and
@@ -232,6 +317,9 @@ test.describe("notes", () => {
 			// same trigger (disabled-not-hidden, see noteEditorPane) — settle it before cutting the
 			// network, or the offline assertions race the create's own flush.
 			await expect(menuTrigger).toBeEnabled()
+			// Barrier before the network dies: the e2e hooks arrive via a fire-and-forget dynamic
+			// import, and a chunk request that is in flight when the page goes offline FAILS PERMANENTLY.
+			await waitForE2eHooks(page)
 			await page.context().setOffline(true)
 
 			try {
@@ -246,24 +334,31 @@ test.describe("notes", () => {
 				await page.context().setOffline(false)
 			}
 
-			// Rename — InputDialog (role="dialog"), the field pre-filled with the SDK's default title.
+			// Rename — InputDialog (role="dialog"), the field pre-filled with the note's current title.
+			// Both waits below are gated on a LIVE account write (the dialog closes when setNoteTitle
+			// resolves, and the header follows its cache patch), so they take the live-write budget rather
+			// than the config's UI-responsiveness default — the same rule helpers/listing.ts applies to
+			// its own confirm waits. Without it this test's own 240s ceiling, which exists for the SDK's
+			// rate-limit backoff, is unreachable: the first slow write would fail at 10s.
 			const newTitle = `e2e action note ${String(Date.now())}`
-			await runMenuAction(page, menuTrigger, "Rename", "dialogOpen")
-			const renameDialog = page.getByRole("dialog")
+			await runMenuAction(page, menuTrigger, "Rename", { dialogTitled: "Rename note" })
+			const renameDialog = dialogTitled(page, "Rename note")
 			await renameDialog.getByLabel("Title", { exact: true }).fill(newTitle)
 			await renameDialog.getByRole("button", { name: "Rename", exact: true }).click()
-			await expect(renameDialog).toHaveCount(0)
-			await expect(main.getByRole("heading", { level: 1, name: newTitle, exact: true })).toBeVisible()
+			await expect(renameDialog).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			await expect(main.getByRole("heading", { level: 1, name: newTitle, exact: true })).toBeVisible({
+				timeout: LIVE_WRITE_TIMEOUT_MS
+			})
 
 			// Pin — direct action, no dialog; verified on the note's own sidebar row. The row's pin/
 			// favorite marks are bare aria-labeled <svg> icons (no ARIA role), so a plain attribute
 			// selector is used rather than getByLabel (which targets form-control label association).
 			await runMenuAction(page, menuTrigger, "Pin", "menuClosed")
-			await expect(row.locator('[aria-label="Pinned"]')).toBeVisible()
+			await expect(row.locator('[aria-label="Pinned"]')).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// Favorite — direct action, no dialog.
 			await runMenuAction(page, menuTrigger, "Favorite", "menuClosed")
-			await expect(row.locator('[aria-label="Favorite"]')).toBeVisible()
+			await expect(row.locator('[aria-label="Favorite"]')).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// Tags submenu: the inline "New tag" entry creates a tag AND assigns it to this note in one
 			// round trip (old-web parity, useNoteDialogHost's own handleCreateTagSubmit). Same bounded
@@ -287,7 +382,8 @@ test.describe("notes", () => {
 			const tagDialog = page.getByRole("dialog")
 			await tagDialog.getByLabel("Name", { exact: true }).fill(tagName)
 			await tagDialog.getByRole("button", { name: "Create", exact: true }).click()
-			await expect(tagDialog).toHaveCount(0)
+			// Closes on the live createNoteTag+tagNote round trip — live-write budget, not the UI default.
+			await expect(tagDialog).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// Tags view: the new tag's collapsible group, expanded, shows this note nested inside it.
 			// Search narrows to the tag's own (unique, timestamped) name first — the shared account may
@@ -314,11 +410,12 @@ test.describe("notes", () => {
 				}
 
 				await page.getByRole("menuitem", { name: "Delete", exact: true }).click({ timeout: 10_000 })
-				await expect(page.getByRole("alertdialog")).toBeVisible({ timeout: 10_000 })
+				await expect(dialogTitled(page, "Delete tag?")).toBeVisible({ timeout: 10_000 })
 			}).toPass({ timeout: 90_000 })
-			const tagDeleteDialog = page.getByRole("alertdialog")
+			const tagDeleteDialog = dialogTitled(page, "Delete tag?")
 			await tagDeleteDialog.getByRole("button", { name: "Delete", exact: true }).click()
-			await expect(tagDeleteDialog).toHaveCount(0)
+			// Closes on the live deleteNoteTag — live-write budget, not the UI default.
+			await expect(tagDeleteDialog).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 			// The group row disappears with its tag; the note itself survives (deleteNoteTag only strips
 			// the tag) — asserted implicitly by every step below still operating on it.
 			await expect(sidebar.getByRole("button", { name: `Collapse ${tagName}`, exact: true })).toHaveCount(0)
@@ -354,32 +451,27 @@ test.describe("notes", () => {
 			// the restore patch. The delete step's own retry then absorbs the re-trash patch lag the same
 			// way (its item appears once the trashed variant lands).
 			await runMenuAction(page, menuTrigger, "Trash", "menuClosed")
-			await runMenuAction(page, menuTrigger, "Delete permanently", "dialogOpen")
+			await runMenuAction(page, menuTrigger, "Delete permanently", { dialogTitled: "Delete permanently?" })
 
 			// Delete permanently (confirm) — the note IS the currently-routed one, so a successful
 			// confirm navigates away from it (useNoteDialogHost's nav-race guard) before this test's own
 			// net-zero teardown call below (a no-op by then, since the note is already gone).
-			const deleteDialog = page.getByRole("alertdialog")
+			const deleteDialog = dialogTitled(page, "Delete permanently?")
 			await deleteDialog.getByRole("button", { name: "Delete permanently", exact: true }).click()
 			await page.waitForURL(url => !url.pathname.includes(uuid))
 		} finally {
-			// Best-effort: when the test-budget timeout killed the page, evaluate throws against the
-			// closed target — swallowing that keeps the REAL failure as the test's reported error, and
-			// cleanup-setup's own notes/tags sweep self-heals whatever a dead page left behind on the
-			// next suite run. The note teardown is the uuid DIFF against the pre-test snapshot (serial
-			// mode: any new uuid is this test's), which covers failures before the uuid was ever known.
+			// Best-effort and INDEPENDENTLY guarded: when the test-budget timeout killed the page, every
+			// evaluate here throws against the closed target, and a throw escaping a finally would both
+			// replace the REAL failure and skip whatever came after it. Each step names what it could not
+			// remove instead, and cleanup-setup's own notes/tags sweep self-heals the rest on the next
+			// suite run. The note teardown is the uuid DIFF against the pre-test snapshot (serial mode:
+			// any new uuid is this test's), which covers failures before the uuid was ever known.
+			await sweepLeakedNotes(page, uuidsBefore)
+
 			try {
-				const uuidsAfter = await page.evaluate(() => window.__filenE2E.listTestNoteUuids())
-
-				for (const id of uuidsAfter) {
-					if (!uuidsBefore.has(id)) {
-						await page.evaluate(i => window.__filenE2E.deleteTestNoteByUuid(i), id)
-					}
-				}
-
 				await page.evaluate(prefix => window.__filenE2E.sweepTestTagsByNamePrefix(prefix), tagName)
 			} catch {
-				// Covered by cleanup-setup on the next run.
+				console.log(`notes-spec teardown: could not sweep tag "${tagName}" — left for the next run's sweep`)
 			}
 		}
 	})
@@ -413,7 +505,7 @@ test.describe("notes", () => {
 			// races that patch: the note can still read noteType "text" at click time, producing a wrong,
 			// un-converted .txt download. Waiting for the two checklist rows to render proves the cache has
 			// already settled to "checklist" before the menu opens.
-			await expect(main.getByRole("textbox")).toHaveCount(2)
+			await expect(main.getByRole("textbox", { name: "Checklist item", exact: true })).toHaveCount(2)
 
 			// Single-note export (noteMenu.tsx's "Export" entry, direct — no dialog).
 			const [download] = await Promise.all([
@@ -448,7 +540,7 @@ test.describe("notes", () => {
 			expect(entry).not.toBeNull()
 			await expect(entry?.async("string")).resolves.toBe(expectedMarkdown)
 		} finally {
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await deleteNoteQuietly(page, uuid)
 		}
 	})
 })
@@ -471,6 +563,11 @@ async function createAndOpenTestNote(
 	await page.goto("/drive")
 	await dismissStartupReminders(page)
 	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+
+	// An authed shell only proves the hooks arrived on the FIRST load of a context that never persisted
+	// a session — bootSdk resumes from kv independently of the fire-and-forget hook import, so every
+	// later load can render exactly like this one with no `window.__filenE2E` on it at all.
+	await waitForE2eHooks(page)
 
 	const note = await page.evaluate(args => window.__filenE2E.createTestNoteWithContent(args.noteType, args.content, args.title), {
 		noteType,
@@ -518,7 +615,7 @@ test.describe("notes: read-only content renderers", () => {
 			await expect(page.getByRole("complementary").getByRole("list", { name: "Notes list" })).toBeVisible()
 			await expect(page.getByRole("complementary").getByRole("listitem").first()).toBeVisible()
 		} finally {
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await deleteNoteQuietly(page, uuid)
 		}
 	})
 
@@ -532,7 +629,7 @@ test.describe("notes: read-only content renderers", () => {
 		try {
 			await expect(page.getByRole("main").getByText(content, { exact: true })).toBeVisible()
 		} finally {
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await deleteNoteQuietly(page, uuid)
 		}
 	})
 
@@ -551,7 +648,7 @@ test.describe("notes: read-only content renderers", () => {
 			await expect(main.getByRole("heading", { level: 1, name: "E2E Heading" })).toBeVisible()
 			await expect(main.locator("strong", { hasText: "bold" })).toBeVisible()
 		} finally {
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await deleteNoteQuietly(page, uuid)
 		}
 	})
 
@@ -571,7 +668,7 @@ test.describe("notes: read-only content renderers", () => {
 			expect(await page.locator("script", { hasText: "__e2eRichXss" }).count()).toBe(0)
 			expect(await page.evaluate(() => (window as unknown as { __e2eRichXss?: boolean }).__e2eRichXss)).toBeUndefined()
 		} finally {
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await deleteNoteQuietly(page, uuid)
 		}
 	})
 
@@ -589,7 +686,13 @@ test.describe("notes: read-only content renderers", () => {
 		const main = page.getByRole("main")
 
 		try {
-			const rows = main.getByRole("textbox")
+			// Scoped by the row input's own aria-label (checklistEditor.tsx renders `aria-label="Checklist
+			// item"` on each `<input type="text">`), NOT a bare getByRole("textbox"): `main` also contains
+			// the rich editor's contenteditable surface, which carries the same role. Under load the
+			// checklist editor can mount a frame later than that surface, so the bare locator
+			// intermittently resolved to the WRONG element — a fill+Enter there splits nothing, and an
+			// assertion on it fails with "Not an input element".
+			const rows = main.getByRole("textbox", { name: "Checklist item", exact: true })
 			await expect(rows).toHaveCount(2)
 			await expect(rows.nth(0)).toHaveValue("Buy milk")
 			await expect(rows.nth(1)).toHaveValue("Already done")
@@ -599,7 +702,7 @@ test.describe("notes: read-only content renderers", () => {
 			await expect(checkboxes.nth(0)).not.toBeChecked()
 			await expect(checkboxes.nth(1)).toBeChecked()
 		} finally {
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await deleteNoteQuietly(page, uuid)
 		}
 	})
 })
@@ -617,6 +720,10 @@ async function createEmptyNoteAndOpen(
 	await page.goto("/drive")
 	await dismissStartupReminders(page)
 	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+
+	// Same barrier as createAndOpenTestNote: an authed shell is no proof the hooks are installed on any
+	// load past a context's first.
+	await waitForE2eHooks(page)
 
 	// Empty content — the editor is what writes the content in these cases, not the hook.
 	const note = await page.evaluate(args => window.__filenE2E.createTestNoteWithContent(args.noteType, "", args.title), {
@@ -645,6 +752,27 @@ async function reloadToShell(page: Page): Promise<void> {
 	await page.reload()
 	await dismissStartupReminders(page)
 	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+	// A reload re-runs the fire-and-forget hook import while bootSdk resumes the session from kv on its
+	// own — so the shell can be authed and interactive with no `window.__filenE2E` yet. Every caller
+	// here reads a hook shortly after, and an evaluate that lands early rejects; inside an expect.poll
+	// that rejection aborts the poll on its first iteration rather than retrying.
+	await waitForE2eHooks(page)
+}
+
+// The precondition for typing is FOCUS, never mere visibility. The editor pane remounts whenever the
+// note query's `dataUpdatedAt` advances, and its key only freezes once an inflight entry exists — i.e.
+// from the FIRST keystroke onward. So the window between the click and that first character is exactly
+// the one in which a remount can still happen, and a remount drops focus: the keystrokes then land on
+// document.body and the note silently records nothing, failing several assertions later with no trace
+// of the cause. Re-clicking until the surface actually holds focus closes that window; each inner wait
+// is well under the envelope so a click dropped by a concurrent re-render retries instead of wedging.
+async function focusEditorSurface(editor: Locator): Promise<void> {
+	await expect(editor).toBeVisible()
+
+	await expect(async () => {
+		await editor.click({ timeout: 10_000 })
+		await expect(editor).toBeFocused({ timeout: 2_000 })
+	}).toPass({ timeout: 30_000 })
 }
 
 test.describe("notes: live editors", () => {
@@ -663,8 +791,7 @@ test.describe("notes: live editors", () => {
 		try {
 			// Type distinctive content straight into the live CodeMirror surface.
 			const editor = main.locator(".cm-content")
-			await expect(editor).toBeVisible()
-			await editor.click()
+			await focusEditorSurface(editor)
 			await page.keyboard.type(marker)
 
 			// Prove the immediate-persist landed on OPFS BEFORE the reload — the survives-window-close
@@ -686,7 +813,7 @@ test.describe("notes: live editors", () => {
 				.poll(() => page.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), uuid), { timeout: 30_000 })
 				.toBe(marker)
 		} finally {
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await deleteNoteQuietly(page, uuid)
 		}
 	})
 
@@ -702,8 +829,7 @@ test.describe("notes: live editors", () => {
 		try {
 			// Type a markdown heading into the editable LEFT pane.
 			const editor = main.locator(".cm-content")
-			await expect(editor).toBeVisible()
-			await editor.click()
+			await focusEditorSurface(editor)
 			await page.keyboard.type(typed)
 
 			// Let the 3s debounce fire and the push land — the plain type→debounce→persist leg. Generous
@@ -721,7 +847,7 @@ test.describe("notes: live editors", () => {
 			await expect(main.getByText(typed, { exact: true })).toBeVisible()
 			await expect(main.getByRole("heading", { level: 1, name: headingText })).toBeVisible()
 		} finally {
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await deleteNoteQuietly(page, uuid)
 		}
 	})
 })
@@ -740,8 +866,7 @@ test.describe("notes: rich and checklist editors", () => {
 		try {
 			// Type bold content straight into the live Quill surface: focus the editor, toggle Bold, type.
 			const editor = main.locator(".ql-editor")
-			await expect(editor).toBeVisible()
-			await editor.click()
+			await focusEditorSurface(editor)
 			await main.getByRole("button", { name: "Bold", exact: true }).click()
 			await page.keyboard.type(marker)
 
@@ -764,8 +889,11 @@ test.describe("notes: rich and checklist editors", () => {
 			await reloadToShell(page)
 			await openNoteByTitle(page, title, uuid)
 
-			// The formatting survived the reload — the bold run is back in the editor.
-			await expect(main.locator(".ql-editor strong", { hasText: marker })).toBeVisible()
+			// The formatting survived the reload — the bold run is back in the editor. Explicit budget for
+			// the same reason as the checklist reload below: this is the first assertion after a COLD boot,
+			// waiting on wasm init, the outbox replaying from OPFS, and the note content being fetched and
+			// decrypted before Quill seeds. The suite's 10s default governs UI responsiveness, not this.
+			await expect(main.locator(".ql-editor strong", { hasText: marker })).toBeVisible({ timeout: 30_000 })
 
 			// ...and it reaches the server as sanitized rich HTML (the <strong> wrapper preserved).
 			await expect
@@ -779,7 +907,7 @@ test.describe("notes: rich and checklist editors", () => {
 				)
 				.toBe(true)
 		} finally {
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await deleteNoteQuietly(page, uuid)
 		}
 	})
 
@@ -804,7 +932,7 @@ test.describe("notes: rich and checklist editors", () => {
 			expect(await page.locator("script", { hasText: "__e2eEditorXss" }).count()).toBe(0)
 			expect(await page.evaluate(() => (window as unknown as { __e2eEditorXss?: boolean }).__e2eEditorXss)).toBeUndefined()
 		} finally {
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await deleteNoteQuietly(page, uuid)
 		}
 	})
 
@@ -820,11 +948,36 @@ test.describe("notes: rich and checklist editors", () => {
 		try {
 			// A brand-new checklist opens as one empty editable row. Type the first item, append a second
 			// with Enter, type it, then check the first row's toggle.
-			const rows = main.getByRole("textbox")
+			//
+			// Scoped by the row input's own aria-label (checklistEditor.tsx renders `aria-label="Checklist
+			// item"` on each `<input type="text">`), NOT a bare getByRole("textbox"): `main` also holds the
+			// rich editor's contenteditable surface, which carries the same role. Under a full-suite load
+			// the checklist editor mounts a frame later than that surface, so the bare locator resolves to
+			// the WRONG element — a fill+Enter there splits nothing and the count below never reaches 2.
+			const rows = main.getByRole("textbox", { name: "Checklist item", exact: true })
 			await expect(rows.first()).toBeVisible()
 			await rows.first().fill(first)
-			await rows.first().press("Enter")
-			await expect(rows).toHaveCount(2)
+			// Read the value back before pressing Enter: `fill` proves only that the DOM input was
+			// written, and the checklist editor's own model round trip lands after it — a remount inside
+			// that window restores the row from the model, so an Enter can land on a row that no longer
+			// holds `first`, splitting nothing and losing the item outright. The name-scoped locator
+			// resolves to the row's own `<input type="text">` (checklistEditor.tsx), so this is a real
+			// value read rather than a probe at the editor root.
+			await expect(rows.first()).toHaveValue(first)
+
+			// Envelope the split rather than firing it once: an Enter that still lands mid-round-trip
+			// splits nothing, leaving one row and failing the count. Retrying the press is the
+			// deterministic fix.
+			await expect(async () => {
+				if ((await rows.count()) < 2) {
+					await rows.first().press("Enter")
+				}
+
+				// 15s per attempt, not 5: under a full-suite load the editor's own state round trip is
+				// slower than the split, and too tight an inner budget just re-pressed Enter into a row
+				// that was already splitting.
+				await expect(rows).toHaveCount(2, { timeout: 15_000 })
+			}).toPass({ timeout: 60_000 })
 			await rows.nth(1).fill(second)
 
 			const toggles = main.getByRole("checkbox")
@@ -848,8 +1001,13 @@ test.describe("notes: rich and checklist editors", () => {
 			await openNoteByTitle(page, title, uuid)
 
 			// Both rows are back with faithful text and checked state (first checked, second not).
-			const reloadedRows = main.getByRole("textbox")
-			await expect(reloadedRows).toHaveCount(2)
+			// Explicit budget rather than the suite's 10s default: that default governs UI
+			// responsiveness, and this is the first assertion after a COLD reload — it is waiting on a
+			// wasm boot, the outbox replaying the inflight edit, and the note content being fetched and
+			// decrypted before the editor can seed. Live reads opt in at their call site (see the note on
+			// `expect.timeout` in playwright.config.ts) instead of the global covering the slowest case.
+			const reloadedRows = main.getByRole("textbox", { name: "Checklist item", exact: true })
+			await expect(reloadedRows).toHaveCount(2, { timeout: 30_000 })
 			await expect(reloadedRows.nth(0)).toHaveValue(first)
 			await expect(reloadedRows.nth(1)).toHaveValue(second)
 
@@ -857,7 +1015,7 @@ test.describe("notes: rich and checklist editors", () => {
 			await expect(reloadedToggles.nth(0)).toBeChecked()
 			await expect(reloadedToggles.nth(1)).not.toBeChecked()
 		} finally {
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await deleteNoteQuietly(page, uuid)
 		}
 	})
 })
@@ -890,6 +1048,10 @@ async function bootSecondPage(page: Page, injectedSession: string): Promise<Page
 	await pageB.goto("/drive")
 	await dismissStartupReminders(pageB)
 	await expect(pageB.getByRole("navigation", { name: "Filen" })).toBeVisible()
+	// A sibling page seeds its own session, so its shell renders authed off kv whether or not the
+	// fire-and-forget hook import has landed — and every caller of this helper drives pageB through
+	// `window.__filenE2E`. The barrier belongs to pageB, not to the fixture page.
+	await waitForE2eHooks(pageB)
 
 	return pageB
 }
@@ -927,11 +1089,14 @@ test.describe("notes: realtime", () => {
 			// carries it.
 			await expect(main.getByRole("heading", { level: 1, name: title, exact: true })).toHaveCount(0)
 		} finally {
+			// Each step guarded on its own: a throw here would replace the body's real error AND skip
+			// every statement after it — the two prefix sweeps below are precisely the backstop for the
+			// case where the uuid delete is the thing that failed.
 			await pageB.close()
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await deleteNoteQuietly(page, uuid)
 			// Backstop: sweep either title prefix in case a dead page skipped the uuid teardown.
-			await page.evaluate(prefix => window.__filenE2E.sweepTestNotesByTitlePrefix(prefix), "e2e realtime-meta")
-			await page.evaluate(prefix => window.__filenE2E.sweepTestNotesByTitlePrefix(prefix), "e2e renamed")
+			await sweepNotesQuietly(page, "e2e realtime-meta")
+			await sweepNotesQuietly(page, "e2e renamed")
 		}
 	})
 
@@ -998,8 +1163,8 @@ test.describe("notes: realtime", () => {
 			await expect(main.getByText(remoteContent, { exact: true })).toHaveCount(0)
 		} finally {
 			await pageB.close()
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
-			await page.evaluate(prefix => window.__filenE2E.sweepTestNotesByTitlePrefix(prefix), "e2e realtime-content")
+			await deleteNoteQuietly(page, uuid)
+			await sweepNotesQuietly(page, "e2e realtime-content")
 		}
 	})
 })
@@ -1039,7 +1204,7 @@ test.describe("notes: participants and history dialogs", () => {
 			// Open the history dialog through the editor header's ⋯ menu — "History" is open to every
 			// participant (owner included), never gated like "Participants" below.
 			const menuTrigger = main.getByRole("button", { name: "More actions", exact: true })
-			await runMenuAction(page, menuTrigger, "History", "dialogOpen")
+			await runMenuAction(page, menuTrigger, "History", { dialogTitled: "History" })
 
 			const dialog = page.getByRole("dialog")
 			await expect(dialog.getByRole("heading", { name: "History", exact: true })).toBeVisible()
@@ -1061,19 +1226,24 @@ test.describe("notes: participants and history dialogs", () => {
 			await dialog.getByRole("button", { name: "Back to list", exact: true }).click()
 			await dialog.locator("li").filter({ hasText: v1 }).getByRole("button", { name: "Restore", exact: true }).click()
 
-			const confirm = page.getByRole("alertdialog")
+			// Scoped to the restore confirm's own title: the startup account reminders are alertdialogs
+			// too, so a bare role lookup could both click the wrong dialog and fail the toHaveCount(0)
+			// below on a confirm that did close.
+			const confirm = dialogTitled(page, "Restore this version?")
 			await expect(confirm).toBeVisible()
 			await confirm.getByRole("button", { name: "Restore", exact: true }).click()
-			await expect(confirm).toHaveCount(0)
-			await expect(dialog).toHaveCount(0)
+			// Both dialogs close on the live restoreNoteHistory write, and the editor reseeds from its
+			// cache patch — live-write budget, not the config's UI-responsiveness default.
+			await expect(confirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			await expect(dialog).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// The editor reflects the restored content once the remount lands, and the server agrees.
-			await expect(main.getByText(v1, { exact: true })).toBeVisible({ timeout: 15_000 })
+			await expect(main.getByText(v1, { exact: true })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 			await expect
 				.poll(() => page.evaluate(id => window.__filenE2E.readTestNoteContentByUuid(id), uuid), { timeout: 30_000 })
 				.toBe(v1)
 		} finally {
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await deleteNoteQuietly(page, uuid)
 		}
 	})
 
@@ -1093,7 +1263,7 @@ test.describe("notes: participants and history dialogs", () => {
 
 		try {
 			const menuTrigger = main.getByRole("button", { name: "More actions", exact: true })
-			await runMenuAction(page, menuTrigger, "Participants", "dialogOpen")
+			await runMenuAction(page, menuTrigger, "Participants", { dialogTitled: "Participants" })
 
 			const dialog = page.getByRole("dialog")
 			await expect(dialog.getByRole("heading", { name: "Participants", exact: true })).toBeVisible()
@@ -1116,7 +1286,7 @@ test.describe("notes: participants and history dialogs", () => {
 			await page.keyboard.press("Escape")
 			await expect(dialog).toHaveCount(0)
 		} finally {
-			await page.evaluate(id => window.__filenE2E.deleteTestNoteByUuid(id), uuid)
+			await deleteNoteQuietly(page, uuid)
 		}
 	})
 })
@@ -1127,10 +1297,7 @@ test.describe("notes: participants and history dialogs", () => {
 // failover — kill the leader inside the debounce window and the follower, promoted via the released db
 // lock, still pushes the pending edit with no user action. Serial + net-zero like every note test here.
 async function typeIntoTextEditor(target: Page, text: string): Promise<void> {
-	const editor = target.getByRole("main").locator(".cm-content")
-
-	await expect(editor).toBeVisible()
-	await editor.click()
+	await focusEditorSurface(target.getByRole("main").locator(".cm-content"))
 	await target.keyboard.type(text)
 }
 
@@ -1142,6 +1309,14 @@ test.describe("notes: multi-tab outbox", () => {
 	}) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
+
+		// Explicit opt-in ABOVE the suite's 120s default, sized off this test's OWN pinned waits: the four
+		// server/OPFS polls below alone pin 30 + 30 + 15 + 60 = 135s, before a single second of the
+		// sibling-tab boot, the three shell loads, the three note creates and the typing they gate. The
+		// default cannot even reach the failover assertion, and the notes lane runs with retries: 0 — a
+		// harness kill there strands up to three live notes against the account's hard 10-note cap,
+		// because the teardown below never runs.
+		test.setTimeout(300_000)
 
 		const stamp = `${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 		const markerX = `leaderX-${stamp}`
@@ -1197,9 +1372,11 @@ test.describe("notes: multi-tab outbox", () => {
 				.toBe(markerZ)
 		} finally {
 			// Net-zero: the follower (promoted to leader) keeps its own SDK access to tear all three down.
+			// Each delete is guarded on its own — an unguarded throw on the first would take the other two
+			// AND the leader close below with it, on top of destroying the body's real error.
 			for (const id of [uuidX, uuidY, uuidZ]) {
 				if (id !== undefined) {
-					await page.evaluate(noteId => window.__filenE2E.deleteTestNoteByUuid(noteId), id)
+					await deleteNoteQuietly(page, id)
 				}
 			}
 

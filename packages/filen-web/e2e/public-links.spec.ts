@@ -75,7 +75,7 @@ test.describe("public links (unauthenticated)", () => {
 		await expect(page.getByRole("link", { name: "Report abuse" })).toHaveAttribute("href", "mailto:abuse@filen.io")
 	})
 
-	test("the reachable surfaces do not overflow a narrow phone viewport", async ({ page }) => {
+	test("the reachable surfaces do not overflow a narrow phone viewport", async ({ page, browserName }) => {
 		// Public links get opened on phones. On the reachable states (the chrome plus, on non-Firefox, the
 		// terminal invalid card) the body must never scroll horizontally at a 360px width. A protected
 		// link's password gate is not reachable without a live premium link, so its overflow is covered by
@@ -84,6 +84,14 @@ test.describe("public links (unauthenticated)", () => {
 		await page.goto(`/f/${RANDOM_UUID}#${HEX_KEY}`)
 
 		await expect(page.getByRole("link", { name: "Get Filen" })).toBeVisible({ timeout: 30_000 })
+
+		// The chrome above renders the moment the route does (see the chrome test's own note), so gating
+		// on it alone would measure the TRANSIENT "Opening link…" state and let an invalid card that
+		// overflows 360px pass. Firefox's COI worker fetch hangs before that terminal state ever
+		// arrives, so there the chrome really is all there is to measure.
+		if (browserName !== "firefox") {
+			await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: 30_000 })
+		}
 
 		const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
 		expect(overflow).toBeLessThanOrEqual(0)

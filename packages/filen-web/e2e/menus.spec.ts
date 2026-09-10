@@ -5,7 +5,9 @@ import {
 	dismissStartupReminders,
 	enterScratchDirectory,
 	trashScratchDirectory,
-	descendInto
+	descendInto,
+	createDirectoryViaDialog,
+	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
@@ -98,15 +100,7 @@ test.describe("context menus", () => {
 		try {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
 
-			// .first(): the freshly entered scratch root is still empty at this point, so its own
-			// empty-state "+ Add" affordance renders a second identical "New directory" button (same
-			// ambiguity enterScratchDirectory's own helper already guards against — see its comment).
-			await page.getByRole("button", { name: "New directory", exact: true }).first().click()
-			const dirDialog = page.getByRole("dialog")
-			await expect(dirDialog).toBeVisible()
-			await page.getByLabel("Name", { exact: true }).fill(dirName)
-			await page.getByRole("button", { name: "Create", exact: true }).click()
-			await expect(dirDialog).toHaveCount(0)
+			await createDirectoryViaDialog(page, dirName, listbox)
 
 			await page.getByRole("button", { name: "Upload", exact: true }).click()
 			const uploadMenu = page.getByRole("menu")
@@ -117,12 +111,14 @@ test.describe("context menus", () => {
 			await expect(fileDialog).toBeVisible()
 			await page.getByLabel("Name", { exact: true }).fill(fileBaseName)
 			await page.getByRole("button", { name: "Create", exact: true }).click()
-			await expect(fileDialog).toHaveCount(0)
 
-			// The editor opens automatically (createTextFile.ts already patched the listing by this
-			// point, before any save) — this test never types into it, just proves creation landed and
-			// closes the overlay to reach the row underneath.
+			// The editor opening IS the outcome (createTextFile.ts patches the listing by this point,
+			// before any save) — this test never types into it, just proves creation landed and closes
+			// the overlay to reach the row underneath. Assert that FIRST: the dialog closing is a side
+			// effect of the same live write, and asserting it on the suite's UI-responsiveness budget
+			// made a slow-but-successful create look like a failure.
 			await expect(page.locator(".cm-content")).toBeVisible({ timeout: 30_000 })
+			await expect(fileDialog).toHaveCount(0, { timeout: 10_000 })
 			await page.keyboard.press("Escape")
 
 			const dirRow = listbox.getByRole("option", { name: dirName })
@@ -215,11 +211,37 @@ test.describe("context menus", () => {
 			await expect(trashMenu).toBeVisible()
 			await trashMenu.getByRole("menuitem", { name: labelFor("trash"), exact: true }).click()
 
-			const trashConfirm = page.getByRole("alertdialog")
+			// Scoped by title, never a bare role: a startup account reminder is an alertdialog too and can
+			// pop asynchronously, which would make this both a strict-mode hazard and an unreachable
+			// toHaveCount(0) below. Base UI wires the accessible name from the title (confirmDialog.tsx).
+			const trashConfirm = page.getByRole("alertdialog", { name: driveDict.driveTrashConfirmTitle })
 			await expect(trashConfirm).toBeVisible()
 			await trashConfirm.getByRole("button", { name: labelFor("trash"), exact: true }).click()
-			await expect(trashConfirm).toHaveCount(0)
-			await expect(dirRow).toHaveCount(0)
+			// The write budget, not the expect default: this dialog stays open and pending for the whole
+			// trash, so its close is the live write settling on the account-wide lease.
+			await expect(trashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+
+			// runBulkDialogAction closes that confirm on a server-side rejection too, reporting the
+			// difference only as a toast (bulkToast.ts) — read it back so a rejected trash names itself
+			// here instead of surfacing as a bare row count below. A single-item bulk can only fail
+			// wholesale, so the rejection copy is fully determined.
+			const trashFailureToast = driveDict.driveBulkActionCompleteWithFailures_other
+				.replace("{{count}}", "0")
+				.replace("{{failed}}", "1")
+			expect((await page.locator("[data-sonner-toast]").allInnerTexts()).join("\n")).not.toContain(trashFailureToast)
+
+			// Re-read from a fresh boot each attempt rather than trusting this page's own query state: the
+			// app refetches listings on window focus (queries/client.ts: staleTime 0 +
+			// refetchOnWindowFocus), and Playwright's multi-worker automation shifts OS window focus across
+			// concurrently-running pages — a refetch that raced this trash restores the pre-trash rows on
+			// top of the patch trashItems already made, and nothing refetches again on its own afterwards.
+			// Only a reload corrects that, which is the same mechanism drive-actions.spec.ts guards with a
+			// reload before its own final cleanup assertion.
+			await expect(async () => {
+				await page.reload()
+				await waitForListingSettled(page)
+				await expect(dirRow).toHaveCount(0)
+			}).toPass({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// Within the directories partition, default name-ascending order can still bury a fresh
 			// row under alphabetically-earlier debris — sorting by upload date (descending) puts THIS
@@ -254,7 +276,9 @@ test.describe("context menus", () => {
 			await expect(restoreMenu).toBeVisible()
 			// "restore" runs "direct" (itemMenu.logic.ts) — no confirm dialog, unlike bulk restore.
 			await restoreMenu.getByRole("menuitem", { name: labelFor("restore"), exact: true }).click()
-			await expect(trashedDirRow).toHaveCount(0)
+			// With no confirm to close, the row leaving the trash listing IS the live write — hence the
+			// write budget rather than the expect default, which only ever covers a React commit.
+			await expect(trashedDirRow).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
 			const rootAfterRestore = await waitForListingSettled(page)

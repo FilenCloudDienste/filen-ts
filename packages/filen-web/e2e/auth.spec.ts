@@ -53,6 +53,16 @@ const SDK_HOST_RE = /(^|\.)filen(-[1-6])?\.(io|net)$/
 
 const email = process.env["FILEN_WEB_E2E_TEST_EMAIL"] ?? ""
 
+// A cold authed boot is a wasm init + rayon pool spin-up + OPFS open — the same budget
+// playwright.config.ts pins navigationTimeout to — and after a logout it additionally follows the
+// whole phased wipe plus the reload that triggers it. The 10s expect default governs UI
+// responsiveness only and was never sized for any of that.
+const COLD_BOOT_TIMEOUT_MS = 30_000
+
+// The wrong-password attempt is a live, un-retryable round trip: v3/auth/info, wasm key derivation,
+// v3/login, and only then the toast. Same reason as above — the expect default never covered network.
+const LIVE_LOGIN_TIMEOUT_MS = 30_000
+
 test.describe("auth", () => {
 	// This block makes a real call to the rate-limited login endpoint, so it must never retry: under
 	// CI (retries: 1 in playwright.config) a flake would fire a SECOND real failed login in the same
@@ -82,7 +92,21 @@ test.describe("auth", () => {
 			// exists for is that the MINIFIED production worker still duck-types the live FilenSdkError
 			// (toErrorDTO's isSdkError probe survives minification) and reports the right kind, not that the
 			// server's message happens to match.
-			await expect(page.getByText("Wrong email or password. Please try again.")).toBeVisible()
+			try {
+				await expect(page.getByText("Wrong email or password. Please try again.")).toBeVisible({ timeout: LIVE_LOGIN_TIMEOUT_MS })
+			} catch (cause) {
+				// loginForm.tsx surfaces this through toast.error(errorLabel(...)), so the toast is the sole
+				// carrier of the reason — and the other outcome this real, rate-limited endpoint can return
+				// is a rate-limit error whose toast reads nothing like the string above. Unattached, that
+				// failure reports only "expected 'Wrong email or password…' to be visible" and points the
+				// next reader at the error catalog instead of at the rate limit.
+				const toasts = await page
+					.locator("[data-sonner-toast]")
+					.allInnerTexts()
+					.catch(() => [])
+
+				throw new Error(`the wrong-password toast never rendered; toasts on the page: ${JSON.stringify(toasts)}`, { cause })
+			}
 
 			// A rejected attempt never navigates — still on the sign-in form.
 			await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible()
@@ -161,7 +185,7 @@ test.describe("auth", () => {
 		// just before the Account click. This spec drives the shell directly (never through the listing
 		// gate that dismisses it), so it dismisses per tab here.
 		await dismissStartupReminders(page)
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: COLD_BOOT_TIMEOUT_MS })
 
 		// A second, already-signed-in tab opened BEFORE logout — the realistic multi-tab scenario the
 		// auth broadcast channel exists to keep coherent. The once-per-page marker lives in localStorage,
@@ -173,13 +197,17 @@ test.describe("auth", () => {
 		await seedOncePerPage(second, session)
 		await second.goto("/")
 		await dismissStartupReminders(second)
-		await expect(second.getByRole("navigation", { name: "Filen" })).toBeVisible()
+		await expect(second.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: COLD_BOOT_TIMEOUT_MS })
 
 		await page.getByRole("button", { name: "Account", exact: true }).click()
 		await page.getByRole("menuitem", { name: "Sign out", exact: true }).click()
 		await page.getByRole("button", { name: "Sign out", exact: true }).click() // the confirm dialog's own action button
 
-		await expect(page.getByText("Sign in to Filen")).toBeVisible()
+		// Everything between the click and this render is one budget: runLogout's eight phases
+		// (cancel-queries, clear-query-cache, sdk-logout, clear-session, kv-clear, wipe-service-worker,
+		// broadcast, reload — sdk-logout being a live call of its own), then a complete cold boot before
+		// the sign-in form exists at all.
+		await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: COLD_BOOT_TIMEOUT_MS })
 
 		// kvHas, not kvGet: the session key holds an OBJECT (StringifiedClient), not a plain string, so
 		// kvGet's stringSchema would report "null" whether the row is genuinely gone or merely the wrong
@@ -191,7 +219,7 @@ test.describe("auth", () => {
 		// now-empty shared kv (seedOncePerPage's marker means this reload does NOT re-seed) and
 		// converges it onto sign-in too.
 		await second.reload()
-		await expect(second.getByText("Sign in to Filen")).toBeVisible()
+		await expect(second.getByText("Sign in to Filen")).toBeVisible({ timeout: COLD_BOOT_TIMEOUT_MS })
 
 		await second.close()
 	})

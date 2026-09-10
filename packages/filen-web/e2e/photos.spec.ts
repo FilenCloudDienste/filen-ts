@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures"
-import { enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { PNG_BYTES } from "./helpers/fixtureBytes"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // The one live proof of the whole photos arc: root selection, the media-only grid over a mixed
@@ -8,9 +9,6 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // drive socket echo's photos-invalidation set — favorite needs its own patch since it has no such
 // echo), the change-directory affordance, and the root-gone reset once the chosen directory is
 // trashed. Net-zero via the same scratch-directory convention as every other upload spec.
-
-// A real 1x1 transparent PNG — duplicated from preview-media.spec.ts (no cross-spec e2e helpers module).
-const PNG_BYTES = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64")
 
 // A real, tiny synthetic H.264/mp4 clip (64x64, 2s @ 5fps) — generated once via
 // `ffmpeg -f lavfi -i testsrc=size=64x64:rate=5:duration=2 -c:v libx264 -profile:v baseline
@@ -36,6 +34,9 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 	const nameImage = `e2e-photos-${runId}.png`
 	const nameVideo = `e2e-photos-${runId}.mp4`
 	const nameDoc = `e2e-photos-${runId}.txt`
+	// The root-gone leg trashes the scratch directory mid-test, so the finally's own net has to know
+	// whether it still has anything to do.
+	let trashed = false
 
 	await page.goto("/drive")
 
@@ -106,7 +107,10 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 		await expect(overlay).toHaveCount(0)
 
 		// ---- the patch proof: the grid's heart badge shows on the video tile with NO reload ----
-		await expect(videoTile.getByText("Favorited")).toBeVisible({ timeout: 20_000 })
+		// On the write budget: the menu closed on the click alone (the descriptor runs unawaited,
+		// itemMenu.tsx), so the setFavorited write is still in flight here — the Escape above races it —
+		// and it queues on the account-wide drive lease like every other write.
+		await expect(videoTile.getByText("Favorited")).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// ---- keyboard operability: one tab stop into the grid, arrows move the cursor, Enter opens ----
 		// Placed AFTER the imageTile.click() above on purpose: that click's "a plain click opens the
@@ -191,6 +195,7 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 
 		// ---- trash the scratch directory itself (root-gone), then revisit /photos ----
 		await trashScratchDirectory(page, scratchName)
+		trashed = true
 
 		await page.getByRole("link", { name: "Photos", exact: true }).first().click()
 		await page.waitForURL(/\/photos$/)
@@ -198,9 +203,13 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 		await expect(page.getByText("Your photos directory is no longer available.")).toBeVisible({ timeout: 20_000 })
 		await expect(page.getByText("Choose your photos directory")).toBeVisible()
 	} finally {
-		// Idempotent-safe: a no-op once the directory above was already trashed (trashScratchDirectory's
-		// own "row not found" branch returns early) — the net-zero safety net if an earlier assertion
-		// threw before that point was reached.
-		await trashScratchDirectory(page, scratchName)
+		// The net-zero safety net for every path that threw before the in-body trash above — but ONLY
+		// those. Calling it a second time after that one ran is not a cheap no-op: it burns its full row
+		// wait on a row that is correctly gone and then reports the directory as leaked on a green run,
+		// and it cannot improve on the first call either, which already named a genuine failure for the
+		// next run's sweep.
+		if (!trashed) {
+			await trashScratchDirectory(page, scratchName)
+		}
 	}
 })
