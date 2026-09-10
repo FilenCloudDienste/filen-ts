@@ -28,6 +28,16 @@ function testUuid(label: string): UuidStr {
 const ROOT_UUID = testUuid("root")
 const PARENT_A = testUuid("parent-a")
 const PARENT_B = testUuid("parent-b")
+// The whole-life id every fixture file carries. A content edit moves the lineage to the successor row,
+// whose uuid is what a `newUUID` announces; a user trash leaves `newUUID` undefined.
+const STABLE_FILE = testUuid("stable-file")
+const NEW_FILE = testUuid("new-file")
+// What a `fileTrash` carrying `newUUID` really names: the trashed row's OWN freshly minted stable id, not
+// the lineage's — the lineage left with the successor's fileNew, so a fileTrash naming it would let a
+// stable-keyed consumer tombstone the live file (the SDK's FileTrash doc comment says exactly this, and
+// its live socket test asserts the two differ). fileArchived is the opposite: there `stableUUID` IS the
+// lineage's on a normal edit, so those fixtures keep STABLE_FILE.
+const RETIRED_STABLE = testUuid("retired-stable")
 
 function seedRootUuid(uuid: UuidStr = ROOT_UUID): void {
 	testQueryClient.setQueryData<UserInfo>(ACCOUNT_QUERY_KEY, { rootDirUuid: uuid } as UserInfo)
@@ -36,6 +46,7 @@ function seedRootUuid(uuid: UuidStr = ROOT_UUID): void {
 function mockFile(overrides: Partial<File> = {}): File {
 	return {
 		uuid: testUuid("file"),
+		stableUUID: STABLE_FILE,
 		parent: PARENT_A,
 		size: 1_024n,
 		favorited: false,
@@ -201,7 +212,7 @@ describe("drive socket handlers — removals + selection purge", () => {
 		seedRecents([item])
 		useDriveStore.setState({ selectedItems: [item] })
 
-		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file") }))
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined }))
 
 		expect(getListing(PARENT_A)).toEqual([])
 		expect(getFavorites()).toEqual([])
@@ -214,10 +225,23 @@ describe("drive socket handlers — removals + selection purge", () => {
 		seedListing(PARENT_A, [item])
 		useDriveStore.setState({ selectedItems: [item] })
 
-		handleDriveEvent(driveEvt({ type: "fileDeletedPermanent", uuid: testUuid("file") }))
+		handleDriveEvent(driveEvt({ type: "fileDeletedPermanent", uuid: testUuid("file"), stableUUID: STABLE_FILE }))
 
 		expect(getListing(PARENT_A)).toEqual([])
 		expect(useDriveStore.getState().selectedItems).toEqual([])
+	})
+
+	it("fileDeletedPermanent WITHOUT stableUUID leaves the live file alone — only an archived version died", () => {
+		// Its uuid names the deleted VERSION. A listing cached before a content rotation still holds the old
+		// uuid as the live row, so acting on this would make an existing file vanish until the next refetch.
+		const item = narrowItem(mockFile())
+		seedListing(PARENT_A, [item])
+		useDriveStore.setState({ selectedItems: [item] })
+
+		handleDriveEvent(driveEvt({ type: "fileDeletedPermanent", uuid: testUuid("file"), stableUUID: undefined }))
+
+		expect(getListing(PARENT_A).map(i => i.data.uuid)).toEqual([testUuid("file")])
+		expect(useDriveStore.getState().selectedItems).toHaveLength(1)
 	})
 
 	it("folderDeletedPermanent removes the directory from every listing and purges the selection", () => {
@@ -246,7 +270,7 @@ describe("drive socket handlers — removals + selection purge", () => {
 		seedRecents([item])
 		useDriveStore.setState({ selectedItems: [item] })
 
-		handleDriveEvent(driveEvt({ type: "fileArchived", uuid: testUuid("file") }))
+		handleDriveEvent(driveEvt({ type: "fileArchived", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: NEW_FILE }))
 
 		expect(getListing(PARENT_A)).toEqual([])
 		expect(getRecents()).toEqual([])
@@ -260,7 +284,7 @@ describe("drive socket handlers — removals + selection purge", () => {
 		seedListing(PARENT_A, [item])
 		seedTrash([])
 
-		handleDriveEvent(driveEvt({ type: "fileArchived", uuid: testUuid("file") }))
+		handleDriveEvent(driveEvt({ type: "fileArchived", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: NEW_FILE }))
 
 		expect(getTrash()).toEqual([])
 	})
@@ -287,7 +311,7 @@ describe("drive socket handlers — trash listing membership", () => {
 		seedListing(PARENT_A, [item])
 		seedTrash([])
 
-		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file") }))
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined }))
 
 		expect(getListing(PARENT_A)).toEqual([])
 		expect(getTrash()?.map(i => i.data.uuid)).toEqual([testUuid("file")])
@@ -296,10 +320,24 @@ describe("drive socket handlers — trash listing membership", () => {
 	it("fileTrash leaves a row the trash listing already holds in place (a re-delivered echo never drops it)", () => {
 		seedTrash([narrowItem(mockFile())])
 
-		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file") }))
-		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file") }))
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined }))
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined }))
 
 		expect(getTrash()?.map(i => i.data.uuid)).toEqual([testUuid("file")])
+	})
+
+	it("fileTrash carrying newUUID never reaches the trash listing — it is a versioning-disabled edit", () => {
+		// The SDK documents newUUID as "an edit on a versioning-disabled account, NOT a user trash action".
+		// The superseded row still leaves its normal listing (its fileNew successor splices in beside it),
+		// but showing a just-saved file in Trash would be plainly wrong.
+		const item = narrowItem(mockFile())
+		seedListing(PARENT_A, [item])
+		seedTrash([])
+
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: RETIRED_STABLE, newUUID: NEW_FILE }))
+
+		expect(getListing(PARENT_A)).toEqual([])
+		expect(getTrash()).toEqual([])
 	})
 
 	it("folderTrash moves the directory INTO an already-fetched trash listing", () => {
@@ -314,7 +352,7 @@ describe("drive socket handlers — trash listing membership", () => {
 	it("never conjures a trash listing nobody has opened", () => {
 		seedListing(PARENT_A, [narrowItem(mockFile())])
 
-		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file") }))
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined }))
 
 		expect(getTrash()).toBeUndefined()
 	})
@@ -322,7 +360,9 @@ describe("drive socket handlers — trash listing membership", () => {
 	it("applies the removal alone when no cached listing holds the trashed uuid", () => {
 		seedTrash([])
 
-		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("unknown") }))
+		handleDriveEvent(
+			driveEvt({ type: "fileTrash", uuid: testUuid("unknown"), stableUUID: testUuid("stable-unknown"), newUUID: undefined })
+		)
 
 		expect(getTrash()).toEqual([])
 	})
@@ -330,11 +370,14 @@ describe("drive socket handlers — trash listing membership", () => {
 	// The owner trashing a file they shared with this account removes it from the shared listing; it
 	// never lands in THIS account's trash.
 	it("never moves a shared-in row into this account's trash listing", () => {
-		const shared = narrowItem({ ...mockFile(), sharingRole: { Receiver: { email: "sharer@filen.io", id: 7 } } })
+		const shared = narrowItem({
+			...mockFile({ stableUUID: undefined }),
+			sharingRole: { Receiver: { email: "sharer@filen.io", id: 7 } }
+		})
 		testQueryClient.setQueryData(driveListingQueryKey({ variant: "sharedIn", uuid: null }), [shared])
 		seedTrash([])
 
-		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file") }))
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined }))
 
 		expect(testQueryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "sharedIn", uuid: null }))).toEqual([])
 		expect(getTrash()).toEqual([])
@@ -345,7 +388,7 @@ describe("drive socket handlers — trash listing membership", () => {
 
 		seedListing(PARENT_A, [narrowItem(mockFile())])
 		seedTrash([])
-		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file") }))
+		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined }))
 
 		expect(cancelSpy).toHaveBeenCalledWith({ queryKey: driveListingQueryKey({ variant: "trash", uuid: null }), exact: true })
 	})
@@ -527,7 +570,15 @@ describe("drive socket handlers — open-preview reconcile signals", () => {
 	}
 
 	it("fileTrash emits a removed signal for the trashed uuid", () => {
-		expect(captureReconcile({ type: "fileTrash", uuid: testUuid("file") })).toEqual([{ type: "removed", uuid: testUuid("file") }])
+		expect(captureReconcile({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined })).toEqual([
+			{ type: "removed", uuid: testUuid("file") }
+		])
+	})
+
+	it("fileTrash carrying newUUID emits NO reconcile signal — same reasoning as fileArchived", () => {
+		// A versioning-disabled save is fileArchived's twin. Emitting a removal would yank the just-saved
+		// file out of an open preview the instant the socket echoed the user's own save.
+		expect(captureReconcile({ type: "fileTrash", uuid: testUuid("file"), stableUUID: RETIRED_STABLE, newUUID: NEW_FILE })).toEqual([])
 	})
 
 	it("fileMove emits a removed signal so a preview open on it advances or closes", () => {
@@ -537,9 +588,16 @@ describe("drive socket handlers — open-preview reconcile signals", () => {
 	})
 
 	it("fileDeletedPermanent emits a removed signal", () => {
-		expect(captureReconcile({ type: "fileDeletedPermanent", uuid: testUuid("file") })).toEqual([
+		expect(captureReconcile({ type: "fileDeletedPermanent", uuid: testUuid("file"), stableUUID: STABLE_FILE })).toEqual([
 			{ type: "removed", uuid: testUuid("file") }
 		])
+	})
+
+	it("fileDeletedPermanent WITHOUT stableUUID emits nothing — one archived version died, not the file", () => {
+		// The SDK: "Absent for archived-version-only deletes — never treat the file as gone then." The uuid
+		// names the deleted VERSION; an open preview legitimately still holds a pre-rotation uuid, so a
+		// removal here would close a preview of a file that still exists.
+		expect(captureReconcile({ type: "fileDeletedPermanent", uuid: testUuid("file"), stableUUID: undefined })).toEqual([])
 	})
 
 	it("fileArchived emits NO reconcile signal — the file lives on under its version-rotated successor", () => {
@@ -547,7 +605,7 @@ describe("drive socket handlers — open-preview reconcile signals", () => {
 		// removal here would yank the just-saved file's slot out of the frozen pager the instant the
 		// socket echoed the user's own save — the exact regression this pin guards: the editor keeps
 		// serving fresh bytes through its saved-uuid aliases, so the open slot must survive the archive.
-		expect(captureReconcile({ type: "fileArchived", uuid: testUuid("file") })).toEqual([])
+		expect(captureReconcile({ type: "fileArchived", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: NEW_FILE })).toEqual([])
 	})
 
 	it("fileRestore emits a removed signal (the item leaves the trash preview)", () => {

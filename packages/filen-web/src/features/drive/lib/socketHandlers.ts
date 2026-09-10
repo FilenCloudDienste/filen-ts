@@ -204,14 +204,21 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 
 		case "fileTrash":
 		case "folderTrash": {
+			// A fileTrash carrying `newUUID` is NOT a user trash: the SDK documents it as an edit on a
+			// versioning-disabled account, the twin of fileArchived, whose successor arrives as its own
+			// fileNew. It gets fileArchived's treatment — drop the superseded row and nothing else. Inserting
+			// it into the trash listing would show a just-saved file as trashed, and removing it from the
+			// preview would yank that file out from under the user mid-save.
+			const supersededByEdit = inner.type === "fileTrash" && inner.newUUID !== undefined
+
 			// The item left every normal listing and JOINED the trash's own listing (actions.ts's trashItems
 			// patches both halves the same way). Purge it from the selection so the count / select-all toggle /
-			// bulk ops never target a ghost. The payload is uuid-only, so the row for the trash insert is read
-			// out of a cached listing BEFORE the removal fan-out strips it — with no cached copy anywhere,
-			// only the removal applies and the trash listing refetches on its next mount.
+			// bulk ops never target a ghost. The payload carries no row, so the one for the trash insert is
+			// read out of a cached listing BEFORE the removal fan-out strips it — with no cached copy
+			// anywhere, only the removal applies and the trash listing refetches on its next mount.
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 
-			const trashed = ownedRowOrUndefined(findCachedListingItem(inner.uuid))
+			const trashed = supersededByEdit ? undefined : ownedRowOrUndefined(findCachedListingItem(inner.uuid))
 
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, inner.uuid))
 
@@ -220,7 +227,9 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			}
 
 			// A preview open on the trashed item advances to a neighbour or closes.
-			emitPreviewItemRemoved(inner.uuid)
+			if (!supersededByEdit) {
+				emitPreviewItemRemoved(inner.uuid)
+			}
 
 			break
 		}
@@ -241,6 +250,14 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 
 		case "fileDeletedPermanent":
 		case "folderDeletedPermanent": {
+			// A fileDeletedPermanent WITHOUT `stableUUID` deleted one archived VERSION, not the file — its
+			// `uuid` names that version and the live file lives on, so nothing here may fire. Acting on it
+			// would strip a still-existing file from any listing cached under a pre-rotation uuid, and yank
+			// an open preview still holding that frozen slot (see fileArchived).
+			if (inner.type === "fileDeletedPermanent" && inner.stableUUID === undefined) {
+				break
+			}
+
 			// The item is gone for good — purge selection, strip it from every listing, and drop it from an
 			// open preview (advance to a neighbour, or close once it was the only slot).
 			useDriveStore.getState().removeFromSelection([inner.uuid])
