@@ -91,6 +91,20 @@ afterEach(() => {
 })
 
 describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.location)", () => {
+	it("dev registers the worker's source module, which the dev server transforms and scopes to the root", async () => {
+		// There is no built sw.js outside PROD (vite.sw.config.ts is a separate build), and the source
+		// path sits below the root — so the scope has to be asked for, and vite.config.ts's dev server
+		// answers Service-Worker-Allowed to permit it.
+		vi.stubEnv("PROD", false)
+
+		const { register } = setupBrowser(fakeRegistration())
+		const { registerSW } = await freshRegisterModule()
+
+		registerSW(vi.fn())
+
+		expect(register).toHaveBeenCalledWith("/src/sw/sw.ts", { type: "module", scope: "/" })
+	})
+
 	it("first visit: a controllerchange from clients.claim() does not reload or prompt", async () => {
 		const registration = fakeRegistration()
 		const { reload, register, fireControllerChange } = setupBrowser(registration)
@@ -101,7 +115,7 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 		registerSW(onUpdateReady)
 		await flush()
 
-		expect(register).toHaveBeenCalledWith("/sw.js", { type: "module" })
+		expect(register).toHaveBeenCalledWith("/sw.js", { type: "module", scope: "/" })
 
 		fireControllerChange()
 

@@ -94,7 +94,16 @@ export default defineConfig({
 		minify: "oxc",
 		cssMinify: "lightningcss"
 	},
-	server: { headers: COI_HEADERS },
+	server: {
+		headers: {
+			...COI_HEADERS,
+			// Dev has no built sw.js, so registerSW points the worker at its SOURCE module and lets this
+			// server transform it — which scopes it to /src/sw/ by default. The app needs root scope to
+			// see its own download route, and a worker may only claim a scope above its own script when
+			// the script's response says so.
+			"Service-Worker-Allowed": "/"
+		}
+	},
 	preview: {
 		headers: {
 			...COI_HEADERS,

@@ -15,9 +15,9 @@ export async function previewStreamUrl(file: AnyFile, name: string, contentType:
 	return `${SW_DOWNLOAD_PREFIX}${id}`
 }
 
-// Capability gate: true once a service worker is actually controlling this tab — the SW is PROD-only
-// (lib/sw/register.ts never registers one under dev), so this is false there and true under
-// `npm run preview`/a real deploy once boot has claimed the page. This is the single flip point every
+// Capability gate: true once a service worker is actually controlling this tab — registered in every
+// mode now (dev serves the worker's source module, see lib/sw/register.ts), so this is true once boot
+// has claimed the page and false only before that. This is the single flip point every
 // streamed viewer branches on before ever calling previewStreamUrl — if inline streaming ever proves
 // unreliable in a real browser, forcing this false alone reroutes every viewer to the buffered blob
 // fallback, no other call site needs to change.
@@ -31,8 +31,8 @@ const SW_CONTROL_TIMEOUT_MS = 5_000
 
 // The awaitable form of the gate above, for callers that would otherwise treat "not yet" as "no".
 // Returns immediately in both settled cases: true when a worker already controls the tab, false when
-// none is REGISTERED at all — dev never registers one, so that caller pays nothing rather than
-// burning the timeout on every item it looks at. Only the genuinely transient case waits.
+// none is REGISTERED at all, so a browser without one pays nothing rather than burning the timeout on
+// every item its caller looks at. Only the genuinely transient case waits.
 export async function waitForMediaStream(timeoutMs: number = SW_CONTROL_TIMEOUT_MS): Promise<boolean> {
 	if (isMediaStreamAvailable()) {
 		return true

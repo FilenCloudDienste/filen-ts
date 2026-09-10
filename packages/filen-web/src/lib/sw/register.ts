@@ -11,10 +11,19 @@ let updateRequested = false
 // second firing can never re-navigate mid-flight.
 let reloaded = false
 
-// Registration is PROD-only: dev never builds `sw.js` (a separate build, see vite.sw.config.ts), and
-// a controlling worker would fight Vite's own HMR module invalidation.
+// Dev has no built `sw.js` (that is a separate build, see vite.sw.config.ts), so it registers the
+// worker's SOURCE module and lets the dev server transform it — sw.ts imports one module of
+// constants and nothing else, so there is no bundle to reproduce. Scope has to be requested there
+// because the script no longer sits at the root; the dev server answers Service-Worker-Allowed to
+// permit it (vite.config.ts).
+//
+// Running it under HMR is safe for THIS worker specifically: it registers no install handler, never
+// touches the Cache API, and its fetch handler returns without responding to anything but its own
+// two routes — so every module request Vite serves passes straight through it.
+const SW_URL = import.meta.env.PROD ? "/sw.js" : "/src/sw/sw.ts"
+
 export function registerSW(onUpdateReady: () => void): void {
-	if (started || !import.meta.env.PROD || !("serviceWorker" in navigator)) {
+	if (started || !("serviceWorker" in navigator)) {
 		return
 	}
 
@@ -40,7 +49,7 @@ export function registerSW(onUpdateReady: () => void): void {
 	}
 
 	void navigator.serviceWorker
-		.register("/sw.js", { type: "module" })
+		.register(SW_URL, { type: "module", scope: "/" })
 		.then(reg => {
 			registration = reg
 

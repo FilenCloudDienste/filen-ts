@@ -89,7 +89,7 @@ describe("isMediaStreamAvailable", () => {
 		expect(isMediaStreamAvailable()).toBe(false)
 	})
 
-	it("false under dev, where lib/sw/register.ts never registers a service worker at all", async () => {
+	it("false where the browser has no service worker support at all", async () => {
 		vi.stubGlobal("navigator", {})
 
 		const { isMediaStreamAvailable } = await import("@/features/preview/lib/previewStream")

@@ -148,9 +148,8 @@ export const generateVideoThumb: ThumbGenerator = async item => {
 	// uncontrolled for a moment after every worker install or update — the ordinary state of a first
 	// load. Sampling it there returned "failed", which counts toward the blacklist, so scrolling a
 	// directory of videos in that window could spend all three strikes and leave them blank for the
-	// rest of the session even once the worker took control. Where no worker is registered at all
-	// this still returns immediately (dev registers none), so nothing waits for a stream that is
-	// never coming.
+	// rest of the session even once the worker took control. Where no worker is registered at all it
+	// still returns immediately, so nothing ever waits for a stream that is not coming.
 	if (!(await waitForMediaStream())) {
 		return { type: "failed" }
 	}
