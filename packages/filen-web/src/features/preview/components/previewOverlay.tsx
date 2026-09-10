@@ -60,6 +60,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
 
 // Lazy chunks: pdf.js (~1MB+), docx-preview, CodeMirror (+ its per-language grammar chunks) and
 // react-markdown only ever download once a file needing them is actually opened, never on the app's
@@ -744,6 +745,17 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 		// previewOverlay.logic.ts's own isTextEditingTarget for why this checks read-only CodeMirror
 		// too, not just the editable case.
 		if (isMediaTarget(event.target) || isTextEditingTarget(event.target)) {
+			return
+		}
+
+		// An open menu wins too, and this one is not a preference — it is a correctness guard. Menu.Portal
+		// renders inside this Popup's REACT subtree, so a key pressed in the menu reaches this handler by
+		// React propagation wherever the portal put the DOM node, and Base UI only stops a composite key
+		// when it actually moves the highlight (ArrowRight moves nothing in a vertical menu). Paging here
+		// would leave the menu open while the slot beneath it changes, and this menu is built for the
+		// CURRENT slot — so the next click would act on a file the user never opened it for.
+		// directoryListing.tsx guards its own clear-selection action off the same signal.
+		if (isAnyMenuOpen()) {
 			return
 		}
 
