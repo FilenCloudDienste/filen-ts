@@ -350,8 +350,8 @@ export async function fetchDirectorySize(item: DirectorySizeItem): Promise<DirSi
 	return sdkApi.getDirSize(toAnyDirWithContext(item))
 }
 
-// Key + fn + freshness in ONE builder so useDirectorySizeQuery (a row) and prefetchQuery (the size-
-// sort bridge) can never drift onto different keys — a prefetch under a mismatched key would fetch a
+// Key + fn + freshness in ONE builder so useDirectorySizeQuery (a row) and the size-sort bridge's
+// prefetch can never drift onto different keys — a prefetch under a mismatched key would fetch a
 // second time and the reader would find nothing.
 export function directorySizeQueryOptions(item: DirectorySizeItem) {
 	return {

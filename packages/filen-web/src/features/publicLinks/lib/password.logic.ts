@@ -81,5 +81,10 @@ export function dirAccessState(input: {
 // — entering subfolders never re-prompts because the SAME link (password and all) is reused, and the
 // virtual navigation stack never has to carry it.
 export function linkForBrowsing(info: DirPublicInfo, acceptedPassword: string | undefined): DirPublicLink {
-	return { ...info.link, password: acceptedPassword ?? info.link.password }
+	return {
+		...info.link,
+		// sdk-rs 0.4.42 models the password as a tagged state, so a visitor-typed one enters as
+		// "known"; with none accepted yet the link keeps whatever state the info call reported.
+		password: acceptedPassword === undefined ? info.link.password : { type: "known", data: acceptedPassword }
+	}
 }

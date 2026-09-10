@@ -305,6 +305,8 @@ function driveItemFromPlaylistFile(entry: PlaylistFile): DriveItem {
 	const now = BigInt(Date.now())
 	const raw: SdkFile = {
 		uuid: entry.uuid as UuidStr,
+		// The stored PlaylistFile carries no whole-life id, and nothing on the playback path reads one.
+		stableUUID: undefined,
 		meta: {
 			type: "decoded",
 			data: {
@@ -323,6 +325,8 @@ function driveItemFromPlaylistFile(entry: PlaylistFile): DriveItem {
 		bucket: entry.bucket,
 		timestamp: now,
 		chunks: BigInt(entry.chunks),
+		// PlaylistFile carries no SDK flag and the SDK never thumbnails audio, so the veto is the
+		// correct value here — not a placeholder standing in for one.
 		canMakeThumbnail: false
 	}
 

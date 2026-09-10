@@ -1,7 +1,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import type { LinkedFile, DirPublicInfo, LinkedDirsAndFiles, AnyLinkedDir, DirPublicLink, DirSizeResponse } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
-import { publicLinkQueryKey, secretFingerprint } from "@/features/publicLinks/lib/queryKey.logic"
+import { publicLinkQueryKey, secretFingerprint, passwordStatePart } from "@/features/publicLinks/lib/queryKey.logic"
 
 // ★ SECURITY: the decryption key AND any visitor-typed password MUST NOT appear in a react-query key —
 // every secret travels ONLY through the queryFn closures below; the key carries a non-secret djb2
@@ -57,7 +57,7 @@ export function usePublicDirSize(args: {
 	const enabled = levelUuid !== null && dir !== null && link !== null
 
 	return useQuery({
-		queryKey: publicLinkQueryKey("size", levelUuid ?? "disabled", secretFingerprint(link?.linkKey, link?.password)),
+		queryKey: publicLinkQueryKey("size", levelUuid ?? "disabled", secretFingerprint(link?.linkKey, passwordStatePart(link?.password))),
 		queryFn: () => {
 			if (dir === null || link === null) {
 				throw new Error("public-link size invoked without a resolved directory")
@@ -83,7 +83,11 @@ export function usePublicDirListing(args: {
 	const enabled = levelUuid !== null && dir !== null && link !== null
 
 	return useQuery({
-		queryKey: publicLinkQueryKey("listing", levelUuid ?? "disabled", secretFingerprint(link?.linkKey, link?.password)),
+		queryKey: publicLinkQueryKey(
+			"listing",
+			levelUuid ?? "disabled",
+			secretFingerprint(link?.linkKey, passwordStatePart(link?.password))
+		),
 		queryFn: () => {
 			if (dir === null || link === null) {
 				throw new Error("public-link listing invoked without a resolved directory")

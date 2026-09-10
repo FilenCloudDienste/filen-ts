@@ -13,11 +13,11 @@ import {
 // sizes live only in the useDirectorySizeQuery cache a row would otherwise mount individually. This
 // hook makes that cache usable in bulk, cheaply, from ONE call site (directoryListing.tsx):
 //
-//   - PREFETCH, don't observe: every directory in the listing (capped, see logic) gets a
-//     prefetchQuery under the exact key a row would use (shared directorySizeQueryOptions builder) —
-//     deduped against any in-flight row fetch, skipped while the cached value is fresh (15min
-//     staleTime), zero observers, so the cost stays flat for many-directory listings. prefetchQuery
-//     swallows failures; an affected directory just stays on the 0n fallback until a later fetch lands.
+//   - PREFETCH, don't observe: every directory in the listing (capped, see logic) gets an
+//     observer-less `query` under the exact key a row would use (shared directorySizeQueryOptions
+//     builder) — deduped against any in-flight row fetch, skipped while the cached value is fresh
+//     (15min staleTime), so the cost stays flat for many-directory listings. Failures are caught and
+//     dropped; an affected directory just stays on the 0n fallback until a later fetch lands.
 //   - ONE cache subscription total (not one per directory): a single filtered QueryCache listener
 //     bumps a version counter as size results land, and the map is rebuilt from synchronous
 //     getQueryData reads. O(1) reactive footprint regardless of directory count.
@@ -73,7 +73,9 @@ export function useDriveDirectorySizes({
 		}
 
 		for (const item of directorySizePrefetchTargets(items)) {
-			void queryClient.prefetchQuery(directorySizeQueryOptions(item))
+			// `query` rejects where the retired `prefetchQuery` swallowed; this is best-effort warming
+			// with no observer, so a failure stays silent rather than becoming an unhandled rejection.
+			void queryClient.query(directorySizeQueryOptions(item)).catch(() => undefined)
 		}
 	}, [enabled, items])
 

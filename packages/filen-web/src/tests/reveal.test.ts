@@ -41,6 +41,7 @@ function ancestor(uuid: string): Dir {
 function hitItem(): DriveItem {
 	const file: File = {
 		uuid: testUuid("hit"),
+		stableUUID: undefined,
 		parent: testUuid("parent"),
 		size: 1_024n,
 		favorited: false,

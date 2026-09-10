@@ -1,3 +1,5 @@
+import type { PasswordState } from "@filen/sdk-rs"
+
 // ★ SECURITY: the decryption key AND any visitor-typed password MUST NOT appear in a react-query key.
 // The default key hasher JSON-stringifies the whole key into `queryHash`, which the global queryCache
 // `onError` LOGS (queries/client.ts) and the persister uses as its on-disk row name — either would
@@ -24,6 +26,18 @@ export function secretFingerprint(...parts: (string | undefined)[]): string {
 	}
 
 	return (h >>> 0).toString(36)
+}
+
+// A link's password is a tagged union since sdk-rs 0.4.42, but the fingerprint digests strings. Both
+// secret-bearing arms have to move the digest — "known" carries the visitor's typed password and
+// "hashed" the server-side hash — so each contributes its tag AND its payload; "none" contributes the
+// tag alone, which keeps it distinct from an absent link rather than collapsing onto the empty string.
+export function passwordStatePart(state: PasswordState | undefined): string | undefined {
+	if (state === undefined) {
+		return undefined
+	}
+
+	return state.type === "none" ? state.type : `${state.type}:${state.data}`
 }
 
 export function publicLinkQueryKey(scope: string, uuid: string, secret: string) {

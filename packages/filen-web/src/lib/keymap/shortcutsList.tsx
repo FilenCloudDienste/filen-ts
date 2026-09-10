@@ -158,6 +158,11 @@ export function ShortcutsList() {
 					<ul className="flex flex-col">
 						{group.actions.map(action => {
 							const rowRecording = recordingId === action.id
+							// The session flips synchronously on the click, but `start()` runs in an effect — so for a
+							// render the row is "recording" while the recorder is not yet listening, and a key pressed
+							// in that window is silently dropped. Only the PROMPT waits for the recorder to actually be
+							// armed; Cancel stays available from the first render so the row is never a dead end.
+							const rowArmed = rowRecording && isRecording
 							const rowConflict = rejection?.actionId === action.id ? rejection : null
 							const labelId = `${owner}-${action.id}`
 
@@ -181,7 +186,7 @@ export function ShortcutsList() {
 										)}
 									</div>
 									<div className="flex shrink-0 items-center gap-1">
-										{rowRecording ? (
+										{rowArmed ? (
 											<span className="text-xs text-muted-foreground">{t("shortcutsRecording")}</span>
 										) : action.combo.length > 0 ? (
 											<Kbd action={action.id} />

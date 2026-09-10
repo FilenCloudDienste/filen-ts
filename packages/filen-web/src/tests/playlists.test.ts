@@ -52,6 +52,7 @@ function fakeDir(uuid: UuidStr): Dir {
 function fakeJsonFile(uuid: UuidStr, name: string): SdkFile {
 	return {
 		uuid,
+		stableUUID: undefined,
 		meta: { type: "decoded", data: { name, mime: "application/json", modified: 0n, size: 0n, key: "k", version: 2 } },
 		parent: PLAYLISTS_DIR_UUID,
 		size: 0n,

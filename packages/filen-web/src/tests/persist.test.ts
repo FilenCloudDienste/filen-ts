@@ -41,8 +41,8 @@ function makeClient(): QueryClient {
 async function seedTwoQueries(): Promise<{ quotaKey: string; notesKey: string; client: QueryClient }> {
 	const client = makeClient()
 
-	await client.fetchQuery({ queryKey: ["drive", "quota"], queryFn: () => ({ usedBytes: 123456789012345678n }) })
-	await client.fetchQuery({ queryKey: ["notes", "list"], queryFn: () => [{ uuid: "n1", size: 42n }] })
+	await client.query({ queryKey: ["drive", "quota"], queryFn: () => ({ usedBytes: 123456789012345678n }) })
+	await client.query({ queryKey: ["notes", "list"], queryFn: () => [{ uuid: "n1", size: 42n }] })
 
 	// persistQuery is scheduled via notifyManager (setTimeout 0) and the kv write is async — poll.
 	await vi.waitFor(() => {
@@ -75,8 +75,8 @@ describe("per-query persister (Map-backed fake kv)", () => {
 
 		writes.length = 0
 
-		// Default staleTime 0 → this fetchQuery refetches the existing query with new data.
-		await client.fetchQuery({ queryKey: ["drive", "quota"], queryFn: () => ({ usedBytes: 2n }) })
+		// Default staleTime 0 → this query refetches the existing entry with new data.
+		await client.query({ queryKey: ["drive", "quota"], queryFn: () => ({ usedBytes: 2n }) })
 
 		await vi.waitFor(() => {
 			expect(writes).toContain(quotaKey)
@@ -90,7 +90,7 @@ describe("per-query persister (Map-backed fake kv)", () => {
 		const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined)
 		const client = makeClient()
 
-		await client.fetchQuery({ queryKey: ["boot", "config"], queryFn: () => ({ ok: true }) })
+		await client.query({ queryKey: ["boot", "config"], queryFn: () => ({ ok: true }) })
 
 		await vi.waitFor(() => {
 			expect(fakeStore.size).toBe(1)
@@ -115,7 +115,7 @@ describe("per-query persister (Map-backed fake kv)", () => {
 		const circular: Circular = {}
 		circular.self = circular
 
-		await client.fetchQuery({ queryKey: ["boot", "config"], queryFn: () => circular })
+		await client.query({ queryKey: ["boot", "config"], queryFn: () => circular })
 
 		// The wrapped serialize turns the throw into warn + skip. Without the wrap this waitFor
 		// times out (no warn ever fires) and the floating persistQuery rejection additionally

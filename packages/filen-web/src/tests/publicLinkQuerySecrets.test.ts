@@ -30,7 +30,18 @@ const RAW_PASSWORD = "hunter2-super-secret"
 const UUID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 
 const dir = { uuid: UUID } as unknown as AnyLinkedDir
-const link = { linkKey: RAW_KEY, password: RAW_PASSWORD } as unknown as DirPublicLink
+
+// `password` has to be a real tagged `PasswordState`: the size and listing hooks digest it through
+// `passwordStatePart`, which reads a bare string as the literal "undefined:undefined" — the raw
+// password would never enter the digest and the assertions below would hold whatever the hooks did.
+const link: DirPublicLink = {
+	linkUuid: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+	linkKey: RAW_KEY,
+	linkKeyVersion: 2,
+	password: { type: "known", data: RAW_PASSWORD },
+	enableDownload: true,
+	salt: "salt"
+}
 
 function renderPublicLinkQueries() {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })

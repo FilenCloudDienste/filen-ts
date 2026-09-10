@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { DirPublicInfo } from "@filen/sdk-rs"
+import type { DirPublicInfo, PasswordState } from "@filen/sdk-rs"
 import { fileAccessState, dirAccessState, linkForBrowsing } from "@/features/publicLinks/lib/password.logic"
 
 const passwordError = { kind: "wrongPassword", label: "Wrong password", message: "" }
@@ -146,40 +146,61 @@ describe("dirAccessState", () => {
 })
 
 describe("linkForBrowsing", () => {
-	const info: DirPublicInfo = {
-		root: {
-			inner: {
-				uuid: "11111111-1111-1111-1111-111111111111",
-				color: "default",
-				timestamp: 0n,
-				meta: { type: "decoded", data: { name: "root" } }
+	// The only producer that reaches this function is the ANONYMOUS info call, and it hardcodes
+	// `PasswordState::None` on the link it builds (the `v3/dir/link/info` response carries `hasPassword`
+	// and a salt, never a hash). So `hasPassword` alone distinguishes a protected link here — its
+	// `link.password` is "none" either way, and the prompt is driven by `hasPassword` via dirAccessState.
+	function dirInfo(hasPassword: boolean, password: PasswordState = { type: "none" }): DirPublicInfo {
+		return {
+			root: {
+				inner: {
+					uuid: "11111111-1111-1111-1111-111111111111",
+					color: "default",
+					timestamp: 0n,
+					meta: { type: "decoded", data: { name: "root" } }
+				},
+				linkedTag: true
 			},
-			linkedTag: true
-		},
-		link: {
-			linkUuid: "22222222-2222-2222-2222-222222222222",
-			linkKey: "linkkey",
-			linkKeyVersion: 2,
-			password: undefined,
-			enableDownload: true,
-			salt: "salt"
-		},
-		hasPassword: true
+			link: {
+				linkUuid: "22222222-2222-2222-2222-222222222222",
+				linkKey: "linkkey",
+				linkKeyVersion: 2,
+				password,
+				enableDownload: true,
+				salt: "salt"
+			},
+			hasPassword
+		}
 	}
 
-	it("folds the accepted password into the link handle, carrying it across navigation", () => {
-		expect(linkForBrowsing(info, "hunter2").password).toBe("hunter2")
+	const protectedInfo = dirInfo(true)
+	const unprotectedInfo = dirInfo(false)
+
+	it("folds the accepted password into the link handle as a known state, carrying it across navigation", () => {
+		expect(linkForBrowsing(protectedInfo, "hunter2").password).toEqual({ type: "known", data: "hunter2" })
 	})
 
-	it("leaves the link password untouched when none is accepted", () => {
-		expect(linkForBrowsing(info, undefined).password).toBeUndefined()
+	// Before acceptance a protected link browses anonymously — that empty state is exactly what
+	// dirAccessState turns into the prompt, so inventing an auth state here would skip the gate.
+	it("leaves the info call's empty state alone until a password is accepted", () => {
+		expect(linkForBrowsing(protectedInfo, undefined).password).toEqual({ type: "none" })
+		expect(linkForBrowsing(unprotectedInfo, undefined).password).toEqual({ type: "none" })
+	})
+
+	// Exercises the declared `PasswordState` union beyond what this call site can produce: "hashed"
+	// reaches a DirPublicLink only through the authenticated owner-links conversion. It pins the
+	// no-password branch as a genuine passthrough rather than a hardcoded literal.
+	it("passes any other declared password state through untouched", () => {
+		const hashedInfo = dirInfo(true, { type: "hashed", data: "the-hashed-password" })
+
+		expect(linkForBrowsing(hashedInfo, undefined).password).toEqual({ type: "hashed", data: "the-hashed-password" })
 	})
 
 	it("preserves the rest of the link handle unchanged", () => {
-		const derived = linkForBrowsing(info, "hunter2")
+		const derived = linkForBrowsing(protectedInfo, "hunter2")
 
-		expect(derived.linkUuid).toBe(info.link.linkUuid)
-		expect(derived.linkKey).toBe(info.link.linkKey)
+		expect(derived.linkUuid).toBe(protectedInfo.link.linkUuid)
+		expect(derived.linkKey).toBe(protectedInfo.link.linkKey)
 		expect(derived.enableDownload).toBe(true)
 	})
 })

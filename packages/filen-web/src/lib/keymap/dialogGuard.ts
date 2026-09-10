@@ -22,3 +22,20 @@ const OPEN_DIALOG_SELECTOR = '[role="dialog"][data-open], [role="alertdialog"][d
 export function isAnyDialogOpen(): boolean {
 	return document.querySelector(OPEN_DIALOG_SELECTOR) !== null
 }
+
+// Base UI menus (dropdown AND context) carry `role="menu"` + the same `data-open` marker while open.
+// Escape belongs to an open menu — Base UI closes it on Escape itself — so a global Escape action must
+// stand down, exactly as it already does for dialogs. Without this a bulk context menu is
+// undismissable: Escape clears the drive selection instead, the row swaps its bulk menu content for
+// the single-item one WHILE the menu is open, and the stranded popup keeps `data-open` forever.
+const OPEN_MENU_SELECTOR = '[role="menu"][data-open]'
+
+export function isAnyMenuOpen(): boolean {
+	return document.querySelector(OPEN_MENU_SELECTOR) !== null
+}
+
+// Both of the above as one selector, for a caller that asks "is ANY layer still stacked over the page"
+// rather than which kind. Exported because the e2e teardown helper (e2e/helpers/listing.ts) needs the
+// same answer from outside the page, and the two selectors above are subtle enough (see their comments)
+// that a second copy of them would drift.
+export const OPEN_OVERLAY_SELECTOR = `${OPEN_DIALOG_SELECTOR}, ${OPEN_MENU_SELECTOR}`

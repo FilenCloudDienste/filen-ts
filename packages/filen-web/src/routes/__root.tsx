@@ -22,7 +22,7 @@ export const Route = createRootRoute({
 	// Reads its OWN match, not matches[0], because the root IS matches[0] — and for the same reason this
 	// is the one route that must not go through routeHead(), whose job is to yield to this title.
 	head: ({ match }) => ({
-		meta: match.globalNotFound === true ? titleMeta(i18n.t("common:notFoundTitle")) : titleMeta()
+		meta: match._notFound === true ? titleMeta(i18n.t("common:notFoundTitle")) : titleMeta()
 	})
 })
 

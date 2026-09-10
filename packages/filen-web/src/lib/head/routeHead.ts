@@ -27,14 +27,20 @@ export const NOINDEX_META: HeadMetaTag = { name: "robots", content: "noindex, no
 // Structural minimum of a head ctx, declared as a supertype of TanStack's own so `routeHead(...)` is
 // assignable to `head?:` without naming that option's generics.
 export interface HeadContext {
-	matches?: readonly { globalNotFound?: boolean }[]
+	matches?: readonly { _notFound?: boolean }[]
 }
 
 // A URL that matches no route still fuzzy-matches its nearest ANCESTOR, and that ancestor's `head`
 // still runs — so without this guard the ancestor's title would win over the not-found page's. Only
-// the root match carries `globalNotFound`, and the root is `matches[0]`, hence the index.
+// the root match reports the global not-found, and the root is `matches[0]`, hence the index.
+//
+// `_notFound` is router-core's own renaming of the field this used to read as `globalNotFound`. NOT
+// `status === "notFound"`, which the changelog offers as the replacement but which means something
+// else: `status` is the match's own load outcome, while `_notFound` marks the match that OWNS the
+// not-found boundary. The router itself tests them separately, and a global not-found leaves the root
+// match's status on "success" — reading it here silently loses the not-found title.
 export function isGlobalNotFound(ctx: HeadContext): boolean {
-	return ctx.matches?.[0]?.globalNotFound === true
+	return ctx.matches?.[0]?._notFound === true
 }
 
 // The ONLY way a non-root route declares head tags. Non-title meta survives a not-found so the

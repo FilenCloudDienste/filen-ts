@@ -43,16 +43,16 @@ describe("routeHead", () => {
 	it("emits the title on a normal match", () => {
 		const head = routeHead({ title: () => ["Recents"] })
 
-		expect(head({ matches: [{ globalNotFound: false }, {}] }).meta).toEqual([{ title: "Recents · Filen" }])
+		expect(head({ matches: [{ _notFound: false }, {}] }).meta).toEqual([{ title: "Recents · Filen" }])
 	})
 
 	it("drops the title on a global not-found so the root's own title wins", () => {
 		const head = routeHead({ title: () => ["Recents"] })
 
-		expect(head({ matches: [{ globalNotFound: true }, {}] }).meta).toEqual([])
+		expect(head({ matches: [{ _notFound: true }, {}] }).meta).toEqual([])
 	})
 
-	it("treats an absent globalNotFound field and an absent matches array as a normal match", () => {
+	it("treats an absent _notFound field and an absent matches array as a normal match", () => {
 		const head = routeHead({ title: () => ["Recents"] })
 
 		expect(head({ matches: [{}] }).meta).toEqual([{ title: "Recents · Filen" }])
@@ -62,15 +62,15 @@ describe("routeHead", () => {
 	it("keeps non-title meta on a global not-found and drops only the title", () => {
 		const head = routeHead({ title: () => ["Shared file"], meta: [NOINDEX_META] })
 
-		expect(head({ matches: [{ globalNotFound: false }] }).meta).toEqual([{ title: "Shared file · Filen" }, NOINDEX_META])
-		expect(head({ matches: [{ globalNotFound: true }] }).meta).toEqual([NOINDEX_META])
+		expect(head({ matches: [{ _notFound: false }] }).meta).toEqual([{ title: "Shared file · Filen" }, NOINDEX_META])
+		expect(head({ matches: [{ _notFound: true }] }).meta).toEqual([NOINDEX_META])
 	})
 
 	it("emits meta alone when no title is declared, in both ctx shapes", () => {
 		const head = routeHead({ meta: [NOINDEX_META] })
 
-		expect(head({ matches: [{ globalNotFound: false }] }).meta).toEqual([NOINDEX_META])
-		expect(head({ matches: [{ globalNotFound: true }] }).meta).toEqual([NOINDEX_META])
+		expect(head({ matches: [{ _notFound: false }] }).meta).toEqual([NOINDEX_META])
+		expect(head({ matches: [{ _notFound: true }] }).meta).toEqual([NOINDEX_META])
 	})
 
 	it("calls the title thunk per head run, never at construction", () => {
@@ -87,11 +87,11 @@ describe("routeHead", () => {
 
 		expect(calls).toBe(0)
 
-		head({ matches: [{ globalNotFound: false }] })
+		head({ matches: [{ _notFound: false }] })
 
 		expect(calls).toBe(1)
 
-		head({ matches: [{ globalNotFound: true }] })
+		head({ matches: [{ _notFound: true }] })
 
 		expect(calls).toBe(1)
 	})
