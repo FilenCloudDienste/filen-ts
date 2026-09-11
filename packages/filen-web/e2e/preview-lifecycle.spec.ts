@@ -74,7 +74,7 @@ test("editable text preview saves via its Save button, persists across reopen, a
 		await input.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }])
 
 		const row = listbox.getByRole("option", { name: nameTxt })
-		await expect(row).toBeVisible({ timeout: 45_000 })
+		await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		await row.dblclick()
 		const original = page.getByRole("dialog").getByText("Hello from a tiny text fixture.")
@@ -169,7 +169,7 @@ test("editable text preview: a long file's editor actually scrolls", async ({ pa
 		await input.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: LONG_TEXT_BYTES }])
 
 		const row = listbox.getByRole("option", { name: nameTxt })
-		await expect(row).toBeVisible({ timeout: 45_000 })
+		await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// A short viewport (not enterScratchDirectory's tall one, which exists only to defeat the drive
 		// LISTING's own virtualization) — mirrors preview-media-formats.spec.ts's PDF leg. The fixture's
@@ -239,8 +239,8 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 
 		const rowA = listbox.getByRole("option", { name: nameA })
 		const rowB = listbox.getByRole("option", { name: nameB })
-		await expect(rowA).toBeVisible({ timeout: 45_000 })
-		await expect(rowB).toBeVisible({ timeout: 45_000 })
+		await expect(rowA).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(rowB).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// "a" sorts before "b" — Next from A lands on B, mirroring the image leg's own nameA/nameB proof.
 		await rowA.dblclick()
@@ -311,7 +311,7 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 		await input.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }])
 
 		const row = listbox.getByRole("option", { name: nameTxt })
-		await expect(row).toBeVisible({ timeout: 45_000 })
+		await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// The helper rather than a hand-rolled select/confirm: it clears any lingering toast before the
 		// bulk-bar click (Sonner and the bar share the bottom-right corner, and a fading toast swallows
@@ -418,8 +418,8 @@ test("the preview header's own item menu: matches the row menu's set (no Downloa
 
 		const rowA = listbox.getByRole("option", { name: nameA })
 		const rowB = listbox.getByRole("option", { name: nameB })
-		await expect(rowA).toBeVisible({ timeout: 45_000 })
-		await expect(rowB).toBeVisible({ timeout: 45_000 })
+		await expect(rowA).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(rowB).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// "a" sorts before "b" — opening A leaves B as its one sibling to advance onto after trash below.
 		await rowA.dblclick()
@@ -446,14 +446,13 @@ test("the preview header's own item menu: matches the row menu's set (no Downloa
 		// enabled at index 0, so only a leaked ArrowRight is observable, as B rendering in A's place.
 		// Escape then closes just the menu, leaving the preview itself open on A.
 		//
-		// THIS LEG FAILS against the app as it stands, and is left asserting the contract rather than the
-		// behavior. Menu.Portal is a ReactDOM.createPortal inside the dialog popup's React subtree, so the
-		// keydown reaches previewOverlay.tsx's own handleKeyDown through the REACT tree no matter where the
-		// popup sits in the DOM — measured with focus on a role=menuitem inside the menu, and the pager
-		// still stepped onto B. Base UI contributes no guard: its composite root stopPropagation()s only a
-		// key that actually moves the highlight, and ArrowRight in a vertical menu moves nothing. The guard
-		// has to live in handleKeyDown, which can stand down on isAnyMenuOpen() (lib/keymap/dialogGuard.ts)
-		// exactly as directoryListing.tsx already does for its own keys.
+		// Guarded by handleKeyDown's isAnyMenuOpen() stand-down (previewOverlay.tsx), the same way
+		// directoryListing.tsx guards its own keys. Nothing else stops it: Menu.Portal is a
+		// ReactDOM.createPortal inside the dialog popup's React subtree, so the keydown reaches
+		// handleKeyDown through the REACT tree wherever the popup sits in the DOM, and Base UI's
+		// composite root stopPropagation()s only a key that actually moves the highlight — ArrowRight in
+		// a vertical menu moves nothing. So a failure here is that guard regressing, which is the
+		// trash-the-wrong-file bug: the menu still says A while acting on B.
 		await page.keyboard.press("ArrowRight")
 		await expect(dialog.getByText("Preview menu content A")).toBeVisible()
 		await expect(dialog.getByText("Preview menu content B")).toHaveCount(0)

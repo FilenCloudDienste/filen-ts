@@ -6,7 +6,8 @@ import {
 	createDirectoryViaDialog,
 	enterScratchDirectory,
 	LIVE_WRITE_TIMEOUT_MS,
-	BOOT_SETTLE_TIMEOUT_MS
+	BOOT_SETTLE_TIMEOUT_MS,
+	trashScratchDirectory
 } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
@@ -200,161 +201,178 @@ test.describe("drive bulk actions", () => {
 		// real double-click in there too — an in-app client-side route change, same as drive.spec.ts's
 		// own subdirectory-navigation test. Everything below this point, until the final cleanup, stays
 		// inside the scratch directory and never touches the root listing again.
-		const { listbox } = await enterScratchDirectory(page, scratchName)
+		// The scratch root is trashed in-body below as the test's own final assertion. This bracket is
+		// for every path that never reaches it: without it a failure anywhere in the ~150 lines between
+		// here and there left e2e-bulk-actions-<uuid> at the ACCOUNT ROOT permanently, plus up to two
+		// children — and this is the test that actually failed on CI, so the account has been paying for
+		// it. The flag is set from the PROVEN removal, never from calling the helper:
+		// trashScratchDirectory swallows its own failure by design (it logs and returns), so
+		// "I called it" and "it worked" are different facts.
+		let trashed = false
 
-		await createDirectoryViaDialog(page, nameA, listbox)
-		await createDirectoryViaDialog(page, nameB, listbox)
+		try {
+			const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		const rowA = listbox.getByRole("option", { name: nameA })
-		const rowB = listbox.getByRole("option", { name: nameB })
-		await expect(rowA).toBeVisible()
-		await expect(rowB).toBeVisible()
-		await expect(rowA.getByText("Favorited")).toHaveCount(0) // fresh directories start unfavorited
+			await createDirectoryViaDialog(page, nameA, listbox)
+			await createDirectoryViaDialog(page, nameB, listbox)
 
-		// Bulk-favorite is a SET: with neither favorited, the button reads "Favorite" and applies TRUE
-		// to both, not a per-item flip.
-		await rowA.click()
-		await rowB.click({ modifiers: [MOD_KEY] })
-		await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
+			const rowA = listbox.getByRole("option", { name: nameA })
+			const rowB = listbox.getByRole("option", { name: nameB })
+			await expect(rowA).toBeVisible()
+			await expect(rowB).toBeVisible()
+			await expect(rowA.getByText("Favorited")).toHaveCount(0) // fresh directories start unfavorited
 
-		// The write budget on all four badge assertions, not the expect default: bulk favorite runs through
-		// runBulkFavorite with no dialog of its own (bulkActionBar.tsx), so the badge appearing/disappearing IS
-		// the live write settling on the account-wide lease rather than a React commit after one.
-		await page.getByRole("button", { name: "Favorite", exact: true }).click()
-		await expect(rowA.getByText("Favorited")).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(rowB.getByText("Favorited")).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			// Bulk-favorite is a SET: with neither favorited, the button reads "Favorite" and applies TRUE
+			// to both, not a per-item flip.
+			await rowA.click()
+			await rowB.click({ modifiers: [MOD_KEY] })
+			await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
 
-		// Re-select (a successful bulk favorite prunes the selection) and SET back to unfavorited —
-		// nets out to the exact pre-test state.
-		await rowA.click()
-		await rowB.click({ modifiers: [MOD_KEY] })
-		await page.getByRole("button", { name: "Unfavorite", exact: true }).click()
-		await expect(rowA.getByText("Favorited")).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(rowB.getByText("Favorited")).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			// The write budget on all four badge assertions, not the expect default: bulk favorite runs through
+			// runBulkFavorite with no dialog of its own (bulkActionBar.tsx), so the badge appearing/disappearing IS
+			// the live write settling on the account-wide lease rather than a React commit after one.
+			await page.getByRole("button", { name: "Favorite", exact: true }).click()
+			await expect(rowA.getByText("Favorited")).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			await expect(rowB.getByText("Favorited")).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
-		// Bulk-trash both.
-		await rowA.click()
-		await rowB.click({ modifiers: [MOD_KEY] })
-		await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
+			// Re-select (a successful bulk favorite prunes the selection) and SET back to unfavorited —
+			// nets out to the exact pre-test state.
+			await rowA.click()
+			await rowB.click({ modifiers: [MOD_KEY] })
+			await page.getByRole("button", { name: "Unfavorite", exact: true }).click()
+			await expect(rowA.getByText("Favorited")).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			await expect(rowB.getByText("Favorited")).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
-		await page.getByRole("button", { name: "Trash", exact: true }).click()
-		const trashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
-		await expect(trashConfirm).toBeVisible()
-		await trashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-		// The write budget, not the expect default: runBulkDialogAction holds this open and pending for the
-		// whole trash, so its close is the live write settling on the account-wide lease.
-		await expect(trashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			// Bulk-trash both.
+			await rowA.click()
+			await rowB.click({ modifiers: [MOD_KEY] })
+			await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
 
-		await expect(rowA).toHaveCount(0)
-		await expect(rowB).toHaveCount(0)
+			await page.getByRole("button", { name: "Trash", exact: true }).click()
+			const trashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
+			await expect(trashConfirm).toBeVisible()
+			await trashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
+			// The write budget, not the expect default: runBulkDialogAction holds this open and pending for the
+			// whole trash, so its close is the live write settling on the account-wide lease.
+			await expect(trashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
-		// Trash variant: both items are visible there, gated to Restore/Delete-permanently only — no
-		// Favorite/Move surface (mirrors the /drive gating table, inverted). An in-app sidebar-link
-		// click (not page.goto) keeps this a client-side route change on the SAME already-booted app
-		// instance — goto's full reload re-runs the whole boot/re-auth sequence, which raced the
-		// listTrash() fetch against the just-completed trash write when this was first written.
-		await page.getByRole("complementary").getByRole("link", { name: "Trash", exact: true }).click()
-		const trashListing = await waitForListingSettled(page)
-		const trashRowA = trashListing.listbox.getByRole("option", { name: nameA })
-		const trashRowB = trashListing.listbox.getByRole("option", { name: nameB })
-		await expect(trashRowA).toBeVisible()
-		await expect(trashRowB).toBeVisible()
+			await expect(rowA).toHaveCount(0)
+			await expect(rowB).toHaveCount(0)
 
-		// Toolbar's own Empty trash trigger: present because the trash listing is non-empty. Opens the
-		// already-wired typed-confirm dialog and dismisses without ever typing the match phrase — this
-		// spec must never actually empty the shared account's trash.
-		await page.getByRole("button", { name: "Empty trash", exact: true }).click()
-		const emptyTrashConfirm = page.getByRole("alertdialog", { name: "Empty trash?" })
-		await expect(emptyTrashConfirm).toBeVisible()
-		await expect(emptyTrashConfirm.getByRole("heading", { name: "Empty trash?", exact: true })).toBeVisible()
-		await page.keyboard.press("Escape")
-		await expect(emptyTrashConfirm).toHaveCount(0)
-		await expect(trashRowA).toBeVisible()
-		await expect(trashRowB).toBeVisible()
+			// Trash variant: both items are visible there, gated to Restore/Delete-permanently only — no
+			// Favorite/Move surface (mirrors the /drive gating table, inverted). An in-app sidebar-link
+			// click (not page.goto) keeps this a client-side route change on the SAME already-booted app
+			// instance — goto's full reload re-runs the whole boot/re-auth sequence, which raced the
+			// listTrash() fetch against the just-completed trash write when this was first written.
+			await page.getByRole("complementary").getByRole("link", { name: "Trash", exact: true }).click()
+			const trashListing = await waitForListingSettled(page)
+			const trashRowA = trashListing.listbox.getByRole("option", { name: nameA })
+			const trashRowB = trashListing.listbox.getByRole("option", { name: nameB })
+			await expect(trashRowA).toBeVisible()
+			await expect(trashRowB).toBeVisible()
 
-		await trashRowA.click()
-		await trashRowB.click({ modifiers: [MOD_KEY] })
-		await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
+			// Toolbar's own Empty trash trigger: present because the trash listing is non-empty. Opens the
+			// already-wired typed-confirm dialog and dismisses without ever typing the match phrase — this
+			// spec must never actually empty the shared account's trash.
+			await page.getByRole("button", { name: "Empty trash", exact: true }).click()
+			const emptyTrashConfirm = page.getByRole("alertdialog", { name: "Empty trash?" })
+			await expect(emptyTrashConfirm).toBeVisible()
+			await expect(emptyTrashConfirm.getByRole("heading", { name: "Empty trash?", exact: true })).toBeVisible()
+			await page.keyboard.press("Escape")
+			await expect(emptyTrashConfirm).toHaveCount(0)
+			await expect(trashRowA).toBeVisible()
+			await expect(trashRowB).toBeVisible()
 
-		await expect(page.getByRole("button", { name: "Favorite", exact: true })).toHaveCount(0)
-		await expect(page.getByRole("button", { name: "Move", exact: true })).toHaveCount(0)
-		await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible()
-		await expect(page.getByRole("button", { name: "Delete permanently", exact: true })).toBeVisible()
+			await trashRowA.click()
+			await trashRowB.click({ modifiers: [MOD_KEY] })
+			await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
 
-		// Destructive confirms open with Cancel focused — a blind Enter must never fire an irreversible
-		// delete. Opened and dismissed; this suite never permanently deletes anything.
-		await page.getByRole("button", { name: "Delete permanently", exact: true }).click()
-		// Scoped by title like every other confirm here — which also makes this the one assertion that the
-		// permanent-delete confirm is the dialog that opened, since no heading check follows it.
-		const deleteConfirm = page.getByRole("alertdialog", { name: "Delete permanently?" })
-		await expect(deleteConfirm).toBeVisible()
-		await expect(deleteConfirm.getByRole("button", { name: "Cancel", exact: true })).toBeFocused()
-		await page.keyboard.press("Escape")
-		await expect(deleteConfirm).toHaveCount(0)
+			await expect(page.getByRole("button", { name: "Favorite", exact: true })).toHaveCount(0)
+			await expect(page.getByRole("button", { name: "Move", exact: true })).toHaveCount(0)
+			await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible()
+			await expect(page.getByRole("button", { name: "Delete permanently", exact: true })).toBeVisible()
 
-		// Bulk restore CONFIRMS — the one behavior this task adds (a single item's own restore, from the
-		// per-item menu, stays direct/unconfirmed; only the bulk path opens this dialog).
-		await page.getByRole("button", { name: "Restore", exact: true }).click()
-		const restoreConfirm = page.getByRole("alertdialog", { name: "Restore items?" })
-		await expect(restoreConfirm).toBeVisible()
-		await expect(restoreConfirm.getByRole("heading", { name: "Restore items?", exact: true })).toBeVisible()
-		// The preserved half of the same tier rule: a reversible confirm still opens on its confirm button.
-		await expect(restoreConfirm.getByRole("button", { name: "Restore", exact: true })).toBeFocused()
-		await restoreConfirm.getByRole("button", { name: "Restore", exact: true }).click()
-		// The write budget, not the expect default: runBulkDialogAction holds this open for the whole
-		// restore, so its close is the live write settling on the account-wide lease, not a UI beat.
-		await expect(restoreConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			// Destructive confirms open with Cancel focused — a blind Enter must never fire an irreversible
+			// delete. Opened and dismissed; this suite never permanently deletes anything.
+			await page.getByRole("button", { name: "Delete permanently", exact: true }).click()
+			// Scoped by title like every other confirm here — which also makes this the one assertion that the
+			// permanent-delete confirm is the dialog that opened, since no heading check follows it.
+			const deleteConfirm = page.getByRole("alertdialog", { name: "Delete permanently?" })
+			await expect(deleteConfirm).toBeVisible()
+			await expect(deleteConfirm.getByRole("button", { name: "Cancel", exact: true })).toBeFocused()
+			await page.keyboard.press("Escape")
+			await expect(deleteConfirm).toHaveCount(0)
 
-		await expect(trashRowA).toHaveCount(0)
-		await expect(trashRowB).toHaveCount(0)
+			// Bulk restore CONFIRMS — the one behavior this task adds (a single item's own restore, from the
+			// per-item menu, stays direct/unconfirmed; only the bulk path opens this dialog).
+			await page.getByRole("button", { name: "Restore", exact: true }).click()
+			const restoreConfirm = page.getByRole("alertdialog", { name: "Restore items?" })
+			await expect(restoreConfirm).toBeVisible()
+			await expect(restoreConfirm.getByRole("heading", { name: "Restore items?", exact: true })).toBeVisible()
+			// The preserved half of the same tier rule: a reversible confirm still opens on its confirm button.
+			await expect(restoreConfirm.getByRole("button", { name: "Restore", exact: true })).toBeFocused()
+			await restoreConfirm.getByRole("button", { name: "Restore", exact: true }).click()
+			// The write budget, not the expect default: runBulkDialogAction holds this open for the whole
+			// restore, so its close is the live write settling on the account-wide lease, not a UI beat.
+			await expect(restoreConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
-		// restoreItems restores each item to its OWN previous parent — the scratch directory, not root
-		// — so getting back to them means re-descending, not just returning to /drive.
-		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
-		const rootAfterRestore = await waitForListingSettled(page)
-		await descendInto(page, rootAfterRestore.listbox, scratchName)
+			await expect(trashRowA).toHaveCount(0)
+			await expect(trashRowB).toHaveCount(0)
 
-		const restoredListing = await waitForListingSettled(page)
-		const restoredRowA = restoredListing.listbox.getByRole("option", { name: nameA })
-		const restoredRowB = restoredListing.listbox.getByRole("option", { name: nameB })
-		await expect(restoredRowA).toBeVisible()
-		await expect(restoredRowB).toBeVisible()
+			// restoreItems restores each item to its OWN previous parent — the scratch directory, not root
+			// — so getting back to them means re-descending, not just returning to /drive.
+			await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
+			const rootAfterRestore = await waitForListingSettled(page)
+			await descendInto(page, rootAfterRestore.listbox, scratchName)
 
-		// Re-trash both inner items, leaving the scratch directory empty.
-		await restoredRowA.click()
-		await restoredRowB.click({ modifiers: [MOD_KEY] })
-		await page.getByRole("button", { name: "Trash", exact: true }).click()
-		const innerFinalTrashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
-		await expect(innerFinalTrashConfirm).toBeVisible()
-		await innerFinalTrashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-		await expect(innerFinalTrashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(restoredRowA).toHaveCount(0)
-		await expect(restoredRowB).toHaveCount(0)
+			const restoredListing = await waitForListingSettled(page)
+			const restoredRowA = restoredListing.listbox.getByRole("option", { name: nameA })
+			const restoredRowB = restoredListing.listbox.getByRole("option", { name: nameB })
+			await expect(restoredRowA).toBeVisible()
+			await expect(restoredRowB).toBeVisible()
 
-		// Final cleanup: trash the now-empty scratch directory itself — the only other root-level
-		// mutation this test makes, ending everything in Trash (recoverable, net-zero on the live
-		// account: nothing permanent was created or destroyed).
-		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
-		const rootBeforeFinalCleanup = await waitForListingSettled(page)
-		const finalScratchRow = rootBeforeFinalCleanup.listbox.getByRole("option", { name: scratchName })
-		await expect(finalScratchRow).toBeVisible()
+			// Re-trash both inner items, leaving the scratch directory empty.
+			await restoredRowA.click()
+			await restoredRowB.click({ modifiers: [MOD_KEY] })
+			await page.getByRole("button", { name: "Trash", exact: true }).click()
+			const innerFinalTrashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
+			await expect(innerFinalTrashConfirm).toBeVisible()
+			await innerFinalTrashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
+			await expect(innerFinalTrashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			await expect(restoredRowA).toHaveCount(0)
+			await expect(restoredRowB).toHaveCount(0)
 
-		await finalScratchRow.click()
-		await page.getByRole("button", { name: "Trash", exact: true }).click()
-		const scratchTrashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
-		await expect(scratchTrashConfirm).toBeVisible()
-		await scratchTrashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-		await expect(scratchTrashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			// Final cleanup: trash the now-empty scratch directory itself — the only other root-level
+			// mutation this test makes, ending everything in Trash (recoverable, net-zero on the live
+			// account: nothing permanent was created or destroyed).
+			await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
+			const rootBeforeFinalCleanup = await waitForListingSettled(page)
+			const finalScratchRow = rootBeforeFinalCleanup.listbox.getByRole("option", { name: scratchName })
+			await expect(finalScratchRow).toBeVisible()
 
-		// A reload (not just re-checking the same live query-client state) before this LAST assertion —
-		// the app's queries refetch on window focus (queries/client.ts: staleTime 0 +
-		// refetchOnWindowFocus), and Playwright's own multi-worker automation can shift OS-level window
-		// focus across concurrently-running pages; a refetch that happens to land against a moment the
-		// backend hasn't fully caught up with the just-issued trash can overwrite the correct optimistic
-		// removal with a stale "still there" read on THIS page, without anything ever being wrong
-		// server-side. A fresh boot re-fetches once, for real, independent of that page's prior state.
-		await page.reload()
-		const rootAfterFinalCleanup = await waitForListingSettled(page, BOOT_SETTLE_TIMEOUT_MS)
-		await expect(rootAfterFinalCleanup.listbox.getByRole("option", { name: scratchName })).toHaveCount(0)
+			await finalScratchRow.click()
+			await page.getByRole("button", { name: "Trash", exact: true }).click()
+			const scratchTrashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
+			await expect(scratchTrashConfirm).toBeVisible()
+			await scratchTrashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
+			await expect(scratchTrashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+
+			// A reload (not just re-checking the same live query-client state) before this LAST assertion —
+			// the app's queries refetch on window focus (queries/client.ts: staleTime 0 +
+			// refetchOnWindowFocus), and Playwright's own multi-worker automation can shift OS-level window
+			// focus across concurrently-running pages; a refetch that happens to land against a moment the
+			// backend hasn't fully caught up with the just-issued trash can overwrite the correct optimistic
+			// removal with a stale "still there" read on THIS page, without anything ever being wrong
+			// server-side. A fresh boot re-fetches once, for real, independent of that page's prior state.
+			await page.reload()
+			const rootAfterFinalCleanup = await waitForListingSettled(page, BOOT_SETTLE_TIMEOUT_MS)
+			await expect(rootAfterFinalCleanup.listbox.getByRole("option", { name: scratchName })).toHaveCount(0)
+
+			trashed = true
+		} finally {
+			if (!trashed) {
+				await trashScratchDirectory(page, scratchName)
+			}
+		}
 	})
 })

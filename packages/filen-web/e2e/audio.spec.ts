@@ -63,8 +63,8 @@ test("drive audio double-click hands off to the persistent player and transport 
 
 		const rowA = listbox.getByRole("option", { name: nameA })
 		const rowB = listbox.getByRole("option", { name: nameB })
-		await expect(rowA).toBeVisible({ timeout: 60_000 })
-		await expect(rowB).toBeVisible({ timeout: 60_000 })
+		await expect(rowA).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(rowB).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// The player bar is absent until a queue exists.
 		const bar = page.getByRole("region", { name: "Audio player" })
@@ -203,8 +203,8 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 
 		const rowA = listbox.getByRole("option", { name: nameA })
 		const rowB = listbox.getByRole("option", { name: nameB })
-		await expect(rowA).toBeVisible({ timeout: 60_000 })
-		await expect(rowB).toBeVisible({ timeout: 60_000 })
+		await expect(rowA).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(rowB).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// The rail's dedicated Playlists entry — no queue needed first, unlike the old popover-tab route.
 		await page.getByRole("link", { name: "Playlists", exact: true }).click()

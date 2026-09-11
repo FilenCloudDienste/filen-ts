@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { descendInto, enterScratchDirectory, trashScratchDirectory, waitForListingSettled } from "./helpers/listing"
+import { descendInto, enterScratchDirectory, trashScratchDirectory, waitForListingSettled, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
 import { DOCX_BYTES, TEXT_BYTES } from "./helpers/fixtureBytes"
 import { trackCspViolations } from "./helpers/csp"
@@ -145,8 +145,8 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 		])
 
 		const row = listbox.getByRole("option", { name: nameTxt })
-		await expect(row).toBeVisible({ timeout: 45_000 })
-		await expect(listbox.getByRole("option", { name: nameDocx })).toBeVisible({ timeout: 45_000 })
+		await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(listbox.getByRole("option", { name: nameDocx })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Opens the CodeMirror lazy chunk for the first time this run.
 		await row.dblclick()
@@ -296,7 +296,7 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 		await input.setInputFiles([{ name: nameMd, mimeType: "text/markdown", buffer: MARKDOWN_BYTES }])
 
 		const row = listbox.getByRole("option", { name: nameMd })
-		await expect(row).toBeVisible({ timeout: 45_000 })
+		await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Opens the react-markdown + remark-gfm lazy chunk for the first time this run.
 		await row.dblclick()
@@ -339,7 +339,7 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 		// A save rotates the file uuid, which re-keys the body and remounts the viewer in its default
 		// rendered mode — "save, then see the rendered result" is the shipped behavior.
 		await saveButton.click()
-		await expect(page.getByRole("heading", { name: "Hello Markdown!", level: 1 })).toBeVisible({ timeout: 60_000 })
+		await expect(page.getByRole("heading", { name: "Hello Markdown!", level: 1 })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		// The dirty reset: without it both the Save button and the locked toggle stay in their dirty state
 		// forever, and Escape below would pop a phantom "Unsaved changes" prompt instead of closing.
 		await expect(saveButton).toHaveCount(0)
@@ -382,7 +382,7 @@ test("discarding after a cancelled back on the same pop still proceeds to the de
 			.first()
 			.setInputFiles([{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }])
 		const row = listbox.getByRole("option", { name: nameTxt })
-		await expect(row).toBeVisible({ timeout: 45_000 })
+		await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		await row.dblclick()
 
 		const dialog = page.getByRole("dialog")
