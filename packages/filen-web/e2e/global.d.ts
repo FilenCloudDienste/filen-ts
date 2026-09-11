@@ -35,6 +35,7 @@ interface E2eHooks {
 	listTestNoteUuids: () => Promise<string[]>
 	sweepTestNotesByTitlePrefix: (prefix: string) => Promise<number>
 	sweepTestTagsByNamePrefix: (prefix: string) => Promise<number>
+	sweepTestDriveDebris: (target: "root" | "trash", limit: number) => Promise<number>
 	thumbnailFileStat: (parentUuid: string, name: string) => Promise<{ size: number; lastModified: number } | null>
 	createTestSelfChat: () => Promise<string>
 	deleteTestChatByUuid: (uuid: string) => Promise<void>

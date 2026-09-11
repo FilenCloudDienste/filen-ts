@@ -1,12 +1,7 @@
 import type { Page } from "@playwright/test"
 import { test as setup, expect } from "../fixtures"
-import {
-	dismissStartupReminders,
-	firstMatchingRowName,
-	selectAndDeleteTrashRow,
-	selectAndTrashRow,
-	waitForListingSettled
-} from "../helpers/listing"
+import { dismissStartupReminders } from "../helpers/listing"
+import { waitForE2eHooks } from "../helpers/e2eHooks"
 import {
 	isScratchDebrisName,
 	NOTE_DEBRIS_TITLE_PREFIXES,
@@ -33,63 +28,41 @@ setup.describe.configure({ retries: 0 })
 // simply leaves the rest for the next run.
 const SWEEP_BUDGET_MS = 150_000
 
-// Far above the expect default the specs use. A root holding a large debris backlog is slow to render
-// precisely because of the backlog, so the assertion budget that is right for a test would time this
-// sweep out on the one state it exists to clear — and every later run would inherit a worse account.
-const SWEEP_SETTLE_TIMEOUT_MS = 60_000
-
 // Defensive bound only — not tuned to any known leftover count. A predicate bug turning this into an
 // unbounded remove-everything loop against the shared live account is the one failure mode this guards.
 const MAX_ROUNDS = 500
 
-type Listbox = ReturnType<Page["getByRole"]>
+// Removals per programmatic batch. Small enough that a budget check between batches bounds the
+// overshoot to seconds, large enough that draining a real backlog does not spend its time on round
+// trips — the first live run of this cleared 1,224 rows.
+const SWEEP_BATCH = 50
 
-// One item per round, re-scanned from scratch next round — a batch multi-select would go stale the
-// moment the listing reorders under it, which a debris-heavy listing guarantees, and every removal here
-// must act on a row whose name was just matched against isScratchDebrisName. A row that refuses to go
-// is remembered and skipped instead of retried until the budget is gone.
-async function sweepListing(page: Page, surface: string, remove: (listbox: Listbox, name: string) => Promise<void>): Promise<void> {
+// Batches, with the budget checked BETWEEN batches — the shape the old per-round check got wrong by
+// letting a round that started inside the deadline run to completion outside it. A batch of
+// SWEEP_BATCH removals is the most this can overshoot by, instead of a whole surface. Draining is
+// bounded but not abandoned: whatever is left is reported and picked up next run.
+async function sweepDriveSurface(page: Page, target: "root" | "trash"): Promise<number> {
 	const deadline = Date.now() + SWEEP_BUDGET_MS
-	const unsweepable = new Set<string>()
+	let total = 0
 
-	for (let round = 0; round < MAX_ROUNDS; round += 1) {
-		if (Date.now() >= deadline) {
-			console.log(`cleanup-setup: ${surface} sweep hit its time budget — leftovers remain for the next run`)
+	while (Date.now() < deadline) {
+		const removed = await page.evaluate(([surface, limit]) => window.__filenE2E.sweepTestDriveDebris(surface, limit), [
+			target,
+			SWEEP_BATCH
+		] as const)
 
-			return
-		}
+		total += removed
 
-		const { listbox, hasItems } = await waitForListingSettled(page, SWEEP_SETTLE_TIMEOUT_MS)
-
-		// Fast path: a clean listing costs exactly this one read, every run.
-		if (!hasItems) {
-			return
-		}
-
-		const name = await firstMatchingRowName(listbox, candidate => isScratchDebrisName(candidate) && !unsweepable.has(candidate))
-
-		if (name === null) {
-			return
-		}
-
-		try {
-			await remove(listbox, name)
-		} catch {
-			unsweepable.add(name)
-
-			console.log(`cleanup-setup: ${surface} sweep could not remove "${name}" — left for the next run`)
+		// A short batch means the surface is drained (or the rest refused, which the hook already
+		// skipped past) — either way there is nothing a further pass would reach.
+		if (removed < SWEEP_BATCH) {
+			return total
 		}
 	}
-}
 
-// The nav click can silently fail to commit under load (menus.spec.ts hit exactly this), which would
-// leave the caller sweeping whatever listing is still mounted — so the destination is proven by URL
-// before any removal runs, not assumed from the click.
-async function gotoSidebarListing(page: Page, linkName: string, url: RegExp): Promise<void> {
-	await expect(async () => {
-		await page.getByRole("complementary").getByRole("link", { name: linkName, exact: true }).click()
-		await expect(page).toHaveURL(url, { timeout: 5_000 })
-	}).toPass({ timeout: 30_000 })
+	console.log(`cleanup-setup: ${target} sweep hit its budget after ${String(total)} rows — leftovers remain for the next run`)
+
+	return total
 }
 
 // Playlists live in the app-created `.filen/Playlists` directory, which the listing sweeps never
@@ -98,7 +71,16 @@ async function gotoSidebarListing(page: Page, linkName: string, url: RegExp): Pr
 // attribute the row puts on its name span (playlistsPanel.tsx) and matched by the same anchored
 // predicate as every other surface.
 async function sweepPlaylistDebris(page: Page): Promise<void> {
-	await page.getByRole("link", { name: "Playlists", exact: true }).click()
+	// Through the proven nav, like every other surface here: a bare click can silently fail to commit
+	// under load, and this one runs straight after the drive sweep — so an uncommitted click would have
+	// scanned whatever listing was still mounted and reported "nothing to sweep".
+	// NOT gotoSidebarListing: that scopes to the contextual sidebar (`complementary`), and Playlists is
+	// an icon-RAIL entry — scoping it there found nothing and burned the click's whole timeout. Same URL
+	// proof, unscoped locator.
+	await expect(async () => {
+		await page.getByRole("link", { name: "Playlists", exact: true }).click()
+		await expect(page).toHaveURL(/\/playlists$/, { timeout: 5_000 })
+	}).toPass({ timeout: 30_000 })
 	await expect(page.getByRole("heading", { name: "Playlists", exact: true })).toBeVisible()
 
 	const deadline = Date.now() + SWEEP_BUDGET_MS
@@ -155,21 +137,21 @@ setup("sweep drive, trash and playlist debris matching a retired scratch-name pr
 
 	try {
 		await page.goto("/drive")
+		await waitForE2eHooks(page)
 
-		// Same virtualization workaround as enterScratchDirectory (helpers/listing.ts): a tall viewport
-		// makes the virtualizer render every row in one pass, so the round-by-round scan below never
-		// misses a debris row sitting below an unscrolled fold.
-		await page.setViewportSize({ width: 1280, height: 8000 })
+		// Through the SDK, not the listing. The UI sweep this replaces had to render a debris-heavy
+		// root, defeat the virtualizer with an 8000px viewport, then drive a select/confirm/toast cycle
+		// per row inside a wall-clock budget that was only checked BETWEEN rounds — so a single round
+		// could overrun it by minutes, and on a busy account it simply ran out and left the rest for
+		// "the next run", every run. Each write-lane spec brackets itself with a scratch directory, so a
+		// run produces ~22 of them plus the fixture tree; the sweep has to be able to outpace that.
+		// Same anchored isScratchDebrisName predicate as before, so nothing this suite did not create is
+		// reachable — "Empty trash" still stays off the table. Root moves matches to trash; trash then
+		// deletes permanently, which is why root runs first.
+		const trashedFromRoot = await sweepDriveSurface(page, "root")
+		const deletedFromTrash = await sweepDriveSurface(page, "trash")
 
-		await sweepListing(page, "drive root", (listbox, name) => selectAndTrashRow(page, listbox, name))
-
-		// Nothing else sweeps /trash: every net-zero spec ends by moving its scratch directory THERE, and
-		// both destructive confirms in the suite are deliberately cancelled, so without this the shared
-		// account accumulates a run's worth of trashed directories forever — which is what already forced
-		// tall-viewport and sort-order workarounds into the drive specs. Row by row and prefix-matched:
-		// the toolbar's "Empty trash" would destroy content this suite never created.
-		await gotoSidebarListing(page, "Trash", /\/trash$/)
-		await sweepListing(page, "trash", (listbox, name) => selectAndDeleteTrashRow(page, listbox, name))
+		console.log(`cleanup-setup: swept ${String(trashedFromRoot)} root rows, ${String(deletedFromTrash)} trash rows`)
 
 		await sweepPlaylistDebris(page)
 	} catch (error) {

@@ -1,7 +1,7 @@
 import { type } from "arktype"
 import * as Comlink from "comlink"
 import { createNotePreviewFromContentText } from "@filen/utils"
-import type { StringifiedClient, File, Note, NoteType } from "@filen/sdk-rs"
+import type { StringifiedClient, File, Note, NoteType, DirMeta, FileMeta } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
 import { kvGetJson, kvHas, kvSetJson } from "@/lib/storage/adapter"
@@ -15,6 +15,7 @@ import { enqueueChatMessage } from "@/features/chats/lib/sync"
 import { inflightChatMessagesSchema } from "@/features/chats/lib/sync.logic"
 import { chatsQueryUpsert, chatsQueryGet } from "@/features/chats/queries/chats"
 import { log } from "@/lib/log"
+import { isScratchDebrisName } from "@/e2e-hooks/scratchDebris"
 
 // Test-only hooks, loaded ONLY when the app is built with VITE_E2E=1 (a dynamic import behind that
 // env condition in main.tsx, so a normal build dead-code-eliminates this whole module — proven by
@@ -109,6 +110,15 @@ interface E2eHooks {
 	// Tag counterpart: a spec that dies between creating its tag and deleting it leaves the tag behind
 	// (tags survive their notes — deleting a note never deletes the tags on it). Returns the count.
 	sweepTestTagsByNamePrefix: (prefix: string) => Promise<number>
+	// Drive-side counterpart to the note/tag sweeps above, and for the same reason: doing this through
+	// the UI meant rendering a debris-heavy listing, defeating a virtualizer with a tall viewport, and
+	// driving a select/confirm/toast cycle per row inside a wall-clock budget that was not enforced
+	// inside a round. Every write-lane spec brackets itself with a scratch directory, so a run leaves
+	// ~22 of them plus the fixture tree behind; a UI sweep could not keep up, and said so in a log line
+	// nothing read. `target` picks the surface: "root" moves matches to trash, "trash" deletes them
+	// permanently. Matching is isScratchDebrisName — the SAME anchored predicate the UI sweep used, so
+	// the safety argument is unchanged. Returns the count removed.
+	sweepTestDriveDebris: (target: "root" | "trash", limit: number) => Promise<number>
 	// Reads one cached thumbnail's on-disk size + write time, found by file name inside a parent
 	// directory. The only way to prove a repaint after a real page reload came from the existing OPFS
 	// cache entry rather than a fresh generation: a regenerate rewrites the file (a new
@@ -333,6 +343,45 @@ export function installE2eHooks(router: RouterLike): void {
 			}
 
 			return matches.length
+		},
+		sweepTestDriveDebris: async (target, limit) => {
+			await whenBootReady()
+
+			// A row whose meta did not decode carries no name to match, so it can never be debris by this
+			// predicate — and must never be swept on a guess.
+			const nameOf = (meta: DirMeta | FileMeta): string => (meta.type === "decoded" ? meta.data.name : "")
+			const listing = await sdkApi.listDirectory({ kind: target })
+			// Batched: the caller re-invokes until a short batch comes back, so a backlog is drained
+			// across several calls and each one stays bounded. The first real run of this cleared 1,224
+			// trash rows the UI sweep had never been able to reach — a single unbounded call would have
+			// run for as long as that took, with the project timeout as its only limit.
+			const matched = [
+				...listing.dirs.filter(d => isScratchDebrisName(nameOf(d.meta))).map(d => ({ kind: "dir" as const, item: d })),
+				...listing.files.filter(f => isScratchDebrisName(nameOf(f.meta))).map(f => ({ kind: "file" as const, item: f }))
+			].slice(0, limit)
+
+			// Sequential, like the note sweep: these all serialise on the account-wide drive lock
+			// anyway, so firing them together only makes a mid-failure state harder to read. Each
+			// removal is independently guarded — one undeletable row must not strand the rest, which is
+			// the whole reason the previous UI sweep kept running out of budget.
+			let removed = 0
+
+			for (const entry of matched) {
+				try {
+					if (entry.kind === "dir") {
+						await (target === "trash" ? sdkApi.deleteDirectoryPermanently(entry.item) : sdkApi.trashDirectory(entry.item))
+					} else {
+						await (target === "trash" ? sdkApi.deleteFilePermanently(entry.item) : sdkApi.trashFile(entry.item))
+					}
+
+					removed++
+				} catch {
+					// Left for the next run; the caller reports the shortfall. One undeletable row must
+					// never strand the rest — that is what kept the old sweep permanently behind.
+				}
+			}
+
+			return removed
 		},
 		thumbnailFileStat: async (parentUuid, name) => {
 			await whenBootReady()
