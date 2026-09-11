@@ -81,9 +81,60 @@ jobs:
       - name: Test
         working-directory: packages/filen-mobile
         run: npm test
-  test-web:
+  # Everything for filen-web that needs NO live account and NO secrets. Deliberately outside the
+  # `filen-web-e2e` concurrency group below: these used to sit in that group, so a six-second unit
+  # suite queued behind whatever ~35-minute e2e run happened to hold the account — turning the fastest
+  # signal in the repo into the slowest. Runs in parallel with test-web, not before it, so neither
+  # waits on the other.
+  web-checks:
     needs: changes
     if: needs.changes.outputs.filen-web == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # The Vite production build (SDK wasm + full module graph) needs more than the default heap.
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Install dependencies
+        working-directory: packages/filen-web
+        run: npm ci
+      - name: Check generated error kinds are up to date
+        working-directory: packages/filen-web
+        run: npm run gen:error-kinds && git diff --exit-code
+      - name: React Compiler healthcheck
+        working-directory: packages/filen-web
+        run: npm run check:compiler
+      - name: Unit tests
+        working-directory: packages/filen-web
+        run: npm run test
+      - name: Assert e2e hooks are absent from a production build
+        # A property of the BUILD, so it belongs with the other account-free checks rather than behind
+        # the e2e queue — and an e2e flake can no longer decide whether it runs at all.
+        working-directory: packages/filen-web
+        run: |
+          rm -rf dist && npm run build
+          if grep -rq 'filenE2E\|filen.e2e.session' dist; then
+            echo 'E2E hooks leaked into the production build'
+            exit 1
+          fi
+
+  test-web:
+    needs: changes
+    # `push` is filtered to the default branch on purpose. For a same-repo branch `push` and
+    # `pull_request` BOTH fire for the same commit, and because they carry different refs neither the
+    # workflow nor the constant group below dedupes them — so one commit queued two full ~35-minute
+    # live-account runs back to back. Worse, GitHub keeps only ONE pending job per group, so the run
+    # dropped while pending was usually a NEWER commit's. The PR event stays the branch signal; push
+    # covers main, where there is no PR event.
+    if: |
+      (needs.changes.outputs.filen-web == 'true' || github.event_name == 'workflow_dispatch')
+      && (github.event_name != 'push' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     # Playwright's globalTimeout bounds the e2e step alone; npm ci, both production builds and the
     # browser install are unbounded, and a hang in any of them would hold the non-cancelling
@@ -114,15 +165,6 @@ jobs:
       - name: Install dependencies
         working-directory: packages/filen-web
         run: npm ci
-      - name: Check generated error kinds are up to date
-        working-directory: packages/filen-web
-        run: npm run gen:error-kinds && git diff --exit-code
-      - name: React Compiler healthcheck
-        working-directory: packages/filen-web
-        run: npm run check:compiler
-      - name: Unit tests
-        working-directory: packages/filen-web
-        run: npm run test
       # The runner image id (ubuntu24, ubuntu26, ...) belongs in the Playwright cache key below, but it
       # cannot be read there: ImageOS lives in the runner PROCESS's environment, and the `env` context
       # does not inherit those — `${{ env.ImageOS }}` would silently expand to nothing. Promoting it
@@ -157,18 +199,6 @@ jobs:
         env:
           FILEN_WEB_E2E_TEST_EMAIL: ${{ secrets.FILEN_WEB_E2E_TEST_EMAIL }}
           FILEN_WEB_E2E_TEST_PASSWORD: ${{ secrets.FILEN_WEB_E2E_TEST_PASSWORD }}
-      - name: Assert e2e hooks are absent from a production build
-        # Same reason the report upload below runs unconditionally: this asserts a property of the
-        # BUILD, which an e2e flake says nothing about — without it the check runs only on success()
-        # and any red run silently skips it.
-        if: ${{ !cancelled() }}
-        working-directory: packages/filen-web
-        run: |
-          rm -rf dist && npm run build
-          if grep -rq 'filenE2E\|filen.e2e.session' dist; then
-            echo 'E2E hooks leaked into the production build'
-            exit 1
-          fi
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
