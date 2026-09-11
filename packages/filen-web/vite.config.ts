@@ -83,7 +83,17 @@ export default defineConfig({
 	// injects that import during the Babel transform above, which runs after Vite's dependency scan.
 	// Discovered mid-session it re-optimizes the graph and reloads, and every request already in
 	// flight for the previous generation's content-hashed chunks 404s on the way through.
-	optimizeDeps: { exclude: ["@sqlite.org/sqlite-wasm"], include: ["react/compiler-runtime"] },
+	// The service-worker SDK is excluded for the same reason as sqlite-wasm directly above: its glue
+	// self-locates its wasm with `new URL("sdk-rs_bg.wasm", import.meta.url)`. Pre-bundled, the glue is
+	// moved out of its own directory and that relative URL no longer points at the binary beside it.
+	// The page's own SDK is deliberately NOT excluded: pre-bundled, its wasm URL lands in the deps
+	// directory, where vite/sdk-artifacts-plugin.ts answers it by basename — which is what that
+	// middleware is for. Only the worker's copy needs its real path, because it is the one whose
+	// basename is shared with a different binary.
+	optimizeDeps: {
+		exclude: ["@sqlite.org/sqlite-wasm", "@filen/sdk-rs/service-worker/sdk-rs.js"],
+		include: ["react/compiler-runtime"]
+	},
 	// Vite 8 already defaults both of these on (verified against the installed package's
 	// own types: `minify` defaults to 'oxc', `cssMinify` to 'lightningcss') — pinned
 	// explicitly so a future Vite default change can't silently soften production output.

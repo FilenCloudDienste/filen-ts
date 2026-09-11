@@ -31,6 +31,16 @@ const COI: Record<string, string> = {
 // works both at the worker's dev source dir and at the built assets dir. `sdk.worker.ts` and Vite's
 // own hashed emits never collide (the names here are exact and unhashed).
 function artifactRel(urlPath: string): string | null {
+	// A request that already names a path INSIDE the package is authoritative — Vite can serve it from
+	// where it actually lives, and this middleware must not answer it from the package root instead.
+	// Two of these basenames are not unique: the package ships a separate single-threaded build for the
+	// service worker under service-worker/, with its own sdk-rs.js and its own (much smaller)
+	// sdk-rs_bg.wasm. Matching those by basename handed the worker the PAGE's threaded binary, which
+	// fails to instantiate against single-threaded glue because it imports its memory.
+	if (urlPath.includes("/@filen/sdk-rs/")) {
+		return null
+	}
+
 	const snippetIdx = urlPath.indexOf("/snippets/")
 	if (snippetIdx !== -1) {
 		return urlPath.slice(snippetIdx + 1) // "snippets/…" relative to PKG
