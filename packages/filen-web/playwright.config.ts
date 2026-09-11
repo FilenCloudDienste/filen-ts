@@ -253,8 +253,18 @@ export default defineConfig({
 		// drive lock, so neither is ordered after anything — but neither is it free of the lanes above:
 		// they all draw on the one `workers` pool, so on CI, where that pool is 3 and the read lane alone
 		// caps at 3, these two mostly get their slots as the read lane drains.
+		// Both lanes below carry a derived ceiling for the same reason chromium-read and chromium-write do.
+		// They used to inherit the 120s suite default, which exists for the drive-lock orphan case that
+		// these surfaces never reach — and their own pinned waits declare far more than that. notes.spec's
+		// createAndOpenTestNote preamble alone is ~178s of bounded waiting before a test body's first
+		// assertion (30s goto + 18s reminders + 10s nav + 15s hooks + 15s rail click + 30s waitForURL +
+		// 15s fill + 15s click + 30s waitForURL), and its history test pins ~555s on top. A test that
+		// outruns the default is killed by the HARNESS, which names nothing and dies before teardown —
+		// the one outcome every other budget here is shaped to avoid. 300s covers the longest declared
+		// test with room over; the per-test test.setTimeout calls that papered over this can go.
 		{
 			name: "chromium-notes",
+			timeout: 300_000,
 			use: { ...devices["Desktop Chrome"] },
 			dependencies: ["fixtures-setup"],
 			testMatch: NOTES_SPEC,
@@ -263,6 +273,7 @@ export default defineConfig({
 		},
 		{
 			name: "chromium-chats",
+			timeout: 300_000,
 			use: { ...devices["Desktop Chrome"] },
 			dependencies: ["fixtures-setup"],
 			testMatch: CHATS_SPEC,

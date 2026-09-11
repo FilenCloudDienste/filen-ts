@@ -10,6 +10,7 @@ import { routeTree } from "@/routeTree.gen"
 import { bootSdk } from "@/lib/sdk/boot"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { NotFoundScreen } from "@/features/shell/components/notFoundScreen"
+import { markReminderFired, markStorageReminderFired } from "@/features/settings/components/security/exportMasterKeys.logic"
 
 // notFoundMode "root" (the default is "fuzzy") keeps every unknown URL on ONE full-page 404 instead of
 // rendering it inside whichever ancestor layout happened to match, and makes the root match the
@@ -43,9 +44,25 @@ declare module "@tanstack/react-router" {
 // E2E-only test hooks. The dynamic import behind this env condition is dead-code-eliminated from a
 // normal build (asserted by the no-flag build grep), so nothing test-related ships to production.
 if (import.meta.env.VITE_E2E === "1") {
-	void import("@/e2e-hooks").then(m => {
-		m.installE2eHooks(router)
-	})
+	// Latched HERE rather than inside installE2eHooks, and synchronously: the import below is
+	// fire-and-forget, so a latch inside it races the first render of the authed shell. Both startup
+	// reminders are modal alertdialogs, and while one stands Base UI's markOthers aria-hides the whole
+	// shell — every role-based locator in the suite then matches nothing, several steps from the cause.
+	// Suppressing them here rather than dismissing them from the test side also removes a fixed 3s (and
+	// up to 15s more) from every authed page load. AccountReminders keeps its own coverage in
+	// src/tests/accountReminders.test.ts.
+	markReminderFired()
+	markStorageReminderFired()
+
+	void import("@/e2e-hooks")
+		.then(m => {
+			m.installE2eHooks(router)
+		})
+		.catch((error: unknown) => {
+			// Nothing retries this import, so a failed chunk fetch leaves window.__filenE2E absent for
+			// the life of the page and every hook-driven spec fails on a missing global. Say so once.
+			console.error("[e2e] hook install failed — window.__filenE2E will never appear", error)
+		})
 }
 
 const rootElement = document.getElementById("root")

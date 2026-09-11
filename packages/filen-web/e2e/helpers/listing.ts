@@ -3,58 +3,43 @@ import { expect } from "../fixtures"
 import { OPEN_OVERLAY_SELECTOR } from "@/lib/keymap/dialogGuard"
 
 // Startup account reminders (master-keys export, storage over limit) are BLOCKING modal alertdialogs
-// the authed shell raises once per page LOAD, keys before storage — while open they render the rest of
-// the app inert/aria-hidden. THE RULE for every authed spec: no shell interaction or landmark
-// assertion before either waitForListingSettled (which calls this first) or an explicit
-// dismissStartupReminders on that page — and again after every reload/new page, which re-arms the
-// reminders. The "already handled" guard lives in a window flag rather than a WeakSet<Page> ON
-// PURPOSE: a reload re-arms the reminders but keeps the same Page object, so a WeakSet would wrongly
-// suppress the second dismissal — the window flag clears on reload exactly as the reminders do. First
-// pass per load: dismiss never exports keys, so the keys reminder deterministically re-appears for the
-// e2e account and is bounded-waited for; storage only fires when over limit, so it is a non-blocking
-// snapshot after keys closes. Later same-load calls read the flag and return immediately.
+// the authed shell raises once per page LOAD. They are LATCHED CLOSED in the e2e build before the first
+// render (src/main.tsx calls markReminderFired/markStorageReminderFired under VITE_E2E), so the normal
+// path here reads the DOM once and returns.
+//
+// This used to drive the dismissal itself, and it was the single most expensive thing in the suite: a
+// 15s wait for the keys dialog plus an unconditional 3s for a storage dialog that CANNOT mount on an
+// under-quota account — paid on every authed page load, ~4 minutes a run. It also latched a
+// "handled" flag that could be set while a dialog was still standing, after which Base UI's markOthers
+// left the shell aria-hidden and every later getByRole matched nothing, reported several steps away as
+// "the listing never rendered".
+//
+// The dismissal survives only as a backstop, and only when one is ACTUALLY on screen: a standing
+// reminder is still fatal to every locator after it, so silently ignoring one would trade a slow suite
+// for an inscrutable one. It warns, because reaching it means the latch did not take.
 export async function dismissStartupReminders(page: Page): Promise<void> {
-	const handled = await page
-		.evaluate(() => Boolean((window as unknown as { __e2eRemindersHandled?: boolean }).__e2eRemindersHandled))
-		.catch(() => false)
+	// Both reminders' dismiss buttons, matched exactly. Scoped to alertdialog rather than the broad
+	// open-overlay selector so a legitimately open menu or dialog never routes a spec through here.
+	// count() reads the DOM as it stands and never waits, so the latched path costs one round trip.
+	const dismiss = page
+		.getByRole("alertdialog")
+		.getByRole("button", { name: /^(Remind me later|OK)$/ })
+		.first()
 
-	if (handled) {
+	if ((await dismiss.count().catch(() => 0)) === 0) {
 		return
 	}
 
-	const keysDismiss = page.getByRole("alertdialog").getByRole("button", { name: "Remind me later", exact: true })
-	let settledClean: boolean
+	console.warn("dismissStartupReminders: a startup reminder is on screen — the e2e latch did not take")
 
-	try {
-		await keysDismiss.click({ timeout: 15_000 })
-		settledClean = true
-	} catch {
-		// Either the reminder never showed (keys already exported) or the authed boot outran the wait.
-		// Those are not the same thing, and only the first may latch the flag: a reminder that mounts
-		// just after this gets no second chance, and Base UI's markOthers then stamps the whole shell
-		// aria-hidden — after which every getByRole on this page matches NOTHING, far from the cause.
-		settledClean =
-			(await page
-				.locator(OPEN_OVERLAY_SELECTOR)
-				.count()
-				.catch(() => 1)) === 0
+	// One at a time: the storage reminder mounts only after the keys one closes.
+	for (let i = 0; i < 2; i++) {
+		if ((await dismiss.count().catch(() => 0)) === 0) {
+			return
+		}
+
+		await dismiss.click({ timeout: 15_000 }).catch(() => undefined)
 	}
-
-	// Waited for, not snapshotted: the storage dialog mounts after the keys one closes, and a one-shot
-	// isVisible can lose that race and leave it standing for the rest of the load.
-	const storageDismiss = page.getByRole("alertdialog").getByRole("button", { name: "OK", exact: true })
-
-	await storageDismiss.click({ timeout: STORAGE_REMINDER_TIMEOUT_MS }).catch(() => undefined)
-
-	if (!settledClean) {
-		return
-	}
-
-	await page
-		.evaluate(() => {
-			;(window as unknown as { __e2eRemindersHandled?: boolean }).__e2eRemindersHandled = true
-		})
-		.catch(() => undefined)
 }
 
 // Resolves once the listing has settled to one of its THREE terminal render states for the CURRENT
@@ -119,10 +104,6 @@ export const BOOT_SETTLE_TIMEOUT_MS = 30_000
 // Bounded poll for a create that landed after its attempt gave up. Short: it only has to outlast the
 // restored snapshot's background refetch, not a write.
 const ADOPT_POLL_TIMEOUT_MS = 15_000
-
-// The storage reminder mounts only after the keys one closes, and only when the account is over its
-// limit — so this waits briefly rather than snapshotting, and costs that much only when it is absent.
-const STORAGE_REMINDER_TIMEOUT_MS = 3_000
 
 // Budget for re-driving the menu/confirm interaction alone — no live write is in flight while this
 // retries, so it is sized off UI responsiveness rather than off the lease.
