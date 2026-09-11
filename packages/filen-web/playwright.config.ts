@@ -182,7 +182,11 @@ export default defineConfig({
 		// the first's, every extra in-flight write is one more lease a timeout can orphan, and a create
 		// that loses the race wedges its dialog pending, which makes the page inert and leaves the
 		// client blind past the SDK backoff's 22s mark. Serialised, the only hold a test ever waits out
-		// is an orphaned lease's own 30s TTL, which every write budget here already covers.
+		// is an orphaned lease's own 30s TTL, which every write budget here already covers — though what
+		// a test actually WAITS is longer than that TTL: the SDK probes for the lease on a backoff that
+		// is blind for long stretches, so a lease free at 30s is not noticed until the next probe.
+		// Measured end to end, the first write after another context closed costs 35-72s (the method and
+		// the numbers are in helpers/listing.ts's LIVE_WRITE_TIMEOUT_MS note).
 		//
 		// drive-search.spec.ts is a member like any other — it builds its own nested scratch tree, so it
 		// takes the lock by the lane's own criterion — but it leans on the single worker for a second
@@ -210,20 +214,20 @@ export default defineConfig({
 			// burn on a contended account (helpers/listing.ts). Counting only the waits pinned at their own
 			// call sites there:
 			//
-			//   create retry loop  291s = attempt 1 77s (15s reminder dismissal + 3s storage reminder
-			//                             + 10s settle + 45s pinned create wait + 4s dialog probes)
-			//                             + 2 x 92s (the same, plus the 15s adopt poll, which is gated on
-			//                             attempt > 1) + 2 x 15s reload. Every reload RE-ARMS the startup
-			//                             reminders, so the 15s dismissal recurs per attempt rather than
-			//                             being paid once.
+			//   create retry loop  334s = attempt 1 152s (15s reminder dismissal + 3s storage reminder
+			//                             + 10s settle + 120s pinned create wait + 4s dialog probes)
+			//                             + attempt 2 167s (the same, plus the 15s adopt poll, which is
+			//                             gated on attempt > 1) + 15s reload. Every reload RE-ARMS the
+			//                             startup reminders, so the 15s dismissal recurs per attempt
+			//                             rather than being paid once.
 			//   descent             70s = 10s row + 30s descendInto retry envelope + 10s breadcrumb
 			//                             + 2 x 10s settle
-			//   teardown           198s = 48s overlay-reload fallback (30s goto + 18s reminders) + 15s
-			//                             sidebar click + 10s settle + 15s row poll + 110s
-			//                             selectAndTrashRow envelope (40s interaction + 60s confirm
+			//   teardown           258s = 48s overlay-reload fallback (30s goto + 18s reminders) + 15s
+			//                             sidebar click + 10s settle + 15s row poll + 170s
+			//                             selectAndTrashRow envelope (40s interaction + 120s confirm
 			//                             + 10s trailing row)
 			//   -----------------------
-			//                      559s, and all of it is reachable on a run that still PASSES: each of
+			//                      662s, and all of it is reachable on a run that still PASSES: each of
 			//                      those loops retries, so burning the whole envelope is a slow success,
 			//                      not a failure.
 			//
@@ -238,10 +242,11 @@ export default defineConfig({
 			// The old 120s held neither end, and the end it cut was the teardown — leaking the scratch
 			// directory onto the shared account and reporting a timeout instead of the real failure; 300s
 			// and then 480s held the brackets only by understating them (the latter still carried a 3-
-			// attempt figure after a loop change). What is left over above 559s is the test body's,
-			// and a body whose own pinned waits need more than that says so with test.slow /
-			// test.setTimeout, where the cost is visible in the file.
-			timeout: 720_000
+			// attempt figure after a loop change), and 720s was derived when a create attempt was pinned
+			// at 45s rather than at the measured cost of waiting out an orphaned lease. What is left over
+			// above 662s is the test body's, and a body whose own pinned waits need more than that says
+			// so with test.slow / test.setTimeout, where the cost is visible in the file.
+			timeout: 900_000
 		},
 		// Serial lanes for the two surfaces that race THEMSELVES rather than the drive: notes against the
 		// free plan's 10-note cap, chats against the conversation-create rate limiter. Neither takes the

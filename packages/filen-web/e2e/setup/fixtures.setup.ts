@@ -173,11 +173,14 @@ async function uploadScenarioFiles(page: Page, scenario: FixtureScenario, workDi
 
 // The first write of a run is the one that loses to a stale `drive-write` lease. The lease is
 // server-side (TTL 30s, refreshed every 15s by the holding client — filen-rs src/sync/lock.rs:176-186).
-// An orderly abort releases it: ResourceLock's Drop posts a Release. A KILLED context does not — the
-// wasm runtime dies before Drop runs — so a run torn down mid-write leaves the lease to expire on its
-// own, and meanwhile the next writer just waits. It waits silently and effectively forever: contention
-// is never an error, only `acquired:false` plus a backoff that runs ~8640 attempts before giving up.
-// The dialog sits in its pending state throughout, undismissable by design, so only a reload gets out.
+// An orderly abort releases it: ResourceLock's Drop posts a Release. A CLOSED context does not — the
+// wasm runtime dies before Drop runs — so any context torn down while the SDK holds the lease leaves it
+// to expire on its own, and meanwhile the next writer just waits. It waits silently and effectively
+// forever: contention is never an error, only `acquired:false` plus a backoff that runs ~8640 attempts
+// before giving up. The dialog sits in its pending state throughout, undismissable by design, so only a
+// reload gets out. This is not limited to a run killed mid-write: an ordinary test whose context closes
+// does it too, which is why the first write of EVERY spec pays for the previous one (35-72s measured —
+// helpers/listing.ts's LIVE_WRITE_TIMEOUT_MS note carries the numbers and the method).
 //
 // That used to cost the one test that hit it. It now gates every chromium lane, so the same wedge
 // would skip the whole suite — which is why this one create gets attempts the rest of the build does

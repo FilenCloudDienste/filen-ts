@@ -92,12 +92,22 @@ export async function waitForListingSettled(
 }
 
 // Ceiling for a wait that closes on a live ACCOUNT WRITE rather than on UI responsiveness. Every
-// create/rename/move/trash serialises on the SDK's account-wide drive lock, whose acquisition under
-// contention is a poll lottery with no useful bound — a write queued behind a sibling worker's write
-// (or behind a lease left by a context torn down mid-write) routinely outlives the 10s expect default,
-// and in a setup step that turns into a burnt test plus scratch debris on the shared account.
-// Assertions that are genuinely about UI responsiveness keep the tight default.
-export const LIVE_WRITE_TIMEOUT_MS = 60_000
+// create/rename/move/trash serialises on the SDK's account-wide `drive-write` lease, and the dominant
+// cost is not the write — it is waiting out a lease nobody holds any more.
+//
+// Measured on a quiet account, one spec at a time, nothing else touching it: a write costs ~0.5s, and
+// a write issued by a context that FOLLOWS a closed one costs 35-72s (35.7, 49.4, 63.5, 64.3, 71.7,
+// 72.1s across runs). A page that is merely ALIVE never blocks another client — an overlapping write
+// from a second context measured 413-422ms — so this is not app-level contention between clients. It
+// is the close itself: a context torn down while the SDK holds the lease stops refreshing it without
+// posting a Release, and the next writer waits out the TTL on a fibonacci backoff that is blind for
+// long stretches (one measurement landed on 35.713s, the documented 35.75s step, to the millisecond).
+//
+// So the budget is sized off that measured worst case with headroom, NOT off how long a write takes.
+// Anything tighter fails on a lease that was always going to clear: 60s sat just under the 72s tail
+// and is exactly what failed drive-actions' second create on CI. Assertions that are genuinely about
+// UI responsiveness keep the tight default.
+export const LIVE_WRITE_TIMEOUT_MS = 120_000
 
 // Settle budget for the first listing after a full document load, where the wait covers a COLD BOOT
 // (wasm init, the SDK's thread pool, OPFS open) rather than UI responsiveness — the same cost
@@ -207,46 +217,31 @@ export async function createDirectoryViaDialog(
 // concurrent create/trash at root can break, and this exact interference already reproduced live once
 // as a flaky drive.spec.ts failure. Nesting confines every count-shifting moment to the two around the
 // scratch directory itself (create, final trash) instead of one pair per fixture file.
-// A scratch create is the FIRST write a spec makes, and it is the one that meets a `drive-write` lease
-// left behind by something that died holding it — a crashed test, a killed CI runner, a cancelled
-// workflow. No SDK change can remove that case: a process that dies never releases anything, so the
-// lease always has to age out on its own (TTL 30s, refreshed every 15s by a live holder).
+// A scratch create is the FIRST write a spec makes, and the one that pays for the PREVIOUS spec's
+// browser context being closed. That teardown is what orphans the account-wide `drive-write` lease:
+// the SDK stops refreshing it without posting a Release, so it has to age out on its own (TTL 30s,
+// refreshed every 15s by a live holder). Nothing the suite does can prevent it — a closed context
+// cannot release anything — and it is not contention between live clients: a write issued while
+// another context is booted and idle measured 413-422ms, overlapping its boot window on purpose.
 //
-// Waiting it out is the wrong strategy, and not because 30s is long. The SDK probes for the lock on a
-// fibonacci backoff capped at 30s — 0, .25, .5, 1, 1.75, 3, 5, 8.25, 13.5, 22, 35.75, 58, 88s — so once
-// past the early attempts it is BLIND for 22s, then 30s at a stretch. A lease that frees at 40s is not
-// noticed until 58s; one that frees at 60s, not until 88s. Sitting on a longer timeout mostly buys
-// blindness.
+// Waiting it out is therefore the ONLY strategy, and the budget above is sized off what it actually
+// costs (35-72s measured; see LIVE_WRITE_TIMEOUT_MS for the numbers and the method).
 //
-// A reload is what actually helps: a fresh page is a fresh SDK client whose backoff restarts at zero,
-// so it probes immediately instead of inside someone else's 30s gap. Hence retry-with-reload rather
-// than a bigger budget. Bounded rather than open-ended (the count is SCRATCH_CREATE_ATTEMPTS below):
-// a lease that outlives a run of fresh probes is not transient, and the failure should say so rather
-// than hide in a longer wait.
+// Reloading was the old strategy and it was strictly worse. The reasoning was that a fresh page is a
+// fresh SDK client whose backoff restarts at zero, so it probes immediately instead of inside someone
+// else's blind stretch. What it actually does is abandon a create that was ALREADY GOING TO LAND —
+// every CI run showed the abandoned name arriving moments later ("landed late — adopting it instead
+// of retrying the write") — and then pay a fresh boot before waiting out the same lease anyway. On the
+// last CI run that cost ~70s on every one of 18 write specs, ~21 minutes of a 35-minute build, and the
+// reload itself tears down one more context, which is the very thing that orphans a lease.
 //
-// The budgets are what they are because the whole loop AND the caller's teardown have to fit inside one
-// test, with room left over: a test the HARNESS kills never releases the lease it holds, while one that
-// fails on an assertion's own pin unwinds cleanly, so every wait on this path has to be able to expire
-// before the lane's own ceiling does. A failing attempt costs 15s (dismissStartupReminders' own click
-// wait, re-armed by every reload, so it recurs on every attempt rather than being paid once) + 3s (the
-// storage reminder wait) + 10s (listing settle) + 45s (the pinned create wait) + 4s (the two dialog
-// probes above) = 77s, plus 15s for the adopt poll on attempts 2 and up. So the loop's ceiling is
-// 77s + 2 x 92s + 2 x 15s reload = 291s. That counts only the PINNED waits: createDirectoryViaDialog's
-// button click, name fill and Create click each inherit the 15s actionTimeout and its dialog
-// toBeVisible the 10s expect default, another 55s per attempt if they were all to expire. All of the
-// 291s is reachable on a run that still PASSES, since the loop retries — so the lane ceiling has to
-// clear it with the teardown on top. playwright.config.ts's chromium-write note carries the rest of
-// that arithmetic.
-//
-// The per-attempt wait is sized to OUTLAST a hold, not to duck under the SDK's 22s backoff blind spot.
-// That earlier sizing answered sibling starvation, which the lane's single worker has since made
-// impossible: the only hold left is an orphaned lease's own 30s TTL, and 45s rides that out where 15s
-// abandoned a create that was going to land. Abandoning is not free — it costs a reload, a re-boot and
-// a re-settle before the next probe, so a create merely slower than the budget was paying ~24s twice
-// over to reach the same directory. Three attempts, because an attempt now outlives the longest hold
-// there is; a lease that survives three of them is not transient and the failure should say so.
-const SCRATCH_CREATE_ATTEMPTS = 3
-const SCRATCH_CREATE_ATTEMPT_TIMEOUT_MS = 45_000
+// So the first attempt now gets the full write budget and is expected to be the only one. The retry
+// survives as a genuine last resort — a lease held by something still alive, a listing that came back
+// in its error state — not as the common path. Bounded at two, because a lease that outlives one full
+// budget is not the transient case this loop exists for, and the failure should say so rather than
+// hide in a third wait.
+const SCRATCH_CREATE_ATTEMPTS = 2
+const SCRATCH_CREATE_ATTEMPT_TIMEOUT_MS = LIVE_WRITE_TIMEOUT_MS
 // Pinned below the 30s navigationTimeout default: this only has to reach the document's load event, and
 // the app's own boot is waited for by the listing settle at the top of the next attempt.
 const SCRATCH_CREATE_RELOAD_TIMEOUT_MS = 15_000
@@ -286,10 +281,9 @@ async function createScratchDirectoryWithRetry(
 				return settled
 			}
 
-			// A SHORT budget per attempt, deliberately far below LIVE_WRITE_TIMEOUT_MS. Waiting longer here
-			// buys almost nothing — the SDK's lock backoff goes blind for 22s, then 30s at a stretch, so a
-			// client that missed its window sits idle rather than probing — while a reload starts a fresh
-			// client that probes immediately.
+			// The FULL write budget, not a clipped one: waiting out the orphaned lease IS the work here,
+			// and a shorter pin only abandons a create that was going to land (see the note above the
+			// attempt constants).
 			await createDirectoryViaDialog(page, name, settled.listbox, { writeTimeoutMs: SCRATCH_CREATE_ATTEMPT_TIMEOUT_MS })
 
 			return settled
@@ -302,9 +296,10 @@ async function createScratchDirectoryWithRetry(
 
 			// A full reload, not just a retried click: the pending create dialog holds the app modal and
 			// inert (undismissable by design while pending), so nothing else on the page is reachable
-			// until the document is thrown away — and throwing it away is precisely what resets the
-			// backoff. The SAME name is safe to reuse here, unlike the fixtures root: a create that lands
-			// late under this name makes the row this helper is waiting for, and descendInto follows it.
+			// until the document is thrown away. The SAME name is safe to reuse here, unlike the fixtures
+			// root: a create that lands late under this name makes the row this helper is waiting for,
+			// and descendInto follows it — which is what the adopt poll at the top of the next attempt
+			// looks for before writing again.
 			console.warn(`enterScratchDirectory: create "${name}" attempt ${String(attempt)} did not land — reloading and retrying`)
 
 			// Swallowed: this is the loop's own recovery step, and letting it throw would discard both
@@ -315,7 +310,7 @@ async function createScratchDirectoryWithRetry(
 	}
 
 	throw new Error(
-		`enterScratchDirectory could not create "${name}" in ${String(SCRATCH_CREATE_ATTEMPTS)} attempts, each on a fresh page — the account's drive-write lease looks held by something still alive, not merely orphaned`,
+		`enterScratchDirectory could not create "${name}" in ${String(SCRATCH_CREATE_ATTEMPTS)} attempts, the second on a fresh page, each waiting out the full write budget — the account's drive-write lease looks held by something still alive, not merely orphaned`,
 		{ cause: lastError }
 	)
 }
