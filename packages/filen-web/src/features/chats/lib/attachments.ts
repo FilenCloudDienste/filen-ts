@@ -36,6 +36,14 @@ export type AttachmentOutcome = { status: "success"; url: string } | { status: "
 // attachment after the first skips the two round trips.
 let cachedUploadsDirUuid: string | null = null
 
+// The memo above is keyed on nothing but the tab, so it MUST be dropped when the account behind it
+// changes: a uuid minted under the signed-out account names a directory the next one cannot write to,
+// and every attachment would upload into a directory that is not theirs until the tab reloaded.
+// performLogout calls this alongside its other per-session teardowns.
+export function resetChatUploadsDirCache(): void {
+	cachedUploadsDirUuid = null
+}
+
 async function chatUploadsDirUuid(): Promise<string> {
 	if (cachedUploadsDirUuid !== null) {
 		return cachedUploadsDirUuid

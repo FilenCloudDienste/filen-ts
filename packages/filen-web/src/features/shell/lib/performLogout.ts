@@ -2,6 +2,8 @@ import { runLogout } from "@/lib/logout"
 import { sync as notesSync } from "@/features/notes/lib/sync"
 import { sync as chatsSync } from "@/features/chats/lib/sync"
 import { clearAllTyping } from "@/features/chats/lib/typing"
+import { resetChatUploadsDirCache } from "@/features/chats/lib/attachments"
+import { resetSocketReconnectState } from "@/features/chats/lib/socketHandlers"
 import { socketBridge } from "@/lib/sdk/socket"
 import { sdkApi } from "@/lib/sdk/client"
 import { wipeSwClient } from "@/features/drive/lib/saveDownload"
@@ -75,6 +77,11 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 	// (useUnsyncedWork) instead of promising it syncs back on the next sign-in.
 	notesSync.cancel()
 	chatsSync.cancel()
+	// Drop the chat module's two session-scoped caches: the memoized `.filen/Chat Uploads` uuid (which
+	// names a directory the next account cannot write to) and the reconnect latch (which would make the
+	// next account's first authSuccess read as a recovery).
+	resetChatUploadsDirCache()
+	resetSocketReconnectState()
 	// Stop every typing watchdog + wipe the typing store so no timer fires into the cleared session.
 	clearAllTyping()
 	// Stop playback, revoke the live blob URL, tear down the media element and clear the queue so no

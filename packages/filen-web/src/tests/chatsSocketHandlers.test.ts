@@ -41,7 +41,13 @@ import { useChatTypingStore } from "@/features/chats/store/useChatTyping"
 import { useSocketStatusStore } from "@/features/chats/store/useSocketStatus"
 import { setFocusedChat, getFocusedChat } from "@/features/chats/lib/focusedChat"
 import { signalTyping, signalStopped, TYPING_EXPIRY_MS, clearAllTyping } from "@/features/chats/lib/typing"
-import { handleChatEvent, handleConversationDeleted, handleReconnecting, handleAuthSuccess } from "@/features/chats/lib/socketHandlers"
+import {
+	handleChatEvent,
+	handleConversationDeleted,
+	handleReconnecting,
+	handleAuthSuccess,
+	resetSocketReconnectState
+} from "@/features/chats/lib/socketHandlers"
 
 function makeChat(uuid: string, overrides: Partial<Chat> = {}): Chat {
 	return {
@@ -119,6 +125,10 @@ beforeEach(() => {
 	testQueryClient.clear()
 	useChatTypingStore.setState({ typing: {} })
 	setFocusedChat(null)
+	// The reconnect latch is module state: a test that arms it and does not clear it makes the NEXT
+	// test's bare authSuccess read as a recovery. That is order-dependent, and it failed at 2 of 5
+	// shuffle seeds before this line.
+	resetSocketReconnectState()
 	vi.clearAllMocks()
 })
 

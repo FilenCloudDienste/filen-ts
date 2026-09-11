@@ -326,6 +326,13 @@ export async function handleConversationDeleted(uuid: string): Promise<void> {
 // assertions.
 let sawReconnecting = false
 
+// Session-scoped, like the memo in attachments.ts: a logout that lands mid-reconnect would otherwise
+// leave this armed, and the NEXT account's first authSuccess would read as a recovery and fire a full
+// resync it never needed. performLogout calls this.
+export function resetSocketReconnectState(): void {
+	sawReconnecting = false
+}
+
 export function handleReconnecting(): void {
 	sawReconnecting = true
 

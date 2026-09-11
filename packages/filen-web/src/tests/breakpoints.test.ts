@@ -1,9 +1,9 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { isNarrowViewport, LAYOUT_BREAKPOINT_QUERY, subscribeToLayoutBreakpoint } from "@/features/shell/lib/breakpoints"
 
-// One mutable fake for the whole file, stubbed before any import-time consumer runs: the module caches
-// its MediaQueryList on first use ON PURPOSE (one query object app-wide), so a per-test stub would only
-// ever be seen by whichever test happened to run first.
+// One mutable fake for the whole file. The module caches its MediaQueryList on first use ON PURPOSE
+// (one query object app-wide), so the cache — not the stub — is what outlives a test here: whichever
+// test runs first pays the single real matchMedia call and the rest read the cached object.
 const listeners = new Map<string, Set<() => void>>()
 const fakeMediaQuery = {
 	matches: true,
@@ -20,12 +20,11 @@ const fakeMediaQuery = {
 
 const matchMedia = vi.fn(() => fakeMediaQuery)
 
-beforeAll(() => {
+// Per test, not once for the file: vitest.config.ts sets `unstubGlobals`, so every stub is torn down
+// after each test. Re-stubbing here is what makes that isolation free rather than something this file
+// has to opt out of.
+beforeEach(() => {
 	vi.stubGlobal("window", { matchMedia })
-})
-
-afterAll(() => {
-	vi.unstubAllGlobals()
 })
 
 describe("isNarrowViewport", () => {
@@ -52,11 +51,21 @@ describe("subscribeToLayoutBreakpoint", () => {
 		expect(listeners.get("change")?.has(listener)).toBe(false)
 	})
 
-	it("shares one MediaQueryList with every other consumer", () => {
-		subscribeToLayoutBreakpoint(() => undefined)()
-		isNarrowViewport()
+	// Against a FRESH module graph, so the count belongs to this test. The cached MediaQueryList means
+	// the only real matchMedia call in this file otherwise belongs to whichever test ran first — so an
+	// absolute `toHaveBeenCalledTimes(1)` here pinned file order rather than the sharing invariant, and
+	// read as zero the moment mock state was cleared per test.
+	it("shares one MediaQueryList with every other consumer", async () => {
+		vi.resetModules()
 
-		expect(matchMedia).toHaveBeenCalledTimes(1)
-		expect(matchMedia).toHaveBeenCalledWith(LAYOUT_BREAKPOINT_QUERY)
+		const fresh = await import("@/features/shell/lib/breakpoints")
+		const before = matchMedia.mock.calls.length
+
+		fresh.subscribeToLayoutBreakpoint(() => undefined)()
+		fresh.isNarrowViewport()
+
+		// Two consumers, one construction: that IS the invariant.
+		expect(matchMedia.mock.calls.length).toBe(before + 1)
+		expect(matchMedia).toHaveBeenLastCalledWith(LAYOUT_BREAKPOINT_QUERY)
 	})
 })

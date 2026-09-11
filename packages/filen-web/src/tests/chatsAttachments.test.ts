@@ -20,7 +20,7 @@ vi.mock("@/lib/sdk/client", () => ({
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
-import { uploadAttachment, attachExistingDriveItem } from "@/features/chats/lib/attachments"
+import { uploadAttachment, attachExistingDriveItem, resetChatUploadsDirCache } from "@/features/chats/lib/attachments"
 import { narrowItem } from "@/features/drive/lib/item"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { noop } from "@/lib/utils"
@@ -98,6 +98,10 @@ function mockDirPublicLinkRW(overrides: Partial<DirPublicLinkRW> = {}): DirPubli
 beforeEach(() => {
 	vi.clearAllMocks()
 	useTransfersStore.setState({ transfers: [] })
+	// attachments.ts memoizes the uploads-directory uuid for the tab's lifetime, so without this the
+	// directory-creation tests can only ever pass in the one order where they run before the memo is
+	// warm — which is why two of them failed under shuffle.
+	resetChatUploadsDirCache()
 })
 
 afterEach(() => {
