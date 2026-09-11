@@ -77,21 +77,22 @@ export async function waitForListingSettled(
 }
 
 // Ceiling for a wait that closes on a live ACCOUNT WRITE rather than on UI responsiveness. Every
-// create/rename/move/trash serialises on the SDK's account-wide `drive-write` lease, and the dominant
-// cost is not the write — it is waiting out a lease nobody holds any more.
+// create/rename/move/trash serialises on the SDK's account-wide `drive-write` lease.
 //
-// Measured on a quiet account, one spec at a time, nothing else touching it: a write costs ~0.5s, and
-// a write issued by a context that FOLLOWS a closed one costs 35-72s (35.7, 49.4, 63.5, 64.3, 71.7,
-// 72.1s across runs). A page that is merely ALIVE never blocks another client — an overlapping write
-// from a second context measured 413-422ms — so this is not app-level contention between clients. It
-// is the close itself: a context torn down while the SDK holds the lease stops refreshing it without
-// posting a Release, and the next writer waits out the TTL on a fibonacci backoff that is blind for
-// long stretches (one measurement landed on 35.713s, the documented 35.75s step, to the millisecond).
+// The history matters, because the obvious reading of the symptom was wrong. Measured: a write costs
+// ~0.5s, but the first write of a context that FOLLOWED a closed one cost 35-72s. A live page never
+// blocked anyone — an overlapping write from a second context measured 413-422ms — so the close
+// itself looked like the cause, and this budget was sized to ride it out.
 //
-// So the budget is sized off that measured worst case with headroom, NOT off how long a write takes.
-// Anything tighter fails on a lease that was always going to clear: 60s sat just under the 72s tail
-// and is exactly what failed drive-actions' second create on CI. Assertions that are genuinely about
-// UI responsiveness keep the tight default.
+// It was not the cause. The RELEASE of the previous context's last write was still in flight when
+// Playwright killed it, so the lease was never released and had to age out on its own. Waiting three
+// seconds before the context closes removes the whole thing (e2e/fixtures.ts carries that teardown and
+// the measurement: 74,683ms -> 544ms). A write should now cost what a write costs.
+//
+// The budget stays at 120s anyway, because it is free on a green run and the failure it prevents is
+// expensive: a CI runner is slower than this machine, and 60s already sat just under the tail once and
+// failed drive-actions' second create. Assertions that are genuinely about UI responsiveness keep the
+// tight default.
 export const LIVE_WRITE_TIMEOUT_MS = 120_000
 
 // Settle budget for the first listing after a full document load, where the wait covers a COLD BOOT
@@ -198,29 +199,27 @@ export async function createDirectoryViaDialog(
 // concurrent create/trash at root can break, and this exact interference already reproduced live once
 // as a flaky drive.spec.ts failure. Nesting confines every count-shifting moment to the two around the
 // scratch directory itself (create, final trash) instead of one pair per fixture file.
-// A scratch create is the FIRST write a spec makes, and the one that pays for the PREVIOUS spec's
-// browser context being closed. That teardown is what orphans the account-wide `drive-write` lease:
-// the SDK stops refreshing it without posting a Release, so it has to age out on its own (TTL 30s,
-// refreshed every 15s by a live holder). Nothing the suite does can prevent it — a closed context
-// cannot release anything — and it is not contention between live clients: a write issued while
-// another context is booted and idle measured 413-422ms, overlapping its boot window on purpose.
+// A scratch create is the FIRST write a spec makes, which used to make it the one that paid for the
+// PREVIOUS spec's context being closed — 35-72s, every spec, because that context died with its last
+// write's lease release unsent. e2e/fixtures.ts now waits for the release before teardown, so this is
+// an ordinary write again. The claim that once stood here, that "nothing the suite does can prevent it
+// — a closed context cannot release anything", was wrong: it could, given three seconds.
 //
-// Waiting it out is therefore the ONLY strategy, and the budget above is sized off what it actually
-// costs (35-72s measured; see LIVE_WRITE_TIMEOUT_MS for the numbers and the method).
+// What the retry below is still for is the case that reading always covered by accident: a lease held
+// by something genuinely gone — a crashed run, a killed CI runner, a cancelled workflow — which no
+// teardown of ours can release. That one really does have to age out (TTL 30s, refreshed every 15s by
+// a live holder), and a spec that meets it should wait rather than fail.
 //
-// Reloading was the old strategy and it was strictly worse. The reasoning was that a fresh page is a
+// Reloading is a LAST resort, not the common path. The reasoning for it was that a fresh page is a
 // fresh SDK client whose backoff restarts at zero, so it probes immediately instead of inside someone
 // else's blind stretch. What it actually does is abandon a create that was ALREADY GOING TO LAND —
 // every CI run showed the abandoned name arriving moments later ("landed late — adopting it instead
-// of retrying the write") — and then pay a fresh boot before waiting out the same lease anyway. On the
-// last CI run that cost ~70s on every one of 18 write specs, ~21 minutes of a 35-minute build, and the
-// reload itself tears down one more context, which is the very thing that orphans a lease.
+// of retrying the write") — and then pay a fresh boot before waiting out the same lease anyway. And
+// the reload tears down one more context, which was itself the thing that stranded a lease.
 //
-// So the first attempt now gets the full write budget and is expected to be the only one. The retry
-// survives as a genuine last resort — a lease held by something still alive, a listing that came back
-// in its error state — not as the common path. Bounded at two, because a lease that outlives one full
-// budget is not the transient case this loop exists for, and the failure should say so rather than
-// hide in a third wait.
+// So the first attempt gets the full write budget and is expected to be the only one. Bounded at two,
+// because a lease that outlives one full budget is not the transient case this loop exists for, and
+// the failure should say so rather than hide in a third wait.
 const SCRATCH_CREATE_ATTEMPTS = 2
 const SCRATCH_CREATE_ATTEMPT_TIMEOUT_MS = LIVE_WRITE_TIMEOUT_MS
 // Pinned below the 30s navigationTimeout default: this only has to reach the document's load event, and
