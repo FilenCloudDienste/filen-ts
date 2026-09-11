@@ -27,7 +27,7 @@ const GC_TIME = 86400 * 365 * 1000 * 10 // ~10 years
 // `queryKeyHashFn`; adopt that only if a key genuinely needs a bigint param — none should).
 //
 // Persistence: PER-QUERY, mirroring mobile (see src/queries/persist.ts for the full rationale) —
-// each query owns one sqlite kv row (`rq.v1-<queryHash>`), written via the `persister` default
+// each query owns one sqlite kv row (`<PERSIST_PREFIX>-<queryHash>`), written via the `persister` default
 // below only when that query settles successfully; `restorePersistedQueries(queryClient)` runs
 // once on boot. Mobile's O(1) `persistQueryByKey` narrowing facade (version-pinned to library
 // internals) is deliberately NOT ported — parked until profiling shows the need. When the first

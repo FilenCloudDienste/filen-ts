@@ -34,7 +34,7 @@ import { REGISTER_CHECK_QUERY_KEY } from "@/features/auth/queries/registerCheck"
 // fresh key family and makes the persister's own expired-or-busted check drop any older-versioned
 // row on read — deliberately a single constant so the two can never drift apart. Bump on ANY
 // change to the persisted shape (mobile's client.ts:13 flags this as the easy-to-forget step).
-export const PERSIST_PREFIX = "rq.v1"
+export const PERSIST_PREFIX = "rq.v2"
 
 // ON-DISK expiry: a persisted row whose `state.dataUpdatedAt` is older than this is dropped (and
 // its kv row deleted) by the persister's own expired-or-busted check on read/restore. This is the
@@ -48,7 +48,7 @@ export const PERSIST_PREFIX = "rq.v1"
 export const PERSIST_MAX_AGE = 86400 * 365 * 1000 * 10
 
 // Storage keys follow the persister's OWN scheme — `${prefix}-${queryHash}` (verified in the
-// installed createPersister.ts) — so rows live at `rq.v1-<queryHash>`.
+// installed createPersister.ts) — so rows live at `<PERSIST_PREFIX>-<queryHash>`.
 const KV_KEY_PREFIX = `${PERSIST_PREFIX}-`
 
 // Every kv read is arktype-validated. This checks the OUTER `PersistedQuery` wrapper only —
@@ -206,7 +206,7 @@ export const persister = experimental_createQueryPersister({
 	}
 })
 
-// Boot-time restore-all (called once, after storage init): walks every `rq.v1-*` row via
+// Boot-time restore-all (called once, after storage init): walks every `<PERSIST_PREFIX>-*` row via
 // the bridge's `entries()` and `setQueryData`s each fresh, current-buster row back into `client`
 // (the library's documented restore mechanism for this API — mobile's hand-rolled equivalent walks
 // its buffer the same way). Expired/busted/corrupt rows are deleted as it walks, which is also why
@@ -220,7 +220,7 @@ export async function restorePersistedQueries(client: QueryClient): Promise<void
 	}
 }
 
-// Wipes every rq.v1-* row without restoring any of them — the not-authed counterpart to
+// Wipes every `<PERSIST_PREFIX>-*` row without restoring any of them — the not-authed counterpart to
 // restorePersistedQueries, called instead of it whenever a boot's resumeSession() comes back false.
 // Closes a cross-tab race: a floating persister write (fire-and-forget, see kvStorage.setItem above)
 // can land after another tab's logout wipe, leaving an orphan row this tab must not adopt. Same

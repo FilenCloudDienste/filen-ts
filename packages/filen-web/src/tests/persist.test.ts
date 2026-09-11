@@ -139,7 +139,7 @@ describe("per-query persister (Map-backed fake kv)", () => {
 		expect(target.getQueryData(["notes", "list"])).toEqual([{ uuid: "n1", size: 42n }])
 	})
 
-	it("purgePersistedQueries wipes every rq.v1-* row without restoring any of them", async () => {
+	it("purgePersistedQueries wipes every persisted row without restoring any of them", async () => {
 		const { quotaKey, notesKey } = await seedTwoQueries()
 
 		await purgePersistedQueries()

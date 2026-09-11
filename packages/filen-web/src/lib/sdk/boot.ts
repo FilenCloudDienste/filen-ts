@@ -95,7 +95,7 @@ export async function bootSdk(): Promise<void> {
 			// (best-effort — never rejects; a failed restore just means an empty cache).
 			await restorePersistedQueries(queryClient)
 		} else {
-			// An unauthed boot must not resurrect a leftover rq.v1-* row (e.g. a cross-tab
+			// An unauthed boot must not resurrect a leftover `<PERSIST_PREFIX>-*` row (e.g. a cross-tab
 			// logout/persister-write race) into the cache, where it would flash under whatever
 			// account signs in next — wipe instead of restoring.
 			await purgePersistedQueries()
