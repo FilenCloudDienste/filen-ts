@@ -61,6 +61,12 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
+        with:
+          # The action defaults to 'tools platform-tools', and the obsolete `tools` package is gone
+          # from Google's repository: sdkmanager exits 1 on it and takes the whole job with it.
+          # Nothing here needs it — Gradle resolves its own platform and build-tools, and the NDK
+          # cargo-ndk builds against comes from the runner image.
+          packages: 'platform-tools'
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@master
