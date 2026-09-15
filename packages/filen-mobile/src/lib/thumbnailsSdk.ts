@@ -6,16 +6,25 @@ import { toSignalOpts, wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/li
 import { abortError } from "@/lib/thumbnailsHelpers"
 import logger from "@/lib/logger"
 
-// The SDK request box (Contain, never upscaled). 256 wide reproduces today's "256 px wide" tiles for
-// every aspect up to 1:2; the 512 long side makes the SDK reject ≈160 px EXIF stamps (160 × 2 < 512)
-// while still serving ≥256 px embedded previews (HEIC thmb, RAW SubIFD) instead of a full decode
-// (microthumb lib.rs:367-370, 511-513) — a portrait HEIC thmb of 240×320 is served at 240 wide, never
-// upscaled. The cost of the taller box: the SDK sizes its decode canvas with fill semantics and a 2×
-// oversample (lib.rs:342-346), so a 4000×3000 JPEG needs a 1368×1026 canvas (≈28 MB at 20 B/px,
-// IDCT 1/2) for 256×512 against 684×513 (≈7 MB, IDCT 1/4) for 256×256 — accepted for parity with
-// today's 256-wide output, well inside the 62 MiB remote budget.
-export const THUMBNAIL_MAX_WIDTH = 256
-export const THUMBNAIL_MAX_HEIGHT = 512
+// The SDK request box (Contain, never upscaled). 384 wide is sized to the tiles that actually render
+// it: the photos grid divides the screen by a 1-5 tiles-per-row setting, so a tile reaches half the
+// screen width at 2 and the whole width at 1, and even the densest drive grid is 3 columns below
+// 600dp (~414 px at 3×). 256 was an upscale in every one of those.
+//
+// The 768 long side keeps the 2:1 ratio that raises the SDK's embedded-preview acceptance bar
+// (microthumb lib.rs:367-370, 511-513) in step with the width, so a preview is only taken when it is
+// large enough for the box. That does spend the ~320 px HEIC `thmb`, which now costs a full decode;
+// a RAW's full-size embedded JPEG is unaffected and still answers in a couple of range reads.
+export const THUMBNAIL_MAX_WIDTH = 384
+export const THUMBNAIL_MAX_HEIGHT = 768
+
+// WebP quality 0-100. Absent would mean LOSSLESS (the SDK's default), which is what the box above
+// could not afford: lossy runs several times smaller on photographic content, and that is what pays
+// for 2.25× the pixels without growing the cache. Storage is the binding constraint at both ends —
+// web caps its cache at 256 MiB and evicts LRU, this one is not capped at all — so bytes per entry
+// is what a large library pays forever. 80 is where WebP artefacts stop being visible at tile size;
+// above it the extra bytes buy detail no tile resolves.
+export const THUMBNAIL_LOSSY_QUALITY = 80
 
 // written → `<uuid>.webp` exists, return its URI
 // settled → Unsupported / OverBudget / Corrupt: no thumbnail for this session. Unsupported is a
@@ -96,8 +105,8 @@ function handleThumbnailResult(
 }
 
 // Remote image thumbnails: the SDK decodes from ranged reads of the encrypted file (1 MiB chunks,
-// nothing persisted, format decided from magic bytes) and hands back a lossless WebP no larger than
-// the request, orientation applied. The caller has already applied both gates (displayability and
+// nothing persisted, format decided from magic bytes) and hands back a lossy WebP no larger than the
+// request, orientation applied. The caller has already applied both gates (displayability and
 // canMakeThumbnail), ruled out local bytes and the offline case, and does NOT hold the JS semaphore:
 // the client owns decode concurrency and memory, a parked call holds no buffers, and cancelling
 // dequeues it. Authed client only — no thumbnail-bearing screen is reachable logged out.
@@ -117,7 +126,8 @@ export async function generateImageViaSdk(params: {
 		{
 			file: params.file,
 			maxWidth: THUMBNAIL_MAX_WIDTH,
-			maxHeight: THUMBNAIL_MAX_HEIGHT
+			maxHeight: THUMBNAIL_MAX_HEIGHT,
+			lossyQuality: THUMBNAIL_LOSSY_QUALITY
 		},
 		toSignalOpts(params.signal)
 	)
@@ -168,6 +178,9 @@ export async function generateImageFromPathViaSdk(params: {
 				pauseSignal: undefined,
 				abortSignal: wrappedSignal ?? undefined
 			}),
+			// Positional, and it sits BEFORE asyncOpts — passing the signal options here instead would
+			// type-check as a quality and silently encode every local thumbnail at some arbitrary level.
+			THUMBNAIL_LOSSY_QUALITY,
 			toSignalOpts(params.signal)
 		)
 

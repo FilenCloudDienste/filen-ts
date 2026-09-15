@@ -36,9 +36,11 @@ export type ThumbnailParams = {
 }
 
 // Resize width + WebP quality of the ONE remaining manipulator path: the extracted video frame.
-// Every image thumbnail is an SDK decode with its own request box (thumbnailsSdk.ts), lossless.
-export const DEFAULT_WIDTH = 256
-export const DEFAULT_QUALITY = 0.9
+// Every image thumbnail is an SDK decode with its own request box and quality (thumbnailsSdk.ts);
+// these track THUMBNAIL_MAX_WIDTH / THUMBNAIL_LOSSY_QUALITY so a video tile is neither softer nor
+// heavier than the image tile beside it in the same grid.
+export const DEFAULT_WIDTH = 384
+export const DEFAULT_QUALITY = 0.8
 export const DEFAULT_VIDEO_TIMESTAMP = 1.0
 // Bounds the JS-side native work only: video frame extraction and its manipulator resize. NO image
 // thumbnail is behind it any more — remote and local alike are SDK decodes, and the client owns

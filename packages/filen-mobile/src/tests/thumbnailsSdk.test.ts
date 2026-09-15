@@ -61,7 +61,13 @@ vi.mock("@/lib/signals", () => ({
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-import { generateImageViaSdk, generateImageFromPathViaSdk, THUMBNAIL_MAX_WIDTH, THUMBNAIL_MAX_HEIGHT } from "@/lib/thumbnailsSdk"
+import {
+	generateImageViaSdk,
+	generateImageFromPathViaSdk,
+	THUMBNAIL_MAX_WIDTH,
+	THUMBNAIL_MAX_HEIGHT,
+	THUMBNAIL_LOSSY_QUALITY
+} from "@/lib/thumbnailsSdk"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
 
 const OUTPUT_PATH = "file:///shared/group.io.filen.app/thumbnails/v4/uuid-1.webp"
@@ -92,14 +98,14 @@ describe("generateImageViaSdk", () => {
 		mockMakeThumbnailInMemory.mockResolvedValue(thumbnailVerdict())
 	})
 
-	it("asks for a 256×512 contain thumbnail of the AnyFile with the JS AbortSignal as the uniffi cancellation handle", async () => {
+	it("asks for a 384×768 contain lossy thumbnail of the AnyFile with the JS AbortSignal as the uniffi cancellation handle", async () => {
 		const controller = new AbortController()
 
 		const outcome = await generateImageViaSdk({ file: anyFile, uuid: "uuid-1", outputPath: OUTPUT_PATH, signal: controller.signal })
 
 		expect(outcome).toBe("written")
 		expect(mockMakeThumbnailInMemory).toHaveBeenCalledWith(
-			{ file: anyFile, maxWidth: 256, maxHeight: 512 },
+			{ file: anyFile, maxWidth: 384, maxHeight: 768, lossyQuality: 80 },
 			{ signal: controller.signal }
 		)
 	})
@@ -107,7 +113,7 @@ describe("generateImageViaSdk", () => {
 	it("passes undefined asyncOpts when there is no signal", async () => {
 		await generateImageViaSdk({ file: anyFile, uuid: "uuid-1", outputPath: OUTPUT_PATH })
 
-		expect(mockMakeThumbnailInMemory).toHaveBeenCalledWith(expect.objectContaining({ maxWidth: 256 }), undefined)
+		expect(mockMakeThumbnailInMemory).toHaveBeenCalledWith(expect.objectContaining({ maxWidth: 384 }), undefined)
 	})
 
 	it("writes the WebP through <uuid>.webp.tmp and renames it into place", async () => {
@@ -177,7 +183,7 @@ describe("generateImageFromPathViaSdk", () => {
 		mockMakeThumbnailFromPath.mockResolvedValue(thumbnailVerdict())
 	})
 
-	it("asks for a 256×512 contain thumbnail of the path, with the ManagedFuture carrying the wrapped abort signal", async () => {
+	it("asks for a 384×768 contain lossy thumbnail of the path, with the ManagedFuture carrying the wrapped abort signal", async () => {
 		const controller = new AbortController()
 
 		const outcome = await generateImageFromPathViaSdk({
@@ -198,6 +204,7 @@ describe("generateImageFromPathViaSdk", () => {
 			THUMBNAIL_MAX_WIDTH,
 			THUMBNAIL_MAX_HEIGHT,
 			mockManagedFutureNew.mock.results[0]?.value,
+			THUMBNAIL_LOSSY_QUALITY,
 			{ signal: controller.signal }
 		)
 	})
@@ -212,6 +219,7 @@ describe("generateImageFromPathViaSdk", () => {
 			THUMBNAIL_MAX_WIDTH,
 			THUMBNAIL_MAX_HEIGHT,
 			expect.anything(),
+			THUMBNAIL_LOSSY_QUALITY,
 			undefined
 		)
 		// Nothing was allocated, so nothing is freed — disposeSdkAbortSignal tolerates undefined anyway.
@@ -231,6 +239,7 @@ describe("generateImageFromPathViaSdk", () => {
 			THUMBNAIL_MAX_WIDTH,
 			THUMBNAIL_MAX_HEIGHT,
 			expect.anything(),
+			THUMBNAIL_LOSSY_QUALITY,
 			undefined
 		)
 	})

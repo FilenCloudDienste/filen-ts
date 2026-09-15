@@ -288,7 +288,7 @@ vi.mock("@tanstack/react-query", () => ({
 }))
 
 import thumbnails, { DEFAULT_WIDTH, DEFAULT_QUALITY, VERSION } from "@/lib/thumbnails"
-import { THUMBNAIL_MAX_WIDTH, THUMBNAIL_MAX_HEIGHT } from "@/lib/thumbnailsSdk"
+import { THUMBNAIL_MAX_WIDTH, THUMBNAIL_MAX_HEIGHT, THUMBNAIL_LOSSY_QUALITY } from "@/lib/thumbnailsSdk"
 import { fs, Directory, Paths } from "@/tests/mocks/expoFileSystem"
 
 const THUMBNAILS_DIR = `file:///shared/group.io.filen.app/thumbnails/v${VERSION}`
@@ -383,10 +383,11 @@ describe("Thumbnails", () => {
 	// THUMBNAILS_VERSION in storageRoots.ts on ANY output change, then update this fingerprint.
 	// (128→256 once shipped without the bump, leaving installs on stale 128px thumbnails; v4 is the
 	// move of every image thumbnail from the manipulator to the SDK's lossless contain box, after
-	// which DEFAULT_WIDTH/DEFAULT_QUALITY describe the video frame alone.)
+	// which DEFAULT_WIDTH/DEFAULT_QUALITY describe the video frame alone; v5 grew the SDK box to
+	// 384×768 and made its encode lossy.)
 	it("keeps the thumbnail format fingerprint in sync with THUMBNAILS_VERSION", () => {
-		expect(`w${DEFAULT_WIDTH}:q${DEFAULT_QUALITY}:v${VERSION}`).toBe("w256:q0.9:v4")
-		expect(`${THUMBNAIL_MAX_WIDTH}x${THUMBNAIL_MAX_HEIGHT}`).toBe("256x512")
+		expect(`w${DEFAULT_WIDTH}:q${DEFAULT_QUALITY}:v${VERSION}`).toBe("w384:q0.8:v5")
+		expect(`${THUMBNAIL_MAX_WIDTH}x${THUMBNAIL_MAX_HEIGHT}@q${THUMBNAIL_LOSSY_QUALITY}`).toBe("384x768@q80")
 	})
 
 	beforeEach(() => {
@@ -437,7 +438,12 @@ describe("Thumbnails", () => {
 
 			expect(mockMakeThumbnailInMemory).toHaveBeenCalledTimes(1)
 			expect(mockMakeThumbnailInMemory).toHaveBeenCalledWith(
-				{ file: expect.objectContaining({ tag: "File", inner: [item.data] }), maxWidth: 256, maxHeight: 512 },
+				{
+					file: expect.objectContaining({ tag: "File", inner: [item.data] }),
+					maxWidth: 384,
+					maxHeight: 768,
+					lossyQuality: 80
+				},
 				undefined
 			)
 
@@ -453,7 +459,7 @@ describe("Thumbnails", () => {
 
 			await thumbnails.generate({ item: makeFileItem("signal-uuid", "photo.jpg"), signal: controller.signal })
 
-			expect(mockMakeThumbnailInMemory).toHaveBeenCalledWith(expect.objectContaining({ maxWidth: 256 }), {
+			expect(mockMakeThumbnailInMemory).toHaveBeenCalledWith(expect.objectContaining({ maxWidth: 384 }), {
 				signal: controller.signal
 			})
 		})
@@ -570,6 +576,7 @@ describe("Thumbnails", () => {
 				THUMBNAIL_MAX_WIDTH,
 				THUMBNAIL_MAX_HEIGHT,
 				expect.anything(),
+				THUMBNAIL_LOSSY_QUALITY,
 				undefined
 			)
 			expect(result).toBe(`${THUMBNAILS_DIR}/offline-hit-uuid.webp`)
@@ -593,6 +600,7 @@ describe("Thumbnails", () => {
 				THUMBNAIL_MAX_WIDTH,
 				THUMBNAIL_MAX_HEIGHT,
 				expect.anything(),
+				THUMBNAIL_LOSSY_QUALITY,
 				undefined
 			)
 		})
@@ -617,6 +625,7 @@ describe("Thumbnails", () => {
 				THUMBNAIL_MAX_WIDTH,
 				THUMBNAIL_MAX_HEIGHT,
 				mockManagedFutureNew.mock.results[0]?.value,
+				THUMBNAIL_LOSSY_QUALITY,
 				{ signal: controller.signal }
 			)
 			expect(mockDisposeSdkAbortSignal).toHaveBeenCalledTimes(1)
@@ -695,6 +704,7 @@ describe("Thumbnails", () => {
 				THUMBNAIL_MAX_WIDTH,
 				THUMBNAIL_MAX_HEIGHT,
 				expect.anything(),
+				THUMBNAIL_LOSSY_QUALITY,
 				undefined
 			)
 			expect(result).toBe(`${THUMBNAILS_DIR}/filecache-hit-uuid.webp`)
@@ -715,6 +725,7 @@ describe("Thumbnails", () => {
 				THUMBNAIL_MAX_WIDTH,
 				THUMBNAIL_MAX_HEIGHT,
 				expect.anything(),
+				THUMBNAIL_LOSSY_QUALITY,
 				undefined
 			)
 		})
@@ -1435,6 +1446,7 @@ describe("Thumbnails", () => {
 				THUMBNAIL_MAX_WIDTH,
 				THUMBNAIL_MAX_HEIGHT,
 				expect.anything(),
+				THUMBNAIL_LOSSY_QUALITY,
 				undefined
 			)
 			expect(mockManipulate).not.toHaveBeenCalled()
@@ -1538,6 +1550,7 @@ describe("Thumbnails", () => {
 				THUMBNAIL_MAX_WIDTH,
 				THUMBNAIL_MAX_HEIGHT,
 				expect.anything(),
+				THUMBNAIL_LOSSY_QUALITY,
 				undefined
 			)
 		})
