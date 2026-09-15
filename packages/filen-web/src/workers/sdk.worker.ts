@@ -1413,10 +1413,13 @@ const api = {
 	// decodes neither, so those keep their own client-side generators (thumbGenerators.ts).
 	// Persisting is the CALLER's job (features/drive/lib/thumbnails.ts stores whatever any generator
 	// returns, uniformly) — a persist here would double-write the same uuid.
-	async makeSdkThumbnail(file: AnyFile, maxWidth: number, maxHeight: number): Promise<SdkThumbnailResult> {
+	// `lossyQuality` is threaded from the caller like the dimensions rather than read from a constant
+	// here: all three describe the artifact the CALLER is about to persist under its own cache
+	// generation, and splitting them across the boundary is how they drift.
+	async makeSdkThumbnail(file: AnyFile, maxWidth: number, maxHeight: number, lossyQuality: number): Promise<SdkThumbnailResult> {
 		armThumbSweep()
 
-		return asThumbnailResult(await requireClient().makeThumbnailInMemory({ file, maxWidth, maxHeight }))
+		return asThumbnailResult(await requireClient().makeThumbnailInMemory({ file, maxWidth, maxHeight, lossyQuality }))
 	},
 	// The same decode for bytes that are NOT on the drive yet — what the upload path hands over the
 	// moment an upload lands, so the client never re-downloads a file it just sent. The browser File
@@ -1425,7 +1428,12 @@ const api = {
 	// consumes it — exactly what uploadFile above already does. That is also what keeps a retry safe:
 	// every call gets a FRESH reader off the same File, where a transferred ReadableStream would be
 	// one-shot and dead the moment anything needed a second attempt.
-	async makeSdkThumbnailFromFile(file: BrowserFile, maxWidth: number, maxHeight: number): Promise<SdkThumbnailResult> {
+	async makeSdkThumbnailFromFile(
+		file: BrowserFile,
+		maxWidth: number,
+		maxHeight: number,
+		lossyQuality: number
+	): Promise<SdkThumbnailResult> {
 		armThumbSweep()
 
 		// `managedFuture` is omissible because the Rust field carries `#[serde(default)]`
@@ -1439,7 +1447,8 @@ const api = {
 				reader: file.stream(),
 				maxWidth,
 				maxHeight,
-				knownSize: file.size
+				knownSize: file.size,
+				lossyQuality
 			})
 		)
 	},

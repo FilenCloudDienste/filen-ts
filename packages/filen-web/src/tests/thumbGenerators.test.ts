@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type BaseFileItem, type DriveItem } from "@/features/drive/lib/item"
 import { type ThumbGeneratorCategory, type ThumbGenerator, type ThumbSeedResult } from "@/features/drive/lib/thumbnails"
-import { THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SIZE_GATE, THUMB_WARM_SIZE_GATE } from "@/features/drive/lib/thumbnails.logic"
+import {
+	THUMB_MAX_DIM,
+	THUMB_SDK_MAX_HEIGHT,
+	THUMB_SDK_LOSSY_QUALITY,
+	THUMB_SIZE_GATE,
+	THUMB_WARM_SIZE_GATE
+} from "@/features/drive/lib/thumbnails.logic"
 import type { SdkThumbnailResult } from "@/workers/sdk.worker"
 
 // Mock boundaries: registerThumbGenerator/seedThumbnail are replaced so this file's module-scope
@@ -25,8 +31,10 @@ vi.mock("@/features/drive/lib/thumbnails", () => ({
 
 const { downloadFileBytesMock, makeSdkThumbnailMock, makeSdkThumbnailFromFileMock } = vi.hoisted(() => ({
 	downloadFileBytesMock: vi.fn<(file: unknown, token: string) => Promise<Uint8Array>>(),
-	makeSdkThumbnailMock: vi.fn<(file: unknown, maxWidth: number, maxHeight: number) => Promise<SdkThumbnailResult>>(),
-	makeSdkThumbnailFromFileMock: vi.fn<(file: File, maxWidth: number, maxHeight: number) => Promise<SdkThumbnailResult>>()
+	makeSdkThumbnailMock:
+		vi.fn<(file: unknown, maxWidth: number, maxHeight: number, lossyQuality: number) => Promise<SdkThumbnailResult>>(),
+	makeSdkThumbnailFromFileMock:
+		vi.fn<(file: File, maxWidth: number, maxHeight: number, lossyQuality: number) => Promise<SdkThumbnailResult>>()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({
@@ -145,7 +153,7 @@ describe("registration", () => {
 })
 
 describe("generateSdkThumb", () => {
-	it("asks the SDK for a 256x512 thumbnail of the narrowed file, never downloading bytes itself", async () => {
+	it("asks the SDK for a 384x768 lossy thumbnail of the narrowed file, never downloading bytes itself", async () => {
 		const item = imageItem()
 		makeSdkThumbnailMock.mockResolvedValue({
 			type: "thumbnail",
@@ -157,7 +165,7 @@ describe("generateSdkThumb", () => {
 
 		await generateSdkThumb(item)
 
-		expect(makeSdkThumbnailMock).toHaveBeenCalledWith(item.data, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT)
+		expect(makeSdkThumbnailMock).toHaveBeenCalledWith(item.data, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SDK_LOSSY_QUALITY)
 		expect(downloadFileBytesMock).not.toHaveBeenCalled()
 	})
 
@@ -184,7 +192,7 @@ describe("generateSdkThumb", () => {
 		})
 
 		await expect(generateSdkThumb(item)).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([7]) })
-		expect(makeSdkThumbnailMock).toHaveBeenCalledWith(item.data, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT)
+		expect(makeSdkThumbnailMock).toHaveBeenCalledWith(item.data, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SDK_LOSSY_QUALITY)
 	})
 
 	// The three byte-less arms are answers about the file's content, not failures — the service keeps
@@ -248,24 +256,22 @@ describe("warmUploadThumbnail", () => {
 		expect(seedThumbnailMock.mock.calls[0]?.[0]).toEqual(narrowItem(uploaded))
 	})
 
-	// The gate is the point at which the SDK's from-stream decode can no longer afford the 256x512 it
+	// The gate is the point at which the SDK's from-stream decode can no longer afford the 384x768 it
 	// is asked for, NOT the point at which it refuses: 64 MiB of budget less the whole buffered source
-	// must still leave 512^2 * 40 = 10 MiB, so 54 MiB is the last source that comes back full-size. A
-	// warm past it would persist a shrunken thumbnail as the uuid's durable cache entry.
+	// must still leave 768^2 * 40 = 22.5 MiB, so 41.5 MiB is the last source that comes back full-size
+	// (the bigger request box moved this down from 54 MiB). A warm past it would persist a shrunken
+	// thumbnail as the uuid's durable cache entry.
 	it("gates the warm at the last source the local decode can still thumbnail at full size", () => {
-		const fiftyFourMib = 54 * 1024 * 1024
+		const gateBytes = 41.5 * 1024 * 1024
 
-		expect(THUMB_WARM_SIZE_GATE).toBe(BigInt(fiftyFourMib))
+		expect(THUMB_WARM_SIZE_GATE).toBe(BigInt(gateBytes))
 		expect(THUMB_WARM_SIZE_GATE).toBeLessThan(THUMB_SIZE_GATE)
 
-		warmUploadThumbnail(namedFile("shot.nef", "image/x-nikon-nef", { canMakeThumbnail: true }), sizedFile("shot.nef", fiftyFourMib))
+		warmUploadThumbnail(namedFile("shot.nef", "image/x-nikon-nef", { canMakeThumbnail: true }), sizedFile("shot.nef", gateBytes))
 
 		expect(seedThumbnailMock).toHaveBeenCalledTimes(1)
 
-		warmUploadThumbnail(
-			namedFile("shot2.nef", "image/x-nikon-nef", { canMakeThumbnail: true }),
-			sizedFile("shot2.nef", fiftyFourMib + 1)
-		)
+		warmUploadThumbnail(namedFile("shot2.nef", "image/x-nikon-nef", { canMakeThumbnail: true }), sizedFile("shot2.nef", gateBytes + 1))
 
 		expect(seedThumbnailMock).toHaveBeenCalledTimes(1) // unchanged — the oversize source was skipped
 	})
@@ -316,7 +322,7 @@ describe("warmUploadThumbnail", () => {
 		}
 
 		await expect(produce()).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([5, 5]) })
-		expect(makeSdkThumbnailFromFileMock).toHaveBeenCalledWith(file, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT)
+		expect(makeSdkThumbnailFromFileMock).toHaveBeenCalledWith(file, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SDK_LOSSY_QUALITY)
 	})
 
 	// unsupported/corrupt are answers about the bytes, which the drive-side arm sniffs identically — the

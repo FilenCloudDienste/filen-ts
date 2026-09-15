@@ -11,15 +11,21 @@ export type ThumbnailCategory = "sdk" | "video" | "pdf" | "none"
 // The thumbnail's width bound, shared by every producer — one target keeps every cached .thumb file
 // roughly the same size. The video and pdf generators use it for both dimensions (a square fit); the
 // SDK arm pairs it with THUMB_SDK_MAX_HEIGHT below instead, for the reason documented there.
-export const THUMB_MAX_DIM = 256
+//
+// 384 is sized to the largest tile this app renders, not the smallest: the photos grid's density
+// steps top out at a 320px tile (gridDensity.ts), which is 640 real pixels at 2x DPR. The old 256
+// was an upscale even in the drive grid's fixed 176px tile. It is affordable only because the SDK
+// arm now encodes lossy (THUMB_SDK_LOSSY_QUALITY) — see that constant.
+export const THUMB_MAX_DIM = 384
 
-// The SDK's own thumbnail request is 256x512, NOT square, and the asymmetry is deliberate. The SDK
+// The SDK's own thumbnail request is 384x768, NOT square, and the asymmetry is deliberate. The SDK
 // accepts an image's embedded preview (an EXIF IFD1 stamp, a HEIF `thmb` item) instead of decoding
 // the full frame when `preview_long_side * 2 >= max(maxWidth, maxHeight)` — so asking for a square
-// 256 would accept a 128px stamp, which is mush once a 176px tile renders it at 2x DPR. Raising only
-// the height to 512 raises that acceptance bar to a 256px preview without changing what the result
-// actually gets scaled to: nothing is ever upscaled, and fitting a landscape photo inside 256x512
-// still lands on a 256px-wide thumbnail.
+// 384 would accept a 192px stamp, mush in a tile twice that size. Doubling only the height raises
+// that acceptance bar to a 384px preview without changing what the result gets scaled to: nothing is
+// ever upscaled, and fitting a landscape photo inside 384x768 still lands on a 384px-wide thumbnail.
+// The bar is deliberately above the ~320px HEIC `thmb`, which now costs a full decode; a RAW's
+// full-size embedded JPEG clears it and still answers in a couple of range reads.
 export const THUMB_SDK_MAX_HEIGHT = THUMB_MAX_DIM * 2
 
 // Whole-buffer decode/generate ceiling (64 MiB) for the ONE remaining category that pulls the entire
@@ -43,17 +49,26 @@ const THUMB_SDK_MEM_BUDGET = 67_108_864n
 // a request survives at the size it asked for only while the budget can still afford its LONGEST side.
 const THUMB_TARGET_BUDGET_BYTES_PER_PX = 40n
 
-// What must remain of the budget for a whole 256x512 request to come back unclamped: 512^2 * 40, 10 MiB.
+// What must remain of the budget for a whole 384x768 request to come back unclamped: 768^2 * 40, 22.5 MiB.
 const THUMB_FULL_TARGET_BUDGET = BigInt(THUMB_SDK_MAX_HEIGHT) * BigInt(THUMB_SDK_MAX_HEIGHT) * THUMB_TARGET_BUDGET_BYTES_PER_PX
 
-// Ceiling (54 MiB) on a LOCAL source handed to the SDK's from-stream thumbnail path, which buffers the
-// source whole and takes its length off the decode budget above. Past this what is left can no longer
-// afford the full 256x512 request, so that path does not fail — it quietly returns a SMALLER thumbnail
-// (a 63 MiB source leaves ~1 MiB, good for ~160px). The drive-side path pays a constant 2 MiB for its
+// Ceiling (41.5 MiB) on a LOCAL source handed to the SDK's from-stream thumbnail path, which buffers
+// the source whole and takes its length off the decode budget above. Past this what is left can no
+// longer afford the full 384x768 request, so that path does not fail — it quietly returns a SMALLER
+// thumbnail (a 63 MiB source leaves ~1 MiB, good for ~160px). The larger request box tightened this
+// gate from 54 MiB, so more just-uploaded files now fall through to the drive-side producer. The drive-side path pays a constant 2 MiB for its
 // resident chunk slots instead, so its budget never shrinks with the file; past this gate it is simply
 // the better producer. Below THUMB_SIZE_GATE, so it also covers the from-stream path's outright refusal
 // of a source over `max_source_bytes`.
 export const THUMB_WARM_SIZE_GATE = THUMB_SDK_MEM_BUDGET - THUMB_FULL_TARGET_BUDGET
+
+// WebP quality 0-100 handed to the SDK arm. Absent would mean LOSSLESS (the SDK's default), which is
+// what a 384x768 box could not afford: lossy runs several times smaller on photographic content, and
+// that is what pays for the larger request without growing each cache entry. It matters most here
+// because THUMB_CACHE_CAP is a HARD cap with LRU eviction — bytes per entry is exactly how many
+// thumbnails a large library gets to keep, and every eviction costs a fresh range read plus a decode.
+// 80 is where WebP artefacts stop being visible at tile size.
+export const THUMB_SDK_LOSSY_QUALITY = 80
 
 // On-disk cache ceiling (256 MiB) — sweepThumbs evicts the oldest entries once the store exceeds
 // this, so a long-lived session's thumbnail cache never grows unbounded.
@@ -67,9 +82,10 @@ export const THUMB_DIR_ROOT = ["thumbnails"]
 // Bumped whenever the cached bytes themselves change shape (a different max dimension, a different
 // encode, a different PRODUCER) — "v1" -> "v2" was the 512 -> 256 THUMB_MAX_DIM drop; "v2" -> "v3" is
 // the still-image producer changing from a browser createImageBitmap decode to the SDK's own webp
-// encode. A stale generation can never serve under the new code, and removeStaleThumbGenerations
-// reclaims v2's bytes on the next sweep rather than leaking them.
-export const THUMB_GENERATION = "v3"
+// encode; "v3" -> "v4" is THUMB_MAX_DIM 256 -> 384 with the SDK arm's encode going lossy. A stale
+// generation can never serve under the new code, and removeStaleThumbGenerations reclaims the
+// superseded bytes on the next sweep rather than leaking them.
+export const THUMB_GENERATION = "v4"
 
 // OPFS path segments under the origin's private root for the live generation's own cache tree.
 export const THUMB_DIR = [...THUMB_DIR_ROOT, THUMB_GENERATION]

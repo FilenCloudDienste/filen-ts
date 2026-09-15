@@ -5,7 +5,13 @@ import { runOp } from "@/lib/actions/outcome"
 import { log } from "@/lib/log"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { registerThumbGenerator, seedThumbnail, type ThumbGenerationResult, type ThumbGenerator } from "@/features/drive/lib/thumbnails"
-import { THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_WARM_SIZE_GATE, thumbnailCategory } from "@/features/drive/lib/thumbnails.logic"
+import {
+	THUMB_MAX_DIM,
+	THUMB_SDK_MAX_HEIGHT,
+	THUMB_SDK_LOSSY_QUALITY,
+	THUMB_WARM_SIZE_GATE,
+	thumbnailCategory
+} from "@/features/drive/lib/thumbnails.logic"
 import { fitWithin, encodeCanvasThumb } from "@/features/drive/lib/thumbGenerators.logic"
 import { previewStreamUrl, waitForMediaStream } from "@/features/preview/lib/previewStream"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
@@ -48,14 +54,14 @@ function asGenerationResult(result: SdkThumbnailResult): ThumbGenerationResult {
 // back. That is the whole point of routing RAW here — a 90 MB NEF usually costs a couple of range
 // reads because the camera already embedded a full-size JPEG in it.
 //
-// The request is 256x512 rather than square; THUMB_SDK_MAX_HEIGHT's own comment explains why (a square
-// 256 would let the SDK accept a 128px EXIF stamp, which is mush in a 176px tile at 2x DPR).
+// The request is 384x768 rather than square, and lossy; THUMB_SDK_MAX_HEIGHT and
+// THUMB_SDK_LOSSY_QUALITY carry the reasoning for the shape and the encode respectively.
 //
 // A thrown call (the worker died, the client is gone, the read never landed) is a transient failure
 // and counts toward the blacklist; the SDK's own unsupported/overBudget/corrupt answers do not.
 export const generateSdkThumb: ThumbGenerator = async item => {
 	try {
-		const result = await sdkApi.makeSdkThumbnail(narrowToAnyFile(item), THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT)
+		const result = await sdkApi.makeSdkThumbnail(narrowToAnyFile(item), THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SDK_LOSSY_QUALITY)
 
 		return asGenerationResult(result)
 	} catch (e) {
@@ -99,7 +105,7 @@ export function warmUploadThumbnail(uploaded: SdkFile, file: File): void {
 	}
 
 	seedThumbnail(item, async () => {
-		const result = await sdkApi.makeSdkThumbnailFromFile(file, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT)
+		const result = await sdkApi.makeSdkThumbnailFromFile(file, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SDK_LOSSY_QUALITY)
 
 		if (result.type === "thumbnail") {
 			return { type: "bytes", bytes: result.bytes }

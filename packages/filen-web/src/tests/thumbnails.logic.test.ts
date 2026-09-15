@@ -228,12 +228,12 @@ describe("thumbnailCategory", () => {
 
 describe("THUMB_SDK_MAX_HEIGHT", () => {
 	// Pinned because the asymmetry is the whole point: the SDK accepts an embedded preview when
-	// preview_long_side * 2 >= max(maxWidth, maxHeight), so a square 256 request would accept a 128px
-	// EXIF stamp — mush in a 176px tile at 2x DPR. Doubling only the height raises that bar to 256px
+	// preview_long_side * 2 >= max(maxWidth, maxHeight), so a square 384 request would accept a 192px
+	// EXIF stamp — mush in a tile twice that size. Doubling only the height raises that bar to 384px
 	// without changing what the result is scaled to.
 	it("is twice THUMB_MAX_DIM, never equal to it", () => {
 		expect(THUMB_SDK_MAX_HEIGHT).toBe(THUMB_MAX_DIM * 2)
-		expect(THUMB_SDK_MAX_HEIGHT).toBe(512)
+		expect(THUMB_SDK_MAX_HEIGHT).toBe(768)
 	})
 })
 
