@@ -74,13 +74,16 @@ The three submodules under `packages/filen-mobile/` are:
 
 ## Install dependencies
 
-From the repo root:
+From this package. The repo is not an npm workspace — every package carries its own lockfile and
+installs on its own:
 
 ```bash
+cd packages/filen-mobile
 npm install
 ```
 
-(Workspace-aware — installs deps for every package in `packages/*` including `filen-mobile`.)
+`postinstall` applies everything in `patches/` with patch-package, and deliberately skips itself
+when `$CI` is set — the workflows run patch-package as their own step instead.
 
 ---
 
