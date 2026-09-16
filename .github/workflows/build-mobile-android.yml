@@ -113,8 +113,12 @@ jobs:
           # cargo-ndk 4.x required: filen-rs heif-decoder/build.rs reads ANDROID_ABI (d454f4d); 3.5.4 set CARGO_NDK_ANDROID_TARGET (reverses bbqsrc/cargo-ndk#181)
           tool: cargo-ndk@4.1.2
 
+      # The workflow-level NODE_ENV=production makes yarn skip the prepare script that builds the
+      # uniffi-bindgen-react-native git dependency; pnpm itself ignores NODE_ENV.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter @filen/mobile...
+        env:
+          NODE_ENV: development
 
       - name: Set up Expo credentials
         run: echo "${{ secrets.EXPO_CREDENTIALS }}" | base64 --decode > credentials.json
@@ -123,7 +127,14 @@ jobs:
         run: pnpm run prebuild:ci:android
 
       - name: Build Android release APK & AAB
-        run: cd android && chmod +x ./gradlew && ./gradlew app:bundleRelease app:assembleRelease && cd ..
+        run: set -o pipefail && cd android && chmod +x ./gradlew && ./gradlew app:bundleRelease app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/gradle.log" && cd ..
+
+      - name: Build diagnostics
+        if: failure()
+        run: |
+          echo "::group::disk and memory"; df -h; vm_stat; echo "::endgroup::"
+          echo "::group::last errors"; grep -nE 'error:|FAILURE:|What went wrong|Execution failed|OutOfMemory|No space left' "$RUNNER_TEMP/gradle.log" | tail -40; echo "::endgroup::"
+          grep -E 'error:|FAILURE:|What went wrong|Execution failed|OutOfMemory|No space left' "$RUNNER_TEMP/gradle.log" | tail -8 | while IFS= read -r line; do echo "::error::${line}"; done
 
       - name: Cleanup
         if: always()

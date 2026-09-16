@@ -74,14 +74,23 @@ jobs:
       - name: Install build tools for heif-decoder's vendored dav1d
         run: brew install meson ninja
 
+      # The workflow-level NODE_ENV=production makes yarn skip the prepare script that builds the
+      # uniffi-bindgen-react-native git dependency; pnpm itself ignores NODE_ENV.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter @filen/mobile...
+        env:
+          NODE_ENV: development
 
       - name: Prebuild
-        run: pnpm run prebuild:ci:ios
+        run: pnpm run superclean && pnpm exec expo prebuild --clean --platform ios --no-install
+
+      - name: Install pods
+        run: pod install --repo-update
+        working-directory: packages/filen-mobile/ios
 
       - name: Build iOS app for simulator
         run: |
+          set -o pipefail
           cd ios
           xcodebuild \
             -workspace Filen.xcworkspace \
@@ -90,7 +99,14 @@ jobs:
             -sdk iphonesimulator \
             -derivedDataPath $RUNNER_TEMP/DerivedData \
             ARCHS=arm64 \
-            build
+            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+
+      - name: Build diagnostics
+        if: failure()
+        run: |
+          echo "::group::disk and memory"; df -h; vm_stat; sysctl -n hw.ncpu hw.memsize; echo "::endgroup::"
+          echo "::group::last errors"; grep -nE 'error:|\*\* BUILD FAILED|ld: |PhaseScriptExecution|fatal error' "$RUNNER_TEMP/xcodebuild.log" | tail -40; echo "::endgroup::"
+          grep -E 'error:|\*\* BUILD FAILED|ld: ' "$RUNNER_TEMP/xcodebuild.log" | tail -8 | while IFS= read -r line; do echo "::error::${line}"; done
 
       - name: Cleanup
         if: always()
