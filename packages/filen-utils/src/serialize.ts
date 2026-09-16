@@ -1,7 +1,7 @@
 export type SerializedError = {
 	name: string
 	message: string
-	stack?: string
+	stack?: string | undefined
 	stringified: string
 }
 
@@ -16,9 +16,11 @@ export function serializeError(error: Error): SerializedError {
 
 export function deserializeError(serializedError: SerializedError): Error {
 	const error = new Error(serializedError.message)
+	// exactOptionalPropertyTypes rejects writing `string | undefined` through lib's `Error.stack?: string`
+	const writableStack: { stack?: string | undefined } = error
 
 	error.name = serializedError.name
-	error.stack = serializedError.stack
+	writableStack.stack = serializedError.stack
 	error.message = serializedError.message
 
 	return error

@@ -30,7 +30,7 @@ export type DeferredFunctions = Array<DeferredFunction>
 
 export type Options = {
 	throw?: boolean
-	onError?: (err: unknown) => void
+	onError?: ((err: unknown) => void) | undefined
 }
 
 export async function run<TResult, E = unknown>(
@@ -378,7 +378,7 @@ export function runDebounced<TResult, TArgs extends unknown[]>(
 	delayMs: number,
 	options?: Options
 ): (...args: TArgs) => Promise<Result<TResult, unknown>> {
-	let timeoutId: NodeJS.Timeout | null = null
+	let timeoutId: ReturnType<typeof setTimeout> | null = null
 	let pendingResolve: ((value: Result<TResult, unknown>) => void) | null = null
 	let pendingPromise: Promise<Result<TResult, unknown>> | null = null
 	let executing = false
