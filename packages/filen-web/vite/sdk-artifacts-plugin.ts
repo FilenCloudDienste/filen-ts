@@ -19,6 +19,11 @@ const PKG = join(require.resolve("@filen/sdk-rs"), "..")
 // worker chunk there). There is therefore NO single fixed base — dev must serve these files at
 // WHATEVER directory the request carries (match by basename / `/snippets/` suffix), and the build
 // copies them next to the emitted worker in `<assetsDir>`.
+// The rayon pool workers are NOT part of that copy: the snippet's own
+// `new Worker(new URL("./workerHelpers.js", import.meta.url))` is Vite's to emit, and vite 8.3.0 rewrites it
+// to a hashed `/assets/workerHelpers-*.js` it then never emits — the SPA fallback answers those worker loads
+// with index.html, so `initThreadPool` never gets `wasm_bindgen_worker_ready` and boot fails with reason
+// "pool". Hence the exact vite pin in package.json; drop it once a release emits that chunk again.
 const ARTIFACTS = ["filen-sdk-worker-thread.js", "sdk-rs.js", "sdk-rs_bg.wasm"]
 const MIME: Record<string, string> = { ".js": "text/javascript", ".wasm": "application/wasm" }
 const COI: Record<string, string> = {
