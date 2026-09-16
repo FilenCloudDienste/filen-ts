@@ -97,10 +97,14 @@ jobs:
           echo "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_CONNECT_API_KEY_ID.p8
           chmod 600 ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_CONNECT_API_KEY_ID.p8
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          cache: pnpm
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@master
@@ -114,10 +118,10 @@ jobs:
         run: brew install meson ninja
 
       - name: Install dependencies
-        run: npm install --force --include=dev && npx -y patch-package --patch-dir ./patches
+        run: pnpm install --frozen-lockfile --filter @filen/mobile...
 
       - name: Prebuild
-        run: npm run prebuild:ci:ios
+        run: pnpm run prebuild:ci:ios
 
       - name: Build and archive iOS app
         run: |

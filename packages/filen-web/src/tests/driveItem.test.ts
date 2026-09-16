@@ -121,7 +121,7 @@ describe("narrowItem", () => {
 		if (dirItem.type === "directory") {
 			// @ts-expect-error -- a directory's decryptedMeta (DecryptedDirMeta) has no mime field; this
 			// line must stay a type error, or the union has stopped narrowing `data` by `type`.
-			void dirItem.data.decryptedMeta?.mime
+			expect(dirItem.data.decryptedMeta?.mime).toBeUndefined()
 		}
 	})
 })
@@ -333,7 +333,7 @@ describe("upsertDriveItem", () => {
 // their held-item parameter as the plain wasm Dir/File shape, but every real caller only ever holds
 // a DriveItem — Dir/File plus ExtraData plus decryptedMeta. These two assignments only need to
 // TYPECHECK: if DriveItem's arms ever stopped being a structural superset of Dir/File, this file
-// would fail `npm run typecheck` (no adapter/stripper exists anywhere, by design — see the worker's
+// would fail `pnpm run typecheck` (no adapter/stripper exists anywhere, by design — see the worker's
 // own comment on this). Runtime toleration of the extra own fields crossing the wasm boundary is a
 // separate, already-verified concern (no serde deny_unknown_fields); confirming it against a live
 // authed call is deferred to QA, since this environment has no session to log in with.

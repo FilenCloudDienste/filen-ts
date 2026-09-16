@@ -1,7 +1,7 @@
-diff --git a/node_modules/expo-media-library/ios/next/extensions/PHAssetExtensions.swift b/node_modules/expo-media-library/ios/next/extensions/PHAssetExtensions.swift
-index c52d109..8ff9ea7 100644
---- a/node_modules/expo-media-library/ios/next/extensions/PHAssetExtensions.swift
-+++ b/node_modules/expo-media-library/ios/next/extensions/PHAssetExtensions.swift
+diff --git a/ios/next/extensions/PHAssetExtensions.swift b/ios/next/extensions/PHAssetExtensions.swift
+index c52d1093d85712db5d899d3ea54ebbc320a82dab..8ff9ea70d0eb6feb3ce1e9ba41ff302c144104ce 100644
+--- a/ios/next/extensions/PHAssetExtensions.swift
++++ b/ios/next/extensions/PHAssetExtensions.swift
 @@ -5,6 +5,7 @@ extension PHAsset {
      options: PHContentEditingInputRequestOptions = PHContentEditingInputRequestOptions()
    ) async throws -> (input: PHContentEditingInput?, info: [AnyHashable: Any]?) {

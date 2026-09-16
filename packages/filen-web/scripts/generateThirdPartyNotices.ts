@@ -20,16 +20,16 @@ import { join } from "node:path"
  * holder, which is worse than an honest gap.
  *
  * Two ecosystems reach the browser: the npm tree (minus dev/optional entries, which are build tooling)
- * and the Rust crates the SDK wasm is compiled from. The app's own published npm packages (@filen/*)
- * are non-dev lockfile entries and are therefore described here too — that is correct, not a bug.
+ * and the Rust crates the SDK wasm is compiled from. @filen/sdk-rs is a registry package and is
+ * described here; @filen/utils is a workspace member, so pnpm does not report it and it is correctly
+ * absent — first-party code needs no attribution.
  *
- * Algorithm adapted from filen-mobile's generator of the same name. There is no shared package and the
- * monorepo has no workspaces, so an adapted copy is the honest call; the pod/gradle collectors are
+ * Algorithm adapted from filen-mobile's generator of the same name; the pod/gradle collectors are
  * dropped and the npm dedup key is `name@version` rather than the bare name (this tree ships 30
  * packages at two versions, and a bare-name key would silently describe only one of each pair).
  *
  * CANNOT RUN IN CI: it needs a filen-rs checkout and the local cargo caches. Re-run after any
- * @filen/sdk-rs bump; the payload's exported SDK version is checked against package-lock.json by
+ * @filen/sdk-rs bump; the payload's exported SDK version is checked against the installed tree by
  * src/tests/thirdPartyNotices.test.ts, so a stale payload fails there rather than shipping quietly.
  *
  * Run from the package root: node --experimental-strip-types scripts/generateThirdPartyNotices.ts
@@ -403,56 +403,112 @@ function repositoryOf(value: unknown): string | null {
 	return null
 }
 
-interface LockEntry {
-	version?: string
-	dev?: boolean
-	devOptional?: boolean
-	optional?: boolean
+interface InstalledPackage {
+	name: string
+	version: string
+	dir: string
 }
 
-function lockPackages(): Record<string, LockEntry> {
-	return (requireJson("package-lock.json")["packages"] ?? {}) as Record<string, LockEntry>
+/** One installed package as `pnpm licenses list --json` reports it, under its license key. */
+interface LicensesEntry {
+	name?: unknown
+	versions?: unknown
+	paths?: unknown
+}
+
+let installedCache: InstalledPackage[] | null = null
+
+/**
+ * The installed npm packages, read from pnpm rather than from a lockfile.
+ *
+ * `--prod` follows only `dependencies` edges: a package reachable ONLY through devDependencies is
+ * dropped, one reachable through both is kept — the same thing npm's `dev` flag meant. `--no-optional`
+ * drops optionalDependencies, whose install set is decided per machine, so counting them would make the
+ * payload depend on where it was generated. The `...` on the filter is load-bearing: without it pnpm
+ * reports this package's own tree only, and the packages @filen/utils brings in silently vanish from the
+ * attribution.
+ */
+function installedNpm(): InstalledPackage[] {
+	if (installedCache !== null) {
+		return installedCache
+	}
+
+	let raw: string
+
+	try {
+		raw = execFileSync("pnpm", ["licenses", "list", "--json", "--prod", "--no-optional", "--filter", "@filen/web..."], {
+			encoding: "utf8",
+			maxBuffer: 256 * 1024 * 1024
+		})
+	} catch (error) {
+		throw new Error(
+			`\`pnpm licenses list\` failed — pnpm 12 must be on PATH and \`pnpm install\` must have run at the repo root: ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+			{ cause: error }
+		)
+	}
+
+	const grouped = JSON.parse(raw) as Record<string, LicensesEntry[]>
+	const installed: InstalledPackage[] = []
+
+	for (const entries of Object.values(grouped)) {
+		for (const entry of entries) {
+			const { name, versions, paths } = entry
+
+			if (typeof name !== "string" || !Array.isArray(versions) || !Array.isArray(paths)) {
+				continue
+			}
+
+			// versions[i] pairs with paths[i]: one name can be installed at several versions, and this tree
+			// ships ~30 of them — which is why identity below is `name@version`, never the bare name.
+			for (let index = 0; index < versions.length; index++) {
+				const version: unknown = versions[index]
+				const dir: unknown = paths[index]
+
+				if (typeof version !== "string" || version.length === 0) {
+					throw new Error(`pnpm licenses entry for ${name} has no version`)
+				}
+
+				if (typeof dir !== "string" || dir.length === 0) {
+					continue
+				}
+
+				installed.push({ name, version, dir })
+			}
+		}
+	}
+
+	if (installed.length === 0) {
+		throw new Error("`pnpm licenses list` reported no packages — run `pnpm install` at the repo root")
+	}
+
+	installedCache = installed
+
+	return installed
 }
 
 /**
  * The npm packages that reach a browser.
  *
  * Identity is `name@version`, not the bare name: several packages ship at two versions in this tree and
- * both are distributed, so a name-keyed dedup would describe only one of each pair. The emitted version
- * is always the LOCKFILE's — the same field the payload test compares against.
- *
- * `optional` is excluded alongside `dev` because npm decides per machine whether to install one, so
- * including them would make the payload depend on where it was generated.
+ * both are distributed, so a name-keyed dedup would describe only one of each pair.
  */
 function collectNpm(): Collected[] {
 	const seen = new Set<string>()
 	const entries: Collected[] = []
 
-	for (const [key, meta] of Object.entries(lockPackages())) {
-		if (!key.startsWith("node_modules/") || meta.dev === true || meta.devOptional === true || meta.optional === true) {
-			continue
-		}
-
-		// The lockfile key IS the install path, and a nested entry (a/node_modules/b) lives at that path
-		// rather than at the top level.
-		const name = key.replace(/.*node_modules\//, "")
-		const version = meta.version
-
-		if (typeof version !== "string" || version.length === 0) {
-			throw new Error(`package-lock.json entry ${key} has no version`)
-		}
-
+	for (const { name, version, dir } of installedNpm()) {
 		const id = `${name}@${version}`
 
 		if (seen.has(id)) {
 			continue
 		}
 
-		const manifest = readJson(join(key, "package.json"))
+		const manifest = readJson(join(dir, "package.json"))
 
-		// Marked seen only once actually described: a name@version can be reachable at several keys, and
-		// claiming it on the first — which may be an uninstalled entry — would drop the copy that IS
-		// installed. An id no key can supply stays undescribed and fails the payload's drift guard loudly.
+		// Marked seen only once actually described: an id pnpm reports but no directory can supply stays
+		// undescribed and fails the payload's drift guard loudly rather than silently.
 		if (!manifest) {
 			continue
 		}
@@ -460,13 +516,13 @@ function collectNpm(): Collected[] {
 		const manifestVersion = manifest["version"]
 
 		if (typeof manifestVersion === "string" && manifestVersion !== version) {
-			throw new Error(`${id}: package-lock.json says ${version}, ${key}/package.json says ${manifestVersion} — run npm ci`)
+			throw new Error(`${id}: pnpm says ${version}, ${dir}/package.json says ${manifestVersion} — run pnpm install`)
 		}
 
 		seen.add(id)
 
 		const license = spdxOf(manifest["license"] ?? manifest["licenses"])
-		const licensing = describeLicensing(key, license)
+		const licensing = describeLicensing(dir, license)
 
 		entries.push({
 			name,
@@ -643,19 +699,19 @@ function collectRust(expected: string): { entries: Collected[]; ref: string; sou
 	return { entries, ref, source: checkout.source, crates }
 }
 
-// The one definition of "the installed SDK": the committed lockfile, which is also what the payload
-// test reads. node_modules is only a cross-check, so an edited package.json with no install cannot
-// generate a payload that only fails later.
-const expectedSdk = lockPackages()["node_modules/@filen/sdk-rs"]?.version
+// The one definition of "the installed SDK": what pnpm reports for the installed tree, which is also
+// what the payload test reads. The symlink under node_modules is the cross-check, so an edited
+// package.json with no install cannot generate a payload that only fails later.
+const expectedSdk = installedNpm().find(entry => entry.name === "@filen/sdk-rs")?.version
 
 if (typeof expectedSdk !== "string" || expectedSdk.length === 0) {
-	throw new Error("package-lock.json has no @filen/sdk-rs entry")
+	throw new Error("the installed tree has no @filen/sdk-rs — run `pnpm install` at the repo root")
 }
 
 const installedSdk = requireJson("node_modules/@filen/sdk-rs/package.json")["version"]
 
 if (installedSdk !== expectedSdk) {
-	throw new Error(`package-lock.json says @filen/sdk-rs ${expectedSdk}, node_modules says ${String(installedSdk)} — run npm install`)
+	throw new Error(`pnpm says @filen/sdk-rs ${expectedSdk}, node_modules says ${String(installedSdk)} — run pnpm install`)
 }
 
 const npm = collectNpm()
@@ -737,7 +793,7 @@ const output = `// AUTO-GENERATED by scripts/generateThirdPartyNotices.ts — do
 // repository are given instead rather than borrowing another package's copyright. More than one entry
 // means the declared license is a conjunction — every text applies.
 //
-// npm:  package-lock.json (${String(npm.length)} name@version packages)
+// npm:  pnpm licenses list --json --prod --no-optional --filter @filen/web... (${String(npm.length)} name@version packages)
 // rust: filen-rs @ ${rust.ref} (${String(rust.crates)} crates)  [resolved via: ${rust.source}]
 //
 // Cannot run in CI: needs a filen-rs checkout and the local cargo caches. Re-run after any SDK bump.

@@ -1,7 +1,7 @@
-diff --git a/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt b/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt
-index 69ccba6..3fbce27 100644
---- a/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt
-+++ b/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt
+diff --git a/android/src/main/java/expo/modules/sharing/SharingModule.kt b/android/src/main/java/expo/modules/sharing/SharingModule.kt
+index 69ccba68e28af71a262c01bd54a202a7bd985909..3fbce27789789d3d146d73699fd19527b5d9ba85 100644
+--- a/android/src/main/java/expo/modules/sharing/SharingModule.kt
++++ b/android/src/main/java/expo/modules/sharing/SharingModule.kt
 @@ -23,9 +23,11 @@ class SharingModule : Module() {
      Name("ExpoSharing")
  
@@ -17,10 +17,10 @@ index 69ccba6..3fbce27 100644
        try {
          val fileToShare = getLocalFileFoUrl(url)
          val contentUri = FileProvider.getUriForFile(
-diff --git a/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/ResolvingShareIntentDataParser.kt b/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/ResolvingShareIntentDataParser.kt
-index 5f4d942..93d30b3 100644
---- a/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/ResolvingShareIntentDataParser.kt
-+++ b/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/ResolvingShareIntentDataParser.kt
+diff --git a/android/src/main/java/expo/modules/sharing/dataParsers/ResolvingShareIntentDataParser.kt b/android/src/main/java/expo/modules/sharing/dataParsers/ResolvingShareIntentDataParser.kt
+index 5f4d9423acc2999c1f1209181c95c37138155b5d..93d30b33c93a8a100191bb6c5fadba1e28469898 100644
+--- a/android/src/main/java/expo/modules/sharing/dataParsers/ResolvingShareIntentDataParser.kt
++++ b/android/src/main/java/expo/modules/sharing/dataParsers/ResolvingShareIntentDataParser.kt
 @@ -25,11 +25,20 @@ class ResolvingShareIntentDataParser {
      }
  
@@ -44,10 +44,10 @@ index 5f4d942..93d30b3 100644
        }
      }
  
-diff --git a/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/SimpleShareIntentDataParser.kt b/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/SimpleShareIntentDataParser.kt
-index 8dd50e8..0f0e4db 100644
---- a/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/SimpleShareIntentDataParser.kt
-+++ b/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/dataParsers/SimpleShareIntentDataParser.kt
+diff --git a/android/src/main/java/expo/modules/sharing/dataParsers/SimpleShareIntentDataParser.kt b/android/src/main/java/expo/modules/sharing/dataParsers/SimpleShareIntentDataParser.kt
+index 8dd50e8f04022d183884a57e4d61a7e1711b9e49..0f0e4db81f0280b4a8a5148edb74c1ed21a602e4 100644
+--- a/android/src/main/java/expo/modules/sharing/dataParsers/SimpleShareIntentDataParser.kt
++++ b/android/src/main/java/expo/modules/sharing/dataParsers/SimpleShareIntentDataParser.kt
 @@ -17,6 +17,17 @@ internal class SimpleShareIntentDataParser {
      }
  

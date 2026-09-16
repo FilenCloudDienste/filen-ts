@@ -16,8 +16,8 @@
 	"scripts": {
 		"tsc": "tsc",
 		"clear": "rimraf ./dist",
-		"build": "npm run clear && npm run lint && npm run tsc",
-		"dev": "npm run build && cross-env NODE_ENV=development electron ./src/index.dev.js --no-sandbox",
+		"build": "pnpm run clear && pnpm run lint && pnpm run tsc",
+		"dev": "pnpm run build && cross-env NODE_ENV=development electron ./src/index.dev.js --no-sandbox",
 		"ncu": "npm-check-updates --interactive --format group",
 		"lint": "eslint --report-unused-disable-directives --max-warnings 0 --no-warn-ignored"
 	},
@@ -25,16 +25,20 @@
 		"node": ">=24"
 	},
 	"dependencies": {
-		"@filen/utils": "*"
+		"@filen/utils": "workspace:*"
 	},
 	"devDependencies": {
+		"@eslint/eslintrc": "^3.3.5",
+		"@eslint/js": "^9.34.0",
 		"@types/node": "^24.3.0",
+		"@typescript-eslint/eslint-plugin": "^8.41.0",
 		"@typescript-eslint/parser": "^8.41.0",
 		"cross-env": "^10.0.0",
 		"electron": "^37.4.0",
 		"electron-builder": "^26.0.12",
 		"eslint": "^9.34.0",
 		"npm-check-updates": "^18.0.3",
+		"rimraf": "^6.1.0",
 		"tsx": "^4.20.5",
 		"typescript": "^5.9.2"
 	}

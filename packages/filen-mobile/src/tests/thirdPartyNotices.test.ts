@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest"
+import { execFileSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { LICENSE_TEXTS, THIRD_PARTY_NOTICES } from "@/features/settings/thirdPartyNotices.generated"
@@ -20,31 +21,50 @@ const POD_INFRASTRUCTURE = new Set(["Headers", "Local Podspecs", "Target Support
 const PACKAGE_ROOT = path.join(__dirname, "..", "..")
 
 /**
- * The packages the lockfile says reach a device.
+ * The packages pnpm says reach a device — the same query the generator runs, so the two sides of the
+ * comparison cannot drift apart.
  *
- * Read from the lockfile alone, never from what is installed here: the lockfile is committed, so this
- * set is identical on every machine, and the payload has to satisfy CI as much as the laptop it was
- * generated on.
+ * `--prod` follows only `dependencies` edges: a package reachable ONLY through devDependencies is
+ * dropped, one reachable through both is kept — the same thing npm's `dev` flag meant, and why
+ * @types/react, babel-preset-expo and zod are direct devDependencies that ship. `--no-optional` drops
+ * optionalDependencies, whose install set is decided per machine: a macOS run gets the darwin native
+ * binaries, CI's Linux run the linux ones, so counting them would make the expectation depend on where
+ * the payload was generated.
  *
- * `optional` is what makes that hold. npm decides per machine whether to install one — a macOS run
- * gets the darwin native binaries, CI's Linux run the linux ones — so counting them made the payload
- * describe wherever it happened to be generated. Every optional entry here is build tooling that
- * cannot execute on a device anyway: the lightningcss/oxide/napi-rs binaries and their wasm fallbacks,
- * pdf.js's Node canvas backend (the app runs pdf.js in a WebView), and type-only packages.
+ * The `...` on the filter keeps everything @filen/utils brings in inside the set; @filen/utils itself is
+ * a workspace member, is not reported, and is correctly absent from the payload.
  */
 function installedShippingPackages(): Set<string> {
-	const lock = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, "package-lock.json"), "utf8")) as {
-		packages?: Record<string, { dev?: boolean; devOptional?: boolean; optional?: boolean }>
+	let raw: string
+
+	try {
+		raw = execFileSync("pnpm", ["licenses", "list", "--json", "--prod", "--no-optional", "--filter", "@filen/mobile..."], {
+			cwd: PACKAGE_ROOT,
+			encoding: "utf8",
+			maxBuffer: 256 * 1024 * 1024
+		})
+	} catch (error) {
+		throw new Error(
+			`\`pnpm licenses list\` failed — pnpm 12 must be on PATH and \`pnpm install\` must have run at the repo root: ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+			{ cause: error }
+		)
 	}
 
+	const grouped = JSON.parse(raw) as Record<string, { name?: unknown }[]>
 	const names = new Set<string>()
 
-	for (const [key, meta] of Object.entries(lock.packages ?? {})) {
-		if (!key.startsWith("node_modules/") || meta.dev === true || meta.devOptional === true || meta.optional === true) {
-			continue
+	for (const entries of Object.values(grouped)) {
+		for (const entry of entries) {
+			if (typeof entry.name === "string" && entry.name.length > 0) {
+				names.add(entry.name)
+			}
 		}
+	}
 
-		names.add(key.replace(/.*node_modules\//, ""))
+	if (names.size === 0) {
+		throw new Error("`pnpm licenses list` reported no packages — run `pnpm install` at the repo root")
 	}
 
 	return names
@@ -60,7 +80,7 @@ describe("third-party notices payload", () => {
 
 		expect([...expected].filter(name => !actual.has(name)).sort()).toEqual([])
 		expect([...actual].filter(name => !expected.has(name)).sort()).toEqual([])
-	})
+	}, 60_000)
 
 	it("describes every ecosystem that ships", () => {
 		// A machine missing one of the four caches would otherwise emit a payload that looks complete.

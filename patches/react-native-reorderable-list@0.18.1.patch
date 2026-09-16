@@ -1,7 +1,7 @@
-diff --git a/node_modules/react-native-reorderable-list/src/components/ReorderableListCore.tsx b/node_modules/react-native-reorderable-list/src/components/ReorderableListCore.tsx
-index 81bdff2..dd6da78 100644
---- a/node_modules/react-native-reorderable-list/src/components/ReorderableListCore.tsx
-+++ b/node_modules/react-native-reorderable-list/src/components/ReorderableListCore.tsx
+diff --git a/src/components/ReorderableListCore.tsx b/src/components/ReorderableListCore.tsx
+index 81bdff2c77320769401e3609dab2edd5716a437c..dd6da7831e1b5bc1fea5c191359b82a66b115732 100644
+--- a/src/components/ReorderableListCore.tsx
++++ b/src/components/ReorderableListCore.tsx
 @@ -511,7 +511,19 @@ const ReorderableListCore = <T,>(
    const reorder = (fromIndex: number, toIndex: number) => {
      runOnUI(resetSharedValues)();

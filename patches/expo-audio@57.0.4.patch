@@ -1,7 +1,7 @@
-diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
-index 196a5d5..9787caa 100644
---- a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
-+++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
+diff --git a/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt b/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
+index 196a5d57f887c2667a88543bd2f6a80044a044f2..9787caa19be2785709f11876f82dff2990fb0f2c 100644
+--- a/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
++++ b/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
 @@ -90,6 +90,8 @@ class AudioControlsService : MediaSessionService() {
  
          ACTION_SEEK_FORWARD -> currentPlayerRef.seekTo(currentPlayerRef.currentPosition + SEEK_INTERVAL_MS)
@@ -84,10 +84,10 @@ index 196a5d5..9787caa 100644
  
      const val SEEK_INTERVAL_MS = 10000L
    }
-diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioMediaSessionCallback.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioMediaSessionCallback.kt
-index 839aaef..ad40c3e 100644
---- a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioMediaSessionCallback.kt
-+++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioMediaSessionCallback.kt
+diff --git a/android/src/main/java/expo/modules/audio/service/AudioMediaSessionCallback.kt b/android/src/main/java/expo/modules/audio/service/AudioMediaSessionCallback.kt
+index 839aaef12d7699ea1a89037b31849775daa079f4..ad40c3e6a626e4bcc9ea8ab9fe24e511ab8bc52d 100644
+--- a/android/src/main/java/expo/modules/audio/service/AudioMediaSessionCallback.kt
++++ b/android/src/main/java/expo/modules/audio/service/AudioMediaSessionCallback.kt
 @@ -10,7 +10,9 @@ import androidx.media3.common.util.UnstableApi
  import com.google.common.util.concurrent.ListenableFuture
  
@@ -121,10 +121,10 @@ index 839aaef..ad40c3e 100644
      }
      return super.onCustomCommand(session, controller, command, args)
    }
-diff --git a/node_modules/expo-audio/build/AudioModule.types.d.ts b/node_modules/expo-audio/build/AudioModule.types.d.ts
-index f3ae4ee..2a8550a 100644
---- a/node_modules/expo-audio/build/AudioModule.types.d.ts
-+++ b/node_modules/expo-audio/build/AudioModule.types.d.ts
+diff --git a/build/AudioModule.types.d.ts b/build/AudioModule.types.d.ts
+index f3ae4ee4044d86032cd5c6dbcfee6f905d1ce99f..2a8550a51986f95321c90284b8c081edc51e940f 100644
+--- a/build/AudioModule.types.d.ts
++++ b/build/AudioModule.types.d.ts
 @@ -222,6 +222,10 @@ export type AudioEvents = {
      playbackStatusUpdate(status: AudioStatus): void;
      /** Fired when audio sampling is enabled and new sample data is available. */
@@ -136,10 +136,10 @@ index f3ae4ee..2a8550a 100644
  };
  export declare class AudioRecorder extends SharedObject<RecordingEvents> {
      /**
-diff --git a/node_modules/expo-audio/ios/MediaController.swift b/node_modules/expo-audio/ios/MediaController.swift
-index e977f57..e358ac2 100644
---- a/node_modules/expo-audio/ios/MediaController.swift
-+++ b/node_modules/expo-audio/ios/MediaController.swift
+diff --git a/ios/MediaController.swift b/ios/MediaController.swift
+index e977f577cd2e16b194b56537ad76b423f40d2496..e358ac24c6285b5269500fcc807f9dd60a4a33eb 100644
+--- a/ios/MediaController.swift
++++ b/ios/MediaController.swift
 @@ -14,6 +14,7 @@ class MediaController {
    private var artworkLoadToken: UUID?
    private var currentArtworkItemIdentifier: ObjectIdentifier?
@@ -225,10 +225,10 @@ index e977f57..e358ac2 100644
 +    remoteCommandCenter.previousTrackCommand.removeTarget(self)
    }
  }
-diff --git a/node_modules/expo-audio/src/AudioModule.types.ts b/node_modules/expo-audio/src/AudioModule.types.ts
-index 7e75371..d91567e 100644
---- a/node_modules/expo-audio/src/AudioModule.types.ts
-+++ b/node_modules/expo-audio/src/AudioModule.types.ts
+diff --git a/src/AudioModule.types.ts b/src/AudioModule.types.ts
+index 7e7537173d067fecef767a03dc0f1860c8aca7ac..d91567ef9d284ca1b063278abdfd6e3304bce89f 100644
+--- a/src/AudioModule.types.ts
++++ b/src/AudioModule.types.ts
 @@ -280,6 +280,10 @@ export type AudioEvents = {
    playbackStatusUpdate(status: AudioStatus): void;
    /** Fired when audio sampling is enabled and new sample data is available. */

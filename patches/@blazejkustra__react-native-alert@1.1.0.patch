@@ -1,7 +1,7 @@
-diff --git a/node_modules/@blazejkustra/react-native-alert/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt b/node_modules/@blazejkustra/react-native-alert/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt
-index ceeb405..da8b927 100644
---- a/node_modules/@blazejkustra/react-native-alert/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt
-+++ b/node_modules/@blazejkustra/react-native-alert/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt
+diff --git a/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt b/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt
+index ceeb405c78eb3d53b4ead439b2356de8cffa1636..da8b927d603830f3493fa0f8fa151d60ca63e60f 100644
+--- a/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt
++++ b/android/src/main/java/com/blazejkustra/reactnativealert/ReactNativeAlertModule.kt
 @@ -5,6 +5,7 @@ import android.os.Build
  import android.text.InputFilter
  import android.text.InputType

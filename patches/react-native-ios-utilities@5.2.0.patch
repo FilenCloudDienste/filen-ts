@@ -1,7 +1,7 @@
-diff --git a/node_modules/react-native-ios-utilities/ios/Sources/Extensions+Helpers/RCTView+Helpers.swift b/node_modules/react-native-ios-utilities/ios/Sources/Extensions+Helpers/RCTView+Helpers.swift
-index 09be306..5f0b4e6 100644
---- a/node_modules/react-native-ios-utilities/ios/Sources/Extensions+Helpers/RCTView+Helpers.swift
-+++ b/node_modules/react-native-ios-utilities/ios/Sources/Extensions+Helpers/RCTView+Helpers.swift
+diff --git a/ios/Sources/Extensions+Helpers/RCTView+Helpers.swift b/ios/Sources/Extensions+Helpers/RCTView+Helpers.swift
+index 09be306d5aa39337c5114c2ad6ba7513218e0751..d13312c59b4419efa238467d4d6989d5f967d09b 100644
+--- a/ios/Sources/Extensions+Helpers/RCTView+Helpers.swift
++++ b/ios/Sources/Extensions+Helpers/RCTView+Helpers.swift
 @@ -25,15 +25,24 @@ public extension RCTView {
      return rootView.recursivelyFindSubview(whereType: targetType);
    };
@@ -16,7 +16,7 @@ index 09be306..5f0b4e6 100644
 +    guard let targetType = NSClassFromString("RCTRootContentView") else {
 +      return nil;
 +    };
- 
+   
 -    if let match = self.recursivelyFindParentView(whereType: targetType) {
 -      return match;
 +    var currentView: UIView? = self.superview;
@@ -26,7 +26,7 @@ index 09be306..5f0b4e6 100644
 +      };
 +      currentView = view.superview;
      };
- 
+     
 -    guard let rootView = self.rootViewForCurrentWindow else { return nil };
 -    return rootView.recursivelyFindSubview(whereType: targetType);
 +    return nil;

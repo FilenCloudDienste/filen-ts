@@ -44,7 +44,12 @@ export function directorySizePrefetchTargets(items: readonly DriveItem[]): Direc
 // 0n fallback covers them. Returns undefined when the map is empty so the sort takes its zero-cost
 // path (identical to passing no map). Sizes cross Comlink as bigint; Number() here matches the map
 // type sort expects — a directory past 2^53 bytes is not a real case.
-export function collectDirectorySizes(items: readonly DriveItem[], queryClient: QueryClient): ReadonlyMap<string, number> | undefined {
+// _cacheVersion is read only so memoisation keys on the query-cache subscription counter.
+export function collectDirectorySizes(
+	items: readonly DriveItem[],
+	queryClient: QueryClient,
+	_cacheVersion?: number
+): ReadonlyMap<string, number> | undefined {
 	const sizes = new Map<string, number>()
 
 	for (const item of items) {

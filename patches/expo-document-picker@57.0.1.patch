@@ -1,7 +1,7 @@
-diff --git a/node_modules/expo-document-picker/android/src/main/java/expo/modules/documentpicker/DocumentPickerModule.kt b/node_modules/expo-document-picker/android/src/main/java/expo/modules/documentpicker/DocumentPickerModule.kt
-index 6c2bff0..0fa1772 100644
---- a/node_modules/expo-document-picker/android/src/main/java/expo/modules/documentpicker/DocumentPickerModule.kt
-+++ b/node_modules/expo-document-picker/android/src/main/java/expo/modules/documentpicker/DocumentPickerModule.kt
+diff --git a/android/src/main/java/expo/modules/documentpicker/DocumentPickerModule.kt b/android/src/main/java/expo/modules/documentpicker/DocumentPickerModule.kt
+index 6c2bff0523842cff4051ee00a9ad11d969fb68e3..0fa1772b5d7abcc6ff659b5d79594defd6936ab0 100644
+--- a/android/src/main/java/expo/modules/documentpicker/DocumentPickerModule.kt
++++ b/android/src/main/java/expo/modules/documentpicker/DocumentPickerModule.kt
 @@ -12,6 +12,8 @@ import expo.modules.kotlin.exception.Exceptions
  import expo.modules.kotlin.exception.toCodedException
  import expo.modules.kotlin.modules.Module

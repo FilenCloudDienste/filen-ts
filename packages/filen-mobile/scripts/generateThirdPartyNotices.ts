@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
@@ -28,7 +29,7 @@ import { homedir } from "node:os"
  * pod install, and assembled an Android release. A missing input throws rather than quietly emitting a
  * payload that omits an ecosystem.
  *
- * Run: npx tsx scripts/generateThirdPartyNotices.ts
+ * Run: pnpm run notices
  */
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -406,41 +407,154 @@ function repositoryOf(value: unknown): string | null {
 	return null
 }
 
-/**
- * The npm packages that reach a device.
- *
- * `optional` is excluded alongside `dev` because npm decides per machine whether to install one, so
- * including them makes the payload depend on where it was generated — a macOS run describes the darwin
- * native binaries, a Linux run the linux ones. Every optional entry in this tree is build tooling that
- * cannot execute on a device anyway: the napi-rs/lightningcss/oxide native binaries and their wasm
- * fallbacks, pdf.js's Node canvas backend (the app runs pdf.js in a WebView), and type-only packages.
- */
-function collectNpm(): Collected[] {
-	const lock = readJson(join(packageRoot, "package-lock.json"))
-	const packages = (lock?.["packages"] ?? {}) as Record<string, { dev?: boolean; devOptional?: boolean; optional?: boolean }>
-	const seen = new Set<string>()
-	const entries: Collected[] = []
+/** One installed package as `pnpm licenses list --json` reports it, under its license key. */
+type LicensesEntry = {
+	name?: unknown
+	versions?: unknown
+	paths?: unknown
+}
 
-	for (const [key, meta] of Object.entries(packages)) {
-		if (!key.startsWith("node_modules/") || meta.dev === true || meta.devOptional === true || meta.optional === true) {
+/**
+ * Highest version first; a release outranks its own prereleases. Leading numeric segments are compared
+ * as numbers so 10.4.3 outranks 5.1.1, which a plain string compare gets backwards; equal or
+ * non-numeric segments fall back to a string compare, which only has to be deterministic.
+ */
+function compareVersionsDescending(left: string, right: string): number {
+	const leftParts = left.split(".")
+	const rightParts = right.split(".")
+
+	for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index++) {
+		const leftPart = leftParts[index] ?? ""
+		const rightPart = rightParts[index] ?? ""
+
+		if (leftPart === rightPart) {
 			continue
 		}
 
-		// The lockfile key IS the install path, and a nested entry (a/node_modules/b) lives at that path
-		// rather than at the top level. Reading from the key rather than the bare name is what lets a
-		// deduplicated transitive dependency be described at all.
-		const name = key.replace(/.*node_modules\//, "")
+		const leftNumber = Number.parseInt(leftPart, 10)
+		const rightNumber = Number.parseInt(rightPart, 10)
 
+		if (!Number.isNaN(leftNumber) && !Number.isNaN(rightNumber)) {
+			if (leftNumber !== rightNumber) {
+				return rightNumber - leftNumber
+			}
+
+			// Same number, one side carrying a `-` suffix: that side is a prerelease of the other, so it ranks lower.
+			const leftPrerelease = leftPart.includes("-")
+			const rightPrerelease = rightPart.includes("-")
+
+			if (leftPrerelease !== rightPrerelease) {
+				return leftPrerelease ? 1 : -1
+			}
+		}
+
+		return leftPart < rightPart ? 1 : -1
+	}
+
+	return 0
+}
+
+/**
+ * The installed npm packages, read from pnpm rather than from a lockfile.
+ *
+ * `--prod` follows only `dependencies` edges: a package reachable ONLY through devDependencies is
+ * dropped, one reachable through both is kept — the same thing npm's `dev` flag meant, and why
+ * @types/react, babel-preset-expo and zod are direct devDependencies that ship. `--no-optional` drops
+ * optionalDependencies, whose install set is decided per machine — a macOS run gets the darwin native
+ * binaries, a Linux run the linux ones — so counting them made the payload describe wherever it
+ * happened to be generated.
+ *
+ * The `...` on the filter is load-bearing: without it pnpm reports this package's own tree only, and
+ * everything @filen/utils brings in silently vanishes from the attribution. @filen/utils itself is a
+ * workspace member and is not reported, which is correct — it is first-party.
+ */
+function installedNpm(): { name: string; version: string; dir: string }[] {
+	let raw: string
+
+	try {
+		raw = execFileSync("pnpm", ["licenses", "list", "--json", "--prod", "--no-optional", "--filter", "@filen/mobile..."], {
+			cwd: packageRoot,
+			encoding: "utf8",
+			maxBuffer: 256 * 1024 * 1024
+		})
+	} catch (error) {
+		throw new Error(
+			`\`pnpm licenses list\` failed — pnpm 12 must be on PATH and \`pnpm install\` must have run at the repo root: ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+			{ cause: error }
+		)
+	}
+
+	const grouped = JSON.parse(raw) as Record<string, LicensesEntry[]>
+	const installed: { name: string; version: string; dir: string }[] = []
+
+	for (const entries of Object.values(grouped)) {
+		for (const entry of entries) {
+			const { name, versions, paths } = entry
+
+			if (typeof name !== "string" || !Array.isArray(versions) || !Array.isArray(paths)) {
+				continue
+			}
+
+			// versions[i] pairs with paths[i]: one name can be installed at several versions.
+			for (let index = 0; index < versions.length; index++) {
+				const version: unknown = versions[index]
+				const dir: unknown = paths[index]
+
+				if (typeof version !== "string" || typeof dir !== "string" || dir.length === 0) {
+					continue
+				}
+
+				installed.push({
+					name,
+					version,
+					dir
+				})
+			}
+		}
+	}
+
+	if (installed.length === 0) {
+		throw new Error("`pnpm licenses list` reported no packages — the workspace is not installed")
+	}
+
+	// Which copy of a multi-version name gets described must not depend on pnpm's report order: the
+	// highest installed version leads each name and the "first described wins" dedupe below keeps it.
+	const byName = new Map<string, { name: string; version: string; dir: string }[]>()
+
+	for (const entry of installed) {
+		const bucket = byName.get(entry.name)
+
+		if (bucket === undefined) {
+			byName.set(entry.name, [entry])
+
+			continue
+		}
+
+		bucket.push(entry)
+	}
+
+	for (const bucket of byName.values()) {
+		bucket.sort((left, right) => compareVersionsDescending(left.version, right.version))
+	}
+
+	return [...byName.values()].flat()
+}
+
+function collectNpm(): Collected[] {
+	const seen = new Set<string>()
+	const entries: Collected[] = []
+
+	for (const { name, version, dir } of installedNpm()) {
 		if (seen.has(name)) {
 			continue
 		}
 
-		const dir = join(packageRoot, key)
 		const manifest = readJson(join(dir, "package.json"))
 
-		// Marked seen only once actually described. A name can appear at several paths, and claiming it
-		// on the first — which may be an uninstalled optional dependency for another platform — dropped
-		// the copy that IS installed.
+		// Marked seen only once actually described: a name can be reported at several paths, and claiming
+		// it on the first would drop the copy that IS readable.
 		if (!manifest) {
 			continue
 		}
@@ -452,7 +566,7 @@ function collectNpm(): Collected[] {
 
 		entries.push({
 			name,
-			version: typeof manifest["version"] === "string" ? manifest["version"] : "",
+			version: typeof manifest["version"] === "string" ? manifest["version"] : version,
 			license,
 			ecosystem: "npm",
 			copyright: licensing.copyright,

@@ -267,11 +267,9 @@ export function needsImageTransform(item: DriveItem): boolean {
 // Gate for opening a preview: a file, decryptable, resolves to a real category, and — for a
 // whole-buffer-only category — under the memory cap (a streamed category is never capped here, except
 // HEIC/HEIF: needsImageTransform pulls those back under the cap despite being category "image"). Trash
-// is NOT excluded — a trashed file still previews, read-only, mirroring mobile — `variant` is threaded
+// is NOT excluded — a trashed file still previews, read-only, mirroring mobile — `_variant` is threaded
 // for a later trash-exclusion/editability override, not consulted by this base gate.
-export function canPreview(item: DriveItem, variant: DriveVariant): boolean {
-	void variant
-
+export function canPreview(item: DriveItem, _variant: DriveVariant): boolean {
 	const base = asDirectoryOrFile(item)
 
 	if (base.type !== "file" || base.data.undecryptable) {

@@ -71,10 +71,14 @@ jobs:
           # build's bundling subprocess. .env is gitignored; the always() Cleanup step removes it.
           printf 'EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY=%s\n' "${EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY}" > .env
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          cache: pnpm
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -110,13 +114,13 @@ jobs:
           tool: cargo-ndk@4.1.2
 
       - name: Install dependencies
-        run: npm install --force --include=dev && npx -y patch-package --patch-dir ./patches
+        run: pnpm install --frozen-lockfile --filter @filen/mobile...
 
       - name: Set up Expo credentials
         run: echo "${{ secrets.EXPO_CREDENTIALS }}" | base64 --decode > credentials.json
 
       - name: Prebuild
-        run: npm run prebuild:ci:android
+        run: pnpm run prebuild:ci:android
 
       - name: Build Android release APK & AAB
         run: cd android && chmod +x ./gradlew && ./gradlew app:bundleRelease app:assembleRelease && cd ..

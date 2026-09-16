@@ -15,22 +15,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          cache: pnpm
       - name: Install dependencies
         working-directory: packages/filen-utils
-        run: npm install --force --include=dev && npx -y patch-package  --patch-dir ./patches
+        run: pnpm install --frozen-lockfile --filter @filen/utils
       - name: Build
         working-directory: packages/filen-utils
-        run: npm run build
-      - name: Configure npm for publishing
+        run: pnpm run build
+      - name: Configure the registry for publishing
         working-directory: packages/filen-utils
         run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_PUBLISH_TOKEN }}" > ~/.npmrc
       - name: Publish
         working-directory: packages/filen-utils
-        run: npm publish --access public
+        run: pnpm publish --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
       - name: Cleanup

@@ -14,11 +14,10 @@ vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 // Use the REAL Semaphore here (not the no-op mock) so writeMutex actually
 // serializes — the enable() race fix depends on genuine mutual exclusion.
-// The dist subpath bypasses this vi.mock interception of the bare specifier.
+// vi.importActual bypasses this factory's own interception of the bare specifier.
 vi.mock("@filen/utils", async () => ({
 	...(await import("@/tests/mocks/filenUtils")),
-	// @ts-expect-error — the dist subpath ships JS with no co-located .d.ts (types live under dist/types/); this is the real FIFO Semaphore, imported directly to bypass the bare-specifier vi.mock above
-	Semaphore: (await import("@filen/utils/dist/semaphore.js")).Semaphore
+	Semaphore: (await vi.importActual<typeof import("@filen/utils")>("@filen/utils")).Semaphore
 }))
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))

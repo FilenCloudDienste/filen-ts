@@ -1,7 +1,7 @@
-diff --git a/node_modules/expo-file-system/src/pathUtilities/url.ts b/node_modules/expo-file-system/src/pathUtilities/url.ts
-index 1a9d579..35dbc73 100644
---- a/node_modules/expo-file-system/src/pathUtilities/url.ts
-+++ b/node_modules/expo-file-system/src/pathUtilities/url.ts
+diff --git a/src/pathUtilities/url.ts b/src/pathUtilities/url.ts
+index 1a9d5794d72394e9b262c1ac6c99ec091f45deb8..35dbc73050f6fdc038f42f101ad3c6717be856cd 100644
+--- a/src/pathUtilities/url.ts
++++ b/src/pathUtilities/url.ts
 @@ -29,6 +29,20 @@ const tabRegEx = /\t/g;
  const questionRegex = /\?/g;
  const hashRegex = /#/g;

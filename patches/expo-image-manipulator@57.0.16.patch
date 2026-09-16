@@ -1,7 +1,7 @@
-diff --git a/node_modules/expo-image-manipulator/android/src/main/java/expo/modules/imagemanipulator/ImageManipulatorModule.kt b/node_modules/expo-image-manipulator/android/src/main/java/expo/modules/imagemanipulator/ImageManipulatorModule.kt
-index a080c8a..023446a 100644
---- a/node_modules/expo-image-manipulator/android/src/main/java/expo/modules/imagemanipulator/ImageManipulatorModule.kt
-+++ b/node_modules/expo-image-manipulator/android/src/main/java/expo/modules/imagemanipulator/ImageManipulatorModule.kt
+diff --git a/android/src/main/java/expo/modules/imagemanipulator/ImageManipulatorModule.kt b/android/src/main/java/expo/modules/imagemanipulator/ImageManipulatorModule.kt
+index a080c8a91a8b2652b5734223db71acca659ec777..023446a03540bc6c4e51e46350b6c05de5861ed0 100644
+--- a/android/src/main/java/expo/modules/imagemanipulator/ImageManipulatorModule.kt
++++ b/android/src/main/java/expo/modules/imagemanipulator/ImageManipulatorModule.kt
 @@ -37,12 +37,22 @@ class ImageManipulatorModule : Module() {
          imageLoader.loadImageForManipulationFromURL(
            url.toString(),

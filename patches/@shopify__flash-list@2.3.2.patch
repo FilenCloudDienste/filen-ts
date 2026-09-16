@@ -1,7 +1,7 @@
-diff --git a/node_modules/@shopify/flash-list/dist/recyclerview/RecyclerViewManager.js b/node_modules/@shopify/flash-list/dist/recyclerview/RecyclerViewManager.js
-index 1aa651d..bbe7120 100644
---- a/node_modules/@shopify/flash-list/dist/recyclerview/RecyclerViewManager.js
-+++ b/node_modules/@shopify/flash-list/dist/recyclerview/RecyclerViewManager.js
+diff --git a/dist/recyclerview/RecyclerViewManager.js b/dist/recyclerview/RecyclerViewManager.js
+index 1aa651d9d985a36d3c6ef69f20407f51ca0e3e6f..bbe7120af173059892485cd43b4b09c5f333dcfb 100644
+--- a/dist/recyclerview/RecyclerViewManager.js
++++ b/dist/recyclerview/RecyclerViewManager.js
 @@ -293,7 +293,17 @@ export class RecyclerViewManager {
              // re-estimate unmeasured items with an updated average height, changing
              // the target item's position. Reading before recompute would capture a
@@ -21,10 +21,10 @@ index 1aa651d..bbe7120 100644
              const initialItemLayout = this.layoutManager.getLayout(initialScrollIndex);
              const initialItemOffset = this.propsRef.horizontal
                  ? initialItemLayout.x
-diff --git a/node_modules/@shopify/flash-list/src/recyclerview/RecyclerViewManager.ts b/node_modules/@shopify/flash-list/src/recyclerview/RecyclerViewManager.ts
-index 41704d0..75f7a3c 100644
---- a/node_modules/@shopify/flash-list/src/recyclerview/RecyclerViewManager.ts
-+++ b/node_modules/@shopify/flash-list/src/recyclerview/RecyclerViewManager.ts
+diff --git a/src/recyclerview/RecyclerViewManager.ts b/src/recyclerview/RecyclerViewManager.ts
+index 41704d03e807f962c17ca8d008738c7a387d9b2a..75f7a3cc9da04dc16cfaf95a6ecb4f3c5a3fd7a8 100644
+--- a/src/recyclerview/RecyclerViewManager.ts
++++ b/src/recyclerview/RecyclerViewManager.ts
 @@ -385,7 +385,20 @@ export class RecyclerViewManager<T> {
        // re-estimate unmeasured items with an updated average height, changing
        // the target item's position. Reading before recompute would capture a

@@ -8,12 +8,20 @@ on:
       - 'packages/filen-web/**'
       - 'packages/filen-mobile/**'
       - 'packages/filen-utils/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'patches/**'
+      - 'package.json'
 
   pull_request:
     paths:
       - 'packages/filen-web/**'
       - 'packages/filen-mobile/**'
       - 'packages/filen-utils/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'patches/**'
+      - 'package.json'
 
 concurrency:
   group: 'typecheck'
@@ -34,10 +42,24 @@ jobs:
           filters: |
             filen-web:
               - 'packages/filen-web/**'
+              - 'packages/filen-utils/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'patches/**'
+              - 'package.json'
             filen-mobile:
               - 'packages/filen-mobile/**'
+              - 'packages/filen-utils/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'patches/**'
+              - 'package.json'
             filen-utils:
               - 'packages/filen-utils/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'patches/**'
+              - 'package.json'
 
   typecheck-web:
     needs: changes
@@ -46,16 +68,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          cache: pnpm
       - name: Install dependencies
         working-directory: packages/filen-web
-        run: npm install --force --include=dev && npx -y patch-package  --patch-dir ./patches
+        run: pnpm install --frozen-lockfile --filter @filen/web...
       - name: Typecheck
         working-directory: packages/filen-web
-        run: npm run typecheck
+        run: pnpm run typecheck
   typecheck-mobile:
     needs: changes
     if: needs.changes.outputs.filen-mobile == 'true' || github.event_name == 'workflow_dispatch'
@@ -63,16 +88,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          cache: pnpm
       - name: Install dependencies
         working-directory: packages/filen-mobile
-        run: npm install --force --include=dev && npx -y patch-package  --patch-dir ./patches
+        run: pnpm install --frozen-lockfile --filter @filen/mobile...
       - name: Typecheck
         working-directory: packages/filen-mobile
-        run: npm run typecheck
+        run: pnpm run typecheck
   typecheck-utils:
     needs: changes
     if: needs.changes.outputs.filen-utils == 'true' || github.event_name == 'workflow_dispatch'
@@ -80,13 +108,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          cache: pnpm
       - name: Install dependencies
         working-directory: packages/filen-utils
-        run: npm install --force --include=dev && npx -y patch-package  --patch-dir ./patches
+        run: pnpm install --frozen-lockfile --filter @filen/utils...
       - name: Typecheck
         working-directory: packages/filen-utils
-        run: npm run typecheck
+        run: pnpm run typecheck

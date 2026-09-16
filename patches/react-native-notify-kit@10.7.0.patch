@@ -1,7 +1,7 @@
-diff --git a/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/ForegroundService.java b/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/ForegroundService.java
-index bda1ee4..af4394e 100644
---- a/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/ForegroundService.java
-+++ b/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/ForegroundService.java
+diff --git a/android/src/main/java/app/notifee/core/ForegroundService.java b/android/src/main/java/app/notifee/core/ForegroundService.java
+index bda1ee4fa7a6ddd94d6e0dee948fa72ad9dda3d1..af4394ef0fbcb45eb3bc87c8dc453d0fa6ef5e35 100644
+--- a/android/src/main/java/app/notifee/core/ForegroundService.java
++++ b/android/src/main/java/app/notifee/core/ForegroundService.java
 @@ -94,6 +94,49 @@ public class ForegroundService extends Service {
      }
    }
@@ -84,10 +84,10 @@ index bda1ee4..af4394e 100644
    /**
     * Called by the system on API 34 (Android 14) when a foreground service of type {@code
     * shortService} exceeds its timeout. Stops the service gracefully to prevent ANR.
-diff --git a/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/NotificationManager.java b/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/NotificationManager.java
-index 1549dce..23757f6 100644
---- a/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/NotificationManager.java
-+++ b/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/NotificationManager.java
+diff --git a/android/src/main/java/app/notifee/core/NotificationManager.java b/android/src/main/java/app/notifee/core/NotificationManager.java
+index 1549dcef1ea22264eda457e15fdbcbed2bd03df4..23757f6baafee523ae806f905d4ee88038e675ad 100644
+--- a/android/src/main/java/app/notifee/core/NotificationManager.java
++++ b/android/src/main/java/app/notifee/core/NotificationManager.java
 @@ -705,11 +705,19 @@ class NotificationManager {
                  }
  

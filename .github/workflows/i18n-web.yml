@@ -51,14 +51,18 @@ jobs:
           # checkout is fine — kept at 2 (harmless) rather than 1 to avoid disturbing the PR step.
           fetch-depth: 2
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          cache: pnpm
 
       - name: Install dependencies
         working-directory: packages/filen-web
-        run: npm install --force --include=dev && npx -y patch-package  --patch-dir ./patches
+        run: pnpm install --frozen-lockfile --filter @filen/web...
 
       # `translate-i18n` (packages/filen-web/scripts/translate-i18n.ts + a matching package.json
       # script) is a port of filen-mobile's own script, adapted for filen-web's two real i18next
@@ -74,7 +78,10 @@ jobs:
           # carry arbitrary text. Resolved to a flag in env, then passed via a quoted shell
           # variable — no untrusted value is interpolated into the run line.
           TRANSLATE_FLAG: ${{ inputs.mode == 'full' && '--full' || '' }}
-        run: npm run translate-i18n -- "$TRANSLATE_FLAG"
+        # No `--` separator: pnpm forwards it to the script as a literal argument, and parseArgs would
+        # reject it as an unknown target language. An empty flag still arrives as one empty argument,
+        # which parseArgs skips.
+        run: pnpm run translate-i18n "$TRANSLATE_FLAG"
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v8

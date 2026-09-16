@@ -1,7 +1,7 @@
-diff --git a/node_modules/expo-background-task/ios/BackgroundTaskModule.swift b/node_modules/expo-background-task/ios/BackgroundTaskModule.swift
-index f0f4e41..8a7c11f 100644
---- a/node_modules/expo-background-task/ios/BackgroundTaskModule.swift
-+++ b/node_modules/expo-background-task/ios/BackgroundTaskModule.swift
+diff --git a/ios/BackgroundTaskModule.swift b/ios/BackgroundTaskModule.swift
+index f0f4e414124b17a86f8e0a57dabf8f76afd6ce09..8a7c11f39720f61a01d44dd3fc40693e74222a06 100644
+--- a/ios/BackgroundTaskModule.swift
++++ b/ios/BackgroundTaskModule.swift
 @@ -72,9 +72,11 @@ public class BackgroundTaskModule: Module {
    }
  

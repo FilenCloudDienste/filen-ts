@@ -79,16 +79,14 @@ export function useDriveDirectorySizes({
 		}
 	}, [enabled, items])
 
+	// version is bumped by the subscription above as directory-size results land; passing it into the
+	// collector keys the memo on it under both exhaustive-deps and the React Compiler.
 	return useMemo(() => {
-		// `version` is the reactivity bridge to the query cache: the subscription above bumps it as
-		// directory-size results land, which is what makes this memo re-read getQueryData.
-		void version
-
 		if (!enabled || items === undefined) {
 			return undefined
 		}
 
-		return collectDirectorySizes(items, queryClient)
+		return collectDirectorySizes(items, queryClient, version)
 	}, [enabled, items, version])
 }
 

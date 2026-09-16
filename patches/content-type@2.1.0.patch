@@ -1,7 +1,7 @@
-diff --git a/node_modules/content-type/dist/index.js b/node_modules/content-type/dist/index.js
-index 4026f97..0e50c58 100644
---- a/node_modules/content-type/dist/index.js
-+++ b/node_modules/content-type/dist/index.js
+diff --git a/dist/index.js b/dist/index.js
+index 6f3a3e71d2e667ec749a8c80ae459944d78a1ee7..453bf1f324aac2085ce25ec885f5ecfa4884b5b0 100644
+--- a/dist/index.js
++++ b/dist/index.js
 @@ -7,6 +7,10 @@
  Object.defineProperty(exports, "__esModule", { value: true });
  exports.format = format;

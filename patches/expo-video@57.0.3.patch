@@ -1,7 +1,7 @@
-diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt b/node_modules/expo-video/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt
-index 8b8eba9..934d502 100644
---- a/node_modules/expo-video/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt
-+++ b/node_modules/expo-video/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt
+diff --git a/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt b/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt
+index 8b8eba984272d471ddb592dc81b2cf1aa5a2db99..934d502a31e01af845866dffe2e0c71103dc9fce 100644
+--- a/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt
++++ b/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt
 @@ -285,7 +285,13 @@ class PictureInPictureManager(appContext: AppContext) : PictureInPictureFragment
      val decorView = mainActivity.window.decorView
      val rootView = decorView.findViewById<ViewGroup>(android.R.id.content)

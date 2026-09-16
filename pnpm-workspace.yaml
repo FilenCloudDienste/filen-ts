@@ -1,0 +1,62 @@
+packages:
+  - packages/*
+
+nodeLinker: isolated
+# npm-check-updates 23.x wants node 24.15+; a workspace-wide strict check would fail on
+# older 24.x. pnpm still warns on engine mismatches. Flip to true once every dev machine
+# runs node >= 24.15.
+engineStrict: false
+strictDepBuilds: true
+# @filen/sdk-rs depends on a git fork of uniffi-bindgen-react-native; pnpm 12 blocks
+# git-resolved subdependencies by default. Remove once the SDK depends on a registry release.
+blockExoticSubdeps: false
+
+# react-native-worklets' Babel plugin requires these without declaring them; the hidden hoist
+# would otherwise hand it web's Babel 8 and Metro crashes.
+packageExtensions:
+  react-native-worklets:
+    dependencies:
+      '@babel/generator': ^7.29.7
+      '@babel/traverse': ^7.29.7
+
+# react-native-worklets accepts any @react-native/metro-config; keep the one that matches
+# react-native 0.86.3 instead of the latest 0.87.x. Remove when worklets narrows its peer range.
+overrides:
+  '@react-native/metro-config': 0.86.3
+  # uniwind's metro peers are `*`; keep them on the Metro line Expo's metro-config ships (0.84.5)
+  # instead of the latest 0.87.x. Bump together with @expo/metro; remove when uniwind narrows its
+  # peer ranges.
+  'uniwind>metro': 0.84.5
+  'uniwind>metro-cache': 0.84.5
+  'uniwind>metro-transform-worker': 0.84.5
+
+# Deliberately disabled (a968c1e8); keep the intent visible.
+# minimumReleaseAge: 10080
+
+allowBuilds:
+  esbuild: true
+  fsevents: true
+  unrs-resolver: true
+  electron: true
+  electron-winstaller: true
+  # Keyed by the exact git resolution; update it together with sdk-rs's uniffi-bindgen-react-native ref.
+  "uniffi-bindgen-react-native@https://codeload.github.com/Enduriel/uniffi-bindgen-react-native/tar.gz/e0282ad3eb972eaea74225dcc06247b7a67204dd": true
+patchedDependencies:
+  '@blazejkustra/react-native-alert@1.1.0': patches/@blazejkustra__react-native-alert@1.1.0.patch
+  '@expo/dom-webview@57.0.1': patches/@expo__dom-webview@57.0.1.patch
+  '@react-native-menu/menu@2.0.0': patches/@react-native-menu__menu@2.0.0.patch
+  '@shopify/flash-list@2.3.2': patches/@shopify__flash-list@2.3.2.patch
+  content-type@2.1.0: patches/content-type@2.1.0.patch
+  expo-audio@57.0.4: patches/expo-audio@57.0.4.patch
+  expo-background-task@57.0.16: patches/expo-background-task@57.0.16.patch
+  expo-document-picker@57.0.1: patches/expo-document-picker@57.0.1.patch
+  expo-file-system@57.0.6: patches/expo-file-system@57.0.6.patch
+  expo-image-manipulator@57.0.16: patches/expo-image-manipulator@57.0.16.patch
+  expo-media-library@57.0.4: patches/expo-media-library@57.0.4.patch
+  expo-sharing@57.0.18: patches/expo-sharing@57.0.18.patch
+  expo-video@57.0.3: patches/expo-video@57.0.3.patch
+  react-native-ios-utilities@5.2.0: patches/react-native-ios-utilities@5.2.0.patch
+  react-native-notify-kit@10.7.0: patches/react-native-notify-kit@10.7.0.patch
+  react-native-reorderable-list@0.18.1: patches/react-native-reorderable-list@0.18.1.patch
+  react-native-svg@15.15.4: patches/react-native-svg@15.15.4.patch
+  xcode@3.0.1: patches/xcode@3.0.1.patch

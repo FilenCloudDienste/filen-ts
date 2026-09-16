@@ -1,7 +1,7 @@
-diff --git a/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt b/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt
-index 125ad1d..3b045c2 100644
---- a/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt
-+++ b/node_modules/@expo/dom-webview/android/src/main/java/expo/modules/webview/DomWebView.kt
+diff --git a/android/src/main/java/expo/modules/webview/DomWebView.kt b/android/src/main/java/expo/modules/webview/DomWebView.kt
+index 125ad1db8dc4e099b689ac45b651f142b07c728c..3b045c28ad29406130705c3a30735cc82db65b95 100644
+--- a/android/src/main/java/expo/modules/webview/DomWebView.kt
++++ b/android/src/main/java/expo/modules/webview/DomWebView.kt
 @@ -7,12 +7,18 @@ import android.annotation.SuppressLint
  import android.content.Context
  import android.graphics.Bitmap
@@ -202,10 +202,10 @@ index 125ad1d..3b045c2 100644
      override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
        super.onPageStarted(view, url, favicon)
        if (this@DomWebView.useExpoModulesBridge) {
-diff --git a/node_modules/@expo/dom-webview/ios/DomWebView.swift b/node_modules/@expo/dom-webview/ios/DomWebView.swift
-index d18e5cb..f8225b0 100644
---- a/node_modules/@expo/dom-webview/ios/DomWebView.swift
-+++ b/node_modules/@expo/dom-webview/ios/DomWebView.swift
+diff --git a/ios/DomWebView.swift b/ios/DomWebView.swift
+index d18e5cbc44dc3576d2a5ee0bf21b2a22f4010eee..f8225b0a528e1aee24868d75ec2102edc6553860 100644
+--- a/ios/DomWebView.swift
++++ b/ios/DomWebView.swift
 @@ -181,8 +181,13 @@ internal final class DomWebView: ExpoView, UIScrollViewDelegate, WKUIDelegate, W
  
    private func load(request: URLRequest) {
@@ -288,10 +288,10 @@ index d18e5cb..f8225b0 100644
    // MARK: - WKScriptMessageHandler implementations
  
    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-diff --git a/node_modules/@expo/dom-webview/src/DomWebView.tsx b/node_modules/@expo/dom-webview/src/DomWebView.tsx
-index 3a07ac9..f1ecde1 100644
---- a/node_modules/@expo/dom-webview/src/DomWebView.tsx
-+++ b/node_modules/@expo/dom-webview/src/DomWebView.tsx
+diff --git a/src/DomWebView.tsx b/src/DomWebView.tsx
+index 3a07ac938325385dc7e314f0e6d557068bc6f622..f1ecde1f33ddf1a7bc661207dce6003ad4852a05 100644
+--- a/src/DomWebView.tsx
++++ b/src/DomWebView.tsx
 @@ -23,7 +23,13 @@ const WebView = React.forwardRef<DomWebViewRef, DomWebViewProps>(
        ref,
        () => ({

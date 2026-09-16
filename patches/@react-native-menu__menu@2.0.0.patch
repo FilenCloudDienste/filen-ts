@@ -1,7 +1,7 @@
-diff --git a/node_modules/@react-native-menu/menu/android/src/main/java/com/reactnativemenu/MenuView.kt b/node_modules/@react-native-menu/menu/android/src/main/java/com/reactnativemenu/MenuView.kt
-index c45f5cc..e752d98 100644
---- a/node_modules/@react-native-menu/menu/android/src/main/java/com/reactnativemenu/MenuView.kt
-+++ b/node_modules/@react-native-menu/menu/android/src/main/java/com/reactnativemenu/MenuView.kt
+diff --git a/android/src/main/java/com/reactnativemenu/MenuView.kt b/android/src/main/java/com/reactnativemenu/MenuView.kt
+index c45f5cc8ee16db610686fe5b6bef9f3372c6944b..e752d9873984757fd08b4d002640224906429b65 100644
+--- a/android/src/main/java/com/reactnativemenu/MenuView.kt
++++ b/android/src/main/java/com/reactnativemenu/MenuView.kt
 @@ -72,6 +72,11 @@ class MenuView(private val mContext: ReactContext) : ReactViewGroup(mContext) {
    }
  

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { readFileSync } from "node:fs"
+import { beforeAll, describe, expect, it } from "vitest"
+import { execFileSync } from "node:child_process"
 import { LICENSE_TEXTS } from "@/features/settings/thirdPartyNotices.gen"
 import {
 	filterThirdPartyNotices,
@@ -17,52 +17,80 @@ import { noticeRepositoryHref } from "@/features/settings/components/advanced/th
  * attribution describing a tree the app no longer has, and nothing about the app misbehaves.
  *
  * The generator cannot run in CI (it needs a filen-rs checkout and the local cargo caches), so every
- * guard here reads only committed inputs: the payload itself and package-lock.json.
+ * guard here reads what CI does have: the committed payload and the installed pnpm tree.
  */
-interface LockEntry {
-	version?: string
-	dev?: boolean
-	devOptional?: boolean
-	optional?: boolean
+interface InstalledPackage {
+	name: string
+	version: string
 }
-
-const lock = JSON.parse(readFileSync("package-lock.json", "utf8")) as { packages: Record<string, LockEntry> }
 
 /**
- * The packages the lockfile says ship, identified as `name@version` — the same identity the generator
- * dedupes on. A name-keyed set would silently excuse one of each multi-version package from the payload.
+ * The packages pnpm says ship, identified as `name@version` — the same query and the same identity the
+ * generator uses, so the two sides of the comparison cannot drift apart. A name-keyed set would
+ * silently excuse one of each multi-version package from the payload.
  *
- * `optional` is excluded alongside `dev` because npm decides per machine whether to install one, so
- * counting them would make the expectation depend on where the payload was generated.
+ * `--prod` follows only `dependencies` edges: a package reachable ONLY through devDependencies is
+ * dropped, one reachable through both is kept — the same thing npm's `dev` flag meant. `--no-optional`
+ * drops optionalDependencies, whose install set is decided per machine. The `...` on the filter keeps
+ * everything @filen/utils brings in inside the set; @filen/utils itself is a workspace member, is not
+ * reported, and is correctly absent from the payload.
  */
-function lockfileShippingIds(): { ids: Set<string>; visited: number } {
-	const ids = new Set<string>()
-	let visited = 0
+function installedPackages(): InstalledPackage[] {
+	let raw: string
 
-	for (const [key, meta] of Object.entries(lock.packages)) {
-		if (!key.startsWith("node_modules/") || meta.dev === true || meta.devOptional === true || meta.optional === true) {
-			continue
-		}
-
-		// This regex, not slice: a nested key is `a/node_modules/b` and the install path IS the key.
-		const name = key.replace(/.*node_modules\//, "")
-
-		if (typeof meta.version !== "string" || meta.version.length === 0) {
-			throw new Error(`package-lock.json entry ${key} has no version`)
-		}
-
-		visited++
-		ids.add(`${name}@${meta.version}`)
+	try {
+		raw = execFileSync("pnpm", ["licenses", "list", "--json", "--prod", "--no-optional", "--filter", "@filen/web..."], {
+			encoding: "utf8",
+			maxBuffer: 256 * 1024 * 1024
+		})
+	} catch (error) {
+		throw new Error(
+			`\`pnpm licenses list\` failed — run \`pnpm install\` at the repo root: ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+			{ cause: error }
+		)
 	}
 
-	return { ids, visited }
+	const grouped = JSON.parse(raw) as Record<string, { name?: unknown; versions?: unknown }[]>
+	const installed: InstalledPackage[] = []
+
+	for (const entries of Object.values(grouped)) {
+		for (const entry of entries) {
+			if (typeof entry.name !== "string" || !Array.isArray(entry.versions)) {
+				continue
+			}
+
+			for (const version of entry.versions) {
+				if (typeof version === "string" && version.length > 0) {
+					installed.push({ name: entry.name, version })
+				}
+			}
+		}
+	}
+
+	if (installed.length === 0) {
+		throw new Error("`pnpm licenses list` reported no packages — run `pnpm install` at the repo root")
+	}
+
+	return installed
 }
 
-const { ids: lockIds, visited: lockEntries } = lockfileShippingIds()
+let installed: InstalledPackage[]
+let lockIds: Set<string>
+let lockEntries: number
+
+// The spawn is the slow part of this file; run it in a hook whose timeout actually covers it.
+beforeAll(() => {
+	installed = installedPackages()
+	lockIds = new Set(installed.map(entry => `${entry.name}@${entry.version}`))
+	lockEntries = installed.length
+}, 60_000)
+
 const payloadNpmIds = new Set(THIRD_PARTY_NOTICES.filter(notice => notice.ecosystem === "npm").map(n => `${n.name}@${n.version}`))
 const BUILD_ONLY = ["vitest", "eslint", "prettier", "typescript"]
 
-/** Names the lockfile itself ships at two or more distinct versions — computed, never hardcoded. */
+/** Names the installed tree holds at two or more distinct versions — computed, never hardcoded. */
 function multiVersionNames(): string[] {
 	const versions = new Map<string, Set<string>>()
 
@@ -83,18 +111,18 @@ describe("third-party notices drift guard", () => {
 		// The drift guard, and the reason this file exists: add, remove or bump a runtime dependency without
 		// re-running the generator and this fails, naming what went missing or appeared. No tolerance.
 		expect([...lockIds].filter(id => !payloadNpmIds.has(id)).sort(), "missing from the payload — re-run the generator").toEqual([])
-		expect([...payloadNpmIds].filter(id => !lockIds.has(id)).sort(), "in the payload but not the lockfile — run npm ci").toEqual([])
+		expect([...payloadNpmIds].filter(id => !lockIds.has(id)).sort(), "in the payload but not installed — run pnpm install").toEqual([])
 	})
 
 	it("was generated against the installed SDK", () => {
 		// Turns three previously-silent failures red: generating from the wrong filen-rs checkout, merging a
 		// payload built before an SDK bump, and any future bump that forgets to re-run the generator.
 		expect(THIRD_PARTY_NOTICES_SDK_VERSION, `payload ref ${THIRD_PARTY_NOTICES_FILEN_RS_REF}`).toBe(
-			lock.packages["node_modules/@filen/sdk-rs"]?.version
+			installed.find(entry => entry.name === "@filen/sdk-rs")?.version
 		)
 	})
 
-	it("reads a well-formed, non-empty id set from the lockfile", () => {
+	it("reads a well-formed, non-empty id set from the installed tree", () => {
 		expect(lockIds.size).toBeGreaterThan(0)
 		expect([...lockIds].filter(id => !/^(@[^/]+\/)?[^/@]+@\S+$/.test(id)).sort()).toEqual([])
 	})
@@ -104,23 +132,23 @@ describe("third-party notices drift guard", () => {
 		expect(BUILD_ONLY.filter(name => [...lockIds].some(id => id.startsWith(`${name}@`))).sort()).toEqual([])
 	})
 
-	it("includes a known shipping package at the version the lockfile states", () => {
-		const react = lock.packages["node_modules/react"]?.version
+	it("includes a known shipping package at the version pnpm states", () => {
+		const react = installed.find(entry => entry.name === "react")?.version
 
 		expect(typeof react).toBe("string")
 		expect(lockIds.has(`react@${String(react)}`)).toBe(true)
 	})
 
-	it("collapses lockfile keys that share an id", () => {
-		// Hoisting/nesting can reach one id at several keys; the payload holds one entry per id.
+	it("collapses reported entries that share an id", () => {
+		// One id can be reported more than once; the payload holds a single entry per id.
 		expect(lockIds.size).toBeLessThanOrEqual(lockEntries)
 	})
 
-	it("keeps every version of a package the lockfile ships twice", () => {
+	it("keeps every version of a package that is installed twice", () => {
 		const names = multiVersionNames()
 
 		// Skips rather than fails if a future dedupe removes every collision — the guard is the payload
-		// matching the lockfile, not this tree happening to have multi-version packages.
+		// matching the installed tree, not this tree happening to have multi-version packages.
 		for (const name of names) {
 			for (const id of [...lockIds].filter(candidate => candidate.startsWith(`${name}@`))) {
 				expect(payloadNpmIds.has(id), `${id} missing from the payload`).toBe(true)

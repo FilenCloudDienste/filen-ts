@@ -1,7 +1,7 @@
-diff --git a/node_modules/react-native-svg/android/src/main/java/com/horcrux/svg/MarkerView.java b/node_modules/react-native-svg/android/src/main/java/com/horcrux/svg/MarkerView.java
-index 8c79623..31368f1 100644
---- a/node_modules/react-native-svg/android/src/main/java/com/horcrux/svg/MarkerView.java
-+++ b/node_modules/react-native-svg/android/src/main/java/com/horcrux/svg/MarkerView.java
+diff --git a/android/src/main/java/com/horcrux/svg/MarkerView.java b/android/src/main/java/com/horcrux/svg/MarkerView.java
+index 8c796236f9f4b58717ac3fbab65e33d11ba032f2..31368f18299ef8614d18e1b16abac7a02e1c9b80 100644
+--- a/android/src/main/java/com/horcrux/svg/MarkerView.java
++++ b/android/src/main/java/com/horcrux/svg/MarkerView.java
 @@ -16,6 +16,7 @@ import android.graphics.RectF;
  import android.view.View;
  import com.facebook.react.bridge.Dynamic;

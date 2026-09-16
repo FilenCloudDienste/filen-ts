@@ -8,12 +8,20 @@ on:
       - 'packages/filen-utils/**'
       - 'packages/filen-mobile/**'
       - 'packages/filen-web/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'patches/**'
+      - 'package.json'
 
   pull_request:
     paths:
       - 'packages/filen-utils/**'
       - 'packages/filen-mobile/**'
       - 'packages/filen-web/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'patches/**'
+      - 'package.json'
 
 jobs:
   changes:
@@ -30,10 +38,24 @@ jobs:
           filters: |
             filen-utils:
               - 'packages/filen-utils/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'patches/**'
+              - 'package.json'
             filen-mobile:
               - 'packages/filen-mobile/**'
+              - 'packages/filen-utils/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'patches/**'
+              - 'package.json'
             filen-web:
               - 'packages/filen-web/**'
+              - 'packages/filen-utils/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'patches/**'
+              - 'package.json'
 
   test-utils:
     needs: changes
@@ -48,16 +70,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          cache: pnpm
       - name: Install dependencies
         working-directory: packages/filen-utils
-        run: npm install --force --include=dev && npx -y patch-package  --patch-dir ./patches
+        run: pnpm install --frozen-lockfile --filter @filen/utils...
       - name: Test
         working-directory: packages/filen-utils
-        run: npm test
+        run: pnpm test
   test-mobile:
     needs: changes
     if: needs.changes.outputs.filen-mobile == 'true' || github.event_name == 'workflow_dispatch'
@@ -71,16 +96,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          cache: pnpm
       - name: Install dependencies
         working-directory: packages/filen-mobile
-        run: npm install --force --include=dev && npx -y patch-package  --patch-dir ./patches
+        run: pnpm install --frozen-lockfile --filter @filen/mobile...
       - name: Test
         working-directory: packages/filen-mobile
-        run: npm test
+        run: pnpm test
   # Everything for filen-web that needs NO live account and NO secrets. Deliberately outside the
   # `filen-web-e2e` concurrency group below: these used to sit in that group, so a six-second unit
   # suite queued behind whatever ~35-minute e2e run happened to hold the account — turning the fastest
@@ -97,28 +125,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          cache: pnpm
       - name: Install dependencies
         working-directory: packages/filen-web
-        run: npm ci
+        run: pnpm install --frozen-lockfile --filter @filen/web...
       - name: Check generated error kinds are up to date
         working-directory: packages/filen-web
-        run: npm run gen:error-kinds && git diff --exit-code
+        run: pnpm run gen:error-kinds && git diff --exit-code
       - name: React Compiler healthcheck
         working-directory: packages/filen-web
-        run: npm run check:compiler
+        run: pnpm run check:compiler
       - name: Unit tests
         working-directory: packages/filen-web
-        run: npm run test
+        run: pnpm run test
       - name: Assert e2e hooks are absent from a production build
         # A property of the BUILD, so it belongs with the other account-free checks rather than behind
         # the e2e queue — and an e2e flake can no longer decide whether it runs at all.
         working-directory: packages/filen-web
         run: |
-          rm -rf dist && npm run build
+          rm -rf dist && pnpm run build
           if grep -rq 'filenE2E\|filen.e2e.session' dist; then
             echo 'E2E hooks leaked into the production build'
             exit 1
@@ -136,7 +167,7 @@ jobs:
       (needs.changes.outputs.filen-web == 'true' || github.event_name == 'workflow_dispatch')
       && (github.event_name != 'push' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
-    # Playwright's globalTimeout bounds the e2e step alone; npm ci, both production builds and the
+    # Playwright's globalTimeout bounds the e2e step alone; the install, both production builds and the
     # browser install are unbounded, and a hang in any of them would hold the non-cancelling
     # `filen-web-e2e` group below for GitHub's 6h job default.
     timeout-minutes: 150
@@ -158,13 +189,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          cache: pnpm
       - name: Install dependencies
         working-directory: packages/filen-web
-        run: npm ci
+        run: pnpm install --frozen-lockfile --filter @filen/web...
       # The runner image id (ubuntu24, ubuntu26, ...) belongs in the Playwright cache key below, but it
       # cannot be read there: ImageOS lives in the runner PROCESS's environment, and the `env` context
       # does not inherit those — `${{ env.ImageOS }}` would silently expand to nothing. Promoting it
@@ -183,19 +217,19 @@ jobs:
           # only installs system libs and never re-downloads — so every browser launch fails with a
           # loader error until someone touches the lockfile. Deliberately NO restore-keys: a prefix
           # restore is that same stale hit, reintroduced on purpose.
-          key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ env.IMAGE_OS }}-${{ hashFiles('packages/filen-web/package-lock.json') }}
+          key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ env.IMAGE_OS }}-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install Playwright browsers
         working-directory: packages/filen-web
         # On a cache hit the binaries are already there and only the system libs are missing.
         run: |
           if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
-            npx playwright install-deps chromium firefox webkit
+            pnpm exec playwright install-deps chromium firefox webkit
           else
-            npx playwright install --with-deps chromium firefox webkit
+            pnpm exec playwright install --with-deps chromium firefox webkit
           fi
       - name: E2E tests
         working-directory: packages/filen-web
-        run: VITE_E2E=1 npm run test:e2e
+        run: VITE_E2E=1 pnpm run test:e2e
         env:
           FILEN_WEB_E2E_TEST_EMAIL: ${{ secrets.FILEN_WEB_E2E_TEST_EMAIL }}
           FILEN_WEB_E2E_TEST_PASSWORD: ${{ secrets.FILEN_WEB_E2E_TEST_PASSWORD }}

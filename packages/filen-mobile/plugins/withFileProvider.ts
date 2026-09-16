@@ -332,7 +332,7 @@ export const withFileProviderXcodeTarget: ConfigPlugin<FileProviderPluginProps> 
 
 				throw new Error(
 					// eslint-disable-next-line quotes
-					'[expo-file-provider] Could not add resource files to the FileProvider, please check your "patch-package" installation for xcode'
+					'[expo-file-provider] Could not add resource files to the FileProvider; the xcode patch under patches/ did not apply'
 				)
 			}
 

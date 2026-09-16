@@ -312,7 +312,7 @@ export default defineConfig({
 	webServer: {
 		// Build with the e2e hooks, then serve dist with the full COI + hardened-CSP header set. Dev
 		// mode is CSP-exempt, so e2e always runs against preview.
-		command: "npm run build && npm run preview",
+		command: "pnpm run build && pnpm run preview",
 		url: BASE_URL,
 		reuseExistingServer: !process.env["CI"],
 		// The command builds the app from scratch when no server is reused (always on CI) — a slow
