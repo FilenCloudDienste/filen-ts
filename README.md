@@ -39,16 +39,23 @@ git submodule update --init --recursive
 
 ## Installing
 
-Despite the `packages/` directory this is not an npm workspace. Every package carries its own
-`package-lock.json` and installs on its own:
+This is a pnpm workspace. One install at the root covers all four packages:
 
 ```bash
-cd packages/filen-web
-npm install
+pnpm install
 ```
 
-The clients depend on `@filen/utils` from the registry like any other package, so a change there
-has to be published before the others can see it. Node 24 and npm 11 are the floor.
+Run a package's scripts from its own directory, or from anywhere with a filter:
+
+```bash
+cd packages/filen-web && pnpm run dev
+pnpm --filter @filen/web run dev
+```
+
+Node 24 and pnpm 12 are the floor; `packageManager` in the root `package.json` pins the exact pnpm
+version, and pnpm downloads that version itself when the local one differs. `@filen/utils` is linked
+from the workspace — a change there is visible to the clients immediately, and it still publishes to
+npm on release.
 
 ## CI
 

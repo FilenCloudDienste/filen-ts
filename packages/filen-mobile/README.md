@@ -74,16 +74,15 @@ The three submodules under `packages/filen-mobile/` are:
 
 ## Install dependencies
 
-From this package. The repo is not an npm workspace — every package carries its own lockfile and
-installs on its own:
+This is a pnpm workspace. Install once from the repo root — it covers every package:
 
 ```bash
-cd packages/filen-mobile
-npm install
+pnpm install
 ```
 
-`postinstall` applies everything in `patches/` with patch-package, and deliberately skips itself
-when `$CI` is set — the workflows run patch-package as their own step instead.
+Native fixes live as pnpm patches under the root `patches/`, registered in `pnpm-workspace.yaml`
+and applied automatically by `pnpm install`. Add a new one with `pnpm patch <name>@<version>` +
+`pnpm patch-commit`.
 
 ---
 
@@ -93,7 +92,7 @@ Generates the native `ios/` and `android/` projects from `app.config.ts`. The cu
 
 ```bash
 cd packages/filen-mobile
-npm run prebuild:clean
+pnpm run prebuild:clean
 ```
 
 What `prebuild:clean` does end to end:
@@ -107,27 +106,27 @@ What `prebuild:clean` does end to end:
 
 ## Run
 
-| Goal                                          | Command                          |
-| --------------------------------------------- | -------------------------------- |
-| Start Metro (clears cache)                    | `npm run start`                  |
-| Run iOS sim (debug)                           | `npm run ios`                    |
-| Run iOS physical device (debug)               | `npm run ios:device`             |
-| Run iOS sim (Release config)                  | `npm run ios:release`            |
-| Run iOS physical device (Release)             | `npm run ios:device:release`     |
-| Run Android emulator                          | `npm run android`                |
-| Run Android physical device                   | `npm run android:device`         |
-| Run Android emulator (release variant)        | `npm run android:release`        |
-| Run Android physical device (release variant) | `npm run android:device:release` |
+| Goal                                          | Command                           |
+| --------------------------------------------- | --------------------------------- |
+| Start Metro (clears cache)                    | `pnpm run start`                  |
+| Run iOS sim (debug)                           | `pnpm run ios`                    |
+| Run iOS physical device (debug)               | `pnpm run ios:device`             |
+| Run iOS sim (Release config)                  | `pnpm run ios:release`            |
+| Run iOS physical device (Release)             | `pnpm run ios:device:release`     |
+| Run Android emulator                          | `pnpm run android`                |
+| Run Android physical device                   | `pnpm run android:device`         |
+| Run Android emulator (release variant)        | `pnpm run android:release`        |
+| Run Android physical device (release variant) | `pnpm run android:device:release` |
 
 ---
 
 ## Quality checks
 
 ```bash
-npm run verify   # lint + typecheck + tests, in that order
-npm run lint     # eslint, max-warnings 0
-npm run typecheck  # tsc --noEmit (driven by typecheck.mjs)
-npm run test     # vitest run
+pnpm run verify   # lint + typecheck + tests, in that order
+pnpm run lint     # eslint, max-warnings 0
+pnpm run typecheck  # tsc --noEmit (driven by typecheck.mjs)
+pnpm run test     # vitest run
 ```
 
 Tests live in `src/tests/*.test.ts` and run under Node with mocks for React Native / expo-file-system / expo-media-library / `@filen/sdk-rs`. The three vendored submodules are excluded from lint, typecheck and tests.

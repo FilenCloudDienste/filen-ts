@@ -3,7 +3,7 @@
  *
  * Gated behind SORT_BENCH=1 so the normal suite skips it. Run with:
  *
- *   SORT_BENCH=1 npx vitest run src/tests/sortBench.test.ts
+ *   SORT_BENCH=1 pnpm exec vitest run src/tests/sortBench.test.ts
  *
  * Knobs (env): SORT_BENCH_SAMPLES (default 5), SORT_BENCH_WARMUP (default 2),
  * SORT_BENCH_SCALES (default "10000,100000"), SORT_BENCH_OUT (table file, default

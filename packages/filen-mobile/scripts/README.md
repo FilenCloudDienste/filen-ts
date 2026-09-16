@@ -40,14 +40,14 @@ keys as separate entries.
 
 | Command | Mode | What it translates |
 | --- | --- | --- |
-| `npm run translate-i18n` | **DELTA** (default) | Keys added/changed in `src/locales/en` since the previous commit (`git diff HEAD~1`), plus any English key missing from a target catalog (covers fresh/empty stubs). Removed keys are deleted from every catalog. |
-| `npm run translate-i18n -- --full` | **FULL** | Every English key for every target language. |
-| `npm run translate-i18n -- de,fr` | (either) | Restrict to specific languages (comma-separated or repeated args). |
+| `pnpm run translate-i18n` | **DELTA** (default) | Keys added/changed in `src/locales/en` since the previous commit (`git diff HEAD~1`), plus any English key missing from a target catalog (covers fresh/empty stubs). Removed keys are deleted from every catalog. |
+| `pnpm run translate-i18n --full` | **FULL** | Every English key for every target language. |
+| `pnpm run translate-i18n de,fr` | (either) | Restrict to specific languages (comma-separated or repeated args). |
 
 ### `DRY_RUN=1` — preview with zero token spend
 
 ```bash
-DRY_RUN=1 npm run translate-i18n -- --full
+DRY_RUN=1 pnpm run translate-i18n --full
 ```
 
 Skips the Anthropic API entirely and stubs each translation as `"<lang>:<english>"`
@@ -67,8 +67,8 @@ The catalogs ship as empty `{}` stubs. To populate all eight languages the first
 
 - **Via CI (recommended):** GitHub → Actions → **i18n translate** → *Run workflow* →
   set `mode = full`. It opens a PR (`i18n: update translations`) for review.
-- **Locally:** `DRY_RUN=1 npm run translate-i18n -- --full` to preview the file structure, then
-  `ANTHROPIC_API_KEY=… npm run translate-i18n -- --full` to actually translate.
+- **Locally:** `DRY_RUN=1 pnpm run translate-i18n --full` to preview the file structure, then
+  `ANTHROPIC_API_KEY=… pnpm run translate-i18n --full` to actually translate.
 
 After the first full run, the workflow runs automatically (DELTA mode) on every push to `main`
 that changes `packages/filen-mobile/src/locales/en/**`.

@@ -28,9 +28,9 @@ Fixes #<!-- issue number, if any -->
 
 ## How it was tested
 
-<!-- Be specific: commands run, platforms used. "npm run verify" = lint + typecheck + tests, per package. -->
+<!-- Be specific: commands run, platforms used. "pnpm run verify" = lint + typecheck + tests, per package. -->
 
-- [ ] `npm run verify` is green in every touched package
+- [ ] `pnpm run verify` is green in every touched package
 - [ ] filen-mobile, native-affecting changes only: fresh `expo prebuild` + ran on iOS
 - [ ] filen-mobile, native-affecting changes only: fresh `expo prebuild` + ran on Android
 
@@ -43,5 +43,5 @@ Fixes #<!-- issue number, if any -->
 ## Checklist
 
 - [ ] New user-facing strings (mobile) live only in `src/locales/en/*.ts` - the translated `<lang>.json` catalogs and `.en-snapshot.json` are CI-managed and untouched
-- [ ] Dependency bumps: `patches/` still apply cleanly (patch-package filenames match the installed versions)
+- [ ] Dependency bumps: the root `patches/` still apply (a stale patch fails `pnpm install` — re-create it with `pnpm patch`)
 - [ ] No secrets, tokens, or account data in code, fixtures, or test data

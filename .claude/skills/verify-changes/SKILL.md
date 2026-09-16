@@ -31,7 +31,7 @@ Read(file_path: "/absolute/path/to/packages/<package>/package.json")
 ### 1. ESLint
 
 ```bash
-npx eslint <changed-file> --max-warnings=0
+pnpm exec eslint <changed-file> --max-warnings=0
 ```
 
 Lint changed files first for speed. Run full lint if errors reference other files. Skip if no ESLint config found.
@@ -39,7 +39,7 @@ Lint changed files first for speed. Run full lint if errors reference other file
 ### 2. TypeScript
 
 ```bash
-npx tsc --noEmit
+pnpm exec tsc --noEmit
 ```
 
 Skip if no `tsconfig.json`.
@@ -48,10 +48,10 @@ Skip if no `tsconfig.json`.
 
 ```bash
 # Scoped to changed files first
-npx jest --testPathPattern=<basename> --passWithNoTests 2>/dev/null
+pnpm exec jest --testPathPattern=<basename> --passWithNoTests 2>/dev/null
 
 # Or full suite
-npm test
+pnpm test
 ```
 
 Skip if no test config or test files.

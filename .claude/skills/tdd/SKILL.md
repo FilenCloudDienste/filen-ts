@@ -201,8 +201,8 @@ Coverage is a signal, not a goal. 100% with weak assertions is worthless.
 Aim for: all happy paths, all error paths, edge cases and boundaries.
 
 ```bash
-npx vitest --coverage
-npx jest --coverage
+pnpm exec vitest --coverage
+pnpm exec jest --coverage
 ```
 
 ---

@@ -35,7 +35,7 @@
 	"singleAttributePerLine": true,
 	"printWidth": 140,
 	"endOfLine": "lf",
-	"packageManager": "npm",
+	"packageManager": "pnpm",
 	"typescript": {
 		"typeImports": "type-keyword-inline",
 		"notes": "Use 'import { type Foo }' syntax for type-only imports, not 'import type { Foo }'"

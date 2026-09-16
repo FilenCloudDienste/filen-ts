@@ -7,24 +7,26 @@ The Filen web app — a from-scratch rewrite of Filen's end-to-end encrypted Clo
 | Tool | Version |
 | ---- | ------- |
 | Node | >= 24   |
-| npm  | >= 11   |
+| pnpm | >= 12   |
 
 ## Commands
 
-| Command             | Description                                              |
-| ------------------- | -------------------------------------------------------- |
-| `npm run dev`       | Start the Vite dev server                                |
-| `npm run build`     | Type-check, build the app, then build the service worker |
-| `npm run preview`   | Serve the production build locally                       |
-| `npm run test`      | Run the unit tests (Vitest)                              |
-| `npm run test:e2e`  | Run the end-to-end tests (Playwright)                    |
-| `npm run lint`      | ESLint plus a Prettier format check                      |
-| `npm run typecheck` | Type-check without emitting                              |
-| `npm run format`    | Format the source with Prettier                          |
+Install once at the repo root (`pnpm install`); these run from this directory.
+
+| Command              | Description                                              |
+| -------------------- | -------------------------------------------------------- |
+| `pnpm run dev`       | Start the Vite dev server                                |
+| `pnpm run build`     | Type-check, build the app, then build the service worker |
+| `pnpm run preview`   | Serve the production build locally                       |
+| `pnpm run test`      | Run the unit tests (Vitest)                              |
+| `pnpm run test:e2e`  | Run the end-to-end tests (Playwright)                    |
+| `pnpm run lint`      | ESLint plus a Prettier format check                      |
+| `pnpm run typecheck` | Type-check without emitting                              |
+| `pnpm run format`    | Format the source with Prettier                          |
 
 ## Deployment
 
-`npm run build` emits a static `dist/` plus a service worker. Any static host can serve it, but the response headers below are part of the contract — the app does not boot without them.
+`pnpm run build` emits a static `dist/` plus a service worker. Any static host can serve it, but the response headers below are part of the contract — the app does not boot without them.
 
 ### Response headers
 

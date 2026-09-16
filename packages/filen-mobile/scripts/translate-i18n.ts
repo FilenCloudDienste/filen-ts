@@ -1,9 +1,10 @@
 // i18n translation pipeline — fills the target-language catalogs (src/locales/<lang>.json)
 // from the English source catalog (src/locales/en/*.ts) via the Anthropic Messages API.
 //
-// Run with: npm run translate-i18n            (DELTA mode — only changed English keys)
-//           npm run translate-i18n -- --full  (FULL mode — every key for every language)
-//           npm run translate-i18n -- de,fr   (restrict to specific languages)
+// Run with: pnpm run translate-i18n          (DELTA mode — only changed English keys)
+//           pnpm run translate-i18n --full   (FULL mode — every key for every language)
+//           pnpm run translate-i18n de,fr    (restrict to specific languages)
+//           No `--` separator: pnpm forwards it to the script as a literal argument.
 //
 // Modes:
 //   DELTA (default) — compare the English catalog against the committed snapshot

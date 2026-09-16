@@ -7,7 +7,7 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // The one live proof the streamed-preview architecture actually works: a service worker is PROD-only
 // (never registered under `vite dev`), so this only ever runs against
-// `npm run build && npm run preview` (playwright.config.ts's webServer). Proves, against the real SW
+// `pnpm run build && pnpm run preview` (playwright.config.ts's webServer). Proves, against the real SW
 // route: an <img> is served by it (not the buffered blob: fallback), a <video> plays AND a mid-file
 // seek gets answered with a fresh 206/Content-Range (proving Range/seek actually works, not just an
 // initial full-file GET), a drive <audio> file hands off to the persistent player and streams over

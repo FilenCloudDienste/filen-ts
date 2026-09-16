@@ -3,7 +3,7 @@
  *
  * Gated behind SECURESTORE_BENCH=1. Run with:
  *
- *   SECURESTORE_BENCH=1 npx vitest run src/tests/secureStoreBench.test.ts
+ *   SECURESTORE_BENCH=1 pnpm exec vitest run src/tests/secureStoreBench.test.ts
  *
  * Knobs (env): SECURESTORE_BENCH_SAMPLES (default 5), SECURESTORE_BENCH_WARMUP
  * (default 2), SECURESTORE_BENCH_SCALES (default "16,10000,100000" — 16 is the

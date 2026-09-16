@@ -2,10 +2,10 @@
  * TEMP performance benchmark for the cameraUpload lib (cameraUpload.ts +
  * cameraUploadHelpers.ts).
  *
- * Gated behind CAMERA_BENCH=1 so the normal test suite ("npm test" / verify)
+ * Gated behind CAMERA_BENCH=1 so the normal test suite ("pnpm test" / verify)
  * skips it entirely. Run with:
  *
- *   CAMERA_BENCH=1 npx vitest run src/tests/cameraUploadBench.test.ts
+ *   CAMERA_BENCH=1 pnpm exec vitest run src/tests/cameraUploadBench.test.ts
  *
  * Knobs (env): CAMERA_BENCH_SAMPLES (default 5), CAMERA_BENCH_WARMUP (default 2),
  * CAMERA_BENCH_SCALES (default "10000,100000"), CAMERA_BENCH_OUT (table file,

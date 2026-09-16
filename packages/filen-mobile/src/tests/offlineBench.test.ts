@@ -2,10 +2,10 @@
  * TEMP performance benchmark for the offline lib (offline.ts + offlineSync.ts +
  * offlineSyncPlanner.ts + offlineHelpers.ts).
  *
- * Gated behind OFFLINE_BENCH=1 so the normal test suite ("npm test" / verify)
+ * Gated behind OFFLINE_BENCH=1 so the normal test suite ("pnpm test" / verify)
  * skips it entirely. Run with:
  *
- *   OFFLINE_BENCH=1 npx vitest run src/tests/offlineBench.test.ts
+ *   OFFLINE_BENCH=1 pnpm exec vitest run src/tests/offlineBench.test.ts
  *
  * Knobs (env): OFFLINE_BENCH_SAMPLES (default 7), OFFLINE_BENCH_WARMUP (default 3),
  * OFFLINE_BENCH_SCALE (default 1 — multiplies all entry counts).

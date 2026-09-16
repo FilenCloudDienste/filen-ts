@@ -4,7 +4,7 @@
  *
  * Gated behind QUERY_BENCH=1. Run with:
  *
- *   QUERY_BENCH=1 npx vitest run src/tests/queryClientBench.test.ts
+ *   QUERY_BENCH=1 pnpm exec vitest run src/tests/queryClientBench.test.ts
  *
  * Knobs (env): QUERY_BENCH_SAMPLES (default 5), QUERY_BENCH_WARMUP (default 2),
  * QUERY_BENCH_SCALES (default "10000,100000"), QUERY_BENCH_OUT (table file, default
