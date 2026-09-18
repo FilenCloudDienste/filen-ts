@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { bootTo, enterScratchDirectory, openTransfers, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Transfers-screen-specific affordances (transferRow.tsx/screens/transfers.tsx) that uploads.spec.ts
@@ -20,7 +20,7 @@ test.describe("transfers screen", () => {
 		const scratchName = `e2e-transfers-screen-${runId}`
 		const fileName = `e2e-transfers-screen-${runId}.txt`
 
-		await page.goto("/drive")
+		await bootTo(page)
 
 		try {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -34,14 +34,12 @@ test.describe("transfers screen", () => {
 			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// A plain nav link now (mirrors every other rail entry), not a popover trigger.
-			await page
-				.getByRole("link", { name: /Transfers/i })
-				.first()
-				.click()
-			await page.waitForURL(/\/transfers$/)
+			await openTransfers(page)
 
 			// Finished row: a "Remove" control, never "Cancel" — cancel only makes sense for a still-active
-			// transfer (transferRow.tsx's finished/active branch).
+			// transfer (transferRow.tsx's finished/active branch). Remove FIRST: the row's controls render
+			// together, so asserting the absence of Cancel before anything proves the row is on screen
+			// passes vacuously against a transfers list that has not rendered yet.
 			const removeButton = page.getByRole("button", { name: "Remove", exact: true })
 			await expect(removeButton).toBeVisible()
 			await expect(page.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0)

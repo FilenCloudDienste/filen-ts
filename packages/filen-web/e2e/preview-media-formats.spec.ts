@@ -1,4 +1,5 @@
 import { test, expect } from "./fixtures"
+import { bootTo } from "./helpers/listing"
 import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
 import { PDF_PASSWORD_CORRECT } from "./helpers/fixtureBytes"
 import { trackCspViolations } from "./helpers/csp"
@@ -24,7 +25,7 @@ test("image preview opens, pages with the button and the arrow key, and closes w
 	// Exactly two slots, so the pager has somewhere to go and exactly one direction is enabled at each end.
 	const [nameA, nameB] = FIXTURE_FILES["preview-image"]
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	const { listbox } = await enterFixtureDirectory(page, "preview-image")
 
@@ -38,8 +39,13 @@ test("image preview opens, pages with the button and the arrow key, and closes w
 	const imgA = page.getByRole("img", { name: nameA })
 	await expect(imgA).toBeVisible({ timeout: 30_000 })
 
-	// The on-screen next button pages forward (isolates the pager machinery from the key path).
-	await page.getByRole("button", { name: "Next file" }).click()
+	// The on-screen next button pages forward (isolates the pager machinery from the key path). Both
+	// pager buttons are always rendered, one of them disabled, so the button being ENABLED — not merely
+	// present — is what says the overlay has committed the slot the image just rendered into; clicking a
+	// still-disabled Next only expires against it.
+	const next = page.getByRole("button", { name: "Next file" })
+	await expect(next).toBeEnabled()
+	await next.click()
 	const imgB = page.getByRole("img", { name: nameB })
 	await expect(imgB).toBeVisible({ timeout: 30_000 })
 
@@ -70,7 +76,7 @@ test("HEIC preview transforms client-side and renders via the buffered path, nev
 
 	const cspViolations = trackCspViolations(page)
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	const { listbox } = await enterFixtureDirectory(page, "preview-heic")
 
@@ -110,11 +116,18 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
+	// Two 60s canvas renders, a 30s text layer, the retried band reads and the page-2 scroll add to
+	// ~270s of pinned waits, on top of the fixture-tree descent preamble the read lane's 480s already
+	// mostly holds — together they can exceed it. An explicit ceiling rather than test.slow(), which
+	// triples that lane budget to 1440s for a test whose own worst case is ~560s (downloads.spec.ts opts
+	// in the same way).
+	test.setTimeout(600_000)
+
 	const [namePdf, nameLinksPdf] = FIXTURE_FILES["preview-pdf-pages"]
 
 	const cspViolations = trackCspViolations(page)
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	const { listbox } = await enterFixtureDirectory(page, "preview-pdf-pages")
 
@@ -155,21 +168,27 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	// / 300pt = 0.360; its left edge is 20/300 = 0.067. pdf.js pins the span to exactly that ratio via
 	// --scale-x = canvasWidth * scale / measuredWidth, so both are scale- and zoom-independent, and a
 	// broken layer (inherited ~14-16px font, no scaleX) lands far outside either band.
-	const spanBox = await pageOneSpan.boundingBox()
-	const canvasBox = await firstPageCanvas.boundingBox()
+	//
+	// Read inside a retry, not once: pdf.js sets each span's --scale-x from the canvas's measured width
+	// AFTER the canvas paints, so a pair of boxes sampled in between is self-consistent and still outside
+	// the band — a failure that says the layer is broken when it is only mid-layout.
+	await expect(async () => {
+		const spanBox = await pageOneSpan.boundingBox()
+		const canvasBox = await firstPageCanvas.boundingBox()
 
-	if (!spanBox || !canvasBox) {
-		throw new Error("text-layer span or page canvas has no bounding box")
-	}
+		if (!spanBox || !canvasBox) {
+			throw new Error("text-layer span or page canvas has no bounding box")
+		}
 
-	expect(spanBox.x).toBeGreaterThanOrEqual(canvasBox.x - 1)
-	expect(spanBox.y).toBeGreaterThanOrEqual(canvasBox.y - 1)
-	expect(spanBox.x + spanBox.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width + 1)
-	expect(spanBox.y + spanBox.height).toBeLessThanOrEqual(canvasBox.y + canvasBox.height + 1)
-	expect(spanBox.width / canvasBox.width).toBeGreaterThan(0.3)
-	expect(spanBox.width / canvasBox.width).toBeLessThan(0.42)
-	expect((spanBox.x - canvasBox.x) / canvasBox.width).toBeGreaterThan(0.047)
-	expect((spanBox.x - canvasBox.x) / canvasBox.width).toBeLessThan(0.087)
+		expect(spanBox.x).toBeGreaterThanOrEqual(canvasBox.x - 1)
+		expect(spanBox.y).toBeGreaterThanOrEqual(canvasBox.y - 1)
+		expect(spanBox.x + spanBox.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width + 1)
+		expect(spanBox.y + spanBox.height).toBeLessThanOrEqual(canvasBox.y + canvasBox.height + 1)
+		expect(spanBox.width / canvasBox.width).toBeGreaterThan(0.3)
+		expect(spanBox.width / canvasBox.width).toBeLessThan(0.42)
+		expect((spanBox.x - canvasBox.x) / canvasBox.width).toBeGreaterThan(0.047)
+		expect((spanBox.x - canvasBox.x) / canvasBox.width).toBeLessThan(0.087)
+	}).toPass({ timeout: 30_000 })
 
 	// A click on a text-layer span selects text; it must never toggle the overlay chrome away. Asserted
 	// on the header's own opacity rather than on any control's visibility: hidden chrome stays in the DOM
@@ -184,8 +203,8 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	// scrolls page 2 into view; the indicator is IntersectionObserver-driven, so it follows once
 	// the scroll settles rather than updating synchronously with the click.
 	await page.getByRole("button", { name: "Next page" }).click()
-	await expect(page.getByText("Page 2 of 2")).toBeVisible({ timeout: 15_000 })
-	await expect(page.locator('canvas[aria-label*="Page 2 of 2"]')).toBeVisible({ timeout: 15_000 })
+	await expect(page.getByText("Page 2 of 2")).toBeVisible({ timeout: 30_000 })
+	await expect(page.locator('canvas[aria-label*="Page 2 of 2"]')).toBeVisible({ timeout: 30_000 })
 
 	await page.keyboard.press("Escape")
 	await expect(firstPageCanvas).toHaveCount(0)
@@ -203,17 +222,21 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 	await expect(annotationLink).toHaveAttribute("target", "_blank")
 	await expect(annotationLink).toHaveAttribute("rel", "noreferrer")
 
-	const linkBox = await annotationLink.boundingBox()
-	const linksCanvasBox = await linksPageCanvas.boundingBox()
+	// Retried for the same reason the text-layer bands above are: the annotation layer is positioned off
+	// the canvas's measured box, so a pair sampled mid-layout is self-consistent and still out of bounds.
+	await expect(async () => {
+		const linkBox = await annotationLink.boundingBox()
+		const linksCanvasBox = await linksPageCanvas.boundingBox()
 
-	if (!linkBox || !linksCanvasBox) {
-		throw new Error("annotation link or page canvas has no bounding box")
-	}
+		if (!linkBox || !linksCanvasBox) {
+			throw new Error("annotation link or page canvas has no bounding box")
+		}
 
-	expect(linkBox.x).toBeGreaterThanOrEqual(linksCanvasBox.x - 1)
-	expect(linkBox.x + linkBox.width).toBeLessThanOrEqual(linksCanvasBox.x + linksCanvasBox.width + 1)
-	expect(linkBox.y).toBeGreaterThanOrEqual(linksCanvasBox.y - 1)
-	expect(linkBox.y + linkBox.height).toBeLessThanOrEqual(linksCanvasBox.y + linksCanvasBox.height + 1)
+		expect(linkBox.x).toBeGreaterThanOrEqual(linksCanvasBox.x - 1)
+		expect(linkBox.x + linkBox.width).toBeLessThanOrEqual(linksCanvasBox.x + linksCanvasBox.width + 1)
+		expect(linkBox.y).toBeGreaterThanOrEqual(linksCanvasBox.y - 1)
+		expect(linkBox.y + linkBox.height).toBeLessThanOrEqual(linksCanvasBox.y + linksCanvasBox.height + 1)
+	}).toPass({ timeout: 30_000 })
 
 	await page.keyboard.press("Escape")
 	await expect(linksPageCanvas).toHaveCount(0)
@@ -239,7 +262,7 @@ test("PDF preview prompts for a password, retries after a wrong one, and renders
 
 	const cspViolations = trackCspViolations(page)
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	const { listbox } = await enterFixtureDirectory(page, "preview-pdf-locked")
 

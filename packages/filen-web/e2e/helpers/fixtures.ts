@@ -16,11 +16,11 @@ import { descendInto, waitForListingSettled } from "./listing"
 // drift into a "row never appeared" timeout that names neither side. Names are plain and stable (no
 // run id) — the containing scenario directory is already unique per run, so nothing collides.
 //
-// NO NAME MAY BE A SUBSTRING OF A SIBLING, and that binds the SCENARIO KEYS as much as the file names
-// under them: `getByRole("option", { name })` matches accessible names by SUBSTRING, so two scenario
-// directories sitting in the same fixture root — "preview-pdf" and "preview-pdf-password", say — make
-// the descent into the shorter one a strict-mode violation the moment both exist (observed live).
-// Hence "preview-pdf-pages"/"preview-pdf-locked" rather than the obvious pair.
+// NO FILE NAME MAY BE A SUBSTRING OF A SIBLING: each spec locates its own rows with a bare
+// `getByRole("option", { name })`, which matches accessible names by SUBSTRING, so a name that is a
+// prefix of a sibling's turns the lookup for the shorter one into a strict-mode violation (observed
+// live). The SCENARIO KEYS are no longer bound by it — every descent goes through descendInto, whose
+// row lookup anchors the name on a token boundary (helpers/listing.ts).
 //
 // EXACT COUNTS ARE LOAD-BEARING. Several specs assert a listing's option count outright, and every
 // preview pager leg depends on how many slots the overlay has (a two-file scenario is what makes
@@ -52,27 +52,37 @@ export const FIXTURE_FILES = {
 export type FixtureScenario = keyof typeof FIXTURE_FILES
 export type FixtureFileName = (typeof FIXTURE_FILES)[FixtureScenario][number]
 
-// Read-only counterpart to enterScratchDirectory (helpers/listing.ts): same contract — call it with
-// the page sitting on the drive ROOT listing, get the scenario listing back — but every step is a
-// READ. Two descents rather than one, since the tree is root -> fixtureRoot -> scenario; the fixture
-// root exists so the whole run's tree is ONE row at the account root (one create, one trash) instead
-// of a dozen, and so the teardown has a single thing to remove.
+// The fixture ROOT's own listing, one hop from the drive root. Worth having on its own: it is the one
+// listing in the account with a known, stable row set (one directory per scenario) that no write-lane
+// test can churn underneath an assertion.
 //
 // The tall viewport is the same virtualization workaround enterScratchDirectory documents: the
 // listing renders rows through a virtualizer, so a row sorted below the fold may not be in the DOM at
 // all, and a locator hunting one specific name would silently miss it.
-export async function enterFixtureDirectory(
-	page: Page,
-	scenario: FixtureScenario
-): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
+export async function enterFixtureRoot(page: Page): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
 	await page.setViewportSize({ width: 1280, height: 8000 })
 
 	const { fixtureRoot } = readFixtureManifest()
 	const { listbox } = await waitForListingSettled(page)
 
-	// One locator for both hops on purpose: it re-resolves against whatever listing is mounted, so the
-	// second descent runs against the fixture root's listing, not a stale handle on the account root's.
 	await descendInto(page, listbox, fixtureRoot)
+
+	return waitForListingSettled(page)
+}
+
+// Read-only counterpart to enterScratchDirectory (helpers/listing.ts): same contract — call it with
+// the page sitting on the drive ROOT listing, get the scenario listing back — but every step is a
+// READ. Two descents rather than one, since the tree is root -> fixtureRoot -> scenario; the fixture
+// root exists so the whole run's tree is ONE row at the account root (one create, one trash) instead
+// of a dozen, and so the teardown has a single thing to remove.
+export async function enterFixtureDirectory(
+	page: Page,
+	scenario: FixtureScenario
+): Promise<{ listbox: ReturnType<Page["getByRole"]>; hasItems: boolean }> {
+	// Re-resolves against whatever listing is mounted, so this descent runs against the fixture root's
+	// listing rather than a stale handle on the account root's.
+	const { listbox } = await enterFixtureRoot(page)
+
 	await descendInto(page, listbox, scenario)
 
 	return waitForListingSettled(page)

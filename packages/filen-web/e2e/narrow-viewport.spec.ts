@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { dismissStartupReminders, waitForListingSettled } from "./helpers/listing"
+import { bootTo, openTransfers, waitForListingSettled } from "./helpers/listing"
 import { gotoSettings } from "./helpers/settings"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -21,7 +21,7 @@ test.describe("narrow viewport", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		await page.goto("/drive")
+		await bootTo(page)
 		await waitForListingSettled(page)
 
 		// <aside> is unique to the five module sidebars, so an <aside> inside the shell row means exactly
@@ -61,11 +61,18 @@ test.describe("narrow viewport", () => {
 
 		const sections = ["Account", "Security", "Appearance", "Events", "Billing", "Advanced"]
 
+		// The positive control the hidden-loop below needs: every one of those links is equally "hidden"
+		// on a settings shell that never rendered at all, so the loop would pass vacuously. This trigger
+		// exists ONLY in the narrow layout, so it says both that the shell is up and that it chose the
+		// layout this whole spec is about.
+		const drawerTrigger = page.getByRole("button", { name: "Open navigation", exact: true })
+		await expect(drawerTrigger).toBeVisible()
+
 		for (const label of sections) {
 			await expect(page.getByRole("link", { name: label, exact: true })).toBeHidden()
 		}
 
-		await page.getByRole("button", { name: "Open navigation", exact: true }).click()
+		await drawerTrigger.click()
 
 		for (const label of sections) {
 			await expect(page.getByRole("link", { name: label, exact: true })).toBeVisible()
@@ -87,15 +94,17 @@ test.describe("narrow viewport", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		await page.goto("/drive")
+		await bootTo(page)
 
 		const { hasItems } = await waitForListingSettled(page)
 
 		// The Size/Modified header spans live inside the listing's own rendered content, which the empty
-		// branch never reaches — there is no column layout to assert on an empty account, so skip rather
-		// than fail. Both strings are unique while menus are closed: the sort menu's trigger renders only
-		// "Sort by" and its own items live inside a closed dropdown.
-		test.skip(!hasItems, "drive root is empty on the shared account — no listing header to assert")
+		// branch never reaches. Asserted rather than skipped on: the fixtures-setup project this lane
+		// depends on puts its run-scoped root directory at the account root before any spec starts, so an
+		// empty root is a broken run, and skipping would report it as a pass. Both strings are unique
+		// while menus are closed: the sort menu's trigger renders only "Sort by" and its own items live
+		// inside a closed dropdown.
+		expect(hasItems).toBe(true)
 
 		const size = page.getByText("Size", { exact: true })
 		const modified = page.getByText("Modified", { exact: true })
@@ -122,19 +131,12 @@ test.describe("narrow viewport", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		// goto("/drive") and not goto("/transfers"): the session-injection hook re-seeds and navigates to
-		// "/" → /drive on every load, so a hard goto to any other authed route bounces before it renders.
-		// The rail click below is a client nav and is unaffected. No listing assertion is wanted here, so
-		// the explicit dismissal is the right half of THE RULE (helpers/listing.ts), not
-		// waitForListingSettled.
-		await page.goto("/drive")
-		await dismissStartupReminders(page)
+		// Entered through the rail rather than a hard goto to /transfers: the rail's own link is part of
+		// what "reachable at 390px" means. No listing assertion is wanted here, so bootTo's shell barrier
+		// is the right half of THE RULE (helpers/listing.ts), not waitForListingSettled.
+		await bootTo(page)
 
-		await page
-			.getByRole("link", { name: /Transfers/i })
-			.first()
-			.click()
-		await page.waitForURL(/\/transfers$/)
+		await openTransfers(page)
 
 		// With no active transfers these are disabled but still rendered — which is what keeps this test
 		// net-zero. Their accessible names come from the same i18n keys as the labels the narrow layout
@@ -143,10 +145,13 @@ test.describe("narrow viewport", () => {
 			const button = page.getByRole("button", { name, exact: true })
 
 			await expect(button).toBeVisible()
-			// ratio: 1, matching the drive chrome assertions above — the toolbar's contract is "shed
-			// labels, then wrap, never scroll, never clip" (transfers.tsx), and the default ratio (> 0)
-			// passes on a button clipped almost entirely off a 390px viewport.
-			await expect(button).toBeInViewport({ ratio: 1 })
+			// Effectively ratio: 1, matching the drive chrome assertions above — the toolbar's contract is
+			// "shed labels, then wrap, never scroll, never clip" (transfers.tsx), and the default ratio
+			// (> 0) passes on a button clipped almost entirely off a 390px viewport. 0.99 rather than a
+			// literal 1: these four buttons are sized by their own rendered text, so a sub-pixel width from
+			// a font metric that differs between the local and CI Chromium builds can leave a fraction of
+			// the last one's box outside a viewport it demonstrably fits.
+			await expect(button).toBeInViewport({ ratio: 0.99 })
 		}
 	})
 })

@@ -100,10 +100,10 @@ test.describe("shell", { tag: "@no-sdk" }, () => {
 
 		await expect(submit).toBeVisible()
 
-		const transitionDuration = await submit.evaluate(el => getComputedStyle(el).transitionDuration)
-
-		// transition-all's un-reduced Tailwind default is 150ms, so 0.00001 passes and 0.15 fails.
-		expect(parseFloat(transitionDuration)).toBeLessThan(0.001)
+		// Polled, not read once: the stylesheet the reduce rule lives in is applied on first paint, and a
+		// computed read taken before it lands returns the un-reduced default. transition-all's un-reduced
+		// Tailwind default is 150ms, so 0.00001 passes and 0.15 fails.
+		await expect.poll(() => submit.evaluate(el => parseFloat(getComputedStyle(el).transitionDuration))).toBeLessThan(0.001)
 
 		// No spinner or skeleton renders pre-auth, and the CSS RULE is what is under test — so probe it
 		// directly, alongside a no-data-slot control. Without the control the test cannot tell "the

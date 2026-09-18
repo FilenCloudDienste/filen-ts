@@ -1,5 +1,7 @@
 import { test, expect } from "./fixtures"
+import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { gotoSettings } from "./helpers/settings"
+import { isDark, pressUntilTheme } from "./helpers/theme"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // The browser is the only real proof that the shortcuts catalog is complete WITHOUT having visited
@@ -80,9 +82,7 @@ test.describe("keyboard shortcuts", () => {
 
 		await gotoKeyboardSettings(page)
 
-		const isDark = () => page.evaluate(() => document.documentElement.classList.contains("dark"))
-
-		await expect.poll(isDark).toBe(false)
+		await expect.poll(() => isDark(page)).toBe(false)
 
 		const row = settingsRow(page)
 
@@ -94,8 +94,11 @@ test.describe("keyboard shortcuts", () => {
 		await page.keyboard.press("d")
 
 		await expect(row).toContainText("Already used by")
-		await expect.poll(isDark).toBe(false)
+		await expect.poll(() => isDark(page)).toBe(false)
 		await expect(row).toContainText("Not set")
+		// The hooks arrive on a fire-and-forget dynamic import, independently of the shell's own
+		// render — an interactive settings page is no proof they are installed.
+		await waitForE2eHooks(page)
 		expect(await page.evaluate(() => window.__filenE2E.comboFor("app.openSettings"))).toBe("")
 	})
 
@@ -125,7 +128,6 @@ test.describe("keyboard shortcuts", () => {
 
 		await gotoKeyboardSettings(page)
 
-		const isDark = () => page.evaluate(() => document.documentElement.classList.contains("dark"))
 		const row = settingsRow(page)
 
 		await row.getByRole("button", { name: "Change shortcut" }).click()
@@ -141,16 +143,16 @@ test.describe("keyboard shortcuts", () => {
 		await expect(dialog).toBeVisible()
 		await page.keyboard.press("d")
 		await page.keyboard.press("Escape")
-		await expect(dialog).toBeHidden()
+		// Gone, not merely hidden: the dialog's own list holds the recording surface for as long as it is
+		// mounted, so the presses below only read as global bindings once it has actually unmounted.
+		await expect(dialog).toHaveCount(0)
 
 		await expect(row).toContainText("Not set")
 
 		// No session survived either list, so the global binding works again.
-		await page.keyboard.press("d")
-		await expect.poll(isDark).toBe(true)
+		await pressUntilTheme(page, "d", true)
 
 		// Net-zero: put the theme back.
-		await page.keyboard.press("d")
-		await expect.poll(isDark).toBe(false)
+		await pressUntilTheme(page, "d", false)
 	})
 })

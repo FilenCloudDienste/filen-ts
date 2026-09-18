@@ -18,11 +18,12 @@ const BASE_URL = `http://localhost:${String(PORT)}`
 // (Verified per file by grepping for enterScratchDirectory / createDirectoryViaDialog / setInputFiles /
 // createTestFile / trashScratchDirectory, then reading each hit.) That lock is a SERVER-SIDE LEASE with
 // a client keep-alive — the wasm carries `v3/user/lock`, the resource name `drive-write`, and
-// `Refreshed lock` — and the SDK's write path waits for it with unbounded patience and no error
-// (`resync: drive lock still contended after a patient wait; retrying in`). Two consequences shape
-// everything below: a browser context killed mid-write stops refreshing its lease but does NOT release
-// it, so it blocks every other client until the TTL expires; and one such orphaned lease cascades,
-// because the next test to want the lock also hangs, also gets killed, and orphans another.
+// `Refreshed lock` — and the SDK's write path waits for it with unbounded patience and no error (it
+// polls ~8640 times on a fibonacci backoff capped at 30s, which is forever in any practical sense).
+// Two consequences shape everything below: a browser context killed mid-write stops refreshing its
+// lease but does NOT release it, so it blocks every other client until the TTL expires; and one such
+// orphaned lease cascades, because the next test to want the lock also hangs, also gets killed, and
+// orphans another.
 //
 // READ_SPECS therefore is not a performance tier — it is the set that CANNOT take the lock, and so can
 // neither be starved by it nor orphan one. Those get real concurrency and retries. Everything that
@@ -44,43 +45,34 @@ const CHATS_SPEC = /\/chats\.spec\.ts$/
 export default defineConfig({
 	testDir: "./e2e",
 	fullyParallel: true,
-	// The OVERALL pool; each lane below caps itself within it. On CI this is a 4-vCPU runner and every
-	// page carries a Chromium renderer plus the SDK's own wasm thread pool (threadCount() = 2 there),
-	// so four pages already oversubscribe it — which is the likeliest reason CI is flakier than a dev
-	// machine at the identical worker count. Hence 3 and not 4: the read lane's own cap plus the write
-	// lane's single worker would otherwise make four concurrent pages the STEADY STATE of every run,
-	// and the read lane's one retry would quietly absorb the resulting flakes instead of reporting
-	// them. The write lane keeps a worker either way, so the serial critical path is unchanged.
+	// The OVERALL pool. On CI this is a 4-vCPU runner and every page carries a Chromium renderer plus
+	// the SDK's own wasm thread pool (threadCount() = 2 there), so four pages already oversubscribe it.
+	// A project's own `workers` is an UPPER BOUND inside this pool, not a reservation — hence the read
+	// lane's CI cap of 2 below, which leaves the serial write lane a slot instead of starving it.
 	workers: process.env["CI"] ? 3 : 6,
 	forbidOnly: Boolean(process.env["CI"]),
 	// Set PER LANE, not globally — see the READ_SPECS note above for why a retry is safe on a lane that
 	// cannot take the drive lock and actively harmful on one that can.
 	retries: 0,
-	// A wedged run must not sit until GitHub's 6h job default. Expiry here is not a clean stop:
-	// Playwright abandons the phase loop and hands the cleanup runner the SAME already-expired
-	// deadline, so fixtures-teardown never runs and the fixture root is left behind on the shared live
-	// account. That leak is bounded and self-healing rather than an orphaned tree: the root is ONE row
-	// named `e2e-fixtures-<runId>`, which isScratchDebrisName's anchored `^(e2e-|…)` matches, so the
-	// next run's cleanup sweep drains it in a single round and its whole subtree with it.
+	// Unconditional: a wedged LOCAL run holds the same shared account as a CI one and poisons the next
+	// run, so both get the backstop. Expiry is not a clean stop — Playwright abandons the phase loop and
+	// hands the cleanup runner the SAME already-expired deadline, so fixtures-teardown never runs and
+	// the fixture root is left behind on the live account. That leak is bounded and self-healing: the
+	// root is ONE row named `e2e-fixtures-<runId>`, which isScratchDebrisName's anchored `^(e2e-|…)`
+	// matches, so the next run's cleanup sweep drains it and its whole subtree in a single round.
 	//
 	// NOT derived from the lane ceilings below, and it cannot be: chromium-write alone is serial over
-	// 14 spec files at 720s each, more declared ceiling than any run budget could hold. Those are
+	// 14 spec files at 900s each, more declared ceiling than any run budget could hold. Those are
 	// per-test worst cases a healthy run never spends; this is the outer bound on the run as a whole.
 	// The mandatory serial chain under it IS additive, though — 600s webServer + 120s auth-setup (suite
 	// default) + 600s cleanup-setup + 900s fixtures-setup + 420s fixtures-teardown = 44 min of budget
-	// before and after any spec at all. Spread rather than set-to-undefined: exactOptionalPropertyTypes
-	// rejects an explicit undefined here.
-	...(process.env["CI"] ? { globalTimeout: 120 * 60_000 } : {}),
+	// before and after any spec at all.
+	globalTimeout: 120 * 60_000,
 	reporter: process.env["CI"] ? [["github"], ["html", { open: "never" }], ["list"]] : [["html", { open: "never" }], ["list"]],
-	// Deliberately TIGHT, and identical on CI. A generous ceiling looks harmless but is not: a write that
-	// hangs holds the test open for the whole budget, and the kill at the end of it orphans a
-	// `drive-write` lease that then blocks every later test (see the READ_SPECS note). A long timeout
-	// therefore converts one stuck write into a cascade, so shortening this is a RELIABILITY change and
-	// not just a speed one. A slow CI runner is answered with fewer workers, never a bigger number here.
-	// The handful of genuinely long scenarios (notes' SDK backoff, thumbnails' double descent into the
-	// shared fixture tree) opt in explicitly with test.setTimeout / test.slow, where the cost is visible
-	// in the file, and the write lane raises it at the project level for a reason of its own (see
-	// chromium-write).
+	// Covers auth-setup, firefox and webkit only — every real lane below sets its own. Kept tight all the
+	// same: a write that hangs holds its test open for the whole budget, and the kill at the end of it
+	// orphans a `drive-write` lease that blocks every later test (see the READ_SPECS note), so a generous
+	// default turns one stuck write into a cascade. A slow CI runner is answered with fewer workers.
 	timeout: 120_000,
 	// Governs UI responsiveness only — a live write opts into LIVE_WRITE_TIMEOUT_MS at its own call
 	// site (helpers/listing.ts), so this budget never has to cover the network.
@@ -136,11 +128,10 @@ export default defineConfig({
 		},
 		// Above what the single trash can actually burn, because a KILL here is the expensive outcome: it
 		// orphans the `drive-write` lease the trash was holding AND skips the catch that names the leaked
-		// root for the next run's sweep. The worst case is 30s goto + 18s reminders + trashScratchDirectory
-		// (48s overlay-reload fallback + 15s sidebar click + 10s settle + 15s row poll + 170s
-		// selectAndTrashRow, whose confirm wait this caller widens to 120s for a root holding 13
-		// subdirectories and 26 files) = 306s. It runs once per run, so the headroom costs a healthy run
-		// nothing.
+		// root for the next run's sweep. The worst case is 30s goto + trashScratchDirectory (30s
+		// overlay-reload fallback + 15s sidebar click + 30s settle + 15s row poll + 170s selectAndTrashRow,
+		// whose confirm wait this caller widens to 120s for a root holding 13 subdirectories and 26 files)
+		// = 290s. It runs once per run, so the headroom costs a healthy run nothing.
 		{ name: "fixtures-teardown", testMatch: /fixtures\.teardown\.ts/, timeout: 420_000 },
 		// Cannot take the drive lock, so it can neither starve nor orphan one: real concurrency, and a
 		// retry here is a genuine transient-infra retry rather than a second write against an account
@@ -150,7 +141,7 @@ export default defineConfig({
 			use: { ...devices["Desktop Chrome"] },
 			dependencies: ["fixtures-setup"],
 			testMatch: READ_SPECS,
-			workers: process.env["CI"] ? 3 : 5,
+			workers: process.env["CI"] ? 2 : 5,
 			// ONE retry, not two. This is the only lane that retries at all and it carries most of the
 			// suite, so it is also where the signal is weakest: at two retries a test that passes one run
 			// in three still reports green. One absorbs a single blip against the live account while a
@@ -161,21 +152,20 @@ export default defineConfig({
 			// other half of it: a wait has to be able to reach its OWN pin and name what it was waiting
 			// for, instead of being cut off by a harness kill that names nothing. Several specs here pin
 			// past 120s unaided, because entering the shared fixture tree is itself expensive: one entry
-			// is 30s goto + 18s startup-reminder dismissal (a 15s keys click plus a 3s storage click) +
-			// 10s settle + TWO descents (each 10s row + 30s descendInto retry envelope + 10s breadcrumb
-			// + 10s settle) + 10s settle = 188s.
+			// declares 30s goto + 30s settle + TWO descents (each 30s row + 30s descendInto retry envelope
+			// + 10s breadcrumb + 30s settle) + 30s settle = 290s.
 			//
-			// 360s, rather than a ceiling sized off the single most expensive spec in the lane: it holds
-			// that 188s preamble with a real body on top for the five specs that read the tree
-			// (downloads, drive-marquee, preview-media, preview-media-formats, thumbnails), while the
-			// other fifteen here never touch it and would only inherit dead headroom. A spec whose own
-			// pinned waits need more than that says so with test.setTimeout, where the cost is visible in
-			// the file — thumbnails.spec.ts is the one that does, because it enters the tree TWICE (its
-			// reload leg re-arms the reminders) and so pays the whole preamble again before a single
-			// assertion of its own. A kill here costs the run wall clock, not the account's write lock —
-			// though with the retry above, a systematically hung test costs it twice, which is what
-			// globalTimeout is the backstop for.
-			timeout: 360_000
+			// 480s, rather than a ceiling sized off the single most expensive spec in the lane: it holds
+			// that 290s preamble with a body's worth of headroom left over for the five specs that read the
+			// tree (downloads, drive-marquee, preview-media, preview-media-formats, thumbnails), while the
+			// other fifteen here never touch it and would only inherit dead headroom — and none of those
+			// waits is spent on a healthy run, each closes on a rendered row. A spec whose own pinned waits
+			// need more says so with test.setTimeout, where the cost is visible in the file —
+			// downloads.spec.ts (it enters the tree TWICE, so it pays the whole preamble again) and
+			// preview-media-formats.spec.ts (two 60s pdf.js canvas renders on top of it) are the two that do.
+			// A kill here costs the run wall clock, not the account's write lock — though with the retry
+			// above, a systematically hung test costs it twice, which is what globalTimeout backstops.
+			timeout: 480_000
 		},
 		// Everything that takes the drive lock, ONE worker. Writes serialise on the account-wide lease
 		// regardless, so a second worker adds no throughput — it only contends: its writes queue behind
@@ -214,57 +204,49 @@ export default defineConfig({
 			// burn on a contended account (helpers/listing.ts). Counting only the waits pinned at their own
 			// call sites there:
 			//
-			//   create retry loop  334s = attempt 1 152s (15s reminder dismissal + 3s storage reminder
-			//                             + 10s settle + 120s pinned create wait + 4s dialog probes)
-			//                             + attempt 2 167s (the same, plus the 15s adopt poll, which is
-			//                             gated on attempt > 1) + 15s reload. Every reload RE-ARMS the
-			//                             startup reminders, so the 15s dismissal recurs per attempt
-			//                             rather than being paid once.
-			//   descent             70s = 10s row + 30s descendInto retry envelope + 10s breadcrumb
-			//                             + 2 x 10s settle
-			//   teardown           258s = 48s overlay-reload fallback (30s goto + 18s reminders) + 15s
-			//                             sidebar click + 10s settle + 15s row poll + 170s
-			//                             selectAndTrashRow envelope (40s interaction + 120s confirm
-			//                             + 10s trailing row)
+			//   create retry loop  338s = attempt 1 154s (30s settle + 120s pinned create wait + 4s dialog
+			//                             probes) + attempt 2 169s (the same, plus the 15s adopt poll,
+			//                             which is gated on attempt > 1) + 15s reload
+			//   descent            130s = 30s row + 30s descendInto retry envelope + 10s breadcrumb
+			//                             + 2 x 30s settle
+			//   teardown           260s = 30s overlay-reload fallback + 15s sidebar click + 30s settle
+			//                             + 15s row poll + 170s selectAndTrashRow envelope (40s
+			//                             interaction + 120s confirm + 10s trailing row)
 			//   -----------------------
-			//                      662s, and all of it is reachable on a run that still PASSES: each of
+			//                      728s, and all of it is reachable on a run that still PASSES: each of
 			//                      those loops retries, so burning the whole envelope is a slow success,
 			//                      not a failure.
 			//
 			// FOUR waits inside createDirectoryViaDialog are NOT pinned and are excluded above: the
 			// "New directory" click, the name fill and the "Create" click each inherit the 15s
 			// actionTimeout, and the dialog's own toBeVisible inherits the 10s expect default — +55s per
-			// attempt, so the loop's literal ceiling is 590s and the total 858s. This budget deliberately
+			// attempt, so the loop's literal ceiling is 448s and the total 838s. This budget deliberately
 			// assumes they do not all expire: unlike the pinned waits, none of them closes on a live
 			// account write. They are local actionability/visibility waits against a dialog the page has
 			// already rendered, so a run that spends them is not slow, it is broken somewhere else.
 			//
 			// The old 120s held neither end, and the end it cut was the teardown — leaking the scratch
 			// directory onto the shared account and reporting a timeout instead of the real failure; 300s
-			// and then 480s held the brackets only by understating them (the latter still carried a 3-
-			// attempt figure after a loop change), and 720s was derived when a create attempt was pinned
-			// at 45s rather than at the measured cost of waiting out an orphaned lease. What is left over
-			// above 662s is the test body's, and a body whose own pinned waits need more than that says
-			// so with test.slow / test.setTimeout, where the cost is visible in the file.
+			// and then 480s held the brackets only by understating them, and 720s was derived when a create
+			// attempt was pinned at 45s rather than at the measured cost of waiting out an orphaned lease.
+			// What is left over above 728s is the test body's, and a body whose own pinned waits need more
+			// says so with test.slow / test.setTimeout, where the cost is visible in the file.
 			timeout: 900_000
 		},
 		// Serial lanes for the two surfaces that race THEMSELVES rather than the drive: notes against the
 		// free plan's 10-note cap, chats against the conversation-create rate limiter. Neither takes the
 		// drive lock, so neither is ordered after anything — but neither is it free of the lanes above:
-		// they all draw on the one `workers` pool, so on CI, where that pool is 3 and the read lane alone
-		// caps at 3, these two mostly get their slots as the read lane drains.
-		// Both lanes below carry a derived ceiling for the same reason chromium-read and chromium-write do.
-		// They used to inherit the 120s suite default, which exists for the drive-lock orphan case that
-		// these surfaces never reach — and their own pinned waits declare far more than that. notes.spec's
-		// createAndOpenTestNote preamble alone is ~178s of bounded waiting before a test body's first
-		// assertion (30s goto + 18s reminders + 10s nav + 15s hooks + 15s rail click + 30s waitForURL +
-		// 15s fill + 15s click + 30s waitForURL), and its history test pins ~555s on top. A test that
-		// outruns the default is killed by the HARNESS, which names nothing and dies before teardown —
-		// the one outcome every other budget here is shaped to avoid. 300s covers the longest declared
-		// test with room over; the per-test test.setTimeout calls that papered over this can go.
+		// they all draw on the one `workers` pool, so on CI, where that pool is 3 and the read lane caps
+		// at 2, these two contend with the write lane for the remaining slot.
+		// Both lanes below carry a derived ceiling for the same reason chromium-read and chromium-write
+		// do: a test that outruns its budget is killed by the HARNESS, which names nothing and dies before
+		// teardown — and here that strands notes against the free plan's 10-note cap. Their longest tests
+		// declare far more than the 120s suite default: notes.spec's createAndOpenTestNote preamble alone
+		// is ~175s of bounded waiting before a first assertion, and its history test pins ~555s on top.
+		// Hence 600s, and the per-test test.setTimeout calls that papered over it can go.
 		{
 			name: "chromium-notes",
-			timeout: 300_000,
+			timeout: 600_000,
 			use: { ...devices["Desktop Chrome"] },
 			dependencies: ["fixtures-setup"],
 			testMatch: NOTES_SPEC,
@@ -273,7 +255,7 @@ export default defineConfig({
 		},
 		{
 			name: "chromium-chats",
-			timeout: 300_000,
+			timeout: 600_000,
 			use: { ...devices["Desktop Chrome"] },
 			dependencies: ["fixtures-setup"],
 			testMatch: CHATS_SPEC,

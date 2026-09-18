@@ -93,8 +93,12 @@ test.describe("public links (unauthenticated)", () => {
 			await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: 30_000 })
 		}
 
-		const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
-		expect(overflow).toBeLessThanOrEqual(0)
+		// Polled, not read once: the invalid card's own mount is what settles the layout, and a read taken
+		// on the frame it commits can catch the document mid-reflow and report an overflow that is gone a
+		// tick later.
+		await expect
+			.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth))
+			.toBeLessThanOrEqual(0)
 	})
 
 	test("a legacy hash-format link redirects to the new swapped path with the fragment key intact", async ({ page }) => {
@@ -103,7 +107,9 @@ test.describe("public links (unauthenticated)", () => {
 		// swapped), key preserved verbatim in the new fragment.
 		await page.goto(`/#/f/${RANDOM_UUID}%23${HEX_KEY}`)
 
-		await expect(page).toHaveURL(new RegExp(`/d/${RANDOM_UUID}#${HEX_KEY}`))
+		// The rewrite runs client-side once the app boots, so this closes on a cold boot, not on a server
+		// redirect — the same budget every other first-paint wait in this file carries.
+		await expect(page).toHaveURL(new RegExp(`/d/${RANDOM_UUID}#${HEX_KEY}`), { timeout: 30_000 })
 	})
 
 	test("a link route carries a generic title and a noindex robots meta", async ({ page }) => {

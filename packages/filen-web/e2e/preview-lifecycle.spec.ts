@@ -1,11 +1,15 @@
 import { test, expect } from "./fixtures"
 import {
+	bootTo,
+	clickSidebarLink,
 	waitForListingSettled,
 	enterScratchDirectory,
 	trashScratchDirectory,
 	selectAndTrashRow,
+	BOOT_SETTLE_TIMEOUT_MS,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
+import { focusEditorSurface } from "./helpers/editor"
 import { TEXT_BYTES } from "./helpers/fixtureBytes"
 import { resolveEditorModKey } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
@@ -17,14 +21,7 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // (playwright.config.ts), and a root-level create/trash races drive.spec.ts's own root-listing
 // assertions (see drive-actions.spec.ts's comment for the exact failure this once produced live).
 
-// Sequential within this file (one worker), overriding the config's fullyParallel — the same
-// live-account rationale as drive-actions.spec.ts's own serial mode, but "default" so one test's
-// failure doesn't skip the rest. Every test here creates and trashes a root-level scratch directory;
-// with this file's own tests racing each other across workers, a teardown's root-row click can retry
-// forever against a listing whose rows keep detaching/remounting under the concurrent creates/trashes
-// plus focus-driven refetches (reproduced live: a teardown click stayed "element is not stable /
-// detached from the DOM" for its whole remaining budget). Cross-FILE churn from other specs remains an
-// accepted residual, exactly as drive-actions.spec.ts documents.
+// Serialised by the write lane's `workers: 1` today; the directive keeps that true if it is ever widened.
 test.describe.configure({ mode: "default" })
 
 // Many short lines rather than a few long ones — small on the wire (a few KB), but at CodeMirror's
@@ -65,7 +62,7 @@ test("editable text preview saves via its Save button, persists across reopen, a
 	// false failure.
 	const unsavedPrompt = page.getByRole("alertdialog", { name: "Unsaved changes" })
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -85,12 +82,15 @@ test("editable text preview saves via its Save button, persists across reopen, a
 		// @uiw/codemirror-extensions-basic-setup) — simpler to assert on than an appended tail, and
 		// exercises onChange/dirty-tracking across the WHOLE buffer, not just its end.
 		const editor = page.locator(".cm-content")
-		await editor.click()
+		await focusEditorSurface(editor)
 		await page.keyboard.press(`${modKey}+a`)
 		await page.keyboard.type("edited content one")
 
-		const saveButton = page.getByRole("button", { name: "Save" })
-		await expect(saveButton).toBeVisible()
+		// ENABLED, not merely visible: Save is RENDERED only while `editable && dirty` and disabled only
+		// while `saving` (previewOverlay.tsx), so enabled proves both that the buffer took the edit and
+		// that no save is in flight.
+		const saveButton = page.getByRole("button", { name: "Save", exact: true })
+		await expect(saveButton).toBeEnabled()
 		await saveButton.click()
 		// The save clears the dirty bit once it resolves — the Save button (shown only while
 		// editable+dirty) disappearing is the save's own success signal, no separate toast to wait on.
@@ -112,10 +112,10 @@ test("editable text preview saves via its Save button, persists across reopen, a
 
 		// Dirty again, then Escape prompts a confirm instead of closing outright.
 		const editorAgain = page.locator(".cm-content")
-		await editorAgain.click()
+		await focusEditorSurface(editorAgain)
 		await page.keyboard.press(`${modKey}+a`)
 		await page.keyboard.type("edited content two")
-		await expect(page.getByRole("button", { name: "Save" })).toBeVisible()
+		await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled()
 
 		// Arrow keys move the CodeMirror caret while focus is inside the editor — they must never bubble
 		// to the overlay's own pager key handler, which used to page (or, dirty as here, pop this very
@@ -160,7 +160,7 @@ test("editable text preview: a long file's editor actually scrolls", async ({ pa
 	const nameTxt = `e2e-preview-scroll-${runId}.txt`
 	const modKey = await resolveEditorModKey(page)
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -190,7 +190,7 @@ test("editable text preview: a long file's editor actually scrolls", async ({ pa
 		// the caret to the document's last character and scrolls it into view, the same outcome a real
 		// user's manual wheel scroll to the bottom would produce.
 		const editor = page.locator(".cm-content")
-		await editor.click()
+		await focusEditorSurface(editor)
 		const scrollTopBefore = await scroller.evaluate(el => el.scrollTop)
 		await page.keyboard.press(`${modKey}+End`)
 
@@ -226,7 +226,7 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 	const nameB = `e2e-preview-edit-pager-b-${runId}.txt`
 	const modKey = await resolveEditorModKey(page)
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -247,22 +247,25 @@ test("editable preview: saving a file, paging to a sibling and back still resolv
 		await expect(page.getByRole("dialog").getByText("Hello from a tiny text fixture.")).toBeVisible({ timeout: 30_000 })
 
 		const editor = page.locator(".cm-content")
-		let saveButton = page.getByRole("button", { name: "Save" })
+		// ENABLED before each click, never merely visible: Save renders only while `editable && dirty`
+		// and is disabled while `saving`, so enabled proves the buffer took the edit with no save in
+		// flight.
+		const saveButton = page.getByRole("button", { name: "Save", exact: true })
 
 		// First save: rotates A's uuid once. The button's disappearance closes on a real uploadFileBytes,
 		// hence the write budget on both saves below.
-		await editor.click()
+		await focusEditorSurface(editor)
 		await page.keyboard.press(`${modKey}+a`)
 		await page.keyboard.type("A first save")
+		await expect(saveButton).toBeEnabled()
 		await saveButton.click()
 		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Second save, same slot, no navigation in between: rotates A's uuid again.
-		await editor.click()
+		await focusEditorSurface(editor)
 		await page.keyboard.press(`${modKey}+a`)
 		await page.keyboard.type("A second save")
-		saveButton = page.getByRole("button", { name: "Save" })
-		await expect(saveButton).toBeVisible()
+		await expect(saveButton).toBeEnabled()
 		await saveButton.click()
 		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
@@ -302,7 +305,7 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 	const scratchName = `e2e-preview-trash-${runId}`
 	const nameTxt = `e2e-preview-trash-${runId}.txt`
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -321,45 +324,41 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 		// An in-app sidebar-link click keeps this a client-side route change on the same booted app
 		// instance — mirrors drive-actions.spec.ts's own identical rationale (a goto reload would race
 		// listTrash() against the just-completed trash write).
-		await page.getByRole("complementary").getByRole("link", { name: "Trash", exact: true }).click()
+		await clickSidebarLink(page, "Trash", /\/trash$/)
+
 		const trashListing = await waitForListingSettled(page)
+
+		// The URL commits before the trash listing does, so the trash-only Empty-trash trigger is required
+		// first: the fill below must reach the trash listing's local filter, not the outgoing drive search.
+		await expect(page.getByRole("button", { name: "Empty trash", exact: true })).toBeVisible()
+
+		// The shared account's trash accumulates every net-zero run's scratch items, and directories sort
+		// before files, so this just-trashed FILE mounts far below even a tall viewport's virtualization
+		// window — the row simply doesn't exist in the DOM until it is reached. The listing's own filter
+		// box is the way to reach it: every non-drive variant binds it to the instant local name filter
+		// (directoryListing.tsx's localFilter), which is applied BEFORE sorting and virtualization, so
+		// filling it collapses the listing to the matching row. It is component state keyed on the
+		// listing, so it resets on navigation and nothing has to undo it.
+		const filterBox = page.getByRole("searchbox", { name: "Search", exact: true })
+		await filterBox.fill(nameTxt)
+
 		const trashRow = trashListing.listbox.getByRole("option", { name: nameTxt })
+		await expect(trashRow).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
-		// The shared account's trash accumulates every net-zero run's scratch items (312 at the time
-		// this was written), and directories sort before files, so this just-trashed FILE mounts far
-		// below even the tall viewport's virtualization window — the row simply doesn't exist in the
-		// DOM until scrolled to (reproduced live). Wheel down in steps smaller than the window (no
-		// overshoot past a mounted-but-not-yet-checked row), settling briefly so the virtualizer has
-		// rendered before each probe; the real assertion still follows the loop, so a genuine absence
-		// fails loudly rather than silently scrolling forever.
-		async function scrollTrashRowIntoView(): Promise<void> {
-			await trashListing.listbox.hover()
-
-			for (let i = 0; i < 30 && !(await trashRow.isVisible()); i++) {
-				await page.mouse.wheel(0, 5000)
-				await page.waitForTimeout(250)
-			}
-
-			await expect(trashRow).toBeVisible({ timeout: 15_000 })
-		}
-
-		await scrollTrashRowIntoView()
-
-		// Envelope the open, don't just fire it: scrolling a virtualized listing leaves rows re-rendering
-		// underneath the cursor, so the dblclick's two clicks can land on DIFFERENT rows and open a
-		// neighbour's preview (the hazard descendInto documents for the same reason).
-		//
-		// Each attempt re-scrolls, and that is the load-bearing part: closing the overlay returns focus to
-		// a listing that has re-virtualized, so the row this test wants is usually NOT where it was left.
-		// A retry that only re-fired the dblclick kept hitting whatever row happened to be under the old
-		// coordinates, and burned the whole envelope converging on nothing.
+		// Envelope the open, don't just fire it: the filtered listing still re-renders under the cursor
+		// (the trash query refetches on focus), so the dblclick's two clicks can land on different rows
+		// — the hazard descendInto documents for the same reason.
 		const line = page.getByRole("dialog").getByText("Hello from a tiny text fixture.")
 
 		await expect(async () => {
 			if (!(await line.isVisible())) {
 				await page.keyboard.press("Escape").catch(() => undefined)
 				await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 10_000 })
-				await scrollTrashRowIntoView()
+				// Re-filtered per attempt, and that is the load-bearing part: the Escape above reaches the filter
+				// box whenever focus is still in it (searchInput.tsx clears the query on Escape), and the
+				// unfiltered listing virtualizes this row straight back out of the DOM.
+				await filterBox.fill(nameTxt)
+				await expect(trashRow).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 				await trashRow.dblclick()
 			}
 
@@ -370,7 +369,7 @@ test("a trashed file opens its preview read-only: content renders, no save actio
 		// while editable, see previewOverlay.tsx) never appears — the trash listing's own item-level
 		// menu still offers Restore/Delete-permanently (drive-actions.spec.ts covers that surface), just
 		// not from inside this overlay.
-		await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0)
+		await expect(page.getByRole("button", { name: "Save", exact: true })).toHaveCount(0)
 		// The header's Download action is hidden in trash — mirrors the listing's own download gating.
 		await expect(page.getByRole("button", { name: "Download", exact: true })).toHaveCount(0)
 
@@ -405,7 +404,7 @@ test("the preview header's own item menu: matches the row menu's set (no Downloa
 	const contentA = Buffer.from("Preview menu content A\n", "utf8")
 	const contentB = Buffer.from("Preview menu content B\n", "utf8")
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -429,14 +428,26 @@ test("the preview header's own item menu: matches the row menu's set (no Downloa
 		const menuTrigger = dialog.getByRole("button", { name: "More actions", exact: true })
 		const menu = page.getByRole("menu")
 
-		await menuTrigger.click()
-		await expect(menu).toBeVisible()
-		// The row/tile ⋯ dropdown's own drive-variant set (itemMenu.test.ts), minus Download — the
-		// header's separate Download button (still present, asserted below) covers that one.
-		for (const label of ["Rename", "Move", "Favorite", "Info", "Share", "Public link", "Copy link", "Trash"]) {
-			await expect(menu.getByRole("menuitem", { name: label, exact: true })).toBeVisible()
-		}
-		await expect(menu.getByRole("menuitem", { name: "Download", exact: true })).toHaveCount(0)
+		// Reopened per attempt rather than asserted once: the header re-renders whenever a mutation's
+		// cache patch lands, and a popup anchored to a re-rendering tree can be detached out from under
+		// an assertion partway through the set (notes.spec.ts's runMenuAction carries the same shape).
+		// The open step is skipped when a previous attempt already left the menu standing, so the common
+		// path costs one open.
+		await expect(async () => {
+			if ((await menu.count()) === 0) {
+				await menuTrigger.click({ timeout: 10_000 })
+				await expect(menu).toBeVisible({ timeout: 10_000 })
+			}
+
+			// The row/tile ⋯ dropdown's own drive-variant set (itemMenu.test.ts), minus Download — the
+			// header's separate Download button (still present, asserted below) covers that one.
+			for (const label of ["Rename", "Move", "Favorite", "Info", "Share", "Public link", "Copy link", "Trash"]) {
+				await expect(menu.getByRole("menuitem", { name: label, exact: true })).toBeVisible({ timeout: 10_000 })
+			}
+
+			await expect(menu.getByRole("menuitem", { name: "Download", exact: true })).toHaveCount(0)
+		}).toPass({ timeout: 60_000 })
+
 		await expect(dialog.getByRole("button", { name: "Download", exact: true })).toBeVisible()
 
 		// An arrow key with this menu open must not page the preview under it: the menu renders for the

@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures"
-import { enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { bootTo, enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { focusEditorSurface } from "./helpers/editor"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // "New text file" (Upload menu's third entry, uploadMenu.tsx): create -> row appears instantly ->
@@ -27,7 +28,7 @@ test("New text file: name without an extension defaults to .txt, the row appears
 	const baseName = `e2e-create-text-${runId}`
 	const nameTxt = `${baseName}.txt`
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -47,18 +48,19 @@ test("New text file: name without an extension defaults to .txt, the row appears
 		// The editor opening IS the outcome, and it is asserted FIRST: runCreateTextFile awaits the real
 		// uploadFileBytes round trip before patching the listing, and the name dialog only closes after
 		// that — asserting the close on the suite's UI-responsiveness budget would make a slow-but-
-		// successful create look like a failure (the same ordering menus.spec.ts already carries).
+		// successful create look like a failure (the same ordering menus.spec.ts already carries). It
+		// closes on that live create+upload, so it gets the write budget rather than a UI one.
 		// The editor also has to come before the listing row below: the full-bleed preview overlay is a
 		// modal dialog (previewOverlay.tsx) that inerts the rest of the page while open, so the listbox's
 		// own option isn't accessible-queryable until it closes.
 		const editor = page.locator(".cm-content")
-		await expect(editor).toBeVisible({ timeout: 30_000 })
+		await expect(editor).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		// The name dialog is gone, replaced by that overlay — ALSO a role="dialog" (previewOverlay.tsx),
 		// so this checks the name dialog's own heading rather than asserting zero dialogs on screen.
 		await expect(nameDialogHeading).toHaveCount(0)
 		await expect(page.getByRole("dialog").getByText(nameTxt)).toBeVisible()
 
-		await editor.click()
+		await focusEditorSurface(editor)
 		await page.keyboard.type("created from the New text file dialog")
 
 		const saveButton = page.getByRole("button", { name: "Save" })

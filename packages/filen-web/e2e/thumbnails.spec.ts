@@ -1,8 +1,10 @@
 import { test, expect } from "./fixtures"
+import { bootTo, waitForListingSettled } from "./helpers/listing"
 import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
+import { waitForSwReady } from "./helpers/sw"
 
 // The one live proof the whole thumbnail pipeline works end to end: a real SDK decode inside the sdk
 // worker (range reads against the stored file, a webp encode in wasm, nothing ever downloaded into JS),
@@ -11,9 +13,9 @@ import { waitForE2eHooks } from "./helpers/e2eHooks"
 // sibling matters because it is a NON-JPEG raster the browser used to own: `bmp` sits in the SDK's
 // unconditional thumbnailable set (filen-sdk-rs/src/thumbnail.rs — no `#[cfg]` gate, unlike svg, which
 // is native-only), so canMakeThumbnail is true and it must render a real thumbnail through the SDK just
-// as the png does. It is the proof that the swap did not quietly narrow format coverage. Also the one
-// deliberate reload in this suite (every other spec stays client-nav): proves the OPFS cache survives a
-// real cold document boot, not just a component remount.
+// as the png does. It is the proof that the swap did not quietly narrow format coverage. It also boots
+// a second, fresh document mid-test: the proof that the OPFS cache survives a real cold boot, not just
+// a component remount.
 test("png and bmp images render real thumbnails in both listing views, the text/svg siblings keep their icon, and a fresh reload repaints from the OPFS cache without regenerating", async ({
 	page,
 	injectedSession,
@@ -22,26 +24,24 @@ test("png and bmp images render real thumbnails in both listing views, the text/
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 	expect(injectedSession.length).toBeGreaterThan(0)
 
-	// Explicit opt-in above the read lane's 360s: the reload leg below enters the shared fixture tree a
-	// SECOND time, so this one test pays that 188s descent preamble twice before any wait of its own.
-	test.setTimeout(600_000)
-
 	// The png/bmp pair that must thumbnail and the txt/svg pair that must not — provisioned once per run
 	// by the fixtures-setup project, in that exact set (helpers/fixtures.ts).
 	const [namePng, nameBmp, nameTxt, nameSvg] = FIXTURE_FILES.thumbnails
 
 	const cspViolations = trackCspViolations(page)
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	const { listbox } = await enterFixtureDirectory(page, "thumbnails")
 
-	// The scenario directory's own uuid, off the URL the descent above just navigated to (mirrors
-	// drive.spec.ts's own subdirectory-navigation assertion) — needed below to probe its thumbnail's
-	// on-disk cache entry by (parent, name) rather than by a uuid this test never otherwise sees. The
-	// LAST segment, not the one right after /drive: the drive route's splat carries the whole ancestor
-	// chain, and the fixture tree is two levels deep (root -> fixtureRoot -> scenario).
-	const fixtureUuid = /\/([^/]+)$/.exec(page.url())?.[1]
+	// The scenario directory's own url and uuid, off the URL the descent above just navigated to (mirrors
+	// drive.spec.ts's own subdirectory-navigation assertion) — the uuid to probe its thumbnail's on-disk
+	// cache entry by (parent, name) rather than by a uuid this test never otherwise sees, and the path to
+	// boot straight back into below. The LAST segment, not the one right after /drive: the drive route's
+	// splat carries the whole ancestor chain, and the fixture tree is two levels deep (root ->
+	// fixtureRoot -> scenario).
+	const scenarioPath = new URL(page.url()).pathname
+	const fixtureUuid = /\/([^/]+)$/.exec(scenarioPath)?.[1]
 
 	if (fixtureUuid === undefined) {
 		throw new Error("fixture directory did not navigate to a uuid'd url")
@@ -90,8 +90,13 @@ test("png and bmp images render real thumbnails in both listing views, the text/
 	// radio click that never took would make this leg silently re-prove the list leg above it.
 	await expect(page.getByRole("menuitemradio", { name: "Grid view", exact: true })).toHaveAttribute("aria-checked", "true")
 	await page.keyboard.press("Escape")
+	// The press is not the outcome: a menu still standing leaves the whole shell aria-hidden (Base UI's
+	// markOthers), after which every getByRole below matches nothing and reports it as a missing tile.
+	await expect(page.getByRole("menu")).toHaveCount(0)
 
-	const tilePng = page.getByRole("option", { name: namePng })
+	// Scoped to the listing, not the page: both view modes render the same single listbox
+	// (directoryListing.tsx), so this stays the tile without reaching for a row anywhere else on screen.
+	const tilePng = listbox.getByRole("option", { name: namePng })
 	const pngThumbGrid = tilePng.locator("img")
 	await expect(pngThumbGrid).toBeVisible({ timeout: 15_000 })
 	await expect(pngThumbGrid).toHaveAttribute("src", /^blob:/)
@@ -100,6 +105,7 @@ test("png and bmp images render real thumbnails in both listing views, the text/
 	await page.getByRole("menuitemradio", { name: "List view", exact: true }).click()
 	await expect(page.getByRole("menuitemradio", { name: "List view", exact: true })).toHaveAttribute("aria-checked", "true")
 	await page.keyboard.press("Escape")
+	await expect(page.getByRole("menu")).toHaveCount(0)
 
 	await waitForE2eHooks(page)
 
@@ -109,16 +115,14 @@ test("png and bmp images render real thumbnails in both listing views, the text/
 	})
 	expect(statBeforeReload).not.toBeNull()
 
-	// The one deliberate reload in this suite: a fresh document, same session — proves the OPFS
-	// cache round-trips across a real cold boot, not just a component remount within the same page.
-	// Reloads to /drive (root), never straight to the fixture directory's own uuid'd url: the
-	// injected-session fixture's addInitScript reseeds sessionStorage on EVERY navigation, and the
-	// app's own seedFromSlot unconditionally re-navigates to "/" once it replays that seed — which
-	// index.tsx resolves to the bare drive root regardless of what url was actually requested, so a
-	// direct goto to a nested path is silently overridden (reproduced live: it lands back at root,
-	// not the deep link). Re-descending by name below still exercises a genuine cold document boot.
-	await page.goto("/drive")
-	const { listbox: listboxAfterReload } = await enterFixtureDirectory(page, "thumbnails")
+	// A fresh document, same session — proves the OPFS cache round-trips across a real cold boot, not
+	// just a component remount within the same page. Straight to the scenario directory's own uuid'd
+	// url, which a hard goto now lands and STAYS on: descending the tree by name a second time would
+	// pay the whole two-hop preamble again to reach a listing this boot already renders, and the cold
+	// boot is the only part of it this leg is about.
+	await bootTo(page, scenarioPath)
+
+	const { listbox: listboxAfterReload } = await waitForListingSettled(page)
 
 	const rowPngAfterReload = listboxAfterReload.getByRole("option", { name: namePng })
 	await expect(rowPngAfterReload).toBeVisible({ timeout: 15_000 })
@@ -154,7 +158,12 @@ test("a video row renders a real thumbnail off the service worker's stream", asy
 
 	const cspViolations = trackCspViolations(page)
 
-	await page.goto("/drive")
+	await bootTo(page)
+
+	// This path has a HARD dependency on a controlling worker and no fallback, so the worker being ready
+	// is a precondition, not something to race: without this the frame pull can start against an
+	// unclaimed page and the row simply never gets an img, reported as a missing thumbnail.
+	await waitForSwReady(page)
 
 	const { listbox } = await enterFixtureDirectory(page, "preview-media")
 	const [, nameMp4] = FIXTURE_FILES["preview-media"]

@@ -1,7 +1,8 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs"
 import { test as setup, expect } from "@playwright/test"
 import { AUTH_DIR, SESSION_FILE } from "../fixtures"
-import { dismissStartupReminders } from "../helpers/listing"
+import { BOOT_SETTLE_TIMEOUT_MS, dismissStartupReminders } from "../helpers/listing"
+import { waitForE2eHooks } from "../helpers/e2eHooks"
 
 // Exactly one real login per run: this setup project runs once and every authed spec reuses the blob
 // it writes (via the injection fixture) rather than logging in again — the production API rate-limits
@@ -16,9 +17,11 @@ setup("sign in through the real form and harvest the session", async ({ page }) 
 
 	await page.goto("/")
 	// The login screen only renders once boot reaches "ready" (the SDK worker's thread pool must be up
-	// before login can derive keys), so its presence gates the form fill below.
-	await expect(page.getByText("Sign in to Filen")).toBeVisible()
-	await page.waitForFunction(() => "__filenE2E" in window)
+	// before login can derive keys), so its presence gates the form fill below. Pinned at the cold-boot
+	// budget rather than the expect default: the whole project graph depends on this one test and it
+	// cannot retry, so a slow runner must not read as a broken login form.
+	await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+	await waitForE2eHooks(page)
 
 	// Drive the REAL form for the one login the budget allows — genuine UI coverage of the field
 	// wiring, submit gating, and the worker round-trip, not a bare evaluate() call. The password
@@ -33,7 +36,7 @@ setup("sign in through the real form and harvest the session", async ({ page }) 
 	// rest of the app inert/aria-hidden until dismissed — the nav below is unreachable while it is open.
 	await dismissStartupReminders(page)
 
-	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 	// Harvest the now-live worker session — NOT the kv copy: a persist failure (persisted: false, a
 	// real documented outcome — see loginAttempt.ts) would leave nothing there even though the login

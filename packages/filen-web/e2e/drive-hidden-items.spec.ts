@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { createDirectoryViaDialog, enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
+import { bootTo, createDirectoryViaDialog, enterScratchDirectory, trashScratchDirectory } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // The hide-hidden-items display filter, end to end: the Display menu's checkbox, the listing filter,
@@ -27,7 +27,7 @@ test("Display > Show hidden items filters dot-prefixed rows, counts them in the 
 	const visibleName = `visible-${runId}`
 	const secondHiddenName = `.e2e-hidden-second-${runId}`
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -37,6 +37,10 @@ test("Display > Show hidden items filters dot-prefixed rows, counts them in the 
 			const menu = page.getByRole("menu")
 			await expect(menu).toBeVisible()
 			const checkbox = menu.getByRole("menuitemcheckbox", { name: "Show hidden items", exact: true })
+			// Read only once the item carries a settled aria-checked: a one-shot getAttribute against a
+			// popup still finishing its enter transition answers null, which reads as "was unchecked" and
+			// inverts every assertion below.
+			await expect(checkbox).toHaveAttribute("aria-checked", /^(true|false)$/)
 			const wasChecked = (await checkbox.getAttribute("aria-checked")) === "true"
 			await checkbox.click()
 			// Checkbox menu items keep the menu open by design so display options can be batch-toggled;

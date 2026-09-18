@@ -2,6 +2,8 @@ import { test, expect } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import {
 	waitForListingSettled,
+	bootTo,
+	clickSidebarLink,
 	descendInto,
 	createDirectoryViaDialog,
 	enterScratchDirectory,
@@ -24,21 +26,21 @@ test.describe("drive bulk actions", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		await page.goto("/drive")
+		await bootTo(page)
 		const { listbox, hasItems } = await waitForListingSettled(page)
 		test.skip(!hasItems, "drive root has no items in this account — nothing to select")
 
 		// Enabled, not merely visible: every non-writable listing variant still RENDERS this button, just
 		// disabled (directoryListing.tsx's writeDisabled — menus.spec.ts asserts that state directly), so a
 		// visibility check would pass on a dead control and prove nothing about this listing being writable.
-		await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeEnabled()
+		await expect(page.getByRole("button", { name: "New directory", exact: true }).first()).toBeEnabled()
 
 		await listbox.getByRole("option").first().click()
 
 		// The floating selection bar appears; the toolbar stays put — the two coexist.
 		await expect(page.getByRole("button", { name: "Clear selection", exact: true })).toBeVisible()
 		await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
-		await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeEnabled()
+		await expect(page.getByRole("button", { name: "New directory", exact: true }).first()).toBeEnabled()
 
 		// Trash is never gated by undecryptable — always present for a /drive selection regardless of
 		// what this unknown account's first item happens to be.
@@ -50,7 +52,7 @@ test.describe("drive bulk actions", () => {
 		await page.getByRole("button", { name: "Clear selection", exact: true }).click()
 
 		await expect(page.getByText("1 selected", { exact: true })).toHaveCount(0)
-		await expect(page.getByRole("button", { name: "New directory", exact: true })).toBeEnabled()
+		await expect(page.getByRole("button", { name: "New directory", exact: true }).first()).toBeEnabled()
 		await expect(page.getByRole("button", { name: "Clear selection", exact: true })).toHaveCount(0)
 	})
 
@@ -58,14 +60,17 @@ test.describe("drive bulk actions", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		await page.goto("/drive")
+		await bootTo(page)
 		const { listbox, hasItems } = await waitForListingSettled(page)
 		test.skip(!hasItems, "drive root has no items in this account — nothing to select")
 
 		await listbox.getByRole("option").first().click()
 
+		// Asserted, not gated on a one-shot isVisible(): Move is only ever withheld for an undecryptable
+		// item, which is a broken account row rather than a shape this test should quietly pass over —
+		// and reading visibility once against a bulk bar that is still mounting skips a healthy run.
 		const moveButton = page.getByRole("button", { name: "Move", exact: true })
-		test.skip(!(await moveButton.isVisible()), "the first item in this account is undecryptable — Move is gated off")
+		await expect(moveButton).toBeVisible()
 
 		await moveButton.click()
 
@@ -114,7 +119,7 @@ test.describe("drive bulk actions", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		await page.goto("/drive")
+		await bootTo(page)
 		const { listbox, hasItems } = await waitForListingSettled(page)
 		test.skip(!hasItems, "drive root has no items in this account — nothing to open a menu on")
 
@@ -136,7 +141,7 @@ test.describe("drive bulk actions", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		await page.goto("/drive")
+		await bootTo(page)
 		const { listbox, hasItems } = await waitForListingSettled(page)
 		test.skip(!hasItems, "drive root has no items in this account — nothing to select")
 
@@ -193,7 +198,7 @@ test.describe("drive bulk actions", () => {
 		const nameA = `e2e-bulk-actions-${suffix}-a`
 		const nameB = `e2e-bulk-actions-${suffix}-b`
 
-		await page.goto("/drive")
+		await bootTo(page)
 
 		// Through the shared helper rather than create-then-descend by hand: this is the run's FIRST
 		// write, the one that meets a `drive-write` lease left behind by anything that died holding it,
@@ -264,7 +269,7 @@ test.describe("drive bulk actions", () => {
 			// click (not page.goto) keeps this a client-side route change on the SAME already-booted app
 			// instance — goto's full reload re-runs the whole boot/re-auth sequence, which raced the
 			// listTrash() fetch against the just-completed trash write when this was first written.
-			await page.getByRole("complementary").getByRole("link", { name: "Trash", exact: true }).click()
+			await clickSidebarLink(page, "Trash", /\/trash$/)
 			const trashListing = await waitForListingSettled(page)
 			const trashRowA = trashListing.listbox.getByRole("option", { name: nameA })
 			const trashRowB = trashListing.listbox.getByRole("option", { name: nameB })
@@ -321,7 +326,7 @@ test.describe("drive bulk actions", () => {
 
 			// restoreItems restores each item to its OWN previous parent — the scratch directory, not root
 			// — so getting back to them means re-descending, not just returning to /drive.
-			await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
+			await clickSidebarLink(page, "Cloud Drive", /\/drive$/)
 			const rootAfterRestore = await waitForListingSettled(page)
 			await descendInto(page, rootAfterRestore.listbox, scratchName)
 
@@ -345,7 +350,7 @@ test.describe("drive bulk actions", () => {
 			// Final cleanup: trash the now-empty scratch directory itself — the only other root-level
 			// mutation this test makes, ending everything in Trash (recoverable, net-zero on the live
 			// account: nothing permanent was created or destroyed).
-			await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
+			await clickSidebarLink(page, "Cloud Drive", /\/drive$/)
 			const rootBeforeFinalCleanup = await waitForListingSettled(page)
 			const finalScratchRow = rootBeforeFinalCleanup.listbox.getByRole("option", { name: scratchName })
 			await expect(finalScratchRow).toBeVisible()

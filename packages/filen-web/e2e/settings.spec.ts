@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { test, expect } from "./fixtures"
 import { gotoSettings } from "./helpers/settings"
+import { BOOT_SETTLE_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Every settings section here is either a plain, read-only render (Account/Appearance/Security's own
@@ -40,11 +41,17 @@ test.describe("settings", () => {
 
 		await gotoSettings(page)
 
-		await expect(page.getByText("Current email:")).toBeVisible()
-		await expect(page.getByText(/[^\s@]+@[^\s@]+\.[^\s@]+/)).toBeVisible()
+		// Each pattern scoped to the card that owns it, never the whole page: an unscoped email regex
+		// matches any address the shell happens to render, and an unscoped quota regex any other "… of …
+		// used" copy — either would let this pass on something that is not the live getUserInfo read.
+		const emailCard = page.locator('[data-slot="card"]').filter({ hasText: "Current email:" })
+		const storageCard = page.locator('[data-slot="card"]').filter({ hasText: /of .* used/ })
 
-		await expect(page.getByText("Storage", { exact: true })).toBeVisible()
-		await expect(page.getByText(/of .* used/)).toBeVisible()
+		await expect(emailCard.getByText("Current email:")).toBeVisible()
+		await expect(emailCard.getByText(/[^\s@]+@[^\s@]+\.[^\s@]+/)).toBeVisible()
+
+		await expect(storageCard.getByText("Storage", { exact: true })).toBeVisible()
+		await expect(storageCard.getByText(/of .* used/)).toBeVisible()
 	})
 
 	test("security page is reachable from the sidebar and renders unchanged", async ({ page, injectedSession, browserName }) => {
@@ -78,8 +85,16 @@ test.describe("settings", () => {
 		await page.getByRole("link", { name: "Events", exact: true }).click()
 		await page.waitForURL(/\/settings\/events$/)
 
-		await expect(page.getByText("No events yet", { exact: true })).toHaveCount(0)
-		await expect(page.locator('[aria-label="Events"]').getByRole("button").first()).toBeVisible()
+		// The list renders exactly one of two terminal states, and the container below exists only in the
+		// non-empty one (eventsList.tsx). Raced first, then narrowed: asserting the empty state's absence
+		// up front is instantly true while the paginated read is still in flight, which left the row
+		// assertion to close inside the 10s expect default on a live network round trip.
+		const firstEventRow = page.locator('[aria-label="Events"]').getByRole("button").first()
+		const emptyState = page.getByText("No events yet", { exact: true })
+
+		await expect(firstEventRow.or(emptyState)).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+		await expect(emptyState).toHaveCount(0)
+		await expect(firstEventRow).toBeVisible()
 	})
 
 	test("the Billing section renders every table's empty state (the e2e account is FREE)", async ({
@@ -159,8 +174,17 @@ test.describe("settings", () => {
 		const trigger = page.getByRole("combobox", { name: "Theme" })
 
 		async function pickTheme(label: string): Promise<void> {
+			// One popup at a time. Base UI keeps a CLOSING Select popup mounted through its exit animation,
+			// so opening the next pick while the previous is still unwinding puts two listboxes on the page
+			// — a bare role lookup there is a strict-mode violation, not a useful failure. Waited out first,
+			// and `.last()` as the backstop for the page's other select (Start Screen).
+			await expect(page.getByRole("listbox")).toHaveCount(0)
 			await trigger.click()
-			await page.getByRole("listbox").getByRole("option", { name: label, exact: true }).click()
+
+			const options = page.getByRole("listbox").last()
+
+			await expect(options).toBeVisible()
+			await options.getByRole("option", { name: label, exact: true }).click()
 		}
 
 		await pickTheme("Dark")
@@ -214,10 +238,16 @@ test.describe("settings", () => {
 			{ label: "Advanced", heading: "Advanced", path: "/settings/advanced" }
 		]
 
+		// Each section's own heading is waited for before the next click — the URL flips before the route's
+		// component commits, so moving on at the URL alone would click the next link out of a tree that has
+		// not rendered yet. Generously budgeted: several sections fire a live read on mount, and this loop
+		// pays for all six in one test.
 		for (const section of sections) {
 			await page.getByRole("link", { name: section.label, exact: true }).click()
 			await page.waitForURL(new RegExp(`${section.path}$`))
-			await expect(page.getByRole("heading", { name: section.heading, exact: true })).toBeVisible()
+			await expect(page.getByRole("heading", { name: section.heading, exact: true })).toBeVisible({
+				timeout: BOOT_SETTLE_TIMEOUT_MS
+			})
 		}
 
 		expect(consoleErrors, consoleErrors.join("\n")).toEqual([])
@@ -229,8 +259,10 @@ test.describe("settings", () => {
 
 		await gotoSettings(page)
 
+		// The write budget, not a UI one: the export is assembled from a live getGdprInfo round trip
+		// against the shared account before a byte is offered to the browser.
 		const [download] = await Promise.all([
-			page.waitForEvent("download", { timeout: 20_000 }),
+			page.waitForEvent("download", { timeout: LIVE_WRITE_TIMEOUT_MS }),
 			page.getByRole("button", { name: "Export data", exact: true }).click()
 		])
 
@@ -254,8 +286,8 @@ test.describe("settings", () => {
 		await page.getByRole("link", { name: "Advanced", exact: true }).click()
 		await page.waitForURL(/\/settings\/advanced$/)
 
-		// Asserted, never clicked — a real click would leave the app on an external filen.io page,
-		// which the on-load-into-"/" injection hook (see helpers/settings.ts's own doc comment) can't undo.
+		// Asserted, never clicked — a real click would leave the app on an external filen.io page, and
+		// every assertion after it would run against that.
 		const tos = page.getByRole("link", { name: "Terms of Service", exact: true })
 		await expect(tos).toBeVisible()
 		await expect(tos).toHaveAttribute("href", "https://filen.io/terms")

@@ -2,18 +2,16 @@ import { readFileSync } from "node:fs"
 import JSZip from "jszip"
 import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
+import { focusEditorSurface } from "./helpers/editor"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
-import { dismissStartupReminders, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { BOOT_SETTLE_TIMEOUT_MS, bootTo, dismissStartupReminders, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
+import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
 
 // Notes shell smoke: rail entry → /notes, the contextual sidebar renders, the two-view toggle switches,
 // and a UI-created note lands in the list and navigates. Net-zero on the shared FREE account — the one
 // created note is torn down through the programmatic e2e hook (this shell has no trash UI yet; that
 // lands in the actions step).
-//
-// Client-nav only (same constraint as contacts.spec.ts): the injection hook re-seeds and navigates to
-// "/" → /drive on every load, so a hard goto to any other authed route bounces back before it renders.
-// The one path into /notes is goto("/drive") then a real in-app rail click.
 //
 // Chromium-only: NotesSidebar fires authenticated reads (listNotes, listNoteTags) on mount — the same
 // cross-origin worker SDK path that hangs on Playwright-firefox (helpers/firefox.ts).
@@ -25,12 +23,7 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 test.describe.configure({ mode: "serial" })
 
 async function gotoNotes(page: Page): Promise<void> {
-	await page.goto("/drive")
-
-	// The authed shell raises a blocking startup reminder modal that renders the rest of the app inert
-	// until dismissed — it must go before the rail is in the role tree for the click below.
-	await dismissStartupReminders(page)
-	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+	await bootTo(page)
 
 	await page.getByRole("link", { name: "Notes", exact: true }).click()
 	await page.waitForURL(/\/notes(\/|$)/)
@@ -46,12 +39,21 @@ async function gotoNotes(page: Page): Promise<void> {
 	// landed on an unrelated pinned note often enough to be a real, not theoretical, hazard.
 	const sidebar = page.getByRole("complementary")
 	const noNotesYet = sidebar.getByText("No notes yet", { exact: true })
-	await expect(sidebar.getByRole("link").first().or(noNotesYet)).toBeVisible()
+	const firstNoteLink = sidebar.getByRole("link").first()
+
+	await expect(firstNoteLink.or(noNotesYet)).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 	// Only wait for the URL to leave bare "/notes" when the account actually has notes to redirect to —
 	// an empty account correctly never redirects, and waiting for a URL change that will never come
-	// would hang forever.
-	if ((await noNotesYet.count()) === 0) {
+	// would hang forever. The branch is decided by a RETRIED read, never a one-shot count(): the two
+	// states swap as the list query settles, so a read taken between them picks the wrong branch and
+	// then waits out a redirect that is never coming.
+	const hasNotes = await firstNoteLink
+		.waitFor({ state: "visible", timeout: 5_000 })
+		.then(() => true)
+		.catch(() => false)
+
+	if (hasNotes) {
 		await page.waitForURL(url => url.pathname !== "/notes")
 	}
 }
@@ -263,14 +265,6 @@ test.describe("notes", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		// Explicit opt-in ABOVE the suite's 120s default, and the only kind of exception the config
-		// sanctions: this single test drives ~10 real, sequential SDK mutations against the shared
-		// account, and a live run has landed right at 180s when one of them sat behind the SDK's own
-		// rate-limit backoff (CLAUDE.md: retry/backoff is the SDK's job, never re-implemented here).
-		// A typical run is ~4s — the budget is for the backoff tail, not the happy path. The per-step
-		// toPass envelopes (runMenuAction) keep any single wedged interaction from consuming it whole.
-		test.setTimeout(240_000)
-
 		await gotoNotes(page)
 
 		const main = page.getByRole("main")
@@ -391,7 +385,11 @@ test.describe("notes", () => {
 			await page.getByRole("button", { name: "Tags", exact: true }).click()
 			const search = page.getByRole("searchbox", { name: "Search notes" })
 			await search.fill(tagName)
-			await sidebar.getByRole("button", { name: `Expand ${tagName}`, exact: true }).click()
+			// The tag's group row arrives with the tag-list query's own refetch, not with the dialog's
+			// close — clicking straight through raced that fetch against the 15s action timeout.
+			const expandTag = sidebar.getByRole("button", { name: `Expand ${tagName}`, exact: true })
+			await expect(expandTag).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+			await expandTag.click()
 			// A fresh note has no content yet, so its preview snippet falls back to the title too
 			// (noteRow.tsx) — the title text legitimately renders twice in the expanded row (title +
 			// preview spans); .first() is enough proof the note is nested under the tag.
@@ -507,9 +505,12 @@ test.describe("notes", () => {
 			// already settled to "checklist" before the menu opens.
 			await expect(main.getByRole("textbox", { name: "Checklist item", exact: true })).toHaveCount(2)
 
-			// Single-note export (noteMenu.tsx's "Export" entry, direct — no dialog).
+			// Single-note export (noteMenu.tsx's "Export" entry, direct — no dialog). The download wait
+			// carries runMenuAction's OWN envelope: pinned under it, a menu interaction that retries
+			// (its whole reason for existing) expires this wait first and reports a missing download
+			// instead of the interaction that was still in flight.
 			const [download] = await Promise.all([
-				page.waitForEvent("download", { timeout: 20_000 }),
+				page.waitForEvent("download", { timeout: 90_000 }),
 				runMenuAction(page, menuTrigger, "Export", "menuClosed")
 			])
 
@@ -518,9 +519,10 @@ test.describe("notes", () => {
 
 			// Export-all (the sidebar header's ⋯ bulk-ops menu, one entry today) — same bounded
 			// open→click envelope as runMenuAction, since the header re-renders on cache changes too.
+			// Same rule as the single-note download above: the wait matches the envelope beside it.
 			const exportAllMenu = page.getByRole("menu")
 			const [zipDownload] = await Promise.all([
-				page.waitForEvent("download", { timeout: 30_000 }),
+				page.waitForEvent("download", { timeout: 60_000 }),
 				expect(async () => {
 					if ((await exportAllMenu.count()) === 0) {
 						await sidebar.getByRole("button", { name: "More options", exact: true }).click({ timeout: 10_000 })
@@ -557,12 +559,10 @@ async function createAndOpenTestNote(
 ): Promise<{ uuid: string; title: string }> {
 	const title = `${titlePrefix} ${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 
-	// The hook only exists once the app has booted — goto + dismiss first (same boot as gotoNotes), THEN
-	// create the note, THEN enter /notes so its own list query mounts fresh and picks the new note up in
-	// its very first fetch (no stale-cache dance: nothing has fetched the list yet in this page load).
-	await page.goto("/drive")
-	await dismissStartupReminders(page)
-	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+	// The hook only exists once the app has booted — boot first, THEN create the note, THEN enter /notes
+	// so its own list query mounts fresh and picks the new note up in its very first fetch (no
+	// stale-cache dance: nothing has fetched the list yet in this page load).
+	await bootTo(page)
 
 	// An authed shell only proves the hooks arrived on the FIRST load of a context that never persisted
 	// a session — bootSdk resumes from kv independently of the fire-and-forget hook import, so every
@@ -578,11 +578,8 @@ async function createAndOpenTestNote(
 	await page.getByRole("link", { name: "Notes", exact: true }).click()
 	await page.waitForURL(/\/notes(\/|$)/)
 
-	// Click the row by its stable HREF, not its text (openNoteByTitle's own rationale): the row repeats
-	// its title in BOTH the title span AND the preview snippet whenever the row carries no preview yet —
-	// which the live socket's "new"-event list refetch can transiently produce (the refetch can observe
-	// the note between createNote and setNoteContent, before its preview exists) — so a getByText(title)
-	// click is strict-mode ambiguous. The href is unique regardless of what the preview happens to show.
+	// Clicked by href, not text: a row with no preview yet repeats its title in both the title span and
+	// the preview snippet, which makes a getByText(title) click strict-mode ambiguous.
 	await page.getByRole("searchbox", { name: "Search notes" }).fill(title)
 	await page.getByRole("complementary").locator(`a[href="/notes/${note.uuid}"]`).click()
 	await page.waitForURL(new RegExp(`/notes/${note.uuid}$`))
@@ -717,9 +714,7 @@ async function createEmptyNoteAndOpen(
 ): Promise<{ uuid: string; title: string }> {
 	const title = `${titlePrefix} ${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 
-	await page.goto("/drive")
-	await dismissStartupReminders(page)
-	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+	await bootTo(page)
 
 	// Same barrier as createAndOpenTestNote: an authed shell is no proof the hooks are installed on any
 	// load past a context's first.
@@ -748,31 +743,17 @@ async function openNoteByTitle(page: Page, title: string, uuid: string): Promise
 	await page.waitForURL(new RegExp(`/notes/${uuid}$`))
 }
 
-async function reloadToShell(page: Page): Promise<void> {
+// Kills the tab mid-edit and boots it again ON THE SAME NOTE — a reload keeps the /notes/<uuid> route,
+// so the editor reseeds itself and nothing has to re-find the row in the sidebar.
+async function reloadToNote(page: Page): Promise<void> {
 	await page.reload()
 	await dismissStartupReminders(page)
-	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 	// A reload re-runs the fire-and-forget hook import while bootSdk resumes the session from kv on its
 	// own — so the shell can be authed and interactive with no `window.__filenE2E` yet. Every caller
 	// here reads a hook shortly after, and an evaluate that lands early rejects; inside an expect.poll
 	// that rejection aborts the poll on its first iteration rather than retrying.
 	await waitForE2eHooks(page)
-}
-
-// The precondition for typing is FOCUS, never mere visibility. The editor pane remounts whenever the
-// note query's `dataUpdatedAt` advances, and its key only freezes once an inflight entry exists — i.e.
-// from the FIRST keystroke onward. So the window between the click and that first character is exactly
-// the one in which a remount can still happen, and a remount drops focus: the keystrokes then land on
-// document.body and the note silently records nothing, failing several assertions later with no trace
-// of the cause. Re-clicking until the surface actually holds focus closes that window; each inner wait
-// is well under the envelope so a click dropped by a concurrent re-render retries instead of wedging.
-async function focusEditorSurface(editor: Locator): Promise<void> {
-	await expect(editor).toBeVisible()
-
-	await expect(async () => {
-		await editor.click({ timeout: 10_000 })
-		await expect(editor).toBeFocused({ timeout: 2_000 })
-	}).toPass({ timeout: 30_000 })
 }
 
 test.describe("notes: live editors", () => {
@@ -785,7 +766,7 @@ test.describe("notes: live editors", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const marker = `killpath-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
-		const { uuid, title } = await createEmptyNoteAndOpen(page, "text", "e2e killpath")
+		const { uuid } = await createEmptyNoteAndOpen(page, "text", "e2e killpath")
 		const main = page.getByRole("main")
 
 		try {
@@ -802,11 +783,12 @@ test.describe("notes: live editors", () => {
 				.toBe(marker)
 
 			// The tab dies mid-edit. On boot the outbox replays from OPFS; the editor seeds inflight-first.
-			await reloadToShell(page)
-			await openNoteByTitle(page, title, uuid)
+			await reloadToNote(page)
 
-			// The typed content is back in the editor after a reload that happened before any debounce push.
-			await expect(main.getByText(marker, { exact: true })).toBeVisible()
+			// The typed content is back in the editor after a reload that happened before any debounce
+			// push. Boot budget: this is the first assertion after a COLD boot, waiting on wasm init and
+			// the outbox replay, not on UI responsiveness.
+			await expect(main.getByText(marker, { exact: true })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 			// ...and it reaches the server: replay-on-boot kicks a push even without a fresh debounce.
 			await expect
@@ -823,7 +805,7 @@ test.describe("notes: live editors", () => {
 
 		const headingText = `ReloadHeading-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 		const typed = `# ${headingText}`
-		const { uuid, title } = await createEmptyNoteAndOpen(page, "md", "e2e md-edit")
+		const { uuid } = await createEmptyNoteAndOpen(page, "md", "e2e md-edit")
 		const main = page.getByRole("main")
 
 		try {
@@ -840,11 +822,11 @@ test.describe("notes: live editors", () => {
 
 			// After reload the outbox has drained, so the note re-fetches its now-persisted server content
 			// on mount (the content query's refetchOnMount:"always" overrides its persisted stale value).
-			await reloadToShell(page)
-			await openNoteByTitle(page, title, uuid)
+			await reloadToNote(page)
 
-			// Left pane: the raw markdown source (CodeMirror). Right pane: the rendered heading.
-			await expect(main.getByText(typed, { exact: true })).toBeVisible()
+			// Left pane: the raw markdown source (CodeMirror). Right pane: the rendered heading. Boot
+			// budget on the first one: it is waiting on a cold boot plus that refetch.
+			await expect(main.getByText(typed, { exact: true })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 			await expect(main.getByRole("heading", { level: 1, name: headingText })).toBeVisible()
 		} finally {
 			await deleteNoteQuietly(page, uuid)
@@ -860,7 +842,7 @@ test.describe("notes: rich and checklist editors", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		const marker = `RichBold${String(Date.now())}${String(Math.floor(Math.random() * 100_000))}`
-		const { uuid, title } = await createEmptyNoteAndOpen(page, "rich", "e2e rich-edit")
+		const { uuid } = await createEmptyNoteAndOpen(page, "rich", "e2e rich-edit")
 		const main = page.getByRole("main")
 
 		try {
@@ -886,8 +868,7 @@ test.describe("notes: rich and checklist editors", () => {
 				.toBe(true)
 
 			// The tab dies mid-edit; the outbox replays from OPFS on boot and the editor seeds inflight-first.
-			await reloadToShell(page)
-			await openNoteByTitle(page, title, uuid)
+			await reloadToNote(page)
 
 			// The formatting survived the reload — the bold run is back in the editor. Explicit budget for
 			// the same reason as the checklist reload below: this is the first assertion after a COLD boot,
@@ -942,7 +923,7 @@ test.describe("notes: rich and checklist editors", () => {
 
 		const first = `Chk1-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 		const second = `Chk2-${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
-		const { uuid, title } = await createEmptyNoteAndOpen(page, "checklist", "e2e checklist-edit")
+		const { uuid } = await createEmptyNoteAndOpen(page, "checklist", "e2e checklist-edit")
 		const main = page.getByRole("main")
 
 		try {
@@ -997,8 +978,7 @@ test.describe("notes: rich and checklist editors", () => {
 				.toBe(true)
 
 			// Kill the tab mid-edit; the outbox replays and the editor seeds inflight-first.
-			await reloadToShell(page)
-			await openNoteByTitle(page, title, uuid)
+			await reloadToNote(page)
 
 			// Both rows are back with faithful text and checked state (first checked, second not).
 			// Explicit budget rather than the suite's 10s default: that default governs UI
@@ -1031,7 +1011,6 @@ test.describe("notes: rich and checklist editors", () => {
 //      same-account e2e therefore CANNOT observe the un-suppressed ContentEdited path — that (clean→
 //      invalidate, dirty→banner) is unit-covered in src/tests/notesSocketHandlers.test.ts. Here we prove
 //      the suppressed path: page A shows NO reload banner and its editor is NOT clobbered.
-const SESSION_SLOT = "filen.e2e.session"
 
 // A second authed page in the same context, booted to the shell (its own SDK worker + socket). The
 // injected-session fixture only seeds the fixture's own `page`; a sibling page re-seeds sessionStorage
@@ -1045,9 +1024,7 @@ async function bootSecondPage(page: Page, injectedSession: string): Promise<Page
 		},
 		[SESSION_SLOT, injectedSession] as const
 	)
-	await pageB.goto("/drive")
-	await dismissStartupReminders(pageB)
-	await expect(pageB.getByRole("navigation", { name: "Filen" })).toBeVisible()
+	await bootTo(pageB)
 	// A sibling page seeds its own session, so its shell renders authed off kv whether or not the
 	// fire-and-forget hook import has landed — and every caller of this helper drives pageB through
 	// `window.__filenE2E`. The barrier belongs to pageB, not to the fixture page.
@@ -1118,9 +1095,8 @@ test.describe("notes: realtime", () => {
 		// Create the content-bearing note through the hook, then open it BY HREF (openNoteByTitle) rather
 		// than by text — a short single-line content can equal the row's own preview snippet, which would
 		// make a getByText(title) row click strict-mode ambiguous.
-		await page.goto("/drive")
-		await dismissStartupReminders(page)
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+		await bootTo(page)
+		await waitForE2eHooks(page)
 
 		const note = await page.evaluate(args => window.__filenE2E.createTestNoteWithContent("text", args.content, args.title), {
 			content: initialContent,
@@ -1309,14 +1285,6 @@ test.describe("notes: multi-tab outbox", () => {
 	}) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
-
-		// Explicit opt-in ABOVE the suite's 120s default, sized off this test's OWN pinned waits: the four
-		// server/OPFS polls below alone pin 30 + 30 + 15 + 60 = 135s, before a single second of the
-		// sibling-tab boot, the three shell loads, the three note creates and the typing they gate. The
-		// default cannot even reach the failover assertion, and the notes lane runs with retries: 0 — a
-		// harness kill there strands up to three live notes against the account's hard 10-note cap,
-		// because the teardown below never runs.
-		test.setTimeout(300_000)
 
 		const stamp = `${String(Date.now())}-${String(Math.floor(Math.random() * 100_000))}`
 		const markerX = `leaderX-${stamp}`

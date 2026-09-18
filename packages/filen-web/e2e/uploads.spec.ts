@@ -1,8 +1,16 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test, expect } from "./fixtures"
-import { descendInto, enterScratchDirectory, trashScratchDirectory, waitForListingSettled, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import {
+	bootTo,
+	descendInto,
+	enterScratchDirectory,
+	openTransfers,
+	trashScratchDirectory,
+	waitForListingSettled,
+	LIVE_WRITE_TIMEOUT_MS
+} from "./helpers/listing"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
 // Drag-and-drop upload — both the files dropzone and a dropped directory's FileSystemEntry walk — is
@@ -21,7 +29,7 @@ test.describe("uploads", () => {
 		const scratchName = `e2e-upload-${runId}`
 		const fileName = `e2e-upload-${runId}.txt`
 
-		await page.goto("/drive")
+		await bootTo(page)
 
 		try {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -42,11 +50,7 @@ test.describe("uploads", () => {
 			// and reflects this same just-finished transfer — runUpload settles the store to "done" before
 			// it patches the listing (features/drive/lib/upload.ts), so the row above already being visible
 			// guarantees the store side already settled too.
-			await page
-				.getByRole("link", { name: /Transfers/i })
-				.first()
-				.click()
-			await page.waitForURL(/\/transfers$/)
+			await openTransfers(page)
 			// Scoped to THIS transfer's own row rather than the first "Done" anywhere on the screen: the
 			// row is a plain div with no role of its own, so its progressbar (the one element carrying the
 			// transfer's name — transferRow.tsx) is what identifies it, and the status label is that
@@ -75,7 +79,7 @@ test.describe("uploads", () => {
 		writeFileSync(join(rootPath, "a.txt"), "a")
 		writeFileSync(join(rootPath, "sub", "b.txt"), "b")
 
-		await page.goto("/drive")
+		await bootTo(page)
 
 		try {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -90,21 +94,24 @@ test.describe("uploads", () => {
 			await page.getByTestId("drive-upload-directory-input").first().setInputFiles(rootPath)
 
 			const row = listbox.getByRole("option", { name: rootName })
-			await expect(row).toBeVisible({ timeout: 60_000 }) // cold boot + a tree walk + two file uploads
+			// A tree walk plus two file uploads, all on the account-wide write lease.
+			await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// The top-level row alone proves nothing about the TREE: a walk that created the root and
 			// dropped every child passes that assertion identically. Descend both levels and assert each
 			// one's own contents.
 			await descendInto(page, listbox, rootName)
 			const uploadedRoot = await waitForListingSettled(page)
-			await expect(uploadedRoot.listbox.getByRole("option", { name: "a.txt" })).toBeVisible({ timeout: 60_000 })
-			await expect(uploadedRoot.listbox.getByRole("option", { name: "sub" })).toBeVisible({ timeout: 60_000 })
+			await expect(uploadedRoot.listbox.getByRole("option", { name: "a.txt" })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			await expect(uploadedRoot.listbox.getByRole("option", { name: "sub" })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			await descendInto(page, uploadedRoot.listbox, "sub")
 			const uploadedSub = await waitForListingSettled(page)
-			await expect(uploadedSub.listbox.getByRole("option", { name: "b.txt" })).toBeVisible({ timeout: 60_000 })
+			await expect(uploadedSub.listbox.getByRole("option", { name: "b.txt" })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		} finally {
 			await trashScratchDirectory(page, scratchName)
+			// The temp tree is this test's own, and nothing else ever removes it.
+			rmSync(base, { recursive: true, force: true })
 		}
 	})
 })

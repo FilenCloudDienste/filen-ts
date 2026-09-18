@@ -1,7 +1,15 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { descendInto, enterScratchDirectory, trashScratchDirectory, waitForListingSettled, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import {
+	bootTo,
+	descendInto,
+	enterScratchDirectory,
+	trashScratchDirectory,
+	waitForListingSettled,
+	LIVE_WRITE_TIMEOUT_MS
+} from "./helpers/listing"
 import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
+import { focusEditorSurface } from "./helpers/editor"
 import { DOCX_BYTES, TEXT_BYTES } from "./helpers/fixtureBytes"
 import { trackCspViolations } from "./helpers/csp"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
@@ -14,15 +22,8 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // directory, and each for a reason the shared tree cannot serve: the markdown leg SAVES its file, and
 // the two navigation-guard legs assert the exact URL a browser back lands on (`/drive`), which is only
 // true when the file sits ONE descent below the root — the fixture tree is two.
-//
-// Sequential within this file (one worker), overriding the config's fullyParallel — the same
-// live-account rationale as drive-actions.spec.ts's own serial mode, but "default" so one test's
-// failure doesn't skip the rest. It is the three scratch-directory tests that need it: with them
-// racing each other across workers, a teardown's root-row click can retry forever against a listing
-// whose rows keep detaching/remounting under the concurrent creates/trashes plus focus-driven
-// refetches (reproduced live: a teardown click stayed "element is not stable / detached from the DOM"
-// for its whole remaining budget). Cross-FILE churn from other specs remains an accepted residual,
-// exactly as drive-actions.spec.ts documents.
+
+// Serialised by the write lane's `workers: 1` today; the directive keeps that true if it is ever widened.
 test.describe.configure({ mode: "default" })
 
 // A tiny GFM markdown fixture — a heading (real <h1> once rendered), bold text, and one safe external
@@ -31,12 +32,13 @@ test.describe.configure({ mode: "default" })
 // docxViewer.logic.test.ts's own precedent).
 const MARKDOWN_BYTES = Buffer.from("# Hello Markdown\n\nThis is **bold** text and a [safe link](https://example.com/safe).\n", "utf8")
 
-// Teardown budget for the unsaved-changes prompt the finally's own Escape raises. Short because it is
-// a local React commit, not a write — but it has to be WAITED for rather than snapshotted: the first
-// test below ends dirty by design, so on a green run the finally's Escape and the prompt's mount are a
-// genuine race, and a lost race means Discard is never clicked and the teardown falls through to
-// trashScratchDirectory's reload recovery.
-const UNSAVED_PROMPT_TIMEOUT_MS = 5_000
+// Teardown budget for the unsaved-changes prompt the finally's own Escape raises. It is a local React
+// commit, not a write, but it has to be WAITED for rather than snapshotted: the first test below ends
+// dirty by design, so on a green run the finally's Escape and the prompt's mount are a genuine race.
+// Generous rather than tight because the two sides are not symmetric — losing the race means Discard is
+// never clicked and the teardown falls through to trashScratchDirectory's reload recovery, a four-minute
+// path, while waiting longer costs nothing on a run where the prompt never opens at all.
+const UNSAVED_PROMPT_TIMEOUT_MS = 15_000
 
 // The exact history tail both navigation-guard legs below depend on — […, /favorites, /drive,
 // /drive/<scratch>] — built with in-app clicks inside ONE document, so every back they drive is a real
@@ -44,15 +46,14 @@ const UNSAVED_PROMPT_TIMEOUT_MS = 5_000
 // blocked: there is a single drive route file, routes/_app/drive.$.tsx, so both share routeId
 // "/_app/drive/$") and one leave-route back (/drive -> /favorites, blocked).
 //
-// Built AFTER the scratch directory exists, which is the whole reason this is a separate step:
-// enterScratchDirectory RELOADS the page for a create that does not land (helpers/listing.ts), and every
-// reload re-runs the session-injection seed, whose `router.navigate({ to: "/" })` pushes an entry the
-// route guard then rewrites to /drive. That is one extra /drive entry per reload, so a tail seeded
-// before provisioning has ANOTHER /drive behind /drive on any contended run — a same-routeId back the
-// guard correctly never blocks, leaving the leg to wait out its budget for a prompt that never opens.
-// Reproduced live at 3 failures in 5 runs, each failing run's second back landing on /drive again.
+// A separate step run AFTER the scratch directory exists, because its last hop descends into it — and
+// because enterScratchDirectory's own retry path can reload the page, which throws away whatever tail
+// was built before it. The depth is asserted at the end rather than assumed: an entry too many behind
+// /drive is a same-routeId back the guard correctly never blocks, which the leg then reads as a prompt
+// that never opens.
 async function seedLeaveRouteHistory(page: Page, scratchName: string): Promise<void> {
 	const sidebar = page.getByRole("complementary")
+	const entriesBefore = await page.evaluate(() => history.length)
 
 	await sidebar.getByRole("link", { name: "Favorites", exact: true }).click()
 	await expect(page).toHaveURL(/\/favorites$/)
@@ -64,6 +65,13 @@ async function seedLeaveRouteHistory(page: Page, scratchName: string): Promise<v
 	const { listbox } = await waitForListingSettled(page)
 
 	await descendInto(page, listbox, scratchName)
+
+	// EXACTLY three pushes — /favorites, /drive, /drive/<scratch> — because the guard legs below step
+	// back through them one for one. A tail with an entry too few or too many puts a different route
+	// under each back, and the leg then waits out its whole budget for a prompt that correctly never
+	// opens (or misses one it should have got), several steps away from the cause.
+	const entriesAfter = await page.evaluate(() => history.length)
+	expect(entriesAfter - entriesBefore).toBe(3)
 }
 
 // The one live proof the docx-preview path actually works: real JSZip/DOMParser XML parsing (neither
@@ -81,7 +89,7 @@ test("docx preview renders document content and closes, no CSP console errors", 
 
 	const cspViolations = trackCspViolations(page)
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	const { listbox } = await enterFixtureDirectory(page, "preview-docx")
 
@@ -124,7 +132,7 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 	const dialog = page.getByRole("dialog")
 	const unsavedPrompt = page.getByRole("alertdialog", { name: "Unsaved changes" })
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -159,8 +167,14 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 		const nextButton = dialog.getByRole("button", { name: "Next file", exact: true })
 
 		// Whichever pager direction the docx sibling happens to sit in — with exactly two slots, exactly
-		// one of the two buttons is enabled from either end.
+		// one of the two buttons is enabled from either end. WHICH one only settles once the slot's own
+		// render has committed, though, and a one-shot read taken a tick early routes the step to the
+		// disabled button, whose click then merely expires. Both buttons are always RENDERED (one
+		// disabled), so the decidable state is polled rather than asserted through a combined locator,
+		// which would match two elements and violate strict mode.
 		async function stepToSibling(): Promise<void> {
+			await expect.poll(async () => (await nextButton.isEnabled()) || (await prevButton.isEnabled()), { timeout: 15_000 }).toBe(true)
+
 			if (await nextButton.isEnabled()) {
 				await nextButton.click()
 			} else {
@@ -169,13 +183,13 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 		}
 
 		async function dirtyTheBuffer(): Promise<void> {
-			await dialog.locator(".cm-content").click()
+			// Focus, never mere visibility: a click that lands while the editor pane is remounting types
+			// into document.body, and every assertion below then hunts a prompt that correctly never opens.
+			await focusEditorSurface(dialog.locator(".cm-content"))
 			await page.keyboard.type("x")
 			// ENABLED, not merely visible: Save is RENDERED only while `editable && dirty`, and disabled
 			// only while `saving` (previewOverlay.tsx), so enabled proves both that the buffer took the edit
-			// and that no save is in flight. A click that failed to focus CodeMirror types into nothing, and
-			// every navigation-guard assertion below would then fail far away from the cause, hunting a
-			// prompt that correctly never opens.
+			// and that no save is in flight.
 			await expect(saveButton).toBeEnabled()
 		}
 
@@ -252,7 +266,7 @@ test("code preview renders with syntax highlighting, no CSP console errors", asy
 
 	const cspViolations = trackCspViolations(page)
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	const { listbox } = await enterFixtureDirectory(page, "preview-code")
 
@@ -287,7 +301,7 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 
 	const cspViolations = trackCspViolations(page)
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -329,8 +343,12 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 		await viewSource.click()
 		await expect(page.getByText("# Hello Markdown")).toBeVisible({ timeout: 30_000 })
 		// The FIRST line specifically (a center click on .cm-content could land on the blank second line),
-		// so the typed character lands in the heading and the saved result is observable as one.
+		// so the typed character lands in the heading and the saved result is observable as one — which is
+		// also why focusEditorSurface is not used here: it clicks the surface, not a chosen line. The
+		// focus assertion is the half of it that still matters, since keystrokes on an unfocused editor
+		// land on document.body and record nothing.
 		await dialog.locator(".cm-line").first().click()
+		await expect(dialog.locator(".cm-content")).toBeFocused()
 		await page.keyboard.press("End")
 		await page.keyboard.type("!")
 		await expect(viewRendered).toBeDisabled()
@@ -341,9 +359,11 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 		await saveButton.click()
 		await expect(page.getByRole("heading", { name: "Hello Markdown!", level: 1 })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		// The dirty reset: without it both the Save button and the locked toggle stay in their dirty state
-		// forever, and Escape below would pop a phantom "Unsaved changes" prompt instead of closing.
-		await expect(saveButton).toHaveCount(0)
-		await expect(viewSource).toBeEnabled()
+		// forever, and Escape below would pop a phantom "Unsaved changes" prompt instead of closing. On the
+		// write budget like the heading above, not the expect default — all three close on the same
+		// uuid-rotation remount, so a slow save leaves them arriving together, well past 10s.
+		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(viewSource).toBeEnabled({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		await page.keyboard.press("Escape")
 		await expect(page.getByRole("alertdialog", { name: "Unsaved changes" })).toHaveCount(0)
@@ -370,7 +390,7 @@ test("discarding after a cancelled back on the same pop still proceeds to the de
 	const nameTxt = `${scratchName}.txt`
 	const unsavedPrompt = page.getByRole("alertdialog", { name: "Unsaved changes" })
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -387,7 +407,7 @@ test("discarding after a cancelled back on the same pop still proceeds to the de
 
 		const dialog = page.getByRole("dialog")
 		await expect(dialog.getByText("Hello from a tiny text fixture.")).toBeVisible({ timeout: 30_000 })
-		await dialog.locator(".cm-content").click()
+		await focusEditorSurface(dialog.locator(".cm-content"))
 		await page.keyboard.type("x")
 		// Save is rendered only while `editable && dirty` and disabled only while `saving`, so enabled
 		// proves the buffer took the edit with no save in flight — see dirtyTheBuffer's note above.

@@ -1,4 +1,5 @@
 import { test, expect } from "./fixtures"
+import { BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
 import { waitForSwReady } from "./helpers/sw"
 
 // Registration is PROD-only and gated on boot ready, so this runs against preview. webkit is excluded
@@ -16,8 +17,9 @@ test.describe("service worker version endpoint", () => {
 
 		await page.goto("/")
 
-		// SW registration fires once the app reaches a ready shell.
-		await expect(page.getByText("Sign in to Filen")).toBeVisible()
+		// SW registration fires once the app reaches a ready shell — so this closes on a cold boot (wasm
+		// init, the SDK thread pool, the OPFS open), not on UI responsiveness.
+		await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 		await waitForSwReady(page)
 	})

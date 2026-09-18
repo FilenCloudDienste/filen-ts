@@ -2,7 +2,8 @@ import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import {
 	waitForListingSettled,
-	dismissStartupReminders,
+	bootTo,
+	clickSidebarLink,
 	enterScratchDirectory,
 	trashScratchDirectory,
 	descendInto,
@@ -96,14 +97,19 @@ test.describe("context menus", () => {
 		const fileBaseName = `e2e-menus-${runId}-file`
 		const fileName = `${fileBaseName}.txt`
 
-		await page.goto("/drive")
+		await bootTo(page)
 
 		try {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
+			// The route the reload below has to land back on — everything from here to the /trash hop
+			// stays inside this listing.
+			const scratchUrl = page.url()
 
 			await createDirectoryViaDialog(page, dirName, listbox)
 
-			await page.getByRole("button", { name: "Upload", exact: true }).click()
+			// .first(): the fresh scratch directory starts empty, so its empty-state "+ Add" affordance
+			// renders a second identical Upload trigger; the toolbar's is always first in DOM order.
+			await page.getByRole("button", { name: "Upload", exact: true }).first().click()
 			const uploadMenu = page.getByRole("menu")
 			await expect(uploadMenu).toBeVisible()
 			await uploadMenu.getByRole("menuitem", { name: "New text file", exact: true }).click()
@@ -117,10 +123,14 @@ test.describe("context menus", () => {
 			// before any save) — this test never types into it, just proves creation landed and closes
 			// the overlay to reach the row underneath. Assert that FIRST: the dialog closing is a side
 			// effect of the same live write, and asserting it on the suite's UI-responsiveness budget
-			// made a slow-but-successful create look like a failure.
-			await expect(page.locator(".cm-content")).toBeVisible({ timeout: 30_000 })
+			// made a slow-but-successful create look like a failure. It closes on a live create+upload,
+			// so it gets the write budget.
+			await expect(page.locator(".cm-content")).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 			await expect(fileDialog).toHaveCount(0, { timeout: 10_000 })
 			await page.keyboard.press("Escape")
+			// The preview overlay is modal and marks the rest of the page aria-hidden while it stands, so
+			// every role-based lookup below is unreachable until it is proven gone.
+			await expect(page.getByRole("dialog")).toHaveCount(0)
 
 			const dirRow = listbox.getByRole("option", { name: dirName })
 			const fileRow = listbox.getByRole("option", { name: fileName })
@@ -141,7 +151,9 @@ test.describe("context menus", () => {
 			await expect(linkMenu).toBeVisible()
 			await linkMenu.getByRole("menuitem", { name: labelFor("publicLink"), exact: true }).click()
 
-			const linkDialog = page.getByRole("dialog")
+			// Scoped by its own title: the preview overlay is a role="dialog" too (previewOverlay.tsx), so a
+			// bare role lookup can resolve to the wrong surface — or to both at once.
+			const linkDialog = page.getByRole("dialog", { name: driveDict.driveLinkDialogTitle })
 			await expect(linkDialog).toBeVisible()
 			await expect(linkDialog.getByText(driveDict.driveLinkPremiumRequiredTitle, { exact: true })).toBeVisible()
 			// The Upgrade action is a Button rendered polymorphically as a router Link (an <a> under the
@@ -201,12 +213,7 @@ test.describe("context menus", () => {
 			// reachable from the right-click surface too, not just the toolbar/bulk bar), then read
 			// the reduced menu back on the /trash listing, then restore — net-zero, it lands back in
 			// the scratch directory it came from (restoreItems restores to the original parent),
-			// where the `finally` below sweeps it up regardless. The directory (not the file) is the
-			// one taken through /trash's flat root listing: sortDriveItems partitions directories
-			// before files unconditionally (sort.ts), and this shared account's /trash holds far more
-			// leftover directories than the render window below — a trashed FILE can sit arbitrarily
-			// far past every one of them and never mount, a trashed DIRECTORY only competes with its
-			// own partition.
+			// where the `finally` below sweeps it up regardless.
 			await dirRow.click({ button: "right" })
 			const trashMenu = page.getByRole("menu")
 			await expect(trashMenu).toBeVisible()
@@ -229,7 +236,7 @@ test.describe("context menus", () => {
 			const trashFailureToast = driveDict.driveBulkActionCompleteWithFailures_other
 				.replace("{{count}}", "0")
 				.replace("{{failed}}", "1")
-			expect((await page.locator("[data-sonner-toast]").allInnerTexts()).join("\n")).not.toContain(trashFailureToast)
+			await expect(page.locator("[data-sonner-toast]").filter({ hasText: trashFailureToast })).toHaveCount(0, { timeout: 5_000 })
 
 			// Re-read from a fresh boot each attempt rather than trusting this page's own query state: the
 			// app refetches listings on window focus (queries/client.ts: staleTime 0 +
@@ -240,52 +247,28 @@ test.describe("context menus", () => {
 			// reload before its own final cleanup assertion.
 			await expect(async () => {
 				await page.reload()
+				// The reload stays on the deep route, so the row assertion is about THIS listing rather
+				// than whatever the app would otherwise have fallen back to.
+				await expect(page).toHaveURL(scratchUrl)
 				await waitForListingSettled(page, BOOT_SETTLE_TIMEOUT_MS)
 				await expect(dirRow).toHaveCount(0)
 			}).toPass({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
-			// Within the directories partition, default name-ascending order can still bury a fresh
-			// row under alphabetically-earlier debris — sorting by upload date (descending) puts THIS
-			// test's own just-trashed directory at or near the top of its partition instead, since
-			// nothing else in the account was uploaded more recently.
-			// The nav click can silently fail to commit under suite load (observed: every later step then
-			// runs against the still-mounted /drive listing, whose toolbar renders the same Sort/Display
-			// controls) — retry until the URL proves the route changed, then require the trash-only
-			// Empty-trash trigger before touching anything, so a wrong-listing state can never pass.
-			await expect(async () => {
-				await page.getByRole("complementary").getByRole("link", { name: "Trash", exact: true }).click()
-				await expect(page).toHaveURL(/\/trash$/, { timeout: 5_000 })
-			}).toPass({ timeout: 30_000 })
+			// Retried until the URL proves the route changed, then the trash-only Empty-trash trigger is
+			// required before anything else is touched, so a nav click that never committed (leaving the
+			// /drive listing mounted, whose toolbar renders the same controls) can never pass.
+			await clickSidebarLink(page, "Trash", /\/trash$/)
 			const trashListing = await waitForListingSettled(page)
 			await expect(page.getByRole("button", { name: "Empty trash", exact: true })).toBeVisible()
 
-			// Re-opened per attempt rather than clicked once: a menu item can be reported visible, enabled
-			// and stable while its popup is still finishing its enter transition, and a click that lands
-			// in that window is swallowed. Nothing here used to notice — the radios went unchecked, the
-			// sort never changed, and the row assertion below failed 15s later looking like a listing
-			// problem. Each attempt now proves both radios took before leaving the menu.
-			const sortMenu = page.getByRole("menu")
-
-			await expect(async () => {
-				if ((await sortMenu.count()) === 0) {
-					await page.getByRole("button", { name: "Sort by", exact: true }).click()
-					await expect(sortMenu).toBeVisible()
-				}
-
-				const uploadDate = sortMenu.getByRole("menuitemradio", { name: "Upload date", exact: true })
-				const descending = sortMenu.getByRole("menuitemradio", { name: "Descending", exact: true })
-
-				await uploadDate.click()
-				await expect(uploadDate).toHaveAttribute("aria-checked", "true")
-				await descending.click()
-				await expect(descending).toHaveAttribute("aria-checked", "true")
-			}).toPass({ timeout: 60_000 })
-
-			await page.keyboard.press("Escape")
-			await expect(sortMenu).toHaveCount(0)
+			// /trash's filter box is a purely LOCAL name filter — directoryListing.tsx routes every
+			// non-"drive" variant to it — applied before virtualization, so it collapses this shared
+			// account's several hundred leftover rows to the one row this test just trashed. It resets on
+			// navigation, so nothing has to put it back.
+			await page.getByRole("searchbox", { name: "Search", exact: true }).fill(dirName)
 
 			const trashedDirRow = trashListing.listbox.getByRole("option", { name: dirName })
-			await expect(trashedDirRow).toBeVisible({ timeout: 15_000 })
+			await expect(trashedDirRow).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 			await assertRowContextMenu(page, trashListing.listbox, dirName, TRASH_MENU_IDS)
 
@@ -298,7 +281,7 @@ test.describe("context menus", () => {
 			// write budget rather than the expect default, which only ever covers a React commit.
 			await expect(trashedDirRow).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
-			await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
+			await clickSidebarLink(page, "Cloud Drive", /\/drive$/)
 			const rootAfterRestore = await waitForListingSettled(page)
 			await descendInto(page, rootAfterRestore.listbox, scratchName)
 			const restoredListing = await waitForListingSettled(page)
@@ -324,14 +307,10 @@ test.describe("context menus", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		await page.goto("/drive")
-		await dismissStartupReminders(page)
-
-		const sidebar = page.getByRole("complementary")
+		await bootTo(page)
 
 		async function assertWriteGated(linkName: string, urlPattern: RegExp): Promise<void> {
-			await sidebar.getByRole("link", { name: linkName, exact: true }).click()
-			await page.waitForURL(urlPattern)
+			await clickSidebarLink(page, linkName, urlPattern)
 			await waitForListingSettled(page)
 
 			// The outgoing surface's own toolbar can linger in the DOM for a frame while the route

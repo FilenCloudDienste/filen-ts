@@ -11,7 +11,9 @@ import { expect } from "../fixtures"
 // that then reaches for `window.__filenE2E` gets "Cannot read properties of undefined" forever.
 //
 // So this is a BARRIER, not a poll-until-lucky: call it before `setOffline(true)`, and after any reload
-// whose next step touches the hooks. Online it resolves in milliseconds because the chunk is cached.
+// whose next step touches the hooks. Online it resolves in milliseconds because the chunk is cached —
+// the budget only has to hold a cold fetch on a loaded runner, where it is one more thing competing
+// with the boot itself.
 export async function waitForE2eHooks(page: Page): Promise<void> {
-	await expect.poll(() => page.evaluate(() => "__filenE2E" in window), { timeout: 15_000 }).toBe(true)
+	await expect.poll(() => page.evaluate(() => "__filenE2E" in window), { timeout: 30_000 }).toBe(true)
 }

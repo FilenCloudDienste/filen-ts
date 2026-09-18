@@ -1,6 +1,7 @@
 import type { Locator } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { enterFixtureDirectory } from "./helpers/fixtures"
+import { bootTo } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -20,7 +21,7 @@ test.describe("drive rubber-band selection", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		await page.goto("/drive")
+		await bootTo(page)
 
 		// Six tiny files, provisioned once per run by the fixtures-setup project — the marquee's targets.
 		// enterFixtureDirectory forces the same tall viewport enterScratchDirectory did, so all six rows

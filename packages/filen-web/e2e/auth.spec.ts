@@ -1,11 +1,9 @@
 import { existsSync, readFileSync } from "node:fs"
 import type { Page } from "@playwright/test"
 import { test, expect, SESSION_FILE } from "./fixtures"
-import { dismissStartupReminders } from "./helpers/listing"
-
-// Mirrors fixtures.ts's own (non-exported) constant — see storage.spec.ts's follower-tab test for
-// the same local-redeclaration precedent.
-const SESSION_SLOT = "filen.e2e.session"
+import { waitForE2eHooks } from "./helpers/e2eHooks"
+import { bootTo, dismissStartupReminders } from "./helpers/listing"
+import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
 
 interface SessionFile {
 	session: string
@@ -56,7 +54,8 @@ const email = process.env["FILEN_WEB_E2E_TEST_EMAIL"] ?? ""
 // A cold authed boot is a wasm init + rayon pool spin-up + OPFS open — the same budget
 // playwright.config.ts pins navigationTimeout to — and after a logout it additionally follows the
 // whole phased wipe plus the reload that triggers it. The 10s expect default governs UI
-// responsiveness only and was never sized for any of that.
+// responsiveness only and was never sized for any of that. (bootTo carries the same budget for the
+// authed-shell case; this one is for the sign-in surface a logout lands on.)
 const COLD_BOOT_TIMEOUT_MS = 30_000
 
 // The wrong-password attempt is a live, un-retryable round trip: v3/auth/info, wasm key derivation,
@@ -123,12 +122,7 @@ test.describe("auth", () => {
 		test.skip(browserName !== "chromium", "reload-resume is chromium-gated: Playwright-firefox authed-shell-reload instability")
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		await page.goto("/")
-		// THE RULE (helpers/listing.ts): the blocking startup reminder renders the rest of the shell
-		// inert, so it is dismissed before any role-based landmark assertion — and again after the
-		// reload, which re-arms it.
-		await dismissStartupReminders(page)
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+		await bootTo(page, "/")
 
 		const sdkHostRequests: string[] = []
 		page.on("request", req => {
@@ -137,9 +131,11 @@ test.describe("auth", () => {
 			}
 		})
 
+		// THE RULE (helpers/listing.ts): the blocking startup reminder renders the rest of the shell
+		// inert, so it is dismissed before any role-based landmark assertion — the reload re-arms it.
 		await page.reload()
 		await dismissStartupReminders(page)
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: COLD_BOOT_TIMEOUT_MS })
 
 		// The authed shell's own account query (IconRail's AccountMenu + the export-keys reminder) fires
 		// its normal reads (verified live: user/info, user/settings, user/account) the instant it mounts,
@@ -178,14 +174,7 @@ test.describe("auth", () => {
 		}
 
 		await seedOncePerPage(page, session)
-		await page.goto("/")
-		// The authed shell raises a blocking startup reminder modal that renders the rest of the app
-		// inert/aria-hidden until dismissed — while it is open the shell's own nav is not even in the role
-		// tree, so it must be dismissed BEFORE any role-based shell assertion or interaction below, not
-		// just before the Account click. This spec drives the shell directly (never through the listing
-		// gate that dismisses it), so it dismisses per tab here.
-		await dismissStartupReminders(page)
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: COLD_BOOT_TIMEOUT_MS })
+		await bootTo(page, "/")
 
 		// A second, already-signed-in tab opened BEFORE logout — the realistic multi-tab scenario the
 		// auth broadcast channel exists to keep coherent. The once-per-page marker lives in localStorage,
@@ -195,19 +184,32 @@ test.describe("auth", () => {
 		const second = await context.newPage()
 
 		await seedOncePerPage(second, session)
-		await second.goto("/")
-		await dismissStartupReminders(second)
-		await expect(second.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: COLD_BOOT_TIMEOUT_MS })
+		await bootTo(second, "/")
+
+		// Each surface asserted before it is clicked: the three steps are one chained interaction, and
+		// a click issued against a menu that has not opened (or a confirm that has not mounted) fails
+		// as an actionability timeout on the NEXT step, naming a locator rather than the step that
+		// actually did not happen.
+		const accountMenu = page.getByRole("menu")
+		const signOutItem = accountMenu.getByRole("menuitem", { name: "Sign out", exact: true })
+		// the confirm dialog's own action button
+		const signOutConfirm = page.getByRole("alertdialog").getByRole("button", { name: "Sign out", exact: true })
 
 		await page.getByRole("button", { name: "Account", exact: true }).click()
-		await page.getByRole("menuitem", { name: "Sign out", exact: true }).click()
-		await page.getByRole("button", { name: "Sign out", exact: true }).click() // the confirm dialog's own action button
+		await expect(signOutItem).toBeVisible()
+		await signOutItem.click()
+		await expect(signOutConfirm).toBeVisible()
+		await signOutConfirm.click()
 
 		// Everything between the click and this render is one budget: runLogout's eight phases
 		// (cancel-queries, clear-query-cache, sdk-logout, clear-session, kv-clear, wipe-service-worker,
 		// broadcast, reload — sdk-logout being a live call of its own), then a complete cold boot before
 		// the sign-in form exists at all.
 		await expect(page.getByText("Sign in to Filen")).toBeVisible({ timeout: COLD_BOOT_TIMEOUT_MS })
+
+		// The logout reload is a cold boot, and the hooks arrive on their own fire-and-forget import —
+		// a rendered sign-in form is no proof they are back.
+		await waitForE2eHooks(page)
 
 		// kvHas, not kvGet: the session key holds an OBJECT (StringifiedClient), not a plain string, so
 		// kvGet's stringSchema would report "null" whether the row is genuinely gone or merely the wrong

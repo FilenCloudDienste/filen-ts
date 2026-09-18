@@ -1,22 +1,23 @@
 import { test, expect } from "./fixtures"
-import { dismissStartupReminders } from "./helpers/listing"
-
-const SESSION_SLOT = "filen.e2e.session"
+import { waitForE2eHooks } from "./helpers/e2eHooks"
+import { bootTo } from "./helpers/listing"
+import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
 
 test.describe("storage", () => {
 	test("kv values persist across a reload", async ({ page }) => {
 		await page.goto("/")
-		await page.waitForFunction(() => "__filenE2E" in window)
+		await waitForE2eHooks(page)
 
 		await page.evaluate(() => window.__filenE2E.kvSet("e2e.storage.persist", "persisted-value"))
 
 		// Retried because Playwright-firefox aborts a reload issued while the first load still has a
 		// request in flight (NS_BINDING_ABORTED) — the boot fires several, so on a slow runner the race
-		// is ordinary rather than exceptional. Re-reloading is safe: the value under test is already
+		// is ordinary rather than exceptional. That abort fails fast, so the barrier's own budget inside
+		// still leaves room for a second attempt. Re-reloading is safe: the value under test is already
 		// written, and the assertion below is what proves the reload happened at all.
 		await expect(async () => {
 			await page.reload()
-			await page.waitForFunction(() => "__filenE2E" in window, undefined, { timeout: 15_000 })
+			await waitForE2eHooks(page)
 		}).toPass({ timeout: 60_000 })
 
 		const value = await page.evaluate(() => window.__filenE2E.kvGet("e2e.storage.persist"))
@@ -36,9 +37,8 @@ test.describe("storage", () => {
 		expect(injectedSession.length).toBeGreaterThan(0)
 
 		// Leader tab: wins the Web Lock, opens OPFS directly, and writes a value into its own sqlite.
-		await page.goto("/")
-		await dismissStartupReminders(page)
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+		await bootTo(page, "/")
+		await waitForE2eHooks(page)
 		await page.evaluate(() => window.__filenE2E.kvSet("e2e.storage.leader", "from-leader"))
 
 		// Follower tab: the lock is already held, so it reads through the BroadcastChannel RPC instead
@@ -51,11 +51,10 @@ test.describe("storage", () => {
 			},
 			[SESSION_SLOT, injectedSession] as const
 		)
-		await follower.goto("/")
-
-		// The blocking startup reminders arm per page load — the follower is its own load.
-		await dismissStartupReminders(follower)
-		await expect(follower.getByRole("navigation", { name: "Filen" })).toBeVisible()
+		// The blocking startup reminders arm per page load — the follower is its own load, so it gets
+		// its own boot barrier.
+		await bootTo(follower, "/")
+		await waitForE2eHooks(follower)
 
 		const readThrough = await follower.evaluate(() => window.__filenE2E.kvGet("e2e.storage.leader"))
 		expect(readThrough).toBe("from-leader")
@@ -84,15 +83,13 @@ test.describe("storage", () => {
 			},
 			[SESSION_SLOT, injectedSession] as const
 		)
-		await leader.goto("/")
-		await dismissStartupReminders(leader)
-		await expect(leader.getByRole("navigation", { name: "Filen" })).toBeVisible()
+		await bootTo(leader, "/")
+		await waitForE2eHooks(leader)
 		await leader.evaluate(() => window.__filenE2E.kvSet("e2e.storage.failover", "before-handoff"))
 
 		// Follower boots second → reads through the BroadcastChannel RPC (proves the leader holds the lock).
-		await page.goto("/")
-		await dismissStartupReminders(page)
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+		await bootTo(page, "/")
+		await waitForE2eHooks(page)
 		expect(await page.evaluate(() => window.__filenE2E.kvGet("e2e.storage.failover"))).toBe("before-handoff")
 
 		// Kill the leader. The released Web Lock promotes the follower, which opens its own OPFS handle on
@@ -106,8 +103,12 @@ test.describe("storage", () => {
 			.toBe("before-handoff")
 
 		// Promotion has settled (the read above went direct) — a fresh write now round-trips through the
-		// promoted tab's own worker.
-		await page.evaluate(() => window.__filenE2E.kvSet("e2e.storage.failover", "after-handoff"))
-		expect(await page.evaluate(() => window.__filenE2E.kvGet("e2e.storage.failover"))).toBe("after-handoff")
+		// promoted tab's own worker. Enveloped: the poll above proves the promoted tab can READ, and the
+		// write path adopts the promoted worker on its own schedule, so a kvSet issued a beat early
+		// rejects against the dead leader's channel rather than failing this claim.
+		await expect(async () => {
+			await page.evaluate(() => window.__filenE2E.kvSet("e2e.storage.failover", "after-handoff"))
+			expect(await page.evaluate(() => window.__filenE2E.kvGet("e2e.storage.failover"))).toBe("after-handoff")
+		}).toPass({ timeout: 30_000 })
 	})
 })

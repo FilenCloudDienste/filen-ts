@@ -1,7 +1,8 @@
 import { test, expect } from "./fixtures"
 import {
 	waitForListingSettled,
-	dismissStartupReminders,
+	bootTo,
+	clickSidebarLink,
 	enterScratchDirectory,
 	createDirectoryViaDialog,
 	trashScratchDirectory
@@ -25,46 +26,33 @@ test.describe("sharing", () => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		await page.goto("/drive")
+		await bootTo(page)
 
-		// The authed shell raises a blocking startup reminder modal that renders the rest of the app
-		// inert/aria-hidden until dismissed — while it is open the shell's own nav/sidebar are not in the
-		// role tree, so it must be dismissed BEFORE the nav assertion or sidebar clicks below. This test
-		// activates the shared surfaces via direct sidebar clicks, never through the listing gate.
-		await dismissStartupReminders(page)
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
-
-		// The e2e injection hook re-seeds the session and navigates to "/" on every hard load (see
-		// src/e2e-hooks/index.ts's seedFromSlot), which bounces any OTHER authed route straight back to
-		// /drive — reaching either shared surface only ever works via an in-app sidebar click.
+		// Activated via in-app sidebar clicks rather than a cold goto, which is what makes the
+		// aria-current assertions below meaningful: they are about the sidebar row the click marked.
 		const sidebar = page.getByRole("complementary")
 
-		const sharedInLink = sidebar.getByRole("link", { name: "Shared with me", exact: true })
-		await expect(sharedInLink).toBeVisible()
-		await sharedInLink.click()
-		await page.waitForURL(/\/shared-in$/)
+		await clickSidebarLink(page, "Shared with me", /\/shared-in$/)
 
 		await waitForListingSettled(page)
 		await expect(page.getByText("Couldn't load this directory")).toHaveCount(0)
-		await expect(sharedInLink).toHaveAttribute("aria-current", "page")
+		await expect(sidebar.getByRole("link", { name: "Shared with me", exact: true })).toHaveAttribute("aria-current", "page")
 
-		const sharedOutLink = sidebar.getByRole("link", { name: "Shared with others", exact: true })
-		await expect(sharedOutLink).toBeVisible()
-		await sharedOutLink.click()
-		await page.waitForURL(/\/shared-out$/)
+		await clickSidebarLink(page, "Shared with others", /\/shared-out$/)
 
 		await waitForListingSettled(page)
 		await expect(page.getByText("Couldn't load this directory")).toHaveCount(0)
-		await expect(sharedOutLink).toHaveAttribute("aria-current", "page")
+		await expect(sidebar.getByRole("link", { name: "Shared with others", exact: true })).toHaveAttribute("aria-current", "page")
 	})
 
 	// The only test in this file that touches live account state — a net-zero scratch directory holding
 	// one nested directory, purely so there is something selectable to open the bulk Share action on
 	// (the account's /drive root may otherwise be empty). Nested rather than created at root, and torn
-	// down from a finally, like every other mutating spec here: a root-level create/trash races
-	// drive.spec.ts's own root option-count assertions, and an inline teardown leaks the directory the
-	// moment anything above it throws. The picker itself is only ever driven up to its own disabled
-	// submit button, then dismissed via Escape — this suite never shares anything for real.
+	// down from a finally, like every other mutating spec here: a root-level create/trash shifts the
+	// root listing under every concurrently-running spec that reads it, and an inline teardown leaks
+	// the directory the moment anything above it throws. The picker itself is only ever driven up to
+	// its own disabled submit button, then dismissed via Escape — this suite never shares anything for
+	// real.
 	test("the bulk Share button opens the contact picker; dismissing shares nothing", async ({ page, injectedSession, browserName }) => {
 		test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
 		expect(injectedSession.length).toBeGreaterThan(0)
@@ -73,7 +61,7 @@ test.describe("sharing", () => {
 		const scratchName = `e2e-share-${runId}`
 		const nestedName = `shared-candidate-${runId}`
 
-		await page.goto("/drive")
+		await bootTo(page)
 
 		try {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -86,9 +74,11 @@ test.describe("sharing", () => {
 			await nestedRow.click()
 			await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
 
-			// Pre-dialog, the bulk bar's own "Share" button is the only one in the DOM — the picker's
-			// identically-labeled submit button doesn't exist until the dialog itself opens.
-			await page.getByRole("button", { name: "Share", exact: true }).click()
+			// Scoped to the bulk bar by its own role and label (bulkActionBar.tsx): the picker's submit button
+			// carries the identical accessible name, so a page-wide locator that resolves again on a retry can
+			// land on it once the dialog is open.
+			const bulkBar = page.getByRole("toolbar", { name: "Selection actions", exact: true })
+			await bulkBar.getByRole("button", { name: "Share", exact: true }).click()
 
 			const dialog = page.getByRole("dialog")
 			await expect(dialog).toBeVisible()

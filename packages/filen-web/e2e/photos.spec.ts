@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { bootTo, enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { PNG_BYTES } from "./helpers/fixtureBytes"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -38,7 +38,7 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 	// whether it still has anything to do.
 	let trashed = false
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	try {
 		const { listbox: driveListbox } = await enterScratchDirectory(page, scratchName)
@@ -63,7 +63,9 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 
 		// ---- choose the scratch directory as the photos root ----
 		await page.getByRole("button", { name: "Choose directory", exact: true }).click()
-		const chooser = page.getByRole("dialog")
+		// Scoped by its own title: the preview overlay is a role="dialog" too (previewOverlay.tsx), so a
+		// bare role lookup can resolve to the wrong surface — or to both at once.
+		const chooser = page.getByRole("dialog", { name: "Choose a photos directory" })
 		await expect(chooser).toBeVisible()
 		await chooser.getByRole("button", { name: scratchName, exact: true }).dblclick()
 		const confirm = chooser.getByRole("button", { name: "Choose this directory", exact: true })
@@ -92,7 +94,12 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 		// steps by enablement rather than by name).
 		const nextButton = overlay.getByRole("button", { name: "Next file", exact: true })
 		const prevButton = overlay.getByRole("button", { name: "Previous file", exact: true })
-		await ((await nextButton.isEnabled()) ? nextButton : prevButton).click()
+		// Waited for, not read once: with two slots exactly one of the pair is enabled, but a one-shot
+		// isEnabled() against a still-mounting overlay reads BOTH as disabled and the ternary then clicks
+		// a dead control, failing at the video assertion with no trace of the cause.
+		await expect.poll(async () => (await nextButton.isEnabled()) !== (await prevButton.isEnabled()), { timeout: 30_000 }).toBe(true)
+		const stepButton = (await nextButton.isEnabled()) ? nextButton : prevButton
+		await stepButton.click()
 		await expect(page.locator("video")).toBeVisible({ timeout: 30_000 })
 
 		// ---- favorite FROM INSIDE the overlay (the currently-viewed video slot) ----
@@ -154,15 +161,18 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 
 		// The rectangle tracks the POINTER, not a padding-shifted origin: under padding-blind geometry the
 		// box lands exactly +16px in x (the grid's own px-4), an unambiguous failure independent of tile
-		// count or viewport width.
-		const rectBox = await page.getByTestId("marquee-rect").boundingBox()
+		// count or viewport width. Polled rather than read once: the rect mounts and lays out on a rAF
+		// after the arm threshold is crossed, so a single read can land on the frame before it exists.
+		await expect(async () => {
+			const rectBox = await page.getByTestId("marquee-rect").boundingBox()
 
-		if (!rectBox) {
-			throw new Error("marquee rectangle has no bounding box")
-		}
+			if (!rectBox) {
+				throw new Error("marquee rectangle has no bounding box")
+			}
 
-		expect(Math.abs(rectBox.x - pressX)).toBeLessThanOrEqual(2)
-		expect(Math.abs(rectBox.y - pressY)).toBeLessThanOrEqual(2)
+			expect(Math.abs(rectBox.x - pressX)).toBeLessThanOrEqual(2)
+			expect(Math.abs(rectBox.y - pressY)).toBeLessThanOrEqual(2)
+		}).toPass({ timeout: 10_000 })
 
 		// Column boundaries are where the tiles actually are: a band confined to the FIRST tile's column
 		// selects only it. An inflated cellWidth moves that boundary and this fails.
@@ -189,9 +199,9 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 
 		// ---- change-directory affordance re-opens the chooser ----
 		await page.getByRole("button", { name: "Change directory", exact: true }).click()
-		await expect(page.getByRole("dialog")).toBeVisible()
+		await expect(chooser).toBeVisible()
 		await page.keyboard.press("Escape")
-		await expect(page.getByRole("dialog")).toHaveCount(0)
+		await expect(chooser).toHaveCount(0)
 
 		// ---- trash the scratch directory itself (root-gone), then revisit /photos ----
 		await trashScratchDirectory(page, scratchName)

@@ -53,10 +53,10 @@ export async function dismissStartupReminders(page: Page): Promise<void> {
 // its own bespoke empty title ("Nothing here yet" is only the drive variant's), so a copy-based match
 // can never settle an empty shared-in/links/trash surface. Returns the listbox locator and whether
 // it actually has content, so callers can gate content-dependent assertions on real account state.
-// `settleTimeoutMs` exists for the debris sweep, not for tests. A root carrying a large backlog of
-// leaked scratch directories renders slower than the expect default allows, so the sweep — the one
-// thing that drains that backlog — would time out on exactly the state it exists to repair, leaving
-// the account to degrade further every run. Recovery has to tolerate what an assertion should not.
+// Settles at BOOT_SETTLE_TIMEOUT_MS, not the expect default: most call sites run straight after a
+// document load, where `goto` has already resolved on `load` but wasm init, the OPFS open and the
+// first listDir have not. A higher ceiling only lengthens a FAILURE, never a pass. `settleTimeoutMs`
+// raises it further for a caller that needs it, such as the debris sweep against a backlogged root.
 export async function waitForListingSettled(
 	page: Page,
 	settleTimeoutMs?: number
@@ -67,13 +67,32 @@ export async function waitForListingSettled(
 	const empty = page.getByTestId("listing-empty")
 	const failed = page.getByTestId("listing-error")
 
-	await expect(listbox.or(empty).or(failed)).toBeVisible(settleTimeoutMs === undefined ? undefined : { timeout: settleTimeoutMs })
+	await expect(listbox.or(empty).or(failed)).toBeVisible({ timeout: settleTimeoutMs ?? BOOT_SETTLE_TIMEOUT_MS })
 
 	if (await failed.isVisible().catch(() => false)) {
 		throw new Error(`Listing settled to its error state: ${await failed.innerText()}`)
 	}
 
 	return { listbox, hasItems: await listbox.isVisible() }
+}
+
+// A row's accessible name is its item name CONCATENATED with the size and date columns and its "More
+// actions" trigger (driveRow.tsx), so `exact` can never match one — and the bare substring match this
+// used to rely on matches every SIBLING whose name merely STARTS with the wanted one. A scratch
+// directory's own children are exactly that shape: looking up "e2e-menus-<uuid>" while its listing was
+// still mounted resolved to "e2e-menus-<uuid>-dir" and "e2e-menus-<uuid>-file.txt" and failed as a
+// strict-mode violation — which expect() treats as fatal rather than retrying, so the wait meant to
+// ride out a stale render died on the first poll instead.
+//
+// Anchored on a whitespace boundary instead: the name must be a whole token of the accessible name,
+// and the columns after it are always space-separated. NOT pinned to the string start, because grid
+// view renders an `.sr-only` badge span before the tile's name (see firstMatchingRowName).
+function itemNamePattern(name: string): RegExp {
+	return new RegExp(`(^|\\s)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s|$)`)
+}
+
+function rowByName(listbox: Locator, name: string): Locator {
+	return listbox.getByRole("option", { name: itemNamePattern(name) })
 }
 
 // Ceiling for a wait that closes on a live ACCOUNT WRITE rather than on UI responsiveness. Every
@@ -85,9 +104,9 @@ export async function waitForListingSettled(
 // itself looked like the cause, and this budget was sized to ride it out.
 //
 // It was not the cause. The RELEASE of the previous context's last write was still in flight when
-// Playwright killed it, so the lease was never released and had to age out on its own. Waiting three
-// seconds before the context closes removes the whole thing (e2e/fixtures.ts carries that teardown and
-// the measurement: 74,683ms -> 544ms). A write should now cost what a write costs.
+// Playwright killed it, so the lease was never released and had to age out on its own. Waiting for the
+// release to go out before the context closes removes the whole thing (e2e/fixtures.ts carries that
+// teardown and the measurement: 74,683ms -> 544ms). A write should now cost what a write costs.
 //
 // The budget stays at 120s anyway, because it is free on a green run and the failure it prevents is
 // expensive: a CI runner is slower than this machine, and 60s already sat just under the tail once and
@@ -95,12 +114,42 @@ export async function waitForListingSettled(
 // tight default.
 export const LIVE_WRITE_TIMEOUT_MS = 120_000
 
-// Settle budget for the first listing after a full document load, where the wait covers a COLD BOOT
-// (wasm init, the SDK's thread pool, OPFS open) rather than UI responsiveness — the same cost
-// playwright.config.ts sizes its navigationTimeout for. The expect default is right everywhere the
-// app is already running and wrong here, which on a loaded CI runner reads as a listing that never
-// rendered.
+// Budget for a wait that can span a COLD BOOT (wasm init, the SDK's thread pool, OPFS open) rather
+// than UI responsiveness — the same cost playwright.config.ts sizes its navigationTimeout for. The
+// default for waitForListingSettled and for the shell barriers below, since a document load precedes
+// most of them.
 export const BOOT_SETTLE_TIMEOUT_MS = 30_000
+
+// The one boot barrier every authed spec starts from: land on `path`, clear anything the shell raised
+// over it, and wait for the shell itself. Everything after it may assume an interactive app.
+export async function bootTo(page: Page, path = "/drive"): Promise<void> {
+	await page.goto(path)
+	await dismissStartupReminders(page)
+	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+}
+
+// A sidebar click can silently fail to commit under suite load, after which every later step runs
+// against the listing the spec believes it has left. Retried until the URL proves otherwise.
+export async function clickSidebarLink(page: Page, name: string, urlPattern: RegExp): Promise<void> {
+	await expect(async () => {
+		await page.getByRole("complementary").getByRole("link", { name, exact: true }).click()
+		await expect(page).toHaveURL(urlPattern, { timeout: 5_000 })
+	}).toPass({ timeout: 30_000 })
+}
+
+// The Transfers entry lives in the icon rail (a `navigation` landmark), not the sidebar, so
+// clickSidebarLink cannot reach it — and its accessible name carries an active-count badge while
+// anything is running (iconRail.tsx), hence the regex. Retried until the URL commits, for the same
+// reason that helper is.
+export async function openTransfers(page: Page): Promise<void> {
+	await expect(async () => {
+		await page
+			.getByRole("link", { name: /Transfers/i })
+			.first()
+			.click()
+		await expect(page).toHaveURL(/\/transfers$/, { timeout: 5_000 })
+	}).toPass({ timeout: 30_000 })
+}
 
 // Bounded poll for a create that landed after its attempt gave up. Short: it only has to outlast the
 // restored snapshot's background refetch, not a write.
@@ -173,7 +222,7 @@ export async function createDirectoryViaDialog(
 	await dialog.getByLabel("Name", { exact: true }).fill(name)
 	await dialog.getByRole("button", { name: "Create", exact: true }).click()
 
-	const row = (listbox ?? page.getByRole("listbox", { name: "Directory contents" })).getByRole("option", { name })
+	const row = rowByName(listbox ?? page.getByRole("listbox", { name: "Directory contents" }), name)
 
 	try {
 		if (options?.expectRow === false) {
@@ -250,7 +299,7 @@ async function createScratchDirectoryWithRetry(
 			const landed =
 				attempt > 1 &&
 				(await expect
-					.poll(() => settled.listbox.getByRole("option", { name }).count(), { timeout: ADOPT_POLL_TIMEOUT_MS })
+					.poll(() => rowByName(settled.listbox, name).count(), { timeout: ADOPT_POLL_TIMEOUT_MS })
 					.toBeGreaterThan(0)
 					.then(() => true)
 					.catch(() => false))
@@ -324,16 +373,25 @@ export async function enterScratchDirectory(
 // upload-input props included — can linger past the URL change, and an upload fired in that window
 // lands in the previous directory. The breadcrumb renders from the same committed tree as the
 // toolbar's inputs, so its name is the commit barrier.
+//
+// The row wait carries the boot budget: this is often the first descent after a document load, and it
+// also closes on a background refetch that is slow under load. The inner URL wait is sized the same
+// way — on a loaded runner a commit outlasts a short one, and the retry then re-clicks for nothing.
 export async function descendInto(page: Page, listbox: ReturnType<Page["getByRole"]>, name: string): Promise<void> {
-	const row = listbox.getByRole("option", { name })
-	await expect(row).toBeVisible()
+	const row = rowByName(listbox, name)
+	await expect(row).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 
 	const before = page.url()
 
 	try {
 		await expect(async () => {
-			await row.dblclick()
-			await page.waitForURL(url => url.toString() !== before, { timeout: 3000 })
+			// Only while the old listing is still mounted: a retry that runs after a slow navigation
+			// finally committed would otherwise dblclick a row of the NEW one.
+			if (page.url() === before) {
+				await row.dblclick()
+			}
+
+			await page.waitForURL(url => url.toString() !== before, { timeout: 10_000 })
 		}).toPass({ timeout: 30_000 })
 	} catch (cause) {
 		// The retry envelope reports nothing but "timed out" on its own, and the two failure shapes it
@@ -404,11 +462,11 @@ async function waitForToastsClear(page: Page): Promise<void> {
 async function selectAndConfirmRowAction(
 	page: Page,
 	listbox: ReturnType<Page["getByRole"]>,
-	name: string | RegExp,
+	name: string,
 	actionLabel: string,
 	confirmTimeoutMs: number
 ): Promise<void> {
-	const row = listbox.getByRole("option", { name })
+	const row = rowByName(listbox, name)
 	// Filtered by its own action button rather than taken as THE alertdialog on the page: a startup
 	// reminder is an alertdialog too and can pop asynchronously (this helper runs from teardowns and
 	// from the debris sweep, both long after the initial dismissal), which would make a bare role
@@ -468,15 +526,12 @@ export async function selectAndTrashRow(
 }
 
 // /trash's own bulk action. IRREVERSIBLE — the only caller is the trash debris sweep, which selects one
-// row at a time by a name it has already matched against isScratchDebrisName. Anchored to the row's OWN
-// name rather than the substring match the trash path uses: a row's accessible name concatenates its
-// size/date columns (see firstMatchingRowName), so `exact` cannot be used, and a bare substring would
-// also accept a row whose name merely CONTAINS a debris name — which for a permanent delete would mean
-// destroying an item the predicate never approved.
+// row at a time by a name it has already matched against isScratchDebrisName. Safe on rowByName's
+// boundary-anchored match and on nothing less: a bare substring would also accept a row whose name
+// merely CONTAINS a debris name, which for a permanent delete means destroying an item the predicate
+// never approved.
 export async function selectAndDeleteTrashRow(page: Page, listbox: ReturnType<Page["getByRole"]>, name: string): Promise<void> {
-	const ownName = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)
-
-	await selectAndConfirmRowAction(page, listbox, ownName, "Delete permanently", LIVE_WRITE_TIMEOUT_MS)
+	await selectAndConfirmRowAction(page, listbox, name, "Delete permanently", LIVE_WRITE_TIMEOUT_MS)
 }
 
 // One Escape closes exactly ONE layer. Base UI's dismiss handler stands down for any popup that still
@@ -519,10 +574,11 @@ export async function dismissOverlays(page: Page): Promise<boolean> {
 // `confirmTimeoutMs` overrides the confirm-dialog wait for a caller whose scratch directory holds more
 // than the usual flat handful (drive-search.spec.ts's nested tree is the one caller that sets it).
 export async function trashScratchDirectory(page: Page, name: string, confirmTimeoutMs?: number): Promise<void> {
-	// The navigation back to root, the settle and the row wait all sit inside the first guard, and for the
-	// same reason: none of them failing means anything is wrong with the TEST, only that there is nothing
-	// here to remove. Settling is what throws when the root listing itself comes back in its error state,
-	// and it has to be caught here rather than propagate out of the caller's finally.
+	// The navigation back to root, the settle and the row wait all sit inside reachRootRow, and so are all
+	// guarded together, for the same reason: none of them failing means anything is wrong with the TEST,
+	// only that there is nothing here to remove. Settling is what throws when the root listing itself comes
+	// back in its error state, and it has to be caught here rather than propagate out of the caller's
+	// finally.
 	//
 	// The row wait then polls rather than checking once. waitForListingSettled only proves SOME listbox
 	// is showing, not that it reflects the scratch directory just created: React Query serves this root
@@ -533,9 +589,7 @@ export async function trashScratchDirectory(page: Page, name: string, confirmTim
 	//
 	// Either way the directory may still exist on the live account with nothing left to remove it, so
 	// name it for the next run's debris sweep instead of losing it silently.
-	let listbox: ReturnType<Page["getByRole"]>
-
-	try {
+	const reachRootRow = async (): Promise<ReturnType<Page["getByRole"]>> => {
 		if (!(await dismissOverlays(page))) {
 			// A dialog whose SDK mutation never settled is undismissable by design (Escape is blocked while
 			// pending), and its modality makes the whole app inert — nothing here can reach the chrome
@@ -546,26 +600,44 @@ export async function trashScratchDirectory(page: Page, name: string, confirmTim
 			await dismissStartupReminders(page)
 		}
 
-		// Retried until the URL proves the route actually changed. A sidebar click can silently fail to
-		// commit under suite load — menus.spec.ts documents the same thing for its own nav — and every
-		// caller reaches here from INSIDE its scratch directory, so an uncommitted click leaves this
-		// looking for a root row while still in the child listing. That read as "not reachable, leaked"
-		// and returned without trashing, which leaked the directory for real.
-		await expect(async () => {
-			await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
-			await expect(page).toHaveURL(/\/drive$/, { timeout: 5_000 })
-		}).toPass({ timeout: 30_000 })
+		// Every caller reaches here from INSIDE its scratch directory, so a click that never commits
+		// leaves this looking for a root row while still in the child listing — which read as "not
+		// reachable, leaked" and returned without trashing, leaking the directory for real.
+		await clickSidebarLink(page, "Cloud Drive", /\/drive$/)
 
-		listbox = (await waitForListingSettled(page)).listbox
+		// The URL flips before React commits the root listing (router navigations are transition-wrapped,
+		// the barrier descendInto documents), so the CHILD listing can still be the one mounted here — and
+		// its rows are precisely the ones whose names carry this one as a prefix. The breadcrumb renders
+		// from the committed tree, so losing the scratch name from it IS the commit barrier.
+		await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByText(name, { exact: true })).toHaveCount(0)
 
-		await expect(listbox.getByRole("option", { name })).toBeVisible({ timeout: 15_000 })
+		const { listbox } = await waitForListingSettled(page)
+
+		await expect(rowByName(listbox, name)).toBeVisible({ timeout: 15_000 })
+
+		return listbox
+	}
+
+	let listbox: ReturnType<Page["getByRole"]>
+
+	try {
+		listbox = await reachRootRow()
 	} catch (error) {
-		console.error(
-			`trashScratchDirectory: "${name}" is not reachable in the root listing — leaked, left for the next run's sweep`,
-			error
-		)
+		try {
+			// One retry from a fresh document before giving the directory up: every wait above closes on a
+			// render this helper does not drive, and a reload is the only thing that resets all of them at
+			// once. The FIRST error is the one reported — the retry's would only ever describe the reload.
+			await page.goto("/drive")
 
-		return
+			listbox = await reachRootRow()
+		} catch {
+			console.error(
+				`trashScratchDirectory: "${name}" is not reachable in the root listing — leaked, left for the next run's sweep`,
+				error
+			)
+
+			return
+		}
 	}
 
 	try {

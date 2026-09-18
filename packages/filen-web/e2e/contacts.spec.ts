@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
-import { dismissStartupReminders } from "./helpers/listing"
+import { BOOT_SETTLE_TIMEOUT_MS, bootTo } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -12,28 +12,14 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // blocked) is real, live, and unknown ahead of time — currently empty — so every test holds
 // regardless, gated on `hasContacts` wherever a row is actually needed (see waitForContactsSettled).
 //
-// Client-nav only: the e2e injection hook (src/e2e-hooks/index.ts, seedFromSlot) re-seeds the session
-// on every load and then navigates to "/", which redirects to /drive — a hard goto/reload on any
-// OTHER authed route bounces back to /drive before that route's own content ever renders. Reaching
-// /contacts is always goto("/drive") (the hook's own target, so it always lands correctly) followed
-// by a real in-app click on the rail link — see gotoContacts below, the one path that survives it.
-//
 // Chromium-only: ContactsList fires two real authenticated reads on mount (useContactsQuery,
 // useContactRequestsQuery) — the same worker cross-origin SDK call path drive's listDir hangs on, from
 // a different call site but the same root cause (helpers/firefox.ts, FIREFOX_HANG_REASON).
 
-// The one path into /contacts that survives the injection hook's own re-seed-then-navigate (see the
-// module doc comment above): goto("/drive") always lands correctly, then a real in-app client-side
-// click on the rail link reaches /contacts without ever hard-loading it.
+// Boot to the shell, then reach /contacts the way a reader does: a real in-app client-side rail click,
+// which is itself what the first test below asserts.
 async function gotoContacts(page: Page): Promise<void> {
-	await page.goto("/drive")
-
-	// The authed shell raises a blocking startup reminder modal that renders the rest of the app inert/
-	// aria-hidden until dismissed — while it is open the shell's own nav/rail are not in the role tree,
-	// so it must be dismissed BEFORE the nav assertion or rail click below. This path reaches /contacts
-	// via a direct rail click, never through the listing gate that dismisses it.
-	await dismissStartupReminders(page)
-	await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+	await bootTo(page)
 
 	await page.getByRole("link", { name: "Contacts", exact: true }).click()
 	// The rail's own Contacts entry always passes an explicit `section: "all"` search param (see
@@ -43,17 +29,26 @@ async function gotoContacts(page: Page): Promise<void> {
 }
 
 // The content region below the search/Add-contact toolbar has exactly one of three terminal states —
-// loading skeleton, load error, or settled (the "No contacts" empty state, or >=1 rendered section) —
-// mirroring drive.spec.ts's waitForListingSettled: a load error leaves neither settled locator
-// visible, which times out here exactly like any other stuck-loading failure, rather than being
-// silently treated as fine. Scoped to the <main> landmark so it can never match a heading from the
-// icon rail / drive sidebar that render alongside every authed route (including this one).
+// loading skeleton, load error, or settled (the "No contacts" empty state, or >=1 rendered section).
+// All three are raced, the same way helpers/listing.ts races the drive listing's: losing to the error
+// state throws immediately, carrying the SDK's own decrypted message (contactsList.tsx renders
+// errorLabel(...) under the "Couldn't load contacts" title), instead of spending the whole budget and
+// reporting a stuck-loading timeout that names nothing. Scoped to the <main> landmark so it can never
+// match a heading from the icon rail / drive sidebar that render alongside every authed route.
 async function waitForContactsSettled(page: Page): Promise<{ hasContacts: boolean }> {
 	const main = page.getByRole("main")
 	const empty = main.getByText("No contacts", { exact: true })
 	const sectionHeading = main.getByRole("heading", { level: 2 }).first()
+	const failed = main.getByText("Couldn't load contacts", { exact: true })
 
-	await expect(empty.or(sectionHeading)).toBeVisible()
+	await expect(empty.or(sectionHeading).or(failed)).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+
+	if (await failed.isVisible().catch(() => false)) {
+		// The error branch renders its whole Empty as role="alert" (contactsList.tsx), so the title and
+		// the SDK's own reason come back together. .first(): this runs on the failure path, where a
+		// strict-mode violation would replace the diagnosis it exists to carry.
+		throw new Error(`Contacts settled to its error state: ${await main.getByRole("alert").first().innerText()}`)
+	}
 
 	return { hasContacts: await sectionHeading.isVisible() }
 }
@@ -66,8 +61,8 @@ test.describe("contacts", () => {
 		await gotoContacts(page)
 
 		await expect(page.getByRole("searchbox", { name: "Search contacts" })).toBeVisible()
+		// Throws on the load-error state, so reaching here is itself the proof the queries resolved.
 		await waitForContactsSettled(page)
-		await expect(page.getByText("Couldn't load contacts", { exact: true })).toHaveCount(0)
 
 		// The stats strip (new, web-only — see contactsList.tsx) renders three count tiles once the
 		// queries settle; a render/count-visibility check only, the live counts are unknown ahead of time.
@@ -190,7 +185,15 @@ test.describe("contacts", () => {
 		// Roving tabindex: the cursor row owns the section's only Tab stop.
 		await expect(options.first()).toHaveAttribute("tabindex", "0")
 
-		if ((await options.count()) > 1) {
+		// Retried, never a one-shot count(): the section's rows render as their query settles, so a bare
+		// read taken a beat early silently drops the multi-select leg below without ever failing.
+		const hasSecondRow = await options
+			.nth(1)
+			.waitFor({ state: "visible", timeout: 10_000 })
+			.then(() => true)
+			.catch(() => false)
+
+		if (hasSecondRow) {
 			await expect(options.nth(1)).toHaveAttribute("tabindex", "-1")
 
 			await page.keyboard.press("ArrowDown")
@@ -222,8 +225,15 @@ test.describe("contacts", () => {
 
 		// Only established-contact rows expose the destructive ⋯ menu (Remove/Block) — request/pending/
 		// blocked rows use direct, non-destructive icon buttons instead (Accept/Deny, Cancel, Unblock).
+		// Retried, never isVisible(): that reads the DOM as it stands and never waits, so a section whose
+		// rows had not painted yet SKIPPED this test silently instead of running it.
 		const moreActions = page.getByRole("button", { name: "More actions", exact: true }).first()
-		test.skip(!(await moreActions.isVisible()), "no established contact row in this account — the destructive menu is contacts-only")
+		const hasEstablishedContact = await moreActions
+			.waitFor({ state: "visible", timeout: 10_000 })
+			.then(() => true)
+			.catch(() => false)
+
+		test.skip(!hasEstablishedContact, "no established contact row in this account — the destructive menu is contacts-only")
 
 		await moreActions.click()
 		const menu = page.getByRole("menu")

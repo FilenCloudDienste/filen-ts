@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures"
-import { enterScratchDirectory, trashScratchDirectory, dismissOverlays, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { bootTo, enterScratchDirectory, trashScratchDirectory, dismissOverlays, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 
@@ -9,9 +9,9 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 // downloads.spec.ts convention) so parallel specs never race a root-level create/trash.
 test.describe.configure({ mode: "default" })
 
-// A valid, tiny PCM WAV of pure silence — 8 kHz, 16-bit, mono. Small (sub-100 KB) but a real container
-// Chromium decodes with an honest duration, so the scrubber/timeupdate assertions exercise genuine
-// playback rather than a hand-rolled byte string. Duration is caller-chosen so two fixtures differ.
+// A valid PCM WAV of pure silence — 8 kHz, 16-bit, mono, so a minute of it costs ~940 KB. A real
+// container Chromium decodes with an honest duration, so the scrubber/timeupdate assertions exercise
+// genuine playback rather than a hand-rolled byte string.
 function makeSilentWav(seconds: number): Buffer {
 	const sampleRate = 8_000
 	const numSamples = sampleRate * seconds
@@ -36,8 +36,12 @@ function makeSilentWav(seconds: number): Buffer {
 	return buffer
 }
 
-const WAV_A = makeSilentWav(4)
-const WAV_B = makeSilentWav(3)
+// A minute each, not seconds. The transport leg below switches to the second track and then reads,
+// pauses and seeks its scrubber — a track that ENDS underneath that leaves the player at end of queue
+// with no duration, where the scrubber is disabled (audioPlayerBar.tsx) and every assertion on it burns
+// its whole timeout against a player that is behaving correctly.
+const WAV_A = makeSilentWav(60)
+const WAV_B = makeSilentWav(60)
 
 test("drive audio double-click hands off to the persistent player and transport works", async ({ page, injectedSession, browserName }) => {
 	test.skip(browserName !== "chromium", FIREFOX_HANG_REASON)
@@ -50,7 +54,7 @@ test("drive audio double-click hands off to the persistent player and transport 
 	const nameA = `e2e-audio-a-${runId}.wav`
 	const nameB = `e2e-audio-b-${runId}.wav`
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -98,14 +102,27 @@ test("drive audio double-click hands off to the persistent player and transport 
 		await bar.getByRole("button", { name: "Next track" }).click()
 		await expect(bar.locator(`[title="${nameB}"]`)).toBeVisible({ timeout: 30_000 })
 
-		// Previous (early in the track, before the smart-previous restart threshold) steps back to the first.
+		// Previous RESTARTS the current track rather than stepping back once the position is past
+		// audioQueue.ts's SMART_PREVIOUS_THRESHOLD_MS (3s), so the press only means "step back" from a position
+		// this leg itself puts back under it — it does not lean on the fixture being shorter than the threshold.
+		// Pause first, or playback walks the readout past the threshold again between the seek and the press,
+		// then seek to the start and read it back: Home on a range input is its min, which the input's own
+		// onChange turns into a real seek(0). A track switch also clears the duration until the new track's
+		// metadata lands, and the scrubber is inert (disabled, and `press` does not wait on that) until it does.
+		await expect(seek).toBeEnabled({ timeout: 30_000 })
+		await pauseButton.click()
+		await expect(bar.getByRole("button", { name: "Play" })).toBeVisible()
+		await expect(async () => {
+			await seek.press("Home")
+			expect(Number(await seek.inputValue())).toBeLessThan(1_000)
+		}).toPass({ timeout: 10_000 })
+
 		await bar.getByRole("button", { name: "Previous track" }).click()
 		await expect(bar.locator(`[title="${nameA}"]`)).toBeVisible({ timeout: 30_000 })
 
 		// Scrubber seek: pause for a stable readout, then nudge the slider forward one step and confirm the
-		// position jumps to the seeked point. A track switch clears the duration until the new track's
-		// metadata lands, and the scrubber is inert (disabled, and `press` does not wait on that) until it
-		// does — so wait for a scrubbable slider first, exactly as after the initial load above.
+		// position jumps to the seeked point. skipPrevious loads AND plays, so the bar is playing again
+		// here regardless of the pause above.
 		await expect(seek).toBeEnabled({ timeout: 30_000 })
 		await pauseButton.click()
 		await expect(bar.getByRole("button", { name: "Play" })).toBeVisible()
@@ -182,7 +199,7 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 			return
 		}
 
-		await playlistRow.getByRole("button", { name: "Playlist options" }).click()
+		await playlistRow.first().getByRole("button", { name: "Playlist options" }).click()
 		await page.getByRole("menuitem", { name: "Delete" }).click()
 		await page.getByRole("alertdialog", { name: "Delete playlist" }).getByRole("button", { name: "Delete", exact: true }).click()
 		await expect(playlistRow).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
@@ -190,7 +207,7 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 
 	let deleted = false
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
@@ -223,7 +240,7 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		await expect(createDialog).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Open the new playlist's detail dialog.
-		await playlistRow.getByRole("button", { name: playlistName }).click()
+		await playlistRow.first().getByRole("button", { name: playlistName }).click()
 		const detailDialog = page.getByRole("dialog", { name: playlistName })
 		await expect(detailDialog).toBeVisible()
 
@@ -236,8 +253,11 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		const pickerRowB = pickerDialog.getByRole("button", { name: nameB })
 		await expect(pickerRowA).toBeVisible({ timeout: 30_000 })
 		await pickerRowA.click()
+		// The submit's own count is the only signal a pick registered — without it a swallowed first
+		// click leaves "Add 2 tracks" unreachable and the failure reads as a missing button.
+		await expect(pickerDialog.getByRole("button", { name: "Add 1 track", exact: true })).toBeVisible()
 		await pickerRowB.click()
-		await pickerDialog.getByRole("button", { name: "Add 2 tracks" }).click()
+		await pickerDialog.getByRole("button", { name: "Add 2 tracks", exact: true }).click()
 		// Same shape as the create above: the add re-uploads the playlist JSON and the dialog closes on it.
 		await expect(pickerDialog).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
@@ -247,10 +267,14 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		await expect(trackRowB).toBeVisible()
 
 		// Drag B above A — the reordered list feeds "Play" below, proving the reorder actually persisted
-		// (not just a local optimistic reshuffle).
-		await trackRowB.dragTo(trackRowA)
-		// The reorder re-uploads the playlist JSON, so this settles on a write, not on a re-render.
-		await expect(detailDialog.locator("li").first().getByText(nameB)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		// (not just a local optimistic reshuffle). Re-dragged on a miss rather than dispatched once: a
+		// single dragTo can land on a row the dialog re-rendered underneath and move nothing at all. The
+		// gesture means "put B first" either way, so a repeat is idempotent — and the inner budget is
+		// wide enough to ride an ordinary write out, so a slow-but-landing reorder is never re-issued.
+		await expect(async () => {
+			await trackRowB.dragTo(trackRowA)
+			await expect(detailDialog.locator("li").first().getByText(nameB)).toBeVisible({ timeout: 30_000 })
+		}).toPass({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		await detailDialog.getByRole("button", { name: "Play", exact: true }).click()
 

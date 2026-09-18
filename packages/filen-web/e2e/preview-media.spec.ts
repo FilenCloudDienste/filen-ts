@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures"
 import { SW_DOWNLOAD_PREFIX } from "@/lib/sw/protocol"
+import { bootTo } from "./helpers/listing"
 import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
 import { waitForSwReady } from "./helpers/sw"
 import { trackCspViolations } from "./helpers/csp"
@@ -54,7 +55,7 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 	})
 	const cspViolations = trackCspViolations(page)
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	const { listbox } = await enterFixtureDirectory(page, "preview-media")
 	await waitForSwReady(page)
@@ -73,6 +74,13 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 
 	const imgSrc = await img.getAttribute("src")
 	expect(imgSrc).toMatch(new RegExp(`^${SW_DOWNLOAD_PREFIX}`))
+
+	// swResponses is filled by an async `page.on("response")` handler, so the entry for the request the
+	// <img> above already rendered from need not be in the array the moment it becomes visible. Polled
+	// rather than read once — a one-shot find that loses that race asserts on `undefined`, and
+	// `undefined?.status` reports "expected 200, received undefined" rather than "the response is not
+	// logged yet".
+	await expect.poll(() => swResponses.find(r => r.contentType === "image/png"), { timeout: 15_000 }).toBeDefined()
 
 	const imageResponse = swResponses.find(r => r.contentType === "image/png")
 	expect(imageResponse?.status).toBe(200)
@@ -95,7 +103,12 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 	await rowVideo.dblclick()
 	const video = page.locator("video")
 	await expect(video).toBeVisible({ timeout: 30_000 })
-	await expect.poll(() => video.evaluate(el => (el as HTMLVideoElement).duration || 0), { timeout: 30_000 }).toBeGreaterThan(0)
+	// Caught per attempt, the same way the remount leg below does it: expect.poll awaits its callback
+	// OUTSIDE the try it retries on, so an element detached mid-poll (the viewer re-keys on its own
+	// source resolving) throws straight out of the poll instead of being retried.
+	await expect
+		.poll(() => video.evaluate(el => (el as HTMLVideoElement).duration || 0).catch(() => 0), { timeout: 30_000 })
+		.toBeGreaterThan(0)
 
 	// currentSrc resolves to an absolute URL (unlike the image leg's raw src attribute above), so this
 	// checks containment rather than an anchored prefix.
@@ -203,7 +216,11 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 	await expect(bar.getByRole("button", { name: "Pause" })).toBeVisible({ timeout: 30_000 })
 	const audioSeek = bar.getByRole("slider", { name: "Seek" })
 	const audioStart = Number(await audioSeek.inputValue())
-	await expect.poll(async () => Number(await audioSeek.inputValue()), { timeout: 15_000 }).toBeGreaterThan(audioStart)
+	await expect.poll(async () => Number(await audioSeek.inputValue()), { timeout: 30_000 }).toBeGreaterThan(audioStart)
+
+	// Polled for the same reason the image leg's own find is — the response handler is async, and the
+	// playhead advancing above does not prove its frame has been logged yet.
+	await expect.poll(() => swResponses.find(r => r.contentType === "audio/mpeg"), { timeout: 15_000 }).toBeDefined()
 
 	const audioResponse = swResponses.find(r => r.contentType === "audio/mpeg")
 	expect(audioResponse?.disposition).toBeNull()

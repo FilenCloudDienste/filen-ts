@@ -2,6 +2,7 @@ import { statSync } from "node:fs"
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { enterFixtureDirectory, FIXTURE_FILES } from "./helpers/fixtures"
+import { bootTo, clickSidebarLink, openTransfers, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { DOWNLOAD_FSA_TEXT, DOWNLOAD_SW_TEXT } from "./helpers/fixtureBytes"
 import { MOD_KEY } from "./helpers/modkey"
 import { FIREFOX_HANG_REASON } from "./helpers/firefox"
@@ -106,7 +107,7 @@ test.describe("downloads", () => {
 
 		await stubFsaPicker(page)
 
-		await page.goto("/drive")
+		await bootTo(page)
 
 		const [fileName] = FIXTURE_FILES["download-fsa"]
 
@@ -118,11 +119,7 @@ test.describe("downloads", () => {
 		await row.click()
 		await page.getByRole("button", { name: "Download", exact: true }).click()
 
-		await page
-			.getByRole("link", { name: /Transfers/i })
-			.first()
-			.click()
-		await page.waitForURL(/\/transfers$/)
+		await openTransfers(page)
 
 		// The transfer row's accessible name lives on its progressbar, not the row's outer container --
 		// the Pause/Cancel buttons are exact-named siblings (vs. the screen's own header
@@ -147,7 +144,7 @@ test.describe("downloads", () => {
 
 		await stubFsaPicker(page)
 
-		await page.goto("/drive")
+		await bootTo(page)
 
 		const [nameA, nameB] = FIXTURE_FILES["download-zip"]
 
@@ -166,11 +163,7 @@ test.describe("downloads", () => {
 
 		await page.getByRole("button", { name: "Download", exact: true }).click()
 
-		await page
-			.getByRole("link", { name: /Transfers/i })
-			.first()
-			.click()
-		await page.waitForURL(/\/transfers$/)
+		await openTransfers(page)
 
 		// A mixed multi-item selection has no single source name to derive from, so the zip falls back to
 		// the shared generic archive name (downloadZip.ts's resolveSuggestedZipName). exact: true guards
@@ -201,7 +194,7 @@ test.describe("downloads", () => {
 
 		await deleteFsaPicker(page)
 
-		await page.goto("/drive")
+		await bootTo(page)
 
 		const [fileName] = FIXTURE_FILES["download-sw"]
 
@@ -213,7 +206,7 @@ test.describe("downloads", () => {
 		await row.click()
 
 		const [download] = await Promise.all([
-			page.waitForEvent("download", { timeout: 15_000 }),
+			page.waitForEvent("download", { timeout: 30_000 }),
 			page.getByRole("button", { name: "Download", exact: true }).click()
 		])
 
@@ -225,11 +218,7 @@ test.describe("downloads", () => {
 		// unlike the fsa branch) -- live-verified against runDownload's own settle call that the row
 		// still reaches Done for a file this size, so that is what this asserts, not an invented
 		// intermediate state.
-		await page
-			.getByRole("link", { name: /Transfers/i })
-			.first()
-			.click()
-		await page.waitForURL(/\/transfers$/)
+		await openTransfers(page)
 		// Scoped to this transfer's own row (the status label is the progressbar's sibling), not the first
 		// "Done" anywhere on the screen.
 		const swProgressbar = page.getByRole("progressbar", { name: fileName })
@@ -258,7 +247,7 @@ test.describe("downloads", () => {
 		// under the "few MiB, well under 50MB" ceiling a real UI upload input would otherwise need.
 		await stubFsaPicker(page, 75)
 
-		await page.goto("/drive")
+		await bootTo(page)
 
 		const [fileName] = FIXTURE_FILES["download-cancel"]
 
@@ -277,11 +266,7 @@ test.describe("downloads", () => {
 		// else ever creates/trashes inside it the way concurrent specs do at /drive's shared root.
 		const optionCountBeforeCancel = await listbox.getByRole("option").count()
 
-		await page
-			.getByRole("link", { name: /Transfers/i })
-			.first()
-			.click()
-		await page.waitForURL(/\/transfers$/)
+		await openTransfers(page)
 
 		const progressbar = page.getByRole("progressbar", { name: fileName })
 		await expect(progressbar).toBeVisible()
@@ -300,14 +285,16 @@ test.describe("downloads", () => {
 		await confirmDialog.getByRole("button", { name: "Cancel", exact: true }).click()
 
 		// Cancelled transfers keep no history (download.ts's runDownload Cancelled branch settles then
-		// immediately removes the row) -- unlike a finished row, there is no separate Dismiss step.
-		await expect(progressbar).toHaveCount(0)
+		// immediately removes the row) -- unlike a finished row, there is no separate Dismiss step. The
+		// row leaves on the SDK's own abort path unwinding, not on a React commit, so it gets the live
+		// budget rather than the UI-responsiveness default.
+		await expect(progressbar).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		await expect(page.getByText(/failed/i)).toHaveCount(0)
 
 		// An in-app sidebar Link click plus a re-descent, never page.goto() -- goto is a hard reload
 		// that re-runs the whole boot/re-auth sequence, tearing down and rebooting the wasm SDK/OPFS
 		// session this test relies on staying alive across the round trip.
-		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
+		await clickSidebarLink(page, "Cloud Drive", /\/drive$/)
 		await enterFixtureDirectory(page, "download-cancel")
 
 		// The source item itself is untouched -- cancelling aborts the in-flight transfer, never the

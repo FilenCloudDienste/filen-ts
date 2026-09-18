@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures"
 import { SW_DOWNLOAD_PREFIX, SW_MSG_INIT_CLIENT, SW_MSG_LOGOUT, SW_MSG_REGISTER_ZIP_DOWNLOAD } from "@/lib/sw/protocol"
-import { enterScratchDirectory, trashScratchDirectory, dismissStartupReminders, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { bootTo, enterScratchDirectory, trashScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { waitForSwReady } from "./helpers/sw"
 
 // Mirrors saveDownload.ts's own (non-exported) SW_REQUEST_TIMEOUT_MS — see no-coi.spec.ts for the same
@@ -41,12 +41,9 @@ test.describe("service worker", () => {
 		)
 		expect(injectedSession.length).toBeGreaterThan(0)
 
-		// The drive listing (not just the bare authed shell) so the scratch directory below has
-		// somewhere to be created — the authed nav still renders here exactly as it does at "/".
-		await page.goto("/drive")
-		// The blocking startup reminders render the shell inert until dismissed.
-		await dismissStartupReminders(page)
-		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
+		// The drive listing, not just the bare authed shell, so the scratch directory below has somewhere
+		// to be created.
+		await bootTo(page)
 		await waitForSwReady(page)
 
 		const scratchName = `e2e-sw-zip-${crypto.randomUUID()}`
@@ -113,7 +110,10 @@ test.describe("service worker", () => {
 					const fileA = a.value
 					const fileB = b.value
 
-					const registration = await navigator.serviceWorker.ready
+					// Bounded like every other stage: a registration that never activates otherwise hangs
+					// here until the harness kills the test mid-write, orphaning the lease the uploads
+					// above took.
+					const registration = await withTimeout("service worker ready", ackTimeoutMs, navigator.serviceWorker.ready)
 
 					if (registration.active === null) {
 						throw new Error("no active service worker")

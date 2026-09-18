@@ -2,6 +2,8 @@ import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import {
 	waitForListingSettled,
+	bootTo,
+	clickSidebarLink,
 	trashScratchDirectory,
 	descendInto,
 	createDirectoryViaDialog,
@@ -43,7 +45,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 
 	const cspViolations = trackCspViolations(page)
 
-	await page.goto("/drive")
+	await bootTo(page)
 
 	try {
 		// Build the scratch tree: <scratchName>/<nestedName>/<targetName> — two levels deep, so finding
@@ -75,7 +77,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		// bounded ~5s a two-item scratch subtree converges in (the number the timeouts below are sized
 		// against) — reproduced live: an account-root-scoped search here timed out past 45s. Subtree
 		// recursion is still fully proven (the file sits two levels below where the search opens).
-		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
+		await clickSidebarLink(page, "Cloud Drive", /\/drive$/)
 		const { listbox: rootListboxAgain } = await waitForListingSettled(page)
 		await descendInto(page, rootListboxAgain, scratchName)
 
@@ -117,7 +119,15 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		await expect(page.getByRole("dialog").getByText(targetContent)).toBeVisible({ timeout: 30_000 })
 		await page.keyboard.press("Escape")
 		await expect(page.locator(".cm-content")).toHaveCount(0)
+
+		// The second Escape has to reach the GLOBAL clear-selection action, and which action an Escape
+		// reaches depends entirely on where focus is: SearchInput consumes it locally to clear the query
+		// (searchInput.tsx's own onKeyDown), which would wipe the query this leg asserts survives. So the
+		// input not holding focus is a precondition, not an assumption, and the cleared selection is what
+		// proves the press landed where it was meant to.
+		await expect(searchInput).not.toBeFocused()
 		await page.keyboard.press("Escape")
+		await expect(page.getByText(/^\d+ selected$/)).toHaveCount(0)
 		await expect(searchInput).toHaveValue(runId)
 
 		// A directory hit navigates straight into it (root-relative, regardless of where the search was
@@ -131,7 +141,20 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		await expect(afterNavListbox.getByRole("option", { name: targetName })).toBeVisible()
 
 		// A second search, now scoped to this even smaller subtree (a single file) — proves a fresh root
-		// re-opens the engine cleanly, not just the one cold open already exercised above.
+		// re-opens the engine cleanly, not just the one cold open already exercised above. Opened on a
+		// query that CANNOT match, because the target is a direct child of this directory: its row is in
+		// the plain listing too, nothing in a direct-child hit's rendering distinguishes it from an
+		// ordinary row (driveRow.tsx renders searchParentPath only for a cross-directory hit), so "the
+		// row is visible" would hold with the engine dead. "No matches" renders only while search is
+		// active (directoryListing.tsx's search branch), which pins the listing to the engine's own
+		// result set — and the row coming back after it can only have come back through the engine.
+		await searchInput.fill(`e2e-search-no-such-query-${crypto.randomUUID()}`)
+		await expect(page.getByText("No matches", { exact: true })).toBeVisible({ timeout: 45_000 })
+
+		// The X button is one of the two ways out of a query; the Escape below is the other.
+		await page.getByRole("button", { name: "Clear search", exact: true }).click()
+		await expect(searchInput).toHaveValue("")
+
 		await searchInput.fill(targetName)
 		await expect(listbox.getByRole("option", { name: targetName })).toBeVisible({ timeout: 40_000 })
 
@@ -142,20 +165,13 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		await expect(searchInput).toHaveValue("")
 		await expect(afterNavListbox.getByRole("option", { name: targetName })).toBeVisible()
 
-		// A query with no chance of ever matching anything in this small subtree.
-		await searchInput.fill(`e2e-search-no-such-query-${crypto.randomUUID()}`)
-		await expect(page.getByText("No matches", { exact: true })).toBeVisible({ timeout: 45_000 })
-
-		await page.getByRole("button", { name: "Clear search", exact: true }).click()
-		await expect(searchInput).toHaveValue("")
-
 		// Re-open a scratch-ROOT search: "Open containing directory" only renders for a hit whose parent
 		// is not the directory on screen (driveRow's searchParentPath), and the two searches above are
 		// both spent — the first was torn down by the directory-hit navigation, the second runs from
 		// inside nestedName, where the target IS a direct child. Placed last so a timeout here cannot
 		// mask a failure in the legs that already pass; the root re-open is warm (this same page session
 		// converged it earlier), but the file's established ceiling is kept rather than assumed away.
-		await page.getByRole("complementary").getByRole("link", { name: "Cloud Drive", exact: true }).click()
+		await clickSidebarLink(page, "Cloud Drive", /\/drive$/)
 		const { listbox: rootListboxForReveal } = await waitForListingSettled(page)
 		await descendInto(page, rootListboxForReveal, scratchName)
 
@@ -164,9 +180,14 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		await expect(revealHit).toBeVisible({ timeout: 40_000 })
 		await expect(revealHit).toContainText(nestedName)
 
-		// Right-click retargets the selection to this row and opens the single-item menu.
+		// Right-click retargets the selection to this row and opens the single-item menu. The menu itself
+		// is required before its item is clicked: a menuitem can read visible, enabled and stable while
+		// its popup is still finishing its enter transition, and a click that lands in that window is
+		// swallowed with nothing to show for it.
 		await revealHit.click({ button: "right" })
-		await page.getByRole("menuitem", { name: "Open containing directory", exact: true }).click()
+		const revealMenu = page.getByRole("menu")
+		await expect(revealMenu).toBeVisible()
+		await revealMenu.getByRole("menuitem", { name: "Open containing directory", exact: true }).click()
 
 		// TWO splat segments — the regression guard for the truncated-splat defect: the target is built
 		// from the SDK's full ancestor chain, never from the item's own single `parent` uuid.
@@ -175,6 +196,11 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 
 		const { listbox: revealedListbox } = await waitForListingSettled(page)
 		await expect(revealedListbox.getByRole("option", { name: targetName })).toHaveAttribute("aria-selected", "true")
+
+		// The reveal navigated away with a live query still in the box — the same teardown the directory-hit
+		// leg above asserts. Required before the finally's write: a search engine still closing at unmount
+		// cancels its convergence resync mid-flight, and that is what strands the account-wide write lease.
+		await expect(searchInput).toHaveValue("")
 
 		expect(cspViolations).toEqual([])
 	} finally {
