@@ -33,9 +33,12 @@ interface E2eHooks {
 	renameTestNoteByUuid: (uuid: string, title: string) => Promise<void>
 	readPersistedInflightContent: (uuid: string) => Promise<string | null>
 	listTestNoteUuids: () => Promise<string[]>
-	sweepTestNotesByTitlePrefix: (prefix: string) => Promise<number>
-	sweepTestTagsByNamePrefix: (prefix: string) => Promise<number>
-	sweepTestDriveDebris: (target: "root" | "trash", limit: number) => Promise<number>
+	// `minAgeMs` is optional on every sweep: an in-test teardown removes whatever it matches, while the
+	// pre-run cleanup passes a window wider than any run so a concurrently running suite's live items
+	// can never match (src/e2e-hooks/index.ts's olderThan).
+	sweepTestNotesByTitlePrefix: (prefix: string, minAgeMs?: number) => Promise<number>
+	sweepTestTagsByNamePrefix: (prefix: string, minAgeMs?: number) => Promise<number>
+	sweepTestDriveDebris: (target: "root" | "trash", limit: number, minAgeMs?: number) => Promise<number>
 	thumbnailFileStat: (parentUuid: string, name: string) => Promise<{ size: number; lastModified: number } | null>
 	createTestSelfChat: () => Promise<string>
 	deleteTestChatByUuid: (uuid: string) => Promise<void>
@@ -44,7 +47,7 @@ interface E2eHooks {
 	readTestChatMessageTexts: (uuid: string) => Promise<string[]>
 	enqueueTestChatMessage: (chatUuid: string, content: string) => Promise<boolean>
 	readPersistedInflightChatMessages: (chatUuid: string) => Promise<string[] | null>
-	sweepTestChatsByNamePrefix: (prefix: string) => Promise<number>
+	sweepTestChatsByNamePrefix: (prefix: string, minAgeMs?: number) => Promise<number>
 }
 
 // Mirrors src/types/desktop.d.ts's DesktopBridge for the same reason as E2eHooks above: this project

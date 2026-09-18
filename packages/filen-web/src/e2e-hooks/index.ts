@@ -3,10 +3,9 @@ import * as Comlink from "comlink"
 import { createNotePreviewFromContentText } from "@filen/utils"
 import type { StringifiedClient, File, Note, NoteType, DirMeta, FileMeta } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
-import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
+import { stringifyEnvelope } from "@/lib/serialize"
 import { kvGetJson, kvHas, kvSetJson } from "@/lib/storage/adapter"
 import { comboFor, setUserCombo } from "@/lib/keymap/registry"
-import { persistSession, resumeSession } from "@/lib/sdk/session"
 import { whenBootReady } from "@/lib/sdk/boot"
 import { readThumbnailBlob } from "@/features/drive/lib/thumbCache"
 import { inflightContentSchema } from "@/features/notes/lib/sync.logic"
@@ -14,7 +13,6 @@ import { latestInflightContent } from "@/features/notes/hooks/useNoteEditor.logi
 import { enqueueChatMessage } from "@/features/chats/lib/sync"
 import { inflightChatMessagesSchema } from "@/features/chats/lib/sync.logic"
 import { chatsQueryUpsert, chatsQueryGet } from "@/features/chats/queries/chats"
-import { log } from "@/lib/log"
 import { isScratchDebrisName } from "@/e2e-hooks/scratchDebris"
 
 // Test-only hooks, loaded ONLY when the app is built with VITE_E2E=1 (a dynamic import behind that
@@ -23,14 +21,25 @@ import { isScratchDebrisName } from "@/e2e-hooks/scratchDebris"
 //
 // The e2e harness never types credentials or the session blob into the UI: it logs in once
 // (`mint`), stores the resulting blob to a file, and re-seeds it on later loads via sessionStorage,
-// which `seedFromSlot` moves into the worker + kv through the app's own code paths. The blob carries
+// which bootSdk drains into kv before its own resumeSession (@/lib/sdk/boot). The blob carries
 // a bigint (`StringifiedClient.userId`), so it always travels as an envelope STRING (@/lib/serialize),
 // never raw JSON.
 
-const SESSION_SLOT = "filen.e2e.session"
-
 // Test kv probes go through the normal adapter, which requires an arktype schema on read.
 const stringSchema = type("string")
+
+// Age gate shared by the debris sweeps below. Without `minAgeMs` everything matched is removed (an
+// in-test teardown sweeps what it just created); with it, only items older than that window are — the
+// pre-run cleanup passes one so a CONCURRENTLY running suite's live fixtures can never match.
+function olderThan(minAgeMs: number | undefined): (timestamp: bigint) => boolean {
+	if (minAgeMs === undefined) {
+		return () => true
+	}
+
+	const cutoff = Date.now() - minAgeMs
+
+	return timestamp => Number(timestamp) <= cutoff
+}
 
 interface E2eHooks {
 	// Logs in and returns the session blob as an envelope string (bigint-safe, ready to persist).
@@ -106,10 +115,12 @@ interface E2eHooks {
 	// than drive's storage quota, so ANY spec that dies before its own teardown compounds into real,
 	// suite-wide failures far sooner than a stray drive item would. Trashes+deletes every note whose
 	// title starts with `prefix`. Returns the count removed.
-	sweepTestNotesByTitlePrefix: (prefix: string) => Promise<number>
+	// `minAgeMs` age-gates the match against `Note.createdTimestamp` — see olderThan.
+	sweepTestNotesByTitlePrefix: (prefix: string, minAgeMs?: number) => Promise<number>
 	// Tag counterpart: a spec that dies between creating its tag and deleting it leaves the tag behind
 	// (tags survive their notes — deleting a note never deletes the tags on it). Returns the count.
-	sweepTestTagsByNamePrefix: (prefix: string) => Promise<number>
+	// `minAgeMs` age-gates the match against `NoteTag.createdTimestamp` — see olderThan.
+	sweepTestTagsByNamePrefix: (prefix: string, minAgeMs?: number) => Promise<number>
 	// Drive-side counterpart to the note/tag sweeps above, and for the same reason: doing this through
 	// the UI meant rendering a debris-heavy listing, defeating a virtualizer with a tall viewport, and
 	// driving a select/confirm/toast cycle per row inside a wall-clock budget that was not enforced
@@ -118,7 +129,9 @@ interface E2eHooks {
 	// nothing read. `target` picks the surface: "root" moves matches to trash, "trash" deletes them
 	// permanently. Matching is isScratchDebrisName — the SAME anchored predicate the UI sweep used, so
 	// the safety argument is unchanged. Returns the count removed.
-	sweepTestDriveDebris: (target: "root" | "trash", limit: number) => Promise<number>
+	// `minAgeMs` age-gates the match against the row's own `timestamp` (server-set at creation, and
+	// unchanged by a trash, so the trash listing carries the same value) — see olderThan.
+	sweepTestDriveDebris: (target: "root" | "trash", limit: number, minAgeMs?: number) => Promise<number>
 	// Reads one cached thumbnail's on-disk size + write time, found by file name inside a parent
 	// directory. The only way to prove a repaint after a real page reload came from the existing OPFS
 	// cache entry rather than a fresh generation: a regenerate rewrites the file (a new
@@ -155,17 +168,11 @@ interface E2eHooks {
 	readPersistedInflightChatMessages: (chatUuid: string) => Promise<string[] | null>
 	// Defensive sweep (cleanup.setup.ts): deletes every conversation whose name starts with `prefix`.
 	// Returns the count removed.
-	sweepTestChatsByNamePrefix: (prefix: string) => Promise<number>
+	// `minAgeMs` age-gates the match against `Chat.created` — see olderThan.
+	sweepTestChatsByNamePrefix: (prefix: string, minAgeMs?: number) => Promise<number>
 	// Fires a realtime typing signal ("down"/"up") for a chat — the seam a second page drives so the
 	// first page's typing indicator can be exercised end-to-end. No-op when the uuid isn't found.
 	sendTestTypingSignal: (chatUuid: string, signalType: "up" | "down") => Promise<void>
-}
-
-// Minimal shape of the TanStack router main.tsx hands in — enough to re-run route guards after the
-// session is injected. `to` is narrowed to the one route the hook navigates to ("/") so the real,
-// strictly-typed router is structurally assignable here without a cast at the call site.
-interface RouterLike {
-	navigate: (opts: { to: "/" }) => Promise<unknown>
 }
 
 declare global {
@@ -174,33 +181,7 @@ declare global {
 	}
 }
 
-// If a session blob was seeded into sessionStorage (by the injection fixture), drive it through the
-// PRODUCTION session path — persist to kv, then resume (validate → inject into the worker) — so the
-// harness exercises the real save/restore round-trip rather than a bespoke write. Then clear the
-// one-shot slot and re-run the route guards. On this first seeded load the guards ran during boot
-// (kv still empty) and landed unauthed; a client-side navigation (never a reload — that would drop
-// the just-injected worker state) mirrors the real post-login transition and lets the authed shell
-// render. On a later reload the blob is already in kv, so bootSdk's own resumeSession authenticates
-// before the guards read hasClient() — no navigation needed.
-async function seedFromSlot(router: RouterLike): Promise<void> {
-	const raw = sessionStorage.getItem(SESSION_SLOT)
-
-	if (raw === null) {
-		return
-	}
-
-	sessionStorage.removeItem(SESSION_SLOT)
-
-	await whenBootReady()
-
-	const blob = parseEnvelope(raw) as StringifiedClient
-
-	await persistSession(blob)
-	await resumeSession()
-	await router.navigate({ to: "/" })
-}
-
-export function installE2eHooks(router: RouterLike): void {
+export function installE2eHooks(): void {
 	window.__filenE2E = {
 		mint: async (email, password) => {
 			await whenBootReady()
@@ -318,10 +299,11 @@ export function installE2eHooks(router: RouterLike): void {
 
 			return (await sdkApi.listNotes()).map(note => note.uuid)
 		},
-		sweepTestNotesByTitlePrefix: async prefix => {
+		sweepTestNotesByTitlePrefix: async (prefix, minAgeMs) => {
 			await whenBootReady()
 
-			const matches = (await sdkApi.listNotes()).filter(n => (n.title ?? "").startsWith(prefix))
+			const isOldEnough = olderThan(minAgeMs)
+			const matches = (await sdkApi.listNotes()).filter(n => (n.title ?? "").startsWith(prefix) && isOldEnough(n.createdTimestamp))
 
 			for (const note of matches) {
 				// deleteNote is permanent; trash first so a note in any lifecycle state is removable.
@@ -332,10 +314,13 @@ export function installE2eHooks(router: RouterLike): void {
 
 			return matches.length
 		},
-		sweepTestTagsByNamePrefix: async prefix => {
+		sweepTestTagsByNamePrefix: async (prefix, minAgeMs) => {
 			await whenBootReady()
 
-			const matches = (await sdkApi.listNoteTags()).filter(tag => (tag.name ?? "").startsWith(prefix))
+			const isOldEnough = olderThan(minAgeMs)
+			const matches = (await sdkApi.listNoteTags()).filter(
+				tag => (tag.name ?? "").startsWith(prefix) && isOldEnough(tag.createdTimestamp)
+			)
 
 			for (const tag of matches) {
 				// Sequential for the same reason as the note sweep above.
@@ -344,7 +329,7 @@ export function installE2eHooks(router: RouterLike): void {
 
 			return matches.length
 		},
-		sweepTestDriveDebris: async (target, limit) => {
+		sweepTestDriveDebris: async (target, limit, minAgeMs) => {
 			await whenBootReady()
 
 			// A row whose meta did not decode carries no name to match, so it can never be debris by this
@@ -355,9 +340,14 @@ export function installE2eHooks(router: RouterLike): void {
 			// across several calls and each one stays bounded. The first real run of this cleared 1,224
 			// trash rows the UI sweep had never been able to reach — a single unbounded call would have
 			// run for as long as that took, with the project timeout as its only limit.
+			const isOldEnough = olderThan(minAgeMs)
 			const matched = [
-				...listing.dirs.filter(d => isScratchDebrisName(nameOf(d.meta))).map(d => ({ kind: "dir" as const, item: d })),
-				...listing.files.filter(f => isScratchDebrisName(nameOf(f.meta))).map(f => ({ kind: "file" as const, item: f }))
+				...listing.dirs
+					.filter(d => isScratchDebrisName(nameOf(d.meta)) && isOldEnough(d.timestamp))
+					.map(d => ({ kind: "dir" as const, item: d })),
+				...listing.files
+					.filter(f => isScratchDebrisName(nameOf(f.meta)) && isOldEnough(f.timestamp))
+					.map(f => ({ kind: "file" as const, item: f }))
 			].slice(0, limit)
 
 			// Sequential, like the note sweep: these all serialise on the account-wide drive lock
@@ -495,10 +485,11 @@ export function installE2eHooks(router: RouterLike): void {
 
 			return group.messages.map(message => message.message ?? "")
 		},
-		sweepTestChatsByNamePrefix: async prefix => {
+		sweepTestChatsByNamePrefix: async (prefix, minAgeMs) => {
 			await whenBootReady()
 
-			const matches = (await sdkApi.listChats()).filter(chat => (chat.name ?? "").startsWith(prefix))
+			const isOldEnough = olderThan(minAgeMs)
+			const matches = (await sdkApi.listChats()).filter(chat => (chat.name ?? "").startsWith(prefix) && isOldEnough(chat.created))
 
 			for (const chat of matches) {
 				// Sequential, same rationale as the note/tag sweeps above.
@@ -519,8 +510,4 @@ export function installE2eHooks(router: RouterLike): void {
 			await sdkApi.sendTypingSignal(chat, signalType)
 		}
 	}
-
-	void seedFromSlot(router).catch((e: unknown) => {
-		log.error("e2e", "session seed failed", e)
-	})
 }

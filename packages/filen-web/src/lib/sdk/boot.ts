@@ -1,6 +1,9 @@
+import type { StringifiedClient } from "@filen/sdk-rs"
 import { sdkApi, threadCount } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { resumeSession } from "@/lib/sdk/session"
+import { persistSession, resumeSession } from "@/lib/sdk/session"
+import { parseEnvelope } from "@/lib/serialize"
+import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
 import { storage } from "@/lib/storage/adapter"
 import { isOpfsApiAvailable } from "@/lib/storage/capability"
 import { isOpfsUnavailableError } from "@/lib/storage/errors"
@@ -82,6 +85,16 @@ export async function bootSdk(): Promise<void> {
 			await sdkApi.setClientConfig(buildJsClientConfig(await getTransferPreferences()))
 		} catch (e) {
 			log.warn("boot", "failed to apply transfer config; using defaults", e)
+		}
+		// E2E only: the harness seeds the session through sessionStorage rather than the login form.
+		// Draining it before the resume below makes the very first load already authed, so the route
+		// guards never see an unauthed state and no navigation is needed to correct one.
+		if (import.meta.env.VITE_E2E === "1") {
+			const seeded = sessionStorage.getItem(SESSION_SLOT)
+			if (seeded !== null) {
+				sessionStorage.removeItem(SESSION_SLOT)
+				await persistSession(parseEnvelope(seeded) as StringifiedClient)
+			}
 		}
 		// Resume a persisted session into the worker BEFORE the gate flips to ready: guards observe
 		// readiness via whenBootReady() and then read hasClient(), so the client must already be

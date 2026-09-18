@@ -32,6 +32,15 @@ const SWEEP_BUDGET_MS = 150_000
 // unbounded remove-everything loop against the shared live account is the one failure mode this guards.
 const MAX_ROUNDS = 500
 
+// Drive debris only costs row churn, so its window is longer than any run — including CI's
+// 120-minute global timeout — and a concurrent suite's live fixtures can never be inside it.
+const MIN_DRIVE_DEBRIS_AGE_MS = 3 * 60 * 60_000
+
+// Notes/tags/chats sit under hard caps (see the notes-side setup below), so a killed run's leak has to
+// drain on the NEXT run rather than three hours later. Still far longer than a concurrent run's live
+// fixtures, each of which lives a few minutes inside one serial test.
+const MIN_NOTES_SIDE_DEBRIS_AGE_MS = 15 * 60_000
+
 // Removals per programmatic batch. Small enough that a budget check between batches bounds the
 // overshoot to seconds, large enough that draining a real backlog does not spend its time on round
 // trips — the first live run of this cleared 1,224 rows.
@@ -46,10 +55,10 @@ async function sweepDriveSurface(page: Page, target: "root" | "trash"): Promise<
 	let total = 0
 
 	while (Date.now() < deadline) {
-		const removed = await page.evaluate(([surface, limit]) => window.__filenE2E.sweepTestDriveDebris(surface, limit), [
-			target,
-			SWEEP_BATCH
-		] as const)
+		const removed = await page.evaluate(
+			([surface, limit, minAgeMs]) => window.__filenE2E.sweepTestDriveDebris(surface, limit, minAgeMs),
+			[target, SWEEP_BATCH, MIN_DRIVE_DEBRIS_AGE_MS] as const
+		)
 
 		total += removed
 
@@ -178,15 +187,24 @@ setup("sweep notes, tags and chats matching a spec-minted debris prefix", async 
 		await expect(page.getByRole("navigation", { name: "Filen" })).toBeVisible()
 
 		await sweepPrefixes("note", NOTE_DEBRIS_TITLE_PREFIXES, prefix =>
-			page.evaluate(p => window.__filenE2E.sweepTestNotesByTitlePrefix(p), prefix)
+			page.evaluate(([p, minAgeMs]) => window.__filenE2E.sweepTestNotesByTitlePrefix(p, minAgeMs), [
+				prefix,
+				MIN_NOTES_SIDE_DEBRIS_AGE_MS
+			] as const)
 		)
 		await sweepPrefixes("tag", TAG_DEBRIS_NAME_PREFIXES, prefix =>
-			page.evaluate(p => window.__filenE2E.sweepTestTagsByNamePrefix(p), prefix)
+			page.evaluate(([p, minAgeMs]) => window.__filenE2E.sweepTestTagsByNamePrefix(p, minAgeMs), [
+				prefix,
+				MIN_NOTES_SIDE_DEBRIS_AGE_MS
+			] as const)
 		)
 		// Chats: self-chat fixtures leaked by a dead chats.spec run (createChat fights a
 		// conversations/create rate limit, so leaks compound fast).
 		await sweepPrefixes("conversation", CHAT_DEBRIS_NAME_PREFIXES, prefix =>
-			page.evaluate(p => window.__filenE2E.sweepTestChatsByNamePrefix(p), prefix)
+			page.evaluate(([p, minAgeMs]) => window.__filenE2E.sweepTestChatsByNamePrefix(p, minAgeMs), [
+				prefix,
+				MIN_NOTES_SIDE_DEBRIS_AGE_MS
+			] as const)
 		)
 	} catch (error) {
 		console.log(`cleanup-setup: notes-side sweep stopped early — ${String(error)}`)

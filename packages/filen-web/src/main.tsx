@@ -56,7 +56,7 @@ if (import.meta.env.VITE_E2E === "1") {
 
 	void import("@/e2e-hooks")
 		.then(m => {
-			m.installE2eHooks(router)
+			m.installE2eHooks()
 		})
 		.catch((error: unknown) => {
 			// Nothing retries this import, so a failed chunk fetch leaves window.__filenE2E absent for
