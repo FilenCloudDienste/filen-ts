@@ -188,6 +188,8 @@ export const drive = {
 	driveSelectionCount_one: "{{count}} selected",
 	/** Drive listing — selection count shown in the toolbar in place of the item count; plural */
 	driveSelectionCount_other: "{{count}} selected",
+	/** Bulk action bar — accessible name of the floating toolbar shown while a drive selection exists */
+	driveSelectionActionsLabel: "Selection actions",
 	/** Drive listing row — visually-hidden label announcing a favorited item's star indicator */
 	driveFavorited: "Favorited",
 	/** Grid tile — visually-hidden label announcing the selection checkmark badge shown on a selected tile, in addition to its selection ring */

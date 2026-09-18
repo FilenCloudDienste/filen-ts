@@ -61,7 +61,11 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 	}
 
 	return (
-		<div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-popover px-3 py-2 text-popover-foreground shadow-lg">
+		<div
+			role="toolbar"
+			aria-label={t("driveSelectionActionsLabel")}
+			className="pointer-events-auto flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-popover px-3 py-2 text-popover-foreground shadow-lg"
+		>
 			<div className="flex items-center gap-2">
 				<Tooltip>
 					<TooltipTrigger
