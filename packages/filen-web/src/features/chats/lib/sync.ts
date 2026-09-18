@@ -126,7 +126,7 @@ export class Sync {
 	// content, so force one when the store holds carried-over optimistic work the dead leader never persisted.
 	//
 	// Handoff window (documented, mobile-parity residual): the dead leader dequeues a committed send from the
-	// in-memory store and THEN persists (sync() flushes after the pass). A crash BETWEEN server-commit and
+	// in-memory store and THEN persists (sync() flushes per commit). A crash BETWEEN server-commit and
 	// that flush leaves the committed send still on disk → the promoted leader replays it → a duplicate. This
 	// is the same server-commit↔dequeue race the single-tab outbox already documents; leadership handoff adds
 	// no NEW double-send because only one loop ever runs — the promoted tab starts its loop only after the old
@@ -454,8 +454,9 @@ export class Sync {
 	// irreversibly accepted server-side (carried back on the returned chat's lastMessage). Everything
 	// after that resolution is best-effort and MUST NOT re-throw — otherwise the loop below would treat
 	// a committed send as failed and retry it, creating a peer-visible duplicate (no client id means
-	// each retry is a brand-new message). Throws ONLY when the send itself (the commit) fails.
-	private async pushMessage(chat: Chat, message: ChatMessageWithInflightId): Promise<void> {
+	// each retry is a brand-new message). Throws ONLY when the send itself (the commit) fails. Returns the
+	// committed chat so the caller can run the best-effort housekeeping AFTER the durable dequeue.
+	private async pushMessage(chat: Chat, message: ChatMessageWithInflightId): Promise<Chat> {
 		const inflightId = message.inflightId
 		// The commit. A throw here propagates to the loop's catch (a genuine send failure).
 		const updatedChat = await sdkApi.sendChatMessage(chat, message.message ?? "", message.replyTo)
@@ -484,8 +485,7 @@ export class Sync {
 			chatMessagesQueryUpdate(chat.uuid, prev => prev.filter(m => m.uuid !== inflightId))
 		}
 
-		// Post-commit housekeeping is best-effort — a rejection here must NOT bubble.
-		await Promise.allSettled([sdkApi.markChatRead(updatedChat), sdkApi.updateLastChatFocusTimesNow([updatedChat])])
+		return updatedChat
 	}
 
 	private async sync(): Promise<void> {
@@ -547,8 +547,10 @@ export class Sync {
 						// reverts to "pending"/"failed" and one that commits reverts to "confirmed" via dequeue.
 						this.setSending(message.inflightId, true)
 
+						let committedChat: Chat | undefined
+
 						try {
-							await this.pushMessage(chat, message)
+							committedChat = await this.pushMessage(chat, message)
 
 							// Success: clear any error record for this send.
 							useChatsInflightStore.getState().setInflightErrors(prev => {
@@ -611,8 +613,17 @@ export class Sync {
 							this.setSending(message.inflightId, false)
 						}
 
-						// Committed: remove from the queue (drop the chat key when empty).
+						// Committed: remove from the queue (drop the chat key when empty) and make that durable
+						// immediately. The housekeeping below is two best-effort round trips — running them
+						// first would hold a committed send on disk across both, and a tab closed in that
+						// window replays it as a peer-visible duplicate.
 						this.dequeue(chatUuid, message.inflightId)
+
+						await this.flushToDisk(useChatsInflightStore.getState().inflightMessages)
+
+						// Fired OUTSIDE the try so a rejection can never be read as a send failure (which would
+						// retry an already-committed message); allSettled keeps it unhandled-safe.
+						void Promise.allSettled([sdkApi.markChatRead(committedChat), sdkApi.updateLastChatFocusTimesNow([committedChat])])
 					}
 				})
 			)

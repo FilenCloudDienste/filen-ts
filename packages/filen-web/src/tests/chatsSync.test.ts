@@ -205,6 +205,44 @@ describe("commit — dequeue + reconcile the message cache off the returned chat
 	})
 })
 
+describe("commit boundary — the durable dequeue lands BEFORE the best-effort housekeeping", () => {
+	it("persists the drained queue before markChatRead is even called, per committed message", async () => {
+		// Both kv writers count as "flush": the first commit leaves one message queued (kvSetJson), the
+		// second drains the chat (kvDelete).
+		const order: string[] = []
+
+		kvSetJson.mockImplementation((key: string, value: unknown) => {
+			order.push("flush")
+			kvStore.set(key, value)
+
+			return Promise.resolve()
+		})
+		kvDelete.mockImplementation((key: string) => {
+			order.push("flush")
+			kvStore.delete(key)
+
+			return Promise.resolve()
+		})
+		markChatRead.mockImplementation(() => {
+			order.push("markChatRead")
+
+			return Promise.resolve()
+		})
+
+		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "m1"), opt("chat-a-a-a", "inf-2-2-2", 2n, "m2")])
+
+		sync.syncNow()
+		await tick()
+		await tick()
+
+		// The trailing flush is the end-of-pass one; what matters is that neither markChatRead is reached
+		// before its own message is off disk.
+		expect(order).toEqual(["flush", "markChatRead", "flush", "markChatRead", "flush"])
+		expect(queue()["chat-a-a-a"]).toBeUndefined()
+		expect(kvStore.has("inflightChatMessages")).toBe(false)
+	})
+})
+
 describe("commit boundary — the post-commit tail never re-throws (no duplicate on a housekeeping failure)", () => {
 	it("keeps the message committed + dequeued even when markChatRead rejects after the send resolved", async () => {
 		markChatRead.mockRejectedValue(new Error("read failed"))
