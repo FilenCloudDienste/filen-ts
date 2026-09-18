@@ -63,10 +63,6 @@ export function notesQueryRemove(uuid: string): void {
 	notesQueryUpdate(prev => prev.filter(n => n.uuid !== uuid))
 }
 
-export function notesQueryReplaceAll(notes: Note[]): void {
-	notesQueryUpdate(() => notes)
-}
-
 // Synchronous cache read for a caller that needs the current note list without subscribing via the
 // hook — mirrors contactsQueryGet's own rationale (a menu/action call site resolving a note's live
 // row, e.g. after a socket event, without mounting a new observer).

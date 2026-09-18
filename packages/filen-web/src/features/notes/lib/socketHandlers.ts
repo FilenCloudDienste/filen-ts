@@ -8,7 +8,7 @@ import useNotesInflightStore, { hasInflight } from "@/features/notes/store/useNo
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { sync } from "@/features/notes/lib/sync"
 import { noteKindForPreview } from "@/features/notes/lib/sync.logic"
-import { fetchNotes, notesQueryUpdate, notesQueryRemove, notesQueryReplaceAll, notesQueryGet } from "@/features/notes/queries/notes"
+import { fetchNotes, notesQueryUpdate, notesQueryRemove, notesQueryGet } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 
 // The realtime note event handlers — a faithful port of filen-mobile's socketHandlers.ts SEMANTICS
@@ -104,10 +104,9 @@ export function handleNoteEvent(event: NoteSocketEvent): void {
 		}
 
 		case "new": {
-			// Mobile refetches the list rather than build the row from the sparse `{ note: uuid }` payload
-			// (it carries no Note). Fetch + replace so the new (or newly-shared-in) note lands with full
-			// metadata. Fire-and-forget: a failed refetch just leaves the list until the next trigger.
-			void refetchNotesList()
+			// The payload is sparse (`{ note: uuid }`, no Note), so a list fetch is the only source of the
+			// row's metadata. Fire-and-forget: a failed fetch just leaves the list until the next trigger.
+			void mergeNewNotes()
 
 			break
 		}
@@ -127,11 +126,26 @@ export function handleNoteEvent(event: NoteSocketEvent): void {
 	}
 }
 
-async function refetchNotesList(): Promise<void> {
+// Additive, never a replace: this fetch is out-of-band (not a React Query fetch, so the patchers'
+// cancel-before-write cannot abort it) and the server serves the note in its just-created state, so a
+// replace landing after the local writes that follow a create — setNoteType applying the default-type
+// preference, import seeding its own type — would regress the row to plain text under a default title.
+// Rows that vanished server-side are dropped by their own events (deleted / participantRemoved). The
+// cost of never replacing: a row trashed, pinned or favourited on another device — states the event
+// catalog carries no variant for — is no longer corrected by a `new` event either, and relies on the
+// query's staleTime 0 plus its refetch on focus/reconnect (queries/client.ts).
+async function mergeNewNotes(): Promise<void> {
 	try {
-		notesQueryReplaceAll(await fetchNotes())
+		const fetched = await fetchNotes()
+
+		notesQueryUpdate(prev => {
+			const known = new Set(prev.map(n => n.uuid))
+			const added = fetched.filter(n => !known.has(n.uuid))
+
+			return added.length === 0 ? prev : [...prev, ...added]
+		})
 	} catch (e) {
-		log.error("socket", "note new: list refetch failed", e)
+		log.error("socket", "note new: list fetch failed", e)
 	}
 }
 

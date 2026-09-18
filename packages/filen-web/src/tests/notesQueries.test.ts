@@ -49,7 +49,6 @@ import {
 	NOTES_QUERY_KEY,
 	notesQueryGet,
 	notesQueryRemove,
-	notesQueryReplaceAll,
 	notesQueryUpdate,
 	notesQueryUpsert,
 	useNotes
@@ -201,17 +200,6 @@ describe("notesQueryRemove", () => {
 		notesQueryRemove(testUuid("a"))
 
 		expect(notesQueryGet()).toEqual([second])
-	})
-})
-
-describe("notesQueryReplaceAll", () => {
-	it("replaces the whole cached list", () => {
-		testQueryClient.setQueryData(NOTES_QUERY_KEY, [mockNote({ uuid: testUuid("a") })])
-		const next = [mockNote({ uuid: testUuid("b") }), mockNote({ uuid: testUuid("c") })]
-
-		notesQueryReplaceAll(next)
-
-		expect(notesQueryGet()).toEqual(next)
 	})
 })
 

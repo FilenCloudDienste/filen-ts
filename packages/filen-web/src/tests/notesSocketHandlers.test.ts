@@ -154,7 +154,7 @@ describe("note socket handlers — metadata", () => {
 		expect(getNotes()[0]?.participants[0]?.permissionsWrite).toBe(true)
 	})
 
-	it("new refetches the list and replaces the cache", async () => {
+	it("new fetches the list and appends the notes the cache is missing", async () => {
 		seedNotes([makeNote("a")])
 		listNotes.mockResolvedValueOnce([makeNote("a"), makeNote("b")])
 
@@ -164,6 +164,46 @@ describe("note socket handlers — metadata", () => {
 		})
 
 		expect(listNotes).toHaveBeenCalledTimes(1)
+	})
+
+	// The create race: the fetch is snapshotted while the note is still in its just-created state
+	// ("text", default title) and resolves AFTER createNote's own setNoteType + upsert landed, so a
+	// replace would silently flip an open note back to the plain-text editor.
+	it("new leaves an already-cached row untouched when the fetch carries a staler copy of it", async () => {
+		seedNotes([makeNote("a"), makeNote("b", { noteType: "checklist", title: "Shopping list" })])
+		listNotes.mockResolvedValueOnce([makeNote("a"), makeNote("b", { noteType: "text", title: "2026-01-01 12:00:00" }), makeNote("c")])
+
+		handleNoteEvent(noteEvt({ type: "new", note: "c" as never }))
+		await vi.waitFor(() => {
+			expect(getNotes().map(n => n.uuid)).toEqual(["a", "b", "c"])
+		})
+
+		expect(getNotes()[1]).toMatchObject({ uuid: "b", noteType: "checklist", title: "Shopping list" })
+	})
+
+	it("new leaves the cache untouched when the fetch adds nothing", async () => {
+		const cached = [makeNote("a")]
+		seedNotes(cached)
+		listNotes.mockResolvedValueOnce([makeNote("a")])
+
+		handleNoteEvent(noteEvt({ type: "new", note: "a" as never }))
+		await vi.waitFor(() => {
+			expect(listNotes).toHaveBeenCalledTimes(1)
+		})
+
+		expect(getNotes()).toBe(cached)
+	})
+
+	it("new logs and leaves the cache untouched when the fetch fails", async () => {
+		seedNotes([makeNote("a")])
+		listNotes.mockRejectedValueOnce(new Error("offline"))
+
+		handleNoteEvent(noteEvt({ type: "new", note: "b" as never }))
+		await vi.waitFor(() => {
+			expect(logError).toHaveBeenCalled()
+		})
+
+		expect(getNotes().map(n => n.uuid)).toEqual(["a"])
 	})
 })
 
