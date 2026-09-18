@@ -80,6 +80,33 @@ describe("RangeFetchTokenizer", () => {
 		expect(read).toBe(5)
 	})
 
+	it("calls the default global fetch detached from the tokenizer — a bare method call is an Illegal invocation", async () => {
+		const file = fakeFile()
+		const receivers: unknown[] = []
+
+		vi.stubGlobal("fetch", function stubbed(this: unknown, _url: RequestInfo | URL, _init?: RequestInit) {
+			receivers.push(this)
+
+			return Promise.resolve({
+				ok: true,
+				status: 206,
+				arrayBuffer: () => Promise.resolve(file.slice(0, 4).buffer)
+			} as Response)
+		})
+
+		try {
+			// No injected impl: the production path, which every other case here bypasses.
+			const tokenizer = new RangeFetchTokenizer("/sw/download/x", FILE_SIZE, "audio/mpeg")
+
+			await tokenizer.readBuffer(new Uint8Array(4), { position: 0, length: 4 })
+
+			expect(receivers).toHaveLength(1)
+			expect(receivers[0]).toBeUndefined()
+		} finally {
+			vi.unstubAllGlobals()
+		}
+	})
+
 	it("reports random-access support and setPosition moves the cursor without a fetch", () => {
 		const file = fakeFile()
 		const { fetchImpl, requests } = makeFetch(file)

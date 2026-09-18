@@ -26,7 +26,10 @@ export class RangeFetchTokenizer extends AbstractTokenizer {
 
 		this.url = url
 		this.fileInfo = mimeType !== undefined ? { size, mimeType } : { size }
-		this.fetchImpl = fetchImpl
+		// Wrapped, never stored bare: a browser `fetch` reached as `this.fetchImpl(...)` runs with the
+		// tokenizer as its receiver and throws "Illegal invocation", which the caller swallows as a failed
+		// tag read — every streamed track silently degrading to filename-only.
+		this.fetchImpl = (input, init) => fetchImpl(input, init)
 	}
 
 	public supportsRandomAccess(): boolean {

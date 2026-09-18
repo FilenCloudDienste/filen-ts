@@ -361,6 +361,12 @@ export class AudioEngine {
 		outgoing?.clear()
 		outgoing?.dispose()
 
+		// A warm element announced its duration while bound to the INERT warm-up events, and a loaded
+		// element never re-fires `durationchange` — so without this seed the store keeps the 0 setCurrent
+		// wrote and the scrubber stays dead for the whole promoted track. Reads 0 when the warm-up had not
+		// reached metadata yet; the now-bound handler corrects that when it lands.
+		this.onDurationChange()
+
 		try {
 			await promoted.play()
 		} catch (error) {

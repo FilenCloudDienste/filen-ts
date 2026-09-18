@@ -52,12 +52,13 @@ interface FakeElement {
 	adapter: AudioElementAdapter
 	calls: { load: string[]; play: number; pause: number; clear: number; dispose: number; rebindCount: number }
 	fire: (name: keyof AudioElementEvents) => void
+	setSample: (next: Partial<ElementSample>) => void
 }
 
 function makeFakeElement(initialEvents: AudioElementEvents): FakeElement {
 	const calls = { load: [] as string[], play: 0, pause: 0, clear: 0, dispose: 0, rebindCount: 0 }
 	let events = initialEvents
-	const sample: ElementSample = { currentTimeMs: 0, durationMs: 0, paused: true, ended: false }
+	let sample: ElementSample = { currentTimeMs: 0, durationMs: 0, paused: true, ended: false }
 
 	const adapter: AudioElementAdapter = {
 		load: src => {
@@ -92,6 +93,9 @@ function makeFakeElement(initialEvents: AudioElementEvents): FakeElement {
 		calls,
 		fire: name => {
 			events[name]()
+		},
+		setSample: next => {
+			sample = { ...sample, ...next }
 		}
 	}
 }
@@ -214,6 +218,25 @@ describe("prefetch — promote on advance", () => {
 		expect(h.mainFakes[0]?.calls.dispose).toBe(1)
 		expect(useAudioStore.getState().currentIndex).toBe(1)
 		expect(useAudioStore.getState().status).toBe("playing")
+	})
+
+	it("publishes the promoted element's duration — its own durationchange fired into the inert warm-up events", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		// The warm-up reached metadata while silently buffering: it fired durationchange into the inert
+		// events, and a loaded element never re-fires it, so promotion is the last chance to read it.
+		h.prefetchFakes[0]?.setSample({ durationMs: 60_000 })
+		useAudioStore.getState().setDuration(120_000)
+
+		await h.engine.skipNext()
+		await flush()
+
+		expect(h.prefetchFakes[0]?.calls.play).toBe(1)
+		// Not the outgoing track's 120s, and not the 0 setCurrent wrote — a dead, disabled scrubber.
+		expect(useAudioStore.getState().durationMs).toBe(60_000)
 	})
 
 	it("keeps at most one element warmed ahead at a time", async () => {
