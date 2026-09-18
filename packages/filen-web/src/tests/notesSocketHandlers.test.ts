@@ -8,7 +8,7 @@ const { listNotes } = vi.hoisted(() => ({ listNotes: vi.fn<() => Promise<Note[]>
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listNotes } }))
 
 // The sync outbox singleton — mocked so the reload action's seam calls are observable and sync.ts's heavy
-// deps stay out of node. The store it reads (useNotesInflight) is NOT mocked (hasInflight is real).
+// deps stay out of node. The store it reads (useNotesInflight) is NOT mocked (the editing test is real).
 const { dropEntry, clearRejections, flushToDisk } = vi.hoisted(() => ({
 	dropEntry: vi.fn<(uuid: string) => void>(),
 	clearRejections: vi.fn<(uuid: string) => void>(),
@@ -27,7 +27,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { NOTES_QUERY_KEY } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
-import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight"
+import useNotesInflightStore, { beginEditingSession, type InflightContent } from "@/features/notes/store/useNotesInflight"
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { handleNoteEvent, reloadRemoteEdit, dismissRemoteEdit } from "@/features/notes/lib/socketHandlers"
 
@@ -84,6 +84,7 @@ function setAccountId(id: bigint): void {
 beforeEach(() => {
 	testQueryClient.clear()
 	setStore({})
+	useNotesInflightStore.setState({ editingSessions: {} })
 	useNotesRemoteEditStore.setState({ remoteEdited: {} })
 	vi.clearAllMocks()
 })
@@ -256,6 +257,23 @@ describe("note socket handlers — contentEdited", () => {
 		expect(getNotes()[0]?.editedTimestamp).toBe(1n)
 	})
 
+	it("dirty note (editor session, outbox already drained): prompts instead of invalidating", () => {
+		// The regression this guards: a push empties the outbox entry, so a note the user is still typing
+		// into reads as inflight-free. Invalidating there refetches, advances the content query's
+		// dataUpdatedAt and remounts the live editor — the caret goes with it, and every keystroke after
+		// that lands on document.body.
+		seedNotes([makeNote("a", { editedTimestamp: 1n })])
+		setAccountId(7n)
+		beginEditingSession("a")
+		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+
+		handleNoteEvent(contentEdited("a", 99))
+
+		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBe(true)
+		expect(invalidate).not.toHaveBeenCalled()
+		expect(getNotes()[0]?.editedTimestamp).toBe(1n)
+	})
+
 	it("skips silently when the note is not in the list cache", () => {
 		seedNotes([])
 		setAccountId(7n)
@@ -279,6 +297,14 @@ describe("note socket handlers — reload/keep actions", () => {
 		expect(flushToDisk).toHaveBeenCalledTimes(1)
 		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
 		expect(invalidate).toHaveBeenCalledWith({ queryKey: noteContentQueryKey("a") })
+	})
+
+	it("reload ends the editing session so the re-enabled content query can actually refetch", async () => {
+		beginEditingSession("a")
+
+		await reloadRemoteEdit(makeNote("a"))
+
+		expect(useNotesInflightStore.getState().editingSessions["a"]).toBeUndefined()
 	})
 
 	it("keep clears the flag and leaves the outbox untouched", () => {

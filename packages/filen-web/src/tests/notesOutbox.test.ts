@@ -43,7 +43,12 @@ vi.mock("sonner", () => ({ toast }))
 vi.mock("@/lib/i18n", () => ({ i18n: { t: (key: string) => key } }))
 
 import { Sync } from "@/features/notes/lib/sync"
-import useNotesInflightStore, { hasInflight, type InflightContent } from "@/features/notes/store/useNotesInflight"
+import useNotesInflightStore, {
+	noteIsEditing,
+	beginEditingSession,
+	endEditingSession,
+	type InflightContent
+} from "@/features/notes/store/useNotesInflight"
 import { reconcileFollower, hashNoteContent, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
@@ -97,6 +102,12 @@ function setStore(content: InflightContent): void {
 
 function getStore(): InflightContent {
 	return useNotesInflightStore.getState().inflightContent
+}
+
+// The QUEUE alone — what the leader drains and the header spinner reads — not the broader
+// "is the user editing this note" test (noteIsEditing), which also counts a live editor session.
+function queued(uuid: string): boolean {
+	return (getStore()[uuid] ?? []).length > 0
 }
 
 async function flushAsync(): Promise<void> {
@@ -186,7 +197,7 @@ describe("follower enqueue — optimistic local apply + forward, no disk", () =>
 		await s.enqueue(note, "typed", hashNoteContent("seed"))
 
 		// Optimistic: the store shows it immediately (UI gating must not wait a round trip).
-		expect(hasInflight("a")).toBe(true)
+		expect(queued("a")).toBe(true)
 		expect(getStore()["a"]?.[0]?.content).toBe("typed")
 
 		// Forwarded to the leader, carrying the follower's own timestamp + base hash.
@@ -242,7 +253,7 @@ describe("follower hydration gate", () => {
 		s.applyLeaderState({ a: [{ timestamp: 1, content: "another tab's edit", note }] })
 
 		expect(useNotesInflightStore.getState().outboxHydrated).toBe(true)
-		expect(hasInflight("a")).toBe(true)
+		expect(queued("a")).toBe(true)
 	})
 
 	it("opens immediately when no channel is attached — nothing can ever answer", () => {
@@ -269,11 +280,11 @@ describe("follower reconcile-on-broadcast — spinner clears when the leader dra
 
 		// Leader confirms receipt (its state carries our entry).
 		s.applyLeaderState({ a: [{ timestamp: forwarded.timestamp, content: "typed", note }] })
-		expect(hasInflight("a")).toBe(true)
+		expect(queued("a")).toBe(true)
 
 		// Leader pushed + drained → empty state → the follower's spinner clears.
 		s.applyLeaderState({})
-		expect(hasInflight("a")).toBe(false)
+		expect(queued("a")).toBe(false)
 	})
 })
 
@@ -446,5 +457,61 @@ describe("terminal shutdown — no cross-tab resurrection after logout", () => {
 		s.broadcastState()
 
 		expect(transport.broadcastState).not.toHaveBeenCalled()
+	})
+})
+
+// The editing session is what "the user is editing this note" actually means. The outbox entry alone
+// answers a narrower question and stops being true at every push — see useNoteContentQuery's gate.
+describe("editing sessions", () => {
+	beforeEach(() => {
+		useNotesInflightStore.setState({ inflightContent: {}, editingSessions: {} })
+	})
+
+	it("survives the drain that empties the note's outbox entry", () => {
+		const note = makeNote("a")
+
+		useNotesInflightStore.setState({ inflightContent: { a: [{ timestamp: 1, content: "x", note }] } })
+		beginEditingSession("a")
+
+		expect(noteIsEditing(useNotesInflightStore.getState(), "a")).toBe(true)
+
+		// The push drained the queue; the user is still typing.
+		useNotesInflightStore.setState({ inflightContent: {} })
+
+		expect(queued("a")).toBe(false)
+		expect(noteIsEditing(useNotesInflightStore.getState(), "a")).toBe(true)
+	})
+
+	it("ends on request and leaves other notes alone", () => {
+		beginEditingSession("a")
+		beginEditingSession("b")
+		endEditingSession("a")
+
+		expect(noteIsEditing(useNotesInflightStore.getState(), "a")).toBe(false)
+		expect(noteIsEditing(useNotesInflightStore.getState(), "b")).toBe(true)
+	})
+
+	it("cancel() clears every session so a wiped account leaves no note gated", () => {
+		beginEditingSession("a")
+
+		new Sync().cancel()
+
+		expect(useNotesInflightStore.getState().editingSessions).toStrictEqual({})
+	})
+
+	it("is idempotent in both directions (no state churn per keystroke)", () => {
+		beginEditingSession("a")
+		const afterBegin = useNotesInflightStore.getState().editingSessions
+
+		beginEditingSession("a")
+
+		expect(useNotesInflightStore.getState().editingSessions).toBe(afterBegin)
+
+		endEditingSession("a")
+		const afterEnd = useNotesInflightStore.getState().editingSessions
+
+		endEditingSession("a")
+
+		expect(useNotesInflightStore.getState().editingSessions).toBe(afterEnd)
 	})
 })

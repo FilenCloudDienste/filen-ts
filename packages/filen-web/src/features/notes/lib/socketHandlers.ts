@@ -4,7 +4,7 @@ import { registerSocketHandler, decryptedOrSkip } from "@/lib/sdk/socket"
 import { queryClient } from "@/queries/client"
 import { log } from "@/lib/log"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import useNotesInflightStore, { hasInflight } from "@/features/notes/store/useNotesInflight"
+import useNotesInflightStore, { isNoteEditing, endEditingSession } from "@/features/notes/store/useNotesInflight"
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { sync } from "@/features/notes/lib/sync"
 import { noteKindForPreview } from "@/features/notes/lib/sync.logic"
@@ -170,10 +170,12 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 		return
 	}
 
-	// Dirty ≡ has an outbox entry: on web every keystroke enqueues synchronously (useNoteEditor.onChange),
-	// so there is no dirty-but-not-inflight buffer state to track separately. Dirty → PROMPT (banner);
-	// never invalidate while inflight (the content query is disabled, so an invalidate would only defer).
-	if (hasInflight(inner.note)) {
+	// Dirty ≡ the user is editing this note: an outbox entry OR an open editor session. The entry alone
+	// is the wrong test — a push empties it, so a note being typed into reads as clean for the gap
+	// between the debounce flush and the next keystroke, and invalidating there refetches, advances the
+	// content query's dataUpdatedAt and remounts the live editor, dropping the caret mid-word. Dirty →
+	// PROMPT (banner); never invalidate while editing (the query is disabled, so it would only defer).
+	if (isNoteEditing(inner.note)) {
 		useNotesRemoteEditStore.getState().setRemoteEdited(inner.note)
 
 		return
@@ -188,13 +190,16 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 }
 
 // The banner's "Reload" action: discard the unsynced local edit and take the server's version. dropEntry
-// re-enables the note's content query (enabled: !inflight) so its remount key can advance and the editor
-// reseeds with fresh content; clearRejections + flushToDisk make the discard durable with a clean strike
-// count; invalidate marks the content stale so the re-enabled query refetches. Extracted (not inlined in
-// the banner) so this project's node-environment tests exercise it against a mocked sync + queryClient.
+// plus closing the editing session re-enable the note's content query (enabled: !editing) so its remount
+// key can advance and the editor reseeds with fresh content — a reseed is the whole point here, so this
+// is the one place that ends a session an editor is still mounted on; clearRejections + flushToDisk make
+// the discard durable with a clean strike count; invalidate marks the content stale so the re-enabled
+// query refetches. Extracted (not inlined in the banner) so this project's node-environment tests
+// exercise it against a mocked sync + queryClient.
 export async function reloadRemoteEdit(note: Note): Promise<void> {
 	sync.dropEntry(note.uuid)
 	sync.clearRejections(note.uuid)
+	endEditingSession(note.uuid)
 
 	const flushed = await sync.flushToDisk(useNotesInflightStore.getState().inflightContent)
 

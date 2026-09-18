@@ -30,6 +30,7 @@ vi.mock("@/lib/log", () => ({ log: { warn: logWarn, error: vi.fn(), info: vi.fn(
 import { queryClient as testQueryClient } from "@/queries/client"
 import { NOTES_QUERY_KEY, notesQueryGet } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
+import useNotesInflightStore, { beginEditingSession } from "@/features/notes/store/useNotesInflight"
 import { restoreNoteFromHistory } from "@/features/notes/lib/history"
 
 beforeEach(() => {
@@ -107,6 +108,16 @@ describe("restoreNoteFromHistory", () => {
 		expect(dropEntry).toHaveBeenCalledExactlyOnceWith(updated.uuid)
 		expect(clearRejections).toHaveBeenCalledExactlyOnceWith(updated.uuid)
 		expect(callOrder).toEqual(["dropEntry", "clearRejections", "flushToDisk"])
+	})
+
+	it("ends the editing session so the re-enabled content query takes the restored version", async () => {
+		const note = mockNote()
+		restoreNoteFromHistoryOp.mockResolvedValueOnce(note)
+		beginEditingSession(note.uuid)
+
+		await restoreNoteFromHistory(note, mockHistory({ content: "restored" }))
+
+		expect(useNotesInflightStore.getState().editingSessions[note.uuid]).toBeUndefined()
 	})
 
 	it("known content: paints it directly into the content cache (bumps dataUpdatedAt for the editor remount key)", async () => {

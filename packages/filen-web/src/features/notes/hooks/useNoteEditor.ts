@@ -2,9 +2,15 @@ import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import type { Note } from "@filen/sdk-rs"
-import { useNoteContentQuery, isUndecryptableContentError } from "@/features/notes/queries/noteContent"
-import useNotesInflightStore, { useNoteInflight, useOutboxHydrated } from "@/features/notes/store/useNotesInflight"
+import { useNoteContentQuery, isUndecryptableContentError, noteContentQueryKey } from "@/features/notes/queries/noteContent"
+import useNotesInflightStore, {
+	useNoteInflight,
+	useOutboxHydrated,
+	beginEditingSession,
+	endEditingSession
+} from "@/features/notes/store/useNotesInflight"
 import { sync } from "@/features/notes/lib/sync"
+import { queryClient } from "@/queries/client"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import {
 	deriveEditorSeed,
@@ -26,7 +32,8 @@ export interface NoteEditorController {
 	// `remountKey` so a re-render can never re-paste it into a live editor and revert typed text.
 	seed: string
 	// note.uuid + dataUpdatedAt — the editor's remount key. Cannot advance mid-edit (the content query
-	// is disabled while inflight), so a keyed editor never remounts and wipes the cursor mid-session.
+	// is disabled for the whole editing session), so a keyed editor never remounts and wipes the cursor
+	// mid-session.
 	remountKey: string
 	readOnly: boolean
 	isInflight: boolean
@@ -84,6 +91,16 @@ export function useNoteEditor(note: Note, currentUserId: bigint | undefined): No
 		})
 	}, [note.uuid, seed, isInflight])
 
+	// The editing session this controller owns: opened by the first local change below, closed when the
+	// editor unmounts (switching notes, leaving the route). It is what keeps the content query — and so
+	// the remount key — frozen across a debounce flush, which empties the outbox entry that used to
+	// stand in for "the user is editing this note".
+	useEffect(() => {
+		return () => {
+			endEditingSession(note.uuid)
+		}
+	}, [note.uuid])
+
 	// Coalesced per-note warning that a durable persist failed (the edit lives in memory + is still
 	// pushed when online, but is not safely on this device's disk). One warning per failure streak;
 	// re-arms after a persist succeeds. Instance state in a ref so React Compiler cannot memoize it away.
@@ -95,6 +112,17 @@ export function useNoteEditor(note: Note, currentUserId: bigint | undefined): No
 		// the note. The editor is rendered read-only here anyway; this is the belt-and-braces layer.
 		if (readOnly) {
 			return
+		}
+
+		// From here until this editor unmounts, nothing may reseed the surface out from under the caret.
+		// Ahead of the size-cap return below, because over-cap text stays on screen and needs the same
+		// protection. On the OPENING edge only, cancel any content fetch already running: `enabled: false`
+		// gates future fetches but never touches a running retryer, and a mount refetch that resolves now
+		// would advance `dataUpdatedAt` (the remount key) under the caret. `revert: true` (the default)
+		// restores the pre-fetch state, so the key does not move — the cancel-before-patch idiom sync.ts
+		// already uses around its own cache writes.
+		if (beginEditingSession(note.uuid)) {
+			void queryClient.cancelQueries({ queryKey: noteContentQueryKey(note.uuid), exact: true })
 		}
 
 		// Block the ENQUEUE past the cap, never the keystroke — CodeMirror keeps the text on screen, but

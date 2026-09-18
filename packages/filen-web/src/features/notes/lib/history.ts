@@ -4,7 +4,7 @@ import { queryClient } from "@/queries/client"
 import { log } from "@/lib/log"
 import { notesQueryUpsert } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight"
+import useNotesInflightStore, { endEditingSession } from "@/features/notes/store/useNotesInflight"
 import { sync } from "@/features/notes/lib/sync"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
@@ -28,10 +28,12 @@ export async function restoreNoteFromHistory(note: Note, history: NoteHistory): 
 	notesQueryUpsert(updated)
 
 	// Drop any unsynced local content for this note BEFORE touching the content cache below — the
-	// content query is disabled-while-inflight (enabled: !inflight), so dropping first re-enables it in
-	// time for the cache write/invalidate that follows to actually take effect.
+	// content query is disabled while the user is editing (enabled: !editing), so dropping the entry AND
+	// closing the session first re-enables it in time for the cache write/invalidate that follows to
+	// actually take effect. A restore is a deliberate reseed, so ending a live session is the point.
 	sync.dropEntry(updated.uuid)
 	sync.clearRejections(updated.uuid)
+	endEditingSession(updated.uuid)
 
 	const flushed = await sync.flushToDisk(useNotesInflightStore.getState().inflightContent)
 

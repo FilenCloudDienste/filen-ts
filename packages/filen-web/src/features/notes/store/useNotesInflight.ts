@@ -34,9 +34,18 @@ export interface NotesInflightStore {
 	// content over a queued local edit, and the next keystroke would push that stale text back over it.
 	outboxHydrated: boolean
 	setOutboxHydrated: (hydrated: boolean) => void
+	// The notes a mounted editor has been typed into during this session. Deliberately NOT derivable
+	// from inflightContent: the first successful push empties a note's queue, so between a debounce
+	// flush and the next keystroke a note the user is still typing into reads as clean — and anything
+	// that treats "clean" as "safe to reseed" then tears the live surface down under the caret.
+	editingSessions: Record<string, true>
+	// Returns the OPENING edge: true only on the call that actually opened the session, false while one
+	// is already open — the caller's signal for once-per-session work (useNoteEditor's in-flight cancel).
+	beginEditingSession: (uuid: string) => boolean
+	endEditingSession: (uuid: string) => void
 }
 
-export const useNotesInflightStore = create<NotesInflightStore>(set => ({
+export const useNotesInflightStore = create<NotesInflightStore>((set, get) => ({
 	inflightContent: {},
 	setInflightContent(fn) {
 		set(state => ({
@@ -46,20 +55,85 @@ export const useNotesInflightStore = create<NotesInflightStore>(set => ({
 	outboxHydrated: false,
 	setOutboxHydrated(hydrated) {
 		set({ outboxHydrated: hydrated })
+	},
+	editingSessions: {},
+	beginEditingSession(uuid) {
+		const { editingSessions } = get()
+
+		if (editingSessions[uuid] === true) {
+			return false
+		}
+
+		set({
+			editingSessions: {
+				...editingSessions,
+				[uuid]: true
+			}
+		})
+
+		return true
+	},
+	endEditingSession(uuid) {
+		set(state => {
+			if (state.editingSessions[uuid] !== true) {
+				return state
+			}
+
+			const next = {
+				...state.editingSessions
+			}
+
+			Reflect.deleteProperty(next, uuid)
+
+			return {
+				editingSessions: next
+			}
+		})
 	}
 }))
 
-// Reactive subscription for the editor — the header spinner + menu suppression + the content
-// query's `enabled` gate all rerun off whether a note has pending outbox entries. Boolean-collapsed
-// so a subscriber re-renders only on the has/has-not EDGE, never on every keystroke that grows the
-// entry list.
+// THE "is the user editing this note right now" test, and the one every reseed decision must ask —
+// a pending outbox entry OR a live editor session. The queue alone answers a narrower question ("is
+// something queued"), which stops being true at every push. Exported in state form too, for a
+// caller that already holds a store snapshot (useNoteSearchBodies).
+export function noteIsEditing(state: NotesInflightStore, uuid: string): boolean {
+	return (state.inflightContent[uuid] ?? []).length > 0 || state.editingSessions[uuid] === true
+}
+
+// Reactive subscription to the QUEUE alone — the header spinner and menu suppression, which mean "a
+// push is in flight", not "the user is editing" (that is noteIsEditing above). Boolean-collapsed so a
+// subscriber re-renders only on the has/has-not EDGE, never on every keystroke that grows the entry
+// list.
 export function useNoteInflight(uuid: string): boolean {
 	return useNotesInflightStore(state => (state.inflightContent[uuid] ?? []).length > 0)
 }
 
-// Non-reactive read off the store singleton for sync-internal callers that must not subscribe.
-export function hasInflight(uuid: string): boolean {
-	return (useNotesInflightStore.getState().inflightContent[uuid] ?? []).length > 0
+// Reactive/non-reactive halves of the editing test above. Boolean-collapsed like useNoteInflight, so a
+// subscriber re-renders only on the edge.
+export function useNoteEditing(uuid: string): boolean {
+	return useNotesInflightStore(state => noteIsEditing(state, uuid))
+}
+
+export function isNoteEditing(uuid: string): boolean {
+	return noteIsEditing(useNotesInflightStore.getState(), uuid)
+}
+
+// The editor's own markers: the session opens on the first local change and closes when the editor
+// unmounts. A deliberate reseed (the remote-edit banner's Reload, a history restore) closes it too —
+// those WANT the content query re-enabled so their invalidation lands. begin returns the opening edge.
+export function beginEditingSession(uuid: string): boolean {
+	return useNotesInflightStore.getState().beginEditingSession(uuid)
+}
+
+export function endEditingSession(uuid: string): void {
+	useNotesInflightStore.getState().endEditingSession(uuid)
+}
+
+// Teardown counterpart to setOutboxHydrated(false) (sync.cancel, before the logout wipe): no note
+// belongs to an editing session any more, and a session left behind would keep its content query
+// gated for the NEXT account.
+export function clearEditingSessions(): void {
+	useNotesInflightStore.setState({ editingSessions: {} })
 }
 
 // Reactive subscription to the hydration edge — the editor holds its loading state until it flips, so

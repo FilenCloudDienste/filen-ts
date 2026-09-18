@@ -10,7 +10,12 @@ import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { type OutboxChannelTransport, type OutboxRole } from "@/lib/storage/outboxChannel"
 import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { fetchNotes, notesQueryGet } from "@/features/notes/queries/notes"
-import useNotesInflightStore, { setOutboxHydrated, type InflightContent, type InflightEntry } from "@/features/notes/store/useNotesInflight"
+import useNotesInflightStore, {
+	setOutboxHydrated,
+	clearEditingSessions,
+	type InflightContent,
+	type InflightEntry
+} from "@/features/notes/store/useNotesInflight"
 import {
 	hashNoteContent,
 	buildInflightEntries,
@@ -123,8 +128,10 @@ export class Sync {
 		this.abortController.abort()
 		this.transport?.close()
 		// The store no longer reflects any account's outbox — an editor still mounted through the teardown
-		// must hold its loading state rather than seed from a wiped store.
+		// must hold its loading state rather than seed from a wiped store, and no note is being edited
+		// any more (a session surviving the wipe would gate the next account's content query).
 		setOutboxHydrated(false)
+		clearEditingSessions()
 	}
 
 	// Drop a note's consecutive-rejection strike count. For the editor's use when it clears a

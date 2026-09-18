@@ -1,6 +1,6 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
-import { useNoteInflight } from "@/features/notes/store/useNotesInflight"
+import { useNoteEditing } from "@/features/notes/store/useNotesInflight"
 import type { Note } from "@filen/sdk-rs"
 
 // Per-note content, keyed on uuid so switching between two notes' editors never shows a stale read
@@ -57,23 +57,27 @@ export async function fetchNoteContentOrThrow(note: Note): Promise<string> {
 // NOT re-persist to disk, so a plain "never stale" query would rehydrate a STALE disk value on the next
 // load and — being never-stale — never refetch it (a reload right after editing would then paint the
 // pre-edit content). refetchOnMount:"always" bypasses the stale check ON MOUNT ONLY, so a fresh editor
-// mount always pulls authoritative server content, while a note that is currently inflight has the
-// query DISABLED (so no mount refetch fires) and its in-flight edit stays protected. Explicit
+// mount always pulls authoritative server content, while a note the user is editing has the query
+// DISABLED (so no mount refetch fires) and its in-progress edit stays protected. Explicit
 // invalidation still owns freshness after a confirmed write. `note` is optional so a caller can mount
 // the hook before its Note is resolved (the editor route's first render) without a conditional hook.
 //
 // USAGE NOTE for the editor: `dataUpdatedAt` on this hook's result is the editor remount key —
-// because the query is disabled while the note has an inflight outbox entry, `dataUpdatedAt`
-// cannot advance mid-edit, so a component keyed on it never remounts (and blows away in-progress
-// keystrokes) while a local edit is still pending. The one read that can outrun that gate — issued
-// before the outbox hydrated, while the store still looked clean — is cancelled by the outbox at its
-// hydration edge (sync.ts), which the editor also waits on before freezing a seed.
+// because the query is disabled for as long as the user is editing the note, `dataUpdatedAt` cannot
+// advance mid-edit, so a component keyed on it never remounts (and blows away in-progress
+// keystrokes) while an editing session is open. Disabling does not stop a fetch ALREADY running, so
+// the two seams that open a gate cancel one explicitly: useNoteEditor when a keystroke opens the
+// editing session, and the outbox at its hydration edge (sync.ts, for a read issued while the store
+// still looked clean).
 export function useNoteContentQuery(note: Note | undefined, options?: { enabled?: boolean }): UseQueryResult<string | undefined> {
-	// UI gating seam: disable the read while the note has a pending sync-outbox entry.
-	// `dataUpdatedAt` (the editor's remount key) therefore cannot advance mid-edit, so the editor never
-	// remounts and blows away in-progress keystrokes while a local edit is still queued. Re-enables the
-	// instant the outbox drains this note. Reactive — subscribes to the store's has/has-not edge.
-	const inflight = useNoteInflight(note?.uuid ?? "")
+	// UI gating seam: disable the read for as long as the user is editing the note — a pending outbox
+	// entry OR an open editor session. `dataUpdatedAt` (the editor's remount key) therefore cannot
+	// advance mid-edit, so the editor never remounts and blows away in-progress keystrokes. The outbox
+	// entry alone is NOT that gate: every successful push empties it, so a note still being typed into
+	// reads as clean from the debounce flush until the next keystroke, and a fetch landing in that gap
+	// remounts the live surface — dropping the caret and, with it, every keystroke that follows.
+	// Reactive — subscribes to the store's edge.
+	const editing = useNoteEditing(note?.uuid ?? "")
 
 	return useQuery({
 		queryKey: noteContentQueryKey(note?.uuid ?? ""),
@@ -86,7 +90,7 @@ export function useNoteContentQuery(note: Note | undefined, options?: { enabled?
 
 			return fetchNoteContentOrThrow(note)
 		},
-		enabled: (options?.enabled ?? true) && note !== undefined && !inflight,
+		enabled: (options?.enabled ?? true) && note !== undefined && !editing,
 		staleTime: Infinity,
 		refetchOnMount: "always"
 	})

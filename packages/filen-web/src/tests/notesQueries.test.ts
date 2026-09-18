@@ -31,12 +31,13 @@ vi.mock("@tanstack/react-query", async importOriginal => {
 	return { ...actual, useQuery }
 })
 
-// useNoteContentQuery now consults the sync-outbox store (the disabled-while-inflight gate). Mock the
+// useNoteContentQuery now consults the sync-outbox store (the disabled-while-editing gate). Mock the
 // reactive selector to a controllable flag so these node-env tests exercise the `enabled` wiring
-// without a React render — the store's own has/has-not logic is covered by notesSync.test.ts.
-const { useNoteInflight } = vi.hoisted(() => ({ useNoteInflight: vi.fn(() => false) }))
+// without a React render — the store's own edge logic is covered by notesOutbox.test.ts's
+// `describe("editing sessions")` block.
+const { useNoteEditing } = vi.hoisted(() => ({ useNoteEditing: vi.fn(() => false) }))
 
-vi.mock("@/features/notes/store/useNotesInflight", () => ({ useNoteInflight }))
+vi.mock("@/features/notes/store/useNotesInflight", () => ({ useNoteEditing }))
 
 // A bare, unconfigured QueryClient stands in for the real singleton — the patchers only need
 // genuine setQueryData/getQueryData/cancelQueries cache mechanics, never the production client's
@@ -295,9 +296,9 @@ describe("useNoteContentQuery", () => {
 		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ enabled: false }))
 	})
 
-	it("disables the query while the note has a pending sync-outbox entry (remount-key freeze gate)", () => {
+	it("disables the query while the user is editing the note (remount-key freeze gate)", () => {
 		useQuery.mockReturnValue({ status: "pending" })
-		useNoteInflight.mockReturnValueOnce(true)
+		useNoteEditing.mockReturnValueOnce(true)
 
 		useNoteContentQuery(mockNote())
 

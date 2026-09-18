@@ -159,8 +159,9 @@ async function sweepLeakedNotes(page: Page, before: Set<string>): Promise<void> 
 // the post-create navigation, so any failure before that point (a rate-limited create's waitForURL
 // timeout, an assertion on the navigated route) leaves a default-titled note the cleanup-setup sweep
 // can never match by prefix — the exact class that once poisoned the 10-cap account during a live
-// rate-limit episode. Snapshot the account's uuids up front and sweep the DIFF in finally; the file's
-// serial mode guarantees any new uuid belongs to the running test. Best-effort like every teardown
+// rate-limit episode. Snapshot the account's uuids up front and sweep the DIFF in finally; any new uuid
+// belongs to the running test because the notes lane is `workers: 1` (playwright.config.ts) and this is
+// the only spec that touches notes — not because of the file's serial mode. Best-effort like every teardown
 // here: a page killed by the test budget makes the sweep's evaluate throw, and that residue is
 // reported (rare) rather than masked or allowed to replace the test's real error.
 async function withNoteLeakGuard(page: Page, body: () => Promise<void>): Promise<void> {
@@ -813,6 +814,15 @@ test.describe("notes: live editors", () => {
 			const editor = main.locator(".cm-content")
 			await focusEditorSurface(editor)
 			await page.keyboard.type(typed)
+
+			// The WHOLE heading is in the EDITABLE pane — scoped to the CodeMirror surface, not to `main`,
+			// which also carries the rendered preview — before anything waits on the server. Without this
+			// an editor torn down mid-word — its remount key advancing under the caret, the rest of the
+			// keystrokes landing on document.body — surfaces 30s later as a server-content mismatch with
+			// nothing to say which layer dropped the text. The sibling kill-path test's
+			// readPersistedInflightContent poll is its equivalent tripwire: it pins the same "every
+			// keystroke reached the editor" claim one layer down, at the outbox.
+			await expect(editor.getByText(typed, { exact: true })).toBeVisible()
 
 			// Let the 3s debounce fire and the push land — the plain type→debounce→persist leg. Generous
 			// timeout: the SDK owns its own retry/backoff, which can stretch a single push (CLAUDE.md).

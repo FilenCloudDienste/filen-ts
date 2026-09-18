@@ -51,7 +51,7 @@ vi.mock("@/lib/i18n", () => ({ i18n: { t: (key: string) => key } }))
 import { queryClient as testQueryClient } from "@/queries/client"
 import { Sync } from "@/features/notes/lib/sync"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
-import useNotesInflightStore, { hasInflight, type InflightContent } from "@/features/notes/store/useNotesInflight"
+import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight"
 import {
 	buildInflightEntries,
 	mergeInflight,
@@ -103,6 +103,12 @@ function setStore(content: InflightContent): void {
 
 function getStore(): InflightContent {
 	return useNotesInflightStore.getState().inflightContent
+}
+
+// The QUEUE alone — what the push loop drains — not the broader "is the user editing this note" test
+// (noteIsEditing), which also counts a live editor session. No test in this file opens one.
+function queued(uuid: string): boolean {
+	return (getStore()[uuid] ?? []).length > 0
 }
 
 // The editor's seed gate: false means "this tab's outbox has not spoken yet", never "clean".
@@ -341,15 +347,15 @@ describe("push loop — bounded drop at 3 non-retryable SDK rejections + reset o
 
 		s.executeNow()
 		await flushAsync()
-		expect(hasInflight("a")).toBe(true)
+		expect(queued("a")).toBe(true)
 
 		s.executeNow()
 		await flushAsync()
-		expect(hasInflight("a")).toBe(true)
+		expect(queued("a")).toBe(true)
 
 		s.executeNow()
 		await flushAsync()
-		expect(hasInflight("a")).toBe(false)
+		expect(queued("a")).toBe(false)
 	})
 
 	it("resets the strike count after a successful push", async () => {
@@ -363,20 +369,20 @@ describe("push loop — bounded drop at 3 non-retryable SDK rejections + reset o
 		await flushAsync()
 		s.executeNow()
 		await flushAsync()
-		expect(hasInflight("a")).toBe(true)
+		expect(queued("a")).toBe(true)
 
 		// A success drains the note and clears its counter.
 		setNoteContent.mockResolvedValue(note)
 		s.executeNow()
 		await flushAsync()
-		expect(hasInflight("a")).toBe(false)
+		expect(queued("a")).toBe(false)
 
 		// A brand-new edit that fails ONCE must NOT drop — the counter restarted from zero.
 		setStore({ a: [{ timestamp: 2, content: "e2", note }] })
 		setNoteContent.mockRejectedValue(sdkError("Server"))
 		s.executeNow()
 		await flushAsync()
-		expect(hasInflight("a")).toBe(true)
+		expect(queued("a")).toBe(true)
 	})
 })
 
@@ -393,7 +399,7 @@ describe("push loop — Unauthenticated is keep-for-retry, never counted toward 
 			await flushAsync()
 		}
 
-		expect(hasInflight("a")).toBe(true)
+		expect(queued("a")).toBe(true)
 	})
 })
 
@@ -455,7 +461,7 @@ describe("push loop — session-base renewal across a full drain (no false overw
 		s.executeNow()
 		await flushAsync()
 
-		expect(hasInflight("a")).toBe(false)
+		expect(queued("a")).toBe(false)
 
 		// The drain wrote "v1" back into the content cache — the seed the editor recomputes is byte-equal
 		// to what it read mid-session, yet the base MUST renew to hash("v1") on the drain edge.
@@ -542,9 +548,9 @@ describe("restoreFromDisk — replay-on-launch hydrates before any network, drop
 		await flushAsync()
 
 		// A was reconciled away (matched cloud); B survives as genuine pending work and then gets pushed.
-		expect(hasInflight("a")).toBe(false)
+		expect(queued("a")).toBe(false)
 		await vi.waitFor(() => {
-			expect(hasInflight("b")).toBe(false)
+			expect(queued("b")).toBe(false)
 		})
 		expect(setNoteContent).toHaveBeenCalledWith(noteB, "still-pending", expect.any(String))
 	})
@@ -559,7 +565,7 @@ describe("restoreFromDisk — replay-on-launch hydrates before any network, drop
 		s.start()
 		await flushAsync()
 
-		expect(hasInflight("gone")).toBe(false)
+		expect(queued("gone")).toBe(false)
 	})
 
 	it("hydrates unconditionally when offline (no reconcile, entry kept for reconnect)", async () => {
@@ -572,7 +578,7 @@ describe("restoreFromDisk — replay-on-launch hydrates before any network, drop
 		s.start()
 		await flushAsync()
 
-		expect(hasInflight("a")).toBe(true)
+		expect(queued("a")).toBe(true)
 		expect(listNotes).not.toHaveBeenCalled()
 
 		onlineManager.setOnline(true)
@@ -640,7 +646,7 @@ describe("restoreFromDisk — undecryptable cloud content never prunes a persist
 		s.start()
 		await flushAsync()
 
-		expect(hasInflight("a")).toBe(false)
+		expect(queued("a")).toBe(false)
 		expect(setNoteContent).not.toHaveBeenCalled()
 	})
 })
@@ -702,7 +708,7 @@ describe("outbox hydration gate — the editor's seed may never precede the rest
 
 		// The reconcile is still in flight, yet the store already holds the restored draft and the gate is
 		// open — an editor mounting now seeds from the draft, not from the server.
-		expect(hasInflight("a")).toBe(true)
+		expect(queued("a")).toBe(true)
 		expect(hydrated()).toBe(true)
 
 		cloud.resolve([note])
