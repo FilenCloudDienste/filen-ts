@@ -72,6 +72,7 @@ const LANGUAGE_NAMES: Record<TargetLanguage, string> = {
 	ru: "Russian",
 	ja: "Japanese",
 	zh: "Chinese (Simplified)",
+	"zh-TW": "Traditional Chinese (Taiwan)",
 	bn: "Bengali",
 	cs: "Czech",
 	da: "Danish",

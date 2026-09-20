@@ -23,6 +23,7 @@ import ptPTJson from "@/locales/pt-PT.json"
 import ruJson from "@/locales/ru.json"
 import jaJson from "@/locales/ja.json"
 import zhJson from "@/locales/zh.json"
+import zhTWJson from "@/locales/zh-TW.json"
 import bnJson from "@/locales/bn.json"
 import csJson from "@/locales/cs.json"
 import daJson from "@/locales/da.json"
@@ -71,6 +72,9 @@ const resources = {
 	},
 	zh: {
 		translation: zhJson
+	},
+	"zh-TW": {
+		translation: zhTWJson
 	},
 	bn: {
 		translation: bnJson
@@ -151,6 +155,24 @@ export async function getInitialLanguage(): Promise<Language> {
 	}
 
 	const deviceLanguage = locale?.languageCode
+
+	const deviceRegion = locale?.languageRegionCode ?? locale?.regionCode
+	const normalizedTag = deviceTag?.toLowerCase()
+	const isTraditionalChinese =
+		deviceLanguage === "zh" &&
+		(locale?.languageScriptCode === "Hant" ||
+			deviceRegion === "TW" ||
+			deviceRegion === "HK" ||
+			deviceRegion === "MO" ||
+			normalizedTag === "zh-hant" ||
+			normalizedTag?.startsWith("zh-hant-") === true ||
+			normalizedTag === "zh-tw" ||
+			normalizedTag === "zh-hk" ||
+			normalizedTag === "zh-mo")
+
+	if (isTraditionalChinese) {
+		return "zh-TW"
+	}
 
 	if (isSupportedLanguage(deviceLanguage)) {
 		return deviceLanguage
