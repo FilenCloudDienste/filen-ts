@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import { AppState } from "react-native"
 import { ManagedFuture, EmbeddedPreviewResult_Tags, type EmbeddedPreviewResult } from "@filen/sdk-rs"
-import { Semaphore, run } from "@filen/utils"
+import { Semaphore, run } from "@filen/shared"
 import { debounce } from "es-toolkit/function"
 import { type DriveItemFileExtracted } from "@/types"
 import auth from "@/lib/auth"

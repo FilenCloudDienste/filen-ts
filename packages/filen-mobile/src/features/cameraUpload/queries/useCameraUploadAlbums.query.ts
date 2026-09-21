@@ -2,7 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import * as MediaLibraryLegacy from "expo-media-library/legacy"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
-import { Semaphore } from "@filen/utils"
+import { Semaphore } from "@filen/shared"
 
 export const BASE_QUERY_KEY = "useCameraUploadAlbumsQuery"
 

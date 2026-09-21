@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { ratePasswordStrength } from "@filen/utils"
+import { ratePasswordStrength } from "@filen/shared"
 
 import { isValidEmail, isPasswordStrongEnough } from "@/features/auth/utils"
 

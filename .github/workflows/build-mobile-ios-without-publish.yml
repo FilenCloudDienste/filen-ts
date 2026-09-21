@@ -8,7 +8,7 @@ on:
       - main
     paths:
       - 'packages/filen-mobile/**'
-      - 'packages/filen-utils/**'
+      - 'packages/filen-shared/**'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'patches/**'

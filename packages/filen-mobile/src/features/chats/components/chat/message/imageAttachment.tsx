@@ -1,4 +1,4 @@
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 import { useRecyclingState } from "@shopify/flash-list"
 import Image from "@/components/ui/image"
 import cache from "@/lib/cache"

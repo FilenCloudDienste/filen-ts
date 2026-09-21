@@ -1,7 +1,7 @@
 import auth, { useSdkClients, useStringifiedClient } from "@/lib/auth"
 import { type JsClientInterface, SocketEvent_Tags, ListenerHandle, GeneralEvent_Tags, type SocketEvent } from "@filen/sdk-rs"
 import { useEffect, useRef, useCallback } from "react"
-import { runEffect, run, Semaphore } from "@filen/utils"
+import { runEffect, run, Semaphore } from "@filen/shared"
 import useChatsStore from "@/features/chats/store/useChats.store"
 import useSocketStore, { type State as SocketState } from "@/stores/useSocket.store"
 import alerts from "@/lib/alerts"

@@ -35,9 +35,9 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("@filen/utils", async () => {
-	const real = await import("@/tests/mocks/filenUtils")
-	const { sortParams } = await import("@filen/utils")
+vi.mock("@filen/shared", async () => {
+	const real = await import("@/tests/mocks/filenShared")
+	const { sortParams } = await import("@filen/shared")
 
 	return {
 		...real,

@@ -1,4 +1,4 @@
-import { run, Semaphore } from "@filen/utils"
+import { run, Semaphore } from "@filen/shared"
 import logger from "@/lib/logger"
 import { onlineManager } from "@tanstack/react-query"
 import NetInfo from "@react-native-community/netinfo"

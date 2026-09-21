@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { addChecklistLine, removeChecklistItem, materializeChecklistGhost } from "@/features/notes/checklistEdit"
-import { checklistParser, type Checklist } from "@filen/utils"
+import { checklistParser, type Checklist } from "@filen/shared"
 
 const base: Checklist = [
 	{ id: "a", checked: false, content: "one" },

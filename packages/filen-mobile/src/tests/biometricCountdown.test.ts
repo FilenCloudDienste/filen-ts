@@ -49,7 +49,7 @@ vi.mock("@/components/ui/view", () => ({ default: "View" }))
 vi.mock("@/components/ui/text", () => ({ default: "Text" }))
 vi.mock("@/components/ui/pressables", () => ({ PressableOpacity: "PressableOpacity" }))
 vi.mock("@/components/ui/animated", () => ({ AnimatedView: "AnimatedView" }))
-vi.mock("@filen/utils", () => ({
+vi.mock("@filen/shared", () => ({
 	run: vi.fn(),
 	runEffect: vi.fn()
 }))

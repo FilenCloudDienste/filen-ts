@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Checklist } from "@filen/utils"
+import type { Checklist } from "@filen/shared"
 import {
 	parseChecklistSeed,
 	serializeChecklist,

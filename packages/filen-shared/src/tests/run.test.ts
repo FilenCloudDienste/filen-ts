@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { run, runAbortable, runEffect, runRetry, runTimeout, runDebounced, AbortError, TimeoutError, createAbortablePipeline } from "@filen/utils"
+import { run, runAbortable, runEffect, runRetry, runTimeout, runDebounced, AbortError, TimeoutError, createAbortablePipeline } from "@filen/shared"
 
 describe("run", () => {
 	describe("basic functionality", () => {

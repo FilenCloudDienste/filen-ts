@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon } from "lucide-react"
-import { type Checklist } from "@filen/utils"
+import { type Checklist } from "@filen/shared"
 import { cn } from "@/lib/utils"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
 import {
@@ -17,7 +17,7 @@ import {
 // Custom checklist editor (mirrors mobile's content/checklist screen): one text input per row with a
 // leading toggle. Enter on a non-empty row appends a row and focuses it; Backspace on an empty row
 // removes it and focuses the previous; the toggle checks/unchecks. Every mutation serializes through
-// @filen/utils checklistParser to the canonical `<ul data-checked>` HTML and enqueues it on the
+// @filen/shared checklistParser to the canonical `<ul data-checked>` HTML and enqueues it on the
 // fault-tolerant outbox (controller.onChange). The CALLER keys this on controller.remountKey so the
 // seed freezes at mount and a real reseed remounts fresh (the EDITOR INVARIANT).
 //

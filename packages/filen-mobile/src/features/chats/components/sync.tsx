@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { run, Semaphore } from "@filen/utils"
+import { run, Semaphore } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import chats from "@/features/chats/chats"
 import alerts from "@/lib/alerts"

@@ -8,7 +8,7 @@ const PARENT_UUID = "22222222-2222-2222-2222-222222222222" as UuidStr
 
 let uuidCounter = 0
 
-// The counter goes in the FIRST segment, not the last: @filen/utils' parseNumbersFromString (the
+// The counter goes in the FIRST segment, not the last: @filen/shared' parseNumbersFromString (the
 // numeric-uuid tiebreak) reads at most the first 16 digit characters of a long string, so a
 // counter placed after 16 leading zeros (e.g. "00000000-0000-0000-0000-...0042") would never be
 // read at all — every generated uuid would numeric-tiebreak as 0, defeating the very ties these

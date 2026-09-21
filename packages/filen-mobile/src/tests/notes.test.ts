@@ -26,8 +26,8 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("@filen/utils", async () => ({
-	...(await import("@/tests/mocks/filenUtils")),
+vi.mock("@filen/shared", async () => ({
+	...(await import("@/tests/mocks/filenShared")),
 	createNotePreviewFromContentText: vi.fn().mockReturnValue("preview-text"),
 	sortParams: vi.fn(x => x)
 }))
@@ -1633,7 +1633,7 @@ describe("notes.setContent", () => {
 	})
 
 	it("preview type mapping: Checklist → 'checklist'", async () => {
-		const { createNotePreviewFromContentText } = await import("@filen/utils")
+		const { createNotePreviewFromContentText } = await import("@filen/shared")
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
@@ -1644,7 +1644,7 @@ describe("notes.setContent", () => {
 	})
 
 	it("preview type mapping: Rich → 'rich'", async () => {
-		const { createNotePreviewFromContentText } = await import("@filen/utils")
+		const { createNotePreviewFromContentText } = await import("@filen/shared")
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
@@ -1655,7 +1655,7 @@ describe("notes.setContent", () => {
 	})
 
 	it("preview type mapping: any other type → 'other'", async () => {
-		const { createNotePreviewFromContentText } = await import("@filen/utils")
+		const { createNotePreviewFromContentText } = await import("@filen/shared")
 		const sdkClient = makeMockSdkClient()
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 

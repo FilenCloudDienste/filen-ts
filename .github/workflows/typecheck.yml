@@ -7,7 +7,7 @@ on:
     paths:
       - 'packages/filen-web/**'
       - 'packages/filen-mobile/**'
-      - 'packages/filen-utils/**'
+      - 'packages/filen-shared/**'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'patches/**'
@@ -17,7 +17,7 @@ on:
     paths:
       - 'packages/filen-web/**'
       - 'packages/filen-mobile/**'
-      - 'packages/filen-utils/**'
+      - 'packages/filen-shared/**'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'patches/**'
@@ -33,7 +33,7 @@ jobs:
     outputs:
       filen-web: ${{ steps.filter.outputs.filen-web }}
       filen-mobile: ${{ steps.filter.outputs.filen-mobile }}
-      filen-utils: ${{ steps.filter.outputs.filen-utils }}
+      filen-shared: ${{ steps.filter.outputs.filen-shared }}
     steps:
       - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v4
@@ -42,20 +42,20 @@ jobs:
           filters: |
             filen-web:
               - 'packages/filen-web/**'
-              - 'packages/filen-utils/**'
+              - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
               - 'package.json'
             filen-mobile:
               - 'packages/filen-mobile/**'
-              - 'packages/filen-utils/**'
+              - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
               - 'package.json'
-            filen-utils:
-              - 'packages/filen-utils/**'
+            filen-shared:
+              - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
@@ -101,9 +101,9 @@ jobs:
       - name: Typecheck
         working-directory: packages/filen-mobile
         run: pnpm run typecheck
-  typecheck-utils:
+  typecheck-shared:
     needs: changes
-    if: needs.changes.outputs.filen-utils == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.changes.outputs.filen-shared == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -116,8 +116,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - name: Install dependencies
-        working-directory: packages/filen-utils
-        run: pnpm install --frozen-lockfile --filter @filen/utils...
+        working-directory: packages/filen-shared
+        run: pnpm install --frozen-lockfile --filter @filen/shared...
       - name: Typecheck
-        working-directory: packages/filen-utils
+        working-directory: packages/filen-shared
         run: pnpm run typecheck

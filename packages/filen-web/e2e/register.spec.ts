@@ -8,7 +8,7 @@ import { test, expect } from "@playwright/test"
 const REGISTER_CHECK_URL = "**/v3/registerCheck"
 const REGISTER_CHECK_PATH = "/v3/registerCheck"
 
-// Deterministic ratePasswordStrength tiers (@filen/utils): length >= 10 with all of
+// Deterministic ratePasswordStrength tiers (@filen/shared): length >= 10 with all of
 // upper/lower/special -> strong (10-15 chars) or best (16+ chars); length >= 10 with exactly two of
 // the three -> normal; anything else -> weak. Picked once here so every test reads the same fixtures.
 const WEAK_PASSWORD = "abcdefgh" // 8 chars, lowercase only

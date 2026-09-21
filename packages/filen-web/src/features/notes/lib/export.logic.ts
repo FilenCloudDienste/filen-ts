@@ -1,4 +1,4 @@
-import { checklistParser } from "@filen/utils"
+import { checklistParser } from "@filen/shared"
 import type { NoteType } from "@filen/sdk-rs"
 import { extensionOf, codeMirrorLanguageFor } from "@/features/drive/lib/preview.logic"
 import { sanitizeRichTextHtml } from "@/features/notes/lib/sanitizeRichText"

@@ -1,16 +1,16 @@
 /**
- * Shared mock of @filen/utils for Vitest.
+ * Shared mock of @filen/shared for Vitest.
  *
  * Provides Semaphore (no-op) and run (execute with defer support).
  *
  * Usage in test files:
  *
- *   vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+ *   vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
  *
  * To extend with additional exports:
  *
- *   vi.mock("@filen/utils", async () => ({
- *       ...await import("@/tests/mocks/filenUtils"),
+ *   vi.mock("@filen/shared", async () => ({
+ *       ...await import("@/tests/mocks/filenShared"),
  *       formatBytes: vi.fn()
  *   }))
  */
@@ -22,7 +22,7 @@ export class Semaphore {
 	release(): void {}
 }
 
-// Faithful to @filen/utils run(): ALWAYS resolves the full Result object on success —
+// Faithful to @filen/shared run(): ALWAYS resolves the full Result object on success —
 // `throw: true` only changes the failure path (rethrow instead of a Failure result) —
 // and runs deferred cleanups in REVERSE registration order (LIFO) inside a finally,
 // exactly like the real implementation.

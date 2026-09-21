@@ -1,5 +1,5 @@
 import { useSecureStore } from "@/lib/secureStore"
-import { fastLocaleCompare } from "@filen/utils"
+import { fastLocaleCompare } from "@filen/shared"
 import { tagDisplayName } from "@/lib/decryption"
 import { type Note, type NoteTag } from "@/types"
 

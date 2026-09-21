@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import { type DriveItem } from "@/types"
 import { normalizeFilePathForExpo, normalizeFilePathForSdk } from "@/lib/paths"
-import { run, Semaphore } from "@filen/utils"
+import { run, Semaphore } from "@filen/shared"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { Platform } from "react-native"
 import useHttpStore from "@/stores/useHttp.store"

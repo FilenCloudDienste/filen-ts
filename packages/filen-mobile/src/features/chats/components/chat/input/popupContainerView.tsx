@@ -4,7 +4,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { SlideInDown, SlideOutDown } from "react-native-reanimated"
 import useChatsStore from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 
 export const PopupContainerView = ({
 	children,

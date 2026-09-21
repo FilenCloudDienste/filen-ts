@@ -1,4 +1,4 @@
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { sync } from "@/features/chats/components/sync"
 import secureStore from "@/lib/secureStore"

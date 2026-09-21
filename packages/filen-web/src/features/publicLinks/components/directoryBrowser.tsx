@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import { ChevronRightIcon, DownloadIcon, SearchIcon, ArrowDownAZIcon, ArrowUpAZIcon } from "lucide-react"
 import type { DirPublicInfo, DirPublicLink, File as SdkFile } from "@filen/sdk-rs"
 import { type DriveItem } from "@/features/drive/lib/item"

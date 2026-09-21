@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from "vitest"
 vi.mock("@/lib/secureStore", () => ({ useSecureStore: vi.fn() }))
 
 import { visibleChecklistIds, isChecklistGhostActive, checklistGhostRowId } from "@/features/notes/checklistView"
-import { type Checklist } from "@filen/utils"
+import { type Checklist } from "@filen/shared"
 
 const parsed: Checklist = [
 	{ id: "a", checked: false, content: "one" },

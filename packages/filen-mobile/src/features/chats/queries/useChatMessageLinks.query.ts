@@ -1,7 +1,7 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import auth from "@/lib/auth"
-import { sortParams, parseFilenPublicLink, run } from "@filen/utils"
+import { sortParams, parseFilenPublicLink, run } from "@filen/shared"
 import { getPreviewType } from "@/lib/previewType"
 import { extractLinks } from "@/lib/linkParser"
 import { MaybeEncryptedUniffi_Tags, type DirPublicInfo, type LinkedFile } from "@filen/sdk-rs"

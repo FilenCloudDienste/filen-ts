@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { MakeThumbnailInMemoryResult_Tags, ManagedFuture, type AnyFile, type MakeThumbnailInMemoryResult } from "@filen/sdk-rs"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import auth from "@/lib/auth"
 import { toSignalOpts, wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
 import { abortError } from "@/lib/thumbnailsHelpers"

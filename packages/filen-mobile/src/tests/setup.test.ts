@@ -58,11 +58,11 @@ const {
 	}
 })
 
-// Inline LIFO-correct run() mock that matches real @filen/utils behavior:
+// Inline LIFO-correct run() mock that matches real @filen/shared behavior:
 // cleanups run in reverse registration order (LIFO) inside a finally block,
 // each individually try/caught. This is more faithful than the shared
-// filenUtils mock which iterates forward and only on success/catch.
-vi.mock("@filen/utils", () => {
+// filenShared mock which iterates forward and only on success/catch.
+vi.mock("@filen/shared", () => {
 	class Semaphore {
 		async acquire(): Promise<void> {}
 		release(): void {

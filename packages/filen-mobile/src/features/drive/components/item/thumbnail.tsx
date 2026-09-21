@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from "react"
 import type { DriveItem, DriveItemFileExtracted, DriveItemDirectoryExtracted } from "@/types"
 import thumbnails, { DIRECTORY as THUMBNAILS_DIRECTORY } from "@/lib/thumbnails"
-import { run, runEffect } from "@filen/utils"
+import { run, runEffect } from "@filen/shared"
 import Image from "@/components/ui/image"
 import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"

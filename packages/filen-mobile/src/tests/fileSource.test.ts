@@ -13,7 +13,7 @@ vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSyst
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("@filen/sdk-rs", () => ({
 	AnyFile: {

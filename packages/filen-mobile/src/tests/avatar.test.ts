@@ -15,7 +15,7 @@ const { cnSpy } = vi.hoisted(() => ({
 
 // ─── Module boundary mocks ────────────────────────────────────────────────────
 
-vi.mock("@filen/utils", () => ({
+vi.mock("@filen/shared", () => ({
 	cn: cnSpy
 }))
 

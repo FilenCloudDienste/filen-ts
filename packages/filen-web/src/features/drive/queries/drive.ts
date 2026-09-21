@@ -15,7 +15,7 @@ import type {
 	DirSizeResponse,
 	GetItemPathResult
 } from "@filen/sdk-rs"
-import { fastLocaleCompare } from "@filen/utils"
+import { fastLocaleCompare } from "@filen/shared"
 import { narrowItem, asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
 import {
 	getHideHiddenItems,

@@ -15,9 +15,9 @@ vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 // Use the REAL Semaphore here (not the no-op mock) so writeMutex actually
 // serializes — the enable() race fix depends on genuine mutual exclusion.
 // vi.importActual bypasses this factory's own interception of the bare specifier.
-vi.mock("@filen/utils", async () => ({
-	...(await import("@/tests/mocks/filenUtils")),
-	Semaphore: (await vi.importActual<typeof import("@filen/utils")>("@filen/utils")).Semaphore
+vi.mock("@filen/shared", async () => ({
+	...(await import("@/tests/mocks/filenShared")),
+	Semaphore: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).Semaphore
 }))
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))

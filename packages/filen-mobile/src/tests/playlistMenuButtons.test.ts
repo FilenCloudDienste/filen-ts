@@ -10,7 +10,7 @@ vi.mock("expo-router", () => ({
 	router: { push: vi.fn(), back: vi.fn(), canGoBack: vi.fn(() => false) }
 }))
 
-vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("@/lib/alerts", () => ({
 	default: { error: vi.fn(), normal: vi.fn() }

@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { run, Semaphore, createExecutableTimeout } from "@filen/utils"
+import { run, Semaphore, createExecutableTimeout } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import { xxHash32 } from "js-xxhash"
 import notes from "@/features/notes/notes"

@@ -4,7 +4,7 @@ import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import { PressableOpacity } from "@/components/ui/pressables"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 
 export type Button = {
 	icon?: React.ComponentProps<typeof Ionicons>["name"]

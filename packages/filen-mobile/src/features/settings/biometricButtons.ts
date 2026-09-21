@@ -1,5 +1,5 @@
 import { type TFunction } from "i18next"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import events from "@/lib/events"

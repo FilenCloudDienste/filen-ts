@@ -18,7 +18,7 @@ vi.mock("react-native", async () => {
 	}
 })
 
-// @filen/utils is deliberately REAL: sortParams is what shapes the query key this suite is pinning,
+// @filen/shared is deliberately REAL: sortParams is what shapes the query key this suite is pinning,
 // so a stub would make the assertions circular.
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))

@@ -1,5 +1,5 @@
 import { open, type DB } from "@op-engineering/op-sqlite"
-import { Semaphore, run } from "@filen/utils"
+import { Semaphore, run } from "@filen/shared"
 import { serialize, deserialize } from "@/lib/serializer"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import { SQLITE_VERSION, SQLITE_DB_FILE_NAME, SQLITE_DB_FILE_DIRECTORY } from "@/lib/storageRoots"

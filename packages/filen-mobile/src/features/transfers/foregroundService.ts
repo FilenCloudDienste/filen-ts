@@ -1,6 +1,6 @@
 import { Platform, AppState } from "react-native"
 import notifee, { AndroidImportance, AndroidForegroundServiceType, AuthorizationStatus } from "react-native-notify-kit"
-import { bpsToReadable } from "@filen/utils"
+import { bpsToReadable } from "@filen/shared"
 import i18n from "@/lib/i18n"
 import secureStore from "@/lib/secureStore"
 import { withSystemPresentation } from "@/lib/systemPresentation"

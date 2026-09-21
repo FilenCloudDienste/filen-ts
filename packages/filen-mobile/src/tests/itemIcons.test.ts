@@ -10,12 +10,12 @@ vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSyst
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-vi.mock("@filen/utils", async () => {
+vi.mock("@filen/shared", async () => {
 	// Use the real isValidHexColor (pure fn, no native deps) and provide cn stub
-	const { isValidHexColor } = await import("@filen/utils")
+	const { isValidHexColor } = await import("@filen/shared")
 
 	return {
-		...(await import("@/tests/mocks/filenUtils")),
+		...(await import("@/tests/mocks/filenShared")),
 		isValidHexColor,
 		cn: (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ")
 	}

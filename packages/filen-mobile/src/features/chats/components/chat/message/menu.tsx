@@ -6,7 +6,7 @@ import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/
 import { useShallow } from "zustand/shallow"
 import * as Clipboard from "expo-clipboard"
 import alerts from "@/lib/alerts"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import { useStringifiedClient } from "@/lib/auth"
 import chats from "@/features/chats/chats"
 import { retryInflightMessage, removeInflightMessage } from "@/features/chats/chatsInflight"

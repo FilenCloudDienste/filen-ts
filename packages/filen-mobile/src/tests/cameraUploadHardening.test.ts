@@ -118,8 +118,8 @@ vi.mock("@filen/sdk-rs", () => ({
 	encodeName: (name: string) => name.replace(/:/g, "：").replace(/[/\\*?"<>|]/g, "＿")
 }))
 
-vi.mock("@filen/utils", async () => {
-	const sharedMock = await import("@/tests/mocks/filenUtils")
+vi.mock("@filen/shared", async () => {
+	const sharedMock = await import("@/tests/mocks/filenShared")
 
 	return {
 		...sharedMock,

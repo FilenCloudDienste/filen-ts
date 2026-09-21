@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useShallow } from "zustand/shallow"
 import usePlaylistsStore from "@/features/audio/store/usePlaylists.store"
 import Text from "@/components/ui/text"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 import events from "@/lib/events"
 import { useTranslation } from "react-i18next"
 

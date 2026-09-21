@@ -12,7 +12,7 @@ import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store
 import { formatRelativeTime } from "@/lib/time"
 import { tagLastActivity } from "@/features/notes/notesTagsSortPreference"
 import Menu from "@/features/notes/components/tag/menu"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { Checkbox } from "@/components/ui/checkbox"

@@ -17,7 +17,7 @@
  * outside the timed region. Reported: min / median / mean ms.
  *
  * Everything third-party is mocked (expo-file-system via the fast hierarchical
- * mock, SDK, transfers, queries); the REAL serializer, @filen/utils, uuid,
+ * mock, SDK, transfers, queries); the REAL serializer, @filen/shared, uuid,
  * storageRoots, tmp, fsAtomic, fsUtils and driveSelectors are used — they are
  * part of the lib's measured JS.
  */

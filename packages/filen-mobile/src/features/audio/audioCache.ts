@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { AppState } from "react-native"
-import { Semaphore, run } from "@filen/utils"
+import { Semaphore, run } from "@filen/shared"
 import { debounce } from "es-toolkit/function"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { MUSIC_METADATA_SUPPORTED_EXTENSIONS, AUDIO_METADATA_MAX_PARSE_SIZE_BYTES, AUDIO_METADATA_MAX_CONCURRENT_PARSES } from "@/constants"

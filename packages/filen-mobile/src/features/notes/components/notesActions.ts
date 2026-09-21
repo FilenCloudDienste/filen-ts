@@ -1,7 +1,7 @@
 import { type TFunction } from "i18next"
 import { type NoteTag } from "@/types"
 import { NoteType } from "@filen/sdk-rs"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import { router } from "@/lib/router"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"

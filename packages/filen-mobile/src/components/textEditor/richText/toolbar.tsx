@@ -11,7 +11,7 @@ import type { QuillFormats, HeaderLevel } from "@/components/textEditor/richText
 import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
 import Text from "@/components/ui/text"
 import prompts from "@/lib/prompts"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 import { Platform } from "react-native"
 import logger from "@/lib/logger"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"

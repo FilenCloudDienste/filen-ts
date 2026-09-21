@@ -3,7 +3,7 @@ import * as ImageManipulator from "expo-image-manipulator"
 import { type ImagePickerAsset } from "expo-image-picker"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
 import i18n from "@/lib/i18n"
-import { type DeferFn } from "@filen/utils"
+import { type DeferFn } from "@filen/shared"
 
 // Validates a freshly-picked image and, when it isn't already JPEG/PNG, transcodes it to JPEG
 // via expo-image-manipulator. Returns the on-disk File ready to upload as the account avatar.

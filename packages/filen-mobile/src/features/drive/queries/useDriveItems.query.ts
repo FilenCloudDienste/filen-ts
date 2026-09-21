@@ -2,7 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { DEFAULT_QUERY_OPTIONS, queryUpdater, preserveArrayIdentity, queryClient } from "@/queries/client"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
-import { sortParams, run } from "@filen/utils"
+import { sortParams, run } from "@filen/shared"
 import {
 	type File,
 	type Dir,

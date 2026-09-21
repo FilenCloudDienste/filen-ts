@@ -1,5 +1,5 @@
 import { type DriveItem, type Note, type Chat, type ChatMessage, type NoteTag } from "@/types"
-import { fastLocaleCompare } from "@filen/utils"
+import { fastLocaleCompare } from "@filen/shared"
 
 export function cannotDecryptPlaceholder(uuid: string): string {
 	return `cannot_decrypt_${uuid}`

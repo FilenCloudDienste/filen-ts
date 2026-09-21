@@ -1,6 +1,6 @@
 import { type TFunction } from "i18next"
 import { AnyNormalDir } from "@filen/sdk-rs"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import { type DrivePath } from "@/hooks/useDrivePath"
 import { type MenuButton } from "@/components/ui/menu"
 import { type UseDriveUpload } from "@/features/drive/hooks/useDriveUpload"

@@ -3,7 +3,7 @@ import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import Image from "@/components/ui/image"
 import { customEmojis, type CustomEmoji } from "@/assets/customEmojis"
-import { fastLocaleCompare } from "@filen/utils"
+import { fastLocaleCompare } from "@filen/shared"
 import AutocompleteSuggestions from "@/features/chats/components/chat/input/autocompleteSuggestions"
 
 // Normalized once at module scope rather than per keystroke: the catalogue is static and over a

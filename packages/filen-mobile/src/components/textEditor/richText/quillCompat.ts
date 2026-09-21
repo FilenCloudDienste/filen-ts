@@ -1,5 +1,5 @@
 // Quill format backward-compat shim (mobile-side): translate this app's Quill 2.0.3 editor output to
-// the Quill 1.3.7 on-disk form that web + desktop (and @filen/utils) read.
+// the Quill 1.3.7 on-disk form that web + desktop (and @filen/shared) read.
 //
 // Notes are stored as raw Quill HTML (root.innerHTML), shared byte-for-byte across clients. Two
 // constructs serialize incompatibly between the versions:
@@ -77,7 +77,7 @@ function openTag(container: LegacyContainer): string {
 
 // Build one v1 <li> from a v2 <li>: strip the Quill v2 toggle UI span (class-gated — a user's own inline
 // <span> must survive), drop data-list, keep the class (preserves ql-indent-N), and normalize an empty
-// item to <li><br></li> (the empty form Quill v1 and @filen/utils checklistParser both use).
+// item to <li><br></li> (the empty form Quill v1 and @filen/shared checklistParser both use).
 function buildLegacyListItem(li: Element): string {
 	for (const ui of Array.from(li.querySelectorAll("span.ql-ui"))) {
 		ui.remove()

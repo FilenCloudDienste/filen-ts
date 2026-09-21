@@ -1,4 +1,4 @@
-import { runTimeout } from "@filen/utils"
+import { runTimeout } from "@filen/shared"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
@@ -167,7 +167,7 @@ export const generateVideoThumb: ThumbGenerator = async item => {
 	}
 
 	// runTimeout races a timer against this whole callback but cannot actually abort a still-running
-	// video/event-listener chain if it loses the race (verified against @filen/utils' own
+	// video/event-listener chain if it loses the race (verified against @filen/shared' own
 	// implementation: the deferred cleanup below only runs once THIS callback itself settles) — an
 	// unplayable stream that never fires loadeddata/seeked/error leaves a listener chain pending in
 	// the background past the 15s return. That is an accepted, bounded cost: the SW's own pending-

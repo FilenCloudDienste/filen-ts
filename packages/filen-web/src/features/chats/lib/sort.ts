@@ -1,4 +1,4 @@
-import { fastLocaleCompare, parseNumbersFromString } from "@filen/utils"
+import { fastLocaleCompare, parseNumbersFromString } from "@filen/shared"
 import type { Chat, ChatMessagePartial } from "@filen/sdk-rs"
 import { contactDisplayName } from "@/features/contacts/components/contactsList.logic"
 import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@/features/contacts/lib/blocking"

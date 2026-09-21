@@ -1,4 +1,4 @@
-import { ratePasswordStrength } from "@filen/utils"
+import { ratePasswordStrength } from "@filen/shared"
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 

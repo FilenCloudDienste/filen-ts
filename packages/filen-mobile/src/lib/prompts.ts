@@ -1,5 +1,5 @@
 import Alert from "@blazejkustra/react-native-alert"
-import { Semaphore, run } from "@filen/utils"
+import { Semaphore, run } from "@filen/shared"
 import { Platform } from "react-native"
 
 export type AlertPromptResult =

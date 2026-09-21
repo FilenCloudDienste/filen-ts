@@ -1,7 +1,7 @@
 import { useState, type DragEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import { GripVerticalIcon, MusicIcon, PlayIcon, PlusIcon, ShuffleIcon, XIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import { usePlaylistsQuery } from "@/features/audio/queries/playlists"

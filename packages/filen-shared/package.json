@@ -1,11 +1,11 @@
 {
-	"name": "@filen/utils",
+	"name": "@filen/shared",
 	"version": "0.0.12",
-	"description": "A collection of utils for Filen",
-	"private": false,
+	"description": "Code shared by the Filen apps",
+	"private": true,
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/FilenCloudDienste/filen-ts/packages/filen-utils"
+		"url": "https://github.com/FilenCloudDienste/filen-ts/packages/filen-shared"
 	},
 	"author": "Filen Cloud Dienste UG",
 	"type": "module",
@@ -17,19 +17,7 @@
 			"default": "./src/index.ts"
 		}
 	},
-	"publishConfig": {
-		"main": "dist/index.js",
-		"types": "dist/types/index.d.ts",
-		"exports": {
-			".": {
-				"types": "./dist/types/index.d.ts",
-				"default": "./dist/index.js"
-			}
-		}
-	},
 	"scripts": {
-		"build": "pnpm run build:clean && tsc --extendedDiagnostics --project tsconfig.build.json",
-		"build:clean": "rimraf ./dist",
 		"typecheck": "tsc --noEmit",
 		"dev": "tsx src/dev.ts",
 		"test": "vitest run",
@@ -38,9 +26,6 @@
 		"test:coverage": "vitest --coverage",
 		"lint": "eslint src/"
 	},
-	"keywords": [
-		"filen"
-	],
 	"engines": {
 		"node": ">=24"
 	},
@@ -49,7 +34,6 @@
 		"@eslint/js": "^9.39.3",
 		"@types/node": "^24.0.0",
 		"eslint": "^9.39.3",
-		"rimraf": "^6.1.0",
 		"tsx": "^4.20.6",
 		"typescript": "^5.9.3",
 		"typescript-eslint": "^8.56.1",

@@ -1,7 +1,7 @@
 import { vi, describe, it, expect } from "vitest"
 
 // listRow.tsx imports several UI primitives at module scope; stub them so importing the module (for its
-// pure className builders) doesn't pull native deps. `@filen/utils` (cn) is intentionally NOT mocked —
+// pure className builders) doesn't pull native deps. `@filen/shared` (cn) is intentionally NOT mocked —
 // the builders' real tailwind-merge output is what we assert on.
 vi.mock("@/components/ui/view", () => ({ default: () => null }))
 vi.mock("@/components/ui/text", () => ({ default: () => null }))

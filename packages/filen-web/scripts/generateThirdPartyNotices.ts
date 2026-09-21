@@ -21,7 +21,7 @@ import { join } from "node:path"
  *
  * Two ecosystems reach the browser: the npm tree (minus dev/optional entries, which are build tooling)
  * and the Rust crates the SDK wasm is compiled from. @filen/sdk-rs is a registry package and is
- * described here; @filen/utils is a workspace member, so pnpm does not report it and it is correctly
+ * described here; @filen/shared is a workspace member, so pnpm does not report it and it is correctly
  * absent — first-party code needs no attribution.
  *
  * Algorithm adapted from filen-mobile's generator of the same name; the pod/gradle collectors are
@@ -425,7 +425,7 @@ let installedCache: InstalledPackage[] | null = null
  * dropped, one reachable through both is kept — the same thing npm's `dev` flag meant. `--no-optional`
  * drops optionalDependencies, whose install set is decided per machine, so counting them would make the
  * payload depend on where it was generated. The `...` on the filter is load-bearing: without it pnpm
- * reports this package's own tree only, and the packages @filen/utils brings in silently vanish from the
+ * reports this package's own tree only, and the packages @filen/shared brings in silently vanish from the
  * attribution.
  */
 function installedNpm(): InstalledPackage[] {

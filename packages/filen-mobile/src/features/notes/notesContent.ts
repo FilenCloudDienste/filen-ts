@@ -3,7 +3,7 @@ import { NoteType } from "@filen/sdk-rs"
 import { type Note } from "@/types"
 import { wrapSdkNote } from "@/features/notes/utils"
 import { noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
-import { createNotePreviewFromContentText } from "@filen/utils"
+import { createNotePreviewFromContentText } from "@filen/shared"
 import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
 
 export async function getContent({ note, signal }: { note: Note; signal?: AbortSignal }) {

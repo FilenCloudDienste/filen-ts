@@ -12,8 +12,8 @@ vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("react-native-quick-crypto", async () => await import("@/tests/mocks/reactNativeQuickCrypto"))
 
-vi.mock("@filen/utils", async () => ({
-	...(await import("@/tests/mocks/filenUtils")),
+vi.mock("@filen/shared", async () => ({
+	...(await import("@/tests/mocks/filenShared")),
 	sortParams: (p: Record<string, unknown>) => {
 		const keys = Object.keys(p).sort()
 		const result: Record<string, unknown> = {}

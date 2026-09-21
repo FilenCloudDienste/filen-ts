@@ -1,6 +1,6 @@
 import Image from "@/components/ui/image"
 import View from "@/components/ui/view"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 import type { ViewStyle, StyleProp } from "react-native"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"

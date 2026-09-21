@@ -1,4 +1,4 @@
-import { parseNumbersFromString } from "@filen/utils"
+import { parseNumbersFromString } from "@filen/shared"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 
 // Field x direction. "type" groups files by MIME (directories have none, so they fall back to

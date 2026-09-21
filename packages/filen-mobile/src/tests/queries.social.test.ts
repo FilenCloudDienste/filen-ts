@@ -32,8 +32,8 @@ vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
-vi.mock("@filen/utils", async () => {
-	const real = await import("@/tests/mocks/filenUtils")
+vi.mock("@filen/shared", async () => {
+	const real = await import("@/tests/mocks/filenShared")
 
 	return {
 		...real,

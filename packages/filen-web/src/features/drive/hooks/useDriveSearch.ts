@@ -224,7 +224,7 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 		}
 	}
 
-	// Hand-rolled setTimeout debounce rather than @filen/utils's runDebounced: that helper's whole
+	// Hand-rolled setTimeout debounce rather than @filen/shared's runDebounced: that helper's whole
 	// value is a STABLE, created-once closure, but its callback needs this render's openSearch (itself
 	// closed over the current rootUuid) — keeping a ref pointed at the latest one would mean writing to
 	// a ref during render, which this codebase's react-hooks/refs lint rule (React Compiler's own

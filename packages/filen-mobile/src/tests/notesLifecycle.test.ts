@@ -93,8 +93,8 @@ vi.mock("expo-localization", () => ({
 	timezone: "UTC"
 }))
 
-vi.mock("@filen/utils", async () => ({
-	...(await import("@/tests/mocks/filenUtils")),
+vi.mock("@filen/shared", async () => ({
+	...(await import("@/tests/mocks/filenShared")),
 	createNotePreviewFromContentText: vi.fn().mockReturnValue("preview-text"),
 	sortParams: vi.fn(x => x)
 }))

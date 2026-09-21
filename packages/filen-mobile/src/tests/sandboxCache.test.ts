@@ -4,7 +4,7 @@ vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSyst
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
-vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 // fsUtils (imported by sandboxCache.ts) now pulls VERSION from sibling lib
 // modules. Mock them so their full transitive deps (SDK, auth, etc.) don't load.

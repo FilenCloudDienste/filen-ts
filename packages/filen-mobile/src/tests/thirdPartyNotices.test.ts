@@ -31,7 +31,7 @@ const PACKAGE_ROOT = path.join(__dirname, "..", "..")
  * binaries, CI's Linux run the linux ones, so counting them would make the expectation depend on where
  * the payload was generated.
  *
- * The `...` on the filter keeps everything @filen/utils brings in inside the set; @filen/utils itself is
+ * The `...` on the filter keeps everything @filen/shared brings in inside the set; @filen/shared itself is
  * a workspace member, is not reported, and is correctly absent from the payload.
  */
 function installedShippingPackages(): Set<string> {

@@ -14,7 +14,7 @@ vi.mock("@/lib/alerts", () => ({ default: { error: mockAlertsError } }))
 vi.mock("@/lib/i18n", () => ({ t: (key: string) => key }))
 vi.mock("expo-router", () => ({ router: { canGoBack: mockCanGoBack, back: mockBack } }))
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({ runWithLoading: mockRunWithLoading }))
-vi.mock("@filen/utils", () => ({
+vi.mock("@filen/shared", () => ({
 	run: async (fn: () => Promise<unknown>) => {
 		try {
 			return { success: true, data: await fn() }

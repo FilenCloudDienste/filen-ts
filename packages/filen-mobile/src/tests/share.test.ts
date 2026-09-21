@@ -44,9 +44,9 @@ vi.mock("react-native", () => ({
 	}
 }))
 
-// Mirror @filen/utils `run`: execute fn with a defer collector, then run the deferred
+// Mirror @filen/shared `run`: execute fn with a defer collector, then run the deferred
 // callbacks (in reverse) on both success and failure, returning a Result.
-vi.mock("@filen/utils", () => ({
+vi.mock("@filen/shared", () => ({
 	run: async (fn: (defer: (d: () => void) => void) => Promise<unknown>) => {
 		const deferred: Array<() => void> = []
 		const defer = (d: () => void) => {

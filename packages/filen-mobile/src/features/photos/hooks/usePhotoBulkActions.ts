@@ -1,4 +1,4 @@
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
 import * as FileSystem from "expo-file-system"

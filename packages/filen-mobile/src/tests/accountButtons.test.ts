@@ -76,8 +76,8 @@ vi.mock("expo-linking", () => ({
 	openURL: mockOpenURL
 }))
 
-vi.mock("@filen/utils", async () => ({
-	...(await import("@/tests/mocks/filenUtils")),
+vi.mock("@filen/shared", async () => ({
+	...(await import("@/tests/mocks/filenShared")),
 	formatBytes: (n: number) => `${n}B`
 }))
 

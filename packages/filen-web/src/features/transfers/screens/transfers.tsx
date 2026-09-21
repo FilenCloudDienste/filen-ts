@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
 import { ArrowDownUpIcon, PauseIcon, PlayIcon, Trash2Icon, XIcon } from "lucide-react"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import { isActiveTransfer, useTransfersAggregate, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import {
 	buildTransfersDisplayList,

@@ -18,7 +18,7 @@
  * (copies per write), the per-op wrapper overhead, and the init fan-out loop.
  *
  * REAL in the loop: node crypto (the device boundary, constant across rounds),
- * serializer (counted passthrough), @filen/utils, events (real emitter + one
+ * serializer (counted passthrough), @filen/shared, events (real emitter + one
  * dummy subscriber to make emit fan-out realistic). Mock boundary: expo-file-system /
  * expo-secure-store / mmkv / quick-crypto Buffer (canonical mocks).
  */

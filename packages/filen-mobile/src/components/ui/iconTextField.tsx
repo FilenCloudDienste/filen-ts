@@ -1,6 +1,6 @@
 import { Fragment } from "react"
 import { TextInput, type TextInputProps } from "react-native"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import View from "@/components/ui/view"
 

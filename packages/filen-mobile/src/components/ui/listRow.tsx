@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 
 // Shared "list row" primitive — the flat avatar-row used across contacts, participants (notes/chats),
 // file versions, note history, events, the chat-input pickers, etc. It is a pure LAYOUT/SLOT shell:

@@ -1,7 +1,7 @@
 import { NativeView } from "react-native-boost/runtime"
 import { withUniwind, useUniwind } from "uniwind"
 import { type ViewProps, type View as RNView, Platform, type StyleProp, type ViewStyle, StyleSheet } from "react-native"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 import {
 	KeyboardAvoidingView as RNKeyboardControllerKeyboardAvoidingView,
 	KeyboardAwareScrollView as RNKeyboardControllerKeyboardAwareScrollView,

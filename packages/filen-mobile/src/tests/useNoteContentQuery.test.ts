@@ -21,8 +21,8 @@ const { mockGetSdkClients, mockSdkClient, mockNotesQueryGet } = vi.hoisted(() =>
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("@filen/utils", async () => ({
-	...(await import("@/tests/mocks/filenUtils")),
+vi.mock("@filen/shared", async () => ({
+	...(await import("@/tests/mocks/filenShared")),
 	// sortParams is only used by the query hooks/updaters — identity is fine for the fetchData tests.
 	sortParams: <T>(params: T): T => params
 }))

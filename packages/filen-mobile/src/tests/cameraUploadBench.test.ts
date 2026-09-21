@@ -23,7 +23,7 @@
  * classes, no vi.fn in hot paths), expo-file-system (canonical mock — same
  * Paths semantics the suites pin), SDK listing/transfers/secureStore/store
  * (plain functions + counters). REAL code measured: cameraUpload.ts,
- * cameraUploadHelpers.ts, @filen/utils (run/Semaphore/fastLocaleCompare),
+ * cameraUploadHelpers.ts, @filen/shared (run/Semaphore/fastLocaleCompare),
  * js-xxhash, @/lib/tmp. unwrapFileMeta is a plain stub that mimics the real
  * shape work (tag check + result-object allocation) and counts calls.
  */

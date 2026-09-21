@@ -23,8 +23,8 @@ vi.mock("@/components/ui/animated", () => ({ AnimatedView: () => null }))
 
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
-vi.mock("@filen/utils", async () => ({
-	...(await import("@/tests/mocks/filenUtils")),
+vi.mock("@filen/shared", async () => ({
+	...(await import("@/tests/mocks/filenShared")),
 	cn: (...args: unknown[]) => args.filter(Boolean).join(" ")
 }))
 

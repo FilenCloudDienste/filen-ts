@@ -34,7 +34,7 @@ const { chatsState, mockSetInflightMessages, mockSetInflightErrors, mockFlushToD
 		}
 	})
 
-vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("@/features/chats/store/useChats.store", () => ({
 	default: {

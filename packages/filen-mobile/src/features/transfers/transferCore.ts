@@ -1,6 +1,6 @@
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import * as FileSystem from "expo-file-system"
 import {
 	type Dir,

@@ -13,7 +13,7 @@ Fixes #<!-- issue number, if any -->
 - [ ] filen-mobile
 - [ ] filen-web
 - [ ] filen-desktop
-- [ ] filen-utils
+- [ ] filen-shared
 - [ ] CI / workflows
 - [ ] Repo tooling / docs
 

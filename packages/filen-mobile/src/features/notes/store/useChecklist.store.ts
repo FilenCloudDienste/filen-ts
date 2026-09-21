@@ -1,6 +1,6 @@
 import { createStore, type StoreApi } from "zustand"
 import { createContext } from "react"
-import type { Checklist } from "@filen/utils"
+import type { Checklist } from "@filen/shared"
 import type { TextInput } from "react-native"
 
 export type ChecklistStore = {

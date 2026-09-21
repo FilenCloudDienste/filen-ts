@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import { ArrowLeftIcon, DownloadIcon, EyeIcon, EyeOffIcon } from "lucide-react"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"

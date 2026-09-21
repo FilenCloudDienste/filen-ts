@@ -1,7 +1,7 @@
 import { NativeText } from "react-native-boost/runtime"
 import { withUniwind } from "uniwind"
 import type { TextProps } from "react-native"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 
 const UniwindText = withUniwind(NativeText) as React.FC<TextProps>
 

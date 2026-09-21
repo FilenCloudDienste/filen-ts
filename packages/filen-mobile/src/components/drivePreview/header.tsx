@@ -15,7 +15,7 @@ import useDriveItemStoredOfflineQuery from "@/features/drive/queries/useDriveIte
 import { useShallow } from "zustand/shallow"
 import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 import { useResolveClassNames } from "uniwind"
 import Menu from "@/components/ui/menu"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"

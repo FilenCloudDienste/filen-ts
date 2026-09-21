@@ -4,7 +4,7 @@ import { PressableScale } from "@/components/ui/pressables"
 import { useSecureStore } from "@/lib/secureStore"
 import useChatsStore, { type Suggestions } from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
-import { findClosestIndexString } from "@filen/utils"
+import { findClosestIndexString } from "@filen/shared"
 import PopupContainerView from "@/features/chats/components/chat/input/popupContainerView"
 
 // Stable empty list for the hidden case — `never[]` is assignable to any `T[]`, and a shared identity

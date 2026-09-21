@@ -13,7 +13,7 @@ import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import { useShallow } from "zustand/shallow"
 import { simpleDate } from "@/lib/time"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import { useResolveClassNames } from "uniwind"
 import prompts from "@/lib/prompts"
 import notes from "@/features/notes/notes"

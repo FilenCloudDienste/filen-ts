@@ -18,7 +18,7 @@
  *
  * REAL in the loop: @tanstack/react-query + query-persist-client-core (their cost is
  * constant across rounds — our machinery's deltas are what the counters isolate),
- * es-toolkit, @filen/utils, the serializer (counted passthrough). Mocked boundary:
+ * es-toolkit, @filen/shared, the serializer (counted passthrough). Mocked boundary:
  * @/lib/sqlite (plain-function db over an in-memory kv Map).
  *
  * Fixture axes: many-small entries at 10k/100k (per-entry machinery), plus a

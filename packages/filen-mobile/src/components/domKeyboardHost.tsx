@@ -1,6 +1,6 @@
 import { KeyboardAvoidingView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 
 /**
  * Wrapper for a DOM (WebView) component whose page can take keyboard focus — #102.

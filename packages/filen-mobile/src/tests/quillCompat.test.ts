@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest"
 import { quillV2ToLegacyV1 } from "@/components/textEditor/richText/quillCompat"
 
 // Realistic Quill v2 markup. The expected outputs below are Quill v1's exact getHTML() form — captured
-// from real Quill 1.3.7 — i.e. the bytes web/desktop (Quill 1.3.7) and @filen/utils read.
+// from real Quill 1.3.7 — i.e. the bytes web/desktop (Quill 1.3.7) and @filen/shared read.
 function v2Item(dataList: string, inner: string, className?: string): string {
 	const cls = className ? ` class="${className}"` : ""
 

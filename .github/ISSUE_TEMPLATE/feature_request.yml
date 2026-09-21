@@ -11,7 +11,7 @@ body:
         - Mobile - Android
         - Web (filen-web)
         - Desktop (@filen/desktop)
-        - Utils (@filen/utils)
+        - Shared (@filen/shared)
         - Multiple / general
     validations:
       required: true

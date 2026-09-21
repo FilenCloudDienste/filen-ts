@@ -57,7 +57,7 @@ vi.mock("expo-image-picker", () => ({
 	requestCameraPermissionsAsync: async () => ({ ...mockCameraRequest })
 }))
 
-vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 // Query mock — useMediaPermissions uses useMediaPermissionsQuery
 const mockQueryData = vi.hoisted(() => ({

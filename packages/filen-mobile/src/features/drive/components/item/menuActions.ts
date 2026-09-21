@@ -9,7 +9,7 @@ import { buildUndecryptableMenuButtons } from "@/features/drive/components/item/
 import { buildDownloadSubButtons, buildExportButton, buildOpenWithButton } from "@/features/drive/components/item/menuActionsDownload"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import { randomUUID } from "expo-crypto"
 import offline from "@/features/offline/offline"
 import { getRealDriveItemParent, makeDriveItemPublicLink, unwrapParentUuid } from "@/lib/sdkUnwrap"

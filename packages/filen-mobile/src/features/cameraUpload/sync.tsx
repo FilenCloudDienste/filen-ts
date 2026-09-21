@@ -8,7 +8,7 @@ import { useSecureStore } from "@/lib/secureStore"
 import { OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY } from "@/features/offline/offlineHelpers"
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import auth from "@/lib/auth"
-import { Semaphore } from "@filen/utils"
+import { Semaphore } from "@filen/shared"
 
 const syncDebounced = debounce(
 	() => {

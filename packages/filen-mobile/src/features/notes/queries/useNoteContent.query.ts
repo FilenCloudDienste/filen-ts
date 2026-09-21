@@ -1,6 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import queryClient, { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
-import { sortParams } from "@filen/utils"
+import { sortParams } from "@filen/shared"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
 import { notesQueryGet } from "@/features/notes/queries/useNotesQuery"

@@ -24,7 +24,7 @@ vi.mock("react-i18next", () => ({
 	useTranslation: vi.fn(() => ({ t: (k: string) => k }))
 }))
 vi.mock("@tanstack/react-query", () => ({ onlineManager: { isOnline: vi.fn(() => true) } }))
-vi.mock("@filen/utils", () => ({ run: vi.fn() }))
+vi.mock("@filen/shared", () => ({ run: vi.fn() }))
 vi.mock("@/lib/time", () => ({ simpleDate: vi.fn(() => "") }))
 vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
 vi.mock("@/lib/serializer", () => ({ serialize: vi.fn(x => JSON.stringify(x)) }))

@@ -1,6 +1,6 @@
 import { type } from "arktype"
 import * as Comlink from "comlink"
-import { createNotePreviewFromContentText } from "@filen/utils"
+import { createNotePreviewFromContentText } from "@filen/shared"
 import type { StringifiedClient, File, Note, NoteType, DirMeta, FileMeta } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { stringifyEnvelope } from "@/lib/serialize"

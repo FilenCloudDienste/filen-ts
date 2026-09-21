@@ -11,7 +11,7 @@ vi.mock("react-native", () => ({
 
 const mockBpsToReadable = vi.fn((speed: number) => `${speed}B/s`)
 
-vi.mock("@filen/utils", () => ({
+vi.mock("@filen/shared", () => ({
 	bpsToReadable: mockBpsToReadable
 }))
 

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import { StarIcon } from "lucide-react"
 import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"

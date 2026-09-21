@@ -1,4 +1,4 @@
-import { run, formatBytes, cn } from "@filen/utils"
+import { run, formatBytes, cn } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"

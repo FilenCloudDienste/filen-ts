@@ -1,6 +1,6 @@
 import { useQuery, onlineManager, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
-import { sortParams } from "@filen/utils"
+import { sortParams } from "@filen/shared"
 import cache from "@/lib/cache"
 import rawPreviewCache, { type RawPreviewResult } from "@/lib/rawPreviewCache"
 import offline from "@/features/offline/offline"

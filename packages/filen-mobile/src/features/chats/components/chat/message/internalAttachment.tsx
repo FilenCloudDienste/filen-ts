@@ -1,7 +1,7 @@
 import { DirColor, MaybeEncryptedUniffi_Tags, DirMeta_Tags } from "@filen/sdk-rs"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
-import { cn, formatBytes, run } from "@filen/utils"
+import { cn, formatBytes, run } from "@filen/shared"
 import { linkedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { Fragment } from "react"
 import { simpleDate } from "@/lib/time"

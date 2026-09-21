@@ -1,5 +1,5 @@
 import { type TFunction } from "i18next"
-import { run, type Result } from "@filen/utils"
+import { run, type Result } from "@filen/shared"
 import { AnyNormalDir } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
 import * as ImagePicker from "expo-image-picker"

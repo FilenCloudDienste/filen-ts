@@ -9,7 +9,7 @@ function testUuid(label: string): UuidStr {
 }
 
 // A controllable promise for interleaving two engine calls at a precise await point — vitest has no
-// built-in for this, and the codebase's own DeferFn (@filen/utils) is a cleanup callback, not a
+// built-in for this, and the codebase's own DeferFn (@filen/shared) is a cleanup callback, not a
 // resolver, so this is a small test-only primitive. No `!`: the executor runs synchronously, but the
 // assignment is still read through an optional call rather than asserted non-null.
 function deferredPromise<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (reason: unknown) => void } {

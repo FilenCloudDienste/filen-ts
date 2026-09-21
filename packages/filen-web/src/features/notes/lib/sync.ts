@@ -1,4 +1,4 @@
-import { run, Semaphore, createExecutableTimeout, createNotePreviewFromContentText } from "@filen/utils"
+import { run, Semaphore, createExecutableTimeout, createNotePreviewFromContentText } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import type { Note } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"

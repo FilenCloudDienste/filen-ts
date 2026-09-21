@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import { deriveStorageBreakdown, storagePercent, storageUsageLevel, type StorageUsageLevel } from "@/features/settings/lib/storageBreakdown"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"

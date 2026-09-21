@@ -61,7 +61,7 @@ import init, {
 	type UserEventResult,
 	type JsClientConfig
 } from "@filen/sdk-rs"
-import { run, runEffect, runTimeout } from "@filen/utils"
+import { run, runEffect, runTimeout } from "@filen/shared"
 import { toErrorDTO, PARENT_NOT_FOUND_PREFIX, DIRECTORY_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 import {

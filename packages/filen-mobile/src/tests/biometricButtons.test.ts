@@ -33,7 +33,7 @@ vi.mock("@/features/settings/fileProvider", () => ({
 
 // Provide a minimal run() that actually invokes fn() and wraps the result.
 // No defer support needed — biometricButtons.ts never registers deferred cleanups.
-vi.mock("@filen/utils", () => ({
+vi.mock("@filen/shared", () => ({
 	run: async (fn: () => Promise<unknown>) => {
 		try {
 			return { success: true, data: await fn() }

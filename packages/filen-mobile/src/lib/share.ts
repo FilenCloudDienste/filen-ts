@@ -1,6 +1,6 @@
 import { AppState, Platform, Share } from "react-native"
 import * as Sharing from "expo-sharing"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import { withSystemPresentation } from "@/lib/systemPresentation"
 import logger from "@/lib/logger"
 

@@ -32,7 +32,7 @@ interface InstalledPackage {
  * `--prod` follows only `dependencies` edges: a package reachable ONLY through devDependencies is
  * dropped, one reachable through both is kept — the same thing npm's `dev` flag meant. `--no-optional`
  * drops optionalDependencies, whose install set is decided per machine. The `...` on the filter keeps
- * everything @filen/utils brings in inside the set; @filen/utils itself is a workspace member, is not
+ * everything @filen/shared brings in inside the set; @filen/shared itself is a workspace member, is not
  * reported, and is correctly absent from the payload.
  */
 function installedPackages(): InstalledPackage[] {

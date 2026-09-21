@@ -12,8 +12,8 @@ vi.mock("@filen/sdk-rs", () => ({
 	ChatTypingType: { Up: 0, Down: 1 }
 }))
 
-vi.mock("@filen/utils", async () => ({
-	...(await import("@/tests/mocks/filenUtils")),
+vi.mock("@filen/shared", async () => ({
+	...(await import("@/tests/mocks/filenShared")),
 	parseNumbersFromString(s: unknown) {
 		const digits = (s as string).replace(/\D/g, "")
 		const n = parseInt(digits, 10)

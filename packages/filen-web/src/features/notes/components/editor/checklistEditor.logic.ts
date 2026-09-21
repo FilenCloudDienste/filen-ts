@@ -1,10 +1,10 @@
-import { checklistParser, type Checklist } from "@filen/utils"
+import { checklistParser, type Checklist } from "@filen/shared"
 
 // checklistParser.stringify interpolates row text raw into `<li>…</li>`, and its parser reads the row
 // back via `rawText` WITHOUT decoding entities. So the only way tag-like row text ("Fix <Header>", a
 // literal `</li><li>`, a bare `&`) survives the serialize→persist→parse round-trip is to HTML-escape it
 // on the way out and reverse that escape on the way in — done here at the web boundary rather than in
-// the shared @filen/utils parser so this app owns its own encoding without changing behavior for other
+// the shared @filen/shared parser so this app owns its own encoding without changing behavior for other
 // clients. escape/unescape are exact inverses (escape does `&` first, unescape does `&` last), which
 // makes the round-trip lossless even for text that itself contains these entities (a literally typed
 // `&lt;` escapes to `&amp;lt;` and comes back as `&lt;`).
@@ -18,7 +18,7 @@ function unescapeChecklistText(text: string): string {
 
 // Pure checklist mutation transforms for the custom checklist editor — ported from mobile's
 // checklistEdit.ts. They compute the next list (and which row to focus) WITHOUT touching React state, so
-// the component applies the result, moves focus, and serializes through the SAME @filen/utils
+// the component applies the result, moves focus, and serializes through the SAME @filen/shared
 // checklistParser both mobile and old-web write. Keeping them pure makes the
 // add/remove/toggle → serialize round-trip unit-testable without rendering.
 

@@ -1,4 +1,4 @@
-import { createNotePreviewFromContentText } from "@filen/utils"
+import { createNotePreviewFromContentText } from "@filen/shared"
 import type { SocketEvent, UserInfo, Note } from "@filen/sdk-rs"
 import { registerSocketHandler, decryptedOrSkip } from "@/lib/sdk/socket"
 import { queryClient } from "@/queries/client"

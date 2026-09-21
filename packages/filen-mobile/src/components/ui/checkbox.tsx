@@ -1,6 +1,6 @@
 import { Checkbox as ExpoCheckbox } from "expo-checkbox"
 import { withUniwind, useResolveClassNames } from "uniwind"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 
 export const UniwindCheckbox = withUniwind(ExpoCheckbox) as React.FC<React.ComponentProps<typeof ExpoCheckbox>>
 

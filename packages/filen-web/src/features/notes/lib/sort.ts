@@ -1,4 +1,4 @@
-import { fastLocaleCompare } from "@filen/utils"
+import { fastLocaleCompare } from "@filen/shared"
 import type { Note, NoteHistory, NoteTag } from "@filen/sdk-rs"
 
 // Port of mobile's notesSorter.sort (src/lib/sort.ts) onto the wasm Note shape. `editedTimestamp`

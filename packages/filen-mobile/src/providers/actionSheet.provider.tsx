@@ -1,6 +1,6 @@
 import events from "@/lib/events"
 import { useEffect, useRef } from "react"
-import { runEffect } from "@filen/utils"
+import { runEffect } from "@filen/shared"
 import { ActionSheetProvider as ExpoActionSheetProvider, useActionSheet } from "@expo/react-native-action-sheet"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import { useSafeAreaInsets } from "react-native-safe-area-context"

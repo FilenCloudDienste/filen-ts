@@ -25,7 +25,7 @@ const { debouncedHandles, RealSemaphore, mockBackgroundTask, mockAuth, mockCamer
 
 	const debouncedHandles: Handle[] = []
 
-	// Faithful re-implementation of @filen/utils Semaphore (the shared mock is a no-op, which would
+	// Faithful re-implementation of @filen/shared Semaphore (the shared mock is a no-op, which would
 	// defeat the CU-02 serialization assertion). One-permit acquire/release with a FIFO waiter queue.
 	class RealSemaphore {
 		private counter = 0
@@ -109,7 +109,7 @@ vi.mock("es-toolkit/function", () => ({
 	}
 }))
 
-vi.mock("@filen/utils", () => ({ Semaphore: RealSemaphore }))
+vi.mock("@filen/shared", () => ({ Semaphore: RealSemaphore }))
 
 vi.mock("@/features/cameraUpload/backgroundTask", () => mockBackgroundTask)
 

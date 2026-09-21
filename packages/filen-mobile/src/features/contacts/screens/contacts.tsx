@@ -1,5 +1,5 @@
 import { onlineManager } from "@tanstack/react-query"
-import { run, cn } from "@filen/utils"
+import { run, cn } from "@filen/shared"
 import { Fragment, useState, useCallback, useEffect, useRef } from "react"
 import { Platform } from "react-native"
 import { useTranslation } from "react-i18next"

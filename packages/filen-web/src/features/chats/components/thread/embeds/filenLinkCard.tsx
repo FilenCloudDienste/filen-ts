@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { FileIcon, FolderIcon } from "lucide-react"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import type { FilenPublicLink } from "@/features/chats/lib/embeds.logic"
 import type { ChatLinkResolution } from "@/features/chats/queries/chatMessageLinks"
 import { linkedFileIntoDriveItem, type DriveItem } from "@/features/drive/lib/item"

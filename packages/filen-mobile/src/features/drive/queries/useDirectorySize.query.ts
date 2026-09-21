@@ -1,7 +1,7 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import auth from "@/lib/auth"
-import { sortParams } from "@filen/utils"
+import { sortParams } from "@filen/shared"
 import cache from "@/lib/cache"
 import {
 	AnyDirWithContext_Tags,

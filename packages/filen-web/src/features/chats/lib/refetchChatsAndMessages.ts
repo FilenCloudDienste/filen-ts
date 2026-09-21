@@ -1,4 +1,4 @@
-import { run, Semaphore } from "@filen/utils"
+import { run, Semaphore } from "@filen/shared"
 import { fetchChats, chatsQueryReplaceAll } from "@/features/chats/queries/chats"
 import { fetchMessagesForChat, chatMessagesQueryUpdate, mergeNewestPage } from "@/features/chats/queries/chatMessages"
 

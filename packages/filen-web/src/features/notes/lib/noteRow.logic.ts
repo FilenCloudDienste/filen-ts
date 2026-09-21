@@ -1,4 +1,4 @@
-import { fastLocaleCompare } from "@filen/utils"
+import { fastLocaleCompare } from "@filen/shared"
 import type { Note, NoteParticipant, NoteTag } from "@filen/sdk-rs"
 
 // Pure per-row content derivations, split out of noteRow.tsx so the row's non-trivial rules

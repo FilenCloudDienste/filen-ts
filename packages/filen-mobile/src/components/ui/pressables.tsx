@@ -5,7 +5,7 @@ import {
 	PressableWithoutFeedback as PresstoPressableWithoutFeedback,
 	PressablesGroup as PresstoPressablesGroup
 } from "pressto"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 import { useLongPressGuard } from "@/components/ui/longPressMenuGuard"
 
 const PressableOpacityUniwind = withUniwind(PresstoPressableOpacity)

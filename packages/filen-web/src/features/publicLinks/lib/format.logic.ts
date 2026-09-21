@@ -14,7 +14,7 @@ import { Buffer } from "buffer"
 //   NEW (this app, path-based):   https://app.filen.io/f/<uuid>#<hexkey>   → f = FILE, d = DIRECTORY
 //   LEGACY (old-web, hash-router): https://app.filen.io/#/f/<uuid>%23<key> → f = DIRECTORY, d = FILE
 // The letters are DELIBERATELY swapped between eras. The legacy host set (app|drive).filen.io and
-// its %23-or-literal-# separator mirror the shared @filen/utils parser these links round-tripped
+// its %23-or-literal-# separator mirror the shared @filen/shared parser these links round-tripped
 // through; this module reimplements the shape web-locally rather than repointing that shared parser
 // (mobile still builds legacy-format links and must keep parsing them — it migrates later).
 

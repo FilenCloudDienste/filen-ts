@@ -5,7 +5,7 @@ on:
 
   push:
     paths:
-      - 'packages/filen-utils/**'
+      - 'packages/filen-shared/**'
       - 'packages/filen-mobile/**'
       - 'packages/filen-web/**'
       - 'pnpm-lock.yaml'
@@ -15,7 +15,7 @@ on:
 
   pull_request:
     paths:
-      - 'packages/filen-utils/**'
+      - 'packages/filen-shared/**'
       - 'packages/filen-mobile/**'
       - 'packages/filen-web/**'
       - 'pnpm-lock.yaml'
@@ -27,7 +27,7 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      filen-utils: ${{ steps.filter.outputs.filen-utils }}
+      filen-shared: ${{ steps.filter.outputs.filen-shared }}
       filen-mobile: ${{ steps.filter.outputs.filen-mobile }}
       filen-web: ${{ steps.filter.outputs.filen-web }}
     steps:
@@ -36,35 +36,35 @@ jobs:
         id: filter
         with:
           filters: |
-            filen-utils:
-              - 'packages/filen-utils/**'
+            filen-shared:
+              - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
               - 'package.json'
             filen-mobile:
               - 'packages/filen-mobile/**'
-              - 'packages/filen-utils/**'
+              - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
               - 'package.json'
             filen-web:
               - 'packages/filen-web/**'
-              - 'packages/filen-utils/**'
+              - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
               - 'package.json'
 
-  test-utils:
+  test-shared:
     needs: changes
-    if: needs.changes.outputs.filen-utils == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.changes.outputs.filen-shared == 'true' || github.event_name == 'workflow_dispatch'
     # A superseded push to the same ref cancels its own in-flight run: this is a cheap unit job
     # that touches nothing shared, so only the newest commit's result is worth paying for. The web
     # job deliberately does NOT cancel — see its own concurrency block for why.
     concurrency:
-      group: filen-utils-tests-${{ github.ref }}
+      group: filen-shared-tests-${{ github.ref }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
@@ -78,10 +78,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - name: Install dependencies
-        working-directory: packages/filen-utils
-        run: pnpm install --frozen-lockfile --filter @filen/utils...
+        working-directory: packages/filen-shared
+        run: pnpm install --frozen-lockfile --filter @filen/shared...
       - name: Test
-        working-directory: packages/filen-utils
+        working-directory: packages/filen-shared
         run: pnpm test
   test-mobile:
     needs: changes

@@ -1,4 +1,4 @@
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import { asDirectoryOrFile, getSharerIdentity, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 

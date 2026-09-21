@@ -1,7 +1,7 @@
 import { useState, type SubmitEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { ratePasswordStrength } from "@filen/utils"
+import { ratePasswordStrength } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { persistSession, clearSession } from "@/lib/sdk/session"
 import { asErrorDTO } from "@/lib/sdk/errors"

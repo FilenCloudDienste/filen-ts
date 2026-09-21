@@ -52,8 +52,8 @@ vi.mock("@/constants", async () => ({
 	EXPO_AUDIO_SUPPORTED_EXTENSIONS: new Set([".mp3", ".m4a", ".wav"])
 }))
 
-vi.mock("@filen/utils", async () => {
-	const sharedMock = await import("@/tests/mocks/filenUtils")
+vi.mock("@filen/shared", async () => {
+	const sharedMock = await import("@/tests/mocks/filenShared")
 
 	// A faithful blocking mutex so the per-uuid serialization is real, as in fileCache.test.ts.
 	class Semaphore {

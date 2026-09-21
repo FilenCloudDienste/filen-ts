@@ -1,5 +1,5 @@
 import View from "@/components/ui/view"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useVideoPlayer, VideoView } from "expo-video"
 import { PressableScale } from "@/components/ui/pressables"

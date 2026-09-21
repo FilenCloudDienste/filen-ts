@@ -50,7 +50,7 @@ vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 import sqlite from "@/lib/sqlite"
 import { forEachKvRowByPrefix, KV_RESTORE_PAGE_SIZE } from "@/lib/kvScan"

@@ -10,7 +10,7 @@ import {
 	UploadIcon,
 	XIcon
 } from "lucide-react"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import { isActiveTransfer, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { transferProgress, activeStatusLabelKey, transferIconKey } from "@/features/transfers/components/transferRow.logic"
 import { pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"

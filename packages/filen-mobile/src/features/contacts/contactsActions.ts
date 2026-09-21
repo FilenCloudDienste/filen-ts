@@ -3,7 +3,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import contacts from "@/features/contacts/contacts"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import { type MenuButton } from "@/components/ui/menu"
 import logger from "@/lib/logger"
 

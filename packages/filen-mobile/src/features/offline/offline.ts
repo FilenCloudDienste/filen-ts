@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import logger from "@/lib/logger"
 import type { DriveItem } from "@/types"
-import { run, Semaphore } from "@filen/utils"
+import { run, Semaphore } from "@filen/shared"
 import transfers from "@/features/transfers/transfers"
 import { serialize, deserialize, serializeEquals } from "@/lib/serializer"
 import auth from "@/lib/auth"

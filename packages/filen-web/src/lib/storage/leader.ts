@@ -1,5 +1,5 @@
 import * as Comlink from "comlink"
-import { serializeError, deserializeError, type SerializedError } from "@filen/utils" // preserves stack traces across the BroadcastChannel
+import { serializeError, deserializeError, type SerializedError } from "@filen/shared" // preserves stack traces across the BroadcastChannel
 import DbWorker from "@/workers/db.worker.ts?worker" // matches the sdk worker's own spawn convention (src/lib/sdk/client.ts) — confirmed working in dev + build
 import type { StorageApi } from "@/workers/db.worker"
 import { log } from "@/lib/log"

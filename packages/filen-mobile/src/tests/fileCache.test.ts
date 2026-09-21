@@ -26,8 +26,8 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-vi.mock("@filen/utils", async () => {
-	const sharedMock = await import("@/tests/mocks/filenUtils")
+vi.mock("@filen/shared", async () => {
+	const sharedMock = await import("@/tests/mocks/filenShared")
 
 	// Override the shared no-op Semaphore with a faithful blocking mutex so the gc fan-out bound
 	// (TC-13) — and the per-key correctness mutexes — actually serialize, as they do in production.

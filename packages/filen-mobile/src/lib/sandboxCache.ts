@@ -1,5 +1,5 @@
 import * as FileSystem from "expo-file-system"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import { walkLocalDirectory } from "@/lib/fsUtils"
 import { TMP_DIR_NAME } from "@/lib/tmp"
 import logger from "@/lib/logger"

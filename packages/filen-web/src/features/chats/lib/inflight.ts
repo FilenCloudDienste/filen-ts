@@ -1,4 +1,4 @@
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import type { Chat } from "@filen/sdk-rs"
 import { log } from "@/lib/log"
 import { sync } from "@/features/chats/lib/sync"

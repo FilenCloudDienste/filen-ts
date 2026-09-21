@@ -100,12 +100,12 @@ vi.mock("@filen/sdk-rs", () => ({
 	encodeName: mockEncodeName
 }))
 
-vi.mock("@filen/utils", async () => {
-	const sharedMock = await import("@/tests/mocks/filenUtils")
+vi.mock("@filen/shared", async () => {
+	const sharedMock = await import("@/tests/mocks/filenShared")
 
 	// The shared mock's Semaphore is a no-op. The staging-bound tests (#B5) need real
 	// acquire/release semantics, so this file substitutes a functional semaphore that
-	// mirrors @filen/utils' Semaphore (counter + FIFO waiter queue).
+	// mirrors @filen/shared' Semaphore (counter + FIFO waiter queue).
 	class FunctionalSemaphore {
 		private counter = 0
 		private readonly waiting: (() => void)[] = []

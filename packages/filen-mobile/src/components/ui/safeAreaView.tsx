@@ -1,6 +1,6 @@
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import View from "@/components/ui/view"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 import type { ViewProps } from "react-native"
 
 const SafeAreaView = ({

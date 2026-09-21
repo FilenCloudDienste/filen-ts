@@ -14,7 +14,7 @@ import useDriveItemIndicators from "@/features/drive/hooks/useDriveItemIndicator
 import { driveItemDisplayName } from "@/lib/decryption"
 import { driveScreenUsesBaseBackground } from "@/features/drive/driveSelectors"
 import { GRID_CELL_PADDING } from "@/features/drive/driveGrid"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 
 // Per-cell padding on all sides (the gap between adjacent cells = 2× this). Sourced from driveGrid
 // so the grid's screen-edge inset and inter-item gutter stay in sync.

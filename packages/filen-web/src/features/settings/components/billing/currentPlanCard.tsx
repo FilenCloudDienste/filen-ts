@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import { tierLabelKey } from "@/features/settings/lib/billing"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Card, CardFooter, CardHeader, CardTitle, CardDescription, CardAction } from "@/components/ui/card"

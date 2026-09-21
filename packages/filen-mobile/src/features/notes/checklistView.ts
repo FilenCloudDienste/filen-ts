@@ -1,5 +1,5 @@
 import { useSecureStore } from "@/lib/secureStore"
-import { type Checklist } from "@filen/utils"
+import { type Checklist } from "@filen/shared"
 
 // Per-note, client-side "hide completed checklist items" view preference. Record<noteUuid, boolean>;
 // absent → false (show everything). Purely a rendering filter — it never edits the note content, so

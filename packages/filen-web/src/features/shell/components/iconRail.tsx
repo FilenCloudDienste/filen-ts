@@ -17,7 +17,7 @@ import {
 	UserIcon,
 	CircleHelpIcon
 } from "lucide-react"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import { cn } from "@/lib/utils"
 import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/contactsList.logic"
 import { flushOutboxes, performLogout } from "@/features/shell/lib/performLogout"

@@ -1,7 +1,7 @@
 import { useEffect } from "react"
 import { useNavigation } from "expo-router"
 import { useTranslation } from "react-i18next"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import events from "@/lib/events"
 import prompts from "@/lib/prompts"

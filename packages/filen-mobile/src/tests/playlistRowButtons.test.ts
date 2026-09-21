@@ -7,7 +7,7 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
-vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("expo-router", () => ({
 	router: { push: vi.fn(), back: vi.fn() }

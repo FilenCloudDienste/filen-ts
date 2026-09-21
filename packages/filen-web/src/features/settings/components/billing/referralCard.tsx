@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import { CopyIcon, CheckIcon } from "lucide-react"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"

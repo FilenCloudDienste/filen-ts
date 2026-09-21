@@ -1,6 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS, queryUpdater, queryClient } from "@/queries/client"
-import { sortParams } from "@filen/utils"
+import { sortParams } from "@filen/shared"
 import cache from "@/lib/cache"
 import offline from "@/features/offline/offline"
 import type { DriveItem } from "@/types"

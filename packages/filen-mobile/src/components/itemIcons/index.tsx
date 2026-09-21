@@ -1,6 +1,6 @@
 import { ExpoImage } from "@/components/ui/image"
 import { Paths } from "expo-file-system"
-import { isValidHexColor, cn } from "@filen/utils"
+import { isValidHexColor, cn } from "@filen/shared"
 import { memoize } from "es-toolkit/function"
 import { type DirColor, DirColor_Tags } from "@filen/sdk-rs"
 import { getPreviewType } from "@/lib/previewType"

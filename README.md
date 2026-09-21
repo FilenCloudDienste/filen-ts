@@ -11,12 +11,12 @@ in TypeScript, and new code here shouldn't start.
 
 ## Packages
 
-| Package                                   | What it is                                                                                                                                                                |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`filen-web`](packages/filen-web)         | The browser app — Drive, Notes and Chats. Vite and React, with the SDK running in a cross-origin-isolated worker.                                                         |
-| [`filen-mobile`](packages/filen-mobile)   | The iOS and Android app. Expo and React Native, plus an iOS File Provider extension and an Android Documents Provider that are built from Rust at prebuild time.          |
-| [`filen-desktop`](packages/filen-desktop) | An Electron shell for the web app. Early scaffolding: the window exists, the wiring does not.                                                                             |
-| [`filen-utils`](packages/filen-utils)     | Shared helpers — semaphore, serialization, date formatting, note and checklist parsing. Published to npm as [`@filen/utils`](https://www.npmjs.com/package/@filen/utils). |
+| Package                                   | What it is                                                                                                                                                       |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`filen-web`](packages/filen-web)         | The browser app — Drive, Notes and Chats. Vite and React, with the SDK running in a cross-origin-isolated worker.                                                |
+| [`filen-mobile`](packages/filen-mobile)   | The iOS and Android app. Expo and React Native, plus an iOS File Provider extension and an Android Documents Provider that are built from Rust at prebuild time. |
+| [`filen-desktop`](packages/filen-desktop) | An Electron shell for the web app. Early scaffolding: the window exists, the wiring does not.                                                                    |
+| [`filen-shared`](packages/filen-shared)   | Code shared by the apps — semaphore, serialization, date formatting, note and checklist parsing. Consumed from the workspace, never published.                   |
 
 Each package has a README covering the setup its platform actually needs. The mobile one is not
 optional reading: that build wants a Rust toolchain, cargo-ndk, meson/ninja/nasm and the usual
@@ -53,20 +53,18 @@ pnpm --filter @filen/web run dev
 ```
 
 Node 24 and pnpm 12 are the floor; `packageManager` in the root `package.json` pins the exact pnpm
-version, and pnpm downloads that version itself when the local one differs. `@filen/utils` is linked
-from the workspace — a change there is visible to the clients immediately, and it still publishes to
-npm on release.
+version, and pnpm downloads that version itself when the local one differs. `@filen/shared` is
+linked from the workspace — a change there is visible to the clients immediately.
 
 ## CI
 
 Lint, typecheck and tests run on every push and pull request that touches `filen-web`,
-`filen-mobile` or `filen-utils`; CodeQL runs on `main` and weekly.
+`filen-mobile` or `filen-shared`; CodeQL runs on `main` and weekly.
 
 The mobile builds are the interesting ones. iOS and Android both build on every push to `main`
 without publishing, and a `filen-mobile@<version>` tag additionally ships them to TestFlight and
 Google Play. The tag is only a trigger — the version that gets built comes from `app.config.ts`,
-and a run whose tag disagrees with it fails before building anything. `@filen/utils` publishes to
-npm when a GitHub release is published.
+and a run whose tag disagrees with it fails before building anything.
 
 Both apps' translations are generated in CI from their English source catalogs. Edit the English
 strings; never the translated files.

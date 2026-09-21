@@ -1,5 +1,5 @@
 import type { AnyFile, ZipItem } from "@filen/sdk-rs"
-import { isAbortError } from "@filen/utils"
+import { isAbortError } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import {
 	SW_DOWNLOAD_PREFIX,

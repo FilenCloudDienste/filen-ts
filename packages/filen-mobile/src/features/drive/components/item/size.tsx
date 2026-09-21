@@ -1,7 +1,7 @@
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { DriveItem } from "@/types"
 import useDirectorySizeQuery from "@/features/drive/queries/useDirectorySize.query"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { directorySizeTypeForDrivePath } from "@/features/drive/utils"
 

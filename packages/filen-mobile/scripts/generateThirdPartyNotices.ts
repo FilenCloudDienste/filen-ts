@@ -465,7 +465,7 @@ function compareVersionsDescending(left: string, right: string): number {
  * happened to be generated.
  *
  * The `...` on the filter is load-bearing: without it pnpm reports this package's own tree only, and
- * everything @filen/utils brings in silently vanishes from the attribution. @filen/utils itself is a
+ * everything @filen/shared brings in silently vanishes from the attribution. @filen/shared itself is a
  * workspace member and is not reported, which is correct — it is first-party.
  */
 function installedNpm(): { name: string; version: string; dir: string }[] {

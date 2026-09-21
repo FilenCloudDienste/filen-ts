@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { createChecklistStore } from "@/features/notes/store/useChecklist.store"
-import { type Checklist } from "@filen/utils"
+import { type Checklist } from "@filen/shared"
 
 const live: Checklist = [
 	{ id: "live-1", checked: false, content: "buy milk" },

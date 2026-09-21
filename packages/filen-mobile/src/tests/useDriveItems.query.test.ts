@@ -75,9 +75,9 @@ vi.mock("expo-router", () => ({
 	useNavigation: vi.fn().mockReturnValue({})
 }))
 
-vi.mock("@filen/utils", async () => {
-	const real = await import("@/tests/mocks/filenUtils")
-	const { sortParams } = await import("@filen/utils")
+vi.mock("@filen/shared", async () => {
+	const real = await import("@/tests/mocks/filenShared")
+	const { sortParams } = await import("@filen/shared")
 
 	return {
 		...real,

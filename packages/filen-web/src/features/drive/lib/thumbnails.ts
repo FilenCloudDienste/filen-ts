@@ -1,6 +1,6 @@
 import * as Comlink from "comlink"
 import { onlineManager } from "@tanstack/react-query"
-import { Semaphore } from "@filen/utils"
+import { Semaphore } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
 import { readThumbnailBlob, deleteThumbnail as deleteThumbnailBlob } from "@/features/drive/lib/thumbCache"

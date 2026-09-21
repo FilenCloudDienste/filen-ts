@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import { CheckIcon, HistoryIcon, RotateCcwIcon, Trash2Icon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { FileVersion } from "@filen/sdk-rs"

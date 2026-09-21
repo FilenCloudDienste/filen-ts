@@ -18,7 +18,7 @@ import {
 	bpsToReadable,
 	formatBytes,
 	isAbortError
-} from "@filen/utils"
+} from "@filen/shared"
 
 describe("parseNumbersFromString", () => {
 	it("should extract digits from a short string", () => {

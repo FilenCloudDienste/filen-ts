@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import { useAccountQuery } from "@/queries/account"
 import { storageUsageLevel, type StorageUsageLevel } from "@/features/settings/lib/storageBreakdown"
 import { Progress } from "@/components/ui/progress"

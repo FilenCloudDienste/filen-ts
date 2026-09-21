@@ -1,6 +1,6 @@
 import { useEffect } from "react"
 import { AppState, type AppStateStatus, Platform } from "react-native"
-import { runEffect } from "@filen/utils"
+import { runEffect } from "@filen/shared"
 import transfers from "@/features/transfers/transfers"
 import foregroundService from "@/features/transfers/foregroundService"
 import { shouldCancelForegroundOnBackground } from "@/features/transfers/components/transferLifecycle.utils"

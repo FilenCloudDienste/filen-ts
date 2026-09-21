@@ -4,7 +4,7 @@ vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSyst
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("@expo/vector-icons/Ionicons", () => ({ default: () => null }))
-vi.mock("@filen/utils", () => ({ bpsToReadable: (n: number) => String(n) }))
+vi.mock("@filen/shared", () => ({ bpsToReadable: (n: number) => String(n) }))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
 vi.mock("expo-router", () => ({ router: { push: vi.fn() } }))
 vi.mock("uniwind", () => ({ useResolveClassNames: () => ({ color: "#fff" }) }))

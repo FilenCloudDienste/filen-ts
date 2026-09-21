@@ -1,6 +1,6 @@
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
-import { formatBytes } from "@filen/utils"
+import { formatBytes } from "@filen/shared"
 import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
 import { computeStorageSegments } from "@/features/settings/storageSegments"

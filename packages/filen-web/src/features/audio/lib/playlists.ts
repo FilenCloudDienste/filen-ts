@@ -1,4 +1,4 @@
-import { Semaphore } from "@filen/utils"
+import { Semaphore } from "@filen/shared"
 import type { File as SdkFile, FileEncryptionVersion, UuidStr } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"

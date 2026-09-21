@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { Modal, ActivityIndicator, Platform, type NativeSyntheticEvent } from "react-native"
-import { run, type DeferFn, type Result, type Options, runEffect } from "@filen/utils"
+import { run, type DeferFn, type Result, type Options, runEffect } from "@filen/shared"
 import { FullWindowOverlay } from "react-native-screens"
 import { FadeIn } from "react-native-reanimated"
 import { AnimatedView } from "@/components/ui/animated"

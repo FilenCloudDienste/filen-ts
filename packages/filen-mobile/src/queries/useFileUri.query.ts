@@ -1,6 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
-import { sortParams } from "@filen/utils"
+import { sortParams } from "@filen/shared"
 import { type FileSource, resolveFile, fileSourceKey } from "@/queries/fileSource"
 
 export const BASE_QUERY_KEY = "useFileUriQuery"

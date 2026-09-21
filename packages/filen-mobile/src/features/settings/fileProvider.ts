@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { Platform } from "react-native"
-import { Semaphore } from "@filen/utils"
+import { Semaphore } from "@filen/shared"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import auth from "@/lib/auth"
 import secureStore from "@/lib/secureStore"

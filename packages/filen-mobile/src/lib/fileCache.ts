@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import { AppState } from "react-native"
 import { AnyFile, ManagedFuture } from "@filen/sdk-rs"
-import { Semaphore, run } from "@filen/utils"
+import { Semaphore, run } from "@filen/shared"
 import { debounce } from "es-toolkit/function"
 import type { CacheItem, DriveItemFileExtracted } from "@/types"
 import { serialize, deserialize } from "@/lib/serializer"

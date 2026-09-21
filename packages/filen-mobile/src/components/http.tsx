@@ -3,7 +3,7 @@ import type { JsClientInterface, HttpProviderHandle, AnyFile } from "@filen/sdk-
 import { type AppStateStatus, AppState } from "react-native"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import { useEffect, useCallback } from "react"
-import { runEffect, run, Semaphore } from "@filen/utils"
+import { runEffect, run, Semaphore } from "@filen/shared"
 import useHttpStore from "@/stores/useHttp.store"
 import usePipStore from "@/stores/usePip.store"
 import alerts from "@/lib/alerts"

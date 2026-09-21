@@ -15,7 +15,7 @@ vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
@@ -107,7 +107,7 @@ vi.mock("@/stores/useDrivePreview.store", () => ({
 // ------------------------------------------------------------------
 
 import { type TFunction } from "i18next"
-import { type Result } from "@filen/utils"
+import { type Result } from "@filen/shared"
 import { fs } from "@/tests/mocks/expoFileSystem"
 import { summarizeTransferResults, useDriveUpload } from "@/features/drive/hooks/useDriveUpload"
 import type { DrivePath } from "@/hooks/useDrivePath"

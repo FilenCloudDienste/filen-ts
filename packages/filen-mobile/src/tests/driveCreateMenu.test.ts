@@ -14,7 +14,7 @@ vi.mock("@/features/drive/driveHiddenItems", () => ({
 	isHiddenName: (name: string) => name.trim().startsWith("."),
 	readHideHiddenItems: async () => false
 }))
-vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("@filen/sdk-rs", () => ({
 	AnyNormalDir: {

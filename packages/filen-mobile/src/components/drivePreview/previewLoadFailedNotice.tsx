@@ -1,6 +1,6 @@
 import { type StyleProp, type ViewStyle } from "react-native"
 import { useTranslation } from "react-i18next"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"

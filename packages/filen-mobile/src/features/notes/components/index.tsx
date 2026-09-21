@@ -7,7 +7,7 @@ import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualLis
 import ListEmpty from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
 import { type Note as TNote, type NoteTag } from "@/types"
-import { run, cn } from "@filen/utils"
+import { run, cn } from "@filen/shared"
 import { createNoteFlow, createTagFlow } from "@/features/notes/components/notesActions"
 import { sortNoteTags, useNotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import alerts from "@/lib/alerts"

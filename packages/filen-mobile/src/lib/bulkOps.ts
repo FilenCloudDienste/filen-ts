@@ -1,4 +1,4 @@
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"

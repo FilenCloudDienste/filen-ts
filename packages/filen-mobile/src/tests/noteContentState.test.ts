@@ -95,8 +95,8 @@ vi.mock("@/lib/i18n", () => ({
 }))
 vi.mock("@/lib/prompts", () => ({ default: {} }))
 vi.mock("@/hooks/useIsOnline", () => ({ default: () => true }))
-vi.mock("@filen/utils", async () => ({
-	...(await import("@/tests/mocks/filenUtils")),
+vi.mock("@filen/shared", async () => ({
+	...(await import("@/tests/mocks/filenShared")),
 	runEffect: (fn: (defer: (cleanup: () => void) => void) => void) => {
 		const cleanups: (() => void)[] = []
 

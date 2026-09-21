@@ -2,7 +2,7 @@ import * as FileSystem from "expo-file-system"
 import * as ImageManipulator from "expo-image-manipulator"
 import * as VideoThumbnails from "expo-video-thumbnails"
 import { normalizeFilePathForExpo } from "@/lib/paths"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import { abortError } from "@/lib/thumbnailsHelpers"
 
 export async function generateVideo(

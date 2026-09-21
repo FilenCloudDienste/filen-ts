@@ -8,7 +8,7 @@ vi.mock("react-i18next", () => ({
 	useTranslation: () => ({ t: (k: string) => k })
 }))
 
-vi.mock("@filen/utils", () => ({
+vi.mock("@filen/shared", () => ({
 	cn: (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ")
 }))
 

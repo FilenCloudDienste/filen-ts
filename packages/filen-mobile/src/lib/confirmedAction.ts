@@ -1,6 +1,6 @@
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import { router } from "@/lib/router"
 import { t } from "@/lib/i18n"

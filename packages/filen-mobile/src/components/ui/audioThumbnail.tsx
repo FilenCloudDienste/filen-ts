@@ -1,5 +1,5 @@
 import { useResolveClassNames } from "uniwind"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import View from "@/components/ui/view"
 import Image from "@/components/ui/image"

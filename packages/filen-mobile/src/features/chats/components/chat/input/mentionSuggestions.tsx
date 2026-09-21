@@ -5,7 +5,7 @@ import Text from "@/components/ui/text"
 import Avatar from "@/components/ui/avatar"
 import { useStringifiedClient } from "@/lib/auth"
 import { contactDisplayName } from "@/lib/utils"
-import { fastLocaleCompare } from "@filen/utils"
+import { fastLocaleCompare } from "@filen/shared"
 import AutocompleteSuggestions from "@/features/chats/components/chat/input/autocompleteSuggestions"
 
 export const MentionSuggestions = ({ chat }: { chat: Chat }) => {

@@ -1,6 +1,6 @@
 import { router } from "@/lib/router"
 import { type TFunction } from "i18next"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 import { type DriveViewMode } from "@/features/drive/driveViewModePreference"
 import { randomUUID } from "expo-crypto"
 import * as FileSystem from "expo-file-system"

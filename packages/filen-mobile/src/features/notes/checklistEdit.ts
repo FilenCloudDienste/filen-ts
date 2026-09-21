@@ -1,4 +1,4 @@
-import { type Checklist } from "@filen/utils"
+import { type Checklist } from "@filen/shared"
 
 // Pure checklist mutation transforms shared by the checklist Item component. They compute the next
 // `parsed` list (and which row to focus) WITHOUT touching the store, so the component can: apply the

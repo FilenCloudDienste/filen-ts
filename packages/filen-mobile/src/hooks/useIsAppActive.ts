@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { AppState, type AppStateStatus } from "react-native"
-import { runEffect } from "@filen/utils"
+import { runEffect } from "@filen/shared"
 
 export default function useIsAppActive(): boolean {
 	const [appState, setAppState] = useState<AppStateStatus>(() => AppState.currentState)

@@ -1,4 +1,4 @@
-import { run, Semaphore } from "@filen/utils"
+import { run, Semaphore } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import type { Chat, ChatMessagePartial } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"

@@ -65,8 +65,8 @@ vi.mock("@/lib/events", () => ({
 
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
-vi.mock("@filen/utils", async () => {
-	const sharedMock = await import("@/tests/mocks/filenUtils")
+vi.mock("@filen/shared", async () => {
+	const sharedMock = await import("@/tests/mocks/filenShared")
 
 	// Override the shared no-op Semaphore with a faithful blocking mutex so the per-playlist write-lock
 	// serialization (AU-06/AU-07) is actually exercised. audio.ts uses Semaphore ONLY for that lock,

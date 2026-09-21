@@ -1,4 +1,4 @@
-import { run, Semaphore } from "@filen/utils"
+import { run, Semaphore } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import sqlite from "@/lib/sqlite"
 import { forEachKvRowByPrefix } from "@/lib/kvScan"

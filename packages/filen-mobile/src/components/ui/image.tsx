@@ -1,6 +1,6 @@
 import { ImageBackground as ExpoImageBackground, Image as ExpoImageNative } from "expo-image"
 import { withUniwind } from "uniwind"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 
 const UniwindImage = withUniwind(ExpoImageNative) as React.FC<React.ComponentProps<typeof ExpoImageNative>>
 

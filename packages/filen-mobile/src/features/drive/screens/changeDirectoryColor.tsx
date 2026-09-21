@@ -9,7 +9,7 @@ import { DirectoryIcon, unwrapDirColor, directoryColorToHex } from "@/components
 import Header from "@/components/ui/header"
 import { Fragment, useState } from "react"
 import { useResolveClassNames } from "uniwind"
-import { cn } from "@filen/utils"
+import { cn } from "@filen/shared"
 import { DirColor } from "@filen/sdk-rs"
 import ColorPicker, { Panel1, Preview, HueSlider } from "reanimated-color-picker"
 import alerts from "@/lib/alerts"

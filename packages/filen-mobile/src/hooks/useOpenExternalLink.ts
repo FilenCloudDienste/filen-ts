@@ -7,7 +7,7 @@ import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import logger from "@/lib/logger"
-import { run } from "@filen/utils"
+import { run } from "@filen/shared"
 
 export const OPEN_LINK_TRUSTED_DOMAINS_SECURE_STORE_KEY = "openLinkTrustedDomains"
 
