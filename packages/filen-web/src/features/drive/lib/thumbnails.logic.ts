@@ -56,10 +56,11 @@ const THUMB_FULL_TARGET_BUDGET = BigInt(THUMB_SDK_MAX_HEIGHT) * BigInt(THUMB_SDK
 // the source whole and takes its length off the decode budget above. Past this what is left can no
 // longer afford the full 384x768 request, so that path does not fail — it quietly returns a SMALLER
 // thumbnail (a 63 MiB source leaves ~1 MiB, good for ~160px). The larger request box tightened this
-// gate from 54 MiB, so more just-uploaded files now fall through to the drive-side producer. The drive-side path pays a constant 2 MiB for its
-// resident chunk slots instead, so its budget never shrinks with the file; past this gate it is simply
-// the better producer. Below THUMB_SIZE_GATE, so it also covers the from-stream path's outright refusal
-// of a source over `max_source_bytes`.
+// gate from 54 MiB, so more just-uploaded files now fall through to the drive-side producer. The drive-side path pays a constant 3 MiB for its
+// resident chunk slots instead — two on-demand slots plus the hand-off slot of the read-ahead stream a
+// full decode switches to — so its budget never shrinks with the file; past this gate it is simply the
+// better producer. Below THUMB_SIZE_GATE, so it also covers the from-stream path's outright refusal of
+// a source over `max_source_bytes`.
 export const THUMB_WARM_SIZE_GATE = THUMB_SDK_MEM_BUDGET - THUMB_FULL_TARGET_BUDGET
 
 // WebP quality 0-100 handed to the SDK arm. Absent would mean LOSSLESS (the SDK's default), which is

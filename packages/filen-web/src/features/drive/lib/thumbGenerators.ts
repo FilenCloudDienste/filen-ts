@@ -95,7 +95,7 @@ export function warmUploadThumbnail(uploaded: SdkFile, file: File): void {
 
 	// Size-gated where the drive-side arm deliberately is not, because the two arms do not decode under
 	// the same budget: makeThumbnailFromStream buffers the source WHOLE and takes its length off the
-	// SDK's decode budget, where the drive arm pays a constant two chunk slots for a source it reads by
+	// SDK's decode budget, where the drive arm pays a constant three chunk slots for a source it reads by
 	// range. Past THUMB_WARM_SIZE_GATE what is left cannot afford the 256x512 this asks for, and the
 	// result is not a refusal but a SMALLER thumbnail — which the seat then persists as the uuid's
 	// durable cache entry, displacing the full-size one the drive arm would have produced. A browser
