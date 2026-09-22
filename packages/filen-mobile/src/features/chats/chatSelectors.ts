@@ -1,5 +1,5 @@
 import { type Chat, type ChatMessage } from "@/types"
-import { type BlockedUsers, EMPTY_BLOCKED_USERS, isBlocked } from "@filen/shared"
+import { type BlockedUsers, EMPTY_BLOCKED_USERS, isBlocked, isMessageUnreadCore, chatHasUnreadCore } from "@filen/shared"
 
 /**
  * Aggregated flags for a Chats selection, computed in a single pass.
@@ -49,14 +49,11 @@ export function isMessageUnread(
 	userId: bigint | undefined,
 	blocked: BlockedUsers = EMPTY_BLOCKED_USERS
 ): boolean {
-	return (
-		chat.lastFocus !== undefined &&
-		chat.lastFocus !== null &&
-		!!chat.lastMessage &&
-		!chat.muted &&
-		message.sentTimestamp > chat.lastFocus &&
-		message.inner.senderId !== userId &&
-		!isBlocked({ userId: message.inner.senderId, email: message.inner.senderEmail }, blocked)
+	return isMessageUnreadCore(
+		{ sentTimestamp: message.sentTimestamp, senderId: message.inner.senderId, senderEmail: message.inner.senderEmail },
+		{ muted: chat.muted, lastFocus: chat.lastFocus ?? undefined, hasLastMessage: !!chat.lastMessage },
+		userId,
+		sender => isBlocked(sender, blocked)
 	)
 }
 
@@ -66,35 +63,15 @@ export function chatHasUnread(
 	blocked: BlockedUsers = EMPTY_BLOCKED_USERS,
 	getMessages?: (uuid: string) => readonly ChatMessage[] | undefined
 ): boolean {
-	if (c.muted) {
-		return false
-	}
-
-	if (!c.lastMessage || c.lastFocus === undefined || c.lastFocus === null) {
-		return false
-	}
-
-	const lastSenderId = c.lastMessage.inner.senderId
-
-	// Last message is our own → not unread.
-	if (lastSenderId === userId) {
-		return false
-	}
-
-	// Last message is from a blocked sender — the cheap last-message check would false-positive.
-	// Scan the cached message list for any unread message from a non-blocked, non-self sender
-	// (false unless we can see the messages). Match userId+email (consistent with isMessageUnread).
-	if (isBlocked({ userId: lastSenderId, email: c.lastMessage.inner.senderEmail }, blocked)) {
-		const messages = getMessages?.(c.uuid)
-
-		if (!messages) {
-			return false
-		}
-
-		return messages.some(m => isMessageUnread(m, c, userId, blocked))
-	}
-
-	return c.lastMessage.sentTimestamp > c.lastFocus
+	return chatHasUnreadCore(
+		{ muted: c.muted, lastFocus: c.lastFocus ?? undefined },
+		c.lastMessage
+			? { sentTimestamp: c.lastMessage.sentTimestamp, senderId: c.lastMessage.inner.senderId, senderEmail: c.lastMessage.inner.senderEmail }
+			: undefined,
+		userId,
+		sender => isBlocked(sender, blocked),
+		() => getMessages?.(c.uuid)?.map(m => ({ sentTimestamp: m.sentTimestamp, senderId: m.inner.senderId, senderEmail: m.inner.senderEmail }))
+	)
 }
 
 /**

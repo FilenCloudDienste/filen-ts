@@ -1,19 +1,18 @@
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
-import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
+import { isBlocked, EMPTY_BLOCKED_USERS, isMessageUnreadCore, chatHasUnreadCore, type BlockedUsers } from "@filen/shared"
 
-// Per-conversation unread derivation — PURE. In-app unread signals are DERIVED client-side (mobile's
-// chatSelectors), never a per-chat SDK round trip (getAllChatsUnreadCount stays unwired). Two tiers, kept
-// separate on purpose (same split mobile draws):
+// Per-conversation unread derivation — thin adapters over @filen/shared's chatUnread core. In-app unread
+// signals are DERIVED client-side (mobile's chatSelectors), never a per-chat SDK round trip
+// (getAllChatsUnreadCount stays unwired). Two tiers, kept separate on purpose (same split mobile draws):
 //   - isMessageUnread — the atomic message-level predicate the numeric count sums over (one hit per
 //     genuinely-unread message).
 //   - chatHasUnread — a cheaper boolean off the chat's own lastMessage, for callers that only need
 //     "is there anything unread" without a per-chat message list (the menu's "Mark as read" gate).
 //
 // senderId is `number` on the wasm surface (a codegen quirk — every other user id is bigint), so it MUST
-// be coerced with BigInt before comparing to the bigint userId. A message from a blocked sender never
-// counts as unread — the same contacts blocking cross-reference the sharedIn drive filter uses
-// (@filen/shared's blocking.ts); an empty/cold blocked set fails open (nobody treated as blocked),
-// matching mobile's own behavior until the contacts list is warm.
+// be coerced with BigInt before comparing to the bigint userId. `lastFocus` is non-optional on this
+// surface (unlike mobile's uniffi type), so it's always passed through as a defined value, and there is
+// no per-chat `lastMessage` presence gate to carry (`hasLastMessage: true` always).
 
 export function isMessageUnread(
 	message: ChatMessage,
@@ -21,23 +20,12 @@ export function isMessageUnread(
 	userId: bigint | undefined,
 	blocked: BlockedUsers = EMPTY_BLOCKED_USERS
 ): boolean {
-	if (userId === undefined || chat.muted) {
-		return false
-	}
-
-	// Cheapest field comparisons first, blocked-set lookup last.
-	if (message.sentTimestamp <= chat.lastFocus) {
-		return false
-	}
-
-	const senderId = BigInt(message.senderId)
-
-	// Our own messages are never unread.
-	if (senderId === userId) {
-		return false
-	}
-
-	return !isBlocked({ userId: senderId, email: message.senderEmail }, blocked)
+	return isMessageUnreadCore(
+		{ sentTimestamp: message.sentTimestamp, senderId: BigInt(message.senderId), senderEmail: message.senderEmail },
+		{ muted: chat.muted, lastFocus: chat.lastFocus, hasLastMessage: true },
+		userId,
+		sender => isBlocked(sender, blocked)
+	)
 }
 
 // Boolean tier — derived from the chat's own lastMessage vs. lastFocus. When that last message is from a
@@ -51,32 +39,20 @@ export function chatHasUnread(
 	blocked: BlockedUsers = EMPTY_BLOCKED_USERS,
 	getMessages?: (uuid: string) => readonly ChatMessage[] | undefined
 ): boolean {
-	if (userId === undefined || chat.muted) {
-		return false
-	}
-
 	const lastMessage = chat.lastMessage
 
-	if (!lastMessage) {
-		return false
-	}
-
-	const senderId = BigInt(lastMessage.senderId)
-
-	// Our own last message is never unread.
-	if (senderId === userId) {
-		return false
-	}
-
-	if (isBlocked({ userId: senderId, email: lastMessage.senderEmail }, blocked)) {
-		const messages = getMessages?.(chat.uuid)
-
-		if (messages === undefined) {
-			return false
-		}
-
-		return messages.some(message => isMessageUnread(message, chat, userId, blocked))
-	}
-
-	return lastMessage.sentTimestamp > chat.lastFocus
+	return chatHasUnreadCore(
+		{ muted: chat.muted, lastFocus: chat.lastFocus },
+		lastMessage
+			? { sentTimestamp: lastMessage.sentTimestamp, senderId: BigInt(lastMessage.senderId), senderEmail: lastMessage.senderEmail }
+			: undefined,
+		userId,
+		sender => isBlocked(sender, blocked),
+		() =>
+			getMessages?.(chat.uuid)?.map(m => ({
+				sentTimestamp: m.sentTimestamp,
+				senderId: BigInt(m.senderId),
+				senderEmail: m.senderEmail
+			}))
+	)
 }

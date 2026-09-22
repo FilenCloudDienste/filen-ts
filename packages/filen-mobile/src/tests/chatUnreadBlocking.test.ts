@@ -3,6 +3,10 @@ import { isMessageUnread, chatHasUnread } from "@/features/chats/chatSelectors"
 import { deriveBlockedUsers } from "@filen/shared"
 import { type Chat, type ChatMessage } from "@/types"
 
+// Blocked-scan predicate matrices moved to @filen/shared's src/tests/chatUnread.test.ts
+// (chatHasUnreadCore) — these are thin adapter tests proving mobile's real isBlocked/deriveBlockedUsers
+// wiring and its `getMessages(uuid)` reader closure map correctly into the shared core.
+
 const blocked = deriveBlockedUsers([{ uuid: "x", userId: 99n, email: "spam@x.com", avatar: undefined, nickName: "S", timestamp: 0n }] as never)
 
 function msg(senderId: bigint, sentTimestamp: bigint, uuid = "m"): ChatMessage {
@@ -34,27 +38,19 @@ describe("isMessageUnread blocked-aware", () => {
 	})
 })
 
-describe("chatHasUnread scan-back", () => {
+describe("chatHasUnread scan-back (getMessages(uuid) reader wiring)", () => {
 	const self = 1n
-	const getMessagesEmpty = () => undefined
 
-	it("blocked spoke last, no older real unread → not unread", () => {
+	it("blocked spoke last, older real unread exists in getMessages(uuid) → unread", () => {
 		const c = chat(50n, msg(99n, 200n))
-		const getMessages = () => [msg(99n, 200n)]
-
-		expect(chatHasUnread(c, self, blocked, getMessages)).toBe(false)
-	})
-
-	it("blocked spoke last, older real unread exists → unread", () => {
-		const c = chat(50n, msg(99n, 200n))
-		const getMessages = () => [msg(7n, 120n), msg(99n, 200n)]
+		const getMessages = (uuid: string) => (uuid === c.uuid ? [msg(7n, 120n), msg(99n, 200n)] : undefined)
 
 		expect(chatHasUnread(c, self, blocked, getMessages)).toBe(true)
 	})
 
-	it("non-blocked spoke last → unread without scanning", () => {
+	it("non-blocked spoke last → unread without needing the reader", () => {
 		const c = chat(50n, msg(7n, 200n))
 
-		expect(chatHasUnread(c, self, blocked, getMessagesEmpty)).toBe(true)
+		expect(chatHasUnread(c, self, blocked, () => undefined)).toBe(true)
 	})
 })
