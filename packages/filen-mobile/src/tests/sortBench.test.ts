@@ -531,14 +531,7 @@ describe.skipIf(!BENCH)("sort benchmark", () => {
 			await runScenario({
 				name: "05 notes group (all flags)",
 				scale,
-				run: () =>
-					notesSorter.group({
-						notes,
-						groupPinned: true,
-						groupFavorited: true,
-						groupArchived: true,
-						groupTrashed: true
-					}),
+				run: () => notesSorter.group(notes),
 				validate: result => {
 					// eslint-disable-next-line @typescript-eslint/no-explicit-any
 					const list = result as any[]
@@ -548,28 +541,20 @@ describe.skipIf(!BENCH)("sort benchmark", () => {
 				}
 			})
 
+			// Tag pre-filtering now lives with group()'s caller (the notes screen) — benchmark the
+			// same shape, filtering before the group() call rather than inside it.
+			const tagFilteredNotes = notes.filter(note => note.tags.some(tag => tag.uuid === "tag-3"))
+
 			await runScenario({
 				name: "05 notes group (tag filter)",
 				scale,
-				run: () =>
-					notesSorter.group({
-						notes,
-						tag: {
-							uuid: "tag-3",
-							name: "tag3",
-							favorite: false,
-							editedTimestamp: 1000n,
-							createdTimestamp: 1000n,
-							undecryptable: false
-						}
-					}),
+				run: () => notesSorter.group(tagFilteredNotes),
 				validate: result => {
 					// eslint-disable-next-line @typescript-eslint/no-explicit-any
 					const list = result as any[]
 					const noteCount = list.filter(item => item.type === "note").length
-					const expected = notes.filter(note => note.tags.some(tag => tag.uuid === "tag-3")).length
 
-					expect(noteCount).toBe(expected)
+					expect(noteCount).toBe(tagFilteredNotes.length)
 				}
 			})
 		}

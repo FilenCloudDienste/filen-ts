@@ -55,10 +55,10 @@ export async function run(fn: (defer: (cleanup: () => void) => void) => Promise<
 
 export const createExecutableTimeout = vi.fn()
 
-// InFlight, the drive-listing splice rules, isHiddenName, fileIconKey and the notes outbox helpers
-// are plain data helpers with no timing-sensitive behavior (unlike Semaphore's no-op above), so there
-// is nothing to fake — pull them through vi.importActual, bypassing this factory's own interception
-// of the bare specifier.
+// InFlight, the drive-listing splice rules, isHiddenName, fileIconKey, the notes outbox helpers
+// and partitionNotesByBucket are plain data helpers with no timing-sensitive behavior (unlike
+// Semaphore's no-op above), so there is nothing to fake — pull them through vi.importActual,
+// bypassing this factory's own interception of the bare specifier.
 export const {
 	InFlight,
 	keepAgainstIncoming,
@@ -72,5 +72,6 @@ export const {
 	buildInflightEntries,
 	pruneAndRebaseNoteOutboxAfterPush,
 	reconcileNoteOutboxAgainstCloud,
-	noteBulkActionAvailability
+	noteBulkActionAvailability,
+	partitionNotesByBucket
 } = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")

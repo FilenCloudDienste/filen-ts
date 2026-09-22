@@ -144,14 +144,9 @@ const Notes = () => {
 		// Every narrowed view (offline, shared) is the same list with fewer notes in it, so they all
 		// keep the identical grouping (pinned / favorited / time buckets) rather than inventing a
 		// second layout — what changes is which notes are in it, not how they read.
-		const grouped = notesSorter.group({
-			notes: narrowedNotes,
-			groupArchived: true,
-			groupTrashed: true,
-			groupFavorited: true,
-			groupPinned: true,
-			tag: tag && !isUntaggedScreen ? tag : undefined
-		})
+		const activeTag = tag && !isUntaggedScreen ? tag : undefined
+		const notesForTag = activeTag ? narrowedNotes.filter(note => note.tags.some(t => t.uuid === activeTag.uuid)) : narrowedNotes
+		const grouped = notesSorter.group(notesForTag)
 
 		return filterNoteListItemsBySearchQuery(grouped, searchQuery)
 	})()

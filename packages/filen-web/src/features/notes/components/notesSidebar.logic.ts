@@ -1,5 +1,5 @@
 import { sortAndFilterNotes, sortNotes, filterNotesBySearch, tagDisplayName } from "@/features/notes/lib/sort"
-import { isBlocked, type BlockedUsers, sortNoteTags, type NoteTagsSortBy } from "@filen/shared"
+import { isBlocked, type BlockedUsers, sortNoteTags, type NoteTagsSortBy, partitionNotesByBucket, type NoteBucketId } from "@filen/shared"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 
 // Pure view-model builders for the two-view sidebar. No React, no cache — the
@@ -34,28 +34,30 @@ export function buildNotesView(notes: readonly Note[], search: string, bodies?: 
 }
 
 // ── Notes-view date grouping ──────────────────────────────────────────────────
-// Ports filen-mobile's notesSorter.group (lib/sort.ts) onto the wasm Note shape, notes view only.
-// First-match-wins partition per note: Trashed → Archived → Pinned → Favorited → Today (24h) →
-// Previous 7 days → Previous 30 days → previous-month (Intl month name) → year buckets (desc) —
-// where Pinned/Favorited/Archived/Trashed REMOVE the note from its date bucket. Emitted in this
-// order: Pinned → Favorited → Today → Previous 7 days → Previous 30 days → month → year(s) desc →
-// Archived → Trashed. Every bucket is sorted newest-first (editedTimestamp desc, uuid tiebreak) and an
-// empty bucket emits no header at all — there is never a blank section. Bucketing reads
-// editedTimestamp unconditionally (the wasm field is a non-optional bigint, so mobile's
-// createdTimestamp fallback is dead code here).
+// Classification (first-match-wins: Trashed → Archived → Pinned → Favorited → date buckets) is
+// @filen/shared's partitionNotesByBucket, shared with filen-mobile's notesSorter.group — this module
+// only resolves the shared core's abstract bucket ids into this app's header rows.
 
-const DAY_MS = 24 * 60 * 60 * 1000
+interface GroupEntry {
+	id: string
+	pinned: boolean
+	favorite: boolean
+	archive: boolean
+	trash: boolean
+	ts: number
+	note: Note
+}
 
 // Newest-first within a bucket — editedTimestamp desc with a uuid tiebreak so equal-timestamp notes
 // keep a stable order across refetches (input order is not itself stable). Bigint-safe: never Number()s
-// the comparison. Mirrors compareNotes' own tiebreak, minus its cross-bucket tier (within one date
-// bucket every note already shares that tier).
-function compareByEditedDesc(a: Note, b: Note): number {
-	if (a.editedTimestamp !== b.editedTimestamp) {
-		return a.editedTimestamp > b.editedTimestamp ? -1 : 1
+// the comparison (reads the original note's bigint field, not the derived `ts`). Mirrors compareNotes'
+// own tiebreak, minus its cross-bucket tier (within one date bucket every note already shares that tier).
+function compareByEditedDesc(a: GroupEntry, b: GroupEntry): number {
+	if (a.note.editedTimestamp !== b.note.editedTimestamp) {
+		return a.note.editedTimestamp > b.note.editedTimestamp ? -1 : 1
 	}
 
-	return a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0
+	return a.note.uuid < b.note.uuid ? -1 : a.note.uuid > b.note.uuid ? 1 : 0
 }
 
 // The previous-month header label — the calendar month name of the bucket's lower bound (mobile names
@@ -65,103 +67,72 @@ function monthLabel(timestamp: number): string {
 	return new Intl.DateTimeFormat(undefined, { month: "long" }).format(new Date(timestamp))
 }
 
+// Resolves the shared core's abstract bucket id into this app's header row — the presentation layer
+// the shared classification core deliberately excludes.
+function headerForBucket(bucketId: NoteBucketId): Extract<NotesSidebarRow, { kind: "header" }> {
+	if (bucketId === "pinned") {
+		return { kind: "header", id: "pinned", label: { kind: "key", key: "notesGroupPinned" }, icon: "pinned" }
+	}
+
+	if (bucketId === "favorited") {
+		return { kind: "header", id: "favorited", label: { kind: "key", key: "notesGroupFavorited" }, icon: "favorited" }
+	}
+
+	if (bucketId === "today") {
+		return { kind: "header", id: "today", label: { kind: "key", key: "notesGroupToday" }, icon: "today" }
+	}
+
+	if (bucketId === "previous7Days") {
+		return { kind: "header", id: "previous7Days", label: { kind: "key", key: "notesGroupPrevious7Days" }, icon: "calendar" }
+	}
+
+	if (bucketId === "previous30Days") {
+		return { kind: "header", id: "previous30Days", label: { kind: "key", key: "notesGroupPrevious30Days" }, icon: "calendar" }
+	}
+
+	if (bucketId === "archived") {
+		return { kind: "header", id: "archived", label: { kind: "key", key: "notesGroupArchived" }, icon: "archived" }
+	}
+
+	if (bucketId === "trashed") {
+		return { kind: "header", id: "trashed", label: { kind: "key", key: "notesGroupTrashed" }, icon: "trashed" }
+	}
+
+	if (bucketId.kind === "month") {
+		return { kind: "header", id: "month", label: { kind: "literal", text: monthLabel(bucketId.monthTimestamp) }, icon: "calendar" }
+	}
+
+	return {
+		kind: "header",
+		id: `year-${String(bucketId.year)}`,
+		label: { kind: "literal", text: String(bucketId.year) },
+		icon: "calendar"
+	}
+}
+
 // Partition + emit. `now` is injected (not read from Date.now inside) so the bucket thresholds are
 // deterministic under test.
 export function groupNotesForView(notes: readonly Note[], now: number): NotesSidebarRow[] {
-	const todayAgo = now - DAY_MS
-	const sevenDaysAgo = now - 7 * DAY_MS
-	const thirtyDaysAgo = now - 30 * DAY_MS
-	const nowDate = new Date(now)
-	const twoMonthsAgo = new Date(nowDate.getFullYear(), nowDate.getMonth() - 2, nowDate.getDate()).getTime()
+	const entries: GroupEntry[] = notes.map(note => ({
+		id: note.uuid,
+		pinned: note.pinned,
+		favorite: note.favorite,
+		archive: note.archive,
+		trash: note.trash,
+		ts: Number(note.editedTimestamp),
+		note
+	}))
 
-	const pinned: Note[] = []
-	const favorited: Note[] = []
-	const today: Note[] = []
-	const last7Days: Note[] = []
-	const last30Days: Note[] = []
-	const previousMonth: Note[] = []
-	const archived: Note[] = []
-	const trashed: Note[] = []
-	const yearBuckets = new Map<number, Note[]>()
-
-	for (const note of notes) {
-		if (note.trash) {
-			trashed.push(note)
-			continue
-		}
-
-		if (note.archive) {
-			archived.push(note)
-			continue
-		}
-
-		if (note.pinned) {
-			pinned.push(note)
-			continue
-		}
-
-		if (note.favorite) {
-			favorited.push(note)
-			continue
-		}
-
-		const ts = Number(note.editedTimestamp)
-
-		if (ts >= todayAgo) {
-			today.push(note)
-		} else if (ts >= sevenDaysAgo) {
-			last7Days.push(note)
-		} else if (ts >= thirtyDaysAgo) {
-			last30Days.push(note)
-		} else if (ts >= twoMonthsAgo) {
-			previousMonth.push(note)
-		} else {
-			const year = new Date(ts).getFullYear()
-			const bucket = yearBuckets.get(year)
-
-			if (bucket !== undefined) {
-				bucket.push(note)
-			} else {
-				yearBuckets.set(year, [note])
-			}
-		}
-	}
-
+	const buckets = partitionNotesByBucket(entries, now, compareByEditedDesc)
 	const rows: NotesSidebarRow[] = []
 
-	const emit = (bucket: Note[], header: Extract<NotesSidebarRow, { kind: "header" }>): void => {
-		if (bucket.length === 0) {
-			return
-		}
+	for (const bucket of buckets) {
+		rows.push(headerForBucket(bucket.bucketId))
 
-		bucket.sort(compareByEditedDesc)
-		rows.push(header)
-
-		for (const note of bucket) {
-			rows.push({ kind: "note", note, tagUuid: "" })
+		for (const entry of bucket.notes) {
+			rows.push({ kind: "note", note: entry.note, tagUuid: "" })
 		}
 	}
-
-	emit(pinned, { kind: "header", id: "pinned", label: { kind: "key", key: "notesGroupPinned" }, icon: "pinned" })
-	emit(favorited, { kind: "header", id: "favorited", label: { kind: "key", key: "notesGroupFavorited" }, icon: "favorited" })
-	emit(today, { kind: "header", id: "today", label: { kind: "key", key: "notesGroupToday" }, icon: "today" })
-	emit(last7Days, { kind: "header", id: "previous7Days", label: { kind: "key", key: "notesGroupPrevious7Days" }, icon: "calendar" })
-	emit(last30Days, { kind: "header", id: "previous30Days", label: { kind: "key", key: "notesGroupPrevious30Days" }, icon: "calendar" })
-	emit(previousMonth, { kind: "header", id: "month", label: { kind: "literal", text: monthLabel(twoMonthsAgo) }, icon: "calendar" })
-
-	const years = [...yearBuckets.keys()].sort((a, b) => b - a)
-
-	for (const year of years) {
-		emit(yearBuckets.get(year) ?? [], {
-			kind: "header",
-			id: `year-${String(year)}`,
-			label: { kind: "literal", text: String(year) },
-			icon: "calendar"
-		})
-	}
-
-	emit(archived, { kind: "header", id: "archived", label: { kind: "key", key: "notesGroupArchived" }, icon: "archived" })
-	emit(trashed, { kind: "header", id: "trashed", label: { kind: "key", key: "notesGroupTrashed" }, icon: "trashed" })
 
 	return rows
 }

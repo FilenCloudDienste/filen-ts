@@ -641,14 +641,14 @@ describe("notesSorter", () => {
 		}
 
 		it("returns empty array for empty input", () => {
-			expect(notesSorter.group({ notes: [] })).toEqual([])
+			expect(notesSorter.group([])).toEqual([])
 		})
 
-		it("groups pinned notes under a pinned header when groupPinned is true", () => {
+		it("groups pinned notes under a pinned header", () => {
 			const pinned = makeNote({ uuid: "pinned-1", editedTimestamp: BigInt(Date.now()), pinned: true })
 			const normal = makeNote({ uuid: "normal-1", editedTimestamp: BigInt(Date.now()) })
 
-			const result = notesSorter.group({ notes: [normal, pinned], groupPinned: true })
+			const result = notesSorter.group([normal, pinned])
 			const headerIdx = result.findIndex(item => item.type === "header" && "id" in item && item.id === "header-pinned")
 
 			expect(headerIdx).toBeGreaterThanOrEqual(0)
@@ -656,11 +656,11 @@ describe("notesSorter", () => {
 			expect((result[headerIdx + 1] as { uuid?: string }).uuid).toBe("pinned-1")
 		})
 
-		it("groups favorited notes under a favorited header when groupFavorited is true", () => {
+		it("groups favorited notes under a favorited header", () => {
 			const favorited = makeNote({ uuid: "fav-1", editedTimestamp: BigInt(Date.now()), favorite: true })
 			const normal = makeNote({ uuid: "normal-1", editedTimestamp: BigInt(Date.now()) })
 
-			const result = notesSorter.group({ notes: [normal, favorited], groupFavorited: true })
+			const result = notesSorter.group([normal, favorited])
 			const headerIdx = result.findIndex(item => item.type === "header" && "id" in item && item.id === "header-favorited")
 
 			expect(headerIdx).toBeGreaterThanOrEqual(0)
@@ -668,22 +668,10 @@ describe("notesSorter", () => {
 			expect((result[headerIdx + 1] as { uuid?: string }).uuid).toBe("fav-1")
 		})
 
-		it("does not emit favorited header when groupFavorited is false (favorite note falls into time buckets)", () => {
-			const favorited = makeNote({ uuid: "fav-1", editedTimestamp: BigInt(Date.now()), favorite: true })
-
-			const result = notesSorter.group({ notes: [favorited], groupFavorited: false })
-			const favHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-favorited")
-
-			expect(favHeader).toBeUndefined()
-			// The note should appear in a time bucket (today)
-			const todayHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-today")
-			expect(todayHeader).toBeDefined()
-		})
-
 		it("header-favorited title is resolved via i18n (mock returns key verbatim)", () => {
 			const favorited = makeNote({ uuid: "fav-1", editedTimestamp: BigInt(Date.now()), favorite: true })
 
-			const result = notesSorter.group({ notes: [favorited], groupFavorited: true })
+			const result = notesSorter.group([favorited])
 			const header = result.find(item => item.type === "header" && "id" in item && item.id === "header-favorited") as
 				| { title?: string }
 				| undefined
@@ -691,26 +679,29 @@ describe("notesSorter", () => {
 			expect(header?.title).toBe("favorited")
 		})
 
-		it("groups archived notes under archived header when groupArchived is true", () => {
+		it("groups archived notes under archived header", () => {
 			const archived = makeNote({ uuid: "arch-1", editedTimestamp: BigInt(Date.now()), archive: true })
 
-			const result = notesSorter.group({ notes: [archived], groupArchived: true })
+			const result = notesSorter.group([archived])
 			const headerIdx = result.findIndex(item => item.type === "header" && "id" in item && item.id === "header-archived")
 
 			expect(headerIdx).toBeGreaterThanOrEqual(0)
 			expect(result[headerIdx + 1]?.type).toBe("note")
 		})
 
-		it("groups trashed notes under trashed header when groupTrashed is true", () => {
+		it("groups trashed notes under trashed header", () => {
 			const trashed = makeNote({ uuid: "trash-1", editedTimestamp: BigInt(Date.now()), trash: true })
 
-			const result = notesSorter.group({ notes: [trashed], groupTrashed: true })
+			const result = notesSorter.group([trashed])
 			const headerIdx = result.findIndex(item => item.type === "header" && "id" in item && item.id === "header-trashed")
 
 			expect(headerIdx).toBeGreaterThanOrEqual(0)
 			expect(result[headerIdx + 1]?.type).toBe("note")
 		})
 
+		// Tag pre-filtering moved to group()'s caller (the notes screen), which already has the tag in
+		// hand — group() itself no longer takes a tag. These tests filter by tag the same way the caller
+		// does, then assert group()'s output over the pre-filtered set.
 		it("filters notes by tag uuid when tag is provided", () => {
 			const matchingTag = makeTag("tag-abc", "work")
 			const otherTag = makeTag("tag-xyz", "other")
@@ -718,7 +709,8 @@ describe("notesSorter", () => {
 			const withOther = makeNote({ uuid: "tagged-2", editedTimestamp: BigInt(Date.now()), tags: [otherTag] })
 			const noTags = makeNote({ uuid: "no-tags", editedTimestamp: BigInt(Date.now()) })
 
-			const result = notesSorter.group({ notes: [withTag, withOther, noTags], tag: matchingTag })
+			const filtered = [withTag, withOther, noTags].filter(note => note.tags.some(t => t.uuid === matchingTag.uuid))
+			const result = notesSorter.group(filtered)
 			const noteItems = result.filter(item => item.type === "note")
 
 			expect(noteItems).toHaveLength(1)
@@ -736,7 +728,8 @@ describe("notesSorter", () => {
 			const pinnedOnly = makeNote({ uuid: "pinned-only", editedTimestamp: BigInt(Date.now()), pinned: true, tags: [] })
 
 			// Tag filter applied before grouping: pinnedOnly excluded, taggedAndPinned included
-			const result = notesSorter.group({ notes: [taggedAndPinned, pinnedOnly], tag: matchingTag, groupPinned: true })
+			const filtered = [taggedAndPinned, pinnedOnly].filter(note => note.tags.some(t => t.uuid === matchingTag.uuid))
+			const result = notesSorter.group(filtered)
 			const noteItems = result.filter(item => item.type === "note")
 
 			expect(noteItems).toHaveLength(1)
@@ -747,7 +740,7 @@ describe("notesSorter", () => {
 			const now = BigInt(Date.now())
 			const recent = makeNote({ uuid: "recent-1", editedTimestamp: now })
 
-			const result = notesSorter.group({ notes: [recent] })
+			const result = notesSorter.group([recent])
 			const todayHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-today")
 
 			expect(todayHeader).toBeDefined()
@@ -757,7 +750,7 @@ describe("notesSorter", () => {
 			const threeDaysAgo = BigInt(Date.now() - 3 * 24 * 60 * 60 * 1000)
 			const note = makeNote({ uuid: "note-7d", editedTimestamp: threeDaysAgo })
 
-			const result = notesSorter.group({ notes: [note] })
+			const result = notesSorter.group([note])
 			const header7d = result.find(item => item.type === "header" && "id" in item && item.id === "header-7days")
 
 			expect(header7d).toBeDefined()
@@ -770,7 +763,7 @@ describe("notesSorter", () => {
 			const fifteenDaysAgo = BigInt(Date.now() - 15 * 24 * 60 * 60 * 1000)
 			const note = makeNote({ uuid: "note-30d", editedTimestamp: fifteenDaysAgo })
 
-			const result = notesSorter.group({ notes: [note] })
+			const result = notesSorter.group([note])
 			const header30d = result.find(item => item.type === "header" && "id" in item && item.id === "header-30days")
 
 			expect(header30d).toBeDefined()
@@ -784,7 +777,7 @@ describe("notesSorter", () => {
 			const ninetyDaysAgoMs = Date.now() - 90 * 24 * 60 * 60 * 1000
 			const note = makeNote({ uuid: "old-2", editedTimestamp: BigInt(ninetyDaysAgoMs) })
 
-			const result = notesSorter.group({ notes: [note] })
+			const result = notesSorter.group([note])
 
 			// It lands in the year bucket for its own calendar year, labelled with that year.
 			const expectedYear = new Date(ninetyDaysAgoMs).getFullYear()
@@ -807,7 +800,7 @@ describe("notesSorter", () => {
 			const recentish = makeNote({ uuid: "month-note", editedTimestamp: BigInt(fortyFiveDaysAgoMs) })
 			const older = makeNote({ uuid: "year-note", editedTimestamp: BigInt(oneHundredFiftyDaysAgoMs) })
 
-			const result = notesSorter.group({ notes: [recentish, older] })
+			const result = notesSorter.group([recentish, older])
 
 			// Exactly one month header — the old code emitted two identically-labelled month headers.
 			const monthHeaders = result.filter(item => item.type === "header" && "id" in item && item.id === "header-month")
@@ -824,7 +817,7 @@ describe("notesSorter", () => {
 			const twoYearsAgo = BigInt(twoYearsAgoMs)
 			const note = makeNote({ uuid: "very-old", editedTimestamp: twoYearsAgo })
 
-			const result = notesSorter.group({ notes: [note] })
+			const result = notesSorter.group([note])
 			const expectedYear = new Date(twoYearsAgoMs).getFullYear()
 			const yearHeader = result.find(item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`) as
 				| { title?: string }
@@ -843,7 +836,7 @@ describe("notesSorter", () => {
 			const twoYearsAgo = BigInt(twoYearsAgoMs)
 			const note = makeNote({ uuid: "very-old", editedTimestamp: twoYearsAgo })
 
-			const result = notesSorter.group({ notes: [note] })
+			const result = notesSorter.group([note])
 			const expectedYear = new Date(twoYearsAgoMs).getFullYear()
 			const yearHeaderIdx = result.findIndex(item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`)
 
@@ -860,7 +853,7 @@ describe("notesSorter", () => {
 			const note2 = makeNote({ uuid: "two-yrs", editedTimestamp: BigInt(twoYearsAgoMs) })
 			const note3 = makeNote({ uuid: "three-yrs", editedTimestamp: BigInt(threeYearsAgoMs) })
 
-			const result = notesSorter.group({ notes: [note3, note2] })
+			const result = notesSorter.group([note3, note2])
 			const year2 = new Date(twoYearsAgoMs).getFullYear()
 			const year3 = new Date(threeYearsAgoMs).getFullYear()
 
@@ -877,7 +870,7 @@ describe("notesSorter", () => {
 			const pinned = makeNote({ uuid: "pinned-1", editedTimestamp: now, pinned: true })
 			const trashed = makeNote({ uuid: "trash-1", editedTimestamp: now, trash: true })
 
-			const result = notesSorter.group({ notes: [recent, pinned, trashed], groupPinned: true, groupTrashed: true })
+			const result = notesSorter.group([recent, pinned, trashed])
 			const headerTitle = (id: string) =>
 				result.find(item => item.type === "header" && "id" in item && item.id === id) as { title?: string } | undefined
 
@@ -893,7 +886,7 @@ describe("notesSorter", () => {
 			const fortyFiveDaysAgo = BigInt(now.getTime() - 45 * 24 * 60 * 60 * 1000)
 			const note = makeNote({ uuid: "old-1", editedTimestamp: fortyFiveDaysAgo })
 
-			const result = notesSorter.group({ notes: [note] })
+			const result = notesSorter.group([note])
 			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month") as
 				| { title?: string }
 				| undefined
@@ -917,7 +910,7 @@ describe("notesSorter", () => {
 			const fortyFiveDaysAgo = BigInt(now.getTime() - 45 * 24 * 60 * 60 * 1000)
 			const note = makeNote({ uuid: "bug20-note", editedTimestamp: fortyFiveDaysAgo })
 
-			const result = notesSorter.group({ notes: [note] })
+			const result = notesSorter.group([note])
 			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month") as
 				| { title?: string }
 				| undefined
@@ -949,7 +942,7 @@ describe("notesSorter", () => {
 			// year0Ts is definitely older than oneYearAgo.
 			const note = makeNote({ uuid: "year-zero", editedTimestamp: BigInt(year0Ts) })
 
-			const result = notesSorter.group({ notes: [note] })
+			const result = notesSorter.group([note])
 			const noteItems = result.filter(item => item.type === "note")
 
 			// With the fix, the note must appear in the output (not be silently dropped)
@@ -979,7 +972,7 @@ describe("notesSorter", () => {
 				createdTimestamp: nowTs
 			}
 
-			const result = notesSorter.group({ notes: [noteWithoutEdited] })
+			const result = notesSorter.group([noteWithoutEdited])
 			// With createdTimestamp === now it must land in the 'today' bucket
 			const todayHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-today")
 
@@ -1007,7 +1000,7 @@ describe("notesSorter", () => {
 				createdTimestamp: newerTs
 			}
 
-			const result = notesSorter.group({ notes: [olderNote, newerNote] })
+			const result = notesSorter.group([olderNote, newerNote])
 			const noteItems = result.filter(item => item.type === "note")
 
 			expect(noteItems).toHaveLength(2)
@@ -1028,7 +1021,7 @@ describe("notesSorter", () => {
 			const noteZero = makeNote({ uuid: "ts-zero", editedTimestamp: 0n })
 			const notePositive = makeNote({ uuid: "ts-positive", editedTimestamp: ts1970later })
 
-			const result = notesSorter.group({ notes: [noteZero, notePositive] })
+			const result = notesSorter.group([noteZero, notePositive])
 			const noteItems = result.filter(item => item.type === "note")
 
 			expect(noteItems).toHaveLength(2)
@@ -1042,7 +1035,7 @@ describe("notesSorter", () => {
 			// The note must land in a year bucket for 1970, not be dropped.
 			const noteZero = makeNote({ uuid: "epoch-note", editedTimestamp: 0n })
 
-			const result = notesSorter.group({ notes: [noteZero] })
+			const result = notesSorter.group([noteZero])
 			const noteItems = result.filter(item => item.type === "note")
 
 			expect(noteItems).toHaveLength(1)
@@ -1070,7 +1063,7 @@ describe("notesSorter", () => {
 				createdTimestamp: noEditedTs
 			}
 
-			const result = notesSorter.group({ notes: [normalNote, noEditedNote] })
+			const result = notesSorter.group([normalNote, noEditedNote])
 			const todayHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-today")
 
 			expect(todayHeader).toBeDefined()
@@ -1103,7 +1096,7 @@ describe("notesSorter", () => {
 			const ts = BigInt(FROZEN_NOW - 2 * 60 * 60 * 1000) // 2 h ago
 			const note = makeNote({ uuid: "today-note", editedTimestamp: ts })
 
-			const result = notesSorter.group({ notes: [note] })
+			const result = notesSorter.group([note])
 			const todayHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-today")
 
 			expect(todayHeader).toBeDefined()
@@ -1116,7 +1109,7 @@ describe("notesSorter", () => {
 			const ts = BigInt(FROZEN_NOW - 3 * 24 * 60 * 60 * 1000)
 			const note = makeNote({ uuid: "7d-note", editedTimestamp: ts })
 
-			const result = notesSorter.group({ notes: [note] })
+			const result = notesSorter.group([note])
 			const header7d = result.find(item => item.type === "header" && "id" in item && item.id === "header-7days")
 
 			expect(header7d).toBeDefined()
@@ -1128,7 +1121,7 @@ describe("notesSorter", () => {
 			const ts = BigInt(FROZEN_NOW - 15 * 24 * 60 * 60 * 1000)
 			const note = makeNote({ uuid: "30d-note", editedTimestamp: ts })
 
-			const result = notesSorter.group({ notes: [note] })
+			const result = notesSorter.group([note])
 			const header30d = result.find(item => item.type === "header" && "id" in item && item.id === "header-30days")
 
 			expect(header30d).toBeDefined()
@@ -1140,7 +1133,7 @@ describe("notesSorter", () => {
 			const ts = BigInt(FROZEN_NOW - 45 * 24 * 60 * 60 * 1000)
 			const note = makeNote({ uuid: "month-note", editedTimestamp: ts })
 
-			const result = notesSorter.group({ notes: [note] })
+			const result = notesSorter.group([note])
 			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month") as
 				| { title?: string }
 				| undefined
@@ -1155,7 +1148,7 @@ describe("notesSorter", () => {
 			const ts = BigInt(FROZEN_NOW - 45 * 24 * 60 * 60 * 1000)
 			const note = makeNote({ uuid: "month-label", editedTimestamp: ts })
 
-			const result = notesSorter.group({ notes: [note] })
+			const result = notesSorter.group([note])
 			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month") as
 				| { title?: string }
 				| undefined
@@ -1175,7 +1168,7 @@ describe("notesSorter", () => {
 			const ts = BigInt(twoYearsAgoMs)
 			const note = makeNote({ uuid: "old-year-note", editedTimestamp: ts })
 
-			const result = notesSorter.group({ notes: [note] })
+			const result = notesSorter.group([note])
 			const expectedYear = new Date(twoYearsAgoMs).getFullYear()
 			const yearHeader = result.find(item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`) as
 				| { title?: string }
@@ -1253,7 +1246,7 @@ describe("notesSorter.group — month header formatter", () => {
 			editedTimestamp: BigInt(twoMonthsAgo.getTime())
 		})
 
-		const grouped = notesSorter.group({ notes: [note] })
+		const grouped = notesSorter.group([note])
 		const header = grouped.find(entry => entry.type === "header" && entry.id === "header-month")
 
 		return header && header.type === "header" ? header.title : undefined

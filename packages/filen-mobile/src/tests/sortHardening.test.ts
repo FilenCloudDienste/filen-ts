@@ -86,13 +86,7 @@ describe("hardening — group() full header sequence + completeness", () => {
 			push(FROZEN_NOW - 6000 - i, { trash: true })
 		}
 
-		const result = notesSorter.group({
-			notes,
-			groupPinned: true,
-			groupFavorited: true,
-			groupArchived: true,
-			groupTrashed: true
-		})
+		const result = notesSorter.group(notes)
 
 		const headerIds = result.filter(item => item.type === "header").map(item => ("id" in item ? item.id : ""))
 

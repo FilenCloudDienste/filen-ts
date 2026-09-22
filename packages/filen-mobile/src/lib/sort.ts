@@ -4,10 +4,12 @@ import {
 	clearNaturalSortCaches,
 	driveItemName,
 	sortItems as sortItemsEngine,
+	partitionNotesByBucket,
+	type NoteBucketId,
 	type SortMode,
 	type SortEngineAccessors
 } from "@filen/shared"
-import { type DriveItem, type Note, type NoteTag } from "@/types"
+import { type DriveItem, type Note } from "@/types"
 import type { ListItem as NoteListItem, Item as NoteItem } from "@/features/notes/components/note"
 import i18n from "@/lib/i18n"
 import { intlLanguage } from "@/lib/time"
@@ -242,241 +244,110 @@ function sort(notes: SortableNote[]): SortableNote[] {
 }
 
 type GroupBucketEntry = {
+	id: string
+	pinned: boolean
+	favorite: boolean
+	archive: boolean
+	trash: boolean
 	ts: number
 	note: NoteItem
 }
 
 // Hoisted bucket comparator over the precomputed per-note timestamp — the previous
 // per-group() closure recomputed Number(editedTimestamp ?? createdTimestamp) twice per
-// comparison in every bucket sort.
+// comparison in every bucket sort. No uuid tiebreak, matching this app's existing order.
 function sortBucketEntriesDesc(a: GroupBucketEntry, b: GroupBucketEntry): number {
 	return b.ts - a.ts
 }
 
-function group({
-	notes,
-	groupPinned,
-	groupFavorited,
-	groupArchived,
-	groupTrashed,
-	tag
-}: {
+// Resolves the shared core's abstract bucket id into this app's translated header row — the
+// presentation layer the shared classification core deliberately excludes.
+function headerForBucket(bucketId: NoteBucketId): NoteListItem {
+	if (bucketId === "pinned") {
+		return { type: "header", id: "header-pinned", title: i18n.t("pinned"), icon: "pin-outline" }
+	}
+
+	if (bucketId === "favorited") {
+		return { type: "header", id: "header-favorited", title: i18n.t("favorited"), icon: "heart-outline" }
+	}
+
+	if (bucketId === "today") {
+		return { type: "header", id: "header-today", title: i18n.t("today"), icon: "today-outline" }
+	}
+
+	if (bucketId === "previous7Days") {
+		return { type: "header", id: "header-7days", title: i18n.t("previous_7_days"), icon: "calendar-outline" }
+	}
+
+	if (bucketId === "previous30Days") {
+		return { type: "header", id: "header-30days", title: i18n.t("previous_30_days"), icon: "calendar-outline" }
+	}
+
+	if (bucketId === "archived") {
+		return { type: "header", id: "header-archived", title: i18n.t("archived"), icon: "archive-outline" }
+	}
+
+	if (bucketId === "trashed") {
+		return { type: "header", id: "header-trashed", title: i18n.t("trashed"), icon: "trash-outline" }
+	}
+
+	if (bucketId.kind === "month") {
+		return {
+			type: "header",
+			id: "header-month",
+			title: monthFormatter().format(new Date(bucketId.monthTimestamp)),
+			icon: "calendar-outline"
+		}
+	}
+
+	return {
+		type: "header",
+		id: `header-${bucketId.year}`,
+		title: bucketId.year.toString(),
+		icon: "calendar-outline"
+	}
+}
+
+// Pinned/favorited/archived/trashed are always their own tier (the app's single production
+// caller always wants all four — see @filen/shared's partitionNotesByBucket); tag pre-filtering
+// now lives with this function's caller, which already has the tag in hand.
+function group(
 	notes: (
 		| Note
 		| (Note & {
 				content?: string
 		  })
 	)[]
-	groupPinned?: boolean
-	groupFavorited?: boolean
-	groupArchived?: boolean
-	groupTrashed?: boolean
-	tag?: NoteTag
-}): NoteListItem[] {
-	if (tag) {
-		notes = notes.filter(note => note.tags.some(t => t.uuid === tag.uuid))
-	}
-
+): NoteListItem[] {
 	const now = Date.now()
-	const result: NoteListItem[] = []
-	const todayMs = 24 * 60 * 60 * 1000
-	const sevenDaysMs = 7 * 24 * 60 * 60 * 1000
-	const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000
-	const todayAgo = now - todayMs
-	const sevenDaysAgo = now - sevenDaysMs
-	const thirtyDaysAgo = now - thirtyDaysMs
-	const nowDate = new Date(now)
-	const currentYear = nowDate.getFullYear()
-	const currentMonth = nowDate.getMonth()
-	const twoMonthsAgo = new Date(currentYear, currentMonth - 2, nowDate.getDate()).getTime()
-	const today: GroupBucketEntry[] = []
-	const last7Days: GroupBucketEntry[] = []
-	const last30Days: GroupBucketEntry[] = []
-	const previousMonth: GroupBucketEntry[] = []
-	const trashed: GroupBucketEntry[] = []
-	const archived: GroupBucketEntry[] = []
-	const pinned: GroupBucketEntry[] = []
-	const favorited: GroupBucketEntry[] = []
-	const yearBuckets: {
-		[year: number]: GroupBucketEntry[]
-	} = {}
+	const entries: GroupBucketEntry[] = new Array(notes.length)
 
-	const len = notes.length
+	for (let i = 0; i < notes.length; i++) {
+		const note = notes[i] as Note
 
-	for (let i = 0; i < len; i++) {
-		const note = notes[i]
-
-		if (!note) {
-			continue
-		}
-
-		// One timestamp per note, shared by the bucket thresholds AND the per-bucket
-		// sorts — the previous shape discarded this value after bucketing (and never
-		// computed it for the special buckets) only to recompute it per comparison.
-		const entry: GroupBucketEntry = {
+		entries[i] = {
+			id: note.uuid,
+			pinned: note.pinned,
+			favorite: note.favorite,
+			archive: note.archive,
+			trash: note.trash,
 			ts: Number(note.editedTimestamp ?? note.createdTimestamp),
 			note
 		}
-
-		if (groupTrashed && note.trash) {
-			trashed.push(entry)
-
-			continue
-		}
-
-		if (groupArchived && note.archive) {
-			archived.push(entry)
-
-			continue
-		}
-
-		if (groupPinned && note.pinned) {
-			pinned.push(entry)
-
-			continue
-		}
-
-		if (groupFavorited && note.favorite) {
-			favorited.push(entry)
-
-			continue
-		}
-
-		if (entry.ts >= todayAgo) {
-			today.push(entry)
-		} else if (entry.ts >= sevenDaysAgo) {
-			last7Days.push(entry)
-		} else if (entry.ts >= thirtyDaysAgo) {
-			last30Days.push(entry)
-		} else if (entry.ts >= twoMonthsAgo) {
-			previousMonth.push(entry)
-		} else {
-			const year = new Date(entry.ts).getFullYear()
-
-			if (!yearBuckets[year]) {
-				yearBuckets[year] = []
-			}
-
-			yearBuckets[year].push(entry)
-		}
 	}
 
-	const emitBucket = (bucket: GroupBucketEntry[], header: NoteListItem): void => {
-		bucket.sort(sortBucketEntriesDesc)
+	const buckets = partitionNotesByBucket(entries, now, sortBucketEntriesDesc)
+	const result: NoteListItem[] = []
 
-		result.push(header)
+	for (const bucket of buckets) {
+		result.push(headerForBucket(bucket.bucketId))
 
-		for (let i = 0; i < bucket.length; i++) {
-			const entry = bucket[i]
-
-			if (!entry) {
-				continue
-			}
-
+		for (const entry of bucket.notes) {
 			result.push({
 				...entry.note,
 				type: "note"
 			})
 		}
-	}
-
-	if (groupPinned && pinned.length > 0) {
-		emitBucket(pinned, {
-			type: "header",
-			id: "header-pinned",
-			title: i18n.t("pinned"),
-			icon: "pin-outline"
-		})
-	}
-
-	if (groupFavorited && favorited.length > 0) {
-		emitBucket(favorited, {
-			type: "header",
-			id: "header-favorited",
-			title: i18n.t("favorited"),
-			icon: "heart-outline"
-		})
-	}
-
-	if (today.length > 0) {
-		emitBucket(today, {
-			type: "header",
-			id: "header-today",
-			title: i18n.t("today"),
-			icon: "today-outline"
-		})
-	}
-
-	if (last7Days.length > 0) {
-		emitBucket(last7Days, {
-			type: "header",
-			id: "header-7days",
-			title: i18n.t("previous_7_days"),
-			icon: "calendar-outline"
-		})
-	}
-
-	if (last30Days.length > 0) {
-		emitBucket(last30Days, {
-			type: "header",
-			id: "header-30days",
-			title: i18n.t("previous_30_days"),
-			icon: "calendar-outline"
-		})
-	}
-
-	if (previousMonth.length > 0) {
-		const date = new Date(twoMonthsAgo)
-
-		emitBucket(previousMonth, {
-			type: "header",
-			id: "header-month",
-			title: monthFormatter().format(date),
-			icon: "calendar-outline"
-		})
-	}
-
-	const years = Object.keys(yearBuckets)
-		.map(Number)
-		.sort((a, b) => b - a)
-
-	for (let i = 0; i < years.length; i++) {
-		const year = years[i]
-
-		if (year === undefined) {
-			continue
-		}
-
-		const yearNotes = yearBuckets[year]
-
-		if (!yearNotes) {
-			continue
-		}
-
-		emitBucket(yearNotes, {
-			type: "header",
-			id: `header-${year}`,
-			title: year.toString(),
-			icon: "calendar-outline"
-		})
-	}
-
-	if (archived.length > 0) {
-		emitBucket(archived, {
-			type: "header",
-			id: "header-archived",
-			title: i18n.t("archived"),
-			icon: "archive-outline"
-		})
-	}
-
-	if (trashed.length > 0) {
-		emitBucket(trashed, {
-			type: "header",
-			id: "header-trashed",
-			title: i18n.t("trashed"),
-			icon: "trash-outline"
-		})
 	}
 
 	return result
