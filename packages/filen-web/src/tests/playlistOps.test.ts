@@ -8,7 +8,7 @@ import {
 	renamePlaylist,
 	reorderPlaylistFile
 } from "@/features/audio/lib/playlistOps"
-import type { Playlist, PlaylistFile } from "@/features/audio/lib/playlistSchema"
+import type { Playlist, PlaylistFile } from "@filen/shared"
 
 function file(uuid: string, overrides: Partial<PlaylistFile> = {}): PlaylistFile {
 	return {

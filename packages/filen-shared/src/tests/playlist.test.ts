@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parsePlaylist, serializePlaylist } from "@/features/audio/lib/playlistSchema"
+import { parsePlaylist, serializePlaylist } from "@filen/shared"
 
 function validPlaylistFile(overrides: Record<string, unknown> = {}): Record<string, unknown> {
 	return {
@@ -47,6 +47,12 @@ describe("parsePlaylist", () => {
 
 		expect(result).not.toBeNull()
 		expect(result?.uuid).toBe("22222222-2222-2222-2222-222222222222")
+	})
+
+	it("preserves unknown extra fields at the playlist level", () => {
+		const result = parsePlaylist(validPlaylist({ futureField: "anything" }))
+
+		expect(result).toEqual(expect.objectContaining({ futureField: "anything" }))
 	})
 
 	it("tolerates unknown extra fields on a file entry", () => {

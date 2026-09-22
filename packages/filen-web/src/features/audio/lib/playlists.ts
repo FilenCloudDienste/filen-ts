@@ -5,7 +5,7 @@ import { runOp } from "@/lib/actions/outcome"
 import { log } from "@/lib/log"
 import { narrowItem, asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { buildQueueTrack } from "@/features/audio/lib/handoff"
-import { parsePlaylist, serializePlaylist, type Playlist, type PlaylistFile } from "@/features/audio/lib/playlistSchema"
+import { parsePlaylist, serializePlaylist, type Playlist, type PlaylistFile } from "@filen/shared"
 import {
 	addTracksToPlaylist as addTracksPure,
 	createPlaylist as createPlaylistPure,

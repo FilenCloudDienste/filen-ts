@@ -6,7 +6,7 @@ import { usePlaylistsQuery, type PlaylistEntry } from "@/features/audio/queries/
 import { createPlaylist, deletePlaylistAction, renamePlaylistAction } from "@/features/audio/lib/playlists"
 import { playPlaylistFrom, shufflePlayPlaylist } from "@/features/audio/lib/playlistPlayback"
 import { PlaylistDetailDialog } from "@/features/audio/components/playlistDetailDialog"
-import type { Playlist } from "@/features/audio/lib/playlistSchema"
+import type { Playlist } from "@filen/shared"
 import { formatRelativeTime } from "@/lib/relativeTime"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"

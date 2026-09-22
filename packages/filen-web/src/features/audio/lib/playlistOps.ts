@@ -1,4 +1,4 @@
-import type { Playlist, PlaylistFile } from "@/features/audio/lib/playlistSchema"
+import type { Playlist, PlaylistFile } from "@filen/shared"
 
 // Pure playlist mutation logic — every CRUD edit playlists.ts applies inside its write-lock, factored
 // out so the composition rules (dedup-on-add, restamp-on-add, index-bounds on reorder/remove) are

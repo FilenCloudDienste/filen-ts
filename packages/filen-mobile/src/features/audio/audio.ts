@@ -5,11 +5,10 @@ import audioCache, { type Metadata } from "@/features/audio/audioCache"
 import type { DriveItem, DriveItemFileExtracted } from "@/types"
 import { useEffect, useState } from "react"
 import events from "@/lib/events"
-import { run, Semaphore, driveItemName } from "@filen/shared"
+import { run, Semaphore, driveItemName, parsePlaylist, type Playlist, type PlaylistFile } from "@filen/shared"
 import auth from "@/lib/auth"
 import { AnyNormalDir, DirMeta_Tags, AnyFile, FileMeta_Tags, FileMeta, ParentUuid, type Dir } from "@filen/sdk-rs"
 import { Buffer } from "react-native-quick-crypto"
-import { type } from "arktype"
 import { wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
 import { playlistsQueryUpdate, playlistsQueryGet } from "@/features/audio/queries/usePlaylists.query"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
@@ -22,30 +21,6 @@ export type QueueItem = {
 	playlistUuid: string
 	item: DriveItemFileExtracted
 }
-
-export const PlaylistFileSchema = type({
-	uuid: "string",
-	name: "string",
-	mime: "string",
-	size: "number",
-	bucket: "string",
-	key: "string",
-	version: "number",
-	chunks: "number",
-	region: "string",
-	playlist: "string"
-})
-
-export const PlaylistSchema = type({
-	uuid: "string",
-	name: "string",
-	created: "number",
-	updated: "number",
-	files: PlaylistFileSchema.array()
-})
-
-export type Playlist = typeof PlaylistSchema.infer
-export type PlaylistFile = typeof PlaylistFileSchema.infer
 
 export type PlaylistWithItems = Omit<Playlist, "files"> & {
 	files: (PlaylistFile & {
@@ -1213,7 +1188,7 @@ export class Audio {
 			type: "file",
 			data: {
 				uuid: file.uuid,
-				// PlaylistFileSchema is the on-drive playlist format and stores no whole-life id, so a
+				// PlaylistFile is the on-drive playlist format and stores no whole-life id, so a
 				// track rebuilt from it cannot be the target of a drive operation (the SDK rejects that
 				// with ErrorKind.MissingStableUuid). The track's own menu only plays it or moves it
 				// between playlists, and usePlaylists.query seeds this into the shared uuid cache ONLY
@@ -1227,7 +1202,7 @@ export class Audio {
 				bucket: file.bucket,
 				timestamp: BigInt(now),
 				chunks: BigInt(file.chunks),
-				// PlaylistFileSchema (the on-drive playlist JSON) carries no SDK flag, and the SDK never
+				// PlaylistFile (the on-drive playlist JSON) carries no SDK flag, and the SDK never
 				// thumbnails audio, so the veto is the correct value — not a placeholder.
 				canMakeThumbnail: false,
 				decryptedMeta: meta,
@@ -1247,13 +1222,7 @@ export class Audio {
 			return null
 		}
 
-		const result = PlaylistSchema(parsed)
-
-		if (result instanceof type.errors) {
-			return null
-		}
-
-		return result
+		return parsePlaylist(parsed)
 	}
 
 	public async getPlaylists(signal?: AbortSignal): Promise<PlaylistWithItems[]> {
@@ -1450,7 +1419,7 @@ export class Audio {
 		// BigInt values to numbers so the stock JSON.stringify doesn't throw when
 		// addFilesToPlaylist appends files that carry the DriveItemFileExtracted shape.
 		// Plain JSON is deliberate here: playlist files are read back with plain
-		// JSON.parse + arktype validation, never through the envelope serializer.
+		// JSON.parse + parsePlaylist validation, never through the envelope serializer.
 		const playlistToSerialize = convertBigInts({
 			...playlist,
 			files: playlist.files.map(({ item: _item, ...rest }: PlaylistFile & { item?: unknown }) => rest)

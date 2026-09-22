@@ -5,7 +5,7 @@ import { render, screen, cleanup } from "@testing-library/react"
 import { createElement } from "react"
 import "@/lib/i18n"
 import type { PlaylistEntry } from "@/features/audio/queries/playlists"
-import type { Playlist } from "@/features/audio/lib/playlistSchema"
+import type { Playlist } from "@filen/shared"
 
 // Mock boundary: usePlaylistsQuery normally goes through react-query + the real sdk client (a Vite
 // `?worker`, unresolvable under this node/jsdom vitest run) — same rationale as playlists.test.ts's own

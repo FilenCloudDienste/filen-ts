@@ -1,7 +1,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { queryClient } from "@/queries/client"
 import { fetchPlaylistEntries } from "@/features/audio/lib/playlists"
-import type { Playlist } from "@/features/audio/lib/playlistSchema"
+import type { Playlist } from "@filen/shared"
 
 // One global playlists list query — every playlist surface (the now-playing panel's Playlists tab, a
 // playlist detail dialog, the add-tracks picker's "already in this playlist" check) reads this one

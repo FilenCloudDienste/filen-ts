@@ -1,6 +1,6 @@
 import { audioEngine } from "@/features/audio/lib/audioEngine"
 import { queueTracksFromPlaylist } from "@/features/audio/lib/playlists"
-import type { Playlist } from "@/features/audio/lib/playlistSchema"
+import type { Playlist } from "@filen/shared"
 
 // Thin glue between the playlist data layer and the playback engine singleton — split out of
 // playlists.ts specifically so that module stays free of audioEngine's import-time side effects

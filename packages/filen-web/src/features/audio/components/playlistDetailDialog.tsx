@@ -15,7 +15,7 @@ import {
 	isTrackReorderDrag,
 	TRACK_DRAG_TYPE
 } from "@/features/audio/lib/trackDnd"
-import type { Playlist, PlaylistFile } from "@/features/audio/lib/playlistSchema"
+import type { Playlist, PlaylistFile } from "@filen/shared"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
