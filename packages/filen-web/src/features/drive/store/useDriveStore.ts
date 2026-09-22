@@ -1,18 +1,6 @@
 import { create } from "zustand"
+import { toggleInArray, removeSelectedIds } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
-
-// Add if absent (by uuid), remove if present — the toggle boilerplate every selection action here
-// builds on. Returns a new array; the input is never mutated.
-function toggleInArray<T>(items: T[], item: T, getId: (item: T) => string): T[] {
-	const id = getId(item)
-	const index = items.findIndex(existing => getId(existing) === id)
-
-	if (index >= 0) {
-		return [...items.slice(0, index), ...items.slice(index + 1)]
-	}
-
-	return [...items, item]
-}
 
 const driveItemId = (item: DriveItem): string => item.data.uuid
 
@@ -57,11 +45,10 @@ export const useDriveStore = create<DriveState>(set => ({
 	},
 	removeFromSelection: uuids => {
 		set(state => {
-			const toRemove = new Set(uuids)
-			const next = state.selectedItems.filter(item => !toRemove.has(driveItemId(item)))
+			const next = removeSelectedIds(state.selectedItems, uuids, driveItemId)
 
 			// Avoid a needless state update (and re-render) when nothing was actually selected.
-			if (next.length === state.selectedItems.length) {
+			if (next === state.selectedItems) {
 				return state
 			}
 

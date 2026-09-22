@@ -15,6 +15,7 @@ const {
 	mockEventsEmit,
 	mockSetTyping,
 	mockSetSelectedChats,
+	mockRemoveFromSelection,
 	mockPurgeChatInflightState
 } = vi.hoisted(() => {
 	const capturedChatsUpdaters: Array<(prev: unknown[]) => unknown[]> = []
@@ -38,6 +39,7 @@ const {
 		mockEventsEmit: vi.fn(),
 		mockSetTyping: vi.fn(),
 		mockSetSelectedChats: vi.fn(),
+		mockRemoveFromSelection: vi.fn(),
 		mockPurgeChatInflightState: vi.fn().mockResolvedValue(undefined)
 	}
 })
@@ -62,7 +64,8 @@ vi.mock("@/features/chats/store/useChats.store", () => ({
 	default: {
 		getState: vi.fn().mockReturnValue({
 			setTyping: mockSetTyping,
-			setSelectedChats: mockSetSelectedChats
+			setSelectedChats: mockSetSelectedChats,
+			removeFromSelection: mockRemoveFromSelection
 		})
 	}
 }))
@@ -223,6 +226,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		mockEventsEmit.mockClear()
 		mockSetTyping.mockClear()
 		mockSetSelectedChats.mockClear()
+		mockRemoveFromSelection.mockClear()
 		mockPurgeChatInflightState.mockClear()
 		// Clear any pending timeouts
 		for (const key of Object.keys(chatTypingTimeoutsRef)) {
@@ -780,15 +784,8 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			await handleChatEvent({ event, userId: USER_ID })
 
 			// Called synchronously — no timer advance needed
-			expect(mockSetSelectedChats).toHaveBeenCalledOnce()
-
-			const updater = mockSetSelectedChats.mock.calls[0]?.[0] as (prev: Array<{ uuid: string }>) => Array<{ uuid: string }>
-			const prev = [{ uuid: "chat-gone" }, { uuid: "chat-keep" }]
-			const result = updater(prev)
-
-			// The deleted chat is removed from the selection; other selected chats remain
-			expect(result).toHaveLength(1)
-			expect(result[0]!.uuid).toBe("chat-keep")
+			expect(mockRemoveFromSelection).toHaveBeenCalledOnce()
+			expect(mockRemoveFromSelection).toHaveBeenCalledWith(["chat-gone"])
 		})
 
 		it("does NOT purge the selection when the chat is not found", async () => {
@@ -798,7 +795,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			await handleChatEvent({ event, userId: USER_ID })
 
-			expect(mockSetSelectedChats).not.toHaveBeenCalled()
+			expect(mockRemoveFromSelection).not.toHaveBeenCalled()
 		})
 
 		// D4b/M5 — the deleted chat's inflight queue, send errors and input drafts must be purged
@@ -936,7 +933,8 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 				expect(mockEventsEmit).toHaveBeenCalledOnce()
 				expect(mockEventsEmit).toHaveBeenCalledWith("chatConversationDeleted", { uuid: "chat-1" })
-				expect(mockSetSelectedChats).toHaveBeenCalledOnce()
+				expect(mockRemoveFromSelection).toHaveBeenCalledOnce()
+				expect(mockRemoveFromSelection).toHaveBeenCalledWith(["chat-1"])
 			})
 
 			it("removes the chat and clears its messages after the 3s timeout instead of filtering participants", async () => {

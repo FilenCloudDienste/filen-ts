@@ -1,18 +1,6 @@
 import { create } from "zustand"
 import type { Note } from "@filen/sdk-rs"
-
-// Add if absent (by uuid), remove if present — mirrors useDriveStore's own toggleInArray. Returns a
-// new array; the input is never mutated.
-function toggleInArray<T>(items: T[], item: T, getId: (item: T) => string): T[] {
-	const id = getId(item)
-	const index = items.findIndex(existing => getId(existing) === id)
-
-	if (index >= 0) {
-		return [...items.slice(0, index), ...items.slice(index + 1)]
-	}
-
-	return [...items, item]
-}
+import { toggleInArray, removeSelectedIds } from "@filen/shared"
 
 const noteId = (note: Note): string => note.uuid
 
@@ -62,11 +50,10 @@ export const useNotesSelectionStore = create<NotesSelectionState>(set => ({
 	},
 	removeFromSelection: uuids => {
 		set(state => {
-			const toRemove = new Set(uuids)
-			const next = state.selectedNotes.filter(note => !toRemove.has(noteId(note)))
+			const next = removeSelectedIds(state.selectedNotes, uuids, noteId)
 
 			// Avoid a needless state update (and re-render) when nothing was actually selected.
-			if (next.length === state.selectedNotes.length) {
+			if (next === state.selectedNotes) {
 				return state
 			}
 

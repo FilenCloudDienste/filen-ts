@@ -1,4 +1,5 @@
 import { type StateCreator } from "zustand"
+import { toggleInArray } from "@filen/shared"
 
 /**
  * Zustand slice for multi-select state. Each domain composes this into its
@@ -42,21 +43,9 @@ export function createSelectionSlice<T>(getId: (item: T) => string): StateCreato
 	})
 }
 
-/**
- * Add `item` to `arr` if absent (by id), remove if present. Returns a new
- * array — input is not mutated. Used by stores that keep their existing
- * field names alongside the factory methods.
- */
-export function toggleInArray<T>(arr: T[], item: T, getId: (i: T) => string): T[] {
-	const id = getId(item)
-	const idx = arr.findIndex(i => getId(i) === id)
-
-	if (idx >= 0) {
-		return [...arr.slice(0, idx), ...arr.slice(idx + 1)]
-	}
-
-	return [...arr, item]
-}
+// Re-exported so stores that keep their existing field names alongside the factory methods can
+// keep importing it from here.
+export { toggleInArray }
 
 /**
  * Membership check by id. Cheaper than callers writing `.some(i => getId(i) === getId(item))`

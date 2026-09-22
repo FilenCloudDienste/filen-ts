@@ -45,7 +45,7 @@ async function removeChatLocally(uuid: string): Promise<boolean> {
 	// deselect-all condition, bulk ops) never targets a non-existent conversation while the user
 	// stays on the chats tab. The query cache removal below is deferred, but the selection must
 	// not lag behind.
-	useChatsStore.getState().setSelectedChats(prev => prev.filter(c => c.uuid !== uuid))
+	useChatsStore.getState().removeFromSelection([uuid])
 
 	// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack if we are inside the chat when this happen.
 	// This is a bit of a band-aid solution, ideally we would have a more robust way to handle this, but it works for now and the delay is short enough that it shouldn't cause any issues.

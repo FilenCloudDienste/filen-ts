@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { create } from "zustand"
-import { createSelectionSlice, toggleInArray, isItemSelected, type SelectionSlice } from "@/stores/createSelectionSlice"
+import { createSelectionSlice, isItemSelected, type SelectionSlice } from "@/stores/createSelectionSlice"
 
 type Item = { uuid: string; name: string }
 
@@ -15,37 +15,6 @@ const getId = (i: Item) => i.uuid
 function makeStore() {
 	return create<SelectionSlice<Item>>()(createSelectionSlice(getId))
 }
-
-describe("toggleInArray", () => {
-	it("adds when absent", () => {
-		expect(toggleInArray<Item>([], items[0]!, getId)).toEqual([items[0]])
-		expect(toggleInArray([items[0]!], items[1]!, getId)).toEqual([items[0], items[1]])
-	})
-
-	it("removes when present", () => {
-		expect(toggleInArray([items[0]!, items[1]!], items[0]!, getId)).toEqual([items[1]])
-		expect(toggleInArray([items[0]!, items[1]!, items[2]!], items[1]!, getId)).toEqual([items[0], items[2]])
-	})
-
-	it("preserves order when adding", () => {
-		expect(toggleInArray([items[0]!, items[1]!], items[2]!, getId)).toEqual([items[0], items[1], items[2]])
-	})
-
-	it("does not mutate input", () => {
-		const arr = [items[0]!]
-		const out = toggleInArray(arr, items[1]!, getId)
-
-		expect(arr).toEqual([items[0]])
-		expect(out).toEqual([items[0], items[1]])
-	})
-
-	it("identifies items by id even when references differ", () => {
-		const arr = [{ uuid: "a", name: "alpha" }]
-		const dup: Item = { uuid: "a", name: "alpha-renamed" }
-
-		expect(toggleInArray(arr, dup, getId)).toEqual([])
-	})
-})
 
 describe("isItemSelected", () => {
 	it("returns true when present", () => {

@@ -1,7 +1,10 @@
 import { create } from "zustand"
 import { type ChatTyping, FilenSdkError } from "@filen/sdk-rs"
+import { removeSelectedIds } from "@filen/shared"
 import { type Chat, type ChatMessage } from "@/types"
 import { toggleInArray } from "@/stores/createSelectionSlice"
+
+const chatId = (chat: Chat): string => chat.uuid
 
 export type InputViewLayout = {
 	width: number
@@ -52,6 +55,7 @@ export type ChatsStore = {
 	selectedChats: Chat[]
 	setSelectedChats: (fn: Chat[] | ((prev: Chat[]) => Chat[])) => void
 	toggleSelectedChat: (chat: Chat) => void
+	removeFromSelection: (uuids: string[]) => void
 	clearSelectedChats: () => void
 	selectAllChats: (chats: Chat[]) => void
 	setInflightErrors: (fn: InflightChatMessageErrors | ((prev: InflightChatMessageErrors) => InflightChatMessageErrors)) => void
@@ -97,8 +101,20 @@ export const useChatsStore = create<ChatsStore>(set => ({
 	},
 	toggleSelectedChat(chat) {
 		set(state => ({
-			selectedChats: toggleInArray(state.selectedChats, chat, c => c.uuid)
+			selectedChats: toggleInArray(state.selectedChats, chat, chatId)
 		}))
+	},
+	removeFromSelection(uuids) {
+		set(state => {
+			const next = removeSelectedIds(state.selectedChats, uuids, chatId)
+
+			// Avoid a needless state update (and re-render) when nothing was selected.
+			if (next === state.selectedChats) {
+				return state
+			}
+
+			return { selectedChats: next }
+		})
 	},
 	clearSelectedChats() {
 		set({ selectedChats: [] })

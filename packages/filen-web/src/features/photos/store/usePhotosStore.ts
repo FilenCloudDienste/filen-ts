@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { toggleInArray, removeSelectedIds } from "@filen/shared"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 
 // A separate store from drive's own useDriveStore — deliberately NOT the same singleton. The photos
@@ -6,18 +7,7 @@ import { type PhotoItem } from "@/features/photos/lib/captureSort"
 // is a module-level singleton regardless: sharing useDriveStore would leak a drive selection into the
 // photos grid (and vice versa) the instant a user navigates between the two, since neither route's
 // mount/unmount resets the OTHER surface's own selection-reset effect. Same shape/behavior as
-// useDriveStore otherwise — mirrors its own toggleInArray/removeFromSelection implementation exactly.
-
-function toggleInArray<T>(items: T[], item: T, getId: (item: T) => string): T[] {
-	const id = getId(item)
-	const index = items.findIndex(existing => getId(existing) === id)
-
-	if (index >= 0) {
-		return [...items.slice(0, index), ...items.slice(index + 1)]
-	}
-
-	return [...items, item]
-}
+// useDriveStore otherwise.
 
 const photoItemId = (item: PhotoItem): string => item.data.uuid
 
@@ -43,10 +33,9 @@ export const usePhotosStore = create<PhotosState>(set => ({
 	},
 	removeFromSelection: uuids => {
 		set(state => {
-			const toRemove = new Set(uuids)
-			const next = state.selectedItems.filter(item => !toRemove.has(photoItemId(item)))
+			const next = removeSelectedIds(state.selectedItems, uuids, photoItemId)
 
-			if (next.length === state.selectedItems.length) {
+			if (next === state.selectedItems) {
 				return state
 			}
 

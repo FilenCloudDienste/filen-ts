@@ -1,18 +1,6 @@
 import { create } from "zustand"
 import type { Chat } from "@filen/sdk-rs"
-
-// Add if absent (by uuid), remove if present — mirrors useNotesSelectionStore's own toggleInArray.
-// Returns a new array; the input is never mutated.
-function toggleInArray<T>(items: T[], item: T, getId: (item: T) => string): T[] {
-	const id = getId(item)
-	const index = items.findIndex(existing => getId(existing) === id)
-
-	if (index >= 0) {
-		return [...items.slice(0, index), ...items.slice(index + 1)]
-	}
-
-	return [...items, item]
-}
+import { toggleInArray, removeSelectedIds } from "@filen/shared"
 
 const chatId = (chat: Chat): string => chat.uuid
 
@@ -45,11 +33,10 @@ export const useChatsSelectionStore = create<ChatsSelectionState>(set => ({
 	},
 	removeFromSelection: uuids => {
 		set(state => {
-			const toRemove = new Set(uuids)
-			const next = state.selectedChats.filter(chat => !toRemove.has(chatId(chat)))
+			const next = removeSelectedIds(state.selectedChats, uuids, chatId)
 
 			// Avoid a needless state update (and re-render) when nothing was actually selected.
-			if (next.length === state.selectedChats.length) {
+			if (next === state.selectedChats) {
 				return state
 			}
 

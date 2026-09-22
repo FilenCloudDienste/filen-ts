@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { removeSelectedIds } from "@filen/shared"
 import type { DriveItem } from "@/types"
 import { toggleInArray } from "@/stores/createSelectionSlice"
 
@@ -27,11 +28,10 @@ export const useDriveStore = create<DriveStore>(set => ({
 	},
 	removeFromSelection(uuids) {
 		set(state => {
-			const toRemove = new Set(uuids)
-			const next = state.selectedItems.filter(item => !toRemove.has(driveItemId(item)))
+			const next = removeSelectedIds(state.selectedItems, uuids, driveItemId)
 
 			// Avoid a needless state update (and re-render) when nothing was selected.
-			if (next.length === state.selectedItems.length) {
+			if (next === state.selectedItems) {
 				return state
 			}
 
