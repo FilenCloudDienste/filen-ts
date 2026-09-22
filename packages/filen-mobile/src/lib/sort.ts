@@ -1,4 +1,4 @@
-import { parseNumbersFromString } from "@filen/shared"
+import { parseNumbersFromString, estimateCaptureTimestamp } from "@filen/shared"
 import { type DriveItem, type Note, type NoteTag } from "@/types"
 import type { ListItem as NoteListItem, Item as NoteItem } from "@/features/notes/components/note"
 import i18n from "@/lib/i18n"
@@ -230,18 +230,11 @@ function creationSortKey(item: DriveItem): number {
 	)
 }
 
-// Client-written timestamps below this (1980-01-01) are treated as garbage — epoch-zero
-// mtimes and similar artifacts of legacy uploaders — rather than as very old capture dates.
-const CAPTURE_TIMESTAMP_FLOOR = Date.UTC(1980, 0, 1)
-
-// Best-effort capture time (ms) for the photos timeline. Legacy clients stamped `created`
-// with the upload time instead of the file's real creation date, stranding old photos at
-// their upload position while the real date survived in `modified`. A photo cannot be
-// modified before it was captured, so the earliest plausible client timestamp — above the
-// garbage floor and no later than the server-assigned upload time (the only fully trusted
-// stamp) — is the closest available estimate. Falls back to the upload time when neither
-// client timestamp is usable. Shared items carry no server timestamp: only the floor
-// applies, and they fall back to the plain creation key.
+// Best-effort capture time (ms) for the photos timeline — see @filen/shared's
+// estimateCaptureTimestamp for the floor/ceiling/min-of-candidates rationale. Non-file,
+// non-shared arms have no capture concept and fall back to creationSortKey; shared items
+// carry no server upload timestamp, so the ceiling is unbounded and a fully-disqualified
+// estimate (non-finite) also falls back to creationSortKey.
 //
 // Exported because it is ALSO the display date for the photos grid — the floating date
 // chip must label rows with the same timestamp the timeline is ordered by (#43), or
@@ -254,25 +247,9 @@ export function captureTimestamp(item: DriveItem): number {
 	}
 
 	const uploaded = isFile ? Number(item.data.timestamp) : Number.POSITIVE_INFINITY
-	let best = Number.POSITIVE_INFINITY
+	const estimate = estimateCaptureTimestamp(uploaded, item.data.decryptedMeta?.created, item.data.decryptedMeta?.modified)
 
-	for (const candidate of [item.data.decryptedMeta?.created, item.data.decryptedMeta?.modified]) {
-		if (candidate === undefined) {
-			continue
-		}
-
-		const value = Number(candidate)
-
-		if (value > CAPTURE_TIMESTAMP_FLOOR && value <= uploaded && value < best) {
-			best = value
-		}
-	}
-
-	if (best !== Number.POSITIVE_INFINITY) {
-		return best
-	}
-
-	return isFile ? Number(item.data.timestamp) : creationSortKey(item)
+	return Number.isFinite(estimate) ? estimate : creationSortKey(item)
 }
 
 type SortMode = {

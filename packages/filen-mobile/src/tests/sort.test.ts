@@ -520,6 +520,15 @@ describe("itemSorter", () => {
 
 				expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["broken.jpg", "anchor.jpg"])
 			})
+
+			it("a sharedFile with no qualifying candidate falls through to creationSortKey (no server timestamp ceiling to fall back to)", () => {
+				// Shared items have no uploaded ceiling (Infinity), so only the floor can disqualify a
+				// candidate. Both below it here, so the estimate is non-finite and routes to creationSortKey,
+				// which prefers created over modified.
+				const shared = makeItem("sharedFile", "shared.jpg", { created: 100, modified: 200 })
+
+				expect(captureTimestamp(shared)).toBe(100)
+			})
 		})
 
 		it("uses uuid as tiebreaker for equal upload dates — lower numeric uuid sorts first in ascending", () => {
