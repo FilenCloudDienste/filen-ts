@@ -24,14 +24,14 @@ import {
 	type LucideIcon
 } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
-import { cn } from "@filen/shared"
+import { cn, aggregateNoteSelectionFlags } from "@filen/shared"
 import { useNotes } from "@/features/notes/queries/notes"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
 import { useNotesViewModeQuery, useNoteTagsSortByQuery } from "@/features/notes/queries/preferences"
 import { useAccountQuery } from "@/queries/account"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { setNotesViewMode, DEFAULT_NOTES_VIEW_MODE, setNoteTagsSortBy, type NotesViewMode } from "@/features/notes/lib/preferences"
-import { DEFAULT_NOTE_TAGS_SORT_BY, tagDisplayName, type NoteTagsSortBy } from "@/features/notes/lib/sort"
+import { DEFAULT_NOTE_TAGS_SORT_BY, tagDisplayName, isNoteUndecryptable, type NoteTagsSortBy } from "@/features/notes/lib/sort"
 import {
 	buildNotesGroupedRows,
 	buildNotesByTag,
@@ -48,7 +48,7 @@ import { createNote } from "@/features/notes/lib/actions"
 import { exportAllNotes } from "@/features/notes/lib/export"
 import { importNoteFromFile } from "@/features/notes/lib/import"
 import { importAcceptAttribute } from "@/features/notes/lib/import.logic"
-import { aggregateNoteSelectionFlags, selectableNotesForSelectAll } from "@/features/notes/lib/selectionFlags"
+import { selectableNotesForSelectAll } from "@/features/notes/lib/selectionFlags"
 import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelectionStore"
 import { useNotesListSelection } from "@/features/notes/hooks/useNotesListSelection"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
@@ -555,7 +555,7 @@ export function NotesSidebar() {
 				return
 			}
 
-			if (!canBulkTrashNotes(aggregateNoteSelectionFlags(liveSelectedNotes, currentUserId))) {
+			if (!canBulkTrashNotes(aggregateNoteSelectionFlags(liveSelectedNotes, currentUserId, isNoteUndecryptable))) {
 				return
 			}
 

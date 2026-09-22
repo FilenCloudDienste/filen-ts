@@ -1,7 +1,7 @@
 import { type LucideIcon } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
+import { type NoteSelectionFlags } from "@filen/shared"
 import { NOTE_ACTION_DEFS } from "@/features/notes/lib/actionDefs"
-import { type NoteSelectionFlags } from "@/features/notes/lib/selectionFlags"
 import { type NotesKey } from "@/lib/i18n"
 
 // Dialog kinds the notes bulk-action bar can ask useNoteDialogHost to open — disjoint from

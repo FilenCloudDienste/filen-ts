@@ -163,12 +163,8 @@ vi.mock("@/lib/share", () => ({
 
 import { buildNotesHeaderRightItems, buildTagsSortMenuButton } from "@/features/notes/components/notesHeaderMenuBuilders"
 import { Platform } from "react-native"
-import {
-	type NoteSelectionFlags,
-	EMPTY_NOTE_FLAGS,
-	type NoteTagSelectionFlags,
-	EMPTY_NOTE_TAG_FLAGS
-} from "@/features/notes/notesSelectors"
+import { type NoteSelectionFlags } from "@filen/shared"
+import { type NoteTagSelectionFlags, EMPTY_NOTE_TAG_FLAGS } from "@/features/notes/notesSelectors"
 import { type Note, type NoteTag } from "@/types"
 import { type MenuButton } from "@/components/ui/menu"
 
@@ -211,9 +207,19 @@ function makeTag(overrides: Partial<NoteTag> = {}): NoteTag {
 
 function makeNoteFlags(overrides: Partial<NoteSelectionFlags> = {}): NoteSelectionFlags {
 	return {
-		...EMPTY_NOTE_FLAGS,
+		count: 0,
+		includesFavorited: false,
+		includesPinned: false,
+		includesArchived: false,
+		includesTrashed: false,
+		includesUndecryptable: false,
+		everyOwned: false,
+		everyTrashed: false,
+		everyArchivedOrTrashed: false,
+		hasWriteAccessToAll: false,
+		participantOfEveryAndNotOwner: false,
 		...overrides
-	} as NoteSelectionFlags
+	}
 }
 
 function makeTagFlags(overrides: Partial<NoteTagSelectionFlags> = {}): NoteTagSelectionFlags {

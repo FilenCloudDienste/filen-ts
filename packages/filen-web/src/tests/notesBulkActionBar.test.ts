@@ -21,7 +21,7 @@ import {
 	isNoteBulkActionOfflineDisabled,
 	canBulkTrashNotes
 } from "@/features/notes/components/notesBulkActionBar.logic"
-import { type NoteSelectionFlags } from "@/features/notes/lib/selectionFlags"
+import { type NoteSelectionFlags } from "@filen/shared"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr

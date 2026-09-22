@@ -3,9 +3,10 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { XIcon } from "lucide-react"
 import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
+import { aggregateNoteSelectionFlags } from "@filen/shared"
 import { type BulkOutcome } from "@/features/drive/lib/bulk"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { aggregateNoteSelectionFlags } from "@/features/notes/lib/selectionFlags"
+import { isNoteUndecryptable } from "@/features/notes/lib/sort"
 import {
 	setPinnedNotes,
 	setFavoritedNotes,
@@ -62,7 +63,7 @@ export interface NotesBulkActionBarProps {
 export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDialogAction }: NotesBulkActionBarProps) {
 	const { t } = useTranslation(["notes", "common"])
 	const isOnline = useIsOnline()
-	const flags = aggregateNoteSelectionFlags(selectedNotes, currentUserId)
+	const flags = aggregateNoteSelectionFlags(selectedNotes, currentUserId, isNoteUndecryptable)
 	const descriptors = noteBulkActions(flags)
 
 	async function runOutcome(pending: Promise<BulkOutcome<Note>>): Promise<void> {

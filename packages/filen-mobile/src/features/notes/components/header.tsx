@@ -10,7 +10,8 @@ import { useShallow } from "zustand/shallow"
 import useNotesTagsQuery from "@/features/notes/queries/useNotesTags.query"
 import { useSecureStore } from "@/lib/secureStore"
 import { useStringifiedClient } from "@/lib/auth"
-import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
+import { aggregateNoteSelectionFlags } from "@filen/shared"
+import { aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
 import { useTranslation } from "react-i18next"
 import { buildNotesHeaderRightItems } from "@/features/notes/components/notesHeaderMenuBuilders"
 import { NOTES_VIEW_MODES, type NotesViewMode } from "@/features/notes/notesViewModes"
@@ -66,7 +67,7 @@ export const Header = ({
 
 		return live ? [live] : []
 	})
-	const noteFlags = aggregateNoteSelectionFlags(selectedNotesLive, stringifiedClient?.userId)
+	const noteFlags = aggregateNoteSelectionFlags(selectedNotesLive, stringifiedClient?.userId, n => n.undecryptable)
 
 	const tag = (() => {
 		if (!tagUuid) {

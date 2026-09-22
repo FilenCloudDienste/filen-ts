@@ -3,7 +3,7 @@ import { type MenuButton } from "@/components/ui/menu"
 import { type Icons } from "@/components/ui/menuIcons"
 import { buildSortFieldButton, type SortDirectionOption } from "@/components/ui/sortFieldMenu"
 import { NoteType } from "@filen/sdk-rs"
-import { run } from "@filen/shared"
+import { run, type NoteSelectionFlags } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import { Platform } from "react-native"
 import { router } from "@/lib/router"
@@ -24,7 +24,7 @@ import { type NotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import { type TFunction } from "i18next"
 import type { Note, NoteTag } from "@/types"
 import { useResolveClassNames } from "uniwind"
-import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
+import { aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
 import { NOTES_VIEW_MODES, NOTES_VIEW_MODE_ORDER, type NotesViewMode } from "@/features/notes/notesViewModes"
 import logger from "@/lib/logger"
 
@@ -114,7 +114,7 @@ export function buildNotesHeaderRightItems({
 	tagsSortBy: NotesTagsSortBy
 	setTagsSortBy: (next: NotesTagsSortBy) => void
 	tagFlags: ReturnType<typeof aggregateNoteTagSelectionFlags>
-	noteFlags: ReturnType<typeof aggregateNoteSelectionFlags>
+	noteFlags: NoteSelectionFlags
 	// uuid -> true for every note kept on the device. Read reactively by the caller from the
 	// offline-notes store, so the entries below flip the moment the ledger changes.
 	markedOffline: Record<string, true>
