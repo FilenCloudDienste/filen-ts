@@ -12,6 +12,7 @@ import {
 	ErrorKind,
 	FilenSdkError
 } from "@filen/sdk-rs"
+import { trimmedOrUndefined } from "@filen/shared"
 import auth from "@/lib/auth"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import { SDK_CACHE_DIRECTORY, SDK_CACHE_PARENT_DIRECTORY, SDK_CACHE_DB_FILE, SDK_CACHE_VERSION } from "@/lib/storageRoots"
@@ -239,7 +240,7 @@ export class DriveSearch {
 		try {
 			search = await authedSdkClient.createSearch(
 				resolvedRoot,
-				{ name: name.trim() || undefined, itemType: CacheSearchItemType.All, recursive: true, caseSensitive: false },
+				{ name: trimmedOrUndefined(name), itemType: CacheSearchItemType.All, recursive: true, caseSensitive: false },
 				{ signal }
 			)
 		} catch (error) {
@@ -308,7 +309,7 @@ export class DriveSearch {
 
 		try {
 			await search.setConfig({
-				name: name.trim() || undefined,
+				name: trimmedOrUndefined(name),
 				itemType: CacheSearchItemType.All,
 				recursive: true,
 				caseSensitive: false

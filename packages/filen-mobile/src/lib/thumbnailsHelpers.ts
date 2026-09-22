@@ -19,14 +19,6 @@ export function abortError(signal?: AbortSignal): Error {
 	return new Error("Aborted")
 }
 
-// The uniffi bindings reject a cancelled Rust future with their own AbortError — `name` is
-// "AbortError" and it is NOT a FilenSdkError (unwrapSdkError never matches it); a DOM AbortSignal's
-// default reason carries the same name. Detected by name, never by instanceof: the class is
-// internal to the bindings and a DOMException is not an Error subclass on every runtime.
-export function isAbortError(error: unknown): boolean {
-	return typeof error === "object" && error !== null && (error as { name?: unknown }).name === "AbortError"
-}
-
 export class OfflineAbortError extends Error {
 	public constructor() {
 		super("Offline")

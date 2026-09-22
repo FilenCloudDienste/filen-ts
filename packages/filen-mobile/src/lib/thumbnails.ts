@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import { type DriveItem } from "@/types"
 import { normalizeFilePathForExpo, normalizeFilePathForSdk } from "@/lib/paths"
-import { run, Semaphore } from "@filen/shared"
+import { run, Semaphore, isAbortError } from "@filen/shared"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { Platform } from "react-native"
 import useHttpStore from "@/stores/useHttp.store"
@@ -10,7 +10,6 @@ import { THUMBNAILS_VERSION, THUMBNAILS_DIRECTORY } from "@/lib/storageRoots"
 import {
 	type ThumbnailKind,
 	abortError,
-	isAbortError,
 	OfflineAbortError,
 	ProviderUnavailableError,
 	getPath,

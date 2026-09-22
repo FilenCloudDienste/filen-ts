@@ -54,7 +54,6 @@ vi.mock("@/stores/useHttp.store", () => ({
 
 import {
 	abortError,
-	isAbortError,
 	OfflineAbortError,
 	getPath,
 	ensureDirectory,
@@ -343,26 +342,5 @@ describe("getThumbnailKind", () => {
 		expect(
 			getThumbnailKind({ type: "directory", data: { uuid: "d", size: 0n, decryptedMeta: { name: "photos.jpg" } } } as never)
 		).toBeNull()
-	})
-})
-
-describe("isAbortError", () => {
-	it("recognises the uniffi bindings' AbortError by name (never by instanceof)", () => {
-		expect(isAbortError({ name: "AbortError", message: "A Rust future was aborted" })).toBe(true)
-	})
-
-	it("recognises a DOM AbortSignal reason (name AbortError)", () => {
-		const controller = new AbortController()
-
-		controller.abort()
-
-		expect(isAbortError(controller.signal.reason)).toBe(true)
-	})
-
-	it("is false for other errors and non-errors", () => {
-		expect(isAbortError(new Error("network"))).toBe(false)
-		expect(isAbortError("AbortError")).toBe(false)
-		expect(isAbortError(null)).toBe(false)
-		expect(isAbortError(undefined)).toBe(false)
 	})
 })

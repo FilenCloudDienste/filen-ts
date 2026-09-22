@@ -17,7 +17,8 @@ import {
 	fastLocaleCompare,
 	bpsToReadable,
 	formatBytes,
-	isAbortError
+	isAbortError,
+	trimmedOrUndefined
 } from "@filen/shared"
 
 describe("parseNumbersFromString", () => {
@@ -585,5 +586,24 @@ describe("isAbortError", () => {
 		expect(isAbortError(undefined)).toBe(false)
 		expect(isAbortError("AbortError")).toBe(false)
 		expect(isAbortError(42)).toBe(false)
+	})
+})
+
+describe("trimmedOrUndefined", () => {
+	it("should return undefined for an empty string", () => {
+		expect(trimmedOrUndefined("")).toBeUndefined()
+	})
+
+	it("should return undefined for a whitespace-only string", () => {
+		expect(trimmedOrUndefined("   ")).toBeUndefined()
+		expect(trimmedOrUndefined("\t\n")).toBeUndefined()
+	})
+
+	it("should trim padding around a non-blank value", () => {
+		expect(trimmedOrUndefined("  hello  ")).toBe("hello")
+	})
+
+	it("should return the value unchanged when already trimmed", () => {
+		expect(trimmedOrUndefined("hello")).toBe("hello")
 	})
 })

@@ -1,4 +1,4 @@
-import { run } from "@filen/shared"
+import { run, trimmedOrUndefined } from "@filen/shared"
 import type {
 	Client,
 	CacheSearch,
@@ -76,12 +76,6 @@ interface OpenToken {
 // fix, not a suppression.
 function isCancelled(token: OpenToken): boolean {
 	return token.cancelled
-}
-
-function trimmedOrUndefined(value: string): string | undefined {
-	const trimmed = value.trim()
-
-	return trimmed.length > 0 ? trimmed : undefined
 }
 
 // activeRootUuid is a plain string (open()'s rootUuid param is caller-supplied, not the branded
