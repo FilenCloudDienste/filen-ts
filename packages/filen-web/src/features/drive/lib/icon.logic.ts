@@ -8,6 +8,7 @@ import {
 	AUDIO_EXTENSIONS
 } from "@/features/drive/lib/preview.logic"
 import { dirColorHex } from "@/features/drive/lib/dirColor"
+import { CODE_FILE_EXTENSIONS } from "@filen/shared"
 
 // The concrete file-type glyphs in src/assets/file-icons/ (byte-identical to filen-mobile's set) a
 // file routes to. "other" is the generic fallback: an unknown extension, or an undecryptable file
@@ -31,66 +32,11 @@ export type FileIconKey =
 	| "apple"
 	| "other"
 
-// Ported from filen-mobile's itemIcons code list (getPreviewType's code arm) — a superset of
-// preview.logic's CODE_EXTENSIONS (adds md/log/ini/makefile/mk/gradle/lua) so a file's icon matches
-// mobile even where this app previews the same file in a different (markdown/text) category.
-const CODE_EXTENSIONS = new Set([
-	"js",
-	"cjs",
-	"mjs",
-	"jsx",
-	"tsx",
-	"ts",
-	"md",
-	"cpp",
-	"c",
-	"php",
-	"htm",
-	"html5",
-	"html",
-	"css",
-	"css3",
-	"coffee",
-	"litcoffee",
-	"sass",
-	"xml",
-	"json",
-	"sql",
-	"java",
-	"kt",
-	"swift",
-	"py3",
-	"py",
-	"cmake",
-	"cs",
-	"dart",
-	"dockerfile",
-	"go",
-	"less",
-	"yaml",
-	"vue",
-	"svelte",
-	"vbs",
-	"cobol",
-	"toml",
-	"conf",
-	"ini",
-	"log",
-	"makefile",
-	"mk",
-	"gradle",
-	"lua",
-	"h",
-	"hpp",
-	"rs",
-	"sh",
-	"rb",
-	"ps1",
-	"bat",
-	"ps",
-	"protobuf",
-	"proto"
-])
+// @filen/shared's CODE_FILE_EXTENSIONS plus the extensions preview.logic's CODE_EXTENSIONS buckets
+// into its own markdown/text categories (md/markdown/log) — so a file's ICON reads as code even where
+// this app PREVIEWS the same file in a different category, matching filen-mobile's single "code"
+// preview category.
+const CODE_EXTENSIONS = new Set([...CODE_FILE_EXTENSIONS, "md", "markdown", "log"])
 
 const ARCHIVE_EXTENSIONS = new Set(["pkg", "rar", "tar", "zip", "7zip"])
 

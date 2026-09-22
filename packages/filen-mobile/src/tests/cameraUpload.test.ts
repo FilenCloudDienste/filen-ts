@@ -102,6 +102,9 @@ vi.mock("@filen/sdk-rs", () => ({
 
 vi.mock("@filen/shared", async () => {
 	const sharedMock = await import("@/tests/mocks/filenShared")
+	// isHeicFile (imageConversion.ts) delegates to isHeicFileName/HEIC_EXTENSIONS_UPLOAD — real
+	// implementations, since the HEIC→JPG conversion tests below exercise it for real.
+	const actual = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")
 
 	// The shared mock's Semaphore is a no-op. The staging-bound tests (#B5) need real
 	// acquire/release semantics, so this file substitutes a functional semaphore that
@@ -148,6 +151,8 @@ vi.mock("@filen/shared", async () => {
 
 	return {
 		...sharedMock,
+		isHeicFileName: actual.isHeicFileName,
+		HEIC_EXTENSIONS_UPLOAD: actual.HEIC_EXTENSIONS_UPLOAD,
 		Semaphore: FunctionalSemaphore,
 		fastLocaleCompare: (a: string, b: string) => a.localeCompare(b)
 	}

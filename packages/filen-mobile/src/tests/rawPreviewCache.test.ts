@@ -94,13 +94,18 @@ vi.mock("@filen/shared", async () => {
 		}
 	}
 
+	// previewType.ts (reached via thumbnailsHelpers) builds its code-extension set from this at
+	// module load — pull the real one through so that import does not throw.
+	const actual = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")
+
 	return {
 		...sharedMock,
 		Semaphore,
+		CODE_FILE_EXTENSIONS: actual.CODE_FILE_EXTENSIONS,
 		// gc() exercises the real eviction planner against the tiny RAW_PREVIEW_CACHE_MAX_SIZE_BYTES
 		// override below, so pull it through unmocked (a stub would silently skip the size-cap pass
 		// under test).
-		planSizeCapEviction: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).planSizeCapEviction
+		planSizeCapEviction: actual.planSizeCapEviction
 	}
 })
 

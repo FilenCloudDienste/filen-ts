@@ -6,10 +6,7 @@ import { normalizeFilePathForExpo } from "@/lib/paths"
 import { transplantMetadata } from "@/modules/filen-exif"
 import secureStore from "@/lib/secureStore"
 import logger from "@/lib/logger"
-
-// HEIC/HEIF file extensions (Apple's High Efficiency Image formats + their
-// multi-image burst variants). Lowercased; matched against the trailing extension.
-const HEIC_EXTENSIONS = new Set([".heic", ".heif", ".heics", ".heifs"])
+import { isHeicFileName, HEIC_EXTENSIONS_UPLOAD } from "@filen/shared"
 
 // JPEG quality for the HEIC→JPG conversion. MAXIMUM (1.0) on purpose: this option
 // exists for cross-device COMPATIBILITY, not size, so it must not throw away quality
@@ -29,17 +26,12 @@ export const DEFAULT_CONVERT_HEIC_TO_JPG_ENABLED = false
 // Deliberately a PLAIN string check, NOT FileSystem.Paths.extname — the latter
 // decodeURIComponent()s file:// URIs and throws URIError on a literal/malformed '%'
 // in a picked filename (drive DocumentPicker/ImagePicker hand us raw file:// URIs).
-// Strip any query/fragment, then take the last path segment's trailing dot-suffix.
+// Strip any query/fragment locally (the shared predicate does no URI truncation of its own),
+// then hand the rest to @filen/shared's isHeicFileName.
 export function isHeicFile(nameOrUri: string): boolean {
-	const path = nameOrUri.split(/[?#]/, 1)[0] ?? nameOrUri
-	const lastSegment = path.slice(path.lastIndexOf("/") + 1)
-	const dotIndex = lastSegment.lastIndexOf(".")
+	const bareName = nameOrUri.split(/[?#]/, 1)[0] ?? nameOrUri
 
-	if (dotIndex <= 0) {
-		return false
-	}
-
-	return HEIC_EXTENSIONS.has(lastSegment.slice(dotIndex).toLowerCase())
+	return isHeicFileName(bareName, HEIC_EXTENSIONS_UPLOAD)
 }
 
 // Non-reactive read of the global toggle for lib/sync contexts (no React hook).

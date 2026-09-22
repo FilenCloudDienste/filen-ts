@@ -1,6 +1,7 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { clampListboxIndex } from "@/features/drive/lib/listbox"
+import { CODE_FILE_EXTENSIONS } from "@filen/shared"
 
 // Every previewable file resolves to one of these; "other" is the download-only fallback (no viewer,
 // ever — canPreview excludes it unconditionally).
@@ -60,64 +61,9 @@ export const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mkv", "mov", "m4v"])
 export const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "wav", "ogg", "flac", "opus"])
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown"])
 const TEXT_EXTENSIONS = new Set(["txt", "log"])
-// Mirrors filen-mobile's previewType.ts code-extension set (itself ported from old-web), minus the two
-// extensions this app buckets into their own, richer-rendered category instead: .md (-> markdown) and
-// .log (-> text).
-const CODE_EXTENSIONS = new Set([
-	"js",
-	"cjs",
-	"mjs",
-	"jsx",
-	"tsx",
-	"ts",
-	"cpp",
-	"c",
-	"php",
-	"htm",
-	"html5",
-	"html",
-	"css",
-	"css3",
-	"coffee",
-	"litcoffee",
-	"sass",
-	"xml",
-	"json",
-	"sql",
-	"java",
-	"kt",
-	"swift",
-	"py3",
-	"py",
-	"cmake",
-	"cs",
-	"dart",
-	"dockerfile",
-	"go",
-	"less",
-	"yaml",
-	"vue",
-	"svelte",
-	"vbs",
-	"cobol",
-	"toml",
-	"conf",
-	"ini",
-	"makefile",
-	"mk",
-	"gradle",
-	"lua",
-	"h",
-	"hpp",
-	"rs",
-	"sh",
-	"rb",
-	"ps1",
-	"bat",
-	"ps",
-	"protobuf",
-	"proto"
-])
+// @filen/shared's CODE_FILE_EXTENSIONS minus the two extensions this app buckets into their own,
+// richer-rendered category instead: .md (-> markdown) and .log (-> text).
+const CODE_EXTENSIONS = CODE_FILE_EXTENSIONS
 
 // Lowercased extension with no leading dot; "" when the name has none (including a dotfile like
 // ".gitignore", where the only "." is the leading one — not a real extension). Exported for
