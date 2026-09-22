@@ -1,9 +1,5 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { mockGetPreviewType } = vi.hoisted(() => ({
-	mockGetPreviewType: vi.fn()
-}))
-
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
@@ -14,9 +10,15 @@ vi.mock("@filen/shared", async () => {
 	// Use the real isValidHexColor (pure fn, no native deps) and provide cn stub
 	const { isValidHexColor } = await import("@filen/shared")
 
+	// resolveFileIconKey pulls in @/lib/previewType for SDK_RAW_PREVIEW_EXTENSIONS, which builds its
+	// own code-extension set from CODE_FILE_EXTENSIONS at module load — pull the real one through so
+	// that import does not throw.
+	const actual = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")
+
 	return {
 		...(await import("@/tests/mocks/filenShared")),
 		isValidHexColor,
+		CODE_FILE_EXTENSIONS: actual.CODE_FILE_EXTENSIONS,
 		cn: (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ")
 	}
 })
@@ -62,12 +64,11 @@ vi.mock("@/components/ui/image", () => ({
 // es-toolkit/function memoize — use the real one (it's a pure JS function, safe in node)
 // No mock needed.
 
-// @/lib/previewType — mock getPreviewType so we control it per-test without needing real expo-file-system
-vi.mock("@/lib/previewType", () => ({
-	getPreviewType: mockGetPreviewType
-}))
+// @/lib/previewType (SDK_RAW_PREVIEW_EXTENSIONS) and @/constants (EXPO_*_SUPPORTED_EXTENSIONS) load for
+// real — both are pure data with no native-module dependency once react-native/expo-file-system are
+// mocked above.
 
-import { directoryColorToHex, shadeColor, unwrapDirColor, directorySvg } from "@/components/itemIcons/index"
+import { directoryColorToHex, shadeColor, unwrapDirColor, directorySvg, resolveFileIconKey } from "@/components/itemIcons/index"
 import { DirColor_Tags } from "@filen/sdk-rs"
 import { type DirColor } from "@filen/sdk-rs"
 
@@ -343,5 +344,116 @@ describe("directorySvg", () => {
 		const numeric32 = directorySvg({ color: null, width: 32, height: 32 })
 
 		expect(numeric64).not.toBe(numeric32)
+	})
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// resolveFileIconKey — B39 diff-check
+//
+// B39 replaced FileIcon's old two-switch classification (a first switch keyed on getPreviewType with
+// NO "code" case, falling through to a second, independently hand-maintained extname switch) with
+// @filen/shared's fileIconKey. Every row below is the extension-by-extension diff against that old
+// behavior, run under Platform.OS "ios" (the reactNative mock's default) so the EXPO_*_SUPPORTED_
+// EXTENSIONS branches below resolve deterministically.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("resolveFileIconKey", () => {
+	it("matches mobile's pre-B39 classification for every extension that did not change", () => {
+		const UNCHANGED_CASES: [name: string, expected: string][] = [
+			// image — via EXPO_IMAGE_SUPPORTED_EXTENSIONS
+			["photo.png", "image"],
+			["photo.jpg", "image"],
+			["photo.jpeg", "image"],
+			["photo.gif", "image"],
+			["photo.webp", "image"],
+			["photo.heic", "image"],
+			["photo.bmp", "image"],
+			["vector.svg", "image"],
+			// image — the old extname-switch fallback, kept as its own fallback set (not in
+			// EXPO_IMAGE_SUPPORTED_EXTENSIONS on either platform, or — .tiff — on Android only)
+			["photo.jfif", "image"],
+			["photo.jpe", "image"],
+			["photo.tiff", "image"],
+			// rawImage previewType — SDK_RAW_PREVIEW_EXTENSIONS, also collapses to the image glyph
+			["shot.nef", "image"],
+			["shot.cr3", "image"],
+			["shot.dng", "image"],
+			// video — via EXPO_VIDEO_SUPPORTED_EXTENSIONS (iOS)
+			["clip.mp4", "video"],
+			["clip.mov", "video"],
+			["clip.m4v", "video"],
+			// video — the old extname-switch fallback (not in iOS's EXPO_VIDEO_SUPPORTED_EXTENSIONS)
+			["clip.wmv", "video"],
+			["clip.avi", "video"],
+			["clip.mkv", "video"],
+			["clip.webm", "video"],
+			// audio — via EXPO_AUDIO_SUPPORTED_EXTENSIONS (iOS)
+			["song.mp3", "audio"],
+			["song.m4a", "audio"],
+			["song.aac", "audio"],
+			["song.wav", "audio"],
+			["song.aiff", "audio"],
+			["song.caf", "audio"],
+			// document / office
+			["report.pdf", "pdf"],
+			["notes.txt", "txt"],
+			["a.doc", "doc"],
+			["a.docx", "doc"],
+			["deck.ppt", "ppt"],
+			["deck.pptx", "ppt"],
+			["sheet.xls", "xls"],
+			["sheet.xlsx", "xls"],
+			// disk images / design / platform packages — same icon asset, "apk"/"ipa" renamed to the
+			// canonical "android"/"apple" FileIconKey members (FILE_ICONS still maps them to the same
+			// android.svg/apple.svg)
+			["disk.dmg", "iso"],
+			["disk.iso", "iso"],
+			["model.cad", "cad"],
+			["art.psd", "psd"],
+			["app.apk", "android"],
+			["app.ipa", "apple"],
+			// archive
+			["bundle.pkg", "archive"],
+			["bundle.rar", "archive"],
+			["bundle.tar", "archive"],
+			["bundle.zip", "archive"],
+			["bundle.7zip", "archive"],
+			// exe
+			["app.jar", "exe"],
+			["app.exe", "exe"],
+			["app.bin", "exe"],
+			// code — already correctly classified before B39 (mobile's old extname switch already
+			// listed these, including the orphan .ahk entry)
+			["main.ts", "code"],
+			["main.rs", "code"],
+			["main.py", "code"],
+			["script.ahk", "code"],
+			// unrecognised extension / no extension / undecryptable (empty name)
+			["mystery.xyz", "other"],
+			["noextension", "other"],
+			["", "other"]
+		]
+
+		for (const [name, expected] of UNCHANGED_CASES) {
+			expect(resolveFileIconKey(name)).toBe(expected)
+		}
+	})
+
+	// The nine extensions whose icon changes from "other" to "code" as B39's documented side effect:
+	// getPreviewType already classified these as "code" (previewType.ts consumes @filen/shared's
+	// CODE_FILE_EXTENSIONS), but FileIcon's old first switch had no "code" case to consume that result,
+	// and its second, independently hand-maintained extname switch never listed these eight — plus
+	// "markdown" as the ninth (previewType.ts's own composed set already included it, but neither of
+	// FileIcon's switches ever matched it either).
+	it("fixes the eight extensions that used to fall through to 'other' (previewType.ts already called these code)", () => {
+		const FIXED_CODE_EXTENSIONS = ["md", "log", "ini", "makefile", "mk", "gradle", "lua", "hpp"]
+
+		for (const ext of FIXED_CODE_EXTENSIONS) {
+			expect(resolveFileIconKey(`readme.${ext}`)).toBe("code")
+		}
+	})
+
+	it("fixes the ninth extension, .markdown, the same way", () => {
+		expect(resolveFileIconKey("readme.markdown")).toBe("code")
 	})
 })

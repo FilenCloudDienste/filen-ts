@@ -1,45 +1,29 @@
 import { describe, expect, it } from "vitest"
 import { directoryFolderTint, fileIconKey, shadeColor } from "@/features/drive/lib/icon.logic"
 
+// Full extension-routing coverage lives in @filen/shared's fileIcon.test.ts now — fileIconKey here is
+// a thin wrapper (icon.logic.ts) deriving `ext` via extensionOf and delegating to the shared
+// classifier, so this only proves the wrapper still resolves a NAME to the right key.
 describe("fileIconKey", () => {
-	it("routes image/video/audio by extension (case-insensitive), including svg and heic as images", () => {
+	it("routes image/video/audio by extension (case-insensitive)", () => {
 		expect(fileIconKey("photo.PNG")).toBe("image")
-		expect(fileIconKey("vector.svg")).toBe("image")
-		expect(fileIconKey("raw.heic")).toBe("image")
-		// Camera RAW shares the plain image glyph on purpose: FileIconKey is an exhaustive Record keyed
-		// to concrete SVG assets, so a distinct "raw" key would mean shipping a new one.
-		expect(fileIconKey("shot.NEF")).toBe("image")
-		expect(fileIconKey("shot.cr3")).toBe("image")
-		expect(fileIconKey("shot.dng")).toBe("image")
 		expect(fileIconKey("clip.mp4")).toBe("video")
 		expect(fileIconKey("song.mp3")).toBe("audio")
 	})
 
-	it("routes document and office types", () => {
+	it("routes document, archive and code types", () => {
 		expect(fileIconKey("report.pdf")).toBe("pdf")
-		expect(fileIconKey("notes.txt")).toBe("txt")
-		expect(fileIconKey("a.doc")).toBe("doc")
-		expect(fileIconKey("a.docx")).toBe("doc")
 		expect(fileIconKey("deck.pptx")).toBe("ppt")
-		expect(fileIconKey("sheet.xlsx")).toBe("xls")
-	})
-
-	it("routes archives, code, binaries and platform packages", () => {
 		expect(fileIconKey("bundle.zip")).toBe("archive")
 		expect(fileIconKey("main.rs")).toBe("code")
-		expect(fileIconKey("readme.md")).toBe("code")
-		expect(fileIconKey("service.log")).toBe("code")
-		expect(fileIconKey("app.exe")).toBe("exe")
-		expect(fileIconKey("app.apk")).toBe("android")
-		expect(fileIconKey("app.ipa")).toBe("apple")
-		expect(fileIconKey("disk.iso")).toBe("iso")
-		expect(fileIconKey("model.cad")).toBe("cad")
-		expect(fileIconKey("art.psd")).toBe("psd")
+		// .markdown was already code pre-B39 (web's own CODE_EXTENSIONS already added it); .ahk is
+		// B39's one documented web-side change (previously code nowhere on web, code on mobile).
+		expect(fileIconKey("readme.markdown")).toBe("code")
+		expect(fileIconKey("script.ahk")).toBe("code")
 	})
 
 	it("falls back to other for an unknown extension or a nameless (undecryptable) file", () => {
 		expect(fileIconKey("mystery.xyz")).toBe("other")
-		expect(fileIconKey("noextension")).toBe("other")
 		expect(fileIconKey("")).toBe("other")
 	})
 })

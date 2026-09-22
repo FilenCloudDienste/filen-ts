@@ -1,212 +1,64 @@
 import { ExpoImage } from "@/components/ui/image"
 import { Paths } from "expo-file-system"
-import { isValidHexColor, cn } from "@filen/shared"
+import { isValidHexColor, cn, fileIconKey, type FileIconKey } from "@filen/shared"
 import { memoize } from "es-toolkit/function"
 import { type DirColor, DirColor_Tags } from "@filen/sdk-rs"
-import { getPreviewType } from "@/lib/previewType"
+import { SDK_RAW_PREVIEW_EXTENSIONS } from "@/lib/previewType"
+import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS } from "@/constants"
 
 const FILE_ICONS = {
-	dmg: require("@/components/itemIcons/svg/iso.svg"),
-	iso: require("@/components/itemIcons/svg/iso.svg"),
-	cad: require("@/components/itemIcons/svg/cad.svg"),
-	psd: require("@/components/itemIcons/svg/psd.svg"),
-	apk: require("@/components/itemIcons/svg/android.svg"),
-	ipa: require("@/components/itemIcons/svg/apple.svg"),
-	txt: require("@/components/itemIcons/svg/txt.svg"),
-	pdf: require("@/components/itemIcons/svg/pdf.svg"),
 	image: require("@/components/itemIcons/svg/image.svg"),
-	archive: require("@/components/itemIcons/svg/archive.svg"),
 	video: require("@/components/itemIcons/svg/video.svg"),
 	audio: require("@/components/itemIcons/svg/audio.svg"),
-	code: require("@/components/itemIcons/svg/code.svg"),
-	exe: require("@/components/itemIcons/svg/exe.svg"),
+	pdf: require("@/components/itemIcons/svg/pdf.svg"),
+	txt: require("@/components/itemIcons/svg/txt.svg"),
 	doc: require("@/components/itemIcons/svg/doc.svg"),
 	ppt: require("@/components/itemIcons/svg/ppt.svg"),
 	xls: require("@/components/itemIcons/svg/xls.svg"),
+	code: require("@/components/itemIcons/svg/code.svg"),
+	archive: require("@/components/itemIcons/svg/archive.svg"),
+	exe: require("@/components/itemIcons/svg/exe.svg"),
+	iso: require("@/components/itemIcons/svg/iso.svg"),
+	cad: require("@/components/itemIcons/svg/cad.svg"),
+	psd: require("@/components/itemIcons/svg/psd.svg"),
+	android: require("@/components/itemIcons/svg/android.svg"),
+	apple: require("@/components/itemIcons/svg/apple.svg"),
 	other: require("@/components/itemIcons/svg/other.svg")
+} satisfies Record<FileIconKey, unknown>
+
+// Extensions the old two-switch FileIcon iconned as image/video that EXPO_*_SUPPORTED_EXTENSIONS
+// doesn't cover on every platform (.tiff has no Android decode entry; .jfif/.jpe/.wmv/.avi/.mkv/.webm
+// aren't in either platform's decode-capability set) — kept so moving to @filen/shared's classifier
+// doesn't change which icon a file gets.
+const IMAGE_ICON_FALLBACK_EXTENSIONS = new Set(["jfif", "jpe", "tiff"])
+const VIDEO_ICON_FALLBACK_EXTENSIONS = new Set(["wmv", "avi", "mkv", "webm"])
+
+function isImageIconExtension(ext: string): boolean {
+	return EXPO_IMAGE_SUPPORTED_EXTENSIONS.has(`.${ext}`) || SDK_RAW_PREVIEW_EXTENSIONS.has(`.${ext}`) || IMAGE_ICON_FALLBACK_EXTENSIONS.has(ext)
+}
+
+function isVideoIconExtension(ext: string): boolean {
+	return EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(`.${ext}`) || VIDEO_ICON_FALLBACK_EXTENSIONS.has(ext)
+}
+
+function isAudioIconExtension(ext: string): boolean {
+	return EXPO_AUDIO_SUPPORTED_EXTENSIONS.has(`.${ext}`)
+}
+
+// Resolves a file name to its type-icon key — mobile's existing trim+lowercase extname (unchanged by
+// this move to @filen/shared) feeds the shared classifier's already-normalised signature. Exported for
+// itemIcons.test.ts's diff-check against the old inline two-switch classification.
+export function resolveFileIconKey(name: string): FileIconKey {
+	const ext = Paths.extname(name.trim().toLowerCase()).slice(1)
+
+	return fileIconKey(ext, { isImage: isImageIconExtension, isVideo: isVideoIconExtension, isAudio: isAudioIconExtension })
 }
 
 export const FileIcon = ({ name, width, height, className }: { name: string; width?: number; height?: number; className?: string }) => {
-	const source = (() => {
-		const previewType = getPreviewType(name)
-
-		switch (previewType) {
-			case "audio": {
-				return FILE_ICONS.audio
-			}
-
-			case "video": {
-				return FILE_ICONS.video
-			}
-
-			case "image":
-			case "svg":
-			case "rawImage": {
-				return FILE_ICONS.image
-			}
-
-			case "pdf": {
-				return FILE_ICONS.pdf
-			}
-
-			case "text": {
-				return FILE_ICONS.txt
-			}
-
-			case "docx": {
-				return FILE_ICONS.doc
-			}
-		}
-
-		const extname = Paths.extname(name.trim().toLowerCase())
-
-		switch (extname) {
-			case ".dmg":
-			case ".iso": {
-				return FILE_ICONS.iso
-			}
-
-			case ".cad": {
-				return FILE_ICONS.cad
-			}
-
-			case ".psd": {
-				return FILE_ICONS.psd
-			}
-
-			case ".apk": {
-				return FILE_ICONS.apk
-			}
-
-			case ".ipa": {
-				return FILE_ICONS.ipa
-			}
-
-			case ".txt": {
-				return FILE_ICONS.txt
-			}
-
-			case ".pdf": {
-				return FILE_ICONS.pdf
-			}
-
-			case ".gif":
-			case ".png":
-			case ".jpg":
-			case ".jpeg":
-			case ".heic":
-			case ".webp":
-			case ".tiff":
-			case ".bmp":
-			case ".jfif":
-			case ".jpe":
-			case ".svg": {
-				return FILE_ICONS.image
-			}
-
-			case ".pkg":
-			case ".rar":
-			case ".tar":
-			case ".zip":
-			case ".7zip": {
-				return FILE_ICONS.archive
-			}
-
-			case ".wmv":
-			case ".mov":
-			case ".avi":
-			case ".mkv":
-			case ".webm":
-			case ".mp4": {
-				return FILE_ICONS.video
-			}
-
-			case ".mp3": {
-				return FILE_ICONS.audio
-			}
-
-			case ".js":
-			case ".cjs":
-			case ".mjs":
-			case ".jsx":
-			case ".tsx":
-			case ".ts":
-			case ".cpp":
-			case ".c":
-			case ".php":
-			case ".htm":
-			case ".html5":
-			case ".html":
-			case ".css":
-			case ".css3":
-			case ".sass":
-			case ".xml":
-			case ".json":
-			case ".sql":
-			case ".java":
-			case ".kt":
-			case ".swift":
-			case ".py3":
-			case ".py":
-			case ".cmake":
-			case ".cs":
-			case ".dart":
-			case ".dockerfile":
-			case ".go":
-			case ".less":
-			case ".yaml":
-			case ".vue":
-			case ".svelte":
-			case ".vbs":
-			case ".toml":
-			case ".cobol":
-			case ".h":
-			case ".conf":
-			case ".sh":
-			case ".rs":
-			case ".rb":
-			case ".ps1":
-			case ".bat":
-			case ".ps":
-			case ".protobuf":
-			case ".ahk":
-			case ".litcoffee":
-			case ".coffee":
-			case ".proto": {
-				return FILE_ICONS.code
-			}
-
-			case ".jar":
-			case ".exe":
-			case ".bin": {
-				return FILE_ICONS.exe
-			}
-
-			case ".doc":
-			case ".docx": {
-				return FILE_ICONS.doc
-			}
-
-			case ".ppt":
-			case ".pptx": {
-				return FILE_ICONS.ppt
-			}
-
-			case ".xls":
-			case ".xlsx": {
-				return FILE_ICONS.xls
-			}
-
-			default: {
-				return FILE_ICONS.other
-			}
-		}
-	})()
-
 	return (
 		<ExpoImage
 			className={cn("shrink-0 bg-transparent", className, "rounded-none")}
-			source={source}
+			source={FILE_ICONS[resolveFileIconKey(name)]}
 			style={{
 				width: width ?? 32,
 				height: height ?? 32

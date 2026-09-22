@@ -8,112 +8,33 @@ import {
 	AUDIO_EXTENSIONS
 } from "@/features/drive/lib/preview.logic"
 import { dirColorHex } from "@/features/drive/lib/dirColor"
-import { CODE_FILE_EXTENSIONS } from "@filen/shared"
+import { fileIconKey as sharedFileIconKey, type FileIconKey } from "@filen/shared"
 
 // The concrete file-type glyphs in src/assets/file-icons/ (byte-identical to filen-mobile's set) a
-// file routes to. "other" is the generic fallback: an unknown extension, or an undecryptable file
-// whose name — and thus extension — is unavailable.
-export type FileIconKey =
-	| "image"
-	| "video"
-	| "audio"
-	| "pdf"
-	| "txt"
-	| "doc"
-	| "ppt"
-	| "xls"
-	| "code"
-	| "archive"
-	| "exe"
-	| "iso"
-	| "cad"
-	| "psd"
-	| "android"
-	| "apple"
-	| "other"
+// file routes to — re-exported from @filen/shared so itemIcon.tsx and transferRow.logic.ts can keep
+// importing it from here.
+export type { FileIconKey }
 
-// @filen/shared's CODE_FILE_EXTENSIONS plus the extensions preview.logic's CODE_EXTENSIONS buckets
-// into its own markdown/text categories (md/markdown/log) — so a file's ICON reads as code even where
-// this app PREVIEWS the same file in a different category, matching filen-mobile's single "code"
-// preview category.
-const CODE_EXTENSIONS = new Set([...CODE_FILE_EXTENSIONS, "md", "markdown", "log"])
+// Camera RAW shares the plain "image" glyph deliberately: FileIconKey is an exhaustive Record in
+// itemIcon.tsx keyed to the concrete SVGs in src/assets/file-icons/, so a distinct "raw" key would
+// mean a new asset. A RAW file reads as an image to a user either way.
+function isImageExtension(ext: string): boolean {
+	return IMAGE_EXTENSIONS.has(ext) || HEIC_EXTENSIONS.has(ext) || RAW_IMAGE_EXTENSIONS.has(ext)
+}
 
-const ARCHIVE_EXTENSIONS = new Set(["pkg", "rar", "tar", "zip", "7zip"])
+function isVideoExtension(ext: string): boolean {
+	return VIDEO_EXTENSIONS.has(ext)
+}
 
-// Resolves a file name to its type-icon key. Preview-type first (image/video/audio/pdf/txt/docx), then
-// a per-extension switch — the same order filen-mobile's FileIcon uses, so the two platforms route
-// identically. An empty name (an undecryptable file, no extension to read) falls through to "other".
+function isAudioExtension(ext: string): boolean {
+	return AUDIO_EXTENSIONS.has(ext)
+}
+
+// Resolves a file name to its type-icon key — a thin wrapper around @filen/shared's fileIconKey so
+// this app's two call sites keep passing a name rather than a pre-extracted extension. An empty name
+// (an undecryptable file, no extension to read) falls through to "other".
 export function fileIconKey(name: string): FileIconKey {
-	const ext = extensionOf(name)
-
-	// Camera RAW shares the plain "image" glyph deliberately: FileIconKey is an exhaustive Record in
-	// itemIcon.tsx keyed to the concrete SVGs in src/assets/file-icons/, so a distinct "raw" key would
-	// mean a new asset. A RAW file reads as an image to a user either way.
-	if (IMAGE_EXTENSIONS.has(ext) || HEIC_EXTENSIONS.has(ext) || RAW_IMAGE_EXTENSIONS.has(ext)) {
-		return "image"
-	}
-
-	if (VIDEO_EXTENSIONS.has(ext)) {
-		return "video"
-	}
-
-	if (AUDIO_EXTENSIONS.has(ext)) {
-		return "audio"
-	}
-
-	if (ext === "pdf") {
-		return "pdf"
-	}
-
-	if (ext === "txt") {
-		return "txt"
-	}
-
-	if (ext === "doc" || ext === "docx") {
-		return "doc"
-	}
-
-	if (ext === "dmg" || ext === "iso") {
-		return "iso"
-	}
-
-	if (ext === "cad") {
-		return "cad"
-	}
-
-	if (ext === "psd") {
-		return "psd"
-	}
-
-	if (ext === "apk") {
-		return "android"
-	}
-
-	if (ext === "ipa") {
-		return "apple"
-	}
-
-	if (ARCHIVE_EXTENSIONS.has(ext)) {
-		return "archive"
-	}
-
-	if (CODE_EXTENSIONS.has(ext)) {
-		return "code"
-	}
-
-	if (ext === "jar" || ext === "exe" || ext === "bin") {
-		return "exe"
-	}
-
-	if (ext === "ppt" || ext === "pptx") {
-		return "ppt"
-	}
-
-	if (ext === "xls" || ext === "xlsx") {
-		return "xls"
-	}
-
-	return "other"
+	return sharedFileIconKey(extensionOf(name), { isImage: isImageExtension, isVideo: isVideoExtension, isAudio: isAudioExtension })
 }
 
 // Darkens a hex color channel-wise (divide each channel by `divisor`, clamp to 255) — ported from
