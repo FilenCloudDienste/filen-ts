@@ -67,7 +67,7 @@ import { TagContextMenuContent } from "@/features/notes/components/noteMenu"
 import { type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ListSkeleton } from "@/components/listSkeleton"
+import { LoadingState } from "@/components/loadingState"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import {
 	DropdownMenu,
@@ -570,14 +570,7 @@ export function NotesSidebar() {
 
 	function renderBody(): ReactNode {
 		if (activeQuery.isPending) {
-			// Bar height mirrors NOTE_ROW_ESTIMATE so the placeholder list has the rhythm of the real one.
-			return (
-				<ListSkeleton
-					count={6}
-					itemClassName="h-[76px] w-full rounded-xl"
-					className="flex flex-col gap-1 px-1 pt-1"
-				/>
-			)
+			return <LoadingState size="md" />
 		}
 
 		if (activeQuery.isError) {

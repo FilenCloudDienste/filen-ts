@@ -18,6 +18,7 @@ import { useAction } from "@/lib/keymap/useAction"
 import { useAccountQuery } from "@/queries/account"
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
@@ -71,14 +72,16 @@ export function NoteEditorPane({ note, loading = false }: NoteEditorPaneProps) {
 	)
 
 	if (note === undefined) {
+		if (loading) {
+			return <LoadingState size="lg" />
+		}
+
 		return (
 			<div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
 				<StickyNoteIcon className="size-8 text-muted-foreground/60" />
 				<div className="flex flex-col gap-1">
-					<p className="font-heading text-lg font-medium tracking-tight">
-						{loading ? t("notesLoadingNote") : t("notesSelectPrompt")}
-					</p>
-					{!loading ? <p className="text-sm text-muted-foreground">{t("notesSelectPromptDescription")}</p> : null}
+					<p className="font-heading text-lg font-medium tracking-tight">{t("notesSelectPrompt")}</p>
+					<p className="text-sm text-muted-foreground">{t("notesSelectPromptDescription")}</p>
 				</div>
 			</div>
 		)

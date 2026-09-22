@@ -8,7 +8,7 @@ import { MarkdownRenderer } from "@/features/preview/components/markdownRenderer
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 
@@ -88,9 +88,10 @@ function MarkdownViewer({ item, alt, editable = false, onDirtyChange, contentRef
 
 	if (result.status === "pending") {
 		return (
-			<div className="flex size-full items-center justify-center">
-				<Spinner className="size-6" />
-			</div>
+			<LoadingState
+				size="lg"
+				className="text-inherit"
+			/>
 		)
 	}
 
@@ -118,9 +119,10 @@ function MarkdownViewer({ item, alt, editable = false, onDirtyChange, contentRef
 				{mode === "source" ? (
 					<Suspense
 						fallback={
-							<div className="flex size-full items-center justify-center">
-								<Spinner className="size-6" />
-							</div>
+							<LoadingState
+								size="lg"
+								className="text-inherit"
+							/>
 						}
 					>
 						<TextViewer

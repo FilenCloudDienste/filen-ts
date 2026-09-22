@@ -47,10 +47,9 @@ import { ContactsBulkBar } from "@/features/contacts/components/contactsBulkBar"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { ListSkeleton } from "@/components/listSkeleton"
+import { LoadingState } from "@/components/loadingState"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
-const SKELETON_ROW_COUNT = 6
 // The floating bulk bar mounts at this many selected — a single selection is already fully served by
 // that row's own action buttons.
 const BULK_BAR_MIN_SELECTION = 2
@@ -79,7 +78,7 @@ type ActiveContactDialog =
 	| { kind: "unblock"; bulk: boolean; items: BlockedContact[] }
 
 // Owns both contacts queries, the search box's local state, bulk-selection mode, and the whole
-// status-branch (loading skeleton / load-error / empty / sectioned list) — mirrors DirectoryListing's
+// status-branch (loading / load-error / empty / sectioned list) — mirrors DirectoryListing's
 // own self-contained shape (route files stay thin; the content component owns its data + its dialog
 // host). `section` is owned by the route (its own `section` search param, see
 // routes/_app/contacts.tsx) — the sidebar and this page are siblings under appShell, not
@@ -626,14 +625,10 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 						</div>
 					) : null}
 					{isPending ? (
-						<ListSkeleton
-							count={SKELETON_ROW_COUNT}
-							itemClassName="h-14 w-full rounded-xl"
-							className="flex flex-1 flex-col gap-1 overflow-y-auto p-4"
-						/>
+						<LoadingState size="md" />
 					) : queryError !== null ? (
 						<div className="flex flex-1 overflow-y-auto">
-							{/* Assertive: this replaces the skeleton the reader was waiting on, and it carries the
+							{/* Assertive: this replaces the spinner the reader was waiting on, and it carries the
 							retry they need. Same treatment as drive's EmptyState error variant. */}
 							<Empty role="alert">
 								<EmptyHeader>

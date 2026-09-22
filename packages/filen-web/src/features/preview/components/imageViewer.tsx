@@ -11,7 +11,7 @@ import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUr
 import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { type ErrorDTO } from "@/lib/sdk/errors"
-import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 import { type Size, type ZoomTransform, wheelZoom, dragPan, doubleClickZoom } from "@/features/preview/components/imageViewer.logic"
 
@@ -193,9 +193,10 @@ function StreamedImage({
 
 	if (result.status !== "success") {
 		return (
-			<div className="flex size-full items-center justify-center">
-				<Spinner className="size-6" />
-			</div>
+			<LoadingState
+				size="lg"
+				className="text-inherit"
+			/>
 		)
 	}
 
@@ -259,9 +260,10 @@ function BufferedImage({ item, alt }: { item: DriveItem; alt: string }) {
 
 	if (result.status === "pending") {
 		return (
-			<div className="flex size-full items-center justify-center">
-				<Spinner className="size-6" />
-			</div>
+			<LoadingState
+				size="lg"
+				className="text-inherit"
+			/>
 		)
 	}
 
@@ -335,9 +337,10 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 
 	if (state.status === "pending") {
 		return (
-			<div className="flex size-full items-center justify-center">
-				<Spinner className="size-6" />
-			</div>
+			<LoadingState
+				size="lg"
+				className="text-inherit"
+			/>
 		)
 	}
 
@@ -369,9 +372,10 @@ function TransformedImage({ item, alt }: { item: DriveItem; alt: string }) {
 
 	if (result.status === "pending") {
 		return (
-			<div className="flex size-full items-center justify-center">
-				<Spinner className="size-6" />
-			</div>
+			<LoadingState
+				size="lg"
+				className="text-inherit"
+			/>
 		)
 	}
 

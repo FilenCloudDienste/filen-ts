@@ -119,8 +119,6 @@ export const notes = {
 	notesSelectPrompt: "Select a note",
 	/** Editor card — body under notesSelectPrompt */
 	notesSelectPromptDescription: "Choose a note from the list, or create a new one.",
-	/** Editor card — centered muted state while the selected note's content is still loading */
-	notesLoadingNote: "Loading note…",
 	/** Editor card — title shown when the selected note's content fails to load; the body is the failing query's own errorLabel */
 	notesContentLoadError: "Couldn't load note content",
 

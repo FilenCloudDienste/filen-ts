@@ -6,7 +6,7 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 // @/features/drive/lib/item); their true recursive size lives only in the directorySizes map a caller
 // threads in from useDriveDirectorySizes. `directorySizes` is keyed by uuid and omitted entirely for
 // a directory whose size hasn't resolved yet — that renders as blank, mirroring filen-mobile's own
-// row (its Size component returns null while the query is pending, no spinner/skeleton). A shared file
+// row (its Size component returns null while the query is pending, no loading indicator). A shared file
 // reads as a file, a shared directory as a directory (asDirectoryOrFile).
 export function formatItemSize(item: DriveItem, directorySizes?: ReadonlyMap<string, number>): string {
 	const base = asDirectoryOrFile(item)

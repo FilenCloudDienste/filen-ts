@@ -2,7 +2,7 @@ import { type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { FileWarningIcon, RotateCwIcon } from "lucide-react"
-import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
 
 // The shell's `main` is a flex column; every terminal state (loading / invalid / error) centers itself
@@ -14,16 +14,7 @@ export function CenteredSurface({ children }: { children: ReactNode }) {
 
 // Resolving spinner — the brief window before a link's metadata lands.
 export function PublicLinkLoading() {
-	const { t } = useTranslation("publicLinks")
-
-	return (
-		<CenteredSurface>
-			<div className="flex items-center gap-2 text-sm text-muted-foreground">
-				<Spinner />
-				<span>{t("opening")}</span>
-			</div>
-		</CenteredSurface>
-	)
+	return <LoadingState size="lg" />
 }
 
 // "This link is unavailable" — the single terminal surface for a bad uuid, a bad/short key, a

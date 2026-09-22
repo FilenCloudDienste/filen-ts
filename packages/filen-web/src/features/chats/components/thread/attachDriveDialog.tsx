@@ -12,7 +12,7 @@ import { cn, driveItemName } from "@filen/shared"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { EmptyState } from "@/features/drive/components/emptyState"
-import { ListingSkeleton } from "@/features/drive/components/listingSkeleton"
+import { LoadingState } from "@/components/loadingState"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -135,7 +135,7 @@ export function AttachDriveDialog({ onClose, onAttached }: AttachDriveDialogProp
 				<p className="text-xs text-muted-foreground">{t("chatAttachDriveDialogHint")}</p>
 				<div className="h-72 overflow-y-auto rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
 					{listingQuery.status === "pending" ? (
-						<ListingSkeleton viewMode="list" />
+						<LoadingState size="md" />
 					) : listingQuery.status === "error" ? (
 						<EmptyState
 							variant="error"

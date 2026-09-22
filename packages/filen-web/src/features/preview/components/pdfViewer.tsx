@@ -31,7 +31,7 @@ import {
 	type PdfLinkAnnotation
 } from "@/features/preview/components/pdfViewer.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
@@ -462,9 +462,10 @@ function PdfPage({
 			style={viewport ? { width: viewport.width, height: viewport.height } : { width: 300, height: 400 }}
 		>
 			{!rendered ? (
-				<div className="absolute inset-0 flex items-center justify-center">
-					<Spinner className="size-5" />
-				</div>
+				<LoadingState
+					size="sm"
+					className="absolute inset-0 text-inherit"
+				/>
 			) : null}
 			<canvas
 				ref={canvasRef}
@@ -671,9 +672,10 @@ function PdfDocument({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 
 	if (state.status === "loading") {
 		return (
-			<div className="flex size-full items-center justify-center">
-				<Spinner className="size-6" />
-			</div>
+			<LoadingState
+				size="lg"
+				className="text-inherit"
+			/>
 		)
 	}
 
@@ -710,9 +712,10 @@ function PdfViewer({ item, alt }: PdfViewerProps) {
 
 	if (result.status === "pending") {
 		return (
-			<div className="flex size-full items-center justify-center">
-				<Spinner className="size-6" />
-			</div>
+			<LoadingState
+				size="lg"
+				className="text-inherit"
+			/>
 		)
 	}
 

@@ -11,9 +11,8 @@ import { clearPhotosRoot, setPhotosRoot, shouldResetRootOnError } from "@/featur
 import { DirectoryChooserDialog } from "@/features/photos/components/directoryChooserDialog"
 import { PhotoGrid } from "@/features/photos/components/photoGrid"
 import { EmptyState } from "@/features/drive/components/emptyState"
-import { ListingSkeleton } from "@/features/drive/components/listingSkeleton"
+import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 // Root selection + persistence + unset/ready/gone states, reachable from the icon rail's own
@@ -72,11 +71,7 @@ export function PhotosScreen() {
 	}
 
 	if (rootQuery.status === "pending") {
-		return (
-			<div className="flex flex-1 items-center justify-center">
-				<Spinner className="size-5 text-muted-foreground" />
-			</div>
-		)
+		return <LoadingState size="lg" />
 	}
 
 	if (rootUuid === null) {
@@ -135,9 +130,7 @@ export function PhotosScreen() {
 			</header>
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 				{listingQuery.status === "pending" ? (
-					<div className="flex-1 overflow-y-auto">
-						<ListingSkeleton viewMode="grid" />
-					</div>
+					<LoadingState size="lg" />
 				) : listingQuery.status === "error" ? (
 					<EmptyState
 						variant="error"

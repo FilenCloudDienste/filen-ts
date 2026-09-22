@@ -22,7 +22,7 @@ import {
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 
 // The playlists CRUD surface for `.filen/Playlists` (list, create, rename, delete, play, shuffle-play) —
@@ -125,12 +125,10 @@ export function PlaylistsPanel() {
 					{t("newPlaylist")}
 				</Button>
 			</div>
-			<div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-				<div className="mx-auto flex w-full max-w-2xl flex-col">
+			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-4">
+				<div className="mx-auto flex w-full max-w-2xl flex-1 flex-col">
 					{playlistsQuery.status === "pending" ? (
-						<div className="flex justify-center py-6">
-							<Spinner className="size-5" />
-						</div>
+						<LoadingState size="lg" />
 					) : playlistsQuery.status === "error" ? (
 						<p className="px-2 py-4 text-center text-sm text-destructive">{errorLabel(asErrorDTO(playlistsQuery.error))}</p>
 					) : entries.length === 0 ? (

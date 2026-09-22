@@ -6,8 +6,6 @@
 export const common = {
 	/** Product name — rendered beside the logo on the boot screen and as the icon rail's accessible home label; brand, never translated */
 	appName: "Filen",
-	/** Boot screen — status line under the logo while the app downloads and starts the SDK */
-	bootDownloading: "Downloading Filen…",
 	/** Boot failure screen — title shown when the app could not start */
 	bootErrorTitle: "Filen could not start",
 	/** Shared reload-page action label: boot failure screen button, /no-coi and /no-opfs page buttons, and the update toast's action */
@@ -20,7 +18,7 @@ export const common = {
 	reset: "Reset",
 	/** Generic retry button for a failed data load (e.g. the security settings page's account query) — shared by any future error-state view */
 	tryAgain: "Try again",
-	/** Shared in-progress announcement: the spinner primitive's default screen-reader label and the list-skeleton wrapper's live-region name */
+	/** Shared in-progress announcement: the spinner primitive's default screen-reader label */
 	loading: "Loading",
 	/** Toast primitive — screen-reader label on the dismiss button every toast carries */
 	toastDismiss: "Dismiss notification",

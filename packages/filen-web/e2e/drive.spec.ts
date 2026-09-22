@@ -18,7 +18,7 @@ import { FIREFOX_HANG_REASON } from "./helpers/firefox"
 //
 // Every test here needs the listing's real, authenticated listDir call to settle, which hangs on
 // Playwright-firefox — see helpers/firefox.ts (FIREFOX_HANG_REASON) for the proven root cause. Live-
-// verified: on firefox the listing sits on its loading skeleton forever, the toolbar stays permanently
+// verified: on firefox the listing sits on its loading spinner forever, the toolbar stays permanently
 // disabled, and neither terminal render state is reached.
 
 // One directory per scenario, built once by the fixtures-setup project — the fixture root's exact row

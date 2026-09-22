@@ -33,6 +33,7 @@ import { Field, FieldContent, FieldGroup, FieldLabel } from "@/components/ui/fie
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -226,9 +227,10 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 						<DialogTitle>{t("driveLinkDialogTitle")}</DialogTitle>
 					</DialogHeader>
 					{premiumGate === "loading" ? (
-						<div className="flex justify-center py-8">
-							<Spinner />
-						</div>
+						<LoadingState
+							size="md"
+							className="min-h-20"
+						/>
 					) : premiumGate === "gated" ? (
 						<Empty className="p-6">
 							<EmptyHeader>
@@ -256,9 +258,10 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 						<>
 							<LinkItemHero item={item} />
 							{linkStatusQuery.status === "pending" ? (
-								<div className="flex justify-center py-8">
-									<Spinner />
-								</div>
+								<LoadingState
+									size="md"
+									className="min-h-20"
+								/>
 							) : linkStatusQuery.status === "error" ? (
 								<PreviewErrorState
 									message={errorLabel(asErrorDTO(linkStatusQuery.error))}

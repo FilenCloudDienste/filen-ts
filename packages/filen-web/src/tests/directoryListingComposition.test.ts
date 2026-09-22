@@ -85,7 +85,7 @@ vi.mock("@/features/drive/components/sortMenu", () => ({ SortMenu: () => null })
 vi.mock("@/features/drive/components/viewModeToggle", () => ({ ViewModeToggle: () => null }))
 vi.mock("@/features/drive/components/searchInput", () => ({ SearchInput: () => null }))
 vi.mock("@/features/drive/components/emptyTrashButton", () => ({ EmptyTrashButton: () => null }))
-vi.mock("@/features/drive/components/listingSkeleton", () => ({ ListingSkeleton: () => null }))
+vi.mock("@/components/loadingState", () => ({ LoadingState: () => null }))
 vi.mock("@/features/drive/components/emptyState", () => ({ EmptyState: () => null }))
 vi.mock("@/features/drive/components/newDirectory", () => ({
 	NewDirectory: (props: { disabled?: boolean }) =>

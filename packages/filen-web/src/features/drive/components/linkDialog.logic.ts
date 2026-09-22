@@ -126,7 +126,7 @@ export function buildPublicLinkUrl(item: DriveItem, status: DriveItemLinkStatus)
 // Public links require a subscription (mobile parity — filen-mobile/src/features/publicLink/screen.tsx's
 // own `userIsSubbed` gate) — a tri-state rather than a plain boolean so "the account query hasn't
 // resolved yet" is a distinct, explicit state from "resolved and not premium": the two render
-// completely differently (a loading skeleton vs. the subscription empty-state), and collapsing them
+// completely differently (a loading spinner vs. the subscription empty-state), and collapsing them
 // would flash the gate at every account-query cold start. `isPremium` is `undefined` for BOTH the
 // pending and the error case (an error never overwrites previously-cached data, and there is none on a
 // cold start) — the caller passes `accountQuery.data?.isPremium` directly, never a bespoke status check.

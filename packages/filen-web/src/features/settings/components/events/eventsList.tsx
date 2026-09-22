@@ -12,8 +12,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { EventRow } from "@/features/settings/components/events/eventRow"
 import { EventDetailDialog } from "@/features/settings/components/events/eventDetailDialog"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
 
 const ROW_HEIGHT = 52
@@ -90,13 +89,7 @@ export function EventsList() {
 	}
 
 	if (eventsQuery.status === "pending") {
-		return (
-			<div className="mx-auto flex w-full max-w-2xl flex-col gap-2 p-6">
-				<Skeleton className="h-13 w-full rounded-xl" />
-				<Skeleton className="h-13 w-full rounded-xl" />
-				<Skeleton className="h-13 w-full rounded-xl" />
-			</div>
-		)
+		return <LoadingState size="md" />
 	}
 
 	if (eventsQuery.status === "error") {
@@ -178,9 +171,10 @@ export function EventsList() {
 					})}
 				</div>
 				{loadingMore && (
-					<div className="flex items-center justify-center py-4">
-						<Spinner className="text-muted-foreground" />
-					</div>
+					<LoadingState
+						size="sm"
+						className="h-12 flex-none"
+					/>
 				)}
 			</div>
 			<EventDetailDialog

@@ -7,7 +7,7 @@ import type { SettingsKey } from "@/lib/i18n"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Field, FieldContent, FieldLabel, FieldDescription } from "@/components/ui/field"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingState } from "@/components/loadingState"
 
 const PRESET_LABEL_KEYS: Record<TransferPerformancePreset, SettingsKey> = {
 	batterySaver: "settingsAdvancedPresetBatterySaver",
@@ -40,7 +40,10 @@ function TransferConfigCard() {
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
 				{pending ? (
-					<Skeleton className="h-8 w-full rounded-2xl" />
+					<LoadingState
+						size="sm"
+						className="min-h-8"
+					/>
 				) : (
 					<>
 						<Field orientation="horizontal">

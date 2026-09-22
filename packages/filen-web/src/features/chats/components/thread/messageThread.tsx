@@ -33,6 +33,7 @@ import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 
 // Estimates for the virtualizer's first pass; real heights come from measureElement (message rows vary in
 // height with content). A day separator is a single fixed pill.
@@ -350,11 +351,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 
 	function renderList(): ReactNode {
 		if (messagesQuery.isPending) {
-			return (
-				<div className="flex flex-1 items-center justify-center">
-					<Spinner className="size-5 text-muted-foreground" />
-				</div>
-			)
+			return <LoadingState size="lg" />
 		}
 
 		if (messagesQuery.isError) {

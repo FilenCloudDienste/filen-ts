@@ -29,7 +29,7 @@ async function gotoContacts(page: Page): Promise<void> {
 }
 
 // The content region below the search/Add-contact toolbar has exactly one of three terminal states —
-// loading skeleton, load error, or settled (the "No contacts" empty state, or >=1 rendered section).
+// loading spinner, load error, or settled (the "No contacts" empty state, or >=1 rendered section).
 // All three are raced, the same way helpers/listing.ts races the drive listing's: losing to the error
 // state throws immediately, carrying the SDK's own decrypted message (contactsList.tsx renders
 // errorLabel(...) under the "Couldn't load contacts" title), instead of spending the whole budget and

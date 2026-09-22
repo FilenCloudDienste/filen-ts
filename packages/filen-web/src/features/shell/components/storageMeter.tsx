@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next"
 import { formatBytes, storageUsageLevel, type StorageUsageLevel } from "@filen/shared"
 import { useAccountQuery } from "@/queries/account"
 import { Progress } from "@/components/ui/progress"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingState } from "@/components/loadingState"
 
 // ui/progress.tsx (registry-verbatim, never edited) renders one fixed indicator with no per-instance
 // color prop — this arbitrary-descendant selector on the shared `data-slot` reaches through it from
@@ -17,13 +17,13 @@ const LEVEL_INDICATOR_CLASS: Record<StorageUsageLevel, string> = {
 	critical: "[&_[data-slot=progress-indicator]]:bg-destructive!"
 }
 
-// Fixed block height so the pending skeleton, the error omission, and the resolved meter all occupy
+// Fixed block height so the pending spinner, the error omission, and the resolved meter all occupy
 // the same vertical space — the sidebar's bottom block never jumps as the account query settles.
 const BLOCK_HEIGHT = "h-9"
 
 // Sidebar bottom-block storage usage: a slim progress bar plus one caption line, read straight from
 // the account query's UserInfo (storageUsed / maxStorage bigints — see queries/account.ts). Formatted
-// with the shared byte formatter. Pending renders a same-height skeleton; an errored or zero-quota
+// with the shared byte formatter. Pending renders a same-height spinner; an errored or zero-quota
 // account renders an empty same-height slot rather than a broken bar — no layout shift either way.
 export function StorageMeter() {
 	const { t } = useTranslation("common")
@@ -33,10 +33,10 @@ export function StorageMeter() {
 		<div>
 			<p className="mb-2 text-xs font-medium text-muted-foreground/80">{t("usage")}</p>
 			{accountQuery.status === "pending" ? (
-				<div className={BLOCK_HEIGHT}>
-					<Skeleton className="h-2 w-full rounded-2xl" />
-					<Skeleton className="mt-2 h-3 w-32 rounded-md" />
-				</div>
+				<LoadingState
+					size="sm"
+					className={BLOCK_HEIGHT}
+				/>
 			) : accountQuery.status === "error" ? (
 				<div
 					className={BLOCK_HEIGHT}

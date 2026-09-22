@@ -18,7 +18,7 @@ import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingState } from "@/components/loadingState"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 export interface ContactPickerDialogProps {
@@ -29,8 +29,6 @@ export interface ContactPickerDialogProps {
 	// below, unchanged for every existing caller.
 	onShared?: (succeededUuids: string[]) => void
 }
-
-const SKELETON_ROW_COUNT = 5
 
 // Contact picker — mounted-when-active by the listing's dialog host (directoryListing.tsx's "share"
 // case) for both the per-item menu and the bulk bar. Multi-selects from the established contact list
@@ -100,16 +98,7 @@ export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerD
 
 	function renderBody(): ReactNode {
 		if (contactsQuery.status === "pending") {
-			return (
-				<div className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
-					{Array.from({ length: SKELETON_ROW_COUNT }, (_, index) => (
-						<Skeleton
-							key={index}
-							className="h-14 w-full rounded-xl"
-						/>
-					))}
-				</div>
-			)
+			return <LoadingState size="md" />
 		}
 
 		if (contactsQuery.status === "error") {

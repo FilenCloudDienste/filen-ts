@@ -302,7 +302,7 @@ test.describe("chats", () => {
 		await expect(dialog.getByRole("heading", { name: "New chat", exact: true })).toBeVisible()
 
 		// Terminal render state only, either is acceptable (see the test's own doc comment above) — proves
-		// the picker settled instead of hanging on a stuck loading skeleton.
+		// the picker settled instead of hanging on a stuck loading spinner.
 		const noContacts = dialog.getByText("No contacts", { exact: true })
 		const contactsListbox = dialog.getByRole("listbox", { name: "Contacts" })
 		await expect(noContacts.or(contactsListbox)).toBeVisible()

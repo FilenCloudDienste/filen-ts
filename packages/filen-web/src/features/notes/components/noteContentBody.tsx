@@ -7,7 +7,7 @@ import { RichTextEditor } from "@/features/notes/components/editor/richTextEdito
 import { ChecklistEditor } from "@/features/notes/components/editor/checklistEditor"
 import { NoteReaderByType } from "@/features/notes/components/reader/noteReaderByType"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { CannotDecryptState } from "@/components/cannotDecryptState"
 
 // Per-type dispatch, once the editor controller has a seed to render. `noteType` is the wasm STRING
@@ -92,12 +92,7 @@ export function NoteContentBody({
 	const controller = useNoteEditor(note, currentUserId)
 
 	if (controller.status === "pending") {
-		return (
-			<div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground">
-				<Spinner className="size-5" />
-				<p className="text-sm">{t("notesLoadingNote")}</p>
-			</div>
-		)
+		return <LoadingState size="lg" />
 	}
 
 	if (controller.status === "undecryptable") {

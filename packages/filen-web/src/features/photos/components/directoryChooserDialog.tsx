@@ -14,7 +14,7 @@ import {
 import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
 import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import { EmptyState } from "@/features/drive/components/emptyState"
-import { ListingSkeleton } from "@/features/drive/components/listingSkeleton"
+import { LoadingState } from "@/components/loadingState"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -29,7 +29,7 @@ export interface DirectoryChooserDialogProps {
 
 // Photos' own root-directory picker — a COMPOSITION of the same generic pieces moveTargetDialog.tsx
 // browses with (useDirectoryListingQuery("drive", …), useDirectoryNamesQuery, ListFilterInput,
-// filterDriveItemsByLocalSearch, EmptyState, ListingSkeleton, DirectoryGlyph), not a lift of that
+// filterDriveItemsByLocalSearch, EmptyState, LoadingState, DirectoryGlyph), not a lift of that
 // component itself: moveTargetDialog's row/confirm gating is inherently move-specific (it forbids a
 // target that is the moved selection's own ancestry, and its confirm calls moveItems/importItems),
 // so extracting a shared shell would need a generic-enough gating callback threaded through both
@@ -143,7 +143,7 @@ export function DirectoryChooserDialog({ pending, onChoose, onClose }: Directory
 				) : null}
 				<div className="h-72 overflow-y-auto rounded-xl ring-1 ring-foreground/5 dark:ring-foreground/10">
 					{listingQuery.status === "pending" ? (
-						<ListingSkeleton viewMode="list" />
+						<LoadingState size="md" />
 					) : listingQuery.status === "error" ? (
 						<EmptyState
 							variant="error"

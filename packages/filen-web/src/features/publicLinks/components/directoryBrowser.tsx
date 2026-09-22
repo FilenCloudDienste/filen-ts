@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
 import { cn } from "@filen/shared"
@@ -255,17 +256,10 @@ function BrowseList({
 
 	if (listing.status === "pending") {
 		return (
-			<div className="flex flex-col gap-1">
-				{Array.from({ length: 8 }, (_, index) => (
-					<div
-						key={index}
-						className="flex h-11 items-center gap-3 rounded-xl px-3"
-					>
-						<div className="size-5 shrink-0 animate-pulse rounded-md bg-muted" />
-						<div className="h-3 flex-1 animate-pulse rounded-md bg-muted" />
-					</div>
-				))}
-			</div>
+			<LoadingState
+				size="md"
+				className="min-h-95"
+			/>
 		)
 	}
 

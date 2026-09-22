@@ -18,7 +18,7 @@ import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 export interface HistoryDialogProps {
@@ -106,9 +106,10 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 	function renderList() {
 		if (historyQuery.status === "pending") {
 			return (
-				<div className="flex justify-center py-8">
-					<Spinner />
-				</div>
+				<LoadingState
+					size="md"
+					className="min-h-20"
+				/>
 			)
 		}
 

@@ -6,7 +6,7 @@ import { previewType } from "@/features/drive/lib/preview.logic"
 import { PreviewAccessModeProvider } from "@/features/preview/lib/accessMode"
 import { ImageViewer } from "@/features/preview/components/imageViewer"
 import { MediaViewer } from "@/features/preview/components/mediaViewer"
-import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 
 // The heavy category viewers are lazy — a text/pdf link shouldn't pull in the media stack, mirroring
 // previewOverlay's own split.
@@ -17,9 +17,10 @@ const MarkdownViewer = lazy(() => import("@/features/preview/components/markdown
 
 function ViewerFallback() {
 	return (
-		<div className="flex size-full items-center justify-center">
-			<Spinner className="size-6" />
-		</div>
+		<LoadingState
+			size="lg"
+			className="text-inherit"
+		/>
 	)
 }
 

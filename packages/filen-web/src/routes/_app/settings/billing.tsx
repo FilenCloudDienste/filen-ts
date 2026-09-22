@@ -7,7 +7,7 @@ import { SubscriptionsCard } from "@/features/settings/components/billing/subscr
 import { InvoicesCard } from "@/features/settings/components/billing/invoicesCard"
 import { ReferralCard } from "@/features/settings/components/billing/referralCard"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingState } from "@/components/loadingState"
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { routeHead } from "@/lib/head/routeHead"
 import { i18n } from "@/lib/i18n"
@@ -36,11 +36,7 @@ function BillingPage() {
 			</header>
 			<div className="flex flex-1 flex-col overflow-y-auto p-6">
 				{accountQuery.status === "pending" ? (
-					<div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
-						<Skeleton className="h-24 w-full rounded-3xl" />
-						<Skeleton className="h-40 w-full rounded-3xl" />
-						<Skeleton className="h-40 w-full rounded-3xl" />
-					</div>
+					<LoadingState size="lg" />
 				) : accountQuery.status === "error" ? (
 					<Empty>
 						<EmptyHeader>

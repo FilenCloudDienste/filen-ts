@@ -26,7 +26,9 @@ test.describe("public links (unauthenticated)", () => {
 
 		// The route's OWN surface renders — the viewer, not some other page. It either sits in its
 		// loading state or has already reached its shared invalid surface.
-		await expect(page.getByText("Opening link…").or(page.getByText("This link is unavailable"))).toBeVisible({ timeout: 30_000 })
+		await expect(page.getByRole("status", { name: "Loading" }).or(page.getByText("This link is unavailable"))).toBeVisible({
+			timeout: 30_000
+		})
 
 		// On engines whose SDK worker completes the cross-origin resolve, the nonexistent link lands on
 		// the shared invalid surface — proving the ANONYMOUS worker path end to end (no session, real
@@ -45,7 +47,9 @@ test.describe("public links (unauthenticated)", () => {
 		await expect(page.getByText("Filen could not start")).toHaveCount(0)
 		await expect(page.getByText("Sign in to Filen")).toHaveCount(0)
 
-		await expect(page.getByText("Opening link…").or(page.getByText("This link is unavailable"))).toBeVisible({ timeout: 30_000 })
+		await expect(page.getByRole("status", { name: "Loading" }).or(page.getByText("This link is unavailable"))).toBeVisible({
+			timeout: 30_000
+		})
 
 		if (browserName !== "firefox") {
 			await expect(page.getByText("This link is unavailable")).toBeVisible({ timeout: 30_000 })
@@ -86,7 +90,7 @@ test.describe("public links (unauthenticated)", () => {
 		await expect(page.getByRole("link", { name: "Get Filen" })).toBeVisible({ timeout: 30_000 })
 
 		// The chrome above renders the moment the route does (see the chrome test's own note), so gating
-		// on it alone would measure the TRANSIENT "Opening link…" state and let an invalid card that
+		// on it alone would measure the TRANSIENT loading state and let an invalid card that
 		// overflows 360px pass. Firefox's COI worker fetch hangs before that terminal state ever
 		// arrives, so there the chrome really is all there is to measure.
 		if (browserName !== "firefox") {

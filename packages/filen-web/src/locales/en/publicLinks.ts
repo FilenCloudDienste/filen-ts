@@ -7,8 +7,6 @@ export const publicLinks = {
 	/** Browser tab title for a /d/ directory link — same privacy rule as documentTitleFile */
 	documentTitleDirectory: "Shared directory",
 
-	/** Shown while the link's metadata is being resolved */
-	opening: "Opening link…",
 	/** Invalid/expired surface — title (shared by bad uuid, bad/short key, not-found, network failure) */
 	unavailableTitle: "This link is unavailable",
 	/** Invalid/expired surface — body; deliberately does not distinguish "doesn't exist" from "expired" */

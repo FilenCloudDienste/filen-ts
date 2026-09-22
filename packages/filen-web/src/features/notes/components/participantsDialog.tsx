@@ -28,15 +28,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Spinner } from "@/components/ui/spinner"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingState } from "@/components/loadingState"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 export interface ParticipantsDialogProps {
 	note: Note
 	onClose: () => void
 }
-
-const SKELETON_ROW_COUNT = 3
 
 // Note-participants panel — mounted-when-active by the surface's dialog host (useNoteDialogHost), the
 // menu's owner-only "Participants" entry. Any participant can open and VIEW this dialog;
@@ -267,16 +265,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 
 	function renderAddBody() {
 		if (contactsQuery.status === "pending") {
-			return (
-				<div className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
-					{Array.from({ length: SKELETON_ROW_COUNT }, (_, index) => (
-						<Skeleton
-							key={index}
-							className="h-14 w-full rounded-xl"
-						/>
-					))}
-				</div>
-			)
+			return <LoadingState size="md" />
 		}
 
 		if (contactsQuery.status === "error") {

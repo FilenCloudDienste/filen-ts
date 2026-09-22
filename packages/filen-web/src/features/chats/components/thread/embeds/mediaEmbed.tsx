@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import type { DirectMediaCategory } from "@/features/chats/lib/embeds.logic"
 import type { ChatLinkResolution } from "@/features/chats/queries/chatMessageLinks"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingState } from "@/components/loadingState"
 import { noop } from "@/lib/utils"
 
 // Derives a display name from the url's own path — the external preview arm's ONLY handle on the item
@@ -21,7 +21,7 @@ function nameFromUrl(url: string): string {
 }
 
 // Direct image/video embed (never a Filen public link, see
-// FilenLinkCard for that). `resolution` undefined = the content-type probe is in flight (skeleton);
+// FilenLinkCard for that). `resolution` undefined = the content-type probe is in flight (spinner);
 // `success: false` = the probe failed (CORS block, timeout, non-matching Content-Type — see
 // queries/chatMessageLinks.ts's honest browser SSRF-posture comment) — renders NOTHING, degrading to
 // the plain link MessageContent already put inline in the text above. Clicking a successful image opens
@@ -41,9 +41,9 @@ export function MediaEmbed({
 
 	if (resolution === undefined) {
 		return (
-			<Skeleton
-				className="mt-1 h-40 w-64"
-				aria-label={t("chatEmbedLoading")}
+			<LoadingState
+				size="sm"
+				className="mt-1 h-40 w-64 flex-none rounded-xl border border-border"
 			/>
 		)
 	}

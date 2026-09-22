@@ -10,7 +10,7 @@ import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingState } from "@/components/loadingState"
 import { noop } from "@/lib/utils"
 
 const CARD_CLASS =
@@ -136,9 +136,9 @@ function FilenStreamedInlineMedia({
 
 	if (result.status === "pending") {
 		return (
-			<Skeleton
-				className="mt-1 h-40 w-64"
-				aria-label={t("chatEmbedLoading")}
+			<LoadingState
+				size="sm"
+				className="mt-1 h-40 w-64 flex-none rounded-xl border border-border"
 			/>
 		)
 	}

@@ -289,8 +289,6 @@ export const chats = {
 	chatEmbedFilenDirectory: "Filen directory",
 	/** Filen-link embed card — subtitle under the name for a file link before it resolves (or on resolution failure) */
 	chatEmbedFilenFile: "Filen file",
-	/** Media embed — accessible label on the loading skeleton while the content-type probe is in flight */
-	chatEmbedLoading: "Loading preview…",
 	/** Media embed / Filen-link previewable-card — accessible label on the click-to-open-preview control */
 	chatEmbedOpenPreview: "Open preview of {{name}}",
 	/** Filen-link card — accessible label for a non-previewable file / directory link's new-tab open control */

@@ -57,6 +57,7 @@ import { ContactPickerDialog } from "@/features/drive/components/contactPickerDi
 import { VersionsDialog } from "@/features/drive/components/versionsDialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -1113,9 +1114,10 @@ function PreviewBody({ source, editable, onDirtyChange, contentRef }: PreviewBod
 			return (
 				<Suspense
 					fallback={
-						<div className="flex size-full items-center justify-center">
-							<Spinner className="size-6" />
-						</div>
+						<LoadingState
+							size="lg"
+							className="text-inherit"
+						/>
 					}
 				>
 					<PdfViewer
@@ -1128,9 +1130,10 @@ function PreviewBody({ source, editable, onDirtyChange, contentRef }: PreviewBod
 			return (
 				<Suspense
 					fallback={
-						<div className="flex size-full items-center justify-center">
-							<Spinner className="size-6" />
-						</div>
+						<LoadingState
+							size="lg"
+							className="text-inherit"
+						/>
 					}
 				>
 					<DocxViewer
@@ -1144,9 +1147,10 @@ function PreviewBody({ source, editable, onDirtyChange, contentRef }: PreviewBod
 			return (
 				<Suspense
 					fallback={
-						<div className="flex size-full items-center justify-center">
-							<Spinner className="size-6" />
-						</div>
+						<LoadingState
+							size="lg"
+							className="text-inherit"
+						/>
 					}
 				>
 					<TextViewer
@@ -1162,9 +1166,10 @@ function PreviewBody({ source, editable, onDirtyChange, contentRef }: PreviewBod
 			return (
 				<Suspense
 					fallback={
-						<div className="flex size-full items-center justify-center">
-							<Spinner className="size-6" />
-						</div>
+						<LoadingState
+							size="lg"
+							className="text-inherit"
+						/>
 					}
 				>
 					<MarkdownViewer

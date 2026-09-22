@@ -3,7 +3,7 @@
 // exactly one place.
 //
 // OBSERVED SYMPTOM (reproducible)
-// On Playwright-firefox the authed drive listing sits on its loading skeleton forever and the toolbar
+// On Playwright-firefox the authed drive listing sits on its loading spinner forever and the toolbar
 // stays permanently disabled — it never reaches either terminal render state. Chromium is unaffected.
 // The SDK runs entirely inside a Web Worker (src/workers/sdk.worker.ts) backed by a SharedArrayBuffer
 // thread pool, which mandates cross-origin isolation (COOP + COEP require-corp; initThreadPool boots

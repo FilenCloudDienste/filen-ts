@@ -5,7 +5,7 @@ import { extensionOf, codeMirrorLanguageFor, decodeUtf8 } from "@/features/drive
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 
 export interface TextViewerProps {
@@ -36,9 +36,10 @@ function TextViewer({ item, alt, editable = false, onDirtyChange, contentRef }: 
 
 	if (result.status === "pending") {
 		return (
-			<div className="flex size-full items-center justify-center">
-				<Spinner className="size-6" />
-			</div>
+			<LoadingState
+				size="lg"
+				className="text-inherit"
+			/>
 		)
 	}
 

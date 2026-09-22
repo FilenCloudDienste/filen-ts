@@ -5,7 +5,7 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { isSafeLinkHref } from "@/features/preview/components/docxViewer.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 
 export interface DocxViewerProps {
@@ -98,9 +98,10 @@ function DocxRender({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 	return (
 		<div className="relative size-full overflow-auto">
 			{status === "pending" ? (
-				<div className="absolute inset-0 flex items-center justify-center">
-					<Spinner className="size-6" />
-				</div>
+				<LoadingState
+					size="lg"
+					className="absolute inset-0 text-inherit"
+				/>
 			) : null}
 			{status === "error" ? (
 				<div className="absolute inset-0">
@@ -130,9 +131,10 @@ function DocxViewer({ item, alt }: DocxViewerProps) {
 
 	if (result.status === "pending") {
 		return (
-			<div className="flex size-full items-center justify-center">
-				<Spinner className="size-6" />
-			</div>
+			<LoadingState
+				size="lg"
+				className="text-inherit"
+			/>
 		)
 	}
 

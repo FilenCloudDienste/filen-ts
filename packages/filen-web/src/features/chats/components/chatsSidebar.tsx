@@ -22,7 +22,7 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import { useAction } from "@/lib/keymap/useAction"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { ListSkeleton } from "@/components/listSkeleton"
+import { LoadingState } from "@/components/loadingState"
 
 // Fixed row height — the single virtualizer needs no measureElement pass (both lines are pinned to a known
 // height), same as notesSidebar's constant-height rows.
@@ -172,14 +172,7 @@ export function ChatsSidebar() {
 
 	function renderBody(): ReactNode {
 		if (chatsQuery.isPending) {
-			// Bar height mirrors CHAT_ROW_HEIGHT so the placeholder list has the rhythm of the real one.
-			return (
-				<ListSkeleton
-					count={8}
-					itemClassName="h-[60px] w-full rounded-xl"
-					className="flex flex-col gap-1 px-1 pt-1"
-				/>
-			)
+			return <LoadingState size="md" />
 		}
 
 		if (chatsQuery.isError) {

@@ -17,7 +17,7 @@ import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingState } from "@/components/loadingState"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 export interface CreateChatDialogProps {
@@ -26,8 +26,6 @@ export interface CreateChatDialogProps {
 	// the new conversation and closes the dialog; this component owns neither concern itself.
 	onCreated: (chat: Chat) => void
 }
-
-const SKELETON_ROW_COUNT = 5
 
 // New-conversation contact picker — mounted-when-active by the sidebar's "New chat" button via
 // useChatDialogHost's "create" kind. Multi-selects from the established contact list (reusing
@@ -83,16 +81,7 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 
 	function renderBody(): ReactNode {
 		if (contactsQuery.status === "pending") {
-			return (
-				<div className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
-					{Array.from({ length: SKELETON_ROW_COUNT }, (_, index) => (
-						<Skeleton
-							key={index}
-							className="h-14 w-full rounded-xl"
-						/>
-					))}
-				</div>
-			)
+			return <LoadingState size="md" />
 		}
 
 		if (contactsQuery.status === "error") {

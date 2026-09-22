@@ -105,7 +105,7 @@ test.describe("shell", { tag: "@no-sdk" }, () => {
 		// Tailwind default is 150ms, so 0.00001 passes and 0.15 fails.
 		await expect.poll(() => submit.evaluate(el => parseFloat(getComputedStyle(el).transitionDuration))).toBeLessThan(0.001)
 
-		// No spinner or skeleton renders pre-auth, and the CSS RULE is what is under test — so probe it
+		// No spinner renders pre-auth, and the CSS RULE is what is under test — so probe it
 		// directly, alongside a no-data-slot control. Without the control the test cannot tell "the
 		// exemption works" from "the media block never applied at all". Both probes are removed again.
 		const durations = await page.evaluate(() => {

@@ -65,7 +65,7 @@ import { UploadMenu } from "@/features/drive/components/uploadMenu"
 import { UploadDropzone } from "@/features/drive/components/uploadDropzone"
 import { BulkActionBar } from "@/features/drive/components/bulkActionBar"
 import { EmptyState } from "@/features/drive/components/emptyState"
-import { ListingSkeleton } from "@/features/drive/components/listingSkeleton"
+import { LoadingState } from "@/components/loadingState"
 import { DriveRow } from "@/features/drive/components/driveRow"
 import { DriveTile } from "@/features/drive/components/driveTile"
 import { SearchInput } from "@/features/drive/components/searchInput"
@@ -815,9 +815,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					>
 						{search.active ? (
 							search.status === "warming" ? (
-								<div className="flex-1 overflow-y-auto">
-									<ListingSkeleton viewMode={effectiveViewMode} />
-								</div>
+								<LoadingState size="lg" />
 							) : search.status === "searching-empty" ? (
 								<div className="flex flex-1 flex-col items-center justify-center gap-2 overflow-y-auto">
 									<Spinner className="size-5 text-muted-foreground" />
@@ -853,9 +851,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 								renderListboxContent()
 							)
 						) : listingQuery.status === "pending" ? (
-							<div className="flex-1 overflow-y-auto">
-								<ListingSkeleton viewMode={effectiveViewMode} />
-							</div>
+							<LoadingState size="lg" />
 						) : listingQuery.status === "error" &&
 						  isBlockingListingError(listingQuery.isRefetchError, listingQuery.data !== undefined) ? (
 							<div className="flex flex-1 overflow-y-auto">

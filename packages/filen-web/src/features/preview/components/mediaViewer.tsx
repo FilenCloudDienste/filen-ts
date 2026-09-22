@@ -9,7 +9,7 @@ import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
 import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
 import { getVideoPlaybackState, setVideoPlaybackState } from "@/features/preview/lib/videoContinuity"
 
@@ -210,9 +210,10 @@ function StreamedMedia({
 
 	if (result.status !== "success") {
 		return (
-			<div className="flex size-full items-center justify-center">
-				<Spinner className="size-6" />
-			</div>
+			<LoadingState
+				size="lg"
+				className="text-inherit"
+			/>
 		)
 	}
 
@@ -286,9 +287,10 @@ function BufferedMedia({ item, category, alt }: { item: DriveItem; category: "vi
 
 	if (result.status === "pending") {
 		return (
-			<div className="flex size-full items-center justify-center">
-				<Spinner className="size-6" />
-			</div>
+			<LoadingState
+				size="lg"
+				className="text-inherit"
+			/>
 		)
 	}
 

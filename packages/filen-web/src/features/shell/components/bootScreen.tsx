@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { Logo } from "@/features/shell/components/logo"
-import { Spinner } from "@/components/ui/spinner"
+import { LoadingState } from "@/components/loadingState"
 
 // Full-screen indeterminate boot state shown while the SDK worker downloads + initializes. No
 // determinate progress yet — wasm download progress is a later refinement; this is deliberately a
@@ -14,10 +14,10 @@ export function BootScreen() {
 				<Logo className="size-12 text-primary" />
 				<span className="font-heading text-xl font-medium tracking-tight">{t("appName")}</span>
 			</div>
-			<div className="flex items-center gap-2 text-sm text-muted-foreground">
-				<Spinner />
-				<span>{t("bootDownloading")}</span>
-			</div>
+			<LoadingState
+				size="lg"
+				className="flex-none"
+			/>
 		</div>
 	)
 }

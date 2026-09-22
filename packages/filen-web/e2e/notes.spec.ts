@@ -1264,7 +1264,7 @@ test.describe("notes: participants and history dialogs", () => {
 
 			await expect(dialog.getByRole("heading", { name: "Add participants", exact: true })).toBeVisible()
 			// Terminal state only, either is acceptable (see the test's own doc comment above) — proves
-			// the picker settled instead of hanging on a stuck loading skeleton.
+			// the picker settled instead of hanging on a stuck loading spinner.
 			const noContacts = dialog.getByText("No contacts available to add", { exact: true })
 			const contactOption = dialog.getByRole("option").first()
 			await expect(noContacts.or(contactOption)).toBeVisible({ timeout: 15_000 })
