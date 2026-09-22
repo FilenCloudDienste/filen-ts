@@ -1,14 +1,11 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon } from "lucide-react"
-import { type Checklist } from "@filen/shared"
-import { cn } from "@filen/shared"
+import { type Checklist, cn, addChecklistLine, removeChecklistItem } from "@filen/shared"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
 import {
 	parseChecklistSeed,
 	serializeChecklist,
-	addChecklistLine,
-	removeChecklistItem,
 	toggleChecklistItem,
 	setChecklistItemContent,
 	visibleChecklistRows
