@@ -9,6 +9,13 @@ export type ChecklistItem = {
 
 export type Checklist = ChecklistItem[]
 
+// The counterpart to `escapeHtml` below: node-html-better-parser's own `.text` getter decodes
+// entities (it wraps `html-entities`, already its transitive dependency), so a row written through
+// the escaped `stringify` reads back byte-for-byte instead of losing `<`/`>`/`&` to HTML parsing.
+function escapeHtml(text: string): string {
+	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
 export class ChecklistParser {
 	public parse(html: string): Checklist {
 		try {
@@ -28,7 +35,7 @@ export class ChecklistParser {
 				for (const liItem of li) {
 					checklist.push({
 						checked,
-						content: liItem.rawText ? liItem.rawText.trim() : "",
+						content: liItem.text ? liItem.text.trim() : "",
 						id: uuidv4()
 					})
 				}
@@ -59,9 +66,9 @@ export class ChecklistParser {
 				currentCheckedStatus = item.checked
 			}
 
-			const trimmed = item.content.trim()
+			const trimmed = escapeHtml(item.content.trim())
 
-		html += `<li>${trimmed.length > 0 ? trimmed : "<br>"}</li>`
+			html += `<li>${trimmed.length > 0 ? trimmed : "<br>"}</li>`
 		}
 
 		if (checklist.length > 0) {
