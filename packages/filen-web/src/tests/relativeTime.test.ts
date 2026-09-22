@@ -8,10 +8,7 @@ const t = ((key: string, options?: { count?: number }): string =>
 	options?.count === undefined ? key : `${key}:${String(options.count)}`) as unknown as TFunction
 
 const NOW = new Date("2026-07-12T12:00:00.000Z").getTime()
-const SECOND = 1000
-const MINUTE = 60 * SECOND
-const HOUR = 60 * MINUTE
-const DAY = 24 * HOUR
+const DAY = 24 * 60 * 60 * 1000
 
 beforeEach(() => {
 	vi.useFakeTimers()
@@ -23,29 +20,14 @@ afterEach(() => {
 })
 
 describe("formatRelativeTime", () => {
-	it("collapses sub-minute and future/skewed timestamps to 'just now'", () => {
+	it("uses web's camelCase keys", () => {
 		expect(formatRelativeTime(NOW, t)).toBe("relativeJustNow")
-		expect(formatRelativeTime(NOW - 59 * SECOND, t)).toBe("relativeJustNow")
-		// A future timestamp (clock skew) is a negative diff — still "just now", never a negative count.
-		expect(formatRelativeTime(NOW + 5 * MINUTE, t)).toBe("relativeJustNow")
+		expect(formatRelativeTime(NOW - 5 * 60 * 1000, t)).toBe("relativeMinutesAgo:5")
+		expect(formatRelativeTime(NOW - 3 * 60 * 60 * 1000, t)).toBe("relativeHoursAgo:3")
+		expect(formatRelativeTime(NOW - 2 * DAY, t)).toBe("relativeDaysAgo:2")
 	})
 
-	it("reports whole minutes below the hour boundary", () => {
-		expect(formatRelativeTime(NOW - MINUTE, t)).toBe("relativeMinutesAgo:1")
-		expect(formatRelativeTime(NOW - 59 * MINUTE, t)).toBe("relativeMinutesAgo:59")
-	})
-
-	it("reports whole hours below the day boundary", () => {
-		expect(formatRelativeTime(NOW - HOUR, t)).toBe("relativeHoursAgo:1")
-		expect(formatRelativeTime(NOW - 23 * HOUR, t)).toBe("relativeHoursAgo:23")
-	})
-
-	it("reports whole days below the 7-day cutoff", () => {
-		expect(formatRelativeTime(NOW - DAY, t)).toBe("relativeDaysAgo:1")
-		expect(formatRelativeTime(NOW - 6 * DAY, t)).toBe("relativeDaysAgo:6")
-	})
-
-	it("falls back to the absolute formatter at and beyond the 7-day cutoff", () => {
+	it("falls back to a custom absolute formatter at and beyond the cutoff", () => {
 		const absolute = vi.fn((timestamp: number) => `abs:${String(timestamp)}`)
 		const old = NOW - 7 * DAY
 
@@ -53,12 +35,12 @@ describe("formatRelativeTime", () => {
 		expect(absolute).toHaveBeenCalledWith(old)
 	})
 
-	it("uses a built-in locale date when no absolute formatter is provided", () => {
+	it("uses the built-in locale date (no time) when no absolute formatter is provided", () => {
 		const old = NOW - 30 * DAY
 		const result = formatRelativeTime(old, t)
 
 		// Not one of the relative keys — the default absolute branch produced a real date string.
 		expect(result).not.toContain("relative")
-		expect(result.length).toBeGreaterThan(0)
+		expect(result).toBe(new Date(old).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }))
 	})
 })

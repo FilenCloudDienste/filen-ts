@@ -1,4 +1,5 @@
-import { vi, describe, it, expect, beforeEach } from "vitest"
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
+import type { TFunction } from "i18next"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 vi.mock("expo-localization", () => ({
@@ -733,6 +734,71 @@ describe("time", () => {
 			const result = mod.simpleDate(d)
 
 			expect(result).toBe("15/01/2025, 09:05:03")
+		})
+	})
+
+	describe("formatRelativeTime", () => {
+		const NOW = new Date(2026, 6, 12, 12, 0, 0).getTime()
+		const SECOND = 1000
+		const MINUTE = 60 * SECOND
+		const HOUR = 60 * MINUTE
+		const DAY = 24 * HOUR
+
+		// Echoes the key and, for the plural keys, the resolved count — pins down both which
+		// branch fired and the number it carried.
+		const t = ((key: string, options?: { count?: number }): string =>
+			options?.count === undefined ? key : `${key}:${String(options.count)}`) as unknown as TFunction
+
+		let formatRelativeTime: typeof import("@/lib/time").formatRelativeTime
+		let simpleDate: typeof import("@/lib/time").simpleDate
+
+		beforeEach(async () => {
+			vi.resetModules()
+			vi.useFakeTimers()
+			vi.setSystemTime(NOW)
+
+			vi.doMock("expo-localization", () => ({
+				getLocales: () => [{ languageTag: "en-US" }]
+			}))
+
+			const mod = await import("@/lib/time")
+
+			formatRelativeTime = mod.formatRelativeTime
+			simpleDate = mod.simpleDate
+		})
+
+		afterEach(() => {
+			vi.useRealTimers()
+		})
+
+		it("uses mobile's snake_case keys", () => {
+			expect(formatRelativeTime(NOW, t)).toBe("relative_just_now")
+			expect(formatRelativeTime(NOW - MINUTE, t)).toBe("relative_minutes_ago:1")
+			expect(formatRelativeTime(NOW - HOUR, t)).toBe("relative_hours_ago:1")
+			expect(formatRelativeTime(NOW - DAY, t)).toBe("relative_days_ago:1")
+		})
+
+		it("falls back to simpleDate past the cutoff by default", () => {
+			const old = NOW - 7 * DAY
+
+			expect(formatRelativeTime(old, t)).toBe(simpleDate(old))
+		})
+
+		it("uses a custom absolute formatter when provided", () => {
+			const old = NOW - 7 * DAY
+			const absolute = vi.fn(() => "custom")
+
+			expect(formatRelativeTime(old, t, { absolute })).toBe("custom")
+			expect(absolute).toHaveBeenCalledWith(old)
+		})
+
+		it("normalizes a seconds-range numeric timestamp the same as milliseconds", () => {
+			expect(formatRelativeTime(NOW / 1000, t)).toBe("relative_just_now")
+		})
+
+		it("accepts a Date object, normalized through toDate() like simpleDate", () => {
+			expect(formatRelativeTime(new Date(NOW), t)).toBe("relative_just_now")
+			expect(formatRelativeTime(new Date(NOW - HOUR), t)).toBe("relative_hours_ago:1")
 		})
 	})
 })
