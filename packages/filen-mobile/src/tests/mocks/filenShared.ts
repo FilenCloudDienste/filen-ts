@@ -69,5 +69,7 @@ export const {
 	fileIconKey,
 	hashNoteContent,
 	mergeInflight,
-	buildInflightEntries
+	buildInflightEntries,
+	pruneAndRebaseNoteOutboxAfterPush,
+	reconcileNoteOutboxAgainstCloud
 } = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")

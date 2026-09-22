@@ -7,7 +7,9 @@ import {
 	MAX_NON_RETRYABLE_REJECTIONS,
 	hashNoteContent,
 	mergeInflight,
-	buildInflightEntries
+	buildInflightEntries,
+	pruneAndRebaseNoteOutboxAfterPush,
+	reconcileNoteOutboxAgainstCloud
 } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import notes from "@/features/notes/notes"
@@ -164,50 +166,12 @@ export class Sync {
 					})
 				)
 
-				// #4 principle applied to restore: drop a disk-seeded inflight entry
-				// only when its content EQUALS the freshly-fetched cloud content
-				// (it's already synced), and drop entries for notes no longer in the
-				// cloud (deleted/no longer accessible). Compare content, never mix
-				// local and server clocks. Applied as a functional update so any edit
-				// made during the fetch is preserved.
-				useNotesInflightStore.getState().setInflightContent(prev => {
-					const updated = {
-						...prev
-					}
-
-					for (const noteUuid of Object.keys(fromDisk)) {
-						const entries = updated[noteUuid]
-
-						if (!entries) {
-							continue
-						}
-
-						if (!cloudByUuid.has(noteUuid)) {
-							delete updated[noteUuid]
-
-							continue
-						}
-
-						// Couldn't fetch this note's cloud content (transient) — keep its entries;
-						// the next sync pass re-pushes. Only prune against content we actually have.
-						if (!contentByUuid.has(noteUuid)) {
-							continue
-						}
-
-						const cloudContent = contentByUuid.get(noteUuid) ?? ""
-						const remaining = entries.filter(c => c.content !== cloudContent)
-
-						if (remaining.length === 0) {
-							delete updated[noteUuid]
-
-							continue
-						}
-
-						updated[noteUuid] = remaining
-					}
-
-					return updated
-				})
+				// #4 principle applied to restore: drop a disk-seeded inflight entry already synced with
+				// the cloud or orphaned (note gone) — see notesOutboxReconcile.ts for the full rule. Applied
+				// as a functional update so any edit made during the fetch is preserved.
+				useNotesInflightStore.getState().setInflightContent(prev =>
+					reconcileNoteOutboxAgainstCloud(prev, Object.keys(fromDisk), new Set(cloudByUuid.keys()), contentByUuid)
+				)
 			})
 
 			if (!reconcile.success) {
@@ -478,21 +442,12 @@ export class Sync {
 							...prev
 						}
 
-						const entries = updated[noteUuid]
+						const remaining = pruneAndRebaseNoteOutboxAfterPush(updated[noteUuid], syncedUpTo, pushedContentHash)
 
-						if (entries) {
-							const remaining = entries
-								.filter(c => c.timestamp > syncedUpTo)
-								.map(c => ({
-									...c,
-									baseContentHash: pushedContentHash
-								}))
-
-							if (remaining.length === 0) {
-								delete updated[noteUuid]
-							} else {
-								updated[noteUuid] = remaining
-							}
+						if (remaining === undefined) {
+							delete updated[noteUuid]
+						} else {
+							updated[noteUuid] = remaining
 						}
 
 						return updated

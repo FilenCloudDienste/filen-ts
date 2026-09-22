@@ -1,4 +1,12 @@
-import { run, Semaphore, createExecutableTimeout, createNotePreviewFromContentText, isPermanentRejection } from "@filen/shared"
+import {
+	run,
+	Semaphore,
+	createExecutableTimeout,
+	createNotePreviewFromContentText,
+	isPermanentRejection,
+	pruneAndRebaseNoteOutboxAfterPush,
+	reconcileNoteOutboxAgainstCloud
+} from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import type { Note } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
@@ -430,10 +438,9 @@ export class Sync {
 					cloudByUuid.set(note.uuid, note)
 				}
 
-				// Drop a disk-seeded entry only when its content EQUALS the freshly-fetched cloud
-				// content (already synced), and drop entries for notes no longer in the cloud
-				// (deleted / no longer accessible). Compare content, never mix local and server clocks.
-				// The web list query carries no content, so cloud content is fetched per inflight note.
+				// Drop a disk-seeded entry already synced with the cloud or orphaned (note gone) — see
+				// notesOutboxReconcile.ts for the full rule. The web list query carries no content, so cloud
+				// content is fetched per inflight note.
 				const cloudContentByUuid = new Map<string, string>()
 
 				for (const noteUuid of Object.keys(fromDisk)) {
@@ -451,45 +458,11 @@ export class Sync {
 				}
 
 				// Applied as a functional update so any edit made during the fetch is preserved.
-				useNotesInflightStore.getState().setInflightContent(prev => {
-					const updated: InflightContent = {
-						...prev
-					}
-
-					for (const noteUuid of Object.keys(fromDisk)) {
-						const entries = updated[noteUuid]
-
-						if (!entries) {
-							continue
-						}
-
-						if (!cloudByUuid.has(noteUuid)) {
-							Reflect.deleteProperty(updated, noteUuid)
-
-							continue
-						}
-
-						const cloudContent = cloudContentByUuid.get(noteUuid)
-
-						// Undecryptable (or unfetched) cloud content is treated exactly like a failed
-						// fetch: never prune a persisted draft against content we could not read.
-						if (cloudContent === undefined) {
-							continue
-						}
-
-						const remaining = entries.filter(c => c.content !== cloudContent)
-
-						if (remaining.length === 0) {
-							Reflect.deleteProperty(updated, noteUuid)
-
-							continue
-						}
-
-						updated[noteUuid] = remaining
-					}
-
-					return updated
-				})
+				useNotesInflightStore
+					.getState()
+					.setInflightContent(prev =>
+						reconcileNoteOutboxAgainstCloud(prev, Object.keys(fromDisk), new Set(cloudByUuid.keys()), cloudContentByUuid)
+					)
 			})
 
 			if (!reconcile.success) {
@@ -695,21 +668,12 @@ export class Sync {
 							...prev
 						}
 
-						const entries = updated[noteUuid]
+						const remaining = pruneAndRebaseNoteOutboxAfterPush(updated[noteUuid], syncedUpTo, pushedContentHash)
 
-						if (entries) {
-							const remaining = entries
-								.filter(c => c.timestamp > syncedUpTo)
-								.map(c => ({
-									...c,
-									baseContentHash: pushedContentHash
-								}))
-
-							if (remaining.length === 0) {
-								Reflect.deleteProperty(updated, noteUuid)
-							} else {
-								updated[noteUuid] = remaining
-							}
+						if (remaining === undefined) {
+							Reflect.deleteProperty(updated, noteUuid)
+						} else {
+							updated[noteUuid] = remaining
 						}
 
 						return updated
