@@ -1,6 +1,6 @@
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
-import { formatBytes } from "@filen/shared"
+import { formatBytes, clampedRatio, storageUsageLevel } from "@filen/shared"
 import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
 import { computeStorageSegments } from "@/features/settings/storageSegments"
@@ -25,7 +25,8 @@ const StorageUsageBar = ({
 	const blue = useResolveClassNames("text-blue-500")
 	const muted = useResolveClassNames("text-muted-foreground")
 
-	const { files, versioned, free, level } = computeStorageSegments(storageUsed, versionedStorage, maxStorage)
+	const { files, versioned, free } = computeStorageSegments(storageUsed, versionedStorage, maxStorage)
+	const level = storageUsageLevel(clampedRatio(Number(storageUsed), Number(maxStorage), 100))
 	const filesColor = (level === "critical" ? red.color : level === "warn" ? yellow.color : green.color) as string
 	const versionedColor = blue.color as string
 	const freeColor = muted.color as string
