@@ -20,20 +20,10 @@ import { driveItemDisplayName } from "@/lib/decryption"
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio"
 import audio from "@/features/audio/audio"
 import useEffectOnce from "@/hooks/useEffectOnce"
+import { formatSecondsToMediaClock } from "@filen/shared"
 
 export const FONT_TABULAR_NUMS: TextStyle = {
 	fontVariant: ["tabular-nums"]
-}
-
-export function formatAudioTime(seconds: number): string {
-	if (!isFinite(seconds) || seconds < 0) {
-		return "0:00"
-	}
-
-	const mins = Math.floor(seconds / 60)
-	const secs = Math.floor(seconds % 60)
-
-	return `${mins}:${secs < 10 ? "0" : ""}${secs}`
 }
 
 const Background = ({ children, blurhash }: { children: React.ReactNode; blurhash?: string }) => {
@@ -410,13 +400,13 @@ const PreviewAudioInner = ({ item, metadata, fileUrl }: { item: GalleryItemTagge
 				className="text-white/70 text-xs"
 				style={FONT_TABULAR_NUMS}
 			>
-				{formatAudioTime(status.currentTime)}
+				{formatSecondsToMediaClock(status.currentTime)}
 			</Text>
 			<Text
 				className="text-white/70 text-xs"
 				style={FONT_TABULAR_NUMS}
 			>
-				{formatAudioTime(status.duration)}
+				{formatSecondsToMediaClock(status.duration)}
 			</Text>
 		</View>
 	)

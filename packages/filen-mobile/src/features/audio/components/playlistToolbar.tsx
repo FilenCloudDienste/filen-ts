@@ -7,8 +7,8 @@ import audio, { useAudio } from "@/features/audio/audio"
 import Image from "@/components/ui/image"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import { cn } from "@filen/shared"
-import { AudioSlider, FONT_TABULAR_NUMS, formatAudioTime } from "@/components/drivePreview/previewAudio"
+import { cn, formatSecondsToMediaClock } from "@filen/shared"
+import { AudioSlider, FONT_TABULAR_NUMS } from "@/components/drivePreview/previewAudio"
 import alerts from "@/lib/alerts"
 import useAudioMetadataQuery from "@/features/audio/queries/useAudioMetadata.query"
 import { useTranslation } from "react-i18next"
@@ -150,13 +150,13 @@ const PlaylistToolbar = () => {
 							className="text-muted-foreground text-xs"
 							style={FONT_TABULAR_NUMS}
 						>
-							{formatAudioTime(!currentQueueItem ? 0 : (status?.currentTime ?? 0))}
+							{formatSecondsToMediaClock(!currentQueueItem ? 0 : (status?.currentTime ?? 0))}
 						</Text>
 						<Text
 							className="text-muted-foreground text-xs"
 							style={FONT_TABULAR_NUMS}
 						>
-							{formatAudioTime(!currentQueueItem ? 0 : (status?.duration ?? 0))}
+							{formatSecondsToMediaClock(!currentQueueItem ? 0 : (status?.duration ?? 0))}
 						</Text>
 					</View>
 				</View>

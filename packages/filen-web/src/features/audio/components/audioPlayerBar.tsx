@@ -5,14 +5,13 @@ import { audioEngine } from "@/features/audio/lib/audioEngine"
 import { useAudioNowPlaying, useAudioQueueControls, useAudioOutput, useAudioError } from "@/features/audio/store/useAudioStore"
 import { NowPlayingPanel } from "@/features/audio/components/nowPlayingPanel"
 import { nextLoopMode } from "@/features/audio/components/audioTransport.logic"
-import { formatTime } from "@/features/audio/lib/format"
 import { useAction } from "@/lib/keymap/useAction"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { MiddleEllipsis } from "@/components/middleEllipsis"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
-import { cn } from "@filen/shared"
+import { cn, formatSecondsToMediaClock } from "@filen/shared"
 
 // The persistent audio player, docked at the bottom of the authed shell (rendered once by AppShell,
 // which never mounts on public-link routes — so this surface is inherently authed-only). It renders
@@ -164,7 +163,7 @@ export function AudioPlayerBar() {
 					</div>
 					<div className="flex w-full items-center gap-2">
 						<span className="w-9 shrink-0 text-right text-[0.7rem] text-muted-foreground tabular-nums">
-							{formatTime(positionMs)}
+							{formatSecondsToMediaClock(positionMs / 1000)}
 						</span>
 						<input
 							type="range"
@@ -179,7 +178,9 @@ export function AudioPlayerBar() {
 								audioEngine.seek(Number(event.target.value) / 1000)
 							}}
 						/>
-						<span className="w-9 shrink-0 text-[0.7rem] text-muted-foreground tabular-nums">{formatTime(durationMs)}</span>
+						<span className="w-9 shrink-0 text-[0.7rem] text-muted-foreground tabular-nums">
+							{formatSecondsToMediaClock(durationMs / 1000)}
+						</span>
 					</div>
 				</div>
 
