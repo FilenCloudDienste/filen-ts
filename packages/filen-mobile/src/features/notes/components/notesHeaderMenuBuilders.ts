@@ -3,7 +3,7 @@ import { type MenuButton } from "@/components/ui/menu"
 import { type Icons } from "@/components/ui/menuIcons"
 import { buildSortFieldButton, type SortDirectionOption } from "@/components/ui/sortFieldMenu"
 import { NoteType } from "@filen/sdk-rs"
-import { run, type NoteSelectionFlags } from "@filen/shared"
+import { noteBulkActionAvailability, run, type NoteSelectionFlags } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import { Platform } from "react-native"
 import { router } from "@/lib/router"
@@ -351,12 +351,14 @@ export function buildNotesHeaderRightItems({
 				})
 			}
 
-			// Non-destructive bulk actions (pin / favorite / type / tag / duplicate /
-			// export) need decrypted metadata. Hide them when any selected note is
-			// undecryptable. Trash / delete / restore-from-trash / leave appear below
-			// and operate by uuid alone, so they stay visible for undecryptable too.
-			if (!noteFlags.includesUndecryptable) {
-				// Toggles (pin / favorite) sit first — one-tap, most-tapped.
+			// Pure decision step — which of the eleven metadata/lifecycle actions this selection
+			// permits, ahead of any MenuButton/dispatch construction below. Identical rule on web
+			// (notesBulkActionBar.logic.ts's noteBulkActions). The two offline-caching entries above
+			// and below have no shared-matrix counterpart and keep reading noteFlags directly.
+			const bulkActionAvailability = noteBulkActionAvailability(noteFlags)
+
+			// Toggles (pin / favorite) sit first — one-tap, most-tapped.
+			if (bulkActionAvailability.pin) {
 				menuButtons.push({
 					id: "bulkPin",
 					title: noteFlags.includesPinned ? t("unpin_selected") : t("pin_selected"),
@@ -370,7 +372,9 @@ export function buildNotesHeaderRightItems({
 						})
 					}
 				})
+			}
 
+			if (bulkActionAvailability.favorite) {
 				menuButtons.push({
 					id: "bulkFavorite",
 					title: noteFlags.includesFavorited ? t("unfavorite_selected") : t("favorite_selected"),
@@ -384,10 +388,13 @@ export function buildNotesHeaderRightItems({
 						})
 					}
 				})
+			}
 
-				// Offline availability. Device-side, so unlike its neighbours it is NOT gated on write
-				// access — keeping a copy is a read, and a read-only share is a perfectly reasonable
-				// thing to want on a plane.
+			// Offline availability. Device-side, so unlike its neighbours it is NOT gated on write
+			// access — keeping a copy is a read, and a read-only share is a perfectly reasonable
+			// thing to want on a plane. Has no web counterpart, so it stays outside the shared matrix,
+			// reading noteFlags.includesUndecryptable directly rather than bulkActionAvailability.
+			if (!noteFlags.includesUndecryptable) {
 				const notMarked = selectedNotesLive.filter(n => markedOffline[n.uuid] !== true)
 
 				if (notMarked.length > 0) {
@@ -409,42 +416,44 @@ export function buildNotesHeaderRightItems({
 						}
 					})
 				}
+			}
 
-				if (noteFlags.hasWriteAccessToAll) {
-					menuButtons.push({
-						id: "type",
-						title: t("type_change_selected"),
-						icon: "text",
-						requiresOnline: true,
-						subButtons: NOTE_TYPE_OPTIONS.map(
-							({ type, typeString }) =>
-								({
-									id: `type_${typeString}`,
-									title: t(NOTE_TYPE_LABEL_KEY[typeString]),
-									icon: noteTypeToIcon(type),
-									keepMenuOpenOnPress: Platform.OS === "android",
-									requiresOnline: true,
-									onPress: async () => {
-										await runBulk({
-											items: selectedNotesLive,
-											clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-											op: async n => {
-												const content = await notesLib.getContent({ note: n })
+			if (bulkActionAvailability.type) {
+				menuButtons.push({
+					id: "type",
+					title: t("type_change_selected"),
+					icon: "text",
+					requiresOnline: true,
+					subButtons: NOTE_TYPE_OPTIONS.map(
+						({ type, typeString }) =>
+							({
+								id: `type_${typeString}`,
+								title: t(NOTE_TYPE_LABEL_KEY[typeString]),
+								icon: noteTypeToIcon(type),
+								keepMenuOpenOnPress: Platform.OS === "android",
+								requiresOnline: true,
+								onPress: async () => {
+									await runBulk({
+										items: selectedNotesLive,
+										clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+										op: async n => {
+											const content = await notesLib.getContent({ note: n })
 
-												await notesLib.setType({ note: n, type, knownContent: content })
-											}
-										})
-									}
-								}) satisfies MenuButton
-						)
-					})
-				}
+											await notesLib.setType({ note: n, type, knownContent: content })
+										}
+									})
+								}
+							}) satisfies MenuButton
+					)
+				})
+			}
 
-				// Bulk tag goes through the same /noteTags screen as per-note tag
-				// editing — the route accepts an array, computes tri-state per tag
-				// (all / some / none selected), and lets the user add OR remove tags
-				// across the whole selection. Add-only inline submenu was divergent
-				// from the per-note flow and lacked a removal path.
+			// Bulk tag goes through the same /noteTags screen as per-note tag
+			// editing — the route accepts an array, computes tri-state per tag
+			// (all / some / none selected), and lets the user add OR remove tags
+			// across the whole selection. Add-only inline submenu was divergent
+			// from the per-note flow and lacked a removal path.
+			if (bulkActionAvailability.tags) {
 				menuButtons.push({
 					id: "bulkTag",
 					title: t("bulk_tag_selected"),
@@ -459,7 +468,9 @@ export function buildNotesHeaderRightItems({
 						})
 					}
 				})
+			}
 
+			if (bulkActionAvailability.duplicate) {
 				menuButtons.push({
 					id: "bulkDuplicate",
 					title: t("duplicate_selected"),
@@ -473,7 +484,9 @@ export function buildNotesHeaderRightItems({
 						})
 					}
 				})
+			}
 
+			if (bulkActionAvailability.export) {
 				menuButtons.push({
 					id: "bulkExport",
 					title: t("export_selected"),
@@ -520,108 +533,87 @@ export function buildNotesHeaderRightItems({
 				})
 			}
 
-			if (noteFlags.everyOwned) {
-				// State machine for notes:
-				//   active  (!archive, !trash) → archive | trash
-				//   archived (archive, !trash) → restore | trash
-				//   trashed (trash)             → restore | delete-permanently
-				//
-				// Bulk gating must only enable an action when EVERY selected
-				// note is in a state where that action is valid. The lib
-				// guards each op so mixed-state slips would be silent no-ops,
-				// but UX-wise we hide invalid actions instead.
-
-				// Archive: every note must be active (no archived, no trashed) AND no
-				// undecryptable in the selection — the per-item undecryptable menu drops
-				// archive too, so the bulk mirror does the same.
-				if (!noteFlags.includesArchived && !noteFlags.includesTrashed && !noteFlags.includesUndecryptable) {
-					menuButtons.push({
-						id: "bulkArchive",
-						title: t("archive_selected"),
-						icon: "archive",
-						requiresOnline: true,
-						onPress: async () => {
-							await runBulk({
-								items: selectedNotesLive,
-								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-								op: n => notesLib.archive({ note: n })
-							})
-						}
-					})
-				}
-
-				// Restore: every note must be archived OR trashed (no active). For an
-				// undecryptable selection the per-item menu only offers restore when the
-				// note is trashed (archive isn't possible on undecryptable items), so the
-				// bulk mirror requires everyTrashed when undecryptable is in the mix.
-				if (noteFlags.everyArchivedOrTrashed && (!noteFlags.includesUndecryptable || noteFlags.everyTrashed)) {
-					menuButtons.push({
-						id: "bulkRestore",
-						title: t("restore_selected"),
-						icon: "restore",
-						requiresOnline: true,
-						onPress: async () => {
-							await runBulk({
-								items: selectedNotesLive,
-								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-								op: n => notesLib.restore({ note: n })
-							})
-						}
-					})
-				}
-
-				// Trash: every note must be active OR archived (no trashed).
-				if (!noteFlags.includesTrashed) {
-					menuButtons.push({
-						id: "bulkTrash",
-						title: t("trash_selected"),
-						icon: "trash",
-						destructive: true,
-						requiresOnline: true,
-						onPress: async () => {
-							await runBulk({
-								items: selectedNotesLive,
-								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-								confirm: {
-									title: t("trash_selected"),
-									message: t("are_you_sure_trash_selected_notes"),
-									okText: t("trash"),
-									cancelText: t("cancel"),
-									destructive: true
-								},
-								op: n => notesLib.trash({ note: n })
-							})
-						}
-					})
-				}
-
-				// Permanent delete: every note must already be trashed.
-				if (noteFlags.everyTrashed) {
-					menuButtons.push({
-						id: "bulkDelete",
-						title: t("delete_selected"),
-						icon: "delete",
-						destructive: true,
-						requiresOnline: true,
-						onPress: async () => {
-							await runBulk({
-								items: selectedNotesLive,
-								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-								confirm: {
-									title: t("delete_selected"),
-									message: t("are_you_sure_delete_selected_notes"),
-									okText: t("delete"),
-									cancelText: t("cancel"),
-									destructive: true
-								},
-								op: n => notesLib.delete({ note: n })
-							})
-						}
-					})
-				}
+			if (bulkActionAvailability.archive) {
+				menuButtons.push({
+					id: "bulkArchive",
+					title: t("archive_selected"),
+					icon: "archive",
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedNotesLive,
+							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+							op: n => notesLib.archive({ note: n })
+						})
+					}
+				})
 			}
 
-			if (noteFlags.participantOfEveryAndNotOwner) {
+			if (bulkActionAvailability.restore) {
+				menuButtons.push({
+					id: "bulkRestore",
+					title: t("restore_selected"),
+					icon: "restore",
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedNotesLive,
+							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+							op: n => notesLib.restore({ note: n })
+						})
+					}
+				})
+			}
+
+			if (bulkActionAvailability.trash) {
+				menuButtons.push({
+					id: "bulkTrash",
+					title: t("trash_selected"),
+					icon: "trash",
+					destructive: true,
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedNotesLive,
+							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+							confirm: {
+								title: t("trash_selected"),
+								message: t("are_you_sure_trash_selected_notes"),
+								okText: t("trash"),
+								cancelText: t("cancel"),
+								destructive: true
+							},
+							op: n => notesLib.trash({ note: n })
+						})
+					}
+				})
+			}
+
+			if (bulkActionAvailability.delete) {
+				menuButtons.push({
+					id: "bulkDelete",
+					title: t("delete_selected"),
+					icon: "delete",
+					destructive: true,
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedNotesLive,
+							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+							confirm: {
+								title: t("delete_selected"),
+								message: t("are_you_sure_delete_selected_notes"),
+								okText: t("delete"),
+								cancelText: t("cancel"),
+								destructive: true
+							},
+							op: n => notesLib.delete({ note: n })
+						})
+					}
+				})
+			}
+
+			if (bulkActionAvailability.leave) {
 				menuButtons.push({
 					id: "bulkLeave",
 					title: t("leave_selected"),

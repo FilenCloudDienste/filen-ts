@@ -1,6 +1,6 @@
 import { type LucideIcon } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
-import { type NoteSelectionFlags } from "@filen/shared"
+import { noteBulkActionAvailability, type NoteSelectionFlags } from "@filen/shared"
 import { NOTE_ACTION_DEFS } from "@/features/notes/lib/actionDefs"
 import { type NotesKey } from "@/lib/i18n"
 
@@ -28,91 +28,90 @@ export type NoteBulkActionDescriptor =
 	| (NoteBulkActionDescriptorShared & { run: "submenu"; submenu: "type" | "tags" })
 
 // Pure gating builder for the notes bulk-action bar — mirrors bulkActionBar.logic.ts's
-// driveBulkActions (variant/flag-gated descriptor list, testable without rendering anything). Ported
-// from mobile's notesHeaderMenuBuilders.ts bulk-button gating (behavior only): pin/favorite/type/
-// tags/duplicate/export need decrypted metadata (suppressed selection-wide by includesUndecryptable);
-// type additionally needs write access to every selected note; archive/restore/trash/delete are
-// owner-only lifecycle transitions (everyOwned) further gated by the selection's own archive/trash
-// state; leave is the non-owner-participant mirror of trash/delete.
+// driveBulkActions (variant/flag-gated descriptor list, testable without rendering anything). Which
+// of the eleven actions the selection permits is the shared decision matrix (identical on mobile);
+// this function only attaches the descriptor/icon/label/dispatch apparatus that stays per-app.
 export function noteBulkActions(flags: NoteSelectionFlags): NoteBulkActionDescriptor[] {
 	const descriptors: NoteBulkActionDescriptor[] = []
+	const availability = noteBulkActionAvailability(flags)
 
-	if (!flags.includesUndecryptable) {
-		// Pin/Favorite first — most-tapped, matches mobile's own ordering. SET semantics: the label/icon
-		// reflect the value this bar will apply to the WHOLE selection, not any single note's own flag.
+	// Pin/Favorite first — most-tapped, matches mobile's own ordering. SET semantics: the label/icon
+	// reflect the value this bar will apply to the WHOLE selection, not any single note's own flag.
+	if (availability.pin) {
 		descriptors.push({
 			id: "pin",
 			...(flags.includesPinned ? NOTE_ACTION_DEFS.unpin : NOTE_ACTION_DEFS.pin),
 			run: "direct"
 		})
+	}
+
+	if (availability.favorite) {
 		descriptors.push({
 			id: "favorite",
 			...(flags.includesFavorited ? NOTE_ACTION_DEFS.unfavorite : NOTE_ACTION_DEFS.favorite),
 			run: "direct"
 		})
+	}
 
-		if (flags.hasWriteAccessToAll) {
-			descriptors.push({ id: "type", ...NOTE_ACTION_DEFS.type, run: "submenu", submenu: "type" })
-		}
+	if (availability.type) {
+		descriptors.push({ id: "type", ...NOTE_ACTION_DEFS.type, run: "submenu", submenu: "type" })
+	}
 
+	if (availability.tags) {
 		descriptors.push({ id: "tags", ...NOTE_ACTION_DEFS.tags, run: "submenu", submenu: "tags" })
+	}
+
+	if (availability.duplicate) {
 		descriptors.push({ id: "duplicate", ...NOTE_ACTION_DEFS.duplicate, run: "direct" })
+	}
+
+	if (availability.export) {
 		descriptors.push({ id: "export", ...NOTE_ACTION_DEFS.export, run: "direct" })
 	}
 
-	if (flags.everyOwned) {
-		// Archive: every note must be active (no archived, no trashed) and none undecryptable — the
-		// per-note menu drops Archive for an undecryptable note too, the bulk mirror does the same.
-		if (!flags.includesArchived && !flags.includesTrashed && !flags.includesUndecryptable) {
-			descriptors.push({ id: "archive", ...NOTE_ACTION_DEFS.archive, run: "direct" })
-		}
-
-		// Restore: every note must be archived or trashed. For an undecryptable selection the per-note
-		// menu only offers Restore once trashed (Archive itself is impossible on an undecryptable note),
-		// so the bulk mirror requires everyTrashed once undecryptable is in the mix.
-		if (flags.everyArchivedOrTrashed && (!flags.includesUndecryptable || flags.everyTrashed)) {
-			descriptors.push({ id: "restore", ...NOTE_ACTION_DEFS.restore, run: "direct" })
-		}
-
-		// Trash: none of the selection may already be trashed. Survives includesUndecryptable — a
-		// pure-uuid disposition, same as the per-note TRASH descriptor. Unlike the single-note menu's
-		// own (non-destructive) Trash entry, the bulk button IS destructive-styled — the confirm dialog
-		// this "dialog" run kind opens makes it a deliberate, confirmed disposition on every selected
-		// note at once, so it gets the same red treatment as bulk Delete/Leave rather than inheriting
-		// NOTE_ACTION_DEFS.trash's single-note styling.
-		if (!flags.includesTrashed) {
-			descriptors.push({
-				id: "trash",
-				...NOTE_ACTION_DEFS.trash,
-				destructive: true,
-				run: "dialog",
-				dialogKind: "trashSelected"
-			})
-		}
-
-		// Delete permanently: every note must already be trashed.
-		if (flags.everyTrashed) {
-			descriptors.push({
-				id: "delete",
-				...NOTE_ACTION_DEFS.deletePermanently,
-				run: "dialog",
-				dialogKind: "deleteSelected"
-			})
-		}
+	if (availability.archive) {
+		descriptors.push({ id: "archive", ...NOTE_ACTION_DEFS.archive, run: "direct" })
 	}
 
-	if (flags.participantOfEveryAndNotOwner) {
+	if (availability.restore) {
+		descriptors.push({ id: "restore", ...NOTE_ACTION_DEFS.restore, run: "direct" })
+	}
+
+	// Unlike the single-note menu's own (non-destructive) Trash entry, the bulk button IS
+	// destructive-styled — the confirm dialog this "dialog" run kind opens makes it a deliberate,
+	// confirmed disposition on every selected note at once, so it gets the same red treatment as bulk
+	// Delete/Leave rather than inheriting NOTE_ACTION_DEFS.trash's single-note styling.
+	if (availability.trash) {
+		descriptors.push({
+			id: "trash",
+			...NOTE_ACTION_DEFS.trash,
+			destructive: true,
+			run: "dialog",
+			dialogKind: "trashSelected"
+		})
+	}
+
+	if (availability.delete) {
+		descriptors.push({
+			id: "delete",
+			...NOTE_ACTION_DEFS.deletePermanently,
+			run: "dialog",
+			dialogKind: "deleteSelected"
+		})
+	}
+
+	if (availability.leave) {
 		descriptors.push({ id: "leave", ...NOTE_ACTION_DEFS.leave, run: "dialog", dialogKind: "leaveSelected" })
 	}
 
 	return descriptors
 }
 
-// The single gate behind BOTH the bar's Trash button and the notes.trash shortcut: derived from the
-// same descriptor list the bar renders, so the two can never disagree about when a bulk trash is
-// offered.
+// The single gate behind BOTH the bar's Trash button and the notes.trash shortcut: reads the same
+// shared matrix field the bar's own descriptor list is built from, so the two can never disagree
+// about when a bulk trash is offered.
 export function canBulkTrashNotes(flags: NoteSelectionFlags): boolean {
-	return noteBulkActions(flags).some(descriptor => descriptor.run === "dialog" && descriptor.dialogKind === "trashSelected")
+	return noteBulkActionAvailability(flags).trash
 }
 
 // Bulk ids whose dispatch is an unconditional SDK write. Export is left enabled (cache-first, and the

@@ -71,5 +71,6 @@ export const {
 	mergeInflight,
 	buildInflightEntries,
 	pruneAndRebaseNoteOutboxAfterPush,
-	reconcileNoteOutboxAgainstCloud
+	reconcileNoteOutboxAgainstCloud,
+	noteBulkActionAvailability
 } = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")
