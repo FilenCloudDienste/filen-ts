@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import { type DriveItem } from "@/types"
 import { normalizeFilePathForExpo, normalizeFilePathForSdk } from "@/lib/paths"
-import { run, Semaphore, isAbortError } from "@filen/shared"
+import { run, Semaphore, isAbortError, InFlight } from "@filen/shared"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { Platform } from "react-native"
 import useHttpStore from "@/stores/useHttp.store"
@@ -60,7 +60,7 @@ export const VERSION = THUMBNAILS_VERSION
 export const DIRECTORY = THUMBNAILS_DIRECTORY
 
 class Thumbnails {
-	private readonly pending = new Map<string, Promise<string | null>>()
+	private readonly pending = new InFlight<string, string | null>()
 	private readonly failures = new Map<string, number>()
 	private readonly semaphore = new Semaphore(MAX_CONCURRENT)
 	private readonly clearBarrier = new ClearBarrier()
@@ -286,38 +286,18 @@ class Thumbnails {
 				throw new Error("Max thumbnail generation failures reached")
 			}
 
-			const pendingPromise = this.pending.get(uuid)
-
-			if (pendingPromise) {
-				return pendingPromise
-			}
-
-			const promise = this.doGenerate({
-				item: params.item,
-				uuid,
-				kind,
-				outputPath,
-				width: params.width ?? DEFAULT_WIDTH,
-				quality: params.quality ?? DEFAULT_QUALITY,
-				videoTimestamp: params.videoTimestamp ?? DEFAULT_VIDEO_TIMESTAMP,
-				signal: params.signal
-			})
-
-			this.pending.set(uuid, promise)
-
-			const result = await run(async defer => {
-				defer(() => {
-					this.pending.delete(uuid)
+			return await this.pending.coalesce(uuid, () =>
+				this.doGenerate({
+					item: params.item,
+					uuid,
+					kind,
+					outputPath,
+					width: params.width ?? DEFAULT_WIDTH,
+					quality: params.quality ?? DEFAULT_QUALITY,
+					videoTimestamp: params.videoTimestamp ?? DEFAULT_VIDEO_TIMESTAMP,
+					signal: params.signal
 				})
-
-				return await promise
-			})
-
-			if (!result.success) {
-				throw result.error
-			}
-
-			return result.data
+			)
 		})
 
 		if (!result.success) {
@@ -622,94 +602,90 @@ class Thumbnails {
 		const width = params.width ?? DEFAULT_WIDTH
 		const quality = params.quality ?? DEFAULT_QUALITY
 
-		const promise = (async (): Promise<string | null> => {
-			try {
-				ensureDirectory()
+		const result = await run(() =>
+			this.pending.coalesce(params.uuid, async (): Promise<string | null> => {
+				try {
+					ensureDirectory()
 
-				if (isImage) {
-					// An SDK decode on the client's own gate — NOT behind the semaphore, exactly like the
-					// remote path (see MAX_CONCURRENT).
-					const outcome = await generateImageFromPathViaSdk({
-						localPath: normalizeFilePathForSdk(params.localUri),
-						uuid: params.uuid,
-						outputPath,
-						signal: params.signal
-					})
-
-					// A verdict is not a failure: it settles the uuid for this session the way generate()
-					// does and leaves the ledger untouched, so the next online flip lets a row ask again.
-					if (outcome === "settled") {
-						this.unavailable.add(params.uuid)
-
-						return null
-					}
-				} else {
-					// Real JS-side native work (frame extraction + manipulator resize) — behind the semaphore.
-					await this.semaphore.acquire()
-
-					try {
-						await generateVideo({
-							localSourceUri: params.localUri,
+					if (isImage) {
+						// An SDK decode on the client's own gate — NOT behind the semaphore, exactly like the
+						// remote path (see MAX_CONCURRENT).
+						const outcome = await generateImageFromPathViaSdk({
+							localPath: normalizeFilePathForSdk(params.localUri),
+							uuid: params.uuid,
 							outputPath,
-							width,
-							quality,
-							timestamp: params.videoTimestamp ?? DEFAULT_VIDEO_TIMESTAMP,
 							signal: params.signal
 						})
-					} finally {
-						this.semaphore.release()
-					}
-				}
 
-				this.available.add(params.uuid)
+						// A verdict is not a failure: it settles the uuid for this session the way generate()
+						// does and leaves the ledger untouched, so the next online flip lets a row ask again.
+						if (outcome === "settled") {
+							this.unavailable.add(params.uuid)
 
-				// Bytes on disk outrank any earlier session verdict for this uuid.
-				this.unavailable.delete(params.uuid)
+							return null
+						}
+					} else {
+						// Real JS-side native work (frame extraction + manipulator resize) — behind the semaphore.
+						await this.semaphore.acquire()
 
-				return normalizeFilePathForExpo(outputPath)
-			} catch (error) {
-				// Same exemptions as doGenerate, and for the same reason the signal test comes first:
-				// the from-path call carries both cancellation channels, so an abort arrives as either
-				// the bindings' AbortError or a FilenSdkError Cancelled. isAbortError was missing here
-				// while its sibling had it, which counted a cancelled upload as a real failure.
-				if (
-					!params.signal?.aborted &&
-					!isAbortError(error) &&
-					!(error instanceof OfflineAbortError) &&
-					!(error instanceof ProviderUnavailableError)
-				) {
-					logger.error("thumbnails", "generateFromLocalFile failed", {
-						uuid: params.uuid,
-						ext: FileSystem.Paths.extname(params.name).toLowerCase().trim(),
-						kind,
-						platform: Platform.OS,
-						error: String(error)
-					})
-
-					this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
-				}
-
-				for (const path of [outputPath, `${outputPath}.tmp`]) {
-					const partial = new FileSystem.File(path)
-
-					if (partial.exists) {
 						try {
-							partial.delete()
-						} catch {
-							// Best-effort cleanup of partial output
+							await generateVideo({
+								localSourceUri: params.localUri,
+								outputPath,
+								width,
+								quality,
+								timestamp: params.videoTimestamp ?? DEFAULT_VIDEO_TIMESTAMP,
+								signal: params.signal
+							})
+						} finally {
+							this.semaphore.release()
 						}
 					}
+
+					this.available.add(params.uuid)
+
+					// Bytes on disk outrank any earlier session verdict for this uuid.
+					this.unavailable.delete(params.uuid)
+
+					return normalizeFilePathForExpo(outputPath)
+				} catch (error) {
+					// Same exemptions as doGenerate, and for the same reason the signal test comes first:
+					// the from-path call carries both cancellation channels, so an abort arrives as either
+					// the bindings' AbortError or a FilenSdkError Cancelled. isAbortError was missing here
+					// while its sibling had it, which counted a cancelled upload as a real failure.
+					if (
+						!params.signal?.aborted &&
+						!isAbortError(error) &&
+						!(error instanceof OfflineAbortError) &&
+						!(error instanceof ProviderUnavailableError)
+					) {
+						logger.error("thumbnails", "generateFromLocalFile failed", {
+							uuid: params.uuid,
+							ext: FileSystem.Paths.extname(params.name).toLowerCase().trim(),
+							kind,
+							platform: Platform.OS,
+							error: String(error)
+						})
+
+						this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
+					}
+
+					for (const path of [outputPath, `${outputPath}.tmp`]) {
+						const partial = new FileSystem.File(path)
+
+						if (partial.exists) {
+							try {
+								partial.delete()
+							} catch {
+								// Best-effort cleanup of partial output
+							}
+						}
+					}
+
+					throw error
 				}
-
-				throw error
-			} finally {
-				this.pending.delete(params.uuid)
-			}
-		})()
-
-		this.pending.set(params.uuid, promise)
-
-		const result = await run(async () => await promise)
+			})
+		)
 
 		if (!result.success) {
 			logger.warn("thumbnails", "generateFromLocalFile run wrapper failed", { uuid: params.uuid, error: result.error })

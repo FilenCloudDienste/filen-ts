@@ -299,6 +299,7 @@ vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 import cameraUploadState from "@/features/cameraUpload/cameraUploadState"
 import cameraUpload, { type Config } from "@/features/cameraUpload/cameraUpload"
+import { InFlight } from "@filen/shared"
 import secureStore from "@/lib/secureStore"
 import auth from "@/lib/auth"
 import transfers from "@/features/transfers/transfers"
@@ -493,8 +494,9 @@ beforeEach(() => {
 	cameraUpload.cancel()
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	;(cameraUpload as any).ensureParentDirectoryExistsCache.clear()
+	// its entries self-remove on settle, but replace it defensively — InFlight has no clear()
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	;(cameraUpload as any).ensureParentDirectoryExistsInFlight.clear()
+	;(cameraUpload as any).ensureParentDirectoryExistsInFlight = new InFlight()
 	setupDefaultMocks()
 })
 

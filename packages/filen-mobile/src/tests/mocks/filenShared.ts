@@ -54,3 +54,8 @@ export async function run(fn: (defer: (cleanup: () => void) => void) => Promise<
 }
 
 export const createExecutableTimeout = vi.fn()
+
+// The real InFlight is a plain Map wrapper with no timing-sensitive behavior (unlike Semaphore's
+// no-op above), so there is nothing to fake — pull it through vi.importActual, bypassing this
+// factory's own interception of the bare specifier.
+export const { InFlight } = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")

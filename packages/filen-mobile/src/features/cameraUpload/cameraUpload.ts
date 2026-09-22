@@ -21,7 +21,7 @@ import { PauseSignal } from "@/lib/signals"
 import transfers from "@/features/transfers/transfers"
 import * as FileSystem from "expo-file-system"
 import { fileHash } from "@preeternal/react-native-file-hash"
-import { run, Semaphore, fastLocaleCompare } from "@filen/shared"
+import { run, Semaphore, fastLocaleCompare, InFlight } from "@filen/shared"
 import useCameraUploadStore from "@/features/cameraUpload/store/useCameraUpload.store"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { randomUUID } from "expo-crypto"
@@ -396,7 +396,7 @@ class CameraUpload {
 	// Dedupes concurrent createDir calls for the same parent before the TTL cache above
 	// populates: the first caller creates the promise, the rest await it. Entries remove
 	// themselves once settled, so a failed createDir can be retried.
-	private readonly ensureParentDirectoryExistsInFlight = new Map<string, Promise<AnyNormalDir>>()
+	private readonly ensureParentDirectoryExistsInFlight = new InFlight<string, AnyNormalDir>()
 
 	public constructor() {
 		events.subscribe("secureStoreChange", ({ key }) => {
@@ -1288,15 +1288,11 @@ class CameraUpload {
 		// populates, every concurrent delta for one album fired its own createDir round
 		// trip (server-side get-or-create under a global drive lock — correct, but N
 		// serialized round trips). The first caller creates the in-flight promise, the
-		// rest await it; a failed promise is removed in the finally below so retries work.
-		const inFlight = this.ensureParentDirectoryExistsInFlight.get(cacheKey)
-
-		if (inFlight) {
-			return await inFlight
-		}
-
+		// rest await it; entries remove themselves once settled, so a failed createDir
+		// can be retried.
 		const remoteDir = config.remoteDir
-		const promise = (async () => {
+
+		return await this.ensureParentDirectoryExistsInFlight.coalesce(cacheKey, async () => {
 			const { authedSdkClient } = await auth.getSdkClients()
 			const dir = new AnyNormalDir.Dir(
 				await authedSdkClient.createDir(remoteDir, parentDirName, {
@@ -1307,19 +1303,7 @@ class CameraUpload {
 			this.ensureParentDirectoryExistsCache.set(cacheKey, { value: dir, expires: Date.now() + 15000 })
 
 			return dir
-		})()
-
-		this.ensureParentDirectoryExistsInFlight.set(cacheKey, promise)
-
-		try {
-			return await promise
-		} finally {
-			// Only remove the entry if it is still OUR promise, so a slow settle cannot
-			// evict a newer in-flight created after this one finished.
-			if (this.ensureParentDirectoryExistsInFlight.get(cacheKey) === promise) {
-				this.ensureParentDirectoryExistsInFlight.delete(cacheKey)
-			}
-		}
+		})
 	}
 
 	public async sync(params?: {

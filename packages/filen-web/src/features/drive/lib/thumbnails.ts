@@ -1,6 +1,6 @@
 import * as Comlink from "comlink"
 import { onlineManager } from "@tanstack/react-query"
-import { Semaphore } from "@filen/shared"
+import { Semaphore, InFlight } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
 import { readThumbnailBlob, deleteThumbnail as deleteThumbnailBlob } from "@/features/drive/lib/thumbCache"
@@ -120,7 +120,7 @@ onlineManager.subscribe(online => {
 })
 // uuid -> the in-flight generation attempt, so two concurrent callers for the same uuid share one
 // generation instead of each starting their own.
-const pending = new Map<string, Promise<string | null>>()
+const pending = new InFlight<string, string | null>()
 // uuid -> the live state of a SEEDED pending entry (seedThumbnail), for exactly as long as that entry
 // exists. `joined` is flipped by getThumbnailUrl the moment it hands the seat's promise to a caller;
 // the seat reads it to decide whether an unanswered production has anyone left to answer. An ordinary
@@ -258,13 +258,7 @@ export async function getThumbnailUrl(item: DriveItem, deps: ThumbnailServiceDep
 		return inFlight
 	}
 
-	const attempt = generate(deps, item, category, uuid).finally(() => {
-		pending.delete(uuid)
-	})
-
-	pending.set(uuid, attempt)
-
-	return attempt
+	return pending.coalesce(uuid, () => generate(deps, item, category, uuid))
 }
 
 // Publishes an already-available production as THE in-flight generation for this item's uuid, so any
@@ -315,49 +309,54 @@ export function seedThumbnail(
 
 	const seat = { joined: false }
 
-	const attempt = (async () => {
-		let result: ThumbSeedResult
-
-		try {
-			result = await produce()
-		} catch (e) {
-			log.warn("thumbnails", "seedThumbnail: production failed", uuid, e)
-
-			result = { type: "unanswered" }
-		}
-
-		if (result.type === "unanswered") {
-			// The fallback the doc comment above describes. It runs INSIDE generate's semaphore — the
-			// download this seat displaced for the caller that joined it would have been gated too — and
-			// inherits that path's whole retry/blacklist accounting, so nothing here counts a failure of
-			// its own. Unjoined, there is no displaced download and no caller: the answer is nobody's.
-			return seat.joined ? await generate(deps, item, category, uuid) : null
-		}
-
-		// An empty buffer is neither bytes to render nor a verdict to report; there is nothing here to
-		// persist either way.
-		if (result.type === "none" || result.bytes.length === 0) {
-			return null
-		}
-
-		// Same ordering hazard generate() documents at length: the Blob must be built BEFORE the
-		// persist call, because storeThumbnail's Comlink.transfer detaches this very buffer
-		// synchronously at the postMessage, leaving a zero-length view behind.
-		const attachedBytes = result.bytes as Uint8Array<ArrayBuffer>
-		const blob = new Blob([attachedBytes])
-
-		await deps.storeThumbnail(uuid, attachedBytes).catch((e: unknown) => {
-			log.warn("thumbnails", "seedThumbnail: persist failed", uuid, e)
-		})
-
-		return finalize(deps, uuid, blob)
-	})().finally(() => {
-		pending.delete(uuid)
-		seats.delete(uuid)
-	})
-
 	seats.set(uuid, seat)
-	pending.set(uuid, attempt)
+
+	// pending.has(uuid) was just checked false above, and this function is synchronous up to here
+	// (no await before this point) — nothing else can touch `pending` for this uuid in between, so
+	// coalesce() can only ever register a fresh entry here, never join an existing one. `seats` is a
+	// web-only side table InFlight does not model, so its cleanup stays a manual .finally() chained
+	// onto coalesce()'s own promise.
+	void pending
+		.coalesce(uuid, async () => {
+			let result: ThumbSeedResult
+
+			try {
+				result = await produce()
+			} catch (e) {
+				log.warn("thumbnails", "seedThumbnail: production failed", uuid, e)
+
+				result = { type: "unanswered" }
+			}
+
+			if (result.type === "unanswered") {
+				// The fallback the doc comment above describes. It runs INSIDE generate's semaphore — the
+				// download this seat displaced for the caller that joined it would have been gated too — and
+				// inherits that path's whole retry/blacklist accounting, so nothing here counts a failure of
+				// its own. Unjoined, there is no displaced download and no caller: the answer is nobody's.
+				return seat.joined ? await generate(deps, item, category, uuid) : null
+			}
+
+			// An empty buffer is neither bytes to render nor a verdict to report; there is nothing here to
+			// persist either way.
+			if (result.type === "none" || result.bytes.length === 0) {
+				return null
+			}
+
+			// Same ordering hazard generate() documents at length: the Blob must be built BEFORE the
+			// persist call, because storeThumbnail's Comlink.transfer detaches this very buffer
+			// synchronously at the postMessage, leaving a zero-length view behind.
+			const attachedBytes = result.bytes as Uint8Array<ArrayBuffer>
+			const blob = new Blob([attachedBytes])
+
+			await deps.storeThumbnail(uuid, attachedBytes).catch((e: unknown) => {
+				log.warn("thumbnails", "seedThumbnail: persist failed", uuid, e)
+			})
+
+			return finalize(deps, uuid, blob)
+		})
+		.finally(() => {
+			seats.delete(uuid)
+		})
 }
 
 // Drops a uuid's rendered thumbnail (revoking its objectURL) and its on-disk cache entry, drops any

@@ -351,6 +351,7 @@ vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 import cameraUploadState from "@/features/cameraUpload/cameraUploadState"
 import cameraUpload, { type Config, canonicalRemoteName, MAX_BACKGROUND_UPLOAD_ABORTS } from "@/features/cameraUpload/cameraUpload"
+import { InFlight } from "@filen/shared"
 import { AppState } from "react-native"
 import {
 	modifyAssetPathOnCollision,
@@ -499,9 +500,10 @@ beforeEach(() => {
 	// The parent-directory cache lives on the singleton and survives cancel(),
 	// so clear it explicitly between tests to avoid stale dir refs from earlier
 	// tests masking createDir call assertions. Same for the in-flight dedupe map
-	// (its entries self-remove on settle, but clear defensively).
+	// (its entries self-remove on settle, but replace it defensively — InFlight has
+	// no clear()).
 	;(cameraUpload as any).ensureParentDirectoryExistsCache.clear()
-	;(cameraUpload as any).ensureParentDirectoryExistsInFlight.clear()
+	;(cameraUpload as any).ensureParentDirectoryExistsInFlight = new InFlight()
 	setupDefaultMocks()
 })
 
@@ -6328,8 +6330,12 @@ describe("B5 — ensureParentDirectoryExists in-flight dedupe", () => {
 
 		expect(createDir).toHaveBeenCalledTimes(2)
 
-		// The in-flight map is empty once everything settled.
-		expect(((cameraUpload as any).ensureParentDirectoryExistsInFlight as Map<string, unknown>).size).toBe(0)
+		// The in-flight slot for this album is gone once everything settled — mirrors
+		// ensureParentDirectoryExists's own cacheKey derivation: `${remoteDir uuid}:${parentDirName}`,
+		// and ENABLED_CONFIG.remoteDir's uuid is the literal "remote-uuid".
+		const cacheKey = "remote-uuid:camera roll"
+
+		expect(((cameraUpload as any).ensureParentDirectoryExistsInFlight as InFlight<string, unknown>).has(cacheKey)).toBe(false)
 	})
 })
 

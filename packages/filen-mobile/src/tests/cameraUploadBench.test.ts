@@ -423,6 +423,7 @@ vi.mock("@/lib/signals", () => ({
 
 import cameraUploadState from "@/features/cameraUpload/cameraUploadState"
 import cameraUpload, { type Config } from "@/features/cameraUpload/cameraUpload"
+import { InFlight } from "@filen/shared"
 import { ml, MediaType } from "@/tests/mocks/expoMediaLibrary"
 import { fs } from "@/tests/mocks/expoFileSystem"
 import {
@@ -677,8 +678,9 @@ function resetSyncState(): void {
 	cameraUploadState.hashes.clear()
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	;(cameraUpload as any).ensureParentDirectoryExistsCache.clear()
+	// its entries self-remove on settle, but replace it defensively — InFlight has no clear()
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	;(cameraUpload as any).ensureParentDirectoryExistsInFlight.clear()
+	;(cameraUpload as any).ensureParentDirectoryExistsInFlight = new InFlight()
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	;(cameraUpload as any).uploadFailures.clear()
 }
