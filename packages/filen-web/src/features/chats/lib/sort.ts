@@ -1,4 +1,10 @@
-import { fastLocaleCompare, parseNumbersFromString, isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
+import {
+	parseNumbersFromString,
+	isBlocked,
+	EMPTY_BLOCKED_USERS,
+	resolveChatParticipantsDisplayName,
+	type BlockedUsers
+} from "@filen/shared"
 import type { Chat, ChatMessagePartial } from "@filen/sdk-rs"
 import { contactDisplayName } from "@/features/contacts/components/contactsList.logic"
 
@@ -42,10 +48,9 @@ export function isChatUndecryptable(chat: Chat): boolean {
 	return chat.key === undefined
 }
 
-// Display-name derivation for unnamed chats — ported from mobile's `chatDisplayName`
-// (`lib/decryption.ts:44-69`): an explicit chat.name wins; a 1:1 (exactly one other participant)
-// falls back to that participant's nickName-or-email; a group with no name joins every other
-// participant's nickName-or-email, locale-sorted for a stable, readable order.
+// Display-name derivation for unnamed chats: an explicit chat.name wins, else the other
+// participant(s)' nickName-or-email via @filen/shared's resolveChatParticipantsDisplayName
+// (shared with mobile's chatDisplayName, lib/decryption.ts).
 //
 // Undecryptable-placeholder COPY (mobile's i18n `cannot_decrypt_${uuid}` string) lives in the
 // component that renders chat rows (chatRow.tsx's `t("chatUndecryptable")`) — same posture
@@ -62,23 +67,7 @@ export function chatDisplayName(chat: Chat, currentUserId: bigint, soloFallback:
 
 	const others = chat.participants.filter(p => p.userId !== currentUserId)
 
-	// Every other participant left (the backend keeps a chat alive with only yourself in it) —
-	// joining an empty list would render an empty title everywhere.
-	if (others.length === 0) {
-		return soloFallback
-	}
-
-	if (others.length === 1) {
-		const other = others[0]
-
-		if (other) {
-			return other.nickName && other.nickName.length > 0 ? other.nickName : other.email
-		}
-	}
-
-	const displayNames = others.map(p => (p.nickName && p.nickName.length > 0 ? p.nickName : p.email))
-
-	return [...displayNames].sort(fastLocaleCompare).join(", ")
+	return resolveChatParticipantsDisplayName(others, soloFallback)
 }
 
 // Participant-derived avatar image (mobile's own rule, list/chat/index.tsx): the other participants sans

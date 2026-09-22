@@ -1,5 +1,5 @@
 import { type DriveItem, type Note, type Chat, type ChatMessage, type NoteTag } from "@/types"
-import { fastLocaleCompare, driveItemName } from "@filen/shared"
+import { driveItemName, resolveChatParticipantsDisplayName } from "@filen/shared"
 
 export function cannotDecryptPlaceholder(uuid: string): string {
 	return `cannot_decrypt_${uuid}`
@@ -53,25 +53,7 @@ export function chatDisplayName(chat: Chat, currentUserId: bigint, soloFallback:
 	// 1:1 fallback: use the other participant's display name
 	const others = chat.participants.filter(p => p.userId !== currentUserId)
 
-	// Every other participant left (the backend keeps a chat alive with only yourself in it) —
-	// joining an empty list would render an empty title everywhere.
-	if (others.length === 0) {
-		return soloFallback
-	}
-
-	if (others.length === 1) {
-		const other = others[0]
-
-		if (other) {
-			return other.nickName && other.nickName.length > 0 ? other.nickName : other.email
-		}
-	}
-
-	// Multi-party: render the joined list of display names, sorted to match the pre-decryption-feature behavior
-	// (chats/list/chat/index.tsx previously sorted via fastLocaleCompare before joining).
-	const displayNames = others.map(p => (p.nickName && p.nickName.length > 0 ? p.nickName : p.email))
-
-	return displayNames.sort(fastLocaleCompare).join(", ")
+	return resolveChatParticipantsDisplayName(others, soloFallback)
 }
 
 export function messageDisplayBody(message: ChatMessage): string {

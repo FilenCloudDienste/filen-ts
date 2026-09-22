@@ -219,7 +219,6 @@ describe("messageDisplayBody", () => {
 describe("chatDisplayName", () => {
 	const ME = 1n
 	const OTHER_A = 2n
-	const OTHER_B = 3n
 	const SOLO = "Just you"
 
 	it("returns the placeholder when chat is undecryptable", () => {
@@ -252,54 +251,6 @@ describe("chatDisplayName", () => {
 		).toBe("Ann")
 	})
 
-	it("1:1 fallback uses the other participant's nickName when present", () => {
-		expect(
-			chatDisplayName(
-				chat("c1", false, {
-					participants: [participant(ME, "me@x.com"), participant(OTHER_A, "a@x.com", "Ann")]
-				}),
-				ME,
-				SOLO
-			)
-		).toBe("Ann")
-	})
-
-	it("1:1 fallback uses the other participant's email when no nickName", () => {
-		expect(
-			chatDisplayName(
-				chat("c1", false, {
-					participants: [participant(ME, "me@x.com"), participant(OTHER_A, "a@x.com")]
-				}),
-				ME,
-				SOLO
-			)
-		).toBe("a@x.com")
-	})
-
-	it("1:1 fallback ignores an empty nickName and uses email", () => {
-		expect(
-			chatDisplayName(
-				chat("c1", false, {
-					participants: [participant(ME, "me@x.com"), participant(OTHER_A, "a@x.com", "")]
-				}),
-				ME,
-				SOLO
-			)
-		).toBe("a@x.com")
-	})
-
-	it("multi-party fallback joins names with comma", () => {
-		expect(
-			chatDisplayName(
-				chat("c1", false, {
-					participants: [participant(ME, "me@x.com"), participant(OTHER_A, "a@x.com", "Ann"), participant(OTHER_B, "b@x.com")]
-				}),
-				ME,
-				SOLO
-			)
-		).toBe("Ann, b@x.com")
-	})
-
 	it("bigint userId comparison filters self out correctly", () => {
 		expect(
 			chatDisplayName(
@@ -310,18 +261,6 @@ describe("chatDisplayName", () => {
 				SOLO
 			)
 		).toBe("Ann")
-	})
-
-	it("multi-party fallback sorts display names regardless of participant order", () => {
-		expect(
-			chatDisplayName(
-				chat("c1", false, {
-					participants: [participant(ME, "me@x.com"), participant(OTHER_B, "b@x.com"), participant(OTHER_A, "a@x.com", "Ann")]
-				}),
-				ME,
-				SOLO
-			)
-		).toBe("Ann, b@x.com")
 	})
 
 	it("returns the solo fallback when every other participant left (only self remains)", () => {
