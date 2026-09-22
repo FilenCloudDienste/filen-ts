@@ -1,7 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { ratePasswordStrength } from "@filen/shared"
-
-import { isValidEmail, isPasswordStrongEnough } from "@/features/auth/utils"
+import { isValidEmail, isPasswordStrongEnough, ratePasswordStrength } from "@filen/shared"
 
 describe("isValidEmail", () => {
 	it("accepts a standard email address", () => {
@@ -37,6 +35,9 @@ describe("isValidEmail", () => {
 	})
 })
 
+// Fixtures run through the REAL ratePasswordStrength (not hand-built rating objects) so the gate is
+// tested against the same tier boundaries the forms see: length >= 10 plus 2 of 3 character classes
+// rates normal, all 3 classes rates strong (>= 16 best), everything below rates weak.
 describe("isPasswordStrongEnough", () => {
 	it("rejects a null strength (empty password)", () => {
 		expect(isPasswordStrongEnough(null)).toBe(false)
@@ -44,6 +45,14 @@ describe("isPasswordStrongEnough", () => {
 
 	it("rejects a weak password", () => {
 		expect(isPasswordStrongEnough(ratePasswordStrength("abc"))).toBe(false)
+	})
+
+	it("rejects a weak rating at the length boundary (9 chars, all character classes)", () => {
+		expect(isPasswordStrongEnough(ratePasswordStrength("Abcdefg!@"))).toBe(false)
+	})
+
+	it("rejects a weak rating with enough length but only one character class", () => {
+		expect(isPasswordStrongEnough(ratePasswordStrength("abcdefghijkl"))).toBe(false)
 	})
 
 	it("accepts a normal-strength password", () => {
