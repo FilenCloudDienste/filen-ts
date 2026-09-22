@@ -6,7 +6,7 @@ import {
 	getHideCompletedChecklist,
 	type NotesViewMode
 } from "@/features/notes/lib/preferences"
-import type { NoteTagsSortBy } from "@/features/notes/lib/sort"
+import type { NoteTagsSortBy } from "@filen/shared"
 
 // The view-mode preference is read as a query for the same reason drive reads its own
 // (useViewModePreferencesQuery): keeps every async read on one primitive (caching, refetch) instead of

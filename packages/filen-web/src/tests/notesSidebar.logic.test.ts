@@ -15,8 +15,7 @@ import {
 	UNTAGGED_TAG_UUID,
 	type NotesSidebarRow
 } from "@/features/notes/components/notesSidebar.logic"
-import { DEFAULT_NOTE_TAGS_SORT_BY, type NoteTagsSortBy } from "@/features/notes/lib/sort"
-import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
+import { deriveBlockedUsers, EMPTY_BLOCKED_USERS, DEFAULT_NOTE_TAGS_SORT_BY, type NoteTagsSortBy } from "@filen/shared"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes — pad a short label, same as notesSort.test.ts.
 function testUuid(label: string): UuidStr {

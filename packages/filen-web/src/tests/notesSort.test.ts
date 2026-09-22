@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Note, NoteHistory, NoteParticipant, NoteTag, UuidStr } from "@filen/sdk-rs"
 import {
-	DEFAULT_NOTE_TAGS_SORT_BY,
 	filterNotesBySearch,
 	filterNoteTagsBySearch,
 	isNoteOwner,
@@ -13,10 +12,9 @@ import {
 	sortAndFilterNotes,
 	sortNotes,
 	sortNoteHistory,
-	sortNoteTags,
-	tagDisplayName,
-	tagLastActivity
+	tagDisplayName
 } from "@/features/notes/lib/sort"
+import { DEFAULT_NOTE_TAGS_SORT_BY, sortNoteTags, tagLastActivity } from "@filen/shared"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a
 // short label the same way drive.test.ts's testUuid does.
@@ -376,15 +374,16 @@ describe("sortNoteTags", () => {
 	it("defaults to lastActivityDesc semantics for an unrecognized sortBy value", () => {
 		const notesByTag = { [workTag.uuid]: [], [personalTag.uuid]: [] }
 
-		expect(sortNoteTags(tags, "not-a-real-mode" as unknown as typeof DEFAULT_NOTE_TAGS_SORT_BY, notesByTag).map(t => t.name)).toEqual([
-			"Personal",
-			"Work"
-		])
+		expect(
+			sortNoteTags(tags, "not-a-real-mode" as unknown as typeof DEFAULT_NOTE_TAGS_SORT_BY, notesByTag, tagDisplayName).map(
+				t => t.name
+			)
+		).toEqual(["Personal", "Work"])
 	})
 
 	it("sorts nameAsc/nameDesc via locale compare", () => {
-		expect(sortNoteTags(tags, "nameAsc", {}).map(t => t.name)).toEqual(["Personal", "Work"])
-		expect(sortNoteTags(tags, "nameDesc", {}).map(t => t.name)).toEqual(["Work", "Personal"])
+		expect(sortNoteTags(tags, "nameAsc", {}, tagDisplayName).map(t => t.name)).toEqual(["Personal", "Work"])
+		expect(sortNoteTags(tags, "nameDesc", {}, tagDisplayName).map(t => t.name)).toEqual(["Work", "Personal"])
 	})
 
 	it("sorts by note count when notesByTag differs from tag edited time", () => {
@@ -393,8 +392,8 @@ describe("sortNoteTags", () => {
 			[personalTag.uuid]: [mockNote()]
 		}
 
-		expect(sortNoteTags(tags, "notesCountDesc", notesByTag).map(t => t.name)).toEqual(["Work", "Personal"])
-		expect(sortNoteTags(tags, "notesCountAsc", notesByTag).map(t => t.name)).toEqual(["Personal", "Work"])
+		expect(sortNoteTags(tags, "notesCountDesc", notesByTag, tagDisplayName).map(t => t.name)).toEqual(["Work", "Personal"])
+		expect(sortNoteTags(tags, "notesCountAsc", notesByTag, tagDisplayName).map(t => t.name)).toEqual(["Personal", "Work"])
 	})
 
 	it("breaks activity/count ties by name", () => {
@@ -403,14 +402,14 @@ describe("sortNoteTags", () => {
 			mockNoteTag({ uuid: testUuid("a"), name: "Alpha", editedTimestamp: 1n })
 		]
 
-		expect(sortNoteTags(tied, "lastActivityDesc", {}).map(t => t.name)).toEqual(["Alpha", "Bravo"])
+		expect(sortNoteTags(tied, "lastActivityDesc", {}, tagDisplayName).map(t => t.name)).toEqual(["Alpha", "Bravo"])
 	})
 
 	it("does not mutate the input array", () => {
 		const input = [...tags]
 		const snapshot = [...input]
 
-		sortNoteTags(input, "nameAsc", {})
+		sortNoteTags(input, "nameAsc", {}, tagDisplayName)
 
 		expect(input).toEqual(snapshot)
 	})

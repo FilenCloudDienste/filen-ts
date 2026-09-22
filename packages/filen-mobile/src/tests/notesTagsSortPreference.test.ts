@@ -8,7 +8,8 @@ vi.mock("@/lib/decryption", () => ({
 	tagDisplayName: (tag: { name?: string }) => tag.name ?? ""
 }))
 
-vi.mock("@filen/shared", () => ({
+vi.mock("@filen/shared", async () => ({
+	...(await vi.importActual<typeof import("@filen/shared")>("@filen/shared")),
 	fastLocaleCompare: (a: string, b: string) => a.localeCompare(b)
 }))
 

@@ -1,12 +1,5 @@
-import {
-	sortAndFilterNotes,
-	sortNotes,
-	filterNotesBySearch,
-	sortNoteTags,
-	tagDisplayName,
-	type NoteTagsSortBy
-} from "@/features/notes/lib/sort"
-import { isBlocked, type BlockedUsers } from "@filen/shared"
+import { sortAndFilterNotes, sortNotes, filterNotesBySearch, tagDisplayName } from "@/features/notes/lib/sort"
+import { isBlocked, type BlockedUsers, sortNoteTags, type NoteTagsSortBy } from "@filen/shared"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 
 // Pure view-model builders for the two-view sidebar. No React, no cache — the
@@ -331,7 +324,7 @@ export function buildTagsViewRows({
 	// Appended AFTER the sort — always the bottom row regardless of the tags-sort preference — and run
 	// through the SAME search filter as a real tag so it is findable by label or by member note.
 	const visible = [
-		...sortNoteTags(filterTagsForView(tags, notesByTag, search, bodies), sortBy, notesByTag),
+		...sortNoteTags(filterTagsForView(tags, notesByTag, search, bodies), sortBy, notesByTag, tagDisplayName),
 		...(untaggedNotes.length > 0 ? filterTagsForView([createUntaggedTag(untaggedLabel)], notesByTag, search, bodies) : [])
 	]
 	const rows: NotesSidebarRow[] = []

@@ -20,7 +20,7 @@ import {
 	getHideCompletedChecklist,
 	setHideCompletedChecklist
 } from "@/features/notes/lib/preferences"
-import { DEFAULT_NOTE_TAGS_SORT_BY } from "@/features/notes/lib/sort"
+import { DEFAULT_NOTE_TAGS_SORT_BY } from "@filen/shared"
 
 beforeEach(() => {
 	kvStore.clear()

@@ -1,7 +1,7 @@
 import { type, type Type } from "arktype"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import type { NoteType } from "@filen/sdk-rs"
-import { NOTE_TAGS_SORT_OPTIONS, DEFAULT_NOTE_TAGS_SORT_BY, type NoteTagsSortBy } from "@/features/notes/lib/sort"
+import { NOTE_TAGS_SORT_OPTIONS, DEFAULT_NOTE_TAGS_SORT_BY, type NoteTagsSortBy } from "@filen/shared"
 
 // The sidebar's two-view toggle, persisted with the same kv-backed convention drive's view mode uses
 // (features/drive/lib/preferences.ts): a single global value, arktype-validated on read, self-healing

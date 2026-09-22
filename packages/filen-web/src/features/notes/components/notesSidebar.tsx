@@ -24,14 +24,14 @@ import {
 	type LucideIcon
 } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
-import { cn, aggregateNoteSelectionFlags } from "@filen/shared"
+import { cn, aggregateNoteSelectionFlags, DEFAULT_NOTE_TAGS_SORT_BY, type NoteTagsSortBy } from "@filen/shared"
 import { useNotes } from "@/features/notes/queries/notes"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
 import { useNotesViewModeQuery, useNoteTagsSortByQuery } from "@/features/notes/queries/preferences"
 import { useAccountQuery } from "@/queries/account"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { setNotesViewMode, DEFAULT_NOTES_VIEW_MODE, setNoteTagsSortBy, type NotesViewMode } from "@/features/notes/lib/preferences"
-import { DEFAULT_NOTE_TAGS_SORT_BY, tagDisplayName, isNoteUndecryptable, type NoteTagsSortBy } from "@/features/notes/lib/sort"
+import { tagDisplayName, isNoteUndecryptable } from "@/features/notes/lib/sort"
 import {
 	buildNotesGroupedRows,
 	buildNotesByTag,
