@@ -16,12 +16,14 @@ function nodeBuffer(): BufferLike {
 
 const UUID_SUB = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
-// NEW path format (what this app's own share dialog builds): <origin>/f|d/<uuid>(#|%23)<hexkey>,
-// f = FILE, d = DIRECTORY. The key group is hex-only — the builder always hex-encodes.
+// NEW path format (what the current web app builds): <origin>/f|d/<uuid>(#|%23)<hexkey>. Its letters
+// read f = file, d = directory, the opposite of the legacy naming below; the scheme stays as shipped.
+// The key group is hex-only: the builder always hex-encodes.
 const NEW_LINK_RE = new RegExp(`^https?://(?:app|drive)\\.filen\\.io/([fd])/(${UUID_SUB})(?:#|%23)([0-9a-f]+)`, "i")
 
-// LEGACY hash-router format (old-web built these; mobile still does): <origin>/#/d|f/<uuid>(%23|#)<key>,
-// letters DELIBERATELY swapped vs NEW (d = FILE, f = DIRECTORY). The key group is broader than NEW's:
+// LEGACY hash-router format (old web built these; mobile still does): <origin>/#/d|f/<uuid>(%23|#)<key>,
+// where d = download (a file) and f = folder. Both eras stay recognised so old links keep working.
+// The key group is broader than NEW's:
 // a genuinely raw (non-hex) key of 32+ chars is still a legacy link that must keep being recognized,
 // not just a hex-encoded one.
 const LEGACY_LINK_RE = new RegExp(`^https?://(?:app|drive)\\.filen\\.io/#/([df])/(${UUID_SUB})(?:%23|#)([A-Za-z0-9]{32,})`, "i")

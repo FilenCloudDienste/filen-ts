@@ -12,8 +12,8 @@ import { parseFilenPublicLink } from "@filen/shared"
 // out of the fragment, and no caller may log it.
 //
 // FORMAT ERAS (both recognized; only the NEW one is emitted):
-//   NEW (this app, path-based):   https://app.filen.io/f/<uuid>#<hexkey>   → f = FILE, d = DIRECTORY
-//   LEGACY (old-web, hash-router): https://app.filen.io/#/f/<uuid>%23<key> → f = DIRECTORY, d = FILE
+//   NEW (this app, path-based):   https://app.filen.io/f/<uuid>#<hexkey>   → f = file, d = directory (this app's own scheme)
+//   LEGACY (old-web, hash-router): https://app.filen.io/#/f/<uuid>%23<key> → f = folder, d = download (a file): the legacy naming
 // The letters are DELIBERATELY swapped between eras. PARSING both eras is owned by @filen/shared's
 // parseFilenPublicLink (used by mobile directly, wrapped here as a thin `type` → `kind` mapper so
 // this app's own PublicLinkTarget shape doesn't change); only the BUILD side (prefixes below) stays
@@ -23,7 +23,8 @@ import { parseFilenPublicLink } from "@filen/shared"
 // pins where the SPA is served, never carries key material.
 export const PUBLIC_LINK_ORIGIN = "https://app.filen.io"
 
-// NEW-format prefixes (path-based, swapped from legacy): /f/ = file, /d/ = directory. The builder
+// NEW-format prefixes (path-based; the letters deliberately differ from the legacy naming, where
+// f meant folder and d meant download): /f/ = file, /d/ = directory. The builder
 // appends `<uuid>#<hexkey>` with a LITERAL '#' so the key lands in a real fragment.
 export const FILE_PUBLIC_LINK_URL_PREFIX = `${PUBLIC_LINK_ORIGIN}/f/`
 export const DIRECTORY_PUBLIC_LINK_URL_PREFIX = `${PUBLIC_LINK_ORIGIN}/d/`
