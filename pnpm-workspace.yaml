@@ -14,6 +14,11 @@ blockExoticSubdeps: false
 # react-native-worklets' Babel plugin requires these without declaring them; the hidden hoist
 # would otherwise hand it web's Babel 8 and Metro crashes.
 packageExtensions:
+  # Imports react-native without declaring it, so it would resolve whichever copy pnpm
+  # hoists; a second copy in the mobile type program breaks ViewStyle assignability.
+  '@expo/react-native-action-sheet':
+    peerDependencies:
+      react-native: '*'
   react-native-worklets:
     dependencies:
       '@babel/generator': ^7.29.7
