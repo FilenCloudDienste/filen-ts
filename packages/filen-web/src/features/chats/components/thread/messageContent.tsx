@@ -1,8 +1,8 @@
 import { Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import type { Chat } from "@filen/sdk-rs"
-import { cn } from "@filen/shared"
-import { segmentMessage, isEmojiOnly } from "@/features/chats/lib/regexed.logic"
+import { cn, segmentMessage, isEmojiOnly } from "@filen/shared"
+import { hardenLinkHref } from "@/features/chats/lib/regexed.logic"
 import { emojiForShortcode, customEmojiImageForShortcode } from "@/features/chats/lib/emoji"
 import { parseFilenPublicLink } from "@/features/chats/lib/embeds.logic"
 import { TrustedExternalLink } from "@/features/chats/components/thread/trustedExternalLink"
@@ -10,8 +10,10 @@ import { contactDisplayName } from "@/features/contacts/components/contactsList.
 
 // Renders one message body from the pure segment list. Every branch emits a React text node or element —
 // never parsed HTML, never dangerouslySetInnerHTML — so injection is structurally impossible.
-// Links are hardened at the segment layer (regexed.logic.hardenLinkHref) AND rendered with
-// rel="noopener noreferrer nofollow" + target="_blank". A genuinely EXTERNAL link (not this app's own
+// A "link" segment carries the RAW matched string (@filen/shared's chatMessageSegments no longer
+// hardens it), so the "link" case below hardens it here (regexed.logic.hardenLinkHref) before it is
+// ever rendered — a rejected href falls back to plain inert text. A hardened link renders with
+// rel="noopener noreferrer nofollow" + target="_blank"; a genuinely EXTERNAL link (not this app's own
 // public-link format) additionally routes through TrustedExternalLink — a one-time-per-domain trust
 // confirmation before it's ever opened; a Filen link stays a plain anchor (same domain, resolved
 // through the authenticated in-app client either way, never gated). Emoji shortcodes resolve to the
@@ -19,7 +21,7 @@ import { contactDisplayName } from "@/features/contacts/components/contactsList.
 // yields to the custom pack on a colliding id — see its own comment); a shortcode that resolves to
 // neither stays literal. A message whose entire (trimmed) body is emoji shortcodes renders them
 // "jumbo" — larger glyphs/images and no surrounding text sizing — mirroring mobile's emojiSize
-// heuristic (regexed.logic.ts's isEmojiOnly).
+// heuristic (@filen/shared's isEmojiOnly).
 export function MessageContent({ chat, text }: { chat: Chat; text: string | undefined }) {
 	const { t } = useTranslation("chats")
 	const segments = segmentMessage(text)
@@ -50,20 +52,29 @@ export function MessageContent({ chat, text }: { chat: Chat; text: string | unde
 						)
 
 					case "link": {
+						// Harden the raw match once, here — the segment itself carries only the unvalidated
+						// string. A rejected href (non-http(s), unparseable) falls back to plain inert text,
+						// same as classify() used to do before hardening moved out of the segment layer.
+						const href = hardenLinkHref(segment.raw)
+
+						if (href === null) {
+							return <Fragment key={index}>{segment.raw}</Fragment>
+						}
+
 						const linkClassName = "text-primary underline underline-offset-2 hover:no-underline"
 
 						// A Filen public link is this app's own domain — no external-navigation trust gate,
 						// same posture as the embed card below it (filenLinkCard.tsx) opens with.
-						if (parseFilenPublicLink(segment.href) !== null) {
+						if (parseFilenPublicLink(href) !== null) {
 							return (
 								<a
 									key={index}
-									href={segment.href}
+									href={href}
 									target="_blank"
 									rel="noopener noreferrer nofollow"
 									className={linkClassName}
 								>
-									{segment.href}
+									{href}
 								</a>
 							)
 						}
@@ -71,7 +82,7 @@ export function MessageContent({ chat, text }: { chat: Chat; text: string | unde
 						return (
 							<TrustedExternalLink
 								key={index}
-								href={segment.href}
+								href={href}
 								className={linkClassName}
 							/>
 						)

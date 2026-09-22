@@ -12,8 +12,10 @@ vi.mock("@filen/sdk-rs", () => ({
 	ChatTypingType: { Up: 0, Down: 1 }
 }))
 
-// regexed.tsx's Mention component resolves display names through contactDisplayName — pulled
-// through from the real module (not reimplemented here) since it's pure, platform-free logic.
+// regexed.tsx's Mention component resolves display names through contactDisplayName, and now also
+// consumes segmentMessage/isEmojiOnly directly (both already pulled through actual in the shared mock
+// factory below) — pulled through from the real module rather than reimplemented here since they're
+// pure, platform-free logic.
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
 	parseNumbersFromString(s: unknown) {
@@ -241,13 +243,7 @@ vi.mock("@/lib/systemPresentation", () => ({
 
 // ─── Actual imports ───────────────────────────────────────────────────────────
 
-import {
-	MENTIONS,
-	CODE_REGEX,
-	EMOJI_REGEX_WITH_SKIN_TONES,
-	LINE_BREAK_REGEX,
-	customEmojisSet
-} from "@/features/chats/components/chat/message/regexed"
+import { customEmojisSet } from "@/features/chats/components/chat/message/regexed"
 
 import { createMenuButtons } from "@/features/chats/components/list/chat/menu"
 import { flushInflightMessagesWithAlert } from "@/features/chats/components/chat/input"
@@ -270,149 +266,6 @@ function makeChat(overrides: Partial<Chat> = {}): Chat {
 		...overrides
 	} as Chat
 }
-
-// ─── MENTIONS ─────────────────────────────────────────────────────────────────
-
-describe("MENTIONS", () => {
-	it("matches email-format mention @user@domain.com", () => {
-		const input = "hello @alice@example.com how are you"
-		const matches = input.match(new RegExp(MENTIONS.source, MENTIONS.flags))
-		expect(matches).not.toBeNull()
-		expect(matches).toContain("@alice@example.com")
-	})
-
-	it("matches @everyone", () => {
-		const input = "hey @everyone listen up"
-		const matches = input.match(new RegExp(MENTIONS.source, MENTIONS.flags))
-		expect(matches).not.toBeNull()
-		expect(matches).toContain("@everyone")
-	})
-
-	it("does NOT match a bare @word with no domain", () => {
-		const input = "hello @alice"
-		const matches = input.match(new RegExp(MENTIONS.source, MENTIONS.flags))
-		expect(matches).toBeNull()
-	})
-
-	it("matches multiple email-format mentions in one string", () => {
-		const input = "@a@b.com and @c@d.org"
-		const matches = input.match(new RegExp(MENTIONS.source, MENTIONS.flags))
-		expect(matches).toHaveLength(2)
-	})
-
-	it("split('@').length === 3 holds for email-format matches (routing logic precondition)", () => {
-		// The decorator routes email-format mentions by checking split('@').length === 3
-		const match = "@alice@example.com"
-		expect(match.split("@").length).toBe(3)
-	})
-
-	it("@everyone has split('@').length of 2 and startsWith('@everyone') (routing logic precondition)", () => {
-		const match = "@everyone"
-		expect(match.startsWith("@everyone")).toBe(true)
-		// length is 2, not 3 — routing uses startsWith as fallback
-		expect(match.split("@").length).toBe(2)
-	})
-})
-
-// ─── CODE_REGEX ───────────────────────────────────────────────────────────────
-
-describe("CODE_REGEX", () => {
-	it("matches inline code block ```code```", () => {
-		const input = "here is ```console.log('hi')``` for you"
-		const matches = input.match(new RegExp(CODE_REGEX.source, CODE_REGEX.flags))
-		expect(matches).not.toBeNull()
-		expect(matches![0]).toBe("```console.log('hi')```")
-	})
-
-	it("matched code split('```').length >= 3 (routing logic precondition)", () => {
-		const match = "```code here```"
-		expect(match.split("```").length).toBeGreaterThanOrEqual(3)
-	})
-
-	it("matches multi-line code blocks", () => {
-		const input = "```\nline1\nline2\n```"
-		const matches = input.match(new RegExp(CODE_REGEX.source, CODE_REGEX.flags))
-		expect(matches).not.toBeNull()
-		expect(matches![0]).toContain("line1")
-		expect(matches![0]).toContain("line2")
-	})
-
-	it("does NOT match an unclosed backtick run", () => {
-		const input = "```only two ticks"
-		const matches = input.match(new RegExp(CODE_REGEX.source, CODE_REGEX.flags))
-		expect(matches).toBeNull()
-	})
-
-	it("matches two separate code blocks in one message", () => {
-		const input = "```a``` and ```b```"
-		const matches = input.match(new RegExp(CODE_REGEX.source, CODE_REGEX.flags))
-		expect(matches).toHaveLength(2)
-	})
-})
-
-// ─── EMOJI_REGEX_WITH_SKIN_TONES ──────────────────────────────────────────────
-
-describe("EMOJI_REGEX_WITH_SKIN_TONES", () => {
-	it("matches :thumbsup:", () => {
-		const input = "Nice work :thumbsup: mate"
-		const matches = input.match(new RegExp(EMOJI_REGEX_WITH_SKIN_TONES.source, EMOJI_REGEX_WITH_SKIN_TONES.flags))
-		expect(matches).not.toBeNull()
-		expect(matches).toContain(":thumbsup:")
-	})
-
-	it("matches emoji with skin tone modifier :thumbsup::skin-tone-2:", () => {
-		const input = ":thumbsup::skin-tone-2:"
-		const matches = input.match(new RegExp(EMOJI_REGEX_WITH_SKIN_TONES.source, EMOJI_REGEX_WITH_SKIN_TONES.flags))
-		expect(matches).not.toBeNull()
-		expect(matches![0]).toBe(":thumbsup::skin-tone-2:")
-	})
-
-	it("does NOT match :abc def: (contains space)", () => {
-		const input = ":abc def:"
-		const matches = input.match(new RegExp(EMOJI_REGEX_WITH_SKIN_TONES.source, EMOJI_REGEX_WITH_SKIN_TONES.flags))
-		expect(matches).toBeNull()
-	})
-
-	it("matches emoji with plus sign in name :+1:", () => {
-		const input = "great :+1: job"
-		const matches = input.match(new RegExp(EMOJI_REGEX_WITH_SKIN_TONES.source, EMOJI_REGEX_WITH_SKIN_TONES.flags))
-		expect(matches).not.toBeNull()
-		expect(matches).toContain(":+1:")
-	})
-
-	it("matches emoji with underscore :thumbs_up:", () => {
-		const input = ":thumbs_up:"
-		const matches = input.match(new RegExp(EMOJI_REGEX_WITH_SKIN_TONES.source, EMOJI_REGEX_WITH_SKIN_TONES.flags))
-		expect(matches).not.toBeNull()
-	})
-})
-
-// ─── LINE_BREAK_REGEX ─────────────────────────────────────────────────────────
-
-describe("LINE_BREAK_REGEX", () => {
-	it("matches newline character", () => {
-		const input = "line1\nline2"
-		const matches = input.match(new RegExp(LINE_BREAK_REGEX.source, LINE_BREAK_REGEX.flags))
-		expect(matches).not.toBeNull()
-		expect(matches).toContain("\n")
-	})
-
-	it("matches multiple newlines and returns one entry per newline", () => {
-		const input = "a\nb\nc"
-		const matches = input.match(new RegExp(LINE_BREAK_REGEX.source, LINE_BREAK_REGEX.flags))
-		expect(matches).toHaveLength(2)
-	})
-
-	it("does NOT match strings without newlines", () => {
-		const input = "no newline here"
-		const matches = input.match(new RegExp(LINE_BREAK_REGEX.source, LINE_BREAK_REGEX.flags))
-		expect(matches).toBeNull()
-	})
-
-	it("matched newline includes('\\n') is true (routing logic precondition)", () => {
-		expect("\n".includes("\n")).toBe(true)
-	})
-})
 
 // ─── customEmojisSet ─────────────────────────────────────────────────────────
 

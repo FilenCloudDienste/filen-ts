@@ -19,9 +19,10 @@ export function TrustedExternalLink({ href, className }: { href: string; classNa
 	const domain = externalLinkDomain(href)
 	const [pendingConfirm, setPendingConfirm] = useState(false)
 
-	// No stable domain to gate on (an unparseable href — see externalLinkDomain's own doc comment on why
-	// this is effectively unreachable given hardenLinkHref's upstream http(s)-only filter) — render a
-	// plain, ungated anchor rather than block navigation on a confirmation that could never resolve.
+	// No stable domain to gate on (an unparseable href — see externalLinkDomain's own doc comment: this
+	// stays reachable in principle since segments no longer arrive pre-hardened, though the one current
+	// caller, messageContent.tsx, always hardens first) — render a plain, ungated anchor rather than
+	// block navigation on a confirmation that could never resolve.
 	if (domain === null) {
 		return (
 			<a

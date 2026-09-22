@@ -56,9 +56,10 @@ export async function run(fn: (defer: (cleanup: () => void) => void) => Promise<
 export const createExecutableTimeout = vi.fn()
 
 // InFlight, the drive-listing splice rules, isHiddenName, fileIconKey, the notes outbox helpers,
-// partitionNotesByBucket and shareIdentityFromRole are plain data helpers with no timing-sensitive
-// behavior (unlike Semaphore's no-op above), so there is nothing to fake — pull them through
-// vi.importActual, bypassing this factory's own interception of the bare specifier.
+// partitionNotesByBucket, shareIdentityFromRole and the chat message segmentation pipeline are plain
+// data helpers with no timing-sensitive behavior (unlike Semaphore's no-op above), so there is nothing
+// to fake — pull them through vi.importActual, bypassing this factory's own interception of the bare
+// specifier.
 export const {
 	InFlight,
 	keepAgainstIncoming,
@@ -81,5 +82,7 @@ export const {
 	removeTracksFromPlaylist,
 	reorderPlaylistFile,
 	pruneDeadTracks,
-	shareIdentityFromRole
+	shareIdentityFromRole,
+	segmentMessage,
+	isEmojiOnly
 } = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")

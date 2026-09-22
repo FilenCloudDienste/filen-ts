@@ -554,9 +554,6 @@ importers:
       reanimated-color-picker:
         specifier: ^5.1.3
         version: 5.1.3(5dd4c3dc785a72ad353f7afaf0c8a120)
-      regexify-string:
-        specifier: ^1.0.19
-        version: 1.0.19
       rehype-sanitize:
         specifier: ^6.0.0
         version: 6.0.0
@@ -8051,9 +8048,6 @@ packages:
 
   regenerator-runtime@0.13.11:
     resolution: {integrity: sha512-kY1AZVr2Ra+t+piVaJ4gxaFaReZVH40AKNo7UCX6W+dEwBo/2oZJzqfuN1qLq1oL45o56cPaTXELwrTh8Fpggg==}
-
-  regexify-string@1.0.19:
-    resolution: {integrity: sha512-EREOggl31J6v2Hk3ksPuOof0DMq5QhFfVQ7iDaGQ6BeA1QcrV4rhGvwCES5a72ITMmLBDAOb6cOWbn8/Ja82Ig==}
 
   regexp.prototype.flags@1.5.4:
     resolution: {integrity: sha512-dYqgNSZbDwkaJ2ceRd9ojCGjBq+mOm9LmtXnAnEGyHhN/5R7iDW2TRw3h+o/jCFxus3P2LfWIIiwowAjANm7IA==}
@@ -18758,8 +18752,6 @@ snapshots:
   regenerate@1.4.2: {}
 
   regenerator-runtime@0.13.11: {}
-
-  regexify-string@1.0.19: {}
 
   regexp.prototype.flags@1.5.4:
     dependencies:

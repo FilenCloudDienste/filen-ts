@@ -1,5 +1,3 @@
-import { Fragment } from "react"
-import regexifyString from "regexify-string"
 import { Text } from "@/components/ui/text"
 import View from "@/components/ui/view"
 import { Platform } from "react-native"
@@ -11,19 +9,10 @@ import Image from "@/components/ui/image"
 import { useShallow } from "zustand/shallow"
 import { PressableScale } from "@/components/ui/pressables"
 import { safeParseUrl, extractLinks } from "@/lib/linkParser"
-import { cn, contactDisplayName } from "@filen/shared"
+import { cn, contactDisplayName, segmentMessage, isEmojiOnly } from "@filen/shared"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"
-import { URL_REGEX } from "@/constants"
 import { useTranslation } from "react-i18next"
 import logger from "@/lib/logger"
-
-export const LINE_BREAK_REGEX: RegExp = /\n/gi
-export const CODE_REGEX: RegExp = /```([\s\S]*?)```/gi
-export const EMOJI_REGEX_WITH_SKIN_TONES: RegExp = /:[\d+_a-z-]+(?:::skin-tone-\d+)?:/gi
-export const MENTIONS: RegExp = /(@[\w.-]+@[\w.-]+\.\w+|@everyone)/gi
-export const REGEX: RegExp = new RegExp(
-	`${EMOJI_REGEX_WITH_SKIN_TONES.source}|${CODE_REGEX.source}|${URL_REGEX.source}|${MENTIONS.source}|${LINE_BREAK_REGEX.source}`
-)
 
 export const customEmojisSet = new Set(customEmojis.map(emoji => emoji.id))
 export const customEmojisListRecord: Record<string, string> = Object.fromEntries(
@@ -64,21 +53,7 @@ const Mention = ({
 	)
 }
 
-const CodeBlock = ({ match, fromSelf }: { match: string; fromSelf: boolean }) => {
-	const code = (() => {
-		let code = match.split("```").join("").trim()
-
-		while (code.startsWith("\n")) {
-			code = code.slice(1, code.length)
-		}
-
-		while (code.endsWith("\n")) {
-			code = code.slice(0, code.length - 1)
-		}
-
-		return code
-	})()
-
+const CodeBlock = ({ code, fromSelf }: { code: string; fromSelf: boolean }) => {
 	return (
 		<View className={cn("flex-1 rounded-lg basis-full p-2 shrink-0", fromSelf ? "bg-blue-600" : "bg-background-tertiary")}>
 			<Text
@@ -146,151 +121,159 @@ const Regexed = ({ chat, message, fromSelf }: { chat: Chat; message: ChatMessage
 		useShallow(state => state.inflightMessages[chat.uuid]?.messages.some(m => m.inflightId === message.inflightId))
 	)
 
-	const replaced = (() => {
-		if (!message.inner.message) {
-			return []
-		}
+	const segments = segmentMessage(message.inner.message)
+	// isEmojiOnly(text) replaces the old inverted default (jumbo unless mixed content) — equivalent,
+	// since the old default only ever mattered while at least one emoji was present.
+	const emojiSize = isEmojiOnly(message.inner.message) ? 32 : 20
 
-		const emojiCount = message.inner.message.match(EMOJI_REGEX_WITH_SKIN_TONES)
-		let emojiSize: number | undefined = 32
-
-		if (emojiCount) {
-			const emojiCountJoined = emojiCount.join("")
-
-			if (emojiCountJoined.length !== message.inner.message.trim().length) {
-				emojiSize = 20
-			}
-		}
-
-		const regexed = regexifyString({
-			pattern: REGEX,
-			decorator: match => {
-				if (match.startsWith("@") && (match.split("@").length === 3 || match.startsWith("@everyone"))) {
-					const email = match.slice(1).trim()
-
-					if (email === "everyone") {
-						return (
-							<Mention
-								name={t("everyone")}
-								fromSelf={fromSelf}
-							/>
-						)
-					}
-
-					if (!email.includes("@")) {
-						return (
-							<Mention
-								name={t("unknown")}
-								fromSelf={fromSelf}
-							/>
-						)
-					}
-
-					const foundParticipant = chat.participants.find(p => p.email === email)
-
-					// The mention text is the email itself — render it rather than "unknown" so
-					// mentions of users who since left the chat stay attributable.
-					if (!foundParticipant) {
-						return (
-							<Mention
-								name={email}
-								fromSelf={fromSelf}
-							/>
-						)
-					}
-
-					return (
-						<Mention
-							name={contactDisplayName(foundParticipant)}
-							participant={foundParticipant}
-							fromSelf={fromSelf}
-						/>
-					)
-				}
-
-				if (match.split("```").length >= 3) {
-					return (
-						<CodeBlock
-							match={match}
-							fromSelf={fromSelf}
-						/>
-					)
-				}
-
-				if (match.startsWith("https://") && extractLinks(match).length === 1 && safeParseUrl(match)) {
-					return (
-						<Link
-							match={match}
-							fromSelf={fromSelf}
-							inflight={isInflight}
-						/>
-					)
-				}
-
-				if (match.includes("\n")) {
-					return <View className="flex-1 w-full h-2 basis-full shrink-0 bg-transparent" />
-				}
-
-				const customEmoji = match.split(":").join("").trim()
-
-				if (customEmojisSet.has(customEmoji) && customEmojisListRecord[customEmoji]) {
-					return (
-						<Image
-							cachePolicy="disk"
-							contentFit="contain"
-							style={{
-								width: emojiSize,
-								height: emojiSize
-							}}
-							source={{
-								uri: customEmojisListRecord[customEmoji]
-							}}
-							className="shrink-0 bg-transparent"
-							recyclingKey={`emoji-${customEmoji}-${emojiSize}`}
-						/>
-					)
-				}
-
-				return match
-			},
-			input: message.inner.message
-		}) as (string | React.ReactElement)[]
-
-		return regexed
-	})()
-
-	if (replaced.length === 0) {
+	if (segments.length === 0) {
 		return null
 	}
 
+	const plainTextClassName = cn(
+		"text-sm shrink-0 flex-wrap text-wrap items-center break-all",
+		fromSelf ? (isInflight ? "text-gray-200" : "text-white") : isInflight ? "text-muted-foreground" : "text-foreground"
+	)
+
 	return (
 		<View className="flex-row flex-wrap text-wrap break-all items-center bg-transparent">
-			{replaced.map((item, index) => {
-				if (typeof item === "string") {
-					if (item.length === 0) {
-						return null
+			{segments.map((segment, index) => {
+				switch (segment.kind) {
+					case "text": {
+						if (segment.value.length === 0) {
+							return null
+						}
+
+						return (
+							<Text
+								key={index}
+								className={plainTextClassName}
+							>
+								{segment.value}
+							</Text>
+						)
 					}
 
-					return (
-						<Text
-							key={index}
-							className={cn(
-								"text-sm shrink-0 flex-wrap text-wrap items-center break-all",
-								fromSelf
-									? isInflight
-										? "text-gray-200"
-										: "text-white"
-									: isInflight
-										? "text-muted-foreground"
-										: "text-foreground"
-							)}
-						>
-							{item}
-						</Text>
-					)
-				}
+					case "linebreak":
+						return (
+							<View
+								key={index}
+								className="flex-1 w-full h-2 basis-full shrink-0 bg-transparent"
+							/>
+						)
 
-				return <Fragment key={index}>{item}</Fragment>
+					case "code":
+						return (
+							<CodeBlock
+								key={index}
+								code={segment.code}
+								fromSelf={fromSelf}
+							/>
+						)
+
+					case "link": {
+						// Segments carry the raw matched string, unvalidated — mobile's own single link
+						// funnel decides eligibility (https-only, exactly one sub-link, safe-parseable),
+						// same gate the pre-rewrite decorator applied inline.
+						if (segment.raw.startsWith("https://") && extractLinks(segment.raw).length === 1 && safeParseUrl(segment.raw)) {
+							return (
+								<Link
+									key={index}
+									match={segment.raw}
+									fromSelf={fromSelf}
+									inflight={isInflight}
+								/>
+							)
+						}
+
+						return (
+							<Text
+								key={index}
+								className={plainTextClassName}
+							>
+								{segment.raw}
+							</Text>
+						)
+					}
+
+					case "mention": {
+						if (segment.everyone) {
+							return (
+								<Mention
+									key={index}
+									name={t("everyone")}
+									fromSelf={fromSelf}
+								/>
+							)
+						}
+
+						if (segment.email === null) {
+							return (
+								<Mention
+									key={index}
+									name={t("unknown")}
+									fromSelf={fromSelf}
+								/>
+							)
+						}
+
+						const foundParticipant = chat.participants.find(p => p.email === segment.email)
+
+						// The mention text is the email itself — render it rather than "unknown" so
+						// mentions of users who since left the chat stay attributable.
+						if (!foundParticipant) {
+							return (
+								<Mention
+									key={index}
+									name={segment.email}
+									fromSelf={fromSelf}
+								/>
+							)
+						}
+
+						return (
+							<Mention
+								key={index}
+								name={contactDisplayName(foundParticipant)}
+								participant={foundParticipant}
+								fromSelf={fromSelf}
+							/>
+						)
+					}
+
+					case "emoji": {
+						if (customEmojisSet.has(segment.shortcode) && customEmojisListRecord[segment.shortcode]) {
+							return (
+								<Image
+									key={index}
+									cachePolicy="disk"
+									contentFit="contain"
+									style={{
+										width: emojiSize,
+										height: emojiSize
+									}}
+									source={{
+										uri: customEmojisListRecord[segment.shortcode]
+									}}
+									className="shrink-0 bg-transparent"
+									recyclingKey={`emoji-${segment.shortcode}-${emojiSize}`}
+								/>
+							)
+						}
+
+						return (
+							<Text
+								key={index}
+								className={plainTextClassName}
+							>
+								{`:${segment.shortcode}:`}
+							</Text>
+						)
+					}
+
+					default:
+						return null
+				}
 			})}
 		</View>
 	)

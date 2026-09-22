@@ -7,9 +7,11 @@ import { parseFilenPublicLink } from "@/features/chats/lib/embeds.logic"
 // is excluded here rather than ever entering the confirm flow.
 //
 // Returns the lowercased hostname to confirm against, or null when no confirmation is warranted (a
-// Filen link, or a url too malformed to have a stable domain identity in the first place — hardenLinkHref
-// already excludes non-http(s) schemes upstream, so a null here is effectively unreachable in practice,
-// but this stays a total function rather than assuming that invariant).
+// Filen link, or a url too malformed to have a stable domain identity in the first place). Segments from
+// @filen/shared's chatMessageSegments carry the raw matched string, unhardened — this function no longer
+// has an upstream guarantee that only ever hands it an http(s) url, so the null path is genuinely
+// reachable whenever a caller passes something un-hardened, not just a defensive total-function guard.
+// The one current call site (messageContent.tsx) always hardens via hardenLinkHref first.
 export function externalLinkDomain(url: string): string | null {
 	if (parseFilenPublicLink(url) !== null) {
 		return null

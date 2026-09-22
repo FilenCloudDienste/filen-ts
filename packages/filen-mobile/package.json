@@ -158,7 +158,6 @@
 		"react-qr-code": "^2.2.0",
 		"readable-stream": "^4.7.0",
 		"reanimated-color-picker": "^5.1.3",
-		"regexify-string": "^1.0.19",
 		"rehype-sanitize": "^6.0.0",
 		"tailwindcss": "^4.3.3",
 		"uniffi-bindgen-react-native": "github:Enduriel/uniffi-bindgen-react-native#e0282ad3eb972eaea74225dcc06247b7a67204dd",

@@ -197,7 +197,7 @@ describe("embedCandidatesForLinks", () => {
 })
 
 describe("extractMessageLinks", () => {
-	it("pulls every 'link' segment's href, in order, from the regexed.logic pipeline", () => {
+	it("pulls every 'link' segment's href, in order, from the shared segmentMessage pipeline", () => {
 		// hardenLinkHref normalizes via `new URL().href`, which appends the root path — matches
 		// segmentMessage's own actual output, not the raw substring the message text contained.
 		expect(extractMessageLinks("see https://a.example.com and https://b.example.com too")).toEqual([

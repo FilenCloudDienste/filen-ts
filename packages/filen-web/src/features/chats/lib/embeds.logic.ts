@@ -1,15 +1,19 @@
 import { parsePublicLink } from "@/features/publicLinks/lib/format.logic"
 import { previewCategoryForName, HEIC_EXTENSIONS, extensionOf } from "@/features/drive/lib/preview.logic"
 import { isAllowedInlineContentType } from "@/lib/sw/protocol"
-import { segmentMessage } from "@/features/chats/lib/regexed.logic"
+import { segmentMessage } from "@filen/shared"
+import { hardenLinkHref } from "@/features/chats/lib/regexed.logic"
 
 // The ONE link-extraction path every embed-aware call site shares (MessageEmbeds' own render, the
-// message-menu's "has an embed to disable" gate) — reuses regexed.logic's already-tokenized "link"
-// segments rather than re-scanning the raw text with a second regex pass.
+// message-menu's "has an embed to disable" gate) — reuses chatMessageSegments's already-tokenized
+// "link" segments rather than re-scanning the raw text with a second regex pass. A segment's raw match
+// is hardened here (never validated upstream any more), and a rejected one is dropped — no plain-text
+// fallback makes sense for an embed-link list.
 export function extractMessageLinks(text: string | undefined): string[] {
 	return segmentMessage(text)
 		.filter((segment): segment is Extract<typeof segment, { kind: "link" }> => segment.kind === "link")
-		.map(segment => segment.href)
+		.map(segment => hardenLinkHref(segment.raw))
+		.filter((href): href is string => href !== null)
 }
 
 // EXACT embed scope: Filen public-link cards + direct image/video ONLY. No YouTube/X/OpenGraph — those
@@ -81,7 +85,7 @@ export function isEmbeddableHttpsUrl(raw: string): boolean {
 	return parsed.protocol === "https:" && parsed.username.length === 0 && parsed.password.length === 0
 }
 
-// One classified embed candidate for a single extracted link (regexed.logic's "link" segments are
+// One classified embed candidate for a single extracted link (chatMessageSegments's "link" segments are
 // the caller's only source of urls — never raw message text re-scanned here). "none" means "render as
 // a plain link, no embed" — the out-of-scope case (YouTube/X/OG/anything else) collapses to this.
 export type EmbedCandidate =
@@ -119,8 +123,8 @@ export function classifyEmbedUrl(url: string): EmbedCandidate {
 export const MAX_MESSAGE_EMBEDS = 6
 
 // Every UNIQUE, in-scope embed candidate for a message's link segments, capped and order-preserving
-// (first occurrence wins on a repeated URL). Pure — the caller (messageContent.tsx) feeds it the "link"
-// segments regexed.logic.ts already extracted, so this never re-implements url extraction.
+// (first occurrence wins on a repeated URL). Pure — callers feed it the urls extractMessageLinks
+// already extracted and hardened, so this never re-implements url extraction or hardening.
 export function embedCandidatesForLinks(urls: readonly string[]): RenderableEmbedCandidate[] {
 	const seen = new Set<string>()
 	const candidates: RenderableEmbedCandidate[] = []
