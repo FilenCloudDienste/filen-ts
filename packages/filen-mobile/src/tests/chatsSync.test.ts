@@ -55,12 +55,19 @@ const { kvStore, chatsState, mockSendMessage, mockFetchChats, mockSetInflightMes
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-// restoreFromDisk delegates the merge to the real @filen/shared mergeInflightQueuesByUnion — pull it
-// through via importActual rather than re-implementing the algorithm here.
-vi.mock("@filen/shared", async () => ({
-	...(await import("@/tests/mocks/filenShared")),
-	mergeInflightQueuesByUnion: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).mergeInflightQueuesByUnion
-}))
+// restoreFromDisk delegates the merge to the real @filen/shared mergeInflightQueuesByUnion, and the
+// outbox drop gate to the real isPermanentRejection/MAX_NON_RETRYABLE_REJECTIONS — pull them through
+// via importActual rather than re-implementing the algorithms here.
+vi.mock("@filen/shared", async () => {
+	const actual = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")
+
+	return {
+		...(await import("@/tests/mocks/filenShared")),
+		mergeInflightQueuesByUnion: actual.mergeInflightQueuesByUnion,
+		isPermanentRejection: actual.isPermanentRejection,
+		MAX_NON_RETRYABLE_REJECTIONS: actual.MAX_NON_RETRYABLE_REJECTIONS
+	}
+})
 
 vi.mock("@/lib/sqlite", async () => (await import("@/tests/mocks/sqliteKv")).createSqliteKvMock(kvStore))
 

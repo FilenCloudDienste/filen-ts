@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { run, Semaphore, createExecutableTimeout } from "@filen/shared"
+import { run, Semaphore, createExecutableTimeout, isPermanentRejection, MAX_NON_RETRYABLE_REJECTIONS } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import { xxHash32 } from "js-xxhash"
 import notes from "@/features/notes/notes"
@@ -12,7 +12,8 @@ import { type Note } from "@/types"
 import sqlite from "@/lib/sqlite"
 import { fetchData as notesQueryFetch, notesQueryGet } from "@/features/notes/queries/useNotesQuery"
 import { noteContentQueryUpdate, noteContentQueryDataUpdatedAt } from "@/features/notes/queries/useNoteContent.query"
-import { unwrapSdkError, isNetworkClassError, isRetryableAuthError } from "@/lib/sdkErrors"
+import { unwrapSdkError } from "@/lib/sdkErrors"
+import { ErrorKind } from "@filen/sdk-rs"
 import logger from "@/lib/logger"
 
 // D3: cheap stable content hash used for overwrite-conflict DETECTION (same xxHash32 the
@@ -28,7 +29,7 @@ export function hashNoteContent(content: string): string {
 // non-network error (e.g. a one-off `ErrorKind.Server`, the catch-all for non-`internal_error` API
 // failures) must NOT lose the first edit. We bound the drop: only after this many CONSECUTIVE
 // non-network, non-auth SDK rejections for the same note do we discard its inflight content.
-export const MAX_NON_RETRYABLE_REJECTIONS = 3
+export { MAX_NON_RETRYABLE_REJECTIONS }
 
 // #41 fix: functional, per-uuid MERGE used to hydrate the disk-restored inflight
 // queue into the (possibly already-populated) store without clobbering edits the
@@ -433,8 +434,9 @@ export class Sync {
 						//      after N attempts.
 						//   4. Any non-SDK error (e.g. abort) is re-thrown unchanged.
 						const unwrapped = unwrapSdkError(e)
+						const kind = unwrapped !== null ? ErrorKind[unwrapped.kind()] : undefined
 
-						if (!unwrapped || isNetworkClassError(e) || isRetryableAuthError(e)) {
+						if (!isPermanentRejection({ hasSdkError: unwrapped !== null, kind })) {
 							throw e
 						}
 

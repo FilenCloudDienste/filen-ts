@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { run, Semaphore, mergeInflightQueuesByUnion } from "@filen/shared"
+import { run, Semaphore, mergeInflightQueuesByUnion, isPermanentRejection, MAX_NON_RETRYABLE_REJECTIONS } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import chats from "@/features/chats/chats"
 import alerts from "@/lib/alerts"
@@ -7,8 +7,8 @@ import { AppState } from "react-native"
 import useChatsStore, { type InflightChatMessages } from "@/features/chats/store/useChats.store"
 import sqlite from "@/lib/sqlite"
 import { fetchData as chatsQueryFetch } from "@/features/chats/queries/useChats.query"
-import { FilenSdkError } from "@filen/sdk-rs"
-import { unwrapSdkError, isNetworkClassError, isRetryableAuthError } from "@/lib/sdkErrors"
+import { FilenSdkError, ErrorKind } from "@filen/sdk-rs"
+import { unwrapSdkError } from "@/lib/sdkErrors"
 import logger from "@/lib/logger"
 
 // D4a (ported from notes sync #40/VC3): a message whose send is rejected by the server with a
@@ -19,7 +19,7 @@ import logger from "@/lib/logger"
 // rejections for the same message do we drop it from the send queue. The error entry (which
 // carries the counter and a message snapshot) is kept so the failure stays visible in the chat
 // until the user retries or removes it.
-export const MAX_NON_RETRYABLE_REJECTIONS = 3
+export { MAX_NON_RETRYABLE_REJECTIONS }
 
 export class Sync {
 	private readonly mutex: Semaphore = new Semaphore(1)
@@ -221,17 +221,18 @@ export class Sync {
 								e instanceof Error ? e : FilenSdkError.hasInner(e) ? FilenSdkError.getInner(e) : new Error(String(e))
 
 							// D4a: classify the rejection exactly like the notes sync (#40/VC3,
-							// via the shared src/lib/sdkErrors classifiers). Network-class errors,
+							// via the shared sdkRetryPolicy classifiers). Network-class errors,
 							// re-auth-recoverable `Unauthenticated` errors and non-SDK errors
 							// (e.g. abort) are KEEP-for-retry and never advance the drop bound.
 							// Any OTHER SDK error (incl. the `Server` catch-all — the only signal
 							// for a permanent rejection the SDK exposes) increments the per-message
 							// consecutive-rejection counter.
 							const unwrapped = unwrapSdkError(e)
-							const isPermanentRejection = unwrapped !== null && !isNetworkClassError(e) && !isRetryableAuthError(e)
+							const kind = unwrapped !== null ? ErrorKind[unwrapped.kind()] : undefined
+							const permanent = isPermanentRejection({ hasSdkError: unwrapped !== null, kind })
 							const previousRejections =
 								useChatsStore.getState().inflightErrors[message.inflightId]?.permanentRejections ?? 0
-							const permanentRejections = isPermanentRejection ? previousRejections + 1 : previousRejections
+							const permanentRejections = permanent ? previousRejections + 1 : previousRejections
 
 							useChatsStore.getState().setInflightErrors(prev => ({
 								...prev,

@@ -1,4 +1,4 @@
-import { run, Semaphore, createExecutableTimeout, createNotePreviewFromContentText } from "@filen/shared"
+import { run, Semaphore, createExecutableTimeout, createNotePreviewFromContentText, isPermanentRejection } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import type { Note } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
@@ -6,6 +6,7 @@ import { queryClient } from "@/queries/client"
 import { i18n } from "@/lib/i18n"
 import { log } from "@/lib/log"
 import { toast } from "sonner"
+import { asErrorDTO } from "@/lib/sdk/errors"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { type OutboxChannelTransport, type OutboxRole } from "@/lib/storage/outboxChannel"
 import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
@@ -22,9 +23,6 @@ import {
 	mergeInflight,
 	inflightContentSchema,
 	noteKindForPreview,
-	isNetworkClassError,
-	isRetryableAuthError,
-	isNonSdkError,
 	reconcileFollower,
 	remoteEnqueueToPatch,
 	newestEntry,
@@ -627,8 +625,14 @@ export class Sync {
 						// reaches MAX_NON_RETRYABLE_REJECTIONS — a one-off transient keeps the edit, a
 						// genuine read-only/permission rejection un-wedges the query after N attempts.
 						const e = push.error
+						const dto = asErrorDTO(e)
 
-						if (isNonSdkError(e) || isNetworkClassError(e) || isRetryableAuthError(e)) {
+						if (
+							!isPermanentRejection({
+								hasSdkError: dto.species === "sdk",
+								kind: dto.species === "sdk" ? dto.kind : undefined
+							})
+						) {
 							throw e
 						}
 

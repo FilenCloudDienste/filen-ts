@@ -1,4 +1,5 @@
 import { FilenSdkError, ErrorKind } from "@filen/sdk-rs"
+import { isNetworkClassErrorKind } from "@filen/shared"
 import i18n from "@/lib/i18n"
 
 export function unwrapSdkError(error: unknown): FilenSdkError | null {
@@ -11,32 +12,13 @@ export function unwrapSdkError(error: unknown): FilenSdkError | null {
 	return null
 }
 
+// Thin adapter over the shared kind-name allowlist: `ErrorKind` is a plain (non-`const`) numeric TS
+// enum with no explicit initializers, so TypeScript emits a reverse map and `ErrorKind[u.kind()]`
+// yields the member name at zero extra cost.
 export function isNetworkClassError(error: unknown): boolean {
 	const unwrapped = unwrapSdkError(error)
 
-	if (!unwrapped) {
-		return false
-	}
-
-	const kind = unwrapped.kind()
-
-	return kind === ErrorKind.Reqwest || kind === ErrorKind.RetryFailed || kind === ErrorKind.Response
-}
-
-// An SDK error whose root cause is a recoverable authentication state rather than a permanent
-// rejection. The SDK surfaces `api_key_not_found` (e.g. right after a password change, before the
-// client re-authenticates) as `ErrorKind.Unauthenticated`. Callers that DROP inflight work on a
-// non-network SDK error (notes sync, #40) must treat this as keep-for-retry: the edit is valid and
-// will succeed once the session refreshes. The SDK only exposes `kind()`/`message()` (no API code),
-// so `kind() === Unauthenticated` is the strongest structured signal available here.
-export function isRetryableAuthError(error: unknown): boolean {
-	const unwrapped = unwrapSdkError(error)
-
-	if (!unwrapped) {
-		return false
-	}
-
-	return unwrapped.kind() === ErrorKind.Unauthenticated
+	return isNetworkClassErrorKind(unwrapped !== null ? ErrorKind[unwrapped.kind()] : undefined)
 }
 
 // Produces the user-facing string for an SDK error. Priority: (1) SERVER/API errors show the

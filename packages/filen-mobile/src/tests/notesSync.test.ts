@@ -90,7 +90,9 @@ vi.mock("react-native", async () => {
 
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
-	createExecutableTimeout: (...args: unknown[]) => mockCreateExecutableTimeout(...args)
+	createExecutableTimeout: (...args: unknown[]) => mockCreateExecutableTimeout(...args),
+	isPermanentRejection: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).isPermanentRejection,
+	MAX_NON_RETRYABLE_REJECTIONS: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).MAX_NON_RETRYABLE_REJECTIONS
 }))
 
 vi.mock("@/lib/sqlite", async () => (await import("@/tests/mocks/sqliteKv")).createSqliteKvMock(kvStore))

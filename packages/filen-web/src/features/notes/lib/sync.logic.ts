@@ -6,7 +6,7 @@ import type { InflightContent, InflightEntry } from "@/features/notes/store/useN
 // The outbox retry classifiers now live in a shared module (chats' send outbox reuses the identical
 // semantics — a byte-identical mechanical move, not a fork). Re-exported here so every existing
 // importer of this module's classifier surface (sync.ts, the notes tests) resolves unchanged.
-export { isNetworkClassError, isRetryableAuthError, isNonSdkError, MAX_NON_RETRYABLE_REJECTIONS } from "@/lib/sdk/retry"
+export { isNetworkClassError, MAX_NON_RETRYABLE_REJECTIONS } from "@/lib/sdk/retry"
 
 // Cheap stable content hash used for overwrite-conflict DETECTION — the same xxHash32 lib +
 // hex format filen-mobile uses. Persisted inside inflight entries as `baseContentHash`, so the

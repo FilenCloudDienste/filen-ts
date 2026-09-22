@@ -1,4 +1,4 @@
-import { run, Semaphore, mergeInflightQueuesByUnion } from "@filen/shared"
+import { run, Semaphore, mergeInflightQueuesByUnion, isPermanentRejection } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import type { Chat, ChatMessagePartial } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
@@ -14,9 +14,6 @@ import {
 	buildOptimisticMessage,
 	CommittedIdLedger,
 	inflightChatMessagesSchema,
-	isNetworkClassError,
-	isRetryableAuthError,
-	isNonSdkError,
 	MAX_NON_RETRYABLE_REJECTIONS,
 	type OptimisticSender,
 	type RemoteChatEnqueue
@@ -570,20 +567,24 @@ export class Sync {
 								return
 							}
 
-							// Classify the rejection with the shared outbox classifiers. Network-class,
-							// re-auth-recoverable Unauthenticated, and non-SDK errors are KEEP-for-retry
-							// and never advance the drop bound. Any OTHER SDK error (incl. the `Server`
-							// catch-all — the only permanent-rejection signal the SDK exposes) increments
-							// the per-message consecutive-rejection counter.
-							const isPermanentRejection = !isNonSdkError(e) && !isNetworkClassError(e) && !isRetryableAuthError(e)
+							// Classify the rejection with the shared outbox classifiers (@filen/shared's
+							// sdkRetryPolicy). Network-class, re-auth-recoverable Unauthenticated, and
+							// non-SDK errors are KEEP-for-retry and never advance the drop bound. Any OTHER
+							// SDK error (incl. the `Server` catch-all — the only permanent-rejection signal
+							// the SDK exposes) increments the per-message consecutive-rejection counter.
+							const dto = asErrorDTO(e)
+							const permanent = isPermanentRejection({
+								hasSdkError: dto.species === "sdk",
+								kind: dto.species === "sdk" ? dto.kind : undefined
+							})
 							const previousRejections =
 								useChatsInflightStore.getState().inflightErrors[message.inflightId]?.permanentRejections ?? 0
-							const permanentRejections = isPermanentRejection ? previousRejections + 1 : previousRejections
+							const permanentRejections = permanent ? previousRejections + 1 : previousRejections
 
 							useChatsInflightStore.getState().setInflightErrors(prev => ({
 								...prev,
 								[message.inflightId]: {
-									error: asErrorDTO(e),
+									error: dto,
 									permanentRejections,
 									message
 								}
