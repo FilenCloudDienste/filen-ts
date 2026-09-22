@@ -18,7 +18,7 @@ import {
 	CircleHelpIcon
 } from "lucide-react"
 import { formatBytes } from "@filen/shared"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/contactsList.logic"
 import { flushOutboxes, performLogout } from "@/features/shell/lib/performLogout"
 import { useHasUnsyncedWork } from "@/features/shell/hooks/useUnsyncedWork"

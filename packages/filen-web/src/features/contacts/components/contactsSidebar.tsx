@@ -2,7 +2,7 @@ import type { ComponentType } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { LayoutListIcon, InboxIcon, SendIcon, UsersIcon, BanIcon } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import {
 	CONTACTS_SECTION_FILTERS,
 	CONTACTS_SECTION_HEADER_KEY,

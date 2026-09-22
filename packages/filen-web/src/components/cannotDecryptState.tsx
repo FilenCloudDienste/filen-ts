@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { LockIcon } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 
 // Shared explainer for an item whose metadata never decrypted (no usable key for this account) —
 // rendered in place of the normal content on every surface an undecryptable item can still reach:

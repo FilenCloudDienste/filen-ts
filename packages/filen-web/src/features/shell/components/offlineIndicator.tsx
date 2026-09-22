@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { WifiOffIcon, WifiIcon } from "lucide-react"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { nextOfflineStatus, toIndicatorStatus } from "@/features/shell/lib/offlineIndicator.logic"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 
 const BACK_ONLINE_DURATION_MS = 2000
 

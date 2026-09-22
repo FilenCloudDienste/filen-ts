@@ -11,7 +11,7 @@ import { formatRelativeTime } from "@/lib/relativeTime"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import {

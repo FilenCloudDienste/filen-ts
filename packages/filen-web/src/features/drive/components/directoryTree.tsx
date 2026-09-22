@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next"
 import { ChevronRightIcon } from "lucide-react"
 import type { UseQueryResult } from "@tanstack/react-query"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import type { DirectoryTreeChild } from "@/features/drive/queries/drive"
 import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"

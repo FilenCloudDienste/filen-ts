@@ -11,7 +11,7 @@ import { filterDriveItemsByLocalSearch } from "@/features/drive/components/direc
 import type { Playlist } from "@/features/audio/lib/playlistSchema"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ItemIcon, DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import { EmptyState } from "@/features/drive/components/emptyState"

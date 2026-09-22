@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 
 // Brand mark: a filled disc with Filen's hexagon punched out via `evenodd` (a true transparent hole,
 // so the underlying surface shows through regardless of where the mark sits), drawn in

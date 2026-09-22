@@ -2,7 +2,7 @@ import type { ComponentType } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { UserIcon, ShieldIcon, SunMoonIcon, KeyboardIcon, HistoryIcon, CreditCardIcon, SlidersHorizontalIcon } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 
 type IconType = ComponentType<{ className?: string }>
 

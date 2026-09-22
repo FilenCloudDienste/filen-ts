@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { checklistRows } from "@/features/notes/components/reader/checklistReader.logic"
 
 // checklist note render — disabled checkboxes, checked state faithful to the parsed

@@ -5,7 +5,7 @@ import { useAudioQueue, useAudioQueueControls, useAudioNowPlaying, useAudioError
 import { nextLoopMode } from "@/features/audio/components/audioTransport.logic"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 
 // The now-playing panel body (rendered inside the player bar's queue popover): the live queue (current
 // track highlighted, click-to-jump, per-row remove, clear-queue, shuffle/loop toggles) — queue only.

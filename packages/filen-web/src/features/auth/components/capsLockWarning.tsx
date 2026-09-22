@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 
 // The caps-lock hint under a password field (useCapsLock drives `active`), shared by every
 // account-password field in the app, settings included.

@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { type ResizableSidebarHandle } from "@/features/shell/hooks/useResizableSidebar"
 import { SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN } from "@/features/shell/lib/sidebarWidth"
 

@@ -39,7 +39,7 @@ import {
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { ROW_HEIGHT, TILE_ROW_HEIGHT, TILE_WIDTH } from "@/features/drive/lib/gridLayout"
 import { isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { useAction } from "@/lib/keymap/useAction"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"

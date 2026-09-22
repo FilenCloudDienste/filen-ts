@@ -1,7 +1,7 @@
 import type { DirColor } from "@filen/sdk-rs"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { directoryFolderTint, fileIconKey, type FileIconKey } from "@/features/drive/lib/icon.logic"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import imageUrl from "@/assets/file-icons/image.svg"
 import videoUrl from "@/assets/file-icons/video.svg"
 import audioUrl from "@/assets/file-icons/audio.svg"

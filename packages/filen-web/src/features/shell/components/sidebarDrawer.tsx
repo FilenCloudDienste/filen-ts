@@ -2,7 +2,7 @@ import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { PanelLeftIcon } from "lucide-react"
 import { Drawer as DrawerPrimitive } from "@base-ui/react/drawer"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 
 // Below the layout breakpoint the module sidebar moves out of the shell row into this drawer — the
 // SAME element, mounted once (see appShell.tsx: never both, or the notes/chats sidebars' virtualizers,

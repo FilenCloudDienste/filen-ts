@@ -1,7 +1,7 @@
 import { useEffect, useState, type ComponentType } from "react"
 import { useTranslation } from "react-i18next"
 import { MinusIcon, SquareIcon, CopyIcon, EyeOffIcon, XIcon } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import {
 	deriveSystemStripLayout,
 	deriveMaximizeIconState,

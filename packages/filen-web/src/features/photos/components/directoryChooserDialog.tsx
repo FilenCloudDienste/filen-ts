@@ -4,7 +4,7 @@ import { ChevronRightIcon, SearchXIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import { useDirectoryListingQuery, useDirectoryNamesQuery } from "@/features/drive/queries/drive"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import {
 	isPhotosChooserConfirmDisabled,

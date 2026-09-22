@@ -4,7 +4,7 @@ import { toast } from "sonner"
 import { CheckIcon, CrownIcon, SearchXIcon, UserCheckIcon, UsersIcon, UserXIcon, XIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { isChatOwner } from "@/features/chats/lib/actions"
 import { addChatParticipants, removeChatParticipant, removeChatParticipants } from "@/features/chats/lib/participants"
 import {

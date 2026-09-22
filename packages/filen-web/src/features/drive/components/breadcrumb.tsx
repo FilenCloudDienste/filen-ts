@@ -9,7 +9,7 @@ import { canDragVariant } from "@/features/drive/lib/dnd.logic"
 import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { Spinner } from "@/components/ui/spinner"
 
 const VARIANT_ROOT_LABEL_KEY = {

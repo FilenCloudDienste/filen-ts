@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { PinIcon, HeartIcon, MoreHorizontalIcon } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { formatRelativeTime } from "@/lib/relativeTime"
 import { noteIcon } from "@/features/notes/lib/icon.logic"
 import {

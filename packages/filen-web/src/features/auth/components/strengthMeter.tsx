@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 import type { ratePasswordStrength } from "@filen/shared"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 
 export type PasswordStrengthTier = ReturnType<typeof ratePasswordStrength>["strength"]
 

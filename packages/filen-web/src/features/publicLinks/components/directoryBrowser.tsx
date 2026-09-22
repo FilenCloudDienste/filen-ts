@@ -28,7 +28,7 @@ import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 
 type ZipUiState = { status: "idle" } | { status: "running"; loaded: number; total: number | null } | { status: "error" }
 

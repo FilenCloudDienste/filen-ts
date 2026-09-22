@@ -24,7 +24,7 @@ import {
 	type LucideIcon
 } from "lucide-react"
 import type { Note, NoteTag } from "@filen/sdk-rs"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { useNotes } from "@/features/notes/queries/notes"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
 import { useNotesViewModeQuery, useNoteTagsSortByQuery } from "@/features/notes/queries/preferences"

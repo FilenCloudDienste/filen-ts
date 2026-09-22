@@ -16,7 +16,7 @@ import { transferProgress, activeStatusLabelKey, transferIconKey } from "@/featu
 import { pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
 import { FileTypeIcon } from "@/features/drive/components/itemIcon"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"

@@ -7,7 +7,7 @@ import { ContactMenuContent } from "@/features/contacts/components/contactMenu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 
 interface ContactRowShellProps {
 	avatar?: string | undefined

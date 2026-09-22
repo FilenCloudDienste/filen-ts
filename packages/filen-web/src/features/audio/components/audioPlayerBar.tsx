@@ -12,7 +12,7 @@ import { MiddleEllipsis } from "@/components/middleEllipsis"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 
 // The persistent audio player, docked at the bottom of the authed shell (rendered once by AppShell,
 // which never mounts on public-link routes — so this surface is inherently authed-only). It renders

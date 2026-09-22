@@ -16,7 +16,7 @@ import { DriveBulkContextMenuContent } from "@/features/drive/components/bulkMen
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
 import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"

@@ -1,7 +1,7 @@
 import { Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import type { Chat } from "@filen/sdk-rs"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { segmentMessage, isEmojiOnly } from "@/features/chats/lib/regexed.logic"
 import { emojiForShortcode, customEmojiImageForShortcode } from "@/features/chats/lib/emoji"
 import { parseFilenPublicLink } from "@/features/chats/lib/embeds.logic"

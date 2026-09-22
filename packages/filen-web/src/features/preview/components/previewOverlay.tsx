@@ -30,7 +30,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { cn } from "@/lib/utils"
+import { cn } from "@filen/shared"
 import { ImageViewer, ZoomableImage } from "@/features/preview/components/imageViewer"
 import { MediaViewer, MediaElement } from "@/features/preview/components/mediaViewer"
 import {
