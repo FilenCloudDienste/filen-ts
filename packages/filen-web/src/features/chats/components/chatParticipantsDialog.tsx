@@ -4,7 +4,7 @@ import { toast } from "sonner"
 import { CheckIcon, CrownIcon, SearchXIcon, UserCheckIcon, UsersIcon, UserXIcon, XIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
-import { cn } from "@filen/shared"
+import { cn, deriveBlockedUsers } from "@filen/shared"
 import { isChatOwner } from "@/features/chats/lib/actions"
 import { addChatParticipants, removeChatParticipant, removeChatParticipants } from "@/features/chats/lib/participants"
 import {
@@ -17,7 +17,6 @@ import { useChats } from "@/features/chats/queries/chats"
 import { useAccountQuery } from "@/queries/account"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { blockContactByEmail, unblockContact } from "@/features/contacts/lib/actions"
-import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
 import { contactDisplayName, contactInitials, filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
 // Same generic Set<uuid> picker helpers notes' own participantsDialog.tsx reuses — not re-implemented
 // here either (feedback: no duplicated selection/data layer across features for a picker this

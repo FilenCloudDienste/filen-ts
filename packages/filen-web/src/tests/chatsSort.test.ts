@@ -9,7 +9,7 @@ import {
 	messageSenderName,
 	sortChats
 } from "@/features/chats/lib/sort"
-import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
+import { deriveBlockedUsers } from "@filen/shared"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a
 // short label the same way notesSort.test.ts's testUuid does.

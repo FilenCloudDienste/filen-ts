@@ -5,7 +5,7 @@ import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
 import { countUnreadMessages } from "@/features/chats/hooks/useChatUnreadCount"
-import type { BlockedUsers } from "@/features/contacts/lib/blocking"
+import type { BlockedUsers } from "@filen/shared"
 
 export interface GlobalUnread {
 	// Summed unread across every chat whose message cache is resident.

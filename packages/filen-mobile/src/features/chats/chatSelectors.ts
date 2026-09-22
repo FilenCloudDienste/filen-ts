@@ -1,5 +1,5 @@
 import { type Chat, type ChatMessage } from "@/types"
-import { type BlockedUsers, EMPTY_BLOCKED_USERS, isBlocked } from "@/features/contacts/blockedSelectors"
+import { type BlockedUsers, EMPTY_BLOCKED_USERS, isBlocked } from "@filen/shared"
 
 /**
  * Aggregated flags for a Chats selection, computed in a single pass.

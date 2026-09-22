@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import { CornerUpLeftIcon, CopyIcon, PencilIcon, Trash2Icon, UserXIcon } from "lucide-react"
 import type { Chat, ChatMessage, UuidStr } from "@filen/sdk-rs"
-import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
+import { deriveBlockedUsers } from "@filen/shared"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -167,14 +167,14 @@ describe("messageMenuActions", () => {
 
 	it("omits block when the sender is already blocked (cross-referenced against the blocked set)", () => {
 		const message = mockMessage({ senderId: 5, senderEmail: "peer@x.io" })
-		const blocked = deriveBlockedUsers([{ uuid: testUuid("b"), userId: 5n, email: "peer@x.io", nickName: "Peer", timestamp: 0n }])
+		const blocked = deriveBlockedUsers([{ userId: 5n, email: "peer@x.io" }])
 
 		expect(messageMenuActions(message, 1n, "confirmed", false, blocked).map(d => d.id)).toEqual(["reply", "copy"])
 	})
 
 	it("block matches a blocked sender by EMAIL even when the userId differs (email fallback)", () => {
 		const message = mockMessage({ senderId: 5, senderEmail: "peer@x.io" })
-		const blocked = deriveBlockedUsers([{ uuid: testUuid("b"), userId: 999n, email: "peer@x.io", nickName: "Peer", timestamp: 0n }])
+		const blocked = deriveBlockedUsers([{ userId: 999n, email: "peer@x.io" }])
 
 		expect(messageMenuActions(message, 1n, "confirmed", false, blocked).map(d => d.id)).not.toContain("block")
 	})

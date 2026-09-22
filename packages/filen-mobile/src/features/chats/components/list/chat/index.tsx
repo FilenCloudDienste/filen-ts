@@ -10,7 +10,7 @@ import Menu from "@/features/chats/components/list/chat/menu"
 import { chatDisplayName } from "@/lib/decryption"
 import { router } from "@/lib/router"
 import { useStringifiedClient } from "@/lib/auth"
-import { fastLocaleCompare, cn, contactDisplayName } from "@filen/shared"
+import { fastLocaleCompare, cn, contactDisplayName, isBlocked } from "@filen/shared"
 import useChatUnreadCount from "@/features/chats/hooks/useChatUnreadCount"
 import useChatsStore from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
@@ -20,7 +20,6 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
 import { formatRelativeTime, simpleDateNoTime } from "@/lib/time"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
-import { isBlocked } from "@/features/contacts/blockedSelectors"
 
 const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	const { t } = useTranslation()

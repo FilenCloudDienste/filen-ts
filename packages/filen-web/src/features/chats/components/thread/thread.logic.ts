@@ -1,5 +1,5 @@
 import type { ChatMessage } from "@filen/sdk-rs"
-import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@/features/contacts/lib/blocking"
+import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 import { messageSenderName } from "@/features/chats/lib/sort"
 
 // Thread row model + scroll math — PURE, no React, unit-tested.

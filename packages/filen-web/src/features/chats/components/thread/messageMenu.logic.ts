@@ -12,7 +12,7 @@ import {
 import type { ChatMessage } from "@filen/sdk-rs"
 import type { ChatsKey } from "@/lib/i18n"
 import type { ChatSendState } from "@/features/chats/store/useChatsInflight"
-import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@/features/contacts/lib/blocking"
+import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 
 export type MessageActionId = "reply" | "copy" | "edit" | "delete" | "retry" | "remove" | "disableEmbed" | "block"
 

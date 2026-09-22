@@ -13,7 +13,7 @@ import Button from "@/components/ui/button"
 import Item from "@/features/drive/components/item"
 import Header from "@/features/drive/components/header"
 import DriveListFooter from "@/features/drive/components/listFooter"
-import { run, cn } from "@filen/shared"
+import { run, cn, isBlocked } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import { type View as RNView, Platform, ActivityIndicator } from "react-native"
 import useViewLayout from "@/hooks/useViewLayout"
@@ -29,7 +29,6 @@ import { isSearchWindowTruncated } from "@/features/drive/hooks/driveSearchStatu
 import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
 import { useDriveHighlight } from "@/features/drive/hooks/useDriveHighlight"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
-import { isBlocked } from "@/features/contacts/blockedSelectors"
 import { getSharerIdentity } from "@/features/drive/driveSharer"
 import {
 	getDriveEmptyStateIcon,

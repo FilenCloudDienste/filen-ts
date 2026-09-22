@@ -2,7 +2,7 @@ import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { isChatOwner } from "@/features/chats/lib/actions"
 import { isChatUndecryptable } from "@/features/chats/lib/sort"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
-import { EMPTY_BLOCKED_USERS, type BlockedUsers } from "@/features/contacts/lib/blocking"
+import { EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 
 // Aggregated flags for a Chats-list multi-selection, computed in a single pass — the bulk-action bar's
 // only source of gating truth. Mirrors features/notes/lib/selectionFlags.ts's own

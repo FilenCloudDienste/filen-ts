@@ -13,7 +13,7 @@ vi.mock("@filen/sdk-rs", () => ({
 }))
 
 import { filterNotesByBlockedOwner, filterNotesMarkedOffline, filterNotesShared } from "@/features/notes/utils"
-import { deriveBlockedUsers } from "@/features/contacts/blockedSelectors"
+import { deriveBlockedUsers } from "@filen/shared"
 import { type Note } from "@/types"
 
 const blocked = deriveBlockedUsers([{ uuid: "x", userId: 99n, email: "b@x.com", avatar: undefined, nickName: "B", timestamp: 0n }] as never)

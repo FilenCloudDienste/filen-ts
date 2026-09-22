@@ -11,7 +11,7 @@ import { useNotes } from "@/features/notes/queries/notes"
 import { useAccountQuery } from "@/queries/account"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { blockContactByEmail, unblockContact } from "@/features/contacts/lib/actions"
-import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
+import { deriveBlockedUsers } from "@filen/shared"
 import { contactDisplayName, contactInitials, filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
 // Pure selection helpers, not the drive-specific parts of the module — same generic Set<uuid> shape
 // this dialog's own add-picker needs, reused rather than re-implemented (feedback: no duplicated data

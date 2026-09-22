@@ -12,7 +12,7 @@ import {
 	type ThreadRow,
 	type ScrollAffordanceState
 } from "@/features/chats/components/thread/thread.logic"
-import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
+import { deriveBlockedUsers } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
 
 function testUuid(label: string): UuidStr {

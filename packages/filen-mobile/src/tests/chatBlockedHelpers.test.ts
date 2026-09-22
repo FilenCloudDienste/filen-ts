@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { isOneOnOneWithBlocked } from "@/features/chats/chatSelectors"
-import { deriveBlockedUsers } from "@/features/contacts/blockedSelectors"
+import { deriveBlockedUsers } from "@filen/shared"
 import { type Chat } from "@/types"
 
 const blocked = deriveBlockedUsers([{ uuid: "x", userId: 99n, email: "b@x.com", avatar: undefined, nickName: "B", timestamp: 0n }] as never)

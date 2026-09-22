@@ -11,7 +11,7 @@ import {
 import { retryInflightMessage, removeInflightMessage } from "@/features/chats/lib/inflight"
 import { disableMessageEmbed } from "@/features/chats/lib/messageActions"
 import { blockContactByEmail } from "@/features/contacts/lib/actions"
-import type { BlockedUsers } from "@/features/contacts/lib/blocking"
+import type { BlockedUsers } from "@filen/shared"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useChatComposerStore } from "@/features/chats/store/useChatComposer"
 import type { ChatSendState } from "@/features/chats/store/useChatsInflight"

@@ -26,7 +26,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { NOTES_QUERY_KEY, notesQueryGet } from "@/features/notes/queries/notes"
 import { addNoteParticipants, removeNoteParticipant, setNoteParticipantPermission } from "@/features/notes/lib/participants"
 import { participantRows, contactsAvailableToAdd } from "@/features/notes/components/participantsDialog.logic"
-import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
+import { deriveBlockedUsers } from "@filen/shared"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -249,9 +249,7 @@ describe("participantRows — blocked cross-reference", () => {
 	const note = mockNote({ ownerId: 1n, participants: [owner, blockedParticipant, regularParticipant] })
 
 	it("flags only the row whose identity is in the blocked set — NOT gated by canManage/ownership", () => {
-		const blocked = deriveBlockedUsers([
-			{ uuid: testUuid("blocked-contact"), userId: 2n, email: "blocked@x.io", nickName: "", timestamp: 0n }
-		])
+		const blocked = deriveBlockedUsers([{ userId: 2n, email: "blocked@x.io" }])
 
 		// Non-owner viewer (canManage is false on every row here) still sees the correct blocked flags —
 		// mobile parity: block/unblock is never gated on ownership.

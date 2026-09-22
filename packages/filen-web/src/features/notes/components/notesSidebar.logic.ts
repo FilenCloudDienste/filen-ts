@@ -6,7 +6,7 @@ import {
 	tagDisplayName,
 	type NoteTagsSortBy
 } from "@/features/notes/lib/sort"
-import { isBlocked, type BlockedUsers } from "@/features/contacts/lib/blocking"
+import { isBlocked, type BlockedUsers } from "@filen/shared"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 
 // Pure view-model builders for the two-view sidebar. No React, no cache — the

@@ -1,6 +1,5 @@
-import { droppedIds, driveItemName } from "@filen/shared"
+import { droppedIds, driveItemName, isBlocked, type BlockedUsers } from "@filen/shared"
 import { getSharerIdentity, type DriveItem } from "@/features/drive/lib/item"
-import { isBlocked, type BlockedUsers } from "@/features/contacts/lib/blocking"
 import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
 import { filterHiddenDriveItems } from "@/features/drive/lib/hiddenItems"
 import { type DriveVariant } from "@/features/drive/lib/preferences"

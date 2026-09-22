@@ -128,7 +128,7 @@ vi.mock("@/features/drive/queries/drive", async importOriginal => ({
 
 import "@/lib/i18n"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@/features/contacts/lib/blocking"
+import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { DirectoryListing } from "@/features/drive/components/directoryListing"
@@ -199,9 +199,7 @@ function mockSharedFile(name: string, role: SharingRole): SharedFile {
 
 const BLOCKED_ROLE = sharerRole(10, "blocked@x.com")
 const OK_ROLE = sharerRole(20, "ok@x.com")
-const blockedUsers = deriveBlockedUsers([
-	{ uuid: testUuid("blocked-contact"), userId: 10n, email: "blocked@x.com", nickName: "Blocked", timestamp: 1n }
-])
+const blockedUsers = deriveBlockedUsers([{ userId: 10n, email: "blocked@x.com" }])
 
 function renderListing(options: { variant?: DriveVariant; splat?: string; items?: DriveItem[] } = {}) {
 	const variant = options.variant ?? "drive"

@@ -11,7 +11,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import { isMessageUnread, chatHasUnread } from "@/features/chats/lib/unread.logic"
 import { countUnreadMessages } from "@/features/chats/hooks/useChatUnreadCount"
 import { sumUnread } from "@/features/chats/hooks/useChatsUnreadCount"
-import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@/features/contacts/lib/blocking"
+import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -74,13 +74,13 @@ describe("isMessageUnread", () => {
 	})
 
 	it("is not unread: the sender is blocked by userId", () => {
-		const blocked = deriveBlockedUsers([{ uuid: testUuid("b"), userId: 2n, email: "other@x.io", nickName: "P", timestamp: 0n }])
+		const blocked = deriveBlockedUsers([{ userId: 2n, email: "other@x.io" }])
 
 		expect(isMessageUnread(mockMessage({ senderId: 2, sentTimestamp: 200n }), mockChat(), SELF, blocked)).toBe(false)
 	})
 
 	it("is not unread: the sender is blocked by email fallback (userId mismatch)", () => {
-		const blocked = deriveBlockedUsers([{ uuid: testUuid("b"), userId: 999n, email: "peer@x.io", nickName: "P", timestamp: 0n }])
+		const blocked = deriveBlockedUsers([{ userId: 999n, email: "peer@x.io" }])
 
 		expect(
 			isMessageUnread(mockMessage({ senderId: 2, senderEmail: "peer@x.io", sentTimestamp: 200n }), mockChat(), SELF, blocked)
@@ -101,7 +101,7 @@ describe("chatHasUnread (cheap boolean tier, with blocked cross-ref)", () => {
 
 	it("false when the last message's sender is blocked", () => {
 		const chat = mockChat({ lastFocus: 0n, lastMessage: mockMessage({ senderId: 2, senderEmail: "peer@x.io", sentTimestamp: 900n }) })
-		const blocked = deriveBlockedUsers([{ uuid: testUuid("b"), userId: 2n, email: "peer@x.io", nickName: "P", timestamp: 0n }])
+		const blocked = deriveBlockedUsers([{ userId: 2n, email: "peer@x.io" }])
 
 		expect(chatHasUnread(chat, SELF, blocked)).toBe(false)
 	})
@@ -116,7 +116,7 @@ describe("chatHasUnread (cheap boolean tier, with blocked cross-ref)", () => {
 })
 
 describe("chatHasUnread with a blocked last-message sender", () => {
-	const blocked = deriveBlockedUsers([{ uuid: testUuid("b"), userId: 2n, email: "peer@x.io", nickName: "P", timestamp: 0n }])
+	const blocked = deriveBlockedUsers([{ userId: 2n, email: "peer@x.io" }])
 
 	function blockedLastMessageChat(overrides: Partial<Chat> = {}): Chat {
 		return mockChat({
@@ -169,7 +169,7 @@ describe("chatHasUnread with a blocked last-message sender", () => {
 describe("countUnreadMessages", () => {
 	it("counts exactly the unread messages, excluding own, old, and blocked senders", () => {
 		const chat = mockChat({ lastFocus: 100n })
-		const blocked = deriveBlockedUsers([{ uuid: testUuid("b"), userId: 3n, email: "b@x.io", nickName: "B", timestamp: 0n }])
+		const blocked = deriveBlockedUsers([{ userId: 3n, email: "b@x.io" }])
 		const messages = [
 			mockMessage({ uuid: testUuid("m1"), senderId: 2, sentTimestamp: 150n }), // unread
 			mockMessage({ uuid: testUuid("m2"), senderId: 2, sentTimestamp: 200n }), // unread

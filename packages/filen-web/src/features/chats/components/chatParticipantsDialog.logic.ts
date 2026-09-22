@@ -1,5 +1,5 @@
 import type { Chat, ChatParticipant, Contact } from "@filen/sdk-rs"
-import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@/features/contacts/lib/blocking"
+import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 
 // Pure gating/derivation helpers for chatParticipantsDialog.tsx, kept out of the component so the
 // owner-vs-participant view split and the add-picker's exclusion filter stay testable without a DOM

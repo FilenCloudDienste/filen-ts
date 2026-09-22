@@ -1,6 +1,6 @@
 import type { Chat } from "@filen/sdk-rs"
 import { sortChats, chatDisplayName, chatMessagePreview, isChatUndecryptable, isLastMessageFromBlocked } from "@/features/chats/lib/sort"
-import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@/features/contacts/lib/blocking"
+import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 
 // A chat is listed only when the viewer owns it OR it has at least one message — mirrors mobile's own
 // list filter (components/list/index.tsx): an owned-but-empty chat the user just created still shows

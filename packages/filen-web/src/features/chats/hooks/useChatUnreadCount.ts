@@ -1,7 +1,7 @@
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { useChatMessages } from "@/features/chats/queries/chatMessages"
 import { isMessageUnread } from "@/features/chats/lib/unread.logic"
-import type { BlockedUsers } from "@/features/contacts/lib/blocking"
+import type { BlockedUsers } from "@filen/shared"
 
 // Pure per-chat unread tally — the number of messages in `messages` that count as unread for `chat`
 // (isMessageUnread: newer than lastFocus, not ours, not from a blocked sender, chat not muted). Exported

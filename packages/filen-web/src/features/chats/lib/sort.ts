@@ -1,7 +1,6 @@
-import { fastLocaleCompare, parseNumbersFromString } from "@filen/shared"
+import { fastLocaleCompare, parseNumbersFromString, isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 import type { Chat, ChatMessagePartial } from "@filen/sdk-rs"
 import { contactDisplayName } from "@/features/contacts/components/contactsList.logic"
-import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@/features/contacts/lib/blocking"
 
 // Conversation-list ordering — ported from
 // `filen-mobile/src/features/chats/components/list/index.tsx:36-45`, not a guess. There is no

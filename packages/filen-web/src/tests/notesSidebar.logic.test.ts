@@ -16,7 +16,7 @@ import {
 	type NotesSidebarRow
 } from "@/features/notes/components/notesSidebar.logic"
 import { DEFAULT_NOTE_TAGS_SORT_BY, type NoteTagsSortBy } from "@/features/notes/lib/sort"
-import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@/features/contacts/lib/blocking"
+import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes — pad a short label, same as notesSort.test.ts.
 function testUuid(label: string): UuidStr {
@@ -463,7 +463,7 @@ describe("filterNotesByBlockedOwner", () => {
 	it("hides a note whose ownerId is in the blocked set", () => {
 		const blockedOwnerNote = mockNote({ uuid: testUuid("a"), ownerId: 2n })
 		const okNote = mockNote({ uuid: testUuid("b"), ownerId: 3n })
-		const blocked = deriveBlockedUsers([{ uuid: testUuid("bc"), userId: 2n, email: "owner@x.io", nickName: "", timestamp: 0n }])
+		const blocked = deriveBlockedUsers([{ userId: 2n, email: "owner@x.io" }])
 
 		expect(filterNotesByBlockedOwner([blockedOwnerNote, okNote], blocked)).toEqual([okNote])
 	})
@@ -476,7 +476,7 @@ describe("filterNotesByBlockedOwner", () => {
 			ownerId: 3n,
 			participants: [{ userId: 2n, isOwner: false, email: "p@x.io", nickName: "", permissionsWrite: true, addedTimestamp: 0n }]
 		})
-		const blocked = deriveBlockedUsers([{ uuid: testUuid("bc"), userId: 2n, email: "p@x.io", nickName: "", timestamp: 0n }])
+		const blocked = deriveBlockedUsers([{ userId: 2n, email: "p@x.io" }])
 
 		expect(filterNotesByBlockedOwner([note], blocked)).toEqual([note])
 	})

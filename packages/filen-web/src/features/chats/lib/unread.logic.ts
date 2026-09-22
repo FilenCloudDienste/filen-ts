@@ -1,5 +1,5 @@
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
-import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@/features/contacts/lib/blocking"
+import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 
 // Per-conversation unread derivation — PURE. In-app unread signals are DERIVED client-side (mobile's
 // chatSelectors), never a per-chat SDK round trip (getAllChatsUnreadCount stays unwired). Two tiers, kept
@@ -12,7 +12,7 @@ import { isBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@/features/co
 // senderId is `number` on the wasm surface (a codegen quirk — every other user id is bigint), so it MUST
 // be coerced with BigInt before comparing to the bigint userId. A message from a blocked sender never
 // counts as unread — the same contacts blocking cross-reference the sharedIn drive filter uses
-// (features/contacts/lib/blocking.ts); an empty/cold blocked set fails open (nobody treated as blocked),
+// (@filen/shared's blocking.ts); an empty/cold blocked set fails open (nobody treated as blocked),
 // matching mobile's own behavior until the contacts list is warm.
 
 export function isMessageUnread(

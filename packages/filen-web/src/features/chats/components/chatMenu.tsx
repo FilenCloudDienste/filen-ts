@@ -6,7 +6,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { setChatMuted, markChatRead } from "@/features/chats/lib/actions"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
-import type { BlockedUsers } from "@/features/contacts/lib/blocking"
+import type { BlockedUsers } from "@filen/shared"
 import {
 	applyOfflineGate,
 	chatMenuActions,

@@ -7,7 +7,7 @@ import {
 	staleChatSelectionUuids
 } from "@/features/chats/components/chatsSidebar.logic"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
-import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@/features/contacts/lib/blocking"
+import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr

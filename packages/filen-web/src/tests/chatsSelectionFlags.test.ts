@@ -9,7 +9,7 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { aggregateChatSelectionFlags, selectableChatsForSelectAll } from "@/features/chats/lib/selectionFlags"
-import { deriveBlockedUsers } from "@/features/contacts/lib/blocking"
+import { deriveBlockedUsers } from "@filen/shared"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -163,7 +163,7 @@ describe("aggregateChatSelectionFlags — includesUnread", () => {
 	// Forwards chatHasUnread's blocked-last-message scan, so a blocked member's post can't mask a real
 	// unread sitting behind it.
 	it("is true for a blocked-last-message chat with an older unread from someone else when a reader is supplied", () => {
-		const blocked = deriveBlockedUsers([{ uuid: testUuid("bc"), userId: 2n, email: "other@x.io", nickName: "", timestamp: 0n }])
+		const blocked = deriveBlockedUsers([{ userId: 2n, email: "other@x.io" }])
 		const chat = mockChat({ uuid: testUuid("a"), lastFocus: 100n, lastMessage: mockMessage({ sentTimestamp: 900n }) })
 		const older = mockMessage({ uuid: testUuid("older"), senderId: 3, senderEmail: "third@x.io", sentTimestamp: 500n })
 		const flags = aggregateChatSelectionFlags([chat], OWNER, blocked, () => [older])
@@ -172,7 +172,7 @@ describe("aggregateChatSelectionFlags — includesUnread", () => {
 	})
 
 	it("degrades to false for that same chat when no reader is supplied", () => {
-		const blocked = deriveBlockedUsers([{ uuid: testUuid("bc"), userId: 2n, email: "other@x.io", nickName: "", timestamp: 0n }])
+		const blocked = deriveBlockedUsers([{ userId: 2n, email: "other@x.io" }])
 		const chat = mockChat({ uuid: testUuid("a"), lastFocus: 100n, lastMessage: mockMessage({ sentTimestamp: 900n }) })
 		const flags = aggregateChatSelectionFlags([chat], OWNER, blocked)
 

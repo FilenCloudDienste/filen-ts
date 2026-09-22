@@ -1,5 +1,5 @@
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
-import { deriveBlockedUsers, type BlockedUsers } from "@/features/contacts/lib/blocking"
+import { deriveBlockedUsers, type BlockedUsers } from "@filen/shared"
 
 // Reactive blocked-user lookup — mirrors filen-mobile's useBlockedUsers. React Compiler memoizes the
 // derivation, keyed on the query's blocked array reference, so this needs no hand-written useMemo. An
