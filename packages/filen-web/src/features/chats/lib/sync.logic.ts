@@ -1,10 +1,12 @@
 import { type } from "arktype"
+import { mergeInflightQueuesByUnion } from "@filen/shared"
 import type { Chat, ChatMessage, ChatMessagePartial } from "@filen/sdk-rs"
 import type { ChatMessageWithInflightId, InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 
 // Pure, testable core of the chat send outbox — a faithful port of filen-mobile's chats sync/store
 // helpers (features/chats/components/sync.tsx mergeInflight + features/chats/utils.ts
-// composeMessageList). No store/IO/React access here.
+// composeMessageList). No store/IO/React access here. The union-by-inflightId merge itself now
+// lives in @filen/shared (mergeInflightQueuesByUnion) — see reconcileChatFollower below.
 
 // The retry classifiers + drop bound live in the shared @/lib/sdk/retry module (notes' outbox uses the
 // same). Re-exported so lib/sync.ts and the tests import the whole outbox surface from one place, the
@@ -61,49 +63,6 @@ export function buildOptimisticMessage({
 		...(sender.avatarUrl !== undefined ? { senderAvatar: sender.avatarUrl } : {}),
 		...(replyTo !== undefined ? { replyTo } : {})
 	}
-}
-
-// Functional, per-chat MERGE used to hydrate the disk-restored queue into the (possibly
-// already-populated) store without clobbering a message the user sent DURING the seconds-long restore
-// window (enqueue writes the store/disk outside the sync mutex). Disk seeds chats the store doesn't
-// have yet; for chats present on both sides the message lists are UNIONED by inflightId with LIVE
-// entries winning (anything already in the live store is newer than any disk snapshot of the same id).
-// This is the load-bearing divergence from notes' mergeInflight (which keeps newest-per-uuid,
-// last-write-wins) — chat sends are append-only, so a union, never an overwrite. Pure.
-export function mergeChatInflight(current: InflightChatMessages, fromDisk: InflightChatMessages): InflightChatMessages {
-	const merged: InflightChatMessages = {
-		...current
-	}
-
-	for (const chatUuid of Object.keys(fromDisk)) {
-		const diskEntry = fromDisk[chatUuid]
-
-		if (!diskEntry) {
-			continue
-		}
-
-		const currentEntry = merged[chatUuid]
-
-		if (!currentEntry || currentEntry.messages.length === 0) {
-			merged[chatUuid] = diskEntry
-
-			continue
-		}
-
-		const liveInflightIds = new Set(currentEntry.messages.map(message => message.inflightId))
-		const missingFromLive = diskEntry.messages.filter(message => !liveInflightIds.has(message.inflightId))
-
-		if (missingFromLive.length === 0) {
-			continue
-		}
-
-		merged[chatUuid] = {
-			...currentEntry,
-			messages: [...currentEntry.messages, ...missingFromLive]
-		}
-	}
-
-	return merged
 }
 
 // Port of mobile's composeMessageList: the thread's render source, merging the confirmed message-query
@@ -293,7 +252,7 @@ export function reconcileChatFollower(
 	}
 
 	return {
-		store: mergeChatInflight(leaderState, remaining),
+		store: mergeInflightQueuesByUnion(leaderState, remaining),
 		unacked: remaining
 	}
 }

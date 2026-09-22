@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { ChatMessage } from "@filen/sdk-rs"
-import { composeMessageList, mergeChatInflight, buildOptimisticMessage, type OptimisticSender } from "@/features/chats/lib/sync.logic"
-import type { ChatMessageWithInflightId, InflightChatMessages } from "@/features/chats/store/useChatsInflight"
+import { composeMessageList, buildOptimisticMessage, type OptimisticSender } from "@/features/chats/lib/sync.logic"
+import type { ChatMessageWithInflightId } from "@/features/chats/store/useChatsInflight"
 
 // Pure core of the chat send outbox — no store/IO. Uuid-shaped fields are the SDK's branded UuidStr;
 // literal strings with 3+ dashes satisfy that template type directly, so no casts are needed.
@@ -137,41 +137,5 @@ describe("composeMessageList", () => {
 		})
 
 		expect(list.map(m => m.uuid)).toEqual(["srv-9-9-9", "inf-4-4-4"])
-	})
-})
-
-describe("mergeChatInflight — union-by-inflightId, live-wins (the divergence from notes' overwrite merge)", () => {
-	function group(chatUuid: string, messages: ChatMessageWithInflightId[]): InflightChatMessages {
-		return {
-			[chatUuid]: {
-				chat: { uuid: chatUuid } as InflightChatMessages[string]["chat"],
-				messages
-			}
-		}
-	}
-
-	it("seeds a chat the live store does not have from disk", () => {
-		const merged = mergeChatInflight({}, group("chat-a-a-a", [optimistic("inf-1-1-1", 1n)]))
-
-		expect(merged["chat-a-a-a"]?.messages.map(m => m.inflightId)).toEqual(["inf-1-1-1"])
-	})
-
-	it("unions disk entries missing from the live queue WITHOUT clobbering a message sent during restore", () => {
-		const live = group("chat-a-a-a", [optimistic("inf-live-9-9", 900n, "sent-during-restore")])
-		const disk = group("chat-a-a-a", [optimistic("inf-live-9-9", 900n, "stale-disk-copy"), optimistic("inf-disk-1-1", 100n)])
-
-		const merged = mergeChatInflight(live, disk)
-		const messages = merged["chat-a-a-a"]?.messages ?? []
-
-		// Live copy of the shared id wins (kept as the FIRST entry, content unchanged); the disk-only id is appended.
-		expect(messages.map(m => m.inflightId)).toEqual(["inf-live-9-9", "inf-disk-1-1"])
-		expect(messages.find(m => m.inflightId === "inf-live-9-9")?.message).toBe("sent-during-restore")
-	})
-
-	it("is a no-op for a chat whose disk entries are all already live", () => {
-		const live = group("chat-a-a-a", [optimistic("inf-1-1-1", 1n)])
-		const merged = mergeChatInflight(live, group("chat-a-a-a", [optimistic("inf-1-1-1", 1n)]))
-
-		expect(merged["chat-a-a-a"]?.messages).toHaveLength(1)
 	})
 })

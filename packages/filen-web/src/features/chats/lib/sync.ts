@@ -1,4 +1,4 @@
-import { run, Semaphore } from "@filen/shared"
+import { run, Semaphore, mergeInflightQueuesByUnion } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import type { Chat, ChatMessagePartial } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
@@ -10,7 +10,6 @@ import { chatsQueryUpsert, chatsQueryGet, chatsQueryReplaceAll, fetchChats } fro
 import { chatMessagesQueryUpdate } from "@/features/chats/queries/chatMessages"
 import useChatsInflightStore, { type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 import {
-	mergeChatInflight,
 	reconcileChatFollower,
 	buildOptimisticMessage,
 	CommittedIdLedger,
@@ -122,7 +121,7 @@ export class Sync {
 	// Promotion (this follower just won the db lock after the leader died). Flip to leader, announce so any
 	// OTHER followers re-send their unacked, then run the EXISTING replay-on-launch machinery: our optimistic
 	// sends already live in the store, and restoreFromDisk merges them with whatever the dead leader persisted
-	// (mergeChatInflight), prunes gone chats, and sends. restoreFromDisk only kicks a pass when DISK had
+	// (mergeInflightQueuesByUnion), prunes gone chats, and sends. restoreFromDisk only kicks a pass when DISK had
 	// content, so force one when the store holds carried-over optimistic work the dead leader never persisted.
 	//
 	// Handoff window (documented, mobile-parity residual): the dead leader dequeues a committed send from the
@@ -284,7 +283,7 @@ export class Sync {
 			}
 		}))
 
-		this.unacked = mergeChatInflight(this.unacked, {
+		this.unacked = mergeInflightQueuesByUnion(this.unacked, {
 			[chat.uuid]: {
 				chat,
 				messages: [optimistic]
@@ -351,7 +350,7 @@ export class Sync {
 	}
 
 	// Replay-on-launch: the ONLY disk→store bridge, so it MUST hydrate the store even with no network.
-	// (1) hydrate UNCONDITIONALLY via mergeChatInflight (union-by-inflightId) before any network call —
+	// (1) hydrate UNCONDITIONALLY via mergeInflightQueuesByUnion (union-by-inflightId) before any network call —
 	// an offline boot must not strand persisted sends. (2) best-effort PRUNE of queued messages for
 	// chats that no longer exist, reconciled against the freshly-fetched chats list — mobile's exact
 	// restore reconcile (there is no content/time-window match; the temporal dedupe is the commit-
@@ -376,7 +375,7 @@ export class Sync {
 			// from this disk snapshot — a chat the user messaged during restore must survive the prune.
 			const liveBeforeMerge = useChatsInflightStore.getState().inflightMessages
 
-			useChatsInflightStore.getState().setInflightMessages(prev => mergeChatInflight(prev, fromDisk))
+			useChatsInflightStore.getState().setInflightMessages(prev => mergeInflightQueuesByUnion(prev, fromDisk))
 
 			if (!onlineManager.isOnline()) {
 				return true

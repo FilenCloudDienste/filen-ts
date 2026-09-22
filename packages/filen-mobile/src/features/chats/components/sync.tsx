@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { run, Semaphore } from "@filen/shared"
+import { run, Semaphore, mergeInflightQueuesByUnion } from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import chats from "@/features/chats/chats"
 import alerts from "@/lib/alerts"
@@ -20,48 +20,6 @@ import logger from "@/lib/logger"
 // carries the counter and a message snapshot) is kept so the failure stays visible in the chat
 // until the user retries or removes it.
 export const MAX_NON_RETRYABLE_REJECTIONS = 3
-
-// D1 fix: functional, per-chat MERGE used to hydrate the disk-restored inflight queue into the
-// (possibly already-populated) store without clobbering a message the user sent during the
-// seconds-long restore window (input's send() writes the store/disk without the sync mutex).
-// Disk seeds chats the store doesn't have yet; for chats present on both sides the message lists
-// are unioned by inflightId with LIVE entries winning (anything in the live store is newer than
-// any disk snapshot of the same id). Pure — no store/IO access — so it stays trivially testable.
-export function mergeInflight(current: InflightChatMessages, fromDisk: InflightChatMessages): InflightChatMessages {
-	const merged: InflightChatMessages = {
-		...current
-	}
-
-	for (const chatUuid of Object.keys(fromDisk)) {
-		const diskEntry = fromDisk[chatUuid]
-
-		if (!diskEntry) {
-			continue
-		}
-
-		const currentEntry = merged[chatUuid]
-
-		if (!currentEntry || currentEntry.messages.length === 0) {
-			merged[chatUuid] = diskEntry
-
-			continue
-		}
-
-		const liveInflightIds = new Set(currentEntry.messages.map(message => message.inflightId))
-		const missingFromLive = diskEntry.messages.filter(message => !liveInflightIds.has(message.inflightId))
-
-		if (missingFromLive.length === 0) {
-			continue
-		}
-
-		merged[chatUuid] = {
-			...currentEntry,
-			messages: [...currentEntry.messages, ...missingFromLive]
-		}
-	}
-
-	return merged
-}
 
 export class Sync {
 	private readonly mutex: Semaphore = new Semaphore(1)
@@ -118,7 +76,7 @@ export class Sync {
 			// become visible and deliverable for the session even when the chats-list fetch below
 			// throws (offline launch). Pruning is a best-effort refinement layered on top, never a
 			// gate on hydration.
-			useChatsStore.getState().setInflightMessages(prev => mergeInflight(prev, fromDisk))
+			useChatsStore.getState().setInflightMessages(prev => mergeInflightQueuesByUnion(prev, fromDisk))
 
 			// Best-effort prune of messages for chats that no longer exist. On a fetch failure
 			// (e.g. offline) keep the unpruned queue rather than dropping everything. The prune

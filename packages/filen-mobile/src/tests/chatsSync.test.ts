@@ -55,7 +55,12 @@ const { kvStore, chatsState, mockSendMessage, mockFetchChats, mockSetInflightMes
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
+// restoreFromDisk delegates the merge to the real @filen/shared mergeInflightQueuesByUnion — pull it
+// through via importActual rather than re-implementing the algorithm here.
+vi.mock("@filen/shared", async () => ({
+	...(await import("@/tests/mocks/filenShared")),
+	mergeInflightQueuesByUnion: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).mergeInflightQueuesByUnion
+}))
 
 vi.mock("@/lib/sqlite", async () => (await import("@/tests/mocks/sqliteKv")).createSqliteKvMock(kvStore))
 
@@ -123,7 +128,7 @@ function asSdkError<E>(error: E, kind: string): E {
 }
 
 import { onlineManager } from "@tanstack/react-query"
-import { Sync, mergeInflight, MAX_NON_RETRYABLE_REJECTIONS } from "@/features/chats/components/sync"
+import { Sync, MAX_NON_RETRYABLE_REJECTIONS } from "@/features/chats/components/sync"
 import sqlite from "@/lib/sqlite"
 import type { InflightChatMessages } from "@/features/chats/store/useChats.store"
 
@@ -1213,107 +1218,6 @@ describe("Sync (Chats)", () => {
 
 			expect(chatsState.inflightErrors["msg-1"]!.permanentRejections).toBe(1)
 			expect(chatsState.inflightMessages["chat-1"]!.messages).toHaveLength(1)
-		})
-	})
-
-	// D1 — the pure merge used by the restore hydration.
-	describe("mergeInflight", () => {
-		it("seeds chats the current store does not have", () => {
-			const current = {}
-			const fromDisk = {
-				"chat-1": {
-					chat: mockChat("chat-1"),
-					messages: [mockMessage("msg-1", "disk", 1000)]
-				}
-			}
-
-			const merged = mergeInflight(current, fromDisk as InflightChatMessages)
-
-			expect(merged["chat-1"]!.messages).toHaveLength(1)
-		})
-
-		it("keeps the live copy when both sides carry the same inflightId", () => {
-			const current = {
-				"chat-1": {
-					chat: mockChat("chat-1"),
-					messages: [mockMessage("shared", "live", 5000)]
-				}
-			}
-			const fromDisk = {
-				"chat-1": {
-					chat: mockChat("chat-1"),
-					messages: [mockMessage("shared", "disk", 1000)]
-				}
-			}
-
-			const merged = mergeInflight(current as InflightChatMessages, fromDisk as InflightChatMessages)
-
-			expect(merged["chat-1"]!.messages).toHaveLength(1)
-			expect(merged["chat-1"]!.messages[0]!.inner.message).toBe("live")
-		})
-
-		it("unions disjoint messages of the same chat (live + disk)", () => {
-			const current = {
-				"chat-1": {
-					chat: mockChat("chat-1"),
-					messages: [mockMessage("live-only", "live", 5000)]
-				}
-			}
-			const fromDisk = {
-				"chat-1": {
-					chat: mockChat("chat-1"),
-					messages: [mockMessage("disk-only", "disk", 1000)]
-				}
-			}
-
-			const merged = mergeInflight(current as InflightChatMessages, fromDisk as InflightChatMessages)
-			const ids = merged["chat-1"]!.messages.map(m => m.inflightId)
-
-			expect(ids).toHaveLength(2)
-			expect(ids).toContain("live-only")
-			expect(ids).toContain("disk-only")
-		})
-
-		it("preserves live-only chats untouched", () => {
-			const liveEntry = {
-				chat: mockChat("chat-live"),
-				messages: [mockMessage("live-1", "stays", 5000)]
-			}
-			const current = {
-				"chat-live": liveEntry
-			}
-			const fromDisk = {
-				"chat-disk": {
-					chat: mockChat("chat-disk"),
-					messages: [mockMessage("disk-1", "disk", 1000)]
-				}
-			}
-
-			const merged = mergeInflight(current as InflightChatMessages, fromDisk as InflightChatMessages)
-
-			expect(merged["chat-live"]).toBe(liveEntry)
-			expect(merged["chat-disk"]).toBeDefined()
-		})
-
-		it("does not mutate either input", () => {
-			const current = {
-				"chat-1": {
-					chat: mockChat("chat-1"),
-					messages: [mockMessage("live-only", "live", 5000)]
-				}
-			}
-			const fromDisk = {
-				"chat-1": {
-					chat: mockChat("chat-1"),
-					messages: [mockMessage("disk-only", "disk", 1000)]
-				}
-			}
-
-			const merged = mergeInflight(current as InflightChatMessages, fromDisk as InflightChatMessages)
-
-			expect(merged).not.toBe(current)
-			expect(current["chat-1"]!.messages).toHaveLength(1)
-			expect(fromDisk["chat-1"]!.messages).toHaveLength(1)
 		})
 	})
 })
