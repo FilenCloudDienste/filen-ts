@@ -18,7 +18,7 @@
 		}
 	},
 	"scripts": {
-		"typecheck": "tsc --noEmit",
+		"typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
 		"dev": "tsx src/dev.ts",
 		"test": "vitest run",
 		"test:watch": "vitest",

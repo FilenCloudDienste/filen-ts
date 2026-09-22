@@ -1,0 +1,13 @@
+{
+	"extends": "./tsconfig.json",
+	"include": ["src/tests", "src/globals.d.ts"],
+	"exclude": [],
+	"compilerOptions": {
+		"types": ["node"],
+		"noEmit": true,
+		"baseUrl": ".",
+		"paths": {
+			"@filen/shared": ["./src/index.ts"]
+		}
+	}
+}
