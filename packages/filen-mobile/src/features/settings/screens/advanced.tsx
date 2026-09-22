@@ -6,7 +6,7 @@ import { Platform, AppState } from "react-native"
 import { useNavigation } from "expo-router"
 import { router } from "@/lib/router"
 import { Image } from "expo-image"
-import { run, formatBytes } from "@filen/shared"
+import { run, formatBytes, TRANSFER_PERFORMANCE_PRESETS, type TransferPerformancePreset } from "@filen/shared"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { shareTmpFile } from "@/lib/share"
@@ -39,8 +39,6 @@ import logger from "@/lib/logger"
 import auth from "@/lib/auth"
 import { actionSheet } from "@/providers/actionSheet.provider"
 import {
-	TRANSFER_PERFORMANCE_PRESETS,
-	type TransferPerformancePreset,
 	TRANSFER_BANDWIDTH_PRESETS_KBPS,
 	kbpsToMbLabel,
 	useTransferPerformancePreset,

@@ -1,12 +1,8 @@
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { useTransferPreferencesQuery } from "@/features/settings/queries/preferences"
-import {
-	setTransferPreferences,
-	TRANSFER_PERFORMANCE_PRESETS,
-	type TransferPerformancePreset,
-	type TransferPreferences
-} from "@/features/settings/lib/transferConfig"
+import { setTransferPreferences, type TransferPreferences } from "@/features/settings/lib/transferConfig"
+import { TRANSFER_PERFORMANCE_PRESETS, type TransferPerformancePreset } from "@filen/shared"
 import type { SettingsKey } from "@/lib/i18n"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Field, FieldContent, FieldLabel, FieldDescription } from "@/components/ui/field"

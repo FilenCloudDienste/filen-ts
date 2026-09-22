@@ -1,6 +1,12 @@
 import { type, type Type } from "arktype"
 import type { JsClientConfig } from "@filen/sdk-rs"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
+import {
+	TRANSFER_PERFORMANCE_PRESETS,
+	type TransferPerformancePreset,
+	DEFAULT_TRANSFER_PERFORMANCE_PRESET,
+	TRANSFER_PRESET_VALUES
+} from "@filen/shared"
 
 // Advanced settings → transfer performance preset. Scoped to THIS web app's own uploads/downloads
 // (the worker-held wasm Client every drive/notes/chats transfer runs through) — worded that way
@@ -17,25 +23,13 @@ import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 //
 // No bandwidth cap here: the wasm build compiles the SDK's bandwidth limiter out entirely, while
 // concurrency and the file-IO memory budget below carry no such gate and are honored unconditionally.
-export const TRANSFER_PERFORMANCE_PRESETS = ["batterySaver", "balanced", "performance", "maximum"] as const
-
-export type TransferPerformancePreset = (typeof TRANSFER_PERFORMANCE_PRESETS)[number]
-
-export const DEFAULT_TRANSFER_PERFORMANCE_PRESET: TransferPerformancePreset = "balanced"
-
+//
+// The preset ladder itself (TRANSFER_PERFORMANCE_PRESETS / TRANSFER_PRESET_VALUES) lives in
+// @filen/shared and is the same one mobile's advanced settings use — there is no web-specific
+// constraint (no low iOS-style file-descriptor ceiling in a browser tab) that would argue for
+// different numbers, and keeping them identical means the four preset names mean the same thing on
+// every Filen client.
 const MIB = 1024 * 1024
-
-// concurrency = the SDK's global in-flight HTTP request cap; memoryMib = its file-IO chunk-buffer
-// budget. Same ladder mobile's own advanced settings use (transferConfig.ts) — there is no
-// web-specific constraint (no low iOS-style file-descriptor ceiling in a browser tab) that would
-// argue for different numbers, and keeping them identical means the four preset names mean the
-// same thing on every Filen client.
-export const TRANSFER_PRESET_VALUES: Record<TransferPerformancePreset, { concurrency: number; memoryMib: number }> = {
-	batterySaver: { concurrency: 4, memoryMib: 4 },
-	balanced: { concurrency: 8, memoryMib: 8 },
-	performance: { concurrency: 16, memoryMib: 16 },
-	maximum: { concurrency: 32, memoryMib: 32 }
-}
 
 export interface TransferPreferences {
 	preset: TransferPerformancePreset

@@ -18,10 +18,10 @@ import {
 	buildJsClientConfig,
 	getTransferPreferences,
 	setTransferPreferences,
-	TRANSFER_PRESET_VALUES,
 	DEFAULT_TRANSFER_PREFERENCES,
 	type TransferPreferences
 } from "@/features/settings/lib/transferConfig"
+import { TRANSFER_PRESET_VALUES } from "@filen/shared"
 
 beforeEach(() => {
 	kvStore.clear()
