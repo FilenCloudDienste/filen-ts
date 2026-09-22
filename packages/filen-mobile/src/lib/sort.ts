@@ -1,4 +1,11 @@
-import { parseNumbersFromString, estimateCaptureTimestamp } from "@filen/shared"
+import {
+	estimateCaptureTimestamp,
+	getUuidNumber,
+	getLowerName,
+	getNumericParts,
+	comparePartsNumeric,
+	clearNaturalSortCaches
+} from "@filen/shared"
 import { type DriveItem, type Note, type NoteTag } from "@/types"
 import type { ListItem as NoteListItem, Item as NoteItem } from "@/features/notes/components/note"
 import i18n from "@/lib/i18n"
@@ -44,118 +51,9 @@ export type SortByType =
 	| "captureAsc"
 	| "captureDesc"
 
-const uuidCache = new Map<string, number>()
-const lowerCache = new Map<string, string>()
-const numericPartsCache = new Map<string, (string | number)[]>()
-
-// Logout hook: the memo caches key on decrypted names (and uuids), so like every other
-// session-scoped in-memory store they must not carry one account's data — or its decrypted
-// names — into the next session. Growth is otherwise bounded only by distinct names seen.
+// Delegate kept so the existing logout wiring (src/lib/auth.ts) is untouched.
 export function clearSortCaches(): void {
-	uuidCache.clear()
-	lowerCache.clear()
-	numericPartsCache.clear()
-}
-
-function getUuidNumber(uuid: string): number {
-	let cached = uuidCache.get(uuid)
-
-	if (cached === undefined) {
-		cached = parseNumbersFromString(uuid)
-
-		uuidCache.set(uuid, cached)
-	}
-
-	return cached
-}
-
-function getLowerName(name: string): string {
-	let cached = lowerCache.get(name)
-
-	if (cached === undefined) {
-		cached = name.toLowerCase()
-
-		lowerCache.set(name, cached)
-	}
-
-	return cached
-}
-
-function getNumericParts(str: string): (string | number)[] {
-	let cached = numericPartsCache.get(str)
-
-	if (!cached) {
-		cached = []
-
-		// Run-sliced scan: the previous shape extracted a 1-char string per character
-		// (str[i]) and grew accumulator strings char-by-char — O(length) string
-		// allocations per UNCACHED name. Runs are detected via charCodeAt only and
-		// materialized with ONE slice each; digit runs keep parseInt so numeric
-		// semantics (incl. precision rounding of absurdly long digit runs) stay
-		// byte-identical to the previous implementation.
-		const length = str.length
-		let runStart = 0
-		let runIsDigit = false
-		let hasRun = false
-
-		for (let i = 0; i < length; i++) {
-			const code = str.charCodeAt(i)
-			const isDigit = code >= 48 && code <= 57
-
-			if (!hasRun) {
-				hasRun = true
-				runIsDigit = isDigit
-				runStart = i
-
-				continue
-			}
-
-			if (isDigit !== runIsDigit) {
-				cached.push(runIsDigit ? parseInt(str.slice(runStart, i), 10) : str.slice(runStart, i))
-
-				runStart = i
-				runIsDigit = isDigit
-			}
-		}
-
-		if (hasRun) {
-			cached.push(runIsDigit ? parseInt(str.slice(runStart), 10) : str.slice(runStart))
-		}
-
-		numericPartsCache.set(str, cached)
-	}
-
-	return cached
-}
-
-function comparePartsNumeric(aParts: (string | number)[], bParts: (string | number)[]): number {
-	// Identical strings resolve to the SAME cached parts array (numericPartsCache), so
-	// reference equality short-circuits the whole walk — this makes tie-dense comparisons
-	// (same mime across a group, duplicated names) O(1) instead of O(parts).
-	if (aParts === bParts) {
-		return 0
-	}
-
-	const minLen = Math.min(aParts.length, bParts.length)
-
-	for (let i = 0; i < minLen; i++) {
-		const aPart = aParts[i]
-		const bPart = bParts[i]
-
-		if (typeof aPart === "number" && typeof bPart === "number") {
-			if (aPart !== bPart) {
-				return aPart - bPart
-			}
-		} else if (typeof aPart === "string" && typeof bPart === "string") {
-			if (aPart !== bPart) {
-				return aPart < bPart ? -1 : 1
-			}
-		} else {
-			return typeof aPart === "number" ? -1 : 1
-		}
-	}
-
-	return aParts.length - bParts.length
+	clearNaturalSortCaches()
 }
 
 function isDirectoryType(type: string): boolean {
