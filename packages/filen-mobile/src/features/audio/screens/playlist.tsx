@@ -15,7 +15,7 @@ import audio from "@/features/audio/audio"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import ReorderableList from "react-native-reorderable-list"
 import usePlaylistTracksStore from "@/features/audio/store/usePlaylistTracks.store"
-import { pruneSelectionByUuid } from "@/features/audio/store/usePlaylists.store"
+import { pruneSelection } from "@filen/shared"
 import { useShallow } from "zustand/shallow"
 import { useTranslation } from "react-i18next"
 import Track from "@/features/audio/components/track"
@@ -67,8 +67,9 @@ export function Playlist() {
 			return
 		}
 
+		const liveUuids = new Set(trackFiles.map(file => file.uuid))
 		const selected = usePlaylistTracksStore.getState().selectedTracks
-		const kept = pruneSelectionByUuid(selected, trackFiles)
+		const kept = pruneSelection(selected, file => liveUuids.has(file.uuid))
 
 		if (kept !== selected) {
 			usePlaylistTracksStore.getState().setSelectedTracks(kept)

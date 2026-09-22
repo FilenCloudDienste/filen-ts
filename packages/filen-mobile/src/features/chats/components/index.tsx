@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from "react"
+import { pruneSelection } from "@filen/shared"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { Platform } from "react-native"
@@ -56,9 +57,9 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 	// partner while the selection is active) it's hidden from the list, so drop it from the
 	// selection too — keeps bulk actions and the select-all toggle honest. Guarded to avoid loops.
 	useEffect(() => {
-		const kept = selectedChats.filter(chat => !isOneOnOneWithBlocked(chat, stringigiedClient?.userId, blocked))
+		const kept = pruneSelection(selectedChats, chat => !isOneOnOneWithBlocked(chat, stringigiedClient?.userId, blocked))
 
-		if (kept.length !== selectedChats.length) {
+		if (kept !== selectedChats) {
 			useChatsStore.getState().setSelectedChats(kept)
 		}
 	}, [selectedChats, blocked, stringigiedClient?.userId])

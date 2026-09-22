@@ -11,7 +11,7 @@ import { useResolveClassNames } from "uniwind"
 import { useLocalSearchParams, useFocusEffect } from "expo-router"
 import { router } from "@/lib/router"
 import usePlaylistsQuery from "@/features/audio/queries/usePlaylists.query"
-import { run } from "@filen/shared"
+import { run, pruneSelection } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import audio, { type PlaylistWithItems } from "@/features/audio/audio"
 import prompts from "@/lib/prompts"
@@ -19,7 +19,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { randomUUID } from "expo-crypto"
 import { deserialize } from "@/lib/serializer"
 import events from "@/lib/events"
-import usePlaylistsStore, { pruneSelectionByUuid } from "@/features/audio/store/usePlaylists.store"
+import usePlaylistsStore from "@/features/audio/store/usePlaylists.store"
 import { useShallow } from "zustand/shallow"
 import { runBulk } from "@/lib/bulkOps"
 import { useTranslation } from "react-i18next"
@@ -107,8 +107,9 @@ export function Playlists() {
 			return
 		}
 
+		const liveUuids = new Set(playlistsData.map(playlist => playlist.uuid))
 		const selected = usePlaylistsStore.getState().selectedPlaylists
-		const kept = pruneSelectionByUuid(selected, playlistsData)
+		const kept = pruneSelection(selected, playlist => liveUuids.has(playlist.uuid))
 
 		if (kept !== selected) {
 			usePlaylistsStore.getState().setSelectedPlaylists(kept)

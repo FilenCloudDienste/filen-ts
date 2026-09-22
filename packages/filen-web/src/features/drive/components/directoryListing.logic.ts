@@ -1,3 +1,4 @@
+import { droppedIds } from "@filen/shared"
 import { getSharerIdentity, type DriveItem } from "@/features/drive/lib/item"
 import { isBlocked, type BlockedUsers } from "@/features/contacts/lib/blocking"
 import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
@@ -29,7 +30,11 @@ export function filterSharedInByBlocked(items: readonly DriveItem[], blocked: Bl
 // exactly these from useDriveStore so the bulk bar can never target a now-hidden item. An item whose
 // identity is unresolved is never included here (fail-open — mirrors isVisibleSharedInItem).
 export function staleBlockedSelectionUuids(selectedItems: readonly DriveItem[], blocked: BlockedUsers): string[] {
-	return selectedItems.filter(item => !isVisibleSharedInItem(item, blocked)).map(item => item.data.uuid)
+	return droppedIds(
+		selectedItems,
+		item => isVisibleSharedInItem(item, blocked),
+		item => item.data.uuid
+	)
 }
 
 // Uuids of currently-selected items no longer present in a live item set — directoryListing.tsx's
@@ -39,7 +44,11 @@ export function staleBlockedSelectionUuids(selectedItems: readonly DriveItem[], 
 export function staleSelectionUuids(selectedItems: readonly DriveItem[], liveItems: readonly DriveItem[]): string[] {
 	const liveUuids = new Set(liveItems.map(item => item.data.uuid))
 
-	return selectedItems.filter(item => !liveUuids.has(item.data.uuid)).map(item => item.data.uuid)
+	return droppedIds(
+		selectedItems,
+		item => liveUuids.has(item.data.uuid),
+		item => item.data.uuid
+	)
 }
 
 // A background refetch failure must never blank a listing that still has cached items on screen —
@@ -134,7 +143,11 @@ export function hiddenSelectionUuids(selectedItems: readonly DriveItem[], hidden
 
 	const hidden = new Set(hiddenUuids)
 
-	return selectedItems.filter(item => hidden.has(item.data.uuid)).map(item => item.data.uuid)
+	return droppedIds(
+		selectedItems,
+		item => !hidden.has(item.data.uuid),
+		item => item.data.uuid
+	)
 }
 
 // Local-substring fallback for every non-"drive" variant (favorites/recents/trash/sharedIn/

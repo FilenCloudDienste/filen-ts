@@ -7,7 +7,7 @@ import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualLis
 import ListEmpty from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
 import { type Note as TNote, type NoteTag } from "@/types"
-import { run, cn } from "@filen/shared"
+import { run, cn, pruneSelection } from "@filen/shared"
 import { createNoteFlow, createTagFlow } from "@/features/notes/components/notesActions"
 import { sortNoteTags, useNotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import alerts from "@/lib/alerts"
@@ -165,9 +165,9 @@ const Notes = () => {
 	// hidden from the list, so drop it from the selection too — keeps bulk actions honest.
 	useEffect(() => {
 		const selected = useNotesStore.getState().selectedNotes
-		const kept = selected.filter(note => !blocked.userIds.has(note.ownerId))
+		const kept = pruneSelection(selected, note => !blocked.userIds.has(note.ownerId))
 
-		if (kept.length !== selected.length) {
+		if (kept !== selected) {
 			useNotesStore.getState().setSelectedNotes(kept)
 		}
 	}, [blocked])
@@ -187,9 +187,9 @@ const Notes = () => {
 	useEffect(() => {
 		const narrowedUuids = new Set(narrowedNoteUuidsKey.length > 0 ? narrowedNoteUuidsKey.split(",") : [])
 		const selected = useNotesStore.getState().selectedNotes
-		const kept = selected.filter(note => narrowedUuids.has(note.uuid))
+		const kept = pruneSelection(selected, note => narrowedUuids.has(note.uuid))
 
-		if (kept.length !== selected.length) {
+		if (kept !== selected) {
 			useNotesStore.getState().setSelectedNotes(kept)
 		}
 		// `selectedNotes` is in the deps so a selection WRITE is re-checked too, not just a membership
@@ -314,11 +314,7 @@ const Notes = () => {
 
 		const liveTagUuids = new Set(liveTagUuidsKey.length > 0 ? liveTagUuidsKey.split(",") : [])
 
-		useNotesStore.getState().setSelectedTags(prev => {
-			const pruned = prev.filter(selectedTag => liveTagUuids.has(selectedTag.uuid))
-
-			return pruned.length === prev.length ? prev : pruned
-		})
+		useNotesStore.getState().setSelectedTags(prev => pruneSelection(prev, selectedTag => liveTagUuids.has(selectedTag.uuid)))
 	}, [liveTagUuidsKey])
 
 	// Selection-ghost purge (#42): a remote NoteEvent_Tags.Deleted removes the note from
@@ -336,11 +332,7 @@ const Notes = () => {
 
 		const liveNoteUuids = new Set(liveNoteUuidsKey.length > 0 ? liveNoteUuidsKey.split(",") : [])
 
-		useNotesStore.getState().setSelectedNotes(prev => {
-			const pruned = prev.filter(selectedNote => liveNoteUuids.has(selectedNote.uuid))
-
-			return pruned.length === prev.length ? prev : pruned
-		})
+		useNotesStore.getState().setSelectedNotes(prev => pruneSelection(prev, selectedNote => liveNoteUuids.has(selectedNote.uuid)))
 	}, [liveNoteUuidsKey])
 
 	const searchActive = searchQuery.trim().length > 0
