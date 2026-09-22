@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { externalLinkDomain, shouldInterceptLinkClick } from "@/features/chats/lib/linkTrust.logic"
 
+// Version 4 (third group starts "4"), variant 8 (fourth "8"), and a 64-hex-char (32-byte) key —
+// @filen/shared's parseFilenPublicLink, which this recognition ultimately delegates to, hard-rejects
+// any other uuid variant or decoded key length.
+const FILEN_UUID = "11111111-1111-4111-8111-111111111111"
+const FILEN_KEY_HEX = "3031323334353637383961626364656630313233343536373839616263646566"
+
 describe("externalLinkDomain", () => {
 	it("resolves the lowercased hostname for a genuine external https url", () => {
 		expect(externalLinkDomain("https://Example.com/path?x=1")).toBe("example.com")
@@ -11,11 +17,11 @@ describe("externalLinkDomain", () => {
 	})
 
 	it("is null for a Filen public FILE link — same-domain, never gated", () => {
-		expect(externalLinkDomain("https://app.filen.io/#/d/11111111-1111-1111-1111-111111111111%23abcd")).toBeNull()
+		expect(externalLinkDomain(`https://app.filen.io/#/d/${FILEN_UUID}%23${FILEN_KEY_HEX}`)).toBeNull()
 	})
 
 	it("is null for a Filen public DIRECTORY link", () => {
-		expect(externalLinkDomain("https://app.filen.io/#/f/11111111-1111-1111-1111-111111111111%23abcd")).toBeNull()
+		expect(externalLinkDomain(`https://app.filen.io/#/f/${FILEN_UUID}%23${FILEN_KEY_HEX}`)).toBeNull()
 	})
 
 	it("is null for an unparseable url", () => {

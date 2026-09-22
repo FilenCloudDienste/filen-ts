@@ -2,76 +2,16 @@ import { Buffer } from "buffer"
 import { describe, expect, it } from "vitest"
 import { parsePublicLink, buildPublicLinkUrl, resolveRouteLink, deriveLegacyRedirect } from "@/features/publicLinks/lib/format.logic"
 
-const UUID = "11111111-2222-3333-4444-555555555555"
+// Version 4 (third group starts "4"), variant 8 (fourth "8") — parsePublicLink now delegates to
+// @filen/shared's parseFilenPublicLink, which validates both nibbles via the 'uuid' package.
+const UUID = "11111111-2222-4333-8444-555555555555"
 // A realistic 32-char plaintext key → 64 hex chars, comfortably above the route's min-fragment floor.
 const KEY_PLAINTEXT = "0123456789abcdef0123456789abcdef"
 const KEY_HEX = Buffer.from(KEY_PLAINTEXT, "utf-8").toString("hex")
 
-describe("parsePublicLink — new path format (letters swapped from legacy)", () => {
-	it("recognizes /f/ as a FILE", () => {
-		expect(parsePublicLink(`https://app.filen.io/f/${UUID}#${KEY_HEX}`)).toEqual({ kind: "file", uuid: UUID, key: KEY_PLAINTEXT })
-	})
-
-	it("recognizes /d/ as a DIRECTORY", () => {
-		expect(parsePublicLink(`https://app.filen.io/d/${UUID}#${KEY_HEX}`)).toEqual({
-			kind: "directory",
-			uuid: UUID,
-			key: KEY_PLAINTEXT
-		})
-	})
-
-	it("accepts a %23-encoded separator too", () => {
-		expect(parsePublicLink(`https://app.filen.io/f/${UUID}%23${KEY_HEX}`)).toEqual({ kind: "file", uuid: UUID, key: KEY_PLAINTEXT })
-	})
-})
-
-describe("parsePublicLink — legacy hash format (letters swapped: f=dir, d=file)", () => {
-	it("recognizes legacy /d/ as a FILE", () => {
-		expect(parsePublicLink(`https://app.filen.io/#/d/${UUID}%23${KEY_HEX}`)).toEqual({ kind: "file", uuid: UUID, key: KEY_PLAINTEXT })
-	})
-
-	it("recognizes legacy /f/ as a DIRECTORY", () => {
-		expect(parsePublicLink(`https://app.filen.io/#/f/${UUID}%23${KEY_HEX}`)).toEqual({
-			kind: "directory",
-			uuid: UUID,
-			key: KEY_PLAINTEXT
-		})
-	})
-
-	it("accepts a legacy literal # separator", () => {
-		expect(parsePublicLink(`https://app.filen.io/#/d/${UUID}#${KEY_HEX}`)).toEqual({ kind: "file", uuid: UUID, key: KEY_PLAINTEXT })
-	})
-
-	it("accepts the drive.filen.io legacy host", () => {
-		expect(parsePublicLink(`https://drive.filen.io/#/d/${UUID}%23${KEY_HEX}`)).toEqual({ kind: "file", uuid: UUID, key: KEY_PLAINTEXT })
-	})
-})
-
-describe("parsePublicLink — rejections", () => {
-	it("rejects a non-Filen host", () => {
-		expect(parsePublicLink(`https://evil.example.com/f/${UUID}#${KEY_HEX}`)).toBeNull()
-	})
-
-	it("rejects an unknown route letter", () => {
-		expect(parsePublicLink(`https://app.filen.io/x/${UUID}#${KEY_HEX}`)).toBeNull()
-	})
-
-	it("rejects a malformed uuid", () => {
-		expect(parsePublicLink(`https://app.filen.io/f/not-a-uuid#${KEY_HEX}`)).toBeNull()
-	})
-
-	it("rejects a non-hex key", () => {
-		expect(parsePublicLink(`https://app.filen.io/f/${UUID}#not-hex`)).toBeNull()
-	})
-
-	it("rejects a missing key", () => {
-		expect(parsePublicLink(`https://app.filen.io/f/${UUID}`)).toBeNull()
-	})
-
-	it("rejects a plain non-Filen url", () => {
-		expect(parsePublicLink("https://example.com/photo.png")).toBeNull()
-	})
-})
+// parsePublicLink's own format-recognition cases (new/legacy eras, rejections) live in
+// @filen/shared's src/tests/publicLink.test.ts, against the parseFilenPublicLink it delegates to.
+// This file keeps only what stays web-local: building links and route-side resolution.
 
 describe("buildPublicLinkUrl", () => {
 	it("builds the NEW file format (/f/, hex key in a literal-# fragment)", () => {

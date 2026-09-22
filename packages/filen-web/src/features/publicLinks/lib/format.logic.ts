@@ -1,4 +1,5 @@
 import { Buffer } from "buffer"
+import { parseFilenPublicLink } from "@filen/shared"
 
 // Single source of truth for what a Filen public link looks like — both BUILDING one (the drive
 // link dialog imports the prefixes + builder here) and PARSING one (the chat-embed recognizer, the
@@ -13,10 +14,10 @@ import { Buffer } from "buffer"
 // FORMAT ERAS (both recognized; only the NEW one is emitted):
 //   NEW (this app, path-based):   https://app.filen.io/f/<uuid>#<hexkey>   → f = FILE, d = DIRECTORY
 //   LEGACY (old-web, hash-router): https://app.filen.io/#/f/<uuid>%23<key> → f = DIRECTORY, d = FILE
-// The letters are DELIBERATELY swapped between eras. The legacy host set (app|drive).filen.io and
-// its %23-or-literal-# separator mirror the shared @filen/shared parser these links round-tripped
-// through; this module reimplements the shape web-locally rather than repointing that shared parser
-// (mobile still builds legacy-format links and must keep parsing them — it migrates later).
+// The letters are DELIBERATELY swapped between eras. PARSING both eras is owned by @filen/shared's
+// parseFilenPublicLink (used by mobile directly, wrapped here as a thin `type` → `kind` mapper so
+// this app's own PublicLinkTarget shape doesn't change); only the BUILD side (prefixes below) stays
+// app-local, since mobile still builds legacy-format links and web builds NEW-format ones.
 
 // Canonical host every in-app-built link uses. The key stays in the fragment, so this host only
 // pins where the SPA is served, never carries key material.
@@ -40,16 +41,6 @@ export interface PublicLinkTarget {
 const UUID_SUB = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 const UUID_RE = new RegExp(`^${UUID_SUB}$`, "i")
 
-// NEW path format: <origin>/f|d/<uuid>(#|%23)<hexkey>. The key group is hex only (the builder always
-// hex-encodes) — a non-hex tail simply fails to match, same negative outcome as a bad link.
-const NEW_LINK_RE = new RegExp(`^https?://(?:app|drive)\\.filen\\.io/([fd])/(${UUID_SUB})(?:#|%23)([0-9a-f]+)`, "i")
-
-// LEGACY hash-router format: <origin>/#/f|d/<uuid>(%23|#)<hexkey>, letters swapped vs NEW. Hex-only
-// key group mirrors the shape this app itself built under the old convention (the only legacy links
-// the chat recognizer ever matched); genuinely raw-key legacy links degrade to a plain link, same as
-// today — no regression.
-const LEGACY_LINK_RE = new RegExp(`^https?://(?:app|drive)\\.filen\\.io/#/([df])/(${UUID_SUB})(?:%23|#)([0-9a-f]+)`, "i")
-
 // Even-length, all-hex → its UTF-8 plaintext. Anything else (odd length, non-hex, empty) is null —
 // the caller treats that as "not a recognizable link", never a partial parse.
 function hexDecode(hex: string): string | null {
@@ -64,44 +55,14 @@ function hexDecode(hex: string): string | null {
 	}
 }
 
-// Recognizes a full link URL of EITHER era and returns the era-correct kind (letters swapped between
-// eras — see the module header). Used by the chat-embed recognizer, so it is strict: the key must be
-// valid hex it can decode, otherwise null (render the raw link, never a half-resolved card).
+// Thin `type` → `kind` mapper over @filen/shared's parseFilenPublicLink, which owns recognition of
+// BOTH eras (letters swapped between them — see the module header). Used by the chat-embed
+// recognizer, so it is strict: the key must decode and be a valid 32-byte key, otherwise null
+// (render the raw link, never a half-resolved card).
 export function parsePublicLink(raw: string): PublicLinkTarget | null {
-	const nw = NEW_LINK_RE.exec(raw)
+	const target = parseFilenPublicLink(raw)
 
-	if (nw !== null) {
-		const letter = nw[1]?.toLowerCase()
-		const uuid = nw[2]
-		const hex = nw[3]
-
-		if (letter === undefined || uuid === undefined || hex === undefined) {
-			return null
-		}
-
-		const key = hexDecode(hex)
-
-		return key === null ? null : { kind: letter === "f" ? "file" : "directory", uuid, key }
-	}
-
-	const lg = LEGACY_LINK_RE.exec(raw)
-
-	if (lg !== null) {
-		const letter = lg[1]?.toLowerCase()
-		const uuid = lg[2]
-		const hex = lg[3]
-
-		if (letter === undefined || uuid === undefined || hex === undefined) {
-			return null
-		}
-
-		const key = hexDecode(hex)
-
-		// Legacy semantics are swapped: `d` = file, `f` = directory.
-		return key === null ? null : { kind: letter === "d" ? "file" : "directory", uuid, key }
-	}
-
-	return null
+	return target === null ? null : { kind: target.type, uuid: target.uuid, key: target.key }
 }
 
 // The NEW-format link the drive dialog copies to the clipboard: `<prefix><uuid>#<hexkey>`. `keyPlain`

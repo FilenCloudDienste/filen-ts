@@ -1,5 +1,3 @@
-import { validate as validateUUID } from "uuid"
-
 export function parseNumbersFromString(string: string): number {
 	if (!string) {
 		return 0
@@ -201,58 +199,6 @@ export function parseYouTubeVideoId(url: string): string | null {
 	}
 
 	return null
-}
-
-/**
- * Buffer typed here and read at CALL time: this file is consumed as source by clients whose tsconfig
- * carries no Node globals, and React Native installs its polyfill at app start, so capturing the
- * global at module evaluation would bind undefined. An ambient `declare const Buffer` would instead
- * collide with @types/node wherever a consumer does have it.
- */
-type BufferLike = {
-	from(input: string, encoding?: string): { toString(encoding?: string): string; length: number }
-}
-
-function nodeBuffer(): BufferLike {
-	return (globalThis as unknown as { Buffer: BufferLike }).Buffer
-}
-
-const FILEN_PUBLIC_LINK_RE =
-	/https?:\/\/(?:app|drive)\.filen\.io\/#\/([df])\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:%23|#)([A-Za-z0-9]{32,})/
-const HEX_64_RE = /^[0-9A-Fa-f]{64}$/
-
-export function parseFilenPublicLink(url: string): { uuid: string; key: string; type: "file" | "directory" } | null {
-	if (!url || url.length === 0) {
-		return null
-	}
-
-	const match = FILEN_PUBLIC_LINK_RE.exec(url)
-
-	if (!match || match.length < 4 || !match[1] || !match[2] || !match[3]) {
-		return null
-	}
-
-	const pathType: string = match[1]
-	const uuid: string = match[2]
-	let key: string = match[3]
-
-	if (HEX_64_RE.test(key)) {
-		try {
-			key = nodeBuffer().from(key, "hex").toString("utf8")
-		} catch {
-			return null
-		}
-	}
-
-	if (nodeBuffer().from(key).length !== 32 || !validateUUID(uuid) || (pathType !== "d" && pathType !== "f")) {
-		return null
-	}
-
-	return {
-		uuid,
-		key,
-		type: pathType === "d" ? "file" : "directory"
-	}
 }
 
 export function parseXStatusId(url: string): string {

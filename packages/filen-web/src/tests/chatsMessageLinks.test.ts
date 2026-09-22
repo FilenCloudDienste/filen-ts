@@ -13,8 +13,11 @@ vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getLinkedFile, getDirPublicLinkIn
 
 import { fetchChatMessageLinks } from "@/features/chats/queries/chatMessageLinks"
 
-const UUID = "11111111-1111-1111-1111-111111111111"
-const KEY_PLAINTEXT = "the-file-key"
+// Version 4 (third group starts "4"), variant 8 (fourth "8") — parseFilenPublicLink validates both
+// nibbles via the 'uuid' package, unlike a plain 8-4-4-4-12 hex-shape regex.
+const UUID = "11111111-1111-4111-8111-111111111111"
+// A realistic 32-byte key — @filen/shared's parseFilenPublicLink hard-rejects any other length.
+const KEY_PLAINTEXT = "0123456789abcdef0123456789abcdef"
 const KEY_HEX = Buffer.from(KEY_PLAINTEXT, "utf-8").toString("hex")
 const FILE_LINK_URL = `https://app.filen.io/#/d/${UUID}%23${KEY_HEX}`
 const DIR_LINK_URL = `https://app.filen.io/#/f/${UUID}%23${KEY_HEX}`
