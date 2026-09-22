@@ -55,9 +55,9 @@ export async function run(fn: (defer: (cleanup: () => void) => void) => Promise<
 
 export const createExecutableTimeout = vi.fn()
 
-// InFlight and the drive-listing splice rules are plain data helpers with no timing-sensitive
-// behavior (unlike Semaphore's no-op above), so there is nothing to fake — pull them through
-// vi.importActual, bypassing this factory's own interception of the bare specifier.
-export const { InFlight, keepAgainstIncoming, upsertItem, removeByUuid, applyMembershipPatch } = await vi.importActual<
+// InFlight, the drive-listing splice rules and isHiddenName are plain data helpers with no
+// timing-sensitive behavior (unlike Semaphore's no-op above), so there is nothing to fake — pull
+// them through vi.importActual, bypassing this factory's own interception of the bare specifier.
+export const { InFlight, keepAgainstIncoming, upsertItem, removeByUuid, applyMembershipPatch, isHiddenName } = await vi.importActual<
 	typeof import("@filen/shared")
 >("@filen/shared")

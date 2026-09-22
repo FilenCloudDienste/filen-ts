@@ -1,5 +1,6 @@
 import { type TFunction } from "i18next"
-import { isHiddenName, readHideHiddenItems } from "@/features/drive/driveHiddenItems"
+import { isHiddenName } from "@filen/shared"
+import { readHideHiddenItems } from "@/features/drive/driveHiddenItems"
 import alerts from "@/lib/alerts"
 import logger from "@/lib/logger"
 

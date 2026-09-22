@@ -8,10 +8,7 @@ const { alertsMock, readHideHiddenItems, loggerWarn } = vi.hoisted(() => ({
 
 vi.mock("@/lib/alerts", () => ({ default: alertsMock }))
 vi.mock("@/lib/logger", () => ({ default: { warn: loggerWarn, error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
-vi.mock("@/features/drive/driveHiddenItems", () => ({
-	isHiddenName: (name: string) => name.trim().startsWith("."),
-	readHideHiddenItems
-}))
+vi.mock("@/features/drive/driveHiddenItems", () => ({ readHideHiddenItems }))
 
 import { notifyIfNameIsHidden } from "@/features/drive/components/hiddenNameNotice"
 import type { TFunction } from "i18next"

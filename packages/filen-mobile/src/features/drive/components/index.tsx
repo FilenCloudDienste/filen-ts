@@ -6,14 +6,14 @@ import useDriveItemsQuery from "@/features/drive/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 import { itemSorter } from "@/lib/sort"
 import { useDriveSortPreference } from "@/features/drive/driveSortPreference"
-import { filterHiddenDriveItems, useHideHiddenItems } from "@/features/drive/driveHiddenItems"
+import { useHideHiddenItems } from "@/features/drive/driveHiddenItems"
 import VirtualList, { type ListRef, type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
 import Item from "@/features/drive/components/item"
 import Header from "@/features/drive/components/header"
 import DriveListFooter from "@/features/drive/components/listFooter"
-import { run, cn, isBlocked } from "@filen/shared"
+import { run, cn, isBlocked, filterHiddenItems } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import { type View as RNView, Platform, ActivityIndicator } from "react-native"
 import useViewLayout from "@/hooks/useViewLayout"
@@ -136,7 +136,7 @@ const Drive = () => {
 	// Which contexts it applies to is `hiddenFilterAppliesTo`: the two browsing views only. See
 	// there for why every other list this screen backs shows everything.
 	const hidingActive = hideHiddenItems && hiddenFilterAppliesTo(drivePath)
-	const items = filterHiddenDriveItems({
+	const items = filterHiddenItems({
 		items: visibleItems,
 		hide: hidingActive,
 		// Search is recursive: without the hit's ancestry, hiding `.thumb` from the browser would

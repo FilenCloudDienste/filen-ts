@@ -22,10 +22,9 @@ vi.mock("@/lib/confirmedAction", () => ({
 }))
 
 // driveHiddenItems (reached via components/hiddenNameNotice) is backed by secureStore, which pulls in
-// expo-secure-store. Stub the two accessors the code under test touches; the preference is off,
-// so the hidden-name notice never fires here.
+// expo-secure-store. Stub the accessor the code under test touches; the preference is off, so the
+// hidden-name notice never fires here. isHiddenName now comes from @filen/shared (see filenShared mock).
 vi.mock("@/features/drive/driveHiddenItems", () => ({
-	isHiddenName: (name: string) => name.trim().startsWith("."),
 	readHideHiddenItems: async () => false
 }))
 

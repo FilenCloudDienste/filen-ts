@@ -9,9 +9,8 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 // This suite exercises only getDriveParent / canShowDriveCreateMenu, neither of which touches the
 // hidden-items preference — but driveCreateMenu imports components/hiddenNameNotice, which reaches
 // driveHiddenItems -> secureStore -> expo-secure-store. The stub exists purely to keep the module
-// graph loadable.
+// graph loadable. isHiddenName now comes from @filen/shared (see filenShared mock).
 vi.mock("@/features/drive/driveHiddenItems", () => ({
-	isHiddenName: (name: string) => name.trim().startsWith("."),
 	readHideHiddenItems: async () => false
 }))
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))

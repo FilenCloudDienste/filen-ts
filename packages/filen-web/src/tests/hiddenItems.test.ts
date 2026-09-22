@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest"
 import type { Dir, File, UuidStr } from "@filen/sdk-rs"
+import { filterHiddenItems } from "@filen/shared"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { filterHiddenDriveItems, hiddenFilterAppliesTo, isHiddenName, isHiddenSearchPath } from "@/features/drive/lib/hiddenItems"
+import { hiddenFilterAppliesTo } from "@/features/drive/lib/hiddenItems"
 
 // Pure module — no mocks at all: the kv half of this feature lives in lib/preferences.ts, so nothing
 // here touches storage.
@@ -58,56 +59,20 @@ function fileItem(name: string, uuid = testUuid("file")): DriveItem {
 	return narrowItem(file)
 }
 
-describe("isHiddenName", () => {
-	it("treats a dot-prefixed name as hidden", () => {
-		expect(isHiddenName(".env")).toBe(true)
-	})
-
-	it("trims leading whitespace first — another client can create ' .env', the same hidden file to a user", () => {
-		expect(isHiddenName(" .env")).toBe(true)
-	})
-
-	it("leaves an ordinary name alone", () => {
-		expect(isHiddenName("env")).toBe(false)
-		expect(isHiddenName("a.b")).toBe(false)
-	})
-
-	it("is false for an empty name", () => {
-		expect(isHiddenName("")).toBe(false)
-	})
-
-	it("treats a bare dot-entry name as hidden", () => {
-		expect(isHiddenName("..")).toBe(true)
-	})
-})
-
-describe("isHiddenSearchPath", () => {
-	it("is false for a direct child of the search root (empty path)", () => {
-		expect(isHiddenSearchPath("")).toBe(false)
-	})
-
-	it("is true when any ancestor segment is hidden", () => {
-		expect(isHiddenSearchPath("docs/.cache")).toBe(true)
-		expect(isHiddenSearchPath(".git/objects")).toBe(true)
-	})
-
-	it("is false when no segment is hidden", () => {
-		expect(isHiddenSearchPath("docs/cache")).toBe(false)
-	})
-})
-
-describe("filterHiddenDriveItems", () => {
+// isHiddenName/isHiddenSearchPath/filterHiddenItems are shared (see @filen/shared's
+// hiddenItems.test.ts); these cases exercise filterHiddenItems against web's real DriveItem shapes.
+describe("filterHiddenItems", () => {
 	it("returns everything when hide is false", () => {
 		const items = [dirItem(".secret"), fileItem("report.pdf")]
 
-		expect(filterHiddenDriveItems({ items, hide: false })).toEqual(items)
+		expect(filterHiddenItems({ items, hide: false })).toEqual(items)
 	})
 
 	it("hides an item by its own dot-prefixed display name", () => {
 		const visible = fileItem("report.pdf")
 		const items = [dirItem(".secret"), visible]
 
-		expect(filterHiddenDriveItems({ items, hide: true })).toEqual([visible])
+		expect(filterHiddenItems({ items, hide: true })).toEqual([visible])
 	})
 
 	it("hides a search hit whose ancestor chain contains a hidden directory, keeping its siblings", () => {
@@ -118,19 +83,19 @@ describe("filterHiddenDriveItems", () => {
 			[sibling.data.uuid, "docs"]
 		])
 
-		expect(filterHiddenDriveItems({ items: [buried, sibling], hide: true, searchParentPaths })).toEqual([sibling])
+		expect(filterHiddenItems({ items: [buried, sibling], hide: true, searchParentPaths })).toEqual([sibling])
 	})
 
 	it("keeps an undecryptable row — its display name is its uuid, and hiding something unidentifiable strands it", () => {
 		const opaque = undecryptableItem()
 
-		expect(filterHiddenDriveItems({ items: [opaque], hide: true })).toEqual([opaque])
+		expect(filterHiddenItems({ items: [opaque], hide: true })).toEqual([opaque])
 	})
 
 	it("keeps an item with no searchParentPaths entry", () => {
 		const item = fileItem("report.pdf")
 
-		expect(filterHiddenDriveItems({ items: [item], hide: true, searchParentPaths: new Map() })).toEqual([item])
+		expect(filterHiddenItems({ items: [item], hide: true, searchParentPaths: new Map() })).toEqual([item])
 	})
 })
 

@@ -1,6 +1,6 @@
 import { toast } from "sonner"
+import { isHiddenName } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
-import { isHiddenName } from "@/features/drive/lib/hiddenItems"
 
 // Tells the user when the name they just typed will be filtered out from under them. Creating or
 // renaming has no success feedback of its own — the row appearing IS the feedback — so with the

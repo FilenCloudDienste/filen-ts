@@ -1,7 +1,6 @@
-import { droppedIds, driveItemName, isBlocked, type BlockedUsers } from "@filen/shared"
+import { droppedIds, driveItemName, isBlocked, filterHiddenItems, type BlockedUsers } from "@filen/shared"
 import { getSharerIdentity, type DriveItem } from "@/features/drive/lib/item"
 import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
-import { filterHiddenDriveItems } from "@/features/drive/lib/hiddenItems"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 
 // Fail-open visibility check for a sharedIn item: an unresolved sharer identity (getSharerIdentity
@@ -118,7 +117,7 @@ export function resolveListingDisplayItems(input: {
 		input.search === undefined
 			? sortDriveItems(input.items, input.sortBy, input.directorySizes)
 			: resolveSearchDisplayItems(input.items, input.search.total, input.sortBy, input.directorySizes)
-	const items = filterHiddenDriveItems({
+	const items = filterHiddenItems({
 		items: resolved,
 		hide: input.hide,
 		...(input.search !== undefined ? { searchParentPaths: input.search.parentPaths } : {})

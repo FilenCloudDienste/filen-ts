@@ -7,14 +7,8 @@ vi.mock("@/lib/secureStore", () => ({
 	useSecureStore: vi.fn()
 }))
 
-import {
-	isHiddenName,
-	isHiddenDriveItem,
-	isHiddenSearchPath,
-	filterHiddenDriveItems,
-	DEFAULT_HIDE_HIDDEN_ITEMS,
-	HIDE_HIDDEN_ITEMS_SECURE_STORE_KEY
-} from "@/features/drive/driveHiddenItems"
+import { filterHiddenItems } from "@filen/shared"
+import { isHiddenDriveItem, DEFAULT_HIDE_HIDDEN_ITEMS, HIDE_HIDDEN_ITEMS_SECURE_STORE_KEY } from "@/features/drive/driveHiddenItems"
 import type { DriveItem } from "@/types"
 
 function file(uuid: string, name: string | null, undecryptable = false): DriveItem {
@@ -63,19 +57,6 @@ describe("hidden-item preference defaults", () => {
 	})
 })
 
-describe("isHiddenName", () => {
-	it("matches a leading dot, including one behind stray whitespace", () => {
-		expect(isHiddenName(".env")).toBe(true)
-		expect(isHiddenName("  .env")).toBe(true)
-	})
-
-	it("does not match a dot elsewhere, or an empty name", () => {
-		expect(isHiddenName("notes.txt")).toBe(false)
-		expect(isHiddenName("archive.tar.gz")).toBe(false)
-		expect(isHiddenName("")).toBe(false)
-	})
-})
-
 describe("isHiddenDriveItem", () => {
 	it("treats a leading dot as hidden, for files and directories alike", () => {
 		expect(isHiddenDriveItem(file("f1", ".env"))).toBe(true)
@@ -103,36 +84,25 @@ describe("isHiddenDriveItem", () => {
 	})
 })
 
-describe("isHiddenSearchPath", () => {
-	it("treats a direct child of the search root as not hidden", () => {
-		expect(isHiddenSearchPath("")).toBe(false)
-	})
-
-	it("matches a hidden ancestor at any depth", () => {
-		expect(isHiddenSearchPath(".thumb")).toBe(true)
-		expect(isHiddenSearchPath("Projects/.git/objects")).toBe(true)
-		expect(isHiddenSearchPath("Projects/app/.cache")).toBe(true)
-	})
-
-	it("leaves a fully visible ancestry alone", () => {
-		expect(isHiddenSearchPath("Projects/app/src")).toBe(false)
-		expect(isHiddenSearchPath("v1.2/build")).toBe(false)
-	})
-})
-
-describe("filterHiddenDriveItems", () => {
+// filterHiddenItems itself is shared (see @filen/shared's hiddenItems.test.ts); these cases exercise
+// it against mobile's real DriveItem shapes and call convention.
+describe("filterHiddenItems", () => {
 	const items = [file("f1", ".env"), file("f2", "notes.txt"), dir("d1", ".thumb"), dir("d2", "Documents")]
 
 	it("returns the input untouched — same reference — when the preference is off", () => {
-		expect(filterHiddenDriveItems({ items, hide: false })).toBe(items)
+		expect(filterHiddenItems({ items, hide: false })).toBe(items)
 	})
 
 	it("drops every dot-prefixed entry when the preference is on", () => {
-		expect(filterHiddenDriveItems({ items, hide: true }).map(item => item.data.uuid)).toEqual(["f2", "d2"])
+		expect(filterHiddenItems({ items, hide: true }).map(item => item.data.uuid)).toEqual(["f2", "d2"])
 	})
 
 	it("can empty a listing whose entries are all hidden", () => {
-		expect(filterHiddenDriveItems({ items: [file("f1", ".env"), dir("d1", ".git")], hide: true })).toEqual([])
+		expect(filterHiddenItems({ items: [file("f1", ".env"), dir("d1", ".git")], hide: true })).toEqual([])
+	})
+
+	it("keeps an undecryptable item visible — its display name is its uuid, never dotted", () => {
+		expect(filterHiddenItems({ items: [file("f1", null, true)], hide: true })).toEqual([file("f1", null, true)])
 	})
 
 	// Search is recursive: hiding `.thumb` from the browser while its contents flood the results
@@ -144,19 +114,19 @@ describe("filterHiddenDriveItems", () => {
 			["b", "Documents"]
 		])
 
-		expect(filterHiddenDriveItems({ items: hits, hide: true, searchParentPaths: paths }).map(item => item.data.uuid)).toEqual(["b"])
+		expect(filterHiddenItems({ items: hits, hide: true, searchParentPaths: paths }).map(item => item.data.uuid)).toEqual(["b"])
 	})
 
 	it("keeps a hit whose path is absent from the map (not a search result)", () => {
 		const hits = [file("a", "cover.jpg")]
 
-		expect(filterHiddenDriveItems({ items: hits, hide: true, searchParentPaths: new Map() }).map(item => item.data.uuid)).toEqual(["a"])
+		expect(filterHiddenItems({ items: hits, hide: true, searchParentPaths: new Map() }).map(item => item.data.uuid)).toEqual(["a"])
 	})
 
 	it("ignores ancestry entirely when the preference is off", () => {
 		const hits = [file("a", "cover.jpg")]
 		const paths = new Map([["a", ".thumb"]])
 
-		expect(filterHiddenDriveItems({ items: hits, hide: false, searchParentPaths: paths })).toBe(hits)
+		expect(filterHiddenItems({ items: hits, hide: false, searchParentPaths: paths })).toBe(hits)
 	})
 })
