@@ -41,6 +41,7 @@
 	},
 	"dependencies": {
 		"clsx": "^2.1.1",
+		"js-xxhash": "^5.0.1",
 		"node-html-better-parser": "^1.5.8",
 		"striptags": "^3.2.0",
 		"tailwind-merge": "^3.3.1",

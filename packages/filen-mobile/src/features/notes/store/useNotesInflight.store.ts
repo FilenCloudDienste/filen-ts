@@ -1,4 +1,6 @@
 import { create } from "zustand"
+import { type InflightContent as SharedInflightContent } from "@filen/shared"
+import { type Note } from "@/types"
 
 /**
  * SQLite kv row the inflight queue is persisted under. Declared here rather than on the Sync class so
@@ -7,21 +9,9 @@ import { create } from "zustand"
  */
 export const INFLIGHT_CONTENT_SQLITE_KV_KEY = "inflightNoteContent"
 
-export type InflightContent = Record<
-	string,
-	{
-		timestamp: number
-		content: string
-		note: import("@/types").Note
-		// D3: hash (sync.tsx `hashNoteContent`) of the synced/loaded content this editing
-		// session was BASED on — NOT the typed text. The push loop compares it against the
-		// note's current cloud content to detect (never prevent — local edits always win)
-		// that a push buried newer remote work. OPTIONAL because the queue is persisted to
-		// SQLite: entries written by older app versions have no hash and push WITHOUT the
-		// conflict check (a one-time grace instead of migration machinery).
-		baseContentHash?: string
-	}[]
->
+// The per-entry shape (timestamp/content/note/baseContentHash?) lives in @filen/shared, generic over
+// this app's own generated Note type.
+export type InflightContent = SharedInflightContent<Note>
 
 export type NotesInflightStore = {
 	inflightContent: InflightContent

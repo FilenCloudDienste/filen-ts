@@ -79,10 +79,13 @@ vi.mock("@/features/notes/utils", () => ({ noteTypeToEditorType: () => "text" })
 vi.mock("@/features/notes/checklistView", () => ({ useChecklistHideCompleted: () => [false] }))
 // M3: flushToDisk is the controllable seam — the live flushInflightContentWithAlert helper
 // (exported from the component module) is exercised against it. hashNoteContent is a
-// deterministic stand-in; buildInflightEntries receives hashes as opaque strings anyway.
-vi.mock("@/features/notes/components/sync", () => ({
+// deterministic stand-in; buildInflightEntries receives hashes as opaque strings anyway, so the
+// REAL @filen/shared implementation (pulled via importActual, bypassing this file's own
+// @filen/shared mock below) is used rather than re-implementing the algorithm here.
+vi.mock("@/features/notes/components/sync", async () => ({
 	sync: { flushToDisk: mockFlushToDisk, clearRejections: vi.fn() },
-	hashNoteContent: (content: string) => `h(${content})`
+	hashNoteContent: (content: string) => `h(${content})`,
+	buildInflightEntries: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).buildInflightEntries
 }))
 vi.mock("@/lib/auth", () => ({ useStringifiedClient: () => null }))
 vi.mock("@/features/notes/store/useNotesInflight.store", () => ({ default: { getState: () => ({ inflightContent: {} }) } }))

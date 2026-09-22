@@ -20,7 +20,7 @@ import events from "@/lib/events"
 import alerts from "@/lib/alerts"
 import i18n from "@/lib/i18n"
 import prompts from "@/lib/prompts"
-import { sync, hashNoteContent } from "@/features/notes/components/sync"
+import { sync, hashNoteContent, buildInflightEntries } from "@/features/notes/components/sync"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useHeaderHeight } from "expo-router/react-navigation"
 import useIsOnline from "@/hooks/useIsOnline"
@@ -78,20 +78,6 @@ export function isNoteContentUnavailable({
 	return !history && typeof initialValue !== "string"
 }
 
-// M1 + D3: pure builder for a note's inflight entry list after a keystroke. Exported so the
-// standalone test exercises the live derivation (T5 pattern).
-//
-// M1: the author timestamp is PER-NOTE MONOTONIC — `max(Date.now(), newest existing + 1)` —
-// so a backward clock step (NTP correction mid-editing) can never leave an OLDER entry
-// outranking the text just typed: sync's max-timestamp pick would push the stale entry and
-// its `> syncedUpTo` prune would then discard the newest text. All comparisons stay
-// local-vs-local; server clocks are never consulted.
-//
-// D3: an ongoing session CARRIES its existing base hash forward unchanged (including the
-// legacy no-hash grace for entries persisted by older app versions — stamping a fresh base
-// mid-session would claim a sync point the session never had). Only a FRESH session (no
-// existing entries) stamps `sessionBaseHash` — the hash of the synced/loaded content the
-// editor was seeded from, or none when nothing synced is known.
 /**
  * D3: base hash for a NEW editing session (no inflight entries yet) — the hash of the per-note
  * content cache, which sync's post-push write keeps equal to the cloud content at every drain
@@ -110,38 +96,10 @@ export function sessionBaseHashForNewSession(entries: InflightContent[string] | 
 	return typeof cachedContent === "string" ? hashNoteContent(cachedContent) : null
 }
 
-export function buildInflightEntries({
-	previous,
-	note,
-	content,
-	now,
-	sessionBaseHash
-}: {
-	previous: InflightContent[string] | undefined
-	note: Note
-	content: string
-	now: number
-	sessionBaseHash: string | null
-}): InflightContent[string] {
-	const entries = previous ?? []
-	const newestExisting = entries.reduce((acc, c) => (c.timestamp > acc ? c.timestamp : acc), Number.NEGATIVE_INFINITY)
-	const timestamp = entries.length > 0 ? Math.max(now, newestExisting + 1) : now
-	const newestEntry = entries.find(c => c.timestamp === newestExisting)
-	const baseContentHash = entries.length > 0 ? newestEntry?.baseContentHash : (sessionBaseHash ?? undefined)
-
-	return [
-		{
-			timestamp,
-			note,
-			content,
-			baseContentHash
-		},
-		// The new keystroke strictly supersedes every existing entry (its timestamp is the
-		// monotonic maximum), so this keeps nothing in practice — retained purely as a guard
-		// against an exotic concurrent writer racing this functional update.
-		...entries.filter(c => c.timestamp > timestamp)
-	]
-}
+// M1 + D3: the monotonic-timestamp + base-hash-carry builder now lives in @filen/shared, imported
+// above (via components/sync, which re-exports it) and re-exported here so this module's existing
+// exported surface — and the standalone test importing it — resolves unchanged.
+export { buildInflightEntries }
 
 // M3: sync.flushToDisk never throws — persistence failure comes back as `false`
 // (sync-internal callers ignore it; their next pass re-flushes). HERE it must surface:

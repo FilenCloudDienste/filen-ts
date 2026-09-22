@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { xxHash32 } from "js-xxhash"
+import { hashNoteContent, mergeInflight, buildInflightEntries } from "@filen/shared"
 import type { Note, NoteType } from "@filen/sdk-rs"
 import type { InflightContent, InflightEntry } from "@/features/notes/store/useNotesInflight"
 
@@ -8,109 +8,16 @@ import type { InflightContent, InflightEntry } from "@/features/notes/store/useN
 // importer of this module's classifier surface (sync.ts, the notes tests) resolves unchanged.
 export { isNetworkClassError, MAX_NON_RETRYABLE_REJECTIONS } from "@/lib/sdk/retry"
 
-// Cheap stable content hash used for overwrite-conflict DETECTION — the same xxHash32 lib +
-// hex format filen-mobile uses. Persisted inside inflight entries as `baseContentHash`, so the
-// algorithm must stay stable across app versions: changing it only costs a one-pass grace (entries
-// fall back to the legacy no-hash path), never data. Local-only bookkeeping; never sent to the server.
-export function hashNoteContent(content: string): string {
-	return xxHash32(content).toString(16)
-}
+// The outbox's content hash, disk-restore merge and monotonic-timestamp entry builder now live in a
+// shared module (mobile's outbox uses the identical algorithms). Re-exported here so every existing
+// importer of this module's outbox surface (sync.ts, the notes tests, useNoteEditor.logic) resolves
+// unchanged.
+export { hashNoteContent, mergeInflight, buildInflightEntries }
 
 // createNotePreviewFromContentText's `type` argument, derived from the wasm STRING-union noteType —
 // mirrors mobile's `Checklist ? "checklist" : Rich ? "rich" : "other"` mapping exactly.
 export function noteKindForPreview(noteType: NoteType): "rich" | "checklist" | "other" {
 	return noteType === "checklist" ? "checklist" : noteType === "rich" ? "rich" : "other"
-}
-
-// Pure builder for a note's inflight entry list after a keystroke.
-//
-// The author timestamp is PER-NOTE MONOTONIC — `max(now, newest existing + 1)` — so a backward
-// clock step (NTP correction mid-editing) can never leave an OLDER entry outranking the text just
-// typed: sync's max-timestamp pick would push the stale entry and its `> syncedUpTo` prune would
-// then discard the newest text. All comparisons stay local-vs-local; server clocks are never consulted.
-//
-// An ongoing session CARRIES its existing base hash forward unchanged (including the legacy
-// no-hash grace for entries persisted by older app versions — stamping a fresh base mid-session
-// would claim a sync point the session never had). Only a FRESH session (no existing entries) stamps
-// `sessionBaseHash` — the hash of the synced/loaded content the editor was seeded from, or none when
-// nothing synced is known. The caller supplies `sessionBaseHash` when a session starts; omitting it is
-// the legacy grace.
-export function buildInflightEntries({
-	previous,
-	note,
-	content,
-	now,
-	sessionBaseHash
-}: {
-	previous: InflightEntry[] | undefined
-	note: Note
-	content: string
-	now: number
-	sessionBaseHash: string | null
-}): InflightEntry[] {
-	const entries = previous ?? []
-	const newestExisting = entries.reduce((acc, c) => (c.timestamp > acc ? c.timestamp : acc), Number.NEGATIVE_INFINITY)
-	const timestamp = entries.length > 0 ? Math.max(now, newestExisting + 1) : now
-	const newestEntry = entries.find(c => c.timestamp === newestExisting)
-	const baseContentHash = entries.length > 0 ? newestEntry?.baseContentHash : (sessionBaseHash ?? undefined)
-
-	// exactOptionalPropertyTypes: an absent base hash must OMIT the key, never set it to `undefined`.
-	const newEntry: InflightEntry =
-		baseContentHash !== undefined
-			? {
-					timestamp,
-					note,
-					content,
-					baseContentHash
-				}
-			: {
-					timestamp,
-					note,
-					content
-				}
-
-	return [
-		newEntry,
-		// The new keystroke strictly supersedes every existing entry (its timestamp is the monotonic
-		// maximum), so this keeps nothing in practice — retained purely as a guard against an exotic
-		// concurrent writer racing this functional update.
-		...entries.filter(c => c.timestamp > timestamp)
-	]
-}
-
-// Functional, per-uuid MERGE used to hydrate the disk-restored outbox into the (possibly already-
-// populated) store without clobbering edits the user typed during the seconds-long cloud-fetch
-// reconciliation window. For each uuid we keep whichever side carries the newest LOCAL author-
-// timestamp: a fresh store edit beats stale disk content, and disk content seeds uuids the store
-// doesn't have yet. Pure — no store/IO access — so it stays trivially testable.
-export function mergeInflight(current: InflightContent, fromDisk: InflightContent): InflightContent {
-	const merged: InflightContent = {
-		...current
-	}
-
-	for (const uuid of Object.keys(fromDisk)) {
-		const diskEntries = fromDisk[uuid] ?? []
-		const currentEntries = merged[uuid]
-
-		if (!currentEntries || currentEntries.length === 0) {
-			merged[uuid] = diskEntries
-
-			continue
-		}
-
-		const newestCurrent = currentEntries.reduce((acc, c) => (c.timestamp > acc ? c.timestamp : acc), Number.NEGATIVE_INFINITY)
-		const newestDisk = diskEntries.reduce((acc, c) => (c.timestamp > acc ? c.timestamp : acc), Number.NEGATIVE_INFINITY)
-
-		// Current store edits win when they're at least as fresh as disk; otherwise the disk copy is
-		// the newer record (e.g. store was empty for this uuid at fetch start) and replaces it.
-		if (newestCurrent >= newestDisk) {
-			continue
-		}
-
-		merged[uuid] = diskEntries
-	}
-
-	return merged
 }
 
 // arktype schema for the DURABLE outbox's read path (invalid → dropped, the kv

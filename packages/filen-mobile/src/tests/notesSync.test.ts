@@ -174,7 +174,7 @@ function asSdkError<E>(error: E, kind: string): E {
 	return error
 }
 
-import { Sync, SyncHost, mergeInflight, hashNoteContent, MAX_NON_RETRYABLE_REJECTIONS } from "@/features/notes/components/sync"
+import { Sync, SyncHost, hashNoteContent, MAX_NON_RETRYABLE_REJECTIONS } from "@/features/notes/components/sync"
 import sqlite from "@/lib/sqlite"
 import alerts from "@/lib/alerts"
 import { AppState } from "react-native"
@@ -1645,62 +1645,6 @@ describe("Sync (Notes)", () => {
 			unmount()
 
 			expect(removeListenerSpy).toHaveBeenCalledTimes(1)
-		})
-	})
-
-	describe("mergeInflight (#41)", () => {
-		it("seeds uuids the current store does not have", () => {
-			const current = {}
-			const fromDisk = {
-				"note-1": [{ timestamp: 1000, content: "disk", note: mockNote("note-1") }]
-			}
-
-			const merged = mergeInflight(current, fromDisk)
-
-			expect(merged["note-1"]).toHaveLength(1)
-			expect(merged["note-1"]![0]!.content).toBe("disk")
-		})
-
-		it("keeps the fresher current store edit over a staler disk entry", () => {
-			const current = {
-				"note-1": [{ timestamp: 5000, content: "current-newer", note: mockNote("note-1") }]
-			}
-			const fromDisk = {
-				"note-1": [{ timestamp: 1000, content: "disk-older", note: mockNote("note-1") }]
-			}
-
-			const merged = mergeInflight(current, fromDisk)
-
-			expect(merged["note-1"]).toHaveLength(1)
-			expect(merged["note-1"]![0]!.content).toBe("current-newer")
-		})
-
-		it("takes the disk entry when it is newer than the current store entry", () => {
-			const current = {
-				"note-1": [{ timestamp: 1000, content: "current-older", note: mockNote("note-1") }]
-			}
-			const fromDisk = {
-				"note-1": [{ timestamp: 5000, content: "disk-newer", note: mockNote("note-1") }]
-			}
-
-			const merged = mergeInflight(current, fromDisk)
-
-			expect(merged["note-1"]).toHaveLength(1)
-			expect(merged["note-1"]![0]!.content).toBe("disk-newer")
-		})
-
-		it("preserves current-only uuids untouched", () => {
-			const current = {
-				"note-other": [{ timestamp: 2000, content: "stays", note: mockNote("note-other") }]
-			}
-			const fromDisk = {
-				"note-1": [{ timestamp: 1000, content: "disk", note: mockNote("note-1") }]
-			}
-
-			const merged = mergeInflight(current, fromDisk)
-
-			expect(merged["note-other"]![0]!.content).toBe("stays")
-			expect(merged["note-1"]![0]!.content).toBe("disk")
 		})
 	})
 })

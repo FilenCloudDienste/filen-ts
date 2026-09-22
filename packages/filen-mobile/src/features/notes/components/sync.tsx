@@ -1,7 +1,15 @@
 import { useEffect } from "react"
-import { run, Semaphore, createExecutableTimeout, isPermanentRejection, MAX_NON_RETRYABLE_REJECTIONS } from "@filen/shared"
+import {
+	run,
+	Semaphore,
+	createExecutableTimeout,
+	isPermanentRejection,
+	MAX_NON_RETRYABLE_REJECTIONS,
+	hashNoteContent,
+	mergeInflight,
+	buildInflightEntries
+} from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
-import { xxHash32 } from "js-xxhash"
 import notes from "@/features/notes/notes"
 import alerts from "@/lib/alerts"
 import i18n from "@/lib/i18n"
@@ -16,13 +24,10 @@ import { unwrapSdkError } from "@/lib/sdkErrors"
 import { ErrorKind } from "@filen/sdk-rs"
 import logger from "@/lib/logger"
 
-// D3: cheap stable content hash used for overwrite-conflict DETECTION (same xxHash32 the
-// fileCache/cameraUpload dedup paths use). Persisted inside inflight entries as
-// `baseContentHash`, so the algorithm must stay stable across app versions — changing it
-// only costs a one-pass grace (entries fall back to the legacy no-hash path), never data.
-export function hashNoteContent(content: string): string {
-	return xxHash32(content).toString(16)
-}
+// D3/#41/M1: content hash, disk-restore merge, and the monotonic-timestamp entry builder now live in
+// a shared module (web's outbox uses the identical algorithms). Re-exported here so every existing
+// importer of this module's outbox surface (content/index.tsx, the notes tests) resolves unchanged.
+export { hashNoteContent, mergeInflight, buildInflightEntries }
 
 // #40 / VC3: a genuine read-only/permission rejection (the server replies with a non-network,
 // non-auth error) must eventually DROP so the wedged content query re-enables — but a TRANSIENT
@@ -30,43 +35,6 @@ export function hashNoteContent(content: string): string {
 // failures) must NOT lose the first edit. We bound the drop: only after this many CONSECUTIVE
 // non-network, non-auth SDK rejections for the same note do we discard its inflight content.
 export { MAX_NON_RETRYABLE_REJECTIONS }
-
-// #41 fix: functional, per-uuid MERGE used to hydrate the disk-restored inflight
-// queue into the (possibly already-populated) store without clobbering edits the
-// user typed during the seconds-long cloud-fetch reconciliation window. For each
-// uuid we keep whichever side carries the newest local author-timestamp: a fresh
-// store edit beats stale disk content, and disk content seeds uuids the store
-// doesn't have yet. Pure — no store/IO access — so it stays trivially testable.
-export function mergeInflight(current: InflightContent, fromDisk: InflightContent): InflightContent {
-	const merged: InflightContent = {
-		...current
-	}
-
-	for (const uuid of Object.keys(fromDisk)) {
-		const diskEntries = fromDisk[uuid] ?? []
-		const currentEntries = merged[uuid]
-
-		if (!currentEntries || currentEntries.length === 0) {
-			merged[uuid] = diskEntries
-
-			continue
-		}
-
-		const newestCurrent = currentEntries.reduce((acc, c) => (c.timestamp > acc ? c.timestamp : acc), Number.NEGATIVE_INFINITY)
-		const newestDisk = diskEntries.reduce((acc, c) => (c.timestamp > acc ? c.timestamp : acc), Number.NEGATIVE_INFINITY)
-
-		// Current store edits win when they're at least as fresh as disk; otherwise
-		// the disk copy is the newer record (e.g. store was empty for this uuid at
-		// fetch start) and replaces it.
-		if (newestCurrent >= newestDisk) {
-			continue
-		}
-
-		merged[uuid] = diskEntries
-	}
-
-	return merged
-}
 
 export class Sync {
 	private readonly mutex: Semaphore = new Semaphore(1)
