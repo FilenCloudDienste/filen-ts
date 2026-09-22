@@ -686,8 +686,9 @@ test.describe("chats", () => {
 		// A syntactically-valid Filen file-link shape (drive/components/linkDialog.logic.ts's own
 		// FILE_PUBLIC_LINK_URL_PREFIX) pointing at a uuid nobody owns — getLinkedFile rejects, so the
 		// card can only ever render from the url's own parts (no name resolves).
+		// The key must be a real 32-character key: the shared parser rejects any other length.
 		const linkUuid = crypto.randomUUID()
-		const embedUrl = `https://app.filen.io/#/d/${linkUuid}%23${"a".repeat(24)}`
+		const embedUrl = `https://app.filen.io/#/d/${linkUuid}%23${"a".repeat(32)}`
 
 		await sendViaComposer(page, embedUrl)
 
