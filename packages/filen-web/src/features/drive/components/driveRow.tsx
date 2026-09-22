@@ -16,7 +16,7 @@ import { DriveBulkContextMenuContent } from "@/features/drive/components/bulkMen
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
 import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
-import { cn } from "@filen/shared"
+import { cn, driveItemName } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
@@ -75,7 +75,7 @@ export function DriveRow({
 	registerRef
 }: DriveRowProps) {
 	const { t } = useTranslation("drive")
-	const name = item.data.decryptedMeta?.name ?? item.data.uuid
+	const name = driveItemName(item)
 	// Drag-to-move: a move-capable row is a drag source; a directory row is also a drop target for a
 	// move (self/descendant/same-parent guarded via its own ancestry). The accessible move route stays
 	// the item menu's "Move" action — this is a pointer-only enhancement.

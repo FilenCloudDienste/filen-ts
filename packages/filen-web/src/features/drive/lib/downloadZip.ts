@@ -1,5 +1,6 @@
 import * as Comlink from "comlink"
 import type { ZipItem } from "@filen/sdk-rs"
+import { driveItemName } from "@filen/shared"
 import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
@@ -172,7 +173,7 @@ function resolveSuggestedZipName(items: DriveItem[]): string {
 	const [item] = items
 
 	if (items.length === 1 && item !== undefined && asDirectoryOrFile(item).type === "directory") {
-		return `${item.data.decryptedMeta?.name ?? item.data.uuid}.zip`
+		return `${driveItemName(item)}.zip`
 	}
 
 	return i18n.t("transfers:transfersZipDownloadDefaultName")

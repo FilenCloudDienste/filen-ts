@@ -111,7 +111,8 @@ vi.mock("@filen/shared", async () => {
 
 	return {
 		...sharedMock,
-		Semaphore
+		Semaphore,
+		driveItemName: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).driveItemName
 	}
 })
 

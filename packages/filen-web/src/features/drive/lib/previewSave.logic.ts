@@ -1,5 +1,6 @@
 import * as Comlink from "comlink"
 import type { File as SdkFile } from "@filen/sdk-rs"
+import { driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { previewType } from "@/features/drive/lib/preview.logic"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
@@ -68,7 +69,7 @@ export async function runPreviewSave(deps: PreviewSaveDeps, args: { item: DriveI
 		return { status: "error", dto: { species: "plain", message, label: message } }
 	}
 
-	const name = base.data.decryptedMeta?.name ?? base.data.uuid
+	const name = driveItemName(base)
 	const mime = base.data.decryptedMeta?.mime ?? ""
 	const bytes = new TextEncoder().encode(content)
 	// Root-sentinel collapse inlined rather than importing normalizeParentUuid (queries/drive.ts): the

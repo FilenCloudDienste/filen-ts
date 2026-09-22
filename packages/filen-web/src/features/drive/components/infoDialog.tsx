@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
-import { formatBytes } from "@filen/shared"
+import { formatBytes, driveItemName } from "@filen/shared"
 import { StarIcon } from "lucide-react"
 import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
@@ -89,7 +89,7 @@ export function InfoDialog({ item, variant, remoteInfoEnabled, onClose }: InfoDi
 	// img's own onError below. Never reset back to false: this mount already gave up on this uuid.
 	const [thumbFailed, setThumbFailed] = useState(false)
 
-	const name = item.data.decryptedMeta?.name ?? item.data.uuid
+	const name = driveItemName(item)
 	// A shared file reads as a file, a shared directory as a directory (asDirectoryOrFile) — the raw
 	// six-arm `item.type` would miss every shared arm in the branches below (see item.ts).
 	const base = asDirectoryOrFile(item)

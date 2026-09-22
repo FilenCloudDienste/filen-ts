@@ -11,7 +11,7 @@ import { filterDriveItemsByLocalSearch } from "@/features/drive/components/direc
 import type { Playlist } from "@/features/audio/lib/playlistSchema"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { cn } from "@filen/shared"
+import { cn, driveItemName } from "@filen/shared"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ItemIcon, DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import { EmptyState } from "@/features/drive/components/emptyState"
@@ -229,9 +229,7 @@ export function AddPlaylistTracksDialog({ playlist, onClose }: AddPlaylistTracks
 													className="size-4 shrink-0"
 												/>
 											)}
-											<span className="min-w-0 flex-1 truncate">
-												{item.data.decryptedMeta?.name ?? item.data.uuid}
-											</span>
+											<span className="min-w-0 flex-1 truncate">{driveItemName(item)}</span>
 											{alreadyAdded ? (
 												<span className="shrink-0 text-xs text-muted-foreground">{t("alreadyInPlaylist")}</span>
 											) : isSelected ? (

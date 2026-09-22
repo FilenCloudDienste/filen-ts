@@ -1,4 +1,5 @@
 import type { RefObject } from "react"
+import { driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { extensionOf, codeMirrorLanguageFor, decodeUtf8 } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
@@ -56,7 +57,7 @@ function TextViewer({ item, alt, editable = false, onDirtyChange, contentRef }: 
 		return null
 	}
 
-	const name = base.data.decryptedMeta?.name ?? base.data.uuid
+	const name = driveItemName(base)
 	const tag = codeMirrorLanguageFor(extensionOf(name))
 	const text = decodeUtf8(result.bytes)
 

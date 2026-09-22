@@ -11,17 +11,7 @@ import type {
 	AnyDirWithContext,
 	LinkedFile
 } from "@filen/sdk-rs"
-
-// Extra fields every DriveItem carries beyond its raw wasm shape (mirrors filen-mobile's
-// ExtraData): `size` is synthetic for directories (Dir has no native size field — sort.ts's bigint
-// size compare needs one so dirs group uniformly against files), `uuid` restates the item's own
-// uuid at the union's shared shape, and `undecryptable` mirrors `decryptedMeta`'s nullness so a
-// consumer can branch on a plain boolean instead of a null check.
-export interface ExtraData {
-	size: bigint
-	uuid: string
-	undecryptable: boolean
-}
+import { type ExtraData } from "@filen/shared"
 
 // The four shared arms carry a Dir|File-shaped `data` (the underlying item flattened out of its
 // SharedDir/SharedRootDir/SharedFile wrapper) PLUS the sharing metadata — so a consumer that only

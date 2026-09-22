@@ -30,7 +30,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { cn } from "@filen/shared"
+import { cn, driveItemName } from "@filen/shared"
 import { ImageViewer, ZoomableImage } from "@/features/preview/components/imageViewer"
 import { MediaViewer, MediaElement } from "@/features/preview/components/mediaViewer"
 import {
@@ -1086,7 +1086,7 @@ function PreviewBody({ source, editable, onDirtyChange, contentRef }: PreviewBod
 		return null
 	}
 
-	const alt = base.data.decryptedMeta?.name ?? base.data.uuid
+	const alt = driveItemName(base)
 	// Stored once (rather than switching on the previewType(item) call directly) so the "video"/"audio"
 	// case below can pass it straight through as MediaViewer's own narrower category prop without a
 	// second, redundant resolution — a raw switch on the call expression doesn't narrow across cases.

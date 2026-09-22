@@ -1,4 +1,4 @@
-import { runTimeout } from "@filen/shared"
+import { runTimeout, driveItemName } from "@filen/shared"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
@@ -175,7 +175,7 @@ export const generateVideoThumb: ThumbGenerator = async item => {
 	// session even if this happens repeatedly.
 	const result = await runTimeout(async defer => {
 		const file = narrowToAnyFile(item)
-		const name = item.data.decryptedMeta?.name ?? item.data.uuid
+		const name = driveItemName(item)
 		const url = await previewStreamUrl(file, name, contentType)
 
 		const video = document.createElement("video")

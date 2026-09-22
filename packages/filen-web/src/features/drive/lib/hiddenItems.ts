@@ -1,3 +1,4 @@
+import { driveItemName } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 
@@ -39,7 +40,7 @@ export function filterHiddenDriveItems({
 	}
 
 	return items.filter(item => {
-		if (isHiddenName(item.data.decryptedMeta?.name ?? item.data.uuid)) {
+		if (isHiddenName(driveItemName(item))) {
 			return false
 		}
 

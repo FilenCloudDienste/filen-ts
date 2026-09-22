@@ -1,4 +1,4 @@
-import { droppedIds } from "@filen/shared"
+import { droppedIds, driveItemName } from "@filen/shared"
 import { getSharerIdentity, type DriveItem } from "@/features/drive/lib/item"
 import { isBlocked, type BlockedUsers } from "@/features/contacts/lib/blocking"
 import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
@@ -170,7 +170,7 @@ export function filterDriveItemsByLocalSearch<T extends DriveItem>(items: readon
 		return [...items]
 	}
 
-	return items.filter(item => (item.data.decryptedMeta?.name ?? item.data.uuid).toLowerCase().includes(normalized))
+	return items.filter(item => driveItemName(item).toLowerCase().includes(normalized))
 }
 
 // Reconciles the store's possibly-stale selected-item snapshots against the freshest metadata in

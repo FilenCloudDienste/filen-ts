@@ -14,13 +14,7 @@ import {
 	type NoteHistory as SdkNoteHistory,
 	type NoteParticipant as SdkNoteParticipant
 } from "@filen/sdk-rs"
-import { type Prettify } from "@filen/shared"
-
-export type ExtraData = {
-	size: bigint
-	uuid: string
-	undecryptable: boolean
-}
+import { type Prettify, type ExtraData } from "@filen/shared"
 
 export type DriveItemFile = Prettify<
 	File &

@@ -1,4 +1,4 @@
-import { run, Semaphore } from "@filen/shared"
+import { run, Semaphore, driveItemName } from "@filen/shared"
 import logger from "@/lib/logger"
 import { onlineManager } from "@tanstack/react-query"
 import NetInfo from "@react-native-community/netinfo"
@@ -466,7 +466,7 @@ export class OfflineSync {
 				makeSyncError({
 					itemUuid: item.data.uuid,
 					topLevelUuid: item.data.uuid,
-					name: item.data.decryptedMeta?.name ?? item.data.uuid,
+					name: driveItemName(item),
 					itemType: item.type,
 					kind: "listing",
 					message: errorMessage(lookup.error)
@@ -510,7 +510,7 @@ export class OfflineSync {
 				makeSyncError({
 					itemUuid: item.data.uuid,
 					topLevelUuid: item.data.uuid,
-					name: item.data.decryptedMeta?.name ?? item.data.uuid,
+					name: driveItemName(item),
 					itemType: item.type,
 					kind: "listing",
 					message: parentResolution.message
@@ -594,7 +594,7 @@ export class OfflineSync {
 				makeSyncError({
 					itemUuid: item.data.uuid,
 					topLevelUuid: item.data.uuid,
-					name: item.data.decryptedMeta?.name ?? item.data.uuid,
+					name: driveItemName(item),
 					itemType: item.type,
 					kind: "listing",
 					message: listingState.message
@@ -682,7 +682,7 @@ export class OfflineSync {
 				makeSyncError({
 					itemUuid: item.data.uuid,
 					topLevelUuid: null,
-					name: item.data.decryptedMeta?.name ?? item.data.uuid,
+					name: driveItemName(item),
 					itemType: item.type,
 					kind: "listing",
 					message: errorMessage(lookup.error)
@@ -770,7 +770,7 @@ export class OfflineSync {
 				makeSyncError({
 					itemUuid: item.data.uuid,
 					topLevelUuid: null,
-					name: item.data.decryptedMeta?.name ?? item.data.uuid,
+					name: driveItemName(item),
 					itemType: item.type,
 					kind: "listing",
 					message: listingState.message
@@ -889,7 +889,7 @@ export class OfflineSync {
 					makeSyncError({
 						itemUuid: item.data.uuid,
 						topLevelUuid: null,
-						name: item.data.decryptedMeta?.name ?? item.data.uuid,
+						name: driveItemName(item),
 						itemType: item.type,
 						kind: "download",
 						message: errorMessage(adoption.error)
@@ -1359,7 +1359,7 @@ export class OfflineSync {
 							makeSyncError({
 								itemUuid: item.data.uuid,
 								topLevelUuid,
-								name: item.data.decryptedMeta?.name ?? item.data.uuid,
+								name: driveItemName(item),
 								itemType: item.type,
 								kind: "store",
 								message: errorMessage(result.error)

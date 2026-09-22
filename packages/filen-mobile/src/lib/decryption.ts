@@ -1,5 +1,5 @@
 import { type DriveItem, type Note, type Chat, type ChatMessage, type NoteTag } from "@/types"
-import { fastLocaleCompare } from "@filen/shared"
+import { fastLocaleCompare, driveItemName } from "@filen/shared"
 
 export function cannotDecryptPlaceholder(uuid: string): string {
 	return `cannot_decrypt_${uuid}`
@@ -30,7 +30,7 @@ export function driveItemDisplayName(item: DriveItem): string {
 		return cannotDecryptPlaceholder(item.data.uuid)
 	}
 
-	return item.data.decryptedMeta?.name ?? item.data.uuid
+	return driveItemName(item)
 }
 
 export function noteDisplayTitle(note: Note): string {

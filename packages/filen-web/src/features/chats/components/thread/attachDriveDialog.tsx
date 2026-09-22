@@ -8,7 +8,7 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { useDirectoryListingQuery, useDirectoryNamesQuery } from "@/features/drive/queries/drive"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { cn } from "@filen/shared"
+import { cn, driveItemName } from "@filen/shared"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { EmptyState } from "@/features/drive/components/emptyState"
@@ -174,9 +174,7 @@ export function AttachDriveDialog({ onClose, onAttached }: AttachDriveDialogProp
 												item={item}
 												className="size-4 shrink-0"
 											/>
-											<span className="min-w-0 flex-1 truncate">
-												{item.data.decryptedMeta?.name ?? item.data.uuid}
-											</span>
+											<span className="min-w-0 flex-1 truncate">{driveItemName(item)}</span>
 											{isAttaching ? <Spinner className="size-3.5 shrink-0" /> : null}
 										</button>
 									</li>

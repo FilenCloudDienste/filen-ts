@@ -25,7 +25,10 @@ vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSyst
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
-vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
+vi.mock("@filen/shared", async () => ({
+	...(await import("@/tests/mocks/filenShared")),
+	driveItemName: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).driveItemName
+}))
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 

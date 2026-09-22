@@ -1,4 +1,5 @@
 import { type DragEvent } from "react"
+import { driveItemName } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
 import { canDragVariant, assembleDragPayload } from "@/features/drive/lib/dnd.logic"
 import { moveItems } from "@/features/drive/lib/actions"
@@ -42,7 +43,7 @@ function dragImageLabel(items: readonly DriveItem[]): string {
 	if (items.length === 1) {
 		const only = items[0]
 
-		return only?.data.decryptedMeta?.name ?? only?.data.uuid ?? ""
+		return only ? driveItemName(only) : ""
 	}
 
 	return i18n.t("drive:driveDragItemCount", { count: items.length })

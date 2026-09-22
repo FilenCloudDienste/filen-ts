@@ -8,7 +8,7 @@ import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { PhotosContextMenuContent, PhotosDropdownMenuContent } from "@/features/photos/components/itemMenu"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
-import { cn } from "@filen/shared"
+import { cn, driveItemName } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
@@ -53,7 +53,7 @@ export function PhotoTile({
 	onItemAction
 }: PhotoTileProps) {
 	const { t } = useTranslation(["drive", "photos"])
-	const name = item.data.decryptedMeta?.name ?? item.data.uuid
+	const name = driveItemName(item)
 	const thumbUrl = useThumbnail(item)
 	const [thumbFailed, setThumbFailed] = useState(false)
 

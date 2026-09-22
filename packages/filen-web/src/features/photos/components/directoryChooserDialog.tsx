@@ -4,7 +4,7 @@ import { ChevronRightIcon, SearchXIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import { useDirectoryListingQuery, useDirectoryNamesQuery } from "@/features/drive/queries/drive"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { cn } from "@filen/shared"
+import { cn, driveItemName } from "@filen/shared"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import {
 	isPhotosChooserConfirmDisabled,
@@ -195,9 +195,7 @@ export function DirectoryChooserDialog({ pending, onChoose, onClose }: Directory
 												color={directory.data.color}
 												className="size-4 shrink-0"
 											/>
-											<span className="min-w-0 flex-1 truncate">
-												{directory.data.decryptedMeta?.name ?? directory.data.uuid}
-											</span>
+											<span className="min-w-0 flex-1 truncate">{driveItemName(directory)}</span>
 										</button>
 									</li>
 								)

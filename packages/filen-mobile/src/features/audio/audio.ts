@@ -5,7 +5,7 @@ import audioCache, { type Metadata } from "@/features/audio/audioCache"
 import type { DriveItem, DriveItemFileExtracted } from "@/types"
 import { useEffect, useState } from "react"
 import events from "@/lib/events"
-import { run, Semaphore } from "@filen/shared"
+import { run, Semaphore, driveItemName } from "@filen/shared"
 import auth from "@/lib/auth"
 import { AnyNormalDir, DirMeta_Tags, AnyFile, FileMeta_Tags, FileMeta, ParentUuid, type Dir } from "@filen/sdk-rs"
 import { Buffer } from "react-native-quick-crypto"
@@ -572,7 +572,7 @@ export class Audio {
 
 				this.player.replace({
 					uri: audio.uri,
-					name: metadata?.title ?? entry.item.data.decryptedMeta?.name ?? entry.item.data.uuid
+					name: metadata?.title ?? driveItemName(entry.item)
 				})
 
 				// No seekTo(0) here on purpose: a freshly-replaced AVPlayerItem is already at
@@ -626,7 +626,7 @@ export class Audio {
 		}
 
 		const lockScreenMetadata = {
-			title: metadata?.title ?? item.item.data.decryptedMeta?.name ?? item.item.data.uuid,
+			title: metadata?.title ?? driveItemName(item.item),
 			artist: metadata?.artist ?? undefined,
 			albumTitle: metadata?.album ?? undefined,
 			artworkUrl: artworkUrl ?? undefined
@@ -1556,7 +1556,7 @@ export class Audio {
 					.filter(item => !existing.has(item.data.uuid))
 					.map(item => ({
 						uuid: item.data.uuid,
-						name: item.data.decryptedMeta?.name ?? item.data.uuid,
+						name: driveItemName(item),
 						mime: item.data.decryptedMeta?.mime ?? "application/octet-stream",
 						size: Number(item.data.size),
 						bucket: item.data.bucket,

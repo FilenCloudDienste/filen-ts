@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { formatBytes } from "@filen/shared"
+import { formatBytes, driveItemName } from "@filen/shared"
 import { ArrowLeftIcon, DownloadIcon, EyeIcon, EyeOffIcon } from "lucide-react"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
@@ -25,7 +25,7 @@ type DownloadUiState =
 export function FileHero({ item, downloadEnabled, onBack }: { item: DriveItem; downloadEnabled: boolean; onBack?: () => void }) {
 	const { t } = useTranslation("publicLinks")
 	const base = asDirectoryOrFile(item)
-	const name = base.type === "file" ? (base.data.decryptedMeta?.name ?? base.data.uuid) : base.data.uuid
+	const name = base.type === "file" ? driveItemName(base) : base.data.uuid
 	const size = base.data.size
 	const previewability = anonPreviewability(item)
 	const [showPreview, setShowPreview] = useState(previewability === "previewable")

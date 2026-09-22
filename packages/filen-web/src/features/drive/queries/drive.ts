@@ -15,7 +15,7 @@ import type {
 	DirSizeResponse,
 	GetItemPathResult
 } from "@filen/sdk-rs"
-import { fastLocaleCompare } from "@filen/shared"
+import { fastLocaleCompare, driveItemName } from "@filen/shared"
 import { narrowItem, asDirectoryOrFile, toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
 import {
 	getHideHiddenItems,
@@ -120,7 +120,7 @@ export async function fetchDirectoryTreeChildren(uuid: string | null): Promise<D
 			const item = narrowItem(dir)
 			return {
 				uuid: item.data.uuid,
-				name: item.data.decryptedMeta?.name ?? item.data.uuid,
+				name: driveItemName(item),
 				color: item.type === "directory" ? item.data.color : "default"
 			}
 		})

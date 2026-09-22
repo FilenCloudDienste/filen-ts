@@ -1,5 +1,6 @@
 import { lazy, Suspense, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
+import { driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { previewType } from "@/features/drive/lib/preview.logic"
 import { PreviewAccessModeProvider } from "@/features/preview/lib/accessMode"
@@ -34,7 +35,7 @@ export function PublicPreview({ item }: { item: DriveItem }) {
 		return null
 	}
 
-	const alt = base.data.decryptedMeta?.name ?? base.data.uuid
+	const alt = driveItemName(base)
 	const category = previewType(item)
 
 	return (

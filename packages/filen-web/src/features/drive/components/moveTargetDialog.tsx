@@ -14,7 +14,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { cn } from "@filen/shared"
+import { cn, driveItemName } from "@filen/shared"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
 import { isMoveConfirmDisabled, isMoveRowDisabled } from "@/features/drive/components/moveTargetDialog.logic"
 import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
@@ -272,9 +272,7 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 												color={directory.data.color}
 												className="size-4 shrink-0"
 											/>
-											<span className="min-w-0 flex-1 truncate">
-												{directory.data.decryptedMeta?.name ?? directory.data.uuid}
-											</span>
+											<span className="min-w-0 flex-1 truncate">{driveItemName(directory)}</span>
 										</button>
 									</li>
 								)

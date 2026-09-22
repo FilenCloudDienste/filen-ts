@@ -1,3 +1,4 @@
+import { driveItemName } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { clampListboxIndex } from "@/features/drive/lib/listbox"
 
@@ -36,7 +37,7 @@ export function previewSourceKey(source: PreviewSource): string {
 // Human-facing name for the header/alt text — the drive item's decrypted name (uuid fallback) or the
 // external source's own name.
 export function previewSourceName(source: PreviewSource): string {
-	return source.type === "drive" ? (source.item.data.decryptedMeta?.name ?? source.item.data.uuid) : source.name
+	return source.type === "drive" ? driveItemName(source.item) : source.name
 }
 
 // Steps one slot (no wrap) from whichever source currently carries `currentKey` — a key lookup rather

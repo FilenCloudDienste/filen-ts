@@ -1,3 +1,4 @@
+import { driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { previewType } from "@/features/drive/lib/preview.logic"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
@@ -33,7 +34,7 @@ export function buildQueueTrack(item: DriveItem): QueueTrack {
 
 	return {
 		uuid: base.data.uuid,
-		name: base.data.decryptedMeta?.name ?? base.data.uuid,
+		name: driveItemName(base),
 		mime: base.data.decryptedMeta?.mime ?? "",
 		contentType: allowedMediaContentType(item),
 		file: base.data

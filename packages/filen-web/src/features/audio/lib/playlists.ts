@@ -1,4 +1,4 @@
-import { Semaphore } from "@filen/shared"
+import { Semaphore, driveItemName } from "@filen/shared"
 import type { File as SdkFile, FileEncryptionVersion, UuidStr } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
@@ -52,7 +52,7 @@ export function getPlaylistsDirectoryUuid(): Promise<string> {
 }
 
 function fallbackDisplayName(item: DriveItem): string {
-	return asDirectoryOrFile(item).data.decryptedMeta?.name ?? asDirectoryOrFile(item).data.uuid
+	return driveItemName(asDirectoryOrFile(item))
 }
 
 function safeJsonParse(bytes: Uint8Array): unknown {

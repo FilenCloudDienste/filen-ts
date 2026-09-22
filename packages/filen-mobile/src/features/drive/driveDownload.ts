@@ -2,7 +2,7 @@ import { Platform } from "react-native"
 import * as FileSystem from "expo-file-system"
 import * as ReactNativeBlobUtil from "react-native-blob-util"
 import mimeTypes from "mime-types"
-import { run, type Result } from "@filen/shared"
+import { run, type Result, driveItemName } from "@filen/shared"
 import type { DriveItem } from "@/types"
 import { listLocalDirectoryRecursive } from "@/lib/utils"
 import { normalizeFilePathForBlobUtil } from "@/lib/paths"
@@ -173,7 +173,7 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 							// sequence falls back to the raw segment instead of throwing.
 							const parentFolder = FileSystem.Paths.join(
 								"Filen",
-								item.data.decryptedMeta?.name ?? item.data.uuid,
+								driveItemName(item),
 								FileSystem.Paths.dirname(relPath)
 							)
 								.split("/")

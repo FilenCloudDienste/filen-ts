@@ -1,4 +1,4 @@
-import { getUuidNumber, getLowerName, getNumericParts, comparePartsNumeric } from "@filen/shared"
+import { getUuidNumber, getLowerName, getNumericParts, comparePartsNumeric, driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 
 // Field x direction. "type" groups files by MIME (directories have none, so they fall back to
@@ -34,7 +34,7 @@ export type DriveSortBy =
 // own timestamp -> numeric-uuid chain (real-world timestamps don't mass-collide).
 
 function nameSortKey(item: DriveItem): string {
-	return item.data.decryptedMeta?.name ?? item.data.uuid
+	return driveItemName(item)
 }
 
 // Primary key is MIME for files (directories have none, so they use name instead) — NOT the name
@@ -42,7 +42,7 @@ function nameSortKey(item: DriveItem): string {
 // on the sort mode below).
 function typeSortKey(item: DriveItem): string {
 	const base = asDirectoryOrFile(item)
-	return base.type === "file" ? (base.data.decryptedMeta?.mime ?? base.data.decryptedMeta?.name ?? base.data.uuid) : nameSortKey(item)
+	return base.type === "file" ? (base.data.decryptedMeta?.mime ?? driveItemName(base)) : nameSortKey(item)
 }
 
 // Both Dir and File carry a native, server-assigned `timestamp` — the upload time — directly, so

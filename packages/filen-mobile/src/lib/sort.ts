@@ -4,7 +4,8 @@ import {
 	getLowerName,
 	getNumericParts,
 	comparePartsNumeric,
-	clearNaturalSortCaches
+	clearNaturalSortCaches,
+	driveItemName
 } from "@filen/shared"
 import { type DriveItem, type Note, type NoteTag } from "@/types"
 import type { ListItem as NoteListItem, Item as NoteItem } from "@/features/notes/components/note"
@@ -83,13 +84,13 @@ function isDirectoryType(type: string): boolean {
 // timestamp → numeric-uuid chain (real-world timestamps don't mass-collide).
 
 function nameSortKey(item: DriveItem): string {
-	return item.data.decryptedMeta?.name ?? item.data.uuid
+	return driveItemName(item)
 }
 
 function mimeSortKey(item: DriveItem): string {
 	return item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
-		? (item.data.decryptedMeta?.mime ?? item.data.decryptedMeta?.name ?? item.data.uuid)
-		: (item.data.decryptedMeta?.name ?? item.data.uuid)
+		? (item.data.decryptedMeta?.mime ?? driveItemName(item))
+		: driveItemName(item)
 }
 
 function uploadDateSortKey(item: DriveItem): number {

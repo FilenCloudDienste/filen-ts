@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import { useTranslation } from "react-i18next"
+import { driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
@@ -155,7 +156,7 @@ function StreamedImage({
 	onFallback: () => void
 }) {
 	const { t } = useTranslation("preview")
-	const name = item.data.decryptedMeta?.name ?? item.data.uuid
+	const name = driveItemName(item)
 	const result = usePreviewStreamUrl(item, name, contentType)
 	// Mid-consumption-only (set from the onError DOM event below, a genuine event handler — never an
 	// effect). The registration-failure case is deliberately NOT routed through this: see

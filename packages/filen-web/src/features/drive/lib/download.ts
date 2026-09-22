@@ -1,5 +1,6 @@
 import * as Comlink from "comlink"
 import type { AnyFile } from "@filen/sdk-rs"
+import { driveItemName } from "@filen/shared"
 import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
@@ -56,7 +57,7 @@ export async function runDownload(deps: RunDownloadDeps, args: { item: DriveItem
 	}
 
 	const id = crypto.randomUUID()
-	const name = item.data.decryptedMeta?.name ?? item.data.uuid
+	const name = driveItemName(item)
 
 	let save: SaveTarget
 	try {

@@ -1,4 +1,5 @@
 import type { File as SdkFile, LinkedDir, LinkedDirsAndFiles, AnyLinkedDir, DirPublicInfo } from "@filen/sdk-rs"
+import { driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
 // Pure client-side model for browsing a linked directory. Navigation is a VIRTUAL stack (old-web
@@ -68,7 +69,7 @@ export function toBrowseEntries(listing: LinkedDirsAndFiles): BrowseEntry[] {
 }
 
 export function entryName(entry: BrowseEntry): string {
-	return entry.item.data.decryptedMeta?.name ?? entry.item.data.uuid
+	return driveItemName(entry.item)
 }
 
 // File size in bytes; a directory has no cheap size at this layer (getDirSize is a separate call), so

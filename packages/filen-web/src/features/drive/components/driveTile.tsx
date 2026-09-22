@@ -17,7 +17,7 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
 import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
-import { cn } from "@filen/shared"
+import { cn, driveItemName } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
@@ -67,7 +67,7 @@ export function DriveTile({
 	registerRef
 }: DriveTileProps) {
 	const { t } = useTranslation("drive")
-	const name = item.data.decryptedMeta?.name ?? item.data.uuid
+	const name = driveItemName(item)
 	// Drag-to-move — see DriveRow's identical wiring. Pointer-only enhancement; the item menu's "Move"
 	// stays the accessible route.
 	const dragSource = buildDragSourceProps(item, variant)

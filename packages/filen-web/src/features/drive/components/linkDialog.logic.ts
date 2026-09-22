@@ -1,4 +1,5 @@
 import type { DirPublicLinkRW, FilePublicLink, PasswordState, PublicLinkExpiration } from "@filen/sdk-rs"
+import { driveItemName } from "@filen/shared"
 import { buildPublicLinkUrl as buildPublicLinkUrlString } from "@/features/publicLinks/lib/format.logic"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { formatItemSize } from "@/features/drive/lib/format"
@@ -153,7 +154,7 @@ export function resolveLinkHeroInfo(item: DriveItem): LinkHeroInfo {
 	const isDirectory = asDirectoryOrFile(item).type === "directory"
 
 	return {
-		name: item.data.decryptedMeta?.name ?? item.data.uuid,
+		name: driveItemName(item),
 		typeLabelKey: isDirectory ? "driveItemTypeDirectory" : "driveItemTypeFile",
 		sizeLabel: isDirectory ? null : formatItemSize(item)
 	}
