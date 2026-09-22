@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react"
+import { countryOptions } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -15,7 +16,6 @@ import {
 	PERSONAL_FIELD_ORDER,
 	type PersonalFormState
 } from "@/features/settings/components/account/personalInfoCard.logic"
-import { countryOptions } from "@/features/settings/lib/countries"
 import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"

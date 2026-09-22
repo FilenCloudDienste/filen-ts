@@ -4,7 +4,7 @@ import { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment, useState } from "react"
 import { useLocalSearchParams } from "expo-router"
 import { router } from "@/lib/router"
-import { run } from "@filen/shared"
+import { run, COUNTRIES } from "@filen/shared"
 import { useResolveClassNames } from "uniwind"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -17,7 +17,6 @@ import { deserializeRouteParam } from "@/lib/serializer"
 import DismissStack from "@/components/dismissStack"
 import { actionSheet } from "@/providers/actionSheet.provider"
 import { useTranslation } from "react-i18next"
-import { countries } from "@/features/settings/constants"
 import useIsOnline from "@/hooks/useIsOnline"
 import logger from "@/lib/logger"
 
@@ -196,7 +195,7 @@ function Personal() {
 								onPress: () => {
 									actionSheet.show({
 										buttons: [
-											...countries.map(country => ({
+											...COUNTRIES.map(country => ({
 												title: country,
 												onPress: () => {
 													setModified(true)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { COUNTRIES, countryOptions, isValidCountry } from "@/features/settings/lib/countries"
+import { COUNTRIES, countryOptions, isValidCountry } from "@filen/shared"
 
 describe("COUNTRIES", () => {
 	it("is sorted alphabetically with no duplicates", () => {
