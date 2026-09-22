@@ -3,22 +3,13 @@
  * campaign (2026-06-11), mirroring the offline/cameraUpload lesson: perf rewrites exploit
  * whatever the suite under-specifies.
  *
- * What this file pins that sort.test.ts does not:
+ * What this file pins (itemSorter's own bigint-fidelity, equal-key-at-scale and dirs-first
+ * hardening moved to @filen/shared's driveSortEngine.test.ts with the engine it tests):
  *
- * 1. BIGINT FIELD FIDELITY — production DriveItems carry bigint timestamp/modified/created
- *    (SDK types); sort.test.ts fixtures use plain numbers. Every timestamp mode must order
- *    bigint-fielded items identically to their number-fielded twins.
- * 2. EQUAL-KEY STABILITY AT SCALE — comparator-0 pairs (equal names, equal ts + equal
- *    numeric uuid) must preserve input order across hundreds of items, for asc AND desc.
- *    A rewrite that loses sort stability (or negates "stability" along with the key) dies
- *    here.
- * 3. DIRS-FIRST × ALL 12 MODES on interleaved input — every directory-class item precedes
- *    every file-class item regardless of mode/direction, with class membership exactly
- *    {directory, sharedDirectory, sharedRootDirectory} vs the rest.
- * 4. group() HEADER SEQUENCE with every bucket populated — pinned → favorited → today →
+ * 1. group() HEADER SEQUENCE with every bucket populated — pinned → favorited → today →
  *    7days → 30days → month → year buckets (descending) → archived → trashed, and the
  *    output contains every input note exactly once (no drops, no duplicates).
- * 5. sort() undefined-editedTimestamp pair takes the uuid tiebreak (undefined === undefined
+ * 2. sort() undefined-editedTimestamp pair takes the uuid tiebreak (undefined === undefined
  *    is the EQUALITY path — a rewrite comparing via Number() would turn it into NaN math).
  */
 import { vi, describe, it, expect, beforeAll, afterAll } from "vitest"
@@ -33,56 +24,8 @@ vi.mock("@/lib/time", () => ({
 	intlLanguage: "en-US"
 }))
 
-import { itemSorter, notesSorter, type SortByType } from "@/lib/sort"
-import { type DriveItem, type Note } from "@/types"
-
-const ALL_MODES: SortByType[] = [
-	"nameAsc",
-	"nameDesc",
-	"sizeAsc",
-	"sizeDesc",
-	"mimeAsc",
-	"mimeDesc",
-	"lastModifiedAsc",
-	"lastModifiedDesc",
-	"uploadDateAsc",
-	"uploadDateDesc",
-	"creationAsc",
-	"creationDesc",
-	"captureAsc",
-	"captureDesc"
-]
-
-const DIR_TYPES = new Set(["directory", "sharedDirectory", "sharedRootDirectory"])
-
-function makeItemWith(
-	type: string,
-	name: string,
-	fields: {
-		uuid: string
-		size?: bigint
-		timestamp?: number | bigint
-		modified?: number | bigint
-		created?: number | bigint
-		mime?: string
-	}
-): DriveItem {
-	return {
-		type,
-		data: {
-			uuid: fields.uuid,
-			size: fields.size ?? 0n,
-			timestamp: fields.timestamp ?? 1000,
-			decryptedMeta: {
-				name,
-				mime: fields.mime ?? "application/octet-stream",
-				modified: fields.modified ?? fields.timestamp ?? 1000,
-				created: fields.created ?? fields.timestamp ?? 1000
-			},
-			undecryptable: false
-		}
-	} as unknown as DriveItem
-}
+import { notesSorter } from "@/lib/sort"
+import { type Note } from "@/types"
 
 function makeNote(overrides: Partial<Note> & { uuid: string; editedTimestamp: bigint }): Note {
 	return {
@@ -100,164 +43,6 @@ function makeNote(overrides: Partial<Note> & { uuid: string; editedTimestamp: bi
 		...overrides
 	} as Note
 }
-
-describe("hardening — bigint field fidelity across all timestamp modes", () => {
-	const TIMESTAMP_MODES: SortByType[] = [
-		"lastModifiedAsc",
-		"lastModifiedDesc",
-		"uploadDateAsc",
-		"uploadDateDesc",
-		"creationAsc",
-		"creationDesc",
-		"captureAsc",
-		"captureDesc"
-	]
-
-	it("bigint-fielded items order identically to number-fielded twins (500 mixed items, every timestamp mode)", () => {
-		const count = 500
-		const numberItems: DriveItem[] = []
-		const bigintItems: DriveItem[] = []
-
-		for (let i = 0; i < count; i++) {
-			// Deterministic scatter; collisions on purpose (every 7th shares a timestamp).
-			const ts = 1_700_000_000_000 + (i % 7 === 0 ? 5000 : i * 1337)
-			const modified = ts + (i % 11) * 1000
-			const created = ts - (i % 5) * 1000
-			const type = i % 9 === 0 ? "directory" : i % 13 === 0 ? "sharedFile" : "file"
-			const uuid = `${String(i).padStart(8, "0")}-aaaa-bbbb-cccc-000000000000`
-			const name = `item_${i}.bin`
-
-			numberItems.push(
-				makeItemWith(type, name, {
-					uuid,
-					timestamp: ts,
-					modified,
-					created
-				})
-			)
-			bigintItems.push(
-				makeItemWith(type, name, {
-					uuid,
-					timestamp: BigInt(ts),
-					modified: BigInt(modified),
-					created: BigInt(created)
-				})
-			)
-		}
-
-		for (const mode of TIMESTAMP_MODES) {
-			const numberOrder = itemSorter.sortItems(numberItems, mode).map(item => item.data.uuid)
-			const bigintOrder = itemSorter.sortItems(bigintItems, mode).map(item => item.data.uuid)
-
-			expect(bigintOrder, `mode ${mode}`).toEqual(numberOrder)
-		}
-	})
-
-	it("sizeAsc/sizeDesc order bigint sizes exactly (incl. values beyond 2^53)", () => {
-		// Two sizes that collapse to the SAME Number() but differ as bigints — a rewrite
-		// that converts size to Number for comparison breaks this ordering.
-		const base = 2n ** 60n
-		const a = makeItemWith("file", "a.bin", { uuid: "aaaa-1111", size: base + 1n })
-		const b = makeItemWith("file", "b.bin", { uuid: "bbbb-2222", size: base })
-		const c = makeItemWith("file", "c.bin", { uuid: "cccc-3333", size: 1000n })
-
-		const asc = itemSorter.sortItems([a, b, c], "sizeAsc")
-
-		expect(asc.map(item => item.data.uuid)).toEqual(["cccc-3333", "bbbb-2222", "aaaa-1111"])
-
-		const desc = itemSorter.sortItems([c, b, a], "sizeDesc")
-
-		expect(desc.map(item => item.data.uuid)).toEqual(["aaaa-1111", "bbbb-2222", "cccc-3333"])
-	})
-})
-
-describe("hardening — equal-key determinism at scale (#49)", () => {
-	it("400 equal-name files order by the uuid chain — independent of input order — under nameAsc AND nameDesc", () => {
-		const items: DriveItem[] = []
-
-		for (let i = 0; i < 400; i++) {
-			items.push(
-				makeItemWith("file", "same-name.txt", {
-					uuid: `uuid-${String(i).padStart(4, "0")}`,
-					timestamp: 1000
-				})
-			)
-		}
-
-		// Equal keys must NOT fall through to input order — the input is the raw query data,
-		// whose order shuffles across refetches (#49). The tiebreak chain ends at the uuid, so
-		// any input permutation produces the same output, and desc is the exact reverse of asc.
-		const asc = itemSorter.sortItems(items, "nameAsc").map(item => item.data.uuid)
-		const desc = itemSorter.sortItems(items, "nameDesc").map(item => item.data.uuid)
-		const ascFromReversedInput = itemSorter.sortItems(items.slice().reverse(), "nameAsc").map(item => item.data.uuid)
-
-		// These uuids carry ascending digit runs, so the uuid-number chain yields construction order.
-		expect(asc).toEqual(items.map(item => item.data.uuid))
-		expect(desc).toEqual(asc.slice().reverse())
-		expect(ascFromReversedInput).toEqual(asc)
-	})
-
-	it("equal-timestamp equal-uuid-number files keep input order under uploadDateAsc/Desc", () => {
-		const items: DriveItem[] = []
-
-		for (let i = 0; i < 300; i++) {
-			// parseNumbersFromString sees the SAME digits for every uuid → tiebreak diff 0.
-			items.push(
-				makeItemWith("file", `file-${i}.txt`, {
-					uuid: `aaaa-1111-${"x".repeat(i % 7)}`,
-					timestamp: 5000
-				})
-			)
-		}
-
-		const asc = itemSorter.sortItems(items, "uploadDateAsc")
-		const desc = itemSorter.sortItems(items, "uploadDateDesc")
-
-		for (let i = 0; i < items.length; i++) {
-			expect(asc[i], `asc index ${i}`).toBe(items[i])
-			expect(desc[i], `desc index ${i}`).toBe(items[i])
-		}
-	})
-})
-
-describe("hardening — dirs-first across ALL 12 modes on interleaved input", () => {
-	it("every directory-class item precedes every file-class item in every mode", () => {
-		const items: DriveItem[] = []
-		const types = ["file", "directory", "sharedFile", "sharedDirectory", "sharedRootFile", "sharedRootDirectory"]
-
-		for (let i = 0; i < 600; i++) {
-			const type = types[i % types.length] ?? "file"
-
-			items.push(
-				makeItemWith(type, `entry_${(i * 31) % 600}.dat`, {
-					uuid: `${String((i * 17) % 600).padStart(6, "0")}-0000-0000-0000-000000000000`,
-					size: BigInt((i * 13) % 1000),
-					timestamp: 1_700_000_000_000 + ((i * 7919) % 100_000),
-					modified: 1_700_000_000_000 + ((i * 104729) % 100_000),
-					created: 1_700_000_000_000 + ((i * 1299709) % 100_000)
-				})
-			)
-		}
-
-		const dirCount = items.filter(item => DIR_TYPES.has(item.type)).length
-
-		for (const mode of ALL_MODES) {
-			const result = itemSorter.sortItems(items, mode)
-
-			expect(result, `mode ${mode} length`).toHaveLength(items.length)
-
-			for (let i = 0; i < result.length; i++) {
-				const isDir = DIR_TYPES.has(result[i]?.type ?? "")
-
-				if (i < dirCount) {
-					expect(isDir, `mode ${mode}: index ${i} must be a directory-class item`).toBe(true)
-				} else {
-					expect(isDir, `mode ${mode}: index ${i} must be a file-class item`).toBe(false)
-				}
-			}
-		}
-	})
-})
 
 describe("hardening — group() full header sequence + completeness", () => {
 	const FROZEN_NOW = new Date("2025-06-15T12:00:00.000Z").getTime()
