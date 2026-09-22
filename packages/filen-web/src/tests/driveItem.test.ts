@@ -370,7 +370,7 @@ function receiverRole(id: number, email: string): SharingRole {
 }
 
 // The uniffi-style runtime shape the .d.ts doesn't model ({ tag, inner: [ShareInfo] }) — cast in so
-// shareInfoFromRole's dual-surface read can be exercised against a SharingRole-typed value.
+// shareIdentityFromRole's dual-surface read can be exercised against a SharingRole-typed value.
 function runtimeRole(id: number, email: string): SharingRole {
 	return { tag: "Sharer", inner: [{ email, id }] } as unknown as SharingRole
 }

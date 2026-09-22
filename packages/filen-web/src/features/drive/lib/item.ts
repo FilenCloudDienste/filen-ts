@@ -7,11 +7,10 @@ import type {
 	SharedRootDir,
 	SharedFile,
 	SharingRole,
-	ShareInfo,
 	AnyDirWithContext,
 	LinkedFile
 } from "@filen/sdk-rs"
-import { type ExtraData, keepAgainstIncoming } from "@filen/shared"
+import { type ExtraData, type ShareIdentity, keepAgainstIncoming, shareIdentityFromRole } from "@filen/shared"
 
 // The four shared arms carry a Dir|File-shaped `data` (the underlying item flattened out of its
 // SharedDir/SharedRootDir/SharedFile wrapper) PLUS the sharing metadata — so a consumer that only
@@ -306,48 +305,12 @@ export function toAnyDirWithContext(
 	}
 }
 
-// The OTHER party's identity for a block filter: a bigint user id (BigInt-normalized — ShareInfo.id
-// is `number` on the wasm surface, but the block list keys on `Set<bigint>`; an un-normalized number
-// never matches, silently leaking a blocked user's shared item) plus their email.
-export interface ShareIdentity {
-	userId: bigint
-	email: string
-}
-
-// DUAL-SURFACE (see the SDK's dual .d.ts / uniffi runtime): the wasm `.d.ts` types SharingRole as
-// the externally-tagged `{ Sharer: ShareInfo } | { Receiver: ShareInfo }`, but a uniffi-style runtime
-// can instead surface a `{ tag, inner: [ShareInfo] }` shape. This widened view has every possible
-// carrier optional so the extractor reads whichever is actually present at runtime while still
-// type-checking against the declared shape.
-interface RuntimeSharingRole {
-	inner?: readonly ShareInfo[]
-	Sharer?: ShareInfo
-	Receiver?: ShareInfo
-}
-
-function shareInfoFromRole(role: SharingRole | undefined): ShareInfo | null {
-	if (role === undefined) {
-		return null
-	}
-
-	const runtime: RuntimeSharingRole = role
-	const inner = runtime.inner
-
-	if (inner !== undefined && inner.length > 0) {
-		const first = inner[0]
-		if (first !== undefined) {
-			return first
-		}
-	}
-
-	return runtime.Sharer ?? runtime.Receiver ?? null
-}
-
 // Resolves the OTHER party's identity for a shared item (in the sharedIn context, the sharer). The
 // root and file arms carry the role directly; a nested sharedDirectory reads its spread `sharingRole`
 // and falls back to `resolveNestedRole` (the block filter injects a resolver over its own shared-dir
 // context — a SharedDir has no native role) when the spread is absent. A non-shared arm, or a role
-// no known shape can be read from, resolves to null.
+// no known shape can be read from, resolves to null. The dual-surface unwrap itself (uniffi `.inner`
+// vs wasm `.Sharer`/`.Receiver`) lives in shareIdentityFromRole (@filen/shared).
 export function getSharerIdentity(item: DriveItem, resolveNestedRole?: (uuid: string) => SharingRole | undefined): ShareIdentity | null {
 	let role: SharingRole | undefined
 
@@ -364,13 +327,7 @@ export function getSharerIdentity(item: DriveItem, resolveNestedRole?: (uuid: st
 			return null
 	}
 
-	const info = shareInfoFromRole(role)
-
-	if (info === null) {
-		return null
-	}
-
-	return { userId: BigInt(info.id), email: info.email }
+	return shareIdentityFromRole(role)
 }
 
 // Identity/name-collision filter for splicing an incoming item into a cached listing: an existing
