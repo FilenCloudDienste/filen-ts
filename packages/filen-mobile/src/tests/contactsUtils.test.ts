@@ -1,13 +1,4 @@
-import { describe, it, expect, vi } from "vitest"
-
-// utils.ts imports contactDisplayName from @/lib/utils (a heavy module that pulls
-// in SDK runtime values). Stub it with the real nickName-or-email behaviour so the
-// test stays self-contained and avoids the full SDK mock surface.
-vi.mock("@/lib/utils", () => ({
-	contactDisplayName: (contact: { nickName?: string | null; email: string }) =>
-		contact.nickName && contact.nickName.length > 0 ? contact.nickName : contact.email
-}))
-
+import { describe, it, expect } from "vitest"
 import { buildContactSections, filterContactSections } from "@/features/contacts/utils"
 import { type SelectOptions } from "@/features/contacts/contactsSelect"
 import { type ContactListItemWithHeader } from "@/features/contacts/store/useContacts.store"

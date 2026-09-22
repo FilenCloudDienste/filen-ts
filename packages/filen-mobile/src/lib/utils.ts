@@ -1,9 +1,4 @@
-import { type ChatParticipant, type NoteParticipant, type Contact, type ContactRequestIn, type ContactRequestOut } from "@filen/sdk-rs"
 import mimeTypes from "mime-types"
-
-export function contactDisplayName(contact: Contact | NoteParticipant | ChatParticipant | ContactRequestIn | ContactRequestOut): string {
-	return contact.nickName && contact.nickName.length > 0 ? contact.nickName : contact.email
-}
 
 /**
  * Make `filename` safe to write as a single path component on iOS (APFS) and

@@ -1,6 +1,5 @@
-import { fastLocaleCompare } from "@filen/shared"
+import { fastLocaleCompare, contactDisplayName } from "@filen/shared"
 import { type ContactListItemWithHeader } from "@/features/contacts/store/useContacts.store"
-import { contactDisplayName } from "@/lib/utils"
 import { type SelectOptions } from "@/features/contacts/contactsSelect"
 import type { Contact, BlockedContact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 

@@ -12,6 +12,8 @@ vi.mock("@filen/sdk-rs", () => ({
 	ChatTypingType: { Up: 0, Down: 1 }
 }))
 
+// regexed.tsx's Mention component resolves display names through contactDisplayName — pulled
+// through from the real module (not reimplemented here) since it's pure, platform-free logic.
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
 	parseNumbersFromString(s: unknown) {
@@ -24,7 +26,8 @@ vi.mock("@filen/shared", async () => ({
 	},
 	cn(...args: unknown[]) {
 		return args.filter(Boolean).join(" ")
-	}
+	},
+	contactDisplayName: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).contactDisplayName
 }))
 
 // ── UI components — not under test, render nothing ──────────────────────────
@@ -144,11 +147,6 @@ vi.mock("@/lib/decryption", () => ({
 		return other?.email ?? c.uuid
 	},
 	cannotDecryptPlaceholder: (uuid: string) => `cannot_decrypt_${uuid}`
-}))
-
-// @/lib/utils — needed only for the contactDisplayName helper
-vi.mock("@/lib/utils", () => ({
-	contactDisplayName: (p: { nickName?: string; email: string }) => (p.nickName && p.nickName.length > 0 ? p.nickName : p.email)
 }))
 
 vi.mock("@/lib/sdkUnwrap", () => ({

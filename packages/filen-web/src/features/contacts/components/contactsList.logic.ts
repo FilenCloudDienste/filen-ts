@@ -1,6 +1,10 @@
-import { fastLocaleCompare } from "@filen/shared"
+import { fastLocaleCompare, contactDisplayName, type ContactLike } from "@filen/shared"
 import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } from "@filen/sdk-rs"
 import { type ContactsKey } from "@/lib/i18n"
+
+// Re-exported so this file's existing importers (chat mention/sort/composer + contact rows) keep
+// resolving contactDisplayName here — its home moved to @filen/shared.
+export { contactDisplayName }
 
 // Web-only stats-strip counts pinned above the section list (see contactsList.tsx) — a small honest
 // polish surface, not a mobile port (mobile has no equivalent). `requests` is INCOMING requests only,
@@ -18,22 +22,6 @@ export function contactsStatsCounts(input: {
 	blocked: BlockedContact[]
 }): ContactsStats {
 	return { contacts: input.contacts.length, requests: input.incoming.length, blocked: input.blocked.length }
-}
-
-// Minimal shape every contact-like record satisfies (Contact/BlockedContact/ContactRequestIn/
-// ContactRequestOut) — nickName's shape differs only in optionality across those four, never in
-// type: a record with a required `nickName: string` still structurally satisfies an optional
-// `string | undefined` field.
-export interface ContactLike {
-	email: string
-	nickName?: string | undefined
-}
-
-// Mirrors filen-mobile's contactDisplayName (lib/utils.ts): a nickname wins over the bare email
-// whenever one is actually set. Guarded, not asserted — Contact.nickName is the only one of the
-// four record types that can be undefined.
-export function contactDisplayName(contact: ContactLike): string {
-	return contact.nickName && contact.nickName.length > 0 ? contact.nickName : contact.email
 }
 
 // First character of the display name, uppercased — AvatarFallback content when no avatar image

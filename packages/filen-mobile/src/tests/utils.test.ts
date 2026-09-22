@@ -170,10 +170,10 @@ vi.mock("@/constants", () => {
 import {
 	sanitizeFileName,
 	normalizeModificationTimestampForComparison,
-	contactDisplayName,
 	resolveMimeType,
 	convertBigInts
 } from "@/lib/utils"
+import { contactDisplayName } from "@filen/shared"
 import { makeDriveItemPublicLink, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForSdk, normalizeFilePathForExpo, stripUriFragmentAndQuery } from "@/lib/paths"
 import { getPreviewType } from "@/lib/previewType"

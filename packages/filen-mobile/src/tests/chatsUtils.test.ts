@@ -23,12 +23,6 @@ vi.mock("@filen/sdk-rs", () => {
 
 // The rest are only needed so utils.ts (which also exports the effectful openAttachmentPreview)
 // loads cleanly in the node env — resolveLinkMedia itself touches none of them.
-// contactDisplayName mirrors the real one-liner (nickName if non-empty, else email) because
-// messageSenderLabel resolves current participants through it.
-vi.mock("@/lib/utils", () => ({
-	contactDisplayName: (p: { nickName?: string; email: string }) => (p.nickName && p.nickName.length > 0 ? p.nickName : p.email)
-}))
-
 vi.mock("@/lib/sdkUnwrap", () => ({
 	linkedFileIntoDriveItem: vi.fn()
 }))

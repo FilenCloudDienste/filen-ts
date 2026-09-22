@@ -6,7 +6,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn } from "react-native-reanimated"
 import useChatsStore from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
-import { contactDisplayName } from "@/lib/utils"
+import { contactDisplayName } from "@filen/shared"
 
 export const Typing = ({ chat }: { chat: TChat }) => {
 	const { t } = useTranslation()
