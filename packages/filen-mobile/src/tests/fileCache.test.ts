@@ -71,7 +71,10 @@ vi.mock("@filen/shared", async () => {
 
 	return {
 		...sharedMock,
-		Semaphore
+		Semaphore,
+		// fileCache.gc() exercises the real eviction planner, so pull it through unmocked (a stub
+		// would silently skip the size-cap pass under test).
+		planSizeCapEviction: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).planSizeCapEviction
 	}
 })
 

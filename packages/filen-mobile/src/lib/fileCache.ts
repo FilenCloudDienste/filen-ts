@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import { AppState } from "react-native"
 import { AnyFile, ManagedFuture } from "@filen/sdk-rs"
-import { Semaphore, run } from "@filen/shared"
+import { Semaphore, run, planSizeCapEviction } from "@filen/shared"
 import { debounce } from "es-toolkit/function"
 import type { CacheItem, DriveItemFileExtracted } from "@/types"
 import { serialize, deserialize } from "@/lib/serializer"
@@ -14,7 +14,7 @@ import { ClearBarrier } from "@/lib/clearBarrier"
 import offline from "@/features/offline/offline"
 import { xxHash32 } from "js-xxhash"
 import { FILE_CACHE_VERSION, FILE_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
-import { planSizeCapEviction, CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
+import { CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
 import logger from "@/lib/logger"
 
 export type Metadata = (
@@ -579,7 +579,11 @@ export class FileCache {
 			capCachedAt.set(survivor.key, survivor.cachedAt)
 		}
 
-		const capEvict = planSizeCapEviction(survivors, CACHE_MAX_SIZE_BYTES)
+		const capEvict = planSizeCapEviction(
+			survivors.map(survivor => ({ id: survivor.key, size: survivor.size, timestamp: survivor.cachedAt })),
+			CACHE_MAX_SIZE_BYTES,
+			{ protectNewest: true }
+		)
 
 		await Promise.all(
 			[...toDelete, ...capEvict].map(async uuid => {

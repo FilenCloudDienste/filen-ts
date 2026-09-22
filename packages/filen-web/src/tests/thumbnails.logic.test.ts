@@ -2,14 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { RAW_IMAGE_EXTENSIONS } from "@/features/drive/lib/preview.logic"
-import {
-	thumbnailCategory,
-	pickEvictions,
-	THUMB_MAX_DIM,
-	THUMB_SDK_MAX_HEIGHT,
-	THUMB_SIZE_GATE,
-	type ThumbCacheEntry
-} from "@/features/drive/lib/thumbnails.logic"
+import { thumbnailCategory, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SIZE_GATE } from "@/features/drive/lib/thumbnails.logic"
 
 // Mirrors item.test.ts's own fixture helpers — this file needs the same six-arm coverage to prove
 // thumbnailCategory routes the "file" arm only.
@@ -234,52 +227,5 @@ describe("THUMB_SDK_MAX_HEIGHT", () => {
 	it("is twice THUMB_MAX_DIM, never equal to it", () => {
 		expect(THUMB_SDK_MAX_HEIGHT).toBe(THUMB_MAX_DIM * 2)
 		expect(THUMB_SDK_MAX_HEIGHT).toBe(768)
-	})
-})
-
-describe("pickEvictions", () => {
-	function entry(name: string, size: number, lastModified: number): ThumbCacheEntry {
-		return { name, size, lastModified }
-	}
-
-	it("is a no-op when already under the cap", () => {
-		const entries = [entry("a", 10, 1), entry("b", 10, 2)]
-		expect(pickEvictions(entries, 100)).toEqual([])
-	})
-
-	it("is a no-op when landing exactly on the cap", () => {
-		const entries = [entry("a", 50, 1), entry("b", 50, 2)]
-		expect(pickEvictions(entries, 100)).toEqual([])
-	})
-
-	it("evicts the single oldest entry when one byte over the cap", () => {
-		const entries = [entry("old", 10, 1), entry("new", 10, 2)]
-		expect(pickEvictions(entries, 19)).toEqual(["old"])
-	})
-
-	it("evicts oldest-first until back at or under the cap, stopping exactly at the boundary", () => {
-		const entries = [entry("oldest", 10, 1), entry("middle", 10, 2), entry("newest", 10, 3)]
-		// total 30, cap 15 -> evict oldest (remaining 20), evict middle (remaining 10 <= 15) -> stop
-		expect(pickEvictions(entries, 15)).toEqual(["oldest", "middle"])
-	})
-
-	it("evicts everything when the cap is zero", () => {
-		const entries = [entry("a", 10, 1), entry("b", 10, 2)]
-		expect(pickEvictions(entries, 0)).toEqual(["a", "b"])
-	})
-
-	it("is a no-op on an empty entry list", () => {
-		expect(pickEvictions([], 0)).toEqual([])
-	})
-
-	it("does not mutate the input array", () => {
-		const entries = [entry("newest", 10, 2), entry("oldest", 10, 1)]
-		pickEvictions(entries, 5)
-		expect(entries).toEqual([entry("newest", 10, 2), entry("oldest", 10, 1)])
-	})
-
-	it("breaks lastModified ties by input order (stable sort)", () => {
-		const entries = [entry("a", 10, 5), entry("b", 10, 5), entry("c", 10, 5)]
-		expect(pickEvictions(entries, 15)).toEqual(["a", "b"])
 	})
 })

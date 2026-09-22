@@ -1,13 +1,7 @@
 /// <reference lib="webworker" />
 import { log } from "@/lib/log"
-import {
-	THUMB_DIR,
-	THUMB_DIR_ROOT,
-	THUMB_GENERATION,
-	THUMB_EXT,
-	pickEvictions,
-	type ThumbCacheEntry
-} from "@/features/drive/lib/thumbnails.logic"
+import { planSizeCapEviction } from "@filen/shared"
+import { THUMB_DIR, THUMB_DIR_ROOT, THUMB_GENERATION, THUMB_EXT, type ThumbCacheEntry } from "@/features/drive/lib/thumbnails.logic"
 
 // Worker-only OPFS blob store for cached thumbnails — no wasm import anywhere in this module, so it
 // stays trivially importable from sdk.worker.ts without dragging the SDK's own init/thread-pool
@@ -111,7 +105,11 @@ export async function removeStaleThumbGenerations(): Promise<void> {
 // leave every OTHER oversize entry stranded.
 export async function sweepThumbs(capBytes: number): Promise<void> {
 	const entries = await listThumbs()
-	const evict = pickEvictions(entries, capBytes)
+	const evict = planSizeCapEviction(
+		entries.map(entry => ({ id: entry.name, size: entry.size, timestamp: entry.lastModified })),
+		capBytes,
+		{ protectNewest: false }
+	)
 
 	if (evict.length === 0) {
 		return

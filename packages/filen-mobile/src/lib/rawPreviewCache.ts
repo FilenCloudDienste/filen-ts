@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import { AppState } from "react-native"
 import { ManagedFuture, EmbeddedPreviewResult_Tags, type EmbeddedPreviewResult } from "@filen/sdk-rs"
-import { Semaphore, run } from "@filen/shared"
+import { Semaphore, run, planSizeCapEviction } from "@filen/shared"
 import { debounce } from "es-toolkit/function"
 import { type DriveItemFileExtracted } from "@/types"
 import auth from "@/lib/auth"
@@ -12,7 +12,7 @@ import offline from "@/features/offline/offline"
 import { newTmpFile } from "@/lib/tmp"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { RAW_PREVIEW_CACHE_DIRECTORY } from "@/lib/storageRoots"
-import { planSizeCapEviction, RAW_PREVIEW_CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
+import { RAW_PREVIEW_CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
 import logger from "@/lib/logger"
 
 // `uri` = file:// URI of the JPEG the SDK extracted from the RAW container; `noPreview` = the SDK's
@@ -308,7 +308,11 @@ export class RawPreviewCache {
 			capCachedAt.set(survivor.key, survivor.cachedAt)
 		}
 
-		const capEvict = planSizeCapEviction(survivors, RAW_PREVIEW_CACHE_MAX_SIZE_BYTES)
+		const capEvict = planSizeCapEviction(
+			survivors.map(survivor => ({ id: survivor.key, size: survivor.size, timestamp: survivor.cachedAt })),
+			RAW_PREVIEW_CACHE_MAX_SIZE_BYTES,
+			{ protectNewest: true }
+		)
 
 		await Promise.all(
 			[...toDelete, ...capEvict].map(async name => {

@@ -139,34 +139,10 @@ export function thumbnailCategory(item: DriveItem): ThumbnailCategory {
 }
 
 // name/size/lastModified projection of one cached .thumb file — thumbStore.ts's listThumbs() own
-// return shape, and pickEvictions' own input below.
+// return shape. Oldest-first eviction over this shape is planSizeCapEviction from @filen/shared
+// (thumbStore.ts maps {name,size,lastModified} to {id,size,timestamp} at the call site).
 export interface ThumbCacheEntry {
 	name: string
 	size: number
 	lastModified: number
-}
-
-// Oldest-first eviction until the running total is back at or under capBytes — pure so the boundary
-// cases (already under cap, landing exactly on cap) are cheap to exhaust without touching OPFS.
-export function pickEvictions(entries: ThumbCacheEntry[], capBytes: number): string[] {
-	const total = entries.reduce((sum, entry) => sum + entry.size, 0)
-
-	if (total <= capBytes) {
-		return []
-	}
-
-	const oldestFirst = [...entries].sort((a, b) => a.lastModified - b.lastModified)
-	const evict: string[] = []
-	let remaining = total
-
-	for (const entry of oldestFirst) {
-		if (remaining <= capBytes) {
-			break
-		}
-
-		evict.push(entry.name)
-		remaining -= entry.size
-	}
-
-	return evict
 }

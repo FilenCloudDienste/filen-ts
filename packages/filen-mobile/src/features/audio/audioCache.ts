@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { AppState } from "react-native"
-import { Semaphore, run } from "@filen/shared"
+import { Semaphore, run, planSizeCapEviction } from "@filen/shared"
 import { debounce } from "es-toolkit/function"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { MUSIC_METADATA_SUPPORTED_EXTENSIONS, AUDIO_METADATA_MAX_PARSE_SIZE_BYTES, AUDIO_METADATA_MAX_CONCURRENT_PARSES } from "@/constants"
@@ -13,7 +13,7 @@ import { xxHash32 } from "js-xxhash"
 import mimeTypes from "mime-types"
 import type { CacheItem } from "@/types"
 import { AUDIO_CACHE_VERSION, AUDIO_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
-import { planSizeCapEviction, CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
+import { CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
 import logger from "@/lib/logger"
 
 export type Metadata = {
@@ -555,7 +555,11 @@ export class AudioCache {
 		}
 
 		await Promise.all(
-			planSizeCapEviction(survivors, CACHE_MAX_SIZE_BYTES).map(async cacheId => {
+			planSizeCapEviction(
+				survivors.map(survivor => ({ id: survivor.key, size: survivor.size, timestamp: survivor.cachedAt })),
+				CACHE_MAX_SIZE_BYTES,
+				{ protectNewest: true }
+			).map(async cacheId => {
 				await run(async defer => {
 					await gcSemaphore.acquire()
 
