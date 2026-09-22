@@ -11,7 +11,7 @@ import { useResolveClassNames } from "uniwind"
 import { useLocalSearchParams, useFocusEffect } from "expo-router"
 import { router } from "@/lib/router"
 import usePlaylistsQuery from "@/features/audio/queries/usePlaylists.query"
-import { run, pruneSelection } from "@filen/shared"
+import { run, pruneSelection, createPlaylist } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import audio, { type PlaylistWithItems } from "@/features/audio/audio"
 import prompts from "@/lib/prompts"
@@ -163,13 +163,7 @@ export function Playlists() {
 
 		const result = await runWithLoading(async () => {
 			await audio.savePlaylist({
-				playlist: {
-					name: newName,
-					files: [],
-					uuid: randomUUID(),
-					updated: Date.now(),
-					created: Date.now()
-				}
+				playlist: createPlaylist(randomUUID(), newName, Date.now())
 			})
 		})
 

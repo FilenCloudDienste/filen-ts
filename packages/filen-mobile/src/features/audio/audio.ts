@@ -5,7 +5,19 @@ import audioCache, { type Metadata } from "@/features/audio/audioCache"
 import type { DriveItem, DriveItemFileExtracted } from "@/types"
 import { useEffect, useState } from "react"
 import events from "@/lib/events"
-import { run, Semaphore, driveItemName, parsePlaylist, type Playlist, type PlaylistFile } from "@filen/shared"
+import {
+	run,
+	Semaphore,
+	driveItemName,
+	parsePlaylist,
+	type Playlist,
+	type PlaylistFile,
+	addTracksToPlaylist as addTracksToPlaylistShared,
+	pruneDeadTracks as pruneDeadTracksShared,
+	removeTracksFromPlaylist as removeTracksFromPlaylistShared,
+	renamePlaylist as renamePlaylistShared,
+	reorderPlaylistFile as reorderPlaylistFileShared
+} from "@filen/shared"
 import auth from "@/lib/auth"
 import { AnyNormalDir, DirMeta_Tags, AnyFile, FileMeta_Tags, FileMeta, ParentUuid, type Dir } from "@filen/sdk-rs"
 import { Buffer } from "react-native-quick-crypto"
@@ -1323,18 +1335,7 @@ export class Audio {
 						this.mutatePlaylist({
 							uuid: result.uuid,
 							fallback: result,
-							mutate: current => {
-								const files = current.files.filter(file => !nonExistentFileUuids.has(file.uuid))
-
-								if (files.length === current.files.length) {
-									return null
-								}
-
-								return {
-									...current,
-									files
-								}
-							},
+							mutate: current => pruneDeadTracksShared(current, nonExistentFileUuids),
 							signal
 						}).catch(e =>
 							logger.error("audio", "playlist cleanup persist failed", {
@@ -1514,40 +1515,34 @@ export class Audio {
 			return 0
 		}
 
+		// SDK-shaped projection done up front (base-independent — dedup against the FRESHEST copy
+		// happens inside the shared addTracksToPlaylist below); `playlist` is a placeholder the shared
+		// function always restamps to `current.uuid`.
+		const projected = candidates.map(item => ({
+			uuid: item.data.uuid,
+			name: driveItemName(item),
+			mime: item.data.decryptedMeta?.mime ?? "application/octet-stream",
+			size: Number(item.data.size),
+			bucket: item.data.bucket,
+			key: item.data.decryptedMeta?.key ?? "",
+			version: item.data.decryptedMeta?.version ? Number(item.data.decryptedMeta?.version) : 0,
+			chunks: Number(item.data.chunks),
+			region: item.data.region,
+			playlist: playlist.uuid,
+			item
+		}))
+
 		let addedCount = 0
 
 		await this.mutatePlaylist({
 			uuid: playlist.uuid,
 			fallback: playlist,
 			mutate: current => {
-				const existing = new Set(current.files.map(file => file.uuid))
-				const toAppend = candidates
-					.filter(item => !existing.has(item.data.uuid))
-					.map(item => ({
-						uuid: item.data.uuid,
-						name: driveItemName(item),
-						mime: item.data.decryptedMeta?.mime ?? "application/octet-stream",
-						size: Number(item.data.size),
-						bucket: item.data.bucket,
-						key: item.data.decryptedMeta?.key ?? "",
-						version: item.data.decryptedMeta?.version ? Number(item.data.decryptedMeta?.version) : 0,
-						chunks: Number(item.data.chunks),
-						region: item.data.region,
-						playlist: current.uuid,
-						item
-					}))
+				const { next, added } = addTracksToPlaylistShared(current, projected, Date.now())
 
-				if (toAppend.length === 0) {
-					return null
-				}
+				addedCount = added
 
-				addedCount = toAppend.length
-
-				return {
-					...current,
-					files: [...current.files, ...toAppend],
-					updated: Date.now()
-				}
+				return next
 			},
 			signal
 		})
@@ -1581,25 +1576,11 @@ export class Audio {
 			uuid: playlist.uuid,
 			fallback: playlist,
 			mutate: current => {
-				const existing = new Set(current.files.map(file => file.uuid))
-				const toAppend = tracks
-					.filter(track => !existing.has(track.uuid))
-					.map(track => ({
-						...track,
-						playlist: current.uuid
-					}))
+				const { next, added } = addTracksToPlaylistShared(current, tracks, Date.now())
 
-				if (toAppend.length === 0) {
-					return null
-				}
+				addedCount = added
 
-				addedCount = toAppend.length
-
-				return {
-					...current,
-					files: [...current.files, ...toAppend],
-					updated: Date.now()
-				}
+				return next
 			},
 			signal
 		})
@@ -1625,24 +1606,10 @@ export class Audio {
 			return
 		}
 
-		const toRemove = new Set(uuids)
-
 		await this.mutatePlaylist({
 			uuid: playlist.uuid,
 			fallback: playlist,
-			mutate: current => {
-				const files = current.files.filter(file => !toRemove.has(file.uuid))
-
-				if (files.length === current.files.length) {
-					return null
-				}
-
-				return {
-					...current,
-					files,
-					updated: Date.now()
-				}
-			},
+			mutate: current => removeTracksFromPlaylistShared(current, uuids, Date.now()),
 			signal
 		})
 	}
@@ -1670,26 +1637,7 @@ export class Audio {
 		await this.mutatePlaylist({
 			uuid: playlist.uuid,
 			fallback: playlist,
-			mutate: current => {
-				if (from < 0 || from >= current.files.length || to < 0 || to >= current.files.length) {
-					return null
-				}
-
-				const files = [...current.files]
-				const [moved] = files.splice(from, 1)
-
-				if (!moved) {
-					return null
-				}
-
-				files.splice(to, 0, moved)
-
-				return {
-					...current,
-					files,
-					updated: Date.now()
-				}
-			},
+			mutate: current => reorderPlaylistFileShared(current, from, to, Date.now()),
 			signal
 		})
 	}
@@ -1702,11 +1650,7 @@ export class Audio {
 		await this.mutatePlaylist({
 			uuid: playlist.uuid,
 			fallback: playlist,
-			mutate: current => ({
-				...current,
-				name,
-				updated: Date.now()
-			}),
+			mutate: current => renamePlaylistShared(current, name, Date.now()),
 			signal
 		})
 	}

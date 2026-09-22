@@ -74,5 +74,11 @@ export const {
 	reconcileNoteOutboxAgainstCloud,
 	noteBulkActionAvailability,
 	partitionNotesByBucket,
-	parsePlaylist
+	parsePlaylist,
+	createPlaylist,
+	renamePlaylist,
+	addTracksToPlaylist,
+	removeTracksFromPlaylist,
+	reorderPlaylistFile,
+	pruneDeadTracks
 } = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")

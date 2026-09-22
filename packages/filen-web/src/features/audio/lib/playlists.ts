@@ -1,19 +1,23 @@
-import { Semaphore, driveItemName } from "@filen/shared"
-import type { File as SdkFile, FileEncryptionVersion, UuidStr } from "@filen/sdk-rs"
-import { sdkApi } from "@/lib/sdk/client"
-import { runOp } from "@/lib/actions/outcome"
-import { log } from "@/lib/log"
-import { narrowItem, asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { buildQueueTrack } from "@/features/audio/lib/handoff"
-import { parsePlaylist, serializePlaylist, type Playlist, type PlaylistFile } from "@filen/shared"
 import {
+	Semaphore,
+	driveItemName,
+	parsePlaylist,
+	serializePlaylist,
+	type Playlist,
+	type PlaylistFile,
 	addTracksToPlaylist as addTracksPure,
 	createPlaylist as createPlaylistPure,
 	pruneDeadTracks as pruneDeadTracksPure,
 	removeTracksFromPlaylist as removeTracksPure,
 	renamePlaylist as renamePlaylistPure,
 	reorderPlaylistFile as reorderPure
-} from "@/features/audio/lib/playlistOps"
+} from "@filen/shared"
+import type { File as SdkFile, FileEncryptionVersion, UuidStr } from "@filen/sdk-rs"
+import { sdkApi } from "@/lib/sdk/client"
+import { runOp } from "@/lib/actions/outcome"
+import { log } from "@/lib/log"
+import { narrowItem, asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
+import { buildQueueTrack } from "@/features/audio/lib/handoff"
 import type { QueueTrack } from "@/features/audio/store/audioQueue"
 import { playlistsQueryGet, playlistsQueryRemove, playlistsQueryUpsert, type PlaylistEntry } from "@/features/audio/queries/playlists"
 
@@ -234,11 +238,11 @@ export function addTracksToPlaylistAction(playlist: Playlist, items: DriveItem[]
 }
 
 export function removeTracksFromPlaylistAction(playlist: Playlist, uuids: string[]): Promise<Playlist | null> {
-	return mutatePlaylist(playlist.uuid, playlist, current => removeTracksPure(current, uuids))
+	return mutatePlaylist(playlist.uuid, playlist, current => removeTracksPure(current, uuids, Date.now()))
 }
 
 export function reorderPlaylistFileAction(playlist: Playlist, from: number, to: number): Promise<Playlist | null> {
-	return mutatePlaylist(playlist.uuid, playlist, current => reorderPure(current, from, to))
+	return mutatePlaylist(playlist.uuid, playlist, current => reorderPure(current, from, to, Date.now()))
 }
 
 // Deletes the playlist's own `${uuid}.json` file from the Playlists directory. Re-lists rather than
