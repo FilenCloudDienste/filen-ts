@@ -3,7 +3,7 @@ import { AnyNormalDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"
-import { keepAgainstIncomingDriveItem } from "@/features/drive/driveSelectors"
+import { upsertItem } from "@filen/shared"
 import cache from "@/lib/cache"
 import events from "@/lib/events"
 
@@ -61,10 +61,7 @@ export async function createDirectory({
 
 	driveItemsQueryUpdateForNormalParent({
 		parentUuid: parentDir.inner[0].uuid,
-		updater: prev => [
-			...prev.filter(i => keepAgainstIncomingDriveItem(i, createdDriveItem.data.uuid, createdDriveItem.data.decryptedMeta?.name)),
-			createdDriveItem
-		]
+		updater: prev => upsertItem(prev, createdDriveItem)
 	})
 
 	return createdDriveItem
@@ -165,7 +162,7 @@ export async function move({
 	if (unwrappedParentUuid) {
 		driveItemsQueryUpdateForNormalParent({
 			parentUuid: unwrappedParentUuid,
-			updater: prev => [...prev.filter(i => keepAgainstIncomingDriveItem(i, item.data.uuid, item.data.decryptedMeta?.name)), item]
+			updater: prev => upsertItem(prev, item)
 		})
 	}
 

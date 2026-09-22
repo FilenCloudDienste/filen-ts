@@ -6,6 +6,7 @@ import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate } from "@/features/d
 import cache from "@/lib/cache"
 import { toSignalOpts } from "@/lib/signals"
 import events from "@/lib/events"
+import { applyMembershipPatch } from "@filen/shared"
 
 /**
  * Optimistic updater for the root Favorites listing (`{ type: "favorites", uuid: null }`).
@@ -14,9 +15,7 @@ import events from "@/lib/events"
  * ADD a newly-favorited item to the Favorites listing — this closes that gap.
  */
 export function favoritesListingUpdater(prev: DriveItem[], item: DriveItem, favorited: boolean): DriveItem[] {
-	const withoutItem = prev.filter(i => i.data.uuid !== item.data.uuid)
-
-	return favorited ? [...withoutItem, item] : withoutItem
+	return applyMembershipPatch(prev, item, favorited)
 }
 
 export async function favorite({ item, favorited, signal }: { item: DriveItem; favorited: boolean; signal?: AbortSignal }) {

@@ -3,6 +3,7 @@ import type { DrivePath, DrivePathType, SharedNavContext } from "@/hooks/useDriv
 import type { PreviewType } from "@/lib/previewType"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { serialize } from "@/lib/serializer"
+import { keepAgainstIncoming } from "@filen/shared"
 
 // Local extension check — kept inline (rather than calling getPreviewType from
 // src/lib/previewType) so this module doesn't pull in the SDK at test time. IMAGE ∪ VIDEO only:
@@ -87,18 +88,7 @@ export function isDirectoryItem(item: DriveItem): item is DriveItemDirectoryExtr
  * undecryptable item arrived. Guarding on presence keeps unrelated undecryptable rows.
  */
 export function keepAgainstIncomingDriveItem(existing: DriveItem, incomingUuid: string, incomingName: string | undefined): boolean {
-	if (existing.data.uuid === incomingUuid) {
-		return false
-	}
-
-	const existingName = existing.data.decryptedMeta?.name.toLowerCase().trim()
-	const normalizedIncomingName = incomingName?.toLowerCase().trim()
-
-	if (existingName !== undefined && normalizedIncomingName !== undefined && existingName === normalizedIncomingName) {
-		return false
-	}
-
-	return true
+	return keepAgainstIncoming(existing.data.uuid, existing.data.decryptedMeta?.name, incomingUuid, incomingName)
 }
 
 export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): DriveSelectionFlags {

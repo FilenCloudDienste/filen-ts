@@ -11,7 +11,7 @@ import type {
 	AnyDirWithContext,
 	LinkedFile
 } from "@filen/sdk-rs"
-import { type ExtraData } from "@filen/shared"
+import { type ExtraData, keepAgainstIncoming } from "@filen/shared"
 
 // The four shared arms carry a Dir|File-shaped `data` (the underlying item flattened out of its
 // SharedDir/SharedRootDir/SharedFile wrapper) PLUS the sharing metadata — so a consumer that only
@@ -380,24 +380,11 @@ export function getSharerIdentity(item: DriveItem, resolveNestedRole?: (uuid: st
 // undecryptable item's decryptedMeta is null (name undefined), and undefined === undefined would
 // wrongly treat every undecryptable row as colliding with every other one.
 export function keepAgainstIncomingDriveItem(existing: DriveItem, incoming: DriveItem): boolean {
-	if (existing.data.uuid === incoming.data.uuid) {
-		return false
-	}
-
-	const existingName = existing.data.decryptedMeta?.name.toLowerCase().trim()
-	const incomingName = incoming.data.decryptedMeta?.name.toLowerCase().trim()
-
-	if (existingName !== undefined && incomingName !== undefined && existingName === incomingName) {
-		return false
-	}
-
-	return true
+	return keepAgainstIncoming(existing.data.uuid, existing.data.decryptedMeta?.name, incoming.data.uuid, incoming.data.decryptedMeta?.name)
 }
 
 // Insert an incoming item into a cached listing, replacing (never duplicating) whatever row it
 // collides with — see keepAgainstIncomingDriveItem. Covers createDirectory's idempotent-existing-
 // directory return: the backend hands back the SAME uuid it already returned last time, so the
 // stale cached row is dropped and the fresh one appended, net item count unchanged.
-export function upsertDriveItem(items: DriveItem[], incoming: DriveItem): DriveItem[] {
-	return [...items.filter(existing => keepAgainstIncomingDriveItem(existing, incoming)), incoming]
-}
+export { upsertItem as upsertDriveItem } from "@filen/shared"

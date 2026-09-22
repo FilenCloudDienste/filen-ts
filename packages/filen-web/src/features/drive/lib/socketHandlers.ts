@@ -1,4 +1,5 @@
 import type { SocketEvent, NonRootItemTagged } from "@filen/sdk-rs"
+import { removeByUuid } from "@filen/shared"
 import { registerSocketHandler } from "@/lib/sdk/socket"
 import { queryClient } from "@/queries/client"
 import { log } from "@/lib/log"
@@ -47,10 +48,6 @@ export function registerDriveSocketHandlers(): () => void {
 // appends, so a global patch leaves an absent row absent instead of conjuring it into every listing.
 function replaceIfPresent(items: DriveItem[], updated: DriveItem): DriveItem[] {
 	return items.map(item => (item.data.uuid === updated.data.uuid ? updated : item))
-}
-
-function removeByUuid(items: DriveItem[], uuid: string): DriveItem[] {
-	return items.filter(item => item.data.uuid !== uuid)
 }
 
 // Only an OWNED row can enter this account's trash: a shared-in item its owner trashed leaves the

@@ -1,5 +1,6 @@
 import * as Comlink from "comlink"
 import type { Dir, DirColor, File, FileVersion, UserInfo } from "@filen/sdk-rs"
+import { applyMembershipPatch, removeByUuid } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
@@ -39,9 +40,7 @@ export function currentRootUuid(): string {
 // Exported: features/photos/lib/actions.ts reuses both helpers verbatim for its own single-key
 // photos-listing patch (photosListingQueryUpdate) after delegating the actual mutation to this
 // file's own action helpers below — same list-splice rules, no reason to re-implement them.
-export function removeByUuid(items: DriveItem[], uuid: string): DriveItem[] {
-	return items.filter(item => item.data.uuid !== uuid)
-}
+export { removeByUuid }
 
 // Attribute-only refresh (a flag or color changed; identity and name did not) — replaces an
 // existing row in place, never appends. Deliberately not upsertDriveItem: patched globally, an
@@ -195,9 +194,7 @@ export function patchFavoritesListing(favorited: boolean, item: DriveItem): void
 	// Same cancel-before-patch discipline as every other listing patch: a Favorites refetch already in
 	// flight was snapshotted before this membership change and would land on top of it.
 	cancelListingFetch(queryKey)
-	queryClient.setQueryData<DriveItem[]>(queryKey, prev =>
-		prev === undefined ? prev : favorited ? [...removeByUuid(prev, item.data.uuid), item] : removeByUuid(prev, item.data.uuid)
-	)
+	queryClient.setQueryData<DriveItem[]>(queryKey, prev => (prev === undefined ? prev : applyMembershipPatch(prev, item, favorited)))
 }
 
 // Shared cache-patch tail for both the single-item toggle and the bulk SET below — factored out so

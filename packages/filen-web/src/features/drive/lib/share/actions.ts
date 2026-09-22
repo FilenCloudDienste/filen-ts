@@ -1,4 +1,5 @@
 import type { Contact } from "@filen/sdk-rs"
+import { removeByUuid } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 import { driveListingQueryKey } from "@/features/drive/queries/drive"
@@ -58,13 +59,6 @@ export async function shareItems(items: DriveItem[], contacts: Contact[]): Promi
 	}
 
 	return outcome
-}
-
-// Filters a cached shared-root listing down to every row except the given uuid — a local, standalone
-// copy of drive/actions.ts's own private removeByUuid (unexported there, and this file already stands
-// alone from drive/actions.ts's write helpers, same as shareItems above).
-function removeByUuid(items: DriveItem[], uuid: string): DriveItem[] {
-	return items.filter(item => item.data.uuid !== uuid)
 }
 
 // Stops sharing a shared-root item — a directory shared out, or an item shared in the caller wants

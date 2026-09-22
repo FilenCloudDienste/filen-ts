@@ -8,7 +8,7 @@ import {
 	driveItemsQueryUpdateForRecents
 } from "@/features/drive/queries/useDriveItems.query"
 import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
-import { keepAgainstIncomingDriveItem } from "@/features/drive/driveSelectors"
+import { upsertItem } from "@filen/shared"
 import cache from "@/lib/cache"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import logger from "@/lib/logger"
@@ -41,10 +41,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			if (unwrappedParentUuid) {
 				driveItemsQueryUpdateForNormalParent({
 					parentUuid: unwrappedParentUuid,
-					updater: prev => [
-						...prev.filter(i => keepAgainstIncomingDriveItem(i, unwrappedFileMeta.file.uuid, unwrappedFileMeta.meta?.name)),
-						driveItem
-					]
+					updater: prev => upsertItem(prev, driveItem)
 				})
 
 				// Mirror into the recursive Photos grid too — a SEPARATE virtual-root query from the parent's
@@ -208,10 +205,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			if (unwrappedParentUuidNew) {
 				driveItemsQueryUpdateForNormalParent({
 					parentUuid: unwrappedParentUuidNew,
-					updater: prev => [
-						...prev.filter(i => keepAgainstIncomingDriveItem(i, unwrappedFileMeta.file.uuid, unwrappedFileMeta.meta?.name)),
-						driveItem
-					]
+					updater: prev => upsertItem(prev, driveItem)
 				})
 			}
 
@@ -254,10 +248,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			if (unwrappedParentUuidNew) {
 				driveItemsQueryUpdateForNormalParent({
 					parentUuid: unwrappedParentUuidNew,
-					updater: prev => [
-						...prev.filter(i => keepAgainstIncomingDriveItem(i, unwrappedDirMeta.uuid, unwrappedDirMeta.meta?.name)),
-						driveItem
-					]
+					updater: prev => upsertItem(prev, driveItem)
 				})
 			}
 
@@ -425,10 +416,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			if (unwrappedParentUuid) {
 				driveItemsQueryUpdateForNormalParent({
 					parentUuid: unwrappedParentUuid,
-					updater: prev => [
-						...prev.filter(i => keepAgainstIncomingDriveItem(i, unwrappedDirMeta.uuid, unwrappedDirMeta.meta?.name)),
-						driveItem
-					]
+					updater: prev => upsertItem(prev, driveItem)
 				})
 			}
 
