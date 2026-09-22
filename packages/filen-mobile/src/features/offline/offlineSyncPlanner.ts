@@ -1,3 +1,5 @@
+import { pathSegmentDepth } from "@filen/shared"
+
 export type RemoteTreeEntry = {
 	uuid: string
 	// Raw root-relative path with leading "/" — original decrypted names, NEVER decoded or encoded.
@@ -62,20 +64,6 @@ export function uuidFromSyncTmpName(name: string): string | null {
 	return UUID_SHAPE_REGEX.test(uuid) ? uuid : null
 }
 
-// Segment depth without the per-call array allocation of path.split("/").length —
-// equal to slash count + 1 for the leading-"/" paths this module works on.
-function depth(path: string): number {
-	let segments = 1
-
-	for (let i = 0; i < path.length; i++) {
-		if (path.charCodeAt(i) === 47) {
-			segments++
-		}
-	}
-
-	return segments
-}
-
 // Rewrite the simulated location of `from` and everything under it to live under `to`.
 function rewritePrefix(paths: Map<string, string>, from: string, to: string): void {
 	const fromPrefix = `${from}/`
@@ -114,7 +102,7 @@ function simulateMoves(simulated: Map<string, string>, movers: string[], remote:
 	const phase1Depths = new Map<string, number>()
 
 	for (const uuid of movers) {
-		phase1Depths.set(uuid, depth(projected.get(uuid) ?? ""))
+		phase1Depths.set(uuid, pathSegmentDepth(projected.get(uuid) ?? ""))
 	}
 
 	const phase1 = [...movers].sort((a, b) => (phase1Depths.get(b) as number) - (phase1Depths.get(a) as number))
@@ -132,7 +120,7 @@ function simulateMoves(simulated: Map<string, string>, movers: string[], remote:
 	const phase2Depths = new Map<string, number>()
 
 	for (const uuid of movers) {
-		phase2Depths.set(uuid, depth(remote.get(uuid)?.path ?? ""))
+		phase2Depths.set(uuid, pathSegmentDepth(remote.get(uuid)?.path ?? ""))
 	}
 
 	const phase2 = [...movers].sort((a, b) => (phase2Depths.get(a) as number) - (phase2Depths.get(b) as number))
@@ -209,7 +197,7 @@ export function planTreeReconcile({
 
 		if (r !== undefined && r.path !== p) {
 			candidates.push(uuid)
-			candidateDepths.set(uuid, depth(p))
+			candidateDepths.set(uuid, pathSegmentDepth(p))
 			candidateIsDir.set(uuid, r.isDirectory)
 		}
 	}
@@ -354,7 +342,7 @@ export function planTreeReconcile({
 	const phase1Depths = new Map<string, number>()
 
 	for (const uuid of movers) {
-		phase1Depths.set(uuid, depth(simulated.get(uuid) ?? ""))
+		phase1Depths.set(uuid, pathSegmentDepth(simulated.get(uuid) ?? ""))
 	}
 
 	const phase1 = [...movers].sort((a, b) => (phase1Depths.get(b) as number) - (phase1Depths.get(a) as number))
@@ -405,7 +393,7 @@ export function planTreeReconcile({
 			for (const [uuid, p] of simulated) {
 				if (remote.has(uuid) && !moverSet.has(uuid)) {
 					riderCandidates.push(uuid)
-					riderDepths.set(uuid, depth(p))
+					riderDepths.set(uuid, pathSegmentDepth(p))
 				}
 			}
 
@@ -486,7 +474,7 @@ export function planTreeReconcile({
 				deletes.push({
 					uuid,
 					path,
-					pathDepth: depth(path)
+					pathDepth: pathSegmentDepth(path)
 				})
 			}
 		}
@@ -510,7 +498,7 @@ export function planTreeReconcile({
 	const phase2Depths = new Map<string, number>()
 
 	for (const uuid of allMovers) {
-		phase2Depths.set(uuid, depth(remote.get(uuid)?.path ?? ""))
+		phase2Depths.set(uuid, pathSegmentDepth(remote.get(uuid)?.path ?? ""))
 	}
 
 	const phase2 = [...allMovers].sort((a, b) => (phase2Depths.get(a) as number) - (phase2Depths.get(b) as number))

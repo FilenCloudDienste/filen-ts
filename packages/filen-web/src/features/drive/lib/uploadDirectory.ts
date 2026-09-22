@@ -1,4 +1,5 @@
 import { toast } from "sonner"
+import { dirnameOf, pathSegmentDepth } from "@filen/shared"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { i18n } from "@/lib/i18n"
@@ -159,18 +160,6 @@ function readFileEntry(entry: FileSystemFileEntry): Promise<File> {
 	})
 }
 
-// The containing directory's relPath, or null for a top-level entry with no ancestor — "a/b/c.txt"
-// -> "a/b", "a.txt" -> null. Shared by the dir-creation loop (a dir's own parent) and the file
-// fan-out (a file's containing dir) in runDirectoryUpload below. Exported for import.ts's own
-// parent-before-child directory recreation over the SDK's recursive-listing paths — the exact same
-// relPath convention (relative to the walked root, no leading segment for it), just a different path
-// source (a remote listing instead of a picked/dropped local tree).
-export function dirnameOf(relPath: string): string | null {
-	const index = relPath.lastIndexOf("/")
-
-	return index === -1 ? null : relPath.slice(0, index)
-}
-
 // The final path segment — the `name` runCreateDirectory creates. Exported alongside dirnameOf for
 // import.ts's own reuse.
 export function basenameOf(relPath: string): string {
@@ -190,12 +179,6 @@ function ancestorPaths(relPath: string): string[] {
 	}
 
 	return ancestors
-}
-
-// Segment count — the depth-ascending sort key so every parent is created before any of its
-// children ("a" < "a/b" < "a/b/c"). Exported alongside dirnameOf/basenameOf for import.ts's own reuse.
-export function depthOf(relPath: string): number {
-	return relPath.split("/").length
 }
 
 // ---------------------------------------------------------------------------
@@ -233,7 +216,7 @@ export async function runDirectoryUpload(
 	const failedDirPaths = new Set<string>()
 	let createdDirs = 0
 
-	const orderedDirs = [...dirs].sort((a, b) => depthOf(a) - depthOf(b))
+	const orderedDirs = [...dirs].sort((a, b) => pathSegmentDepth(a) - pathSegmentDepth(b))
 
 	for (const relPath of orderedDirs) {
 		const parentPath = dirnameOf(relPath)

@@ -7,7 +7,8 @@ import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { toAnyDirWithContext, type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { throttle, PROGRESS_THROTTLE_MS, runUpload, defaultUploadDeps, type RunUploadDeps } from "@/features/drive/lib/upload"
-import { dirnameOf, basenameOf, depthOf } from "@/features/drive/lib/uploadDirectory"
+import { dirnameOf, pathSegmentDepth } from "@filen/shared"
+import { basenameOf } from "@/features/drive/lib/uploadDirectory"
 import { runCreateDirectory, type CreateDirectoryDeps } from "@/features/drive/lib/createDirectory"
 import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { runBulk, type BulkOutcome } from "@/features/drive/lib/bulk"
@@ -215,7 +216,7 @@ export async function runImportDirectory(
 	// "" (the walked root itself) maps to the already-created rootUuid — every real sub-path's
 	// dirnameOf resolves up the chain to this base case.
 	const dirUuids = new Map<string, string>([["", rootUuid]])
-	const orderedDirs = [...scan.listing.dirs].sort((a, b) => depthOf(a.path) - depthOf(b.path))
+	const orderedDirs = [...scan.listing.dirs].sort((a, b) => pathSegmentDepth(a.path) - pathSegmentDepth(b.path))
 	let failedEntries = 0
 
 	for (const { path } of orderedDirs) {

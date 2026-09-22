@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import logger from "@/lib/logger"
 import type { DriveItem } from "@/types"
-import { run, Semaphore } from "@filen/shared"
+import { run, Semaphore, dirnameOf } from "@filen/shared"
 import transfers from "@/features/transfers/transfers"
 import { serialize, deserialize, serializeEquals } from "@/lib/serializer"
 import auth from "@/lib/auth"
@@ -111,9 +111,9 @@ function normalizeNfcFast(value: string): string {
 // "/a/b" → "/a", "/a" → "/". Replaces FileSystem.Paths.dirname + the "."/"" normalization in
 // per-entry listing loops.
 function rawPathDirname(path: string): string {
-	const lastSlash = path.lastIndexOf("/")
+	const d = dirnameOf(path)
 
-	return lastSlash <= 0 ? "/" : path.slice(0, lastSlash)
+	return d === null || d === "" ? "/" : d
 }
 
 // Manages offline file/directory storage on device.
