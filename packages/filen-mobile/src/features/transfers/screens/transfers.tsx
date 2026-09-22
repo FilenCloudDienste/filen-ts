@@ -24,7 +24,7 @@ import { DirectoryIcon, FileIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"
 import transfersLib from "@/features/transfers/transfers"
 import { driveItemDisplayName } from "@/lib/decryption"
-import { run } from "@filen/shared"
+import { run, clampedRatio } from "@filen/shared"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import logger from "@/lib/logger"
@@ -134,11 +134,7 @@ const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: 
 							color={textForeground.color}
 						/>
 					) : (
-						<Text>
-							{transfer.size > 0
-								? `${Math.min(100, Math.max(0, (transfer.bytesTransferred / transfer.size) * 100)).toFixed(0)}%`
-								: "0%"}
-						</Text>
+						<Text>{`${clampedRatio(transfer.bytesTransferred, transfer.size, 100).toFixed(0)}%`}</Text>
 					)}
 					<Menu
 						type="dropdown"

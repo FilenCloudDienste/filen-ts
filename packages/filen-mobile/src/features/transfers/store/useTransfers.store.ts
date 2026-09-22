@@ -2,6 +2,7 @@ import { create } from "zustand"
 import * as FileSystem from "expo-file-system"
 import type { AnyNormalDir, FilenSdkErrorInterface, UploadError, DownloadError, NonRootItem } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
+import { clampedRatio } from "@filen/shared"
 
 export type Transfer = {
 	id: string
@@ -262,7 +263,7 @@ function updateTransfers({
 		}
 	}
 
-	const progress = totalSize > 0 ? Math.min(1, Math.max(0, totalBytesTransferred / totalSize)) : 0
+	const progress = clampedRatio(totalBytesTransferred, totalSize)
 
 	if (addToNextUpdateAt) {
 		nextUpdateAt = now + STATS_UPDATE_THROTTLE_MS

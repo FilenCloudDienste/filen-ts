@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { useShallow } from "zustand/shallow"
 import type { ErrorDTO } from "@/lib/sdk/errors"
+import { clampedRatio } from "@filen/shared"
 
 // One row per in-flight or finished transfer, in-memory only (no persistence — mirrors
 // useDriveStore's selection state, not a query). `direction` now carries real "download" rows
@@ -219,7 +220,7 @@ export function computeTransfersAggregate(
 
 	return {
 		activeCount,
-		percent: activeCount === 0 || total === 0 ? 0 : (transferred / total) * 100,
+		percent: clampedRatio(transferred, total, 100),
 		speed: computeTransfersSpeed(speedSamples)
 	}
 }

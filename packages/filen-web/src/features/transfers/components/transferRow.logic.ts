@@ -1,5 +1,6 @@
 import { type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { fileIconKey, type FileIconKey } from "@/features/drive/lib/icon.logic"
+import { clampedRatio } from "@filen/shared"
 
 // Per-row value fed straight into <Progress value={...}> (Base UI's 0-max range, max defaults to
 // 100 — see ui/progress.tsx), scaled 0-100 same as useTransfersAggregate's own percent.
@@ -16,11 +17,7 @@ export function transferProgress(transfer: Transfer): number {
 		return 100
 	}
 
-	if (transfer.size <= 0) {
-		return 0
-	}
-
-	return Math.min(100, Math.max(0, (transfer.bytesTransferred / transfer.size) * 100))
+	return clampedRatio(transfer.bytesTransferred, transfer.size, 100)
 }
 
 // The active-row status icon's sr-only label key, direction-aware — isActiveTransfer's two members

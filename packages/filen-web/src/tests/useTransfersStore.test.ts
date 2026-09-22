@@ -462,6 +462,12 @@ describe("computeTransfersAggregate", () => {
 		expect(computeTransfersAggregate(transfers)).toEqual({ activeCount: 1, percent: 0, speed: 0 })
 	})
 
+	it("clamps percent to 100 when an active transfer's bytesTransferred overshoots its size", () => {
+		const transfers = [makeTransfer({ id: "a", status: "uploading", size: 100, bytesTransferred: 150 })]
+
+		expect(computeTransfersAggregate(transfers)).toEqual({ activeCount: 1, percent: 100, speed: 0 })
+	})
+
 	it("folds in computeTransfersSpeed's result when samples are given", () => {
 		vi.useFakeTimers()
 		vi.setSystemTime(1_700_000_010_000)

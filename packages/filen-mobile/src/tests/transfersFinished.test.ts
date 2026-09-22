@@ -16,7 +16,11 @@ vi.mock("uniwind", () => ({ useResolveClassNames: vi.fn(() => ({})) }))
 vi.mock("react-i18next", () => ({
 	useTranslation: vi.fn(() => ({ t: (k: string) => k }))
 }))
-vi.mock("@filen/shared", () => ({ run: vi.fn() }))
+vi.mock("@filen/shared", () => ({
+	run: vi.fn(),
+	clampedRatio: (numerator: number, denominator: number, scale = 1) =>
+		denominator > 0 ? Math.min(scale, Math.max(0, (numerator / denominator) * scale)) : 0
+}))
 vi.mock("@filen/sdk-rs", () => ({ DirColor: { Default: { new: vi.fn(() => ({})) } } }))
 vi.mock("@/lib/decryption", () => ({ driveItemDisplayName: vi.fn(() => "") }))
 vi.mock("@/lib/prompts", () => ({ default: { alert: vi.fn() } }))
