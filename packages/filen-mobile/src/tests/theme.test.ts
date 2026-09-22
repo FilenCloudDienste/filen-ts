@@ -22,7 +22,8 @@ vi.mock("uniwind", () => ({
 	}
 }))
 
-import { getInitialThemeSetting, DEFAULT_THEME_SETTING, THEME_SECURE_STORE_KEY } from "@/lib/theme"
+import { DEFAULT_THEME_SETTING } from "@filen/shared"
+import { getInitialThemeSetting, THEME_SECURE_STORE_KEY } from "@/lib/theme"
 
 describe("getInitialThemeSetting", () => {
 	it("returns 'light' when secureStore has 'light'", async () => {

@@ -1,9 +1,10 @@
 /* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
+import { DEFAULT_THEME_SETTING, isThemeSetting, type ThemeSetting } from "@filen/shared"
 import { useAction } from "@/lib/keymap/useAction"
 import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 
-export type Theme = "dark" | "light" | "system"
+export type Theme = ThemeSetting
 type ResolvedTheme = "dark" | "light"
 
 interface ThemeProviderProps {
@@ -19,17 +20,8 @@ interface ThemeProviderState {
 }
 
 const COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)"
-const THEME_VALUES: Theme[] = ["dark", "light", "system"]
 
 const ThemeProviderContext = React.createContext<ThemeProviderState | undefined>(undefined)
-
-function isTheme(value: string | null): value is Theme {
-	if (value === null) {
-		return false
-	}
-
-	return THEME_VALUES.includes(value as Theme)
-}
 
 function getSystemTheme(): ResolvedTheme {
 	if (window.matchMedia(COLOR_SCHEME_QUERY).matches) {
@@ -56,14 +48,14 @@ function disableTransitionsTemporarily() {
 
 export function ThemeProvider({
 	children,
-	defaultTheme = "system",
+	defaultTheme = DEFAULT_THEME_SETTING,
 	storageKey = "theme",
 	disableTransitionOnChange = true,
 	...props
 }: ThemeProviderProps) {
 	const [theme, setThemeState] = React.useState<Theme>(() => {
 		const storedTheme = localStorage.getItem(storageKey)
-		if (isTheme(storedTheme)) {
+		if (isThemeSetting(storedTheme)) {
 			return storedTheme
 		}
 
@@ -153,7 +145,7 @@ export function ThemeProvider({
 				return
 			}
 
-			if (isTheme(event.newValue)) {
+			if (isThemeSetting(event.newValue)) {
 				setThemeState(event.newValue)
 				return
 			}
