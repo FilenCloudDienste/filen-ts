@@ -14,10 +14,7 @@ import {
 	type NoteHistory as SdkNoteHistory,
 	type NoteParticipant as SdkNoteParticipant
 } from "@filen/sdk-rs"
-
-export type Prettify<T> = {
-	[K in keyof T]: T[K]
-} & {}
+import { type Prettify } from "@filen/shared"
 
 export type ExtraData = {
 	size: bigint
