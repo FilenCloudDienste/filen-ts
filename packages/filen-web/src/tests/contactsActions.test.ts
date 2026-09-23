@@ -181,32 +181,54 @@ describe("sendContactRequest", () => {
 		sendContactRequest.mockResolvedValueOnce(testUuid("new-request"))
 		const dto = sdkDto("Timeout")
 		listOutgoingContactRequests.mockRejectedValueOnce(dto)
+		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
 
 		const outcome = await sendContactRequestAction("new@filen.io")
 
 		expect(outcome).toEqual({ status: "error", dto })
 		expect(testQueryClient.getQueryData(CONTACT_REQUESTS_QUERY_KEY)).toEqual({ incoming: [], outgoing: [mockOutgoing()] })
+		expect(invalidateSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: CONTACT_REQUESTS_QUERY_KEY })
 	})
 })
 
 describe("acceptRequest", () => {
-	it("accepts, removes the request from incoming immediately, and invalidates both queries rather than synthesizing a contact", async () => {
+	it("accepts, removes the request from incoming immediately, and reads back only the contact list", async () => {
 		const target = mockIncoming()
 		const other = mockIncoming({ uuid: testUuid("other-in"), email: "other@filen.io" })
-		seedRequests({ incoming: [target, other] })
-		seedContacts({ contacts: [mockContact()] })
+		const blocked = mockBlockedContact()
+		const promoted = mockContact({ uuid: testUuid("carol"), email: "carol@filen.io" })
+		seedRequests({ incoming: [target, other], outgoing: [mockOutgoing()] })
+		seedContacts({ contacts: [mockContact()], blocked: [blocked] })
 		acceptContactRequest.mockResolvedValueOnce(testUuid("new-contact"))
+		getContacts.mockResolvedValueOnce([mockContact(), promoted])
 		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
 
 		const outcome = await acceptRequest(target.uuid)
 
 		expect(outcome).toEqual({ status: "success" })
 		expect(acceptContactRequest).toHaveBeenCalledExactlyOnceWith(target.uuid)
-		expect(testQueryClient.getQueryData<{ incoming: ContactRequestIn[] }>(CONTACT_REQUESTS_QUERY_KEY)?.incoming).toEqual([other])
-		// No uuid-based Contact synthesis: the contacts cache is untouched synchronously, only invalidated.
+		expect(testQueryClient.getQueryData(CONTACT_REQUESTS_QUERY_KEY)).toEqual({ incoming: [other], outgoing: [mockOutgoing()] })
+
+		await vi.waitFor(() => {
+			expect(testQueryClient.getQueryData(CONTACTS_QUERY_KEY)).toEqual({ contacts: [mockContact(), promoted], blocked: [blocked] })
+		})
+		expect(getContacts).toHaveBeenCalledOnce()
+		expect(invalidateSpy).not.toHaveBeenCalled()
+	})
+
+	it("falls back to invalidating the contacts query when the read-back fails", async () => {
+		seedRequests({ incoming: [mockIncoming()] })
+		seedContacts({ contacts: [mockContact()] })
+		acceptContactRequest.mockResolvedValueOnce(testUuid("new-contact"))
+		getContacts.mockRejectedValueOnce(sdkDto("Unknown"))
+		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
+
+		expect(await acceptRequest(mockIncoming().uuid)).toEqual({ status: "success" })
+
+		await vi.waitFor(() => {
+			expect(invalidateSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: CONTACTS_QUERY_KEY })
+		})
 		expect(testQueryClient.getQueryData<{ contacts: Contact[] }>(CONTACTS_QUERY_KEY)?.contacts).toEqual([mockContact()])
-		expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: CONTACTS_QUERY_KEY })
-		expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: CONTACT_REQUESTS_QUERY_KEY })
 	})
 
 	it("returns an error outcome without removing the request or invalidating on rejection", async () => {
@@ -448,12 +470,14 @@ describe("unblockContact", () => {
 		unblockContact.mockResolvedValueOnce(undefined)
 		const dto = sdkDto("Timeout")
 		getContacts.mockRejectedValueOnce(dto)
+		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
 
 		const outcome = await unblockContactAction(blocked.uuid)
 
 		expect(outcome).toEqual({ status: "error", dto })
 		const data = testQueryClient.getQueryData<{ contacts: Contact[]; blocked: BlockedContact[] }>(CONTACTS_QUERY_KEY)
 		expect(data?.blocked).toEqual([blocked]) // still blocked locally — server-side already unblocked, self-heals on refetch
+		expect(invalidateSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: CONTACTS_QUERY_KEY })
 	})
 })
 

@@ -1,11 +1,10 @@
-import type { BlockedContact, Chat, Contact, ContactRequestOut, UuidStr } from "@filen/sdk-rs"
+import type { BlockedContact, Chat, Contact, UuidStr } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
-import { queryClient } from "@/queries/client"
 import {
-	CONTACTS_QUERY_KEY,
-	CONTACT_REQUESTS_QUERY_KEY,
 	contactRequestsQueryUpdate,
-	contactsQueryUpdate
+	contactsQueryUpdate,
+	rereadContactList,
+	rereadOutgoingRequests
 } from "@/features/contacts/queries/contacts"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
@@ -20,17 +19,14 @@ export type { VoidActionOutcome }
 // from features/drive/lib/actions.ts. Cache-patch semantics mirror the mobile contacts feature exactly.
 
 export async function sendContactRequest(email: string): Promise<VoidActionOutcome> {
-	let outgoing: ContactRequestOut[]
 	try {
 		// The op's own return (the new request's uuid) is discarded — a fresh listOutgoingContactRequests
 		// is the source of truth for the patch, same as the mobile client.
 		await runOp(sdkApi.sendContactRequest(email))
-		outgoing = await runOp(sdkApi.listOutgoingContactRequests())
+		await rereadOutgoingRequests()
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
-
-	contactRequestsQueryUpdate(prev => ({ ...prev, outgoing }))
 
 	return { status: "success" }
 }
@@ -46,14 +42,11 @@ export async function acceptRequest(uuid: string): Promise<VoidActionOutcome> {
 	contactRequestsQueryUpdate(prev => ({ ...prev, incoming: prev.incoming.filter(r => r.uuid !== uuid) }))
 
 	// The accepted request promotes to a full contact server-side, but the op's return is only a bare
-	// uuid — not enough to reconstruct a Contact (nickname/avatar/publicKey/... are unknown here).
-	// Invalidating both queries lets a real refetch fill the gap instead of leaving one inconsistent
-	// until the next focus/reconnect. Fire-and-forget, same as renameItem's names-cache invalidation in
-	// features/drive/lib/actions.ts: the removal above already covers the immediate feedback, and
-	// invalidateQueries resolves even when the refetch it triggers fails (the query's own error state
-	// absorbs that, not this call's promise).
-	void queryClient.invalidateQueries({ queryKey: CONTACTS_QUERY_KEY })
-	void queryClient.invalidateQueries({ queryKey: CONTACT_REQUESTS_QUERY_KEY })
+	// uuid — not enough to reconstruct a Contact (nickname/avatar/publicKey/... are unknown here), so the
+	// contact list is read back. The removal above already leaves the requests cache right, and blocked
+	// contacts are untouched. Not awaited: the removal above is the immediate feedback, and a failed
+	// read-back marks the contacts stale itself.
+	rereadContactList().catch(() => undefined)
 
 	return { status: "success" }
 }
@@ -167,19 +160,19 @@ export async function blockContact(contact: Contact): Promise<VoidActionOutcome>
 }
 
 export async function unblockContact(uuid: string): Promise<VoidActionOutcome> {
-	let contacts: Contact[]
 	try {
 		await runOp(sdkApi.unblockContact(uuid))
 		// No reconstructable Contact comes back from unblockContact itself — getContacts is the source
-		// of truth for the patch, same shape as sendContactRequest's outgoing refetch above. A rejection
+		// of truth for the patch, same shape as sendContactRequest's outgoing read-back above. A rejection
 		// here still surfaces as an error outcome even though the unblock already completed server-side
-		// (mirrors the mobile client) — the stale blocked-list entry self-heals on the next focus refetch.
-		contacts = await runOp(sdkApi.getContacts())
+		// (mirrors the mobile client) — the read-back marks the contacts stale, so the stale blocked-list
+		// entry self-heals on the next mount or focus.
+		await rereadContactList()
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
 
-	contactsQueryUpdate(prev => ({ ...prev, contacts, blocked: prev.blocked.filter(c => c.uuid !== uuid) }))
+	contactsQueryUpdate(prev => ({ ...prev, blocked: prev.blocked.filter(c => c.uuid !== uuid) }))
 
 	return { status: "success" }
 }
