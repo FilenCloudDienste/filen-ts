@@ -108,7 +108,8 @@ describe("previewType — extension category map", () => {
 
 	// HEIC/HEIF join "image" too (they're previewable), but can't stream — needsImageTransform below
 	// is the seam a viewer branches on to route them through the buffered + transform path instead.
-	it.each(["heic", "heif"])("%s -> image", ext => {
+	// "hif" is Fujifilm's name for the same container.
+	it.each(["heic", "heif", "hif"])("%s -> image", ext => {
 		expect(previewType(fileNamed(`photo.${ext}`))).toBe("image")
 	})
 
@@ -232,12 +233,13 @@ describe("previewType — extension category map", () => {
 })
 
 describe("needsImageTransform", () => {
-	it.each(["heic", "heif"])("is true for a %s file", ext => {
+	it.each(["heic", "heif", "hif"])("is true for a %s file", ext => {
 		expect(needsImageTransform(fileNamed(`photo.${ext}`))).toBe(true)
 	})
 
 	it("is case-insensitive on the extension", () => {
 		expect(needsImageTransform(fileNamed("PHOTO.HEIC"))).toBe(true)
+		expect(needsImageTransform(fileNamed("DSCF0001.HIF"))).toBe(true)
 	})
 
 	it.each(["jpg", "png", "webp", "avif"])("is false for a streamable image extension (%s)", ext => {

@@ -22,6 +22,12 @@ describe("isHeicUploadCandidate", () => {
 		expect(isHeicUploadCandidate(mockFile("photo.heif"))).toBe(true)
 	})
 
+	// Fujifilm's HEIF extension, written uppercase by the camera.
+	it("is true for a Fujifilm .HIF file", () => {
+		expect(isHeicUploadCandidate(mockFile("DSCF0001.HIF"))).toBe(true)
+		expect(isHeicUploadCandidate(mockFile("DSCF0001.hif"))).toBe(true)
+	})
+
 	it("is false for a non-HEIC file, including other image formats", () => {
 		expect(isHeicUploadCandidate(mockFile("photo.jpg"))).toBe(false)
 		expect(isHeicUploadCandidate(mockFile("report.pdf"))).toBe(false)
@@ -33,6 +39,7 @@ describe("renameToJpg", () => {
 	it("swaps the extension for .jpg", () => {
 		expect(renameToJpg("photo.heic")).toBe("photo.jpg")
 		expect(renameToJpg("photo.HEIC")).toBe("photo.jpg")
+		expect(renameToJpg("DSCF0001.HIF")).toBe("DSCF0001.jpg")
 	})
 
 	it("preserves dots within the base name, only swapping the trailing extension", () => {

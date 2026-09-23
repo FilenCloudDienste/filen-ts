@@ -7,6 +7,7 @@ import { directoryFolderTint, fileIconKey, shadeColor } from "@/features/drive/l
 describe("fileIconKey", () => {
 	it("routes image/video/audio by extension (case-insensitive)", () => {
 		expect(fileIconKey("photo.PNG")).toBe("image")
+		expect(fileIconKey("DSCF0001.HIF")).toBe("image")
 		expect(fileIconKey("clip.mp4")).toBe("video")
 		expect(fileIconKey("song.mp3")).toBe("audio")
 	})

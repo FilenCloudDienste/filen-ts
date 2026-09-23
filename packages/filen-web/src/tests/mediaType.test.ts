@@ -112,6 +112,7 @@ describe("allowedMediaContentType", () => {
 
 	it("rejects a HEIC file even with a spoofed, otherwise-allowlisted mime", () => {
 		expect(allowedMediaContentType(fileNamed("photo.heic", "image/jpeg"))).toBeNull()
+		expect(allowedMediaContentType(fileNamed("DSCF0001.HIF", "image/jpeg"))).toBeNull()
 	})
 
 	// Camera RAW resolves its own "rawImage" category, which this module's allowlist-of-three excludes

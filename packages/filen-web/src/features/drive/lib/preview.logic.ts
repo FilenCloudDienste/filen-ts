@@ -26,8 +26,9 @@ export const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "s
 // HEIC/HEIF resolve to the "image" category below like every other image extension, but browsers
 // cannot decode them inline — needsImageTransform/canPreview single them out to route through the
 // buffered download + a client-side transform (features/preview/lib/heicTransform.ts) instead of the SW's
-// streamed route every other image extension uses.
-export const HEIC_EXTENSIONS = new Set(["heic", "heif"])
+// streamed route every other image extension uses. "hif" is Fujifilm's extension for the same container,
+// written 10-bit 4:2:2; libheif decodes high-bit-depth HEVC and hands back 8-bit RGBA like any other HEIC.
+export const HEIC_EXTENSIONS = new Set(["heic", "heif", "hif"])
 // Consulted only for a name whose extension resolves no category (previewType's own order), so a
 // mime can pull a file OUT of the streamed branch but never into it.
 const HEIC_MIMES = new Set(["image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"])
