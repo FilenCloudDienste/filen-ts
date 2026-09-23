@@ -6,6 +6,8 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { useAction } from "@/lib/keymap/useAction"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
+import { canCopyToClipboard, shouldHandleClipboardShortcut } from "@/features/drive/lib/clipboard.logic"
+import { clipboardShortcutContext, copyToClipboard } from "@/features/drive/lib/clipboard"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { usePhotosSelection } from "@/features/photos/hooks/usePhotosSelection"
@@ -204,6 +206,27 @@ export function PhotoGrid({ rootUuid, items }: PhotoGridProps) {
 		},
 		undefined,
 		[isDialogOpen, isOnline, selectedItems]
+	)
+
+	// Copies the selection onto the drive clipboard, for a paste into a Cloud Drive directory. Photos has
+	// no directory to paste into, and no Move, so no paste or cut here. Stands down like drive's own
+	// (useDriveClipboard.ts), leaving text copy to the browser.
+	useAction(
+		"photos.copy",
+		keyboardEvent => {
+			if (
+				isDialogOpen ||
+				!shouldHandleClipboardShortcut(clipboardShortcutContext(keyboardEvent, true)) ||
+				!canCopyToClipboard(selectedItems, "drive")
+			) {
+				return
+			}
+
+			keyboardEvent.preventDefault()
+			copyToClipboard(selectedItems)
+		},
+		undefined,
+		[isDialogOpen, selectedItems]
 	)
 
 	async function handleDensityChange(nextIndex: number): Promise<void> {

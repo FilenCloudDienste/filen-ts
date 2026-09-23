@@ -50,8 +50,19 @@ function ids(item: PhotoItem): string[] {
 }
 
 describe("photosItemActions (photos per-item menu gating)", () => {
-	it("offers rename/favorite/versions/info/download/share/publicLink/copyLink/trash, in that order", () => {
-		expect(ids(photoItem())).toEqual(["rename", "favorite", "versions", "info", "download", "share", "publicLink", "copyLink", "trash"])
+	it("offers rename/copy/favorite/versions/info/download/share/publicLink/copyLink/trash, in that order", () => {
+		expect(ids(photoItem())).toEqual([
+			"rename",
+			"copy",
+			"favorite",
+			"versions",
+			"info",
+			"download",
+			"share",
+			"publicLink",
+			"copyLink",
+			"trash"
+		])
 	})
 
 	it("never offers move — mobile hides Move from its own photos context, and photos has no navigation context to move from", () => {
@@ -62,8 +73,8 @@ describe("photosItemActions (photos per-item menu gating)", () => {
 		expect(ids(photoItem())).not.toContain("color")
 	})
 
-	it("never offers unshare/import/restore/deletePermanently — photos items are always owned, non-trashed, non-shared", () => {
-		const forbidden = ["unshare", "copy", "restore", "deletePermanently"]
+	it("never offers unshare/restore/deletePermanently — photos items are always owned, non-trashed, non-shared", () => {
+		const forbidden = ["unshare", "restore", "deletePermanently"]
 
 		for (const id of ids(photoItem())) {
 			expect(forbidden).not.toContain(id)

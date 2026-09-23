@@ -19,8 +19,12 @@ function ids(f: DriveSelectionFlags): string[] {
 }
 
 describe("photosBulkActions (photos bulk-action bar gating)", () => {
-	it("offers favorite/download/share/trash, in that order", () => {
-		expect(ids(flags())).toEqual(["favorite", "download", "share", "trash"])
+	it("offers favorite/copy/download/share/trash, in that order", () => {
+		expect(ids(flags())).toEqual(["favorite", "copy", "download", "share", "trash"])
+	})
+
+	it("copies through the destination picker, like drive's bulk bar", () => {
+		expect(photosBulkActions(flags()).find(descriptor => descriptor.id === "copy")).toMatchObject({ run: "dialog", dialogKind: "copy" })
 	})
 
 	it("never offers move — mobile hides Move from its own photos context", () => {

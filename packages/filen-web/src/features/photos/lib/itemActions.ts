@@ -1,5 +1,6 @@
 import {
 	RENAME,
+	COPY,
 	VERSIONS,
 	INFO,
 	SHARE,
@@ -24,7 +25,8 @@ export type { ItemActionDescriptor }
 // Color never applies (a photos item is always a file, never a directory), and Move is deliberately
 // excluded to match mobile, which hides Move from its own photos context (menuActions.ts) — photos is
 // a flat cross-tree projection with no directory-navigation context a move destination picker would
-// make sense restarting from.
+// make sense restarting from. Copy stays: its destination is picked in the Cloud Drive tree, whatever
+// surface it starts from.
 export function photosItemActions(item: DriveItem): ItemActionDescriptor[] {
-	return [RENAME, favoriteDescriptor(item), VERSIONS, INFO, downloadDescriptor(), SHARE, PUBLIC_LINK, COPY_LINK, TRASH]
+	return [RENAME, COPY, favoriteDescriptor(item), VERSIONS, INFO, downloadDescriptor(), SHARE, PUBLIC_LINK, COPY_LINK, TRASH]
 }

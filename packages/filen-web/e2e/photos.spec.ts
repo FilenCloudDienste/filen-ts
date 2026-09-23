@@ -191,6 +191,15 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 
 		await expect(grid.locator('[role="option"][aria-selected="true"]')).toHaveCount(2)
 
+		// ---- Copy: the bulk bar opens drive's destination picker on the selection; dismissed unused ----
+		await page.getByRole("toolbar", { name: "Selection actions" }).getByRole("button", { name: "Copy", exact: true }).click()
+		const copyDialog = page.getByRole("dialog", { name: "Copy to" })
+		await expect(copyDialog).toBeVisible()
+		await expect(copyDialog.getByRole("button", { name: "Copy here", exact: true })).toBeVisible()
+		await copyDialog.getByRole("button", { name: "Close", exact: true }).click()
+		await expect(copyDialog).toHaveCount(0)
+		await expect(grid.locator('[role="option"][aria-selected="true"]')).toHaveCount(2)
+
 		// Clear the selection so the change-directory block and the teardown below run against exactly the
 		// state they run against without this leg.
 		await tiles.first().focus()

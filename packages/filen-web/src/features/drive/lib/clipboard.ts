@@ -5,6 +5,8 @@ import { type CopyDestination } from "@/features/drive/lib/copy.logic"
 import { performMove } from "@/features/drive/lib/dnd"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
+import { type ClipboardShortcutContext } from "@/features/drive/lib/clipboard.logic"
+import { isAnyDialogOpen, isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
 
 export function copyToClipboard(items: readonly DriveItem[]): void {
 	useDriveClipboardStore.getState().set({ mode: "copy", items: items.slice() })
@@ -37,4 +39,16 @@ export async function pasteClipboard(destination: CopyDestination): Promise<void
 	const outcome = await performMove(entry.items, destination.uuid)
 
 	useDriveClipboardStore.getState().restoreCut(outcome.failed.map(failure => failure.item))
+}
+
+// What shouldHandleClipboardShortcut needs to know about a keydown, read off the page. Selected text
+// only matters to copy and cut: pasting over it has no text meaning outside a field.
+export function clipboardShortcutContext(event: KeyboardEvent, textMatters: boolean): ClipboardShortcutContext {
+	const selection = window.getSelection()
+
+	return {
+		target: event.target,
+		overlayOpen: isAnyDialogOpen() || isAnyMenuOpen(),
+		textSelected: textMatters && selection !== null && !selection.isCollapsed
+	}
 }

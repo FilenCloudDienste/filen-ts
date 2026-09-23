@@ -16,16 +16,17 @@ import { VersionsDialog } from "@/features/drive/components/versionsDialog"
 import { InfoDialog } from "@/features/drive/components/infoDialog"
 import { LinkDialog } from "@/features/drive/components/linkDialog"
 import { ContactPickerDialog } from "@/features/drive/components/contactPickerDialog"
+import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 
 // The photos surface's own dialog kind — narrower than drive's ActiveDialogKind (no move/color/
 // unshare/delete/import/emptyTrash/restoreSelected/disableLink: none of those ever reach a photos item
 // — see itemActions.ts/bulkActions.ts's own doc comments on what's dropped and why). "preview" is the
-// one addition beyond the per-item menu's own six kinds — opened directly by a tile click, never via
+// one addition beyond the per-item menu's own seven kinds — opened directly by a tile click, never via
 // handleItemAction, mirroring useDriveDialogHost's identical split between menu-dispatched kinds and
 // its own dedicated openPreview entry point.
-type PhotosDialogKind = "rename" | "trash" | "versions" | "info" | "link" | "share" | "preview"
+type PhotosDialogKind = "rename" | "copy" | "trash" | "versions" | "info" | "link" | "share" | "preview"
 
 interface ActivePhotosDialog {
 	kind: PhotosDialogKind
@@ -56,9 +57,9 @@ interface UsePhotosDialogHostParams {
 	selectedItems: PhotoItem[]
 }
 
-// The photos-scoped counterpart of drive's useDriveDialogHost, trimmed to the seven dialog kinds the
+// The photos-scoped counterpart of drive's useDriveDialogHost, trimmed to the eight dialog kinds the
 // photos menu/bar/grid ever dispatch. rename/trash route through this file's own PhotoItem-cache-
-// patching wrappers (features/photos/lib/actions.ts); versions/info/link/share/preview reuse the EXACT
+// patching wrappers (features/photos/lib/actions.ts); copy/versions/info/link/share/preview reuse the EXACT
 // same generic dialog components drive uses unchanged (the two that take the `variant` the preview
 // overlay does — the overlay itself and the info dialog — get "drive", see their render-site comments),
 // so there is no photos-specific fork of any of them beyond the preview's one extra favorite-patch prop.
@@ -142,7 +143,15 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 	// dispatch move/color/unshare/delete/import too) — photosItemActions never produces a descriptor
 	// carrying one of those, so this narrows defensively and no-ops rather than widening the type.
 	function handleItemAction(kind: ItemActionDialogKind, item: PhotoItem): void {
-		if (kind !== "rename" && kind !== "trash" && kind !== "versions" && kind !== "info" && kind !== "link" && kind !== "share") {
+		if (
+			kind !== "rename" &&
+			kind !== "copy" &&
+			kind !== "trash" &&
+			kind !== "versions" &&
+			kind !== "info" &&
+			kind !== "link" &&
+			kind !== "share"
+		) {
 			return
 		}
 
@@ -150,7 +159,7 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 	}
 
 	function handleBulkDialogAction(kind: BulkDialogActionKind): void {
-		if (kind !== "trash" && kind !== "share") {
+		if (kind !== "copy" && kind !== "trash" && kind !== "share") {
 			return
 		}
 
@@ -213,6 +222,16 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 					/>
 				)
 			}
+			// Drive's destination picker in its copy mode: the copy lands in the Cloud Drive tree and runs
+			// on with its own progress card; the selection stays.
+			case "copy":
+				return activeDialog.items.length > 0 ? (
+					<MoveTargetDialog
+						items={activeDialog.items}
+						mode="copy"
+						onClose={closeActiveDialog}
+					/>
+				) : null
 			case "trash":
 				return (
 					<ConfirmDialog

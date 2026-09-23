@@ -87,7 +87,8 @@ export function PhotosBulkActionBar({ rootUuid, selectedItems, onDialogAction }:
 			</div>
 			<div className="flex items-center gap-2">
 				{descriptors.map(descriptor => {
-					const offlineDisabled = !isOnline && (descriptor.id === "trash" || descriptor.id === "download")
+					const offlineDisabled =
+						!isOnline && (descriptor.id === "trash" || descriptor.id === "download" || descriptor.id === "copy")
 					const disabled = (descriptor.id === "download" && selectedItems.length === 0) || offlineDisabled
 					const keymapAction = KEYMAP_ACTION_FOR[descriptor.id]
 

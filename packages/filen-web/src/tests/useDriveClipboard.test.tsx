@@ -10,7 +10,15 @@ const { copyToClipboard, cutToClipboard, pasteClipboard } = vi.hoisted(() => ({
 	pasteClipboard: vi.fn(() => Promise.resolve())
 }))
 
-vi.mock("@/features/drive/lib/clipboard", () => ({ copyToClipboard, cutToClipboard, pasteClipboard }))
+// The real module is kept for its shortcut-context reader; its copy/move paths stay out of reach.
+vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard: vi.fn() }))
+vi.mock("@/features/drive/lib/dnd", () => ({ performMove: vi.fn() }))
+vi.mock("@/features/drive/lib/clipboard", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/drive/lib/clipboard")>()),
+	copyToClipboard,
+	cutToClipboard,
+	pasteClipboard
+}))
 vi.mock("@/features/drive/queries/drive", () => ({ cachedDirectoryName: () => "dest" }))
 vi.mock("@/lib/storage/adapter", () => ({ kvGetJson: () => Promise.resolve(null), kvSetJson: () => Promise.resolve() }))
 

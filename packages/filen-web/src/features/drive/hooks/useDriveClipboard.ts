@@ -4,9 +4,8 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { cachedDirectoryName } from "@/features/drive/queries/drive"
 import { canCopyToClipboard, canCutToClipboard, canPaste, shouldHandleClipboardShortcut } from "@/features/drive/lib/clipboard.logic"
-import { copyToClipboard, cutToClipboard, pasteClipboard } from "@/features/drive/lib/clipboard"
+import { clipboardShortcutContext, copyToClipboard, cutToClipboard, pasteClipboard } from "@/features/drive/lib/clipboard"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
-import { isAnyDialogOpen, isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
 import { useAction } from "@/lib/keymap/useAction"
 
 export interface DrivePasteAction {
@@ -24,12 +23,6 @@ export interface UseDriveClipboardParams {
 	selectedItems: readonly DriveItem[]
 	isOnline: boolean
 	isDialogOpen: boolean
-}
-
-function hasTextSelection(): boolean {
-	const selection = window.getSelection()
-
-	return selection !== null && !selection.isCollapsed
 }
 
 // The listing's mod+c/x/v and the Paste entry its menus show. Each shortcut stands down (without
@@ -52,14 +45,7 @@ export function useDriveClipboard({
 	}
 
 	function claims(event: KeyboardEvent, textMatters: boolean): boolean {
-		return (
-			!isDialogOpen &&
-			shouldHandleClipboardShortcut({
-				target: event.target,
-				overlayOpen: isAnyDialogOpen() || isAnyMenuOpen(),
-				textSelected: textMatters && hasTextSelection()
-			})
-		)
+		return !isDialogOpen && shouldHandleClipboardShortcut(clipboardShortcutContext(event, textMatters))
 	}
 
 	const onCopy: HotkeyCallback = event => {

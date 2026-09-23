@@ -99,7 +99,7 @@ const DELETE_PERMANENTLY: ItemActionDescriptor = {
 // Copies the item anywhere in the caller's own drive. Offered wherever the item can be read — owned or
 // shared in, any listing but the trash — since a copy changes nothing about the source. A submenu in the
 // item menus (copySubmenu.tsx); "dialog" opens the full destination picker in its copy mode.
-const COPY: ItemActionDescriptor = { id: "copy", ...ACTION_DEFS.copy, run: "dialog", dialogKind: "copy" }
+export const COPY: ItemActionDescriptor = { id: "copy", ...ACTION_DEFS.copy, run: "dialog", dialogKind: "copy" }
 
 export function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
 	return item.data.favorited
