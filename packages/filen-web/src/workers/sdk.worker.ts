@@ -43,6 +43,8 @@ import init, {
 	type DuplicateNoteResponse,
 	type AddTagToNoteResponse,
 	type MakeThumbnailInMemoryResult,
+	type EmbeddedPreviewResult,
+	type ManagedFuture,
 	type SocketEvent,
 	type ListenerHandle,
 	type Chat,
@@ -85,6 +87,7 @@ import { lookupDirectoryName } from "@/features/drive/lib/directoryName"
 import { THUMB_CACHE_CAP } from "@/features/drive/lib/thumbnails.logic"
 import { removeStaleThumbGenerations, sweepThumbs, writeThumb } from "@/workers/thumbStore"
 import { createSearchEngine, type SearchPush, type SearchSnapshotDTO } from "@/workers/searchEngine"
+import { createMemorySink, toRawPreviewResult, type RawPreviewResult } from "@/features/preview/lib/rawPreview.logic"
 
 // NEITHER a fixed `/` nor `/assets/`: the wasm holds a RELATIVE `./filen-sdk-worker-thread.js`
 // (verified via `strings` over sdk-rs_bg.wasm) which it passes to `new Worker(...)`, so the
@@ -175,6 +178,23 @@ async function withPauseSignal<T>(
 // — previews are never registered as transfers (no row, no progress), so they get their own registry
 // rather than borrowing that one.
 const previewAborts = new Map<string, AbortController>()
+
+// A RAW's embedded preview, collected in this worker and handed back as one Blob — structured-cloning
+// a Blob hands over a handle, not a byte copy. Registered under the caller's preview token like the
+// whole-buffer reads, so cancelPreviewDownload aborts it through the SDK's own ManagedFuture.
+async function writeRawPreview(
+	previewToken: string,
+	write: (params: { writer: WritableStream<Uint8Array>; managedFuture: ManagedFuture }) => Promise<EmbeddedPreviewResult>
+): Promise<RawPreviewResult> {
+	const controller = new AbortController()
+	previewAborts.set(previewToken, controller)
+	const { writer, chunks } = createMemorySink()
+	try {
+		return toRawPreviewResult(await write({ writer, managedFuture: { abortSignal: controller.signal } }), chunks)
+	} finally {
+		previewAborts.delete(previewToken)
+	}
+}
 
 // Latched by armThumbSweep below, never reset.
 let thumbsSweptThisSession = false
@@ -863,6 +883,12 @@ const api = {
 	cancelPreviewDownload(previewToken: string): void {
 		previewAborts.get(previewToken)?.abort()
 	},
+	// A camera RAW's preview: the JPEG embedded in the container, extracted by the SDK from the ranges
+	// it needs (never a whole-file download into JS, never a RAW decode). Cancelled by the same token.
+	fetchRawPreview(file: AnyFile, previewToken: string): Promise<RawPreviewResult> {
+		const c = requireClient()
+		return writeRawPreview(previewToken, params => c.writeEmbeddedPreview({ file, ...params }))
+	},
 	// ── Rename ───────────────────────────────────────────────────────────────
 	// Held-item ops throughout this section take the caller's already-fetched DriveItem.data
 	// directly (Dir & ExtraData & {decryptedMeta} / File & ExtraData & {decryptedMeta}) — no uuid
@@ -1101,6 +1127,10 @@ const api = {
 				previewAborts.delete(previewToken)
 			}
 		})
+	},
+	// The anon mirror of fetchRawPreview above, for a RAW behind a public link.
+	fetchLinkedRawPreviewAnon(file: AnyFile, previewToken: string): Promise<RawPreviewResult> {
+		return withLinkedUnauth(unauth => writeRawPreview(previewToken, params => unauth.writeEmbeddedPreview({ file, ...params })))
 	},
 	// Anon single-file save — the streaming mirror of downloadFileToWriter, same downloadAborts/
 	// downloadPauses maps + transferId convention so cancelDownload/pauseDownload/resumeDownload reach

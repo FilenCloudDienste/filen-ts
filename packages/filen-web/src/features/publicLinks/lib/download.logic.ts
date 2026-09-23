@@ -42,8 +42,16 @@ export function anonPreviewability(item: DriveItem, cap: bigint = PREVIEW_MAX_BY
 		return "unpreviewable"
 	}
 
-	if (previewType(item) === "other") {
+	const category = previewType(item)
+
+	if (category === "other") {
 		return "unpreviewable"
+	}
+
+	// A RAW's preview is the embedded JPEG the SDK lifts out with a few range reads — the file itself
+	// never enters JS memory, so the buffered cap has nothing to bound (canPreview's same exemption).
+	if (category === "rawImage") {
+		return "previewable"
 	}
 
 	return base.data.size <= cap ? "previewable" : "too-large"

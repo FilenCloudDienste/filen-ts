@@ -26,6 +26,6 @@ export function isPhotoItem(item: DriveItem): boolean {
 
 	// rawImage joins image/video: a camera RAW is a photo by any user's reckoning, and the grid's tile
 	// is thumbnail-driven — the SDK produces those for RAW (usually straight off the embedded preview),
-	// so a RAW row renders exactly like every other photo even though no full-size viewer exists yet.
+	// so a RAW row renders exactly like every other photo, and the viewer shows its embedded preview.
 	return category === "image" || category === "rawImage" || category === "video"
 }

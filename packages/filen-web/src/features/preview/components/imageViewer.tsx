@@ -9,6 +9,8 @@ import { transformHeicBytes } from "@/features/preview/lib/heicTransform"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
 import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
+import { useRawPreview } from "@/features/preview/hooks/useRawPreview"
+import { getThumbnailUrl } from "@/features/drive/lib/thumbnails"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { type ErrorDTO } from "@/lib/sdk/errors"
 import { LoadingState } from "@/components/loadingState"
@@ -391,6 +393,138 @@ function TransformedImage({ item, alt }: { item: DriveItem; alt: string }) {
 	return (
 		<TransformedImageBytes
 			bytes={result.bytes}
+			alt={alt}
+		/>
+	)
+}
+
+// A Blob already in hand (a RAW's embedded preview), minted/revoked as a blob URL with the same
+// effect-owned lifecycle as BufferedImageBytes.
+function BlobImage({ blob, alt }: { blob: Blob; alt: string }) {
+	const [url, setUrl] = useState<string | null>(null)
+
+	useEffect(() => {
+		const objectUrl = URL.createObjectURL(blob)
+
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- minting the URL is the effect, see BufferedImageBytes
+		setUrl(objectUrl)
+
+		return () => {
+			URL.revokeObjectURL(objectUrl)
+		}
+	}, [blob])
+
+	if (!url) {
+		return null
+	}
+
+	return (
+		<ZoomableImage
+			url={url}
+			alt={alt}
+		/>
+	)
+}
+
+// The SDK's documented fallback for a RAW with no usable embedded preview is its thumbnail (made from
+// the smaller stamp the SDK still accepts for one). The URL belongs to the thumbnail service's cache,
+// so it is never revoked here; if that cache evicts it before the <img> loads, onError drops to the
+// labeled state. Anon (public link) skips it: the thumbnail service runs on the authed client only.
+function RawThumbnailFallback({ item, alt }: { item: DriveItem; alt: string }) {
+	const { t } = useTranslation("preview")
+	const accessMode = usePreviewAccessMode()
+	const [state, setState] = useState<{ status: "pending" } | { status: "done"; url: string | null }>(
+		accessMode === "anon" ? { status: "done", url: null } : { status: "pending" }
+	)
+
+	useEffect(() => {
+		if (accessMode === "anon") {
+			return
+		}
+
+		let live = true
+
+		getThumbnailUrl(item).then(
+			url => {
+				if (live) {
+					setState({ status: "done", url })
+				}
+			},
+			() => {
+				if (live) {
+					setState({ status: "done", url: null })
+				}
+			}
+		)
+
+		return () => {
+			live = false
+		}
+	}, [item, accessMode])
+
+	if (state.status === "pending") {
+		return (
+			<LoadingState
+				size="lg"
+				className="text-inherit"
+			/>
+		)
+	}
+
+	if (state.url === null) {
+		return (
+			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+				{t("previewRawNoPreview")}
+			</div>
+		)
+	}
+
+	return (
+		<ZoomableImage
+			url={state.url}
+			alt={alt}
+			onError={() => {
+				setState({ status: "done", url: null })
+			}}
+		/>
+	)
+}
+
+// Camera RAW: no browser decodes the container, so the page shows the JPEG the camera embedded in it,
+// extracted by the SDK (useRawPreview). Never the SW route and never a whole-file download.
+export function RawImageViewer({ item, alt }: ImageViewerProps) {
+	const result = useRawPreview(item)
+
+	if (result.status === "pending") {
+		return (
+			<LoadingState
+				size="lg"
+				className="text-inherit"
+			/>
+		)
+	}
+
+	if (result.status === "error") {
+		return (
+			<PreviewErrorState
+				message={errorLabel(result.dto)}
+				onRetry={result.refetch}
+			/>
+		)
+	}
+
+	if (result.preview.type === "noPreview") {
+		return (
+			<RawThumbnailFallback
+				item={item}
+				alt={alt}
+			/>
+		)
+	}
+
+	return (
+		<BlobImage
+			blob={result.preview.blob}
 			alt={alt}
 		/>
 	)

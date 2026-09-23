@@ -56,6 +56,10 @@ describe("anonPreviewability", () => {
 		expect(anonPreviewability(linkedFileIntoDriveItem(makeLinkedFile("movie.mp4", 8_000_000n)), 1_000_000n)).toBe("too-large")
 	})
 
+	it("never caps a camera RAW — its preview is the SDK-extracted embedded JPEG, not the file's bytes", () => {
+		expect(anonPreviewability(linkedFileIntoDriveItem(makeLinkedFile("shot.NEF", 90_000_000n)), 1_000_000n)).toBe("previewable")
+	})
+
 	it("marks an unknown-category file unpreviewable", () => {
 		expect(anonPreviewability(linkedFileIntoDriveItem(makeLinkedFile("archive.zip", 1024n)))).toBe("unpreviewable")
 	})

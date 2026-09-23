@@ -21,6 +21,8 @@ export const preview = {
 	previewStreamFailed: "This preview failed and the file is too large to retry.",
 	/** Preview overlay body — a HEIC/HEIF image could not be converted for preview (corrupt or unsupported file) */
 	previewTransformFailed: "This image couldn't be converted for preview.",
+	/** Preview overlay body — a camera RAW file (.cr2, .nef, .arw, .dng…) embeds no preview image large enough to show, and no thumbnail could be made for it either */
+	previewRawNoPreview: "This RAW image has no embedded preview to show.",
 	/** Preview overlay body — shown by the scoped error boundary when a viewer throws while rendering (e.g. a parse failure) */
 	previewRenderError: "This preview couldn't be displayed.",
 

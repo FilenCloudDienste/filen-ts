@@ -31,7 +31,7 @@ import { useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { cn, driveItemName } from "@filen/shared"
-import { ImageViewer, ZoomableImage } from "@/features/preview/components/imageViewer"
+import { ImageViewer, RawImageViewer, ZoomableImage } from "@/features/preview/components/imageViewer"
 import { MediaViewer, MediaElement } from "@/features/preview/components/mediaViewer"
 import {
 	isTextEditingTarget,
@@ -1181,12 +1181,15 @@ function PreviewBody({ source, editable, onDirtyChange, contentRef }: PreviewBod
 					/>
 				</Suspense>
 			)
-		// "rawImage" is genuinely reachable (canPreview admits it — see preview.logic.ts) and shows the
-		// same labeled unsupported state until a real RAW viewer exists; the thumbnail grid already
-		// renders these via the SDK, so the overlay is the only surface still missing pixels. "other"
-		// is the opposite case: canPreview excludes it from ever reaching the overlay, and it stays
-		// only as the exhaustive switch's required fallback.
 		case "rawImage":
+			return (
+				<RawImageViewer
+					item={item}
+					alt={alt}
+				/>
+			)
+		// canPreview excludes "other" from ever reaching the overlay; it stays only as the exhaustive
+		// switch's required fallback.
 		case "other":
 			return (
 				<div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">

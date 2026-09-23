@@ -1,10 +1,9 @@
 import { lazy, Suspense, type ReactNode } from "react"
-import { useTranslation } from "react-i18next"
 import { driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { previewType } from "@/features/drive/lib/preview.logic"
 import { PreviewAccessModeProvider } from "@/features/preview/lib/accessMode"
-import { ImageViewer } from "@/features/preview/components/imageViewer"
+import { ImageViewer, RawImageViewer } from "@/features/preview/components/imageViewer"
 import { MediaViewer } from "@/features/preview/components/mediaViewer"
 import { LoadingState } from "@/components/loadingState"
 
@@ -55,8 +54,6 @@ export function PublicPreview({ item }: { item: DriveItem }) {
 // Guarded against a missing category arm by the `default` arm at the bottom, the same way
 // previewOverlay's own PreviewBody is.
 function PublicPreviewBody({ item, category, alt }: { item: DriveItem; category: ReturnType<typeof previewType>; alt: string }): ReactNode {
-	const { t } = useTranslation("preview")
-
 	switch (category) {
 		case "image":
 			return (
@@ -111,15 +108,14 @@ function PublicPreviewBody({ item, category, alt }: { item: DriveItem; category:
 					/>
 				</Suspense>
 			)
-		// Reachable, unlike "other": anonPreviewability admits rawImage (previewType resolves a real
-		// category for it), so this arm must render the labeled unsupported state rather than the
-		// `null` below — a blank pane with a "Hide preview" button over it reads as a broken viewer.
-		// Reuses the authed overlay's own preview:previewUnsupportedType copy, not a second string.
+		// Reachable, unlike "other": anonPreviewability admits rawImage. The embedded preview is read
+		// through the anon worker method by the provider this component wraps its viewer in.
 		case "rawImage":
 			return (
-				<div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-					{t("previewUnsupportedType")}
-				</div>
+				<RawImageViewer
+					item={item}
+					alt={alt}
+				/>
 			)
 		// Unreachable: anonPreviewability (download.logic.ts) refuses an "other" item before FileHero
 		// ever renders a preview pane for it.
