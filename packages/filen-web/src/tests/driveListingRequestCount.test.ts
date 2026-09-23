@@ -122,9 +122,10 @@ function listing(uuid: string): DriveItem[] | undefined {
 	return queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid }))
 }
 
-function isInvalidated(uuid: string | null, variant: DriveVariant = "drive"): boolean {
+function isInvalidated(uuid: string): boolean {
 	return (
-		queryClient.getQueryCache().find({ queryKey: driveListingQueryKey({ variant, uuid }), exact: true })?.state.isInvalidated ?? false
+		queryClient.getQueryCache().find({ queryKey: driveListingQueryKey({ variant: "drive", uuid }), exact: true })?.state
+			.isInvalidated ?? false
 	)
 }
 
@@ -255,78 +256,33 @@ describe("drive listing request counts", () => {
 })
 
 describe("flat and shared listing request counts", () => {
-	it.each(["favorites", "trash"] as const)(
-		"%s reads once across mount, remount and focus; a network reconnect reads again",
+	// No event reports a recent aging out, a link or share made on another device, or the server purging
+	// an item 30 days after it was trashed (a favorite inside a trashed directory goes with it).
+	it.each(["favorites", "trash", "recents", "links", "sharedIn", "sharedOut"] as const)(
+		"%s reads on every mount, focus and reconnect",
 		async variant => {
 			const first = mountFlat(variant)
 			await drain()
 
+			expect(reads()).toBe(1)
+
 			first.unmount()
 			mountFlat(variant)
 			await drain()
-			await refocus()
+
+			expect(reads()).toBe(2)
+
 			await refocus()
 
-			expect(reads()).toBe(1)
+			expect(reads()).toBe(3)
 
 			await reconnectNetwork()
 
-			expect(reads()).toBe(2)
+			expect(reads()).toBe(4)
 		}
 	)
 
-	it.each(["favorites", "trash"] as const)("%s is re-read by the authSuccess that ends a socket drop", async variant => {
-		mountFlat(variant)
-		await drain()
-
-		dropSocket()
-		recoverSocket()
-		await drain()
-
-		expect(reads()).toBe(2)
-	})
-
-	// No event reports a recent aging out, or a link or share made on another device.
-	it.each(["recents", "links", "sharedIn", "sharedOut"] as const)("%s reads on every mount, focus and reconnect", async variant => {
-		const first = mountFlat(variant)
-		await drain()
-
-		expect(reads()).toBe(1)
-
-		first.unmount()
-		mountFlat(variant)
-		await drain()
-
-		expect(reads()).toBe(2)
-
-		await refocus()
-
-		expect(reads()).toBe(3)
-
-		await reconnectNetwork()
-
-		expect(reads()).toBe(4)
-	})
-
-	it("a trashing no cached row can patch marks the trash stale: the next focus reads, once", async () => {
-		mountFlat("trash")
-		await drain()
-
-		handleDriveEvent(
-			driveEvent({ type: "fileTrash", uuid: testUuid("uncached"), stableUUID: testUuid("stable-uncached"), newUUID: undefined })
-		)
-		await drain()
-
-		expect(reads()).toBe(1)
-		expect(isInvalidated(null, "trash")).toBe(true)
-
-		await refocus()
-		await refocus()
-
-		expect(reads()).toBe(2)
-	})
-
-	it("a trashing a cached row patches is taken in without a read", async () => {
+	it("a trashing a cached row patches lands in the open trash listing without a read", async () => {
 		const dir = nextDir()
 
 		await mountRead(dir)
@@ -337,7 +293,7 @@ describe("flat and shared listing request counts", () => {
 		handleDriveEvent(
 			driveEvent({ type: "fileTrash", uuid: testUuid("cached"), stableUUID: testUuid("stable-cached"), newUUID: undefined })
 		)
-		await refocus()
+		await drain()
 
 		expect(reads()).toBe(2)
 		expect(
@@ -345,22 +301,7 @@ describe("flat and shared listing request counts", () => {
 		).toEqual([testUuid("cached")])
 	})
 
-	it("a folder trashing marks Favorites stale: the next focus reads, once", async () => {
-		mountFlat("favorites")
-		await drain()
-
-		handleDriveEvent(driveEvent({ type: "folderTrash", parent: nextDir(), uuid: testUuid("folder") }))
-		await drain()
-
-		expect(reads()).toBe(1)
-
-		await refocus()
-		await refocus()
-
-		expect(reads()).toBe(2)
-	})
-
-	it("a remote move of a favorite patches Favorites without a read", async () => {
+	it("a remote move of a favorite patches the open Favorites listing without a read", async () => {
 		const dir = nextDir()
 		const favorite = { ...mockDir("fav", dir), favorited: true }
 
@@ -369,53 +310,12 @@ describe("flat and shared listing request counts", () => {
 		await drain()
 
 		handleDriveEvent(driveEvent({ type: "folderMove", dir: { ...favorite, parent: nextDir() } }))
-		await refocus()
+		await drain()
 
 		expect(reads()).toBe(1)
 		expect(
 			queryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "favorites", uuid: null }))?.map(i => i.data.uuid)
 		).toEqual([testUuid("fav")])
-	})
-
-	it("a stale mark landing during a read keeps the listing stale once the read settles", async () => {
-		const pending = deferred<NormalDirsAndFiles>()
-
-		listDirectory.mockImplementationOnce(() => pending.promise)
-		mountFlat("favorites")
-		handleDriveEvent(driveEvent({ type: "folderTrash", parent: nextDir(), uuid: testUuid("folder") }))
-		pending.resolve({ dirs: [], files: [] })
-		await drain()
-
-		expect(reads()).toBe(1)
-
-		await refocus()
-
-		expect(reads()).toBe(2)
-
-		await refocus()
-
-		expect(reads()).toBe(2)
-	})
-
-	it("a favorite patch landing on a pending refresh keeps it pending", async () => {
-		mountFlat("favorites")
-		await drain()
-
-		const pending = deferred<NormalDirsAndFiles>()
-
-		listDirectory.mockImplementationOnce(() => pending.promise)
-		dropSocket()
-		recoverSocket()
-		handleDriveEvent(driveEvent({ type: "itemFavorite", item: { type: "file", ...mockFile("fav", nextDir()), favorited: true } }))
-		pending.resolve({ dirs: [], files: [] })
-		await drain()
-
-		expect(reads()).toBe(2)
-		expect(isInvalidated(null, "favorites")).toBe(true)
-
-		await refocus()
-
-		expect(reads()).toBe(3)
 	})
 })
 
@@ -531,6 +431,27 @@ describe("drive listing socket reconcile", () => {
 		await drain()
 
 		expect(reads()).toBe(1)
+
+		await refocus()
+
+		expect(reads()).toBe(2)
+	})
+
+	it("an undecodable drive event landing during a read keeps the listing stale once the read settles", async () => {
+		const dir = nextDir()
+		const pending = deferred<NormalDirsAndFiles>()
+
+		listDirectory.mockImplementationOnce(() => pending.promise)
+		mountListing(dir)
+		markDriveEventsMissed()
+		pending.resolve({ dirs: [], files: [] })
+		await drain()
+
+		expect(reads()).toBe(1)
+
+		await refocus()
+
+		expect(reads()).toBe(2)
 
 		await refocus()
 

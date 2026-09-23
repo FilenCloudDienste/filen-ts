@@ -59,9 +59,11 @@ export async function fetchDirectoryListing(variant: DriveVariant, uuid: string 
 }
 
 // The variants socket events keep current: every change to one either arrives as an event that patches
-// it in place or marks it stale (socketHandlers.ts). Recents also ages rows out by upload time, links
-// and shares change with no event at all, so those keep refetching.
-const SOCKET_SYNCED_VARIANTS: ReadonlySet<DriveVariant> = new Set(["drive", "favorites", "trash"])
+// it in place or marks it stale (socketHandlers.ts). The rest change with no event, so they keep
+// refetching: recents ages rows out by upload time, links and shares are made elsewhere silently, and
+// the server purges trash 30 days after trashing with no event, while no row carries when it was trashed.
+// Favorites follow trash: a favorite inside a trashed directory may stay listed until that purge.
+const SOCKET_SYNCED_VARIANTS: ReadonlySet<DriveVariant> = new Set(["drive"])
 
 function listingId(variant: DriveVariant, uuid: string | null): string {
 	return `${variant}:${uuid ?? ""}`
@@ -245,11 +247,11 @@ export function invalidateDriveListings(): void {
 	void queryClient.invalidateQueries({ queryKey: ["drive", "listing"] })
 }
 
-// Marks listings stale without reading, for a change no event patches in place: each re-reads on its
-// next mount or focus. `queryKey` narrows to one listing; the default covers them all.
-export function markListingsStale(queryKey: QueryKey = ["drive", "listing"]): void {
+// Marks every listing stale without reading, for a change no event patches in place: each re-reads on
+// its next mount or focus.
+export function markListingsStale(): void {
 	listingStaleMarks++
-	void queryClient.invalidateQueries({ queryKey, refetchType: "none" })
+	void queryClient.invalidateQueries({ queryKey: ["drive", "listing"], refetchType: "none" })
 }
 
 // The cancel half of this module's cancel-before-patch discipline, shared by every listing patch —

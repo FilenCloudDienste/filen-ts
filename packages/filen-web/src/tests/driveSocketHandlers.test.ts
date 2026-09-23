@@ -119,13 +119,6 @@ function getFlat(variant: "links" | "sharedOut", uuid: string | null = null): Dr
 	return testQueryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant, uuid }))
 }
 
-function isInvalidated(variant: "favorites" | "trash"): boolean {
-	return (
-		testQueryClient.getQueryCache().find({ queryKey: driveListingQueryKey({ variant, uuid: null }), exact: true })?.state
-			.isInvalidated ?? false
-	)
-}
-
 beforeEach(() => {
 	testQueryClient.clear()
 	useDriveStore.setState({ selectedItems: [] })
@@ -309,51 +302,6 @@ describe("drive socket handlers — favorites rejoin", () => {
 		handleDriveEvent(driveEvt({ type: "fileNew", file: mockFile() }))
 
 		expect(getFavorites()).toEqual([])
-		expect(isInvalidated("favorites")).toBe(false)
-	})
-})
-
-// A folder event names only the folder, so the listings its descendants may sit in go stale instead.
-describe("drive socket handlers — stale marks", () => {
-	it("folderTrash marks Favorites stale", () => {
-		seedFavorites([])
-		handleDriveEvent(driveEvt({ type: "folderTrash", parent: PARENT_A, uuid: testUuid("dir") }))
-
-		expect(isInvalidated("favorites")).toBe(true)
-	})
-
-	it("folderRestore marks Favorites stale", () => {
-		seedFavorites([])
-		handleDriveEvent(driveEvt({ type: "folderRestore", dir: mockDir() }))
-
-		expect(isInvalidated("favorites")).toBe(true)
-	})
-
-	it("folderDeletedPermanent marks Favorites and the trash stale", () => {
-		seedFavorites([])
-		seedTrash([])
-		handleDriveEvent(driveEvt({ type: "folderDeletedPermanent", uuid: testUuid("dir") }))
-
-		expect(isInvalidated("favorites")).toBe(true)
-		expect(isInvalidated("trash")).toBe(true)
-	})
-
-	it("trashEmpty marks Favorites stale", () => {
-		seedFavorites([])
-		handleDriveEvent(driveEvt({ type: "trashEmpty" }))
-
-		expect(isInvalidated("favorites")).toBe(true)
-	})
-
-	it("a fileTrash or fileDeletedPermanent patches without any stale mark", () => {
-		seedListing(PARENT_A, [narrowItem(mockFile())])
-		seedFavorites([])
-		seedTrash([])
-		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: undefined }))
-		handleDriveEvent(driveEvt({ type: "fileDeletedPermanent", uuid: testUuid("file"), stableUUID: STABLE_FILE }))
-
-		expect(isInvalidated("favorites")).toBe(false)
-		expect(isInvalidated("trash")).toBe(false)
 	})
 })
 
@@ -510,7 +458,7 @@ describe("drive socket handlers — trash listing membership", () => {
 		expect(getTrash()).toBeUndefined()
 	})
 
-	it("marks the trash listing stale when no cached listing holds the trashed uuid", () => {
+	it("applies the removal alone when no cached listing holds the trashed uuid", () => {
 		seedTrash([])
 
 		handleDriveEvent(
@@ -518,15 +466,6 @@ describe("drive socket handlers — trash listing membership", () => {
 		)
 
 		expect(getTrash()).toEqual([])
-		expect(isInvalidated("trash")).toBe(true)
-	})
-
-	it("a versioning-disabled edit never marks the trash listing stale", () => {
-		seedTrash([])
-
-		handleDriveEvent(driveEvt({ type: "fileTrash", uuid: testUuid("unknown"), stableUUID: RETIRED_STABLE, newUUID: NEW_FILE }))
-
-		expect(isInvalidated("trash")).toBe(false)
 	})
 
 	// The owner trashing a file they shared with this account removes it from the shared listing; it

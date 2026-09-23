@@ -3,7 +3,6 @@ import { removeByUuid } from "@filen/shared"
 import { registerSocketHandler } from "@/lib/sdk/socket"
 import { log } from "@/lib/log"
 import {
-	driveListingQueryKey,
 	driveListingQueryUpdate,
 	driveListingQueryUpdateGlobal,
 	findCachedListingItem,
@@ -31,8 +30,7 @@ import {
 // it into its parent listing (the item's own `.parent`); an event that ships only a uuid patches every
 // currently-instantiated listing at once via driveListingQueryUpdateGlobal (the same fan-out actions.ts
 // uses), which reaches whichever listing holds the row without a parent lookup. No invalidate-storm — every
-// path is a targeted setQueryData with the queries' own cancel-before-patch discipline, or a stale mark on
-// the one listing a payload can't patch.
+// path is a targeted setQueryData with the queries' own cancel-before-patch discipline.
 //
 // Alongside the listing-cache patch, an event that removes / rotates / renames an item also emits a
 // previewReconcile signal so an OPEN preview pager (which steps a frozen snapshot the cache patch can't
@@ -113,12 +111,6 @@ function rejoinFavorites(item: DriveItem): void {
 		patchFavoritesListing(true, item)
 	}
 }
-
-// A folder event names only the folder, while favorited descendants may enter or leave Favorites with
-// it (trashed, restored or purged), and a purged folder takes its own trashed descendants out of the
-// trash.
-const FAVORITES_KEY = driveListingQueryKey({ variant: "favorites", uuid: null })
-const TRASH_KEY = driveListingQueryKey({ variant: "trash", uuid: null })
 
 // ItemFavorite ships a NonRootItemTagged (the full item carrying its new favorited flag). Mobile's socket
 // path handles only owned files/dirs here — shared/linked arms have no favorite toggle — so this narrows
@@ -273,7 +265,6 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
 			driveListingQueryUpdate(normalizeParentUuid(inner.dir.parent, rootUuid), prev => upsertDriveItem(prev, item))
 			rejoinFavorites(item)
-			markListingsStale(FAVORITES_KEY)
 			emitPreviewItemRemoved(item.data.uuid)
 
 			break
@@ -313,7 +304,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// patches both halves the same way). Purge it from the selection so the count / select-all toggle /
 			// bulk ops never target a ghost. The payload carries no row, so the one for the trash insert is
 			// read out of a cached listing BEFORE the removal fan-out strips it — with no cached copy
-			// anywhere, only the removal applies and the trash listing is marked stale.
+			// anywhere, only the removal applies and the trash listing refetches on its next mount or focus.
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 
 			const trashed = supersededByEdit ? undefined : ownedRowOrUndefined(findCachedListingItem(inner.uuid))
@@ -322,12 +313,6 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 
 			if (trashed !== undefined) {
 				insertIntoTrashListing(trashed)
-			} else if (!supersededByEdit) {
-				markListingsStale(TRASH_KEY)
-			}
-
-			if (inner.type === "folderTrash") {
-				markListingsStale(FAVORITES_KEY)
 			}
 
 			// A preview open on the trashed item advances to a neighbour or closes.
@@ -366,12 +351,6 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// open preview (advance to a neighbour, or close once it was the only slot).
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, inner.uuid))
-
-			if (inner.type === "folderDeletedPermanent") {
-				markListingsStale(FAVORITES_KEY)
-				markListingsStale(TRASH_KEY)
-			}
-
 			emitPreviewItemRemoved(inner.uuid)
 
 			break
@@ -428,7 +407,6 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 
 		case "trashEmpty": {
 			flatListingQueryUpdate("trash", () => [])
-			markListingsStale(FAVORITES_KEY)
 
 			break
 		}
