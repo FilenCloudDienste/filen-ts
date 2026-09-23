@@ -28,6 +28,9 @@ export const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "s
 // buffered download + a client-side transform (features/preview/lib/heicTransform.ts) instead of the SW's
 // streamed route every other image extension uses.
 export const HEIC_EXTENSIONS = new Set(["heic", "heif"])
+// Consulted only for a name whose extension resolves no category (previewType's own order), so a
+// mime can pull a file OUT of the streamed branch but never into it.
+const HEIC_MIMES = new Set(["image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"])
 // The camera-RAW families the Rust SDK's own decoder recognizes, listed here so this app's category
 // map, icon routing and photos predicate agree with what `canMakeThumbnail` will actually say for
 // them. Their own category ("rawImage") rather than "image": no browser decodes a RAW container, so
@@ -80,8 +83,8 @@ function categoryForExtension(ext: string): PreviewCategory | null {
 	}
 
 	// AFTER the image/heic branch on purpose: the two sets are disjoint today, but if a RAW family ever
-	// gained a browser-decodable sibling extension the browser-decodable answer must win — "image" has
-	// real viewers behind it, "rawImage" currently has none.
+	// gained a browser-decodable sibling extension the browser-decodable answer must win — "image"
+	// renders the full picture, "rawImage" only the camera's embedded preview.
 	if (RAW_IMAGE_EXTENSIONS.has(ext)) {
 		return "rawImage"
 	}
@@ -194,10 +197,11 @@ const STREAMED_CATEGORIES = new Set<PreviewCategory>(["video", "audio", "image"]
 
 // True for HEIC/HEIF — an "image"-category item that still can't stream, since no browser decodes it
 // inline. imageViewer.tsx checks this before ever considering the SW route, routing these through the
-// buffered download + a client-side transform (features/preview/lib/heicTransform.ts) instead. Extension-only
-// (mirrors how previewType itself resolves category), never the item's own mime — a spoofed or absent
-// mime must not let a HEIC file slip into the streamed branch (mediaType.ts independently excludes it
-// too, defense-in-depth, the same pattern as the SW's own content-type re-validation).
+// buffered download + a client-side transform (features/preview/lib/heicTransform.ts) instead. Resolved
+// the way previewType resolves category: the extension decides, and the mime only for a name with no
+// recognized extension (an extensionless image/heic upload). A mime can therefore only route a file
+// AWAY from the streamed branch — a spoofed mime can never let a HEIC-named file slip into it
+// (mediaType.ts independently excludes it too, defense-in-depth).
 export function needsImageTransform(item: DriveItem): boolean {
 	const base = asDirectoryOrFile(item)
 
@@ -206,8 +210,19 @@ export function needsImageTransform(item: DriveItem): boolean {
 	}
 
 	const name = base.data.decryptedMeta?.name
+	const ext = name !== undefined ? extensionOf(name) : ""
 
-	return name !== undefined && HEIC_EXTENSIONS.has(extensionOf(name))
+	if (HEIC_EXTENSIONS.has(ext)) {
+		return true
+	}
+
+	if (categoryForExtension(ext) !== null) {
+		return false
+	}
+
+	const mime = base.data.decryptedMeta?.mime
+
+	return mime !== undefined && HEIC_MIMES.has(mime.toLowerCase().trim())
 }
 
 // Gate for opening a preview: a file, decryptable, resolves to a real category, and — for a

@@ -33,14 +33,15 @@ async function getSharedWorker(): Promise<Comlink.Remote<HeicWorkerApi>> {
 // that startUploads/runDirectoryUpload actually UPLOAD once the user's convert-on-upload preference is
 // on. Changing the encode (quality, format, any downscale) therefore changes bytes stored on the user's
 // drive, not just pixels on screen.
+//
+// The caller's buffer is never detached: a private copy is what crosses to the worker. The preview
+// keeps its downloaded bytes in state and hands the SAME Uint8Array to every run of its transform
+// effect — StrictMode's double-invoked effect in dev, the Retry button, any later re-run — so
+// transferring the caller's own buffer would leave every run after the first posting a detached
+// buffer (DataCloneError).
 export async function transformHeicBytes(bytes: Uint8Array): Promise<Blob> {
 	const worker = await getSharedWorker()
-	// Narrowed the same way imageViewer.tsx's BufferedImageBytes narrows a worker-sourced Uint8Array:
-	// this buffer is always a fresh ArrayBuffer allocation (usePreviewBytes's buffered download), never a
-	// SharedArrayBuffer, so the cast only widens the generic parameter Comlink's transfer list requires —
-	// it doesn't change what's actually backing the value. Transferred, not cloned: HEIC originals run
-	// multi-megabyte, and nothing on the main thread reads these bytes again after this call.
-	const transferable = bytes as Uint8Array<ArrayBuffer>
+	const copy = bytes.slice()
 
-	return await worker.transform(Comlink.transfer(transferable, [transferable.buffer]))
+	return await worker.transform(Comlink.transfer(copy, [copy.buffer]))
 }

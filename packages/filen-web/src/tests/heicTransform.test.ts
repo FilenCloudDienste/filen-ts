@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 // at module load), wraps it with Comlink, and forwards transform() calls through it. The worker
 // itself is heic.worker.ts, which heic.worker.test.ts already pins over a real MessageChannel — this
 // file only needs to prove heicTransform.ts's OWN seam (lazy spin-up, memoization, retry-after-failure,
-// transfer-not-clone, pass-through of the transform result/opts), so both the `?worker` constructor and
+// transfer of a private copy, pass-through of the transform result/opts), so both the `?worker` constructor and
 // Comlink.wrap are replaced with plain fakes rather than a second real worker boundary.
 
 const { WorkerCtor, wrap, transformMock, transferSpy } = vi.hoisted(() => ({
@@ -90,15 +90,36 @@ describe("transformHeicBytes", () => {
 		expect(transformMock.mock.calls[0]?.[1]).toBeUndefined()
 	})
 
-	it("marks the input as transferred (its own buffer, not a clone) and forwards the same reference", async () => {
+	it("transfers a private copy of the input, never the caller's own buffer", async () => {
 		const { transformHeicBytes } = await freshModule()
 		transformMock.mockResolvedValue(new Blob())
 		const bytes = new Uint8Array([1, 2, 3])
 
 		await transformHeicBytes(bytes)
 
-		expect(transferSpy).toHaveBeenCalledWith(bytes, [bytes.buffer])
-		expect(transformMock.mock.calls[0]?.[0]).toBe(bytes)
+		const sent = transformMock.mock.calls[0]?.[0] as Uint8Array
+		expect(sent).not.toBe(bytes)
+		expect(sent.buffer).not.toBe(bytes.buffer)
+		expect(Array.from(sent)).toEqual([1, 2, 3])
+		expect(transferSpy).toHaveBeenCalledWith(sent, [sent.buffer])
+	})
+
+	// The preview hands the SAME Uint8Array to every run of its transform effect (StrictMode's second
+	// run in dev, the Retry button). The fake worker detaches whatever it is sent, the way a real
+	// postMessage transfer does — a second call with the same input must still get through.
+	it("leaves the caller's bytes intact, so the same input can be transformed again", async () => {
+		const { transformHeicBytes } = await freshModule()
+		transformMock.mockImplementation((sent: Uint8Array) => {
+			structuredClone(sent, { transfer: [sent.buffer] })
+
+			return Promise.resolve(new Blob(["jpeg"]))
+		})
+		const bytes = new Uint8Array([1, 2, 3])
+
+		await expect(transformHeicBytes(bytes)).resolves.toBeInstanceOf(Blob)
+		expect(bytes.byteLength).toBe(3)
+		await expect(transformHeicBytes(bytes)).resolves.toBeInstanceOf(Blob)
+		expect(Array.from(bytes)).toEqual([1, 2, 3])
 	})
 
 	it("does not cache a failed spin-up — the next call gets a fresh worker instead of staying broken", async () => {

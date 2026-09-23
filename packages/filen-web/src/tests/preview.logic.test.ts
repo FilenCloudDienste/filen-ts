@@ -82,8 +82,8 @@ describe("previewType — extension category map", () => {
 	})
 
 	// The RAW set has 21 families and none of them may collide with a browser-decodable extension —
-	// "image" has real viewers behind it, "rawImage" currently has none, so an overlap would silently
-	// demote a previewable file.
+	// "image" renders the full picture, "rawImage" only the camera's embedded preview, so an overlap
+	// would silently demote a previewable file.
 	it("has 21 RAW families, disjoint from the browser-decodable image set", () => {
 		expect(RAW_IMAGE_EXTENSIONS.size).toBe(21)
 		for (const ext of RAW_IMAGE_EXTENSIONS) {
@@ -256,10 +256,23 @@ describe("needsImageTransform", () => {
 		expect(needsImageTransform(fileNamed("photo.heic", { undecryptable: true }))).toBe(false)
 	})
 
-	// Extension-only, never the item's own mime — a spoofed streamable mime on a HEIC-named file must
-	// still resolve true (mediaType.ts's own test file separately proves this keeps it off the SW route).
+	// The extension decides — a spoofed streamable mime on a HEIC-named file must still resolve true
+	// (mediaType.ts's own test file separately proves this keeps it off the SW route).
 	it("ignores a spoofed streamable mime on a HEIC-named file", () => {
 		expect(needsImageTransform(fileNamed("photo.heic", { mime: "image/jpeg" }))).toBe(true)
+	})
+
+	it.each(["image/heic", "image/HEIF", " image/heic-sequence "])("routes an extensionless file with a %s mime to the transform", mime => {
+		expect(needsImageTransform(fileNamed("IMG_0001", { mime }))).toBe(true)
+	})
+
+	// The mime only ever pulls a file OUT of the streamed branch: a recognized extension keeps its own answer.
+	it("never lets a HEIC mime override a recognized extension", () => {
+		expect(needsImageTransform(fileNamed("photo.jpg", { mime: "image/heic" }))).toBe(false)
+	})
+
+	it("is false for an extensionless file with a streamable image mime", () => {
+		expect(needsImageTransform(fileNamed("IMG_0001", { mime: "image/jpeg" }))).toBe(false)
 	})
 })
 
