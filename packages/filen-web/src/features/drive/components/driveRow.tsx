@@ -151,7 +151,7 @@ export function DriveRow({
 								alt=""
 								draggable={false}
 								decoding="async"
-								className="size-4 shrink-0 rounded-sm object-cover"
+								className="size-6 shrink-0 rounded-md object-cover"
 								onError={() => {
 									invalidateThumbnail(item.data.uuid)
 									setThumbFailed(true)
@@ -160,7 +160,7 @@ export function DriveRow({
 						) : (
 							<ItemIcon
 								item={item}
-								className="size-4 shrink-0"
+								className="size-6 shrink-0"
 							/>
 						)}
 						<span className="min-w-0 flex-1 truncate">{name}</span>

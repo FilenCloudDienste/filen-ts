@@ -7,6 +7,8 @@ import { type DriveViewMode } from "@/features/drive/lib/preferences"
 export const ROW_HEIGHT = 40
 export const TILE_WIDTH = 176
 export const TILE_ROW_HEIGHT = 244
+// Grid view's padding on the listbox, keeping the full-bleed listing's tiles off the pane edges.
+export const GRID_INSET = 12
 
 // How many item slots can be simultaneously on screen for a viewport of this size, before any
 // headroom multiplier — a list row is one slot per ROW_HEIGHT of vertical space, a grid tile is one

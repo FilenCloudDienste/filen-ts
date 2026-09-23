@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
-import { ROW_HEIGHT, TILE_WIDTH, TILE_ROW_HEIGHT } from "@/features/drive/lib/gridLayout"
+import { GRID_INSET, ROW_HEIGHT, TILE_WIDTH, TILE_ROW_HEIGHT } from "@/features/drive/lib/gridLayout"
 import { setThumbnailViewport } from "@/features/drive/lib/thumbnails"
 
 const LIST_OVERSCAN = 8
@@ -67,6 +67,10 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 		getScrollElement: () => scrollElement,
 		estimateSize: () => TILE_ROW_HEIGHT,
 		overscan: GRID_OVERSCAN,
+		// The listbox's CSS padding shifts every row down by GRID_INSET, which the virtualizer's offsets
+		// do not know about: scrolling a row into view at the bottom has to clear that shift plus the
+		// bottom inset, or the row lands half-hidden.
+		scrollPaddingEnd: GRID_INSET * 2,
 		getItemKey: index => index
 	})
 

@@ -107,9 +107,6 @@
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
     --radius: 0.625rem;
-    /* Centered content-column cap inside the card. Presets: 60rem smaller / 68rem default / 76rem
-       bigger; `none` for full width. One knob, project-wide. */
-    --content-column: 68rem;
     /* Sidebar is a floating near-white panel on the gray canvas (same family as the content card);
        hover/active fills are tonal against that panel surface. */
     --sidebar: oklch(0.985 0 0);

@@ -37,9 +37,8 @@ import {
 	useViewModePreferencesQuery
 } from "@/features/drive/queries/drive"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
-import { ROW_HEIGHT, TILE_ROW_HEIGHT, TILE_WIDTH } from "@/features/drive/lib/gridLayout"
+import { GRID_INSET, ROW_HEIGHT, TILE_ROW_HEIGHT, TILE_WIDTH } from "@/features/drive/lib/gridLayout"
 import { isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
-import { cn } from "@filen/shared"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { useAction } from "@/lib/keymap/useAction"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
@@ -81,9 +80,9 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
-// Centered content column inside the card — the width cap rides one CSS var (see index.css) so the
-// preset flips project-wide in one place.
-const CONTENT_COLUMN_CLASS = "mx-auto w-full max-w-(--content-column)"
+// Grid-view inset between the tiles and the pane's edges. A CSS padding on the listbox, not a
+// virtualizer padding, because the marquee reads the listbox's computed paddings for its hit math.
+const GRID_LISTBOX_STYLE = { padding: GRID_INSET }
 
 // Stable identity so a disabled/empty directorySizes read never re-triggers row renders — module scope,
 // not recreated per render (a fresh `new Map()` every render would defeat DriveRow's memoization).
@@ -564,7 +563,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						aria-hidden="true"
 						className="flex h-8 shrink-0 items-center gap-3 border-b border-border/50 px-3 text-xs font-medium text-muted-foreground"
 					>
-						<span className="size-4 shrink-0" />
+						<span className="size-6 shrink-0" />
 						<span className="min-w-0 flex-1">{t("driveColumnName")}</span>
 						{/* Secondary columns step out by importance as the card narrows (size at sm, modified at lg);
 						    name keeps min-w-0 flex-1 and never yields. Modified waits for lg, not md: md is where
@@ -573,6 +572,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						    the same reason. */}
 						<span className="hidden w-20 shrink-0 text-right sm:block">{t("driveColumnSize")}</span>
 						<span className="hidden w-28 shrink-0 text-right lg:block">{t("driveColumnModified")}</span>
+						{/* Holds the row's trailing ⋯ trigger slot (driveRow.tsx), so size/modified sit over their values. */}
+						<span className="size-6 shrink-0 pointer-coarse:size-8" />
 					</div>
 				) : null}
 				<div
@@ -584,6 +585,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					onKeyDown={handleKeyDown}
 					onPointerDown={marquee.onPointerDown}
 					className="min-h-0 flex-1 overflow-y-auto"
+					style={effectiveViewMode === "grid" ? GRID_LISTBOX_STYLE : undefined}
 				>
 					{/* Generic layout wrappers between the listbox and its options: role="presentation" keeps
 					    the owned-element relationship intact (an unlabelled generic in between breaks it). */}
@@ -723,96 +725,90 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	return (
 		<>
-			{/* Card top row: breadcrumbs left, the action-button cluster right, content column-capped —
-			    the bottom hairline is the card's one sanctioned full-width rule. */}
-			<header className="shrink-0 border-b border-border/50 px-6">
-				<div className={cn(CONTENT_COLUMN_CLASS, "flex h-14 items-center justify-between gap-4")}>
-					<Breadcrumb
-						variant={variant}
-						splat={splat}
+			{/* Card top row: breadcrumbs left, the action-button cluster right. Everything down to the
+			    listing runs full width at px-3, the listing rows' own inset, so the page's left and right
+			    content edges line up with the table's first column and its trailing ⋯ column. */}
+			<header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border/50 px-3">
+				<Breadcrumb
+					variant={variant}
+					splat={splat}
+				/>
+				<div className="flex shrink-0 items-center gap-2">
+					{isEmptyTrashTriggerVisible(variant, sortedItems.length) ? (
+						<EmptyTrashButton
+							onClick={handleEmptyTrash}
+							disabled={!isOnline}
+							offlineTitle={!isOnline ? t("common:offlineActionDisabled") : undefined}
+						/>
+					) : null}
+					<NewDirectory
+						parentUuid={uuid}
+						disabled={writeDisabled}
+						dialogOpen={isDialogOpen}
+						offline={!isOnline}
+						hiddenNotice={hideHidden}
 					/>
-					<div className="flex shrink-0 items-center gap-2">
-						{isEmptyTrashTriggerVisible(variant, sortedItems.length) ? (
-							<EmptyTrashButton
-								onClick={handleEmptyTrash}
-								disabled={!isOnline}
-								offlineTitle={!isOnline ? t("common:offlineActionDisabled") : undefined}
-							/>
-						) : null}
-						<NewDirectory
-							parentUuid={uuid}
-							disabled={writeDisabled}
-							dialogOpen={isDialogOpen}
-							offline={!isOnline}
-							hiddenNotice={hideHidden}
-						/>
-						<UploadMenu
-							parentUuid={uuid}
-							disabled={writeDisabled}
-							openPreview={openPreview}
-							offline={!isOnline}
-							hiddenNotice={hideHidden}
-						/>
-					</div>
+					<UploadMenu
+						parentUuid={uuid}
+						disabled={writeDisabled}
+						openPreview={openPreview}
+						offline={!isOnline}
+						hiddenNotice={hideHidden}
+					/>
 				</div>
 			</header>
 			{/* Controls row: sort + display left, search right — bordered controls, room to grow. */}
-			<div className="shrink-0 px-6 pt-4">
-				<div className={cn(CONTENT_COLUMN_CLASS, "flex items-center justify-between gap-2")}>
-					<div className="flex items-center gap-2">
-						<SortMenu
-							value={effectiveSort}
-							onChange={next => {
-								void applySortChange(next)
-							}}
-							disabled={!isSortableVariant(variant) || listingQuery.status !== "success"}
-						/>
-						<ViewModeToggle
-							value={effectiveViewMode}
-							onChange={next => {
-								void applyViewModeChange(next)
-							}}
-							{...(hiddenFilterApplies
-								? {
-										hiddenItems: {
-											show: !hiddenPref,
-											onChange: next => {
-												void applyHideHiddenItemsChange(!next)
-											}
+			<div className="flex shrink-0 items-center justify-between gap-2 px-3 pt-4">
+				<div className="flex items-center gap-2">
+					<SortMenu
+						value={effectiveSort}
+						onChange={next => {
+							void applySortChange(next)
+						}}
+						disabled={!isSortableVariant(variant) || listingQuery.status !== "success"}
+					/>
+					<ViewModeToggle
+						value={effectiveViewMode}
+						onChange={next => {
+							void applyViewModeChange(next)
+						}}
+						{...(hiddenFilterApplies
+							? {
+									hiddenItems: {
+										show: !hiddenPref,
+										onChange: next => {
+											void applyHideHiddenItemsChange(!next)
 										}
 									}
-								: {})}
-						/>
-					</div>
-					{/* Every variant gets a filter box — "drive" drives the cache-backed recursive engine
+								}
+							: {})}
+					/>
+				</div>
+				{/* Every variant gets a filter box — "drive" drives the cache-backed recursive engine
 					above, every other variant drives the instant local name filter (localFilter) instead.
 					Same component either way (mod+f focuses it, Escape/the X button clears it) — only which
 					state it's bound to differs. */}
-					<SearchInput
-						value={variant === "drive" ? search.input : localFilter}
-						onChange={variant === "drive" ? search.setInput : setLocalFilter}
-						onClear={
-							variant === "drive"
-								? search.clear
-								: () => {
-										setLocalFilter("")
-									}
-						}
-						dialogOpen={isDialogOpen}
-					/>
-				</div>
+				<SearchInput
+					value={variant === "drive" ? search.input : localFilter}
+					onChange={variant === "drive" ? search.setInput : setLocalFilter}
+					onClear={
+						variant === "drive"
+							? search.clear
+							: () => {
+									setLocalFilter("")
+								}
+					}
+					dialogOpen={isDialogOpen}
+				/>
 			</div>
 			<UploadDropzone
 				parentUuid={uuid}
 				disabled={writeDisabled}
 			>
-				<div className="relative flex min-h-0 flex-1 flex-col px-6 pt-4 pb-6">
-					<div
-						className={cn(
-							CONTENT_COLUMN_CLASS,
-							"flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/70 bg-background"
-						)}
-					>
+				<div className="relative flex min-h-0 flex-1 flex-col pt-4">
+					{/* Full bleed to the content card's side and bottom edges; only the top rule separates it
+					    from the controls above. */}
+					<div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-border/70 bg-background">
 						{search.active ? (
 							search.status === "warming" ? (
 								<LoadingState size="lg" />
@@ -915,7 +911,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					{/* Bottom-anchored floating selection bar — overlays the listing container, replacing
 					    nothing in the toolbar. */}
 					{listingQuery.status === "success" && selectedItems.length > 0 ? (
-						<div className="pointer-events-none absolute inset-x-6 bottom-10 z-10 flex justify-center">
+						<div className="pointer-events-none absolute inset-x-6 bottom-4 z-10 flex justify-center">
 							<BulkActionBar
 								variant={variant}
 								selectedItems={reconciledSelectedItems}
