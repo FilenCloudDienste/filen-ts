@@ -70,10 +70,9 @@ function listingId(variant: DriveVariant, uuid: string | null): string {
 }
 
 // Socket-synced listings whose latest read ran entirely under a live socket with no stale mark landing
-// meanwhile. A persisted listing restores with its original read time, a patch can create one no read
-// backs (driveListingQueryUpdate's `prev ?? []`), a read the socket wasn't up for may predate an event it
-// never delivered, and a read a stale mark overlaps may predate the change behind it, so none of those
-// count.
+// meanwhile. A persisted listing restores with its original read time, a read the socket wasn't up for
+// may predate an event it never delivered, and a read a stale mark overlaps may predate the change behind
+// it, so none of those count.
 const listingsReadThisSession = new Set<string>()
 let listingStaleMarks = 0
 
@@ -201,15 +200,10 @@ export async function fetchSharedListing(
 
 // Confirm-then-patch for a write landing in My Drive (queries/client.ts's zero-useMutation
 // convention) — always the "drive" variant: the three flat listings (recents/favorites/trash) have
-// no navigable parent to create/move into. A cache miss (nobody has viewed this directory yet)
-// defaults to [] so the patch still lands for whenever it first mounts.
+// no navigable parent to create/move into. A listing nobody has read stays unread: made from the rows
+// a patch adds, it would show as that directory's whole content until its read, and a copy or a
+// directory upload would leave one such entry behind per directory it creates.
 export function driveListingQueryUpdate(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]): void {
-	listingQueryUpdate(driveListingQueryKey({ variant: "drive", uuid: parentUuid }), prev => updater(prev ?? []))
-}
-
-// For a write the caller may not be looking at: a listing nobody has read stays unread rather than being
-// created from the rows the patch adds, which would show as that directory's whole content until its read.
-export function driveListingQueryUpdateIfCached(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]): void {
 	listingQueryUpdate(driveListingQueryKey({ variant: "drive", uuid: parentUuid }), prev => (prev === undefined ? prev : updater(prev)))
 }
 

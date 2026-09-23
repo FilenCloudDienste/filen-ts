@@ -3,7 +3,7 @@ import { removeByUuid } from "@filen/shared"
 import { registerSocketHandler } from "@/lib/sdk/socket"
 import { log } from "@/lib/log"
 import {
-	driveListingQueryUpdateIfCached,
+	driveListingQueryUpdate,
 	driveListingQueryUpdateGlobal,
 	findCachedListingItem,
 	flatListingQueryUpdate,
@@ -241,7 +241,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// stale row so a re-delivered event never duplicates.
 			const item = narrowItem(inner.file)
 
-			driveListingQueryUpdateIfCached(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
 			// A brand-new file is a recents entry by definition — mobile inserts unconditionally too.
 			insertIntoRecents(item)
 			rejoinFavorites(item)
@@ -256,7 +256,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// destination parent — uuid is preserved across a restore, so removing after the upsert would strip
 			// the just-restored row right back out.
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
-			driveListingQueryUpdateIfCached(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
 			rejoinFavorites(item)
 			// The item left the trash listing — a trash preview open on it advances to a neighbour or closes.
 			emitPreviewItemRemoved(item.data.uuid)
@@ -270,7 +270,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// A version restore rotates the file's uuid: drop both the restored uuid (if a stale copy lingers)
 			// and the superseded current uuid, then splice the fresh file into its parent.
 			driveListingQueryUpdateGlobal(prev => removeByUuid(removeByUuid(prev, item.data.uuid), inner.currentUuid))
-			driveListingQueryUpdateIfCached(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			driveListingQueryUpdate(normalizeParentUuid(inner.file.parent, rootUuid), prev => upsertDriveItem(prev, item))
 			rejoinFavorites(item)
 			// A preview open on the superseded uuid reseeds with the restored file (same slot, fresh content).
 			emitPreviewItemReplaced(inner.currentUuid, item)
@@ -279,9 +279,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 		}
 
 		case "folderSubCreated": {
-			driveListingQueryUpdateIfCached(normalizeParentUuid(inner.dir.parent, rootUuid), prev =>
-				upsertDriveItem(prev, narrowItem(inner.dir))
-			)
+			driveListingQueryUpdate(normalizeParentUuid(inner.dir.parent, rootUuid), prev => upsertDriveItem(prev, narrowItem(inner.dir)))
 
 			break
 		}
@@ -290,7 +288,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			const item = narrowItem(inner.dir)
 
 			driveListingQueryUpdateGlobal(prev => removeByUuid(prev, item.data.uuid))
-			driveListingQueryUpdateIfCached(normalizeParentUuid(inner.dir.parent, rootUuid), prev => upsertDriveItem(prev, item))
+			driveListingQueryUpdate(normalizeParentUuid(inner.dir.parent, rootUuid), prev => upsertDriveItem(prev, item))
 			rejoinFavorites(item)
 			emitPreviewItemRemoved(item.data.uuid)
 

@@ -697,17 +697,19 @@ describe("driveItemLinkStatusQueryUpdate", () => {
 })
 
 describe("driveListingQueryUpdate", () => {
-	it("defaults an uncached listing to [] before applying the updater", () => {
-		const created = narrowItem(mockDir({ uuid: testUuid("new") }))
+	it("leaves a listing nobody has read unread, never calling the updater", () => {
+		const updater = vi.fn((prev: DriveItem[]) => [...prev, narrowItem(mockDir({ uuid: testUuid("new") }))])
 
-		driveListingQueryUpdate(null, prev => [...prev, created])
+		driveListingQueryUpdate(null, updater)
 
-		expect(testQueryClient.getQueryData(driveListingQueryKey({ variant: "drive", uuid: null }))).toEqual([created])
+		expect(updater).not.toHaveBeenCalled()
+		expect(testQueryClient.getQueryCache().find({ queryKey: driveListingQueryKey({ variant: "drive", uuid: null }) })).toBeUndefined()
 	})
 
 	it("targets the drive variant's key for the given parent uuid, leaving other parents untouched", () => {
 		const otherParentKey = driveListingQueryKey({ variant: "drive", uuid: "other-parent" })
 		testQueryClient.setQueryData(otherParentKey, [])
+		testQueryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: "this-parent" }), [])
 		const created = narrowItem(mockDir({ uuid: testUuid("new") }))
 
 		driveListingQueryUpdate("this-parent", prev => [...prev, created])

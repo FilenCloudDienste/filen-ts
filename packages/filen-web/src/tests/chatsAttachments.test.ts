@@ -33,6 +33,7 @@ import { noop } from "@/lib/utils"
 import { formatBytes } from "@filen/shared"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { driveListingQueryKey } from "@/features/drive/queries/drive"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -169,6 +170,8 @@ describe("uploadAttachment", () => {
 		// The composer pre-flights the pick; the upload itself never reads the account, only patches it.
 		expect(getUserInfo).not.toHaveBeenCalled()
 		expect(queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY)?.storageUsed).toBe(1_024n)
+		// Nobody browses the chat-uploads directory, so the upload leaves no listing behind for it.
+		expect(queryClient.getQueryData(driveListingQueryKey({ variant: "drive", uuid: testUuid("chat-uploads") }))).toBeUndefined()
 	})
 
 	it("reuses an EXISTING link rather than creating a second one, when the just-uploaded item already has one", async () => {

@@ -9,7 +9,7 @@ import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import type { CopyJobEvent } from "@/workers/sdk.worker"
 import { narrowItem, narrowToSdkItems, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
-import { driveListingQueryUpdateIfCached, invalidateDirectorySize, normalizeParentUuid } from "@/features/drive/queries/drive"
+import { driveListingQueryUpdate, invalidateDirectorySize, normalizeParentUuid } from "@/features/drive/queries/drive"
 import { currentRootUuid, trashItems } from "@/features/drive/lib/actions"
 import { type BulkOutcome } from "@/features/drive/lib/bulk"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
@@ -217,7 +217,7 @@ function copyRowName(itemCount: number, firstName: string): string {
 
 // The destination listing is usually the one on screen; one nobody has read is left to its first read.
 function patchCopiedItem(item: DriveItem): void {
-	driveListingQueryUpdateIfCached(normalizeParentUuid(item.data.parent, currentRootUuid()), prev => upsertDriveItem(prev, item))
+	driveListingQueryUpdate(normalizeParentUuid(item.data.parent, currentRootUuid()), prev => upsertDriveItem(prev, item))
 }
 
 // A copied file is the source's content under a new uuid, so the source's cached thumbnail is its

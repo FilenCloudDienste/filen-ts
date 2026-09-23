@@ -414,6 +414,19 @@ describe("moveItems", () => {
 		expect(testQueryClient.getQueryData<DriveItem[]>(driveListing(null))?.map(i => i.data.uuid)).toEqual([testUuid("b")])
 	})
 
+	it("moving into a directory nobody has read leaves it unread, so its first open reads it whole", async () => {
+		seedRootUuid()
+		const item = dirItem({ uuid: testUuid("a"), parent: OTHER_PARENT_UUID })
+		const targetUuid = testUuid("unread-target")
+		testQueryClient.setQueryData(driveListing(OTHER_PARENT_UUID), [item])
+		moveDirectory.mockResolvedValueOnce(mockDir({ uuid: testUuid("a"), parent: targetUuid }))
+
+		await moveItems([item], targetUuid)
+
+		expect(testQueryClient.getQueryData<DriveItem[]>(driveListing(OTHER_PARENT_UUID))).toEqual([])
+		expect(testQueryClient.getQueryCache().find({ queryKey: driveListing(targetUuid), exact: true })).toBeUndefined()
+	})
+
 	it("keeps a moved favorite in the Favorites listing with its new parent", async () => {
 		seedRootUuid()
 		const item = fileItem({ uuid: testUuid("f"), parent: OTHER_PARENT_UUID, favorited: true })
@@ -564,6 +577,18 @@ describe("restoreItems", () => {
 		expect(testQueryClient.getQueryData<DriveItem[]>(trashListing())).toEqual([siblingInTrash])
 		const destination = testQueryClient.getQueryData<DriveItem[]>(driveListing(null))
 		expect(destination?.map(i => i.data.uuid)).toEqual([testUuid("a")]) // present, not stripped back out
+	})
+
+	it("restoring into a directory nobody has read leaves it unread", async () => {
+		seedRootUuid()
+		const trashed = dirItem({ uuid: testUuid("a") })
+		testQueryClient.setQueryData(trashListing(), [trashed])
+		restoreDirectory.mockResolvedValueOnce(mockDir({ uuid: testUuid("a"), parent: OTHER_PARENT_UUID }))
+
+		await restoreItems([trashed])
+
+		expect(testQueryClient.getQueryData<DriveItem[]>(trashListing())).toEqual([])
+		expect(testQueryClient.getQueryCache().find({ queryKey: driveListing(OTHER_PARENT_UUID), exact: true })).toBeUndefined()
 	})
 
 	it("restores a file via restoreFile, not restoreDirectory", async () => {

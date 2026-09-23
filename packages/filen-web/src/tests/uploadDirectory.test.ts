@@ -577,6 +577,9 @@ describe("startDirectoryUpload (real wiring)", () => {
 
 		const files = [mockRelFile("myfolder/a.txt"), mockRelFile("myfolder/sub/b.txt")]
 
+		// The root listing is the one on screen; the directories the upload creates below it are not.
+		testQueryClient.setQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: null }), [])
+
 		await startDirectoryUpload({ kind: "files", files }, null)
 
 		expect(getUserInfo).not.toHaveBeenCalled()
@@ -597,6 +600,9 @@ describe("startDirectoryUpload (real wiring)", () => {
 		// patches synchronously, no refetch needed (per createDirectory.ts/upload.ts's own contract).
 		const rootListing = testQueryClient.getQueryData<DriveItem[]>(driveListingQueryKey({ variant: "drive", uuid: null }))
 		expect(rootListing?.some(item => item.data.uuid === testUuid("myfolder"))).toBe(true)
+		// No listing is created for the directories the upload made and nobody has opened.
+		expect(testQueryClient.getQueryData(driveListingQueryKey({ variant: "drive", uuid: testUuid("myfolder") }))).toBeUndefined()
+		expect(testQueryClient.getQueryData(driveListingQueryKey({ variant: "drive", uuid: testUuid("sub") }))).toBeUndefined()
 	})
 
 	it("toasts a generic error and calls neither createDirectory nor uploadFile when the tree walk itself fails", async () => {

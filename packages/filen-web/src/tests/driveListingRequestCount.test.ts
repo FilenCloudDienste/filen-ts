@@ -226,10 +226,13 @@ describe("drive listing request counts", () => {
 		expect(reads()).toBe(1)
 	})
 
-	it("a listing only a patch created is still read on its first mount", async () => {
+	it("a patch never creates a listing: the first mount reads it whole, without flashing the patched row alone", async () => {
 		const dir = nextDir()
 
 		driveListingQueryUpdate(dir, prev => [...prev, narrowItem(mockFile("patched", dir))])
+
+		expect(listing(dir)).toBeUndefined()
+
 		mountListing(dir)
 		await drain()
 
