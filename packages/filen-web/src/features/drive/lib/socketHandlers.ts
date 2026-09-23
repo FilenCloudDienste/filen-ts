@@ -13,7 +13,7 @@ import {
 } from "@/features/drive/queries/drive"
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { currentRootUuid, insertIntoTrashListing, patchFavoritesListing } from "@/features/drive/lib/actions"
-import { invalidatePhotosListing } from "@/features/photos/queries/photos"
+import { invalidatePhotosListing, markPhotosListingStale, type PhotosEventScope } from "@/features/photos/queries/photos"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	emitPreviewFileMetaChanged,
@@ -39,9 +39,16 @@ import {
 type DriveSocketEvent = Extract<SocketEvent, { type: "drive" }>
 
 // Registers the drive handler on the generic bridge; returns the unregister fn. Called once by the authed
-// shell's socket host. Only "drive" events reach handleDriveEvent — the registry routes by type.
+// shell's socket host. Only "drive" events reach handleDriveEvent — the registry routes by type. A socket
+// drop marks the photos listing stale, since the drive events it missed are what keep that listing fresh.
 export function registerDriveSocketHandlers(): () => void {
-	return registerSocketHandler("drive", handleDriveEvent)
+	const unregisterDrive = registerSocketHandler("drive", handleDriveEvent)
+	const unregisterReconnecting = registerSocketHandler("reconnecting", markPhotosListingStale)
+
+	return () => {
+		unregisterDrive()
+		unregisterReconnecting()
+	}
 }
 
 // In-place attribute swap by uuid (a flag/color/meta changed; identity and membership did not) — never
@@ -89,13 +96,8 @@ function narrowFavoriteItem(item: NonRootItemTagged): DriveItem | undefined {
 	}
 }
 
-// Coarse, cheap photos-query invalidation (see photos/queries/photos.ts's invalidatePhotosListing
-// doc comment for why this is a whole-listing refetch rather than a splice-patch): every drive event
-// that adds, removes, or renames a file or directory anywhere invalidates the entire photos recursive
-// listing, since a single-item socket payload has no cheap way to prove whether its uuid even falls
-// under the current photos root's subtree. A no-op when no photos query is mounted. Full recursive
-// splice-patching (mirroring this file's own per-parent precision for drive listings) is a later
-// optimization, not required for v1.
+// Drive events that can add, remove or rename a photo; photosEventScope then narrows each to the part
+// of the tree it touched, so a change outside the photos root skips the recursive refetch.
 const PHOTOS_INVALIDATING_EVENT_TYPES: ReadonlySet<DriveSocketEvent["inner"]["type"]> = new Set([
 	"fileNew",
 	"fileMove",
@@ -112,12 +114,49 @@ const PHOTOS_INVALIDATING_EVENT_TYPES: ReadonlySet<DriveSocketEvent["inner"]["ty
 	"folderMetadataChanged"
 ])
 
+// null when the payload can't locate every end of the change, which always invalidates: a move names
+// only its destination, a file rename carries no parent (and can turn a file into a photo), and a
+// permanently deleted dir may already be gone from the dir cache. A restore's other end is the trash.
+function photosEventScope(inner: DriveSocketEvent["inner"]): PhotosEventScope | null {
+	switch (inner.type) {
+		case "fileNew":
+		case "fileRestore":
+			return { dirs: [inner.file.parent], item: inner.file.uuid }
+
+		// The superseded uuid is the one a listing may hold; the restored file replaces it in place.
+		case "fileArchiveRestored":
+			return { dirs: [inner.file.parent], item: inner.currentUuid }
+
+		// A move's old parent isn't in the payload, but a file that left the root matters only if listed.
+		case "fileMove":
+			return { dirs: [inner.file.parent], item: inner.file.uuid }
+
+		case "fileTrash":
+		case "fileArchived":
+		case "fileDeletedPermanent":
+			return { dirs: [], item: inner.uuid }
+
+		case "folderTrash":
+			return { dirs: [inner.parent], item: inner.uuid }
+
+		case "folderRestore":
+			return { dirs: [inner.dir.parent], item: inner.dir.uuid }
+
+		// A rename leaves the dir where it was, so its own cached chain locates it.
+		case "folderMetadataChanged":
+			return { dirs: [inner.uuid], item: inner.uuid }
+
+		default:
+			return null
+	}
+}
+
 export function handleDriveEvent(event: DriveSocketEvent): void {
 	const inner = event.inner
 	const rootUuid = currentRootUuid()
 
 	if (PHOTOS_INVALIDATING_EVENT_TYPES.has(inner.type)) {
-		invalidatePhotosListing()
+		invalidatePhotosListing(photosEventScope(inner))
 	}
 
 	switch (inner.type) {

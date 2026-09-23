@@ -6,11 +6,13 @@ import type { Dir, UuidStr, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 import {
 	cacheDirs,
 	cacheSharedDirContext,
+	classifyUnderRoot,
 	clearDirectoryCache,
 	evictDirs,
 	getCachedDir,
 	getCachedName,
-	getSharedDirContext
+	getSharedDirContext,
+	isOutsideRoot
 } from "@/features/drive/lib/cache"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
@@ -204,5 +206,93 @@ describe("shared-dir context cache", () => {
 		clearDirectoryCache()
 
 		expect(getSharedDirContext(uuid)).toBeUndefined()
+	})
+})
+
+describe("classifyUnderRoot", () => {
+	// drive root -> photos root -> A -> B, plus C directly under the drive root.
+	const DRIVE_ROOT = testUuid("drive-root")
+	const PHOTOS_ROOT = testUuid("photos-root")
+	const A = testUuid("a")
+	const B = testUuid("b")
+	const C = testUuid("c")
+
+	function seedTree(): void {
+		cacheDirs([
+			mockDir({ uuid: PHOTOS_ROOT, parent: DRIVE_ROOT }),
+			mockDir({ uuid: A, parent: PHOTOS_ROOT }),
+			mockDir({ uuid: B, parent: A }),
+			mockDir({ uuid: C, parent: DRIVE_ROOT })
+		])
+	}
+
+	it("a dir under the root, at any depth, is a member", () => {
+		seedTree()
+
+		expect(classifyUnderRoot(A, PHOTOS_ROOT, DRIVE_ROOT)).toBe("member")
+		expect(classifyUnderRoot(B, PHOTOS_ROOT, DRIVE_ROOT)).toBe("member")
+	})
+
+	it("the root itself is a member, even uncached", () => {
+		expect(classifyUnderRoot(PHOTOS_ROOT, PHOTOS_ROOT, DRIVE_ROOT)).toBe("member")
+	})
+
+	it("a dir whose cached chain reaches the drive root without passing the root is a non-member", () => {
+		seedTree()
+
+		expect(classifyUnderRoot(C, PHOTOS_ROOT, DRIVE_ROOT)).toBe("nonMember")
+		expect(classifyUnderRoot(DRIVE_ROOT, PHOTOS_ROOT, DRIVE_ROOT)).toBe("nonMember")
+	})
+
+	it("everything is a member when the photos root is the drive root", () => {
+		seedTree()
+
+		expect(classifyUnderRoot(C, DRIVE_ROOT, DRIVE_ROOT)).toBe("member")
+	})
+
+	it("an uncached dir is unknown", () => {
+		seedTree()
+
+		expect(classifyUnderRoot(testUuid("uncached"), PHOTOS_ROOT, DRIVE_ROOT)).toBe("unknown")
+	})
+
+	it("an uncached ancestor makes the whole chain unknown", () => {
+		const D = testUuid("d")
+		cacheDirs([mockDir({ uuid: D, parent: testUuid("uncached") })])
+
+		expect(classifyUnderRoot(D, PHOTOS_ROOT, DRIVE_ROOT)).toBe("unknown")
+	})
+
+	it("a trashed dir's pseudo parent is unknown, not outside", () => {
+		const D = testUuid("d")
+		cacheDirs([mockDir({ uuid: D, parent: "trash" })])
+
+		expect(classifyUnderRoot(D, PHOTOS_ROOT, DRIVE_ROOT)).toBe("unknown")
+	})
+
+	it("a cycle left by stale pointers is unknown", () => {
+		const D = testUuid("d")
+		const E = testUuid("e")
+		cacheDirs([mockDir({ uuid: D, parent: E }), mockDir({ uuid: E, parent: D })])
+
+		expect(classifyUnderRoot(D, PHOTOS_ROOT, DRIVE_ROOT)).toBe("unknown")
+	})
+
+	it("an evicted ancestor turns a non-member into unknown", () => {
+		const D = testUuid("d")
+		seedTree()
+		cacheDirs([mockDir({ uuid: D, parent: C })])
+		evictDirs([C])
+
+		expect(classifyUnderRoot(D, PHOTOS_ROOT, DRIVE_ROOT)).toBe("unknown")
+	})
+
+	it("isOutsideRoot holds only when every dir is a proven non-member", () => {
+		seedTree()
+
+		expect(isOutsideRoot([C], PHOTOS_ROOT, DRIVE_ROOT)).toBe(true)
+		expect(isOutsideRoot([C, B], PHOTOS_ROOT, DRIVE_ROOT)).toBe(false)
+		expect(isOutsideRoot([C, testUuid("uncached")], PHOTOS_ROOT, DRIVE_ROOT)).toBe(false)
+		expect(isOutsideRoot([], PHOTOS_ROOT, DRIVE_ROOT)).toBe(true)
 	})
 })

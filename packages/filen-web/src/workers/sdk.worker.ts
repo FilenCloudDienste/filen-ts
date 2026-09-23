@@ -73,7 +73,8 @@ import {
 	evictDirs,
 	getCachedDir,
 	getCachedName,
-	getSharedDirContext
+	getSharedDirContext,
+	isOutsideRoot
 } from "@/features/drive/lib/cache"
 import {
 	coalesceSharedPathDeps,
@@ -706,6 +707,11 @@ const api = {
 		cacheDirs(normalDirs)
 
 		return { dirs: normalDirs, files }
+	},
+	// Photos' socket scoping: whether every dir provably sits outside `rootUuid`, judged from the dir cache
+	// alone. Deciding to skip a refetch must never cost a round trip of its own.
+	isOutsidePhotosRoot(rootUuid: string, dirUuids: string[]): boolean {
+		return isOutsideRoot(dirUuids, rootUuid, requireClient().root().uuid)
 	},
 	// Backend directory create is idempotent and case-insensitive: an existing directory with this
 	// name under this parent returns ITS uuid rather than erroring (a name clash with a FILE still

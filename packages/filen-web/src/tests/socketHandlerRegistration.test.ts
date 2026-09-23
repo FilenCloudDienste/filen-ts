@@ -36,10 +36,10 @@ import { registerGeneralSocketHandlers, handleGeneralEvent } from "@/features/sh
 import { registerNoteSocketHandlers, handleNoteEvent } from "@/features/notes/lib/socketHandlers"
 import { registerChatSocketHandlers, handleChatEvent, handleReconnecting, handleAuthSuccess } from "@/features/chats/lib/socketHandlers"
 import { registerContactSocketHandlers, handleContactEvent } from "@/features/contacts/lib/socketHandlers"
+import { markPhotosListingStale } from "@/features/photos/queries/photos"
 
-// The four domains that subscribe exactly one category.
+// The three domains that subscribe exactly one category.
 const SINGLE_REGISTRATIONS = [
-	{ category: "drive", register: registerDriveSocketHandlers, handler: handleDriveEvent },
 	{ category: "general", register: registerGeneralSocketHandlers, handler: handleGeneralEvent },
 	{ category: "note", register: registerNoteSocketHandlers, handler: handleNoteEvent },
 	{ category: "contact", register: registerContactSocketHandlers, handler: handleContactEvent }
@@ -78,14 +78,34 @@ describe("socket handler registration", () => {
 		expect(unregister).toHaveBeenCalledTimes(3)
 	})
 
-	it("no two domains claim the same category", () => {
+	// Drive also marks the photos listing stale on a drop, since the drive events it missed are what keep
+	// that listing fresh.
+	it("subscribes the drive handler alongside the photos listing's drop handler", () => {
+		registerDriveSocketHandlers()
+
+		expect(registerSocketHandler.mock.calls).toEqual([
+			["drive", handleDriveEvent],
+			["reconnecting", markPhotosListingStale]
+		])
+	})
+
+	it("the drive disposer releases both of its subscriptions", () => {
+		registerDriveSocketHandlers()()
+
+		expect(unregister).toHaveBeenCalledTimes(2)
+	})
+
+	// Connection-lifecycle categories are shared by design: every domain that caches socket-fed data
+	// needs to know when the socket dropped.
+	it("no two domains claim the same domain category", () => {
 		for (const { register } of SINGLE_REGISTRATIONS) {
 			register()
 		}
 
 		registerChatSocketHandlers()
+		registerDriveSocketHandlers()
 
-		const categories = registerSocketHandler.mock.calls.map(call => call[0])
+		const categories = registerSocketHandler.mock.calls.map(call => call[0]).filter(category => category !== "reconnecting")
 
 		expect(new Set(categories).size).toBe(categories.length)
 	})

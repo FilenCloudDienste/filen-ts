@@ -37,6 +37,42 @@ export function getCachedName(uuid: string): string | undefined {
 	return namesByUuid.get(uuid)
 }
 
+export type RootMembership = "member" | "nonMember" | "unknown"
+
+// Whether directory `uuid` is `rootUuid` or sits under it, by walking cached parent pointers up to the
+// drive root. Only reaching the drive root proves "nonMember": a cache miss, a pseudo parent (a trashed
+// dir's "trash") or a cycle left by stale pointers is "unknown".
+export function classifyUnderRoot(uuid: string, rootUuid: string, driveRootUuid: string): RootMembership {
+	const seen = new Set<string>()
+	let current = uuid
+
+	while (!seen.has(current)) {
+		if (current === rootUuid) {
+			return "member"
+		}
+
+		if (current === driveRootUuid) {
+			return "nonMember"
+		}
+
+		const dir = dirsByUuid.get(current)
+
+		if (dir === undefined) {
+			return "unknown"
+		}
+
+		seen.add(current)
+		current = dir.parent
+	}
+
+	return "unknown"
+}
+
+// True only when every one of `dirUuids` is provably outside `rootUuid`.
+export function isOutsideRoot(dirUuids: readonly string[], rootUuid: string, driveRootUuid: string): boolean {
+	return dirUuids.every(uuid => classifyUnderRoot(uuid, rootUuid, driveRootUuid) === "nonMember")
+}
+
 // Upserts every dir into both maps — the single population point for listDirectory's returned
 // dirs, createDirectory's created-or-idempotent-existing dir, and resolveOwnedDir's cold
 // getDirOptional fallback. A dir whose meta isn't decodable updates the Dir map only; any name

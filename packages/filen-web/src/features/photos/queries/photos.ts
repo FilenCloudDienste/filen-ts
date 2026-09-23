@@ -14,22 +14,37 @@ export function photosListingQueryKey(rootUuid: string) {
 	return ["photos", "listing", rootUuid] as const
 }
 
+// Roots whose listing was read from the server in this page session. A persisted listing restores with
+// its original read time, and the socket can't replay what changed while the app was closed.
+const readThisSession = new Set<string>()
+
 // The recursive walk (listPhotosRecursive) plus the media predicate and capture-date sort, all in one
 // queryFn — a photos listing has exactly one consumer shape (the grid), so there is no separate
 // selector layer filtering/sorting on every render the way a multi-mode drive listing would need.
 export async function fetchPhotosListing(rootUuid: string): Promise<PhotoItem[]> {
 	const { dirs, files } = await sdkApi.listPhotosRecursive(rootUuid)
+
+	readThisSession.add(rootUuid)
+
 	const items: DriveItem[] = [...dirs.map(narrowItem), ...files.map(narrowItem)]
 	const photos = items.filter(isPhotoItem) as PhotoItem[]
 
 	return sortPhotosByCaptureDesc(photos)
 }
 
+// A full recursive walk, and drive socket events already mark the listing stale when something under the
+// root changes (invalidatePhotosListing), so a remount or refocus reuses it. The first mount of a
+// session still reads, and a network reconnect always does: events may have been missed meanwhile.
+export const PHOTOS_LISTING_STALE_TIME = 15 * 60 * 1000
+
 export function usePhotosListingQuery(rootUuid: string | null): UseQueryResult<PhotoItem[]> {
 	return useQuery({
 		queryKey: photosListingQueryKey(rootUuid ?? ""),
 		queryFn: () => fetchPhotosListing(rootUuid ?? ""),
-		enabled: rootUuid !== null
+		enabled: rootUuid !== null,
+		staleTime: PHOTOS_LISTING_STALE_TIME,
+		refetchOnMount: query => (readThisSession.has(query.queryKey[2]) ? true : "always"),
+		refetchOnReconnect: "always"
 	})
 }
 
@@ -42,19 +57,82 @@ export function usePhotosListingQuery(rootUuid: string | null): UseQueryResult<P
 // always already populated by the time this runs.
 export function photosListingQueryUpdate(rootUuid: string, updater: (prev: PhotoItem[]) => PhotoItem[]): void {
 	const queryKey = photosListingQueryKey(rootUuid)
+	const query = queryClient.getQueryCache().find({ queryKey, exact: true })
+	// setQueryData marks the listing fresh, dropping a pending invalidation and the refetch cancelled
+	// below; left unrestored, the change behind them would wait out the stale time.
+	const refreshPending = query !== undefined && (query.state.isInvalidated || query.state.fetchStatus !== "idle")
 
 	if (queryClient.getQueryData(queryKey) !== undefined) {
 		void queryClient.cancelQueries({ queryKey })
 	}
 
 	queryClient.setQueryData<PhotoItem[]>(queryKey, prev => (prev === undefined ? prev : updater(prev)))
+
+	if (refreshPending && queryClient.getQueryData(queryKey) !== undefined) {
+		void queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" })
+	}
 }
 
-// Coarse, cheap invalidation (see socketHandlers.ts's own call site for which drive events trigger
-// this): refetches the WHOLE recursive walk rather than attempting to splice-patch a socket event's
-// single item into a listing that may or may not even contain it (a photo three subdirectories under
-// the root has no cheap membership test from a bare uuid/parent payload). A no-op when no photos
-// query is mounted — invalidateQueries against an absent key does nothing.
-export function invalidatePhotosListing(): void {
-	void queryClient.invalidateQueries({ queryKey: ["photos", "listing"] })
+// What a drive event touched, for deciding whether a photos listing can have changed: every directory
+// it landed in or left, and the item itself. The event concerns a listing when the item is the root or
+// a photo the listing holds, or when any of `dirs` may sit under the root.
+export interface PhotosEventScope {
+	dirs: readonly string[]
+	item: string
+}
+
+// Refetches the whole recursive walk rather than splice-patching the event's single item in: a photo
+// three subdirectories down has no cheap membership test from a bare uuid/parent payload. Given a
+// scope, a listing is skipped only when that is proven harmless; anything unproven invalidates. The
+// proof reads the worker's dir cache, which is only trusted for an active listing that was read this
+// session and is neither mid-walk (the walk may predate the change) nor already invalidated (a
+// missed or pending change may have left cached parent pointers stale). An inactive listing is just
+// marked stale, which costs nothing until it mounts.
+export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
+	for (const query of queryClient.getQueryCache().findAll({ queryKey: ["photos", "listing"] })) {
+		const queryKey = query.queryKey
+		const rootUuid = queryKey[2]
+		const photos = queryClient.getQueryData<PhotoItem[]>(queryKey)
+
+		const invalidate = (): void => {
+			void queryClient.invalidateQueries({ queryKey, exact: true })
+		}
+
+		if (
+			scope === null ||
+			typeof rootUuid !== "string" ||
+			photos === undefined ||
+			!readThisSession.has(rootUuid) ||
+			!query.isActive() ||
+			query.state.fetchStatus !== "idle" ||
+			query.state.isInvalidated
+		) {
+			invalidate()
+
+			continue
+		}
+
+		if (scope.item === rootUuid || photos.some(photo => photo.data.uuid === scope.item)) {
+			invalidate()
+
+			continue
+		}
+
+		// Only the item itself could have been involved, and it isn't listed: removing it changes nothing.
+		if (scope.dirs.length === 0) {
+			continue
+		}
+
+		sdkApi.isOutsidePhotosRoot(rootUuid, [...scope.dirs]).then(outside => {
+			if (!outside) {
+				invalidate()
+			}
+		}, invalidate)
+	}
+}
+
+// A dropped socket may have missed events: mark every listing stale without refetching while the socket
+// is down. The next mount, focus or event reads it again, and the scoping above stays off until it has.
+export function markPhotosListingStale(): void {
+	void queryClient.invalidateQueries({ queryKey: ["photos", "listing"], refetchType: "none" })
 }
