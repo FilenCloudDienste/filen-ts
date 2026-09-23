@@ -99,26 +99,25 @@ export function AppShell() {
 			    domain's handlers (drive/chats reuse the bridge later). Renders nothing. */}
 			<SocketHost />
 			<SystemStrip />
-			{/* Drawer.Root renders no DOM of its own, so wrapping the row leaves its layout untouched at
-			    every width; the panel goes to exactly one of the two slots. */}
+			{/* A sibling of the row, never its wrapper (see sidebarDrawer.tsx); the panel goes to exactly one
+			    of the two slots. */}
 			<SidebarDrawer
 				open={narrow && sidebarOpen}
 				narrow={narrow}
 				label={t(SIDEBAR_LABEL_KEY[sidebarKind])}
 				panel={sidebar}
 				onOpenChange={setSidebarOpen}
-			>
-				<div className="flex min-h-0 flex-1 gap-2 overflow-hidden p-2">
-					<IconRail />
-					{/* Positioning context for the sidebar's drag handle, which sits absolutely in the gap-2
-					    after the panel (see sidebarResizeHandle.tsx) — an in-flow handle would add a second
-					    gap and make the sidebar-to-main spacing wider than the row's padding. */}
-					{narrow ? null : <div className="relative flex shrink-0">{sidebar}</div>}
-					<main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-card shadow-sm">
-						<Outlet />
-					</main>
-				</div>
-			</SidebarDrawer>
+			/>
+			<div className="flex min-h-0 flex-1 gap-2 overflow-hidden p-2">
+				<IconRail />
+				{/* Positioning context for the sidebar's drag handle, which sits absolutely in the gap-2
+				    after the panel (see sidebarResizeHandle.tsx) — an in-flow handle would add a second
+				    gap and make the sidebar-to-main spacing wider than the row's padding. */}
+				{narrow ? null : <div className="relative flex shrink-0">{sidebar}</div>}
+				<main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-card shadow-sm">
+					<Outlet />
+				</main>
+			</div>
 			{/* Persistent audio player — docked at the bottom of the authed shell, below the module row, the
 			    same shell-level docking the transfers rail established. Renders null until a queue exists;
 			    since AppShell is the authed layout (public-link routes have their own tree), the player is

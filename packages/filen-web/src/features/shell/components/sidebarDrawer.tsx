@@ -15,28 +15,32 @@ import { cn } from "@filen/shared"
 // shell's own floating-panel language: inset by the row's own p-2, and the panel keeps its own
 // rounded-xl bg-sidebar surface, so opening the drawer looks like the desktop sidebar sliding in rather
 // than a foreign sheet.
+//
+// The root wraps nothing but its own portal; the rail's trigger reaches it through a detached handle.
+// Base UI treats any Dialog/AlertDialog/Drawer root rendered inside another as nested and skips a nested
+// root's Backdrop, so a root wrapping the shell would strip the backdrop from every dialog the app opens.
+const sidebarDrawerHandle = DrawerPrimitive.createHandle()
+
 export function SidebarDrawer({
 	open,
 	narrow,
 	label,
 	panel,
-	children,
 	onOpenChange
 }: {
 	open: boolean
 	narrow: boolean
 	label: string
 	panel: ReactNode
-	children: ReactNode
 	onOpenChange: (open: boolean) => void
 }) {
 	return (
 		<DrawerPrimitive.Root
 			open={open}
+			handle={sidebarDrawerHandle}
 			swipeDirection="left"
 			onOpenChange={onOpenChange}
 		>
-			{children}
 			{narrow ? (
 				<DrawerPrimitive.Portal keepMounted={true}>
 					<DrawerPrimitive.Backdrop className="fixed inset-0 isolate z-50 bg-black/30 duration-100 supports-backdrop-filter:backdrop-blur-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
@@ -56,15 +60,15 @@ export function SidebarDrawer({
 	)
 }
 
-// The drawer's ONE trigger, rendered by IconRail inside SidebarDrawer's own subtree so it reaches the
-// drawer through Base UI's context (no detached handle needed). `md:hidden` rather than a second
-// useIsNarrowViewport consumer: display:none also removes it from the tab order, so the desktop rail is
-// unchanged in both pixels and keyboard order.
+// The drawer's ONE trigger, rendered by IconRail outside SidebarDrawer's subtree and bound to it through
+// sidebarDrawerHandle. `md:hidden` rather than a second useIsNarrowViewport consumer: display:none also
+// removes it from the tab order, so the desktop rail is unchanged in both pixels and keyboard order.
 export function SidebarDrawerTrigger({ className }: { className?: string }) {
 	const { t } = useTranslation("common")
 
 	return (
 		<DrawerPrimitive.Trigger
+			handle={sidebarDrawerHandle}
 			render={
 				<button
 					type="button"
