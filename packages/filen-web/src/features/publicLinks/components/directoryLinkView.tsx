@@ -1,8 +1,10 @@
 import { useState } from "react"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
-import { usePublicDirInfo } from "@/features/publicLinks/queries/publicLink"
+import { queryClient } from "@/queries/client"
+import { usePublicDirInfo, publicDirListingQueryKey } from "@/features/publicLinks/queries/publicLink"
 import { dirAccessState, linkForBrowsing } from "@/features/publicLinks/lib/password.logic"
+import { rootCrumb } from "@/features/publicLinks/lib/browse.logic"
 import { PasswordGate } from "@/features/publicLinks/components/passwordGate"
 import { DirectoryBrowser } from "@/features/publicLinks/components/directoryBrowser"
 import { PublicLinkLoading, PublicLinkInvalid, PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
@@ -37,8 +39,13 @@ export function DirectoryLinkView({ uuid, linkKey }: { uuid: string; linkKey: st
 		setVerifying(true)
 		setFailed(false)
 
-		void runOp(sdkApi.listLinkedDirAnon(data.root, linkForBrowsing(data, candidate)))
-			.then(() => {
+		const root = rootCrumb(data)
+		const link = linkForBrowsing(data, candidate)
+
+		void runOp(sdkApi.listLinkedDirAnon(root.dir, link))
+			.then(listing => {
+				// The browser's first level is this same root under this same link, so it opens on this read.
+				queryClient.setQueryData(publicDirListingQueryKey(root.uuid, link), listing)
 				setAccepted(candidate)
 			})
 			.catch(() => {

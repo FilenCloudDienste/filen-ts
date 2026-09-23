@@ -1,11 +1,21 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import type { LinkedFile, DirPublicInfo, LinkedDirsAndFiles, AnyLinkedDir, DirPublicLink, DirSizeResponse } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
+import { isNetworkClassError } from "@/lib/sdk/retry"
 import { publicLinkQueryKey, secretFingerprint, passwordStatePart } from "@/features/publicLinks/lib/queryKey.logic"
 
 // ★ SECURITY: the decryption key AND any visitor-typed password MUST NOT appear in a react-query key —
 // every secret travels ONLY through the queryFn closures below; the key carries a non-secret djb2
 // fingerprint of it (queryKey.logic.ts) so a query re-runs when the fragment key or password changes.
+
+// No socket reaches this unauthenticated surface, so a resolved read is a snapshot: a focus or a return
+// to a visited level serves it, and the error retry or a reload re-reads. With no events to miss while
+// offline, a reconnect only re-runs a read that last failed on the wire.
+const snapshotFreshness = {
+	staleTime: Infinity,
+	refetchOnWindowFocus: false,
+	refetchOnReconnect: (query: { state: { error: Error | null } }) => (isNetworkClassError(query.state.error) ? "always" : false)
+} as const
 
 // `MaybeEncrypted<string>` narrow (mirrors chatMessageLinks.ts's decryptedName) — a still-encrypted
 // name degrades to the uuid rather than throwing, so an undecryptable-but-resolvable link still
@@ -28,7 +38,8 @@ export function usePublicFile(uuid: string | null, key: string | null, password:
 		queryFn: () => sdkApi.getLinkedFileAnon(uuid ?? "", key ?? "", password),
 		enabled,
 		retry: false,
-		persister: (queryFn, context) => queryFn(context)
+		persister: (queryFn, context) => queryFn(context),
+		...snapshotFreshness
 	})
 }
 
@@ -42,7 +53,8 @@ export function usePublicDirInfo(uuid: string | null, key: string | null): UseQu
 		queryFn: () => sdkApi.getDirPublicLinkInfoAnon(uuid ?? "", key ?? ""),
 		enabled,
 		retry: false,
-		persister: (queryFn, context) => queryFn(context)
+		persister: (queryFn, context) => queryFn(context),
+		...snapshotFreshness
 	})
 }
 
@@ -67,8 +79,14 @@ export function usePublicDirSize(args: {
 		},
 		enabled,
 		retry: false,
-		persister: (queryFn, context) => queryFn(context)
+		persister: (queryFn, context) => queryFn(context),
+		...snapshotFreshness
 	})
+}
+
+// Shared with the directory password check, which seeds the root level with the listing it already read.
+export function publicDirListingQueryKey(levelUuid: string | null, link: DirPublicLink | null) {
+	return publicLinkQueryKey("listing", levelUuid ?? "disabled", secretFingerprint(link?.linkKey, passwordStatePart(link?.password)))
 }
 
 // One directory LEVEL's listing. Keyed by that level's own uuid plus a fingerprint of the link key +
@@ -83,11 +101,7 @@ export function usePublicDirListing(args: {
 	const enabled = levelUuid !== null && dir !== null && link !== null
 
 	return useQuery({
-		queryKey: publicLinkQueryKey(
-			"listing",
-			levelUuid ?? "disabled",
-			secretFingerprint(link?.linkKey, passwordStatePart(link?.password))
-		),
+		queryKey: publicDirListingQueryKey(levelUuid, link),
 		queryFn: () => {
 			if (dir === null || link === null) {
 				throw new Error("public-link listing invoked without a resolved directory")
@@ -97,6 +111,7 @@ export function usePublicDirListing(args: {
 		},
 		enabled,
 		retry: false,
-		persister: (queryFn, context) => queryFn(context)
+		persister: (queryFn, context) => queryFn(context),
+		...snapshotFreshness
 	})
 }
