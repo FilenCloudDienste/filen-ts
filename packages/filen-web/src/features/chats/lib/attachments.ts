@@ -11,6 +11,8 @@ import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/features/drive/lib/upload"
 import { noop } from "@/lib/utils"
 import { markAccountStale } from "@/queries/account"
+import { addAccountStorageUsed, ensureUploadQuota } from "@/features/drive/lib/quota"
+import { sumBytes } from "@/features/drive/lib/quota.logic"
 
 // Composer attachment flow: no first-class attachment message type
 // on either mobile or old-web — attachments are Filen public links pasted into the message body. A
@@ -100,6 +102,12 @@ export async function attachExistingDriveItem(item: DriveItem): Promise<Attachme
 	return ensurePublicLinkUrl(item)
 }
 
+// The quota pre-flight for a whole local pick, run once before any of its uploadAttachment calls: the
+// pick is blocked as a whole (one message, nothing created) like a drive upload. False once refused.
+export function preflightAttachments(files: readonly File[]): Promise<boolean> {
+	return ensureUploadQuota(sumBytes(files.map(file => file.size)))
+}
+
 // A LOCAL file (file-input / drag-drop path): upload into the chat-uploads directory (registered in the
 // transfers panel like any other upload, so it shows real progress there — mirrors features/drive/lib/upload.ts's
 // runUpload registration exactly, but this needs the resulting DriveItem back to build the link, which
@@ -158,6 +166,7 @@ export async function uploadAttachment(file: File, onProgress: (bytesTransferred
 	const item = narrowItem(uploaded)
 	driveListingQueryUpdate(parentUuid, prev => upsertDriveItem(prev, item))
 	markAccountStale()
+	addAccountStorageUsed(uploaded.size)
 
 	return ensurePublicLinkUrl(item)
 }

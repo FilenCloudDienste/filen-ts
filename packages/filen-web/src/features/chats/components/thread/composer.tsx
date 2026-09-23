@@ -10,7 +10,7 @@ import { enqueueChatMessage } from "@/features/chats/lib/sync"
 import { signalTyping, signalStopped } from "@/features/chats/lib/typing"
 import { messageSenderName } from "@/features/chats/lib/sort"
 import { editMessage } from "@/features/chats/lib/messageActions"
-import { uploadAttachment } from "@/features/chats/lib/attachments"
+import { preflightAttachments, uploadAttachment } from "@/features/chats/lib/attachments"
 import type { OptimisticSender } from "@/features/chats/lib/sync.logic"
 import {
 	MAX_CHAT_MESSAGE_LENGTH,
@@ -304,8 +304,15 @@ export function Composer({
 		}
 	}
 
-	function attachLocalFiles(files: FileList | File[]): void {
-		for (const file of files) {
+	async function attachLocalFiles(files: FileList | File[]): Promise<void> {
+		// Copied before the await: the input's FileList empties once its value is reset.
+		const picked = Array.from(files)
+
+		if (picked.length === 0 || !(await preflightAttachments(picked))) {
+			return
+		}
+
+		for (const file of picked) {
 			void attachLocalFile(file)
 		}
 	}
@@ -316,7 +323,7 @@ export function Composer({
 		}
 
 		event.preventDefault()
-		attachLocalFiles(event.dataTransfer.files)
+		void attachLocalFiles(event.dataTransfer.files)
 	}
 
 	async function submit(): Promise<void> {
@@ -468,7 +475,7 @@ export function Composer({
 				className="hidden"
 				onChange={event => {
 					if (event.target.files !== null) {
-						attachLocalFiles(event.target.files)
+						void attachLocalFiles(event.target.files)
 					}
 
 					// Reset so selecting the SAME file twice in a row still fires onChange the second time.

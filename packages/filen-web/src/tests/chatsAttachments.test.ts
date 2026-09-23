@@ -1,29 +1,38 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { File as SdkFile, Dir, FilePublicLink, DirPublicLinkRW, UuidStr } from "@filen/sdk-rs"
+import type { File as SdkFile, Dir, FilePublicLink, DirPublicLinkRW, UserInfo, UuidStr } from "@filen/sdk-rs"
 
 // Mock boundary matching upload.test.ts: the real sdk client/query client modules import a Vite
 // `?worker` / touch an OPFS-backed persister, unresolvable/unwanted under node vitest.
-const { createDirectory, uploadFile, getFileLinkStatus, getDirectoryLinkStatus, createFileLink, createDirectoryLink } = vi.hoisted(() => ({
-	createDirectory: vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>(),
-	uploadFile:
-		vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>(),
-	getFileLinkStatus: vi.fn<(file: unknown) => Promise<FilePublicLink | undefined>>(),
-	getDirectoryLinkStatus: vi.fn<(dir: unknown) => Promise<DirPublicLinkRW | undefined>>(),
-	createFileLink: vi.fn<(file: unknown) => Promise<FilePublicLink>>(),
-	createDirectoryLink: vi.fn<(dir: unknown, onProgress: unknown) => Promise<DirPublicLinkRW>>()
-}))
+const { createDirectory, uploadFile, getFileLinkStatus, getDirectoryLinkStatus, createFileLink, createDirectoryLink, getUserInfo } =
+	vi.hoisted(() => ({
+		createDirectory: vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>(),
+		uploadFile:
+			vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>(),
+		getFileLinkStatus: vi.fn<(file: unknown) => Promise<FilePublicLink | undefined>>(),
+		getDirectoryLinkStatus: vi.fn<(dir: unknown) => Promise<DirPublicLinkRW | undefined>>(),
+		createFileLink: vi.fn<(file: unknown) => Promise<FilePublicLink>>(),
+		createDirectoryLink: vi.fn<(dir: unknown, onProgress: unknown) => Promise<DirPublicLinkRW>>(),
+		getUserInfo: vi.fn<() => Promise<UserInfo>>()
+	}))
 
 vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { createDirectory, uploadFile, getFileLinkStatus, getDirectoryLinkStatus, createFileLink, createDirectoryLink }
+	sdkApi: { createDirectory, uploadFile, getFileLinkStatus, getDirectoryLinkStatus, createFileLink, createDirectoryLink, getUserInfo }
 }))
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
-import { uploadAttachment, attachExistingDriveItem, resetChatUploadsDirCache } from "@/features/chats/lib/attachments"
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
+
+vi.mock("sonner", () => ({ toast: { error: toastError } }))
+
+import { uploadAttachment, attachExistingDriveItem, preflightAttachments, resetChatUploadsDirCache } from "@/features/chats/lib/attachments"
 import { narrowItem } from "@/features/drive/lib/item"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { noop } from "@/lib/utils"
+import { formatBytes } from "@filen/shared"
+import { queryClient } from "@/queries/client"
+import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -102,18 +111,35 @@ beforeEach(() => {
 	// directory-creation tests can only ever pass in the one order where they run before the memo is
 	// warm — which is why two of them failed under shuffle.
 	resetChatUploadsDirCache()
+	// Room to spare: the quota pre-flight passes from the cache without a read.
+	queryClient.setQueryData(ACCOUNT_QUERY_KEY, { storageUsed: 0n, maxStorage: 1n << 40n })
 })
 
 afterEach(() => {
 	vi.clearAllMocks()
 })
 
+describe("preflightAttachments", () => {
+	it("passes a pick that fits the cached account without an account read", async () => {
+		expect(await preflightAttachments([mockBrowserFile("a.jpg", 1_024), mockBrowserFile("b.jpg", 1_024)])).toBe(true)
+		expect(getUserInfo).not.toHaveBeenCalled()
+		expect(toastError).not.toHaveBeenCalled()
+	})
+
+	it("checks the pick as one total: refused after exactly one fresh read, with a single message", async () => {
+		// Each file alone fits; together they do not.
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, { storageUsed: 1_000n, maxStorage: 2_500n })
+		getUserInfo.mockResolvedValueOnce({ storageUsed: 1_000n, maxStorage: 2_500n } as UserInfo)
+
+		expect(await preflightAttachments([mockBrowserFile("a.jpg", 1_024), mockBrowserFile("b.jpg", 1_024)])).toBe(false)
+		expect(getUserInfo).toHaveBeenCalledOnce()
+		expect(toastError).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(formatBytes(2_048)))
+		expect(createDirectory).not.toHaveBeenCalled()
+		expect(uploadFile).not.toHaveBeenCalled()
+	})
+})
+
 describe("uploadAttachment", () => {
-	// MUST run before any test that lets chatUploadsDirUuid() succeed: attachments.ts memoizes the
-	// resolved directory uuid at MODULE scope for the tab's lifetime (deliberate — every attachment
-	// after the first skips the two round trips), so once warm within this file no later test's
-	// createDirectory mock is ever consulted again. Declaration order is vitest's real run order here
-	// (no shuffling configured), so this is the only test that can ever exercise the failure path.
 	it("returns an error outcome when the chat-uploads directory itself can't be created/found", async () => {
 		createDirectory.mockRejectedValueOnce(new Error("parent directory not found"))
 
@@ -140,6 +166,9 @@ describe("uploadAttachment", () => {
 		expect(createFileLink).toHaveBeenCalledOnce()
 		expect(outcome.status).toBe("success")
 		expect(outcome.status === "success" && outcome.url.startsWith("https://app.filen.io/f/")).toBe(true)
+		// The composer pre-flights the pick; the upload itself never reads the account, only patches it.
+		expect(getUserInfo).not.toHaveBeenCalled()
+		expect(queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY)?.storageUsed).toBe(1_024n)
 	})
 
 	it("reuses an EXISTING link rather than creating a second one, when the just-uploaded item already has one", async () => {

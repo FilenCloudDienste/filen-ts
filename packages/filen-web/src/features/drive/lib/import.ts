@@ -13,6 +13,8 @@ import { runCreateDirectory, type CreateDirectoryDeps } from "@/features/drive/l
 import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { runBulk, type BulkOutcome } from "@/features/drive/lib/bulk"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { ensureUploadQuota } from "@/features/drive/lib/quota"
+import { sumBytes } from "@/features/drive/lib/quota.logic"
 
 // Import a sharedIn item (owned by someone else) into your own drive — mobile parity: the SDK has no
 // server-side copy op (see sdk.worker.ts's own listDirectoryRecursiveForImport comment), so mobile's
@@ -171,7 +173,13 @@ export interface RunImportDirectoryDeps {
 	// Injected (mirrors every other DI seam here) rather than calling sdkApi directly, so this whole
 	// function is testable with plain fakes — no worker/query-client mock boundary needed.
 	listRecursive: (dir: AnyDirWithContext) => Promise<{ listing: DirsAndFilesWithPaths; hadScanErrors: boolean }>
+	// Optional (tests that don't exercise the quota omit it): false once the scanned total was refused,
+	// the message already shown (quota.ts's ensureUploadQuota).
+	ensureQuota?: (neededBytes: bigint) => Promise<boolean>
 }
+
+// "blocked": refused by the quota pre-flight before anything was created, its message already shown.
+export type ImportDirectoryOutcome = VoidActionOutcome | { status: "blocked" }
 
 // Recreates the imported directory's OWN top-level entry at the destination (mobile parity — the
 // staged tmp directory mobile downloads into is named after the item, so the reupload lands a real
@@ -189,17 +197,11 @@ export async function runImportDirectory(
 		name: string
 		parentUuid: string | null
 	}
-): Promise<VoidActionOutcome> {
+): Promise<ImportDirectoryOutcome> {
 	const { item, name, parentUuid } = args
 
-	const rootOutcome = await runCreateDirectory(deps.createDirectory, parentUuid, name)
-
-	if (rootOutcome.status === "error") {
-		return { status: "error", dto: rootOutcome.dto }
-	}
-
-	const rootUuid = rootOutcome.item.data.uuid
-
+	// Scanned before the root is created: the quota check needs the tree's total size, and a refused
+	// or unscannable import must leave nothing behind.
 	let scan: { listing: DirsAndFilesWithPaths; hadScanErrors: boolean }
 	try {
 		scan = await runOp(deps.listRecursive(toAnyDirWithContext(item)))
@@ -212,6 +214,18 @@ export async function runImportDirectory(
 
 		return { status: "error", dto: { species: "plain", message, label: message } }
 	}
+
+	if (deps.ensureQuota !== undefined && !(await deps.ensureQuota(sumBytes(scan.listing.files.map(entry => entry.file.size))))) {
+		return { status: "blocked" }
+	}
+
+	const rootOutcome = await runCreateDirectory(deps.createDirectory, parentUuid, name)
+
+	if (rootOutcome.status === "error") {
+		return { status: "error", dto: rootOutcome.dto }
+	}
+
+	const rootUuid = rootOutcome.item.data.uuid
 
 	// "" (the walked root itself) maps to the already-created rootUuid — every real sub-path's
 	// dirnameOf resolves up the chain to this base case.
@@ -277,6 +291,7 @@ export interface RunImportDeps {
 	upload: RunUploadDeps
 	download: RunImportDownloadDeps
 	listRecursive: RunImportDirectoryDeps["listRecursive"]
+	ensureQuota?: RunImportDirectoryDeps["ensureQuota"]
 }
 
 // runBulk's perItem is throw-on-failure/resolve-on-success only — no third "neither" state — so a
@@ -286,6 +301,8 @@ export interface RunImportDeps {
 // this, it is not an error to surface), mirroring runDownload/runUpload's own cancel-is-not-a-failure
 // convention at the single-op layer.
 const IMPORT_CANCELLED = Symbol("import-cancelled")
+// Same treatment for an import the quota pre-flight refused: its own message is already on screen.
+const IMPORT_BLOCKED = Symbol("import-blocked")
 
 async function importItem(deps: RunImportDeps, item: DriveItem, targetParentUuid: string | null): Promise<void> {
 	const name = driveItemName(item)
@@ -295,10 +312,16 @@ async function importItem(deps: RunImportDeps, item: DriveItem, targetParentUuid
 			{
 				createDirectory: deps.createDirectory,
 				importFile: { download: deps.download, upload: deps.upload },
-				listRecursive: deps.listRecursive
+				listRecursive: deps.listRecursive,
+				...(deps.ensureQuota !== undefined ? { ensureQuota: deps.ensureQuota } : {})
 			},
 			{ item, name, parentUuid: targetParentUuid }
 		)
+
+		if (outcome.status === "blocked") {
+			// eslint-disable-next-line @typescript-eslint/only-throw-error -- identity-checked sentinel, see IMPORT_BLOCKED's own comment above
+			throw IMPORT_BLOCKED
+		}
 
 		if (outcome.status === "error") {
 			// eslint-disable-next-line @typescript-eslint/only-throw-error -- runBulk's per-item catch expects a plain ErrorDTO, mirrors runOp's own convention
@@ -314,6 +337,12 @@ async function importItem(deps: RunImportDeps, item: DriveItem, targetParentUuid
 	} catch (e) {
 		// eslint-disable-next-line @typescript-eslint/only-throw-error -- see the directory branch's own comment above
 		throw asErrorDTO(e)
+	}
+
+	// Before the download: nothing is fetched for an import that could not be stored.
+	if (deps.ensureQuota !== undefined && !(await deps.ensureQuota(item.data.size))) {
+		// eslint-disable-next-line @typescript-eslint/only-throw-error -- identity-checked sentinel, see IMPORT_BLOCKED's own comment above
+		throw IMPORT_BLOCKED
 	}
 
 	const mime = item.data.decryptedMeta?.mime
@@ -341,7 +370,8 @@ export const defaultImportDeps: RunImportDeps = {
 	},
 	upload: defaultUploadDeps,
 	download: defaultImportDownloadDeps,
-	listRecursive: dir => sdkApi.listDirectoryRecursiveForImport(dir)
+	listRecursive: dir => sdkApi.listDirectoryRecursiveForImport(dir),
+	ensureQuota: ensureUploadQuota
 }
 
 // The destination picker's one call (moveTargetDialog.tsx's mode="import" branch) — same shape as
@@ -357,5 +387,8 @@ export const defaultImportDeps: RunImportDeps = {
 export async function importItems(items: DriveItem[], targetParentUuid: string | null): Promise<BulkOutcome<DriveItem>> {
 	const outcome = await runBulk(items, item => importItem(defaultImportDeps, item, targetParentUuid))
 
-	return { succeeded: outcome.succeeded, failed: outcome.failed.filter(failure => failure.error !== IMPORT_CANCELLED) }
+	return {
+		succeeded: outcome.succeeded,
+		failed: outcome.failed.filter(failure => failure.error !== IMPORT_CANCELLED && failure.error !== IMPORT_BLOCKED)
+	}
 }

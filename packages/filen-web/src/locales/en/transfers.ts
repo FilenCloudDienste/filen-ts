@@ -86,6 +86,10 @@ export const transfers = {
 	/** Loading toast shown the instant a directory upload/drop starts, for the JS tree-walk scan phase before any transfer row exists yet (uploadDirectory.ts's collectDirectoryUploads) */
 	transfersScanningDirectory: "Scanning directory…",
 
+	// ── Upload quota pre-flight (features/drive/lib/quota.ts) ─────────────────
+	/** Error toast when a file, directory, attachment or import upload does not fit the account's free storage; nothing was uploaded; {{needed}} = formatted total size of the upload, {{free}} = formatted free storage */
+	transfersQuotaExceeded: "This upload needs {{needed}} but only {{free}} is free.",
+
 	// ── Upload summary toast (startUploads) ──────────────────────────────────
 	/** Upload summary toast — every uploaded file in the batch succeeded; singular */
 	transfersUploadSummaryComplete_one: "{{count}} file uploaded",

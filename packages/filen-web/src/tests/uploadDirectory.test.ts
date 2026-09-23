@@ -11,13 +11,14 @@ import type { Transfer, TerminalStatus } from "@/features/transfers/store/useTra
 // `@/features/drive/lib/upload`, or `@/features/drive/lib/createDirectory`) lets startDirectoryUpload's
 // real defaultDirectoryUploadDeps wiring — driveListingQueryUpdate, runCreateDirectory, runUpload,
 // defaultUploadDeps — run for real against those two mocked leaves.
-const { createDirectory, uploadFile } = vi.hoisted(() => ({
+const { createDirectory, uploadFile, getUserInfo } = vi.hoisted(() => ({
 	createDirectory: vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>(),
 	uploadFile:
-		vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
+		vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>(),
+	getUserInfo: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { createDirectory, uploadFile } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { createDirectory, uploadFile, getUserInfo } }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 // toastLoading returns a fixed id — startDirectoryUpload's own scanning-toast id — so assertions
@@ -34,6 +35,7 @@ vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError, lo
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { driveListingQueryKey } from "@/features/drive/queries/drive"
+import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import {
 	collectDirectoryUploads,
 	runDirectoryUpload,
@@ -183,6 +185,9 @@ beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
 	useTransfersStore.setState({ transfers: [] })
+	// A cached account with room to spare: the quota pre-flight passes without a read
+	// (uploadQuota.test.ts covers the other branches).
+	testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { storageUsed: 0n, maxStorage: 1n << 40n })
 })
 
 // ---------------------------------------------------------------------------
@@ -574,6 +579,7 @@ describe("startDirectoryUpload (real wiring)", () => {
 
 		await startDirectoryUpload({ kind: "files", files }, null)
 
+		expect(getUserInfo).not.toHaveBeenCalled()
 		expect(createDirectory).toHaveBeenCalledTimes(2)
 		expect(uploadFile).toHaveBeenCalledTimes(2)
 		expect(toastSuccess).toHaveBeenCalledWith(expect.any(String))

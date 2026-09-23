@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { AnyFile, Dir, DirsAndFilesWithPaths, File as SdkFile, UuidStr } from "@filen/sdk-rs"
+import type { AnyFile, Dir, DirsAndFilesWithPaths, File as SdkFile, UserInfo, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { Transfer, TerminalStatus } from "@/features/transfers/store/useTransfersStore"
@@ -10,7 +10,7 @@ import type { Transfer, TerminalStatus } from "@/features/transfers/store/useTra
 // "importItems (real wiring)" describe block below reaches these — every runImportFile/
 // runImportDirectory test uses fully injected deps (RunImportFileDeps/RunImportDirectoryDeps), no
 // worker mock needed at all.
-const { createDirectory, uploadFile, downloadFileToWriter, listDirectoryRecursiveForImport } = vi.hoisted(() => ({
+const { createDirectory, uploadFile, downloadFileToWriter, listDirectoryRecursiveForImport, getUserInfo } = vi.hoisted(() => ({
 	createDirectory: vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>(),
 	uploadFile:
 		vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>(),
@@ -18,13 +18,18 @@ const { createDirectory, uploadFile, downloadFileToWriter, listDirectoryRecursiv
 		vi.fn<
 			(file: AnyFile, transferId: string, writer: WritableStream<Uint8Array>, onProgress: (bytes: bigint) => void) => Promise<void>
 		>(),
-	listDirectoryRecursiveForImport: vi.fn<(dir: unknown) => Promise<{ listing: DirsAndFilesWithPaths; hadScanErrors: boolean }>>()
+	listDirectoryRecursiveForImport: vi.fn<(dir: unknown) => Promise<{ listing: DirsAndFilesWithPaths; hadScanErrors: boolean }>>(),
+	getUserInfo: vi.fn<() => Promise<UserInfo>>()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { createDirectory, uploadFile, downloadFileToWriter, listDirectoryRecursiveForImport }
+	sdkApi: { createDirectory, uploadFile, downloadFileToWriter, listDirectoryRecursiveForImport, getUserInfo }
 }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
+
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
+
+vi.mock("sonner", () => ({ toast: { error: toastError } }))
 
 import {
 	runImportFile,
@@ -34,6 +39,8 @@ import {
 	type RunImportDirectoryDeps
 } from "@/features/drive/lib/import"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { queryClient } from "@/queries/client"
+import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -130,6 +137,8 @@ async function drainToBytes(writer: WritableStream<Uint8Array>, bytes: Uint8Arra
 beforeEach(() => {
 	vi.clearAllMocks()
 	useTransfersStore.setState({ transfers: [], speedSamples: [] })
+	// A cached account with room to spare: the real-wiring quota pre-flight passes without a read.
+	queryClient.setQueryData(ACCOUNT_QUERY_KEY, { storageUsed: 0n, maxStorage: 1n << 40n })
 })
 
 afterEach(() => {
@@ -329,7 +338,7 @@ describe("runImportDirectory (injected deps, real runCreateDirectory/runImportFi
 		expect(h.upload).not.toHaveBeenCalled()
 	})
 
-	it("returns a partial-import error and creates no sub-tree when the recursive scan reports scan errors", async () => {
+	it("returns a partial-import error and creates nothing when the recursive scan reports scan errors", async () => {
 		const h = makeHarness()
 		resolveDirByName(h)
 		h.listRecursive.mockResolvedValue({ listing: { dirs: [], files: [] }, hadScanErrors: true })
@@ -337,8 +346,8 @@ describe("runImportDirectory (injected deps, real runCreateDirectory/runImportFi
 		const outcome = await runImportDirectory(h.deps, { item: dirItem(), name: "Shared", parentUuid: "dest-root" })
 
 		expect(outcome.status).toBe("error")
-		// Only the root itself was created — the scan-error bail happens before any sub-tree work.
-		expect(h.create).toHaveBeenCalledTimes(1)
+		// The scan runs before the root is created, so the bail leaves nothing behind.
+		expect(h.create).not.toHaveBeenCalled()
 	})
 
 	it("skips a sub-directory's whole subtree when its parent fails to create, without aborting siblings", async () => {
@@ -379,14 +388,50 @@ describe("runImportDirectory (injected deps, real runCreateDirectory/runImportFi
 		expect(h.upload).not.toHaveBeenCalled()
 	})
 
-	it("fails outright without listing when the root directory itself fails to create", async () => {
+	it("fails outright, importing nothing, when the root directory itself fails to create", async () => {
 		const h = makeHarness()
 		h.create.mockRejectedValue(sdkDto("DirCreateFileExists"))
+		h.listRecursive.mockResolvedValue({
+			listing: { dirs: [{ path: "sub", dir: mockDir() } as never], files: [nestedFile("a.txt", "a.txt")] },
+			hadScanErrors: false
+		})
 
 		const outcome = await runImportDirectory(h.deps, { item: dirItem(), name: "Shared", parentUuid: "dest-root" })
 
 		expect(outcome.status).toBe("error")
-		expect(h.listRecursive).not.toHaveBeenCalled()
+		expect(h.create).toHaveBeenCalledTimes(1)
+		expect(h.download).not.toHaveBeenCalled()
+	})
+
+	it("sizes the quota check from the scan and, when refused, creates and downloads nothing", async () => {
+		const h = makeHarness()
+		resolveDirByName(h)
+		h.listRecursive.mockResolvedValue({
+			listing: { dirs: [], files: [nestedFile("a.txt", "a.txt"), nestedFile("b.txt", "sub/b.txt")] },
+			hadScanErrors: false
+		})
+		const ensureQuota = vi.fn<(neededBytes: bigint) => Promise<boolean>>().mockResolvedValue(false)
+
+		const outcome = await runImportDirectory({ ...h.deps, ensureQuota }, { item: dirItem(), name: "Shared", parentUuid: "dest-root" })
+
+		expect(outcome.status).toBe("blocked")
+		expect(ensureQuota).toHaveBeenCalledExactlyOnceWith(1_024n)
+		expect(h.create).not.toHaveBeenCalled()
+		expect(h.download).not.toHaveBeenCalled()
+	})
+
+	it("imports as usual when the quota check passes", async () => {
+		const h = makeHarness()
+		resolveDirByName(h)
+		emptyDownload(h)
+		h.upload.mockResolvedValue({ ...testFile(), uuid: testUuid("uploaded") } as unknown as SdkFile)
+		h.listRecursive.mockResolvedValue({ listing: { dirs: [], files: [nestedFile("a.txt", "a.txt")] }, hadScanErrors: false })
+		const ensureQuota = vi.fn<(neededBytes: bigint) => Promise<boolean>>().mockResolvedValue(true)
+
+		const outcome = await runImportDirectory({ ...h.deps, ensureQuota }, { item: dirItem(), name: "Shared", parentUuid: "dest-root" })
+
+		expect(outcome.status).toBe("success")
+		expect(h.upload).toHaveBeenCalledTimes(1)
 	})
 })
 
@@ -410,6 +455,21 @@ describe("importItems (real wiring)", () => {
 		expect(outcome.succeeded).toHaveLength(1)
 		expect(uploadFile).toHaveBeenCalledTimes(1)
 		expect(uploadFile.mock.calls[0]?.[0]).toBe("dest-uuid")
+		expect(getUserInfo).not.toHaveBeenCalled()
+	})
+
+	it("refuses a file the account has no room for before downloading it, reporting neither success nor failure", async () => {
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, { storageUsed: 1_000n, maxStorage: 1_500n })
+		getUserInfo.mockResolvedValueOnce({ storageUsed: 1_000n, maxStorage: 1_500n } as UserInfo)
+
+		const outcome = await importItems([fileItem()], "dest-uuid")
+
+		expect(getUserInfo).toHaveBeenCalledOnce()
+		expect(downloadFileToWriter).not.toHaveBeenCalled()
+		expect(uploadFile).not.toHaveBeenCalled()
+		// Its own message is the only feedback; the bulk toast sees an empty outcome and stays silent.
+		expect(toastError).toHaveBeenCalledOnce()
+		expect(outcome).toEqual({ succeeded: [], failed: [] })
 	})
 
 	it("reports a failure without throwing when the download rejects", async () => {

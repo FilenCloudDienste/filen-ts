@@ -9,13 +9,14 @@ import type { Transfer, TerminalStatus } from "@/features/transfers/store/useTra
 // persister, unresolvable/unwanted under node vitest — mock both down to what this module actually
 // calls, mirroring drive/actions.test.ts's mock boundary. `sonner` is mocked to assert the summary
 // toast's call args without a mounted <Toaster/>.
-const { uploadFile, cancelUpload } = vi.hoisted(() => ({
+const { uploadFile, cancelUpload, getUserInfo } = vi.hoisted(() => ({
 	uploadFile:
 		vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>(),
-	cancelUpload: vi.fn()
+	cancelUpload: vi.fn(),
+	getUserInfo: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { uploadFile, cancelUpload } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { uploadFile, cancelUpload, getUserInfo } }))
 
 // A bare, unconfigured QueryClient stands in for the real singleton — driveListingQueryUpdate only
 // needs genuine setQueryData/getQueryData cache mechanics, never the production client's OPFS-backed
@@ -49,6 +50,9 @@ vi.mock("@/features/drive/lib/heicUpload", async importOriginal => {
 import { runUpload, startUploads, throttle, defaultUploadDeps, type RunUploadDeps } from "@/features/drive/lib/upload"
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { queryClient } from "@/queries/client"
+import { ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { addAccountStorageUsed } from "@/features/drive/lib/quota"
 
 // UuidStr is a template-literal brand requiring at least 3 dashes (see @filen/sdk-rs) — pad a short
 // readable test label into a shape that satisfies it, mirroring queries/drive.test.ts's own fixture.
@@ -89,6 +93,9 @@ beforeEach(() => {
 	useTransfersStore.setState({ transfers: [] })
 	heicUploadConversionEnabledMock.mockResolvedValue(false)
 	maybeConvertHeicUploadMock.mockImplementation((_deps, file) => Promise.resolve(file))
+	// A cached account with room to spare: the quota pre-flight passes without a read
+	// (uploadQuota.test.ts covers the other branches).
+	queryClient.setQueryData(ACCOUNT_QUERY_KEY, { storageUsed: 0n, maxStorage: 1n << 40n })
 })
 
 afterEach(() => {
@@ -112,15 +119,29 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		const invalidateDirectorySize = vi.fn<(parentUuid: string | null) => void>()
 		const warmThumbnail = vi.fn<(uploaded: SdkFile, file: File) => void>()
 		const markAccountStale = vi.fn<() => void>()
+		const addStorageUsed = vi.fn<(bytes: bigint) => void>()
 		const deps: RunUploadDeps = {
 			upload,
 			store: { add, setProgress, settle, remove },
 			patchListing,
 			invalidateDirectorySize,
 			markAccountStale,
+			addStorageUsed,
 			warmThumbnail
 		}
-		return { deps, upload, add, setProgress, settle, remove, patchListing, invalidateDirectorySize, markAccountStale, warmThumbnail }
+		return {
+			deps,
+			upload,
+			add,
+			setProgress,
+			settle,
+			remove,
+			patchListing,
+			invalidateDirectorySize,
+			markAccountStale,
+			addStorageUsed,
+			warmThumbnail
+		}
 	}
 
 	it("adds an uploading transfer before calling upload", async () => {
@@ -157,6 +178,8 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		expect(h.invalidateDirectorySize).toHaveBeenCalledWith("parent-uuid")
 		// Storage used moved; the account read waits for the next focus or mount rather than one per file.
 		expect(h.markAccountStale).toHaveBeenCalledOnce()
+		// The uploaded size lands in the cached storage used for the next quota pre-flight.
+		expect(h.addStorageUsed).toHaveBeenCalledExactlyOnceWith(1_024n)
 
 		const updater = h.patchListing.mock.calls[0]?.[1]
 		if (!updater) {
@@ -283,6 +306,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		expect(h.patchListing).not.toHaveBeenCalled()
 		expect(h.invalidateDirectorySize).not.toHaveBeenCalled()
 		expect(h.markAccountStale).not.toHaveBeenCalled()
+		expect(h.addStorageUsed).not.toHaveBeenCalled()
 	})
 
 	it("normalizes a plain Error rejection through asErrorDTO", async () => {
@@ -309,6 +333,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		expect(h.remove).toHaveBeenCalledWith(id)
 		expect(h.invalidateDirectorySize).not.toHaveBeenCalled()
 		expect(h.markAccountStale).not.toHaveBeenCalled()
+		expect(h.addStorageUsed).not.toHaveBeenCalled()
 	})
 })
 
@@ -445,8 +470,10 @@ describe("startUploads (real runUpload + defaultUploadDeps, mocked sdk client/qu
 
 		const promise = startUploads([mockBrowserFile("a.txt"), mockBrowserFile("b.txt")], null)
 
-		await Promise.resolve()
-		await Promise.resolve()
+		// Both started while neither has resolved.
+		await vi.waitFor(() => {
+			expect(callOrder).toHaveLength(2)
+		})
 
 		expect(callOrder).toEqual(["called:a.txt", "called:b.txt"])
 
@@ -569,6 +596,12 @@ describe("defaultUploadDeps.cancel", () => {
 		defaultUploadDeps.cancel?.("transfer-id")
 
 		expect(cancelUpload).toHaveBeenCalledWith("transfer-id")
+	})
+})
+
+describe("defaultUploadDeps.addStorageUsed", () => {
+	it("is wired to the real addAccountStorageUsed", () => {
+		expect(defaultUploadDeps.addStorageUsed).toBe(addAccountStorageUsed)
 	})
 })
 

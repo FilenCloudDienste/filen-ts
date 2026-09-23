@@ -11,6 +11,8 @@ import { markAccountStale } from "@/queries/account"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { defaultHeicUploadDeps, heicUploadConversionEnabled, maybeConvertHeicUpload } from "@/features/drive/lib/heicUpload"
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
+import { addAccountStorageUsed, ensureUploadQuota } from "@/features/drive/lib/quota"
+import { sumBytes } from "@/features/drive/lib/quota.logic"
 
 // Leading+trailing throttle, written locally rather than pulling a dependency — no throttle/debounce
 // util exists in src/lib yet. The leading edge invokes immediately so the first progress
@@ -78,7 +80,10 @@ export interface RunUploadDeps {
 	// Optional for the same DI reason: the account's storage used moved (see queries/account.ts's
 	// markAccountStale).
 	markAccountStale?: () => void
-	// Optional for the same DI reason as the two above: turns the bytes still in hand into this file's
+	// Optional for the same DI reason: the cached storage used, bumped so the next quota pre-flight
+	// counts this upload (see quota.ts's addAccountStorageUsed).
+	addStorageUsed?: (bytes: bigint) => void
+	// Optional for the same DI reason: turns the bytes still in hand into this file's
 	// thumbnail instead of letting the listing download them straight back. Synchronous and
 	// fire-and-forget by contract — see warmUploadThumbnail (thumbGenerators.ts) for why.
 	warmThumbnail?: (uploaded: SdkFile, file: File) => void
@@ -142,6 +147,7 @@ export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string 
 	deps.patchListing(parentUuid, prev => upsertDriveItem(prev, narrowItem(uploaded)))
 	deps.invalidateDirectorySize?.(parentUuid)
 	deps.markAccountStale?.()
+	deps.addStorageUsed?.(uploaded.size)
 
 	return { status: "success" }
 }
@@ -165,6 +171,7 @@ export const defaultUploadDeps: RunUploadDeps = {
 	patchListing: driveListingQueryUpdate,
 	invalidateDirectorySize,
 	markAccountStale,
+	addStorageUsed: addAccountStorageUsed,
 	warmThumbnail: warmUploadThumbnail
 }
 
@@ -176,6 +183,12 @@ export const defaultUploadDeps: RunUploadDeps = {
 // runUpload outcomes directly instead of forcing a mismatched reuse.
 export async function startUploads(files: File[], parentUuid: string | null): Promise<void> {
 	if (files.length === 0) {
+		return
+	}
+
+	// The whole selection or nothing: a partial start would leave an arbitrary subset uploaded. Sized
+	// before HEIC conversion, so the server stays the judge of a near-exact fit.
+	if (!(await ensureUploadQuota(sumBytes(files.map(file => file.size))))) {
 		return
 	}
 
