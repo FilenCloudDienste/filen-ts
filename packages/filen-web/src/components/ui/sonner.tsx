@@ -2,6 +2,8 @@ import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { useTranslation } from "react-i18next"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 import { useTheme } from "@/providers/themeProvider"
+import { useToastClearance } from "@/lib/toastClearance"
+import { TOAST_EDGE_OFFSET_PX, TOAST_MOBILE_EDGE_OFFSET_PX, TOAST_WIDTH_PX, toastBottomOffset } from "@/lib/toastClearance.logic"
 
 // Registry default reads the theme from `next-themes`; this app owns its theme provider, so the
 // import is repointed and `next-themes` is not a dependency. `theme` is "dark" | "light" | "system",
@@ -9,6 +11,9 @@ import { useTheme } from "@/providers/themeProvider"
 const Toaster = ({ ...props }: ToasterProps) => {
 	const { theme } = useTheme()
 	const { t } = useTranslation("common")
+	// Flush with the bottom edge unless a registered surface (selection bar, audio player, composer) occupies the
+	// toast corner — then lifted by exactly its measured clearance. Top/left stay sonner's defaults.
+	const clearance = useToastClearance()
 
 	return (
 		<Sonner
@@ -33,9 +38,23 @@ const Toaster = ({ ...props }: ToasterProps) => {
 					"--normal-bg": "var(--popover)",
 					"--normal-text": "var(--popover-foreground)",
 					"--normal-border": "var(--border)",
-					"--border-radius": "var(--radius)"
+					"--border-radius": "var(--radius)",
+					"--width": `${String(TOAST_WIDTH_PX)}px`
 				} as React.CSSProperties
 			}
+			offset={{
+				right: TOAST_EDGE_OFFSET_PX,
+				bottom: toastBottomOffset({
+					clearance,
+					edge: TOAST_EDGE_OFFSET_PX
+				})
+			}}
+			mobileOffset={{
+				bottom: toastBottomOffset({
+					clearance,
+					edge: TOAST_MOBILE_EDGE_OFFSET_PX
+				})
+			}}
 			// Every toast gets a tabbable dismiss — a timed-only toast is unreachable by keyboard. The
 			// label rides inside toastOptions (sonner declares it there, not on ToasterProps) and is not
 			// caller-overridable: a caller-supplied toastOptions replaces this object wholesale.

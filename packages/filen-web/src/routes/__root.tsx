@@ -120,11 +120,11 @@ function RootLayout() {
 					    with its own top-center position, so this single instance covers the authed shell
 					    AND the unauthenticated sign-in/register/reset pages without a second subscription. */}
 					<OfflineIndicator />
-					{/* Bottom-right, lifted above the floating selection bar's band: the bar's trailing
-					    buttons and the default toast viewport measurably overlap at ~1280px width, and a
-					    transient toast then swallows clicks on a visibly-present button. Top positions are
-					    no alternative — they intercepted the header buttons and the listing's first rows. */}
-					<Toaster offset={{ bottom: 96 }} />
+					{/* Bottom-right. A toast over a selection bar's buttons swallows their clicks, so the Toaster
+					    lifts itself while a registered surface occupies that corner (lib/toastClearance.ts).
+					    Top positions are no alternative — they intercepted the header buttons and the
+					    listing's first rows. */}
+					<Toaster />
 				</TooltipProvider>
 			</ThemeProvider>
 		</QueryClientProvider>

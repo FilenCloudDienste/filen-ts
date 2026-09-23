@@ -39,6 +39,7 @@ import { useChatComposerEntry, useChatComposerStore } from "@/features/chats/sto
 import { loadDraft, saveDraftDebounced } from "@/features/chats/lib/drafts"
 import { AttachDriveDialog } from "@/features/chats/components/thread/attachDriveDialog"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { toastObstructionRef } from "@/lib/toastClearance"
 import { useAccountQuery } from "@/queries/account"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -453,6 +454,7 @@ export function Composer({
 
 	return (
 		<div
+			ref={toastObstructionRef}
 			className="relative shrink-0 p-3"
 			onDragOver={event => {
 				event.preventDefault()

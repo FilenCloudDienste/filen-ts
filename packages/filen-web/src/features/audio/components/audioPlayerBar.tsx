@@ -11,6 +11,7 @@ import { MiddleEllipsis } from "@/components/middleEllipsis"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
+import { toastObstructionRef } from "@/lib/toastClearance"
 import { cn, formatSecondsToMediaClock } from "@filen/shared"
 
 // The persistent audio player, docked at the bottom of the authed shell (rendered once by AppShell,
@@ -53,6 +54,7 @@ export function AudioPlayerBar() {
 
 	return (
 		<section
+			ref={toastObstructionRef}
 			aria-label={t("playerLabel")}
 			className="flex flex-col gap-1 border-t border-border bg-card px-3 py-2 text-foreground"
 		>

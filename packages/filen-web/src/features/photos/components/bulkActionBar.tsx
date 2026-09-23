@@ -11,6 +11,7 @@ import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Kbd } from "@/lib/keymap/kbd"
+import { toastObstructionRef } from "@/lib/toastClearance"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -59,6 +60,7 @@ export function PhotosBulkActionBar({ rootUuid, selectedItems, onDialogAction }:
 
 	return (
 		<div
+			ref={toastObstructionRef}
 			role="toolbar"
 			aria-label={t("driveSelectionActionsLabel")}
 			className="pointer-events-auto flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-popover px-3 py-2 text-popover-foreground shadow-lg"

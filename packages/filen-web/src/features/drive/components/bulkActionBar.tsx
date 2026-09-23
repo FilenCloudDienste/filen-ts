@@ -16,6 +16,7 @@ import {
 } from "@/features/drive/components/bulkActionBar.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Kbd } from "@/lib/keymap/kbd"
+import { toastObstructionRef } from "@/lib/toastClearance"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -62,6 +63,7 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 
 	return (
 		<div
+			ref={toastObstructionRef}
 			role="toolbar"
 			aria-label={t("driveSelectionActionsLabel")}
 			className="pointer-events-auto flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-popover px-3 py-2 text-popover-foreground shadow-lg"
@@ -97,8 +99,8 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 					// Every other descriptor stays always-enabled.
 					const offlineDisabled = isBulkActionOfflineDisabled(descriptor.id, isOnline)
 					const disabled = (descriptor.id === "download" && !isBulkDownloadEnabled(selectedItems)) || offlineDisabled
-					// Icon-only keeps the floating pill compact enough to never reach the toast corner;
-					// the label lives on aria-label (stable accessible name) and in the tooltip.
+					// Icon-only keeps the floating pill compact; the label lives on aria-label (stable
+					// accessible name) and in the tooltip.
 					const keymapAction = KEYMAP_ACTION_FOR[descriptor.id]
 
 					return (

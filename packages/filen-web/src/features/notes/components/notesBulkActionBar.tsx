@@ -31,6 +31,7 @@ import { NOTE_TYPE_SUBMENU } from "@/features/notes/components/noteMenu.logic"
 import { Kbd } from "@/lib/keymap/kbd"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { toastObstructionRef } from "@/lib/toastClearance"
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -121,7 +122,10 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 	}
 
 	return (
-		<div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-popover px-3 py-2 text-popover-foreground shadow-lg">
+		<div
+			ref={toastObstructionRef}
+			className="pointer-events-auto flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-popover px-3 py-2 text-popover-foreground shadow-lg"
+		>
 			<div className="flex items-center gap-2">
 				<Tooltip>
 					<TooltipTrigger

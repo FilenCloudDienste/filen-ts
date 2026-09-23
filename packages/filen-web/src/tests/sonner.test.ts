@@ -7,8 +7,8 @@ import type { ToasterProps } from "sonner"
 import "@/lib/i18n"
 
 // Prop-capturing stub for sonner's own Toaster: the assertions are about what this app's wrapper
-// hands down (the close affordance and its localized label), not about sonner's rendering.
-const { capturedProps } = vi.hoisted(() => ({ capturedProps: [] as ToasterProps[] }))
+// hands down (the close affordance, its localized label, the offsets), not about sonner's rendering.
+const { capturedProps, clearance } = vi.hoisted(() => ({ capturedProps: [] as ToasterProps[], clearance: { value: 0 } }))
 
 vi.mock("sonner", () => ({
 	Toaster: (props: ToasterProps) => {
@@ -19,6 +19,10 @@ vi.mock("sonner", () => ({
 }))
 
 vi.mock("@/providers/themeProvider", () => ({ useTheme: () => ({ theme: "light" }) }))
+
+// The measured clearance is the store's concern (toastClearance.test.ts); here only its mapping onto
+// sonner's offsets matters.
+vi.mock("@/lib/toastClearance", () => ({ useToastClearance: () => clearance.value }))
 
 import { Toaster } from "@/components/ui/sonner"
 
@@ -34,6 +38,7 @@ function lastProps(): ToasterProps {
 
 afterEach(() => {
 	capturedProps.length = 0
+	clearance.value = 0
 	cleanup()
 })
 
@@ -67,5 +72,31 @@ describe("ui/sonner Toaster", () => {
 		const { container } = render(createElement("div", null, lastProps().icons?.loading))
 
 		expect(container.querySelector('[data-slot="spinner"]')).not.toBeNull()
+	})
+
+	it("sits flush with the bottom edge when nothing occupies the toast corner", () => {
+		render(createElement(Toaster))
+
+		const { offset, mobileOffset } = lastProps()
+
+		expect(offset).toEqual({
+			right: 24,
+			bottom: "calc(24px + env(safe-area-inset-bottom, 0px))"
+		})
+		expect(mobileOffset).toEqual({ bottom: "calc(16px + env(safe-area-inset-bottom, 0px))" })
+	})
+
+	it("lifts by the measured clearance, on both the desktop and the mobile offsets", () => {
+		clearance.value = 70
+
+		render(createElement(Toaster))
+
+		const { offset, mobileOffset } = lastProps()
+
+		expect(offset).toEqual({
+			right: 24,
+			bottom: "max(94px, calc(24px + env(safe-area-inset-bottom, 0px)))"
+		})
+		expect(mobileOffset).toEqual({ bottom: "max(86px, calc(16px + env(safe-area-inset-bottom, 0px)))" })
 	})
 })
