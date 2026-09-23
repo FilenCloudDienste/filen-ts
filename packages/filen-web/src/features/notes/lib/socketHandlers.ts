@@ -9,7 +9,7 @@ import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdi
 import { sync } from "@/features/notes/lib/sync"
 import { noteKindForPreview } from "@/features/notes/lib/sync.logic"
 import { fetchNotes, notesQueryUpdate, notesQueryRemove, notesQueryGet } from "@/features/notes/queries/notes"
-import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
+import { markNoteContentUnsynced, noteContentQueryKey } from "@/features/notes/queries/noteContent"
 
 // The realtime note event handlers — a faithful port of filen-mobile's socketHandlers.ts SEMANTICS
 // onto the wasm surface (flat discriminated `event.inner.type`, string-union noteType, MaybeEncrypted
@@ -150,6 +150,9 @@ async function mergeNewNotes(): Promise<void> {
 }
 
 function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "contentEdited" }>): void {
+	// Before every early return below: whichever branch runs, the cached content may now be behind.
+	markNoteContentUnsynced(inner.note)
+
 	// Echo suppression — mobile keys on editorId === own userId (screens content/index.tsx): the server
 	// echoes a note author's OWN edit back to them, and applying it would clobber the editor. All our
 	// tabs share one userId, so cross-TAB echoes are suppressed too — correct as long as tabs stay

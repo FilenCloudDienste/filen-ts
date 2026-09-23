@@ -1,5 +1,6 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
+import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { useNoteEditing } from "@/features/notes/store/useNotesInflight"
 import type { Note } from "@filen/sdk-rs"
 
@@ -51,16 +52,49 @@ export async function fetchNoteContentOrThrow(note: Note): Promise<string> {
 	return result.content
 }
 
-// staleTime: Infinity + refetchOnMount:"always" — mobile's exact per-note content config. staleTime
-// Infinity stops focus/reconnect refetches from clobbering an open editor mid-session; but this query
-// is PERSISTED per-query (queries/client.ts persister), and the sync loop's post-push cache write does
-// NOT re-persist to disk, so a plain "never stale" query would rehydrate a STALE disk value on the next
-// load and — being never-stale — never refetch it (a reload right after editing would then paint the
-// pre-edit content). refetchOnMount:"always" bypasses the stale check ON MOUNT ONLY, so a fresh editor
-// mount always pulls authoritative server content, while a note the user is editing has the query
-// DISABLED (so no mount refetch fires) and its in-progress edit stays protected. Explicit
-// invalidation still owns freshness after a confirmed write. `note` is optional so a caller can mount
-// the hook before its Note is resolved (the editor route's first render) without a conditional hook.
+// Each note's last content read that ran entirely under a live socket (socketSession.ts) with no
+// contentEdited arriving meanwhile. contentEdited drops a note's entry, a drop or re-auth retires them
+// all, and the persister restores content without one. readAt catches a read that was cancelled rather
+// than committed: the reverted cache keeps an older dataUpdatedAt.
+const contentReads = new Map<string, { epoch: number; readAt: number }>()
+let contentEditEvents = 0
+
+// Called for EVERY contentEdited, echoes included: the echo test keys on userId, so it also swallows the
+// user's own edits from another device, which only a later read picks up.
+export function markNoteContentUnsynced(uuid: string): void {
+	contentEditEvents++
+	contentReads.delete(uuid)
+}
+
+async function fetchTrackedNoteContent(note: Note): Promise<string> {
+	const epoch = currentSocketEpoch()
+	const editEvents = contentEditEvents
+	const content = await fetchNoteContentOrThrow(note)
+
+	if (epoch !== null && socketLiveSince(epoch) && editEvents === contentEditEvents) {
+		contentReads.set(note.uuid, { epoch, readAt: Date.now() })
+	} else {
+		contentReads.delete(note.uuid)
+	}
+
+	return content
+}
+
+function noteContentIsCurrent(uuid: string, dataUpdatedAt: number): boolean {
+	const read = contentReads.get(uuid)
+
+	return read !== undefined && socketLiveSince(read.epoch) && dataUpdatedAt >= read.readAt
+}
+
+// staleTime: Infinity stops focus/reconnect refetches from clobbering an open editor mid-session. A
+// mount forces a refetch ("always") unless the cached content is current per contentReads: this
+// query is PERSISTED per-query (queries/client.ts persister) and the sync loop's post-push cache write
+// does NOT re-persist to disk, so the first mount after a load must not trust the rehydrated value, and
+// neither may a mount after the socket could have missed a contentEdited. Otherwise `true` still
+// refetches content an invalidation marked stale. A note the user is editing has the query DISABLED (so
+// no mount refetch fires) and its in-progress edit stays protected. Explicit invalidation still owns
+// freshness after a confirmed write. `note` is optional so a caller can mount the hook before its Note
+// is resolved (the editor route's first render) without a conditional hook.
 //
 // USAGE NOTE for the editor: `dataUpdatedAt` on this hook's result is the editor remount key —
 // because the query is disabled for as long as the user is editing the note, `dataUpdatedAt` cannot
@@ -88,10 +122,11 @@ export function useNoteContentQuery(note: Note | undefined, options?: { enabled?
 				throw new Error("noteContent queryFn: called while disabled (note is undefined)")
 			}
 
-			return fetchNoteContentOrThrow(note)
+			return fetchTrackedNoteContent(note)
 		},
 		enabled: (options?.enabled ?? true) && note !== undefined && !editing,
 		staleTime: Infinity,
-		refetchOnMount: "always"
+		refetchOnMount: query =>
+			query.state.status !== "error" && noteContentIsCurrent(note?.uuid ?? "", query.state.dataUpdatedAt) ? true : "always"
 	})
 }
