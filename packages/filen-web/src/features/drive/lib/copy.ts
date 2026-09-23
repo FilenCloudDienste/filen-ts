@@ -21,6 +21,8 @@ import { type QuotaCheckDeps, type StorageCounters } from "@/features/drive/lib/
 import {
 	applyCopyCreated,
 	applyCopyUpdate,
+	copyGlyphForEntries,
+	copyGlyphForItems,
 	copyMaxBytes,
 	createCopyJob,
 	isQuotaPreflightFailure,
@@ -28,6 +30,7 @@ import {
 	settleCopyJob,
 	type CopyDestination,
 	type CopyJob,
+	type CopyJobGlyph,
 	type CopyJobOutcome,
 	type CopySettlement
 } from "@/features/drive/lib/copy.logic"
@@ -67,6 +70,7 @@ export interface CopyJobRequest {
 	destination: CopyDestination
 	itemCount: number
 	name: string
+	glyph: CopyJobGlyph
 }
 
 async function attempt(
@@ -132,9 +136,9 @@ function settleRow(transfers: RunCopyDeps["transfers"], id: string, outcome: Cop
 // Never throws: every way a job can end is an outcome on its job. Resolves undefined only if the job
 // was dropped from the store meanwhile.
 export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Promise<CopyJob | undefined> {
-	const { id, source, destination, itemCount, name } = request
+	const { id, source, destination, itemCount, name, glyph } = request
 
-	deps.jobs.put(createCopyJob(id, destination, itemCount))
+	deps.jobs.put(createCopyJob(id, destination, itemCount, glyph))
 	deps.transfers.add({
 		id,
 		direction: "copy",
@@ -321,7 +325,8 @@ export function startCopy(items: DriveItem[], destination: CopyDestination): str
 		source: { kind: "items", items, destinationUuid: destination.uuid },
 		destination,
 		itemCount: items.length,
-		name: copyRowName(items.length, driveItemName(first))
+		name: copyRowName(items.length, driveItemName(first)),
+		glyph: copyGlyphForItems(items)
 	})
 
 	return id
@@ -338,12 +343,15 @@ export function retryFailedCopy(jobId: string): string | null {
 
 	const id = crypto.randomUUID()
 
+	const entries = retryEntries(job.retryable)
+
 	void runCopyJob(defaultCopyDeps, {
 		id,
-		source: { kind: "entries", entries: retryEntries(job.retryable) },
+		source: { kind: "entries", entries },
 		destination: job.destination,
 		itemCount: job.retryable.length,
-		name: copyRowName(job.retryable.length, first.info.destName)
+		name: copyRowName(job.retryable.length, first.info.destName),
+		glyph: copyGlyphForEntries(entries)
 	})
 
 	return id

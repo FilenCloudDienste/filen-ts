@@ -17,8 +17,7 @@ export function canShareVariant(variant: DriveVariant): boolean {
 // don't own. sharedOut is deliberately excluded here: those items are the caller's OWN, merely shared
 // OUT to someone else, so the full owner toolbar applies there exactly as it would in My Drive (see
 // the item/bulk-action builders' own `ownerMutable = !isReadOnlySharedVariant(variant)` gate). Only
-// IMPORT (copying a not-owned item into your own drive) and the sharing-scoped SHARE/UNSHARE
-// distinguish the two surfaces beyond this.
+// the sharing-scoped SHARE/UNSHARE distinguish the two surfaces beyond this.
 export function isReadOnlySharedVariant(variant: DriveVariant): boolean {
 	return variant === "sharedIn"
 }

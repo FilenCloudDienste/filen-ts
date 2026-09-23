@@ -1,10 +1,10 @@
 import {
 	CopyIcon,
+	CopyPlusIcon,
 	DownloadIcon,
 	FolderInputIcon,
 	FolderOpenIcon,
 	HistoryIcon,
-	ImportIcon,
 	InfoIcon,
 	Link2OffIcon,
 	LinkIcon,
@@ -35,6 +35,8 @@ export interface ActionDef {
 export const ACTION_DEFS = {
 	rename: { labelKey: "driveActionRename", icon: PencilIcon },
 	move: { labelKey: "driveActionMove", icon: FolderInputIcon },
+	// Not CopyIcon: that one already means "Copy link".
+	copy: { labelKey: "driveActionCopy", icon: CopyPlusIcon },
 	favorite: { labelKey: "driveActionFavorite", icon: StarIcon },
 	unfavorite: { labelKey: "driveActionUnfavorite", icon: StarOffIcon },
 	color: { labelKey: "driveActionColor", icon: PaletteIcon },
@@ -42,7 +44,6 @@ export const ACTION_DEFS = {
 	info: { labelKey: "driveActionInfo", icon: InfoIcon },
 	openContainingDirectory: { labelKey: "driveActionOpenContainingDirectory", icon: FolderOpenIcon },
 	download: { labelKey: "driveActionDownload", icon: DownloadIcon },
-	import: { labelKey: "driveActionImport", icon: ImportIcon },
 	publicLink: { labelKey: "driveActionPublicLink", icon: LinkIcon },
 	copyLink: { labelKey: "driveActionCopyLink", icon: CopyIcon },
 	share: { labelKey: "driveActionShare", icon: UsersIcon },

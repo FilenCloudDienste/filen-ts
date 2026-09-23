@@ -167,7 +167,8 @@ function request(id = "job") {
 		source: { kind: "items" as const, items: SOURCE_ITEMS, destinationUuid: null },
 		destination: DESTINATION,
 		itemCount: 2,
-		name: "2 items"
+		name: "2 items",
+		glyph: "items" as const
 	}
 }
 

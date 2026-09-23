@@ -15,10 +15,10 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 // link — can never be bulk-dispatched, so they have no place here). "share"/"unshare" are both
 // bulk-dispatchable (the contact picker / unshare confirm each take the whole selection), unlike the
 // other link/access kinds.
-export type BulkDialogActionKind = "move" | "share" | "unshare" | "trash" | "delete" | "restoreSelected" | "disableLink"
+export type BulkDialogActionKind = "move" | "copy" | "share" | "unshare" | "trash" | "delete" | "restoreSelected" | "disableLink"
 
 interface BulkActionDescriptorShared {
-	id: "favorite" | "move" | "share" | "unshare" | "trash" | "restoreSelected" | "delete" | "download" | "disableLink"
+	id: "favorite" | "move" | "copy" | "share" | "unshare" | "trash" | "restoreSelected" | "delete" | "download" | "disableLink"
 	labelKey: DriveKey
 	icon: LucideIcon
 	destructive?: boolean
@@ -71,6 +71,10 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 				descriptors.push({ id: "move", ...ACTION_DEFS.move, run: "dialog", dialogKind: "move" })
 			}
 		}
+
+		// Copying only reads the selection, so it is offered on every surface it is readable from, shared
+		// in included — the one exception to the owner gate above, as in the per-item menu.
+		descriptors.push({ id: "copy", ...ACTION_DEFS.copy, run: "dialog", dialogKind: "copy" })
 
 		// Share the whole selection with contacts — same undecryptable gate as favorite/move above (an
 		// undecryptable item can't be shared), plus the owned-surface variant gate (canShareVariant
@@ -129,6 +133,7 @@ export function isBulkDownloadEnabled(items: DriveItem[]): boolean {
 const OFFLINE_GATED_BULK_IDS: ReadonlySet<BulkActionDescriptor["id"]> = new Set([
 	"favorite",
 	"move",
+	"copy",
 	"share",
 	"unshare",
 	"trash",

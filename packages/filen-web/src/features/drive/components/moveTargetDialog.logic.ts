@@ -45,6 +45,11 @@ export function isMoveRowDisabled(row: DriveItem, currentAncestry: readonly stri
 	return isMoveDestinationForbidden([...currentAncestry, row.data.uuid], movedItems)
 }
 
+// A copy may land beside its source (the SDK keeps both names); only self/descendant is illegal.
+export function isCopyConfirmDisabled(currentAncestry: readonly string[], copiedItems: readonly DriveItem[]): boolean {
+	return isMoveDestinationForbidden(currentAncestry, copiedItems)
+}
+
 // "Move here" gate for the directory currently open in the picker.
 export function isMoveConfirmDisabled(
 	currentAncestry: readonly string[],
@@ -59,13 +64,14 @@ export interface MoveTreeGates {
 	isTargetDisabled: (target: DirectoryTreeTarget) => boolean
 }
 
-// The same two gates for the item menu's directory-tree submenu, which knows each directory only by its
-// uuid chain. `readListing` supplies what the dialog would have on screen: a node's parent listing (to
-// find the row itself) and a target's own listing (for the no-op check). An unread target listing
-// keeps "Move here" disabled, as the dialog does until its listing loads.
+// The same two gates for the directory-tree submenus (move or copy), which know each directory only by
+// its uuid chain. `readListing` supplies what the dialog would have on screen: a node's parent listing
+// (to find the row itself) and a target's own listing (for the move no-op check). An unread target
+// listing keeps the action disabled, as the dialog does until its listing loads.
 export function createMoveTreeGates(
 	movedItems: readonly DriveItem[],
-	readListing: (uuid: string | null) => readonly DriveItem[] | undefined
+	readListing: (uuid: string | null) => readonly DriveItem[] | undefined,
+	mode: "move" | "copy" = "move"
 ): MoveTreeGates {
 	// One uuid index per listing array, so a level of n directories isn't n linear scans.
 	const rowIndexes = new WeakMap<readonly DriveItem[], Map<string, DriveItem>>()
@@ -94,7 +100,13 @@ export function createMoveTreeGates(
 		isTargetDisabled: target => {
 			const listing = readListing(target.uuid)
 
-			return listing === undefined || isMoveConfirmDisabled(target.ancestry, movedItems, listing)
+			if (listing === undefined) {
+				return true
+			}
+
+			return mode === "copy"
+				? isCopyConfirmDisabled(target.ancestry, movedItems)
+				: isMoveConfirmDisabled(target.ancestry, movedItems, listing)
 		}
 	}
 }

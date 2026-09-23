@@ -5,6 +5,8 @@ import {
 	applyCopyCreated,
 	applyCopyUpdate,
 	copyErrorDTO,
+	copyGlyphForEntries,
+	copyGlyphForItems,
 	copyMaxBytes,
 	createCopyJob,
 	isQuotaPreflightFailure,
@@ -358,5 +360,41 @@ describe("retryEntries", () => {
 		const failed = failure({ destParentDir: dir, destName: "b (1).txt" })
 
 		expect(retryEntries([failed])).toEqual([{ item: failed.item, destination: dir, name: "b (1).txt" }])
+	})
+})
+
+describe("copy glyphs", () => {
+	const dir: Dir = {
+		uuid: testUuid("dir"),
+		parent: testUuid("dest"),
+		color: "default",
+		timestamp: 0n,
+		favorited: false,
+		meta: { type: "decoded", data: { name: "dir" } }
+	}
+
+	it("names the one item's kind, or several items", () => {
+		expect(copyGlyphForItems([narrowItem(dir)])).toBe("directory")
+		expect(copyGlyphForItems([narrowItem(mockFile("a"))])).toBe("file")
+		expect(copyGlyphForItems([narrowItem(mockFile("a")), narrowItem(dir)])).toBe("items")
+		expect(copyGlyphForItems([])).toBe("items")
+	})
+
+	it("reads a retry's single entry the same way", () => {
+		const destination = { uuid: testUuid("dest") }
+
+		expect(copyGlyphForEntries([{ item: mockFile("a"), destination }])).toBe("file")
+		expect(copyGlyphForEntries([{ item: dir, destination }])).toBe("directory")
+		expect(
+			copyGlyphForEntries([
+				{ item: dir, destination },
+				{ item: mockFile("a"), destination }
+			])
+		).toBe("items")
+	})
+
+	it("defaults a job to several items", () => {
+		expect(createCopyJob("j", DESTINATION, 2).glyph).toBe("items")
+		expect(createCopyJob("j", DESTINATION, 1, "file").glyph).toBe("file")
 	})
 })

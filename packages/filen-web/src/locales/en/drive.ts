@@ -90,9 +90,9 @@ export const drive = {
 	// One bespoke icon+title+body pair per listing surface (mobile parity — filen-mobile's own
 	// DRIVE_EMPTY_STATE_ICON/TITLE_KEY/DESCRIPTION_KEY tables) rather than one generic pair reused
 	// everywhere; emptyState.logic.ts's driveEmptyStateCopy is the lookup table these back.
-	/** Drive page — empty-state title for a directory (or the move/import picker) with no content */
+	/** Drive page — empty-state title for a directory (or the move/copy picker) with no content */
 	driveEmptyTitle: "Nothing here yet",
-	/** Drive page — empty-state body under the title, for a directory (or the move/import picker) */
+	/** Drive page — empty-state body under the title, for a directory (or the move/copy picker) */
 	driveEmptyBody: "Files and directories you add will appear here.",
 	/** Trash — empty-state title when nothing is trashed */
 	driveEmptyTrashTitle: "Trash is empty",
@@ -271,8 +271,8 @@ export const drive = {
 	driveActionOpenContainingDirectory: "Open containing directory",
 	/** Item menu — download the selected item to disk; disabled for a directory or a multi-selection until zip download ships */
 	driveActionDownload: "Download",
-	/** Item menu (shared-with-me only) — copy the selected item into your own drive; opens the destination picker (driveImportDialogTitle) */
-	driveActionImport: "Import",
+	/** Item menu — copy the selected item(s) into your own drive: a submenu in the item menus (driveMoveChooseDestination plus a directory tree), the destination picker (driveCopyDialogTitle) from the bulk bar; offered wherever the item can be read */
+	driveActionCopy: "Copy",
 	/** Item menu — open the public-link dialog for the selected item */
 	driveActionPublicLink: "Public link",
 	/** Item menu — copy the selected item's existing public-link URL to the clipboard */
@@ -349,18 +349,16 @@ export const drive = {
 	driveMoveDialogTitle: "Select destination",
 	/** Move dialog — confirm button moving the selection into the currently open directory; also the Move submenu's per-directory entry */
 	driveMoveHereAction: "Move here",
-	/** Move/import dialog — filter box placeholder and aria-label over the currently listed directories (shared with the import dialog below, same picker component) */
+	/** Move/copy dialog — filter box placeholder and aria-label over the currently listed directories (shared with the copy dialog below, same picker component) */
 	driveMoveDialogFilterPlaceholder: "Filter directories",
-	/** Move/import dialog — button creating a new destination directory in place, right inside the directory currently open in the picker */
+	/** Move/copy dialog — button creating a new destination directory in place, right inside the directory currently open in the picker */
 	driveMoveDialogNewDirectory: "New directory",
 
-	// ── Import dialog (reuses the move dialog's destination picker, see moveTargetDialog.tsx's mode prop) ──
-	/** Import dialog — title of the destination-directory picker (driveActionImport) */
-	driveImportDialogTitle: "Import to",
-	/** Import dialog — confirm button copying the shared item into the currently open directory */
-	driveImportHereAction: "Import here",
-	/** Import — error toast when a directory import completed with at least one nested file/sub-directory failure (a scan failure, a create failure, or a download/upload failure); the item may have imported partially */
-	driveImportPartial: "Import completed with errors — some files may be missing.",
+	// ── Copy dialog (the move dialog's destination picker in its copy mode, see moveTargetDialog.tsx) ──
+	/** Copy dialog — title of the destination-directory picker (driveActionCopy) */
+	driveCopyDialogTitle: "Copy to",
+	/** Copy dialog and the Copy submenu's directory tree — button copying the item(s) into the directory currently open or picked; the copy gets a free name if the directory already holds one of that name */
+	driveCopyHereAction: "Copy here",
 
 	// ── Share dialog (contact picker) ────────────────────────────────────────
 	/** Share dialog — title of the contact picker (opened via driveActionShare); the submit button reuses driveActionShare */

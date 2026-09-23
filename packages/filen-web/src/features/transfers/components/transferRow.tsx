@@ -4,6 +4,7 @@ import {
 	CircleCheckIcon,
 	CopyIcon,
 	DownloadIcon,
+	FilesIcon,
 	PanelBottomOpenIcon,
 	PauseCircleIcon,
 	PauseIcon,
@@ -24,7 +25,7 @@ import { pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
 import { showCopyToast } from "@/features/transfers/lib/copyToast"
 import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
-import { FileTypeIcon } from "@/features/drive/components/itemIcon"
+import { DirectoryGlyph, FileTypeIcon } from "@/features/drive/components/itemIcon"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
@@ -143,6 +144,8 @@ export function TransferRow({ transfer, onRequestCancel }: TransferRowProps) {
 	const finished = !isActiveTransfer(transfer.status)
 	// A copy's row reopens its progress card for as long as the job's detail is kept.
 	const hasCopyCard = useCopyJobsStore(state => transfer.direction === "copy" && transfer.id in state.jobs)
+	// A copy row's name may be a directory's or "N items", which no file glyph fits; the job knows which.
+	const copyGlyph = useCopyJobsStore(state => (transfer.direction === "copy" ? state.jobs[transfer.id]?.glyph : undefined))
 
 	// Never renders bytesTransferred for a "done" row (only its final size) — settle()/setProgress()
 	// are separate store writes, so a just-finished row's bytesTransferred can still briefly trail
@@ -179,10 +182,22 @@ export function TransferRow({ transfer, onRequestCancel }: TransferRowProps) {
 				transfer row carries no DriveItem to derive a directory glyph or a real download thumbnail
 				from (see transferIconKey's own comment) — every row here is file-shaped, including a zip
 				download, whose name already routes to the "archive" glyph. */}
-				<FileTypeIcon
-					iconKey={transferIconKey(transfer)}
-					className="size-4 shrink-0"
-				/>
+				{copyGlyph === "directory" ? (
+					<DirectoryGlyph
+						color="default"
+						className="size-4 shrink-0"
+					/>
+				) : copyGlyph === "items" ? (
+					<FilesIcon
+						aria-hidden="true"
+						className="size-4 shrink-0 text-muted-foreground"
+					/>
+				) : (
+					<FileTypeIcon
+						iconKey={transferIconKey(transfer)}
+						className="size-4 shrink-0"
+					/>
+				)}
 				<TransferStatusIcon
 					status={transfer.status}
 					direction={transfer.direction}

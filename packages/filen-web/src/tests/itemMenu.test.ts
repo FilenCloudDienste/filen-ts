@@ -15,7 +15,7 @@ import {
 	Trash2Icon,
 	RotateCcwIcon,
 	DownloadIcon,
-	ImportIcon
+	CopyPlusIcon
 } from "lucide-react"
 import type { Dir, File, SharedDir, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
@@ -173,10 +173,11 @@ function facts(item: DriveItem, variant: Parameters<typeof driveItemActions>[1])
 }
 
 describe("driveItemActions (item menu gating)", () => {
-	it("drive variant, directory: rename/move/favorite/color/info/download/share/publicLink/copyLink/trash, in that order (no versions)", () => {
+	it("drive variant, directory: rename/move/copy/favorite/color/info/download/share/publicLink/copyLink/trash, in that order (no versions)", () => {
 		expect(ids(dirItem(), "drive")).toEqual([
 			"rename",
 			"move",
+			"copy",
 			"favorite",
 			"color",
 			"info",
@@ -188,10 +189,11 @@ describe("driveItemActions (item menu gating)", () => {
 		])
 	})
 
-	it("drive variant, file: rename/move/favorite/versions/info/download/share/publicLink/copyLink/trash, in that order (no color)", () => {
+	it("drive variant, file: rename/move/copy/favorite/versions/info/download/share/publicLink/copyLink/trash, in that order (no color)", () => {
 		expect(ids(fileItem(), "drive")).toEqual([
 			"rename",
 			"move",
+			"copy",
 			"favorite",
 			"versions",
 			"info",
@@ -297,9 +299,10 @@ describe("driveItemActions (item menu gating)", () => {
 // copyLink), share, and download/info all behave as on every other owned surface — canShareVariant
 // includes links (the top-level row is the user's own item, same share-with-contact flow as My Drive).
 describe("driveItemActions — links variant gating", () => {
-	it("directory: rename/favorite/color/info/download/share/publicLink/copyLink/trash, in that order (no move)", () => {
+	it("directory: rename/copy/favorite/color/info/download/share/publicLink/copyLink/trash, in that order (no move)", () => {
 		expect(ids(dirItem(), "links")).toEqual([
 			"rename",
+			"copy",
 			"favorite",
 			"color",
 			"info",
@@ -311,9 +314,10 @@ describe("driveItemActions — links variant gating", () => {
 		])
 	})
 
-	it("file: rename/favorite/versions/info/download/share/publicLink/copyLink/trash, in that order (no move)", () => {
+	it("file: rename/copy/favorite/versions/info/download/share/publicLink/copyLink/trash, in that order (no move)", () => {
 		expect(ids(fileItem(), "links")).toEqual([
 			"rename",
+			"copy",
 			"favorite",
 			"versions",
 			"info",
@@ -393,48 +397,40 @@ describe("driveItemActions — unshare gating (shared-root arms only)", () => {
 		expect(descriptor).toMatchObject({ run: "dialog", dialogKind: "unshare", destructive: true, icon: UserMinusIcon })
 	})
 
-	it("unshare is the last action offered on a decryptable shared-root item, after info and import (sharedIn has no owner actions)", () => {
+	it("unshare is the last action offered on a decryptable shared-root item, after info and copy (sharedIn has no owner actions)", () => {
 		const descriptors = ids(sharedRootFileItem(), "sharedIn")
 
-		expect(descriptors).toEqual(["info", "download", "import", "unshare"])
+		expect(descriptors).toEqual(["info", "download", "copy", "unshare"])
 	})
 })
 
-// Import (copy a sharedIn item into your own drive — mobile parity, menuActionsDownload.ts's own
-// Download > Import) is gated on the sharedIn variant alone: mobile ALSO offers it on its
-// "linked" drivePath (browsing a followed public link), which has no web equivalent yet, so web's
-// gate collapses to sharedIn only. sharedOut is deliberately excluded — you already own those items.
-describe("driveItemActions — import gating (sharedIn only, mobile Download > Import parity)", () => {
-	it("offers import on a sharedIn root item, file and directory alike", () => {
-		expect(ids(sharedRootDirItem(), "sharedIn")).toContain("import")
-		expect(ids(sharedRootFileItem(), "sharedIn")).toContain("import")
+// Copy reads the item and writes only into the caller's own drive, so it is offered wherever the item
+// can be read: every owned surface, shared-in and shared-out alike, but never in the trash-reduced menu
+// or for an undecryptable item (no key to read it with).
+describe("driveItemActions — copy gating", () => {
+	it("offers copy on every readable surface, owned and shared alike", () => {
+		for (const variant of ["drive", "recents", "favorites", "links"] as const) {
+			expect(ids(dirItem(), variant)).toContain("copy")
+			expect(ids(fileItem(), variant)).toContain("copy")
+		}
+
+		for (const item of [sharedRootDirItem, sharedRootFileItem, sharedDirItem, sharedFileItem]) {
+			expect(ids(item(), "sharedIn")).toContain("copy")
+			expect(ids(item(), "sharedOut")).toContain("copy")
+		}
 	})
 
-	it("offers import on a nested sharedIn item, file and directory alike", () => {
-		expect(ids(sharedDirItem(), "sharedIn")).toContain("import")
-		expect(ids(sharedFileItem(), "sharedIn")).toContain("import")
+	it("sits right after move where the item is the caller's, and after download where it isn't", () => {
+		expect(ids(fileItem(), "drive").slice(0, 3)).toEqual(["rename", "move", "copy"])
+		expect(ids(sharedFileItem(), "sharedIn")).toEqual(["info", "download", "copy"])
 	})
 
-	it("never offers import on sharedOut — the caller already owns those items", () => {
-		expect(ids(sharedRootDirItem(), "sharedOut")).not.toContain("import")
-		expect(ids(sharedRootFileItem(), "sharedOut")).not.toContain("import")
-		expect(ids(sharedDirItem(), "sharedOut")).not.toContain("import")
-		expect(ids(sharedFileItem(), "sharedOut")).not.toContain("import")
+	it("never offers copy in the trash-reduced menu", () => {
+		expect(ids(dirItem(), "trash")).not.toContain("copy")
+		expect(ids(fileItem(), "trash")).not.toContain("copy")
 	})
 
-	it("never offers import on an owned surface (drive/recents/favorites/links)", () => {
-		expect(ids(dirItem(), "drive")).not.toContain("import")
-		expect(ids(fileItem(), "recents")).not.toContain("import")
-		expect(ids(dirItem(), "favorites")).not.toContain("import")
-		expect(ids(fileItem(), "links")).not.toContain("import")
-	})
-
-	it("never offers import in the trash-reduced menu", () => {
-		expect(ids(dirItem(), "trash")).not.toContain("import")
-		expect(ids(fileItem(), "trash")).not.toContain("import")
-	})
-
-	it("never offers import for an undecryptable sharedIn item — same reduction as download", () => {
+	it("never offers copy for an undecryptable item — same reduction as download", () => {
 		const undecryptableRootDir = narrowItem(
 			mockSharedRootDir({
 				inner: {
@@ -446,31 +442,32 @@ describe("driveItemActions — import gating (sharedIn only, mobile Download > I
 			})
 		)
 
-		expect(ids(undecryptableRootDir, "sharedIn")).not.toContain("import")
+		expect(ids(undecryptableRootDir, "sharedIn")).not.toContain("copy")
+		expect(ids(undecryptableRootDir, "sharedOut")).not.toContain("copy")
 	})
 
-	it("dispatches its own dialog kind and carries the import label/icon", () => {
-		const descriptor = driveItemActions(sharedRootFileItem(), "sharedIn").find(d => d.id === "import")
+	it("opens the destination picker in its copy mode and carries the copy label/icon", () => {
+		const descriptor = driveItemActions(sharedRootFileItem(), "sharedIn").find(d => d.id === "copy")
 
-		expect(descriptor).toMatchObject({ run: "dialog", dialogKind: "import", icon: ImportIcon })
+		expect(descriptor).toMatchObject({ run: "dialog", dialogKind: "copy", labelKey: "driveActionCopy", icon: CopyPlusIcon })
 	})
 })
 
 // sharedIn is the one shared surface exposing only sharing-scoped + read-only actions — every
-// owner-mutating action (rename/move/favorite/color/versions/publicLink/copyLink/trash) is gated off
+// owner-mutating action (rename/move/copy/favorite/color/versions/publicLink/copyLink/trash) is gated off
 // it regardless of root/nested item type, since the caller doesn't own the item (the SDK would reject
 // the mutation). See isReadOnlySharedVariant.
 describe("driveItemActions — sharedIn safe subset (read-only surface)", () => {
 	const OWNER_ONLY_IDS = ["rename", "move", "favorite", "color", "versions", "publicLink", "copyLink", "trash"]
 
 	it("sharedIn root: exactly info + download + import + unshare", () => {
-		expect(ids(sharedRootDirItem(), "sharedIn")).toEqual(["info", "download", "import", "unshare"])
-		expect(ids(sharedRootFileItem(), "sharedIn")).toEqual(["info", "download", "import", "unshare"])
+		expect(ids(sharedRootDirItem(), "sharedIn")).toEqual(["info", "download", "copy", "unshare"])
+		expect(ids(sharedRootFileItem(), "sharedIn")).toEqual(["info", "download", "copy", "unshare"])
 	})
 
 	it("sharedIn nested: exactly info + download + import (unshare stays root-only)", () => {
-		expect(ids(sharedDirItem(), "sharedIn")).toEqual(["info", "download", "import"])
-		expect(ids(sharedFileItem(), "sharedIn")).toEqual(["info", "download", "import"])
+		expect(ids(sharedDirItem(), "sharedIn")).toEqual(["info", "download", "copy"])
+		expect(ids(sharedFileItem(), "sharedIn")).toEqual(["info", "download", "copy"])
 	})
 
 	it("never offers an owner-mutating action, root or nested", () => {
@@ -483,7 +480,7 @@ describe("driveItemActions — sharedIn safe subset (read-only surface)", () => 
 })
 
 // sharedOut items are the caller's OWN, merely shared out to someone else, so the FULL owner
-// toolbar applies exactly as it does in My Drive (rename/move/favorite/color|versions/publicLink/
+// toolbar applies exactly as it does in My Drive (rename/move/copy/favorite/color|versions/publicLink/
 // copyLink/trash), plus the sharing-scoped SHARE and the root-only UNSHARE. Mirrors
 // itemMenu.logic.ts's own `ownerMutable = !isReadOnlySharedVariant(variant)` gate.
 describe("driveItemActions — sharedOut full owner toolbar (owned surface)", () => {
@@ -491,6 +488,7 @@ describe("driveItemActions — sharedOut full owner toolbar (owned surface)", ()
 		expect(ids(sharedRootDirItem(), "sharedOut")).toEqual([
 			"rename",
 			"move",
+			"copy",
 			"favorite",
 			"color",
 			"info",
@@ -507,6 +505,7 @@ describe("driveItemActions — sharedOut full owner toolbar (owned surface)", ()
 		expect(ids(sharedRootFileItem(), "sharedOut")).toEqual([
 			"rename",
 			"move",
+			"copy",
 			"favorite",
 			"versions",
 			"info",
@@ -523,6 +522,7 @@ describe("driveItemActions — sharedOut full owner toolbar (owned surface)", ()
 		expect(ids(sharedDirItem(), "sharedOut")).toEqual([
 			"rename",
 			"move",
+			"copy",
 			"favorite",
 			"color",
 			"info",
@@ -538,6 +538,7 @@ describe("driveItemActions — sharedOut full owner toolbar (owned surface)", ()
 		expect(ids(sharedFileItem(), "sharedOut")).toEqual([
 			"rename",
 			"move",
+			"copy",
 			"favorite",
 			"versions",
 			"info",
@@ -547,13 +548,6 @@ describe("driveItemActions — sharedOut full owner toolbar (owned surface)", ()
 			"copyLink",
 			"trash"
 		])
-	})
-
-	it("never offers import, root or nested — the caller already owns these items", () => {
-		expect(ids(sharedRootDirItem(), "sharedOut")).not.toContain("import")
-		expect(ids(sharedRootFileItem(), "sharedOut")).not.toContain("import")
-		expect(ids(sharedDirItem(), "sharedOut")).not.toContain("import")
-		expect(ids(sharedFileItem(), "sharedOut")).not.toContain("import")
 	})
 })
 
@@ -598,7 +592,7 @@ describe("driveItemActions — download gating (enabled unconditionally, transpo
 })
 
 // Every descriptor derived from ACTION_DEFS, pinned to its label + icon across the variants that
-// surface it: drive dir (rename/move/favorite/color/info/download/share/publicLink/copyLink/trash),
+// surface it: drive dir (rename/move/copy/favorite/color/info/download/share/publicLink/copyLink/trash),
 // drive file (versions), trash (restore/deletePermanently), sharedOut root (unshare), plus the
 // favorited-state toggle. A wrong entry in ACTION_DEFS or a mis-wired builder reference fails here.
 describe("driveItemActions — descriptor label/icon facts (ACTION_DEFS drift guard)", () => {
@@ -606,6 +600,7 @@ describe("driveItemActions — descriptor label/icon facts (ACTION_DEFS drift gu
 		expect(facts(dirItem(), "drive")).toEqual([
 			{ id: "rename", labelKey: "driveActionRename", icon: PencilIcon },
 			{ id: "move", labelKey: "driveActionMove", icon: FolderInputIcon },
+			{ id: "copy", labelKey: "driveActionCopy", icon: CopyPlusIcon },
 			{ id: "favorite", labelKey: "driveActionFavorite", icon: StarIcon },
 			{ id: "color", labelKey: "driveActionColor", icon: PaletteIcon },
 			{ id: "info", labelKey: "driveActionInfo", icon: InfoIcon },
@@ -700,7 +695,7 @@ describe("applyOfflineGate", () => {
 		info: "readOnly",
 		openContainingDirectory: "gated",
 		download: "gated",
-		import: "gated",
+		copy: "gated",
 		publicLink: "gated",
 		copyLink: "gated",
 		share: "gated",

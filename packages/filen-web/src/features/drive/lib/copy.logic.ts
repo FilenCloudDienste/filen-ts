@@ -1,7 +1,7 @@
 import type { CopyCounts, CopyEntry, CopyError, CopyFailure, CopyFailureInfo, CopyPhase, CopyReport, CopyUpdate } from "@filen/sdk-rs"
 import { labelFirst, type ErrorDTO } from "@/lib/sdk/errors"
 import { freeBytes, type StorageCounters } from "@/features/drive/lib/quota.logic"
-import { type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 
 // Pure state for one copy job: the SDK's bigint progress is narrowed to numbers here, so nothing
 // downstream renders or compares a bigint.
@@ -31,6 +31,30 @@ export interface CopyJobFailure {
 
 export type CopyJobCounts = { [K in keyof CopyCounts]: number }
 
+// What a copy's transfers row shows as its icon: the one item's kind, or several items.
+export type CopyJobGlyph = "directory" | "file" | "items"
+
+export function copyGlyphForItems(items: readonly DriveItem[]): CopyJobGlyph {
+	const [only] = items
+
+	if (only === undefined || items.length > 1) {
+		return "items"
+	}
+
+	return asDirectoryOrFile(only).type
+}
+
+// A retry's entries carry SDK items: a file is the only kind with chunks.
+export function copyGlyphForEntries(entries: readonly CopyEntry[]): CopyJobGlyph {
+	const [only] = entries
+
+	if (only === undefined || entries.length > 1) {
+		return "items"
+	}
+
+	return "chunks" in only.item ? "file" : "directory"
+}
+
 export type CopyJobOutcome =
 	| { status: "running" }
 	| { status: "done" }
@@ -43,6 +67,7 @@ export interface CopyJob {
 	id: string
 	destination: CopyDestination
 	itemCount: number
+	glyph: CopyJobGlyph
 	phase: CopyPhase
 	pausing: boolean
 	paused: boolean
@@ -83,11 +108,12 @@ const ZERO_COUNTS: CopyJobCounts = {
 	bytesSkipped: 0
 }
 
-export function createCopyJob(id: string, destination: CopyDestination, itemCount: number): CopyJob {
+export function createCopyJob(id: string, destination: CopyDestination, itemCount: number, glyph: CopyJobGlyph = "items"): CopyJob {
 	return {
 		id,
 		destination,
 		itemCount,
+		glyph,
 		phase: "scanning",
 		pausing: false,
 		paused: false,

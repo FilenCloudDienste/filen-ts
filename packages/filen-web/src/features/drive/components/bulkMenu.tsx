@@ -14,6 +14,7 @@ import {
 } from "@/features/drive/components/bulkActionBar.logic"
 import { CONTEXT_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
 import { MoveSubmenu } from "@/features/drive/components/moveSubmenu"
+import { CopySubmenu } from "@/features/drive/components/copySubmenu"
 import { ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu"
 
 export interface DriveBulkMenuProps {
@@ -56,7 +57,7 @@ export function DriveBulkContextMenuContent({ variant, selectedItems, onBulkActi
 			{descriptors.map(descriptor => {
 				const offlineDisabled = isBulkActionOfflineDisabled(descriptor.id, isOnline)
 
-				// Moves the whole selection, same submenu as the single-item menu.
+				// Moves or copies the whole selection, same submenus as the single-item menu.
 				if (descriptor.id === "move") {
 					return (
 						<MoveSubmenu
@@ -67,6 +68,21 @@ export function DriveBulkContextMenuContent({ variant, selectedItems, onBulkActi
 							title={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
 							onChooseDestination={() => {
 								onBulkAction("move")
+							}}
+						/>
+					)
+				}
+
+				if (descriptor.id === "copy") {
+					return (
+						<CopySubmenu
+							key={descriptor.id}
+							family={CONTEXT_TREE_MENU_FAMILY}
+							items={selectedItems}
+							disabled={offlineDisabled}
+							title={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
+							onChooseDestination={() => {
+								onBulkAction("copy")
 							}}
 						/>
 					)

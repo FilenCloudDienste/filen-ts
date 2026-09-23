@@ -28,6 +28,7 @@ import {
 	type DirectoryTreeMenuFamily
 } from "@/features/drive/components/directoryTreeSubmenu"
 import { MoveSubmenu } from "@/features/drive/components/moveSubmenu"
+import { CopySubmenu } from "@/features/drive/components/copySubmenu"
 import { ContextMenuContent } from "@/components/ui/context-menu"
 import { DropdownMenuContent } from "@/components/ui/dropdown-menu"
 
@@ -62,7 +63,8 @@ const SEPARATOR_BEFORE = new Set<ItemActionId>(["info", "trash", "deletePermanen
 // one mapping from descriptor to menu row. Base UI's ContextMenu and DropdownMenu are separate Root
 // families with their own Item/Separator primitives (not interchangeable across triggers even though
 // their props are structurally identical), so the one piece each caller supplies is which family to
-// render rows with. Move is a submenu (moveSubmenu.tsx) that also needs the family's submenu parts.
+// render rows with. Move and Copy are submenus (moveSubmenu.tsx, copySubmenu.tsx) that also need the
+// family's submenu parts.
 function ItemMenuEntries({
 	item,
 	variant,
@@ -174,6 +176,16 @@ function ItemMenuEntries({
 							title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
 							onChooseDestination={() => {
 								onItemAction("move", item)
+							}}
+						/>
+					) : descriptor.id === "copy" ? (
+						<CopySubmenu
+							family={family}
+							items={[item]}
+							disabled={descriptor.enabled === false}
+							title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
+							onChooseDestination={() => {
+								onItemAction("copy", item)
 							}}
 						/>
 					) : (

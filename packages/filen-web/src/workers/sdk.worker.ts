@@ -39,7 +39,6 @@ import init, {
 	type SharedDir,
 	type SharedRootItem,
 	type SharingRole,
-	type DirsAndFilesWithPaths,
 	type Note,
 	type NoteTag,
 	type NoteHistory,
@@ -188,17 +187,20 @@ async function withPauseSignal<T>(
 export type CopyJobEvent = { type: "update"; update: CopyUpdate } | { type: "created"; item: CopiedTopLevelItem }
 
 type CopyJobCall = (
-	callbacks: Pick<Parameters<Client["copyItems"]>[0], "onUpdate" | "onTopLevelCreated" | "managedFuture">
+	callbacks: Pick<Parameters<Client["copyItems"]>[0], "onUpdate" | "onTopLevelPlanned" | "onTopLevelCreated" | "managedFuture">
 ) => Promise<CopyReport>
 
 // Plain worker-side callbacks around the caller's proxy: the wasm layer rejects the proxy object itself.
-// The planned-items callback is left out, as nothing cleans up after a copy the tab closed on.
+// Nothing cleans up after a copy the tab closed on, so the planned items are ignored, but the callback
+// must still be passed: the SDK stands in for a missing one with `new Function("")`, which the
+// production CSP (no 'unsafe-eval') rejects, leaving the copy's promise pending forever.
 async function runCopyJob(jobId: string, onEvent: (event: CopyJobEvent) => void, call: CopyJobCall): Promise<CopyReport> {
 	const controller = new AbortController()
 	copyAborts.set(jobId, controller)
 
 	return withPauseSignal(copyPauses, copyAborts, jobId, pause =>
 		call({
+			onTopLevelPlanned: () => undefined,
 			onUpdate: update => {
 				onEvent({ type: "update", update })
 			},
@@ -1510,28 +1512,6 @@ const api = {
 			cacheSharedDirContext(dir.inner.uuid, { dir, role: context.role })
 		}
 		return { dirs: result.dirs, files: result.files, role: context.role }
-	},
-	// Recursive tree listing (WITH relative paths) for Import (features/drive/lib/import.ts) — there is no
-	// server-side copy op on the SDK (only download/upload primitives — see the Client class), so
-	// importing a directory downloads then re-uploads every nested file, recreating the sub-directory
-	// structure from these paths. `dir` is the AnyDirWithContext the caller builds via item.ts's
-	// toAnyDirWithContext (mirrors downloadItemsToZip's own dispatch), so a shared directory walks
-	// through the share endpoint/crypter rather than the owned code path. Per-entry scan failures (an
-	// undecryptable/unreadable nested item) only flip `hadScanErrors` rather than rejecting the whole
-	// walk — the caller treats that as a partial listing and fails the import rather than silently
-	// importing a hollowed-out tree (mirrors mobile's own partial-download bail in
-	// menuActionsDownload.ts's import action).
-	async listDirectoryRecursiveForImport(dir: AnyDirWithContext): Promise<{ listing: DirsAndFilesWithPaths; hadScanErrors: boolean }> {
-		const c = requireClient()
-		let hadScanErrors = false
-		const listing = await c.listDirRecursiveWithPaths(
-			dir,
-			() => undefined,
-			() => {
-				hadScanErrors = true
-			}
-		)
-		return { listing, hadScanErrors }
 	},
 	// Stops sharing a shared-root item (a directory shared out, or an item shared in the caller wants
 	// gone). The caller-side arg shape is a later concern; this only exposes the op.

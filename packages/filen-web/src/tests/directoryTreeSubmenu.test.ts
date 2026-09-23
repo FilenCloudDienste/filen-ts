@@ -9,9 +9,10 @@ import "@/lib/i18n"
 
 // The tree reads each level through useDirectoryTreeChildrenQuery; the per-uuid results below stand in
 // for it, and the move gates read full listings from the (mocked) query client, seeded per test.
-const { treeResults, performMoveMock } = vi.hoisted(() => ({
+const { treeResults, performMoveMock, startCopyWithCardMock } = vi.hoisted(() => ({
 	treeResults: new Map<string, unknown>(),
-	performMoveMock: vi.fn()
+	performMoveMock: vi.fn(),
+	startCopyWithCardMock: vi.fn()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
@@ -21,6 +22,7 @@ vi.mock("@/queries/client", async () => {
 })
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock("@/features/drive/lib/dnd", () => ({ performMove: performMoveMock }))
+vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard: startCopyWithCardMock }))
 vi.mock("@/features/drive/queries/drive", async importOriginal => {
 	const actual = await importOriginal<typeof import("@/features/drive/queries/drive")>()
 	return {
@@ -34,6 +36,7 @@ import { driveListingQueryKey, projectTreeChildren } from "@/features/drive/quer
 import { queryClient } from "@/queries/client"
 import { DROPDOWN_TREE_MENU_FAMILY, DirectoryTreeSubmenu, type DirectoryTreeTarget } from "@/features/drive/components/directoryTreeSubmenu"
 import { MoveSubmenu } from "@/features/drive/components/moveSubmenu"
+import { CopySubmenu } from "@/features/drive/components/copySubmenu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { FolderInputIcon } from "lucide-react"
 
@@ -322,5 +325,75 @@ describe("MoveSubmenu", () => {
 		})
 
 		expect(isDisabled(menuItem("Move here"))).toBe(true)
+	})
+})
+
+describe("CopySubmenu", () => {
+	function renderCopy(items: DriveItem[]) {
+		const onChooseDestination = vi.fn()
+
+		inOpenMenu(createElement(CopySubmenu, { family: DROPDOWN_TREE_MENU_FAMILY, items, onChooseDestination }))
+
+		return { onChooseDestination }
+	}
+
+	it("opens the destination picker from its first entry", async () => {
+		seedTree()
+		const { onChooseDestination } = renderCopy([REPORT])
+
+		await openSubmenu("Copy")
+		fireEvent.click(menuItem("Choose destination…"))
+
+		expect(onChooseDestination).toHaveBeenCalledOnce()
+		expect(startCopyWithCardMock).not.toHaveBeenCalled()
+	})
+
+	it("'Copy here' copies the selection into that directory, named for its card", async () => {
+		seedTree()
+		renderCopy([REPORT, PHOTOS])
+
+		await openSubmenu("Copy")
+		await openSubmenu("docs")
+		const docsAction = screen.getAllByRole("menuitem", { name: "Copy here" }).at(-1)
+		if (!docsAction) {
+			throw new Error("no docs action")
+		}
+		fireEvent.click(docsAction)
+
+		expect(startCopyWithCardMock).toHaveBeenCalledExactlyOnceWith([REPORT, PHOTOS], { uuid: DOCS.data.uuid, name: "docs" })
+	})
+
+	it("offers the copied items' own directory, which a move would refuse", async () => {
+		seedTree()
+		renderCopy([REPORT])
+
+		await openSubmenu("Copy")
+		await openSubmenu("docs")
+
+		const docsAction = screen.getAllByRole("menuitem", { name: "Copy here" }).at(-1)
+		if (!docsAction) {
+			throw new Error("no docs action")
+		}
+
+		expect(isDisabled(docsAction)).toBe(false)
+	})
+
+	it("refuses a copied directory as its own destination", async () => {
+		seedTree()
+		renderCopy([DOCS])
+
+		await openSubmenu("Copy")
+
+		expect(isDisabled(menuItem("docs"))).toBe(true)
+	})
+
+	it("names the root after the drive", async () => {
+		seedTree()
+		renderCopy([REPORT])
+
+		await openSubmenu("Copy")
+		fireEvent.click(menuItem("Copy here"))
+
+		expect(startCopyWithCardMock).toHaveBeenCalledExactlyOnceWith([REPORT], { uuid: null, name: "Cloud Drive" })
 	})
 })

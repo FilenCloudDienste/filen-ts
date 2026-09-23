@@ -89,7 +89,7 @@ export const transfers = {
 	transfersScanningDirectory: "Scanning directory…",
 
 	// ── Upload quota pre-flight (features/drive/lib/quota.ts) ─────────────────
-	/** Error toast when a file, directory, attachment or import upload does not fit the account's free storage; nothing was uploaded; {{needed}} = formatted total size of the upload, {{free}} = formatted free storage */
+	/** Error toast when a file, directory or attachment upload does not fit the account's free storage; nothing was uploaded; {{needed}} = formatted total size of the upload, {{free}} = formatted free storage */
 	transfersQuotaExceeded: "This upload needs {{needed}} but only {{free}} is free.",
 
 	// ── Upload summary toast (startUploads) ──────────────────────────────────

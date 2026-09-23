@@ -13,18 +13,18 @@ import { startDownloads } from "@/features/drive/lib/download"
 // trigger), so it deliberately isn't part of this union — directoryListing.tsx's own ActiveDialog
 // kind widens this with that one extra literal.
 export type ItemActionDialogKind =
-	"rename" | "move" | "color" | "versions" | "info" | "link" | "share" | "unshare" | "trash" | "delete" | "import"
+	"rename" | "move" | "copy" | "color" | "versions" | "info" | "link" | "share" | "unshare" | "trash" | "delete"
 
 export type ItemActionId =
 	| "rename"
 	| "move"
+	| "copy"
 	| "favorite"
 	| "color"
 	| "versions"
 	| "info"
 	| "openContainingDirectory"
 	| "download"
-	| "import"
 	| "publicLink"
 	| "copyLink"
 	| "share"
@@ -96,12 +96,10 @@ const DELETE_PERMANENTLY: ItemActionDescriptor = {
 	run: "dialog",
 	dialogKind: "delete"
 }
-// Copies an item you don't own into your own drive — sharedIn only (mobile parity: menuActionsDownload.ts's
-// own Download > Import gates on `!isOwner`, and web has no equivalent of mobile's other gate,
-// browsing a followed public link — see driveItemActions' own sharedIn-only push below). Opens the
-// same destination picker as Move (moveTargetDialog.tsx's mode="import" branch) rather than a
-// separate dialog.
-const IMPORT: ItemActionDescriptor = { id: "import", ...ACTION_DEFS.import, run: "dialog", dialogKind: "import" }
+// Copies the item anywhere in the caller's own drive. Offered wherever the item can be read — owned or
+// shared in, any listing but the trash — since a copy changes nothing about the source. A submenu in the
+// item menus (copySubmenu.tsx); "dialog" opens the full destination picker in its copy mode.
+const COPY: ItemActionDescriptor = { id: "copy", ...ACTION_DEFS.copy, run: "dialog", dialogKind: "copy" }
 
 export function favoriteDescriptor(item: DriveItem): ItemActionDescriptor {
 	return item.data.favorited
@@ -149,7 +147,7 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant, options
 	// Every owner-mutating push below (rename/move/favorite/color/versions/publicLink/copyLink/trash)
 	// is gated on ownerMutable, false ONLY for sharedIn — see isReadOnlySharedVariant's own doc comment
 	// for why sharedOut is excluded from this gate (those items are the caller's own). What's left for
-	// sharedIn: INFO always, IMPORT (below), UNSHARE when isSharedRoot allows it.
+	// sharedIn: INFO always, COPY (below), UNSHARE when isSharedRoot allows it.
 	const ownerMutable = !isReadOnlySharedVariant(variant)
 
 	// Download is excluded here (unlike the general branch below): an undecryptable item's meta is the
@@ -176,6 +174,7 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant, options
 		? [
 				RENAME,
 				...(canMoveVariant(variant) ? [MOVE] : []),
+				COPY,
 				favoriteDescriptor(item),
 				asDirectoryOrFile(item).type === "directory" ? COLOR : VERSIONS,
 				INFO
@@ -194,12 +193,9 @@ export function driveItemActions(item: DriveItem, variant: DriveVariant, options
 	// (download mutates nothing).
 	actions.push(downloadDescriptor())
 
-	// Import sits right after Download (mobile parity — menuActionsDownload.ts nests Import inside the
-	// same Download submenu) — sharedIn ONLY, root or nested alike: sharedOut is excluded (you already
-	// own those items — isOwner is true there on mobile too, see IMPORT's own doc comment), and every
-	// owner-mutating surface below never reaches sharedIn in the first place (ownerMutable is false).
-	if (variant === "sharedIn") {
-		actions.push(IMPORT)
+	// An item the caller can't mutate still copies: it sits with the read actions, right after Download.
+	if (!ownerMutable) {
+		actions.push(COPY)
 	}
 
 	// Share sits with the other access-granting actions (info/link) after the type-specific group; it
@@ -239,7 +235,7 @@ const OFFLINE_GATED_IDS: ReadonlySet<ItemActionId> = new Set([
 	"deletePermanently",
 	"openContainingDirectory",
 	"download",
-	"import"
+	"copy"
 ])
 
 export function applyOfflineGate(actions: ItemActionDescriptor[], isOnline: boolean): ItemActionDescriptor[] {

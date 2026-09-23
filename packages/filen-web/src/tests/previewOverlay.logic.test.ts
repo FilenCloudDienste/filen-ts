@@ -121,6 +121,7 @@ describe("previewMenuActions (preview header item-menu derivation)", () => {
 		expect(menuIds(fileItem(), "drive")).toEqual([
 			"rename",
 			"move",
+			"copy",
 			"favorite",
 			"versions",
 			"info",
@@ -133,12 +134,34 @@ describe("previewMenuActions (preview header item-menu derivation)", () => {
 
 	it("otherwise matches driveItemActions' own variant gating exactly (download aside)", () => {
 		expect(menuIds(dirItem(), "trash")).toEqual(["restore", "deletePermanently", "info"])
-		expect(menuIds(fileItem(), "links")).toEqual(["rename", "favorite", "versions", "info", "share", "publicLink", "copyLink", "trash"])
-		expect(menuIds(fileItem(), "sharedIn")).toEqual(["info", "import"])
+		expect(menuIds(fileItem(), "links")).toEqual([
+			"rename",
+			"copy",
+			"favorite",
+			"versions",
+			"info",
+			"share",
+			"publicLink",
+			"copyLink",
+			"trash"
+		])
+		expect(menuIds(fileItem(), "sharedIn")).toEqual(["info", "copy"])
 	})
 
 	it("download is the only id ever stripped — every other descriptor (including a second read-only one) survives", () => {
-		const withDownload = ["rename", "move", "favorite", "versions", "info", "download", "share", "publicLink", "copyLink", "trash"]
+		const withDownload = [
+			"rename",
+			"move",
+			"copy",
+			"favorite",
+			"versions",
+			"info",
+			"download",
+			"share",
+			"publicLink",
+			"copyLink",
+			"trash"
+		]
 		expect(menuIds(fileItem(), "drive")).toEqual(withDownload.filter(id => id !== "download"))
 	})
 })

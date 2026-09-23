@@ -1,6 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import { StarIcon, StarOffIcon, FolderInputIcon, UsersIcon, UserMinusIcon, Trash2Icon, RotateCcwIcon, DownloadIcon } from "lucide-react"
+import {
+	StarIcon,
+	StarOffIcon,
+	FolderInputIcon,
+	CopyPlusIcon,
+	UsersIcon,
+	UserMinusIcon,
+	Trash2Icon,
+	RotateCcwIcon,
+	DownloadIcon
+} from "lucide-react"
 import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
@@ -139,6 +149,7 @@ describe("driveBulkActions — descriptor label/icon facts (ACTION_DEFS drift gu
 		expect(facts("drive", flags({ includesFavorited: false, includesUndecryptable: false }))).toEqual([
 			{ id: "favorite", labelKey: "driveActionFavorite", icon: StarIcon },
 			{ id: "move", labelKey: "driveActionMove", icon: FolderInputIcon },
+			{ id: "copy", labelKey: "driveActionCopy", icon: CopyPlusIcon },
 			{ id: "share", labelKey: "driveActionShare", icon: UsersIcon },
 			{ id: "download", labelKey: "driveActionDownload", icon: DownloadIcon },
 			{ id: "trash", labelKey: "driveActionTrash", icon: Trash2Icon }
@@ -189,18 +200,18 @@ describe("driveBulkActions", () => {
 	})
 
 	it.each(["drive", "recents", "favorites"] as const)(
-		"%s variant, decryptable selection, none favorited: favorite, move, share, download, trash in that order",
+		"%s variant, decryptable selection, none favorited: favorite, move, copy, share, download, trash in that order",
 		variant => {
 			const descriptors = driveBulkActions(variant, flags({ includesFavorited: false, includesUndecryptable: false }))
 
-			expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "share", "download", "trash"])
+			expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "copy", "share", "download", "trash"])
 		}
 	)
 
-	it("links variant, decryptable selection, none favorited: favorite, share, download, trash, disableLink — move dropped (canMoveVariant)", () => {
+	it("links variant, decryptable selection, none favorited: favorite, copy, share, download, trash, disableLink — move dropped (canMoveVariant)", () => {
 		const descriptors = driveBulkActions("links", flags({ includesFavorited: false, includesUndecryptable: false }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["favorite", "share", "download", "trash", "disableLink"])
+		expect(descriptors.map(d => d.id)).toEqual(["favorite", "copy", "share", "download", "trash", "disableLink"])
 	})
 
 	// The one bulk action unique to the links (root) surface: revokes every selected item's
@@ -327,26 +338,26 @@ describe("driveBulkActions — unshare gating (everySharedRoot)", () => {
 		expect(unshare).toMatchObject({ run: "dialog", dialogKind: "unshare", destructive: true, icon: UserMinusIcon })
 	})
 
-	it("is the last descriptor when present, after favorite/move/share/download/trash — sharedOut keeps bulk trash too", () => {
+	it("is the last descriptor when present, after favorite/move/copy/share/download/trash — sharedOut keeps bulk trash too", () => {
 		const descriptors = driveBulkActions("sharedOut", flags({ everySharedRoot: true, includesUndecryptable: false }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "share", "download", "trash", "unshare"])
+		expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "copy", "share", "download", "trash", "unshare"])
 	})
 })
 
 // sharedIn is the one shared surface exposing only sharing-scoped + read-only bulk actions — no bulk
 // favorite/move/trash, regardless of undecryptable/everySharedRoot. See isReadOnlySharedVariant.
 describe("driveBulkActions — sharedIn safe subset (read-only surface)", () => {
-	it("sharedIn, not everySharedRoot: download only (download mutates nothing, so it survives sharedIn's owner-mutating gate)", () => {
+	it("sharedIn, not everySharedRoot: copy and download only (neither mutates the source, so both survive sharedIn's owner-mutating gate)", () => {
 		const descriptors = driveBulkActions("sharedIn", flags({ includesUndecryptable: false, everySharedRoot: false }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["download"])
+		expect(descriptors.map(d => d.id)).toEqual(["copy", "download"])
 	})
 
-	it("sharedIn, everySharedRoot: download then unshare", () => {
+	it("sharedIn, everySharedRoot: copy, download, then unshare", () => {
 		const descriptors = driveBulkActions("sharedIn", flags({ includesUndecryptable: false, everySharedRoot: true }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["download", "unshare"])
+		expect(descriptors.map(d => d.id)).toEqual(["copy", "download", "unshare"])
 	})
 
 	it("never offers favorite/move/trash, undecryptable or everySharedRoot combined any way", () => {
@@ -365,16 +376,16 @@ describe("driveBulkActions — sharedIn safe subset (read-only surface)", () => 
 // (canShareVariant) and the root-only bulk unshare (everySharedRoot). Mirrors driveBulkActions' own
 // `ownerMutable = !isReadOnlySharedVariant(variant)` gate.
 describe("driveBulkActions — sharedOut full owner toolbar (owned surface)", () => {
-	it("sharedOut, not everySharedRoot: favorite, move, share, download, trash — the same set as drive/recents/favorites", () => {
+	it("sharedOut, not everySharedRoot: favorite, move, copy, share, download, trash — the same set as drive/recents/favorites", () => {
 		const descriptors = driveBulkActions("sharedOut", flags({ includesUndecryptable: false, everySharedRoot: false }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "share", "download", "trash"])
+		expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "copy", "share", "download", "trash"])
 	})
 
 	it("sharedOut, everySharedRoot: the same owner set, plus unshare last", () => {
 		const descriptors = driveBulkActions("sharedOut", flags({ includesUndecryptable: false, everySharedRoot: true }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "share", "download", "trash", "unshare"])
+		expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "copy", "share", "download", "trash", "unshare"])
 	})
 
 	it("sharedOut, includesUndecryptable: favorite/move/share/download suppressed, trash and (root) unshare remain — pure-uuid dispositions", () => {

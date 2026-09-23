@@ -5,7 +5,7 @@ import { ChevronRightIcon, FolderPlusIcon, SearchXIcon } from "lucide-react"
 import type { DialogRoot } from "@base-ui/react/dialog"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { moveItems } from "@/features/drive/lib/actions"
-import { importItems } from "@/features/drive/lib/import"
+import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
 import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
 import { runCreateDirectory } from "@/features/drive/lib/createDirectory"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
@@ -16,7 +16,7 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { cn, driveItemName } from "@filen/shared"
 import { shouldForwardOpenChange } from "@/components/dialogs/dismissal.logic"
-import { isMoveConfirmDisabled, isMoveRowDisabled } from "@/features/drive/components/moveTargetDialog.logic"
+import { isCopyConfirmDisabled, isMoveConfirmDisabled, isMoveRowDisabled } from "@/features/drive/components/moveTargetDialog.logic"
 import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
 import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import { EmptyState } from "@/features/drive/components/emptyState"
@@ -32,17 +32,16 @@ export interface MoveTargetDialogProps {
 	items: DriveItem[]
 	onClose: () => void
 	// "move" (default) relocates the selection and, on success, clears it from the source listing's
-	// selection (mirrors every other destructive-to-the-source bulk action's own cleanup). "import"
-	// (itemMenu.logic.ts's IMPORT — mobile parity, menuActionsDownload.ts's Download > Import) copies a
-	// sharedIn item into the chosen destination instead: the source is owned by someone else and stays
-	// exactly where it was, so it is never removed from selection.
-	mode?: "move" | "import"
+	// selection (mirrors every other destructive-to-the-source bulk action's own cleanup). "copy" starts
+	// a copy job into the chosen destination and closes at once — the job runs on with its own progress
+	// card — leaving the source and the selection as they were.
+	mode?: "move" | "copy"
 }
 
 // Destination-directory picker — mounted-when-active by the listing's dialog host. Navigation is LOCAL
 // to this dialog (a uuid stack from root, not the "/drive/$" route) so browsing here never disturbs
 // the app's own navigation history; it always browses the "drive" variant regardless of where the
-// move/import was dispatched from — recents/favorites/trash/sharedIn have no navigable tree of their
+// move/copy was dispatched from — recents/favorites/trash/sharedIn have no navigable tree of their
 // own to land into (mirrors newDirectory.tsx's identical rule for creating a directory).
 export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDialogProps) {
 	const { t } = useTranslation(["drive", "common"])
@@ -116,19 +115,27 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 	}
 
 	async function handleConfirm(): Promise<void> {
+		if (mode === "copy") {
+			// Never awaited: a copy is a transfer, and transfers never sit behind a pending dialog.
+			startCopyWithCard(items, {
+				uuid: targetUuid,
+				name: targetUuid === null ? t("driveMyDrive") : (namesQuery.data?.[targetUuid] ?? "")
+			})
+			onClose()
+
+			return
+		}
+
 		setPending(true)
-		const outcome = mode === "import" ? await importItems(items, targetUuid) : await moveItems(items, targetUuid)
+		const outcome = await moveItems(items, targetUuid)
 		setPending(false)
 		onClose()
 		toastBulkOutcome(outcome)
 
 		// A moved item vanishes from whichever listing it was selected in (see actions.ts) — leaving it
 		// selected would strand a phantom entry in the "N selected" count, same cleanup
-		// directoryListing.tsx's own trash/delete confirms already do. An imported item is a COPY — the
-		// sharedIn source is untouched, so it stays exactly as selected as it was.
-		if (mode === "move") {
-			useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
-		}
+		// directoryListing.tsx's own trash/delete confirms already do.
+		useDriveStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
 	}
 
 	return (
@@ -141,7 +148,7 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 				className="sm:max-w-lg"
 			>
 				<DialogHeader>
-					<DialogTitle>{t(mode === "import" ? "driveImportDialogTitle" : "driveMoveDialogTitle")}</DialogTitle>
+					<DialogTitle>{t(mode === "copy" ? "driveCopyDialogTitle" : "driveMoveDialogTitle")}</DialogTitle>
 				</DialogHeader>
 				<nav
 					aria-label={t("driveBreadcrumbLabel")}
@@ -286,7 +293,9 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 							pending ||
 							!isOnline ||
 							listingQuery.status !== "success" ||
-							isMoveConfirmDisabled(pathStack, items, listingQuery.data)
+							(mode === "copy"
+								? isCopyConfirmDisabled(pathStack, items)
+								: isMoveConfirmDisabled(pathStack, items, listingQuery.data))
 						}
 						title={offlineTitle}
 						onClick={() => {
@@ -294,7 +303,7 @@ export function MoveTargetDialog({ items, onClose, mode = "move" }: MoveTargetDi
 						}}
 					>
 						{pending && <Spinner data-icon="inline-start" />}
-						{t(mode === "import" ? "driveImportHereAction" : "driveMoveHereAction")}
+						{t(mode === "copy" ? "driveCopyHereAction" : "driveMoveHereAction")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

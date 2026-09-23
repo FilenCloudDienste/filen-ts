@@ -63,7 +63,7 @@ describe("photosItemActions (photos per-item menu gating)", () => {
 	})
 
 	it("never offers unshare/import/restore/deletePermanently — photos items are always owned, non-trashed, non-shared", () => {
-		const forbidden = ["unshare", "import", "restore", "deletePermanently"]
+		const forbidden = ["unshare", "copy", "restore", "deletePermanently"]
 
 		for (const id of ids(photoItem())) {
 			expect(forbidden).not.toContain(id)

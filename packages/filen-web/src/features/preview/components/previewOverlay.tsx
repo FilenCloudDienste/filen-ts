@@ -382,11 +382,11 @@ export function PreviewOverlay({ variant, items, index, onStep, onClose, onItemR
 						}}
 					/>
 				)
-			case "import":
+			case "copy":
 				return (
 					<MoveTargetDialog
 						items={[driveItem]}
-						mode="import"
+						mode="copy"
 						onClose={() => {
 							setMenuDialogKind(null)
 						}}

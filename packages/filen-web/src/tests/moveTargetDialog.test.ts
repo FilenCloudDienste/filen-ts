@@ -3,6 +3,7 @@ import type { Dir, File, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import {
 	createMoveTreeGates,
+	isCopyConfirmDisabled,
 	isMoveConfirmDisabled,
 	isMoveDestinationForbidden,
 	isMoveNoOp,
@@ -226,5 +227,36 @@ describe("createMoveTreeGates (directory-tree submenu)", () => {
 	it("target: a multi-item selection is a no-op only when every item already sits there", () => {
 		const { isTargetDisabled } = gates([f, a])
 		expect(isTargetDisabled({ uuid: null, ancestry: [] })).toBe(false)
+	})
+})
+
+describe("copy gates", () => {
+	const a = dirItem("a")
+	const child = dirItem("child")
+	const f = fileItem("f")
+	const listings = new Map<string | null, DriveItem[]>([
+		[null, [a]],
+		[testUuid("a"), [child, f]],
+		[testUuid("child"), []]
+	])
+
+	function gates(copied: DriveItem[]) {
+		return createMoveTreeGates(copied, uuid => listings.get(uuid), "copy")
+	}
+
+	it("allows copying into the directory the items already sit in", () => {
+		expect(isCopyConfirmDisabled([testUuid("a")], [f])).toBe(false)
+		expect(gates([f]).isTargetDisabled({ uuid: testUuid("a"), ancestry: [testUuid("a")] })).toBe(false)
+	})
+
+	it("still refuses a copied directory itself and anything below it", () => {
+		expect(isCopyConfirmDisabled([testUuid("a")], [a])).toBe(true)
+		expect(isCopyConfirmDisabled([testUuid("a"), testUuid("child")], [a])).toBe(true)
+		expect(gates([a]).isTargetDisabled({ uuid: testUuid("child"), ancestry: [testUuid("a"), testUuid("child")] })).toBe(true)
+		expect(gates([a]).isBrowseDisabled({ uuid: testUuid("a"), ancestry: [testUuid("a")] })).toBe(true)
+	})
+
+	it("keeps a target disabled until its own listing has been read, like move", () => {
+		expect(gates([f]).isTargetDisabled({ uuid: testUuid("unread"), ancestry: [testUuid("unread")] })).toBe(true)
 	})
 })
