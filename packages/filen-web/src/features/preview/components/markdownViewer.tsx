@@ -1,8 +1,9 @@
 import { lazy, Suspense, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { CodeIcon, EyeIcon } from "lucide-react"
+import { driveItemName } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { decodeUtf8 } from "@/features/drive/lib/preview.logic"
+import { codeMirrorLanguageFor, decodeUtf8, extensionOf } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { MarkdownRenderer } from "@/features/preview/components/markdownRenderer"
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
@@ -15,18 +16,19 @@ import { PreviewErrorState } from "@/features/preview/components/previewErrorSta
 export interface MarkdownViewerProps {
 	item: DriveItem
 	alt: string
-	// Same three optional props TextViewer already accepts — forwarded to the source-mode instance
-	// only. The rendered arm is never an editing surface.
+	// Same three optional props TextViewer accepts — forwarded to the source-mode editor only. The
+	// rendered arm is never an editing surface.
 	editable?: boolean
 	onDirtyChange?: (dirty: boolean) => void
 	contentRef?: RefObject<string | null>
 }
 
-// "View source" mounts the SAME read-only CodeMirror surface every text/code file uses — a nested
-// lazy() (not a plain import) so opening a markdown file never pulls CodeMirror's chunk in; it fetches
-// only when the toggle is actually used, resolving to the SAME chunk previewOverlay.tsx's own
-// TextViewer lazy() produces.
-const TextViewer = lazy(() => import("@/features/preview/components/textViewer"))
+// "View source" mounts the SAME CodeMirror surface TextViewer renders — a nested lazy() (not a plain
+// import) so opening a markdown file never pulls CodeMirror's chunk in; it fetches only when the
+// toggle is actually used.
+const CodeMirrorSource = lazy(async () => ({
+	default: (await import("@/features/preview/components/codeMirrorSource")).CodeMirrorSource
+}))
 
 function MarkdownToolbar({ mode, disabled, onToggle }: { mode: "rendered" | "source"; disabled: boolean; onToggle: () => void }) {
 	const { t } = useTranslation("preview")
@@ -73,10 +75,9 @@ function MarkdownToolbar({ mode, disabled, onToggle }: { mode: "rendered" | "sou
 }
 
 // Top-level gate on the whole-buffer download (usePreviewBytes, shared with every other buffered
-// category) — decodes ONCE here for the rendered view; the source toggle mounts a fully separate
-// TextViewer instance with its OWN usePreviewBytes call rather than threading these same bytes through,
-// trading one extra re-download (only paid if the toggle is actually used) for keeping both viewers
-// independently composable, matching every other viewer's own self-contained {item, alt} shape.
+// category) — decodes ONCE here and feeds both views, so flipping modes never downloads again. The
+// editor seeds from `text` at mount, which is safe to repeat: the toggle is locked while dirty, and a
+// save rotates the uuid, remounting this whole viewer onto the new bytes.
 function MarkdownViewer({ item, alt, editable = false, onDirtyChange, contentRef }: MarkdownViewerProps) {
 	const result = usePreviewBytes(item)
 	const [mode, setMode] = useState<"rendered" | "source">("rendered")
@@ -125,8 +126,9 @@ function MarkdownViewer({ item, alt, editable = false, onDirtyChange, contentRef
 							/>
 						}
 					>
-						<TextViewer
-							item={item}
+						<CodeMirrorSource
+							text={text}
+							tag={codeMirrorLanguageFor(extensionOf(driveItemName(item)))}
 							alt={alt}
 							editable={editable}
 							// exactOptionalPropertyTypes: an unset optional prop must omit the key entirely

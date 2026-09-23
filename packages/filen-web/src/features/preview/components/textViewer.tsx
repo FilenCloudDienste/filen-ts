@@ -11,9 +11,9 @@ import { PreviewErrorState } from "@/features/preview/components/previewErrorSta
 export interface TextViewerProps {
 	item: DriveItem
 	alt: string
-	// Writable mode for the preview-save feature — omitted (or false) by every read-only caller
-	// (markdownViewer.tsx's own view-source toggle never edits its source), so those call sites need
-	// no changes. `onDirtyChange`/`contentRef` are only ever read while `editable` is true.
+	// Writable mode for the preview-save feature — omitted (or false) by every read-only caller, so
+	// those call sites need no changes. `onDirtyChange`/`contentRef` are only ever read while
+	// `editable` is true.
 	editable?: boolean
 	// Fired whenever the dirty bit flips (never on every keystroke) — the overlay mirrors it into its
 	// own state to gate the Save button/Cmd+S/close+nav confirm, none of which this component renders

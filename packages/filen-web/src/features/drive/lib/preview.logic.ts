@@ -306,8 +306,8 @@ export function decodeUtf8(bytes: Uint8Array): string {
 // renders as a fully usable read-only, unhighlighted CodeMirror view, never a blocked preview. Every
 // CODE_EXTENSIONS entry above is covered (some intentionally unmapped — no maintained CodeMirror 6
 // grammar exists for a bare Makefile/DOS-batch, and "vue"/"svelte" SFC parsing is out of scope), plus
-// the two markdown extensions for the view-source fallback (markdownViewer.tsx delegating to
-// TextViewer). Several tags share one CodeMirror package family (js/cjs/mjs/jsx/tsx/ts all resolve via
+// the two markdown extensions for markdownViewer.tsx's view-source editor. Several tags share one
+// CodeMirror package family (js/cjs/mjs/jsx/tsx/ts all resolve via
 // @codemirror/lang-javascript with different jsx/typescript flags; c/cpp/h/hpp share
 // @codemirror/lang-cpp's C-family grammar; cs/kt/dart/gradle route through the legacy clike/groovy
 // stream parsers, the closest available grammars for those).

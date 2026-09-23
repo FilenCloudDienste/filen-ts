@@ -97,7 +97,7 @@ export interface CodeMirrorSourceProps {
 	tag: string
 	alt: string
 	// Writable mode for the preview-save feature — omitted (or false) by every read-only caller (the
-	// notes reader, markdownViewer.tsx's own view-source toggle) so those need no changes.
+	// notes reader) so those need no changes.
 	editable?: boolean
 	// Fired whenever the dirty bit flips (never on every keystroke) — a read-only caller can omit this
 	// entirely (defaults to a no-op below), since `content` can only diverge from `text` via `onChange`,

@@ -66,8 +66,8 @@ import { isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
 // Lazy chunks: pdf.js (~1MB+), docx-preview, CodeMirror (+ its per-language grammar chunks) and
 // react-markdown only ever download once a file needing them is actually opened, never on the app's
 // own initial bundle (image/video/audio all stream or buffer directly, no heavy renderer library
-// involved). markdownViewer.tsx's own "view source" toggle lazy-imports TextViewer a second time —
-// the same underlying chunk as this one, deduped by the bundler.
+// involved). markdownViewer.tsx's own "view source" toggle lazy-imports CodeMirrorSource — the module
+// TextViewer's chunk also pulls in, deduped by the bundler.
 const PdfViewer = lazy(() => import("@/features/preview/components/pdfViewer"))
 const DocxViewer = lazy(() => import("@/features/preview/components/docxViewer"))
 const TextViewer = lazy(() => import("@/features/preview/components/textViewer"))
@@ -1058,7 +1058,7 @@ function ExternalPreviewBody({ url, name }: { url: string; name: string }) {
 // pdf/docx each own a lazy chunk plus their own whole-buffer load (see pdfViewer.tsx/docxViewer.tsx)
 // — a category still rendered by the fallback below (text/code/markdown) has nothing to load yet.
 // `editable`/`onDirtyChange`/`contentRef` only ever reach a CodeMirror surface: the "text"/"code"
-// case's TextViewer, and the "markdown" case's own source-mode TextViewer — every other category
+// case's TextViewer, and the "markdown" case's own source-mode editor — every other category
 // ignores them.
 //
 // A missing category arm cannot ship as a silently blank overlay: the `default` arm at the bottom of
