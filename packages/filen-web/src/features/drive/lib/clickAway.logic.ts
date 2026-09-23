@@ -92,3 +92,23 @@ export function isScrollbarPress(
 
 	return (overflowsY && offsetX - el.clientLeft >= el.clientWidth) || (overflowsX && offsetY - el.clientTop >= el.clientHeight)
 }
+
+// Whether a right-click or long-press on `target` lands on `container`'s own empty space (a listing's
+// background menu) rather than on an item or a control inside it. Only the container's DOM subtree
+// counts: a portalled popup's events still bubble through the React tree to the container's handlers.
+// The match is bounded to the container, so a keep-selection marker on one of its ancestors does not
+// turn its whole background into a control. `offsetX`/`offsetY` are relative to the container's border
+// box, as in isScrollbarPress.
+export function isEmptySpaceTarget(target: EventTarget | null, container: HTMLElement, offsetX: number, offsetY: number): boolean {
+	if (!(target instanceof Element) || !container.contains(target)) {
+		return false
+	}
+
+	if (target === container && isScrollbarPress(offsetX, offsetY, container)) {
+		return false
+	}
+
+	const hit = target.closest(KEEP_SELECTION_SELECTOR)
+
+	return hit === null || !container.contains(hit)
+}

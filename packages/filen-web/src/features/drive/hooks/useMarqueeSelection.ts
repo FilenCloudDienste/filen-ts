@@ -78,6 +78,7 @@ interface MarqueeHandlers {
 	move: (event: PointerEvent) => void
 	up: (event: PointerEvent) => void
 	key: (event: KeyboardEvent) => void
+	menu: () => void
 }
 
 export interface MarqueeSelection {
@@ -245,6 +246,7 @@ export function useMarqueeSelection<T extends MarqueeItem>({
 			window.removeEventListener("pointerup", handlers.up)
 			window.removeEventListener("pointercancel", handlers.up)
 			window.removeEventListener("keydown", handlers.key, true)
+			window.removeEventListener("contextmenu", handlers.menu, true)
 			handlersRef.current = null
 		}
 
@@ -353,6 +355,14 @@ export function useMarqueeSelection<T extends MarqueeItem>({
 		endDrag()
 	}
 
+	// A press that opens a context menu (macOS Ctrl+click is a primary-button press) is not a drag: the
+	// pointer then travels over the open menu, and a marquee armed underneath it would select behind it.
+	function onContextMenu(): void {
+		if (dragRef.current && !dragRef.current.started) {
+			endDrag()
+		}
+	}
+
 	function onPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
 		// Mouse only — touch/pen are ignored (they scroll/long-press). Primary button, no modifier
 		// required to start (ctrl/cmd only flips it additive).
@@ -404,7 +414,7 @@ export function useMarqueeSelection<T extends MarqueeItem>({
 			paddingTop,
 			paddingRight
 		}
-		const handlers: MarqueeHandlers = { move: onMove, up: onUp, key: onKey }
+		const handlers: MarqueeHandlers = { move: onMove, up: onUp, key: onKey, menu: onContextMenu }
 
 		dragRef.current = drag
 		handlersRef.current = handlers
@@ -412,6 +422,7 @@ export function useMarqueeSelection<T extends MarqueeItem>({
 		window.addEventListener("pointerup", handlers.up)
 		window.addEventListener("pointercancel", handlers.up)
 		window.addEventListener("keydown", handlers.key, true)
+		window.addEventListener("contextmenu", handlers.menu, true)
 	}
 
 	// Tear down any live drag on unmount (navigation away mid-drag).

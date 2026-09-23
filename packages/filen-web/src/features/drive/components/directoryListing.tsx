@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useState, type ReactElement, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { useShallow } from "zustand/shallow"
@@ -60,7 +60,7 @@ import { SortMenu } from "@/features/drive/components/sortMenu"
 import { ViewModeToggle } from "@/features/drive/components/viewModeToggle"
 import { NewDirectory } from "@/features/drive/components/newDirectory"
 import { EmptyTrashButton } from "@/features/drive/components/emptyTrashButton"
-import { UploadMenu } from "@/features/drive/components/uploadMenu"
+import { UploadContextMenu, UploadMenu } from "@/features/drive/components/uploadMenu"
 import { UploadDropzone } from "@/features/drive/components/uploadDropzone"
 import { BulkActionBar } from "@/features/drive/components/bulkActionBar"
 import { EmptyState } from "@/features/drive/components/emptyState"
@@ -309,10 +309,12 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		setCursor
 	})
 
-	// A plain click on empty space anywhere in the window drops the selection, as in a file manager.
-	useClickAwayDeselect(selectedItems.length > 0, () => {
+	function clearSelection(): void {
 		useDriveStore.getState().clearSelectedItems()
-	})
+	}
+
+	// A plain click on empty space anywhere in the window drops the selection, as in a file manager.
+	useClickAwayDeselect(selectedItems.length > 0, clearSelection)
 
 	// Stale-selection purge (sharedIn only): drops any selected item that just became blocked (the
 	// user blocked its sharer while viewing this listing) so the bulk bar can never target a
@@ -557,6 +559,65 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		)
 	}
 
+	// Right-clicking the listing's own empty space — between tiles, below the last row, an empty
+	// directory's placeholder — opens the toolbar's upload menu there and drops the selection, as a
+	// file manager's background menu does. Rows and tiles keep their own item menu.
+	function withBackgroundMenu(surface: ReactElement): ReactNode {
+		return (
+			<UploadContextMenu
+				parentUuid={uuid}
+				disabled={writeDisabled}
+				openPreview={openPreview}
+				hiddenNotice={hideHidden}
+				onOpen={clearSelection}
+				render={surface}
+			/>
+		)
+	}
+
+	function renderEmptyListing(): ReactNode {
+		return allHidden ? (
+			renderAllHiddenEmpty()
+		) : localSearchActive ? (
+			// The local-filter empty state — a non-matching query on a non-empty listing reads as "no matches", never
+			// the generic "nothing here yet" onboarding copy (same distinction the contacts list makes for its own search).
+			<Empty>
+				<EmptyHeader>
+					<EmptyMedia variant="icon">
+						<SearchXIcon />
+					</EmptyMedia>
+					<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>
+				</EmptyHeader>
+			</Empty>
+		) : (
+			<EmptyState
+				variant="empty"
+				driveVariant={variant}
+				// Inline "+ Add" affordance for an empty, writable location — reuses the exact same New-directory/Upload
+				// controls the toolbar above already renders (not a third create/upload implementation), so this can never
+				// drift from what the toolbar itself offers. Hidden wherever the toolbar's own two buttons are too
+				// (writeDisabled already covers non-writable variants, a still-loading listing and offline — see its own
+				// doc comment above).
+				action={
+					writeDisabled ? undefined : (
+						<>
+							<NewDirectory
+								parentUuid={uuid}
+								dialogOpen={isDialogOpen}
+								hiddenNotice={hideHidden}
+							/>
+							<UploadMenu
+								parentUuid={uuid}
+								openPreview={openPreview}
+								hiddenNotice={hideHidden}
+							/>
+						</>
+					)
+				}
+			/>
+		)
+	}
+
 	// The column header + virtualized listbox — identical shape whether sortedItems is the normal
 	// listing or (search.active) the search results; only the per-row/tile searchParentPath and the
 	// trailing footer differ. Kept as one render function rather than duplicated JSX in both branches
@@ -582,130 +643,132 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						<span className="size-6 shrink-0 pointer-coarse:size-8" />
 					</div>
 				) : null}
-				<div
-					ref={setScrollElement}
-					role="listbox"
-					aria-multiselectable="true"
-					aria-label={t("driveListLabel")}
-					tabIndex={-1}
-					onKeyDown={handleKeyDown}
-					onPointerDown={marquee.onPointerDown}
-					className="min-h-0 flex-1 overflow-y-auto"
-					style={effectiveViewMode === "grid" ? GRID_LISTBOX_STYLE : undefined}
-				>
-					{/* Generic layout wrappers between the listbox and its options: role="presentation" keeps
-					    the owned-element relationship intact (an unlabelled generic in between breaks it). */}
+				{withBackgroundMenu(
 					<div
-						role="presentation"
-						style={{ position: "relative", width: "100%", height: activeVirtualizer.getTotalSize() }}
+						ref={setScrollElement}
+						role="listbox"
+						aria-multiselectable="true"
+						aria-label={t("driveListLabel")}
+						tabIndex={-1}
+						onKeyDown={handleKeyDown}
+						onPointerDown={marquee.onPointerDown}
+						className="min-h-0 flex-1 overflow-y-auto"
+						style={effectiveViewMode === "grid" ? GRID_LISTBOX_STYLE : undefined}
 					>
-						{/* Marquee rectangle — content-space, so it stretches correctly as the listing auto-scrolls.
-						    Non-interactive (pointer-events-none) so it never intercepts the ongoing drag. */}
-						{marquee.rect ? (
-							<div
-								aria-hidden="true"
-								data-testid="marquee-rect"
-								className="pointer-events-none absolute z-20 rounded-xs border border-primary/60 bg-primary/15"
-								style={{
-									left: marquee.rect.left,
-									top: marquee.rect.top,
-									width: marquee.rect.right - marquee.rect.left,
-									height: marquee.rect.bottom - marquee.rect.top
-								}}
-							/>
-						) : null}
-						{effectiveViewMode === "list"
-							? listVirtualizer.getVirtualItems().map(virtualRow => {
-									const item = sortedItems[virtualRow.index]
+						{/* Generic layout wrappers between the listbox and its options: role="presentation" keeps
+						    the owned-element relationship intact (an unlabelled generic in between breaks it). */}
+						<div
+							role="presentation"
+							style={{ position: "relative", width: "100%", height: activeVirtualizer.getTotalSize() }}
+						>
+							{/* Marquee rectangle — content-space, so it stretches correctly as the listing auto-scrolls.
+							    Non-interactive (pointer-events-none) so it never intercepts the ongoing drag. */}
+							{marquee.rect ? (
+								<div
+									aria-hidden="true"
+									data-testid="marquee-rect"
+									className="pointer-events-none absolute z-20 rounded-xs border border-primary/60 bg-primary/15"
+									style={{
+										left: marquee.rect.left,
+										top: marquee.rect.top,
+										width: marquee.rect.right - marquee.rect.left,
+										height: marquee.rect.bottom - marquee.rect.top
+									}}
+								/>
+							) : null}
+							{effectiveViewMode === "list"
+								? listVirtualizer.getVirtualItems().map(virtualRow => {
+										const item = sortedItems[virtualRow.index]
 
-									if (!item) {
-										return null
-									}
+										if (!item) {
+											return null
+										}
 
-									// exactOptionalPropertyTypes forbids passing searchParentPath={undefined} outright (a distinct
-									// state from "omitted") — spread it in only when there's a real string to show.
-									const parentPath = search.active ? search.parentPaths.get(item.data.uuid) : undefined
+										// exactOptionalPropertyTypes forbids passing searchParentPath={undefined} outright (a distinct
+										// state from "omitted") — spread it in only when there's a real string to show.
+										const parentPath = search.active ? search.parentPaths.get(item.data.uuid) : undefined
 
-									return (
-										<DriveRow
+										return (
+											<DriveRow
+												key={virtualRow.key}
+												item={item}
+												index={virtualRow.index}
+												total={sortedItems.length}
+												selected={selectedUuids.has(item.data.uuid)}
+												active={virtualRow.index === safeActiveIndex}
+												variant={variant}
+												splat={splat}
+												style={{
+													position: "absolute",
+													top: 0,
+													left: 0,
+													width: "100%",
+													transform: `translateY(${String(virtualRow.start)}px)`
+												}}
+												{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
+												directorySizes={directorySizes}
+												selectedItems={reconciledSelectedItems}
+												onPointerSelect={handlePointerSelect}
+												onCursorMove={setCursor}
+												onOpen={handleOpen}
+												onItemAction={handleItemAction}
+												onBulkAction={handleBulkDialogAction}
+												registerRef={registerRef}
+											/>
+										)
+									})
+								: gridVirtualizer.getVirtualItems().map(virtualRow => (
+										<div
 											key={virtualRow.key}
-											item={item}
-											index={virtualRow.index}
-											total={sortedItems.length}
-											selected={selectedUuids.has(item.data.uuid)}
-											active={virtualRow.index === safeActiveIndex}
-											variant={variant}
-											splat={splat}
+											role="presentation"
 											style={{
 												position: "absolute",
 												top: 0,
 												left: 0,
 												width: "100%",
-												transform: `translateY(${String(virtualRow.start)}px)`
+												transform: `translateY(${String(virtualRow.start)}px)`,
+												display: "grid",
+												gridTemplateColumns: `repeat(${String(columns)}, minmax(0, 1fr))`
 											}}
-											{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
-											directorySizes={directorySizes}
-											selectedItems={reconciledSelectedItems}
-											onPointerSelect={handlePointerSelect}
-											onCursorMove={setCursor}
-											onOpen={handleOpen}
-											onItemAction={handleItemAction}
-											onBulkAction={handleBulkDialogAction}
-											registerRef={registerRef}
-										/>
-									)
-								})
-							: gridVirtualizer.getVirtualItems().map(virtualRow => (
-									<div
-										key={virtualRow.key}
-										role="presentation"
-										style={{
-											position: "absolute",
-											top: 0,
-											left: 0,
-											width: "100%",
-											transform: `translateY(${String(virtualRow.start)}px)`,
-											display: "grid",
-											gridTemplateColumns: `repeat(${String(columns)}, minmax(0, 1fr))`
-										}}
-									>
-										{Array.from({ length: columns }, (_, column) => {
-											const itemIndex = virtualRow.index * columns + column
-											const item = sortedItems[itemIndex]
+										>
+											{Array.from({ length: columns }, (_, column) => {
+												const itemIndex = virtualRow.index * columns + column
+												const item = sortedItems[itemIndex]
 
-											if (!item) {
-												return null
-											}
+												if (!item) {
+													return null
+												}
 
-											// exactOptionalPropertyTypes forbids passing searchParentPath={undefined} outright (a distinct
-											// state from "omitted") — spread it in only when there's a real string to show.
-											const parentPath = search.active ? search.parentPaths.get(item.data.uuid) : undefined
+												// exactOptionalPropertyTypes forbids passing searchParentPath={undefined} outright (a
+												// distinct state from "omitted") — spread it in only when there's a real string to show.
+												const parentPath = search.active ? search.parentPaths.get(item.data.uuid) : undefined
 
-											return (
-												<DriveTile
-													key={item.data.uuid}
-													item={item}
-													index={itemIndex}
-													total={sortedItems.length}
-													selected={selectedUuids.has(item.data.uuid)}
-													active={itemIndex === safeActiveIndex}
-													variant={variant}
-													splat={splat}
-													{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
-													selectedItems={reconciledSelectedItems}
-													onPointerSelect={handlePointerSelect}
-													onCursorMove={setCursor}
-													onOpen={handleOpen}
-													onItemAction={handleItemAction}
-													onBulkAction={handleBulkDialogAction}
-													registerRef={registerRef}
-												/>
-											)
-										})}
-									</div>
-								))}
+												return (
+													<DriveTile
+														key={item.data.uuid}
+														item={item}
+														index={itemIndex}
+														total={sortedItems.length}
+														selected={selectedUuids.has(item.data.uuid)}
+														active={itemIndex === safeActiveIndex}
+														variant={variant}
+														splat={splat}
+														{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
+														selectedItems={reconciledSelectedItems}
+														onPointerSelect={handlePointerSelect}
+														onCursorMove={setCursor}
+														onOpen={handleOpen}
+														onItemAction={handleItemAction}
+														onBulkAction={handleBulkDialogAction}
+														registerRef={registerRef}
+													/>
+												)
+											})}
+										</div>
+									))}
+						</div>
 					</div>
-				</div>
+				)}
 				{/* One strip, one 32px row — the search progress notes and the hidden-row count share it, so
 				    they can never stack into a second bar. Both search reads compare against the PRE-hide
 				    count: post-hide, "Showing N of M" would render forever and its N would mean the wrong
@@ -866,50 +929,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 								/>
 							</div>
 						) : sortedItems.length === 0 ? (
-							<div className="flex flex-1 overflow-y-auto">
-								{allHidden ? (
-									renderAllHiddenEmpty()
-								) : localSearchActive ? (
-									// The local-filter empty state — a non-matching query on a non-empty listing
-									// reads as "no matches", never the generic "nothing here yet" onboarding copy
-									// (same distinction the contacts list makes for its own search).
-									<Empty>
-										<EmptyHeader>
-											<EmptyMedia variant="icon">
-												<SearchXIcon />
-											</EmptyMedia>
-											<EmptyTitle>{t("driveSearchNoResults")}</EmptyTitle>
-										</EmptyHeader>
-									</Empty>
-								) : (
-									<EmptyState
-										variant="empty"
-										driveVariant={variant}
-										// Inline "+ Add" affordance for an empty, writable location — reuses the exact
-										// same New-directory/Upload controls the toolbar above already renders (not a
-										// third create/upload implementation), so this can never drift from what the
-										// toolbar itself offers. Hidden wherever the toolbar's own two buttons are too
-										// (writeDisabled already covers non-writable variants, a still-loading listing
-										// and offline — see its own doc comment above).
-										action={
-											writeDisabled ? undefined : (
-												<>
-													<NewDirectory
-														parentUuid={uuid}
-														dialogOpen={isDialogOpen}
-														hiddenNotice={hideHidden}
-													/>
-													<UploadMenu
-														parentUuid={uuid}
-														openPreview={openPreview}
-														hiddenNotice={hideHidden}
-													/>
-												</>
-											)
-										}
-									/>
-								)}
-							</div>
+							withBackgroundMenu(<div className="flex flex-1 overflow-y-auto">{renderEmptyListing()}</div>)
 						) : (
 							renderListboxContent()
 						)}

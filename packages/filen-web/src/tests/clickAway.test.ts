@@ -2,7 +2,13 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { renderHook } from "@testing-library/react"
-import { isKeepSelectionTarget, isPlainPointerClick, isScrollbarPress, KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
+import {
+	isEmptySpaceTarget,
+	isKeepSelectionTarget,
+	isPlainPointerClick,
+	isScrollbarPress,
+	KEEP_SELECTION_PROPS
+} from "@/features/drive/lib/clickAway.logic"
 import { useClickAwayDeselect } from "@/features/drive/hooks/useClickAwayDeselect"
 
 let root: HTMLDivElement
@@ -92,6 +98,92 @@ describe("isKeepSelectionTarget", () => {
 		root.appendChild(el)
 
 		expect(isKeepSelectionTarget(el, root)).toBe(true)
+	})
+})
+
+describe("isEmptySpaceTarget", () => {
+	function listbox(): HTMLElement {
+		const el = document.getElementById("listbox")
+
+		if (!el) {
+			throw new Error("missing #listbox")
+		}
+
+		return el
+	}
+
+	it("accepts the listbox itself and its layout wrappers", () => {
+		for (const id of ["listbox", "sized"]) {
+			expect(isEmptySpaceTarget(byId(id), listbox(), 10, 10), id).toBe(true)
+		}
+	})
+
+	it("passes over an item and anything inside it — the item menu owns those", () => {
+		expect(isEmptySpaceTarget(byId("row"), listbox(), 10, 10)).toBe(false)
+		expect(isEmptySpaceTarget(byId("row-name"), listbox(), 10, 10)).toBe(false)
+	})
+
+	it("passes over a control inside the surface (an empty state's buttons)", () => {
+		const button = document.createElement("button")
+		const glyph = document.createElement("svg")
+
+		button.appendChild(glyph)
+		byId("sized").appendChild(button)
+
+		expect(isEmptySpaceTarget(button, listbox(), 10, 10)).toBe(false)
+		expect(isEmptySpaceTarget(glyph, listbox(), 10, 10)).toBe(false)
+	})
+
+	it("passes over anything outside the surface, portalled popups included", () => {
+		const portal = document.createElement("div")
+		const item = document.createElement("div")
+
+		item.setAttribute("role", "menuitem")
+		portal.appendChild(item)
+		document.body.appendChild(portal)
+
+		expect(isEmptySpaceTarget(item, listbox(), 10, 10)).toBe(false)
+		expect(isEmptySpaceTarget(portal, listbox(), 10, 10)).toBe(false)
+		expect(isEmptySpaceTarget(byId("bulk-bar"), listbox(), 10, 10)).toBe(false)
+		expect(isEmptySpaceTarget(byId("page-header"), listbox(), 10, 10)).toBe(false)
+	})
+
+	it("is not fooled by a keep-selection marker on an ancestor of the surface", () => {
+		const marked = document.createElement("div")
+		const surface = document.createElement("div")
+		const blank = document.createElement("div")
+
+		for (const [key, value] of Object.entries(KEEP_SELECTION_PROPS)) {
+			marked.setAttribute(key, value)
+		}
+
+		surface.appendChild(blank)
+		marked.appendChild(surface)
+		root.appendChild(marked)
+
+		expect(isEmptySpaceTarget(surface, surface, 10, 10)).toBe(true)
+		expect(isEmptySpaceTarget(blank, surface, 10, 10)).toBe(true)
+	})
+
+	it("passes over the surface's own scrollbar gutter", () => {
+		const surface = listbox()
+
+		Object.defineProperties(surface, {
+			clientLeft: { value: 0 },
+			clientTop: { value: 0 },
+			clientWidth: { value: 485 },
+			clientHeight: { value: 600 },
+			scrollWidth: { value: 485 },
+			scrollHeight: { value: 2000 }
+		})
+
+		expect(isEmptySpaceTarget(surface, surface, 490, 100)).toBe(false)
+		expect(isEmptySpaceTarget(surface, surface, 100, 100)).toBe(true)
+	})
+
+	it("never treats a non-element target as empty space", () => {
+		expect(isEmptySpaceTarget(null, listbox(), 10, 10)).toBe(false)
+		expect(isEmptySpaceTarget(window, listbox(), 10, 10)).toBe(false)
 	})
 })
 

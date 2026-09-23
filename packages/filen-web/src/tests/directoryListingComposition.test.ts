@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createElement, type ReactNode } from "react"
+import { createElement, type ReactElement, type ReactNode } from "react"
 import { act, cleanup, render, screen } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File, SharedFile, SharedRootDir, SharingRole, UuidStr } from "@filen/sdk-rs"
@@ -93,7 +93,15 @@ vi.mock("@/features/drive/components/newDirectory", () => ({
 }))
 vi.mock("@/features/drive/components/uploadMenu", () => ({
 	UploadMenu: (props: { disabled?: boolean }) =>
-		createElement("div", { "data-testid": "upload-menu", "data-disabled": String(props.disabled === true) })
+		createElement("div", { "data-testid": "upload-menu", "data-disabled": String(props.disabled === true) }),
+	// Keeps the surface it wraps (the listbox, or the empty-listing placeholder) and exposes its open hook.
+	UploadContextMenu: (props: { disabled?: boolean; render: ReactElement; onOpen: () => void }) =>
+		createElement(
+			"div",
+			{ "data-testid": "background-menu", "data-disabled": String(props.disabled === true) },
+			props.render,
+			createElement("button", { "data-testid": "background-menu-open", onClick: props.onOpen })
+		)
 }))
 vi.mock("@/features/drive/components/uploadDropzone", () => ({
 	UploadDropzone: (props: { disabled?: boolean; children: ReactNode }) =>
@@ -234,7 +242,9 @@ function writeSurfaceStates(): Record<string, string> {
 	return {
 		newDirectory: screen.getByTestId("new-directory").getAttribute("data-disabled") ?? "",
 		uploadMenu: screen.getByTestId("upload-menu").getAttribute("data-disabled") ?? "",
-		dropzone: screen.getByTestId("upload-dropzone").getAttribute("data-disabled") ?? ""
+		dropzone: screen.getByTestId("upload-dropzone").getAttribute("data-disabled") ?? "",
+		// Absent while the listing itself is (a loading or error state has no empty space of its own).
+		backgroundMenu: screen.queryByTestId("background-menu")?.getAttribute("data-disabled") ?? "absent"
 	}
 }
 
@@ -250,48 +260,66 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-// One gate feeds New directory, Upload and the drop target — a listing with no confirmed write target
-// (or no connection) must offer none of the three.
+// One gate feeds New directory, Upload, the drop target and the empty-space upload menu — a listing with
+// no confirmed write target (or no connection) must offer none of them.
 describe("DirectoryListing — write gate", () => {
-	it("enables all three write surfaces in an online, loaded drive listing", () => {
+	it("enables every write surface in an online, loaded drive listing", () => {
 		renderListing({ items: [narrowItem(mockDir("Documents"))] })
 
-		expect(writeSurfaceStates()).toEqual({ newDirectory: "false", uploadMenu: "false", dropzone: "false" })
+		expect(writeSurfaceStates()).toEqual({ newDirectory: "false", uploadMenu: "false", dropzone: "false", backgroundMenu: "false" })
 	})
 
 	it("disables them while offline — every one of them writes through the SDK", () => {
 		useIsOnline.mockReturnValue(false)
 		renderListing({ items: [narrowItem(mockDir("Documents"))] })
 
-		expect(writeSurfaceStates()).toEqual({ newDirectory: "true", uploadMenu: "true", dropzone: "true" })
+		expect(writeSurfaceStates()).toEqual({ newDirectory: "true", uploadMenu: "true", dropzone: "true", backgroundMenu: "true" })
 	})
 
 	it("disables them while the listing is still loading — there is no confirmed target uuid yet", () => {
 		listingQuery.current = { data: [], status: "pending", isRefetchError: false, error: null }
 		renderListing()
 
-		expect(writeSurfaceStates()).toEqual({ newDirectory: "true", uploadMenu: "true", dropzone: "true" })
+		expect(writeSurfaceStates()).toEqual({ newDirectory: "true", uploadMenu: "true", dropzone: "true", backgroundMenu: "absent" })
 	})
 
 	it("disables them on the sharedOut ROOT but enables them inside an owned nested sharedOut directory", () => {
 		renderListing({ variant: "sharedOut", splat: "" })
 
-		expect(writeSurfaceStates()).toEqual({ newDirectory: "true", uploadMenu: "true", dropzone: "true" })
+		expect(writeSurfaceStates()).toEqual({ newDirectory: "true", uploadMenu: "true", dropzone: "true", backgroundMenu: "true" })
 
 		cleanup()
 		renderListing({ variant: "sharedOut", splat: testUuid("nested") })
 
-		expect(writeSurfaceStates()).toEqual({ newDirectory: "false", uploadMenu: "false", dropzone: "false" })
+		expect(writeSurfaceStates()).toEqual({ newDirectory: "false", uploadMenu: "false", dropzone: "false", backgroundMenu: "false" })
 	})
 
 	it("disables them on every variant that has no directory to write into", () => {
 		for (const variant of ["trash", "favorites", "recents", "links", "sharedIn"] as const) {
 			renderListing({ variant })
 
-			expect(writeSurfaceStates()).toEqual({ newDirectory: "true", uploadMenu: "true", dropzone: "true" })
+			expect(writeSurfaceStates()).toEqual({ newDirectory: "true", uploadMenu: "true", dropzone: "true", backgroundMenu: "true" })
 
 			cleanup()
 		}
+	})
+
+	it("wraps the empty-directory placeholder too, under the same gate", () => {
+		renderListing()
+
+		expect(writeSurfaceStates()).toEqual({ newDirectory: "false", uploadMenu: "false", dropzone: "false", backgroundMenu: "false" })
+	})
+
+	it("drops the selection when the empty-space menu opens, as a click-away does", () => {
+		const documents = narrowItem(mockDir("Documents"))
+		const { select } = renderListing({ items: [documents] })
+
+		select([documents])
+		act(() => {
+			screen.getByTestId("background-menu-open").click()
+		})
+
+		expect(useDriveStore.getState().selectedItems).toEqual([])
 	})
 })
 
