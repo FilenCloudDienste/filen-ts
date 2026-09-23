@@ -168,12 +168,12 @@ function ItemMenuEntries({
 			{descriptors.map((descriptor, index) => (
 				<Fragment key={descriptor.id}>
 					{index > 0 && SEPARATOR_BEFORE.has(descriptor.id) ? <Separator /> : null}
+					{/* The Move and Copy submenus open offline too, for their clipboard entries; each gates its own
+					    destinations, so their descriptors' offline flag is not applied to the trigger. */}
 					{descriptor.id === "move" ? (
 						<MoveSubmenu
 							family={family}
 							items={[item]}
-							disabled={descriptor.enabled === false}
-							title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
 							onChooseDestination={() => {
 								onItemAction("move", item)
 							}}
@@ -182,8 +182,6 @@ function ItemMenuEntries({
 						<CopySubmenu
 							family={family}
 							items={[item]}
-							disabled={descriptor.enabled === false}
-							title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
 							onChooseDestination={() => {
 								onItemAction("copy", item)
 							}}

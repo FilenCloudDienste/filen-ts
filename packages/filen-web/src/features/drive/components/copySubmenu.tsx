@@ -19,8 +19,6 @@ export interface CopySubmenuProps {
 	family: DirectoryTreeMenuFamily
 	// The whole selection for the bulk menu, the one item otherwise.
 	items: DriveItem[]
-	disabled?: boolean | undefined
-	title?: string | undefined
 	// Opens the full destination picker (moveTargetDialog.tsx) in its copy mode on the same items.
 	onChooseDestination: () => void
 }
@@ -39,9 +37,9 @@ function targetName(target: DirectoryTreeTarget, rootName: string): string {
 // "Copy" as a submenu, the Move submenu's twin: Copy (for a later paste), the destination picker, then
 // the Cloud Drive tree for copying in one pick. Unlike a move, the source's own directory is a valid target (the copy gets
 // a free name there); only the copied directories themselves and their descendants are not.
-export function CopySubmenu({ family, items, disabled, title, onChooseDestination }: CopySubmenuProps) {
-	const { t } = useTranslation("drive")
-	// The trigger was gated when the menu opened; the connection can drop while the tree is open.
+export function CopySubmenu({ family, items, onChooseDestination }: CopySubmenuProps) {
+	const { t } = useTranslation(["drive", "common"])
+	// Offline the submenu still opens for its clipboard entry; only the destinations need the network.
 	const isOnline = useIsOnline()
 	const gates = createMoveTreeGates(items, readDriveListing, "copy")
 	const { Item } = family
@@ -51,8 +49,6 @@ export function CopySubmenu({ family, items, disabled, title, onChooseDestinatio
 			family={family}
 			label={t(ACTION_DEFS.copy.labelKey)}
 			icon={ACTION_DEFS.copy.icon}
-			disabled={disabled}
-			title={title}
 			leading={
 				<>
 					<Item
@@ -66,7 +62,11 @@ export function CopySubmenu({ family, items, disabled, title, onChooseDestinatio
 							<Kbd action="drive.copy" />
 						</span>
 					</Item>
-					<Item onClick={onChooseDestination}>
+					<Item
+						disabled={!isOnline}
+						title={isOnline ? undefined : t("common:offlineActionDisabled")}
+						onClick={onChooseDestination}
+					>
 						<FolderSearchIcon aria-hidden="true" />
 						{t("driveMoveChooseDestination")}
 					</Item>
@@ -74,7 +74,7 @@ export function CopySubmenu({ family, items, disabled, title, onChooseDestinatio
 			}
 			actionLabel={t("driveCopyHereAction")}
 			actionIcon={ACTION_DEFS.copy.icon}
-			isBrowseDisabled={gates.isBrowseDisabled}
+			isBrowseDisabled={target => !isOnline || gates.isBrowseDisabled(target)}
 			isTargetDisabled={target => !isOnline || gates.isTargetDisabled(target)}
 			onSelect={target => {
 				startCopyWithCard(items, { uuid: target.uuid, name: targetName(target, t("driveMyDrive")) })

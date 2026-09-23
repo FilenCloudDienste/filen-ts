@@ -349,7 +349,7 @@ describe("MoveSubmenu", () => {
 		expect(isDisabled(menuItem("photos"))).toBe(false)
 	})
 
-	it("disables every 'Move here' while offline", async () => {
+	it("disables every 'Move here' when the connection drops while open", async () => {
 		seedTree()
 		renderMove([REPORT])
 
@@ -359,6 +359,27 @@ describe("MoveSubmenu", () => {
 		})
 
 		expect(isDisabled(menuItem("Move here"))).toBe(true)
+	})
+
+	// Cut only marks items; the destinations need the network.
+	it("opens offline for Cut, with every destination disabled", async () => {
+		seedTree()
+		act(() => {
+			onlineManager.setOnline(false)
+		})
+		renderMove([REPORT])
+
+		await openSubmenu("Move")
+
+		expect(isDisabled(menuItemByText(CUT_ENTRY))).toBe(false)
+		expect(isDisabled(menuItem("Choose destination…"))).toBe(true)
+		expect(isDisabled(menuItem("Move here"))).toBe(true)
+		expect(isDisabled(menuItem("docs"))).toBe(true)
+		expect(isDisabled(menuItem("photos"))).toBe(true)
+
+		fireEvent.click(menuItemByText(CUT_ENTRY))
+
+		expect(useDriveClipboardStore.getState().entry?.mode).toBe("cut")
 	})
 })
 
@@ -440,5 +461,20 @@ describe("CopySubmenu", () => {
 		fireEvent.click(menuItem("Copy here"))
 
 		expect(startCopyWithCardMock).toHaveBeenCalledExactlyOnceWith([REPORT], { uuid: null, name: "Cloud Drive" })
+	})
+
+	it("opens offline for Copy, with every destination disabled", async () => {
+		seedTree()
+		act(() => {
+			onlineManager.setOnline(false)
+		})
+		renderCopy([REPORT])
+
+		await openSubmenu("Copy")
+
+		expect(isDisabled(menuItemByText(COPY_ENTRY))).toBe(false)
+		expect(isDisabled(menuItem("Choose destination…"))).toBe(true)
+		expect(isDisabled(menuItem("Copy here"))).toBe(true)
+		expect(isDisabled(menuItem("docs"))).toBe(true)
 	})
 })

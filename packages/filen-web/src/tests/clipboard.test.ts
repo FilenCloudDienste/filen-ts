@@ -110,6 +110,16 @@ describe("drive clipboard", () => {
 		expect(entry()).toEqual({ mode: "copy", items: [DOCS] })
 	})
 
+	it("names the cut items for dimming, and nothing for a copy", () => {
+		cutToClipboard([DOCS])
+
+		expect([...useDriveClipboardStore.getState().cutUuids]).toEqual([DOCS.data.uuid])
+
+		copyToClipboard([DOCS])
+
+		expect(useDriveClipboardStore.getState().cutUuids.size).toBe(0)
+	})
+
 	it("does nothing with an empty clipboard", async () => {
 		await pasteClipboard(DESTINATION)
 

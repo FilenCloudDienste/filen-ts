@@ -14,6 +14,7 @@ import { type BulkDialogActionKind } from "@/features/drive/components/bulkActio
 import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
 import { DriveBulkContextMenuContent } from "@/features/drive/components/bulkMenu"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
 import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { cn, driveItemName } from "@filen/shared"
@@ -93,6 +94,9 @@ export function DriveRow({
 	// img's own onError below. Never reset back to false: this mount already gave up on this uuid.
 	const [thumbFailed, setThumbFailed] = useState(false)
 	const bulkMenu = selected && selectedItems.length > 1
+	// Cut for a later paste: dimmed, Explorer-style, until the paste or the next copy/cut. The ⋯ trigger
+	// keeps its own hover-only opacity.
+	const cut = useDriveClipboardStore(state => state.cutUuids.has(item.data.uuid))
 	// A cross-directory search hit is the only case "Open containing directory" has somewhere to go —
 	// searchParentPath is "" for a direct child of the search root and undefined outside a search.
 	const searchHit = searchParentPath !== undefined && searchParentPath.length > 0
@@ -118,8 +122,10 @@ export function DriveRow({
 						style={style}
 						className={cn(
 							"group/row flex h-10 items-center gap-3 rounded-xl px-3 text-sm focus-ring-row outline-none select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
-							drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset"
+							drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset",
+							cut && "*:not-data-[slot=dropdown-menu-trigger]:opacity-50"
 						)}
+						data-cut={cut ? "" : undefined}
 						{...dragSource}
 						onClick={event => {
 							onPointerSelect(index, event)

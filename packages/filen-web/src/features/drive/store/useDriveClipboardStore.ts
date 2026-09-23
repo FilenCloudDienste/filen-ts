@@ -12,6 +12,8 @@ export interface DriveClipboardEntry {
 
 interface DriveClipboardState {
 	entry: DriveClipboardEntry | null
+	// The cut items' uuids, for the rows that dim while cut; empty for a copy.
+	cutUuids: ReadonlySet<string>
 	set: (entry: DriveClipboardEntry) => void
 	clear: () => void
 	// A pasted cut leaves the clipboard as it starts moving, so a second paste can't move the same items
@@ -19,15 +21,25 @@ interface DriveClipboardState {
 	restoreCut: (items: readonly DriveItem[]) => void
 }
 
+const NOTHING_CUT: ReadonlySet<string> = new Set()
+
+function withEntry(entry: DriveClipboardEntry | null): Pick<DriveClipboardState, "entry" | "cutUuids"> {
+	return {
+		entry,
+		cutUuids: entry?.mode === "cut" ? new Set(entry.items.map(item => item.data.uuid)) : NOTHING_CUT
+	}
+}
+
 export const useDriveClipboardStore = create<DriveClipboardState>(set => ({
 	entry: null,
+	cutUuids: NOTHING_CUT,
 	set: entry => {
-		set({ entry })
+		set(withEntry(entry))
 	},
 	clear: () => {
-		set({ entry: null })
+		set(withEntry(null))
 	},
 	restoreCut: items => {
-		set(state => (state.entry !== null || items.length === 0 ? state : { entry: { mode: "cut", items: items.slice() } }))
+		set(state => (state.entry !== null || items.length === 0 ? state : withEntry({ mode: "cut", items: items.slice() })))
 	}
 }))

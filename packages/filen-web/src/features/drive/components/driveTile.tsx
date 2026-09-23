@@ -14,6 +14,7 @@ import { type BulkDialogActionKind } from "@/features/drive/components/bulkActio
 import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
 import { DriveBulkContextMenuContent } from "@/features/drive/components/bulkMenu"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
 import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
@@ -84,6 +85,9 @@ export function DriveTile({
 	// img's own onError below. Never reset back to false: this mount already gave up on this uuid.
 	const [thumbFailed, setThumbFailed] = useState(false)
 	const bulkMenu = selected && selectedItems.length > 1
+	// Cut for a later paste: dimmed, Explorer-style, until the paste or the next copy/cut. The ⋯ trigger
+	// keeps its own hover-only opacity.
+	const cut = useDriveClipboardStore(state => state.cutUuids.has(item.data.uuid))
 	// See DriveRow's identical derivation.
 	const searchHit = searchParentPath !== undefined && searchParentPath.length > 0
 
@@ -109,8 +113,10 @@ export function DriveTile({
 						// assumes — see gridLayout.ts's own comment on the shared constants.
 						className={cn(
 							"group/tile relative flex w-44 shrink-0 flex-col gap-2 justify-self-center rounded-2xl p-2 text-center text-sm focus-ring-row outline-none select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
-							drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset"
+							drop.isOver && "bg-primary/10 ring-2 ring-primary/60 ring-inset",
+							cut && "*:not-data-[slot=dropdown-menu-trigger]:opacity-50"
 						)}
+						data-cut={cut ? "" : undefined}
 						{...dragSource}
 						onClick={event => {
 							onPointerSelect(index, event)

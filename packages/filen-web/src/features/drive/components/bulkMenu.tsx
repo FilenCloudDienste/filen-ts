@@ -57,15 +57,14 @@ export function DriveBulkContextMenuContent({ variant, selectedItems, onBulkActi
 			{descriptors.map(descriptor => {
 				const offlineDisabled = isBulkActionOfflineDisabled(descriptor.id, isOnline)
 
-				// Moves or copies the whole selection, same submenus as the single-item menu.
+				// Moves or copies the whole selection, same submenus as the single-item menu. They open offline
+				// too, for their clipboard entries; each gates its own destinations.
 				if (descriptor.id === "move") {
 					return (
 						<MoveSubmenu
 							key={descriptor.id}
 							family={CONTEXT_TREE_MENU_FAMILY}
 							items={selectedItems}
-							disabled={offlineDisabled}
-							title={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
 							onChooseDestination={() => {
 								onBulkAction("move")
 							}}
@@ -79,8 +78,6 @@ export function DriveBulkContextMenuContent({ variant, selectedItems, onBulkActi
 							key={descriptor.id}
 							family={CONTEXT_TREE_MENU_FAMILY}
 							items={selectedItems}
-							disabled={offlineDisabled}
-							title={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
 							onChooseDestination={() => {
 								onBulkAction("copy")
 							}}

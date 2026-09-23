@@ -15,8 +15,6 @@ export interface MoveSubmenuProps {
 	family: DirectoryTreeMenuFamily
 	// The whole selection for the bulk menu, the one item otherwise.
 	items: DriveItem[]
-	disabled?: boolean | undefined
-	title?: string | undefined
 	// Opens the full destination picker (moveTargetDialog.tsx) on the same items.
 	onChooseDestination: () => void
 }
@@ -31,9 +29,9 @@ function readDriveListing(uuid: string | null): DriveItem[] | undefined {
 // moving in one pick.
 // A pick runs the drop-to-move path (moveItems, bulk toast, selection prune), which is what the
 // dialog's own confirm runs too, and the tree greys out exactly what the dialog would.
-export function MoveSubmenu({ family, items, disabled, title, onChooseDestination }: MoveSubmenuProps) {
-	const { t } = useTranslation("drive")
-	// The trigger was gated when the menu opened; the connection can drop while the tree is open.
+export function MoveSubmenu({ family, items, onChooseDestination }: MoveSubmenuProps) {
+	const { t } = useTranslation(["drive", "common"])
+	// Offline the submenu still opens for its clipboard entry; only the destinations need the network.
 	const isOnline = useIsOnline()
 	const gates = createMoveTreeGates(items, readDriveListing)
 	const { Item } = family
@@ -43,8 +41,6 @@ export function MoveSubmenu({ family, items, disabled, title, onChooseDestinatio
 			family={family}
 			label={t(ACTION_DEFS.move.labelKey)}
 			icon={ACTION_DEFS.move.icon}
-			disabled={disabled}
-			title={title}
 			leading={
 				<>
 					<Item
@@ -58,7 +54,11 @@ export function MoveSubmenu({ family, items, disabled, title, onChooseDestinatio
 							<Kbd action="drive.cut" />
 						</span>
 					</Item>
-					<Item onClick={onChooseDestination}>
+					<Item
+						disabled={!isOnline}
+						title={isOnline ? undefined : t("common:offlineActionDisabled")}
+						onClick={onChooseDestination}
+					>
 						<FolderSearchIcon aria-hidden="true" />
 						{t("driveMoveChooseDestination")}
 					</Item>
@@ -66,7 +66,7 @@ export function MoveSubmenu({ family, items, disabled, title, onChooseDestinatio
 			}
 			actionLabel={t("driveMoveHereAction")}
 			actionIcon={ACTION_DEFS.move.icon}
-			isBrowseDisabled={gates.isBrowseDisabled}
+			isBrowseDisabled={target => !isOnline || gates.isBrowseDisabled(target)}
 			isTargetDisabled={target => !isOnline || gates.isTargetDisabled(target)}
 			onSelect={target => {
 				void performMove(items, target.uuid)

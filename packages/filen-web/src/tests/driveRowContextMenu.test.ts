@@ -34,6 +34,7 @@ vi.mock("@/features/drive/hooks/useDriveDropTarget", () => ({
 
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { DriveRow, type DriveRowProps } from "@/features/drive/components/driveRow"
 import { DriveTile } from "@/features/drive/components/driveTile"
 
@@ -101,6 +102,7 @@ function rightClick(container: HTMLElement): void {
 
 beforeEach(() => {
 	useDriveStore.setState({ selectedItems: [] })
+	useDriveClipboardStore.getState().clear()
 })
 
 afterEach(() => {
@@ -221,5 +223,40 @@ describe("Move submenu", () => {
 
 		expect(onPointerSelect).not.toHaveBeenCalled()
 		expect(onOpen).not.toHaveBeenCalled()
+	})
+})
+
+describe("cut dimming", () => {
+	function isDimmed(container: HTMLElement): boolean {
+		return container.querySelector('[role="option"]')?.hasAttribute("data-cut") ?? false
+	}
+
+	it("dims a cut row and tile until the clipboard changes, and never a copied one", () => {
+		const item = dirItem("target")
+		const other = dirItem("other")
+		const row = renderRow(item, false, () => undefined)
+		const tile = renderTile(item, false, () => undefined)
+
+		expect(isDimmed(row.container)).toBe(false)
+
+		act(() => {
+			useDriveClipboardStore.getState().set({ mode: "cut", items: [item] })
+		})
+
+		expect(isDimmed(row.container)).toBe(true)
+		expect(isDimmed(tile.container)).toBe(true)
+
+		act(() => {
+			useDriveClipboardStore.getState().set({ mode: "cut", items: [other] })
+		})
+
+		expect(isDimmed(row.container)).toBe(false)
+
+		act(() => {
+			useDriveClipboardStore.getState().set({ mode: "copy", items: [item] })
+		})
+
+		expect(isDimmed(row.container)).toBe(false)
+		expect(isDimmed(tile.container)).toBe(false)
 	})
 })
