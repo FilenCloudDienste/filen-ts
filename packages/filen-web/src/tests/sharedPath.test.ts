@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { SharedDir, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 import { type SharedDirContext } from "@/features/drive/lib/cache"
-import { resolveSharedDirContext, type SharedPathDeps } from "@/features/drive/lib/sharedPath"
+import {
+	coalesceSharedPathDeps,
+	createSharedPathInFlight,
+	resolveSharedDirContext,
+	type SharedPathDeps
+} from "@/features/drive/lib/sharedPath"
 
 const ROLE: SharingRole = { Sharer: { email: "owner@filen.io", id: 42 } }
 
@@ -99,6 +104,17 @@ describe("resolveSharedDirContext", () => {
 		expect(deps.listChildDirs).toHaveBeenCalledTimes(1)
 	})
 
+	it("skips the root listing when the chain's first segment is already known", async () => {
+		const deps = makeDeps({
+			seeded: { root: { dir: sharedRootDir("root"), role: ROLE } },
+			children: { root: [sharedDir("mid", "root")], mid: [sharedDir("target", "mid")] }
+		})
+
+		await expect(resolveSharedDirContext(deps, "target", ["root", "mid", "target"])).resolves.toBeDefined()
+		expect(deps.listRootDirs).not.toHaveBeenCalled()
+		expect(deps.listChildDirs).toHaveBeenCalledTimes(2)
+	})
+
 	it("returns undefined when a mid-chain segment can't be resolved (a revoked share)", async () => {
 		const deps = makeDeps({ roots: [], children: {} })
 
@@ -127,5 +143,38 @@ describe("resolveSharedDirContext", () => {
 
 		expect(resolved?.role).toEqual(ROLE)
 		expect(deps.listChildDirs).not.toHaveBeenCalled()
+	})
+})
+
+describe("coalesceSharedPathDeps", () => {
+	// A cold /shared-in/root/mid/target: the listing walks to target while each breadcrumb crumb walks
+	// to its own segment, all at once. Coalesced, every chain level costs one request.
+	it("concurrent walks over one chain share one root listing and one listing per ancestor", async () => {
+		const raw = makeDeps({
+			roots: [sharedRootDir("root")],
+			children: { root: [sharedDir("mid", "root")], mid: [sharedDir("target", "mid")] }
+		})
+		const deps = coalesceSharedPathDeps(raw, createSharedPathInFlight())
+
+		const resolved = await Promise.all([
+			resolveSharedDirContext(deps, "target", ["root", "mid", "target"]),
+			resolveSharedDirContext(deps, "root", ["root"]),
+			resolveSharedDirContext(deps, "mid", ["root", "mid"]),
+			resolveSharedDirContext(deps, "target", ["root", "mid", "target"])
+		])
+
+		expect(resolved.every(context => context !== undefined)).toBe(true)
+		expect(raw.listRootDirs).toHaveBeenCalledTimes(1)
+		expect(raw.listChildDirs).toHaveBeenCalledTimes(2)
+	})
+
+	it("a settled listing is not reused — a later cold walk lists again", async () => {
+		const raw = makeDeps({ roots: [sharedRootDir("root")] })
+		const deps = coalesceSharedPathDeps(raw, createSharedPathInFlight())
+
+		await deps.listRootDirs()
+		await deps.listRootDirs()
+
+		expect(raw.listRootDirs).toHaveBeenCalledTimes(2)
 	})
 })

@@ -21,7 +21,7 @@ import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 // down to the methods this module calls, mirroring account.test.ts's mock boundary.
 const {
 	listDirectory,
-	resolveDirectoryNames,
+	resolveDirectoryName,
 	getItemInfo,
 	getItemPath,
 	getDirSize,
@@ -33,7 +33,7 @@ const {
 	listSharedDirectory
 } = vi.hoisted(() => ({
 	listDirectory: vi.fn<(target: unknown) => Promise<NormalDirsAndFiles>>(),
-	resolveDirectoryNames: vi.fn<(uuids: string[]) => Promise<Record<string, string>>>(),
+	resolveDirectoryName: vi.fn<(uuid: string, hint?: { variant: string; path: string[] }) => Promise<string | null>>(),
 	getItemInfo: vi.fn(),
 	getItemPath: vi.fn(),
 	getDirSize: vi.fn(),
@@ -51,7 +51,7 @@ const {
 vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: {
 		listDirectory,
-		resolveDirectoryNames,
+		resolveDirectoryName,
 		getItemInfo,
 		getItemPath,
 		getDirSize,
@@ -97,7 +97,10 @@ import {
 	driveNamesQueryKey,
 	fetchDirectoryListing,
 	fetchDirectoryTreeChildren,
-	fetchDirectoryNames,
+	fetchDirectoryName,
+	cachedDirectoryName,
+	combineDirectoryNames,
+	directoryNameScope,
 	fetchDirectorySize,
 	fetchDriveItemLinkStatus,
 	fetchFileVersions,
@@ -285,41 +288,193 @@ describe("fetchDirectoryTreeChildren", () => {
 })
 
 describe("driveNamesQueryKey", () => {
-	it("builds the [domain, entity, uuids] tuple", () => {
-		expect(driveNamesQueryKey(["a", "b"])).toEqual(["drive", "names", ["a", "b"]])
+	it("keys one entry per uuid under its resolution scope", () => {
+		expect(driveNamesQueryKey("sharedIn", "a")).toEqual(["drive", "names", "sharedIn", "a"])
 	})
 })
 
-describe("fetchDirectoryNames", () => {
-	it("returns an empty record without calling the worker for an empty uuid list", async () => {
-		const result = await fetchDirectoryNames([])
-
-		expect(result).toEqual({})
-		expect(resolveDirectoryNames).not.toHaveBeenCalled()
+describe("directoryNameScope", () => {
+	it.each(["drive", "recents", "favorites", "trash", "links"] as const)("%s resolves through the owned scope", variant => {
+		expect(directoryNameScope(variant)).toBe("drive")
 	})
 
-	it("passes the uuids through to sdkApi.resolveDirectoryNames unchanged", async () => {
-		resolveDirectoryNames.mockResolvedValueOnce({})
+	it.each(["sharedIn", "sharedOut"] as const)("%s keeps its own shared scope", variant => {
+		expect(directoryNameScope(variant)).toBe(variant)
+	})
+})
 
-		await fetchDirectoryNames(["uuid-a", "uuid-b"])
+// A three-level chain a/b/c: each listing holds the next directory, exactly what a click-through
+// leaves in the cache.
+function seedOwnedChain(a: UuidStr, b: UuidStr, c: UuidStr): void {
+	testQueryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: null }), [
+		narrowItem(mockDir({ uuid: a, meta: { type: "decoded", data: { name: "A" } } }))
+	])
+	testQueryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: a }), [
+		narrowItem(mockDir({ uuid: b, parent: a, meta: { type: "decoded", data: { name: "B" } } }))
+	])
+	testQueryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: b }), [
+		narrowItem(mockDir({ uuid: c, parent: b, meta: { type: "decoded", data: { name: "C" } } }))
+	])
+}
 
-		expect(resolveDirectoryNames).toHaveBeenCalledTimes(1)
-		expect(resolveDirectoryNames).toHaveBeenCalledWith(["uuid-a", "uuid-b"])
+// The same chain reached through Shared with me, built by the real fetchSharedListing so the cached
+// rows carry exactly the shared arms a live click-through stores.
+async function seedSharedInChain(a: UuidStr, b: UuidStr, c: UuidStr): Promise<void> {
+	const role = sharerRole(42, "sharer@filen.io")
+	const root = mockSharedRootDir(a)
+
+	listSharedInRoot.mockResolvedValueOnce({
+		dirs: [{ ...root, inner: { ...root.inner, meta: { type: "decoded", data: { name: "A" } } } }],
+		files: []
+	})
+	listSharedDirectory
+		.mockResolvedValueOnce({
+			dirs: [{ inner: mockDir({ uuid: b, parent: a, meta: { type: "decoded", data: { name: "B" } } }), sharedTag: true }],
+			files: [],
+			role
+		})
+		.mockResolvedValueOnce({
+			dirs: [{ inner: mockDir({ uuid: c, parent: b, meta: { type: "decoded", data: { name: "C" } } }), sharedTag: true }],
+			files: [],
+			role
+		})
+
+	testQueryClient.setQueryData(driveListingQueryKey({ variant: "sharedIn", uuid: null }), await fetchSharedListing("sharedIn", null))
+	testQueryClient.setQueryData(driveListingQueryKey({ variant: "sharedIn", uuid: a }), await fetchSharedListing("sharedIn", a, [a]))
+	testQueryClient.setQueryData(driveListingQueryKey({ variant: "sharedIn", uuid: b }), await fetchSharedListing("sharedIn", b, [a, b]))
+	vi.clearAllMocks()
+}
+
+describe("cachedDirectoryName", () => {
+	it("reads a directory's decrypted name off any cached listing", () => {
+		const [a, b, c] = [testUuid("a"), testUuid("b"), testUuid("c")]
+		seedOwnedChain(a, b, c)
+
+		expect(cachedDirectoryName(c)).toBe("C")
 	})
 
-	it("returns the worker's resolved record unchanged, including a partial result", async () => {
-		resolveDirectoryNames.mockResolvedValueOnce({ "uuid-a": "Documents" })
+	it("is undefined for an uncached uuid, a file row, and an undecryptable directory", () => {
+		const file = testUuid("file")
+		const locked = testUuid("locked")
+		testQueryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: null }), [
+			narrowItem(mockFile({ uuid: file })),
+			narrowItem(mockDir({ uuid: locked, meta: { type: "encrypted", data: "x" } }))
+		])
 
-		const result = await fetchDirectoryNames(["uuid-a", "uuid-b"])
+		expect(cachedDirectoryName(testUuid("missing"))).toBeUndefined()
+		expect(cachedDirectoryName(file)).toBeUndefined()
+		expect(cachedDirectoryName(locked)).toBeUndefined()
+	})
+})
 
-		expect(result).toEqual({ "uuid-a": "Documents" })
+describe("fetchDirectoryName", () => {
+	it("owned click-through: every crumb resolves from cached listings with no worker call", async () => {
+		const [a, b, c] = [testUuid("a"), testUuid("b"), testUuid("c")]
+		seedOwnedChain(a, b, c)
+
+		const names = await Promise.all([
+			fetchDirectoryName("drive", [a]),
+			fetchDirectoryName("drive", [a, b]),
+			fetchDirectoryName("drive", [a, b, c])
+		])
+
+		expect(names).toEqual(["A", "B", "C"])
+		expect(resolveDirectoryName).not.toHaveBeenCalled()
+		expect(listDirectory).not.toHaveBeenCalled()
 	})
 
-	it("propagates a rejection from sdkApi.resolveDirectoryNames unchanged", async () => {
+	it("shared-in click-through: every crumb resolves from cached shared listings with no worker call", async () => {
+		const [a, b, c] = [testUuid("sa"), testUuid("sb"), testUuid("sc")]
+		await seedSharedInChain(a, b, c)
+
+		const names = await Promise.all([
+			fetchDirectoryName("sharedIn", [a]),
+			fetchDirectoryName("sharedIn", [a, b]),
+			fetchDirectoryName("sharedIn", [a, b, c])
+		])
+
+		expect(names).toEqual(["A", "B", "C"])
+		expect(resolveDirectoryName).not.toHaveBeenCalled()
+		expect(listSharedInRoot).not.toHaveBeenCalled()
+		expect(listSharedDirectory).not.toHaveBeenCalled()
+	})
+
+	it("owned cold deep URL: exactly one owned lookup per uncached uuid, with no share hint", async () => {
+		const [a, b, c] = [testUuid("a"), testUuid("b"), testUuid("c")]
+		resolveDirectoryName.mockImplementation(uuid => Promise.resolve(`name-of-${uuid}`))
+
+		await Promise.all([fetchDirectoryName("drive", [a]), fetchDirectoryName("drive", [a, b]), fetchDirectoryName("drive", [a, b, c])])
+
+		expect(resolveDirectoryName).toHaveBeenCalledTimes(3)
+		expect(resolveDirectoryName.mock.calls).toEqual([[a], [b], [c]])
+	})
+
+	it("shared cold deep URL: exactly one call per uncached uuid, each hinted with its own shared chain", async () => {
+		const [a, b, c] = [testUuid("sa"), testUuid("sb"), testUuid("sc")]
+		resolveDirectoryName.mockResolvedValue("name")
+
+		await Promise.all([
+			fetchDirectoryName("sharedIn", [a]),
+			fetchDirectoryName("sharedIn", [a, b]),
+			fetchDirectoryName("sharedOut", [a, b, c])
+		])
+
+		expect(resolveDirectoryName.mock.calls).toEqual([
+			[a, { variant: "sharedIn", path: [a] }],
+			[b, { variant: "sharedIn", path: [a, b] }],
+			[c, { variant: "sharedOut", path: [a, b, c] }]
+		])
+	})
+
+	it("a partially warm path only asks the worker for the crumb no listing holds", async () => {
+		const [a, b, c] = [testUuid("a"), testUuid("b"), testUuid("c")]
+		seedOwnedChain(a, b, c)
+		const deeper = testUuid("d")
+		resolveDirectoryName.mockResolvedValueOnce("D")
+
+		const names = await Promise.all([a, b, c, deeper].map((_, index, path) => fetchDirectoryName("drive", path.slice(0, index + 1))))
+
+		expect(names).toEqual(["A", "B", "C", "D"])
+		expect(resolveDirectoryName).toHaveBeenCalledExactlyOnceWith(deeper)
+	})
+
+	it("an empty path resolves null without a worker call", async () => {
+		await expect(fetchDirectoryName("drive", [])).resolves.toBeNull()
+		expect(resolveDirectoryName).not.toHaveBeenCalled()
+	})
+
+	it("propagates a rejection from the worker unchanged", async () => {
 		const error = new Error("no authenticated client")
-		resolveDirectoryNames.mockRejectedValueOnce(error)
+		resolveDirectoryName.mockRejectedValueOnce(error)
 
-		await expect(fetchDirectoryNames(["uuid-a"])).rejects.toBe(error)
+		await expect(fetchDirectoryName("drive", ["uuid-a"])).rejects.toBe(error)
+	})
+})
+
+describe("combineDirectoryNames", () => {
+	const done = (data: string | null) => ({ status: "success" as const, data, error: null })
+	const loading = { status: "pending" as const, data: undefined, error: null }
+
+	it("maps every resolved uuid to its name and leaves an unresolved one out", () => {
+		expect(combineDirectoryNames(["a", "b"], [done("A"), done(null)])).toEqual({ status: "success", data: { a: "A" }, error: null })
+	})
+
+	it("is pending while any crumb is still resolving", () => {
+		expect(combineDirectoryNames(["a", "b"], [done("A"), loading]).status).toBe("pending")
+	})
+
+	it("surfaces the first error over any pending crumb", () => {
+		const error = new Error("boom")
+
+		expect(combineDirectoryNames(["a", "b"], [loading, { status: "error", data: undefined, error }])).toEqual({
+			status: "error",
+			data: undefined,
+			error
+		})
+	})
+
+	it("an empty path is an immediate empty success", () => {
+		expect(combineDirectoryNames([], [])).toEqual({ status: "success", data: {}, error: null })
 	})
 })
 
@@ -644,14 +799,14 @@ describe("driveListingQueryUpdateGlobal", () => {
 	})
 
 	it("leaves a non-listing key (e.g. drive names or sort preferences) completely untouched", () => {
-		const namesKey = driveNamesQueryKey(["a", "b"])
+		const namesKey = driveNamesQueryKey("drive", "a")
 		const sortKey = ["drive", "sortPreferences"] as const
-		testQueryClient.setQueryData(namesKey, { a: "Documents" })
+		testQueryClient.setQueryData(namesKey, "Documents")
 		testQueryClient.setQueryData(sortKey, { mode: "global", global: "nameAsc", perDirectory: {} })
 
 		driveListingQueryUpdateGlobal(items => items)
 
-		expect(testQueryClient.getQueryData(namesKey)).toEqual({ a: "Documents" })
+		expect(testQueryClient.getQueryData(namesKey)).toBe("Documents")
 		expect(testQueryClient.getQueryData(sortKey)).toEqual({ mode: "global", global: "nameAsc", perDirectory: {} })
 	})
 

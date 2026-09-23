@@ -61,7 +61,7 @@ import init, {
 	type UserEventResult,
 	type JsClientConfig
 } from "@filen/sdk-rs"
-import { run, runEffect, runTimeout } from "@filen/shared"
+import { InFlight, run, runEffect, runTimeout } from "@filen/shared"
 import { toErrorDTO, PARENT_NOT_FOUND_PREFIX, DIRECTORY_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 import {
@@ -73,7 +73,15 @@ import {
 	getCachedName,
 	getSharedDirContext
 } from "@/features/drive/lib/cache"
-import { resolveSharedDirContext, type SharedPathDeps } from "@/features/drive/lib/sharedPath"
+import {
+	coalesceSharedPathDeps,
+	createSharedPathInFlight,
+	resolveSharedDirContext,
+	type SharedPathDeps,
+	type SharedPathHint,
+	type SharedPathInFlight
+} from "@/features/drive/lib/sharedPath"
+import { lookupDirectoryName } from "@/features/drive/lib/directoryName"
 import { THUMB_CACHE_CAP } from "@/features/drive/lib/thumbnails.logic"
 import { removeStaleThumbGenerations, sweepThumbs, writeThumb } from "@/workers/thumbStore"
 import { createSearchEngine, type SearchPush, type SearchSnapshotDTO } from "@/workers/searchEngine"
@@ -341,24 +349,69 @@ function cacheSharedRootContexts(dirs: readonly SharedRootDir[]): void {
 	}
 }
 
-// Which shared surface a nested listing's ancestor chain should be re-walked through — the route
-// splat's own variant, since a uuid alone cannot say whether it was reached via shared-in or
-// shared-out.
-export interface SharedPathHint {
-	variant: "sharedIn" | "sharedOut"
-	path: string[]
+// In-flight lookups, keyed on the client that issued them so a lookup still running for a previous
+// session can never be joined by the next one.
+interface ClientLookups {
+	ownedDirs: InFlight<string, Dir | undefined>
+	sharedIn: SharedPathInFlight
+	sharedOut: SharedPathInFlight
+}
+const lookupsByClient = new WeakMap<Client, ClientLookups>()
+
+function lookupsFor(c: Client): ClientLookups {
+	let lookups = lookupsByClient.get(c)
+
+	if (lookups === undefined) {
+		lookups = { ownedDirs: new InFlight(), sharedIn: createSharedPathInFlight(), sharedOut: createSharedPathInFlight() }
+		lookupsByClient.set(c, lookups)
+	}
+
+	return lookups
+}
+
+// Cache-first owned-dir resolve shared by listDirectory's uuid case and the breadcrumb's name lookup:
+// on a cold deep link both ask for the same uuid at once, and this answers them with one getDirOptional.
+async function resolveOwnedDir(c: Client, uuid: string): Promise<Dir | undefined> {
+	const cached = getCachedDir(uuid)
+
+	if (cached !== undefined) {
+		return cached
+	}
+
+	return lookupsFor(c).ownedDirs.coalesce(uuid, async () => {
+		const dir = await c.getDirOptional(uuid)
+
+		if (dir !== undefined) {
+			cacheDirs([dir])
+		}
+
+		return dir
+	})
+}
+
+// The walk's ancestors are exactly the crumbs a reveal or Location click then renders, so caching them
+// lets that breadcrumb resolve without a lookup of its own.
+async function cachedItemPath(c: Client, item: Dir | File): Promise<GetItemPathResult> {
+	const result = await c.getItemPath(item)
+
+	cacheDirs(result.ancestors)
+
+	return result
 }
 
 // Binds resolveSharedDirContext (features/drive/lib/sharedPath.ts) to this worker's live client and
-// its own in-memory context map.
+// its own in-memory context map, coalescing concurrent walks over the same chain.
 function sharedPathDeps(c: Client, variant: "sharedIn" | "sharedOut"): SharedPathDeps {
-	return {
-		getContext: getSharedDirContext,
-		listRootDirs: async () => (variant === "sharedIn" ? await c.listInShared() : await c.listOutShared(undefined)).dirs,
-		cacheRootContexts: cacheSharedRootContexts,
-		listChildDirs: async context => (await c.listSharedDir(context.dir, context.role)).dirs,
-		cacheChildContext: cacheSharedDirContext
-	}
+	return coalesceSharedPathDeps(
+		{
+			getContext: getSharedDirContext,
+			listRootDirs: async () => (variant === "sharedIn" ? await c.listInShared() : await c.listOutShared(undefined)).dirs,
+			cacheRootContexts: cacheSharedRootContexts,
+			listChildDirs: async context => (await c.listSharedDir(context.dir, context.role)).dirs,
+			cacheChildContext: cacheSharedDirContext
+		},
+		lookupsFor(c)[variant]
+	)
 }
 
 // The SDK's `File` type import above shadows the ambient DOM `File` by name — a type-only import
@@ -581,7 +634,7 @@ const api = {
 					// getDirOptional (not listDir({uuid})) is the cold-miss fallback — a plain
 					// `{uuid}` object is structurally a Root, and a bare string isn't assignable to
 					// the branded UuidStr AnyNormalDir needs.
-					const dir = getCachedDir(target.uuid) ?? (await c.getDirOptional(target.uuid))
+					const dir = await resolveOwnedDir(c, target.uuid)
 					if (dir === undefined) {
 						throw new Error(`${DIRECTORY_NOT_FOUND_PREFIX}${target.uuid}`)
 					}
@@ -928,7 +981,7 @@ const api = {
 	// null, same as it already omits every other absent-data row.
 	async getItemInfo(item: Dir | File, dirContext?: AnyDirWithContext): Promise<ItemInfoResult> {
 		const c = requireClient()
-		const pathPromise = PSEUDO_PARENTS.has(item.parent) ? Promise.resolve(null) : c.getItemPath(item).catch(() => null)
+		const pathPromise = PSEUDO_PARENTS.has(item.parent) ? Promise.resolve(null) : cachedItemPath(c, item).catch(() => null)
 		if ("chunks" in item) {
 			const pathResult = await pathPromise
 			return { path: pathResult?.path ?? null, ancestors: pathResult?.ancestors ?? [], size: null }
@@ -948,7 +1001,7 @@ const api = {
 		if (PSEUDO_PARENTS.has(item.parent)) {
 			throw new Error(`item has no navigable ancestry: ${item.uuid}`)
 		}
-		return requireClient().getItemPath(item)
+		return cachedItemPath(requireClient(), item)
 	},
 	// Size-only aggregate (bytes + child file/dir counts) for ONE directory, split out from
 	// getItemInfo (which also walks getItemPath) so the size-sort bridge can prefetch a whole
@@ -1100,37 +1153,30 @@ const api = {
 			})
 		})
 	},
-	// Breadcrumb primitive: the "/drive/$" splat carries the full ancestor-uuid path in the URL
-	// already (see features/drive/lib/navigate.ts), so this only resolves DISPLAY NAMES for a batch of
-	// uuids — no getItemPath walk. Cache-first per uuid; only a cold miss (e.g. a deep-linked path
-	// this tab has never listed before) calls getDirOptional, and every miss resolves IN PARALLEL —
-	// a cold multi-segment link costs one round trip per uncached segment, not one per depth level
-	// in series. A uuid that never resolves (not found, or a rejected lookup) is simply absent from
-	// the returned record; the caller falls back to displaying the raw uuid for that segment.
-	async resolveDirectoryNames(uuids: string[]): Promise<Record<string, string>> {
+	// Breadcrumb primitive: a splat route carries the full ancestor-uuid path in the URL already (see
+	// features/drive/lib/navigate.ts), so this only resolves one crumb's DISPLAY NAME — no getItemPath
+	// walk. Reached only when no cached listing on the main thread held the name
+	// (queries/drive.ts's fetchDirectoryName). Without `hint` the uuid is an owned directory and
+	// resolves cache-first through resolveOwnedDir; with it, through the same share-context walk the
+	// shared listing uses, which a click-through has already seeded and a cold deep link shares with
+	// the listing's own walk.
+	async resolveDirectoryName(uuid: string, hint?: SharedPathHint): Promise<string | null> {
 		const c = requireClient()
-		const misses = uuids.filter(uuid => getCachedName(uuid) === undefined)
 
-		await Promise.all(
-			misses.map(async uuid => {
-				const dir = await c.getDirOptional(uuid).catch((e: unknown) => {
-					log.warn("sdk.worker", "resolveDirectoryNames: unresolved uuid", uuid, e)
-					return undefined
-				})
-				if (dir !== undefined) {
-					cacheDirs([dir])
-				}
-			})
+		return await lookupDirectoryName(
+			{
+				getCachedName,
+				lookupOwnedName: async ownedUuid => {
+					await resolveOwnedDir(c, ownedUuid)
+
+					return getCachedName(ownedUuid)
+				},
+				resolveSharedContext: (sharedHint, sharedUuid) =>
+					resolveSharedDirContext(sharedPathDeps(c, sharedHint.variant), sharedUuid, sharedHint.path)
+			},
+			uuid,
+			hint
 		)
-
-		const names: Record<string, string> = {}
-		for (const uuid of uuids) {
-			const name = getCachedName(uuid)
-			if (name !== undefined) {
-				names[uuid] = name
-			}
-		}
-		return names
 	},
 	// ── Contacts ─────────────────────────────────────────────────────────────
 	// Plain pass-throughs, same shape as getDirectory/getUserInfo above — every returned record is

@@ -204,17 +204,52 @@ describe("thumbnailCategory", () => {
 				"none"
 			)
 		})
+	})
 
-		it("a sharedRootFile — structurally file-like but out of scope", () => {
-			expect(thumbnailCategory(narrowItem(mockSharedFile()))).toBe("none")
+	// A shared file carries the same decrypted meta and the SDK's own canMakeThumbnail as an owned one,
+	// and the SDK thumbnails any AnyFile, so it routes identically.
+	describe("shared file arms — routed exactly like an owned file", () => {
+		const sharedMeta = (name: string) =>
+			({
+				type: "decoded",
+				data: { name, mime: "application/octet-stream", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
+			}) as const
+
+		function nestedSharedFile(name: string, canMakeThumbnail: boolean): DriveItem {
+			return narrowItem({
+				...mockFile({ uuid: testUuid("nested"), canMakeThumbnail, meta: sharedMeta(name) }),
+				sharingRole: { Sharer: { email: "b@filen.io", id: 2 } }
+			})
+		}
+
+		it("a sharedRootFile image the SDK can thumbnail -> sdk", () => {
+			const item = narrowItem(mockSharedFile({ canMakeThumbnail: true }))
+
+			expect(item.type).toBe("sharedRootFile")
+			expect(thumbnailCategory(item)).toBe("sdk")
 		})
 
-		it("a nested sharedFile — structurally file-like but out of scope", () => {
-			const item = narrowItem({
-				...mockFile({ uuid: testUuid("nested") }),
-				sharingRole: { Receiver: { email: "b@filen.io", id: 2 } }
-			})
-			expect(thumbnailCategory(item)).toBe("none")
+		it("a nested sharedFile image the SDK can thumbnail -> sdk", () => {
+			const item = nestedSharedFile("photo.heic", true)
+
+			expect(item.type).toBe("sharedFile")
+			expect(thumbnailCategory(item)).toBe("sdk")
+		})
+
+		it("shared video and pdf take their client-side generators", () => {
+			expect(thumbnailCategory(narrowItem(mockSharedFile({ meta: sharedMeta("clip.mp4") })))).toBe("video")
+			expect(thumbnailCategory(nestedSharedFile("doc.pdf", false))).toBe("pdf")
+		})
+
+		it("the SDK's own refusal still wins for a shared file", () => {
+			expect(thumbnailCategory(narrowItem(mockSharedFile({ canMakeThumbnail: false })))).toBe("none")
+			expect(thumbnailCategory(nestedSharedFile("notes.txt", false))).toBe("none")
+		})
+
+		it("an undecryptable shared file -> none", () => {
+			expect(thumbnailCategory(narrowItem(mockSharedFile({ canMakeThumbnail: true, meta: { type: "encrypted", data: "x" } })))).toBe(
+				"none"
+			)
 		})
 	})
 })

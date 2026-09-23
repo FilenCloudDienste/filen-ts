@@ -1223,11 +1223,10 @@ describe("disableLinks (bulk)", () => {
 	})
 })
 
-// Sanity: driveNamesQueryKey stays importable/used the same way renameItem's own invalidation targets
-// it (a 2-element prefix filter matches any uuids array) — proven directly in queries/drive.test.ts;
-// this just confirms the shape actions.ts's rename patch is invalidating against.
+// Sanity: renameItem invalidates the ["drive", "names"] prefix, which must cover every per-uuid entry
+// whatever its scope.
 describe("names query key shape", () => {
-	it("is a 3-tuple whose first two elements are the prefix renameItem invalidates", () => {
-		expect(driveNamesQueryKey(["a", "b"]).slice(0, 2)).toEqual(["drive", "names"])
+	it.each(["drive", "sharedIn", "sharedOut"] as const)("a %s entry starts with the prefix renameItem invalidates", scope => {
+		expect(driveNamesQueryKey(scope, "a").slice(0, 2)).toEqual(["drive", "names"])
 	})
 })

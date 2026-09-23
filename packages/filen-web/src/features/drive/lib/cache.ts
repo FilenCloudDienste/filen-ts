@@ -6,7 +6,7 @@ import type { Dir, AnySharedDir, SharingRole } from "@filen/sdk-rs"
 // In-memory only — persistence is deferred. Imported into sdk.worker.ts (the only place that calls
 // listDir/createDir/getDirOptional), so population and cache-first reads live right next to the SDK
 // calls they save: every listing and every directory create populates it; listDirectory/
-// createDirectory/resolveDirectoryNames consult it before any getDirOptional round trip
+// createDirectory/resolveDirectoryName consult it before any getDirOptional round trip
 // (cache-first — getDirOptional only on a cold miss, e.g. a deep-linked uuid this tab has never
 // listed). Cleared on every new client adoption (see sdk.worker.ts's adoptClient) so a fresh session
 // never sees a prior account's directories.
@@ -38,7 +38,7 @@ export function getCachedName(uuid: string): string | undefined {
 }
 
 // Upserts every dir into both maps — the single population point for listDirectory's returned
-// dirs, createDirectory's created-or-idempotent-existing dir, and resolveDirectoryNames' cold
+// dirs, createDirectory's created-or-idempotent-existing dir, and resolveOwnedDir's cold
 // getDirOptional fallback. A dir whose meta isn't decodable updates the Dir map only; any name
 // cached for it earlier is left in place rather than clobbered with nothing — the name can only
 // become stale if decryption itself regresses mid-session, and a stale-but-real name is a better
@@ -63,6 +63,14 @@ export function cacheSharedDirContext(uuid: string, context: SharedDirContext): 
 
 export function getSharedDirContext(uuid: string): SharedDirContext | undefined {
 	return sharedDirContextByUuid.get(uuid)
+}
+
+// A shared dir's name lives on its underlying dir (SharedRootDir.inner / SharedDir.inner), decrypted by
+// the SDK under the share's key — the only place a directory the account does not own carries one.
+export function sharedDirName(dir: AnySharedDir): string | undefined {
+	const meta = dir.inner.meta
+
+	return meta.type === "decoded" ? meta.data.name : undefined
 }
 
 export function clearDirectoryCache(): void {

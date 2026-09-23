@@ -5,7 +5,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
 import { readThumbnailBlob, deleteThumbnail as deleteThumbnailBlob } from "@/features/drive/lib/thumbCache"
 import { thumbnailCategory, type ThumbnailCategory } from "@/features/drive/lib/thumbnails.logic"
-import { type BaseFileItem, type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, type BaseFileItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { createThumbnailUrlCache, computeThumbnailCapacity } from "@/features/drive/lib/thumbnailUrlCache"
 
@@ -225,15 +225,17 @@ async function generate(
 // real worker/OPFS/Blob-URL wiring — pass a fake for tests.
 export async function getThumbnailUrl(item: DriveItem, deps: ThumbnailServiceDeps = defaultThumbnailDeps): Promise<string | null> {
 	const category = thumbnailCategory(item)
+	// The base projection, so a shared file reaches the generators as the same file shape an owned one
+	// does; its data still carries the sharing fields the SDK's AnyFile needs to read it as shared.
+	const base = asDirectoryOrFile(item)
 
-	if (category === "none" || item.type !== "file") {
-		// Unreachable in practice — thumbnailCategory already returns "none" for every non-file arm —
-		// kept so the file-arm access below (item.data as an SDK File) type-checks without a non-null
-		// assertion.
+	if (category === "none" || base.type !== "file") {
+		// The directory half is unreachable in practice (thumbnailCategory already returns "none" for
+		// every directory arm) — kept so `base` narrows to its file arm below.
 		return null
 	}
 
-	const uuid = item.data.uuid
+	const uuid = base.data.uuid
 	const cachedUrl = urls.get(uuid)
 
 	if (cachedUrl !== undefined) {
@@ -258,7 +260,7 @@ export async function getThumbnailUrl(item: DriveItem, deps: ThumbnailServiceDep
 		return inFlight
 	}
 
-	return pending.coalesce(uuid, () => generate(deps, item, category, uuid))
+	return pending.coalesce(uuid, () => generate(deps, base, category, uuid))
 }
 
 // Publishes an already-available production as THE in-flight generation for this item's uuid, so any
@@ -295,13 +297,14 @@ export function seedThumbnail(
 	deps: ThumbnailServiceDeps = defaultThumbnailDeps
 ): void {
 	const category = thumbnailCategory(item)
+	const base = asDirectoryOrFile(item)
 
-	if (category === "none" || item.type !== "file") {
+	if (category === "none" || base.type !== "file") {
 		// Same file-arm guard getThumbnailUrl carries above, for the same typing reason.
 		return
 	}
 
-	const uuid = item.data.uuid
+	const uuid = base.data.uuid
 
 	if (urls.get(uuid) !== undefined || pending.has(uuid)) {
 		return
@@ -333,7 +336,7 @@ export function seedThumbnail(
 				// download this seat displaced for the caller that joined it would have been gated too — and
 				// inherits that path's whole retry/blacklist accounting, so nothing here counts a failure of
 				// its own. Unjoined, there is no displaced download and no caller: the answer is nobody's.
-				return seat.joined ? await generate(deps, item, category, uuid) : null
+				return seat.joined ? await generate(deps, base, category, uuid) : null
 			}
 
 			// An empty buffer is neither bytes to render nor a verdict to report; there is nothing here to

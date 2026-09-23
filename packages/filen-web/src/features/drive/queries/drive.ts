@@ -1,4 +1,4 @@
-import { useQuery, type UseQueryResult } from "@tanstack/react-query"
+import { useQueries, useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 // Whole-statement `import type` here too — sdk.worker.ts's own top-level code pulls in
@@ -257,28 +257,104 @@ export function normalizeParentUuid(parentUuid: string | null, rootUuid: string)
 	return parentUuid === rootUuid ? null : parentUuid
 }
 
-// Breadcrumb primitive: the "/drive/$" splat carries the full ancestor-uuid path in the URL itself
-// (see features/drive/lib/navigate.ts's splatToUuids) — this only resolves DISPLAY NAMES for that path's
-// uuids, cache-first, in one batched worker call. No getItemPath walk, no per-ancestor Dir/File
-// narrowing (a name lookup has no item-type union to narrow). A uuid this call can't resolve
-// (not-found, undecryptable meta) is simply absent from the returned record — never a query error —
-// so the breadcrumb degrades one segment at a time (uuid-fallback) instead of failing wholesale.
-export function driveNamesQueryKey(uuids: string[]) {
-	return ["drive", "names", uuids] as const
+// Breadcrumb primitive: a splat route carries the full ancestor-uuid path in the URL itself (see
+// features/drive/lib/navigate.ts's splatToUuids), so only each crumb's DISPLAY NAME is resolved — no
+// getItemPath walk. The resolution path follows the route: every non-shared variant browses owned
+// directories, the two shared variants their own share tree.
+export type DirectoryNameScope = "drive" | "sharedIn" | "sharedOut"
+
+export function directoryNameScope(variant: DriveVariant): DirectoryNameScope {
+	return variant === "sharedIn" || variant === "sharedOut" ? variant : "drive"
 }
 
-export async function fetchDirectoryNames(uuids: string[]): Promise<Record<string, string>> {
-	if (uuids.length === 0) {
-		return {}
+// One entry per uuid rather than per path, so a deeper path reuses every ancestor it shares with the
+// one before it instead of re-resolving them under a new key.
+export function driveNamesQueryKey(scope: DirectoryNameScope, uuid: string) {
+	return ["drive", "names", scope, uuid] as const
+}
+
+// A directory's decrypted name as a cached listing already holds it — the parent listing a
+// click-through came from always does, for owned and shared directories alike. Listings, not the
+// sidebar tree: rename and socket events patch every listing, while the tree is never patched.
+export function cachedDirectoryName(uuid: string): string | undefined {
+	const item = findCachedListingItem(uuid)
+
+	if (item === undefined || asDirectoryOrFile(item).type !== "directory") {
+		return undefined
 	}
-	return sdkApi.resolveDirectoryNames(uuids)
+
+	return item.data.decryptedMeta?.name
 }
 
-export function useDirectoryNamesQuery(uuids: string[]): UseQueryResult<Record<string, string>> {
-	return useQuery({
-		queryKey: driveNamesQueryKey(uuids),
-		enabled: uuids.length > 0,
-		queryFn: () => fetchDirectoryNames(uuids)
+// `path` is the crumb's ancestor chain, the crumb itself last. Cached listings first, so a
+// click-through never reaches the worker; otherwise one worker call, which is itself cache-first and
+// only then asks the SDK: owned lookup for an owned directory, the share walk (hinted with `path`) for
+// a shared one. null means unresolvable and renders as the raw uuid.
+export async function fetchDirectoryName(scope: DirectoryNameScope, path: readonly string[]): Promise<string | null> {
+	const uuid = path.at(-1)
+
+	if (uuid === undefined) {
+		return null
+	}
+
+	const cached = cachedDirectoryName(uuid)
+
+	if (cached !== undefined) {
+		return cached
+	}
+
+	return scope === "drive" ? sdkApi.resolveDirectoryName(uuid) : sdkApi.resolveDirectoryName(uuid, { variant: scope, path: [...path] })
+}
+
+export type DirectoryNamesResult =
+	| { status: "pending"; data: undefined; error: null }
+	| { status: "error"; data: undefined; error: Error }
+	| { status: "success"; data: Record<string, string>; error: null }
+
+interface DirectoryNameQueryState {
+	status: "pending" | "error" | "success"
+	data: string | null | undefined
+	error: Error | null
+}
+
+// Folds the per-uuid entries back into the one record every breadcrumb renders: any error wins, then
+// any pending, else every resolved name (an unresolved uuid is simply absent — the caller falls back to
+// the raw uuid for that one crumb).
+export function combineDirectoryNames(uuids: readonly string[], results: readonly DirectoryNameQueryState[]): DirectoryNamesResult {
+	const names: Record<string, string> = {}
+	let pending = false
+
+	for (const [index, result] of results.entries()) {
+		if (result.status === "error" && result.error !== null) {
+			return { status: "error", data: undefined, error: result.error }
+		}
+
+		if (result.status === "pending") {
+			pending = true
+			continue
+		}
+
+		const uuid = uuids[index]
+
+		if (uuid !== undefined && typeof result.data === "string") {
+			names[uuid] = result.data
+		}
+	}
+
+	return pending ? { status: "pending", data: undefined, error: null } : { status: "success", data: names, error: null }
+}
+
+// Default staleTime on purpose: a remount refetch re-reads the listings rename and socket events keep
+// current, and it costs no request while they hold the name.
+export function useDirectoryNamesQuery(uuids: string[], variant: DriveVariant = "drive"): DirectoryNamesResult {
+	const scope = directoryNameScope(variant)
+
+	return useQueries({
+		queries: uuids.map((uuid, index) => ({
+			queryKey: driveNamesQueryKey(scope, uuid),
+			queryFn: () => fetchDirectoryName(scope, uuids.slice(0, index + 1))
+		})),
+		combine: results => combineDirectoryNames(uuids, results)
 	})
 }
 

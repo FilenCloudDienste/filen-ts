@@ -1,11 +1,11 @@
-import { type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { extensionOf } from "@/features/drive/lib/preview.logic"
 
 // Every category this app can produce a cached thumbnail for. "sdk" is every STILL image — plain
 // raster, HEIC and camera RAW alike — decoded by the Rust SDK, which is the only decoder any of them
 // ever sees now. "video" and "pdf" stay client-side because Rust decodes neither. "none" covers every
-// non-"file" arm (directory, every shared arm — out of scope here), an undecryptable file, svg, a pdf
-// over the size gate, and anything the SDK itself says it cannot thumbnail.
+// directory arm, an undecryptable file, svg, a pdf over the size gate, and anything the SDK itself
+// says it cannot thumbnail.
 export type ThumbnailCategory = "sdk" | "video" | "pdf" | "none"
 
 // The thumbnail's width bound, shared by every producer — one target keeps every cached .thumb file
@@ -95,14 +95,16 @@ export const THUMB_EXT = ".thumb"
 
 const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "webm", "m4v", "mkv"])
 
-// Category routing, "file" arm only — a directory or any shared arm (shared items are out of scope
-// here) always resolves "none", same as an undecryptable file.
+// Category routing over every file-family arm — owned, shared-root and nested shared files alike
+// (asDirectoryOrFile). A shared file carries the same decrypted meta and the SDK's own
+// canMakeThumbnail, and the SDK thumbnails any AnyFile, so a shared file routes exactly like an owned
+// one. A directory arm always resolves "none", same as an undecryptable file.
 //
 // The ORDER below is load-bearing, not cosmetic. Video and pdf both carry `canMakeThumbnail: false`
 // (the SDK decodes neither), so if the sdk arm were checked first they would fall to "none" and lose
 // the client-side generators that DO handle them — they have to be claimed by extension first.
 //
-//   1. non-file / undecryptable  -> none   (nothing to route on)
+//   1. directory / undecryptable -> none   (nothing to route on)
 //   2. svg                       -> none   (defense in depth; the wasm build has no SVG rasteriser
 //                                           either way, so this is belt-and-braces on the long-standing
 //                                           "never feed an untrusted svg to a decoder" posture)
@@ -116,11 +118,13 @@ const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "webm", "m4v", "mkv"])
 // accounts for formats this app has never heard of, and duplicating it as a JS list would only create
 // a second answer that can drift.
 export function thumbnailCategory(item: DriveItem): ThumbnailCategory {
-	if (item.type !== "file" || item.data.undecryptable) {
+	const base = asDirectoryOrFile(item)
+
+	if (base.type !== "file" || base.data.undecryptable) {
 		return "none"
 	}
 
-	const name = item.data.decryptedMeta?.name
+	const name = base.data.decryptedMeta?.name
 	const ext = name !== undefined ? extensionOf(name) : ""
 
 	if (ext === "svg") {
@@ -132,10 +136,10 @@ export function thumbnailCategory(item: DriveItem): ThumbnailCategory {
 	}
 
 	if (ext === "pdf") {
-		return item.data.size <= THUMB_SIZE_GATE ? "pdf" : "none"
+		return base.data.size <= THUMB_SIZE_GATE ? "pdf" : "none"
 	}
 
-	return item.data.canMakeThumbnail ? "sdk" : "none"
+	return base.data.canMakeThumbnail ? "sdk" : "none"
 }
 
 // name/size/lastModified projection of one cached .thumb file — thumbStore.ts's listThumbs() own

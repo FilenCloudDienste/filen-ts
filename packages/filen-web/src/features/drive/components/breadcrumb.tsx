@@ -73,9 +73,8 @@ function CrumbLink({ variant, routeId, splatValue, targetUuid, targetAncestry, l
 }
 
 // Root (an empty splat) renders its variant's own label directly — nothing to resolve, since the
-// URL itself carries no ancestor uuids. A non-empty splat only ever occurs for the "drive" variant
-// today (the only route with a "/drive/$" path — see routes/_app/drive.$.tsx), but the root label
-// still keys off `variant` so a future nested route for another variant needs no change here.
+// URL itself carries no ancestor uuids. A non-empty splat occurs on the three splat routes (drive,
+// shared-in, shared-out); `variant` picks how its crumb names resolve (useDirectoryNamesQuery).
 export function Breadcrumb({ variant, splat }: BreadcrumbProps) {
 	const { t } = useTranslation("drive")
 	const rootLabel = t(VARIANT_ROOT_LABEL_KEY[variant])
@@ -85,7 +84,7 @@ export function Breadcrumb({ variant, splat }: BreadcrumbProps) {
 	// owned "/drive/$" (see features/drive/lib/navigate.ts's driveRouteIdFor). All three routes take the same
 	// splat param, so only the `to` differs.
 	const routeId = driveRouteIdFor(variant)
-	const namesQuery = useDirectoryNamesQuery(uuids)
+	const namesQuery = useDirectoryNamesQuery(uuids, variant)
 
 	return (
 		// The trail is the header row's only yielding item — the action cluster beside it is shrink-0 and
@@ -144,7 +143,7 @@ export function Breadcrumb({ variant, splat }: BreadcrumbProps) {
 				{namesQuery.status === "success"
 					? uuids.map((uuid, index) => {
 							const isLast = index === uuids.length - 1
-							// Whatever resolveDirectoryNames couldn't resolve for this one uuid (not found,
+							// Whatever useDirectoryNamesQuery couldn't resolve for this one uuid (not found,
 							// undecryptable meta) falls back to the raw uuid — a gap in an otherwise-resolved
 							// path degrades one segment, never the whole breadcrumb.
 							const label = namesQuery.data[uuid] ?? uuid
