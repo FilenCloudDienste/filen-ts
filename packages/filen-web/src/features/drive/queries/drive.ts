@@ -94,48 +94,39 @@ export function useDirectoryListingQuery(
 }
 
 // Sidebar directory-tree primitive: the minimal per-node shape the collapsible Cloud Drive tree
-// renders — just a uuid and a display name (its raw meta name, uuid-fallback like every listing row).
-// Deliberately narrower than DriveItem: the tree only ever shows directories and never needs their
-// files, meta, sort keys or share context, so it keys its own cache slice rather than reusing (and
-// force-fetching the files of) the full listing query. The move-dialog can adopt the same primitive
-// later by feeding it this same hook.
+// renders — just a uuid, a display name (its raw meta name, uuid-fallback like every listing row) and
+// its color. The move-dialog can adopt the same primitive later by feeding it this same hook.
 export interface DirectoryTreeChild {
 	uuid: string
 	name: string
 	color: DirColor
 }
 
-export function directoryTreeQueryKey(uuid: string | null) {
-	return ["drive", "tree", uuid] as const
+// Directories only, name-sorted independent of any listing sort preference. Module-level so `select`
+// keeps a stable reference and only re-runs when the listing data itself changes.
+export function projectTreeChildren(items: DriveItem[]): DirectoryTreeChild[] {
+	const children: DirectoryTreeChild[] = []
+
+	for (const item of items) {
+		if (item.type === "directory") {
+			children.push({ uuid: item.data.uuid, name: driveItemName(item), color: item.data.color })
+		}
+	}
+
+	return children.sort((a, b) => fastLocaleCompare(a.name, b.name))
 }
 
-// Reuses the existing listDirectory worker op (no new SDK surface) and filters to directories
-// client-side — the tree never lists a directory's files. `uuid === null` is the drive root, matching
-// toListingTarget's own root sentinel. Exported bare (no hook wrapper) so this project's
-// node-environment unit tests can exercise it against a mocked sdkApi, same as fetchDirectoryListing.
-export async function fetchDirectoryTreeChildren(uuid: string | null): Promise<DirectoryTreeChild[]> {
-	const { dirs } = await sdkApi.listDirectory(uuid === null ? { kind: "root" } : { kind: "uuid", uuid })
-	return dirs
-		.map(dir => {
-			const item = narrowItem(dir)
-			return {
-				uuid: item.data.uuid,
-				name: driveItemName(item),
-				color: item.type === "directory" ? item.data.color : "default"
-			}
-		})
-		.sort((a, b) => fastLocaleCompare(a.name, b.name))
-}
-
-// One query per tree node, lazily fetched: a node's children are only requested once its own subtree
-// mounts (the tree renders a node's DirectoryTree child only while it's open — see directoryTree.tsx),
-// so an unopened node never fetches. Keyed per uuid in the shared TanStack cache, so re-expanding a
-// previously-opened node serves instantly from cache and a directory listing already viewed elsewhere
-// stays independent of this slice.
+// Reads the drive listing's own cache entry rather than a slice of its own: listDirectory returns a
+// directory's files alongside its dirs in one call anyway, so sharing the key costs nothing and lets
+// the tree and the main pane dedupe one in-flight fetch, one focus/reconnect refetch, and pick up the
+// listing's socket patches. Same queryFn as useDirectoryListingQuery's "drive" arm — two observers on
+// one key must never disagree on how it is fetched. Lazy per node: a node's query only mounts once
+// its subtree does (see directoryTree.tsx), so an unopened node never fetches.
 export function useDirectoryTreeChildrenQuery(uuid: string | null): UseQueryResult<DirectoryTreeChild[]> {
 	return useQuery({
-		queryKey: directoryTreeQueryKey(uuid),
-		queryFn: () => fetchDirectoryTreeChildren(uuid)
+		queryKey: driveListingQueryKey({ variant: "drive", uuid }),
+		queryFn: () => fetchDirectoryListing("drive", uuid),
+		select: projectTreeChildren
 	})
 }
 
