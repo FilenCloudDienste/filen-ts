@@ -10,6 +10,8 @@ import { wipeSwClient } from "@/features/drive/lib/saveDownload"
 import { clearSession, broadcastAuth } from "@/lib/sdk/session"
 import { kvClear } from "@/lib/storage/adapter"
 import { disposeAudioEngine } from "@/features/audio/lib/audioEngine"
+import { cancelActiveTransfers } from "@/features/transfers/lib/control"
+import { allowNextUnload } from "@/lib/unloadGuard"
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
 import { confirmDiscardUnsavedPreview, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { queryClient } from "@/queries/client"
@@ -78,6 +80,9 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 	// (useUnsyncedWork) instead of promising it syncs back on the next sign-in.
 	notesSync.cancel()
 	chatsSync.cancel()
+	// Uploads, downloads and copies abort before the worker drops its client; the confirm that leads
+	// here warned about them (useHasActiveTransfers).
+	cancelActiveTransfers()
 	// Drop the chat module's two session-scoped caches: the memoized `.filen/Chat Uploads` uuid (which
 	// names a directory the next account cannot write to) and the reconnect latch (which would make the
 	// next account's first authSuccess read as a recovery).
@@ -107,6 +112,8 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 			broadcastAuth("logout")
 		},
 		reload: () => {
+			// The transfers were cancelled above; a row still settling must not hold the reload.
+			allowNextUnload()
 			location.reload()
 		}
 	})

@@ -40,6 +40,10 @@ export function isActiveTransfer(status: Transfer["status"]): boolean {
 	return status === "uploading" || status === "downloading" || status === "copying"
 }
 
+export function hasActiveTransfers(transfers: readonly Transfer[]): boolean {
+	return transfers.some(transfer => isActiveTransfer(transfer.status))
+}
+
 // Drop the OLDEST finished (non-active) rows once the finished count exceeds the cap — active rows
 // are never dropped. `transfers` is insertion-ordered (add() appends), so array position already IS
 // startedAt order; this walks forward and only skips (drops) the first `excess` finished rows it
@@ -232,4 +236,9 @@ export function computeTransfersAggregate(
 // 0-100, ready to feed straight into a progress bar — not a 0..1 ratio.
 export function useTransfersAggregate(): { activeCount: number; percent: number; speed: number } {
 	return useTransfersStore(useShallow(state => computeTransfersAggregate(state.transfers, state.speedSamples)))
+}
+
+// Boolean-collapsed, so a progress tick re-renders a subscriber only on the has/has-not edge.
+export function useHasActiveTransfers(): boolean {
+	return useTransfersStore(state => hasActiveTransfers(state.transfers))
 }

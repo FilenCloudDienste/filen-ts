@@ -214,6 +214,12 @@ export const auth = {
 	/** Logout confirm dialog — body used instead of logoutConfirmBody while a note edit or chat message is still queued on this device, because signing out destroys that queue */
 	logoutConfirmBodyUnsynced:
 		"Some note edits or messages have not reached Filen's servers yet. Signing out deletes them permanently, along with everything cached on this device. Anything already synced stays safe and comes back the next time you sign in.",
+	/** Logout confirm dialog — body used instead of logoutConfirmBody while an upload, download or copy is running, because signing out cancels it */
+	logoutConfirmBodyTransfers:
+		"Uploads, downloads or copies are still running. Signing out stops them, and a stopped copy keeps only what it copied so far. Everything cached on this device is cleared too; your account and its contents stay safe on Filen's servers.",
+	/** Logout confirm dialog — body used while note edits or messages are still queued AND an upload, download or copy is running; signing out loses both */
+	logoutConfirmBodyUnsyncedTransfers:
+		"Some note edits or messages have not reached Filen's servers yet, and uploads, downloads or copies are still running. Signing out deletes the queued edits permanently and stops the transfers, along with everything cached on this device. Anything already synced stays safe and comes back the next time you sign in.",
 	/** Toast shown when a password change on another device forced a sign-out and the user postponed it at the unsaved-changes prompt */
 	logoutForcedPending:
 		"Your password was changed on another device, so this device is signing out. Copy anything you still need from the unsaved preview — the sign-out finishes as soon as you close it.",

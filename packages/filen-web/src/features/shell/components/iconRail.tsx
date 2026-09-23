@@ -22,10 +22,11 @@ import { cn } from "@filen/shared"
 import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/contactsList.logic"
 import { flushOutboxes, performLogout } from "@/features/shell/lib/performLogout"
 import { useHasUnsyncedWork } from "@/features/shell/hooks/useUnsyncedWork"
+import { logoutConfirmBodyKey } from "@/features/shell/hooks/useUnsyncedWork.logic"
 import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
 import { useContactRequestsQuery } from "@/features/contacts/queries/contacts"
 import { useAccountQuery } from "@/queries/account"
-import { useTransfersAggregate } from "@/features/transfers/store/useTransfersStore"
+import { useHasActiveTransfers, useTransfersAggregate } from "@/features/transfers/store/useTransfersStore"
 import { shouldShowTransfersAggregate } from "@/features/transfers/screens/transfers.logic"
 import { Logo } from "@/features/shell/components/logo"
 import { SidebarDrawerTrigger } from "@/features/shell/components/sidebarDrawer"
@@ -95,6 +96,7 @@ function AccountMenu() {
 	const { setTheme } = useTheme()
 	const accountQuery = useAccountQuery()
 	const hasUnsyncedWork = useHasUnsyncedWork()
+	const hasActiveTransfers = useHasActiveTransfers()
 	const [confirmOpen, setConfirmOpen] = useState(false)
 	const [shortcutsOpen, setShortcutsOpen] = useState(false)
 	const [pending, setPending] = useState(false)
@@ -212,7 +214,7 @@ function AccountMenu() {
 				open={confirmOpen}
 				pending={pending}
 				title={t("auth:logoutConfirmTitle")}
-				body={hasUnsyncedWork ? t("auth:logoutConfirmBodyUnsynced") : t("auth:logoutConfirmBody")}
+				body={t(`auth:${logoutConfirmBodyKey(hasUnsyncedWork, hasActiveTransfers)}`)}
 				confirmLabel={t("signOut")}
 				cancelLabel={t("cancel")}
 				destructive

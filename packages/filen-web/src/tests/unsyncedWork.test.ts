@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { Chat, ChatMessage, Note, UuidStr } from "@filen/sdk-rs"
 import type { InflightContent } from "@/features/notes/store/useNotesInflight"
 import type { ChatMessageWithInflightId, InflightChatMessageErrors, InflightChatMessages } from "@/features/chats/store/useChatsInflight"
-import { hasUnsyncedNotes, hasUnsyncedChatSends } from "@/features/shell/hooks/useUnsyncedWork.logic"
+import { hasUnsyncedNotes, hasUnsyncedChatSends, logoutConfirmBodyKey } from "@/features/shell/hooks/useUnsyncedWork.logic"
 
 function testUuid(label: string): UuidStr {
 	return `${label}-0000-0000-0000-000000000000` as UuidStr
@@ -103,5 +103,14 @@ describe("hasUnsyncedChatSends", () => {
 		}
 
 		expect(hasUnsyncedChatSends({}, errors)).toBe(true)
+	})
+})
+
+describe("logoutConfirmBodyKey", () => {
+	it("names whatever signing out is about to cost", () => {
+		expect(logoutConfirmBodyKey(false, false)).toBe("logoutConfirmBody")
+		expect(logoutConfirmBodyKey(true, false)).toBe("logoutConfirmBodyUnsynced")
+		expect(logoutConfirmBodyKey(false, true)).toBe("logoutConfirmBodyTransfers")
+		expect(logoutConfirmBodyKey(true, true)).toBe("logoutConfirmBodyUnsyncedTransfers")
 	})
 })

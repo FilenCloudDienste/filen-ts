@@ -24,7 +24,7 @@ const { requestCopyCancel } = vi.hoisted(() => ({ requestCopyCancel: vi.fn() }))
 
 vi.mock("@/features/drive/lib/copy", () => ({ requestCopyCancel }))
 
-import { cancelTransfer, pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
+import { cancelActiveTransfers, cancelTransfer, pauseTransfer, resumeTransfer } from "@/features/transfers/lib/control"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 
 function makeTransfer(overrides: Partial<Transfer> = {}): Transfer {
@@ -203,5 +203,24 @@ describe("copy transfers", () => {
 
 		expect(requestCopyCancel).not.toHaveBeenCalled()
 		expect(pauseCopy).not.toHaveBeenCalled()
+	})
+})
+
+describe("cancelActiveTransfers", () => {
+	it("cancels every active transfer of every direction and leaves finished ones alone", () => {
+		useTransfersStore.setState({
+			transfers: [
+				makeTransfer({ id: "u", direction: "upload", status: "uploading" }),
+				makeTransfer({ id: "d", direction: "download", status: "downloading", paused: true }),
+				makeTransfer({ id: "c", direction: "copy", status: "copying" }),
+				makeTransfer({ id: "done", direction: "upload", status: "done" })
+			]
+		})
+
+		cancelActiveTransfers()
+
+		expect(cancelUpload.mock.calls).toEqual([["u"]])
+		expect(cancelDownload.mock.calls).toEqual([["d"]])
+		expect(requestCopyCancel).toHaveBeenCalledWith("c", { trashCopied: false })
 	})
 })

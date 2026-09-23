@@ -280,6 +280,19 @@ describe("triggerSwDownload", () => {
 		expect(location.href).toBe(`${SW_DOWNLOAD_PREFIX}abc-123`)
 	})
 
+	it("keeps the navigation it starts out of the leave-page prompt", async () => {
+		stubWindow()
+		stubServiceWorkerReady(fakeServiceWorker(() => ({ ok: true })))
+
+		const { triggerSwDownload } = await freshModule()
+		const { consumeUnloadAllowance } = await import("@/lib/unloadGuard")
+
+		consumeUnloadAllowance()
+		await triggerSwDownload(testFile(), { kind: "sw", id: "abc-123", url: `${SW_DOWNLOAD_PREFIX}abc-123`, name: "report.pdf" })
+
+		expect(consumeUnloadAllowance()).toBe(true)
+	})
+
 	it("does not navigate when registration fails", async () => {
 		const sw = fakeServiceWorker(() => ({ ok: false, error: "no room" }))
 		const location = stubWindow()

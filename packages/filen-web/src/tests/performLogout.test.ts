@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { LogoutDeps } from "@/lib/logout"
 
 // Every teardown collaborator is worker- or DOM-backed; the phased wipe itself is runLogout's own test
 // (logout.test.ts). What matters here is WHEN — and whether — performLogout reaches it.
@@ -6,35 +7,45 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 // Each collaborator records its own name in `calls` before doing anything else, so the ORDER assertions
 // below read one array instead of comparing invocation counters: the security property is that every
 // plaintext producer is silenced BEFORE the wipe, not merely that each was called at some point.
-const { calls, runLogout, notesCancel, chatsCancel, clearAllTyping, disposeAudioEngine, socketStop, toastWarning } = vi.hoisted(() => {
-	const calls: string[] = []
-	const record =
-		<T>(name: string, result: () => T) =>
-		() => {
-			calls.push(name)
+const { calls, runLogout, notesCancel, chatsCancel, cancelActiveTransfers, clearAllTyping, disposeAudioEngine, socketStop, toastWarning } =
+	vi.hoisted(() => {
+		const calls: string[] = []
+		const record =
+			<T>(name: string, result: () => T) =>
+			() => {
+				calls.push(name)
 
-			return result()
+				return result()
+			}
+
+		return {
+			calls,
+			runLogout: vi.fn<(deps: LogoutDeps) => Promise<void>>(record("runLogout", () => Promise.resolve())),
+			notesCancel: vi.fn(record("notesSync.cancel", () => undefined)),
+			chatsCancel: vi.fn(record("chatsSync.cancel", () => undefined)),
+			cancelActiveTransfers: vi.fn(record("cancelActiveTransfers", () => undefined)),
+			clearAllTyping: vi.fn(record("clearAllTyping", () => undefined)),
+			disposeAudioEngine: vi.fn(record("disposeAudioEngine", () => undefined)),
+			socketStop: vi.fn(record("socketBridge.stop", () => Promise.resolve())),
+			toastWarning: vi.fn()
 		}
-
-	return {
-		calls,
-		runLogout: vi.fn<() => Promise<void>>(record("runLogout", () => Promise.resolve())),
-		notesCancel: vi.fn(record("notesSync.cancel", () => undefined)),
-		chatsCancel: vi.fn(record("chatsSync.cancel", () => undefined)),
-		clearAllTyping: vi.fn(record("clearAllTyping", () => undefined)),
-		disposeAudioEngine: vi.fn(record("disposeAudioEngine", () => undefined)),
-		socketStop: vi.fn(record("socketBridge.stop", () => Promise.resolve())),
-		toastWarning: vi.fn()
-	}
-})
+	})
 
 // Every step that must run before the wipe, in the order performLogout runs them.
-const TEARDOWN_STEPS = ["notesSync.cancel", "chatsSync.cancel", "clearAllTyping", "disposeAudioEngine", "socketBridge.stop"]
+const TEARDOWN_STEPS = [
+	"notesSync.cancel",
+	"chatsSync.cancel",
+	"cancelActiveTransfers",
+	"clearAllTyping",
+	"disposeAudioEngine",
+	"socketBridge.stop"
+]
 
 vi.mock("@/lib/logout", () => ({ runLogout }))
 vi.mock("@/features/notes/lib/sync", () => ({ sync: { cancel: notesCancel } }))
 vi.mock("@/features/chats/lib/sync", () => ({ sync: { cancel: chatsCancel } }))
 vi.mock("@/features/chats/lib/typing", () => ({ clearAllTyping }))
+vi.mock("@/features/transfers/lib/control", () => ({ cancelActiveTransfers }))
 vi.mock("@/lib/sdk/socket", () => ({ socketBridge: { stop: socketStop } }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { logout: vi.fn() } }))
 vi.mock("@/features/drive/lib/saveDownload", () => ({ wipeSwClient: vi.fn() }))
@@ -46,6 +57,7 @@ vi.mock("sonner", () => ({ toast: { warning: toastWarning } }))
 
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { performLogout } from "@/features/shell/lib/performLogout"
+import { consumeUnloadAllowance } from "@/lib/unloadGuard"
 import { getPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 
 // Stands in for the overlay's unsaved-changes prompt: waits for the request the guard armed, then
@@ -136,9 +148,22 @@ describe("performLogout — pre-wipe teardown", () => {
 
 		expect(calls).toEqual([...TEARDOWN_STEPS, "runLogout"])
 
-		for (const step of [notesCancel, chatsCancel, clearAllTyping, disposeAudioEngine, socketStop]) {
+		for (const step of [notesCancel, chatsCancel, cancelActiveTransfers, clearAllTyping, disposeAudioEngine, socketStop]) {
 			expect(step).toHaveBeenCalledTimes(1)
 		}
+	})
+
+	it("lets its own reload past the leave-page prompt that guards running transfers", async () => {
+		const reload = vi.fn()
+
+		vi.stubGlobal("location", { reload })
+
+		await expect(performLogout()).resolves.toBe(true)
+
+		runLogout.mock.calls[0]?.[0].reload()
+
+		expect(reload).toHaveBeenCalledTimes(1)
+		expect(consumeUnloadAllowance()).toBe(true)
 	})
 
 	it("a declined user-initiated sign-out leaves the session completely intact", async () => {

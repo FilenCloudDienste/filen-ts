@@ -4,6 +4,7 @@ import {
 	capFinishedTransfers,
 	computeTransfersAggregate,
 	computeTransfersSpeed,
+	hasActiveTransfers,
 	isActiveTransfer,
 	useTransfersStore,
 	type SpeedSample,
@@ -324,6 +325,22 @@ describe("isActiveTransfer", () => {
 		expect(isActiveTransfer("error")).toBe(false)
 		expect(isActiveTransfer("cancelled")).toBe(false)
 		expect(isActiveTransfer("completedWithErrors")).toBe(false)
+	})
+})
+
+describe("hasActiveTransfers", () => {
+	it("is true while any transfer is active, paused ones included", () => {
+		expect(
+			hasActiveTransfers([makeTransfer({ status: "done" }), makeTransfer({ id: "b", direction: "copy", status: "copying" })])
+		).toBe(true)
+		expect(hasActiveTransfers([makeTransfer({ paused: true })])).toBe(true)
+	})
+
+	it("is false with nothing or only finished transfers", () => {
+		expect(hasActiveTransfers([])).toBe(false)
+		expect(hasActiveTransfers([makeTransfer({ status: "error" }), makeTransfer({ id: "b", status: "completedWithErrors" })])).toBe(
+			false
+		)
 	})
 })
 

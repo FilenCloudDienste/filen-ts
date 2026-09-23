@@ -15,3 +15,16 @@ export function hasUnsyncedNotes(inflightContent: InflightContent): boolean {
 export function hasUnsyncedChatSends(inflightMessages: InflightChatMessages, inflightErrors: InflightChatMessageErrors): boolean {
 	return Object.values(inflightMessages).some(group => group.messages.length > 0) || Object.keys(inflightErrors).length > 0
 }
+
+export type LogoutConfirmBodyKey =
+	"logoutConfirmBody" | "logoutConfirmBodyUnsynced" | "logoutConfirmBodyTransfers" | "logoutConfirmBodyUnsyncedTransfers"
+
+// Signing out cancels running transfers as well as dropping queued edits, so the confirm names
+// whichever of the two it is about to cost.
+export function logoutConfirmBodyKey(unsynced: boolean, transfersRunning: boolean): LogoutConfirmBodyKey {
+	if (unsynced) {
+		return transfersRunning ? "logoutConfirmBodyUnsyncedTransfers" : "logoutConfirmBodyUnsynced"
+	}
+
+	return transfersRunning ? "logoutConfirmBodyTransfers" : "logoutConfirmBody"
+}

@@ -14,6 +14,8 @@ import { useBootStore } from "@/stores/boot"
 import { BootScreen } from "@/features/shell/components/bootScreen"
 import { BootErrorScreen } from "@/features/shell/components/bootErrorScreen"
 import { OfflineIndicator } from "@/features/shell/components/offlineIndicator"
+import { TransfersUnloadGuard } from "@/features/shell/components/transfersUnloadGuard"
+import { allowNextUnload } from "@/lib/unloadGuard"
 import { titleMeta } from "@/lib/head/routeHead"
 
 export const Route = createRootRoute({
@@ -47,6 +49,8 @@ function BootGate() {
 	useEffect(() => {
 		return onAuthBroadcast(message => {
 			if (message.kind === "logout") {
+				// The session is gone for every tab; a running transfer can't be kept by staying.
+				allowNextUnload()
 				location.reload()
 				return
 			}
@@ -120,6 +124,7 @@ function RootLayout() {
 					    with its own top-center position, so this single instance covers the authed shell
 					    AND the unauthenticated sign-in/register/reset pages without a second subscription. */}
 					<OfflineIndicator />
+					<TransfersUnloadGuard />
 					{/* Bottom-right. A toast over a selection bar's buttons swallows their clicks, so the Toaster
 					    lifts itself while a registered surface occupies that corner (lib/toastClearance.ts).
 					    Top positions are no alternative — they intercepted the header buttons and the

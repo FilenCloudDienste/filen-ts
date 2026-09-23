@@ -1,6 +1,7 @@
 import type { AnyFile, ZipItem } from "@filen/sdk-rs"
 import { isAbortError } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
+import { allowNextUnload } from "@/lib/unloadGuard"
 import {
 	SW_DOWNLOAD_PREFIX,
 	SW_ERROR_NO_CLIENT,
@@ -207,6 +208,8 @@ export async function saveDownload(suggestedName: string): Promise<SaveTarget> {
 export async function triggerSwDownload(file: AnyFile, save: SwSaveTarget): Promise<void> {
 	await registerWithSw(SW_MSG_REGISTER_DOWNLOAD, { id: save.id, file, name: save.name, size: Number(file.size) })
 
+	// Starts a download, not a page change: the leave-page prompt must stay out of it.
+	allowNextUnload()
 	window.location.href = save.url
 }
 
@@ -215,5 +218,7 @@ export async function triggerSwDownload(file: AnyFile, save: SwSaveTarget): Prom
 export async function triggerSwZipDownload(items: ZipItem[], save: SwSaveTarget): Promise<void> {
 	await registerWithSw(SW_MSG_REGISTER_ZIP_DOWNLOAD, { id: save.id, items, name: save.name })
 
+	// Starts a download, not a page change: the leave-page prompt must stay out of it.
+	allowNextUnload()
 	window.location.href = save.url
 }

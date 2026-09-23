@@ -33,6 +33,13 @@ export function cancelTransfer(id: string): void {
 	}
 }
 
+// Sign-out: nothing may keep writing with the session being torn down. Copies keep what they made.
+export function cancelActiveTransfers(): void {
+	for (const transfer of useTransfersStore.getState().transfers) {
+		cancelTransfer(transfer.id)
+	}
+}
+
 // Direction-agnostic pause entry point for the active-row pause/resume toggle (transferRow.tsx).
 // Mirrors cancelTransfer's dispatch, but pause never rejects the in-flight call the way abort does —
 // the worker-side PauseSignal just stops delivering bytes/progress until resumeTransfer — so there is
