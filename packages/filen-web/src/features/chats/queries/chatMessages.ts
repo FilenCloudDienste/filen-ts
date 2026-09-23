@@ -32,11 +32,22 @@ function resolveChat(chatUuid: string): Chat | undefined {
 	return chatsQueryGet()?.find(c => c.uuid === chatUuid)
 }
 
+// Chats whose newest page was read from the server since the socket last (re)connected — the same
+// trust rule as the chat list's own marker (chats.ts): a socket patch can create a thread's cache
+// without that page (chatMessagesQueryUpdate's `prev ?? []`), so a mount skips its fetch only for these.
+const syncedChatUuids = new Set<string>()
+
+export function markChatMessagesUnsynced(): void {
+	syncedChatUuids.clear()
+}
+
 // Fetches a chat's initial (newest) message page from a Chat object directly — no cache resolution,
 // so the bulk refetch (refetchChatsAndMessages.ts) can pull messages for a freshly-listed chat before
 // that list has been written back to the chats cache. Sorted ascending, same as the query below.
 export async function fetchMessagesForChat(chat: Chat): Promise<ChatMessage[]> {
 	const messages = await sdkApi.listMessagesBefore(chat, BigInt(Date.now() + INITIAL_CURSOR_OFFSET_MS))
+
+	syncedChatUuids.add(chat.uuid)
 
 	return sortAscending(messages)
 }
@@ -87,12 +98,14 @@ export async function fetchChatMessages(chatUuid: string): Promise<ChatMessage[]
 // query keeps updating the observer from cache writes even while disabled) — the per-chat unread-count
 // hook reads the cache the bulk refetch populates, rather than each rendered row firing its own
 // listMessagesBefore. Defaults to true so the open-thread route's own bare call is unaffected; a
-// disabled query still respects the empty-uuid guard.
+// disabled query still respects the empty-uuid guard. Mount refetch follows useChats's rule: skipped
+// once the thread is synced, since socket events patch it live.
 export function useChatMessages(chatUuid: string, options?: { enabled?: boolean }): UseQueryResult<ChatMessage[]> {
 	return useQuery({
 		queryKey: chatMessagesQueryKey(chatUuid),
 		queryFn: () => fetchChatMessages(chatUuid),
-		enabled: (options?.enabled ?? true) && chatUuid.length > 0
+		enabled: (options?.enabled ?? true) && chatUuid.length > 0,
+		refetchOnMount: query => query.state.status === "error" || !syncedChatUuids.has(chatUuid)
 	})
 }
 

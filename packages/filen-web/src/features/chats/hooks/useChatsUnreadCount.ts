@@ -49,7 +49,7 @@ export function sumUnread(
 // refetch (so overlapping fires collapse into one pass):
 //   - mount-once: fills every chat's message cache at first shell mount (there is no per-chat message
 //     fetch otherwise — web fetches lazily per opened thread).
-//   - missing-messages self-heal: any chat still lacking its message cache retriggers the bulk fetch.
+//   - missing-messages self-heal: any chat still lacking its message cache gets just that cache fetched.
 // Realtime socket cache patches keep the derived count correct between resyncs; the socket reconnect
 // handler fires the same bulk refetch directly.
 export function useChatsUnreadCount(userId: bigint | undefined): number {
@@ -64,10 +64,10 @@ export function useChatsUnreadCount(userId: bigint | undefined): number {
 		void refetchChatsAndMessages()
 	}, [])
 
-	// Self-heal: a chat missing its message cache means the count is under-reporting — pull the full set.
+	// Self-heal: a chat missing its message cache means the count is under-reporting — fetch what is missing.
 	useEffect(() => {
 		if (hasMissingMessages) {
-			void refetchChatsAndMessages()
+			void refetchChatsAndMessages({ onlyMissing: true })
 		}
 	}, [hasMissingMessages])
 

@@ -1,4 +1,4 @@
-import { useQuery, type UseQueryResult } from "@tanstack/react-query"
+import { CancelledError, useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 import type { Chat } from "@filen/sdk-rs"
@@ -8,23 +8,71 @@ import type { Chat } from "@filen/sdk-rs"
 // (chat counts are small) and is a full-list replace on every refetch.
 export const CHATS_QUERY_KEY = ["chats", "list"] as const
 
+// Whether the cache holds a server read taken since the socket last (re)connected. A socket patch can
+// create the cache without one (chatsQueryUpdate's `prev ?? []`), and events missed while disconnected
+// are only reconciled by the next read, so a mount trusts the cache only while this is set.
+let listSynced = false
+
+export function markChatsListUnsynced(): void {
+	listSynced = false
+}
+
 // Plain, testable query function — same rationale as fetchNotes: the hook wrapper below is a
 // one-line pass-through no node-environment test can render, so this is exported and unit-tested
 // against a mocked sdkApi instead.
 export async function fetchChats(): Promise<Chat[]> {
-	return sdkApi.listChats()
+	const chats = await sdkApi.listChats()
+
+	listSynced = true
+
+	return chats
 }
 
 // `enabled` lets a caller subscribe to the chat-list cache WITHOUT firing its own listChats (react-
 // query still feeds the observer from cache writes while disabled) — the global unread-count hook reads
 // the list this way, deriving off whatever the bulk refetch has populated instead of paying a second
 // list fetch of its own. Defaults to true so the sidebar's own bare call is unaffected.
+//
+// No refetch on mount once the list is synced: socket events patch it live, so a remount would only
+// re-read what is already here. Focus and reconnect still refetch (staleTime 0), and an errored query
+// still retries on mount.
 export function useChats(options?: { enabled?: boolean }): UseQueryResult<Chat[]> {
 	return useQuery({
 		queryKey: CHATS_QUERY_KEY,
 		queryFn: fetchChats,
-		enabled: options?.enabled ?? true
+		enabled: options?.enabled ?? true,
+		refetchOnMount: query => query.state.status === "error" || !listSynced
 	})
+}
+
+// Bumped by every patch that would cancel an in-flight list fetch (cancelInFlightIfCached).
+let listFetchCancels = 0
+
+function fetchChatsQuery(): Promise<Chat[]> {
+	return queryClient.query({ queryKey: CHATS_QUERY_KEY, queryFn: fetchChats, staleTime: 0 })
+}
+
+// An authoritative list read that goes through the cache, so it joins a fetch a mounted useChats()
+// already has in flight instead of issuing its own listChats, and lands in the cache on resolve. A
+// patch landing mid-read cancels it, and a cancelled read settles with the patched cache (or rejects,
+// when it joined another caller's fetch) rather than the server list, so it reads once more. That
+// second read starts after the patch, so its result cannot overwrite it.
+export async function chatsQueryFetch(): Promise<Chat[]> {
+	const cancelsBefore = listFetchCancels
+
+	try {
+		const chats = await fetchChatsQuery()
+
+		if (listFetchCancels === cancelsBefore) {
+			return chats
+		}
+	} catch (e) {
+		if (!(e instanceof CancelledError)) {
+			throw e
+		}
+	}
+
+	return fetchChatsQuery()
 }
 
 // Cancel-before-patch WITH the initial-fetch carve-out (notesQueryUpdate's own rule, queries/
@@ -35,6 +83,8 @@ export function useChats(options?: { enabled?: boolean }): UseQueryResult<Chat[]
 // can lose.
 function cancelInFlightIfCached(): void {
 	if (queryClient.getQueryData(CHATS_QUERY_KEY) !== undefined) {
+		listFetchCancels++
+
 		void queryClient.cancelQueries({ queryKey: CHATS_QUERY_KEY })
 	}
 }
@@ -67,10 +117,6 @@ export function chatsQueryUpsert(chat: Chat): void {
 
 export function chatsQueryRemove(uuid: string): void {
 	chatsQueryUpdate(prev => prev.filter(c => c.uuid !== uuid))
-}
-
-export function chatsQueryReplaceAll(chats: Chat[]): void {
-	chatsQueryUpdate(() => chats)
 }
 
 // Synchronous cache read for a caller that needs the current chat list without subscribing via

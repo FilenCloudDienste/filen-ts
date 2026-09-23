@@ -1,6 +1,6 @@
 import { run, Semaphore } from "@filen/shared"
-import { fetchChats, chatsQueryReplaceAll } from "@/features/chats/queries/chats"
-import { fetchMessagesForChat, chatMessagesQueryUpdate, mergeNewestPage } from "@/features/chats/queries/chatMessages"
+import { chatsQueryFetch, chatsQueryGet } from "@/features/chats/queries/chats"
+import { fetchMessagesForChat, chatMessagesQueryGet, chatMessagesQueryUpdate, mergeNewestPage } from "@/features/chats/queries/chatMessages"
 
 // Bulk authoritative resync: the chat list PLUS every chat's message list, all in parallel. This is the
 // one mechanism that makes a client-derived unread count possible — without every chat's messages
@@ -14,7 +14,11 @@ import { fetchMessagesForChat, chatMessagesQueryUpdate, mergeNewestPage } from "
 // in-flight pass instead of stacking duplicate network fan-outs (a StrictMode double-invoke included).
 const mutex = new Semaphore(1)
 
-export async function refetchChatsAndMessages(): Promise<void> {
+// `onlyMissing` is the self-heal: no list read, just the chats whose message cache is still absent,
+// decided after the mutex so a pass it queued behind has already filled what it could. The full pass
+// writes the list before the messages land, which trips that self-heal every time; this is what makes
+// the tripped heal cost nothing.
+export async function refetchChatsAndMessages(options?: { onlyMissing?: boolean }): Promise<void> {
 	await run(
 		async defer => {
 			await mutex.acquire()
@@ -23,20 +27,12 @@ export async function refetchChatsAndMessages(): Promise<void> {
 				mutex.release()
 			})
 
-			const chats = await fetchChats()
+			const chats = options?.onlyMissing
+				? (chatsQueryGet() ?? []).filter(chat => chatMessagesQueryGet(chat.uuid) === undefined)
+				: await chatsQueryFetch()
 
-			if (chats.length === 0) {
-				// Still publish the (empty) list so an account that had chats removed reflects it; nothing
-				// to fan out over.
-				chatsQueryReplaceAll(chats)
-
-				return
-			}
-
-			// Messages first, then the list — the derived count reads both caches, and a chat row landing
-			// before its messages would briefly count as "missing" and retrigger the self-heal. Each
-			// per-chat fetch is independent; one failing must not abort the rest, so failures resolve to an
-			// untouched cache rather than rejecting the whole pass.
+			// Each per-chat fetch is independent; one failing must not abort the rest, so failures resolve
+			// to an untouched cache rather than rejecting the whole pass.
 			await Promise.all(
 				chats.map(async chat => {
 					try {
@@ -50,8 +46,6 @@ export async function refetchChatsAndMessages(): Promise<void> {
 					}
 				})
 			)
-
-			chatsQueryReplaceAll(chats)
 		},
 		{ throw: false }
 	)

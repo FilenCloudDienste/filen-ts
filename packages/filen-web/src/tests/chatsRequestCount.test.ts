@@ -1,0 +1,329 @@
+// @vitest-environment jsdom
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { createElement, type ReactNode } from "react"
+import { act, renderHook, waitFor } from "@testing-library/react"
+import { QueryClient, QueryClientProvider, focusManager } from "@tanstack/react-query"
+import type { Chat, ChatMessage, UuidStr } from "@filen/sdk-rs"
+
+function testUuid(label: string): UuidStr {
+	return `${label}-0000-0000-0000-000000000000` as UuidStr
+}
+
+const { listChats, listMessagesBefore, sendChatMessage } = vi.hoisted(() => ({
+	listChats: vi.fn<() => Promise<Chat[]>>(),
+	listMessagesBefore: vi.fn<(chat: Chat, before: bigint) => Promise<ChatMessage[]>>(),
+	// Never settles: the restored outbox's push stays in flight, so only the restore's list read is counted.
+	sendChatMessage: vi.fn(() => new Promise<never>(() => undefined))
+}))
+
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listChats, listMessagesBefore, sendChatMessage } }))
+
+// The production defaults minus the persister (sqlite, unavailable under vitest).
+vi.mock("@/queries/client", () => ({
+	queryClient: new QueryClient({
+		defaultOptions: {
+			queries: { staleTime: 0, gcTime: Infinity, retry: false, refetchOnWindowFocus: true, refetchOnReconnect: true }
+		}
+	})
+}))
+
+const { kvStore } = vi.hoisted(() => ({ kvStore: new Map<string, unknown>() }))
+
+vi.mock("@/lib/storage/adapter", () => ({
+	kvGetJson: (key: string) => Promise.resolve(kvStore.get(key) ?? null),
+	kvSetJson: (key: string, value: unknown) => {
+		kvStore.set(key, value)
+
+		return Promise.resolve()
+	},
+	kvDelete: (key: string) => {
+		kvStore.delete(key)
+
+		return Promise.resolve()
+	}
+}))
+
+vi.mock("@/features/chats/lib/inflight", () => ({ purgeChatInflightState: () => Promise.resolve() }))
+
+import { queryClient } from "@/queries/client"
+import { chatsQueryGet, chatsQueryUpsert, useChats } from "@/features/chats/queries/chats"
+import { chatMessagesQueryUpdate, useChatMessages } from "@/features/chats/queries/chatMessages"
+import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
+import { handleAuthSuccess, handleChatEvent, handleReconnecting, resetSocketReconnectState } from "@/features/chats/lib/socketHandlers"
+import { Sync } from "@/features/chats/lib/sync"
+import { buildOptimisticMessage } from "@/features/chats/lib/sync.logic"
+import useChatsInflightStore from "@/features/chats/store/useChatsInflight"
+
+const USER_ID = 7n
+
+function mockChat(label: string): Chat {
+	return { uuid: testUuid(label), ownerId: 1n, participants: [], muted: false, created: 0n, lastFocus: 0n }
+}
+
+function mockMessage(chat: Chat): ChatMessage {
+	return {
+		uuid: testUuid(`m${chat.uuid.slice(0, 4)}`),
+		chat: chat.uuid,
+		senderId: 2,
+		senderEmail: "p@x.io",
+		senderNickName: "P",
+		message: "m",
+		embedDisabled: false,
+		edited: false,
+		editedTimestamp: 0n,
+		sentTimestamp: 10n
+	}
+}
+
+const CHATS = [mockChat("a"), mockChat("b"), mockChat("c")]
+const [CHAT_A] = CHATS as [Chat, Chat, Chat]
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+	let resolve!: (value: T) => void
+	const promise = new Promise<T>(r => {
+		resolve = r
+	})
+
+	return { promise, resolve }
+}
+
+function wrapper({ children }: { children: ReactNode }) {
+	return createElement(QueryClientProvider, { client: queryClient, children })
+}
+
+async function settle(): Promise<void> {
+	await act(async () => {
+		for (let i = 0; i < 20; i++) {
+			await new Promise(resolve => setTimeout(resolve, 0))
+		}
+	})
+}
+
+// Lets every queued bulk pass (they serialize on a mutex) and query fetch run to completion.
+async function drain(): Promise<void> {
+	await settle()
+	await waitFor(() => {
+		expect(queryClient.isFetching()).toBe(0)
+	})
+}
+
+// The authed shell at boot on /chats: the rail's unread hook (mount-once pass + self-heal) next to the
+// sidebar's own list read.
+function renderShellOnChats() {
+	return renderHook(
+		() => {
+			useChatsUnreadCount(USER_ID)
+			useChats()
+		},
+		{ wrapper }
+	)
+}
+
+beforeEach(() => {
+	queryClient.clear()
+	kvStore.clear()
+	resetSocketReconnectState()
+	useChatsInflightStore.setState({ inflightMessages: {}, inflightErrors: {} })
+	listChats.mockReset()
+	listMessagesBefore.mockReset()
+	listChats.mockImplementation(() => Promise.resolve(CHATS))
+	listMessagesBefore.mockImplementation(chat => Promise.resolve([mockMessage(chat)]))
+})
+
+afterEach(() => {
+	focusManager.setFocused(undefined)
+})
+
+describe("chat list and message request counts", () => {
+	it("boot on /chats reads the list once and each chat's messages once", async () => {
+		const list = deferred<Chat[]>()
+		listChats.mockImplementationOnce(() => list.promise)
+
+		const { unmount } = renderShellOnChats()
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+		expect(listChats).toHaveBeenCalledTimes(1)
+
+		list.resolve(CHATS)
+		await drain()
+
+		expect(listChats).toHaveBeenCalledTimes(1)
+		expect(listMessagesBefore).toHaveBeenCalledTimes(CHATS.length)
+
+		unmount()
+	})
+
+	// A reload restores the list from disk but not the bulk-written message caches, so the self-heal
+	// fires at mount next to the mount-once pass and queues behind it.
+	it("a reload with a restored list reads it once and each chat's messages once", async () => {
+		queryClient.setQueryData(["chats", "list"], CHATS)
+
+		const { unmount } = renderShellOnChats()
+		await drain()
+
+		expect(listChats).toHaveBeenCalledTimes(1)
+		expect(listMessagesBefore).toHaveBeenCalledTimes(CHATS.length)
+
+		unmount()
+	})
+
+	it("remounting the list and an open thread reuses the cache, while focus still refetches", async () => {
+		const shell = renderShellOnChats()
+		await drain()
+		listChats.mockClear()
+		listMessagesBefore.mockClear()
+
+		const mountThread = () =>
+			renderHook(
+				() => {
+					useChats()
+					useChatMessages(CHAT_A.uuid)
+				},
+				{ wrapper }
+			)
+
+		mountThread().unmount()
+		const thread = mountThread()
+		await drain()
+
+		expect(listChats).not.toHaveBeenCalled()
+		expect(listMessagesBefore).not.toHaveBeenCalled()
+
+		act(() => {
+			focusManager.setFocused(false)
+			focusManager.setFocused(true)
+		})
+		await drain()
+
+		expect(listChats).toHaveBeenCalledTimes(1)
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+
+		thread.unmount()
+		shell.unmount()
+	})
+
+	it("a socket reconnect runs exactly one full pass, and a mount during the gap re-reads", async () => {
+		const shell = renderShellOnChats()
+		await drain()
+		listChats.mockClear()
+		listMessagesBefore.mockClear()
+
+		handleReconnecting()
+
+		const thread = renderHook(() => useChatMessages(CHAT_A.uuid), { wrapper })
+		await drain()
+
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+		listMessagesBefore.mockClear()
+
+		handleAuthSuccess()
+		await drain()
+
+		expect(listChats).toHaveBeenCalledTimes(1)
+		expect(listMessagesBefore).toHaveBeenCalledTimes(CHATS.length)
+
+		thread.unmount()
+		shell.unmount()
+	})
+
+	it("a chat introduced by the socket heals only its own messages", async () => {
+		const shell = renderShellOnChats()
+		await drain()
+		listChats.mockClear()
+		listMessagesBefore.mockClear()
+
+		const introduced = mockChat("d")
+
+		act(() => {
+			handleChatEvent({ inner: { type: "conversationsNew", chat: introduced }, chatMessageId: 1n })
+		})
+		await drain()
+
+		expect(listChats).not.toHaveBeenCalled()
+		expect(listMessagesBefore).toHaveBeenCalledExactlyOnceWith(introduced, expect.any(BigInt))
+
+		shell.unmount()
+	})
+
+	it("a thread whose cache only holds socket patches loads its page on mount", async () => {
+		queryClient.setQueryData(["chats", "list"], CHATS)
+		chatMessagesQueryUpdate(CHAT_A.uuid, () => [mockMessage(CHAT_A)])
+
+		const thread = renderHook(() => useChatMessages(CHAT_A.uuid), { wrapper })
+		await drain()
+
+		expect(listMessagesBefore).toHaveBeenCalledTimes(1)
+
+		thread.unmount()
+	})
+
+	it("a patch that cancels the resync's list read makes it read again instead of keeping the patched cache", async () => {
+		const shell = renderShellOnChats()
+		await drain()
+		listChats.mockClear()
+		listMessagesBefore.mockClear()
+
+		const introduced = mockChat("d")
+		const first = deferred<Chat[]>()
+		listChats.mockImplementationOnce(() => first.promise)
+		listChats.mockImplementationOnce(() => Promise.resolve([...CHATS, introduced]))
+
+		handleReconnecting()
+		handleAuthSuccess()
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+		expect(listChats).toHaveBeenCalledTimes(1)
+
+		act(() => {
+			chatsQueryUpsert({ ...CHAT_A, muted: true })
+		})
+		first.resolve(CHATS)
+		await drain()
+
+		expect(listChats).toHaveBeenCalledTimes(2)
+		expect(chatsQueryGet()?.map(c => c.uuid)).toEqual([...CHATS, introduced].map(c => c.uuid))
+		expect(listMessagesBefore).toHaveBeenCalledTimes(CHATS.length + 1)
+
+		shell.unmount()
+	})
+
+	it("the outbox restore joins the boot list read instead of issuing its own", async () => {
+		kvStore.set("inflightChatMessages", {
+			[CHAT_A.uuid]: {
+				chat: CHAT_A,
+				messages: [
+					buildOptimisticMessage({
+						chatUuid: CHAT_A.uuid,
+						inflightId: testUuid("inflight"),
+						content: "hi",
+						replyTo: undefined,
+						sentTimestamp: 1n,
+						sender: { id: USER_ID, email: "me@filen.io", avatarUrl: undefined, nickName: "Me" }
+					})
+				]
+			}
+		})
+
+		const list = deferred<Chat[]>()
+		listChats.mockImplementationOnce(() => list.promise)
+
+		const shell = renderShellOnChats()
+		const outbox = new Sync()
+		outbox.start()
+
+		await settle()
+		list.resolve(CHATS)
+		await drain()
+
+		expect(listChats).toHaveBeenCalledTimes(1)
+		expect(sendChatMessage).toHaveBeenCalledTimes(1)
+
+		outbox.cancel()
+		shell.unmount()
+	})
+})

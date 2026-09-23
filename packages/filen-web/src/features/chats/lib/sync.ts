@@ -6,7 +6,7 @@ import { log } from "@/lib/log"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { type OutboxChannelTransport, type OutboxRole } from "@/lib/storage/outboxChannel"
-import { chatsQueryUpsert, chatsQueryGet, chatsQueryReplaceAll, fetchChats } from "@/features/chats/queries/chats"
+import { chatsQueryUpsert, chatsQueryGet, chatsQueryFetch } from "@/features/chats/queries/chats"
 import { chatMessagesQueryUpdate } from "@/features/chats/queries/chatMessages"
 import useChatsInflightStore, { type ChatMessageWithInflightId, type InflightChatMessages } from "@/features/chats/store/useChatsInflight"
 import {
@@ -379,12 +379,11 @@ export class Sync {
 			}
 
 			const prune = await run(async () => {
-				const chatsList = await fetchChats()
+				// Through the list cache: joins the boot resync's read instead of issuing a second one, and warms
+				// the cache with LIVE chats so the push loop resolves a sendable chat WITHOUT a per-pass network
+				// read — the send never uses the disk-restored snapshot (resolveSendableChat).
+				const chatsList = await chatsQueryFetch()
 				const existingChatUuids = new Set<string>(chatsList.map(chat => chat.uuid))
-
-				// Warm the list cache with LIVE chats so the push loop resolves a sendable chat WITHOUT a
-				// per-pass network read — the send never uses the disk-restored snapshot (resolveSendableChat).
-				chatsQueryReplaceAll(chatsList)
 
 				useChatsInflightStore.getState().setInflightMessages(prev => {
 					const updated: InflightChatMessages = {

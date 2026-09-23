@@ -38,7 +38,6 @@ import {
 	CHATS_QUERY_KEY,
 	chatsQueryGet,
 	chatsQueryRemove,
-	chatsQueryReplaceAll,
 	chatsQueryUpdate,
 	chatsQueryUpsert,
 	fetchChats,
@@ -204,17 +203,6 @@ describe("chatsQueryRemove", () => {
 		chatsQueryRemove(testUuid("a"))
 
 		expect(chatsQueryGet()).toEqual([second])
-	})
-})
-
-describe("chatsQueryReplaceAll", () => {
-	it("replaces the whole cached list", () => {
-		testQueryClient.setQueryData(CHATS_QUERY_KEY, [mockChat({ uuid: testUuid("a") })])
-		const next = [mockChat({ uuid: testUuid("b") }), mockChat({ uuid: testUuid("c") })]
-
-		chatsQueryReplaceAll(next)
-
-		expect(chatsQueryGet()).toEqual(next)
 	})
 })
 

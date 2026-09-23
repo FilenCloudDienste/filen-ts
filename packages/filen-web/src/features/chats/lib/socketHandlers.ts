@@ -3,8 +3,8 @@ import { registerSocketHandler, decryptedOrSkip } from "@/lib/sdk/socket"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { log } from "@/lib/log"
-import { chatsQueryUpdate, chatsQueryUpsert, chatsQueryGet } from "@/features/chats/queries/chats"
-import { chatMessagesQueryUpdate, chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
+import { chatsQueryUpdate, chatsQueryUpsert, chatsQueryGet, markChatsListUnsynced } from "@/features/chats/queries/chats"
+import { chatMessagesQueryUpdate, chatMessagesQueryGet, markChatMessagesUnsynced } from "@/features/chats/queries/chatMessages"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
 import { useSocketStatusStore } from "@/features/chats/store/useSocketStatus"
 import { purgeChatInflightState } from "@/features/chats/lib/inflight"
@@ -326,15 +326,26 @@ export async function handleConversationDeleted(uuid: string): Promise<void> {
 // assertions.
 let sawReconnecting = false
 
+// A dropped socket may miss events, so cached chats and threads stop counting as current: a mount
+// re-reads them until the resync (or its own fetch) does.
+function markChatsUnsynced(): void {
+	markChatsListUnsynced()
+	markChatMessagesUnsynced()
+}
+
 // Session-scoped, like the memo in attachments.ts: a logout that lands mid-reconnect would otherwise
 // leave this armed, and the NEXT account's first authSuccess would read as a recovery and fire a full
-// resync it never needed. performLogout calls this.
+// resync it never needed. performLogout calls this; the synced markers are session state too.
 export function resetSocketReconnectState(): void {
 	sawReconnecting = false
+
+	markChatsUnsynced()
 }
 
 export function handleReconnecting(): void {
 	sawReconnecting = true
+
+	markChatsUnsynced()
 
 	useSocketStatusStore.getState().setStatus("reconnecting")
 }
