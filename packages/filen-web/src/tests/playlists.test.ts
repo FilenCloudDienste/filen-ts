@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, File as SdkFile, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File as SdkFile, SocketEvent, UuidStr } from "@filen/sdk-rs"
+import { DIRECTORY_NOT_FOUND_PREFIX, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
 
 // UuidStr is a template-literal brand — pad a short label the same way drive.test.ts's testUuid does.
 function testUuid(label: string): UuidStr {
@@ -36,13 +37,14 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 async function freshPlaylists() {
 	vi.resetModules()
 
-	const [playlistsLib, playlistsQueries, clientModule] = await Promise.all([
+	const [playlistsLib, playlistsQueries, socketHandlers, clientModule] = await Promise.all([
 		import("@/features/audio/lib/playlists"),
 		import("@/features/audio/queries/playlists"),
+		import("@/features/audio/lib/socketHandlers"),
 		import("@/queries/client")
 	])
 
-	return { ...playlistsLib, ...playlistsQueries, queryClient: clientModule.queryClient }
+	return { ...playlistsLib, ...playlistsQueries, ...socketHandlers, queryClient: clientModule.queryClient }
 }
 
 function fakeDir(uuid: UuidStr): Dir {
@@ -372,5 +374,172 @@ describe("deletePlaylistAction", () => {
 
 		expect(deleteFilePermanently).toHaveBeenCalledExactlyOnceWith(jsonFile)
 		expect(playlistsQueryGet()).toEqual([])
+	})
+})
+
+describe("the remembered Playlists directory", () => {
+	type DriveEvent = Extract<SocketEvent, { type: "drive" }>["inner"]
+
+	function driveEvent(inner: DriveEvent): Extract<SocketEvent, { type: "drive" }> {
+		return { type: "drive", inner, driveMessageId: 0n }
+	}
+
+	function renamed(uuid: UuidStr, name: string): DriveEvent {
+		return { type: "folderMetadataChanged", uuid, meta: { type: "decoded", data: { name } } }
+	}
+
+	// Resolving costs two createDirectory calls (.filen, then Playlists), so four means it re-resolved.
+	async function resolveCountAfter(act: (modules: Awaited<ReturnType<typeof freshPlaylists>>) => Promise<void>): Promise<number> {
+		mockDirectoryResolve()
+		const modules = await freshPlaylists()
+
+		await modules.getPlaylistsDirectoryUuid()
+		await act(modules)
+		await expect(modules.getPlaylistsDirectoryUuid()).resolves.toBe(PLAYLISTS_DIR_UUID)
+
+		return createDirectory.mock.calls.length
+	}
+
+	it.each<{ name: string; inner: DriveEvent }>([
+		{ name: "Playlists is trashed", inner: { type: "folderTrash", parent: DOT_FILEN_UUID, uuid: PLAYLISTS_DIR_UUID } },
+		{ name: ".filen is trashed", inner: { type: "folderTrash", parent: testUuid("root"), uuid: DOT_FILEN_UUID } },
+		{ name: "Playlists is deleted", inner: { type: "folderDeletedPermanent", uuid: PLAYLISTS_DIR_UUID } },
+		{ name: ".filen is deleted", inner: { type: "folderDeletedPermanent", uuid: DOT_FILEN_UUID } },
+		{ name: "Playlists is moved", inner: { type: "folderMove", dir: fakeDir(PLAYLISTS_DIR_UUID) } },
+		{ name: ".filen is moved", inner: { type: "folderMove", dir: fakeDir(DOT_FILEN_UUID) } },
+		{ name: "Playlists is renamed", inner: renamed(PLAYLISTS_DIR_UUID, "Old playlists") },
+		{ name: ".filen is renamed", inner: renamed(DOT_FILEN_UUID, "filen-backup") },
+		{ name: "the whole drive is deleted", inner: { type: "deleteAll" } }
+	])("is re-resolved after $name", async ({ inner }) => {
+		const count = await resolveCountAfter(({ handlePlaylistsDriveEvent }) => {
+			handlePlaylistsDriveEvent(driveEvent(inner))
+
+			return Promise.resolve()
+		})
+
+		expect(count).toBe(4)
+	})
+
+	it.each<{ name: string; inner: DriveEvent }>([
+		{ name: "another directory is trashed", inner: { type: "folderTrash", parent: DOT_FILEN_UUID, uuid: testUuid("other") } },
+		{ name: "another directory is moved", inner: { type: "folderMove", dir: fakeDir(testUuid("other")) } },
+		{ name: "Playlists is renamed by case only", inner: renamed(PLAYLISTS_DIR_UUID, "playlists") },
+		{
+			name: "a playlist file is trashed",
+			inner: { type: "fileTrash", uuid: testUuid("file"), stableUUID: testUuid("s"), newUUID: undefined }
+		}
+	])("is kept after $name", async ({ inner }) => {
+		const count = await resolveCountAfter(({ handlePlaylistsDriveEvent }) => {
+			handlePlaylistsDriveEvent(driveEvent(inner))
+
+			return Promise.resolve()
+		})
+
+		expect(count).toBe(2)
+	})
+
+	// The first lookup's `.filen` call is held open, so an event can land while the uuids are still unknown.
+	function holdFirstLookup(): { release: () => void; fail: () => void } {
+		const gate: { release: () => void; fail: () => void } = { release: () => undefined, fail: () => undefined }
+
+		createDirectory.mockImplementationOnce(
+			() =>
+				new Promise((resolve, reject) => {
+					gate.release = () => {
+						resolve(fakeDir(DOT_FILEN_UUID))
+					}
+					gate.fail = () => {
+						reject(new Error("network blip"))
+					}
+				})
+		)
+
+		return gate
+	}
+
+	it.each<{ name: string; inner: DriveEvent; expected: number }>([
+		{
+			name: "re-resolved after a directory is trashed",
+			inner: { type: "folderTrash", parent: testUuid("root"), uuid: testUuid("x") },
+			expected: 4
+		},
+		{ name: "re-resolved after a directory is deleted", inner: { type: "folderDeletedPermanent", uuid: testUuid("x") }, expected: 4 },
+		{ name: "re-resolved after a directory is moved", inner: { type: "folderMove", dir: fakeDir(testUuid("x")) }, expected: 4 },
+		{ name: "re-resolved after a directory is renamed", inner: renamed(testUuid("x"), "Old playlists"), expected: 4 },
+		{ name: "re-resolved after the whole drive is deleted", inner: { type: "deleteAll" }, expected: 4 },
+		{
+			name: "kept after a file is trashed",
+			inner: { type: "fileTrash", uuid: testUuid("file"), stableUUID: testUuid("s"), newUUID: undefined },
+			expected: 2
+		},
+		{ name: "kept after a directory is renamed to Playlists", inner: renamed(testUuid("x"), "playlists"), expected: 2 }
+	])("is $name mid-lookup", async ({ inner, expected }) => {
+		mockDirectoryResolve()
+		const gate = holdFirstLookup()
+		const { getPlaylistsDirectoryUuid, handlePlaylistsDriveEvent } = await freshPlaylists()
+		const pending = getPlaylistsDirectoryUuid()
+
+		handlePlaylistsDriveEvent(driveEvent(inner))
+		gate.release()
+
+		// Its own caller still gets an answer; only remembering it is withheld.
+		await expect(pending).resolves.toBe(PLAYLISTS_DIR_UUID)
+		await expect(getPlaylistsDirectoryUuid()).resolves.toBe(PLAYLISTS_DIR_UUID)
+
+		expect(createDirectory).toHaveBeenCalledTimes(expected)
+	})
+
+	it("keeps the successor's memo when a lookup forgotten mid-flight later fails", async () => {
+		mockDirectoryResolve()
+		const gate = holdFirstLookup()
+		const { getPlaylistsDirectoryUuid, handlePlaylistsDriveEvent } = await freshPlaylists()
+		const forgotten = getPlaylistsDirectoryUuid()
+
+		handlePlaylistsDriveEvent(driveEvent({ type: "folderTrash", parent: testUuid("root"), uuid: testUuid("x") }))
+		await expect(getPlaylistsDirectoryUuid()).resolves.toBe(PLAYLISTS_DIR_UUID)
+
+		gate.fail()
+		await expect(forgotten).rejects.toThrow("network blip")
+		await expect(getPlaylistsDirectoryUuid()).resolves.toBe(PLAYLISTS_DIR_UUID)
+
+		expect(createDirectory).toHaveBeenCalledTimes(3) // the held call + one full successor lookup
+	})
+
+	const goneListing: ErrorDTO = {
+		species: "plain",
+		message: `${DIRECTORY_NOT_FOUND_PREFIX}${PLAYLISTS_DIR_UUID}`,
+		label: `${DIRECTORY_NOT_FOUND_PREFIX}${PLAYLISTS_DIR_UUID}`
+	}
+	const goneParent: ErrorDTO = {
+		species: "plain",
+		message: `${PARENT_NOT_FOUND_PREFIX}${PLAYLISTS_DIR_UUID}`,
+		label: `${PARENT_NOT_FOUND_PREFIX}${PLAYLISTS_DIR_UUID}`
+	}
+	const sdkFolderNotFound: ErrorDTO = { species: "sdk", kind: "FolderNotFound", message: "folder not found", label: "folder not found" }
+	const transient: ErrorDTO = { species: "sdk", kind: "Reqwest", message: "network", label: "network" }
+
+	it.each<{ name: string; error: ErrorDTO; op: "list" | "upload" | "delete"; expected: number }>([
+		{ name: "re-resolved after a listing of a gone directory", error: goneListing, op: "list", expected: 4 },
+		{ name: "re-resolved after an upload into a gone parent", error: goneParent, op: "upload", expected: 4 },
+		{ name: "re-resolved after the SDK reports the folder gone", error: sdkFolderNotFound, op: "upload", expected: 4 },
+		{ name: "re-resolved after a delete's listing finds it gone", error: goneListing, op: "delete", expected: 4 },
+		{ name: "kept after a failure that isn't a gone directory", error: transient, op: "list", expected: 2 }
+	])("is $name", async ({ error, op, expected }) => {
+		const failing = op === "upload" ? uploadFileBytes : listDirectory
+
+		failing.mockRejectedValueOnce(error)
+
+		const count = await resolveCountAfter(async ({ fetchPlaylistEntries, createPlaylist, deletePlaylistAction }) => {
+			const run =
+				op === "list"
+					? fetchPlaylistEntries()
+					: op === "upload"
+						? createPlaylist("Mix")
+						: deletePlaylistAction({ uuid: "p-1", name: "Mix", created: 1, updated: 1, files: [] })
+
+			await expect(run).rejects.toBe(error)
+		})
+
+		expect(count).toBe(expected)
 	})
 })
